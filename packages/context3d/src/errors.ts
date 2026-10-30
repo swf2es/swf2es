@@ -15,6 +15,7 @@ export type Context3DErrorReason =
   | "drawRange"
   | "triangleCount"
   | "textureSize"
+  | "compressedSize"
   | "textureShape"
   | "texturePowerOfTwo"
   | "textureUpload"

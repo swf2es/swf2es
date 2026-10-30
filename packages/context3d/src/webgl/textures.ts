@@ -1,10 +1,14 @@
 import type { Texture3D } from "../backend.js";
+import { blockBytes, decodeDxt, encodeDxt } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 import { range } from "./state.js";
 import type { MultisampleTarget } from "./targets.js";
 
 export interface TextureState {
   handle: WebGLTexture;
+  /** The internal format its storage has: RGBA8, or S3TC's for a compressed texture. */
+  storage: number;
+  /** RGBA staging for a level, made at the first upload that needs it: base-sized. */
   bytes: Uint8Array;
   uploaded: Uint16Array;
   framebuffer: WebGLFramebuffer | null;
@@ -18,6 +22,16 @@ export interface TextureState {
   antiAlias: number;
 }
 
+/** The staging array, made base-sized at its first use: a texture given only blocks on S3TC has none. */
+function staging(texture: Texture3D, state: TextureState): Uint8Array {
+  if (state.bytes.length === 0) {
+    state.bytes = new Uint8Array(texture.width * texture.height * 4);
+  }
+
+  return state.bytes;
+}
+
+/** The staged level uploaded: as it is, or a compressed texture's encoded to its blocks, as AIR compresses pixels. */
 function uploadLevel(
   gl: WebGL2RenderingContext,
   texture: Texture3D,
@@ -27,6 +41,17 @@ function uploadLevel(
   w: number,
   h: number,
 ): void {
+  if (texture.format !== "bgra") {
+    const blocks = encodeDxt(
+      state.bytes.subarray(0, w * h * 4),
+      texture.format === "compressedAlpha",
+      w,
+      h,
+    );
+    uploadCompressedLevel(gl, texture, state, blocks, level, face);
+    return;
+  }
+
   const cube = texture.cube;
   const target = cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
   gl.activeTexture(gl.TEXTURE0);
@@ -72,6 +97,9 @@ export function uploadTexture(
   ) {
     throw new Context3DError("textureUpload", "Context3D experiment: texture upload size mismatch");
   }
+
+  // Made once the call is known good: a refused one allocates nothing.
+  staging(texture, state);
 
   if (sw === w && sh === h) {
     for (let i = 0; i < pixels.length; i++) {
@@ -121,6 +149,7 @@ export function uploadTextureBytes(
   const h = Math.max(1, height >> level);
   const length = w * h * 4;
   range(offset, length, data.length);
+  staging(texture, state);
 
   for (let i = 0; i < length; i += 4) {
     state.bytes[i] = data[offset + i + 2];
@@ -130,4 +159,42 @@ export function uploadTextureBytes(
   }
 
   uploadLevel(gl, texture, state, level, face, w, h);
+}
+
+/**
+ * A compressed texture's level from S3TC blocks: as they are where its
+ * storage is S3TC's, or decoded to RGBA where the context takes no S3TC.
+ */
+export function uploadCompressedLevel(
+  gl: WebGL2RenderingContext,
+  texture: Texture3D,
+  state: TextureState,
+  blocks: Uint8Array,
+  level: number,
+  face: number,
+): void {
+  const { width, height, levels, cube } = texture;
+  range(level, 1, levels);
+  range(face, 1, cube ? 6 : 1);
+  const w = Math.max(1, width >> level);
+  const h = Math.max(1, height >> level);
+  const dxt5 = texture.format === "compressedAlpha";
+  if (blocks.length !== blockBytes(w, h, dxt5)) {
+    throw new Context3DError(
+      "textureUpload",
+      "Context3D experiment: compressed level size mismatch",
+    );
+  }
+
+  const target = cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + face : gl.TEXTURE_2D;
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, state.handle);
+  if (state.storage === gl.RGBA8) {
+    decodeDxt(blocks, dxt5, w, h, staging(texture, state));
+    gl.texSubImage2D(target, level, 0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, state.bytes);
+  } else {
+    gl.compressedTexSubImage2D(target, level, 0, 0, w, h, state.storage, blocks);
+  }
+
+  state.uploaded[face] |= 1 << level;
 }

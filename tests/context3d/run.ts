@@ -27,6 +27,8 @@ const scripts = compileScripts(
     "Stencil",
     "BufferBytes",
     "TextureBytes",
+    "AtfTextures",
+    "AtfLegacy",
     "VertexFormats",
     "ShaderMath",
     "ScalarMath",
@@ -74,6 +76,8 @@ for (const name of [
   "Stencil",
   "BufferBytes",
   "TextureBytes",
+  "AtfTextures",
+  "AtfLegacy",
   "VertexFormats",
   "ShaderMath",
   "ScalarMath",
@@ -106,7 +110,10 @@ for (const name of [
   const abc = scripts.get(name);
   assert.ok(abc);
   const size = name === "Triangle" ? 64 : 96;
-  writeFileSync(`${out}${name}.swf`, bare(abc, 1, name, size, size));
+  const swf = bare(abc, 1, name, size, size);
+  // AIR's ATF and sampler rules follow the SWF's version: AIR built these as 51 and 13.
+  swf[3] = name === "AtfTextures" ? 51 : name === "AtfLegacy" ? 13 : swf[3];
+  writeFileSync(`${out}${name}.swf`, swf);
 }
 if (!process.argv.includes("--build-only")) {
   const reference: string[] = JSON.parse(readFileSync(`${here}reference.json`, "utf8"));
@@ -309,6 +316,8 @@ if (!process.argv.includes("--build-only")) {
         "Stencil",
         "BufferBytes",
         "TextureBytes",
+        "AtfTextures",
+        "AtfLegacy",
         "VertexFormats",
         "ShaderMath",
         "ScalarMath",
@@ -347,6 +356,15 @@ if (!process.argv.includes("--build-only")) {
         );
         console.log(`context3d: ${fixture} matches AIR`);
       }
+      const decoded = await evaluate<{ trace: string[] }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture("AtfTextures", false))',
+      );
+      assert.equal(decoded.exception, null, JSON.stringify(decoded));
+      assert.deepEqual(
+        decoded.value?.trace,
+        JSON.parse(readFileSync(`${here}atftextures-reference.json`, "utf8")),
+      );
+      console.log("context3d: AtfTextures matches AIR with S3TC decoded on the CPU");
       const comparisons = await evaluate<{ trace: string[] }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture("Comparisons"))',
       );

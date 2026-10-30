@@ -180,6 +180,8 @@ export async function shaderFixture(
     | "Stencil"
     | "BufferBytes"
     | "TextureBytes"
+    | "AtfTextures"
+    | "AtfLegacy"
     | "VertexFormats"
     | "ShaderMath"
     | "ScalarMath"
@@ -202,6 +204,8 @@ export async function shaderFixture(
     | "CubeBitmapUploads"
     | "CubeTextures"
     | "RenderTargets",
+  /** Whether the context offers S3TC; without it, compressed textures decode on the CPU. */
+  s3tc = true,
 ) {
   const codegen = await createCodegen(
     await WebAssembly.compile(await (await fetch("/codegen/codegen.wasm")).arrayBuffer()),
@@ -213,6 +217,11 @@ export async function shaderFixture(
   const close = install(scripting, {
     create: () => {
       const entry = create();
+      if (!s3tc) {
+        const gl = entry.gl as { getExtension(name: string): unknown };
+        const get = gl.getExtension.bind(gl);
+        gl.getExtension = (name) => (name === "WEBGL_compressed_texture_s3tc" ? null : get(name));
+      }
       if (fixture === "TargetMultisampling") {
         const select = entry.backend.setRenderTarget.bind(entry.backend);
         entry.backend.setRenderTarget = (texture, depth, face, antiAlias) => {

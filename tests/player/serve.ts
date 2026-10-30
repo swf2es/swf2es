@@ -38,6 +38,7 @@ export const importMap = {
     "@swf2es/native/compress": "/native/compress/index.js",
     "@swf2es/format": "/format/index.js",
     "@swf2es/native/mp3": "/native/mp3/index.js",
+    "@swf2es/native/atf": "/native/atf/index.js",
     "@swf2es/codegen": "/codegen/index.js",
     "@swf2es/context3d": "/context3d-backend/index.js",
     "@swf2es/context3d/device": "/context3d-backend/device/index.js",

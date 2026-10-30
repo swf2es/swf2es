@@ -16,10 +16,12 @@ import {
   type StencilAction,
   type Texture3D,
   TextureBindingError,
+  type TextureFormat,
   VERTEX_FORMATS,
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
+import { blockBytes } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 
 import {
@@ -50,8 +52,20 @@ import {
   selectSamples,
   targetFramebuffer,
 } from "./targets.js";
-import { type TextureState, uploadTexture, uploadTextureBytes } from "./textures.js";
+import {
+  type TextureState,
+  uploadCompressedLevel,
+  uploadTexture,
+  uploadTextureBytes,
+} from "./textures.js";
 import { validateIndices, validateVertices } from "./validation.js";
+
+/** What AGAL's sampler must name to read each texture format: RGBA, DXT1 or DXT5. */
+const SAMPLER_FORMATS: Record<TextureFormat, number> = {
+  bgra: 0,
+  compressed: 1,
+  compressedAlpha: 2,
+};
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
 export class WebGLContext3D implements Context3D {
@@ -59,6 +73,7 @@ export class WebGLContext3D implements Context3D {
   width = 0;
   height = 0;
   disposed = false;
+  samplerFormats = true;
   private readonly buffers = new Map<Buffer3D, BufferState>();
   private vertexBuffers = 0;
   private bufferBytes = 0;
@@ -83,6 +98,7 @@ export class WebGLContext3D implements Context3D {
   // Two wrap bits, three filter bits and two mip bits fit each slot in one byte.
   private readonly samplerStates = new Uint8Array(16);
   private anisotropy: EXT_texture_filter_anisotropic | null | undefined;
+  private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
   private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
   private selected: Program3D | null = null;
@@ -715,12 +731,54 @@ export class WebGLContext3D implements Context3D {
     return state;
   }
 
-  createTexture(width: number, height: number, cube = false): Texture3D {
-    return this.allocateTexture(width, height, cube, false);
+  createTexture(
+    width: number,
+    height: number,
+    cube = false,
+    format: TextureFormat = "bgra",
+  ): Texture3D {
+    return this.allocateTexture(width, height, cube, false, format);
   }
 
   createRectangleTexture(width: number, height: number): Texture3D {
-    return this.allocateTexture(width, height, false, true);
+    return this.allocateTexture(width, height, false, true, "bgra");
+  }
+
+  /** GL's internal format for a compressed texture's S3TC, or 0 where the context takes none. */
+  private s3tcFormat(format: TextureFormat): number {
+    if (this.s3tc === undefined) {
+      this.s3tc = this.gl.getExtension("WEBGL_compressed_texture_s3tc");
+    }
+    if (!this.s3tc || format === "bgra") {
+      return 0;
+    }
+
+    // AIR's DXT1 has DXT1's one bit of alpha: a block of three colours has transparent black.
+    return format === "compressed"
+      ? this.s3tc.COMPRESSED_RGBA_S3TC_DXT1_EXT
+      : this.s3tc.COMPRESSED_RGBA_S3TC_DXT5_EXT;
+  }
+
+  /**
+   * Bytes a mip chain of `format` takes, its faces' every level: S3TC's
+   * blocks for a compressed texture whatever its storage, as AIR counts
+   * them, so that a GPU without S3TC allocates no less than one with it.
+   */
+  private chainBytes(
+    width: number,
+    height: number,
+    levels: number,
+    faces: number,
+    format: TextureFormat,
+  ): number {
+    let size = 0;
+    for (let level = 0; level < levels; level++) {
+      const w = Math.max(1, width >> level);
+      const h = Math.max(1, height >> level);
+      size += format === "bgra" ? w * h * 4 : blockBytes(w, h, format === "compressedAlpha");
+    }
+
+    return size * faces;
   }
 
   private allocateTexture(
@@ -728,6 +786,7 @@ export class WebGLContext3D implements Context3D {
     height: number,
     cube: boolean,
     rectangle: boolean,
+    format: TextureFormat,
   ): Texture3D {
     this.alive();
     range(1, width - 1, 2048);
@@ -741,17 +800,22 @@ export class WebGLContext3D implements Context3D {
 
     const faces = cube ? 6 : 1;
     const levels = rectangle ? 1 : 1 + Math.floor(Math.log2(Math.max(width, height)));
-    let size = 0;
-    for (let level = 0; level < levels; level++) {
-      size += Math.max(1, width >> level) * Math.max(1, height >> level) * 4 * faces;
-    }
     if (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) {
       throw new Context3DError(
         "texturePowerOfTwo",
         "Context3D texture size must be a power of two",
       );
     }
+    if (format !== "bgra" && rectangle) {
+      throw new Context3DError("unsupported", "Context3D rectangle textures are not compressed");
+    }
+    if (format !== "bgra" && (width < 4 || height < 4)) {
+      throw new Context3DError("compressedSize", "Context3D compressed textures are at least 4x4");
+    }
 
+    const gl = this.gl;
+    const storage = this.s3tcFormat(format) || gl.RGBA8;
+    const size = this.chainBytes(width, height, levels, faces, format);
     const kind = cube ? 2 : rectangle ? 1 : 0;
     const countLimit = cube
       ? this.limits.maxCubeTextures
@@ -763,8 +827,11 @@ export class WebGLContext3D implements Context3D {
       : rectangle
         ? this.limits.maxRectangleTextureBytes
         : this.limits.max2DTextureBytes;
-    // AIR reserves half the base size for mips, independently of the exact chain storage.
-    const quotaBytes = width * height * faces * (rectangle ? 4 : 6);
+    // AIR reserves half the base size for mips, independently of the exact
+    // chain storage, and charges DXT1 an eighth of BGRA and DXT5 a quarter.
+    const quotaBytes =
+      (width * height * faces * (rectangle ? 4 : 6)) /
+      (format === "compressed" ? 8 : format === "compressedAlpha" ? 4 : 1);
     if (
       this.textures.size >= this.limits.maxTextures ||
       this.textureCounts[kind] >= countLimit ||
@@ -774,8 +841,6 @@ export class WebGLContext3D implements Context3D {
       throw new Context3DError("limit", "Context3D experiment: texture count or memory limit");
     }
 
-    const bytes = new Uint8Array(width * height * 4);
-    const gl = this.gl;
     const handle = gl.createTexture();
     if (!handle) {
       throw new Context3DError("textureAllocation", "Context3D experiment: cannot create texture");
@@ -784,10 +849,11 @@ export class WebGLContext3D implements Context3D {
     gl.activeTexture(gl.TEXTURE0);
     const target = cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
     gl.bindTexture(target, handle);
-    gl.texStorage2D(target, levels, gl.RGBA8, width, height);
+    gl.texStorage2D(target, levels, storage, width, height);
     const state: TextureState = {
       handle,
-      bytes,
+      storage,
+      bytes: new Uint8Array(0),
       uploaded: new Uint16Array(faces),
       framebuffer: null,
       depthBuffer: null,
@@ -805,6 +871,7 @@ export class WebGLContext3D implements Context3D {
       levels,
       cube,
       rectangle,
+      format,
       upload: (pixels, level = 0, face = 0, sourceWidth, sourceHeight) => {
         this.alive();
         this.textureState(texture);
@@ -814,6 +881,18 @@ export class WebGLContext3D implements Context3D {
         this.alive();
         this.textureState(texture);
         uploadTextureBytes(gl, texture, state, data, offset, level, face);
+      },
+      uploadCompressed: (blocks, level = 0, face = 0) => {
+        this.alive();
+        this.textureState(texture);
+        if (format === "bgra") {
+          throw new Context3DError(
+            "textureUpload",
+            "Context3D experiment: BGRA texture given blocks",
+          );
+        }
+
+        uploadCompressedLevel(gl, texture, state, blocks, level, face);
       },
       dispose: () => {
         if (!this.textures.delete(texture)) {
@@ -1029,6 +1108,12 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     if (texture) {
       this.textureState(texture);
+      if (texture.format !== "bgra") {
+        throw new Context3DError(
+          "operation",
+          "Context3D experiment: compressed textures are no render targets",
+        );
+      }
       if (texture.width < 8 || texture.height < 8) {
         throw new Context3DError(
           "operation",
@@ -1553,6 +1638,10 @@ export class WebGLContext3D implements Context3D {
         ) {
           throw new TextureBindingError("mipmaps");
         }
+      }
+      // AGAL must say a compressed texture is one, and which: AIR reads nothing otherwise.
+      if (this.samplerFormats && binding.source.format !== SAMPLER_FORMATS[texture.format]) {
+        throw new TextureBindingError("format", slot);
       }
 
       gl.activeTexture(gl.TEXTURE0 + slot);

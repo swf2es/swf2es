@@ -23,10 +23,13 @@ export {
   STENCIL_ACTIONS,
   type Stage3DHost,
   type StencilAction,
+  TEXTURE_FORMATS,
   type Texture3D,
   TextureBindingError,
+  type TextureFormat,
   VERTEX_FORMATS,
   type VertexFormat,
   VertexOffsetError,
 } from "./backend.js";
+export { blockBytes, decodeDxt, encodeDxt } from "./dxt.js";
 export { Context3DError, type Context3DErrorReason } from "./errors.js";
