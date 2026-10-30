@@ -1,6 +1,7 @@
 // Every binary of the package, each its own wasm32-freestanding module in
-// zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK) and render
-// (bitmap's SIMD kernels, libtess2's fills and the lines). build.ts runs
+// zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK), render
+// (bitmap's SIMD kernels, libtess2's fills and the lines) and atf
+// (jxrlib's JPEG XR decoder). build.ts runs
 // this with the pinned Zig and checks the results in as base64; `zig build
 // test` runs the bitmap kernel's, the fill flattener's, the band filler's and the blurs' tests on the host.
 const std = @import("std");
@@ -258,10 +259,11 @@ fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
         .strip = true,
     });
     root.export_symbol_names = &exports;
-    // The module's own libc headers come before jxrlib's, which name them
-    // with <>, and jxrlib's own before the package's.
+    // The module's own libc headers, then the package's, which they take
+    // with #include_next, then jxrlib's.
     for ([_]std.Build.LazyPath{
         b.path("src/atf/include"),
+        b.path("include"),
         jxrlib,
         jxrlib.path(b, "common/include"),
         jxrlib.path(b, "image/sys"),

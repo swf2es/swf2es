@@ -1,8 +1,10 @@
-// jxrlib's, for wasm32-freestanding, which has no libc headers. The module
-// decodes from memory alone: its file streams and diagnostics are inert.
+// What jxrlib needs beyond include/stdio.h, for wasm32-freestanding: the
+// module decodes from memory alone, so its file streams and diagnostics
+// are inert.
 #ifndef SWF2ES_ATF_STDIO_H
 #define SWF2ES_ATF_STDIO_H
 
+#include_next <stdio.h>
 #include <stddef.h>
 
 typedef struct swf2es_file FILE;
