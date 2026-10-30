@@ -510,6 +510,17 @@ async function runSwf(
       }
     }
 
+    // What the last frame asked to load comes after it, as Ruffle's test runner runs a tick's
+    // loads before the tick ends; the frames before had theirs as the next began.
+    if (scripting) {
+      await scripting.settled();
+      for (const end of scripting.loads.completeLoads()) {
+        end();
+      }
+
+      stopOnUncaught();
+    }
+
     surface.destroy();
     return { images, trace, gl, error: null };
   } catch (e) {
