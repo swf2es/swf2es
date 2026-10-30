@@ -20,7 +20,7 @@ import {
   type PbjSample,
   type PbjSelect,
 } from "@swf2es/format";
-import { nearest } from "./bitmap.js";
+import { type BitmapStore, nearest, type PixelRect } from "./bitmap.js";
 
 /** An image a kernel samples: a BitmapData's premultiplied ARGB, or floats, `channels` a pixel. */
 export interface ShaderImage {
@@ -30,6 +30,15 @@ export interface ShaderImage {
   floats?: Float32Array;
   /** The floats' channels a pixel. */
   channels: number;
+  /** Transparent past its edges, as a filter's source is, rather than clamped to them. */
+  clear?: boolean;
+}
+
+/** A kernel with what it runs with: its parameters' numbers, and its inputs' images by texture number. */
+export interface ShaderUse {
+  kernel: PbjKernel;
+  values: Map<PbjParameter, number[]>;
+  images: Map<number, ShaderImage>;
 }
 
 /** The name Pixel Bender gives the parameter it sets to the pixel's coordinate. */
@@ -275,7 +284,8 @@ export class PixelBender {
    * Run over `width` by `height` pixels into `out`, `channels` floats a
    * pixel: `values` each input parameter's numbers by the parameter,
    * converted already (floats to float32, ints to int32), and `images`
-   * each texture's image by its number.
+   * each texture's image by its number; the first pixel's coordinate
+   * `x0`, `y0`.
    */
   run(
     values: Map<PbjParameter, readonly number[]>,
@@ -283,6 +293,8 @@ export class PixelBender {
     width: number,
     height: number,
     out: Float32Array,
+    x0 = 0,
+    y0 = 0,
   ): void {
     this.f0.fill(0);
     this.i0.fill(0);
@@ -303,11 +315,11 @@ export class PixelBender {
         f.set(f0);
         i.set(i0);
         if (coord.length > 0) {
-          f[coord[0]] = x + 0.5;
+          f[coord[0]] = x0 + x + 0.5;
         }
 
         if (coord.length > 1) {
-          f[coord[1]] = y + 0.5;
+          f[coord[1]] = y0 + y + 0.5;
         }
 
         this.pixel();
@@ -899,6 +911,72 @@ export class PixelBender {
   }
 }
 
+/** A float as a bitmap's byte: clamped, NaN as 0, then rounded to the nearest, a half to the even. */
+export function outputByte(v: number): number {
+  const c = v > 0 ? (v < 1 ? v : 1) : 0;
+  return nearest(Math.fround(c * 255));
+}
+
+/**
+ * BitmapData.applyFilter with a ShaderFilter, as adl runs it: the kernel's
+ * first input is the whole source, transparent past its edges, and each
+ * pixel's coordinate is the destination's, moved back by the left and top
+ * extensions, whatever the rect and point; what it writes is as large as
+ * the source grown by the extensions, from the point less twice the
+ * rect's corner and the left and top extensions, clipped to the
+ * destination (the shader-filters case's probes). Premultiplied, each
+ * colour at most its alpha; an opaque destination stays opaque.
+ */
+export function shaderFilter(
+  dest: BitmapStore,
+  source: BitmapStore,
+  rect: PixelRect,
+  dx: number,
+  dy: number,
+  extensions: readonly number[],
+  use: ShaderUse,
+  program: PixelBender,
+): void {
+  const [left, top, right, bottom] = extensions;
+  const fromX = dx - 2 * rect.x - left;
+  const fromY = dy - 2 * rect.y - top;
+  const x0 = Math.max(0, fromX);
+  const y0 = Math.max(0, fromY);
+  const x1 = Math.min(dest.width, fromX + source.width + left + right);
+  const y1 = Math.min(dest.height, fromY + source.height + top + bottom);
+  if (x1 <= x0 || y1 <= y0) {
+    return;
+  }
+
+  const images = new Map(use.images);
+  const first = use.kernel.inputs[0];
+  images.set(first.index, {
+    width: source.width,
+    height: source.height,
+    pixels: source.readable,
+    channels: first.channels,
+    clear: true,
+  });
+  const width = x1 - x0;
+  const height = y1 - y0;
+  const channels = program.channels;
+  const out = new Float32Array(width * height * channels);
+  program.run(use.values, images, width, height, out, x0 - left, y0 - top);
+  const pixels = dest.pixels;
+  for (let y = 0, at = 0; y < height; y++) {
+    for (let x = 0; x < width; x++, at += channels) {
+      const a = outputByte(out[at + 3]);
+      const r = Math.min(a, outputByte(out[at]));
+      const g = Math.min(a, outputByte(out[at + 1]));
+      const b = Math.min(a, outputByte(out[at + 2]));
+      pixels[(y0 + y) * dest.width + x0 + x] =
+        (((dest.transparent ? a : 255) << 24) | (r << 16) | (g << 8) | b) >>> 0;
+    }
+  }
+
+  dest.changed();
+}
+
 /** A coordinate's pixel, clamped to the edges, NaN to the first. */
 function clampIndex(v: number, size: number): number {
   if (!(v > 0)) {
@@ -908,7 +986,20 @@ function clampIndex(v: number, size: number): number {
   return v >= size ? size - 1 : v;
 }
 
+/** A pixel of a clear image, 0 past its edges, as a pixel at (x, y) is, NaN as 0. */
+function clearPixel(image: ShaderImage, x: number, y: number): number {
+  const i = Number.isNaN(x) ? 0 : x;
+  const j = Number.isNaN(y) ? 0 : y;
+  return i >= 0 && i < image.width && j >= 0 && j < image.height
+    ? (image.pixels as Uint32Array)[j * image.width + i]
+    : 0;
+}
+
 function sampleBytesNearest(image: ShaderImage, x: number, y: number): number {
+  if (image.clear) {
+    return clearPixel(image, Math.floor(x), Math.floor(y));
+  }
+
   const pixels = image.pixels as Uint32Array;
   return pixels[
     clampIndex(Math.floor(y), image.height) * image.width + clampIndex(Math.floor(x), image.width)
@@ -929,14 +1020,26 @@ function sampleBytesLinear(image: ShaderImage, x: number, y: number): number {
   const wy = Math.round((fy - y0) * 256) || 0;
   const w = image.width;
   const h = image.height;
-  const left = clampIndex(x0, w);
-  const right = clampIndex(x0 + 1, w);
-  const top = clampIndex(y0, h) * w;
-  const bottom = clampIndex(y0 + 1, h) * w;
-  const p00 = pixels[top + left];
-  const p10 = pixels[top + right];
-  const p01 = pixels[bottom + left];
-  const p11 = pixels[bottom + right];
+  let p00: number;
+  let p10: number;
+  let p01: number;
+  let p11: number;
+  if (image.clear) {
+    p00 = clearPixel(image, x0, y0);
+    p10 = clearPixel(image, x0 + 1, y0);
+    p01 = clearPixel(image, x0, y0 + 1);
+    p11 = clearPixel(image, x0 + 1, y0 + 1);
+  } else {
+    const left = clampIndex(x0, w);
+    const right = clampIndex(x0 + 1, w);
+    const top = clampIndex(y0, h) * w;
+    const bottom = clampIndex(y0 + 1, h) * w;
+    p00 = pixels[top + left];
+    p10 = pixels[top + right];
+    p01 = pixels[bottom + left];
+    p11 = pixels[bottom + right];
+  }
+
   let out = 0;
   for (let shift = 0; shift < 32; shift += 8) {
     const row0 = (((p00 >>> shift) & 0xff) * (256 - wx) + ((p10 >>> shift) & 0xff) * wx) >> 8;

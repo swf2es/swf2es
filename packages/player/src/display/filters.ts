@@ -3,6 +3,7 @@
 // flash/filters/, a file per class), what a PlaceObject3's list becomes,
 // and what the renderer will draw. A record holds the keys of its kind alone.
 import type { SwfFilter } from "@swf2es/format";
+import type { ShaderUse } from "../bitmap/pixel-bender.js";
 
 export type FilterKind =
   | "blur"
@@ -13,7 +14,8 @@ export type FilterKind =
   | "gradientBevel"
   | "colorMatrix"
   | "convolution"
-  | "displacementMap";
+  | "displacementMap"
+  | "shader";
 
 /** Every value a filter may have; a kind's record has its own keys only. */
 export interface Filter {
@@ -59,6 +61,15 @@ export interface Filter {
   scaleX: number;
   scaleY: number;
   mode: string;
+  /** A ShaderFilter's AS3 Shader. */
+  shader: object | null;
+  /** How far a ShaderFilter grows the object's bitmap, in stage pixels: left, top, right, bottom. */
+  extensions: [number, number, number, number];
+  /**
+   * A display object's ShaderFilter's kernel as it was when its filters
+   * were set, with its parameters and images then, which it draws with.
+   */
+  shaderUse?: ShaderUse | null;
 }
 
 const IDENTITY_MATRIX = [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
@@ -143,13 +154,15 @@ function kindDefaults(kind: FilterKind): object {
         scaleX: 0,
         scaleY: 0,
       };
+    case "shader":
+      return { shader: null, extensions: [0, 0, 0, 0] };
   }
 }
 
 /** A copy of a record, its lists its own. */
 export function copyFilter(f: Filter): Filter {
   const copy = { ...f };
-  for (const key of ["colors", "alphas", "ratios", "matrix", "mapPoint"] as const) {
+  for (const key of ["colors", "alphas", "ratios", "matrix", "mapPoint", "extensions"] as const) {
     if (key in f) {
       (copy as Record<string, unknown>)[key] = [...(f[key] as number[])];
     }

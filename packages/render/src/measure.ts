@@ -8,7 +8,10 @@ import {
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
+  NO_WHOLE,
   type SceneList,
+  WHOLE_ALIASED,
+  WHOLE_SMOOTH,
 } from "./scene.js";
 
 /**
@@ -119,7 +122,15 @@ export function measureLayers(
           kept[layer * 4 + k] = areas[n - 4 + k];
         }
 
-        filteredRect(scene.areas, layer * 4, pad, target, scene.layers, layer * 4);
+        filteredRect(
+          scene.areas,
+          layer * 4,
+          pad,
+          target,
+          scene.layers,
+          layer * 4,
+          scene.wholes[layer],
+        );
         areas.length = n - 4;
         const r = scene.layers;
         const at = layer * 4;
@@ -149,9 +160,10 @@ export function measureLayers(
  * area (least x and y, greatest x and y in target pixels, from `area[at]`)
  * as PixiJS's filter system has it (FilterSystem's _calculateFilterArea): in
  * units, the area cut to the target, out to whole pixels at the
- * resolution, padded; nothing where it has no size then; its edges
- * snapped to the pixels they lie on. Into `out` from `to`: x, y, width,
- * height, of no size for nothing.
+ * resolution, or to whole units as `whole` says (SceneList.wholes),
+ * padded; nothing where it has no size then; its edges snapped to the
+ * pixels they lie on. Into `out` from `to`: x, y, width, height, of no
+ * size for nothing.
  */
 export function filteredRect(
   area: ArrayLike<number>,
@@ -160,6 +172,7 @@ export function filteredRect(
   target: MeasureTarget,
   out: Int32Array,
   to: number,
+  whole = NO_WHOLE,
 ): void {
   const res = target.resolution;
   let x0 = area[at] / res;
@@ -180,10 +193,33 @@ export function filteredRect(
   y0 = Math.max(y0, 0);
   x1 = Math.min(x1, target.width / res);
   y1 = Math.min(y1, target.height / res);
-  x0 = Math.floor(x0 * res) / res - pad;
-  y0 = Math.floor(y0 * res) / res - pad;
-  x1 = Math.ceil(x1 * res) / res + pad;
-  y1 = Math.ceil(y1 * res) / res + pad;
+  if (whole !== NO_WHOLE) {
+    // Out to twips first, as Flash keeps an object's bounds.
+    x0 = Math.floor(x0 * 20 + TEXEL_SNAP) / 20;
+    y0 = Math.floor(y0 * 20 + TEXEL_SNAP) / 20;
+    x1 = Math.ceil(x1 * 20 - TEXEL_SNAP) / 20;
+    y1 = Math.ceil(y1 * 20 - TEXEL_SNAP) / 20;
+  }
+
+  switch (whole) {
+    case WHOLE_SMOOTH:
+      x0 = Math.floor(x0) - pad;
+      y0 = Math.floor(y0) - pad;
+      x1 = Math.floor(x1) + 1 + pad;
+      y1 = Math.floor(y1) + 1 + pad;
+      break;
+    case WHOLE_ALIASED:
+      x0 = Math.ceil(x0 - 0.5) - pad;
+      y0 = Math.ceil(y0 - 0.5) - pad;
+      x1 = Math.ceil(x1 - 0.5) + pad;
+      y1 = Math.ceil(y1 - 0.5) + pad;
+      break;
+    default:
+      x0 = Math.floor(x0 * res) / res - pad;
+      y0 = Math.floor(y0 * res) / res - pad;
+      x1 = Math.ceil(x1 * res) / res + pad;
+      y1 = Math.ceil(y1 * res) / res + pad;
+  }
   if (!(x1 - x0 > 0 && y1 - y0 > 0)) {
     return;
   }

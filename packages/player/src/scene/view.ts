@@ -13,6 +13,7 @@ import {
   Keeps,
   LAYER,
   measureLayers,
+  NO_WHOLE,
   NORMAL,
   PLANE,
   plan,
@@ -20,6 +21,8 @@ import {
   SceneList,
   SMOOTH,
   Textures,
+  WHOLE_ALIASED,
+  WHOLE_SMOOTH,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { argbOf, type BitmapStore } from "../bitmap/bitmap.js";
@@ -499,6 +502,12 @@ export class RenderView implements Drawer {
         : this.filterLayers.filterPlan(o, this.filterUnits, this.scale, this.drawRoot !== null);
     // Its colour, which a 3D object's bitmap takes, all above it drawn into it.
     const full = color;
+    // A ShaderFilter's kernel runs over Flash's bitmap of the object, of whole pixels.
+    const whole = !filtering?.whole
+      ? NO_WHOLE
+      : this.stageQuality === "LOW"
+        ? WHOLE_ALIASED
+        : WHOLE_SMOOTH;
     let layerRow = -1;
     let layer = -1;
     let drawnFrom = 0;
@@ -526,6 +535,7 @@ export class RenderView implements Drawer {
               this.target,
               this.frames,
               this.keptGeneration,
+              whole,
             )
           : null;
       if (output?.reused) {
@@ -539,7 +549,7 @@ export class RenderView implements Drawer {
         // once its filters are fitted to that.
         drawnFrom = this.scene.length;
         const keep = output?.keeping ? (output.handle as KeepHandle).id : -1;
-        layer = this.scene.layerBegin(filtering ? 0 : -1, keep);
+        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole);
       }
     }
 

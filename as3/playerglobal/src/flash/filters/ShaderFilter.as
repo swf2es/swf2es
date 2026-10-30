@@ -9,6 +9,11 @@ package flash.filters
 	{
 		public function ShaderFilter(shader:Shader = null)
 		{
+			// Through the setter, which refuses a Shader without a kernel (2171).
+			if (shader)
+			{
+				this.shader = shader;
+			}
 		}
 
 		public native function get shader():Shader;

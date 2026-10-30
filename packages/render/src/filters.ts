@@ -44,6 +44,14 @@ export const CONVOLUTION = 6;
  * start; the map's point, and its width and height.
  */
 export const DISPLACEMENT = 7;
+/**
+ * A ShaderFilter, its kernel's GLSL the filter's kernel (kernel-shaders.ts):
+ * units, how far in the object's pixels start, its extensions left, top,
+ * right and bottom in stage pixels; how many images it samples, then each
+ * one's texture number and the texture of the frame's it reads, -1 for the
+ * layer; how many floats its parameters take, them, and how many ints, them.
+ */
+export const SHADER = 8;
 
 /**
  * A frame's filters in chains, one a filtered layer: each filter its kind,
@@ -53,6 +61,8 @@ export const DISPLACEMENT = 7;
 export class Filters {
   kind = new Uint8Array(64);
   texture = new Int32Array(64);
+  /** A ShaderFilter's kernel, its GLSL, by the filter; null for the others. */
+  kernels: (string | null)[] = [];
   /** Where each filter's values start in `values`, and where the next one's do. */
   start = new Int32Array(65);
   values = new Float32Array(1024);
@@ -64,10 +74,11 @@ export class Filters {
   reset(): void {
     this.count = 0;
     this.chainCount = 0;
+    this.kernels.length = 0;
   }
 
-  /** A filter of `kind` added to the chain open: its values, and the texture it reads. */
-  add(kind: number, values: ArrayLike<number>, texture = -1): void {
+  /** A filter of `kind` added to the chain open: its values, the texture it reads, and its kernel. */
+  add(kind: number, values: ArrayLike<number>, texture = -1, kernel: string | null = null): void {
     const at = this.count++;
     if (this.count >= this.kind.length) {
       this.kind = grow(this.kind);
@@ -84,6 +95,7 @@ export class Filters {
 
     this.kind[at] = kind;
     this.texture[at] = texture;
+    this.kernels[at] = kernel;
     this.start[at] = from;
     this.values.set(values, from);
     this.start[at + 1] = from + values.length;

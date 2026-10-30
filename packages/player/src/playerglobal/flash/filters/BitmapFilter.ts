@@ -21,6 +21,7 @@ const CLASSES: [string, FilterKind][] = [
   ["ColorMatrixFilter", "colorMatrix"],
   ["ConvolutionFilter", "convolution"],
   ["DisplacementMapFilter", "displacementMap"],
+  ["ShaderFilter", "shader"],
 ];
 
 /** A filter object's class by kind, for the objects a display object's filters are read back as. */

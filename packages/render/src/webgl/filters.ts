@@ -1,4 +1,4 @@
-import { type GlState, linkProgram } from "@swf2es/context3d/device";
+import { type GlState, linkProgram, ShaderError } from "@swf2es/context3d/device";
 import {
   BEVEL_PASS,
   BOX_PASS,
@@ -8,11 +8,14 @@ import {
   FLOATS,
   GLOW_PASS,
   GRADIENT_PASS,
+  IVEC4S,
+  KERNEL_PASS,
   MATRIX_PASS,
   MATRIX4,
   NO_BLUR,
   planChain,
   READ_BACK_PASS,
+  SAMPLER,
   SHRINK_PASS,
   VEC4S,
 } from "../filter-plan.js";
@@ -47,10 +50,18 @@ export interface FilterHost<T extends FilterTarget> {
   sampler(bits: number): WebGLSampler;
 }
 
-/** The units a pass reads its input, the blur it combines with, and a gradient from. */
+/**
+ * The units a pass reads its input, the blur it combines with, and a
+ * gradient from; a kernel's images take those from the last on, as far as
+ * KERNEL_UNITS.
+ */
 const INPUT_UNIT = 4;
 const BLURRED_UNIT = 5;
 const EXTRA_UNIT = 6;
+const KERNEL_UNITS = 8;
+
+/** The most kernels' programs kept, the one used longest ago deleted for another. */
+const KERNEL_PROGRAMS = 32;
 
 /**
  * A triangle over the output's frame, the viewport, reading its input
@@ -127,6 +138,11 @@ export class FilterRunner<T extends FilterTarget> {
   private readonly state: GlState;
   private readonly host: FilterHost<T>;
   private readonly passes = new Map<string, Pass>();
+  /** Kernels' passes by their fragment shader, the one used last last; null for one that would not link. */
+  private readonly kernels = new Map<string, Pass | null>();
+  /** The units a kernel's pass has bound its images to so far. */
+  private samplers = 0;
+  private readonly ints = new Int32Array(4);
   /** The chain being run, planned (filter-plan.ts), each slot's target and the last pass using it. */
   private readonly plan = new FilterPlan();
   private readonly targets: (T | null)[] = [];
@@ -232,7 +248,12 @@ export class FilterRunner<T extends FilterTarget> {
     const pass = plan.passes[k];
     const from = targets[pass.input] as FilterTarget;
     const to = targets[pass.output] as FilterTarget;
-    const program = this.program(pass.program);
+    // A kernel the GPU will not compile leaves its input as it was.
+    const program =
+      pass.program === KERNEL_PASS
+        ? (this.kernel(pass.kernel as string) ?? this.use("copy", COPY))
+        : this.program(pass.program);
+    this.samplers = 0;
     for (let u = pass.first; u < pass.end; u++) {
       this.setUniform(program, plan, u);
     }
@@ -325,6 +346,30 @@ export class FilterRunner<T extends FilterTarget> {
       case VEC4S:
         gl.uniform4fv(location, values, at, count);
         break;
+      case IVEC4S: {
+        let ints = this.ints;
+        if (ints.length < count) {
+          ints = new Int32Array(count);
+        }
+
+        for (let k = 0; k < count; k++) {
+          ints[k] = values[at + k];
+        }
+
+        gl.uniform4iv(location, ints, 0, count);
+        break;
+      }
+
+      case SAMPLER: {
+        const unit = EXTRA_UNIT + this.samplers++;
+        if (unit < EXTRA_UNIT + KERNEL_UNITS) {
+          this.state.bindTexture(unit, this.host.texture(values[at]));
+          this.state.bindSampler(unit, this.host.sampler(CLAMP));
+          gl.uniform1i(location, unit);
+        }
+
+        break;
+      }
       case FLOATS:
         this.set(
           pass,
@@ -412,6 +457,11 @@ export class FilterRunner<T extends FilterTarget> {
     this.set(pass, "uInputPixel", 4, input.width, input.height, 1 / input.width, 1 / input.height);
     this.set(pass, "uCoord", 2, readWidth / input.width, readHeight / input.height);
     this.set(pass, "uTextureRect", 4, input.x ?? 0, input.y ?? 0, input.width, input.height);
+    // A kernel's alone: the others need not be told.
+    if (this.at(pass, "uOutputAt")) {
+      this.set(pass, "uOutputAt", 2, x, y);
+    }
+
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -438,6 +488,44 @@ export class FilterRunner<T extends FilterTarget> {
     return pass;
   }
 
+  /** The pass of a kernel's fragment shader, linked as first used, in use; null where it would not link. */
+  private kernel(fragment: string): Pass | null {
+    const gl = this.gl;
+    let pass = this.kernels.get(fragment);
+    if (pass !== undefined) {
+      // Used last now.
+      this.kernels.delete(fragment);
+    } else {
+      if (this.kernels.size >= KERNEL_PROGRAMS) {
+        const [oldest, old] = this.kernels.entries().next().value as [string, Pass | null];
+        if (old) {
+          gl.deleteProgram(old.program);
+        }
+
+        this.kernels.delete(oldest);
+      }
+
+      pass = null;
+      try {
+        const program = linkProgram(gl, VERTEX, HEADER + fragment);
+        pass = { program, uniforms: new Map(), told: new Map() };
+        this.state.useProgram(program);
+        gl.uniform1i(gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);
+      } catch (e) {
+        if (!(e instanceof ShaderError)) {
+          throw e;
+        }
+      }
+    }
+
+    this.kernels.set(fragment, pass);
+    if (pass) {
+      this.state.useProgram(pass.program);
+    }
+
+    return pass;
+  }
+
   /** Where `pass` takes uniform `name`, asked once. */
   private at(pass: Pass, name: string): WebGLUniformLocation | null {
     let location = pass.uniforms.get(name);
@@ -450,10 +538,13 @@ export class FilterRunner<T extends FilterTarget> {
   }
 
   destroy(): void {
-    for (const pass of this.passes.values()) {
-      this.gl.deleteProgram(pass.program);
+    for (const pass of [...this.passes.values(), ...this.kernels.values()]) {
+      if (pass) {
+        this.gl.deleteProgram(pass.program);
+      }
     }
 
     this.passes.clear();
+    this.kernels.clear();
   }
 }

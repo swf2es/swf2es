@@ -25,6 +25,7 @@ export {
   Filters,
   GLOW,
   GRADIENT,
+  SHADER,
 } from "./filters.js";
 export {
   Geometries,
@@ -59,6 +60,7 @@ export {
   MESH,
   MIRROR,
   MULTIPLY,
+  NO_WHOLE,
   NORMAL,
   OVERLAY,
   PLANE,
@@ -68,5 +70,7 @@ export {
   SMOOTH,
   SNAP,
   SUBTRACT,
+  WHOLE_ALIASED,
+  WHOLE_SMOOTH,
 } from "./scene.js";
 export { type TextureData, type TextureHandle, Textures } from "./textures.js";

@@ -12,8 +12,11 @@ import {
   type MeasureTarget,
   type Rows,
   type SceneList,
+  type TextureHandle,
   type Textures,
 } from "@swf2es/render";
+import { rgbaOf } from "../bitmap/bitmap.js";
+import type { ShaderImage } from "../bitmap/pixel-bender.js";
 import { Container } from "../display/container.js";
 import { type DisplayObject, TRANSFORM } from "../display/displayobject.js";
 import {
@@ -76,6 +79,8 @@ export class FilterLayers {
   /** The filtered layers drawn this frame, each its output's record and its layer number. */
   private readonly ran: (KeptOutput | number)[] = [];
   private readonly movedArea = new Float64Array(4);
+  /** The textures of the images ShaderFilters' kernels sample, by image. */
+  private readonly images = new WeakMap<ShaderImage, TextureHandle>();
   /** A reused output's rectangle (keptOutput). */
   readonly keptRect = new Int32Array(4);
 
@@ -93,7 +98,8 @@ export class FilterLayers {
    * the stage (a b c d), a move of what it scrolls, its filters, or the screen's scale; and drawn
    * again only while its rectangle moved with it, its size the same and its corner within a pixel.
    * One that changes frame after frame is not kept, as keeping it would cost a target for nothing.
-   * `frames` and `generation` are the view's: the stage's frames drawn, and what outputs are kept at.
+   * `frames` and `generation` are the view's: the stage's frames drawn, and what outputs are kept at;
+   * `whole` how its layer covers whole pixels (@swf2es/render's SceneList.wholes).
    */
   keptOutput(
     o: DisplayObject,
@@ -108,6 +114,7 @@ export class FilterLayers {
     target: MeasureTarget,
     frames: number,
     generation: number,
+    whole: number,
   ): KeptOutput {
     let k = this.outputs.get(o);
     if (!k) {
@@ -163,7 +170,7 @@ export class FilterLayers {
       moved[2] = k.area[2] + x - k.x;
       moved[3] = k.area[3] + y - k.y;
       const rect = this.keptRect;
-      filteredRect(moved, 0, k.pad, target, rect, 0);
+      filteredRect(moved, 0, k.pad, target, rect, 0, whole);
       same =
         rect[2] === k.rect[2] &&
         rect[3] === k.rect[3] &&
@@ -343,11 +350,55 @@ export class FilterLayers {
         this.textures.use(texture);
       }
 
-      filters.add(pass.kind, pass.values, texture);
+      for (const { image, at } of pass.images) {
+        pass.values[at] = this.imageTexture(image).id;
+      }
+
+      filters.add(pass.kind, pass.values, texture, pass.kernel);
     }
 
     return filters.close();
   }
+
+  /** An image a kernel samples as a texture, made once, again only after a lost context took it. */
+  private imageTexture(image: ShaderImage): TextureHandle {
+    let handle = this.images.get(image);
+    if (!handle || !this.textures.alive(handle)) {
+      handle = this.textures.add(
+        image.width,
+        image.height,
+        imageBytes(image),
+        GRADIENT_IDLE_FRAMES,
+      );
+      this.images.set(image, handle);
+    }
+
+    this.textures.use(handle.id);
+    return handle;
+  }
+}
+
+/**
+ * An image's premultiplied RGBA bytes: a BitmapData's as they are, floats'
+ * clamped to bytes and their missing channels 0, as the CPU samples them,
+ * as close as a texture of bytes comes.
+ */
+function imageBytes(image: ShaderImage): Uint8Array {
+  if (image.pixels) {
+    return rgbaOf(image.pixels);
+  }
+
+  const floats = image.floats as Float32Array;
+  const c = image.channels;
+  const out = new Uint8Array(image.width * image.height * 4);
+  for (let i = 0; i < image.width * image.height; i++) {
+    for (let k = 0; k < 4; k++) {
+      const v = k < c ? floats[i * c + k] : 0;
+      out[i * 4 + k] = Math.round(Math.max(0, Math.min(1, v || 0)) * 255);
+    }
+  }
+
+  return out;
 }
 
 /** Whether every layer `layer` is in has a size, as the planner draws only such. */

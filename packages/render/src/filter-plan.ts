@@ -13,7 +13,9 @@ import {
   type Filters,
   GLOW,
   GRADIENT,
+  SHADER,
 } from "./filters.js";
+import { filterKernel, type KernelImage, PIXELS_BACK } from "./kernel-shaders.js";
 
 /** The passes' programs, each a fragment shader of filter-shaders.ts. */
 export const BOX_PASS = 1;
@@ -25,11 +27,19 @@ export const GRADIENT_PASS = 6;
 export const MATRIX_PASS = 7;
 export const CONVOLUTION_PASS = 8;
 export const DISPLACE_PASS = 9;
+/** A Pixel Bender kernel's pass, its program FilterPass.kernel. */
+export const KERNEL_PASS = 10;
 
-/** How a uniform's values are set: one to four floats, an array of vec4s, or a 4 by 4 matrix. */
+/**
+ * How a uniform's values are set: one to four floats, an array of vec4s, a
+ * 4 by 4 matrix, an array of ivec4s, or a sampler, its value the texture of
+ * the frame's it reads.
+ */
 export const FLOATS = 1;
 export const VEC4S = 2;
 export const MATRIX4 = 3;
+export const IVEC4S = 4;
+export const SAMPLER = 5;
 
 /** A pass's blurred input (FilterPass.blurred): none read, or the pass's input itself. */
 export const NO_BLUR = -2;
@@ -54,6 +64,8 @@ export interface FilterPass {
   down: number;
   /** A texture of the frame's it reads, a gradient's colours or a map, or -1. */
   texture: number;
+  /** A kernel's pass's fragment shader (KERNEL_PASS), or null. */
+  kernel: string | null;
   /** Its uniforms in the plan's (uniformName and the rest), from `first` to before `end`. */
   first: number;
   end: number;
@@ -123,6 +135,7 @@ export class FilterPlan {
         across: 1,
         down: 1,
         texture: -1,
+        kernel: null,
         first: 0,
         end: 0,
       };
@@ -141,6 +154,7 @@ export class FilterPlan {
     pass.across = 1;
     pass.down = 1;
     pass.texture = -1;
+    pass.kernel = null;
     pass.first = this.uniforms;
     pass.end = this.uniforms;
     return pass;
@@ -206,17 +220,32 @@ export function planChain(
   plan.reset(width, height, resolution);
   const end = filters.chains[chain + 1];
   for (let i = filters.chains[chain]; i < end; i++) {
-    plan.result = planFilter(
-      plan,
-      filters.kind[i],
-      filters.values,
-      filters.start[i],
-      filters.texture[i],
-      plan.result,
-      width,
-      height,
-      hasTexture,
-    );
+    const kernel = filters.kernels[i];
+    plan.result =
+      filters.kind[i] === SHADER
+        ? kernel
+          ? shader(
+              plan,
+              filters.values,
+              filters.start[i],
+              kernel,
+              plan.result,
+              width,
+              height,
+              hasTexture,
+            )
+          : plan.result
+        : planFilter(
+            plan,
+            filters.kind[i],
+            filters.values,
+            filters.start[i],
+            filters.texture[i],
+            plan.result,
+            width,
+            height,
+            hasTexture,
+          );
   }
 }
 
@@ -473,6 +502,99 @@ function displacement(
     height / plan.resolution - inset + 1,
   );
   plan.uniform("uMapAt", 4, inset + v[at + 18], inset + v[at + 19], v[at + 20], v[at + 21]);
+  return out;
+}
+
+/** A kernel's images, read as the plan's of a ShaderFilter are: each one's number and texture. */
+const kernelImages: KernelImage[] = [];
+
+/**
+ * A ShaderFilter: its kernel (kernel-shaders.ts, filterKernel) over the
+ * input, the object's bitmap `inset` units in from its frame, grown by
+ * the extensions; its images and parameters as uniforms. Run once a stage
+ * pixel, as Flash runs it over its bitmap of the object: where a whole
+ * number of the input's texels make a stage pixel, the input is shrunk to
+ * one a pixel, the mean of its texels, run, and drawn back, each texel its
+ * pixel's; else run at each texel. One of whose images there is no
+ * texture leaves its input be.
+ */
+function shader(
+  plan: FilterPlan,
+  v: Float32Array,
+  at: number,
+  kernel: string,
+  input: number,
+  width: number,
+  height: number,
+  hasTexture: (id: number) => boolean,
+): number {
+  const units = v[at];
+  const inset = v[at + 1];
+  const count = v[at + 6];
+  kernelImages.length = 0;
+  for (let k = 0; k < count; k++) {
+    const id = v[at + 8 + k * 2];
+    if (id >= 0 && !hasTexture(id)) {
+      return input;
+    }
+
+    kernelImages.push({ texture: v[at + 7 + k * 2], layer: id < 0 });
+  }
+
+  const res = plan.resolution;
+  const texels = units * res;
+  // The object's corner on a pixel of the shrunk input, as whole units are when a unit is a pixel.
+  const shrink =
+    texels > 1 && texels <= 16 && Number.isInteger(texels) && Number.isInteger(inset / units)
+      ? texels
+      : 1;
+  let from = input;
+  let w = width;
+  let h = height;
+  if (shrink > 1) {
+    w = Math.ceil(width / shrink);
+    h = Math.ceil(height / shrink);
+    from = plan.slot(w, h);
+    plan.pass(SHRINK_PASS, input, w * shrink, h * shrink, from, w, h);
+    plan.uniform("uFactor", 2, shrink, shrink);
+  }
+
+  let out = plan.slot(w, h);
+  const pass = plan.pass(KERNEL_PASS, from, w, h, out, w, h);
+  pass.kernel = filterKernel(kernel, kernelImages);
+  plan.uniform("uKernelAt", 2, (inset * res) / shrink, texels / shrink);
+  plan.uniform(
+    "uKernelRegion",
+    4,
+    -v[at + 2],
+    -v[at + 3],
+    (width / res - inset * 2) / units + v[at + 4],
+    (height / res - inset * 2) / units + v[at + 5],
+  );
+  for (let k = 0; k < count; k++) {
+    const id = v[at + 8 + k * 2];
+    if (id >= 0) {
+      plan.uniformFrom(`pbImage${v[at + 7 + k * 2]}`, SAMPLER, v, at + 8 + k * 2, 1);
+    }
+  }
+
+  const floats = at + 7 + count * 2;
+  if (v[floats] > 0) {
+    plan.uniformFrom("pbFloats", VEC4S, v, floats + 1, v[floats]);
+  }
+
+  const ints = floats + 1 + v[floats];
+  if (v[ints] > 0) {
+    plan.uniformFrom("pbInts", IVEC4S, v, ints + 1, v[ints]);
+  }
+
+  if (shrink > 1) {
+    const pixels = out;
+    out = plan.slot(width, height);
+    plan.pass(KERNEL_PASS, pixels, width / shrink, height / shrink, out, width, height).kernel =
+      PIXELS_BACK;
+  }
+
   return out;
 }
 

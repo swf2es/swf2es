@@ -362,5 +362,55 @@ adl. adl runs those jobs on one thread and drops a job started beside
 another, or the result of one a synchronous job follows; each job here
 completes. The `shader-jobs` case draws kernels of each kind against
 Flash, and Ruffle's corpus's Pixel Bender tests check the rest.
-ShaderFilter, `blendShader` and shader fills, which Flash draws on the
-GPU, wait for a compiler from PBJ to GLSL.
+
+Where Flash draws with a kernel, the renderer runs it on the GPU: the
+player writes it as GLSL ES 3.00 (`scene/pixel-bender-glsl.ts`), a
+function `pbKernel(outCoord)` of the interpreter's operations a lane at a
+time and in its order, so that a destination its source overlaps reads
+the lanes written before, with its quirks (comparisons into `i0`, equal
+of scalars alone, ftoi half to even, written out as not every driver
+rounds so, select on exactly 1, bitwise logic, JavaScript's pow, atan2 of
+-0), its parameters' registers as uniforms. `@swf2es/render`'s
+`kernel-shaders.ts` puts it in a program for its use and samples its
+images as the interpreter does: bytes times the float nearest 1/255,
+linearly in 256ths each step cut to a byte. The pixel's coordinate is
+taken from the fragment's centre, as an interpolated one lands a hair off
+the half that ftoi rounds. `tests/player/pixel-bender.ts` runs families
+of operations and random programs both ways on a random image, the
+interpreter the reference: bytes within 2 but where a value lands across
+a floor or a comparison, at most one pixel in 200 (none of 48 kernels
+passes 5 pixels in 1920, in software GL or on an AMD GPU).
+
+A `ShaderFilter` takes its Shader, which must hold a kernel (2171 as it
+is set, TypeError 2007 for null), and four extensions, ints, a negative
+one RangeError 2006; Flash Player's playerglobal reaches them through a
+private rectangle, `_extendBy`, which the natives give too. A display
+object's `filters` refuse a kernel of no inputs (2167), of an output not
+four channels (2162), and of an input past the first unset (2164) or a
+disposed BitmapData (2015), and take its parameters and images as they
+are then, which it draws with until they are set again, as adl does. The
+kernel runs over Flash's bitmap of the object, of whole pixels: those its
+edges touch, and one more right and down where an edge lies on one,
+antialiased; those whose centres it covers at low quality; the bounds out
+to twips first (`SceneList.wholes`). Its coordinate is the pixel's centre
+from the bitmap's corner in stage pixels, whatever the object's scale or
+turn; its first input is the bitmap, transparent past its edges, and the
+others clamp to theirs; it writes the bitmap grown by the extensions,
+transparent outside, clamped and each colour at most its alpha. A filter
+before it grows what it reads, one after runs on what it made. Where a
+whole number of the layer's texels make a stage pixel, the layer is
+shrunk to one a pixel, the kernel run once a pixel and drawn back, as
+Flash runs it over its bitmap; at another resolution it runs at each
+texel. A kernel the GPU will not compile leaves its input as it was.
+
+`BitmapData.applyFilter` runs the interpreter (`shaderFilter`), as adl
+does, oddly: the first input is the whole source, transparent past its
+edges, the coordinate is the destination's pixel's less the left and top
+extensions, whatever the rect and point, and what it writes is the
+source's size grown by the extensions, from the point less twice the
+rect's corner (rounded) and the left and top extensions, clipped.
+`generateFilterRect` gives the bitmap's own rect grown by the
+extensions, whatever the rect. An opaque destination stays opaque, where
+adl keeps the kernel's alpha in its store. The `shader-filters` case
+draws each of these against adl. `blendShader` and shader fills are still
+to come.
