@@ -476,26 +476,28 @@ export class BitmapStore {
     // it moves right.
     const up = source === this && d.y > sy && d.x >= sx;
     const left = source === this && d.x > sx;
-    // The array written, taken once: a source or alpha that is this store reads it too. A
-    // source that holds alpha is copied opaque, as a draw reads it; within itself, as it is.
+    // The arrays taken once, the written one first: a source or alpha that is this store reads
+    // it too, and so what the copy already wrote. A source that holds alpha is copied opaque, as
+    // a draw reads it; within itself, as it is.
     const into = this.pixels;
-    const opaque = source !== this && source.holdsAlpha ? source.drawable : null;
+    const pixels = source !== this && source.holdsAlpha ? source.drawable : source.readable;
+    const mask = alpha?.readable ?? null;
+
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
       const to = (d.y + row) * this.width + d.x;
       const from = (sy + row) * source.width + sx;
       for (let c = 0; c < d.width; c++) {
         const i = left ? d.width - 1 - c : c;
-        // Read again each pixel: a copy within the store reads what it wrote.
-        let p = opaque ? opaque[from + i] : source.readable[from + i];
-        if (alpha) {
+        let p = pixels[from + i];
+        if (alpha && mask) {
           const mx = ax + i;
           const my = ay + row;
           if (mx < 0 || my < 0 || mx >= alpha.width || my >= alpha.height) {
             continue;
           }
 
-          p = scale(p, alpha.readable[my * alpha.width + mx] >>> 24);
+          p = scale(p, mask[my * alpha.width + mx] >>> 24);
         }
 
         into[to + i] = this.composite(p, into[to + i], mergeAlpha);
@@ -684,10 +686,15 @@ export function over(s: number, d: number): number {
     return d >>> 0;
   }
 
+  // Each channel written out: a closure over s and d would take a context each pixel.
   const k = 256 - sa;
-  const channel = (shift: number) =>
-    Math.min(255, ((s >>> shift) & 0xff) + ((((d >>> shift) & 0xff) * k) >> 8));
-  return ((channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0)) >>> 0;
+  return (
+    ((Math.min(255, sa + (((d >>> 24) * k) >> 8)) << 24) |
+      (Math.min(255, ((s >>> 16) & 0xff) + ((((d >>> 16) & 0xff) * k) >> 8)) << 16) |
+      (Math.min(255, ((s >>> 8) & 0xff) + ((((d >>> 8) & 0xff) * k) >> 8)) << 8) |
+      Math.min(255, (s & 0xff) + (((d & 0xff) * k) >> 8))) >>>
+    0
+  );
 }
 
 /** A premultiplied pixel's channels scaled by an alpha, as Flash's alpha bitmap scales them. */
@@ -696,8 +703,13 @@ function scale(p: number, a: number): number {
     return p >>> 0;
   }
 
-  const channel = (shift: number) => ((((p >>> shift) & 0xff) * a) >> 8) << shift;
-  return (channel(24) | channel(16) | channel(8) | channel(0)) >>> 0;
+  return (
+    (((((p >>> 24) * a) >> 8) << 24) |
+      (((((p >>> 16) & 0xff) * a) >> 8) << 16) |
+      (((((p >>> 8) & 0xff) * a) >> 8) << 8) |
+      (((p & 0xff) * a) >> 8)) >>>
+    0
+  );
 }
 
 /** Each bitmap's fill store, by its pixels, which the SWFs that define the bitmap alike share. */
