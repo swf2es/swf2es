@@ -35,7 +35,7 @@ export function encodePng(store: BitmapStore, rect: PixelRect, fast: boolean): U
   const channels = store.transparent ? 4 : 3;
   const stride = 1 + width * channels;
   const raw = new Uint8Array(stride * height);
-  const pixels = store.readable;
+  const pixels = store.drawable;
   for (let y = 0; y < height; y++) {
     let j = y * stride + 1;
     for (let i = (y0 + y) * store.width + x0, end = i + width; i < end; i++) {

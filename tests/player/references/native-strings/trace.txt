@@ -1,0 +1,30 @@
+name from XMLList Gem_Red
+found by XMLList true
+name from object custom
+found by object true
+name from empty XMLList []
+event type gem
+has listener true true
+heard 1
+url Gem_Red
+method POST
+opaqueBackground undefined true null
+focusRect undefined true null
+null name throws Error #2007: Parameter name must be non-null.
+null getChildByName throws Error #2007: Parameter name must be non-null.
+null hasEventListener throws Error #2007: Parameter type must be non-null.
+null willTrigger throws Error #2007: Parameter type must be non-null.
+null addEventListener throws Error #2007: Parameter type must be non-null.
+null removeEventListener throws Error #2007: Parameter type must be non-null.
+null Event throws Error #2007: Parameter type must be non-null.
+null url null
+null method throws Error #2007: Parameter method must be non-null.
+undefined name throws Error #2007: Parameter name must be non-null.
+undefined getChildByName throws Error #2007: Parameter name must be non-null.
+undefined hasEventListener throws Error #2007: Parameter type must be non-null.
+undefined willTrigger throws Error #2007: Parameter type must be non-null.
+undefined addEventListener throws Error #2007: Parameter type must be non-null.
+undefined removeEventListener throws Error #2007: Parameter type must be non-null.
+undefined Event throws Error #2007: Parameter type must be non-null.
+undefined url null
+undefined method throws Error #2007: Parameter method must be non-null.

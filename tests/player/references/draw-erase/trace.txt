@@ -1,0 +1,38 @@
+erase shape  ff33cc66 ff33cc66 ff33cc66 0 0 0 0 0 0 ff33cc66 ff33cc66 ff33cc66
+alpha shape  ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66
+erase half  ff33cc66 ff33cc66 ff33cc66 8032cb66 8032cb66 8032cb66 8032cb66 8032cb66 8032cb66 ff33cc66 ff33cc66 ff33cc66
+alpha half  ff33cc66 ff33cc66 ff33cc66 7f32cb64 7f32cb64 7f32cb64 7f32cb64 7f32cb64 7f32cb64 ff33cc66 ff33cc66 ff33cc66
+erase ct  ff33cc66 ff33cc66 ff33cc66 c032cb65 c032cb65 c032cb65 c032cb65 c032cb65 c032cb65 ff33cc66 ff33cc66 ff33cc66
+erase Bitmap  ff33cc66 ff33cc66 ff33cc66 0 0 0 0 0 0 ff33cc66 ff33cc66 ff33cc66
+erase opaque  ff33cc66 ff33cc66 ff33cc66 0 0 0 0 0 0 ff33cc66 ff33cc66 ff33cc66
+alpha opaque  ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66
+erase half opaque  ff33cc66 ff33cc66 ff33cc66 80196633 80196633 80196633 80196633 80196633 80196633 ff33cc66 ff33cc66 ff33cc66
+alpha half opaque  ff33cc66 ff33cc66 ff33cc66 7f196532 7f196532 7f196532 7f196532 7f196532 7f196532 ff33cc66 ff33cc66 ff33cc66
+alpha clear shape  ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66
+alpha clear Bitmap  ff33cc66 ff33cc66 ff33cc66 0 0 0 0 0 0 ff33cc66 ff33cc66 ff33cc66
+alpha split Bitmap  ff33cc66 ff33cc66 ff33cc66 0 0 0 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66
+erase split Bitmap  ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 ff33cc66 0 0 0 ff33cc66 ff33cc66 ff33cc66
+erase self  1e33cc66 2c2ecb62 3832cd64 4133cc66 4732c965 4931ce65 4931cb65 4633cc66 3f31ca65 3530ca65 2833cc66 182aca60
+alpha self  1e33cc66 533cc66 d27c462 182aca60 262fd065 3832c864 4c32cc65 6433cc66 7e33cc65 9c33cc65 bd32cb65 e133cc66
+opaque getPixel32  ff33cc66 0 80196633 ff33cc66
+opaque getPixel 0 196633
+opaque getPixels  ff33cc66 0 80196633 ff33cc66
+opaque getVector  ff33cc66 0 80196633 ff33cc66
+opaque clone  ff33cc66 0 80196633 ff33cc66
+opaque compare  0 ffcd349a ffe69acd 0
+opaque compared  0 ff33cc66 ff1a6633 0
+opaque hitTest true true true
+opaque hitTest rect true
+opaque copyPixels  ff33cc66 ff000000 ff196633 ff33cc66
+opaque copyPixels merged  ff33cc66 ff000000 ff196633 ff33cc66
+opaque draw  ff33cc66 ff000000 ff196633 ff33cc66
+opaque draw Bitmap  ff33cc66 ff000000 ff196633 ff33cc66
+opaque floodFill erased  ff33cc66 ff0000ff 80196633 ff33cc66
+opaque floodFill green  ff0000ff 0 80196633 ff33cc66
+opaque ShaderJob  ff33cc66 0 8032cb66 ff33cc66
+opaque PNG colour type 2
+erase disc  ff33cc66 ff33cc66 0 0 0 0 0 0 0 0 ff33cc66 ff33cc66
+erase cached  ff33cc66 ff33cc66 0 0 0 0 0 0 0 0 0 0
+erase Bitmap between  ff33cc66 ff33cc66 ff33cc66 0 0 0 0 0 0 ff33cc66 ff33cc66 ff33cc66
+alpha Bitmap between  ff33cc66 ff33cc66 ff33cc66 8032cb66 8032cb66 8032cb66 8032cb66 8032cb66 8032cb66 ff33cc66 ff33cc66 ff33cc66
+opaque PNG loaded  ff33cc66 ff000000 ff196633 ff33cc66

@@ -5,6 +5,7 @@
 
 import type { Abc, AsObject, ClassDesc, Method, Scope, Value } from "./descriptors.js";
 import { firstDefinition } from "./domain.js";
+import { installMethod } from "./method-factories.js";
 import { formatClassName, type Multiname, NS_Public, qualifiedName } from "./names.js";
 import { invalidate } from "./property-cache.js";
 import type { Runtime } from "./runtime.js";
@@ -149,12 +150,12 @@ export function newClass(
   prototype.$dontEnum = new Set(["constructor"]);
 
   const iscope = rt.scope(scope, [cls], 0);
-  for (const [d, factory, id] of desc.static.methods) {
-    straits.proto[methodKey(d)] = withId(factory(scope, base), id);
+  for (const [d, factory, id, , params] of desc.static.methods) {
+    installMethod(rt, straits.proto, d, withId(factory(scope, base), id), factory, params);
   }
 
-  for (const [d, factory, id] of desc.instance.methods) {
-    itraits.proto[methodKey(d)] = withId(factory(iscope, base), id);
+  for (const [d, factory, id, , params] of desc.instance.methods) {
+    installMethod(rt, itraits.proto, d, withId(factory(iscope, base), id), factory, params);
   }
 
   // Playerglobal can declare an accessor whose setter has no ABC body.
