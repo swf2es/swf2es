@@ -133,6 +133,11 @@ export class SceneList {
    * from its corner: NO_WHOLE, WHOLE_SMOOTH or WHOLE_ALIASED.
    */
   wholes = new Uint8Array(16);
+  /**
+   * Each whole layer's object, Flash's bitmap of it, uncut by the target:
+   * x, y, width and height in target pixels, as measureLayers finds it.
+   */
+  objects = new Float64Array(64);
   /** Each layer's kept output, which its output becomes (Keeps), or -1. */
   keeps = new Int32Array(16);
   /** The layer each layer is in, or -1. */
@@ -193,6 +198,9 @@ export class SceneList {
       this.layers = grow(this.layers);
       this.pads = grow(this.pads);
       this.wholes = grow(this.wholes);
+      const objects = new Float64Array(this.objects.length * 2);
+      objects.set(this.objects);
+      this.objects = objects;
       this.keeps = grow(this.keeps);
       this.parents = grow(this.parents);
       const areas = new Float64Array(this.areas.length * 2);

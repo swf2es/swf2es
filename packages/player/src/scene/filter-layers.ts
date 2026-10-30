@@ -86,7 +86,12 @@ export class FilterLayers {
   /** Each blend shader's values and kernel, and where in them its other images' textures go. */
   private readonly blends = new WeakMap<
     ShaderUse,
-    { values: Float32Array; kernel: string; images: { image: ShaderImage; at: number }[] }
+    {
+      values: Float32Array;
+      ints: Int32Array;
+      kernel: string;
+      images: { image: ShaderImage; at: number }[];
+    }
   >();
   /** A reused output's rectangle (keptOutput). */
   readonly keptRect = new Int32Array(4);
@@ -361,7 +366,7 @@ export class FilterLayers {
         pass.values[at] = this.imageTexture(image).id;
       }
 
-      filters.add(pass.kind, pass.values, texture, pass.kernel);
+      filters.add(pass.kind, pass.values, texture, pass.kernel, pass.ints);
     }
 
     return filters.close();
@@ -380,19 +385,20 @@ export class FilterLayers {
       const glsl = kernelGlslOf(use.kernel);
       const { floats, ints } = kernelParameters(glsl, use.values);
       const [back, front] = use.kernel.inputs;
-      const values = [0, 0, 0, 0, 0, 0, glsl.textures.length];
+      // As a ShaderFilter's values (@swf2es/render's SHADER), whether it blends whole first.
+      const values = [0, 0, 0, 0, 0, 0, 0, glsl.textures.length];
       const images: { image: ShaderImage; at: number }[] = [];
       for (const t of glsl.textures) {
-        const image = use.images.get(t);
+        const image = t === back.index || t === front.index ? undefined : use.images.get(t);
         if (image) {
           images.push({ image, at: values.length + 1 });
         }
 
-        values.push(t, t === back.index ? -1 : t === front.index ? -2 : 0);
+        values.push(t, t === back.index ? -1 : t === front.index ? -2 : 0, image?.floats ? 1 : 0);
       }
 
-      values.push(floats.length, ...floats, ints.length, ...ints);
-      made = { values: Float32Array.from(values), kernel: glsl.source, images };
+      values.push(floats.length, ...floats);
+      made = { values: Float32Array.from(values), ints, kernel: glsl.source, images };
       this.blends.set(use, made);
     }
 
@@ -401,7 +407,7 @@ export class FilterLayers {
     }
 
     made.values[0] = whole ? 1 : 0;
-    filters.add(BLEND, made.values, -1, made.kernel);
+    filters.add(BLEND, made.values, -1, made.kernel, made.ints);
     return filters.close();
   }
 
@@ -412,7 +418,7 @@ export class FilterLayers {
       handle = this.textures.add(
         image.width,
         image.height,
-        imageBytes(image),
+        imageTexels(image),
         GRADIENT_IDLE_FRAMES,
       );
       this.images.set(image, handle);
@@ -424,22 +430,26 @@ export class FilterLayers {
 }
 
 /**
- * An image's premultiplied RGBA bytes: a BitmapData's as they are, floats'
- * clamped to bytes and their missing channels 0, as the CPU samples them,
- * as close as a texture of bytes comes.
+ * An image's texels: a BitmapData's premultiplied RGBA bytes, or floats
+ * as they are, four a texel, the channels they lack 0, as the CPU samples
+ * them.
  */
-function imageBytes(image: ShaderImage): Uint8Array {
+function imageTexels(image: ShaderImage): Uint8Array | Float32Array {
   if (image.pixels) {
     return rgbaOf(image.pixels);
   }
 
   const floats = image.floats as Float32Array;
   const c = image.channels;
-  const out = new Uint8Array(image.width * image.height * 4);
-  for (let i = 0; i < image.width * image.height; i++) {
-    for (let k = 0; k < 4; k++) {
-      const v = k < c ? floats[i * c + k] : 0;
-      out[i * 4 + k] = Math.round(Math.max(0, Math.min(1, v || 0)) * 255);
+  const n = image.width * image.height;
+  if (c === 4) {
+    return floats.subarray(0, n * 4);
+  }
+
+  const out = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) {
+    for (let k = 0; k < c; k++) {
+      out[i * 4 + k] = floats[i * c + k];
     }
   }
 

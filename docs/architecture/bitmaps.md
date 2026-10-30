@@ -389,19 +389,31 @@ object's `filters` refuse a kernel of no inputs (2167), of an output not
 four channels (2162), and of an input past the first unset (2164) or a
 disposed BitmapData (2015), and take its parameters and images as they
 are then, which it draws with until they are set again, as adl does. The
-kernel runs over Flash's bitmap of the object, of whole pixels: those its
-edges touch, and one more right and down where an edge lies on one,
-antialiased; those whose centres it covers at low quality; the bounds out
-to twips first (`SceneList.wholes`). Its coordinate is the pixel's centre
-from the bitmap's corner in stage pixels, whatever the object's scale or
-turn; its first input is the bitmap, transparent past its edges, and the
-others clamp to theirs; it writes the bitmap grown by the extensions,
-transparent outside, clamped and each colour at most its alpha. A filter
-before it grows what it reads, one after runs on what it made. Where a
-whole number of the layer's texels make a stage pixel, the layer is
-shrunk to one a pixel, the kernel run once a pixel and drawn back, as
-Flash runs it over its bitmap; at another resolution it runs at each
-texel. A kernel the GPU will not compile leaves its input as it was.
+kernel runs over Flash's bitmap of the object, of whole stage pixels
+whatever the stage's scale: those its edges touch, and one more right and
+down where an edge lies on one, antialiased; those whose centres it
+covers at low quality; the bounds out to twips first (`SceneList.wholes`,
+`wholeBitmap`). The bitmap's corner is kept uncut (`SceneList.objects`),
+so that an object hanging off the stage keeps its coordinates. Its
+coordinate is the pixel's centre from the bitmap's corner in stage
+pixels, whatever the object's scale or turn; its first input is the
+bitmap, transparent past it and past the layer's frame, and the others
+clamp to their edges, floats (a Vector or a ByteArray) as float textures,
+sampled as the interpreter samples them; it writes the bitmap grown by
+the extensions, transparent outside, clamped and each colour at most its
+alpha. A filter before it grows what it reads, one after runs on what it
+made. Where a whole number of the layer's texels make a stage pixel and
+the bitmap's corner is on a texel, the layer is shrunk to one a pixel on
+the bitmap's grid, the mean of the texels within the frame, the kernel
+run once a pixel and drawn back, as Flash runs it over its bitmap; else
+it runs at each texel. A kernel the GPU will not compile, of more than 8
+images, or with an image gone, leaves its input as it was, decided as the
+chain is planned. Its parameters' ints stay ints all the way, and the
+programs of the backend's kernels share one cache (`webgl/kernels.ts`),
+their images on units of their own. A shader's BitmapData, Vector and
+ByteArray inputs are copied once for each version (a store's version, or
+a hash of the numbers) and shared by the uses that take them, kept while
+one holds them.
 
 `BitmapData.applyFilter` runs the interpreter (`shaderFilter`), as adl
 does, oddly: the first input is the whole source, transparent past its

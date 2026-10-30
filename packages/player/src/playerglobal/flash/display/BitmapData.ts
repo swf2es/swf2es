@@ -38,7 +38,7 @@ import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { colorOf } from "../geom/Transform.js";
 import { programOf } from "./ShaderData.js";
-import { kernelOfShader, shaderUse } from "./shaders.js";
+import { kernelOfShader, READ, shaderUse } from "./shaders.js";
 
 /** The longest side adl makes a BitmapData of: 2^31 / 20, whole. */
 const MAX_SIDE = 107374182;
@@ -374,7 +374,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           throw s.rt.error("ArgumentError", 2171);
         }
 
-        const use = shaderUse(s, f.shader, 1);
+        // Its inputs read as they are, as a job reads them: run now, not drawn later.
+        const use = shaderUse(s, f.shader, 1, READ);
         shaderFilter(store, from, r, dx, dy, f.extensions, use, programOf(use.kernel));
         return;
       }

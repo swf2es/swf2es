@@ -7,15 +7,14 @@ import {
   PBJ_TYPE_SIZES,
   PBJ_TYPES,
   type PbjKernel,
-  PbjOp,
   type PbjParameter,
-  type PbjSample,
   pbjFloatType,
 } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { OUT_COORD, type ShaderImage, type ShaderUse } from "../../../bitmap/pixel-bender.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "./BitmapData.js";
+import { programOf } from "./ShaderData.js";
 import { shaderClasses } from "./ShaderInput.js";
 
 type Value = avm2.Value;
@@ -92,12 +91,68 @@ export function kernelValues(
   return values;
 }
 
+/** How a use takes its inputs' images: read as they are now, copied to draw with later, or checked alone. */
+export const READ = 0;
+export const COPY = 1;
+export const CHECK = 2;
+
+/**
+ * The copy of each input taken last, by its BitmapData's store, its Vector
+ * or its ByteArray: kept while a use holds it, and shared by the uses that
+ * take the same pixels (its store's version) or numbers (their hash), as a
+ * fill begun on every frame takes them, its texture with them.
+ */
+const copies = new WeakMap<
+  object,
+  { version: number; width: number; height: number; channels: number; image: WeakRef<ShaderImage> }
+>();
+
+/** The copy of `source` kept for `version` and this size, else the one `make` makes, kept now. */
+function shared(
+  source: object,
+  version: number,
+  width: number,
+  height: number,
+  channels: number,
+  make: () => ShaderImage,
+): ShaderImage {
+  const kept = copies.get(source);
+  const image =
+    kept &&
+    kept.version === version &&
+    kept.width === width &&
+    kept.height === height &&
+    kept.channels === channels
+      ? kept.image.deref()
+      : undefined;
+  if (image) {
+    return image;
+  }
+
+  const made = make();
+  copies.set(source, { version, width, height, channels, image: new WeakRef(made) });
+
+  return made;
+}
+
+/** A hash of `floats`' bits, FNV-1a, which says whether numbers taken again are the same. */
+function hashOf(floats: Float32Array): number {
+  const words = new Uint32Array(floats.buffer, floats.byteOffset, floats.length);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < words.length; i++) {
+    h = Math.imul(h ^ words[i], 0x01000193);
+  }
+
+  return h >>> 0;
+}
+
 /**
  * An input's image, read now: a BitmapData's pixels, or as many floats
  * as its size needs; a ByteArray's position is moved past them by
  * `read`, once nothing refuses the job, as adl leaves it where it was
- * then. `copy` takes a BitmapData's pixels as a copy, for a use that
- * draws with them later.
+ * then. `how` READ takes them as they are, COPY as a copy (shared, as
+ * `copies` keeps them) for a use that draws with them later, and CHECK
+ * only checks them, null.
  */
 export function inputImage(
   s: Scripting,
@@ -105,8 +160,8 @@ export function inputImage(
   name: string,
   channels: number,
   read: (() => void)[],
-  copy = false,
-): ShaderImage {
+  how = READ,
+): ShaderImage | null {
   const classes = shaderClasses(s);
   const refuse = (id: number, ...args: Value[]): never => {
     throw s.rt.error("ArgumentError", id, ...args);
@@ -124,8 +179,20 @@ export function inputImage(
 
   if (s.rt.isInstance(input, classes.bitmapData)) {
     const store = storeOf(s, input as AsObject);
-    const pixels = copy ? store.readable.slice() : store.readable;
-    return { width: store.width, height: store.height, pixels, channels };
+    const { width, height } = store;
+    switch (how) {
+      case CHECK:
+        return null;
+      case COPY:
+        return shared(store, store.version, width, height, channels, () => ({
+          width,
+          height,
+          pixels: store.readable.slice(),
+          channels,
+        }));
+      default:
+        return { width, height, pixels: store.readable, channels };
+    }
   }
 
   const width: number = o.$width ?? 0;
@@ -142,13 +209,26 @@ export function inputImage(
       refuse(2165, name);
     }
 
-    return { width, height, floats: Float32Array.from(items.slice(0, count)), channels };
+    if (how === CHECK) {
+      return null;
+    }
+
+    const floats = Float32Array.from(items.slice(0, count));
+    const image = { width, height, floats, channels };
+
+    return how === COPY
+      ? shared(input as object, hashOf(floats), width, height, channels, () => image)
+      : image;
   }
 
   // From the start, whatever the position, which is left past what was read.
   const bytes = avm2.bytesOf(s.rt, input as AsObject);
   if (bytes.length < count * 4) {
     refuse(2165, name);
+  }
+
+  if (how === CHECK) {
+    return null;
   }
 
   const floats = new Float32Array(count);
@@ -159,17 +239,23 @@ export function inputImage(
   read.push(() => {
     bytes.position = count * 4;
   });
-  return { width, height, floats, channels };
+  const image = { width, height, floats, channels };
+
+  return how === COPY
+    ? shared(input as object, hashOf(floats), width, height, channels, () => image)
+    : image;
 }
 
 /**
  * What a ShaderFilter, a blend shader or a shader fill draws with, read as
- * it is set: `bound` inputs, the first ones, are the use's own (a filter's
- * object, a blend's background and foreground), and the rest must be
- * set; each needs `bound` inputs at least (2167), and a filter and a blend
- * a kernel of four channels out (2162). Its BitmapData inputs are copies.
+ * it is set, and what applyFilter runs with: `bound` inputs, the first
+ * ones, are the use's own (a filter's object, a blend's background and
+ * foreground), and the rest must be set; each needs `bound` inputs at
+ * least (2167), and a filter and a blend a kernel of four channels out
+ * (2162). `how` takes its inputs' images (inputImage); CHECK takes no
+ * values either, and moves no ByteArray.
  */
-export function shaderUse(s: Scripting, shader: Value, bound: number): ShaderUse {
+export function shaderUse(s: Scripting, shader: Value, bound: number, how = COPY): ShaderUse {
   const found = kernelOfShader(shader) as { data: AsObject; kernel: PbjKernel };
   const { data, kernel } = found;
   const outputs = kernel.parameters.filter((p) => p.output);
@@ -184,17 +270,21 @@ export function shaderUse(s: Scripting, shader: Value, bound: number): ShaderUse
   const images = new Map<number, ShaderImage>();
   const read: (() => void)[] = [];
   for (const input of kernel.inputs.slice(bound)) {
-    images.set(input.index, inputImage(s, data, input.name, input.channels, read, true));
+    const image = inputImage(s, data, input.name, input.channels, read, how);
+    if (image) {
+      images.set(input.index, image);
+    }
   }
 
   // A texture sampled that no input declares, as a job refuses it.
-  for (const op of kernel.operations) {
-    if (
-      (op.op === PbjOp.sampleNearest || op.op === PbjOp.sampleLinear) &&
-      !kernel.inputs.some((input) => input.index === (op as PbjSample).texture)
-    ) {
+  for (const texture of programOf(kernel).sampled) {
+    if (!kernel.inputs.some((input) => input.index === texture)) {
       throw s.rt.error("ArgumentError", 2167);
     }
+  }
+
+  if (how === CHECK) {
+    return { kernel, values: new Map(), images };
   }
 
   const values = kernelValues(s, data, kernel);
