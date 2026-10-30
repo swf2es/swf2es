@@ -223,11 +223,15 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     /** Flash refuses a timeline-placed object's name, so a script's touch there never marks it (the `replaces` case). */
     set name(v: Value) {
+      if (v === null || v === undefined) {
+        throw s.rt.error("TypeError", 2007, "name");
+      }
+
       if (this.$display.placeFrame > 0) {
         throw s.rt.error("flash.errors::IllegalOperationError", 2078);
       }
 
-      this.$display.name = String(v);
+      this.$display.name = v as string;
     }
 
     get visible(): boolean {

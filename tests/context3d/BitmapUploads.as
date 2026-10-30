@@ -1,4 +1,5 @@
 package {
+  import flash.display.Bitmap;
   import flash.display.BitmapData;
   import flash.display.Sprite;
   import flash.display.Stage3D;
@@ -124,6 +125,16 @@ package {
         }
         source.dispose();
         draw(entry[0], 0x01100000, 4 * Math.pow(2, entry[3]));
+      }
+
+      // An opaque bitmap holding less than opaque pixels, as erase leaves them.
+      for each (var cover:uint in [0xff000000, 0x80000000]) {
+        var opaque:BitmapData = new BitmapData(16, 8, false, 0x33cc66);
+        opaque.draw(new Bitmap(new BitmapData(16, 8, true, cover)), null, null, "erase");
+        texture.uploadFromBitmapData(opaque, 0);
+        trace("bitmapuploads opaque erased", opaque.getPixel32(0, 0).toString(16));
+        opaque.dispose();
+        draw("opaque-erased-" + (cover >>> 24).toString(16), 0x01100000, 1);
       }
       context.present();
     }
