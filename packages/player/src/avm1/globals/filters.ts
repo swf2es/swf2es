@@ -47,8 +47,11 @@ const ANGLE = 0.785398163 * (180 / Math.PI);
 
 const states = new WeakMap<Obj, State>();
 
+/** The kinds AVM1 has: all but the ShaderFilter, which came with AS3's Pixel Bender. */
+type Avm1Kind = Exclude<FilterKind, "shader">;
+
 /** The class names by kind, as `flash.filters` has them. */
-const NAMES: Record<FilterKind, string> = {
+const NAMES: Record<Avm1Kind, string> = {
   blur: "BlurFilter",
   glow: "GlowFilter",
   dropShadow: "DropShadowFilter",
@@ -390,7 +393,7 @@ const mode = plain("mode", (v, version) => {
 });
 
 /** Each class's properties in Flash's order, and its constructor's arguments in theirs. */
-const CLASSES: Record<FilterKind, { props: Prop[]; args: Prop[] }> = (() => {
+const CLASSES: Record<Avm1Kind, { props: Prop[]; args: Prop[] }> = (() => {
   const [blurX, blurY] = [blur("blurX"), blur("blurY")];
   const [color, a] = [rgb("color"), alpha("alpha")];
   const [inner, knockout] = [flag("inner"), flag("knockout")];
@@ -627,7 +630,7 @@ export function filtersPackage(host: FiltersHost, filters: Obj): FilterFaces {
 
   const protos = new Map<FilterKind, Obj>();
   // Defined in Flash's order, for..in lists them the other way round.
-  const order: FilterKind[] = [
+  const order: Avm1Kind[] = [
     "dropShadow",
     "blur",
     "glow",

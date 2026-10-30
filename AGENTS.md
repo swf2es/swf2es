@@ -98,6 +98,8 @@ node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]   # GL 
                               # draw-counts.json, which may only go down (part of pnpm test)
 node tests/player/context-loss.ts   # a WebGL context lost and given back mid-play draws the same
                               # in Chrome (part of pnpm test)
+node tests/player/pixel-bender.ts [--gpu]   # Pixel Bender kernels as GLSL in Chrome against the CPU
+                              # interpreter on random images (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
@@ -136,6 +138,8 @@ node tests/bench/untyped/run.ts [<dir A> <dir B>] [runs]   # untyped property ac
                               # runtime's lookup, output vs avmshell; two ab.ts snapshots interleaved
 node tests/bench/native-collections/run.ts [<dir A> <dir B>] [runs]   # the natives that walk Arrays
                               # and Vectors (map, filter, sort, conversion), as the one above
+node tests/bench/bitmap-draws.ts <checkout A> <checkout B> [cases] [seed] [--big]   # random
+                              # BitmapData draws and copies in two built checkouts, every pixel compared
 node tests/bench/enumeration/run.ts [<dir A> <dir B>] [runs]   # for-in and for each over Arrays,
                               # Vectors, Objects and Dictionaries, as the two above
 ```

@@ -362,5 +362,104 @@ adl. adl runs those jobs on one thread and drops a job started beside
 another, or the result of one a synchronous job follows; each job here
 completes. The `shader-jobs` case draws kernels of each kind against
 Flash, and Ruffle's corpus's Pixel Bender tests check the rest.
-ShaderFilter, `blendShader` and shader fills, which Flash draws on the
-GPU, wait for a compiler from PBJ to GLSL.
+
+Where Flash draws with a kernel, the renderer runs it on the GPU: the
+player writes it as GLSL ES 3.00 (`scene/pixel-bender-glsl.ts`), a
+function `pbKernel(outCoord)` of the interpreter's operations a lane at a
+time and in its order, so that a destination its source overlaps reads
+the lanes written before, with its quirks (comparisons into `i0`, equal
+of scalars alone, ftoi half to even, written out as not every driver
+rounds so, select on exactly 1, bitwise logic, JavaScript's pow, atan2 of
+-0), its parameters' registers as uniforms. `@swf2es/render`'s
+`kernel-shaders.ts` puts it in a program for its use and samples its
+images as the interpreter does: bytes times the float nearest 1/255,
+linearly in 256ths each step cut to a byte. The pixel's coordinate is
+taken from the fragment's centre, as an interpolated one lands a hair off
+the half that ftoi rounds. `tests/player/pixel-bender.ts` runs families
+of operations and random programs both ways on a random image, the
+interpreter the reference: bytes within 2 but where a value lands across
+a floor or a comparison, at most one pixel in 200 (none of 48 kernels
+passes 5 pixels in 1920, in software GL or on an AMD GPU).
+
+A `ShaderFilter` takes its Shader, which must hold a kernel (2171 as it
+is set, TypeError 2007 for null), and four extensions, ints, a negative
+one RangeError 2006; Flash Player's playerglobal reaches them through a
+private rectangle, `_extendBy`, which the natives give too. A display
+object's `filters` refuse a kernel of no inputs (2167), of an output not
+four channels (2162), and of an input past the first unset (2164) or a
+disposed BitmapData (2015), and take its parameters and images as they
+are then, which it draws with until they are set again, as adl does. The
+kernel runs over Flash's bitmap of the object, of whole stage pixels
+whatever the stage's scale: those its edges touch, and one more right and
+down where an edge lies on one, antialiased; those whose centres it
+covers at low quality; the bounds out to twips first (`SceneList.wholes`,
+`wholeBitmap`). The bitmap's corner is kept uncut (`SceneList.objects`),
+so that an object hanging off the stage keeps its coordinates. Its
+coordinate is the pixel's centre from the bitmap's corner in stage
+pixels, whatever the object's scale or turn; its first input is the
+bitmap, transparent past it and past the layer's frame, and the others
+clamp to their edges, floats (a Vector or a ByteArray) as float textures,
+sampled as the interpreter samples them; it writes the bitmap grown by
+the extensions, transparent outside, clamped and each colour at most its
+alpha. A filter before it grows what it reads, one after runs on what it
+made. Where a whole number of the layer's texels make a stage pixel and
+the bitmap's corner is on a texel, the layer is shrunk to one a pixel on
+the bitmap's grid, the mean of the texels within the frame, the kernel
+run once a pixel and drawn back, as Flash runs it over its bitmap; else
+it runs at each texel. A kernel the GPU will not compile, of more than 8
+images, or with an image gone, leaves its input as it was, decided as the
+chain is planned. Its parameters' ints stay ints all the way, and the
+programs of the backend's kernels share one cache (`webgl/kernels.ts`),
+their images on units of their own. A shader's BitmapData, Vector and
+ByteArray inputs are copied once for each version (a store's version, or
+a hash of the numbers) and shared by the uses that take them, kept while
+one holds them.
+
+`BitmapData.applyFilter` runs the interpreter (`shaderFilter`), as adl
+does, oddly: the first input is the whole source, transparent past its
+edges, the coordinate is the destination's pixel's less the left and top
+extensions, whatever the rect and point, and what it writes is the
+source's size grown by the extensions, from the point less twice the
+rect's corner (rounded) and the left and top extensions, clipped.
+`generateFilterRect` gives the bitmap's own rect grown by the
+extensions, whatever the rect. An opaque destination stays opaque, where
+adl keeps the kernel's alpha in its store. The `shader-filters` case
+draws each of these against adl.
+
+A `blendShader` set takes the kernel, its parameters and images as they
+are then, and sets `blendMode` to "shader", which keeps it through other
+modes and back; null is TypeError 2007, a Shader of no kernel TypeError
+2007 for its data, fewer than two inputs 2167 and a third unset 2164.
+adl blends a pixel at a time: where the object covers anything, its
+first input is that pixel of what is below and its second the object's,
+coloured, whatever coordinate the kernel samples, which is (0.5, 0.5)
+throughout; the result takes the place of what was below, clamped, though
+less than opaque, and where the object covers nothing what is below
+stays. A filtered object blends as the bitmap Flash keeps of it, over its
+whole rectangle, even where that is transparent. The renderer composites
+such a layer with a program of the kernel's (`blendKernel`, in
+`webgl/composite.ts`), its mode `KERNEL` plus the chain of the frame's
+filters that holds the kernel (`BLEND`); a filtered one is drawn anew each
+frame rather than kept, as a kept layer's mode is a byte. It blends a
+texel at a time, so edges the page draws finer blend there rather than
+by Flash's pixel, and adl's bitmap of a blurred object reaches a little
+further than the renderer's layer (the `shader-blends` case).
+
+`beginShaderFill` takes the kernel, its parameters and images as they are
+then (TypeError 2007 for null, 2171 for no kernel, 2164 for an input
+unset); the fill's coordinate is the pixel's centre in the shape's own
+space through the matrix's inverse, whatever the object's or its
+parents' scale and turn, as a bitmap fill's texels are; a bitmap input
+clamps to its edges; colours past the alpha composite as they are, and a
+colour transform colours the fill on its straight colour. Each shader
+fill is a part of its own (`scene/shapes.ts`), its texels the kernel's
+coordinates with a depth of 1, drawn by a program of the kernel's after
+the mesh's vertex shader (`fillKernel`, `SHADED` draws naming a
+`FILL_SHADER` chain of the frame's filters), the kernel run once a pixel
+of Flash's at its centre, as adl draws one. Turned by its matrix, adl's
+coordinates lie a fifth of a pixel off that centre, which the renderer
+does not copy; at low quality adl also places the shape on whole pixels.
+`lineShaderStyle` is checked as adl checks it and the line keeps its
+colour, as a gradient or bitmap line does; `readGraphicsData` of a shader
+fill, which crashes adl, gives an empty bitmap fill (the `shader-fills`
+case).

@@ -8,7 +8,7 @@ import {
   STENCIL_POP,
   STENCIL_PUSH,
 } from "../commands.js";
-import { FilterPlan, planChain } from "../filter-plan.js";
+import { FilterPlan, type KernelObject, planChain } from "../filter-plan.js";
 import type { Filters } from "../filters.js";
 import type { SceneList } from "../scene.js";
 import { Shelves } from "../shelves.js";
@@ -23,6 +23,7 @@ import {
   layerSide,
   MSAA_BYTES,
   type Open,
+  objectOf,
   type Target,
   type TargetPool,
 } from "./targets.js";
@@ -52,6 +53,8 @@ interface Hold {
   first: number;
   end: number;
   chain: number;
+  /** Where its object lies in it, which its ShaderFilters read (filter-plan.ts). */
+  object: KernelObject | null;
   plan: FilterPlan;
   targets: (Slot | null)[];
   /** Its slots' records, kept from frame to frame, and the last pass that uses each. */
@@ -245,6 +248,8 @@ export class HeldLayers {
         hold.height,
         target.resolution,
         this.gpu.hasTexture,
+        this.filters.links,
+        hold.object,
       );
       hold.targets.length = plan.slots;
       hold.targets.fill(null, 1);
@@ -419,6 +424,7 @@ export class HeldLayers {
           first: 0,
           end: 0,
           chain: 0,
+          object: null,
           plan: new FilterPlan(),
           targets: [],
           slots: [],
@@ -438,6 +444,7 @@ export class HeldLayers {
       hold.y = params[from + 1];
       hold.width = params[from + 2];
       hold.height = params[from + 3];
+      hold.object = objectOf(params, from + 4);
       hold.first = k + 1;
 
       while (ops[k * 4] !== HOLD_POP) {
@@ -591,6 +598,7 @@ export class HeldLayers {
       hold.width,
       hold.height,
       target.resolution,
+      hold.object,
     );
     const index = this.addPage(output, true);
     hold.result = this.slotOf(hold, 0, index, 0, 0, output.width, output.height);

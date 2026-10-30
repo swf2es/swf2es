@@ -30,13 +30,15 @@ import {
   scroll,
   threshold,
 } from "../../../bitmap/ops.js";
+import { shaderFilter } from "../../../bitmap/pixel-bender.js";
 import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
-
 import { colorOf } from "../geom/Transform.js";
+import { programOf } from "./ShaderData.js";
+import { kernelOfShader, READ, shaderUse } from "./shaders.js";
 
 /** The longest side adl makes a BitmapData of: 2^31 / 20, whole. */
 const MAX_SIDE = 107374182;
@@ -162,8 +164,20 @@ function drawInto(
     return;
   }
 
-  // A BitmapData drawn into itself goes a row at a time; through a Bitmap, in scan order.
-  drawBitmap(store, storeOf(s, data), m, c, blend, r, !!smoothing, o.$store !== undefined);
+  // A BitmapData drawn into itself goes a row at a time; through a Bitmap, in scan order. A
+  // Bitmap is a display object, whose erase and alpha blends a BitmapData's are not.
+  const bitmap = o.$store === undefined;
+  drawBitmap(
+    store,
+    storeOf(s, data),
+    m,
+    c,
+    blend,
+    r,
+    !!smoothing,
+    !bitmap,
+    bitmap ? "bitmap" : null,
+  );
 }
 
 /**
@@ -367,6 +381,17 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const r = rectOf(s, sourceRect);
       const [dx, dy] = pointOf(s, destPoint, "destPoint");
       const f = filterOf(filter);
+      if (f.kind === "shader") {
+        if (!kernelOfShader(f.shader)) {
+          throw s.rt.error("ArgumentError", 2171);
+        }
+
+        // Its inputs read as they are, as a job reads them: run now, not drawn later.
+        const use = shaderUse(s, f.shader, 1, READ);
+        shaderFilter(store, from, r, dx, dy, f.extensions, use, programOf(use.kernel));
+        return;
+      }
+
       // adl draws none of the filters with a glow into an opaque destination.
       if (!store.transparent && GLOWS.has(f.kind)) {
         throw s.rt.error("flash.errors::IllegalOperationError", 2077);
@@ -390,6 +415,19 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     generateFilterRect(sourceRect: Value, filter: Value): Value {
       const store = storeOf(s, this);
       const f = filterOf(filter);
+      if (f.kind === "shader") {
+        // This bitmap's rect grown by the extensions, whatever the rect given, as adl gives it.
+        rectOf(s, sourceRect);
+        const [left, top, right, bottom] = f.extensions;
+        return s.rt.construct(
+          s.rt.classNamed("flash.geom::Rectangle"),
+          -left,
+          -top,
+          store.width + left + right,
+          store.height + top + bottom,
+        );
+      }
+
       if (!filtersDrawn.has(f.kind)) {
         throw s.rt.unsupported(`BitmapData.generateFilterRect with a ${f.kind} filter`);
       }

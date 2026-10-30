@@ -28,6 +28,7 @@ import type { Scripting } from "../../../scripting.js";
 import { filterClassName, filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { copyMap } from "../filters/DisplacementMapFilter.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";
+import { kernelOfShader, shaderUse } from "./shaders.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -223,11 +224,15 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
     /** Flash refuses a timeline-placed object's name, so a script's touch there never marks it (the `replaces` case). */
     set name(v: Value) {
+      if (v === null || v === undefined) {
+        throw s.rt.error("TypeError", 2007, "name");
+      }
+
       if (this.$display.placeFrame > 0) {
         throw s.rt.error("flash.errors::IllegalOperationError", 2078);
       }
 
-      this.$display.name = String(v);
+      this.$display.name = v as string;
     }
 
     get visible(): boolean {
@@ -522,6 +527,21 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.setBlendMode(mode);
     }
 
+    /** Taken as it is set, its first input what is below and its second the object (shaders.ts). */
+    set blendShader(v: Value) {
+      if (v === null || v === undefined) {
+        throw s.rt.error("TypeError", 2007, "blendShader");
+      }
+
+      // A Shader of no kernel has no data to blend with, as adl words it.
+      if (!kernelOfShader(v)) {
+        throw s.rt.error("TypeError", 2007, "data");
+      }
+
+      this.$display.touch();
+      this.$display.setBlendShader(shaderUse(s, v, 2));
+    }
+
     // Flash caches an object with filters whatever cacheAsBitmap was set to, and reads it so.
     get cacheAsBitmap(): boolean {
       return this.$display.cachedAsBitmap || this.$display.filters.length > 0;
@@ -565,6 +585,15 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         // after, till its filters are set again; the map itself it keeps.
         if (f.kind === "displacementMap" && f.mapBitmap) {
           f.mapSnapshot = copyMap(s, f.mapBitmap);
+        }
+
+        // A kernel's parameters and images likewise, its first input the object (shaders.ts).
+        if (f.kind === "shader") {
+          if (!kernelOfShader(f.shader)) {
+            throw s.rt.error("ArgumentError", 2171);
+          }
+
+          f.shaderUse = shaderUse(s, f.shader, 1);
         }
 
         return f;

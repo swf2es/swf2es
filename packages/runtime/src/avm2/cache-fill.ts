@@ -27,6 +27,7 @@ import {
   methodKey,
   slotKey,
   type Traits,
+  untypedSetKey,
 } from "./traits.js";
 
 /**
@@ -87,12 +88,12 @@ export function fillCache(
         break;
       case BIND_Set:
         kind = IC_Set;
-        set = traits.proto[methodKey(id + 1)];
+        set = traits.proto[untypedSetKey(id + 1)] ?? traits.proto[methodKey(id + 1)];
         break;
       case BIND_GetSet:
         kind = IC_GetSet;
         get = traits.proto[methodKey(id)];
-        set = traits.proto[methodKey(id + 1)];
+        set = traits.proto[untypedSetKey(id + 1)] ?? traits.proto[methodKey(id + 1)];
         break;
       default:
         return;

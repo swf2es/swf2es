@@ -48,9 +48,13 @@ function drawObject(
     return;
   }
 
+  // Erase and alpha go by where the object is, not how much of a pixel it covers: adl draws
+  // them unsmoothed, as low quality draws.
+  const grid = blend === "erase" || blend === "alpha" ? 1 : samples;
   const drawn = new BitmapStore(x1 - x0, y1 - y0, true, 0);
-  drawn.pixels = drawer.snapshot(d, placed, x1 - x0, y1 - y0, samples);
-  drawBitmap(store, drawn, { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 }, c, blend, r, false);
+  drawn.pixels = drawer.snapshot(d, placed, x1 - x0, y1 - y0, grid);
+  const at = { a: 1, b: 0, c: 0, d: 1, tx: x0, ty: y0 };
+  drawBitmap(store, drawn, at, c, blend, r, false, false, "drawing");
 }
 
 /**

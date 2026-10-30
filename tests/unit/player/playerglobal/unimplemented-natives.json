@@ -529,24 +529,6 @@
       "flash.display3D::VertexBuffer3D#uploadFromVector"
     ]
   },
-  "shaders": {
-    "why": "Pixel Bender where Flash draws with it, blend shaders, shader fills and ShaderFilter, waits for a compiler from PBJ to GLSL; ShaderJob runs on the CPU.",
-    "natives": [
-      "flash.display::DisplayObject#set:blendShader",
-      "flash.display::Graphics#beginShaderFill",
-      "flash.display::Graphics#lineShaderStyle",
-      "flash.filters::ShaderFilter#get:bottomExtension",
-      "flash.filters::ShaderFilter#get:leftExtension",
-      "flash.filters::ShaderFilter#get:rightExtension",
-      "flash.filters::ShaderFilter#get:shader",
-      "flash.filters::ShaderFilter#get:topExtension",
-      "flash.filters::ShaderFilter#set:bottomExtension",
-      "flash.filters::ShaderFilter#set:leftExtension",
-      "flash.filters::ShaderFilter#set:rightExtension",
-      "flash.filters::ShaderFilter#set:shader",
-      "flash.filters::ShaderFilter#set:topExtension"
-    ]
-  },
   "authoring": {
     "why": "The authoring tool's, debugger's, profiler's and test automation's API (adobe.utils, flash.sampler, flash.profiler, flash.debugger, flash.automation): a release player in a browser answers none of it.",
     "natives": [

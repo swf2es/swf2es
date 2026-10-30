@@ -25,8 +25,9 @@ import { Draws, type Masks } from "./draws.js";
 import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
+import { KernelPrograms } from "./kernels.js";
 import { Stage } from "./stage.js";
-import { type Layer, type Open, type Target, TargetPool } from "./targets.js";
+import { type Layer, type Open, objectOf, type Target, TargetPool } from "./targets.js";
 
 export type { Target } from "./targets.js";
 
@@ -53,10 +54,14 @@ export class WebGLBackend {
   private readonly compositor: Compositor;
   private readonly draws: Draws;
   private readonly holds: HeldLayers;
+  /** Pixel Bender kernels' programs, which the filters, the compositor and the draws share. */
+  private readonly kernels: KernelPrograms;
   /** The filters' passes, their programs made as first run. */
   private filters!: FilterRunner<Layer>;
   /** The layers drawn into now, innermost last. */
   private layers: Open[] = [];
+  /** The frame's filters being drawn, whose chains blend shaders' modes name (KERNEL). */
+  private frameFilters: Filters | null = null;
   /**
    * Samples a pixel the stage and its layers are drawn with, 1 for none:
    * Flash's anti-aliasing by the quality, as the host sets it.
@@ -70,12 +75,34 @@ export class WebGLBackend {
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
     this.state = new GlState(gl);
+    this.kernels = new KernelPrograms(gl, this.state);
     this.pool = new TargetPool(gl, this.state);
     this.stage = new Stage(gl, this.state, this.pool);
     this.gpu = new GpuTextures(gl, this.state);
     this.atlas = new GeometryAtlas(gl, this.state);
-    this.compositor = new Compositor(gl, this.state);
-    this.draws = new Draws(gl, this.state, this.atlas, this.gpu, this.pool);
+    this.compositor = new Compositor(
+      gl,
+      this.state,
+      {
+        filters: () => this.frameFilters,
+        texture: (id) => this.gpu.textures[id] ?? null,
+        sampler: (bits) => this.gpu.sampler(bits),
+      },
+      this.kernels,
+    );
+    this.draws = new Draws(
+      gl,
+      this.state,
+      this.atlas,
+      this.gpu,
+      this.pool,
+      {
+        filters: () => this.frameFilters,
+        texture: (id) => this.gpu.textures[id] ?? null,
+        sampler: (bits) => this.gpu.sampler(bits),
+      },
+      this.kernels,
+    );
     this.holds = new HeldLayers(gl, this.state, this.pool, this.draws, this.compositor, this.gpu);
     this.setUp();
   }
@@ -98,15 +125,22 @@ export class WebGLBackend {
   private setUp(): void {
     const gl = this.gl;
     this.state.forget();
+    // Kernels' programs made again as first used, the context's own gone with it.
+    this.kernels.clear();
     const textureMost = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     this.draws.setUp();
     this.compositor.setUp();
-    this.filters = new FilterRunner(gl, this.state, {
-      take: (width, height) => this.pool.takeLayer(width, height, true),
-      give: (layer) => this.pool.giveLayer(layer),
-      texture: (id) => this.gpu.textures[id] ?? null,
-      sampler: (bits) => this.gpu.sampler(bits),
-    });
+    this.filters = new FilterRunner(
+      gl,
+      this.state,
+      {
+        take: (width, height) => this.pool.takeLayer(width, height, true),
+        give: (layer) => this.pool.giveLayer(layer),
+        texture: (id) => this.gpu.textures[id] ?? null,
+        sampler: (bits) => this.gpu.sampler(bits),
+      },
+      this.kernels,
+    );
     this.holds.setUp(this.filters, textureMost);
     this.pool.setUp();
     this.layers = [];
@@ -139,6 +173,7 @@ export class WebGLBackend {
       return;
     }
 
+    this.frameFilters = filters;
     this.atlas.place(geometries);
     this.gpu.uploadTextures(textures);
     for (const id of keeps.removed) {
@@ -254,6 +289,7 @@ export class WebGLBackend {
             y: p[from + 1],
             width,
             height,
+            object: objectOf(p, from + 4),
           };
           this.layers.push(open);
           this.draws.drawInto(open, target);
@@ -282,6 +318,7 @@ export class WebGLBackend {
               open.width,
               open.height,
               target.resolution,
+              open.object,
             );
           }
 
@@ -497,6 +534,7 @@ export class WebGLBackend {
     this.atlas.destroy();
     this.compositor.destroy();
     this.filters.destroy();
+    this.kernels.clear();
     for (const open of this.layers) {
       if (open.layer) {
         this.pool.deleteLayer(open.layer);

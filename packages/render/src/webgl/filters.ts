@@ -8,17 +8,22 @@ import {
   FLOATS,
   GLOW_PASS,
   GRADIENT_PASS,
+  IVEC4S,
+  KERNEL_PASS,
+  type KernelObject,
   MATRIX_PASS,
   MATRIX4,
   NO_BLUR,
   planChain,
   READ_BACK_PASS,
+  SAMPLER,
   SHRINK_PASS,
   VEC4S,
 } from "../filter-plan.js";
 import * as shaders from "../filter-shaders.js";
 import type { Filters } from "../filters.js";
 import { CLAMP, SMOOTH } from "../scene.js";
+import type { KernelPrograms } from "./kernels.js";
 
 /**
  * A texture a pass draws into through its framebuffer, and reads: at least
@@ -47,7 +52,10 @@ export interface FilterHost<T extends FilterTarget> {
   sampler(bits: number): WebGLSampler;
 }
 
-/** The units a pass reads its input, the blur it combines with, and a gradient from. */
+/**
+ * The units a pass reads its input, the blur it combines with, and a
+ * gradient from; a kernel's images take KernelPrograms' own (KERNEL_UNIT).
+ */
 const INPUT_UNIT = 4;
 const BLURRED_UNIT = 5;
 const EXTRA_UNIT = 6;
@@ -127,6 +135,10 @@ export class FilterRunner<T extends FilterTarget> {
   private readonly state: GlState;
   private readonly host: FilterHost<T>;
   private readonly passes = new Map<string, Pass>();
+  /** The kernel image units a kernel's pass has bound so far. */
+  private samplers = 0;
+  /** Whether a kernel's fragment shader links (planChain's `links`), linking it now if not yet. */
+  readonly links = (fragment: string) => this.kernel(fragment) !== null;
   /** The chain being run, planned (filter-plan.ts), each slot's target and the last pass using it. */
   private readonly plan = new FilterPlan();
   private readonly targets: (T | null)[] = [];
@@ -135,7 +147,12 @@ export class FilterRunner<T extends FilterTarget> {
   /** The target's pixels a unit of its own, for the chain running. */
   private resolution = 1;
 
-  constructor(gl: WebGL2RenderingContext, state: GlState, host: FilterHost<T>) {
+  constructor(
+    gl: WebGL2RenderingContext,
+    state: GlState,
+    host: FilterHost<T>,
+    private readonly kernels: KernelPrograms,
+  ) {
     this.gl = gl;
     this.state = state;
     this.host = host;
@@ -145,7 +162,8 @@ export class FilterRunner<T extends FilterTarget> {
    * Chain `chain` of `filters` run over `input`'s first `width` by `height`
    * texels: the target its last pass drew into, `input` itself where none
    * changed it. Every other target, `input` too where it was replaced, goes
-   * back to the host.
+   * back to the host. `object` is where the layer's object lies in it
+   * (planChain).
    */
   run(
     filters: Filters,
@@ -154,9 +172,10 @@ export class FilterRunner<T extends FilterTarget> {
     width: number,
     height: number,
     resolution: number,
+    object: KernelObject | null = null,
   ): T {
     const plan = this.plan;
-    planChain(plan, filters, chain, width, height, resolution, this.hasTexture);
+    planChain(plan, filters, chain, width, height, resolution, this.hasTexture, this.links, object);
     return this.execute(plan, input);
   }
 
@@ -232,7 +251,12 @@ export class FilterRunner<T extends FilterTarget> {
     const pass = plan.passes[k];
     const from = targets[pass.input] as FilterTarget;
     const to = targets[pass.output] as FilterTarget;
-    const program = this.program(pass.program);
+    // A kernel that will not link was left out as the chain was planned (links).
+    const program =
+      pass.program === KERNEL_PASS
+        ? (this.kernel(pass.kernel as string) ?? this.use("copy", COPY))
+        : this.program(pass.program);
+    this.samplers = 0;
     for (let u = pass.first; u < pass.end; u++) {
       this.setUniform(program, plan, u);
     }
@@ -325,6 +349,13 @@ export class FilterRunner<T extends FilterTarget> {
       case VEC4S:
         gl.uniform4fv(location, values, at, count);
         break;
+      case IVEC4S:
+        this.kernels.setInts(location, plan.ints, at, count);
+        break;
+      case SAMPLER:
+        // As many as KERNEL_IMAGES, which the plan holds a kernel to.
+        this.kernels.bindImage(location, this.samplers++, values[at], this.host);
+        break;
       case FLOATS:
         this.set(
           pass,
@@ -412,6 +443,11 @@ export class FilterRunner<T extends FilterTarget> {
     this.set(pass, "uInputPixel", 4, input.width, input.height, 1 / input.width, 1 / input.height);
     this.set(pass, "uCoord", 2, readWidth / input.width, readHeight / input.height);
     this.set(pass, "uTextureRect", 4, input.x ?? 0, input.y ?? 0, input.width, input.height);
+    // A kernel's alone: the others need not be told.
+    if (this.at(pass, "uOutputAt")) {
+      this.set(pass, "uOutputAt", 2, x, y);
+    }
+
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -436,6 +472,13 @@ export class FilterRunner<T extends FilterTarget> {
 
     this.state.useProgram(pass.program);
     return pass;
+  }
+
+  /** The pass of a kernel's fragment shader (KernelPrograms), in use; null where it would not link. */
+  private kernel(fragment: string): Pass | null {
+    return this.kernels.use(VERTEX, fragment, (program) => {
+      this.gl.uniform1i(this.gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);
+    });
   }
 
   /** Where `pass` takes uniform `name`, asked once. */

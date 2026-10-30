@@ -48,6 +48,7 @@ import { dropShadowFilterNatives } from "./flash/filters/DropShadowFilter.js";
 import { glowFilterNatives } from "./flash/filters/GlowFilter.js";
 import { gradientBevelFilterNatives } from "./flash/filters/GradientBevelFilter.js";
 import { gradientGlowFilterNatives } from "./flash/filters/GradientGlowFilter.js";
+import { shaderFilterNatives } from "./flash/filters/ShaderFilter.js";
 import { matrix3DNatives } from "./flash/geom/Matrix3D.js";
 import { perspectiveProjectionNatives } from "./flash/geom/PerspectiveProjection.js";
 import { transformNatives } from "./flash/geom/Transform.js";
@@ -170,6 +171,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...colorMatrixFilterNatives(s),
     ...convolutionFilterNatives(s),
     ...displacementMapFilterNatives(s),
+    ...shaderFilterNatives(s),
     ...soundTransformNatives(s),
     ...soundNatives(s),
     ...soundMixerNatives(s),

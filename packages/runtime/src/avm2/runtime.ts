@@ -47,6 +47,7 @@ import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
   type CountedMethod,
+  installMethod,
   nativeFactory,
   noBodyFactory,
   unverifiedFactory,
@@ -115,6 +116,7 @@ import {
   methodKey,
   slotKey,
   Traits,
+  untypedSetKey,
   VectorRef,
 } from "./traits.js";
 
@@ -449,8 +451,15 @@ export class Runtime {
       // as avmplus' script traits' declaring scope is, and as the compiler
       // indexes the scopes their closures capture: the global object is
       // only what they push.
-      for (const [d, factory, id] of script.desc.traits.methods) {
-        traits.proto[methodKey(d)] = withId(factory(this.empty, null), id);
+      for (const [d, factory, id, , params] of script.desc.traits.methods) {
+        installMethod(
+          this,
+          traits.proto,
+          d,
+          withId(factory(this.empty, null), id),
+          factory,
+          params,
+        );
       }
 
       // Caches keep the methods.
@@ -1218,7 +1227,7 @@ export class Runtime {
           return;
         case BIND_Set:
         case BIND_GetSet:
-          traits.proto[methodKey(id + 1)].call(o, v);
+          (traits.proto[untypedSetKey(id + 1)] ?? traits.proto[methodKey(id + 1)]).call(o, v);
           return;
         case BIND_Method:
           throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
@@ -1674,7 +1683,7 @@ export class Runtime {
     switch (b & 7) {
       case BIND_Set:
       case BIND_GetSet:
-        traits.proto[methodKey(id + 1)].call(o, v);
+        (traits.proto[untypedSetKey(id + 1)] ?? traits.proto[methodKey(id + 1)]).call(o, v);
         return;
       case BIND_Var:
         o[slotKey(id)] = this.coerce(v, traits.slotType(id));
@@ -2963,9 +2972,22 @@ export class Runtime {
     // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
     let r: Value;
     const min = f.$min;
-    const max = f.$max as number;
-    if (min !== undefined && (args.length < min || (max >= 0 && args.length > max))) {
-      throw this.argumentCountError(min, args.length);
+    if (min !== undefined) {
+      const max = f.$max as number;
+      if (args.length < min || (max >= 0 && args.length > max)) {
+        throw this.argumentCountError(min, args.length);
+      }
+
+      // A native's primitive and Object parameters, coerced as avmplus coerces them on entry.
+      const types = f.$coerce;
+      if (types !== undefined) {
+        for (let i = 0; i < args.length && i < types.length; i++) {
+          const type = types[i];
+          if (type !== null) {
+            args[i] = this.coerce(args[i], type);
+          }
+        }
+      }
     }
 
     r = f.apply(o, args);

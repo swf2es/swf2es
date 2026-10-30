@@ -28,6 +28,14 @@ function listeners(o: AsObject): Map<string, Listener[]> {
 
 export function eventDispatcherNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
+  /** An event type, declared String: refused as null, as Flash refuses it. */
+  const typeOf = (type: Value): string => {
+    if (type === null || type === undefined) {
+      throw s.rt.error("TypeError", 2007, "type");
+    }
+
+    return type as string;
+  };
 
   class EventDispatcherNatives {
     /** The IEventDispatcher a composed dispatcher stands in for, as events' target. */
@@ -40,11 +48,11 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
     }
 
     addEventListener(type: Value, fn: Value, useCapture: Value, priority: Value): void {
+      const key = typeOf(type);
       if (typeof fn !== "object" && typeof fn !== "function") {
         return;
       }
 
-      const key = String(type);
       const list = listeners(this).get(key) ?? [];
       const capture = !!useCapture;
       if (list.some((l) => l.fn === fn && l.capture === capture)) {
@@ -70,7 +78,7 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
     }
 
     removeEventListener(type: Value, fn: Value, useCapture: Value): void {
-      const key = String(type);
+      const key = typeOf(type);
       const list = this.$listeners?.get(key);
       const at = list?.findIndex((l) => l.fn === fn && l.capture === !!useCapture) ?? -1;
       if (list && at >= 0) {
@@ -84,11 +92,11 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
     }
 
     hasEventListener(type: Value): boolean {
-      return (this.$listeners?.get(String(type))?.length ?? 0) > 0;
+      return (this.$listeners?.get(typeOf(type))?.length ?? 0) > 0;
     }
 
     willTrigger(type: Value): boolean {
-      const key = String(type);
+      const key = typeOf(type);
       for (let o: AsObject | null = this; o; o = displayOf(o)?.parent?.object ?? null) {
         if ((o.$listeners?.get(key)?.length ?? 0) > 0) {
           return true;

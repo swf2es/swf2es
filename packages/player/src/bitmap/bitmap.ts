@@ -161,6 +161,19 @@ export class BitmapStore {
   private gpuNewer = false;
   /** Counts each change, so a texture of the store knows to upload again. */
   version = 0;
+  /**
+   * Whether the store is opaque but holds pixels below alpha 255, which
+   * erase and alpha leave in one (drawBitmap), as Flash's memory does.
+   * Its pixels then read two ways (adl): as they are, by what reads their
+   * values (getPixel32, getPixels, getVector, clone, compare, floodFill,
+   * Context3D's upload, a ShaderJob's input, unmultiplied), and opaque,
+   * alpha 255 over the premultiplied colour, by what draws or copies them
+   * (draw, copyPixels, encode, the screen, hitTest's alpha): `drawable`.
+   */
+  holdsAlpha = false;
+  /** `drawable`'s pixels and the version they are of, while the store holds alpha. */
+  private opaqueCopy: Uint32Array | null = null;
+  private opaqueVersion = -1;
   disposed = false;
   /**
    * The Bitmaps showing the store, told of each change so the renderer
@@ -309,7 +322,41 @@ export class BitmapStore {
       return 0;
     }
 
-    return unmultiply(this.readable[y * this.width + x]);
+    return this.unmultiplied(this.readable[y * this.width + x]);
+  }
+
+  /**
+   * A stored pixel as its value reads back: unmultiplied, but an opaque
+   * bitmap's as it is, which is the same but where it holds alpha.
+   */
+  unmultiplied(p: number): number {
+    return this.transparent ? unmultiply(p) : p;
+  }
+
+  /**
+   * The pixels as a draw, a copy or the screen reads them, to read only:
+   * `readable`, but where an opaque store holds alpha, a copy at alpha 255.
+   */
+  get drawable(): Uint32Array {
+    const pixels = this.readable;
+    if (!this.holdsAlpha) {
+      return pixels;
+    }
+
+    if (this.opaqueCopy === null || this.opaqueVersion !== this.version) {
+      const copy =
+        this.opaqueCopy?.length === pixels.length
+          ? this.opaqueCopy
+          : new Uint32Array(pixels.length);
+      for (let i = 0; i < pixels.length; i++) {
+        copy[i] = (pixels[i] | 0xff000000) >>> 0;
+      }
+
+      this.opaqueCopy = copy;
+      this.opaqueVersion = this.version;
+    }
+
+    return this.opaqueCopy;
   }
 
   getPixel(x: number, y: number): number {
@@ -408,7 +455,8 @@ export class BitmapStore {
     // source's go over anything unchanged, and a gap is empty. In place,
     // all but a move down and left, which Flash's order smears, are a
     // memmove.
-    const replaces = !alpha && (!source.transparent || (this.transparent && !mergeAlpha));
+    const replaces =
+      !alpha && !source.holdsAlpha && (!source.transparent || (this.transparent && !mergeAlpha));
     const smears = source === this && d.y > sy && d.x < sx;
     if (
       replaces &&
@@ -428,24 +476,30 @@ export class BitmapStore {
     // it moves right.
     const up = source === this && d.y > sy && d.x >= sx;
     const left = source === this && d.x > sx;
-    // The array written, taken once: a source or alpha that is this store reads it too.
+    // The arrays taken once, the written one first: a source or alpha that is this store reads
+    // it too, and so what the copy already wrote. A source that holds alpha is copied opaque, as
+    // a draw reads it; within itself, as it is.
     const into = this.pixels;
+    const pixels = source !== this && source.holdsAlpha ? source.drawable : source.readable;
+    const mask = alpha?.readable ?? null;
+    const maskWidth = alpha?.width ?? 0;
+    const maskHeight = alpha?.height ?? 0;
+
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
       const to = (d.y + row) * this.width + d.x;
       const from = (sy + row) * source.width + sx;
       for (let c = 0; c < d.width; c++) {
         const i = left ? d.width - 1 - c : c;
-        // Read again each pixel: a copy within the store reads what it wrote.
-        let p = source.readable[from + i];
-        if (alpha) {
+        let p = pixels[from + i];
+        if (mask) {
           const mx = ax + i;
           const my = ay + row;
-          if (mx < 0 || my < 0 || mx >= alpha.width || my >= alpha.height) {
+          if (mx < 0 || my < 0 || mx >= maskWidth || my >= maskHeight) {
             continue;
           }
 
-          p = scale(p, alpha.readable[my * alpha.width + mx] >>> 24);
+          p = scale(p, mask[my * maskWidth + mx] >>> 24);
         }
 
         into[to + i] = this.composite(p, into[to + i], mergeAlpha);
@@ -544,7 +598,7 @@ export class BitmapStore {
 
     for (let y = c.y; y < c.y + c.height; y++) {
       for (let x = c.x; x < c.x + c.width; x++) {
-        out.push(unmultiply(this.readable[y * this.width + x]));
+        out.push(this.unmultiplied(this.readable[y * this.width + x]));
       }
     }
 
@@ -564,7 +618,7 @@ export class BitmapStore {
     let j = 0;
     for (let y = c.y; y < c.y + c.height; y++) {
       for (let i = y * this.width + c.x, end = i + c.width; i < end; i++, j += 4) {
-        const p = unmultiply(pixels[i]);
+        const p = this.unmultiplied(pixels[i]);
         view.setUint32(j, p, littleEndian);
       }
     }
@@ -634,10 +688,15 @@ export function over(s: number, d: number): number {
     return d >>> 0;
   }
 
+  // Each channel written out: a closure over s and d would take a context each pixel.
   const k = 256 - sa;
-  const channel = (shift: number) =>
-    Math.min(255, ((s >>> shift) & 0xff) + ((((d >>> shift) & 0xff) * k) >> 8));
-  return ((channel(24) << 24) | (channel(16) << 16) | (channel(8) << 8) | channel(0)) >>> 0;
+  return (
+    ((Math.min(255, sa + (((d >>> 24) * k) >> 8)) << 24) |
+      (Math.min(255, ((s >>> 16) & 0xff) + ((((d >>> 16) & 0xff) * k) >> 8)) << 16) |
+      (Math.min(255, ((s >>> 8) & 0xff) + ((((d >>> 8) & 0xff) * k) >> 8)) << 8) |
+      Math.min(255, (s & 0xff) + (((d & 0xff) * k) >> 8))) >>>
+    0
+  );
 }
 
 /** A premultiplied pixel's channels scaled by an alpha, as Flash's alpha bitmap scales them. */
@@ -646,8 +705,13 @@ function scale(p: number, a: number): number {
     return p >>> 0;
   }
 
-  const channel = (shift: number) => ((((p >>> shift) & 0xff) * a) >> 8) << shift;
-  return (channel(24) | channel(16) | channel(8) | channel(0)) >>> 0;
+  return (
+    (((((p >>> 24) * a) >> 8) << 24) |
+      (((((p >>> 16) & 0xff) * a) >> 8) << 16) |
+      (((((p >>> 8) & 0xff) * a) >> 8) << 8) |
+      (((p & 0xff) * a) >> 8)) >>>
+    0
+  );
 }
 
 /** Each bitmap's fill store, by its pixels, which the SWFs that define the bitmap alike share. */

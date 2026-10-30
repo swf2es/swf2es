@@ -4,22 +4,29 @@
 import { type ColorTransform, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import {
+  BLEND,
   BLEND_NAMES,
   CLAMP,
   Commands,
+  FILL_SHADER,
   Filters,
   Geometries,
+  KERNEL,
   type KeepHandle,
   Keeps,
   LAYER,
   measureLayers,
+  NO_WHOLE,
   NORMAL,
   PLANE,
   plan,
   Rows,
   SceneList,
+  SHADED,
   SMOOTH,
   Textures,
+  WHOLE_ALIASED,
+  WHOLE_SMOOTH,
 } from "@swf2es/render";
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { argbOf, type BitmapStore } from "../bitmap/bitmap.js";
@@ -466,7 +473,22 @@ export class RenderView implements Drawer {
     // A layer of no children is its fills, drawn as normal; a mode it has no blend for (a Pixel
     // Bender shader's) is drawn as normal, and counted.
     // BitmapData.draw takes its object with no blend mode, as with no transform or colour.
-    const named = root ? NORMAL : BLEND_NAMES.indexOf(o.blendMode);
+    // A blend shader's mode names its kernel's chain of the frame's filters; "shader" with none is
+    // normal. A filtered object blends as the bitmap Flash keeps of it, over its whole rectangle.
+    const shading = !root && !hidden && o.blendMode === "shader";
+    const named = shading
+      ? o.blendShader
+        ? KERNEL +
+          this.filterLayers.kernelChain(
+            o.blendShader,
+            this.filters,
+            BLEND,
+            !plane && o.filters.length > 0,
+          )
+        : NORMAL
+      : root
+        ? NORMAL
+        : BLEND_NAMES.indexOf(o.blendMode);
     if (named < 0 && !hidden) {
       unsupported.blendModes++;
     }
@@ -499,6 +521,12 @@ export class RenderView implements Drawer {
         : this.filterLayers.filterPlan(o, this.filterUnits, this.scale, this.drawRoot !== null);
     // Its colour, which a 3D object's bitmap takes, all above it drawn into it.
     const full = color;
+    // A ShaderFilter's kernel runs over Flash's bitmap of the object, of whole pixels.
+    const whole = !filtering?.whole
+      ? NO_WHOLE
+      : this.stageQuality === "LOW"
+        ? WHOLE_ALIASED
+        : WHOLE_SMOOTH;
     let layerRow = -1;
     let layer = -1;
     let drawnFrom = 0;
@@ -511,8 +539,9 @@ export class RenderView implements Drawer {
 
       // What its filters made last, where nothing they ran on changed: composited again where it
       // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
+      // A blend shader's layer is composited anew each frame: a kept one's mode is a byte.
       output =
-        filtering && !this.drawRoot
+        filtering && !this.drawRoot && mode < KERNEL
           ? this.filterLayers.keptOutput(
               o,
               filtering,
@@ -526,6 +555,7 @@ export class RenderView implements Drawer {
               this.target,
               this.frames,
               this.keptGeneration,
+              whole,
             )
           : null;
       if (output?.reused) {
@@ -539,7 +569,7 @@ export class RenderView implements Drawer {
         // once its filters are fitted to that.
         drawnFrom = this.scene.length;
         const keep = output?.keeping ? (output.handle as KeepHandle).id : -1;
-        layer = this.scene.layerBegin(filtering ? 0 : -1, keep);
+        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole);
       }
     }
 
@@ -600,6 +630,17 @@ export class RenderView implements Drawer {
         for (const { part, handle } of this.parts.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(handle.id);
+          // A shader fill's draw names its kernel's chain of the frame's filters.
+          if (part.paint?.type === "shader") {
+            if (row < 0) {
+              row = this.rows.addPlaced(this.places, at + 6, color);
+            }
+
+            const chain = this.filterLayers.kernelChain(part.paint.use, this.filters, FILL_SHADER);
+            this.scene.draw(handle.id, row, NORMAL, chain, SHADED);
+            continue;
+          }
+
           const textured = part.paint !== null || part.mesh !== null;
           const texture = textured ? this.paints.paintTexture(part) : null;
           if (textured && !texture) {

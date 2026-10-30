@@ -17,14 +17,17 @@ export {
 export * as filterShaders from "./filter-shaders.js";
 export {
   BEVEL,
+  BLEND,
   BLUR,
   blurShrink,
   COLOR_MATRIX,
   CONVOLUTION,
   DISPLACEMENT,
+  FILL_SHADER,
   Filters,
   GLOW,
   GRADIENT,
+  SHADER,
 } from "./filters.js";
 export {
   Geometries,
@@ -34,7 +37,13 @@ export {
   IDLE_FRAMES,
 } from "./geometry.js";
 export { KEEP_IDLE_FRAMES, type KeepHandle, Keeps } from "./keeps.js";
-export { drawnArea, filteredRect, type MeasureTarget, measureLayers } from "./measure.js";
+export {
+  drawnArea,
+  filteredRect,
+  type MeasureTarget,
+  measureLayers,
+  wholeBitmap,
+} from "./measure.js";
 export { plan } from "./plan.js";
 export { type ColorRow, ROW_FLOATS, ROWS_A_LINE, Rows } from "./rows.js";
 export {
@@ -49,6 +58,7 @@ export {
   HARDLIGHT,
   INVERT,
   KEPT,
+  KERNEL,
   LAYER,
   LAYER_BEGIN,
   LAYER_END,
@@ -59,14 +69,18 @@ export {
   MESH,
   MIRROR,
   MULTIPLY,
+  NO_WHOLE,
   NORMAL,
   OVERLAY,
   PLANE,
   REPEAT,
   SCREEN,
   SceneList,
+  SHADED,
   SMOOTH,
   SNAP,
   SUBTRACT,
+  WHOLE_ALIASED,
+  WHOLE_SMOOTH,
 } from "./scene.js";
 export { type TextureData, type TextureHandle, Textures } from "./textures.js";

@@ -208,8 +208,9 @@ compose with the display list without copies.
 
 - **Filters and blend modes** are the passes the planner emits: blur,
   glow, shadow, bevel, gradient glow and bevel, colour matrix,
-  convolution and displacement map, drawn to match adl. Their shaders
-  and rules are `filter-shaders.ts` and `filters.ts`. A filtered layer is
+  convolution, displacement map and a Pixel Bender kernel's, drawn to
+  match adl. Their shaders and rules are `filter-shaders.ts`,
+  `kernel-shaders.ts` and `filters.ts`. A filtered layer is
   measured as PixiJS's filter system measured it (`measure.ts`), since
   the filters' exactness rules were found against that.
 - **Text** stays laid out by the player. The renderer sees glyph runs:
