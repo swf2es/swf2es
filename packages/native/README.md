@@ -8,9 +8,11 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
   (`LineBuilder`), and BitmapData's filters and pixel operations (`BitmapKernel`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
+- `@swf2es/native/atf`: Stage3D's ATF textures, read and decoded to what a
+  desktop GPU takes, their JPEG XR images by jxrlib.
 
 The package depends on no other package and uses no DOM or node APIs.
-`compress` and `mp3` each compile their own module. What the renderer
+`compress`, `mp3` and `atf` each compile their own module. What the renderer
 computes is one module, `render` (`src/render/`, about 90 KB), compiled
 once; each user instantiates it apart (a `BitmapKernel`, a `Tessellator` and
 its `LineBuilder`), so each has its own memory and lifetime, and a large
@@ -57,8 +59,9 @@ folder, builds `zig-out/bin/*.wasm` like any Zig project (`.zig-cache/` and
 
 The wrappers, the Zig and the build are Apache-2.0. `LICENSE.third-party`
 carries each vendored library's notice: zlib is under the zlib license,
-the LZMA SDK files are in the public domain, minimp3 is CC0-1.0, and
-libtess2 is under SGI Free Software License B; and that of the code
+the LZMA SDK files are in the public domain, minimp3 is CC0-1.0,
+libtess2 is under SGI Free Software License B, and jxrlib is under the BSD
+2-Clause License; and that of the code
 derived from SVG 1.1's feTurbulence (`src/render/pixels.zig`'s
 perlinNoise), under the W3C Software and Document License.
 
@@ -373,3 +376,59 @@ go after its call. `tests/unit/player/scene/strokes.test.ts` checks the
 lines it builds: their widths, caps, joins and miters by the area they
 cover, that a wide line on a short curve leaves no hole, that an opaque
 line's triangles cover what its outline does and meet corner to corner.
+
+## atf
+
+Stage3D's ATF textures, which `uploadCompressedTextureFromByteArray`
+takes: `readAtfHeader(data, offset)` reads the header, `decodeAtf(data,
+header)` each face's levels, decoded to what Flash Player uploads on the
+desktop. RGB888 and RGBA8888 hold a JPEG XR image a level and decode to
+BGRA, alpha straight. The block compressed formats hold every GPU's
+encoding, and decode to S3TC: Compressed (2) and its lossy variant (12) to
+DXT1, CompressedAlpha (4, and 13) to DXT5, rebuilt from their LZMA'd
+indices and the JPEG XR images of their endpoints; the raw formats (3, 5)
+hold the blocks as they are. PVRTC, ETC1 and ETC2's blocks are skipped.
+
+The layout is Adobe's "ATF file format" (version 3, 2015), and the old
+header, which has no version, 24-bit lengths and no ETC2, as Adobe's MIT
+[dds2atf](https://github.com/adobe/dds2atf) writes it; the endpoints'
+images are a pixel a 4x4 block, the first endpoints above the second, the
+indices 4 bytes a block (DXT5's alpha indices 6), as dds2atf encodes them.
+Nothing is taken from dds2atf. A level rebuilt this way is the very bytes
+png2atf's raw output holds for the same image (`tests/unit/atf.test.ts`).
+
+Refusals are AIR's, as AIR 51 gives them for the same bytes: an
+`AtfError` whose `reason` is `size` (#3669: less data than the header or
+its length), `decode` (#3677: no signature, a format past 13, a size past
+4096, a level count the size has not, a block past the data, a block that
+does not decode) or, for the caller, `format` (#3675). `readAtfHeader`
+checks only what AIR checks before an asynchronous upload returns, the
+signature and the length; `decodeAtf` the rest. As AIR streams textures,
+a level that does not end within the length is left out, as are those
+after it, and so is a level whose blocks for the desktop are empty
+(png2atf's `-n`); AIR reads nothing past the length, and nothing of the
+reserved bytes.
+
+jxrlib's decoder and glue (`vendor/jxrlib`, https://github.com/swf2es/jxrlib,
+a fork of 4creators/jxrlib, Microsoft's release, at tag `v2019.10.9`) are
+compiled unchanged, without its encoder, at `-Os`: the module is about
+100 KB, against 150 KB at `-O2` for 3% less time. `src/atf/jxr.c` decodes
+an image in the pixel format its block must have, setting jxrlib's output
+to the container's pixel format as jxrlib's own decoder does (the
+codestream may name another, which jxrlib would write by into a buffer
+sized for this one), and taking 24-bit RGB as png2atf writes it, named
+24bppBGR. `src/atf/include/` holds the libc headers jxrlib includes, its
+file streams and diagnostics inert, and `root.zig` its allocator over a
+bump arena that each call resets.
+
+jxrlib is not memory safe on corrupt input: AddressSanitizer finds it
+reading past its tables and writing through null pointers. In the module
+these stay within its memory, whose stack comes first: a null pointer's
+writes land at the bottom of the unused stack. A trap refuses the image
+(#3677) and lets the instance go, and each texture decodes in an instance
+of its own, so nothing a corrupt texture did reaches another.
+`node tests/fuzz/atf.ts [cases] [seed]` mutates the fixtures, in both
+headers, and checks that nothing traps or throws but `AtfError` and that
+every level decoded is the size it should be; 450,000 cases traps none.
+The 768 ATFs of a set of Alternativa3D demos, old-header Compressed up to
+2048 pixels, decode in 3.6 s in node, 68 ms the largest.

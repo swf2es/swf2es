@@ -4,6 +4,7 @@
 // whose memory has grown past MEMORY_KEPT is dropped after its call, as is
 // one whose call threw, and the next call starts a new one from the
 // compiled module.
+import { decodeBase64 } from "../base64.js";
 import { binary } from "./binary.js";
 
 interface Exports {
@@ -88,17 +89,6 @@ function call<T>(f: (x: Exports) => T): T {
       instance = null;
     }
   }
-}
-
-/** Base64 to bytes with a plain loop: Uint8Array.from with a callback takes some 8 times as long. */
-function decodeBase64(text: string): Uint8Array {
-  const raw = atob(text);
-  const bytes = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i++) {
-    bytes[i] = raw.charCodeAt(i);
-  }
-
-  return bytes;
 }
 
 /** `data` in the module's memory, after a reset; 0 if it does not fit. */
