@@ -32,6 +32,8 @@ export interface ContextState {
   aa: number;
   target: TextureResource | null;
   targetObject: AsObject | null;
+  /** A compressed texture is the target: AIR takes it, and refuses to clear or draw (#3746). */
+  compressedTarget: boolean;
   program: AsObject | null;
   vertices: (AsObject | null)[];
   textures: (AsObject | null)[];
@@ -326,6 +328,8 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
 
         throw error;
       }
+      // Older content reads a compressed texture with any sampler, as AIR lets it.
+      backend.samplerFormats = s.rt.swfVersion >= 17;
       let object: AsObject;
       try {
         object = construct("Context3D");
@@ -344,6 +348,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         aa: 0,
         target: null,
         targetObject: null,
+        compressedTarget: false,
         program: null,
         vertices: new Array(8).fill(null),
         textures: new Array(8).fill(null),

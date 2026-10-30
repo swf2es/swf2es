@@ -61,6 +61,17 @@ const ERROR_IDS: Record<Context3DErrorReason, number> = {
   agalSampler: 3668,
 };
 
+/** The class of each error that is not an Error. */
+const ERROR_CLASSES: Partial<Record<Context3DErrorReason, string>> = {
+  drawRange: "RangeError",
+  texturePowerOfTwo: "ArgumentError",
+};
+
+/** A backend failure's Flash error: its ID and class. */
+export function flashError(error: Context3DError): { id: number; kind: string } {
+  return { id: ERROR_IDS[error.reason], kind: ERROR_CLASSES[error.reason] ?? "Error" };
+}
+
 /** Only known backend failures become Flash errors; programming errors still surface. */
 export function translateErrors(natives: avm2.Natives, s: Scripting): void {
   const keys = Object.keys(natives);
@@ -83,8 +94,8 @@ export function translateErrors(natives: avm2.Natives, s: Scripting): void {
         return native.call(this, a, b, c, d, e, f, g, h);
       } catch (error) {
         if (error instanceof Context3DError) {
-          const kind = error.reason === "drawRange" ? "RangeError" : "Error";
-          throw s.rt.error(kind, ERROR_IDS[error.reason]);
+          const { id, kind } = flashError(error);
+          throw s.rt.error(kind, id);
         }
 
         throw error;

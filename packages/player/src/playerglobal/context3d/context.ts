@@ -15,6 +15,7 @@ import {
   STENCIL_ACTIONS,
   type StencilAction,
   TextureBindingError,
+  type TextureFormat,
   VERTEX_FORMATS,
   type VertexFormat,
   VertexOffsetError,
@@ -24,6 +25,15 @@ import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
 import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
+
+/** The backend's format for a texture's; the packed and half-float ones are not yet. */
+function textureFormat(format: string): TextureFormat {
+  if (format !== "bgra" && format !== "compressed" && format !== "compressedAlpha") {
+    unsupported();
+  }
+
+  return format;
+}
 
 export function registerContext(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
   const {
@@ -109,6 +119,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {
       const entry = state(this as unknown as AsObject);
+      if (entry.compressedTarget) {
+        throw s.rt.error("Error", 3746);
+      }
+
       const backend = entry.backend;
       if (backend.width === 0) {
         throw s.rt.error("Error", 3698);
@@ -194,12 +208,16 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       levels = 0,
     ): AsObject {
       const backend = context(this as unknown as AsObject);
-      if (format !== "bgra" || levels !== 0) {
+      const compressed = textureFormat(format);
+      if (levels !== 0) {
         unsupported();
+      }
+      if (compressed !== "bgra" && (width < 4 || height < 4)) {
+        throw s.rt.error("ArgumentError", 3745);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createTexture(width, height),
+        backend.createTexture(width, height, false, compressed),
       );
       const object = construct("Texture", value, "flash.display3D.textures");
       textures.set(
@@ -243,6 +261,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (width > 2048 || height > 2048) {
         throw s.rt.error("ArgumentError", 3766);
       }
+      if (format === "compressed" || format === "compressedAlpha") {
+        throw s.rt.error("ArgumentError", 3762);
+      }
       if (format !== "bgra") {
         unsupported();
       }
@@ -267,12 +288,16 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
       const backend = context(this as unknown as AsObject);
-      if (format !== "bgra" || levels !== 0) {
+      const compressed = textureFormat(format);
+      if (levels !== 0) {
         unsupported();
+      }
+      if (compressed !== "bgra" && size < 4) {
+        throw s.rt.error("ArgumentError", 3745);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createTexture(size, size, true),
+        backend.createTexture(size, size, true, compressed),
       );
       const object = construct("CubeTexture", value, "flash.display3D.textures");
       textures.set(
@@ -359,6 +384,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (object && textures.get(object)?.disposed) {
         value = null;
       }
+      // AIR takes a compressed texture as the target, and refuses to clear or draw into it.
+      entry.compressedTarget = value !== null && value.format !== "bgra";
+      if (entry.compressedTarget) {
+        value = null;
+      }
 
       entry.backend.setRenderTarget(value, depth, surface, aa);
       entry.target = value && object ? (textures.get(object) ?? null) : null;
@@ -367,6 +397,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     setRenderToBackBuffer(): void {
       const entry = state(this as unknown as AsObject);
+      entry.compressedTarget = false;
       entry.backend.setRenderTarget(null);
       entry.target = null;
       entry.targetObject = null;
@@ -548,6 +579,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
       try {
         const entry = state(this as unknown as AsObject);
+        if (entry.compressedTarget) {
+          throw s.rt.error("Error", 3746);
+        }
         if (this.$checking) {
           requireClear(entry);
         }
@@ -580,6 +614,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
               throw s.rt.error("Error", 3754);
             case "missing":
               throw s.rt.error("Error", 3663);
+            case "format":
+              // AIR's message for it changed at SWF 19.
+              throw s.rt.error("Error", s.rt.swfVersion >= 19 ? 3763 : 3606, error.sampler);
           }
         }
 
@@ -617,6 +654,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     present(): void {
       const entry = state(this as unknown as AsObject);
+      entry.compressedTarget = false;
       // AIR returns to the back buffer even when the following validation fails.
       if (entry.target) {
         entry.backend.setRenderTarget(null);

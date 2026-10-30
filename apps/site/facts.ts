@@ -85,6 +85,7 @@ export const importMap = {
       "@swf2es/native/compress": "modules/native/compress/index.js",
       "@swf2es/format": "modules/format/index.js",
       "@swf2es/native/mp3": "modules/native/mp3/index.js",
+      "@swf2es/native/atf": "modules/native/atf/index.js",
       "@swf2es/native/render": "modules/native/render/index.js",
       "@swf2es/codegen": "modules/codegen/index.js",
       "@swf2es/context3d": "modules/context3d/index.js",

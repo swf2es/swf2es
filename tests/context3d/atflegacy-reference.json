@@ -1,0 +1,13 @@
+[
+  "atflegacy old-compressed accepted",
+  "atflegacy read-rgba ffff0000 ff00ff00 ff0000ff ffffff00",
+  "atflegacy read-dxt1 ffff0000 ff00ff00 ff0000ff ffffff00",
+  "atflegacy read-dxt5 ffff0000 ff00ff00 ff0000ff ffffff00",
+  "atflegacy new-compressed ArgumentError 3677",
+  "atflegacy old-compressed-alpha ArgumentError 3677",
+  "atflegacy old-raw-alpha ArgumentError 3677",
+  "atflegacy old-rgb accepted",
+  "atflegacy old-rgb ffff0000 ff00ff00 ff0000ff ffffff00",
+  "atflegacy new-rgb ArgumentError 3677",
+  "atflegacy complete"
+]

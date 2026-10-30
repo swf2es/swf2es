@@ -40,6 +40,8 @@ const fixture =
     "Stencil",
     "BufferBytes",
     "TextureBytes",
+    "AtfTextures",
+    "AtfLegacy",
     "VertexFormats",
     "Depth",
     "Texturing",
@@ -80,6 +82,8 @@ const compiled = spawnSync(
   [
     "-compiler.float=false",
     "-omit-trace-statements=false",
+    // AtfLegacy is old content, which AIR serves as Flash Player 11.0 did.
+    ...(fixture === "AtfLegacy" ? ["-swf-version=13"] : []),
     `-source-path=${out},${here}`,
     "-output",
     `${out}Reference.swf`,

@@ -38,6 +38,8 @@ node tests/context3d/oracle.ts --colormask
 node tests/context3d/oracle.ts --stencil
 node tests/context3d/oracle.ts --bufferbytes
 node tests/context3d/oracle.ts --texturebytes
+node tests/context3d/oracle.ts --atftextures
+node tests/context3d/oracle.ts --atflegacy    # compiled as SWF 13
 node tests/context3d/oracle.ts --vertexformats
 node tests/context3d/oracle.ts --shader-math
 node tests/context3d/oracle.ts --scalarmath
@@ -181,6 +183,32 @@ uploads do not. Null data fails first (2007); explicit texture disposal ignores
 non-null uploads even after owner disposal. Other retired owners fail with 3694,
 then invalid faces (3673), mip levels (3674), and source ranges (3669) are checked
 in that order.
+
+`AtfTextures.as` checks 178 AIR trace lines for `uploadCompressedTextureFromByteArray`
+and compressed textures, with ATFs that `atf/make.ts` encodes with png2atf from
+PNGs it draws, inlined by `fixtures.ts`, and the same with the old header. Every
+format is drawn: RGB888, RGBA8888, Compressed, CompressedAlpha, the lossy and raw
+ones and cube maps, old and new (the old header has no lossy ones); samplers that
+read another format are #3763; levels 0 to 2 alone mipmap to #3700; a three-colour
+DXT1 block's fourth texel is transparent. AIR reads the blocks as far as the data
+goes, the length aside: data cut at a level, or in its first block's length, or in
+a block the desktop skips keeps the levels before it, and data cut in a DXT block
+is #3677.
+Refusals come as AIR orders them: null (2007), then the signature (3677) before
+the data's length (3669), then the format AIR knows (3677), the texture's (3675),
+the level count and the blocks (3677), and last the size (3679). Compressed
+textures are at least 4x4 (3745), no rectangle's (3762), and a target only in
+name: clearing or drawing into one is #3746. An asynchronous upload throws only
+the signature and the length; the rest is an ErrorEvent with the whole message, or
+textureReady, before the next frame's enterFrame, even for a texture disposed
+meanwhile (3677), from bytes read when it was called. The browser runs it twice,
+the second time with `WEBGL_compressed_texture_s3tc` hidden, so that the CPU's
+decoding matches AIR too; `byte-budgets.ts` checks the compressed quotas exactly.
+The browser plays it as SWF 51, as AIR built it, since AIR's rules follow the root
+SWF's version: before 17 it reads the old header alone and no CompressedAlpha
+(#3677), and samplers read a compressed texture whatever their format; from 17 a
+sampler of another format is #3606, from 19 #3763; version 3 ATFs, with ETC2's
+blocks, from 29. `AtfLegacy.as`, built as SWF 13, checks the first.
 
 The backend swizzles BGRA into the existing RGBA staging array with an indexed
 loop. Both upload paths, every mip and every cube face share that storage;
