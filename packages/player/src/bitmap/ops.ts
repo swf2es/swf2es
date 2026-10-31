@@ -4,7 +4,7 @@
 // Flash traces under adl and records in Ruffle's corpus.
 import type { CopyOp } from "@swf2es/native/render";
 import { BitmapStore, over, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
-import { bitmapKernel } from "./kernel.js";
+import { bitmapKernel, drawKernel } from "./kernel.js";
 import { perlinSetup } from "./turbulence.js";
 
 const M = 2147483647;
@@ -774,6 +774,13 @@ export function drawBitmap(
   }
 
   const transform = ct ? prepareColorTransform(ct) : null;
+  if (
+    code === NORMAL &&
+    source !== store &&
+    drawnNatively(store, source, m, det, area, transform, smooth)
+  ) {
+    return;
+  }
 
   // Unscaled at a whole pixel, as every snapshot of a display object is
   // composited: each covered pixel is covered whole and is the source's
@@ -933,6 +940,81 @@ export function drawBitmap(
   if (wrote) {
     store.changed();
   }
+}
+
+/**
+ * A draw in the normal blend mode of another store, by the draw kernel
+ * (draw.zig), whose pixels are those of the paths below, to the bit:
+ * whether it drew it, which it does not for numbers it cannot take as
+ * they are, nor where the realm has no kernel.
+ */
+function drawnNatively(
+  store: BitmapStore,
+  source: BitmapStore,
+  m: Affine,
+  det: number,
+  area: PixelRect,
+  ct: PreparedColorTransform | null,
+  smooth: boolean,
+): boolean {
+  // A store the GPU drew last is read back only by a draw that puts a pixel, as below.
+  const kernel = store.newerOnGpu ? null : drawKernel();
+  if (!kernel) {
+    return false;
+  }
+
+  // Unscaled at a whole pixel, composite's, which takes the move as ints.
+  const moved =
+    m.a === 1 &&
+    m.b === 0 &&
+    m.c === 0 &&
+    m.d === 1 &&
+    Number.isInteger(m.tx) &&
+    Number.isInteger(m.ty);
+  if (moved && (Math.abs(m.tx) >= 2 ** 31 || Math.abs(m.ty) >= 2 ** 31)) {
+    return false;
+  }
+
+  // The inverse as drawBitmap's path takes it, every number of it finite, as the transform's.
+  const ia = m.d / det;
+  const ib = -m.b / det;
+  const ic = -m.c / det;
+  const id = m.a / det;
+  const inverse = [ia, ib, ic, id, -(ia * m.tx + ic * m.ty), -(ib * m.tx + id * m.ty)];
+  const transform = ct
+    ? [ct.rMul, ct.gMul, ct.bMul, ct.aMul, ct.rAdd, ct.gAdd, ct.bAdd, ct.aAdd]
+    : null;
+  if (!inverse.every(Number.isFinite) || (transform && !transform.every(Number.isFinite))) {
+    return false;
+  }
+
+  const pixels = source.drawable;
+  const result = kernel.draw(
+    { key: source, version: source.version, width: source.width, height: source.height, pixels },
+    store.readable,
+    store.width,
+    area,
+    {
+      inverse,
+      tx: moved ? m.tx : 0,
+      ty: moved ? m.ty : 0,
+      transform,
+      smooth,
+      opaque: !store.transparent,
+      skipZeroAlpha: ct?.skipZeroAlpha ?? false,
+    },
+    moved,
+  );
+  if (result === "refused") {
+    return false;
+  }
+
+  if (result === "written") {
+    kernel.writeBack(store.pixels, store.width, area);
+    store.changed();
+  }
+
+  return true;
 }
 
 /** drawBitmap's buffers for a row. */
