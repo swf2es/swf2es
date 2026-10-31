@@ -40,6 +40,7 @@ import {
 import { ConstantPool } from "./pool";
 import { typeName } from "./properties";
 import { Reader } from "./reader";
+import { loadEntry, saveEntry, target, throwsAt } from "./targets";
 import { verifyAt } from "./verify";
 
 /**
@@ -100,7 +101,7 @@ export class Code {
 }
 
 // Byte states in BodyDecoder.cover, which starts zeroed: unseen.
-const START: u8 = 1;
+export const START: u8 = 1;
 const INSIDE: u8 = 2;
 
 // Frame value flags.
@@ -314,14 +315,14 @@ export class BodyDecoder {
     this.stack = 0;
     this.scope = 0;
     if (load<u8>(this.start) === ops.OP_label) {
-      if (!this.target(-1, 0, 0, 0)) {
+      if (!target(this, -1, 0, 0, 0)) {
         return code;
       }
     } else {
       if (this.typed) {
         this.entryStack[0] = 0;
         this.entryScope[0] = 0;
-        this.saveEntry(0);
+        saveEntry(this, 0);
       }
 
       if (!this.block(0, 0, 0)) {
@@ -332,7 +333,7 @@ export class BodyDecoder {
     while (this.workCount) {
       const start = this.work[--this.workCount];
       this.pending[start] = 0;
-      this.loadEntry(start);
+      loadEntry(this, start);
       if (!this.block(start, this.entryStack[start], this.entryScope[start])) {
         return code;
       }
@@ -389,7 +390,7 @@ export class BodyDecoder {
     let ok = true;
     for (let pc: u32 = 0; pc < this.length && ok; pc++) {
       if (pc === 0 || this.known[pc]) {
-        this.loadEntry(pc);
+        loadEntry(this, pc);
         ir.addBlock(pc, this.entryStack[pc], this.entryScope[pc], this.valueType, this.valueFlags);
         ok = this.block(pc, this.entryStack[pc], this.entryScope[pc]);
       }
@@ -702,54 +703,6 @@ export class BodyDecoder {
     return (this.valueFlags[i] & NOT_NULL) !== 0;
   }
 
-  /** Save the current state as known target t's entry state. */
-  saveEntry(t: u32): void {
-    const size = this.frameSize;
-    if (this.entryUsed + size > <u32>this.entryType.length) {
-      const capacity = max(this.entryUsed + size, <u32>this.entryType.length * 2);
-      const types = new StaticArray<i32>(capacity);
-      const flags = new StaticArray<u8>(capacity);
-      memory.copy(changetype<usize>(types), changetype<usize>(this.entryType), this.entryUsed << 2);
-      memory.copy(changetype<usize>(flags), changetype<usize>(this.entryFlags), this.entryUsed);
-      this.entryType = types;
-      this.entryFlags = flags;
-    }
-
-    const at = this.entryUsed;
-    this.entryAt[t] = at;
-    this.entryUsed += size;
-    memory.copy(
-      changetype<usize>(this.entryType) + ((<usize>at) << 2),
-      changetype<usize>(this.valueType),
-      (<usize>size) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.entryFlags) + <usize>at,
-      changetype<usize>(this.valueFlags),
-      size,
-    );
-  }
-
-  /** Make known target t's entry state the current one. */
-  loadEntry(t: u32): void {
-    if (!this.typed) {
-      return;
-    }
-
-    this.localsVersion++;
-    const at = this.entryAt[t];
-    memory.copy(
-      changetype<usize>(this.valueType),
-      changetype<usize>(this.entryType) + ((<usize>at) << 2),
-      (<usize>this.frameSize) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.valueFlags),
-      changetype<usize>(this.entryFlags) + <usize>at,
-      this.frameSize,
-    );
-  }
-
   /**
    * As Verifier::mergeState: merge the current values into known target t's
    * entry state, whose depths are the same: types to their common base, not
@@ -800,208 +753,10 @@ export class BodyDecoder {
     return changed;
   }
 
-  /** Put known target t on the work list unless it is there already. */
-  requeue(t: u32): void {
-    if (!this.pending[t]) {
-      this.pending[t] = 1;
-      this.work[this.workCount++] = t;
-    }
-  }
-
-  /**
-   * As Verifier::checkTarget and mergeState: stay in the code, back edges need
-   * a label or known target, and every path into a block has the same stack
-   * and scope depths, whose values merge.
-   */
-  target(from: i64, to: i64, stack: u32, scope: u32): bool {
-    // The second phase only visits what the first already checked.
-    if (this.emitPass) {
-      return true;
-    }
-
-    if (to < 0 || to >= <i64>this.length) {
-      this.code.fail(C.kInvalidBranchTargetError);
-      return false;
-    }
-
-    const t = <u32>to;
-    const isNew = !this.known[t];
-    if (to <= from && isNew && load<u8>(this.start + t) !== ops.OP_label) {
-      this.code.fail(C.kInvalidBranchTargetError);
-      return false;
-    }
-
-    if (isNew) {
-      // Code decoded as part of another block must have been reached with the same state.
-      const walked = this.cover[t] === START;
-      if (walked && !this.sameDepths(this.stackAt[t], this.scopeAt[t], stack, scope)) {
-        return false;
-      }
-
-      this.known[t] = 1;
-      this.entryStack[t] = stack;
-      this.entryScope[t] = scope;
-      if (this.typed) {
-        this.saveEntry(t);
-      }
-
-      this.requeue(t);
-
-      // The block that walked through t must now end there and merge into it.
-      if (walked && this.typed && this.walkOf[t] !== t) {
-        this.requeue(this.walkOf[t]);
-      }
-    } else {
-      if (!this.sameDepths(this.entryStack[t], this.entryScope[t], stack, scope)) {
-        return false;
-      }
-
-      if (this.typed) {
-        const changed = this.mergeEntry(t);
-        if (changed < 0) {
-          return false;
-        }
-
-        if (changed) {
-          this.requeue(t);
-        }
-      }
-    }
-
-    // A loop header's implicit interrupt check can throw, so it reaches the
-    // handlers covering it, even when the back edge is found after its block.
-    if (to <= from && !this.loopHeader[t]) {
-      this.loopHeader[t] = 1;
-      if (this.typed) {
-        // Its handlers are reached with the state it is entered with.
-        this.saveCurrent();
-        this.loadEntry(t);
-        const stackNow = this.stack;
-        const scopeNow = this.scope;
-        this.stack = stack;
-        this.scope = scope;
-        const reached = this.throwsAt(t);
-        this.stack = stackNow;
-        this.scope = scopeNow;
-        this.restoreCurrent();
-        return reached;
-      }
-
-      return this.throwsAt(t);
-    }
-
-    return true;
-  }
-
   // The values of the block being walked, while a loop header's handler
   // edges are followed from its entry state instead.
   savedType: StaticArray<i32> = new StaticArray<i32>(0);
   savedFlags: StaticArray<u8> = new StaticArray<u8>(0);
-
-  saveCurrent(): void {
-    if (<u32>this.savedType.length < this.frameSize) {
-      this.savedType = new StaticArray<i32>(this.frameSize);
-      this.savedFlags = new StaticArray<u8>(this.frameSize);
-    }
-
-    memory.copy(
-      changetype<usize>(this.savedType),
-      changetype<usize>(this.valueType),
-      (<usize>this.frameSize) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.savedFlags),
-      changetype<usize>(this.valueFlags),
-      this.frameSize,
-    );
-  }
-
-  restoreCurrent(): void {
-    this.localsVersion++;
-    memory.copy(
-      changetype<usize>(this.valueType),
-      changetype<usize>(this.savedType),
-      (<usize>this.frameSize) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.valueFlags),
-      changetype<usize>(this.savedFlags),
-      this.frameSize,
-    );
-  }
-
-  sameDepths(stack: u32, scope: u32, otherStack: u32, otherScope: u32): bool {
-    if (stack !== otherStack) {
-      this.code.fail(C.kStackDepthUnbalancedError);
-      return false;
-    }
-
-    if (scope !== otherScope) {
-      this.code.fail(C.kScopeDepthUnbalancedError);
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Edges from `pc` to every handler covering it. A handler starts with the
-   * locals as they are, no scopes, and just the exception on the stack.
-   */
-  throwsAt(pc: u32): bool {
-    if (this.emitPass || pc < this.tryFrom || pc >= this.tryTo) {
-      return true;
-    }
-
-    const abc = this.abc;
-    for (let i: u32 = 0; i < this.handlerCount; i++) {
-      const h = this.handlerFirst + i;
-      if (pc >= abc.exceptionFrom[h] && pc < abc.exceptionTo[h]) {
-        if (this.maxStack < 1) {
-          this.code.fail(C.kStackOverflowError);
-          return false;
-        }
-
-        if (!this.typed) {
-          if (!this.target(<i64>pc, <i64>abc.exceptionTarget[h], 1, 0)) {
-            return false;
-          }
-
-          continue;
-        }
-
-        // The same locals as when last merged into this handler change
-        // nothing there, once a backward edge has made it a loop header.
-        const to = abc.exceptionTarget[h];
-        if (this.handlerMerged[i] === this.localsVersion && (to > pc || this.loopHeader[to])) {
-          continue;
-        }
-
-        const stack = this.stack;
-        const scope = this.scope;
-        const base = this.stackBase;
-        const firstType = this.valueType[base];
-        const firstFlags = this.valueFlags[base];
-        const firstOrigin = this.origin[base];
-        const type = this.handlerType[i];
-        this.setValue(base, type, this.domain.typeNotNull(type) ? NOT_NULL : 0);
-        this.stack = 1;
-        this.scope = 0;
-        const reached = this.target(<i64>pc, <i64>abc.exceptionTarget[h], 1, 0);
-        this.stack = stack;
-        this.scope = scope;
-        this.setValue(base, firstType, firstFlags);
-        this.origin[base] = firstOrigin;
-        if (!reached) {
-          return false;
-        }
-
-        this.handlerMerged[i] = this.localsVersion;
-      }
-    }
-
-    return true;
-  }
 
   /** Decode and check one block from `start` until it ends or runs into another block. */
   block(start: u32, stack: u32, scope: u32): bool {
@@ -1032,14 +787,14 @@ export class BodyDecoder {
       }
 
       if (pc !== start && (opcode === ops.OP_label || this.known[pc])) {
-        return this.target(<i64>pc - 1, <i64>pc, this.stack, this.scope);
+        return target(this, <i64>pc - 1, <i64>pc, this.stack, this.scope);
       }
 
       // A loop header's implicit interrupt check can throw too, with the
       // state the block is entered with.
       const flags = opcodeFlags[opcode];
       if (flags & FLAG_Throws || (pc === start && this.typed && this.loopHeader[pc])) {
-        if (!this.throwsAt(pc)) {
+        if (!throwsAt(this, pc)) {
           return false;
         }
       }
@@ -1077,7 +832,7 @@ export class BodyDecoder {
         const local = test >> 2;
         const kind = test & 3;
         const before = test >= 0 && kind === ORIGIN_IfTrue ? this.markChecked(local) : 0;
-        if (!this.target(<i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
+        if (!target(this, <i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
           return false;
         }
 
@@ -1090,14 +845,14 @@ export class BodyDecoder {
           }
         }
       } else if (opcode === ops.OP_lookupswitch) {
-        if (!this.target(<i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
+        if (!target(this, <i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
           return false;
         }
 
         const first = this.slotC[pc];
         const last = first + this.slotB[pc];
         for (let i = first; i <= last; i++) {
-          if (!this.target(<i64>pc, <i64>pc + code.cases[i], stack, scope)) {
+          if (!target(this, <i64>pc, <i64>pc + code.cases[i], stack, scope)) {
             return false;
           }
         }
