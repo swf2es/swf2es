@@ -12,6 +12,7 @@ pub const panic = std.debug.no_panic;
 comptime {
     _ = @import("bitmap.zig");
     _ = @import("draw.zig");
+    _ = @import("dxt.zig");
     _ = @import("tessellate.zig");
     _ = @import("strokes.zig");
 }

@@ -215,6 +215,7 @@ export async function shaderFixture(
   const scripting = new Scripting(codegen, { print: (line) => trace.push(line), audio: null });
   const owned: ReturnType<typeof create>[] = [];
   let targetSamples = 0;
+  let nativeDxtLevels = 0;
   const close = install(scripting, {
     create: () => {
       const entry = create();
@@ -230,6 +231,19 @@ export async function shaderFixture(
           if (texture) {
             targetSamples = Math.max(targetSamples, entry.gl.getParameter(entry.gl.SAMPLES));
           }
+        };
+      }
+      if (fixture === "AtfTextures") {
+        const setEncoder = entry.backend.setDxtEncoder.bind(entry.backend);
+        entry.backend.setDxtEncoder = (encode) => {
+          setEncoder((...args) => {
+            const result = encode(...args);
+            if (result) {
+              nativeDxtLevels++;
+            }
+
+            return result;
+          });
         };
       }
       owned.push(entry);
@@ -268,6 +282,9 @@ export async function shaderFixture(
     }
     if (fixture === "TargetMultisampling") {
       check(targetSamples > 0, "AS antialiasing requests did not reach texture targets");
+    }
+    if (fixture === "AtfTextures") {
+      check(nativeDxtLevels > 0, "AS compressed pixel uploads skipped the native DXT encoder");
     }
     return { trace };
   } finally {

@@ -35,7 +35,7 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
 /// The kernels', the fill flattener's, the band filler's and the blurs' tests, on the host.
 fn tests(b: *std.Build) void {
     const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's, the band filler's and the blurs' tests on the host");
-    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" } }) |unit| {
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" } }) |unit| {
         const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
     }
@@ -197,11 +197,11 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         "bucketalloc.c", "dict.c", "geom.c", "mesh.c", "priorityq.c", "sweep.c", "tess.c",
     };
     const exports = [_][]const u8{
-        "reset",       "alloc",         "run",          "vertices",        "indices",     "vertexCount",  "triangleCount",
-        "highWater",   "allocated",     "setLimit",     "layer",           "lineInput",   "lineHeader",   "lineBuild",
-        "resetArena",  "convolve",      "capacity",     "bandsOnly",       "blurFilter",  "layerFilter",  "channelPixels",
-        "mergePixels", "palettePixels", "matrixPixels", "transformPixels", "noisePixels", "perlinPixels",
-        "drawPixels",  "compositePixels",
+        "reset",           "alloc",         "run",          "vertices",        "indices",     "vertexCount",  "triangleCount",
+        "highWater",       "allocated",     "setLimit",     "layer",           "lineInput",   "lineHeader",   "lineBuild",
+        "resetArena",      "convolve",      "capacity",     "bandsOnly",       "blurFilter",  "layerFilter",  "channelPixels",
+        "mergePixels",     "palettePixels", "matrixPixels", "transformPixels", "noisePixels", "perlinPixels", "drawPixels",
+        "compositePixels", "encodeDxt",
     };
 
     const library = b.path(vendor ++ "libtess2");

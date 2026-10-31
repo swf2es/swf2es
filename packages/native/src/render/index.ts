@@ -1,7 +1,8 @@
 // The render module's wrappers, each over an instance of its own: fills
 // (Tessellator), a layer's lines (LineBuilder, also a Tessellator's
 // `tessellate.lines`) and BitmapData's CPU filters and pixel operations
-// (BitmapKernel), and BitmapData.draw of a bitmap (DrawKernel).
+// (BitmapKernel), BitmapData.draw of a bitmap (DrawKernel), and DXT1/DXT5
+// texture encoding (DxtEncoder).
 export {
   BitmapKernel,
   type BitmapKernelOptions,
@@ -22,6 +23,7 @@ export {
   DrawKernel,
   type DrawResult,
 } from "./draw-kernel.js";
+export { DxtEncoder } from "./dxt-encoder.js";
 export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "./lines.js";
 export {
   type FillGeometry,

@@ -2,6 +2,7 @@
 // the filters and the pixel operations compute by, in Wasm, and its draw
 // kernel (draw-kernel.ts), which draws a bitmap in the normal blend mode.
 import { BitmapKernel, DrawKernel } from "@swf2es/native/render";
+import { releaseDxtEncoder } from "./dxt.js";
 
 /**
  * The realm's kernel, made at the first filter or operation that needs it:
@@ -51,8 +52,12 @@ export function drawKernelUsed(): void {
 /** A player ended: the last one lets the draw kernel's instance go, and its memory with it. */
 export function drawKernelLetGo(): void {
   players = Math.max(0, players - 1);
-  if (players === 0 && draws) {
-    draws.release();
+  if (players === 0) {
+    if (draws) {
+      draws.release();
+    }
+
+    releaseDxtEncoder();
   }
 }
 

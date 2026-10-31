@@ -1,5 +1,5 @@
 import type { Texture3D } from "../backend.js";
-import { blockBytes, decodeDxt, encodeDxt } from "../dxt.js";
+import { blockBytes, type DxtEncoder, decodeDxt, encodeDxt } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 import { range } from "./state.js";
 import type { MultisampleTarget } from "./targets.js";
@@ -40,14 +40,12 @@ function uploadLevel(
   face: number,
   w: number,
   h: number,
+  encoder: DxtEncoder | null,
 ): void {
   if (texture.format !== "bgra") {
-    const blocks = encodeDxt(
-      state.bytes.subarray(0, w * h * 4),
-      texture.format === "compressedAlpha",
-      w,
-      h,
-    );
+    const rgba = state.bytes.subarray(0, w * h * 4);
+    const dxt5 = texture.format === "compressedAlpha";
+    const blocks = encoder?.(rgba, dxt5, w, h) ?? encodeDxt(rgba, dxt5, w, h);
     uploadCompressedLevel(gl, texture, state, blocks, level, face);
     return;
   }
@@ -79,6 +77,7 @@ export function uploadTexture(
   face: number,
   sourceWidth?: number,
   sourceHeight?: number,
+  encoder: DxtEncoder | null = null,
 ): void {
   const { width, height, levels, cube } = texture;
   const faces = cube ? 6 : 1;
@@ -129,7 +128,7 @@ export function uploadTexture(
     }
   }
 
-  uploadLevel(gl, texture, state, level, face, w, h);
+  uploadLevel(gl, texture, state, level, face, w, h, encoder);
 }
 
 export function uploadTextureBytes(
@@ -140,6 +139,7 @@ export function uploadTextureBytes(
   offset: number,
   level: number,
   face: number,
+  encoder: DxtEncoder | null = null,
 ): void {
   const { width, height, levels, cube } = texture;
   const faces = cube ? 6 : 1;
@@ -158,7 +158,7 @@ export function uploadTextureBytes(
     state.bytes[i + 3] = data[offset + i + 3];
   }
 
-  uploadLevel(gl, texture, state, level, face, w, h);
+  uploadLevel(gl, texture, state, level, face, w, h, encoder);
 }
 
 /**

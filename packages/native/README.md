@@ -5,7 +5,8 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 - `@swf2es/native/render`: what the renderer computes natively, each a
   wrapper over an instance of its own: double-precision libtess2 fill
   tessellation (`Tessellator`), a shape layer's lines built in one call
-  (`LineBuilder`), and BitmapData's filters and pixel operations (`BitmapKernel`).
+  (`LineBuilder`), BitmapData's filters and pixel operations (`BitmapKernel`),
+  and whole-level DXT1/DXT5 texture encoding (`DxtEncoder`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 - `@swf2es/native/atf`: Stage3D's ATF textures, read and decoded to what a
@@ -13,9 +14,8 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress`, `mp3` and `atf` each compile their own module. What the renderer
-computes is one module, `render` (`src/render/`, about 90 KB), compiled
-once; each user instantiates it apart (a `BitmapKernel`, a `Tessellator` and
-its `LineBuilder`), so each has its own memory and lifetime, and a large
+computes is one module, `render` (`src/render/`), compiled once; each user
+instantiates it apart, so each has its own memory and lifetime, and a large
 bitmap job never grows the tessellator's memory, nor does disposing one
 take the other down. Within an instance, every part allocates from one
 arena (`src/render/arena.zig`), which each call resets.
@@ -149,6 +149,30 @@ and checks ownership, rejection and traps; `native-blur.test.ts` holds
 pixel operations to theirs (`pixels-reference.ts`), bit for bit, onto
 their own bitmaps too and across bands, and a band that traps. The player's references
 (`apply-filter`, `convolution`) hold it to Flash's own pixels.
+
+## DXT encoding
+
+`DxtEncoder.encode(rgba, dxt5, width, height)` compresses a whole texture
+level in one call, into DXT1 or DXT5 blocks identical to
+`@swf2es/context3d`'s TypeScript encoder. It takes tightly packed top-down
+RGBA, repeats edge pixels for partial 4×4 blocks, and keeps the reference's
+double arithmetic and tie breaking. Four colour distances are compared
+together with integer SIMD. It returns `null` for invalid dimensions or
+input sizes, failed allocation, a refused module or a trap, so the caller
+can use the TypeScript path.
+
+Each encoder owns an instance. Input and output share one reserved block,
+grown only when a larger level needs it: one encoding crossing per level,
+plus an arena reset on allocation or growth. The result is a view of that
+memory, valid until the next call; upload or copy it before encoding again.
+`release()` drops the instance, and a level that grew it beyond 32 MiB
+causes it to be replaced before the next call. That budget keeps a 2048²
+DXT5 upload's workspace between calls. A trap also drops the instance.
+
+The host Zig tests cover flat blocks and edge repetition;
+`tests/unit/native-dxt.test.ts` compares blocks against the TypeScript
+reference on thousands of levels, checks that each was encoded in wasm,
+and exercises rejection, traps and release.
 
 ## compress
 

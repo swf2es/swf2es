@@ -32,6 +32,14 @@ const palette = new Int32Array(4);
 const texels = new Int32Array(16);
 const alphas = new Uint8Array(8);
 
+/** A whole RGBA level encoded to DXT blocks; null uses the TypeScript encoder. */
+export type DxtEncoder = (
+  rgba: Uint8Array,
+  dxt5: boolean,
+  width: number,
+  height: number,
+) => Uint8Array | null;
+
 /**
  * `blocks`, a level `width` by `height` of DXT1 (8 bytes a 4x4 block) or,
  * with `dxt5`, DXT5 (16), rows of blocks from the top, written to `out` as

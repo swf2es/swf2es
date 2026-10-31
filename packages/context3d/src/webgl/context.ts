@@ -21,7 +21,7 @@ import {
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
-import { blockBytes } from "../dxt.js";
+import { blockBytes, type DxtEncoder } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 
 import {
@@ -131,6 +131,12 @@ export class WebGLContext3D implements Context3D {
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
   private readonly limits: Readonly<WebGLContext3DLimits>;
+  private dxtEncoder: DxtEncoder | null = null;
+
+  /** The host's whole-level encoder; a refusal retains the TypeScript path. */
+  setDxtEncoder(encoder: DxtEncoder): void {
+    this.dxtEncoder = encoder;
+  }
 
   constructor(gl: WebGL2RenderingContext, limits: Partial<WebGLContext3DLimits> = {}) {
     this.limits = resourceLimits(limits);
@@ -875,12 +881,22 @@ export class WebGLContext3D implements Context3D {
       upload: (pixels, level = 0, face = 0, sourceWidth, sourceHeight) => {
         this.alive();
         this.textureState(texture);
-        uploadTexture(gl, texture, state, pixels, level, face, sourceWidth, sourceHeight);
+        uploadTexture(
+          gl,
+          texture,
+          state,
+          pixels,
+          level,
+          face,
+          sourceWidth,
+          sourceHeight,
+          this.dxtEncoder,
+        );
       },
       uploadBytes: (data, offset, level = 0, face = 0) => {
         this.alive();
         this.textureState(texture);
-        uploadTextureBytes(gl, texture, state, data, offset, level, face);
+        uploadTextureBytes(gl, texture, state, data, offset, level, face, this.dxtEncoder);
       },
       uploadCompressed: (blocks, level = 0, face = 0) => {
         this.alive();

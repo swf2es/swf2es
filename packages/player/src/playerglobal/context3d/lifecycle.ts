@@ -7,6 +7,7 @@ import {
   type Texture3D,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
+import { encodeDxt } from "../../bitmap/dxt.js";
 import { dispatchEvent } from "../../scripting/events.js";
 import type { Scripting } from "../../scripting.js";
 
@@ -331,6 +332,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       }
       // Older content reads a compressed texture with any sampler, as AIR lets it.
       backend.samplerFormats = s.rt.swfVersion >= 17;
+      backend.setDxtEncoder?.(encodeDxt);
       let object: AsObject;
       try {
         object = construct("Context3D");
