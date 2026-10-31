@@ -198,7 +198,8 @@ export interface Context3D {
   /**
    * Top-down raw RGBA channels of the back buffer's top-left width by height
    * (the whole of it by default), rows width * 4 bytes apart, without alpha
-   * conversion; valid until the next read.
+   * conversion; valid until the next read. Each size is at most the back
+   * buffer's: a larger one is clamped to it, a negative one to 0.
    */
   read(width?: number, height?: number): Uint8Array;
   present(): void;

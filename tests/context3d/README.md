@@ -276,29 +276,33 @@ switch preserves the previous face and attachments. Cleanup releases every GPU
 handle. Recovery creates fresh cube targets on each restored context and rejects
 retired targets; loss while a cube is active must not retain its resources.
 
-`Readback.as` compares 170 AIR trace lines for `drawToBitmapData` into
+`Readback.as` compares 183 AIR trace lines for `drawToBitmapData` into
 destinations of other sizes than the back buffer and into opaque ones.
 AIR copies the back buffer's top-left corner into the destination's, as much
 as both hold, and leaves the rest of the destination as it was: a smaller
 destination takes its part, a larger one keeps its pixels past the back
-buffer's edges. It raises alpha to the largest channel only in the
-destination's last rows, as many as the back buffer has: in a destination
-taller than it, the rows above keep the back buffer's raw alpha, colour
-channels above alpha included. An opaque destination stores the same pixels, alpha and all, as
-`BitmapStore.holdsAlpha` describes: getPixel32 and clone see the stored alpha,
-draw and copyPixels alpha 255 over the colour. A scissor rectangle does not
-limit the read, an antialiased back buffer reads as its resolved pixels, an
-unconfigured context leaves the destination alone, and after `present()` a
-read without a clear is #3692 at any size. The fixture includes Alternativa3D's
-mouse picking: a one-row opaque BitmapData, read between draws under a scissor.
+buffer's edges. It raises alpha to the largest channel only over the back
+buffer's height of rows counted from the destination's bottom, antialiased or
+not: in a destination taller than it, the rows above keep the back buffer's
+raw alpha, colour channels above alpha included. An opaque destination stores
+those pixels, alpha and all, as `BitmapStore.holdsAlpha` describes: getPixel32
+and clone see the stored alpha, draw and copyPixels alpha 255 over the colour.
+A scissor rectangle does not limit the read, an antialiased back buffer reads
+as its resolved pixels, and rendering to a texture the read still takes the
+back buffer. A null destination is TypeError #2007 before anything but a
+disposed context (#3694); an unconfigured context then returns, leaving a
+disposed BitmapData alone; then a read without a clear is #3692 at any size,
+and only then is a disposed BitmapData ArgumentError #2015. The fixture includes
+Alternativa3D's mouse picking: a one-row opaque BitmapData, read between draws
+under a scissor.
 
-One difference remains. In a transparent BitmapData, AIR reads a raw pixel
-whose channel is above its alpha (getPixel32, getPixel, getVector, getPixels)
-without clamping or masking the quotient, which spills into the channel above:
-green 255 over alpha 128 reads `8001fc00`. The player clamps it to 255 and reads
-`8000ff00`: its perlinNoise stores such pixels where Flash's does not, and reads as
-Flash's only through the clamp. The fixture reads
-such pixels through opaque destinations, which give them as stored.
+One difference remains. A transparent BitmapData's pixels stay premultiplied
+in the player, as GPU uploads, shaders and the native kernels expect, so in the
+raw rows above each colour channel is clamped to alpha. AIR keeps the channel,
+and its getPixel32 lets the quotient spill into the channel above: green 255
+over alpha 128 reads `8001fc00` in AIR and `8000ff00` here. The fixture reads
+such pixels through opaque destinations, which give them as stored, and a unit
+test (`readback.test.ts`) pins the player's clamped result.
 
 AIR 51's `drawToBitmapData` also takes `srcRect` and `destPoint`, which it
 honours from SWF 36 and ignores before. Flash Player's playerglobal, which the

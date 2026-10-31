@@ -6,6 +6,7 @@ package {
   import flash.display3D.IndexBuffer3D;
   import flash.display3D.Program3D;
   import flash.display3D.VertexBuffer3D;
+  import flash.display3D.textures.Texture;
   import flash.events.Event;
   import flash.geom.Point;
   import flash.geom.Rectangle;
@@ -37,6 +38,7 @@ package {
         context.setProgram(program);
         run();
         context.dispose(false);
+        destinations("disposed-context");
         vertices.dispose(); indices.dispose(); program.dispose();
         complete = true;
         trace("readback complete");
@@ -176,10 +178,49 @@ package {
       bitmap.dispose();
     }
 
+    private function attempt(label:String, destination:BitmapData):void {
+      try {
+        context.drawToBitmapData(destination);
+        trace("readback", label, "ok");
+      } catch (error:Error) {
+        trace("readback", label, error.name, error.errorID);
+      }
+    }
+
+    // A null destination, and a disposed one, which AIR checks after the clears.
+    private function destinations(label:String):void {
+      var disposed:BitmapData = new BitmapData(4, 4, true, 0);
+      disposed.dispose();
+      attempt(label + "-null", null);
+      attempt(label + "-disposed", disposed);
+    }
+
+    // A column with green above alpha down the back buffer's height, read into a destination
+    // 16 rows taller: the raw rows (alpha 40) and the raised ones (80), as letters.
+    private function column(label:String):void {
+      pattern();
+      context.setScissorRectangle(new Rectangle(8, 0, 4, 32));
+      context.setProgramConstantsFromVector("fragment", 0, Vector.<Number>([0.25, 0.5, 0, 0.25]));
+      context.drawTriangles(indices);
+      context.setScissorRectangle(null);
+      var bitmap:BitmapData = new BitmapData(16, 48, false, 0x123456);
+      context.drawToBitmapData(bitmap);
+      var line:String = "";
+      for (var y:int = 0; y < 32; y++) {
+        var alpha:uint = bitmap.getPixel32(9, y) >>> 24;
+        line += alpha == 0x40 ? "N" : alpha == 0x80 ? "R" : "?";
+      }
+      trace("readback column", label, line);
+      bitmap.dispose();
+    }
+
     private function run():void {
       read("unconfigured", 16, 8, true, 0xff123456).dispose();
+      destinations("unconfigured");
       context.configureBackBuffer(48, 32, 0, false);
+      destinations("uncleared");
       pattern();
+      destinations("cleared");
       read("same", 48, 32, true, 0xff123456).dispose();
       read("smaller", 16, 8, true, 0xff123456).dispose();
       read("wider", 64, 8, true, 0xff123456).dispose();
@@ -213,10 +254,20 @@ package {
       pattern();
       read("antialiased-smaller", 16, 8, false, 0x123456).dispose();
       read("antialiased-larger", 64, 40, false, 0x123456).dispose();
+      column("antialiased");
       context.configureBackBuffer(48, 32, 0, false);
+      column("plain");
+      // Rendering to a texture, the read still takes the back buffer.
+      var texture:Texture = context.createTexture(64, 64, "bgra", true);
+      context.setRenderToTexture(texture);
+      context.clear(1, 0, 0, 1);
+      column("texture-target");
+      context.setRenderToBackBuffer();
+      texture.dispose();
       values();
 
       context.present();
+      destinations("presented");
       read("presented-smaller", 16, 8, true, 0xff123456).dispose();
       read("presented-opaque", 16, 8, false, 0x123456).dispose();
       context.clear(0, 1, 0, 1);

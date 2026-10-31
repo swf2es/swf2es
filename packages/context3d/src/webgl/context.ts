@@ -1702,6 +1702,8 @@ export class WebGLContext3D implements Context3D {
   }
 
   read(width = this.width, height = this.height): Uint8Array {
+    width = Math.max(0, Math.min(this.width, Math.floor(width) || 0));
+    height = Math.max(0, Math.min(this.height, Math.floor(height) || 0));
     this.target(true);
     this.resolve();
     const gl = this.gl;
@@ -1710,10 +1712,7 @@ export class WebGLContext3D implements Context3D {
     const row = width * 4;
     for (let y = 0; y < height; y++) {
       const from = (height - y - 1) * row;
-      const to = y * row;
-      for (let x = 0; x < row; x++) {
-        this.topDown[to + x] = this.pixels[from + x];
-      }
+      this.topDown.set(this.pixels.subarray(from, from + row), y * row);
     }
 
     return this.topDown;

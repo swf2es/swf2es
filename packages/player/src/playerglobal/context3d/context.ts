@@ -25,6 +25,7 @@ import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
 import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
+import { writeReadback } from "./readback.js";
 
 /** The backend's format for a texture's; the packed and half-float ones are not yet. */
 function textureFormat(format: string): TextureFormat {
@@ -622,6 +623,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     drawToBitmapData(destination: AsObject): void {
       const entry = state(this as unknown as AsObject);
+      if (!destination) {
+        throw s.rt.error("TypeError", 2007, "destination");
+      }
+
+      // AIR reads nothing, and checks nothing more, before the back buffer is configured.
       const backend = entry.backend;
       if (backend.width === 0) {
         return;
@@ -633,28 +639,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       // as much as both hold, and leaves the rest of the destination alone.
       const width = Math.min(store.width, backend.width);
       const height = Math.min(store.height, backend.height);
-      const rgba = backend.read(width, height);
-      const pixels = store.pixels;
-      // AIR raises alpha to cover every channel, so the pixel is premultiplied,
-      // in the destination's last rows as many as the back buffer has: rows
-      // above those, in a destination taller than it, keep the raw alpha.
-      // Multiplying RGB here would darken textures twice.
-      const raw = store.height - backend.height;
-      let opaque = true;
-      for (let y = 0; y < height; y++) {
-        for (let x = 0, at = y * width * 4; x < width; x++, at += 4) {
-          const r = rgba[at];
-          const g = rgba[at + 1];
-          const b = rgba[at + 2];
-          const alpha = y < raw ? rgba[at + 3] : Math.max(r, g, b, rgba[at + 3]);
-          pixels[y * store.width + x] = (alpha << 24) | (r << 16) | (g << 8) | b;
-          opaque &&= alpha === 255;
-        }
-      }
-
-      // An opaque destination keeps that alpha, as erase leaves it in one.
-      store.holdsAlpha ||= !store.transparent && !opaque;
-      store.changed();
+      writeReadback(store, backend.read(width, height), width, height, backend.height);
     }
 
     present(): void {
