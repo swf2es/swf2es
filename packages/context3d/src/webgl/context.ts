@@ -1701,14 +1701,15 @@ export class WebGLContext3D implements Context3D {
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.resolveFramebuffer);
   }
 
-  read(): Uint8Array {
+  read(width = this.width, height = this.height): Uint8Array {
     this.target(true);
     this.resolve();
     const gl = this.gl;
-    gl.readPixels(0, 0, this.width, this.height, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
-    const row = this.width * 4;
-    for (let y = 0; y < this.height; y++) {
-      const from = (this.height - y - 1) * row;
+    // GL's rows run bottom-up, so the top-left region starts height rows below the top.
+    gl.readPixels(0, this.height - height, width, height, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) {
+      const from = (height - y - 1) * row;
       const to = y * row;
       for (let x = 0; x < row; x++) {
         this.topDown[to + x] = this.pixels[from + x];

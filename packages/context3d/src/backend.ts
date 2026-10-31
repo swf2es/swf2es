@@ -195,8 +195,12 @@ export interface Context3D {
   setVertex(index: number, buffer: Buffer3D | null, offset: number, format: VertexFormat): void;
   setConstants(stage: ProgramType, first: number, values: ArrayLike<number>, count: number): void;
   draw(indices: Buffer3D, first: number, triangles: number): void;
-  /** Top-down raw RGBA channels, without alpha conversion; valid until the next read. */
-  read(): Uint8Array;
+  /**
+   * Top-down raw RGBA channels of the back buffer's top-left width by height
+   * (the whole of it by default), rows width * 4 bytes apart, without alpha
+   * conversion; valid until the next read.
+   */
+  read(width?: number, height?: number): Uint8Array;
   present(): void;
   dispose(): void;
 }
