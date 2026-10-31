@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import {
+  acceptOf,
   FileReference,
   type FileServices,
+  filtersGreyOutFiles,
+  filtersTake,
   type SelectedFile,
 } from "../../../packages/player/dist/files.js";
 import type { FetchRequest } from "../../../packages/player/dist/hosts.js";
@@ -241,4 +244,53 @@ test("a complete listener can start another operation without receiving stale up
   assert.deepEqual(events, ["open", "progress", "complete"]);
   await h.frame();
   assert.equal(events.at(-1), "select");
+});
+
+test("FileReference's filters become an input's accept, but none where iOS would grey files out", () => {
+  const as = (userAgent: string, platform: string, maxTouchPoints = 0) => ({
+    userAgent,
+    platform,
+    maxTouchPoints,
+  });
+  const mac = as("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15", "MacIntel");
+  const iPhone = as(
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1",
+    "iPhone",
+    5,
+  );
+  const iPad = as("Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) Safari/604.1", "iPad", 5);
+  // iPadOS asks for desktop sites as a Mac; only its touch points tell it apart.
+  const iPadAsMac = as(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15",
+    "MacIntel",
+    5,
+  );
+  const android = as(
+    "Mozilla/5.0 (Linux; Android 15; Pixel 9) Chrome/141.0 Mobile",
+    "Linux armv8l",
+    5,
+  );
+  const filters = [
+    { description: "Data", extension: "*.dat;*.xml" },
+    { description: "Bad", extension: "*.*;not an extension" },
+  ];
+
+  assert.deepEqual([mac, iPhone, iPad, iPadAsMac, android, undefined].map(filtersGreyOutFiles), [
+    false,
+    true,
+    true,
+    true,
+    false,
+    false,
+  ]);
+  assert.equal(acceptOf(filters, mac), ".dat,.xml");
+  assert.equal(acceptOf(filters, android), ".dat,.xml");
+  assert.equal(acceptOf(filters, iPhone), "");
+  assert.equal(acceptOf(filters, iPadAsMac), "");
+
+  // Where there is no filter, picked files are held to the filters instead.
+  assert.ok(filtersTake(filters, "level.XML"));
+  assert.ok(!filtersTake(filters, "clip.mov"));
+  assert.ok(filtersTake([{ description: "All", extension: "*.*" }], "clip.mov"));
+  assert.ok(filtersTake([], "clip.mov"));
 });

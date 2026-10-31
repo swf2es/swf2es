@@ -5,6 +5,9 @@
  */
 import { defineElement } from "./element.js";
 
+// Whether a page's own file inputs should go without a type filter, which iOS's pickers grey
+// SWFs out for.
+export { filtersGreyOutFiles } from "@swf2es/player";
 export {
   type Configuration,
   configuration,
