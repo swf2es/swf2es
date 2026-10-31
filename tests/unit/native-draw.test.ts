@@ -3,12 +3,18 @@
 // a pixel at a time (player/bitmap/draw-reference.ts) on random bitmaps:
 // scaled, mirrored, turned and moved by whole pixels, smoothed or not,
 // through colour transforms, clipped, into transparent and opaque stores;
-// and a source drawn again after it changed, which the module holds a copy
-// of, drawn as it is now.
+// what it leaves to the JS (a disposed source, numbers too far out), a
+// trap, and the instance let go of when its players end or it goes idle.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { DrawKernel } from "@swf2es/native/render";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
-import { drawKernel } from "../../packages/player/dist/bitmap/kernel.js";
+import {
+  drawKernel,
+  drawKernelFrame,
+  drawKernelLetGo,
+  drawKernelUsed,
+} from "../../packages/player/dist/bitmap/kernel.js";
 import { drawBitmap } from "../../packages/player/dist/bitmap/ops.js";
 import {
   type Affine,
@@ -92,7 +98,10 @@ function transform(r: () => number): ColorTransformValues | null {
 }
 
 test("the kernel draws what a draw a pixel at a time draws, every pixel", () => {
-  assert.ok(drawKernel(), "the realm has the module");
+  const kernel = drawKernel();
+  assert.ok(kernel, "the realm has the module");
+  const before = kernel.drawn;
+  let skipped = 0;
   const r = random(17);
   for (let i = 0; i < 600; i++) {
     const source = store(r, 2 + Math.floor(r() * 20), 2 + Math.floor(r() * 20), r() < 0.8);
@@ -103,11 +112,132 @@ test("the kernel draws what a draw a pixel at a time draws, every pixel", () => 
     const clip =
       r() < 0.3 ? { x: Math.floor(r() * 10), y: Math.floor(r() * 10), width: 12, height: 9 } : null;
     const smooth = r() < 0.4;
+    const drawn = kernel.drawn;
+    const version = into.version;
     drawBitmap(into, source, m, ct, "normal", clip, smooth);
     referenceDraw(expected, source, m, ct, "normal", clip, smooth);
     const what = `draw ${i}: ${JSON.stringify({ m, ct, clip, smooth })}`;
     assert.deepEqual(into.pixels, expected.pixels, what);
+    // Drawn by the kernel, not the JS, but where the draw reaches no pixel of the destination.
+    if (kernel.drawn === drawn) {
+      skipped++;
+      assert.equal(into.version, version, `${what} left to the JS`);
+    }
   }
+
+  assert.ok(kernel.drawn - before > 400 && skipped + kernel.drawn - before === 600);
+});
+
+test("a store drawn into, then drawn, is drawn as the draw left it", () => {
+  const kernel = drawKernel() as DrawKernel;
+  const r = random(5);
+  const source = store(r, 9, 7, true);
+  const middle = store(r, 20, 20, true);
+  const into = store(r, 30, 30, false);
+  const expectedMiddle = copy(middle);
+  const expectedInto = copy(into);
+  const before = kernel.drawn;
+  const m = { a: 1.5, b: 0, c: 0, d: -1.25, tx: 2.5, ty: 15 };
+  drawBitmap(middle, source, m, null, "normal", null, true);
+  referenceDraw(expectedMiddle, source, m, null, "normal", null, true);
+  const turned = { a: 0.8, b: 0.6, c: -0.6, d: 0.8, tx: 10, ty: 2 };
+  drawBitmap(into, middle, turned, null, "normal", null, false);
+  referenceDraw(expectedInto, expectedMiddle, turned, null, "normal", null, false);
+  assert.deepEqual(into.pixels, expectedInto.pixels);
+  assert.equal(kernel.drawn - before, 2);
+});
+
+test("a disposed source and a matrix reaching too far are left to the JS, as it draws them", () => {
+  const kernel = drawKernel() as DrawKernel;
+  const r = random(9);
+  const source = store(r, 6, 6, true);
+  source.dispose();
+  const into = store(r, 16, 16, true);
+  const before = kernel.drawn;
+  drawBitmap(into, source, { a: 2, b: 0, c: 0, d: 2, tx: 1, ty: 1 }, null, "normal", null, false);
+  assert.equal(kernel.drawn, before, "its pixels are not as many as its size says");
+
+  // A scale so small that the source's points are past any number: the JS's path draws it.
+  const live = store(r, 6, 6, true);
+  for (const smooth of [false, true]) {
+    const target = store(r, 16, 16, true);
+    const expected = copy(target);
+    const m = { a: 1, b: 0, c: 0, d: 1e-308, tx: 1, ty: 3 };
+    drawBitmap(target, live, m, null, "normal", null, smooth);
+    referenceDraw(expected, live, m, null, "normal", null, smooth);
+    assert.deepEqual(target.pixels, expected.pixels);
+  }
+
+  assert.equal(kernel.drawn, before);
+});
+
+test("a draw that throws in the kernel is refused, and the next is drawn by a new instance", () => {
+  const kernel = drawKernel() as DrawKernel;
+  const job = DrawKernel.job();
+  Object.assign(job, { sourceWidth: 2, sourceHeight: 1, sourceRows: 1, width: 1, height: 1 });
+  job.source = new Uint32Array(2);
+  job.into = {
+    subarray() {
+      throw new Error("a trap");
+    },
+  } as unknown as Uint32Array;
+  assert.equal(kernel.draw(job), "refused");
+  assert.equal(kernel.held, false);
+
+  const r = random(11);
+  const into = store(r, 10, 10, true);
+  const expected = copy(into);
+  const source = store(r, 4, 4, true);
+  const before = kernel.drawn;
+  drawBitmap(into, source, { a: 1, b: 0, c: 0, d: 1, tx: 2, ty: 2 }, null, "normal", null, false);
+  referenceDraw(
+    expected,
+    source,
+    { a: 1, b: 0, c: 0, d: 1, tx: 2, ty: 2 },
+    null,
+    "normal",
+    null,
+    false,
+  );
+  assert.deepEqual(into.pixels, expected.pixels);
+  assert.equal(kernel.drawn, before + 1);
+  assert.equal(kernel.held, true);
+});
+
+test("the kernel lets its instance go when its last player ends, or after idle frames", () => {
+  const kernel = drawKernel() as DrawKernel;
+  const r = random(13);
+  const draw = () =>
+    drawBitmap(
+      store(r, 8, 8, true),
+      store(r, 3, 3, true),
+      { a: 2, b: 0, c: 0, d: 2, tx: 0, ty: 0 },
+      null,
+      "normal",
+      null,
+      false,
+    );
+
+  drawKernelUsed();
+  drawKernelUsed();
+  draw();
+  assert.equal(kernel.held, true);
+  drawKernelLetGo();
+  assert.equal(kernel.held, true, "a player still plays");
+  drawKernelLetGo();
+  assert.equal(kernel.held, false);
+
+  draw();
+  for (let i = 0; i < 100; i++) {
+    drawKernelFrame();
+  }
+
+  assert.equal(kernel.held, true, "not idle long enough");
+  for (let i = 0; i < 30; i++) {
+    drawKernelFrame();
+  }
+
+  assert.equal(kernel.held, false);
 });
 
 test("a source drawn again after it changed is drawn as it is now", () => {

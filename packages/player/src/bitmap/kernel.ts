@@ -35,3 +35,38 @@ export function drawKernel(): DrawKernel | null {
 
   return draws || null;
 }
+
+/** How many frames the draw kernel keeps its instance without drawing. */
+const DRAW_IDLE_FRAMES = 120;
+
+/** The players that may draw with the draw kernel, and the frames since it last drew. */
+let players = 0;
+let idleFrames = 0;
+
+/** A player began, which may draw with the draw kernel. */
+export function drawKernelUsed(): void {
+  players++;
+}
+
+/** A player ended: the last one lets the draw kernel's instance go, and its memory with it. */
+export function drawKernelLetGo(): void {
+  players = Math.max(0, players - 1);
+  if (players === 0 && draws) {
+    draws.release();
+  }
+}
+
+/** A player's frame played: the draw kernel, idle for DRAW_IDLE_FRAMES of them, lets its instance go. */
+export function drawKernelFrame(): void {
+  const kernel = draws || null;
+  if (!kernel?.held) {
+    idleFrames = 0;
+    return;
+  }
+
+  idleFrames = kernel.idle() ? idleFrames + 1 : 0;
+  if (idleFrames > DRAW_IDLE_FRAMES) {
+    kernel.release();
+    idleFrames = 0;
+  }
+}

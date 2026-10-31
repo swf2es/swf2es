@@ -14,11 +14,13 @@ export {
   type PixelRegion,
 } from "./bitmap-kernel.js";
 export {
-  type DrawArea,
+  DRAW_OPAQUE,
+  DRAW_SKIP_ZERO_ALPHA,
+  DRAW_SMOOTH,
+  DRAW_TRANSFORM,
+  type DrawJob,
   DrawKernel,
   type DrawResult,
-  type DrawSource,
-  type DrawValues,
 } from "./draw-kernel.js";
 export { LineBuilder, type LineBuilderOptions, type LineGeometry } from "./lines.js";
 export {

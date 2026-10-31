@@ -3,16 +3,22 @@
 //! matrix (each pixel the source's under its centre, nearest or bilinear,
 //! through the colour transform, scaled by how many of its 4 x 4 samples
 //! the source covers, then source over the destination), and composite's,
-//! unscaled at a whole pixel. Each takes the whole draw in one call: the
-//! source's pixels, which draw-kernel.ts keeps in the module while they
-//! last, and the destination's area, copied in and back out. A pixel reads
-//! only the source and its own destination pixel, so each is done in one
-//! pass, which is what the row passes of ops.ts leave.
+//! unscaled at a whole pixel. Each takes the whole draw in one call, over
+//! what draw-kernel.ts copies into the input (bitmap.zig's resetArena)
+//! for it: the rows of the source the draw reads, and the destination's
+//! area, which it copies back out. A pixel reads only the source and its
+//! own destination pixel, so each is done in one pass, which is what the
+//! row passes of ops.ts leave.
 const std = @import("std");
 const builtin = @import("builtin");
 const color = @import("color.zig");
 
-const page = 65536;
+/// The input the params and blocks must lie in; the host's tests, which take none from memory, have none.
+const input = if (builtin.target.cpu.arch.isWasm()) @import("bitmap.zig") else struct {
+    pub fn holds(_: usize, _: usize, _: usize) bool {
+        return true;
+    }
+};
 
 pub const SMOOTH: u32 = 1;
 pub const TRANSFORM: u32 = 2;
@@ -34,7 +40,8 @@ pub const DrawParams = extern struct {
     /// The prepared colour transform: multipliers in 256ths and offsets, red, green, blue, alpha.
     muls: [4]f64,
     adds: [4]f64,
-    /// The source's pixels, `src_w` by `src_h`.
+    /// The source, `src_w` by `src_h`, of which `src` holds the rows from
+    /// `src_top`, `src_rows` of them: every row the draw reads.
     src: u32,
     src_w: u32,
     src_h: u32,
@@ -48,7 +55,8 @@ pub const DrawParams = extern struct {
     /// composite's move of the source, whole pixels.
     tx: i32,
     ty: i32,
-    unused: u32,
+    src_top: u32,
+    src_rows: u32,
 };
 
 /// What a draw did: refused its params, wrote nothing, or wrote its block.
@@ -56,23 +64,25 @@ pub const INVALID: usize = 0;
 pub const UNTOUCHED: usize = 1;
 pub const WRITTEN: usize = 2;
 
-/// Whether [at, at + bytes) lies in the memory, aligned.
-fn within(at: u64, bytes: u64, alignment: u64) bool {
-    // The host's tests take no params from memory.
-    if (comptime !builtin.target.cpu.arch.isWasm()) return at % alignment == 0;
-    const size = @as(u64, @wasmMemorySize(0)) * page;
-    return at % alignment == 0 and at <= size and bytes <= size - at;
+/// The params at `address`, copied, and checked: null where they or the blocks they name lie past the input.
+fn paramsAt(address: usize) ?DrawParams {
+    if (!input.holds(address, @sizeOf(DrawParams), @alignOf(DrawParams))) return null;
+    const p = @as(*const DrawParams, @ptrFromInt(address)).*;
+    if (p.flags & ~FLAGS != 0) return null;
+    if (p.w == 0 or p.h == 0 or p.src_w == 0 or p.src_h == 0 or p.src_rows == 0) return null;
+    if (p.src_top >= p.src_h or p.src_rows > p.src_h - p.src_top) return null;
+    const src_bytes = @as(u64, p.src_w) * p.src_rows * 4;
+    const dst_bytes = @as(u64, p.w) * p.h * 4;
+    if (src_bytes > std.math.maxInt(u32) or dst_bytes > std.math.maxInt(u32)) return null;
+    if (!input.holds(p.src, @intCast(src_bytes), 4) or !input.holds(p.dst, @intCast(dst_bytes), 4)) return null;
+    return p;
 }
 
-/// The params at `address`, copied, and checked: null where they name memory past the module's.
-fn paramsAt(address: usize) ?DrawParams {
-    if (!within(address, @sizeOf(DrawParams), @alignOf(DrawParams))) return null;
-    const p = @as(*const DrawParams, @ptrFromInt(address)).*;
-    if (p.flags & ~FLAGS != 0 or p.unused != 0) return null;
-    if (p.w == 0 or p.h == 0 or p.src_w == 0 or p.src_h == 0) return null;
-    if (!within(p.src, @as(u64, p.src_w) * p.src_h * 4, 4)) return null;
-    if (!within(p.dst, @as(u64, p.w) * p.h * 4, 4)) return null;
-    return p;
+/// A source row's place among the rows copied in: `row` itself, which the
+/// copy always holds, and kept within them whatever it is.
+fn local(q: *const DrawParams, row: usize) usize {
+    const last = q.src_top + q.src_rows - 1;
+    return @min(@max(row, q.src_top), last) - q.src_top;
 }
 
 /// The larger of two numbers by comparison, which Wasm's f64.max, a call
@@ -135,24 +145,25 @@ fn put(p: u32, d: u32, opaque_bits: u32) u32 {
     return if (p >> 24 == 255) p else over(p, d) | opaque_bits;
 }
 
-fn nearest(from: []const u32, w: u32, h: u32, x: f64, y: f64) u32 {
-    const px: u32 = @intFromFloat(minf(@as(f64, @floatFromInt(w - 1)), maxf(0.0, @floor(x))));
-    const py: u32 = @intFromFloat(minf(@as(f64, @floatFromInt(h - 1)), maxf(0.0, @floor(y))));
-    return from[@as(usize, py) * w + px];
+fn nearest(q: *const DrawParams, from: []const u32, x: f64, y: f64) u32 {
+    const px: u32 = @intFromFloat(minf(@as(f64, @floatFromInt(q.src_w - 1)), maxf(0.0, @floor(x))));
+    const py: u32 = @intFromFloat(minf(@as(f64, @floatFromInt(q.src_h - 1)), maxf(0.0, @floor(y))));
+    return from[local(q, py) * q.src_w + px];
 }
 
 /// Bilinear between the four premultiplied pixels round (x, y), clamped to the edges, as ops.ts's.
-fn bilinear(from: []const u32, w: u32, h: u32, x: f64, y: f64) u32 {
+fn bilinear(q: *const DrawParams, from: []const u32, x: f64, y: f64) u32 {
+    const w = q.src_w;
     const x0 = @floor(x);
     const y0 = @floor(y);
     const fx = x - x0;
     const fy = y - y0;
     const last_x: f64 = @floatFromInt(w - 1);
-    const last_y: f64 = @floatFromInt(h - 1);
+    const last_y: f64 = @floatFromInt(q.src_h - 1);
     const left: usize = @intFromFloat(minf(last_x, maxf(0.0, x0)));
     const right: usize = @intFromFloat(minf(last_x, maxf(0.0, x0 + 1)));
-    const top: usize = @as(usize, @intFromFloat(minf(last_y, maxf(0.0, y0)))) * w;
-    const bottom: usize = @as(usize, @intFromFloat(minf(last_y, maxf(0.0, y0 + 1)))) * w;
+    const top = local(q, @intFromFloat(minf(last_y, maxf(0.0, y0)))) * w;
+    const bottom = local(q, @intFromFloat(minf(last_y, maxf(0.0, y0 + 1)))) * w;
     const p00 = from[top + left];
     const p10 = from[top + right];
     const p01 = from[bottom + left];
@@ -228,7 +239,7 @@ const Transformer = struct {
     last_out: u32 = 0,
     have_last: bool = false,
 
-    fn of(t: *Transformer, p: u32) u32 {
+    inline fn of(t: *Transformer, p: u32) u32 {
         if (t.have_last and p == t.last) return t.last_out;
         t.have_last = true;
         t.last = p;
@@ -298,9 +309,10 @@ fn fillAxis(axis: *Axis, count: usize, start: f64, a: f64, other: f64, t: f64, s
 }
 
 /// bilinear's channels, from an unturned draw's axes.
-fn blend4(from: []const u32, w: usize, cx: usize, ry: usize) u32 {
-    const top = rows.low[ry] * w;
-    const bottom = rows.high[ry] * w;
+fn blend4(q: *const DrawParams, from: []const u32, cx: usize, ry: usize) u32 {
+    const w = q.src_w;
+    const top = local(q, rows.low[ry]) * w;
+    const bottom = local(q, rows.high[ry]) * w;
     const left = columns.low[cx];
     const right = columns.high[cx];
     const p00 = from[top + left];
@@ -332,7 +344,7 @@ fn blend4(from: []const u32, w: usize, cx: usize, ry: usize) u32 {
 /// zero, give the same numbers, but for the sign of a zero, which no
 /// comparison, floor or clamp tells apart.
 fn drawAligned(q: *const DrawParams) usize {
-    const from = @as([*]const u32, @ptrFromInt(q.src))[0 .. @as(usize, q.src_w) * q.src_h];
+    const from = @as([*]const u32, @ptrFromInt(q.src))[0 .. @as(usize, q.src_w) * q.src_rows];
     const into = @as([*]u32, @ptrFromInt(q.dst))[0 .. @as(usize, q.w) * q.h];
     const sw: f64 = @floatFromInt(q.src_w);
     const sh: f64 = @floatFromInt(q.src_h);
@@ -361,7 +373,7 @@ fn drawAligned(q: *const DrawParams) usize {
         if (inside_y == 0 and k_to == 0) continue;
 
         const row = into[r * q.w ..][0..q.w];
-        const base = if (smooth) 0 else @as(usize, rows.near[r]) * q.src_w;
+        const base = if (smooth) 0 else local(q, rows.near[r]) * q.src_w;
         var buffer: [chunk]u32 = undefined;
         var skip: [chunk]u32 = undefined;
         var at: usize = 0;
@@ -373,7 +385,7 @@ fn drawAligned(q: *const DrawParams) usize {
                 kept.* = @intFromBool(hit == 0);
                 if (hit == 0) continue;
 
-                var p = if (smooth) blend4(from, q.src_w, k, r) else from[base + columns.near[k]];
+                var p = if (smooth) blend4(q, from, k, r) else from[base + columns.near[k]];
                 if (transform) p = transformer.of(p);
                 if (hit < 16) p = scaleBy(p, @as(f64, @floatFromInt(hit)) / 16);
                 b.* = p;
@@ -392,7 +404,7 @@ fn drawAligned(q: *const DrawParams) usize {
 /// drawBitmap's general path over the area, in normal mode.
 pub fn draw(q: *const DrawParams) usize {
     if (q.ib == 0 and q.ic == 0 and q.w <= max_side and q.h <= max_side) return drawAligned(q);
-    const from = @as([*]const u32, @ptrFromInt(q.src))[0 .. @as(usize, q.src_w) * q.src_h];
+    const from = @as([*]const u32, @ptrFromInt(q.src))[0 .. @as(usize, q.src_w) * q.src_rows];
     const into = @as([*]u32, @ptrFromInt(q.dst))[0 .. @as(usize, q.w) * q.h];
     const sw: f64 = @floatFromInt(q.src_w);
     const sh: f64 = @floatFromInt(q.src_h);
@@ -421,7 +433,7 @@ pub fn draw(q: *const DrawParams) usize {
             const hit: u32 = if (x < full_from or x >= full_to) coverage(q, x, y, sw, sh) else 16;
             if (hit == 0) continue;
 
-            var p = if (smooth) bilinear(from, q.src_w, q.src_h, sx - 0.5, sy - 0.5) else nearest(from, q.src_w, q.src_h, sx, sy);
+            var p = if (smooth) bilinear(q, from, sx - 0.5, sy - 0.5) else nearest(q, from, sx, sy);
             if (transform) p = transformer.of(p);
 
             if (hit < 16) p = scaleBy(p, @as(f64, @floatFromInt(hit)) / 16);
@@ -438,7 +450,7 @@ pub fn composite(q: *const DrawParams) usize {
     // The area within the source moved, as drawBitmap makes it.
     const left = @as(i64, q.x) - q.tx;
     const top = @as(i64, q.y) - q.ty;
-    if (left < 0 or top < 0 or left + q.w > q.src_w or top + q.h > q.src_h) return INVALID;
+    if (left < 0 or top < q.src_top or left + q.w > q.src_w or top + q.h > q.src_top + q.src_rows) return INVALID;
     const opaque_bits: u32 = if (q.flags & OPAQUE != 0) 0xff000000 else 0;
     const transform = q.flags & TRANSFORM != 0;
     const from: [*]const u32 = @ptrFromInt(q.src);
@@ -446,7 +458,7 @@ pub fn composite(q: *const DrawParams) usize {
     var wrote = false;
     var transformer: Transformer = .{ .q = q };
     for (0..q.h) |r| {
-        const src = from[(@as(usize, @intCast(top)) + r) * q.src_w + @as(usize, @intCast(left)) ..][0..q.w];
+        const src = from[(@as(usize, @intCast(top)) - q.src_top + r) * q.src_w + @as(usize, @intCast(left)) ..][0..q.w];
         const dst = into[r * q.w ..][0..q.w];
         if (!transform) {
             wrote = overRow(dst, src, opaque_bits) or wrote;

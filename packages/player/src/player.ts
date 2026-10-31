@@ -8,6 +8,7 @@ import type { Avm1 } from "./avm1/avm1.js";
 import { Avm1Keyboard } from "./avm1/keyboard.js";
 import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
+import { drawKernelFrame, drawKernelLetGo, drawKernelUsed } from "./bitmap/kernel.js";
 import {
   BUTTON,
   type ButtonObject,
@@ -133,6 +134,7 @@ export class Player {
     setStageSize(this.stage, this.width, this.height);
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
+    drawKernelUsed();
     const keyboard = scripting ? new KeyboardInput(this.stage, scripting) : null;
     // An AVM1 SWF's keys go to Key, its buttons and its clips.
     this.keyboard = keyboard ?? (avm1 && !scripting ? new Avm1Keyboard(avm1) : null);
@@ -272,6 +274,10 @@ export class Player {
    * host's to let go.
    */
   destroy(): void {
+    if (!this.stopped) {
+      drawKernelLetGo();
+    }
+
     this.stopped = true;
     this.scripting?.destroy();
     this.avm1?.destroy();
@@ -399,6 +405,8 @@ export class Player {
     if (this.stopped) {
       return 0;
     }
+
+    drawKernelFrame();
 
     // The pointer's and the touches' last moves, so the frame's scripts see where they are now.
     this.pointer?.flush();

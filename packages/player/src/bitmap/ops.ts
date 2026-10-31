@@ -2,7 +2,14 @@
 // (bitmap.ts): each on unmultiplied ARGB as Flash's results show it works,
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
-import type { CopyOp } from "@swf2es/native/render";
+import {
+  type CopyOp,
+  DRAW_OPAQUE,
+  DRAW_SKIP_ZERO_ALPHA,
+  DRAW_SMOOTH,
+  DRAW_TRANSFORM,
+  DrawKernel,
+} from "@swf2es/native/render";
 import { BitmapStore, over, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
 import { bitmapKernel, drawKernel } from "./kernel.js";
 import { perlinSetup } from "./turbulence.js";
@@ -774,33 +781,17 @@ export function drawBitmap(
   }
 
   const transform = ct ? prepareColorTransform(ct) : null;
-  if (
-    code === NORMAL &&
-    source !== store &&
-    drawnNatively(store, source, m, det, area, transform, smooth)
-  ) {
-    return;
-  }
-
   // Unscaled at a whole pixel, as every snapshot of a display object is
   // composited: each covered pixel is covered whole and is the source's
   // own, so it is copied straight, as the general path below would.
-  if (
+  const moved =
     m.a === 1 &&
     m.b === 0 &&
     m.c === 0 &&
     m.d === 1 &&
     Number.isInteger(m.tx) &&
     Number.isInteger(m.ty) &&
-    source !== store
-  ) {
-    if (composite(store, source, area, m.tx, m.ty, transform, code, keepClear)) {
-      store.changed();
-    }
-
-    return;
-  }
-
+    source !== store;
   // The inverse: from a destination point to the source's.
   const ia = m.d / det;
   const ib = -m.b / det;
@@ -808,6 +799,27 @@ export function drawBitmap(
   const id = m.a / det;
   const itx = -(ia * m.tx + ic * m.ty);
   const ity = -(ib * m.tx + id * m.ty);
+  if (code === NORMAL && source !== store) {
+    const inverse = job.inverse;
+    inverse[0] = ia;
+    inverse[1] = ib;
+    inverse[2] = ic;
+    inverse[3] = id;
+    inverse[4] = itx;
+    inverse[5] = ity;
+    if (drawnNatively(store, source, m, moved, area, transform, smooth)) {
+      return;
+    }
+  }
+
+  if (moved) {
+    if (composite(store, source, area, m.tx, m.ty, transform, code, keepClear)) {
+      store.changed();
+    }
+
+    return;
+  }
+
   // How many of the pixel's 4 x 4 samples fall inside the source.
   const coverage = (x: number, y: number) => {
     let hits = 0;
@@ -942,17 +954,24 @@ export function drawBitmap(
   }
 }
 
+/** The draw kernel's job, filled for each draw: drawBitmap allocates nothing for it. */
+const job = DrawKernel.job();
+
+/** How far a source point may lie for the draw kernel, whose numbers are then exact as drawBitmap's. */
+const REACH = 2 ** 30;
+
 /**
  * A draw in the normal blend mode of another store, by the draw kernel
- * (draw.zig), whose pixels are those of the paths below, to the bit:
- * whether it drew it, which it does not for numbers it cannot take as
- * they are, nor where the realm has no kernel.
+ * (draw.zig), whose pixels are those of the paths below, to the bit, the
+ * matrix's inverse in `job.inverse` already: whether it drew it, which it
+ * does not for numbers it cannot take as they are, nor where the realm has
+ * no kernel.
  */
 function drawnNatively(
   store: BitmapStore,
   source: BitmapStore,
   m: Affine,
-  det: number,
+  moved: boolean,
   area: PixelRect,
   ct: PreparedColorTransform | null,
   smooth: boolean,
@@ -963,59 +982,99 @@ function drawnNatively(
     return false;
   }
 
-  // Unscaled at a whole pixel, composite's, which takes the move as ints.
-  const moved =
-    m.a === 1 &&
-    m.b === 0 &&
-    m.c === 0 &&
-    m.d === 1 &&
-    Number.isInteger(m.tx) &&
-    Number.isInteger(m.ty);
-  if (moved && (Math.abs(m.tx) >= 2 ** 31 || Math.abs(m.ty) >= 2 ** 31)) {
-    return false;
+  // The source rows the draw reads: the area's, moved; else those its corners reach, and one
+  // more each way for smoothing and rounding. A point far out, or not finite, is drawn below.
+  const inverse = job.inverse;
+  let top: number;
+  let bottom: number;
+  if (moved) {
+    if (Math.abs(m.tx) >= 2 ** 31 || Math.abs(m.ty) >= 2 ** 31) {
+      return false;
+    }
+
+    top = area.y - m.ty;
+    bottom = top + area.height;
+  } else {
+    const x0 = area.x;
+    const x1 = area.x + area.width;
+    const y0 = area.y;
+    const y1 = area.y + area.height;
+    const ia = inverse[0];
+    const ib = inverse[1];
+    const ic = inverse[2];
+    const id = inverse[3];
+    const itx = inverse[4];
+    const ity = inverse[5];
+    const ya = ib * x0 + id * y0 + ity;
+    const yb = ib * x1 + id * y0 + ity;
+    const yc = ib * x0 + id * y1 + ity;
+    const yd = ib * x1 + id * y1 + ity;
+    const xa = ia * x0 + ic * y0 + itx;
+    const xb = ia * x1 + ic * y0 + itx;
+    const xc = ia * x0 + ic * y1 + itx;
+    const xd = ia * x1 + ic * y1 + itx;
+    const low = Math.min(ya, yb, yc, yd);
+    const high = Math.max(ya, yb, yc, yd);
+    const far = Math.max(Math.abs(xa), Math.abs(xb), Math.abs(xc), Math.abs(xd));
+    if (!(Math.abs(low) < REACH && Math.abs(high) < REACH && far < REACH)) {
+      return false;
+    }
+
+    top = Math.max(0, Math.min(source.height - 1, Math.floor(low) - 1));
+    bottom = Math.max(top + 1, Math.min(source.height, Math.ceil(high) + 1));
   }
 
-  // The inverse as drawBitmap's path takes it, every number of it finite, as the transform's.
-  const ia = m.d / det;
-  const ib = -m.b / det;
-  const ic = -m.c / det;
-  const id = m.a / det;
-  const inverse = [ia, ib, ic, id, -(ia * m.tx + ic * m.ty), -(ib * m.tx + id * m.ty)];
-  const transform = ct
-    ? [ct.rMul, ct.gMul, ct.bMul, ct.aMul, ct.rAdd, ct.gAdd, ct.bAdd, ct.aAdd]
-    : null;
-  if (!inverse.every(Number.isFinite) || (transform && !transform.every(Number.isFinite))) {
-    return false;
+  if (ct) {
+    const t = job.transform;
+    t[0] = ct.rMul;
+    t[1] = ct.gMul;
+    t[2] = ct.bMul;
+    t[3] = ct.aMul;
+    t[4] = ct.rAdd;
+    t[5] = ct.gAdd;
+    t[6] = ct.bAdd;
+    t[7] = ct.aAdd;
+    if (!t.every(Number.isFinite)) {
+      return false;
+    }
   }
 
-  const pixels = source.drawable;
-  const result = kernel.draw(
-    { key: source, version: source.version, width: source.width, height: source.height, pixels },
-    store.readable,
-    store.width,
-    area,
-    {
-      inverse,
-      tx: moved ? m.tx : 0,
-      ty: moved ? m.ty : 0,
-      transform,
-      smooth,
-      opaque: !store.transparent,
-      skipZeroAlpha: ct?.skipZeroAlpha ?? false,
-    },
-    moved,
-  );
+  job.source = source.drawable;
+  job.sourceWidth = source.width;
+  job.sourceHeight = source.height;
+  job.sourceTop = top;
+  job.sourceRows = bottom - top;
+  job.into = store.readable;
+  job.intoWidth = store.width;
+  job.x = area.x;
+  job.y = area.y;
+  job.width = area.width;
+  job.height = area.height;
+  job.moved = moved;
+  job.tx = moved ? m.tx : 0;
+  job.ty = moved ? m.ty : 0;
+  job.flags =
+    (smooth ? DRAW_SMOOTH : 0) |
+    (ct ? DRAW_TRANSFORM : 0) |
+    (store.transparent ? 0 : DRAW_OPAQUE) |
+    (ct?.skipZeroAlpha ? DRAW_SKIP_ZERO_ALPHA : 0);
+  const result = kernel.draw(job);
+  // The job holds no store's pixels past the draw.
+  job.source = EMPTY;
+  job.into = EMPTY;
   if (result === "refused") {
     return false;
   }
 
   if (result === "written") {
-    kernel.writeBack(store.pixels, store.width, area);
+    kernel.writeBack(job, store.pixels);
     store.changed();
   }
 
   return true;
 }
+
+const EMPTY = new Uint32Array(0);
 
 /** drawBitmap's buffers for a row. */
 interface RowScratch {
