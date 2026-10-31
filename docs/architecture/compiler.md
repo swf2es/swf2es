@@ -77,8 +77,10 @@ Each method goes through the same steps, in `codegen`:
 1. **Decode** (`abc/code.ts`): the reachable instructions, as the avmplus
    verifier reads them.
 2. **Verify and build the IR**, as avmplus' `Verifier` does its checks,
-   with its VerifyError numbers (`abc/code.ts`, and for finding, getting,
-   setting and calling properties `abc/properties.ts`). A first pass keeps a frame state per block
+   with its VerifyError numbers (`abc/code.ts`; each instruction's checks
+   `abc/verify.ts`, its types `abc/typing.ts`, and for finding, getting,
+   setting and calling properties `abc/properties.ts`; branch and handler
+   targets and their entry states `abc/targets.ts`). A first pass keeps a frame state per block
    (the locals, scope stack and operand stack, each value with its type,
    whether it is known not null, and whether it is a with scope), merges it
    where control flow joins, and walks a block again when its entry state
