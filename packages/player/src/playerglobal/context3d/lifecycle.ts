@@ -40,8 +40,9 @@ export interface ContextState {
   resources: Set<Resource<ResourceValue>>;
 }
 
-export function unsupported(): never {
-  throw new Context3DError("unsupported", "Unsupported operation in Context3D triangle experiment");
+/** Error #3708 for what Context3D does not do yet, `what` naming it for the console. */
+export function unsupported(what: string): never {
+  throw new Context3DError("unsupported", `Context3D does not support ${what} yet`);
 }
 
 export function createBindings(s: Scripting, host: Stage3DHost) {
@@ -143,7 +144,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       const vector = s.rt.getProperty(s.stage?.object, s.rt.publicName("stage3Ds")) as AsObject;
       index = (vector.$a as AsObject[]).indexOf(slot);
       if (index < 0) {
-        unsupported();
+        unsupported("a Stage3D that the stage does not list");
       }
 
       indices.set(slot, index);

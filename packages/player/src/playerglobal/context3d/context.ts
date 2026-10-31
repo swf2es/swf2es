@@ -29,7 +29,7 @@ import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
 /** The backend's format for a texture's; the packed and half-float ones are not yet. */
 function textureFormat(format: string): TextureFormat {
   if (format !== "bgra" && format !== "compressed" && format !== "compressedAlpha") {
-    unsupported();
+    unsupported(`the texture format "${format}"`);
   }
 
   return format;
@@ -100,7 +100,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       if (best || zoom) {
-        unsupported();
+        unsupported(
+          "configureBackBuffer's wantsBestResolution or wantsBestResolutionOnBrowserZoom",
+        );
       }
 
       const changed =
@@ -129,7 +131,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       if (mask !== 0xffffffff && mask > 7) {
-        unsupported();
+        unsupported(`clear's mask ${mask}`);
       }
 
       backend.clear(r, g, b, a, depth, mask, stencil);
@@ -143,7 +145,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     createVertexBuffer(count: number, stride: number, usage = "staticDraw"): AsObject {
       if (usage !== "staticDraw" || stride === 0) {
-        unsupported();
+        unsupported(`a vertex buffer of usage "${usage}" or 32-bit values per vertex ${stride}`);
       }
 
       const owner = this as unknown as AsObject;
@@ -164,7 +166,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     createIndexBuffer(count: number, usage = "staticDraw"): AsObject {
       if (usage !== "staticDraw") {
-        unsupported();
+        unsupported(`an index buffer of usage "${usage}"`);
       }
 
       const owner = this as unknown as AsObject;
@@ -210,7 +212,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       const backend = context(this as unknown as AsObject);
       const compressed = textureFormat(format);
       if (levels !== 0) {
-        unsupported();
+        unsupported(`createTexture's streamingLevels ${levels}`);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
@@ -262,7 +264,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("ArgumentError", 3762);
       }
       if (format !== "bgra") {
-        unsupported();
+        unsupported(`the rectangle texture format "${format}"`);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
@@ -287,7 +289,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       const backend = context(this as unknown as AsObject);
       const compressed = textureFormat(format);
       if (levels !== 0) {
-        unsupported();
+        unsupported(`createCubeTexture's streamingLevels ${levels}`);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
@@ -363,7 +365,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       output = 0,
     ): void {
       if (output !== 0) {
-        unsupported();
+        unsupported(`setRenderToTexture's colorOutputIndex ${output}`);
       }
 
       const entry = state(this as unknown as AsObject);
@@ -423,7 +425,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       if (index >= 8) {
-        unsupported();
+        unsupported(`vertex buffer index ${index}`);
       }
 
       if (!backend) {
@@ -436,7 +438,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     setProgramConstantsFromVector(type: string, first: number, values: AsObject, count = -1): void {
       if (type !== "vertex" && type !== "fragment") {
-        unsupported();
+        unsupported(`program constants of type "${type}"`);
       }
 
       const data: number[] = values.$a;
@@ -630,7 +632,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       // AIR can preserve alpha in opaque targets, outside BitmapStore's current
       // opaque-pixel invariant. Different sizes and clipping need separate probes.
       if (!store.transparent || store.width !== backend.width || store.height !== backend.height) {
-        unsupported();
+        unsupported(
+          "drawToBitmapData into an opaque BitmapData or one of another size than the back buffer",
+        );
       }
 
       const rgba = backend.read();
