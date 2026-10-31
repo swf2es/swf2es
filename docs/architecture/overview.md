@@ -41,7 +41,8 @@ after the module's garbage is collected, and only when asked for: written
 with the module, a large ABC's entries alone took codegen's memory from 128
 to 256 MiB, which wasm never gives back. All go through
 `assembly/compile.ts`, which the test build (`assembly/testing.ts`, with
-the reader, verifier and emitter exposed for the node tests) exports too,
+the reader, verifier and emitter exposed for the node tests by its parts in
+`assembly/testing/`) exports too,
 so the tests exercise the code that ships, and the determinism check
 compiles every chain through both builds.
 
