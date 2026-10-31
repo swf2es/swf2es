@@ -46,6 +46,7 @@ const fixture =
     "Depth",
     "Texturing",
     "Arithmetic",
+    "Readback",
     "Lifecycle",
   ].find((name) =>
     process.argv.includes(`--${name === "ShaderMath" ? "shader-math" : name.toLowerCase()}`),

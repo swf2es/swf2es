@@ -629,24 +629,31 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
       requireClear(entry);
       const store = storeOf(s, destination);
-      // AIR can preserve alpha in opaque targets, outside BitmapStore's current
-      // opaque-pixel invariant. Different sizes and clipping need separate probes.
-      if (!store.transparent || store.width !== backend.width || store.height !== backend.height) {
-        unsupported(
-          "drawToBitmapData into an opaque BitmapData or one of another size than the back buffer",
-        );
-      }
-
-      const rgba = backend.read();
+      // AIR copies the back buffer's top-left corner to the destination's,
+      // as much as both hold, and leaves the rest of the destination alone.
+      const width = Math.min(store.width, backend.width);
+      const height = Math.min(store.height, backend.height);
+      const rgba = backend.read(width, height);
       const pixels = store.pixels;
-      for (let i = 0; i < pixels.length; i++) {
-        const at = i * 4;
-        // AIR preserves RGB and raises alpha to cover every channel.
-        // Multiplying RGB here would darken textures twice.
-        const alpha = Math.max(rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]);
-        pixels[i] = (alpha << 24) | (rgba[at] << 16) | (rgba[at + 1] << 8) | rgba[at + 2];
+      // AIR raises alpha to cover every channel, so the pixel is premultiplied,
+      // in the destination's last rows as many as the back buffer has: rows
+      // above those, in a destination taller than it, keep the raw alpha.
+      // Multiplying RGB here would darken textures twice.
+      const raw = store.height - backend.height;
+      let opaque = true;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0, at = y * width * 4; x < width; x++, at += 4) {
+          const r = rgba[at];
+          const g = rgba[at + 1];
+          const b = rgba[at + 2];
+          const alpha = y < raw ? rgba[at + 3] : Math.max(r, g, b, rgba[at + 3]);
+          pixels[y * store.width + x] = (alpha << 24) | (r << 16) | (g << 8) | b;
+          opaque &&= alpha === 255;
+        }
       }
 
+      // An opaque destination keeps that alpha, as erase leaves it in one.
+      store.holdsAlpha ||= !store.transparent && !opaque;
       store.changed();
     }
 
