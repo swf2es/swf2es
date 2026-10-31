@@ -1,4 +1,5 @@
 import * as ops from "../abc/opcodes";
+import { blockBody } from "./blocks";
 import { MAX_NESTING, MethodEmitter } from "./method";
 import { typeRef } from "./refs";
 
@@ -452,7 +453,7 @@ export function enclosed(em: MethodEmitter, r: i32): bool {
 /** Block k's instructions, and its fall-through as an explicit branch. */
 function structuredBlock(em: MethodEmitter, k: u32): void {
   em.currentBlock = k;
-  em.blockBody(k);
+  blockBody(em, k);
   if (!terminates(em, k) && k + 1 < em.ir.blockCount) {
     em.currentBlock = k;
     branchTo(em, k + 1);
