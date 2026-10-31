@@ -33,6 +33,49 @@ export interface FileHost {
   save(name: string, signal: AbortSignal): SaveFile | null | Promise<SaveFile | null>;
 }
 
+/** What of the browser's `navigator` tells a platform's picker apart. */
+type Browser = Pick<Navigator, "userAgent" | "platform" | "maxTouchPoints">;
+
+/**
+ * Whether the browser's file picker greys out every file of a type it does not know when an
+ * input names any, as iOS's and iPadOS's do (an iPad asks as a Mac with touch; so does a Mac
+ * emulating touch in its developer tools): there an input takes no filter, and every file can
+ * be picked.
+ */
+export function filtersGreyOutFiles(navigator: Browser | undefined): boolean {
+  if (!navigator) {
+    return false;
+  }
+
+  return (
+    /\b(iPhone|iPad|iPod)\b/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+/** The extensions FileReference's filters name, ".xml" for "*.xml"; none for a filter of any file. */
+function extensionsOf(filters: FileFilter[]): string[] {
+  return filters
+    .flatMap((filter) => filter.extension.split(";"))
+    .map((ext) => ext.trim().replace(/^\*\./, "."))
+    .filter((ext) => /^\.[\w-]+$/.test(ext));
+}
+
+/** A file input's `accept` for FileReference's filters, none where the picker would grey files out. */
+export function acceptOf(filters: FileFilter[], navigator: Browser | undefined): string {
+  return filtersGreyOutFiles(navigator) ? "" : extensionsOf(filters).join(",");
+}
+
+/**
+ * Whether a file picked with no filter is one the filters take: where the picker could not
+ * filter, the files it gives are held to them here, as Flash's dialog never offers others.
+ */
+export function filtersTake(filters: FileFilter[], name: string): boolean {
+  const extensions = extensionsOf(filters);
+  const lower = name.toLowerCase();
+  return extensions.length === 0 || extensions.some((ext) => lower.endsWith(ext.toLowerCase()));
+}
+
 /** Browser dialogs are asked synchronously, while transient user activation is still present. */
 export function browserFileHost(): FileHost | null {
   if (typeof document === "undefined") {
@@ -50,11 +93,8 @@ export function browserFileHost(): FileHost | null {
         const input = document.createElement("input");
         input.type = "file";
         input.multiple = multiple;
-        input.accept = filters
-          .flatMap((filter) => filter.extension.split(";"))
-          .map((ext) => ext.trim().replace(/^\*\./, "."))
-          .filter((ext) => /^\.[\w-]+$/.test(ext))
-          .join(",");
+        input.accept = acceptOf(filters, globalThis.navigator);
+        const unfiltered = input.accept === "";
         input.hidden = true;
         const finish = (files: SelectedFile[]) => {
           signal.removeEventListener("abort", abort);
@@ -67,12 +107,15 @@ export function browserFileHost(): FileHost | null {
           "change",
           () =>
             finish(
-              Array.from(input.files ?? [], (file) => ({
-                name: file.name,
-                size: file.size,
-                modificationDate: file.lastModified,
-                read: async () => new Uint8Array(await file.arrayBuffer()),
-              })),
+              // None that the filters take is a cancel, as a dialog closed with none chosen.
+              Array.from(input.files ?? [])
+                .filter((file) => !unfiltered || filtersTake(filters, file.name))
+                .map((file) => ({
+                  name: file.name,
+                  size: file.size,
+                  modificationDate: file.lastModified,
+                  read: async () => new Uint8Array(await file.arrayBuffer()),
+                })),
             ),
           { once: true },
         );
