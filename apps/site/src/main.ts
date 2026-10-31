@@ -34,6 +34,15 @@ const askHost = byId<HTMLElement>("ask-host");
 const askPlay = byId<HTMLButtonElement>("ask-play");
 const status = byId<HTMLElement>("status");
 const fileInput = byId<HTMLInputElement>("file");
+// iOS's and iPadOS's pickers grey out every file of a type they don't know, .swf among them,
+// when the input names any (an iPad asks as a Mac with touch): there it takes any file, and
+// play() says when one is no SWF.
+if (
+  !/\b(iPhone|iPad|iPod)\b/.test(navigator.userAgent) &&
+  !(navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+) {
+  fileInput.accept = ".swf,application/x-shockwave-flash";
+}
 const urlForm = byId<HTMLFormElement>("url-form");
 const urlInput = byId<HTMLInputElement>("url");
 const demoList = byId<HTMLElement>("demos");

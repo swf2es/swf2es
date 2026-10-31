@@ -659,6 +659,29 @@ async function check(): Promise<void> {
         ...stage3DChecks({ value, send, until, navigate, out, site }),
         ...fullscreenChecks({ value, send, until, navigate, out }),
         [
+          "the file picker filters SWFs, but on iOS takes any file, where a filter greys SWFs out",
+          async () => {
+            await navigate("play/");
+            assert.equal(
+              await value<string>("document.getElementById('file').accept"),
+              ".swf,application/x-shockwave-flash",
+            );
+
+            try {
+              await send("Emulation.setUserAgentOverride", {
+                userAgent:
+                  "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+                platform: "iPhone",
+              });
+              await navigate("play/");
+              assert.equal(await value<string>("document.getElementById('file').accept"), "");
+            } finally {
+              await send("Emulation.setUserAgentOverride", { userAgent: "" });
+              await navigate("play/");
+            }
+          },
+        ],
+        [
           "the licences are there",
           async () => {
             const found = await value<number[]>(

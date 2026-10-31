@@ -33,6 +33,38 @@ export interface FileHost {
   save(name: string, signal: AbortSignal): SaveFile | null | Promise<SaveFile | null>;
 }
 
+/** What of the browser's `navigator` tells a platform's picker apart. */
+type Browser = Pick<Navigator, "userAgent" | "platform" | "maxTouchPoints">;
+
+/**
+ * Whether the browser's file picker greys out every file of a type it does not know when an
+ * input names any, as iOS's and iPadOS's do (an iPad asks as a Mac with touch): there an
+ * input takes no filter, and every file can be picked.
+ */
+export function filtersGreyOutFiles(navigator: Browser | undefined): boolean {
+  if (!navigator) {
+    return false;
+  }
+
+  return (
+    /\b(iPhone|iPad|iPod)\b/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+/** A file input's `accept` for FileReference's filters, none where the picker would grey files out. */
+export function acceptOf(filters: FileFilter[], navigator: Browser | undefined): string {
+  if (filtersGreyOutFiles(navigator)) {
+    return "";
+  }
+
+  return filters
+    .flatMap((filter) => filter.extension.split(";"))
+    .map((ext) => ext.trim().replace(/^\*\./, "."))
+    .filter((ext) => /^\.[\w-]+$/.test(ext))
+    .join(",");
+}
+
 /** Browser dialogs are asked synchronously, while transient user activation is still present. */
 export function browserFileHost(): FileHost | null {
   if (typeof document === "undefined") {
@@ -50,11 +82,7 @@ export function browserFileHost(): FileHost | null {
         const input = document.createElement("input");
         input.type = "file";
         input.multiple = multiple;
-        input.accept = filters
-          .flatMap((filter) => filter.extension.split(";"))
-          .map((ext) => ext.trim().replace(/^\*\./, "."))
-          .filter((ext) => /^\.[\w-]+$/.test(ext))
-          .join(",");
+        input.accept = acceptOf(filters, globalThis.navigator);
         input.hidden = true;
         const finish = (files: SelectedFile[]) => {
           signal.removeEventListener("abort", abort);
