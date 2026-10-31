@@ -5,41 +5,16 @@
 // takes the operand stack, `st`, from the activation, since Flash's is one
 // stack that a frame's blocks and the calls they make share. A region whose code
 // is one block that nothing jumps into is written straight, without the
-// dispatcher.
-//
-// The actions written so far: Push, ConstantPool, Trace, Pop, Jump, If,
-// Play, Stop, End, PushDuplicate and StackSwap, and the arithmetic,
-// comparison, logical, bitwise, string and conversion actions, each a call
-// of its version's operation (V.add2, V.less2...), and the variable, member,
-// object and call actions, each a call that takes its operands as they are
-// popped, the top first, or pops them itself where their number is on the
-// stack (V.initObject, V.callMethod...); DefineFunction and DefineFunction2,
-// which make a function of a region, StoreRegister and Return; Extends,
-// InstanceOf, CastOp, ImplementsOp and RandomNumber; the clip actions,
-// SetTarget, SetTarget2, GetProperty, SetProperty, the gotos, NextFrame,
-// PrevFrame, WaitForFrame and WaitForFrame2 (a branch on whether the frame
-// is loaded), TargetPath, Call, StopSounds, ToggleQuality, GetTime,
-// CloneSprite, RemoveSprite, GetUrl and GetUrl2. A function's region takes its `this` and
-// its arguments, and a DefineFunction2's registers are its `let`s; every
-// other register is one of the movie's four, `cx.g`. A jump back counts
-// down V.budget, and the script timeout's check reads the clock only as
-// the count runs out. With, Try and Throw are calls too, and a region
-// that has a With or a Try keeps what they hold on the activation, by
-// ranges of its blocks, which come off as control leaves them (see
-// `heldRanges`). That is every action Flash knows; one left out would be
-// a call that throws, V.notYet. One it does not know is skipped, as Flash
-// skips it. An
-// action Flash cannot read, cut short or a Push of a value type it does
-// not know, stops the SWF,
-// V.halt, as adl does.
+// dispatcher. Its actions are actions.ts's, where control goes control.ts's,
+// and its operand stack stack.ts's.
 
 import { Output } from "../../output";
 import { Action, Actions, ERROR_None } from "../actions/decode";
 import * as ops from "../actions/opcodes";
 import { poolAfter, poolsOf } from "../flow/pool";
 import { Flow, fallsThrough, fallsTo, REGION_Function, REGION_Unit, Region } from "../flow/regions";
+import { action as writeAction } from "./actions";
 import {
-  branch,
   catchInto,
   end,
   exit,
@@ -49,9 +24,7 @@ import {
   jumpsWithin,
   leaves,
   scopes,
-  within,
 } from "./control";
-import { operation, push, pushed, top } from "./stack";
 import { avm1String } from "./strings";
 
 @final
@@ -289,7 +262,7 @@ export class BlockEmitter {
         }
       }
 
-      this.action(actions, region, action, pool);
+      writeAction(this, actions, region, action, pool);
       pool = poolAfter(actions, index, pool);
       if (late) {
         scopes(this, k);
@@ -326,369 +299,6 @@ export class BlockEmitter {
       out.text("b = ");
       out.uint(k + 1);
       out.text(";\n");
-    }
-  }
-
-  private action(actions: Actions, region: Region, action: Action, pool: i32): void {
-    const out = this.out;
-    if (action.error !== ERROR_None) {
-      // adl stops the whole SWF at an action it cannot read; the block's end returns.
-      out.text("V.halt(cx);\n");
-      return;
-    }
-
-    const op = action.opcode;
-    switch (op) {
-      case ops.OP_End:
-        break;
-      case ops.OP_Push:
-        push(this, actions, action, pool);
-        break;
-      case ops.OP_ConstantPool:
-        out.text("V.constantPool(cx, [");
-        for (let i = 0; i < action.count; i++) {
-          if (i > 0) {
-            out.text(", ");
-          }
-
-          this.string(actions, action.first + i);
-        }
-        out.text("]);\n");
-        break;
-      case ops.OP_Trace:
-        top(this, "V.trace(cx, ", ");\n");
-        break;
-      case ops.OP_Pop:
-        out.text("st.pop();\n");
-        break;
-      case ops.OP_Play:
-        out.text("V.play(cx);\n");
-        break;
-      case ops.OP_Stop:
-        out.text("V.stop(cx);\n");
-        break;
-      case ops.OP_Add:
-        operation(this, "add", 2);
-        break;
-      case ops.OP_Add2:
-        operation(this, "add2", 2);
-        break;
-      case ops.OP_Subtract:
-        operation(this, "subtract", 2);
-        break;
-      case ops.OP_Multiply:
-        operation(this, "multiply", 2);
-        break;
-      case ops.OP_Divide:
-        operation(this, "divide", 2);
-        break;
-      case ops.OP_Modulo:
-        operation(this, "modulo", 2);
-        break;
-      case ops.OP_Equals:
-        operation(this, "equals", 2);
-        break;
-      case ops.OP_Equals2:
-        operation(this, "equals2", 2);
-        break;
-      case ops.OP_StrictEquals:
-        operation(this, "strictEquals", 2);
-        break;
-      case ops.OP_Less:
-        operation(this, "less", 2);
-        break;
-      case ops.OP_Less2:
-        operation(this, "less2", 2);
-        break;
-      case ops.OP_Greater:
-        operation(this, "greater", 2);
-        break;
-      case ops.OP_And:
-        operation(this, "and", 2);
-        break;
-      case ops.OP_Or:
-        operation(this, "or", 2);
-        break;
-      case ops.OP_Not:
-        operation(this, "not", 1);
-        break;
-      case ops.OP_BitAnd:
-        operation(this, "bitAnd", 2);
-        break;
-      case ops.OP_BitOr:
-        operation(this, "bitOr", 2);
-        break;
-      case ops.OP_BitXor:
-        operation(this, "bitXor", 2);
-        break;
-      case ops.OP_BitLShift:
-        operation(this, "bitLShift", 2);
-        break;
-      case ops.OP_BitRShift:
-        operation(this, "bitRShift", 2);
-        break;
-      case ops.OP_BitURShift:
-        operation(this, "bitURShift", 2);
-        break;
-      case ops.OP_Increment:
-        operation(this, "increment", 1);
-        break;
-      case ops.OP_Decrement:
-        operation(this, "decrement", 1);
-        break;
-      case ops.OP_StringAdd:
-        operation(this, "stringAdd", 2);
-        break;
-      case ops.OP_StringEquals:
-        operation(this, "stringEquals", 2);
-        break;
-      case ops.OP_StringLess:
-        operation(this, "stringLess", 2);
-        break;
-      case ops.OP_StringGreater:
-        operation(this, "stringGreater", 2);
-        break;
-      case ops.OP_StringLength:
-        operation(this, "stringLength", 1);
-        break;
-      case ops.OP_MBStringLength:
-        operation(this, "mbStringLength", 1);
-        break;
-      case ops.OP_StringExtract:
-        operation(this, "stringExtract", 3);
-        break;
-      case ops.OP_MBStringExtract:
-        operation(this, "mbStringExtract", 3);
-        break;
-      case ops.OP_CharToAscii:
-        operation(this, "charToAscii", 1);
-        break;
-      case ops.OP_AsciiToChar:
-        operation(this, "asciiToChar", 1);
-        break;
-      case ops.OP_MBCharToAscii:
-        operation(this, "mbCharToAscii", 1);
-        break;
-      case ops.OP_MBAsciiToChar:
-        operation(this, "mbAsciiToChar", 1);
-        break;
-      case ops.OP_ToNumber:
-        operation(this, "toNumber", 1);
-        break;
-      case ops.OP_ToString:
-        operation(this, "toString", 1);
-        break;
-      case ops.OP_ToInteger:
-        operation(this, "toInteger", 1);
-        break;
-      case ops.OP_TypeOf:
-        operation(this, "typeOf", 1);
-        break;
-      case ops.OP_GetVariable:
-        pushed(this, top(this, "st.push(V.getVariable(cx, ", "));\n"));
-        break;
-      case ops.OP_SetVariable:
-        top(this, "V.setVariable(cx, ", ", st.pop());\n");
-        break;
-      case ops.OP_DefineLocal:
-        top(this, "V.defineLocal(cx, ", ", st.pop());\n");
-        break;
-      case ops.OP_DefineLocal2:
-        top(this, "V.defineLocal2(cx, ", ");\n");
-        break;
-      case ops.OP_GetMember:
-        pushed(this, top(this, "st.push(V.getMember(cx, ", ", st.pop()));\n"));
-        break;
-      case ops.OP_SetMember:
-        top(this, "V.setMember(cx, ", ", st.pop(), st.pop());\n");
-        break;
-      case ops.OP_Delete:
-        pushed(this, top(this, "st.push(V.deleteMember(cx, ", ", st.pop()));\n"));
-        break;
-      case ops.OP_Delete2:
-        pushed(this, top(this, "st.push(V.deleteVariable(cx, ", "));\n"));
-        break;
-      case ops.OP_Enumerate:
-        top(this, "V.enumerate(cx, ", ");\n");
-        break;
-      case ops.OP_Enumerate2:
-        top(this, "V.enumerate2(cx, ", ");\n");
-        break;
-      case ops.OP_InitObject:
-        out.text("V.initObject(cx);\n");
-        break;
-      case ops.OP_InitArray:
-        out.text("V.initArray(cx);\n");
-        break;
-      case ops.OP_CallFunction:
-        out.text("V.callFunction(cx);\n");
-        break;
-      case ops.OP_CallMethod:
-        out.text("V.callMethod(cx);\n");
-        break;
-      case ops.OP_NewObject:
-        out.text("V.newObject(cx);\n");
-        break;
-      case ops.OP_NewMethod:
-        out.text("V.newMethod(cx);\n");
-        break;
-      case ops.OP_Extends:
-        top(this, "V.extends(cx, ", ", st.pop());\n");
-        break;
-      case ops.OP_InstanceOf:
-        pushed(this, top(this, "st.push(V.instanceOf(cx, ", ", st.pop()));\n"));
-        break;
-      case ops.OP_CastOp:
-        pushed(this, top(this, "st.push(V.castOp(cx, ", ", st.pop()));\n"));
-        break;
-      case ops.OP_ImplementsOp:
-        out.text("V.implementsOp(cx);\n");
-        break;
-      case ops.OP_RandomNumber:
-        pushed(this, top(this, "st.push(V.randomNumber(", "));\n"));
-        break;
-      case ops.OP_DefineFunction:
-      case ops.OP_DefineFunction2:
-        this.defineFunction(actions, action);
-        break;
-      case ops.OP_StoreRegister:
-        // The value stays: popped and pushed again, undefined on an empty stack.
-        out.text("st.push(");
-        if (this.register(action.a)) {
-          out.text(" = ");
-        }
-        out.text("st.pop());\n");
-        break;
-      case ops.OP_Return:
-        // A Try's finally runs first, where one holds.
-        if (within(this.returns, this.k)) {
-          out.text("b = V.ret(cx); continue;\n");
-        } else if (this.inUnit) {
-          top(this, "cx.ret = ", "; return -2;\n");
-        } else {
-          top(this, "return ", ";\n");
-        }
-        break;
-      case ops.OP_With:
-        out.text("if (!V.with(cx, st.pop(), ");
-        out.uint(firstFrom(region, action.s0));
-        out.text(", ");
-        out.uint(firstFrom(region, action.s1));
-        out.text(")) { ");
-        goto(this, region, action.next);
-        out.text(" }\n");
-        break;
-      case ops.OP_Try:
-        this.try(actions, region, action);
-        break;
-      case ops.OP_Throw:
-        top(this, "V.throw(", ");\n");
-        break;
-      case ops.OP_PushDuplicate:
-        out.text("{ const a = st.pop(); st.push(a, a); }\n");
-        break;
-      case ops.OP_StackSwap:
-        out.text("{ const a = st.pop(), b = st.pop(); st.push(a, b); }\n");
-        break;
-      case ops.OP_Jump:
-        goto(this, region, action.target);
-        out.byte(0x0a);
-        break;
-      case ops.OP_If:
-        top(this, "if (V.toBoolean(", ")) ");
-        branch(this, region, action.target);
-        break;
-      case ops.OP_WaitForFrame:
-        // A frame not loaded skips the actions after.
-        out.text("if (!V.frameLoaded(cx, ");
-        out.uint(action.a);
-        out.text(")) ");
-        branch(this, region, action.target);
-        break;
-      case ops.OP_WaitForFrame2:
-        top(this, "if (!V.frameLoaded2(cx, ", ")) ");
-        branch(this, region, action.target);
-        break;
-      case ops.OP_GotoFrame:
-        out.text("V.gotoFrame(cx, ");
-        out.uint(action.a);
-        out.text(");\n");
-        break;
-      case ops.OP_GotoLabel:
-        out.text("V.gotoLabel(cx, ");
-        this.string(actions, action.first);
-        out.text(");\n");
-        break;
-      case ops.OP_GotoFrame2:
-        top(this, "V.gotoFrame2(cx, ", action.a !== 0 ? ", true, " : ", false, ");
-        out.uint(action.b);
-        out.text(");\n");
-        break;
-      case ops.OP_NextFrame:
-        out.text("V.nextFrame(cx);\n");
-        break;
-      case ops.OP_PreviousFrame:
-        out.text("V.prevFrame(cx);\n");
-        break;
-      case ops.OP_SetTarget:
-        out.text("V.setTarget(cx, ");
-        this.string(actions, action.first);
-        out.text(");\n");
-        break;
-      case ops.OP_SetTarget2:
-        top(this, "V.setTarget2(cx, ", ");\n");
-        break;
-      case ops.OP_GetProperty:
-        pushed(this, top(this, "st.push(V.getProperty(cx, ", ", st.pop()));\n"));
-        break;
-      case ops.OP_SetProperty:
-        top(this, "V.setProperty(cx, ", ", st.pop(), st.pop());\n");
-        break;
-      case ops.OP_TargetPath:
-        pushed(this, top(this, "st.push(V.targetPath(cx, ", "));\n"));
-        break;
-      case ops.OP_Call:
-        top(this, "V.callFrame(cx, ", ");\n");
-        break;
-      case ops.OP_StopSounds:
-        out.text("V.stopSounds(cx);\n");
-        break;
-      case ops.OP_GetTime:
-        pushed(this, out.length, "st.push(V.getTime(cx));\n");
-        break;
-      case ops.OP_CloneSprite:
-        top(this, "V.cloneSprite(cx, ", ", st.pop(), st.pop());\n");
-        break;
-      case ops.OP_RemoveSprite:
-        top(this, "V.removeSprite(cx, ", ");\n");
-        break;
-      case ops.OP_StartDrag:
-        out.text("V.startDrag(cx);\n");
-        break;
-      case ops.OP_EndDrag:
-        out.text("V.stopDrag(cx);\n");
-        break;
-      case ops.OP_ToggleQuality:
-        out.text("V.toggleQuality(cx);\n");
-        break;
-      case ops.OP_GetUrl:
-        out.text("V.getUrl(cx, ");
-        this.string(actions, action.first);
-        out.text(", ");
-        this.string(actions, action.first + 1);
-        out.text(");\n");
-        break;
-      case ops.OP_GetUrl2:
-        top(this, "V.getUrl2(cx, ", ", st.pop(), ");
-        out.uint(action.a);
-        out.text(");\n");
-        break;
-      default:
-        if (ops.opcodeKnown[op]) {
-          this.notYet(ops.opcodeNames[op]);
-          out.text(";\n");
-        }
-        break;
     }
   }
 
@@ -806,44 +416,11 @@ export class BlockEmitter {
   }
 
   /**
-   * DefineFunction and DefineFunction2: the function made of region
-   * `action.region`, with its name, and its parameters that are variables,
-   * null for those in a register; a DefineFunction2's flags.
-   */
-  private defineFunction(actions: Actions, action: Action): void {
-    const out = this.out;
-    const two = action.opcode === ops.OP_DefineFunction2;
-    out.text(two ? "V.defineFunction2(cx, " : "V.defineFunction(cx, ");
-    out.uint(action.region);
-    out.text(", ");
-    this.string(actions, action.first);
-    out.text(", [");
-    for (let i = 1; i < action.count; i++) {
-      if (i > 1) {
-        out.text(", ");
-      }
-
-      const index = action.first + i;
-      if (two && actions.stringRegister[index] !== 0) {
-        out.text("null");
-      } else {
-        this.string(actions, index);
-      }
-    }
-    out.byte(0x5d);
-    if (two) {
-      out.text(", ");
-      out.uint(<u32>action.b);
-    }
-    out.text(");\n");
-  }
-
-  /**
    * Try: its bodies as ranges of blocks, where a throw lands for the catch
    * (-1 out of the region, -2 for none), and the catch's variable or
    * register.
    */
-  private try(actions: Actions, region: Region, action: Action): void {
+  try(actions: Actions, region: Region, action: Action): void {
     const out = this.out;
     const flags = <u32>action.a;
     const finallyFrom = firstFrom(region, action.s2);
@@ -882,12 +459,5 @@ export class BlockEmitter {
       <u32>actions.stringLength[index],
       this.version >= 6,
     );
-  }
-
-  private notYet(name: string): void {
-    const out = this.out;
-    out.text('V.notYet("');
-    out.text(name);
-    out.text('")');
   }
 }
