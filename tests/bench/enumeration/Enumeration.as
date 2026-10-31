@@ -67,9 +67,34 @@ var object1k:Object = plain(1000);
 
 var objectKeys:Dictionary = new Dictionary();
 var stringKeys:Dictionary = new Dictionary();
+var mixedKeys:Dictionary = new Dictionary();
+var weakObjectKeys:Dictionary = new Dictionary(true);
+var weakMixedKeys:Dictionary = new Dictionary(true);
+var smallObjectKeys:Dictionary = new Dictionary();
+var mediumObjectKeys:Dictionary = new Dictionary();
+var weakMediumObjectKeys:Dictionary = new Dictionary(true);
+var heldKeys:Array = [];
+
 for (var d:int = 0; d < 1000; d++) {
-  objectKeys[{}] = d;
+  var dictionaryKey:Object = {};
+  heldKeys.push(dictionaryKey);
+  objectKeys[dictionaryKey] = d;
+  weakObjectKeys[dictionaryKey] = d;
   stringKeys["k" + d] = d;
+  if (d < 16) {
+    smallObjectKeys[dictionaryKey] = d;
+  }
+  if (d < 32) {
+    mediumObjectKeys[dictionaryKey] = d;
+    weakMediumObjectKeys[dictionaryKey] = d;
+  }
+  if (d < 500) {
+    mixedKeys[dictionaryKey] = d;
+    weakMixedKeys[dictionaryKey] = d;
+  } else {
+    mixedKeys["k" + d] = d;
+    weakMixedKeys["k" + d] = d;
+  }
 }
 
 var nest:Array = dense(64);
@@ -186,8 +211,14 @@ both("vector-object", 4000, objects);
 both("vector-string", 4000, strings);
 both("object16", 200000, object16);
 both("object1k", 2000, object1k);
+both("dict-objects16", 100000, smallObjectKeys);
+both("dict-objects32", 100000, mediumObjectKeys);
+both("dict-weak-objects32", 100000, weakMediumObjectKeys);
 both("dict-objects", 2000, objectKeys);
 both("dict-strings", 2000, stringKeys);
+both("dict-mixed", 2000, mixedKeys);
+both("dict-weak-objects", 2000, weakObjectKeys);
+both("dict-weak-mixed", 2000, weakMixedKeys);
 both("sealed", 1000000, sealed);
 bench("nested-in", 1000, nestedKeys, nest);
 bench("nested-each", 1000, nestedValues, nest);

@@ -96,6 +96,9 @@ function otherNames(o: AsObject): EnumeratedName[] {
   return names;
 }
 
+// Keep scratch separate so the per-step name lookups see the same record shapes.
+const slotMarks = new WeakMap<Enumeration, Uint8Array>();
+
 /**
  * The names of `o` past its elements, for a for-in starting over it: those
  * it had before in their slots, and new ones in the slots of those gone,
@@ -116,8 +119,17 @@ function startEnumeration(
     return names;
   }
 
+  if (names.length <= 1 && names.length === e.names.length && names[0] === e.names[0]) {
+    return e.names;
+  }
+
   const free: number[] = [];
-  freeSlots(e, o, free, starting);
+  // Weak-name wrappers can change on reinsertion while a slot still follows the original key.
+  if (starting && e.names.length >= 32 && !(o.$keys instanceof WeakKeys)) {
+    refreshSlots(e, names, free);
+  } else {
+    freeSlots(e, o, free, starting);
+  }
 
   let next = 0;
   for (const name of names) {
@@ -446,3 +458,38 @@ export function pairOf(o: Value): string | null {
 }
 
 export const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
+
+// A mark per slot avoids a second map lookup for each existing name.
+function refreshSlots(e: Enumeration, names: EnumeratedName[], free: number[]): void {
+  let present = slotMarks.get(e);
+  if (present === undefined || present.length < e.names.length) {
+    present = new Uint8Array(e.names.length);
+    slotMarks.set(e, present);
+  }
+
+  present.fill(0);
+  let added = 0;
+
+  for (let n = 0; n < names.length; n++) {
+    const name = names[n];
+    const slot = e.slot.get(name);
+    if (slot === undefined) {
+      names[added++] = name;
+    } else {
+      present[slot] = 1;
+    }
+  }
+
+  names.length = added;
+
+  for (let i = 0; i < e.names.length; i++) {
+    const name = e.names[i];
+    if (name === null) {
+      free.push(i);
+    } else if (present[i] === 0) {
+      e.slot.delete(name);
+      e.names[i] = null;
+      free.push(i);
+    }
+  }
+}
