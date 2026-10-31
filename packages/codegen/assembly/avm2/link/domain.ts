@@ -32,7 +32,7 @@
 import { Abc } from "../abc/abc";
 import * as C from "../abc/constants";
 import { readAbc } from "../abc/parse";
-import { layout } from "./bindings";
+import { link } from "./classes";
 import { hashBytes, hashPair, IdTable } from "./table";
 import {
   BIND_None,
@@ -50,14 +50,10 @@ import {
   BUILTIN_Void,
   isDefaultKind,
   legalDefault,
-  Scope,
   TRAITS_Activation,
   TRAITS_Catch,
   TRAITS_Class,
   TRAITS_Instance,
-  TRAITS_Null,
-  TRAITS_Script,
-  TRAITS_Void,
   TraitsTable,
   TYPE_Any,
 } from "./traits";
@@ -352,7 +348,7 @@ export class Domain {
     this.abcString.push(strings);
     this.addNamespaces(abc, base, strings);
     const traitsCount = <u32>this.traits.kind.length;
-    if (!this.link(index)) {
+    if (!link(this, index)) {
       this.abcs.pop();
       this.abcBase.pop();
       this.abcBuffer.pop();
@@ -429,264 +425,6 @@ export class Domain {
     if (kind >= TRAITS_Instance && kind <= TRAITS_Activation && traits.param[t] === TYPE_Any) {
       this.logged(LOG_Resolve, traits.abc[t], kind, traits.owner[t]);
     }
-  }
-
-  /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
-  link(index: u32): bool {
-    const abc = this.abcs[index];
-    const first = <u32>this.classAbc.length;
-    this.classStart.push(first);
-    for (let i: u32 = 0; i < abc.classCount; i++) {
-      this.classAbc.push(index);
-      this.classInstance.push(i);
-      this.classBase.push(-1);
-      this.classFlags.push(abc.instanceFlags[i]);
-      this.classTraits.push(-1);
-      this.classStatic.push(-1);
-    }
-
-    const ids = this.abcNs[index];
-
-    for (let i: u32 = 0; i < abc.classCount; i++) {
-      const id = first + i;
-      const flags = abc.instanceFlags[i];
-      const baseName = abc.instanceSuper[i];
-      if (baseName) {
-        const base = this.resolveType(index, baseName);
-        if (base < 0) {
-          return abc.fail(-base);
-        }
-
-        if (
-          this.classFlags[base] & C.INSTANCE_Final ||
-          base === this.classClass ||
-          (base === this.functionClass && !abc.builtin)
-        ) {
-          return abc.fail(C.kCannotExtendFinalClass);
-        }
-
-        if (this.classFlags[base] & C.INSTANCE_Interface) {
-          return abc.fail(C.kCannotExtendError);
-        }
-
-        this.classBase[id] = base;
-      }
-
-      const interfaces = <u32>this.traits.interfaceList.length;
-      const last = abc.instanceInterfaceStart[i + 1];
-      for (let j = abc.instanceInterfaceStart[i]; j < last; j++) {
-        const t = this.resolveType(index, abc.interfaces[j]);
-        if (t < 0) {
-          this.traits.interfaceList.length = interfaces;
-          return abc.fail(-t);
-        }
-
-        if (!(this.classFlags[t] & C.INSTANCE_Interface)) {
-          this.traits.interfaceList.length = interfaces;
-          return abc.fail(C.kCannotImplementError);
-        }
-
-        this.traits.interfaceList.push(<u32>this.classTraits[t]);
-      }
-
-      if (flags & C.INSTANCE_Interface && baseName) {
-        return abc.fail(C.kCannotExtendError);
-      }
-
-      // As avmplus' AvmCore: the first builtin class without a base is Object.
-      if (!baseName && abc.builtin && !this.hasBuiltins && this.objectClass < 0) {
-        this.objectClass = <i32>id;
-      }
-
-      const base = this.classBase[id];
-      const protectedNs =
-        flags & C.INSTANCE_ProtectedNs ? <i32>ids[abc.instanceProtectedNs[i]] : -1;
-      const t = this.traits.create(
-        TRAITS_Instance,
-        index,
-        i,
-        base >= 0 ? this.classTraits[base] : -1,
-        protectedNs,
-        abc.instanceTraitStart[i],
-        abc.instanceTraitStart[i + 1],
-      );
-      this.traits.isInterface[t] = flags & C.INSTANCE_Interface ? 1 : 0;
-      this.traits.interfaceStart[t] = interfaces;
-      this.traits.interfaceEnd[t] = this.traits.interfaceList.length;
-      this.classTraits[id] = t;
-      const error = layout(this.traits, this, t);
-      if (error) {
-        return abc.fail(error);
-      }
-
-      this.bindMethods(t, abc.instanceInit[i], (flags & C.INSTANCE_Final) !== 0);
-
-      this.nameInstance(index, i);
-    }
-
-    if (abc.builtin) {
-      const floatType = this.builtinType("float");
-      if (floatType >= 0) {
-        this.floatType = floatType;
-      }
-    }
-
-    // As AvmCore's first builtin pool: its classes include the special ones.
-    if (abc.builtin && !this.hasBuiltins) {
-      this.hasBuiltins = true;
-      this.classClass = this.findBuiltin("Class");
-      this.functionClass = this.findBuiltin("Function");
-      this.voidClass = <i32>this.classAbc.length;
-      this.classAbc.push(index);
-      this.classInstance.push(0xffffffff);
-      this.classBase.push(-1);
-      this.classFlags.push(C.INSTANCE_Final);
-      this.voidType = <i32>this.traits.create(TRAITS_Void, index, 0, -1, -1, 0, 0);
-      this.nullType = <i32>this.traits.create(TRAITS_Null, index, 0, -1, -1, 0, 0);
-      this.classTraits.push(this.voidType);
-      this.classStatic.push(-1);
-      this.findBuiltinTypes();
-      const empty = this.internNamespace(NS_Public, this.internText(""));
-      this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1, 0);
-      this.transientName = this.internText("Transient");
-      this.versionName = this.internText("Version");
-      this.nativeName = this.internText("native");
-      this.apiName = this.internText("API");
-    }
-
-    return this.layoutStatics(index) && this.layoutScripts(index) && this.layoutActivations(index);
-  }
-
-  /** Lay out each class object's traits, whose base is Class. */
-  layoutStatics(index: u32): bool {
-    const abc = this.abcs[index];
-    const first = this.classStart[index];
-    const classTraits = this.classClass >= 0 ? this.classTraits[this.classClass] : -1;
-    for (let i: u32 = 0; i < abc.classCount; i++) {
-      const t = this.traits.create(
-        TRAITS_Class,
-        index,
-        i,
-        classTraits,
-        this.traits.protectedNs[this.classTraits[first + i]],
-        abc.classTraitStart[i],
-        abc.classTraitStart[i + 1],
-      );
-      this.classStatic[first + i] = t;
-      const error = layout(this.traits, this, t);
-      if (error) {
-        return abc.fail(error);
-      }
-
-      this.bindMethods(t, abc.classInit[i], false);
-    }
-
-    return true;
-  }
-
-  /** Lay out each script's global object traits, whose base is Object. */
-  layoutScripts(index: u32): bool {
-    const abc = this.abcs[index];
-    const objectTraits = this.objectClass >= 0 ? this.classTraits[this.objectClass] : -1;
-    const scripts = new StaticArray<u32>(abc.scriptCount);
-    this.scriptTraits.push(scripts);
-    for (let s: u32 = 0; s < abc.scriptCount; s++) {
-      const t = this.traits.create(
-        TRAITS_Script,
-        index,
-        s,
-        objectTraits,
-        -1,
-        abc.scriptTraitStart[s],
-        abc.scriptTraitStart[s + 1],
-      );
-      scripts[s] = t;
-      this.traits.scope[t] = new Scope();
-      const error = layout(this.traits, this, t);
-      if (error) {
-        return abc.fail(error);
-      }
-
-      this.bindMethods(t, abc.scriptInit[s], false);
-    }
-
-    return true;
-  }
-
-  /** Lay out activation traits, for bodies that need an activation or declare traits. */
-  layoutActivations(index: u32): bool {
-    const abc = this.abcs[index];
-    const bodies = new StaticArray<i32>(abc.bodyCount);
-    for (let b: u32 = 0; b < abc.bodyCount; b++) {
-      const first = abc.bodyTraitStart[b];
-      const end = abc.bodyTraitStart[b + 1];
-      const flags = abc.methodFlags[abc.bodyMethod[b]];
-      bodies[b] = -1;
-      if (flags & C.METHOD_NeedActivation || end > first) {
-        const t = this.traits.create(TRAITS_Activation, index, b, -1, -1, first, end);
-        bodies[b] = t;
-        const error = layout(this.traits, this, t);
-        if (error) {
-          return abc.fail(error);
-        }
-
-        this.bindMethods(t, -1, false);
-      }
-    }
-
-    this.bodyTraits.push(bodies);
-    return true;
-  }
-
-  /**
-   * As MethodInfo::makeMethodOf, after t's members bind: its methods,
-   * getters, setters and `init` (-1 for none) become t's; `final` for a
-   * final class, whose methods are all final.
-   */
-  bindMethods(t: u32, init: i32, final: bool): void {
-    const traits = this.traits;
-    const index = traits.abc[t];
-    const abc = this.abcs[index];
-    const methods = this.methodStart[index];
-    for (let i = traits.first[t]; i < traits.end[t]; i++) {
-      const tag = abc.traitTag[i];
-      const kind = tag & 0x0f;
-      if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
-        const m = methods + abc.traitIndex[i];
-        traits.methodTraits[m] = t;
-        traits.methodVirtual[m] = 1;
-        traits.methodFinal[m] = tag & C.ATTR_Final || final ? 1 : 0;
-      }
-    }
-
-    if (init >= 0) {
-      traits.methodTraits[methods + init] = t;
-      traits.init[t] = methods + init;
-    }
-  }
-
-  /** The types AvmCore's builtin traits hold, from the first builtin ABC. */
-  findBuiltinTypes(): void {
-    this.numberType = this.builtinType("Number");
-    this.intType = this.builtinType("int");
-    this.uintType = this.builtinType("uint");
-    this.booleanType = this.builtinType("Boolean");
-    this.stringType = this.builtinType("String");
-    this.namespaceType = this.builtinType("Namespace");
-    this.xmlType = this.builtinType("XML");
-    this.xmlListType = this.builtinType("XMLList");
-    this.qnameType = this.builtinType("QName");
-    this.classType = this.builtinType("Class");
-    this.vectorClass = this.findBuiltin("Vector");
-    this.vectorObjectType = this.builtinType("Vector$object");
-    this.vectorIntType = this.builtinType("Vector$int");
-    this.vectorUintType = this.builtinType("Vector$uint");
-    this.vectorDoubleType = this.builtinType("Vector$double");
-    this.arrayType = this.builtinType("Array");
-    this.functionType = this.builtinType("Function");
-    const math = this.findBuiltin("Math");
-    this.mathStatic = math < 0 ? -1 : this.classStatic[math];
-    this.builtinAbc = <i32>(this.abcs.length - 1);
   }
 
   /** Whether the machine type always holds a value: int, uint, Number and Boolean. */
