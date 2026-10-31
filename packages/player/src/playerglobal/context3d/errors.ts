@@ -76,6 +76,9 @@ export function flashError(error: Context3DError): { id: number; kind: string } 
 
 /** Only known backend failures become Flash errors; programming errors still surface. */
 export function translateErrors(natives: avm2.Natives, s: Scripting): void {
+  // The SWF sees only Flash's error, its number and no more, as Flash gives it. The console
+  // names the call and what it refused, once each, so a report says what to fix.
+  const told = new Set<string>();
   const keys = Object.keys(natives);
   for (let i = 0; i < keys.length; i++) {
     const key = keys[i];
@@ -97,6 +100,12 @@ export function translateErrors(natives: avm2.Natives, s: Scripting): void {
       } catch (error) {
         if (error instanceof Context3DError) {
           const { id, kind } = flashError(error);
+          const said = `${key}: ${error.message} (Error #${id})`;
+          if (!told.has(said)) {
+            told.add(said);
+            console.warn(`swf2es: ${said}`);
+          }
+
           throw s.rt.error(kind, id);
         }
 
