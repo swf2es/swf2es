@@ -977,8 +977,7 @@ function drawnNatively(
   smooth: boolean,
 ): boolean {
   // A store the GPU drew last is read back only by a draw that puts a pixel, as below.
-  const kernel = store.newerOnGpu ? null : drawKernel();
-  if (!kernel) {
+  if (store.newerOnGpu) {
     return false;
   }
 
@@ -1037,6 +1036,19 @@ function drawnNatively(
     if (!t.every(Number.isFinite)) {
       return false;
     }
+  }
+
+  // Copying wide source rows for a small clip can cost more than the draw.
+  // Whole-pixel moves do less work per destination pixel, so their limit is lower.
+  const sourcePixels = source.width * (bottom - top);
+  const copiedPerPixel = moved ? 32 : 128;
+  if (sourcePixels > Math.max(1024, area.width * area.height * copiedPerPixel)) {
+    return false;
+  }
+
+  const kernel = drawKernel();
+  if (!kernel) {
+    return false;
   }
 
   job.source = source.drawable;

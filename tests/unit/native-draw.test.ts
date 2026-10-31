@@ -128,6 +128,33 @@ test("the kernel draws what a draw a pixel at a time draws, every pixel", () => 
   assert.ok(kernel.drawn - before > 400 && skipped + kernel.drawn - before === 600);
 });
 
+test("wide source rows behind a small clip stay in JS only where copying costs more", () => {
+  const kernel = drawKernel();
+  assert.ok(kernel);
+  const r = random(23);
+  const source = store(r, 2048, 512, true);
+  const clip = { x: 16, y: 16, width: 32, height: 32 };
+  for (const [a, d, native] of [
+    [0.25, 0.25, false],
+    [0.125, 0.125, false],
+    [1, 1, false],
+    [640 / 2048, 480 / 512, true],
+  ] as const) {
+    for (const smooth of [false, true]) {
+      for (const transparent of [false, true]) {
+        const into = store(r, 640, 480, transparent);
+        const expected = copy(into);
+        const m = { a, b: 0, c: 0, d, tx: 0, ty: 0 };
+        const before: number = kernel.drawn;
+        drawBitmap(into, source, m, null, "normal", clip, smooth);
+        referenceDraw(expected, source, m, null, "normal", clip, smooth);
+        assert.deepEqual(into.pixels, expected.pixels);
+        assert.equal(kernel.drawn - before, native ? 1 : 0);
+      }
+    }
+  }
+});
+
 test("a store drawn into, then drawn, is drawn as the draw left it", () => {
   const kernel = drawKernel() as DrawKernel;
   const r = random(5);
