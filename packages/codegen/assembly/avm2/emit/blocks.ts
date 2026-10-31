@@ -7,6 +7,7 @@
 import * as ops from "../abc/opcodes";
 import { IR_CheckNull, IR_Coerce } from "../ir/ir";
 import { NONE, setsLocal } from "./copies";
+import { regionOf } from "./handlers";
 import { instruction } from "./instructions";
 import { MethodEmitter } from "./method";
 import { conditional, enclosed, terminates } from "./structure";
@@ -164,7 +165,7 @@ export function blockBody(em: MethodEmitter, k: u32): void {
     }
 
     if (handled) {
-      const region = em.regionOf(ir.pc[i]);
+      const region = regionOf(em, ir.pc[i]);
       if (region !== em.region) {
         out.text("t = ");
         out.int(region);

@@ -17,7 +17,8 @@ import { BUILTIN_Float, BUILTIN_Int, BUILTIN_Number, BUILTIN_Uint, TYPE_Any } fr
 import { block } from "./blocks";
 import { CONSTANT, flowCopies, NONE } from "./copies";
 import { floatLocals } from "./floats";
-import { constant, poolString, typeRef } from "./refs";
+import { handlers, regions } from "./handlers";
+import { constant, poolString } from "./refs";
 import { SourceMap } from "./sourcemap";
 import { analyze, branchTo, node } from "./structure";
 import { convert, isStaticInit } from "./values";
@@ -193,7 +194,7 @@ export class MethodEmitter {
 
     const handled = ir.handlerCount > 0;
     if (handled) {
-      this.regions();
+      regions(this);
     }
 
     this.debugLines();
@@ -238,7 +239,7 @@ export class MethodEmitter {
     out.text("default: throw rt.unreachable();\n}");
     if (handled) {
       out.text(" } catch (e) {\n");
-      this.handlers();
+      handlers(this);
       out.text("}");
     }
 
@@ -310,124 +311,6 @@ export class MethodEmitter {
   /** The code written from here on is from the current file and line. */
   mark(): void {
     this.map.mark(this.out.length, this.file, this.line);
-  }
-
-  /** The bounds of the method's handler regions: every handler's from and to, sorted, once each. */
-  regions(): void {
-    const ir = this.ir;
-    const count = ir.handlerCount * 2;
-    if (<u32>this.bounds.length < count) {
-      this.bounds = new StaticArray<u32>(count);
-    }
-
-    const bounds = this.bounds;
-    let n: u32 = 0;
-    for (let h: u32 = 0; h < count; h++) {
-      const pc = h & 1 ? ir.handlerTo[h >> 1] : ir.handlerFrom[h >> 1];
-      // Insert in order, skipping one already there.
-      let at = n;
-      while (at > 0 && bounds[at - 1] > pc) {
-        at--;
-      }
-
-      if (at > 0 && bounds[at - 1] === pc) {
-        continue;
-      }
-
-      for (let k = n; k > at; k--) {
-        bounds[k] = bounds[k - 1];
-      }
-
-      bounds[at] = pc;
-      n++;
-    }
-
-    this.boundCount = n;
-    if (<u32>this.covered.length < n) {
-      this.covered = new StaticArray<u8>(n);
-    }
-
-    for (let r: u32 = 1; r < n; r++) {
-      const start = bounds[r - 1];
-      let covered: u8 = 0;
-      for (let h: u32 = 0; h < ir.handlerCount; h++) {
-        if (start >= ir.handlerFrom[h] && start < ir.handlerTo[h]) {
-          covered = 1;
-          break;
-        }
-      }
-
-      this.covered[r - 1] = covered;
-    }
-  }
-
-  /** The handler region of ABC offset `pc`: how many bounds are at or before it, or 0 if none covers it. */
-  regionOf(pc: u32): i32 {
-    let lo: u32 = 0;
-    let hi = this.boundCount;
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1;
-      if (this.bounds[mid] <= pc) {
-        lo = mid + 1;
-      } else {
-        hi = mid;
-      }
-    }
-
-    return lo > 0 && lo < this.boundCount && this.covered[lo - 1] ? <i32>lo : 0;
-  }
-
-  /**
-   * The catch of the dispatcher: the handlers covering the region that
-   * threw, in the order of the ABC's table, as avmplus finds them; the first
-   * whose type the exception has gets it as its only stack value. With none,
-   * the exception goes on to the caller.
-   */
-  handlers(): void {
-    const out = this.out;
-    const ir = this.ir;
-    const bounds = this.bounds;
-    const exception = <i32>(ir.localCount + ir.maxScope);
-    out.text("const x = rt.caught(e);\nswitch (t) {\n");
-    for (let r: u32 = 1; r < this.boundCount; r++) {
-      if (!this.covered[r - 1]) {
-        continue;
-      }
-
-      const start = bounds[r - 1];
-      let first = true;
-      for (let h: u32 = 0; h < ir.handlerCount; h++) {
-        if (start < ir.handlerFrom[h] || start >= ir.handlerTo[h]) {
-          continue;
-        }
-
-        if (first) {
-          out.text("case ");
-          out.uint(r);
-          out.text(":\n");
-          first = false;
-        }
-
-        const type = ir.handlerType[h];
-        if (type >= 0) {
-          out.text("if (rt.catches(x, ");
-          typeRef(this, type);
-          out.text(")) ");
-        }
-
-        out.text("{ ");
-        this.regName(exception);
-        out.text(" = x; ");
-        this.goto(ir.handlerBlock[h]);
-        out.text(" }\n");
-      }
-
-      if (!first) {
-        out.text("break;\n");
-      }
-    }
-
-    out.text("}\nthrow e;\n");
   }
 
   /** Declare the registers: `this`, the parameters, coerced, with defaults, then the rest. */
