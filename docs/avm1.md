@@ -205,7 +205,9 @@ In `codegen/assembly/avm1/`, grouped as `avm2/` is, by stage:
   Try" below for when exactly).
 - `emit/`: a block as an array of its regions' functions (`block.ts`),
   the block's own code first, then the bodies of the functions it
-  defines, in the order the flow finds them; the module around them
+  defines, in the order the flow finds them, each action written by
+  `actions.ts`, control by `control.ts` and the operand stack by
+  `stack.ts`; the module around them
   (`module.ts`); strings as JavaScript literals (`strings.ts`), read as
   adl reads them. Up to SWF 5 a string is its bytes, each the character of
   its value (0x80 is U+0080, not Windows-1252's euro, which Ruffle reads).
