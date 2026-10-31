@@ -10,7 +10,7 @@ import {
   type TextureHandle,
   type Textures,
 } from "@swf2es/render";
-import { BitmapStore, characterStore, rgbaInto, rgbaOf } from "../bitmap/bitmap.js";
+import { BitmapStore, characterStore, rgbaInto } from "../bitmap/bitmap.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
@@ -26,18 +26,10 @@ export const GRADIENT_IDLE_FRAMES = 30;
 /** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
 const GRADIENT_REGIONS = 8;
 
-/**
- * A texture made of pixels that change: a store's, kept as of its version,
- * and the bytes it is uploaded from again once it changed, so that a store
- * drawn into every frame does not allocate its size every frame. The
- * backend uploads them as it renders and keeps no hold on them; bytes
- * written again before that are the store's newer pixels, which the
- * texture is to show anyway.
- */
+/** A texture made of pixels that change: a store's, kept as of its version. */
 interface Kept {
   handle: TextureHandle;
   version: number;
-  bytes: Uint8Array | null;
 }
 
 /** Bitmaps' and gradients' textures, made as first drawn and kept while they are. */
@@ -70,28 +62,48 @@ export class Paints {
     return this.gradientTexture(paint, part.region);
   }
 
-  /** `store`'s texture, its pixels as drawn (`drawable`) uploaded again if they changed since. */
+  /**
+   * `store`'s texture, its pixels as drawn (`drawable`) uploaded again if
+   * they changed since, converted into the bytes the texture keeps (Textures'
+   * `bytes`), so that a store drawn into every frame allocates none.
+   */
   storeTexture(store: BitmapStore, idle?: number): TextureHandle {
     const kept = this.stores.get(store);
     if (kept && this.textures.alive(kept.handle)) {
+      const id = kept.handle.id;
       if (kept.version !== store.version) {
         kept.version = store.version;
-        const pixels = store.drawable;
-        if (kept.bytes?.length !== pixels.length * 4) {
-          kept.bytes = new Uint8Array(pixels.length * 4);
-        }
-
-        rgbaInto(pixels, kept.bytes);
-        this.textures.set(kept.handle.id, store.width, store.height, kept.bytes);
+        this.textures.set(id, store.width, store.height, this.bytesOf(store, id), idle);
+      } else if (idle !== undefined) {
+        this.textures.idleWithin(id, idle);
       }
 
       return kept.handle;
     }
 
-    // A store's first texture keeps no bytes: one that never changes holds none on the CPU.
-    const handle = this.textures.add(store.width, store.height, rgbaOf(store.drawable), idle);
-    this.stores.set(store, { handle, version: store.version, bytes: null });
+    const bytes = this.bytesOf(store, -1);
+    const handle = this.textures.add(store.width, store.height, bytes, idle);
+    this.stores.set(store, { handle, version: store.version });
     return handle;
+  }
+
+  /**
+   * `store`'s pixels as drawn, in bytes Textures lends for texture `id`: an
+   * opaque store holding alpha made opaque as they are converted, rather
+   * than through a copy of its own.
+   */
+  private bytesOf(store: BitmapStore, id: number): Uint8Array {
+    const pixels = store.readable;
+    const bytes = this.textures.bytes(pixels.length * 4, id);
+    rgbaInto(pixels, bytes, store.holdsAlpha);
+    return bytes;
+  }
+
+  /** Premultiplied ARGB in bytes Textures lends. */
+  private rgba(pixels: Uint32Array): Uint8Array {
+    const bytes = this.textures.bytes(pixels.length * 4);
+    rgbaInto(pixels, bytes);
+    return bytes;
   }
 
   /**
@@ -143,9 +155,9 @@ export class Paints {
         columns,
         rows,
       );
-      handle = this.textures.add(columns, rows, rgbaOf(pixels), GRADIENT_IDLE_FRAMES);
+      handle = this.textures.add(columns, rows, this.rgba(pixels), GRADIENT_IDLE_FRAMES);
     } else {
-      handle = this.textures.add(colors.length, 1, rgbaOf(colors), GRADIENT_IDLE_FRAMES);
+      handle = this.textures.add(colors.length, 1, this.rgba(colors), GRADIENT_IDLE_FRAMES);
     }
 
     // Its region's texture made again, or a new region's kept: those let go of forgotten, and the

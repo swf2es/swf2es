@@ -50,6 +50,13 @@ export class Registry {
     return this.held.length - this.free.length;
   }
 
+  /** `id` let go of after `idle` unused frames, where that is fewer than it was given. */
+  idleWithin(id: number, idle: number): void {
+    if (this.held[id] && idle < this.idleFrames[id]) {
+      this.idleFrames[id] = idle;
+    }
+  }
+
   /** `id` used this frame. */
   use(id: number): void {
     this.usedAt[id] = this.frame;

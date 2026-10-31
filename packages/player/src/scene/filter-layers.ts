@@ -16,7 +16,7 @@ import {
   type TextureHandle,
   type Textures,
 } from "@swf2es/render";
-import { rgbaOf } from "../bitmap/bitmap.js";
+import { rgbaInto } from "../bitmap/bitmap.js";
 import type { ShaderImage, ShaderUse } from "../bitmap/pixel-bender.js";
 import { Container } from "../display/container.js";
 import { type DisplayObject, TRANSFORM } from "../display/displayobject.js";
@@ -349,8 +349,10 @@ export class FilterLayers {
       let texture = -1;
       if (pass.colors) {
         if (!pass.texture || !this.textures.alive(pass.texture)) {
-          // A copy, as the backend lets the pixels it uploads go.
-          pass.texture = this.textures.add(256, 1, pass.colors.slice(), GRADIENT_IDLE_FRAMES);
+          // A copy, in bytes Textures lends, as the backend lets the pixels it uploads go.
+          const bytes = this.textures.bytes(pass.colors.length);
+          bytes.set(pass.colors);
+          pass.texture = this.textures.add(256, 1, bytes, GRADIENT_IDLE_FRAMES);
         }
 
         texture = pass.texture.id;
@@ -447,7 +449,7 @@ export class FilterLayers {
       handle = this.textures.add(
         image.width,
         image.height,
-        imageTexels(image),
+        imageTexels(image, this.textures),
         GRADIENT_IDLE_FRAMES,
       );
       this.images.set(image, handle);
@@ -463,9 +465,12 @@ export class FilterLayers {
  * as they are, four a texel, the channels they lack 0, as the CPU samples
  * them.
  */
-function imageTexels(image: ShaderImage): Uint8Array | Float32Array {
+function imageTexels(image: ShaderImage, textures: Textures): Uint8Array | Float32Array {
   if (image.pixels) {
-    return rgbaOf(image.pixels);
+    // In bytes Textures lends: an input that changes every frame is a new image each frame.
+    const bytes = textures.bytes(image.pixels.length * 4);
+    rgbaInto(image.pixels, bytes);
+    return bytes;
   }
 
   const floats = image.floats as Float32Array;

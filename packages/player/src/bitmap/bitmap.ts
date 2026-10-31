@@ -753,14 +753,21 @@ export function rgbaOf(pixels: Uint32Array): Uint8Array {
 
 /**
  * rgbaOf into `out`, `pixels.length * 4` bytes or more, as a texture
- * uploaded again and again takes it. Little-endian, a pixel is a word
- * whose red and blue swap, written whole rather than a byte at a time.
+ * uploaded again and again takes it; `opaque`, every alpha 255, as an
+ * opaque store holding alpha draws (BitmapStore's drawable). Little-endian,
+ * a pixel is a word whose red and blue swap, written whole rather than a
+ * byte at a time.
  */
-export function rgbaInto(pixels: Uint32Array, out: Uint8Array): void {
+export function rgbaInto(pixels: Uint32Array, out: Uint8Array, opaque = false): void {
+  if (out.length < pixels.length * 4) {
+    throw new RangeError(`${out.length} bytes hold no ${pixels.length} pixels`);
+  }
+
+  const alpha = opaque ? 0xff000000 : 0;
   if (LITTLE_ENDIAN && out.byteOffset % 4 === 0) {
     const words = new Uint32Array(out.buffer, out.byteOffset, pixels.length);
     for (let i = 0; i < pixels.length; i++) {
-      const p = pixels[i];
+      const p = pixels[i] | alpha;
       words[i] = (p & 0xff00ff00) | ((p >>> 16) & 0xff) | ((p & 0xff) << 16);
     }
 
@@ -768,7 +775,7 @@ export function rgbaInto(pixels: Uint32Array, out: Uint8Array): void {
   }
 
   for (let i = 0; i < pixels.length; i++) {
-    const p = pixels[i];
+    const p = pixels[i] | alpha;
     const j = i * 4;
     out[j] = (p >>> 16) & 0xff;
     out[j + 1] = (p >>> 8) & 0xff;
