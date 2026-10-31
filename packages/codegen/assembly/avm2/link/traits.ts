@@ -19,6 +19,7 @@ import {
   resolveSlotsAndMethods,
 } from "./signatures";
 import { hashPair, IdTable } from "./table";
+import { resolveTypeId } from "./typenames";
 
 export const TRAITS_Instance: u8 = 1;
 export const TRAITS_Class: u8 = 2;
@@ -526,7 +527,7 @@ export class TraitsTable {
     const index = domain.methodAbc(m);
     const abc = domain.abcs[index];
     const local = m - domain.methodStart[index];
-    const returnType = domain.resolveTypeId(index, abc.methodReturnType[local], true);
+    const returnType = resolveTypeId(domain, index, abc.methodReturnType[local], true);
     if (returnType < TYPE_Any) {
       return domain.typeError;
     }
@@ -535,7 +536,7 @@ export class TraitsTable {
     const count = abc.methodParamStart[local + 1] - first;
     const start = <u32>this.paramType.length;
     for (let p: u32 = 0; p < count; p++) {
-      const type = domain.resolveTypeId(index, abc.paramTypes[first + p], false);
+      const type = resolveTypeId(domain, index, abc.paramTypes[first + p], false);
       if (type < TYPE_Any) {
         this.paramType.length = start;
         return domain.typeError;

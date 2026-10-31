@@ -16,6 +16,7 @@ import {
   TRAITS_Script,
   TRAITS_Void,
 } from "./traits";
+import { nameInstance, nameType, resolveType } from "./typenames";
 
 /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
 export function link(dom: Domain, index: u32): bool {
@@ -38,7 +39,7 @@ export function link(dom: Domain, index: u32): bool {
     const flags = abc.instanceFlags[i];
     const baseName = abc.instanceSuper[i];
     if (baseName) {
-      const base = dom.resolveType(index, baseName);
+      const base = resolveType(dom, index, baseName);
       if (base < 0) {
         return abc.fail(-base);
       }
@@ -61,7 +62,7 @@ export function link(dom: Domain, index: u32): bool {
     const interfaces = <u32>dom.traits.interfaceList.length;
     const last = abc.instanceInterfaceStart[i + 1];
     for (let j = abc.instanceInterfaceStart[i]; j < last; j++) {
-      const t = dom.resolveType(index, abc.interfaces[j]);
+      const t = resolveType(dom, index, abc.interfaces[j]);
       if (t < 0) {
         dom.traits.interfaceList.length = interfaces;
         return abc.fail(-t);
@@ -106,7 +107,7 @@ export function link(dom: Domain, index: u32): bool {
 
     bindMethods(dom, t, abc.instanceInit[i], (flags & C.INSTANCE_Final) !== 0);
 
-    dom.nameInstance(index, i);
+    nameInstance(dom, index, i);
   }
 
   if (abc.builtin) {
@@ -132,7 +133,7 @@ export function link(dom: Domain, index: u32): bool {
     dom.classStatic.push(-1);
     findBuiltinTypes(dom);
     const empty = dom.internNamespace(NS_Public, dom.internText(""));
-    dom.nameType(empty, dom.internText("void"), API_AllVersions, dom.voidClass, -1, 0);
+    nameType(dom, empty, dom.internText("void"), API_AllVersions, dom.voidClass, -1, 0);
     dom.transientName = dom.internText("Transient");
     dom.versionName = dom.internText("Version");
     dom.nativeName = dom.internText("native");

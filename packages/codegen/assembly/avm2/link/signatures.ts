@@ -17,6 +17,7 @@ import {
   TraitsTable,
   TYPE_Any,
 } from "./traits";
+import { resolveTypeId } from "./typenames";
 
 function hasGetter(binding: u32): bool {
   const kind = binding & 7;
@@ -95,7 +96,7 @@ export function resolveSlotsAndMethods(traits: TraitsTable, domain: Domain, t: u
       if (kind === C.TRAIT_Class) {
         type = domain.classStatic[domain.classStart[index] + abc.traitIndex[i]];
       } else {
-        type = domain.resolveTypeId(index, abc.traitIndex[i], false);
+        type = resolveTypeId(domain, index, abc.traitIndex[i], false);
         if (type < TYPE_Any) {
           return domain.typeError;
         }
