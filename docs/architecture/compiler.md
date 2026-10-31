@@ -21,9 +21,10 @@ three, with the same VerifyError numbers:
    Every namespace's version moves into that series as it is interned, as
    `AvmCore::newNamespace` moves it, so a lookup and the binding it finds
    compare versions of one series; in AIR's, a Flash Player version
-   becomes the next AIR one. While an ABC loads, its classes link
-   to base classes and interfaces defined by earlier ABCs' scripts or by
-   its own earlier classes, as avmplus' `AbcParser` links them.
+   becomes the next AIR one (`link/namespaces.ts`). While an ABC loads,
+   its classes link to base classes and interfaces defined by earlier
+   ABCs' scripts or by its own earlier classes, as avmplus' `AbcParser`
+   links them (`link/classes.ts`, `link/typenames.ts`).
    The domain's ABCs are loaded into application domains, a tree whose
    root is 0, as avmplus' DomainMgr keeps them: an ABC sees the names its
    own application domain and its ancestors define, the first from the
@@ -32,14 +33,15 @@ three, with the same VerifyError numbers:
    module names as `linked` the ABCs it sees, in load order.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
-   (`link/traits.ts`). Types resolve later, when a class is first used:
-   slot types, method signatures, and the override and interface checks
-   that compare them. A type is the id of a traits, including void and
-   null, or `*`.
+   (`link/traits.ts`, `link/bindings.ts`). Types resolve later, when a
+   class is first used: slot types, method signatures, and the override
+   and interface checks that compare them (`link/signatures.ts`). A type
+   is the id of a traits, including void and null, or `*`.
    An application domain the runtime has let go of is dropped with its
-   descendants (`dropDomain`), and one the host has no use for now, as
-   once its ABCs are compiled, is evicted with them (`evictDomain`): no
-   other sees their ABCs, which compile no more and keep their indices.
+   descendants (`dropDomain`, `link/lifetime.ts`), and one the host has
+   no use for now, as once its ABCs are compiled, is evicted with them
+   (`evictDomain`): no other sees their ABCs, which compile no more and
+   keep their indices.
    `compact` rebuilds the domain only when that keeps codegen's memory
    from growing: when the tables, by an estimate from their rows, with
    what a compile's garbage and the rebuild itself take, come near

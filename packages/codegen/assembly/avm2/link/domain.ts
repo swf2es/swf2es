@@ -3,10 +3,11 @@
 // namespaces are interned across ABCs, so a name is a pair of ids however
 // many ABCs spell it.
 //
-// Classes link as in avmplus' AbcParser::parseInstanceInfos: while an ABC
-// loads, a type name resolves to a class some earlier ABC's script defines,
-// or else to an earlier class of the same ABC. Once the ABC has linked, the
-// classes its scripts define become visible to later ABCs.
+// Classes link as in avmplus' AbcParser::parseInstanceInfos (classes.ts):
+// while an ABC loads, a type name resolves to a class some earlier ABC's
+// script defines, or else to an earlier class of the same ABC (typenames.ts).
+// Once the ABC has linked, the classes its scripts define become visible to
+// later ABCs.
 //
 // ABCs load into application domains, as avmplus' DomainMgr keeps them: a
 // tree whose root is domain 0. An ABC sees what its own domain and its
@@ -16,23 +17,25 @@
 // the host has no more use for now evicted, until it gives its ABCs again:
 // nothing sees what their ABCs define, and once enough of them are let go
 // of, the live ABCs are linked again into a new Domain, which leaves the
-// others' tables, names included, to the collector (see rebuilt).
+// others' tables, names included, to the collector (lifetime.ts).
 //
-// Namespaces follow avmplus' AbcParser: two are the same if their kind and
-// URI are; a private namespace is only ever equal to itself. A URI may end
-// in an API version mark (U+E294 + version), which builtin ABCs use to say
-// which player version introduced a name. The mark is stripped from the URI
-// and kept as the namespace's version. Versions come in two interleaved
-// series, Flash Player's and AIR's, and the domain's version says which it
-// runs; every namespace's version moves into that series, where for Flash
-// Player AIR-only versions are VM-internal. A binding gets the earliest
-// version of its namespaces, and is visible to a lookup whose namespace has
-// an equal or later version. User ABCs' public namespaces get the domain's
-// version, so they cannot see VM-internal names.
+// Namespaces follow avmplus' AbcParser (namespaces.ts): two are the same if
+// their kind and URI are; a private namespace is only ever equal to itself.
+// A URI may end in an API version mark (U+E294 + version), which builtin
+// ABCs use to say which player version introduced a name. The mark is
+// stripped from the URI and kept as the namespace's version. Versions come
+// in two interleaved series, Flash Player's and AIR's, and the domain's
+// version says which it runs; every namespace's version moves into that
+// series, where for Flash Player AIR-only versions are VM-internal. A
+// binding gets the earliest version of its namespaces, and is visible to a
+// lookup whose namespace has an equal or later version. User ABCs' public
+// namespaces get the domain's version, so they cannot see VM-internal
+// names.
 import { Abc } from "../abc/abc";
-import { verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { readAbc } from "../abc/parse";
+import { link } from "./classes";
+import { addNamespaces } from "./namespaces";
 import { hashBytes, hashPair, IdTable } from "./table";
 import {
   BIND_None,
@@ -50,17 +53,14 @@ import {
   BUILTIN_Void,
   isDefaultKind,
   legalDefault,
-  Scope,
   TRAITS_Activation,
   TRAITS_Catch,
   TRAITS_Class,
   TRAITS_Instance,
-  TRAITS_Null,
-  TRAITS_Script,
-  TRAITS_Void,
   TraitsTable,
   TYPE_Any,
 } from "./traits";
+import { addClassNames, parameterized, resolveType } from "./typenames";
 import { getOwnBinding } from "./types";
 
 export const NS_Public: u8 = 0;
@@ -76,22 +76,12 @@ export const API_FP_10_0: u8 = 2;
 /** kApiVersionLatest for Flash Player (SWF_31), avmshell's default. */
 export const API_LatestFP: u8 = 50;
 export const API_Internal: u8 = 52;
-/**
- * VM_INTERNAL is the last mark of the table an ABC was built with: 42 in
- * the AIR 15 SDK's, which the oracle's playerglobal has, 52 in
- * core/api-versions.h, which the submodule's builtin has. A builtin ABC's
- * highest mark, from 42 up, is its internal one.
- */
-const API_FirstInternalMark: i32 = 42;
-const API_Count: u32 = 53;
-const API_MinMark: u32 = 0xe294;
-
 /** The URI of a namespace written with string index 0. */
 export const URI_None: u32 = 0xffffffff;
 
 /**
  * An application domain's state: live; evicted, let go of until the host
- * gives its ABCs again (see Domain.evict); or dropped for good.
+ * gives its ABCs again (see evict in lifetime.ts); or dropped for good.
  */
 export const DOMAIN_Live: u8 = 0;
 export const DOMAIN_Evicted: u8 = 1;
@@ -108,24 +98,6 @@ export const LOG_Sign: u8 = 3;
 /** An ABC verified for the first time, or finding scopes for the first time. */
 export const LOG_Verify: u8 = 4;
 
-/** What a log entry kept for an evicted domain weighs. */
-const KEPT_Weight: u64 = 36;
-
-/** The weight of dead ABCs below which a rebuild is not worth it. */
-const DEAD_Floor: u64 = 4 << 20;
-
-/** Whether tables of `weight`, with what its estimate misses, come within `reserve` of `size`. */
-function full(weight: u64, reserve: u64, size: u64): bool {
-  return weight + (weight >> 2) + (weight >> 3) + reserve >= size;
-}
-
-/** What takes the place of an ABC let go of in a rebuilt Domain (see vacate). */
-const NO_ABC = new Abc();
-const NO_BYTES = new StaticArray<u8>(0);
-const NO_IDS = new StaticArray<u32>(0);
-const NO_VERSIONS = new StaticArray<u8>(0);
-const NO_TRAITS = new StaticArray<i32>(0);
-
 @final
 export class Domain {
   /** The version of user ABCs' public namespaces, whose series is the domain's. */
@@ -139,7 +111,7 @@ export class Domain {
    * rejected while linking: interned strings may point into any of them.
    */
   buffers: StaticArray<u8>[] = [];
-  /** Each ABC's bytes, by index, to link it again (see rebuilt). */
+  /** Each ABC's bytes, by index, to link it again (see rebuilt in lifetime.ts). */
   abcBuffer: StaticArray<u8>[] = [];
   /** Per ABC, the interned id of each pool string, and of each namespace and its version. */
   abcString: StaticArray<u32>[] = [];
@@ -267,7 +239,7 @@ export class Domain {
   abcVerified: u8[] = [];
   /**
    * How much each ABC holds of the domain's memory, roughly, by index: its
-   * bytes, and the rows of the tables it added (see weigh).
+   * bytes, and the rows of the tables it added (see weigh in lifetime.ts).
    */
   abcWeight: u32[] = [];
   /** How many rebuilds the domain is from the one reset made; each domain's when it was evicted. */
@@ -368,9 +340,9 @@ export class Domain {
     }
 
     this.abcString.push(strings);
-    this.addNamespaces(abc, base, strings);
+    addNamespaces(this, abc, base, strings);
     const traitsCount = <u32>this.traits.kind.length;
-    if (!this.link(index)) {
+    if (!link(this, index)) {
       this.abcs.pop();
       this.abcBase.pop();
       this.abcBuffer.pop();
@@ -391,7 +363,7 @@ export class Domain {
       return false;
     }
 
-    this.addClassNames(index);
+    addClassNames(this, index);
     this.addBindings(index);
     // The bytes three times: a copy, and the tables parsing made of them.
     this.abcWeight.push(<u32>min<u64>(3 * <u64>abc.length + this.rows() - rows, 0xffffffff));
@@ -420,218 +392,9 @@ export class Domain {
     );
   }
 
-  /** Count what the domain's tables gained since they held `rows` as ABC `index`'s. */
-  weigh(index: u32, rows: u64): void {
-    const now = this.rows();
-    if (now > rows && index < <u32>this.abcWeight.length) {
-      this.abcWeight[index] = <u32>min<u64>(<u64>this.abcWeight[index] + now - rows, 0xffffffff);
-    }
-  }
-
-  /**
-   * Take the place of an ABC of an application domain not live, with
-   * nothing in it, so that the ABCs after it keep their indices.
-   */
-  vacate(domain: u32): void {
-    this.abcs.push(NO_ABC);
-    this.abcDomain.push(domain);
-    this.abcBase.push(0);
-    this.abcBuffer.push(NO_BYTES);
-    this.abcVerified.push(0);
-    this.abcWeight.push(0);
-    this.loads++;
-    this.abcOwner.push(this.loads);
-    this.methodStart.push(<u32>this.traits.methodTraits.length);
-    this.abcString.push(NO_IDS);
-    this.abcNs.push(NO_IDS);
-    this.abcNsVersion.push(NO_VERSIONS);
-    this.classStart.push(<u32>this.classAbc.length);
-    this.scriptTraits.push(NO_IDS);
-    this.bodyTraits.push(NO_TRAITS);
-  }
-
   /** Whether ABC `index` is of a live application domain, one neither evicted nor dropped. */
   isLive(index: u32): bool {
     return this.domainState[this.abcDomain[index]] === DOMAIN_Live;
-  }
-
-  /**
-   * Drop application domain `domain` and its descendants, as the runtime
-   * lets go of them: what their ABCs define is seen by no domain from now
-   * on, and they take no more ABCs. The root is never dropped.
-   */
-  drop(domain: u32): void {
-    this.leave(domain, DOMAIN_Dropped);
-  }
-
-  /**
-   * Evict application domain `domain` and its live descendants: as
-   * dropped, until revive, given their ABCs again, links them back.
-   */
-  evict(domain: u32): void {
-    if (domain < <u32>this.domainState.length && this.domainState[domain] === DOMAIN_Live) {
-      this.leave(domain, DOMAIN_Evicted);
-    }
-  }
-
-  /** Put `domain` and its descendants in `state`, unless dropped already; never the root. */
-  leave(domain: u32, state: u8): void {
-    const count = <u32>this.domainParent.length;
-    if (domain === 0 || domain >= count || this.domainState[domain] === DOMAIN_Dropped) {
-      return;
-    }
-
-    // A child is made after its parent, so its number is higher.
-    this.domainState[domain] = state;
-    this.domainEvicted[domain] = this.generation;
-    for (let d = domain + 1; d < count; d++) {
-      const parent = this.domainState[<u32>this.domainParent[d]];
-      if (parent !== DOMAIN_Live && this.domainState[d] < parent) {
-        if (this.domainState[d] === DOMAIN_Live) {
-          this.domainEvicted[d] = this.generation;
-        }
-
-        this.domainState[d] = parent;
-      }
-    }
-  }
-
-  /**
-   * Give ABC `index`, of an evicted application domain, its bytes again,
-   * if a rebuild has let go of them, for revive to link it: 0, the
-   * VerifyError they were rejected with, or -1 if they are not the ABC's.
-   */
-  restore(index: u32, buffer: StaticArray<u8>, length: u32): i32 {
-    if (
-      index >= <u32>this.abcs.length ||
-      this.domainState[this.abcDomain[index]] !== DOMAIN_Evicted
-    ) {
-      return -1;
-    }
-
-    if (this.abcs[index] !== NO_ABC) {
-      return 0;
-    }
-
-    const abc = readAbc(changetype<usize>(buffer), length, false);
-    if (abc.error) {
-      return abc.error;
-    }
-
-    this.abcs[index] = abc;
-    this.abcBase[index] = changetype<usize>(buffer);
-    this.abcBuffer[index] = buffer;
-    this.abcWeight[index] = <u32>min<u64>(3 * <u64>length, 0xffffffff);
-    return 0;
-  }
-
-  /**
-   * Make evicted application domain `domain` live again, with its evicted
-   * ancestors, the first of them a child of a live one: 0 if their ABCs
-   * and findings are in the tables still, as no rebuild has been since
-   * any was evicted, 1 if a rebuild must link them again, and -1, leaving
-   * them evicted, if they cannot be: `domain` is not evicted, the first
-   * evicted ancestor's parent is not live, or an ABC of theirs that a
-   * rebuild let go of was not restored.
-   */
-  revive(domain: u32): i32 {
-    if (
-      domain === 0 ||
-      domain >= <u32>this.domainState.length ||
-      this.domainState[domain] !== DOMAIN_Evicted
-    ) {
-      return -1;
-    }
-
-    let top = domain;
-    while (this.domainState[<u32>this.domainParent[top]] === DOMAIN_Evicted) {
-      top = <u32>this.domainParent[top];
-    }
-
-    if (this.domainState[<u32>this.domainParent[top]] !== DOMAIN_Live) {
-      return -1;
-    }
-
-    for (let i = 0; i < this.abcs.length; i++) {
-      if (this.abcs[i] === NO_ABC && this.inChain(this.abcDomain[i], top, domain)) {
-        return -1;
-      }
-    }
-
-    let stale = false;
-    for (let d = domain; ; d = <u32>this.domainParent[d]) {
-      stale = stale || this.domainEvicted[d] !== this.generation;
-      this.domainState[d] = DOMAIN_Live;
-      if (d === top) {
-        break;
-      }
-    }
-
-    return stale ? 1 : 0;
-  }
-
-  /** Make `domain` and its ancestors up to `top` evicted again, as revive found them. */
-  unrevive(domain: u32, top: u32): void {
-    for (let d = domain; ; d = <u32>this.domainParent[d]) {
-      this.domainState[d] = DOMAIN_Evicted;
-      if (d === top) {
-        break;
-      }
-    }
-  }
-
-  /** The first evicted ancestor of `domain` from the root down, or `domain` itself. */
-  evictedTop(domain: u32): u32 {
-    let top = domain;
-    while (this.domainState[<u32>this.domainParent[top]] === DOMAIN_Evicted) {
-      top = <u32>this.domainParent[top];
-    }
-
-    return top;
-  }
-
-  /** Whether `d` is `bottom` or one of its ancestors up to `top`. */
-  inChain(d: u32, top: u32, bottom: u32): bool {
-    let x = bottom;
-    while (x !== d && x !== top) {
-      x = <u32>this.domainParent[x];
-    }
-
-    return x === d;
-  }
-
-  /**
-   * Whether a rebuild, which links every live ABC again and does again
-   * what resolved lazily, would keep memory from growing: the tables, by
-   * the ABCs' weight with three eighths more for what the estimate misses, have
-   * come within a reserve of wasm memory's size, and the ABCs of domains
-   * not live weigh DEAD_Floor and enough that the live ones alone are not.
-   * The reserve is what a compile's garbage may take between collections,
-   * which grows with the ABCs compiled: 16 times the weight of the last 16
-   * added, a sixteenth to a half of memory; and what the rebuild itself
-   * takes, twice the live tables. wasm memory never shrinks, so
-   * a rebuild before that reclaims nothing it would grow for, and one that
-   * could not get below is no use.
-   */
-  wantsRebuild(): bool {
-    this.addWeights();
-    const size = (<u64>memory.size()) << 16;
-    let recent: u64 = 0;
-    const count = this.abcWeight.length;
-    for (let i = max(0, count - 16); i < count; i++) {
-      recent += this.abcWeight[i];
-    }
-
-    const reserve = min(size >> 1, max(size >> 4, recent << 4));
-    // A rebuild makes the live tables anew, and as much again in garbage
-    // as they grow, while the old are there still.
-    const live = this.liveWeight + this.keptWeight;
-    const rebuilding = 2 * (live + (live >> 2) + (live >> 3));
-    return (
-      full(live + this.deadWeight, reserve + rebuilding, size) &&
-      this.deadWeight >= DEAD_Floor &&
-      !full(live, reserve, size)
-    );
   }
 
   /** The live ABCs' weight and the others' still in the tables, as addWeights last added them up. */
@@ -639,26 +402,6 @@ export class Domain {
   deadWeight: u64 = 0;
   /** The weight of the log entries kept for evicted domains, which no rebuild frees. */
   keptWeight: u64 = 0;
-
-  /** Add up liveWeight and deadWeight. */
-  addWeights(): void {
-    let dead: u64 = 0;
-    let live: u64 = 0;
-    for (let i = 0; i < this.abcs.length; i++) {
-      if (this.abcs[i] === NO_ABC) {
-        continue;
-      }
-
-      if (this.isLive(<u32>i)) {
-        live += this.abcWeight[i];
-      } else {
-        dead += this.abcWeight[i];
-      }
-    }
-
-    this.liveWeight = live;
-    this.deadWeight = dead;
-  }
 
   /** Append entry `kind` of ABC `abc` to the log. */
   logged(kind: u8, abc: u32, a: u32, b: u32): void {
@@ -676,413 +419,6 @@ export class Domain {
     if (kind >= TRAITS_Instance && kind <= TRAITS_Activation && traits.param[t] === TYPE_Any) {
       this.logged(LOG_Resolve, traits.abc[t], kind, traits.owner[t]);
     }
-  }
-
-  /** The traits of ABC `abc` of `kind` and `owner`, as loggedResolve logged them, or -1. */
-  traitsOf(abc: u32, kind: u32, owner: u32): i32 {
-    if (kind === TRAITS_Instance) {
-      return this.classTraits[this.classStart[abc] + owner];
-    }
-
-    if (kind === TRAITS_Class) {
-      return this.classStatic[this.classStart[abc] + owner];
-    }
-
-    if (kind === TRAITS_Script) {
-      return <i32>this.scriptTraits[abc][owner];
-    }
-
-    return this.bodyTraits[abc][owner];
-  }
-
-  /**
-   * A new Domain with the live ABCs linked again, in the same order and
-   * at the same indices, and the log done again where it happened: each
-   * finding of a live domain recorded, and each lazy answer about a live
-   * ABC asked for again, with the same ABCs there as when it was first
-   * asked, so it is the same; an evicted domain's entries are kept for its
-   * revival. Nothing of the other ABCs is left in it, not even a name only
-   * they spelled. Each live ABC links as it did, since no ABC let go of was
-   * seen by a live one, and what a method compiles to depends only on the
-   * ABCs its domain sees and on those answers, so it compiles alike. Null,
-   * leaving this one as it was, if an ABC does not link again or an answer
-   * comes out an error, which would be a bug.
-   */
-  rebuilt(): Domain | null {
-    const fresh = new Domain();
-    fresh.apiVersion = this.apiVersion;
-    fresh.domainParent = this.domainParent;
-    fresh.domainDepth = this.domainDepth;
-    fresh.domainState = this.domainState;
-    fresh.domainEvicted = this.domainEvicted;
-    fresh.generation = this.generation + 1;
-    const count = <u32>this.abcs.length;
-    let next: u32 = 0;
-    for (let e = 0; e <= this.logKind.length; e++) {
-      const at = e < this.logKind.length ? this.logAt[e] : count;
-      for (; next < at; next++) {
-        if (!this.reattach(fresh, next)) {
-          return null;
-        }
-      }
-
-      if (e === this.logKind.length) {
-        break;
-      }
-
-      const kind = this.logKind[e];
-      const abc = this.logAbc[e];
-      const state =
-        kind === LOG_Found
-          ? max(
-              this.domainState[this.foundDomain[this.logA[e]]],
-              this.domainState[this.abcDomain[abc]],
-            )
-          : this.domainState[this.abcDomain[abc]];
-      if (kind === LOG_None || state === DOMAIN_Dropped) {
-        continue;
-      }
-
-      if (state === DOMAIN_Evicted || this.abcs[abc] === NO_ABC) {
-        fresh.keepEntry(this, e);
-        continue;
-      }
-
-      if (!fresh.replay(this, e)) {
-        return null;
-      }
-    }
-
-    return fresh;
-  }
-
-  /** Link ABC `index` of `this` again as `fresh`'s next, or keep its place if it is not live: false if it does not link. */
-  reattach(fresh: Domain, index: u32): bool {
-    const abc = this.abcs[index];
-    if (abc === NO_ABC || !this.isLive(index)) {
-      fresh.vacate(this.abcDomain[index]);
-      return true;
-    }
-
-    const buffer = this.abcBuffer[index];
-    fresh.buffers.push(buffer);
-    if (!fresh.attach(abc, buffer, this.abcDomain[index])) {
-      abc.error = 0;
-      return false;
-    }
-
-    // Its weight counts what compiling it added too.
-    fresh.abcWeight[index] = max(fresh.abcWeight[index], this.abcWeight[index]);
-    return true;
-  }
-
-  /** Do entry `e` of `from`'s log again, its ABC linked: false if it comes out an error. */
-  replay(from: Domain, e: i32): bool {
-    const kind = from.logKind[e];
-    const abc = from.logAbc[e];
-    if (kind === LOG_Found) {
-      const f = from.logA[e];
-      this.addFound(
-        from.foundDomain[f],
-        from.foundKind[f],
-        from.foundUri[f],
-        from.foundName[f],
-        from.foundAbc[f],
-        from.foundAsType[f] !== 0,
-      );
-      return true;
-    }
-
-    if (kind === LOG_Resolve) {
-      const t = this.traitsOf(abc, from.logA[e], from.logB[e]);
-      return t >= 0 && this.traits.resolve(this, <u32>t) === 0;
-    }
-
-    if (kind === LOG_Sign) {
-      return this.traits.sign(this, this.methodStart[abc] + from.logB[e]) === 0;
-    }
-
-    verifyMethods(this, abc);
-    return true;
-  }
-
-  /** Keep entry `e` of `from`'s log, not done, for when its domain is revived. */
-  keepEntry(from: Domain, e: i32): void {
-    let a = from.logA[e];
-    if (from.logKind[e] === LOG_Found) {
-      a = <u32>this.foundDomain.length;
-      this.foundDomain.push(from.foundDomain[from.logA[e]]);
-      this.foundKind.push(from.foundKind[from.logA[e]]);
-      this.foundUri.push(from.foundUri[from.logA[e]]);
-      this.foundName.push(from.foundName[from.logA[e]]);
-      this.foundAbc.push(from.foundAbc[from.logA[e]]);
-      this.foundAsType.push(from.foundAsType[from.logA[e]]);
-    }
-
-    this.keptWeight += KEPT_Weight;
-    this.logKind.push(from.logKind[e]);
-    this.logAt.push(from.logAt[e]);
-    this.logAbc.push(from.logAbc[e]);
-    this.logA.push(a);
-    this.logB.push(from.logB[e]);
-  }
-
-  /** Link ABC `index`'s classes to their bases and interfaces; false after recording the error. */
-  link(index: u32): bool {
-    const abc = this.abcs[index];
-    const first = <u32>this.classAbc.length;
-    this.classStart.push(first);
-    for (let i: u32 = 0; i < abc.classCount; i++) {
-      this.classAbc.push(index);
-      this.classInstance.push(i);
-      this.classBase.push(-1);
-      this.classFlags.push(abc.instanceFlags[i]);
-      this.classTraits.push(-1);
-      this.classStatic.push(-1);
-    }
-
-    const ids = this.abcNs[index];
-
-    for (let i: u32 = 0; i < abc.classCount; i++) {
-      const id = first + i;
-      const flags = abc.instanceFlags[i];
-      const baseName = abc.instanceSuper[i];
-      if (baseName) {
-        const base = this.resolveType(index, baseName);
-        if (base < 0) {
-          return abc.fail(-base);
-        }
-
-        if (
-          this.classFlags[base] & C.INSTANCE_Final ||
-          base === this.classClass ||
-          (base === this.functionClass && !abc.builtin)
-        ) {
-          return abc.fail(C.kCannotExtendFinalClass);
-        }
-
-        if (this.classFlags[base] & C.INSTANCE_Interface) {
-          return abc.fail(C.kCannotExtendError);
-        }
-
-        this.classBase[id] = base;
-      }
-
-      const interfaces = <u32>this.traits.interfaceList.length;
-      const last = abc.instanceInterfaceStart[i + 1];
-      for (let j = abc.instanceInterfaceStart[i]; j < last; j++) {
-        const t = this.resolveType(index, abc.interfaces[j]);
-        if (t < 0) {
-          this.traits.interfaceList.length = interfaces;
-          return abc.fail(-t);
-        }
-
-        if (!(this.classFlags[t] & C.INSTANCE_Interface)) {
-          this.traits.interfaceList.length = interfaces;
-          return abc.fail(C.kCannotImplementError);
-        }
-
-        this.traits.interfaceList.push(<u32>this.classTraits[t]);
-      }
-
-      if (flags & C.INSTANCE_Interface && baseName) {
-        return abc.fail(C.kCannotExtendError);
-      }
-
-      // As avmplus' AvmCore: the first builtin class without a base is Object.
-      if (!baseName && abc.builtin && !this.hasBuiltins && this.objectClass < 0) {
-        this.objectClass = <i32>id;
-      }
-
-      const base = this.classBase[id];
-      const protectedNs =
-        flags & C.INSTANCE_ProtectedNs ? <i32>ids[abc.instanceProtectedNs[i]] : -1;
-      const t = this.traits.create(
-        TRAITS_Instance,
-        index,
-        i,
-        base >= 0 ? this.classTraits[base] : -1,
-        protectedNs,
-        abc.instanceTraitStart[i],
-        abc.instanceTraitStart[i + 1],
-      );
-      this.traits.isInterface[t] = flags & C.INSTANCE_Interface ? 1 : 0;
-      this.traits.interfaceStart[t] = interfaces;
-      this.traits.interfaceEnd[t] = this.traits.interfaceList.length;
-      this.classTraits[id] = t;
-      const error = this.traits.layout(this, t);
-      if (error) {
-        return abc.fail(error);
-      }
-
-      this.bindMethods(t, abc.instanceInit[i], (flags & C.INSTANCE_Final) !== 0);
-
-      this.nameInstance(index, i);
-    }
-
-    if (abc.builtin) {
-      const floatType = this.builtinType("float");
-      if (floatType >= 0) {
-        this.floatType = floatType;
-      }
-    }
-
-    // As AvmCore's first builtin pool: its classes include the special ones.
-    if (abc.builtin && !this.hasBuiltins) {
-      this.hasBuiltins = true;
-      this.classClass = this.findBuiltin("Class");
-      this.functionClass = this.findBuiltin("Function");
-      this.voidClass = <i32>this.classAbc.length;
-      this.classAbc.push(index);
-      this.classInstance.push(0xffffffff);
-      this.classBase.push(-1);
-      this.classFlags.push(C.INSTANCE_Final);
-      this.voidType = <i32>this.traits.create(TRAITS_Void, index, 0, -1, -1, 0, 0);
-      this.nullType = <i32>this.traits.create(TRAITS_Null, index, 0, -1, -1, 0, 0);
-      this.classTraits.push(this.voidType);
-      this.classStatic.push(-1);
-      this.findBuiltinTypes();
-      const empty = this.internNamespace(NS_Public, this.internText(""));
-      this.nameType(empty, this.internText("void"), API_AllVersions, this.voidClass, -1, 0);
-      this.transientName = this.internText("Transient");
-      this.versionName = this.internText("Version");
-      this.nativeName = this.internText("native");
-      this.apiName = this.internText("API");
-    }
-
-    return this.layoutStatics(index) && this.layoutScripts(index) && this.layoutActivations(index);
-  }
-
-  /** Lay out each class object's traits, whose base is Class. */
-  layoutStatics(index: u32): bool {
-    const abc = this.abcs[index];
-    const first = this.classStart[index];
-    const classTraits = this.classClass >= 0 ? this.classTraits[this.classClass] : -1;
-    for (let i: u32 = 0; i < abc.classCount; i++) {
-      const t = this.traits.create(
-        TRAITS_Class,
-        index,
-        i,
-        classTraits,
-        this.traits.protectedNs[this.classTraits[first + i]],
-        abc.classTraitStart[i],
-        abc.classTraitStart[i + 1],
-      );
-      this.classStatic[first + i] = t;
-      const error = this.traits.layout(this, t);
-      if (error) {
-        return abc.fail(error);
-      }
-
-      this.bindMethods(t, abc.classInit[i], false);
-    }
-
-    return true;
-  }
-
-  /** Lay out each script's global object traits, whose base is Object. */
-  layoutScripts(index: u32): bool {
-    const abc = this.abcs[index];
-    const objectTraits = this.objectClass >= 0 ? this.classTraits[this.objectClass] : -1;
-    const scripts = new StaticArray<u32>(abc.scriptCount);
-    this.scriptTraits.push(scripts);
-    for (let s: u32 = 0; s < abc.scriptCount; s++) {
-      const t = this.traits.create(
-        TRAITS_Script,
-        index,
-        s,
-        objectTraits,
-        -1,
-        abc.scriptTraitStart[s],
-        abc.scriptTraitStart[s + 1],
-      );
-      scripts[s] = t;
-      this.traits.scope[t] = new Scope();
-      const error = this.traits.layout(this, t);
-      if (error) {
-        return abc.fail(error);
-      }
-
-      this.bindMethods(t, abc.scriptInit[s], false);
-    }
-
-    return true;
-  }
-
-  /** Lay out activation traits, for bodies that need an activation or declare traits. */
-  layoutActivations(index: u32): bool {
-    const abc = this.abcs[index];
-    const bodies = new StaticArray<i32>(abc.bodyCount);
-    for (let b: u32 = 0; b < abc.bodyCount; b++) {
-      const first = abc.bodyTraitStart[b];
-      const end = abc.bodyTraitStart[b + 1];
-      const flags = abc.methodFlags[abc.bodyMethod[b]];
-      bodies[b] = -1;
-      if (flags & C.METHOD_NeedActivation || end > first) {
-        const t = this.traits.create(TRAITS_Activation, index, b, -1, -1, first, end);
-        bodies[b] = t;
-        const error = this.traits.layout(this, t);
-        if (error) {
-          return abc.fail(error);
-        }
-
-        this.bindMethods(t, -1, false);
-      }
-    }
-
-    this.bodyTraits.push(bodies);
-    return true;
-  }
-
-  /**
-   * As MethodInfo::makeMethodOf, after t's members bind: its methods,
-   * getters, setters and `init` (-1 for none) become t's; `final` for a
-   * final class, whose methods are all final.
-   */
-  bindMethods(t: u32, init: i32, final: bool): void {
-    const traits = this.traits;
-    const index = traits.abc[t];
-    const abc = this.abcs[index];
-    const methods = this.methodStart[index];
-    for (let i = traits.first[t]; i < traits.end[t]; i++) {
-      const tag = abc.traitTag[i];
-      const kind = tag & 0x0f;
-      if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
-        const m = methods + abc.traitIndex[i];
-        traits.methodTraits[m] = t;
-        traits.methodVirtual[m] = 1;
-        traits.methodFinal[m] = tag & C.ATTR_Final || final ? 1 : 0;
-      }
-    }
-
-    if (init >= 0) {
-      traits.methodTraits[methods + init] = t;
-      traits.init[t] = methods + init;
-    }
-  }
-
-  /** The types AvmCore's builtin traits hold, from the first builtin ABC. */
-  findBuiltinTypes(): void {
-    this.numberType = this.builtinType("Number");
-    this.intType = this.builtinType("int");
-    this.uintType = this.builtinType("uint");
-    this.booleanType = this.builtinType("Boolean");
-    this.stringType = this.builtinType("String");
-    this.namespaceType = this.builtinType("Namespace");
-    this.xmlType = this.builtinType("XML");
-    this.xmlListType = this.builtinType("XMLList");
-    this.qnameType = this.builtinType("QName");
-    this.classType = this.builtinType("Class");
-    this.vectorClass = this.findBuiltin("Vector");
-    this.vectorObjectType = this.builtinType("Vector$object");
-    this.vectorIntType = this.builtinType("Vector$int");
-    this.vectorUintType = this.builtinType("Vector$uint");
-    this.vectorDoubleType = this.builtinType("Vector$double");
-    this.arrayType = this.builtinType("Array");
-    this.functionType = this.builtinType("Function");
-    const math = this.findBuiltin("Math");
-    this.mathStatic = math < 0 ? -1 : this.classStatic[math];
-    this.builtinAbc = <i32>(this.abcs.length - 1);
   }
 
   /** Whether the machine type always holds a value: int, uint, Number and Boolean. */
@@ -1125,7 +461,7 @@ export class Domain {
   checkTypeName(index: u32, mn: u32): i32 {
     const pool = this.abcs[index].pool;
     const isTypeName = pool.mnKind[mn] === C.CONSTANT_TypeName;
-    const c = this.resolveType(index, isTypeName ? pool.mnA[mn] : mn);
+    const c = resolveType(this, index, isTypeName ? pool.mnA[mn] : mn);
     if (c < 0 && c !== -C.kIllegalVoidError) {
       this.typeError = -c;
       return -2;
@@ -1142,7 +478,7 @@ export class Domain {
       return param;
     }
 
-    const t = c >= 0 ? this.parameterized(c, param) : -1;
+    const t = c >= 0 ? parameterized(this, c, param) : -1;
     return t < 0 ? TYPE_Any : t;
   }
 
@@ -1526,112 +862,6 @@ export class Domain {
   }
 
   /**
-   * As PoolObject::resolveTypeName for a slot or parameter type: TYPE_Any
-   * for index 0, or the type; below TYPE_Any on failure, with typeError set.
-   */
-  resolveTypeId(index: u32, mn: u32, allowVoid: bool): i32 {
-    if (mn === 0) {
-      return TYPE_Any;
-    }
-
-    const pool = this.abcs[index].pool;
-    if (mn >= pool.multinameCount) {
-      this.typeError = C.kCpoolIndexRangeError;
-      return -2;
-    }
-
-    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-      const base = this.resolveType(index, pool.mnA[mn]);
-      if (base === -C.kAmbiguousBindingError) {
-        this.typeError = C.kAmbiguousBindingError;
-        return -2;
-      }
-
-      const param = this.resolveTypeId(index, pool.mnB[mn], false);
-      if (param < TYPE_Any) {
-        return param;
-      }
-
-      const t = base >= 0 ? this.parameterized(base, param) : -1;
-      if (t < 0) {
-        this.typeError = C.kClassNotFoundError;
-        return -2;
-      }
-
-      return t;
-    }
-
-    const c = this.resolveType(index, mn);
-    if (c === -C.kIllegalVoidError) {
-      if (allowVoid) {
-        return this.voidType;
-      }
-
-      this.typeError = C.kIllegalVoidError;
-      return -2;
-    }
-
-    if (c < 0) {
-      this.typeError = -c;
-      return -2;
-    }
-
-    return this.classTraits[c];
-  }
-
-  /**
-   * As PoolObject::resolveParameterizedType: Vector.<T>, which avmplus has
-   * as its own classes for int, uint, Number and *, and otherwise makes as
-   * a subclass of Vector.<*>; -1 if `base` is not Vector.
-   */
-  parameterized(base: i32, param: i32): i32 {
-    if (base !== this.vectorClass || base < 0) {
-      return -1;
-    }
-
-    const bt = this.builtin(param);
-    if (bt === BUILTIN_Any) {
-      return this.vectorObjectType;
-    }
-
-    if (bt === BUILTIN_Int) {
-      return this.vectorIntType;
-    }
-
-    if (bt === BUILTIN_Uint) {
-      return this.vectorUintType;
-    }
-
-    if (bt === BUILTIN_Number) {
-      return this.vectorDoubleType;
-    }
-
-    if (this.vectorOf.has(param)) {
-      return this.vectorOf.get(param);
-    }
-
-    // As Traits::newParameterizedITraits: a subclass of Vector.<*> with no members of its own.
-    const traits = this.traits;
-    const objects = <u32>this.vectorObjectType;
-    const t = traits.create(
-      TRAITS_Instance,
-      traits.abc[objects],
-      traits.owner[objects],
-      <i32>objects,
-      -1,
-      0,
-      0,
-    );
-    traits.param[t] = param;
-    traits.slotCount[t] = traits.slotCount[objects];
-    traits.methodCount[t] = traits.methodCount[objects];
-    traits.memberStart[t] = traits.memberTraits.length;
-    traits.memberEnd[t] = traits.memberTraits.length;
-    this.vectorOf.set(param, <i32>t);
-    return <i32>t;
-  }
-
-  /**
    * As PoolObject::getLegalDefaultValue: whether constant `value` of `kind`
    * of ABC `index` may be the default of a slot or parameter of `type`; 0,
    * or the VerifyError.
@@ -1690,186 +920,6 @@ export class Domain {
     }
 
     return legalDefault(this.builtin(type), kind, number) ? 0 : C.kIllegalDefaultValue;
-  }
-
-  /**
-   * As PoolObject::resolveTypeName for a base class or interface: the class
-   * id, or minus the error: 1014 if nothing matches, 1008 if two classes do,
-   * 1022 for void.
-   */
-  resolveType(index: u32, mn: u32): i32 {
-    const abc = this.abcs[index];
-    const pool = abc.pool;
-    const kind = pool.mnKind[mn];
-    if (kind === C.CONSTANT_TypeName) {
-      const base = this.resolveType(index, pool.mnA[mn]);
-      const param = pool.mnB[mn];
-      if (base >= 0 && param) {
-        const t = this.resolveType(index, param);
-        if (t < 0) {
-          return t;
-        }
-      }
-
-      return base;
-    }
-
-    const strings = this.abcString[index];
-    const ids = this.abcNs[index];
-    const versions = this.abcNsVersion[index];
-    const nameIndex = pool.mnB[mn];
-    let found: i32 = -1;
-    if (kind === C.CONSTANT_Qname && pool.mnA[mn] !== 0 && nameIndex !== 0) {
-      const ns = pool.mnA[mn];
-      found = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
-    } else if (kind === C.CONSTANT_Multiname && nameIndex !== 0) {
-      const set = pool.mnA[mn];
-      const last = pool.nsSetStart[set + 1];
-      for (let m = pool.nsSetStart[set]; m < last; m++) {
-        const ns = pool.nsSetMembers[m];
-        const t = this.findType(index, ids[ns], strings[nameIndex], versions[ns]);
-        if (t >= 0 && found >= 0 && t !== found) {
-          return -C.kAmbiguousBindingError;
-        }
-
-        if (t >= 0) {
-          found = t;
-        }
-      }
-    }
-
-    if (found < 0) {
-      return -C.kClassNotFoundError;
-    }
-
-    return found === this.voidClass ? -C.kIllegalVoidError : found;
-  }
-
-  /**
-   * As DomainMgr::findTraitsInPoolByNameAndNS for ABC `index`: a class a
-   * script defines, else one of the ABC's own; -1 if none.
-   */
-  findType(index: u32, ns: u32, name: u32, version: u8): i32 {
-    const found = this.findTypeOf(ns, name, version, -1, this.abcDomain[index]);
-    return found >= 0 ? found : this.findTypeOf(ns, name, version, this.abcOwner[index]);
-  }
-
-  /** A class name's class, of ABC `owner`'s own or else one `domain` sees; -1 if none. */
-  findTypeOf(ns: u32, name: u32, version: u8, owner: i32, domain: u32 = 0): i32 {
-    if (owner < 0 && this.domainParent.length > 1) {
-      return this.findTypeIn(ns, name, version, domain);
-    }
-
-    const hash = hashPair(ns, name);
-    const table = this.types;
-    let slot = table.start(hash);
-    while (true) {
-      const id = table.at(slot);
-      if (id < 0) {
-        return -1;
-      }
-
-      if (
-        this.typeNs[id] === ns &&
-        this.typeName[id] === name &&
-        this.typeVersion[id] <= version &&
-        this.typeOwner[id] === owner
-      ) {
-        return <i32>this.typeClass[id];
-      }
-
-      slot = table.next(slot);
-    }
-  }
-
-  nameType(ns: u32, name: u32, version: u8, id: i32, owner: i32, domain: u32): void {
-    const type = <u32>this.typeNs.length;
-    this.typeDomain.push(domain);
-    this.typeNs.push(ns);
-    this.typeName.push(name);
-    this.typeVersion.push(version);
-    this.typeClass.push(<u32>id);
-    this.typeOwner.push(owner);
-    this.types.insert(hashPair(ns, name), type);
-  }
-
-  /** As DomainMgr::addNamedInstanceTraits: instance i's name, unless something is already found by it. */
-  nameInstance(index: u32, i: u32): void {
-    const abc = this.abcs[index];
-    const pool = abc.pool;
-    let mn = abc.instanceName[i];
-    if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-      mn = pool.mnA[mn];
-    }
-
-    let ns = pool.mnA[mn];
-    if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
-      ns = pool.nsSetMembers[pool.nsSetStart[ns]];
-    }
-
-    const nsId = this.abcNs[index][ns];
-    const version = this.abcNsVersion[index][ns];
-    const name = this.abcString[index][pool.mnB[mn]];
-    if (this.findType(index, nsId, name, version) < 0) {
-      this.nameType(
-        nsId,
-        name,
-        version,
-        <i32>(this.classStart[index] + i),
-        this.abcOwner[index],
-        this.abcDomain[index],
-      );
-    }
-  }
-
-  /**
-   * As AbcParser::addNamedTraits: every class a script of ABC `index`
-   * defines, visible to all later ABCs unless the domain has the name already.
-   */
-  addClassNames(index: u32): void {
-    const abc = this.abcs[index];
-    const pool = abc.pool;
-    const ids = this.abcNs[index];
-    const versions = this.abcNsVersion[index];
-    const strings = this.abcString[index];
-    const first = abc.scriptTraitStart[0];
-    const end = abc.scriptTraitStart[abc.scriptCount];
-    for (let t = first; t < end; t++) {
-      if ((abc.traitTag[t] & 0x0f) !== C.TRAIT_Class) {
-        continue;
-      }
-
-      let mn = abc.traitName[t];
-      if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
-        mn = pool.mnA[mn];
-      }
-
-      let ns = pool.mnA[mn];
-      let version = versions[ns];
-      if (pool.mnKind[mn] === C.CONSTANT_Multiname) {
-        const set = ns;
-        const last = pool.nsSetStart[set + 1];
-        ns = pool.nsSetMembers[pool.nsSetStart[set]];
-        version = API_Internal;
-        for (let m = pool.nsSetStart[set]; m < last; m++) {
-          const v = versions[pool.nsSetMembers[m]];
-          if (v < version) {
-            version = v;
-          }
-        }
-      }
-
-      const nsId = ids[ns];
-      const name = strings[pool.mnB[mn]];
-      const domain = this.abcDomain[index];
-      if (
-        this.nsType[nsId] !== NS_Private &&
-        this.findTypeOf(nsId, name, version, -1, domain) < 0
-      ) {
-        const id = this.classStart[index] + abc.traitIndex[t];
-        this.nameType(nsId, name, version, <i32>id, -1, domain);
-      }
-    }
   }
 
   findText(text: string): i32 {
@@ -1994,67 +1044,6 @@ export class Domain {
     }
   }
 
-  /** As AbcParser::parseCpool: each namespace's interned id and API version. */
-  addNamespaces(abc: Abc, base: usize, strings: StaticArray<u32>): void {
-    const pool = abc.pool;
-    const count = pool.nsCount;
-    const ids = new StaticArray<u32>(count);
-    const versions = new StaticArray<u8>(count);
-    const marks = new StaticArray<i32>(count);
-
-    // A builtin ABC's marked URIs are versioned before any of its namespaces
-    // get a version, as the player registers them before parsing.
-    let highestMark: i32 = -1;
-    for (let i: u32 = 1; i < count; i++) {
-      const index = pool.nsName[i];
-      const mark = index
-        ? versionMark(base, pool.stringStart[index], pool.stringLength[index])
-        : -1;
-      marks[i] = mark;
-      if (mark > highestMark) {
-        highestMark = mark;
-      }
-
-      if (abc.builtin && mark >= 0 && namespaceType(pool.nsKind[i]) === NS_Public) {
-        const uri = this.internString(base + pool.stringStart[index], pool.stringLength[index] - 3);
-        this.versioned[uri] = 1;
-      }
-    }
-
-    for (let i: u32 = 1; i < count; i++) {
-      const type = namespaceType(pool.nsKind[i]);
-      const index = pool.nsName[i];
-      const mark = marks[i];
-      let uri = index ? strings[index] : URI_None;
-      let version = API_AllVersions;
-      if (mark >= 0) {
-        uri = this.internString(base + pool.stringStart[index], pool.stringLength[index] - 3);
-        version = <u8>mark;
-      }
-
-      if (type === NS_Private) {
-        version = API_AllVersions;
-      } else if (index && abc.builtin) {
-        if (
-          (mark < 0 && type === NS_Public && this.versioned[uri]) ||
-          (mark >= API_FirstInternalMark && mark === highestMark)
-        ) {
-          version = API_Internal;
-        }
-      } else if (index && type === NS_Public) {
-        version = this.apiVersion;
-      }
-
-      ids[i] = this.internNamespace(type, uri);
-      // As AvmCore::newNamespace: in the domain's series, so that a lookup
-      // compares versions of the series its bindings have.
-      versions[i] = this.activeVersion(version);
-    }
-
-    this.abcNs.push(ids);
-    this.abcNsVersion.push(versions);
-  }
-
   /**
    * Every script trait of ABC `index`, as AbcParser::addNamedScript binds it:
    * under its name's first namespace, with the earliest of their versions.
@@ -2092,29 +1081,6 @@ export class Domain {
         this.bind(ids[first], name, version, index, script, t);
       }
     }
-  }
-
-  /**
-   * As kApiVersionSeriesTransfer: a version of the other series becomes the
-   * first later one of the domain's, which for Flash Player means AIR-only
-   * versions become VM-internal.
-   */
-  private activeVersion(version: u8): u8 {
-    const air = this.apiVersion !== API_AllVersions && isAir(this.apiVersion);
-    if (version === API_AllVersions || version >= API_Internal || isAir(version) === air) {
-      return version;
-    }
-
-    if (!air) {
-      return API_Internal;
-    }
-
-    let v = version + 1;
-    while (!isAir(v)) {
-      v++;
-    }
-
-    return v;
   }
 
   /** A new domain, a child of `parent`. */
@@ -2345,57 +1311,7 @@ export class Domain {
   }
 }
 
-/**
- * Whether an API version belongs to AIR's series: versions alternate between
- * the series, FP_10_0, FP_10_0_32 and FP_10_1 aside, from FP_10_2 on.
- */
-function isAir(version: u8): bool {
-  if (version >= 10) {
-    return (version & 1) === 1;
-  }
-
-  return version !== API_FP_10_0 && version !== 5 && version !== 7;
-}
-
 /** *, Object and void are all represented as atoms. */
 function isAtom(bt: u8): bool {
   return bt === BUILTIN_Any || bt === BUILTIN_Object || bt === BUILTIN_Void;
-}
-
-function namespaceType(kind: u8): u8 {
-  switch (kind) {
-    case C.CONSTANT_PackageInternalNs:
-      return NS_PackageInternal;
-    case C.CONSTANT_ProtectedNamespace:
-      return NS_Protected;
-    case C.CONSTANT_ExplicitNamespace:
-      return NS_Explicit;
-    case C.CONSTANT_StaticProtectedNs:
-      return NS_StaticProtected;
-    case C.CONSTANT_PrivateNs:
-      return NS_Private;
-    default:
-      return NS_Public;
-  }
-}
-
-/**
- * The API version a string's last character marks, or -1. The marks are
- * U+E294 to U+E2C8, three bytes in UTF-8.
- */
-function versionMark(base: usize, start: u32, length: u32): i32 {
-  if (length < 3) {
-    return -1;
-  }
-
-  const p = base + start + length - 3;
-  const b0 = <u32>load<u8>(p);
-  const b1 = <u32>load<u8>(p + 1);
-  const b2 = <u32>load<u8>(p + 2);
-  if ((b0 & 0xf0) !== 0xe0 || (b1 & 0xc0) !== 0x80 || (b2 & 0xc0) !== 0x80) {
-    return -1;
-  }
-
-  const c = ((b0 & 0x0f) << 12) | ((b1 & 0x3f) << 6) | (b2 & 0x3f);
-  return c >= API_MinMark && c < API_MinMark + API_Count ? <i32>(c - API_MinMark) : -1;
 }
