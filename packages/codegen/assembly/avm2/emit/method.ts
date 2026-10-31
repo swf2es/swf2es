@@ -11,16 +11,16 @@ import { Output } from "../../output";
 import { Abc } from "../abc/abc";
 import * as C from "../abc/constants";
 import * as ops from "../abc/opcodes";
-import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
+import { IR_Coerce, Ir } from "../ir/ir";
 import { Domain } from "../link/domain";
 import { BUILTIN_Float, BUILTIN_Int, BUILTIN_Number, BUILTIN_Uint, TYPE_Any } from "../link/traits";
-import { CONSTANT, flowCopies, NONE, setsLocal } from "./copies";
+import { block } from "./blocks";
+import { CONSTANT, flowCopies, NONE } from "./copies";
 import { floatLocals } from "./floats";
-import { instruction } from "./instructions";
 import { constant, poolString, typeRef } from "./refs";
 import { SourceMap } from "./sourcemap";
-import { analyze, branchTo, conditional, enclosed, node, terminates } from "./structure";
-import { conversionType, convert, isStaticInit, keeps } from "./values";
+import { analyze, branchTo, node } from "./structure";
+import { convert, isStaticInit } from "./values";
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
 export const MAX_NESTING: u32 = 500;
@@ -231,7 +231,7 @@ export class MethodEmitter {
     }
 
     for (let k: u32 = 0; k < ir.blockCount; k++) {
-      this.block(k);
+      block(this, k);
     }
 
     // The verifier proved every block ends; a dispatcher still needs an end.
@@ -513,284 +513,6 @@ export class MethodEmitter {
     out.text(";\n");
   }
 
-  /** Write block k: its case label, then its instructions, following register types. */
-  block(k: u32): void {
-    const out = this.out;
-    out.text("case ");
-    out.uint(k);
-    out.text(":\n");
-    this.blockBody(k);
-  }
-
-  /** Block k's instructions, following register types from its entry state. */
-  blockBody(k: u32): void {
-    const out = this.out;
-    const ir = this.ir;
-    const entry = k * ir.frameSize;
-    this.clearRaw(0);
-    this.resetEnd = -1;
-    for (let r: u32 = 0; r < ir.frameSize; r++) {
-      this.regType[r] = ir.entryType[entry + r];
-    }
-
-    this.scopeDepth = ir.blockScope[k];
-    for (let d: u32 = 0; d < this.scopeDepth; d++) {
-      this.scopeWith[d] = (ir.entryFlags[entry + ir.localCount + d] & 2) >> 1;
-    }
-
-    // A block may be entered from any region, so it sets its own first.
-    const handled = ir.handlerCount > 0;
-    this.region = -1;
-    const last = k + 1 < ir.blockCount ? ir.blockFirst[k + 1] : ir.count;
-    const stack = <i32>(ir.localCount + ir.maxScope);
-    // Every way in wrote the copies the block does not know. A block written
-    // in place has one way in, the code before it, and keeps what that
-    // checked; avmplus' JIT knows no value as it was made from there, a
-    // block in place or not.
-    const base = <i32>ir.localCount;
-    const slots = <i32>ir.frameSize - base;
-    const row = <i32>k * slots;
-    for (let s = 0; s < slots; s++) {
-      this.copyOf[base + s] = this.copyIn[row + s];
-    }
-
-    this.recount();
-
-    for (let r: u32 = 0; r < ir.frameSize; r++) {
-      this.promoted[r] = 0;
-    }
-
-    if (!this.inPlace) {
-      for (let r: u32 = 0; r < ir.frameSize; r++) {
-        this.checked[r] = 0;
-      }
-    }
-
-    this.inPlace = false;
-    this.pendingNull = -1;
-    this.file = this.blockFile[k];
-    this.line = this.blockLine[k];
-    this.mark();
-    for (let i = ir.blockFirst[k]; i < last; i++) {
-      const op = ir.op[i];
-      const dst = ir.dst[i];
-      // A branch's code written in place is another block's: this one's end, for each instruction.
-      this.blockLast = last;
-      const promotes = this.promotes(i);
-      // What the instruction writes, other than stack registers, is copied
-      // first by the stack registers copying it, but for those it takes:
-      // it reads them before it writes. And what a branch leaves on the
-      // stack is written, for the block it goes to.
-      const frame = <i32>ir.frameSize;
-      const pops = this.stackDiscipline(op) && ir.srcCount[i] > 0 && ir.src[i] >= stack;
-      if (dst >= 0 && !this.keptAt(i, this.regType[dst])) {
-        // Above a push nothing is live to copy it.
-        const push = dst >= stack && this.stackDiscipline(op);
-        this.copyAll(dst, pops ? ir.src[i] : push ? dst : frame);
-      }
-
-      if (op === ops.OP_hasnext2) {
-        this.copyAll(<i32>ir.a[i], frame);
-        this.copyAll(<i32>ir.b[i], frame);
-      } else if (op === ops.OP_popscope || op === ops.OP_swap) {
-        this.copyAll(ir.src[i], frame);
-      } else if (conditional(op)) {
-        this.boxRaw(ir.src[i]);
-        this.copyFor(ir.a[i], ir.src[i]);
-      } else if (op === ops.OP_lookupswitch) {
-        this.boxRaw(ir.src[i]);
-        this.copyFor(ir.a[i], ir.src[i]);
-        for (let c: u32 = 0; c <= <u32>ir.c[i]; c++) {
-          this.copyFor(ir.cases[ir.b[i] + c], ir.src[i]);
-        }
-      } else if (op === ops.OP_jump) {
-        this.boxRaw(frame);
-        this.copyFor(ir.a[i], frame);
-      }
-
-      // A value the next instruction only moves to a local or scope goes
-      // there straight, if the instruction assigns it; one it duplicates to
-      // set a local goes to the local, and stays on the stack as its copy.
-      // Conversions between that change nothing write nothing either.
-      this.target = -1;
-      let moves: u32 = 0;
-      let duplicated = false;
-      if (dst >= stack && op !== ops.OP_hasnext2) {
-        let n = i + 1;
-        let type = ir.type[i];
-        while (n < last) {
-          if (
-            this.domain.floatType >= 0 &&
-            type === this.domain.floatType &&
-            this.debugRecord(ir.op[n])
-          ) {
-            n++;
-          } else if (ir.dst[n] === dst && this.keptAt(n, type)) {
-            type = ir.type[n++];
-          } else {
-            break;
-          }
-        }
-
-        if (n < last && ir.src[n] === dst) {
-          const next = ir.op[n];
-          if (setsLocal(next) || next === ops.OP_pushscope) {
-            moves = n - i;
-          } else if (next === ops.OP_dup) {
-            let set = n + 1;
-            while (set < last && this.domain.floatType >= 0 && type === this.domain.floatType) {
-              if (this.debugRecord(ir.op[set])) {
-                set++;
-              } else if (ir.dst[set] === dst + 1 && this.keptAt(set, type)) {
-                type = ir.type[set++];
-              } else {
-                break;
-              }
-            }
-
-            if (
-              set < last &&
-              setsLocal(ir.op[set]) &&
-              ir.src[set] === dst + 1 &&
-              (set === n + 1 || this.unboxedLocal(ir.dst[set]))
-            ) {
-              moves = set - i;
-              duplicated = true;
-            }
-          }
-        }
-      }
-
-      if (moves) {
-        // After them, the stack is as far as dst: what is there on, the
-        // instruction takes.
-        this.target = ir.dst[i + moves];
-        this.copyAll(this.target, dst);
-      }
-
-      if (handled) {
-        const region = this.regionOf(ir.pc[i]);
-        if (region !== this.region) {
-          out.text("t = ");
-          out.int(region);
-          out.text(";\n");
-          this.region = region;
-          if (this.structured && !enclosed(this, region)) {
-            this.unenclosed = true;
-          }
-        }
-      }
-
-      // A branch's own target, written in place, sinks its own values: only
-      // an instruction given a local here can have assigned it.
-      const sinking = this.target;
-      this.kept = false;
-      this.sunk = false;
-      instruction(this, i);
-      if (this.pendingNull >= 0 && i >= this.pendingUntil) {
-        this.unpend();
-      }
-
-      this.unchecks(i);
-      this.target = -1;
-      if (conditional(op) || op === ops.OP_jump || op === ops.OP_lookupswitch) {
-        this.clearRaw(0);
-      } else if (op === ops.OP_swap) {
-        this.rawFloat[ir.src[i]] = 0;
-        this.rawFloat[ir.src[i] + 1] = 0;
-      } else if (dst >= stack && !this.kept) {
-        this.rawFloat[dst] = this.rawResult ? 1 : 0;
-        if (this.rawResult) {
-          this.rawTop = max(this.rawTop, dst + 1);
-        }
-      }
-
-      if (op === ops.OP_swap) {
-        // Its one destination is the new top, whose type the IR gives; the
-        // register below it now holds what the top did, and its type.
-        const x = ir.src[i];
-        this.regType[x] = this.regType[x + 1];
-      }
-
-      if (dst >= 0) {
-        this.regType[dst] = ir.type[i];
-        this.promoted[dst] = promotes ? 1 : 0;
-      }
-
-      if (op === ops.OP_swap) {
-        this.promoted[ir.src[i]] = 0;
-        this.promoted[ir.src[i] + 1] = 0;
-      } else if (op === ops.OP_hasnext2) {
-        this.promoted[ir.a[i]] = 0;
-        this.promoted[ir.b[i]] = 0;
-      }
-
-      if (this.target >= 0) {
-        this.promoted[this.target] = 0;
-      }
-
-      if (sinking >= 0 && this.sunk) {
-        // The setlocal or pushscope is written: its stack register was
-        // never set, and the stack is as far as it, or as far as the copy.
-        for (let j = i + 1; j <= i + moves; j++) {
-          const to = ir.dst[j];
-          if (to >= 0) {
-            this.promoted[to] = this.promotes(j) ? 1 : 0;
-            this.regType[to] = ir.type[j];
-          } else if (ir.op[j] === ops.OP_debugfile) {
-            this.file = <i32>ir.a[j];
-          } else if (ir.op[j] === ops.OP_debugline) {
-            this.line = ir.a[j];
-            this.mark();
-          }
-        }
-
-        i += moves;
-        this.setCopy(sinking, NONE);
-        if (ir.op[i] === ops.OP_pushscope) {
-          this.scopeWith[this.scopeDepth++] = 0;
-        }
-
-        if (duplicated) {
-          this.setCopy(dst, sinking);
-          this.uncopy(dst + 1);
-        } else {
-          this.uncopy(dst);
-        }
-
-        continue;
-      }
-
-      if (conditional(op) || op === ops.OP_lookupswitch) {
-        // What the branch took is gone.
-        this.uncopy(ir.src[i]);
-      } else if (op === ops.OP_swap) {
-        this.setCopy(ir.src[i], NONE);
-        this.setCopy(ir.src[i] + 1, NONE);
-      } else if (op === ops.OP_popscope) {
-        this.setCopy(ir.src[i], NONE);
-      } else {
-        if (dst >= 0 && !this.kept) {
-          this.setCopy(dst, NONE);
-        }
-
-        // What is above the stack now is gone.
-        if (this.stackDiscipline(op)) {
-          if (dst >= stack) {
-            this.uncopy(dst + 1);
-          } else if (pops) {
-            this.uncopy(ir.src[i]);
-          }
-        }
-      }
-    }
-
-    if (!terminates(this, k) && k + 1 < ir.blockCount) {
-      this.boxRaw(<i32>ir.frameSize);
-      this.copyFor(k + 1, <i32>ir.frameSize);
-    }
-  }
-
   /**
    * Whether instruction i, reading register `read`, only makes its
    * destination a copy, as flowCopies knows it: a getlocal, dup,
@@ -817,12 +539,8 @@ export class MethodEmitter {
     return true;
   }
 
-  private debugRecord(op: u16): bool {
-    return op === ops.OP_debugfile || op === ops.OP_debugline || op === ops.OP_debug;
-  }
-
   /** Whether instruction i makes an int or uint a Number, as LIR's i2d and ui2d (see wraps). */
-  private promotes(i: u32): bool {
+  promotes(i: u32): bool {
     const ir = this.ir;
     const dst = ir.dst[i];
     if (ir.op[i] !== IR_Coerce || dst !== ir.src[i]) {
@@ -835,109 +553,8 @@ export class MethodEmitter {
     );
   }
 
-  /** Whether instruction i is a conversion in place that writes nothing, its value of type `from` being one already. */
-  private keptAt(i: u32, from: i32): bool {
-    const ir = this.ir;
-    const op = ir.op[i];
-    if (ir.dst[i] !== ir.src[i] || ir.srcCount[i] !== 1) {
-      return false;
-    }
-
-    if (op === IR_Coerce) {
-      return keeps(this, ir.c[i], from);
-    }
-
-    return op < 256 && keeps(this, conversionType(this, <u8>op, i), from);
-  }
-
-  /**
-   * Before a branch to block t: write the copies below `limit` that t
-   * needs and does not know, as flowCopies found its entry.
-   */
-  private copyFor(t: u32, limit: i32): void {
-    const ir = this.ir;
-    const base = <i32>ir.localCount;
-    const stack = base + <i32>ir.maxScope;
-    const end = min(min(limit, <i32>ir.frameSize), this.copyTop);
-    const row = <i32>t * (<i32>ir.frameSize - base) - base;
-    const scopes = base + <i32>ir.blockScope[t];
-    const depth = stack + <i32>ir.blockStack[t];
-    for (let r = base; r < end; r++) {
-      const copy = this.copyOf[r];
-      if (copy === NONE || this.copyIn[row + r] === copy) {
-        continue;
-      }
-
-      if (r < stack ? r < scopes : r < depth) {
-        this.writeCopy(r);
-      }
-    }
-  }
-
-  /**
-   * Whether op takes its stack operands from the top and pushes what it
-   * gives there, as an instruction of a stack machine: all but a coercion
-   * or null check in place, and swap.
-   */
-  private stackDiscipline(op: u16): bool {
-    return op !== IR_Coerce && op !== IR_CheckNull && op !== ops.OP_swap;
-  }
-
-  /** Write the scope and stack registers below `limit` that copy register w, before w changes. */
-  private copyAll(w: i32, limit: i32): void {
-    if (this.copiedBy[w] === 0) {
-      return;
-    }
-
-    const ir = this.ir;
-    const end = min(min(limit, <i32>ir.frameSize), this.copyTop);
-    for (let r = <i32>ir.localCount; r < end; r++) {
-      if (this.copyOf[r] === w) {
-        this.writeCopy(r);
-      }
-    }
-  }
-
-  /**
-   * A copy written may be the register of a pending null check: the
-   * instruction then reads the copy, as unpend would read what pendingRead
-   * names, both the value when it was checked.
-   */
-  private writeCopy(r: i32): void {
-    const out = this.out;
-    const from = this.copyOf[r];
-    this.setCopy(r, NONE);
-    this.checked[r] = 0;
-    this.regName(r);
-    out.text(" = ");
-    this.copied(from);
-    out.text(";\n");
-    this.rawFloat[r] = 0;
-  }
-
-  /** Forget the null checks of what instruction i wrote. */
-  private unchecks(i: u32): void {
-    const ir = this.ir;
-    const op = ir.op[i];
-    if (ir.dst[i] >= 0) {
-      this.checked[ir.dst[i]] = 0;
-    }
-
-    if (this.target >= 0) {
-      this.checked[this.target] = 0;
-    }
-
-    if (op === ops.OP_hasnext2) {
-      this.checked[ir.a[i]] = 0;
-      this.checked[ir.b[i]] = 0;
-    } else if (op === ops.OP_swap) {
-      this.checked[ir.src[i]] = 0;
-      this.checked[ir.src[i] + 1] = 0;
-    }
-  }
-
   /** What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed. */
-  private copied(copy: i32, boxed: bool = true): void {
+  copied(copy: i32, boxed: bool = true): void {
     if (copy >= 0) {
       const wrap = boxed && (this.unboxedLocal(copy) || this.rawFloat[copy] !== 0);
       if (wrap) {
@@ -1015,7 +632,7 @@ export class MethodEmitter {
   }
 
   /** Forget every copy from register `from` up: none is needed. */
-  private uncopy(from: i32): void {
+  uncopy(from: i32): void {
     this.clearRaw(from);
     const top = min(this.copyTop, <i32>this.ir.frameSize);
     for (let r = from; r < top; r++) {
@@ -1210,27 +827,12 @@ export class MethodEmitter {
     );
   }
 
-  private clearRaw(from: i32): void {
+  clearRaw(from: i32): void {
     for (let r = max(from, 0); r < this.rawTop; r++) {
       this.rawFloat[r] = 0;
     }
 
     this.rawTop = min(this.rawTop, max(from, 0));
-  }
-
-  private boxRaw(limit: i32): void {
-    for (let r = <i32>(this.ir.localCount + this.ir.maxScope); r < min(limit, this.rawTop); r++) {
-      if (this.rawFloat[r]) {
-        if (this.copyOf[r] === NONE) {
-          this.regName(r);
-          this.out.text(" = rt.float(");
-          this.regName(r);
-          this.out.text(");\n");
-        }
-
-        this.rawFloat[r] = 0;
-      }
-    }
   }
 
   /** A known float's payload, avoiding a wrapper when it is a local or its copy. */
