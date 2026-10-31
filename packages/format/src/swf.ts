@@ -101,6 +101,11 @@ export class SwfReader {
   }
 
   sb(n: number): number {
+    if (n > 0 && n <= 32 && n === (n | 0)) {
+      const shift = 32 - n;
+      return (this.ub(n) << shift) >> shift;
+    }
+
     if (n === 0) {
       return 0;
     }
