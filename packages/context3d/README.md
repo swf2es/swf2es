@@ -73,7 +73,10 @@ chains as S3TC's blocks even where the CPU decodes them to RGBA, so that every
 GPU allocates alike. Compressed textures are at least 4x4 (Error #3745, here
 `compressedSize`). A compressed texture also takes pixels, as AIR's does, and as AIR
 compresses them, they are encoded to its blocks (`dxt.ts`), so that a GPU with
-S3TC and one without draw them alike. The RGBA staging array a texture uploads
+S3TC and one without draw them alike. The player injects its native whole-level
+encoder through `setDxtEncoder`; standalone backends and native refusals use the
+TypeScript encoder. `context3d` retains no dependency on `native`.
+The RGBA staging array a texture uploads
 through is made at its first pixel upload or CPU decoding, so compressed
 textures uploaded as blocks on S3TC have none. Samplers must
 read a texture as what it is, AGAL's format DXT1 or DXT5 for a compressed one

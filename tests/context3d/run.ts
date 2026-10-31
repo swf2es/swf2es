@@ -242,6 +242,13 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(bytes.exception, null, JSON.stringify(bytes));
       assert.equal(bytes.value?.passed, true);
       console.log("context3d: raw byte uploads preserve bits, reuse storage and validate indices");
+      const dxtUploads = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.dxtUploads())',
+      );
+      assert.equal(dxtUploads.exception, null, JSON.stringify(dxtUploads));
+      assert.equal(dxtUploads.value?.passed, true);
+      console.log("context3d: native DXT uploads and fallback match, with and without S3TC");
+
       const textureBytes = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.textureBytes())',
       );

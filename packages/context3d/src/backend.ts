@@ -1,4 +1,5 @@
 import type { ProgramType } from "./agal.js";
+import type { DxtEncoder } from "./dxt.js";
 
 export const COMPARE_MODES = [
   "always",
@@ -153,6 +154,8 @@ export interface Context3D {
    * format (TextureBindingError "format"): AIR checks from SWF 17 on.
    */
   samplerFormats: boolean;
+  /** Optional acceleration for pixels uploaded to compressed textures. */
+  setDxtEncoder?(encoder: DxtEncoder): void;
   configure(width: number, height: number, depth?: boolean, antiAlias?: number): void;
   clear(
     red: number,

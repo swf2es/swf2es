@@ -31,5 +31,5 @@ export {
   type VertexFormat,
   VertexOffsetError,
 } from "./backend.js";
-export { blockBytes, decodeDxt, encodeDxt } from "./dxt.js";
+export { blockBytes, type DxtEncoder, decodeDxt, encodeDxt } from "./dxt.js";
 export { Context3DError, type Context3DErrorReason } from "./errors.js";

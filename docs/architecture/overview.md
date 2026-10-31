@@ -162,6 +162,9 @@ translation. Its core is built without DOM or node types; the separate
 `@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
 Neither entry depends on player AS objects. The two TypeScript projects
 keep browser types out of the core while the normal package build checks both.
+For pixels uploaded to compressed textures, the player supplies the native DXT
+encoder through the backend's optional `setDxtEncoder` hook. The backend retains
+its TypeScript encoder as the reference and fallback, with no dependency on `native`.
 A third, `@swf2es/context3d/device`, is what a WebGL 2 context's one owner
 sets it through, shared with `@swf2es/render`'s backend: linking programs,
 and a cache of its state, so that nothing is set twice

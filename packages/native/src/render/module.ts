@@ -5,7 +5,7 @@ let module: WebAssembly.Module | null = null;
 
 /**
  * The render module (root.zig), compiled once and shared: the bitmap
- * kernel, the tessellator and the lines each make an instance of their
+ * kernels, DXT encoder, tessellator and lines each make an instance of their
  * own, so that each has its memory and lifecycle apart. It needs wasm
  * SIMD throughout; this throws where the host refuses to compile it, as
  * without SIMD or Wasm or under a CSP without 'wasm-unsafe-eval'.
