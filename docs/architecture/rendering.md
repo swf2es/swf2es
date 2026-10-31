@@ -95,10 +95,13 @@ placements give (`display/morph.ts`), a shape like any other, so it draws,
 bounds and hit-tests as one. The blend mixes where the ends' points lie,
 not their deltas, a straight edge paired with a curve as a curve, and
 keeps them to whole twips, so a closed path stays closed for `display/shapes.ts`
-to join. A morph keeps only its 64 latest blends, which instances in step
-share, and which a looping tween finds again on its next turn: with 16, a
-tween of 37 frames made each anew on every turn, its fills tessellated
-again. Flash takes a new ratio on only as it draws: a script that moves
+to join. A morph starts by keeping its 64 latest blends, shared by its
+instances. If an evicted ratio returns, the limit doubles, up to 256;
+only the latest 256 evicted ratio numbers are remembered. This lets longer
+looping tweens reuse their paths and tessellations without increasing the
+limit for characters whose ratios never repeat. Clearing the blends resets the limit,
+and the eviction history lives only as long as the character.
+Flash takes a new ratio on only as it draws: a script that moves
 the timeline and asks for bounds before the next render gets the last
 drawn blend's (`morph-shapes`, the corpus's `hittest_morph`). Only a
 timeline makes a `MorphShape`; a script's `new` is refused, #2012.
