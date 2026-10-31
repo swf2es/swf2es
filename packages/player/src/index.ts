@@ -19,6 +19,7 @@ export {
   browserFileHost,
   type FileFilter,
   type FileHost,
+  filtersGreyOutFiles,
   type SaveFile,
   type SelectedFile,
 } from "./files.js";

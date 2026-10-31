@@ -667,6 +667,8 @@ async function check(): Promise<void> {
               ".swf,application/x-shockwave-flash",
             );
 
+            const own = await value<string>("navigator.userAgent");
+            const platform = await value<string>("navigator.platform");
             try {
               await send("Emulation.setUserAgentOverride", {
                 userAgent:
@@ -676,8 +678,9 @@ async function check(): Promise<void> {
               await navigate("play/");
               assert.equal(await value<string>("document.getElementById('file').accept"), "");
             } finally {
-              await send("Emulation.setUserAgentOverride", { userAgent: "" });
+              await send("Emulation.setUserAgentOverride", { userAgent: own, platform });
               await navigate("play/");
+              assert.equal(await value<string>("navigator.platform"), platform);
             }
           },
         ],

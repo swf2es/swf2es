@@ -4,7 +4,7 @@
 // origin to), from ?swf=, or from the demos the build made. Its traces and
 // errors reach the page's console, which the panel shows.
 import { isAs3, readSwf, readSwfHeader } from "@swf2es/format";
-import { configure, type Swf2esPlayerElement } from "@swf2es/web";
+import { configure, filtersGreyOutFiles, type Swf2esPlayerElement } from "@swf2es/web";
 import { isolate } from "./isolation.js";
 import { bindFullscreen } from "./presentation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
@@ -35,13 +35,9 @@ const askPlay = byId<HTMLButtonElement>("ask-play");
 const status = byId<HTMLElement>("status");
 const fileInput = byId<HTMLInputElement>("file");
 // iOS's and iPadOS's pickers grey out every file of a type they don't know, .swf among them,
-// when the input names any (an iPad asks as a Mac with touch): there it takes any file, and
-// play() says when one is no SWF.
-if (
-  !/\b(iPhone|iPad|iPod)\b/.test(navigator.userAgent) &&
-  !(navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
-) {
-  fileInput.accept = ".swf,application/x-shockwave-flash";
+// when the input names any: there it takes any file, and playFile says when one is no SWF.
+if (filtersGreyOutFiles(navigator)) {
+  fileInput.removeAttribute("accept");
 }
 const urlForm = byId<HTMLFormElement>("url-form");
 const urlInput = byId<HTMLInputElement>("url");
@@ -285,6 +281,18 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
 async function playFile(file: File): Promise<void> {
   history.replaceState(null, "", location.pathname);
   urlInput.value = "";
+  // Read whole only once its first bytes say it's a SWF: where the picker takes any file (iOS),
+  // it may be a video of gigabytes.
+  try {
+    readSwfHeader(new Uint8Array(await file.slice(0, 8).arrayBuffer()));
+  } catch (error) {
+    showStatus(
+      `${file.name} is not a SWF: ${error instanceof Error ? error.message : error}`,
+      true,
+    );
+    return;
+  }
+
   // Read here, in the browser: the file goes nowhere else.
   // Its own URL under the site, by its name, so that its shared objects are
   // its own and not every local file's; nothing is there to load from it.

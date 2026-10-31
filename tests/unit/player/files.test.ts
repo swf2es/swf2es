@@ -6,6 +6,7 @@ import {
   FileReference,
   type FileServices,
   filtersGreyOutFiles,
+  filtersTake,
   type SelectedFile,
 } from "../../../packages/player/dist/files.js";
 import type { FetchRequest } from "../../../packages/player/dist/hosts.js";
@@ -286,4 +287,10 @@ test("FileReference's filters become an input's accept, but none where iOS would
   assert.equal(acceptOf(filters, android), ".dat,.xml");
   assert.equal(acceptOf(filters, iPhone), "");
   assert.equal(acceptOf(filters, iPadAsMac), "");
+
+  // Where there is no filter, picked files are held to the filters instead.
+  assert.ok(filtersTake(filters, "level.XML"));
+  assert.ok(!filtersTake(filters, "clip.mov"));
+  assert.ok(filtersTake([{ description: "All", extension: "*.*" }], "clip.mov"));
+  assert.ok(filtersTake([], "clip.mov"));
 });
