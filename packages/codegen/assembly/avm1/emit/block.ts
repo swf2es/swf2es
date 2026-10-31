@@ -36,7 +36,7 @@
 import { Output } from "../../output";
 import { Action, Actions, ERROR_None } from "../actions/decode";
 import * as ops from "../actions/opcodes";
-import { POOL_Unknown, poolAfter, poolsOf } from "../flow/pool";
+import { poolAfter, poolsOf } from "../flow/pool";
 import {
   branches,
   Flow,
@@ -46,6 +46,7 @@ import {
   REGION_Unit,
   Region,
 } from "../flow/regions";
+import { operation, push, pushed, top } from "./stack";
 import { avm1String } from "./strings";
 
 @final
@@ -88,13 +89,13 @@ export class BlockEmitter {
    * take as it is (`top`): where its statement and that value start, and
    * where it ends, 0 where there is none; whether values come before it.
    */
-  private pendStmt: u32 = 0;
-  private pendExpr: u32 = 0;
-  private pendEnd: u32 = 0;
-  private pendMulti: bool = false;
-  private scratch: StaticArray<u8> = new StaticArray<u8>(256);
+  pendStmt: u32 = 0;
+  pendExpr: u32 = 0;
+  pendEnd: u32 = 0;
+  pendMulti: bool = false;
+  scratch: StaticArray<u8> = new StaticArray<u8>(256);
   /** How long the value `detach` took is, -1 for none. */
-  private detached: i32 = -1;
+  detached: i32 = -1;
   /** Whether the region being written is a unit's own, which returns where control goes. */
   private inUnit: bool = false;
   /** Whether the unit being written runs as a SWF 5's function, `V5`. */
@@ -437,7 +438,7 @@ export class BlockEmitter {
       case ops.OP_End:
         break;
       case ops.OP_Push:
-        this.push(actions, action, pool);
+        push(this, actions, action, pool);
         break;
       case ops.OP_ConstantPool:
         out.text("V.constantPool(cx, [");
@@ -451,7 +452,7 @@ export class BlockEmitter {
         out.text("]);\n");
         break;
       case ops.OP_Trace:
-        this.top("V.trace(cx, ", ");\n");
+        top(this, "V.trace(cx, ", ");\n");
         break;
       case ops.OP_Pop:
         out.text("st.pop();\n");
@@ -463,151 +464,151 @@ export class BlockEmitter {
         out.text("V.stop(cx);\n");
         break;
       case ops.OP_Add:
-        this.operation("add", 2);
+        operation(this, "add", 2);
         break;
       case ops.OP_Add2:
-        this.operation("add2", 2);
+        operation(this, "add2", 2);
         break;
       case ops.OP_Subtract:
-        this.operation("subtract", 2);
+        operation(this, "subtract", 2);
         break;
       case ops.OP_Multiply:
-        this.operation("multiply", 2);
+        operation(this, "multiply", 2);
         break;
       case ops.OP_Divide:
-        this.operation("divide", 2);
+        operation(this, "divide", 2);
         break;
       case ops.OP_Modulo:
-        this.operation("modulo", 2);
+        operation(this, "modulo", 2);
         break;
       case ops.OP_Equals:
-        this.operation("equals", 2);
+        operation(this, "equals", 2);
         break;
       case ops.OP_Equals2:
-        this.operation("equals2", 2);
+        operation(this, "equals2", 2);
         break;
       case ops.OP_StrictEquals:
-        this.operation("strictEquals", 2);
+        operation(this, "strictEquals", 2);
         break;
       case ops.OP_Less:
-        this.operation("less", 2);
+        operation(this, "less", 2);
         break;
       case ops.OP_Less2:
-        this.operation("less2", 2);
+        operation(this, "less2", 2);
         break;
       case ops.OP_Greater:
-        this.operation("greater", 2);
+        operation(this, "greater", 2);
         break;
       case ops.OP_And:
-        this.operation("and", 2);
+        operation(this, "and", 2);
         break;
       case ops.OP_Or:
-        this.operation("or", 2);
+        operation(this, "or", 2);
         break;
       case ops.OP_Not:
-        this.operation("not", 1);
+        operation(this, "not", 1);
         break;
       case ops.OP_BitAnd:
-        this.operation("bitAnd", 2);
+        operation(this, "bitAnd", 2);
         break;
       case ops.OP_BitOr:
-        this.operation("bitOr", 2);
+        operation(this, "bitOr", 2);
         break;
       case ops.OP_BitXor:
-        this.operation("bitXor", 2);
+        operation(this, "bitXor", 2);
         break;
       case ops.OP_BitLShift:
-        this.operation("bitLShift", 2);
+        operation(this, "bitLShift", 2);
         break;
       case ops.OP_BitRShift:
-        this.operation("bitRShift", 2);
+        operation(this, "bitRShift", 2);
         break;
       case ops.OP_BitURShift:
-        this.operation("bitURShift", 2);
+        operation(this, "bitURShift", 2);
         break;
       case ops.OP_Increment:
-        this.operation("increment", 1);
+        operation(this, "increment", 1);
         break;
       case ops.OP_Decrement:
-        this.operation("decrement", 1);
+        operation(this, "decrement", 1);
         break;
       case ops.OP_StringAdd:
-        this.operation("stringAdd", 2);
+        operation(this, "stringAdd", 2);
         break;
       case ops.OP_StringEquals:
-        this.operation("stringEquals", 2);
+        operation(this, "stringEquals", 2);
         break;
       case ops.OP_StringLess:
-        this.operation("stringLess", 2);
+        operation(this, "stringLess", 2);
         break;
       case ops.OP_StringGreater:
-        this.operation("stringGreater", 2);
+        operation(this, "stringGreater", 2);
         break;
       case ops.OP_StringLength:
-        this.operation("stringLength", 1);
+        operation(this, "stringLength", 1);
         break;
       case ops.OP_MBStringLength:
-        this.operation("mbStringLength", 1);
+        operation(this, "mbStringLength", 1);
         break;
       case ops.OP_StringExtract:
-        this.operation("stringExtract", 3);
+        operation(this, "stringExtract", 3);
         break;
       case ops.OP_MBStringExtract:
-        this.operation("mbStringExtract", 3);
+        operation(this, "mbStringExtract", 3);
         break;
       case ops.OP_CharToAscii:
-        this.operation("charToAscii", 1);
+        operation(this, "charToAscii", 1);
         break;
       case ops.OP_AsciiToChar:
-        this.operation("asciiToChar", 1);
+        operation(this, "asciiToChar", 1);
         break;
       case ops.OP_MBCharToAscii:
-        this.operation("mbCharToAscii", 1);
+        operation(this, "mbCharToAscii", 1);
         break;
       case ops.OP_MBAsciiToChar:
-        this.operation("mbAsciiToChar", 1);
+        operation(this, "mbAsciiToChar", 1);
         break;
       case ops.OP_ToNumber:
-        this.operation("toNumber", 1);
+        operation(this, "toNumber", 1);
         break;
       case ops.OP_ToString:
-        this.operation("toString", 1);
+        operation(this, "toString", 1);
         break;
       case ops.OP_ToInteger:
-        this.operation("toInteger", 1);
+        operation(this, "toInteger", 1);
         break;
       case ops.OP_TypeOf:
-        this.operation("typeOf", 1);
+        operation(this, "typeOf", 1);
         break;
       case ops.OP_GetVariable:
-        this.pushed(this.top("st.push(V.getVariable(cx, ", "));\n"));
+        pushed(this, top(this, "st.push(V.getVariable(cx, ", "));\n"));
         break;
       case ops.OP_SetVariable:
-        this.top("V.setVariable(cx, ", ", st.pop());\n");
+        top(this, "V.setVariable(cx, ", ", st.pop());\n");
         break;
       case ops.OP_DefineLocal:
-        this.top("V.defineLocal(cx, ", ", st.pop());\n");
+        top(this, "V.defineLocal(cx, ", ", st.pop());\n");
         break;
       case ops.OP_DefineLocal2:
-        this.top("V.defineLocal2(cx, ", ");\n");
+        top(this, "V.defineLocal2(cx, ", ");\n");
         break;
       case ops.OP_GetMember:
-        this.pushed(this.top("st.push(V.getMember(cx, ", ", st.pop()));\n"));
+        pushed(this, top(this, "st.push(V.getMember(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_SetMember:
-        this.top("V.setMember(cx, ", ", st.pop(), st.pop());\n");
+        top(this, "V.setMember(cx, ", ", st.pop(), st.pop());\n");
         break;
       case ops.OP_Delete:
-        this.pushed(this.top("st.push(V.deleteMember(cx, ", ", st.pop()));\n"));
+        pushed(this, top(this, "st.push(V.deleteMember(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_Delete2:
-        this.pushed(this.top("st.push(V.deleteVariable(cx, ", "));\n"));
+        pushed(this, top(this, "st.push(V.deleteVariable(cx, ", "));\n"));
         break;
       case ops.OP_Enumerate:
-        this.top("V.enumerate(cx, ", ");\n");
+        top(this, "V.enumerate(cx, ", ");\n");
         break;
       case ops.OP_Enumerate2:
-        this.top("V.enumerate2(cx, ", ");\n");
+        top(this, "V.enumerate2(cx, ", ");\n");
         break;
       case ops.OP_InitObject:
         out.text("V.initObject(cx);\n");
@@ -628,19 +629,19 @@ export class BlockEmitter {
         out.text("V.newMethod(cx);\n");
         break;
       case ops.OP_Extends:
-        this.top("V.extends(cx, ", ", st.pop());\n");
+        top(this, "V.extends(cx, ", ", st.pop());\n");
         break;
       case ops.OP_InstanceOf:
-        this.pushed(this.top("st.push(V.instanceOf(cx, ", ", st.pop()));\n"));
+        pushed(this, top(this, "st.push(V.instanceOf(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_CastOp:
-        this.pushed(this.top("st.push(V.castOp(cx, ", ", st.pop()));\n"));
+        pushed(this, top(this, "st.push(V.castOp(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_ImplementsOp:
         out.text("V.implementsOp(cx);\n");
         break;
       case ops.OP_RandomNumber:
-        this.pushed(this.top("st.push(V.randomNumber(", "));\n"));
+        pushed(this, top(this, "st.push(V.randomNumber(", "));\n"));
         break;
       case ops.OP_DefineFunction:
       case ops.OP_DefineFunction2:
@@ -659,9 +660,9 @@ export class BlockEmitter {
         if (within(this.returns, this.k)) {
           out.text("b = V.ret(cx); continue;\n");
         } else if (this.inUnit) {
-          this.top("cx.ret = ", "; return -2;\n");
+          top(this, "cx.ret = ", "; return -2;\n");
         } else {
-          this.top("return ", ";\n");
+          top(this, "return ", ";\n");
         }
         break;
       case ops.OP_With:
@@ -677,7 +678,7 @@ export class BlockEmitter {
         this.try(actions, region, action);
         break;
       case ops.OP_Throw:
-        this.top("V.throw(", ");\n");
+        top(this, "V.throw(", ");\n");
         break;
       case ops.OP_PushDuplicate:
         out.text("{ const a = st.pop(); st.push(a, a); }\n");
@@ -690,7 +691,7 @@ export class BlockEmitter {
         out.byte(0x0a);
         break;
       case ops.OP_If:
-        this.top("if (V.toBoolean(", ")) ");
+        top(this, "if (V.toBoolean(", ")) ");
         this.branch(region, action.target);
         break;
       case ops.OP_WaitForFrame:
@@ -701,7 +702,7 @@ export class BlockEmitter {
         this.branch(region, action.target);
         break;
       case ops.OP_WaitForFrame2:
-        this.top("if (!V.frameLoaded2(cx, ", ")) ");
+        top(this, "if (!V.frameLoaded2(cx, ", ")) ");
         this.branch(region, action.target);
         break;
       case ops.OP_GotoFrame:
@@ -715,7 +716,7 @@ export class BlockEmitter {
         out.text(");\n");
         break;
       case ops.OP_GotoFrame2:
-        this.top("V.gotoFrame2(cx, ", action.a !== 0 ? ", true, " : ", false, ");
+        top(this, "V.gotoFrame2(cx, ", action.a !== 0 ? ", true, " : ", false, ");
         out.uint(action.b);
         out.text(");\n");
         break;
@@ -731,31 +732,31 @@ export class BlockEmitter {
         out.text(");\n");
         break;
       case ops.OP_SetTarget2:
-        this.top("V.setTarget2(cx, ", ");\n");
+        top(this, "V.setTarget2(cx, ", ");\n");
         break;
       case ops.OP_GetProperty:
-        this.pushed(this.top("st.push(V.getProperty(cx, ", ", st.pop()));\n"));
+        pushed(this, top(this, "st.push(V.getProperty(cx, ", ", st.pop()));\n"));
         break;
       case ops.OP_SetProperty:
-        this.top("V.setProperty(cx, ", ", st.pop(), st.pop());\n");
+        top(this, "V.setProperty(cx, ", ", st.pop(), st.pop());\n");
         break;
       case ops.OP_TargetPath:
-        this.pushed(this.top("st.push(V.targetPath(cx, ", "));\n"));
+        pushed(this, top(this, "st.push(V.targetPath(cx, ", "));\n"));
         break;
       case ops.OP_Call:
-        this.top("V.callFrame(cx, ", ");\n");
+        top(this, "V.callFrame(cx, ", ");\n");
         break;
       case ops.OP_StopSounds:
         out.text("V.stopSounds(cx);\n");
         break;
       case ops.OP_GetTime:
-        this.pushed(out.length, "st.push(V.getTime(cx));\n");
+        pushed(this, out.length, "st.push(V.getTime(cx));\n");
         break;
       case ops.OP_CloneSprite:
-        this.top("V.cloneSprite(cx, ", ", st.pop(), st.pop());\n");
+        top(this, "V.cloneSprite(cx, ", ", st.pop(), st.pop());\n");
         break;
       case ops.OP_RemoveSprite:
-        this.top("V.removeSprite(cx, ", ");\n");
+        top(this, "V.removeSprite(cx, ", ");\n");
         break;
       case ops.OP_StartDrag:
         out.text("V.startDrag(cx);\n");
@@ -774,7 +775,7 @@ export class BlockEmitter {
         out.text(");\n");
         break;
       case ops.OP_GetUrl2:
-        this.top("V.getUrl2(cx, ", ", st.pop(), ");
+        top(this, "V.getUrl2(cx, ", ", st.pop(), ");
         out.uint(action.a);
         out.text(");\n");
         break;
@@ -894,7 +895,7 @@ export class BlockEmitter {
    * Register `register` as an expression: the region's own, or one of the
    * four global ones, the movie's; any other is none.
    */
-  private register(register: i32): bool {
+  register(register: i32): bool {
     const out = this.out;
     if (register < this.registers) {
       out.byte(0x72);
@@ -1080,182 +1081,13 @@ export class BlockEmitter {
     out.text(");\n");
   }
 
-  private push(actions: Actions, action: Action, pool: i32): void {
-    const out = this.out;
-    if (action.count === 0) {
-      return;
-    }
-
-    const start = out.length;
-    out.text("st.push(");
-    let last = out.length;
-    for (let i = action.first; i < action.first + action.count; i++) {
-      if (i > action.first) {
-        out.text(", ");
-      }
-
-      last = out.length;
-
-      const number = actions.valueNumber[i];
-      const index = actions.valueIndex[i];
-      switch (actions.valueType[i]) {
-        case ops.PUSH_String:
-          this.string(actions, index);
-          break;
-        case ops.PUSH_Float:
-        case ops.PUSH_Double:
-        case ops.PUSH_Integer:
-          out.double(number);
-          break;
-        case ops.PUSH_Null:
-          out.text("null");
-          break;
-        case ops.PUSH_Undefined:
-          out.text("undefined");
-          break;
-        case ops.PUSH_Boolean:
-          out.text(number !== 0 ? "true" : "false");
-          break;
-        case ops.PUSH_Constant8:
-        case ops.PUSH_Constant16:
-          this.constant(actions, pool, index);
-          break;
-        default:
-          if (!this.register(index)) {
-            out.text("undefined");
-          }
-          break;
-      }
-    }
-
-    out.text(");\n");
-    this.pendStmt = start;
-    this.pendExpr = last;
-    this.pendMulti = action.count > 1;
-    this.pendEnd = out.length;
-  }
-
-  /** Constant `index` of pool `pool`: its string, undefined past its end, or the activation's. */
-  private constant(actions: Actions, pool: i32, index: i32): void {
-    const out = this.out;
-    if (pool === POOL_Unknown) {
-      out.text("cx.pool[");
-      out.uint(index);
-      out.text("]");
-      return;
-    }
-
-    const set = actions.actions[pool];
-    if (index < set.count) {
-      this.string(actions, set.first + index);
-    } else {
-      out.text("undefined");
-    }
-  }
-
-  private string(actions: Actions, index: i32): void {
+  string(actions: Actions, index: i32): void {
     avm1String(
       this.out,
       actions.bytes.dataStart + <usize>actions.stringStart[index],
       <u32>actions.stringLength[index],
       this.version >= 6,
     );
-  }
-
-  /**
-   * `V.<name>` of the `operands` values on top of the stack, the top first,
-   * its result pushed.
-   */
-  private operation(name: string, operands: i32): void {
-    const out = this.out;
-    const start = this.detach();
-    out.text("st.push(V.");
-    out.text(name);
-    out.byte(0x28);
-    this.value();
-    out.text(
-      operands === 3 ? ", st.pop(), st.pop()));\n" : operands === 2 ? ", st.pop()));\n" : "));\n",
-    );
-    this.pushed(start);
-  }
-
-  /**
-   * `prefix`, the value on top of the stack, popped, and `rest`: where the
-   * action before pushed it, `st.push(value);` and `st.pop()` become the
-   * value itself, evaluated where the push was, as nothing comes between.
-   * Where the statement it writes starts.
-   */
-  private top(prefix: string, rest: string): u32 {
-    const out = this.out;
-    const start = this.detach();
-    out.text(prefix);
-    this.value();
-    out.text(rest);
-    return start;
-  }
-
-  /**
-   * The value the action before pushed, if any, taken out of its push into
-   * `scratch`; where the statement that takes it starts.
-   */
-  private detach(): u32 {
-    const out = this.out;
-    this.detached = -1;
-    if (this.pendEnd === 0 || this.pendEnd !== out.length) {
-      return out.length;
-    }
-
-    // The value, out of its push, after what stays of that push.
-    const from = this.pendExpr;
-    const length = out.length - 3 - from;
-    if (length > <u32>this.scratch.length) {
-      this.scratch = new StaticArray<u8>(max(<i32>length, this.scratch.length * 2));
-    }
-
-    memory.copy(changetype<usize>(this.scratch), changetype<usize>(out.bytes) + from, length);
-    if (this.pendMulti) {
-      out.length = from - 2;
-      out.text(");\n");
-    } else {
-      out.length = this.pendStmt;
-    }
-
-    this.detached = <i32>length;
-    return out.length;
-  }
-
-  /** The value detach took, else `st.pop()`. */
-  private value(): void {
-    const out = this.out;
-    const length = this.detached;
-    if (length < 0) {
-      out.text("st.pop()");
-    } else {
-      out.reserve(<u32>length);
-      memory.copy(
-        changetype<usize>(out.bytes) + out.length,
-        changetype<usize>(this.scratch),
-        <usize>length,
-      );
-      out.length += <u32>length;
-    }
-
-    this.pendEnd = 0;
-  }
-
-  /**
-   * The statement from `start`, `st.push(value);`, then `text` if given,
-   * whose value the next action may take.
-   */
-  private pushed(start: u32, text: string | null = null): void {
-    if (text !== null) {
-      this.out.text(text);
-    }
-
-    this.pendStmt = start;
-    this.pendExpr = start + 8;
-    this.pendMulti = false;
-    this.pendEnd = this.out.length;
   }
 
   private notYet(name: string): void {
