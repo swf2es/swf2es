@@ -33,6 +33,7 @@ import { Abc } from "../abc/abc";
 import { verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { readAbc } from "../abc/parse";
+import { layout } from "./bindings";
 import { hashBytes, hashPair, IdTable } from "./table";
 import {
   BIND_None,
@@ -910,7 +911,7 @@ export class Domain {
       this.traits.interfaceStart[t] = interfaces;
       this.traits.interfaceEnd[t] = this.traits.interfaceList.length;
       this.classTraits[id] = t;
-      const error = this.traits.layout(this, t);
+      const error = layout(this.traits, this, t);
       if (error) {
         return abc.fail(error);
       }
@@ -969,7 +970,7 @@ export class Domain {
         abc.classTraitStart[i + 1],
       );
       this.classStatic[first + i] = t;
-      const error = this.traits.layout(this, t);
+      const error = layout(this.traits, this, t);
       if (error) {
         return abc.fail(error);
       }
@@ -998,7 +999,7 @@ export class Domain {
       );
       scripts[s] = t;
       this.traits.scope[t] = new Scope();
-      const error = this.traits.layout(this, t);
+      const error = layout(this.traits, this, t);
       if (error) {
         return abc.fail(error);
       }
@@ -1021,7 +1022,7 @@ export class Domain {
       if (flags & C.METHOD_NeedActivation || end > first) {
         const t = this.traits.create(TRAITS_Activation, index, b, -1, -1, first, end);
         bodies[b] = t;
-        const error = this.traits.layout(this, t);
+        const error = layout(this.traits, this, t);
         if (error) {
           return abc.fail(error);
         }

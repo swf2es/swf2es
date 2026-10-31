@@ -10,6 +10,7 @@
 //
 // A type is a traits id, or TYPE_Any for *.
 import * as C from "../abc/constants";
+import { overridden } from "./bindings";
 import { API_Internal, Domain, LOG_Sign } from "./domain";
 import { hashPair, IdTable } from "./table";
 
@@ -33,12 +34,6 @@ export const BKIND_Const: u32 = 3;
 export const BKIND_Get: u32 = 5;
 export const BKIND_Set: u32 = 6;
 export const BKIND_GetSet: u32 = 7;
-
-// Which base binding kinds each trait kind may meet (Traits::getOverride).
-const LEGAL_Method: u32 = (1 << BIND_None) | (1 << BKIND_Method);
-const LEGAL_Accessor: u32 =
-  (1 << BIND_None) | (1 << BKIND_Get) | (1 << BKIND_Set) | (1 << BKIND_GetSet);
-
 // Types the rules below treat specially, as avmplus' BuiltinType.
 export const BUILTIN_Any: u8 = 0;
 export const BUILTIN_Object: u8 = 1;
@@ -63,7 +58,7 @@ function hasSetter(binding: u32): bool {
 }
 
 /** As isCompatibleOverrideKind: whether `over` may implement a binding of kind `base`. */
-function compatibleKind(base: u32, over: u32): bool {
+export function compatibleKind(base: u32, over: u32): bool {
   if (base === BKIND_Method) {
     return over === BKIND_Method;
   }
@@ -390,225 +385,6 @@ export class TraitsTable {
   }
 
   /**
-   * As Traits::verifyBindings: bind t's members, whose base traits are
-   * already laid out; 0, or the VerifyError.
-   */
-  layout(domain: Domain, t: u32): i32 {
-    const index = this.abc[t];
-    const abc = domain.abcs[index];
-    const base = this.base[t];
-    const baseSlots = base >= 0 ? this.slotCount[base] : 0;
-    let methodCount = base >= 0 ? this.methodCount[base] : 0;
-    const start = <u32>this.memberTraits.length;
-    this.memberStart[t] = start;
-    this.memberEnd[t] = start;
-
-    // A subclass sees its base's protected members in its own protected namespace.
-    const protectedNs = this.protectedNs[t];
-    if (base >= 0 && protectedNs >= 0 && this.protectedNs[base] >= 0) {
-      const baseNs = <u32>this.protectedNs[base];
-      const last = this.memberEnd[base];
-      for (let m = this.memberStart[base]; m < last; m++) {
-        if (this.memberNs[m] === baseNs) {
-          this.add(
-            t,
-            <u32>protectedNs,
-            this.memberName[m],
-            this.memberVersion[m],
-            this.memberBinding[m],
-          );
-        }
-      }
-    }
-
-    const first = this.first[t];
-    const end = this.end[t];
-    const nameCount = end - first;
-    const early = this.allowEarlyBinding(t);
-    let slotCount = baseSlots;
-    for (let i = first; i < end; i++) {
-      this.readName(domain, index, i);
-      const nsId = this.nameNs;
-      const nsVersion = this.nameNsVersion;
-      const version = this.nameVersion;
-      const name = this.nameId;
-      const tag = abc.traitTag[i];
-      const kind = tag & 0x0f;
-      switch (kind) {
-        case C.TRAIT_Slot:
-        case C.TRAIT_Const:
-        case C.TRAIT_Class: {
-          // As SlotIdCalcer: explicit ids only where slots may bind early.
-          const id = abc.traitId[i];
-          let slot: u32;
-          if (id === 0 || !early) {
-            slot = ++slotCount;
-          } else {
-            slot = id;
-            if (slotCount < id) {
-              slotCount = id;
-            }
-          }
-
-          if (id > nameCount && early) {
-            return C.kCorruptABCError;
-          }
-
-          // Slots are final, and cannot override anything else.
-          if (slot - 1 < baseSlots) {
-            return C.kIllegalOverrideError;
-          }
-
-          if (this.own(t, nsId, name, version) !== BIND_None) {
-            return C.kCorruptABCError;
-          }
-
-          if (this.isInterface[t]) {
-            return C.kIllegalSlotError;
-          }
-
-          const bkind = kind === C.TRAIT_Slot ? BKIND_Var : BKIND_Const;
-          this.add(t, nsId, name, version, ((slot - 1) << 3) | bkind);
-          break;
-        }
-        case C.TRAIT_Method: {
-          const baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
-          if (baseBinding < 0) {
-            return C.kIllegalOverrideError;
-          }
-
-          if (baseBinding === BIND_None) {
-            this.add(t, nsId, name, version, (methodCount << 3) | BKIND_Method);
-            methodCount += 1;
-          } else if ((<u32>baseBinding & 7) === BKIND_Method) {
-            this.add(t, nsId, name, version, <u32>baseBinding);
-          } else {
-            return C.kCorruptABCError;
-          }
-          break;
-        }
-        case C.TRAIT_Getter:
-        case C.TRAIT_Setter: {
-          // The other accessor of the pair may be defined here already.
-          let baseBinding = <i64>this.own(t, nsId, name, version);
-          if (baseBinding === BIND_None) {
-            baseBinding = this.overridden(t, nsId, nsVersion, name, tag);
-            if (baseBinding < 0) {
-              return C.kIllegalOverrideError;
-            }
-          }
-
-          const us = kind === C.TRAIT_Getter ? BKIND_Get : BKIND_Set;
-          const them = kind === C.TRAIT_Getter ? BKIND_Set : BKIND_Get;
-          const baseKind = <u32>baseBinding & 7;
-          if (baseBinding === BIND_None) {
-            this.add(t, nsId, name, version, (methodCount << 3) | us);
-            methodCount += 2;
-          } else if (
-            baseKind === BKIND_Get ||
-            baseKind === BKIND_Set ||
-            baseKind === BKIND_GetSet
-          ) {
-            const id = <u32>baseBinding & ~7;
-            this.add(
-              t,
-              nsId,
-              name,
-              version,
-              baseKind === them ? id | BKIND_GetSet : <u32>baseBinding,
-            );
-          } else {
-            return C.kCorruptABCError;
-          }
-          break;
-        }
-        default:
-          break;
-      }
-    }
-
-    this.slotCount[t] = slotCount;
-    this.methodCount[t] = methodCount;
-    if (this.kind[t] === TRAITS_Instance && !this.isInterface[t]) {
-      this.bindInterfaces(domain, t);
-    }
-
-    return 0;
-  }
-
-  /**
-   * As TraitsBindings::fixOneInterfaceBindings: for each interface t
-   * implements that its base does not, a member of the interface that t
-   * defines in the public namespace instead is bound in the interface's
-   * namespace too.
-   */
-  bindInterfaces(domain: Domain, t: u32): void {
-    const base = this.base[t];
-    const all = this.allInterfaces(t);
-    const index = this.abc[t];
-    const publicNs = domain.publicNamespace();
-    const publicVersion = domain.publicVersion(index);
-    for (let k = 0; k < all.length; k++) {
-      const ifc = all[k];
-      if (base >= 0 && this.subtypeOf(base, ifc)) {
-        continue;
-      }
-
-      const last = this.memberEnd[ifc];
-      for (let m = this.memberStart[ifc]; m < last; m++) {
-        const ns = this.memberNs[m];
-        const name = this.memberName[m];
-        const version = this.memberVersion[m];
-        const iKind = this.memberBinding[m] & 7;
-        if (compatibleKind(iKind, this.find(t, ns, name, version) & 7)) {
-          continue;
-        }
-
-        const p = publicNs >= 0 ? this.find(t, <u32>publicNs, name, publicVersion) : BIND_None;
-        if (compatibleKind(iKind, p & 7)) {
-          this.add(t, ns, name, version, p);
-        }
-      }
-    }
-  }
-
-  /**
-   * As Traits::getOverride: the base binding a method or accessor named
-   * `name` in `ns` meets, or -1 if the trait may not meet it that way:
-   * overriding something of another kind, or with the override attribute
-   * set where nothing is overridden, or not set where something is.
-   */
-  overridden(t: u32, ns: u32, version: u8, name: u32, tag: u8): i64 {
-    const base = this.base[t];
-    let binding = BIND_None;
-    if (base >= 0) {
-      const protectedNs = this.protectedNs[t];
-      const baseProtected = this.protectedNs[base];
-      const lookup = protectedNs === <i32>ns && baseProtected >= 0 ? <u32>baseProtected : ns;
-      binding = this.find(base, lookup, name, version);
-    }
-
-    const baseKind = binding & 7;
-    const kind = tag & 0x0f;
-    const desired =
-      kind === C.TRAIT_Method ? BKIND_Method : kind === C.TRAIT_Getter ? BKIND_Get : BKIND_Set;
-    const legal = kind === C.TRAIT_Method ? LEGAL_Method : LEGAL_Accessor;
-    if (!((legal >> baseKind) & 1)) {
-      return -1;
-    }
-
-    // Overriding is required exactly where the base has a binding of this kind.
-    const required =
-      baseKind === desired ||
-      (baseKind === BKIND_GetSet && (desired === BKIND_Get || desired === BKIND_Set));
-    if (required !== ((tag & C.ATTR_Override) !== 0)) {
-      return -1;
-    }
-
-    return binding;
-  }
-
-  /**
    * As Traits::allowEarlyBinding: slot ids from the ABC count only if no
    * base with slots comes from another ABC, so early slot access cannot
    * reach another ABC's private members.
@@ -824,7 +600,7 @@ export class TraitsTable {
         }
 
         const d = (b >> 3) + (kind === C.TRAIT_Setter ? 1 : 0);
-        const baseBinding = this.overridden(t, this.nameNs, this.nameNsVersion, this.nameId, tag);
+        const baseBinding = overridden(this, t, this.nameNs, this.nameNsVersion, this.nameId, tag);
         if (baseBinding > 0) {
           const bb = <u32>baseBinding;
           if (
