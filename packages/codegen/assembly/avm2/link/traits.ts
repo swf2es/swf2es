@@ -2,16 +2,22 @@
 // defines by name, its slots and their types, and its methods by dispatch id.
 //
 // As in avmplus, traits are laid out when their ABC loads
-// (Traits::verifyBindings, from AbcParser::parseTraits): names bind to
-// slots and dispatch ids, inheriting the base's, and overrides must be of
-// the right kind. What needs types waits until the traits are first used
-// (Traits::resolveSignatures): slot types and initial values, method
-// signatures, final methods, override signatures and implemented interfaces.
+// (Traits::verifyBindings, from AbcParser::parseTraits; bindings.ts): names
+// bind to slots and dispatch ids, inheriting the base's, and overrides must
+// be of the right kind. What needs types waits until the traits are first
+// used (Traits::resolveSignatures; resolve, and signatures.ts): slot types
+// and initial values, method signatures, final methods, override signatures
+// and implemented interfaces.
 //
 // A type is a traits id, or TYPE_Any for *.
 import * as C from "../abc/constants";
-import { overridden } from "./bindings";
 import { API_Internal, Domain, LOG_Sign } from "./domain";
+import {
+  checkInitialValues,
+  checkInterfaces,
+  checkOverride,
+  resolveSlotsAndMethods,
+} from "./signatures";
 import { hashPair, IdTable } from "./table";
 
 export const TRAITS_Instance: u8 = 1;
@@ -46,16 +52,6 @@ export const BUILTIN_String: u8 = 7;
 export const BUILTIN_Namespace: u8 = 8;
 export const BUILTIN_Other: u8 = 9;
 export const BUILTIN_Float: u8 = 10;
-
-function hasGetter(binding: u32): bool {
-  const kind = binding & 7;
-  return kind === BKIND_Get || kind === BKIND_GetSet;
-}
-
-function hasSetter(binding: u32): bool {
-  const kind = binding & 7;
-  return kind === BKIND_Set || kind === BKIND_GetSet;
-}
 
 /** As isCompatibleOverrideKind: whether `over` may implement a binding of kind `base`. */
 export function compatibleKind(base: u32, over: u32): bool {
@@ -462,12 +458,12 @@ export class TraitsTable {
       }
     }
 
-    const error = this.resolveSlotsAndMethods(domain, t);
+    const error = resolveSlotsAndMethods(this, domain, t);
     if (error) {
       return error;
     }
 
-    const initError = this.checkInitialValues(domain, t);
+    const initError = checkInitialValues(this, domain, t);
     if (initError) {
       return initError;
     }
@@ -499,13 +495,13 @@ export class TraitsTable {
         const virt = this.dispatch[baseDispatch + d];
         const over = this.dispatch[dispatch + d];
         if (virt >= 0 && virt !== over) {
-          legal = legal && this.checkOverride(domain, t, <u32>virt, over);
+          legal = legal && checkOverride(this, domain, t, <u32>virt, over);
         }
       }
     }
 
     if (legal && !this.isInterface[t]) {
-      legal = this.checkInterfaces(domain, t, interfaces);
+      legal = checkInterfaces(this, domain, t, interfaces);
     }
 
     if (!legal) {
@@ -514,147 +510,6 @@ export class TraitsTable {
 
     this.resolved[t] = 1;
     domain.loggedResolve(t);
-    return 0;
-  }
-
-  /**
-   * As Traits::finishSlotsAndMethods: each slot's type, and each method's
-   * dispatch id; an overridden method must not be final.
-   */
-  resolveSlotsAndMethods(domain: Domain, t: u32): i32 {
-    const index = this.abc[t];
-    const abc = domain.abcs[index];
-    const base = this.base[t];
-    const slotCount = this.slotCount[t];
-    const slots = <u32>this.slotType.length;
-    this.slotStart[t] = slots;
-    for (let s: u32 = 0; s < slotCount; s++) {
-      this.slotType.push(TYPE_Any);
-      this.slotSet.push(0);
-    }
-
-    const methodCount = this.methodCount[t];
-    const dispatch = <u32>this.dispatch.length;
-    this.dispatchStart[t] = dispatch;
-    for (let d: u32 = 0; d < methodCount; d++) {
-      this.dispatch.push(-1);
-    }
-
-    let baseSlots: u32 = 0;
-    if (base >= 0) {
-      baseSlots = this.slotCount[base];
-      const from = this.slotStart[base];
-      for (let s: u32 = 0; s < baseSlots; s++) {
-        this.slotType[slots + s] = this.slotType[from + s];
-        this.slotSet[slots + s] = 1;
-      }
-
-      const baseMethods = this.methodCount[base];
-      const fromDispatch = this.dispatchStart[base];
-      for (let d: u32 = 0; d < baseMethods; d++) {
-        this.dispatch[dispatch + d] = this.dispatch[fromDispatch + d];
-      }
-    }
-
-    const methods = domain.methodStart[index];
-    const early = this.allowEarlyBinding(t);
-    let next = baseSlots;
-    for (let i = this.first[t]; i < this.end[t]; i++) {
-      const tag = abc.traitTag[i];
-      const kind = tag & 0x0f;
-      if (kind === C.TRAIT_Slot || kind === C.TRAIT_Const || kind === C.TRAIT_Class) {
-        const id = abc.traitId[i];
-        let slot: u32;
-        if (id === 0 || !early) {
-          slot = ++next;
-        } else {
-          slot = id;
-          if (next < id) {
-            next = id;
-          }
-        }
-
-        // A slot defined twice would give one memory location two types.
-        slot -= 1;
-        if (slot >= slotCount || this.slotSet[slots + slot]) {
-          return C.kCorruptABCError;
-        }
-
-        let type: i32;
-        if (kind === C.TRAIT_Class) {
-          type = domain.classStatic[domain.classStart[index] + abc.traitIndex[i]];
-        } else {
-          type = domain.resolveTypeId(index, abc.traitIndex[i], false);
-          if (type < TYPE_Any) {
-            return domain.typeError;
-          }
-        }
-
-        this.slotType[slots + slot] = type;
-        this.slotSet[slots + slot] = 1;
-      } else if (kind === C.TRAIT_Method || kind === C.TRAIT_Getter || kind === C.TRAIT_Setter) {
-        this.readName(domain, index, i);
-        const b = this.own(t, this.nameNs, this.nameId, this.nameVersion);
-        if (b === BIND_None) {
-          continue;
-        }
-
-        const d = (b >> 3) + (kind === C.TRAIT_Setter ? 1 : 0);
-        const baseBinding = overridden(this, t, this.nameNs, this.nameNsVersion, this.nameId, tag);
-        if (baseBinding > 0) {
-          const bb = <u32>baseBinding;
-          if (
-            (bb & 7) === BKIND_Method ||
-            (hasGetter(bb) && kind === C.TRAIT_Getter) ||
-            (hasSetter(bb) && kind === C.TRAIT_Setter)
-          ) {
-            const virt = this.dispatch[this.dispatchStart[base] + d];
-            if (virt >= 0 && this.methodFinal[virt]) {
-              return C.kIllegalOverrideError;
-            }
-          }
-        }
-
-        this.dispatch[dispatch + d] = methods + abc.traitIndex[i];
-      }
-    }
-
-    return 0;
-  }
-
-  /** As Traits::genInitBody: every slot's initial value must suit its type. */
-  checkInitialValues(domain: Domain, t: u32): i32 {
-    const index = this.abc[t];
-    const abc = domain.abcs[index];
-    const early = this.allowEarlyBinding(t);
-    const base = this.base[t];
-    const slots = this.slotStart[t];
-    let next = base >= 0 ? this.slotCount[base] : 0;
-    for (let i = this.first[t]; i < this.end[t]; i++) {
-      const kind = abc.traitTag[i] & 0x0f;
-      if (kind !== C.TRAIT_Slot && kind !== C.TRAIT_Const && kind !== C.TRAIT_Class) {
-        continue;
-      }
-
-      const id = abc.traitId[i];
-      let slot: u32;
-      if (id === 0 || !early) {
-        slot = ++next;
-      } else {
-        slot = id;
-        if (next < id) {
-          next = id;
-        }
-      }
-
-      const type = this.slotType[slots + slot - 1];
-      const value = kind === C.TRAIT_Class ? 0 : abc.traitValue[i];
-      const error = domain.checkDefault(index, value, abc.traitValueKind[i], type);
-      if (error) {
-        return error;
-      }
-    }
-
     return 0;
   }
 
@@ -733,108 +588,6 @@ export class TraitsTable {
     this.signed[m] = 1;
     domain.logged(LOG_Sign, index, 0, local);
     return 0;
-  }
-
-  /**
-   * As TraitsBindings::checkOverride: `over`, t's method at a dispatch id,
-   * has the signature of the method `virt` it overrides or implements,
-   * except that its receiver may be t.
-   */
-  checkOverride(domain: Domain, t: u32, virt: u32, over: i32): bool {
-    if (over < 0) {
-      return false;
-    }
-
-    const o = <u32>over;
-    if (o === virt) {
-      return true;
-    }
-
-    if (
-      this.returnType[o] !== this.returnType[virt] ||
-      this.paramCount[o] !== this.paramCount[virt] ||
-      this.optionalCount[o] !== this.optionalCount[virt]
-    ) {
-      return false;
-    }
-
-    const receiver = this.receiverType[virt];
-    if (
-      receiver === TYPE_Any ||
-      !this.subtypeOf(t, <u32>receiver) ||
-      !domain.machineCompatible(<i32>t, receiver)
-    ) {
-      if (domain.isMachineType(<i32>t) || receiver !== domain.objectType()) {
-        return false;
-      }
-    }
-
-    const oStart = this.paramStart[o];
-    const vStart = this.paramStart[virt];
-    for (let p: u32 = 0; p < this.paramCount[o]; p++) {
-      if (this.paramType[oStart + p] !== this.paramType[vStart + p]) {
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * As TraitsBindings::checkLegalInterfaces: t implements every member of
-   * every interface it has, with the interface's signatures.
-   */
-  checkInterfaces(domain: Domain, t: u32, interfaces: u32[]): bool {
-    const dispatch = this.dispatchStart[t];
-    for (let k = 0; k < interfaces.length; k++) {
-      const ifc = interfaces[k];
-      const ifcDispatch = this.dispatchStart[ifc];
-      const last = this.memberEnd[ifc];
-      for (let m = this.memberStart[ifc]; m < last; m++) {
-        const iBinding = this.memberBinding[m];
-        const cBinding = this.find(t, this.memberNs[m], this.memberName[m], this.memberVersion[m]);
-        const iKind = iBinding & 7;
-        if (!compatibleKind(iKind, cBinding & 7)) {
-          return false;
-        }
-
-        const iId = iBinding >> 3;
-        const cId = cBinding >> 3;
-        if (iKind === BKIND_Method) {
-          const virt = this.dispatch[ifcDispatch + iId];
-          const over = this.dispatch[dispatch + cId];
-          if (virt >= 0 && !this.checkOverride(domain, t, <u32>virt, over)) {
-            return false;
-          }
-
-          continue;
-        }
-
-        if (hasGetter(iBinding)) {
-          const virt = this.dispatch[ifcDispatch + iId];
-          const over = this.dispatch[dispatch + cId];
-          if (
-            !hasGetter(cBinding) ||
-            (virt >= 0 && !this.checkOverride(domain, t, <u32>virt, over))
-          ) {
-            return false;
-          }
-        }
-
-        if (hasSetter(iBinding)) {
-          const virt = this.dispatch[ifcDispatch + iId + 1];
-          const over = this.dispatch[dispatch + cId + 1];
-          if (
-            !hasSetter(cBinding) ||
-            (virt >= 0 && !this.checkOverride(domain, t, <u32>virt, over))
-          ) {
-            return false;
-          }
-        }
-      }
-    }
-
-    return true;
   }
 }
 
