@@ -10,7 +10,7 @@ import {
   type TextureHandle,
   type Textures,
 } from "@swf2es/render";
-import { BitmapStore, characterStore, rgbaOf } from "../bitmap/bitmap.js";
+import { BitmapStore, characterStore, rgbaInto, rgbaOf } from "../bitmap/bitmap.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
@@ -26,10 +26,18 @@ export const GRADIENT_IDLE_FRAMES = 30;
 /** Regions a gradient's textures are kept for, as a shape that changes draws it over them. */
 const GRADIENT_REGIONS = 8;
 
-/** A texture made of pixels that change: a store's, kept as of its version. */
+/**
+ * A texture made of pixels that change: a store's, kept as of its version,
+ * and the bytes it is uploaded from again once it changed, so that a store
+ * drawn into every frame does not allocate its size every frame. The
+ * backend uploads them as it renders and keeps no hold on them; bytes
+ * written again before that are the store's newer pixels, which the
+ * texture is to show anyway.
+ */
 interface Kept {
   handle: TextureHandle;
   version: number;
+  bytes: Uint8Array | null;
 }
 
 /** Bitmaps' and gradients' textures, made as first drawn and kept while they are. */
@@ -68,14 +76,21 @@ export class Paints {
     if (kept && this.textures.alive(kept.handle)) {
       if (kept.version !== store.version) {
         kept.version = store.version;
-        this.textures.set(kept.handle.id, store.width, store.height, rgbaOf(store.drawable));
+        const pixels = store.drawable;
+        if (kept.bytes?.length !== pixels.length * 4) {
+          kept.bytes = new Uint8Array(pixels.length * 4);
+        }
+
+        rgbaInto(pixels, kept.bytes);
+        this.textures.set(kept.handle.id, store.width, store.height, kept.bytes);
       }
 
       return kept.handle;
     }
 
+    // A store's first texture keeps no bytes: one that never changes holds none on the CPU.
     const handle = this.textures.add(store.width, store.height, rgbaOf(store.drawable), idle);
-    this.stores.set(store, { handle, version: store.version });
+    this.stores.set(store, { handle, version: store.version, bytes: null });
     return handle;
   }
 

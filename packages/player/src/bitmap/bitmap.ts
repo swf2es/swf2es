@@ -741,9 +741,32 @@ export function characterStore(character: BitmapCharacter): BitmapStore | null {
   return character.store;
 }
 
+/** Whether a word's low byte comes first in memory, as on every machine a browser runs on. */
+const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
 /** Premultiplied ARGB as the RGBA bytes a texture holds, still premultiplied. */
 export function rgbaOf(pixels: Uint32Array): Uint8Array {
   const out = new Uint8Array(pixels.length * 4);
+  rgbaInto(pixels, out);
+  return out;
+}
+
+/**
+ * rgbaOf into `out`, `pixels.length * 4` bytes or more, as a texture
+ * uploaded again and again takes it. Little-endian, a pixel is a word
+ * whose red and blue swap, written whole rather than a byte at a time.
+ */
+export function rgbaInto(pixels: Uint32Array, out: Uint8Array): void {
+  if (LITTLE_ENDIAN && out.byteOffset % 4 === 0) {
+    const words = new Uint32Array(out.buffer, out.byteOffset, pixels.length);
+    for (let i = 0; i < pixels.length; i++) {
+      const p = pixels[i];
+      words[i] = (p & 0xff00ff00) | ((p >>> 16) & 0xff) | ((p & 0xff) << 16);
+    }
+
+    return;
+  }
+
   for (let i = 0; i < pixels.length; i++) {
     const p = pixels[i];
     const j = i * 4;
@@ -752,8 +775,6 @@ export function rgbaOf(pixels: Uint32Array): Uint8Array {
     out[j + 2] = p & 0xff;
     out[j + 3] = p >>> 24;
   }
-
-  return out;
 }
 
 /** RGBA bytes read from a texture as premultiplied ARGB. */
