@@ -112,7 +112,7 @@ test("a blend's shape keeps its bounds alone, drawn into layers once, and is kep
   assert.equal(morphAt(c, 21845), half);
 });
 
-test("a morph keeps its 64 latest blends, the one asked for again among them", () => {
+test("a morph starts with its 64 latest blends, the one asked for again among them", () => {
   const c = character();
   const first = morphAt(c, 0);
   for (let ratio = 1; ratio < 64; ratio++) {
@@ -124,6 +124,49 @@ test("a morph keeps its 64 latest blends, the one asked for again among them", (
   assert.equal(c.blends.size, 64);
   assert.equal(c.blends.has(1), false);
   assert.equal(morphAt(c, 0), first);
+});
+
+test("a looping morph grows to keep its ratios after they return following eviction", () => {
+  for (const length of [96, 256]) {
+    const c = character();
+    for (let frame = 0; frame < length * 3; frame++) {
+      morphAt(c, frame % length);
+    }
+
+    assert.equal(c.blends.size, length);
+    const shapes = new Map(c.blends);
+    for (let ratio = 0; ratio < length; ratio++) {
+      assert.equal(morphAt(c, ratio), shapes.get(ratio));
+    }
+  }
+});
+
+test("fresh morph ratios keep 64 blends, and a growing loop keeps at most 256", () => {
+  const c = character();
+  for (let ratio = 0; ratio < 1024; ratio++) {
+    morphAt(c, ratio);
+  }
+
+  assert.equal(c.blends.size, 64);
+  for (let frame = 0; frame < 300 * 4; frame++) {
+    morphAt(c, frame % 300);
+  }
+
+  assert.equal(c.blends.size, 256);
+});
+
+test("clearing a morph's blends resets its growth history", () => {
+  const c = character();
+  for (let frame = 0; frame < 256 * 3; frame++) {
+    morphAt(c, frame % 256);
+  }
+
+  c.blends.clear();
+  for (let ratio = 1000; ratio < 1100; ratio++) {
+    morphAt(c, ratio);
+  }
+
+  assert.equal(c.blends.size, 64);
 });
 
 test("a MorphShape keeps the blend it last drew until it is drawn at a new ratio", () => {

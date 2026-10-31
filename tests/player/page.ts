@@ -596,6 +596,73 @@ interface Bench {
   /** The GL renderer that drew: SwiftShader, or a GPU's name. */
   renderer: string;
   error: string | null;
+  morphs?: {
+    requests: number[];
+    misses: number[];
+    cached: number;
+    pathNumbers: number;
+  };
+}
+
+/** Measure cache work without adding counters to the player's rendering path. */
+function morphMetrics(player: Player) {
+  const characters = [...player.library.characters.values()].filter((c) => c.type === "morph");
+  let requests = 0;
+  let misses = 0;
+  const seenRequests: number[] = [];
+  const seenMisses: number[] = [];
+  for (const character of characters) {
+    const cache = character.blends;
+    const get = cache.get.bind(cache);
+    cache.get = (ratio) => {
+      requests++;
+      const shape = get(ratio);
+      if (!shape) {
+        misses++;
+      }
+
+      return shape;
+    };
+  }
+
+  return {
+    reset() {
+      requests = misses = 0;
+    },
+    frame() {
+      seenRequests.push(requests);
+      seenMisses.push(misses);
+      requests = misses = 0;
+    },
+    result() {
+      let cached = 0;
+      const paths = new Set<number[]>();
+      for (const character of characters) {
+        cached += character.blends.size;
+        for (const shape of character.blends.values()) {
+          for (const layer of shape.layers) {
+            for (const fill of layer.fills) {
+              for (const path of fill.contours) {
+                paths.add(path);
+              }
+            }
+            for (const stroke of layer.strokes) {
+              for (const path of stroke.paths) {
+                paths.add(path);
+              }
+            }
+          }
+        }
+      }
+
+      let pathNumbers = 0;
+      for (const path of paths) {
+        pathNumbers += path.length;
+      }
+
+      return { requests: seenRequests, misses: seenMisses, cached, pathNumbers };
+    },
+  };
 }
 
 /**
@@ -758,6 +825,7 @@ async function benchSwf(
   hold = false,
   clock = false,
   metered = false,
+  measureMorphs = false,
 ): Promise<Bench> {
   // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the
   // player and the renderer keep or let go by age happens on the same frames however fast the
@@ -780,6 +848,7 @@ async function benchSwf(
     const uncaught: unknown[] = [];
     const scripting = await scriptingFor(bytes, [], null, uncaught);
     const player = new Player(bytes, scripting);
+    const morphs = measureMorphs ? morphMetrics(player) : null;
     // Its drawing buffer not kept: a bench's frames are read not.
     const view = await surfaceFor(player, 1, 1, 1, antialias, false);
     document.body.replaceChildren(view.canvas);
@@ -817,6 +886,12 @@ async function benchSwf(
     // Only when asked for: each call wrapped and timed would slow the frames timed.
     const counter = metered ? meter(gl) : { read: () => ({}) as Record<string, number> };
     const lineCounts = view.counts;
+    const nativeCalls = (globalThis as { benchNativeCalls?: { layer: number; lineBuild: number } })
+      .benchNativeCalls;
+    if (nativeCalls) {
+      nativeCalls.layer = nativeCalls.lineBuild = 0;
+    }
+    morphs?.reset();
     let stroked = lineCounts.strokeContexts;
     for (let frame = 2; frame <= frames; frame++) {
       // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
@@ -856,6 +931,12 @@ async function benchSwf(
       finished.push(performance.now() - drawn);
       // Lines stroked anew this frame.
       const reading = counter.read();
+      morphs?.frame();
+      if (nativeCalls) {
+        reading.fillCalls = nativeCalls.layer;
+        reading.lineCalls = nativeCalls.lineBuild;
+        nativeCalls.layer = nativeCalls.lineBuild = 0;
+      }
       reading.strokeContexts = lineCounts.strokeContexts - stroked;
       stroked = lineCounts.strokeContexts;
       meters.push(reading);
@@ -900,6 +981,7 @@ async function benchSwf(
       first,
       renderer: name,
       error: null,
+      ...(morphs ? { morphs: morphs.result() } : {}),
     };
   } catch (e) {
     return {

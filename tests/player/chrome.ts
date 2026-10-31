@@ -433,6 +433,12 @@ export interface BenchResult {
   first: number;
   renderer: string;
   error: string | null;
+  morphs?: {
+    requests: number[];
+    misses: number[];
+    cached: number;
+    pathNumbers: number;
+  };
 }
 
 /** How benchPlayer plays: see page.ts's benchSwf, and bench.ts's options of the same names. */
@@ -463,6 +469,10 @@ export interface BenchOptions {
   clock?: boolean;
   /** Each frame's GL calls counted (meters). */
   metered?: boolean;
+  /** Count morph cache activity; with metered, count fill and line kernel calls too. */
+  morphMetrics?: boolean;
+  /** Alternate built modules for comparisons while keeping the same harness. */
+  mounts?: [string, string][];
 }
 
 /** A node of a sampled heap profile: what was allocated under a call, and the calls under it. */
@@ -521,10 +531,29 @@ export function benchPlayer(
     snapshotPath,
     clock = false,
     metered = false,
+    morphMetrics = false,
+    mounts,
   } = options;
   return withPage(
     "benchSwf",
     async (evaluate, send, _fresh, listen) => {
+      if (morphMetrics && metered) {
+        await evaluate(`globalThis.benchNativeCalls = { layer: 0, lineBuild: 0 };
+          WebAssembly.Instance = new Proxy(WebAssembly.Instance, {
+            construct(target, args) {
+              const instance = Reflect.construct(target, args);
+              const exports = { ...instance.exports };
+              for (const name of ['layer', 'lineBuild']) {
+                const original = exports[name];
+                if (typeof original === 'function') {
+                  exports[name] = (...args) => { benchNativeCalls[name]++; return original(...args); };
+                }
+              }
+              return new Proxy(instance, { get(target, name) { return name === 'exports' ? exports : Reflect.get(target, name, target); } });
+            }
+          });`);
+      }
+
       if (cpuProfilePath) {
         await send("Profiler.enable");
         await send("Profiler.setSamplingInterval", { interval: 100 });
@@ -543,7 +572,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${clock}, ${metered})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${clock}, ${metered}, ${morphMetrics})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };
@@ -610,6 +639,7 @@ export function benchPlayer(
       );
     },
     gpu,
+    { mounts },
   );
 }
 

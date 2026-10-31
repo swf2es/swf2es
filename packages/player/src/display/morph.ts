@@ -14,14 +14,11 @@ import type {
 import { boundsOf, shapeLayers } from "./shapes.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
-/**
- * How many blends a morph keeps: its latest ratios, enough for instances in
- * step to share them, and for a looping tween to find each of its frames'
- * again on its next turn. Kept 16, a tween of 37 frames, as a game's pulsing
- * effects are, made every one anew each turn, its fills tessellated again:
- * nearly 2,000 shapes in 5 s in a crowded room.
- */
+// Grow only after a ratio returns following eviction: longer looping tweens
+// otherwise rebuild every frame, while fresh ratios gain nothing from more space.
 const KEPT_BLENDS = 64;
+const MOST_BLENDS = 256;
+const histories = new WeakMap<MorphCharacter, { limit: number; evicted: Set<number> }>();
 
 /**
  * The shape `character` is at `ratio`, 0 its start to 65535 its end: made
@@ -34,19 +31,44 @@ export function morphAt(character: MorphCharacter, ratio: number): ShapeCharacte
   if (shape) {
     // Last in the map's order, the most recently asked for.
     blends.delete(ratio);
-  } else {
-    const blended = blend(character.morph, ratio / 65535);
-    shape = {
-      type: "shape",
-      id: character.id,
-      shape: boundsOf(blended),
-      layers: shapeLayers(blended, character.bitmap),
-    };
+    blends.set(ratio, shape);
+    return shape;
   }
 
+  let history = histories.get(character);
+  if (blends.size === 0 && history) {
+    histories.delete(character);
+    history = undefined;
+  }
+
+  if (history && history.limit < MOST_BLENDS && history.evicted.delete(ratio)) {
+    history.limit *= 2;
+    history.evicted.clear();
+  }
+
+  const blended = blend(character.morph, ratio / 65535);
+  shape = {
+    type: "shape",
+    id: character.id,
+    shape: boundsOf(blended),
+    layers: shapeLayers(blended, character.bitmap),
+  };
   blends.set(ratio, shape);
-  if (blends.size > KEPT_BLENDS) {
-    blends.delete(blends.keys().next().value as number);
+  const limit = history?.limit ?? KEPT_BLENDS;
+  if (blends.size > limit) {
+    const oldest = blends.keys().next().value as number;
+    blends.delete(oldest);
+    if (limit < MOST_BLENDS) {
+      if (!history) {
+        history = { limit, evicted: new Set() };
+        histories.set(character, history);
+      }
+
+      history.evicted.add(oldest);
+      if (history.evicted.size > MOST_BLENDS) {
+        history.evicted.delete(history.evicted.keys().next().value as number);
+      }
+    }
   }
 
   return shape;

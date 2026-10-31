@@ -278,6 +278,17 @@ sub-draws, binds and uniform calls a frame from creeping up unnoticed
 (`draw-counts.json` may only go down); a change that raises them and is
 measurably faster updates it on purpose.
 
+`node tests/player/morph-bench.ts --morphs 32 --edges 64 --loop 96 --phases --gpu`
+animates curved gradient morphs with outlines. `--unique` gives every instance
+its own character; otherwise they share a ratio cache. `--loop 0` visits fresh
+ratios, and `--solid --no-lines` isolates fill work. The report excludes three
+loops from frame timings, counts cache requests and misses, and measures heap
+and backing storage after full collection with the renderer alive. Run
+`--allocs` separately for sampled allocation across all frames, including
+warm-up; `--counts` also counts fill and line calls into wasm. Compare built
+checkouts with `--checkout DIR` using the same harness. Longer loops should
+reuse their geometry without increasing retained shapes on fresh ratios.
+
 ## Why not Pixi
 
 Until #650 and #651 the player drew with PixiJS, through a fork. Pixi is

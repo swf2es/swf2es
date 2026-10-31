@@ -118,6 +118,9 @@ node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--gpu]   # time
                               # busy synthetic timeline in Chrome (--town: a busy room's mix, see
                               # docs/renderer.md); keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
+node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
+                              # animated morphs: frame time and cache work; --loop 0 visits fresh
+                              # ratios, --allocs samples allocation, --counts counts native calls
 node tools/abc-surface/main.ts file.abc [--classes | --json]   # an ABC's classes, traits and
                               # signatures; how many methods are native and how many AS3
 node tools/abc-surface/as3.ts lib.abc out-dir [package...] [--names dir]   # AS3 skeletons of
