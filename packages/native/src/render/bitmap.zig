@@ -17,7 +17,7 @@ var input_end: usize = 0;
 var input_generation: u32 = 0;
 
 /// Whether [at, at + bytes) lies in the input and is aligned.
-fn holds(at: usize, bytes: usize, alignment: usize) bool {
+pub fn holds(at: usize, bytes: usize, alignment: usize) bool {
     return input_generation == arena.generation and at >= input_start and at <= input_end and at % alignment == 0 and bytes <= input_end - at;
 }
 
