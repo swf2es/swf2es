@@ -21,9 +21,10 @@ three, with the same VerifyError numbers:
    Every namespace's version moves into that series as it is interned, as
    `AvmCore::newNamespace` moves it, so a lookup and the binding it finds
    compare versions of one series; in AIR's, a Flash Player version
-   becomes the next AIR one. While an ABC loads, its classes link
-   to base classes and interfaces defined by earlier ABCs' scripts or by
-   its own earlier classes, as avmplus' `AbcParser` links them.
+   becomes the next AIR one (`link/namespaces.ts`). While an ABC loads,
+   its classes link to base classes and interfaces defined by earlier
+   ABCs' scripts or by its own earlier classes, as avmplus' `AbcParser`
+   links them (`link/classes.ts`, `link/typenames.ts`).
    The domain's ABCs are loaded into application domains, a tree whose
    root is 0, as avmplus' DomainMgr keeps them: an ABC sees the names its
    own application domain and its ancestors define, the first from the
@@ -32,14 +33,15 @@ three, with the same VerifyError numbers:
    module names as `linked` the ABCs it sees, in load order.
    Each class's, script's and activation's traits then lay out their
    members, binding names to slot and dispatch ids after their base's
-   (`link/traits.ts`). Types resolve later, when a class is first used:
-   slot types, method signatures, and the override and interface checks
-   that compare them. A type is the id of a traits, including void and
-   null, or `*`.
+   (`link/traits.ts`, `link/bindings.ts`). Types resolve later, when a
+   class is first used: slot types, method signatures, and the override
+   and interface checks that compare them (`link/signatures.ts`). A type
+   is the id of a traits, including void and null, or `*`.
    An application domain the runtime has let go of is dropped with its
-   descendants (`dropDomain`), and one the host has no use for now, as
-   once its ABCs are compiled, is evicted with them (`evictDomain`): no
-   other sees their ABCs, which compile no more and keep their indices.
+   descendants (`dropDomain`, `link/lifetime.ts`), and one the host has
+   no use for now, as once its ABCs are compiled, is evicted with them
+   (`evictDomain`): no other sees their ABCs, which compile no more and
+   keep their indices.
    `compact` rebuilds the domain only when that keeps codegen's memory
    from growing: when the tables, by an estimate from their rows, with
    what a compile's garbage and the rebuild itself take, come near
@@ -77,8 +79,10 @@ Each method goes through the same steps, in `codegen`:
 1. **Decode** (`abc/code.ts`): the reachable instructions, as the avmplus
    verifier reads them.
 2. **Verify and build the IR**, as avmplus' `Verifier` does its checks,
-   with its VerifyError numbers (`abc/code.ts`, and for finding, getting,
-   setting and calling properties `abc/properties.ts`). A first pass keeps a frame state per block
+   with its VerifyError numbers (`abc/code.ts`; each instruction's checks
+   `abc/verify.ts`, its types `abc/typing.ts`, and for finding, getting,
+   setting and calling properties `abc/properties.ts`; branch and handler
+   targets and their entry states `abc/targets.ts`). A first pass keeps a frame state per block
    (the locals, scope stack and operand stack, each value with its type,
    whether it is known not null, and whether it is a with scope), merges it
    where control flow joins, and walks a block again when its entry state
@@ -124,10 +128,15 @@ Each method goes through the same steps, in `codegen`:
    give the same results.
 5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
    JavaScript strings, and names are copied straight from the ABC. A
-   method's instructions are `emit/method.ts`'s; arithmetic, comparisons
-   and conversions `emit/values.ts`'s, domain memory `emit/memory.ts`'s,
-   how types, namespaces and constants are named `emit/refs.ts`'s, and the
-   module around the methods `emit/module.ts`'s.
+   method's frame, its entry checks and how it reads and writes registers
+   are `emit/method.ts`'s; its blocks, written an instruction at a time,
+   `emit/blocks.ts`'s, and its handler regions and catch
+   `emit/handlers.ts`'s. Its instructions are `emit/instructions.ts`'s,
+   those of the object model (scopes, properties, calls, construction)
+   `emit/objects.ts`'s; arithmetic, comparisons and conversions
+   `emit/values.ts`'s, domain memory `emit/memory.ts`'s, how types,
+   namespaces and constants are named `emit/refs.ts`'s, and the module
+   around the methods `emit/module.ts`'s.
 
 ### Generated code
 

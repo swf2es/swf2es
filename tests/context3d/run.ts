@@ -57,6 +57,7 @@ const scripts = compileScripts(
     "CubeTextures",
     "TemporaryMatrices",
     "IndirectConstants",
+    "Readback",
   ].map((name) => ({
     name,
     source: fixtureSource(name),
@@ -106,6 +107,7 @@ for (const name of [
   "CubeTextures",
   "TemporaryMatrices",
   "IndirectConstants",
+  "Readback",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -345,6 +347,7 @@ if (!process.argv.includes("--build-only")) {
         "CubeTextures",
         "TemporaryMatrices",
         "IndirectConstants",
+        "Readback",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,

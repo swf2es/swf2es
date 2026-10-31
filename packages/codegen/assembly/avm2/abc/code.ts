@@ -16,10 +16,10 @@
 //
 // One BodyDecoder serves every body of every ABC (bodyDecoder): its scratch
 // buffers and its output only grow, so decoding allocates nothing per body.
-import { IR_CheckNull, IR_Coerce, IR_ConstructSlot, Ir } from "../ir/ir";
+import { IR_CheckNull, IR_Coerce, Ir } from "../ir/ir";
 import { Domain, LOG_None, LOG_Verify } from "../link/domain";
 import { Scope, TYPE_Any } from "../link/traits";
-import { BIND_Ambiguous, canAssign, commonBase, isNumeric } from "../link/types";
+import { commonBase } from "../link/types";
 import { Abc } from "./abc";
 import * as C from "./constants";
 import * as ops from "./opcodes";
@@ -36,34 +36,12 @@ import {
   OPERANDS_U30U30,
   opcodeFlags,
   opcodeOperands,
-  opcodePops,
-  opcodePushes,
-  opcodeStack,
-  STACK_ArgcA,
-  STACK_ArgcB,
-  STACK_CheckPushOne,
-  STACK_Multiname,
 } from "./opcodes";
 import { ConstantPool } from "./pool";
-import {
-  binding,
-  callProperty,
-  callStatic,
-  callSuper,
-  coerceArgs,
-  coerceSuper,
-  findDef,
-  findProperty,
-  getProperty,
-  getSuper,
-  globalScope,
-  propertyDepth,
-  readBinding,
-  setProperty,
-  slot,
-  typeName,
-} from "./properties";
+import { typeName } from "./properties";
 import { Reader } from "./reader";
+import { loadEntry, saveEntry, target, throwsAt } from "./targets";
+import { verifyAt } from "./verify";
 
 /**
  * The reachable instructions of one body, ordered by offset; entries past
@@ -123,7 +101,7 @@ export class Code {
 }
 
 // Byte states in BodyDecoder.cover, which starts zeroed: unseen.
-const START: u8 = 1;
+export const START: u8 = 1;
 const INSIDE: u8 = 2;
 
 // Frame value flags.
@@ -136,7 +114,7 @@ export const WITH: u8 = 2;
  * no check of it needs code.
  */
 export const CHECKED: u8 = 4;
-const KNOWN: u8 = NOT_NULL | CHECKED;
+export const KNOWN: u8 = NOT_NULL | CHECKED;
 
 // What a stack value tells of a local: it is a copy of the local, or the local
 // is neither null nor undefined when the value is true, or when it is false.
@@ -337,14 +315,14 @@ export class BodyDecoder {
     this.stack = 0;
     this.scope = 0;
     if (load<u8>(this.start) === ops.OP_label) {
-      if (!this.target(-1, 0, 0, 0)) {
+      if (!target(this, -1, 0, 0, 0)) {
         return code;
       }
     } else {
       if (this.typed) {
         this.entryStack[0] = 0;
         this.entryScope[0] = 0;
-        this.saveEntry(0);
+        saveEntry(this, 0);
       }
 
       if (!this.block(0, 0, 0)) {
@@ -355,7 +333,7 @@ export class BodyDecoder {
     while (this.workCount) {
       const start = this.work[--this.workCount];
       this.pending[start] = 0;
-      this.loadEntry(start);
+      loadEntry(this, start);
       if (!this.block(start, this.entryStack[start], this.entryScope[start])) {
         return code;
       }
@@ -412,7 +390,7 @@ export class BodyDecoder {
     let ok = true;
     for (let pc: u32 = 0; pc < this.length && ok; pc++) {
       if (pc === 0 || this.known[pc]) {
-        this.loadEntry(pc);
+        loadEntry(this, pc);
         ir.addBlock(pc, this.entryStack[pc], this.entryScope[pc], this.valueType, this.valueFlags);
         ok = this.block(pc, this.entryStack[pc], this.entryScope[pc]);
       }
@@ -430,101 +408,6 @@ export class BodyDecoder {
       ir.type[i] = this.valueType[dst];
       ir.notNull[i] = this.valueFlags[dst] & NOT_NULL;
     }
-  }
-
-  /**
-   * The IR of an instruction that wrote none of its own: its opcode reading
-   * the values it popped, or the register it names, and writing what it
-   * pushed; branches name their target blocks.
-   */
-  emitGeneric(
-    pc: u32,
-    opcode: u8,
-    a: u32,
-    b: u32,
-    stackBefore: u32,
-    scopeBefore: u32,
-    pops: u32,
-  ): void {
-    const base = this.stackBase;
-    let src = <i32>(base + stackBefore - pops);
-    let count = pops;
-    let dst = this.stack > stackBefore - pops ? <i32>(base + this.stack - 1) : -1;
-    let ra = a;
-    switch (opcode) {
-      case ops.OP_label:
-      case ops.OP_nop:
-      case ops.OP_bkpt:
-      case ops.OP_bkptline:
-      case ops.OP_timestamp:
-        return;
-      case ops.OP_getlocal:
-        src = <i32>a;
-        count = 1;
-        break;
-      case ops.OP_setlocal:
-        dst = <i32>a;
-        break;
-      case ops.OP_pushscope:
-      case ops.OP_pushwith:
-        dst = <i32>(this.localCount + scopeBefore);
-        break;
-      case ops.OP_popscope:
-        src = <i32>(this.localCount + scopeBefore - 1);
-        count = 1;
-        break;
-      case ops.OP_getscopeobject:
-        ra = <u32>load<u8>(this.start + pc + 1);
-        src = <i32>(this.localCount + ra);
-        count = 1;
-        break;
-      // Slots count from 0 in the IR, as early bound ones do.
-      case ops.OP_getslot:
-      case ops.OP_setslot:
-      case ops.OP_getglobalslot:
-      case ops.OP_setglobalslot:
-        ra = a - 1;
-        break;
-      case ops.OP_jump:
-      case ops.OP_iftrue:
-      case ops.OP_iffalse:
-      case ops.OP_ifeq:
-      case ops.OP_ifne:
-      case ops.OP_iflt:
-      case ops.OP_ifle:
-      case ops.OP_ifgt:
-      case ops.OP_ifge:
-      case ops.OP_ifstricteq:
-      case ops.OP_ifstrictne:
-      case ops.OP_ifnlt:
-      case ops.OP_ifnle:
-      case ops.OP_ifngt:
-      case ops.OP_ifnge:
-        ra = this.blockOf[this.slotNext[pc] + <u32>this.slotA[pc]];
-        break;
-      case ops.OP_lookupswitch: {
-        const ir = this.ir;
-        const first = this.slotC[pc];
-        const cases = ir.caseCount;
-        for (let i = first; i <= first + b; i++) {
-          ir.addCase(this.blockOf[pc + this.code.cases[i]]);
-        }
-
-        this.emit(opcode, -1, src, count, this.blockOf[pc + this.slotA[pc]], cases, <i32>b, pc);
-        return;
-      }
-      default:
-        break;
-    }
-
-    if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
-      src = <i32>(opcode - ops.OP_getlocal0);
-      count = 1;
-    } else if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
-      dst = <i32>(opcode - ops.OP_setlocal0);
-    }
-
-    this.emit(opcode, dst, src, count, ra, b, this.rowC, pc);
   }
 
   /** Zeroed scratch for this body, growing it if the body is the longest yet. */
@@ -820,54 +703,6 @@ export class BodyDecoder {
     return (this.valueFlags[i] & NOT_NULL) !== 0;
   }
 
-  /** Save the current state as known target t's entry state. */
-  saveEntry(t: u32): void {
-    const size = this.frameSize;
-    if (this.entryUsed + size > <u32>this.entryType.length) {
-      const capacity = max(this.entryUsed + size, <u32>this.entryType.length * 2);
-      const types = new StaticArray<i32>(capacity);
-      const flags = new StaticArray<u8>(capacity);
-      memory.copy(changetype<usize>(types), changetype<usize>(this.entryType), this.entryUsed << 2);
-      memory.copy(changetype<usize>(flags), changetype<usize>(this.entryFlags), this.entryUsed);
-      this.entryType = types;
-      this.entryFlags = flags;
-    }
-
-    const at = this.entryUsed;
-    this.entryAt[t] = at;
-    this.entryUsed += size;
-    memory.copy(
-      changetype<usize>(this.entryType) + ((<usize>at) << 2),
-      changetype<usize>(this.valueType),
-      (<usize>size) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.entryFlags) + <usize>at,
-      changetype<usize>(this.valueFlags),
-      size,
-    );
-  }
-
-  /** Make known target t's entry state the current one. */
-  loadEntry(t: u32): void {
-    if (!this.typed) {
-      return;
-    }
-
-    this.localsVersion++;
-    const at = this.entryAt[t];
-    memory.copy(
-      changetype<usize>(this.valueType),
-      changetype<usize>(this.entryType) + ((<usize>at) << 2),
-      (<usize>this.frameSize) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.valueFlags),
-      changetype<usize>(this.entryFlags) + <usize>at,
-      this.frameSize,
-    );
-  }
-
   /**
    * As Verifier::mergeState: merge the current values into known target t's
    * entry state, whose depths are the same: types to their common base, not
@@ -918,208 +753,10 @@ export class BodyDecoder {
     return changed;
   }
 
-  /** Put known target t on the work list unless it is there already. */
-  requeue(t: u32): void {
-    if (!this.pending[t]) {
-      this.pending[t] = 1;
-      this.work[this.workCount++] = t;
-    }
-  }
-
-  /**
-   * As Verifier::checkTarget and mergeState: stay in the code, back edges need
-   * a label or known target, and every path into a block has the same stack
-   * and scope depths, whose values merge.
-   */
-  target(from: i64, to: i64, stack: u32, scope: u32): bool {
-    // The second phase only visits what the first already checked.
-    if (this.emitPass) {
-      return true;
-    }
-
-    if (to < 0 || to >= <i64>this.length) {
-      this.code.fail(C.kInvalidBranchTargetError);
-      return false;
-    }
-
-    const t = <u32>to;
-    const isNew = !this.known[t];
-    if (to <= from && isNew && load<u8>(this.start + t) !== ops.OP_label) {
-      this.code.fail(C.kInvalidBranchTargetError);
-      return false;
-    }
-
-    if (isNew) {
-      // Code decoded as part of another block must have been reached with the same state.
-      const walked = this.cover[t] === START;
-      if (walked && !this.sameDepths(this.stackAt[t], this.scopeAt[t], stack, scope)) {
-        return false;
-      }
-
-      this.known[t] = 1;
-      this.entryStack[t] = stack;
-      this.entryScope[t] = scope;
-      if (this.typed) {
-        this.saveEntry(t);
-      }
-
-      this.requeue(t);
-
-      // The block that walked through t must now end there and merge into it.
-      if (walked && this.typed && this.walkOf[t] !== t) {
-        this.requeue(this.walkOf[t]);
-      }
-    } else {
-      if (!this.sameDepths(this.entryStack[t], this.entryScope[t], stack, scope)) {
-        return false;
-      }
-
-      if (this.typed) {
-        const changed = this.mergeEntry(t);
-        if (changed < 0) {
-          return false;
-        }
-
-        if (changed) {
-          this.requeue(t);
-        }
-      }
-    }
-
-    // A loop header's implicit interrupt check can throw, so it reaches the
-    // handlers covering it, even when the back edge is found after its block.
-    if (to <= from && !this.loopHeader[t]) {
-      this.loopHeader[t] = 1;
-      if (this.typed) {
-        // Its handlers are reached with the state it is entered with.
-        this.saveCurrent();
-        this.loadEntry(t);
-        const stackNow = this.stack;
-        const scopeNow = this.scope;
-        this.stack = stack;
-        this.scope = scope;
-        const reached = this.throwsAt(t);
-        this.stack = stackNow;
-        this.scope = scopeNow;
-        this.restoreCurrent();
-        return reached;
-      }
-
-      return this.throwsAt(t);
-    }
-
-    return true;
-  }
-
   // The values of the block being walked, while a loop header's handler
   // edges are followed from its entry state instead.
   savedType: StaticArray<i32> = new StaticArray<i32>(0);
   savedFlags: StaticArray<u8> = new StaticArray<u8>(0);
-
-  saveCurrent(): void {
-    if (<u32>this.savedType.length < this.frameSize) {
-      this.savedType = new StaticArray<i32>(this.frameSize);
-      this.savedFlags = new StaticArray<u8>(this.frameSize);
-    }
-
-    memory.copy(
-      changetype<usize>(this.savedType),
-      changetype<usize>(this.valueType),
-      (<usize>this.frameSize) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.savedFlags),
-      changetype<usize>(this.valueFlags),
-      this.frameSize,
-    );
-  }
-
-  restoreCurrent(): void {
-    this.localsVersion++;
-    memory.copy(
-      changetype<usize>(this.valueType),
-      changetype<usize>(this.savedType),
-      (<usize>this.frameSize) << 2,
-    );
-    memory.copy(
-      changetype<usize>(this.valueFlags),
-      changetype<usize>(this.savedFlags),
-      this.frameSize,
-    );
-  }
-
-  sameDepths(stack: u32, scope: u32, otherStack: u32, otherScope: u32): bool {
-    if (stack !== otherStack) {
-      this.code.fail(C.kStackDepthUnbalancedError);
-      return false;
-    }
-
-    if (scope !== otherScope) {
-      this.code.fail(C.kScopeDepthUnbalancedError);
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Edges from `pc` to every handler covering it. A handler starts with the
-   * locals as they are, no scopes, and just the exception on the stack.
-   */
-  throwsAt(pc: u32): bool {
-    if (this.emitPass || pc < this.tryFrom || pc >= this.tryTo) {
-      return true;
-    }
-
-    const abc = this.abc;
-    for (let i: u32 = 0; i < this.handlerCount; i++) {
-      const h = this.handlerFirst + i;
-      if (pc >= abc.exceptionFrom[h] && pc < abc.exceptionTo[h]) {
-        if (this.maxStack < 1) {
-          this.code.fail(C.kStackOverflowError);
-          return false;
-        }
-
-        if (!this.typed) {
-          if (!this.target(<i64>pc, <i64>abc.exceptionTarget[h], 1, 0)) {
-            return false;
-          }
-
-          continue;
-        }
-
-        // The same locals as when last merged into this handler change
-        // nothing there, once a backward edge has made it a loop header.
-        const to = abc.exceptionTarget[h];
-        if (this.handlerMerged[i] === this.localsVersion && (to > pc || this.loopHeader[to])) {
-          continue;
-        }
-
-        const stack = this.stack;
-        const scope = this.scope;
-        const base = this.stackBase;
-        const firstType = this.valueType[base];
-        const firstFlags = this.valueFlags[base];
-        const firstOrigin = this.origin[base];
-        const type = this.handlerType[i];
-        this.setValue(base, type, this.domain.typeNotNull(type) ? NOT_NULL : 0);
-        this.stack = 1;
-        this.scope = 0;
-        const reached = this.target(<i64>pc, <i64>abc.exceptionTarget[h], 1, 0);
-        this.stack = stack;
-        this.scope = scope;
-        this.setValue(base, firstType, firstFlags);
-        this.origin[base] = firstOrigin;
-        if (!reached) {
-          return false;
-        }
-
-        this.handlerMerged[i] = this.localsVersion;
-      }
-    }
-
-    return true;
-  }
 
   /** Decode and check one block from `start` until it ends or runs into another block. */
   block(start: u32, stack: u32, scope: u32): bool {
@@ -1150,14 +787,14 @@ export class BodyDecoder {
       }
 
       if (pc !== start && (opcode === ops.OP_label || this.known[pc])) {
-        return this.target(<i64>pc - 1, <i64>pc, this.stack, this.scope);
+        return target(this, <i64>pc - 1, <i64>pc, this.stack, this.scope);
       }
 
       // A loop header's implicit interrupt check can throw too, with the
       // state the block is entered with.
       const flags = opcodeFlags[opcode];
       if (flags & FLAG_Throws || (pc === start && this.typed && this.loopHeader[pc])) {
-        if (!this.throwsAt(pc)) {
+        if (!throwsAt(this, pc)) {
           return false;
         }
       }
@@ -1176,7 +813,7 @@ export class BodyDecoder {
       this.stackAt[pc] = this.stack;
       this.scopeAt[pc] = this.scope;
       const test = this.typed ? this.nullTest(opcode) : -1;
-      if (!this.verifyAt(pc, opcode)) {
+      if (!verifyAt(this, pc, opcode)) {
         return false;
       }
 
@@ -1195,7 +832,7 @@ export class BodyDecoder {
         const local = test >> 2;
         const kind = test & 3;
         const before = test >= 0 && kind === ORIGIN_IfTrue ? this.markChecked(local) : 0;
-        if (!this.target(<i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
+        if (!target(this, <i64>pc, <i64>next + this.slotA[pc], stack, scope)) {
           return false;
         }
 
@@ -1208,14 +845,14 @@ export class BodyDecoder {
           }
         }
       } else if (opcode === ops.OP_lookupswitch) {
-        if (!this.target(<i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
+        if (!target(this, <i64>pc, <i64>pc + this.slotA[pc], stack, scope)) {
           return false;
         }
 
         const first = this.slotC[pc];
         const last = first + this.slotB[pc];
         for (let i = first; i <= last; i++) {
-          if (!this.target(<i64>pc, <i64>pc + code.cases[i], stack, scope)) {
+          if (!target(this, <i64>pc, <i64>pc + code.cases[i], stack, scope)) {
             return false;
           }
         }
@@ -1319,809 +956,6 @@ export class BodyDecoder {
     return true;
   }
 
-  /**
-   * The checks of the instruction at `pc` in Verifier::verifyBlock, in the
-   * verifier's order, and its effect on the stack and scope depths and, when
-   * typed, on the values; false after recording the error.
-   */
-  verifyAt(pc: u32, opcode: u8): bool {
-    const pool = this.abc.pool;
-    const a = <u32>this.slotA[pc];
-    const b = this.slotB[pc];
-    const stack = opcodeStack[opcode];
-    let pops = <u64>opcodePops[opcode];
-    const pushes = <u64>opcodePushes[opcode];
-    const checkPushes = stack & STACK_CheckPushOne ? 1 : pushes;
-
-    // A name looked up in the scope chain needs a scope to look in.
-    if (
-      this.typed &&
-      (opcode === ops.OP_getlex ||
-        opcode === ops.OP_findpropstrict ||
-        opcode === ops.OP_findproperty) &&
-      this.scope + this.outer.size === 0
-    ) {
-      return this.fail(C.kFindVarWithNoScopeError);
-    }
-
-    // Operands that index the pool or the method tables, checked before the stack.
-    if (stack & STACK_Multiname) {
-      if (a === 0 || a >= pool.multinameCount) {
-        return this.fail(C.kCpoolIndexRangeError);
-      }
-
-      pops += runtimeParts(pool, a);
-    }
-
-    if (stack & STACK_ArgcA) {
-      pops += a;
-    } else if (stack & STACK_ArgcB) {
-      pops += b;
-    }
-
-    switch (opcode) {
-      case ops.OP_newobject:
-        pops = <u64>a * 2;
-        break;
-      case ops.OP_newarray:
-        pops = a;
-        break;
-      case ops.OP_callstatic:
-        if (a >= this.abc.methodCount || !this.callable(a)) {
-          return this.fail(C.kCorruptABCError);
-        }
-        break;
-      case ops.OP_dxns:
-        if (!(this.methodFlags & C.METHOD_SetsDxns)) {
-          return this.fail(C.kIllegalSetDxns);
-        }
-
-        if (this.emitPass) {
-          this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
-        }
-
-        return this.checkString(a);
-      case ops.OP_debugfile:
-        if (this.emitPass) {
-          this.emit(opcode, -1, -1, 0, a, 0, 0, pc);
-        }
-
-        return this.checkString(a);
-      case ops.OP_kill:
-        if (!this.checkLocal(a)) {
-          return false;
-        }
-
-        if (this.typed) {
-          this.setValue(a, TYPE_Any, 0);
-        }
-
-        if (this.emitPass) {
-          this.emit(opcode, <i32>a, -1, 0, a, 0, 0, pc);
-        }
-
-        return true;
-      case ops.OP_inclocal:
-      case ops.OP_declocal:
-      case ops.OP_inclocal_i:
-      case ops.OP_declocal_i: {
-        if (!this.checkLocal(a)) {
-          return false;
-        }
-
-        if (this.typed) {
-          const integer = opcode === ops.OP_inclocal_i || opcode === ops.OP_declocal_i;
-          const numeric = this.numericType(this.typeOf(a));
-          if (!integer && this.abc.hasFloatSupport && numeric !== this.domain.numberType) {
-            this.retype(a, numeric);
-          } else {
-            this.coerce(a, integer ? this.domain.intType : this.domain.numberType);
-          }
-        }
-
-        if (this.emitPass) {
-          this.emit(opcode, <i32>a, <i32>a, 1, a, 0, 0, pc);
-        }
-
-        return true;
-      }
-      case ops.OP_popscope:
-        if (this.scope === 0) {
-          return this.fail(C.kScopeStackUnderflowError);
-        }
-
-        this.scope--;
-        if (this.emitPass) {
-          this.emit(opcode, -1, <i32>(this.localCount + this.scope), 1, 0, 0, 0, pc);
-        }
-
-        return true;
-      case ops.OP_setglobalslot:
-        if (this.typed && this.scope === 0 && this.outer.size === 0) {
-          return this.fail(C.kNoGlobalScopeError);
-        }
-        break;
-      default:
-        break;
-    }
-
-    if (<u64>this.stack < pops) {
-      return this.fail(C.kStackUnderflowError);
-    }
-
-    if (<u64>this.stack - pops + checkPushes > this.maxStack) {
-      return this.fail(C.kStackOverflowError);
-    }
-
-    const scopeBefore = this.scope;
-    if (!this.verifySpecial(pc, opcode, a, b)) {
-      return false;
-    }
-
-    this.emitted = false;
-    this.rowC = 0;
-    this.pc = pc;
-    if (this.typed && !this.typeAt(pc, opcode, a, b, scopeBefore)) {
-      return false;
-    }
-
-    const stackBefore = this.stack;
-    this.stack = <u32>(<u64>this.stack - pops + pushes);
-    if (this.emitPass && !this.emitted) {
-      this.emitGeneric(pc, opcode, a, b, stackBefore, scopeBefore, <u32>pops);
-    }
-
-    return true;
-  }
-
-  /** The checks after the stack check that only some opcodes have. */
-  verifySpecial(pc: u32, opcode: u8, a: u32, b: u32): bool {
-    const abc = this.abc;
-    const pool = abc.pool;
-    if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
-      return this.checkLocal(opcode - ops.OP_getlocal0);
-    }
-
-    if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
-      return this.checkLocal(opcode - ops.OP_setlocal0);
-    }
-
-    switch (opcode) {
-      case ops.OP_getlocal:
-      case ops.OP_setlocal:
-        return this.checkLocal(a);
-      case ops.OP_hasnext2:
-        if (!this.checkLocal(a) || !this.checkLocal(b)) {
-          return false;
-        }
-
-        return a === b ? this.fail(C.kInvalidHasNextError) : true;
-      case ops.OP_pushstring:
-        return this.checkString(a);
-      case ops.OP_pushint:
-        return a === 0 || a >= <u32>pool.ints.length ? this.fail(C.kCpoolIndexRangeError) : true;
-      case ops.OP_pushuint:
-        return a === 0 || a >= <u32>pool.uints.length ? this.fail(C.kCpoolIndexRangeError) : true;
-      case ops.OP_pushfloat:
-        return a === 0 || a >= <u32>pool.floats.length ? this.fail(C.kCpoolIndexRangeError) : true;
-      case ops.OP_pushdouble:
-        return a === 0 || a >= <u32>pool.doubles.length ? this.fail(C.kCpoolIndexRangeError) : true;
-      case ops.OP_pushnamespace:
-        return a === 0 || a >= pool.nsCount ? this.fail(C.kCpoolIndexRangeError) : true;
-      case ops.OP_dxnslate:
-        return this.methodFlags & C.METHOD_SetsDxns ? true : this.fail(C.kIllegalSetDxns);
-      case ops.OP_getlex:
-        return runtimeParts(pool, a) ? this.fail(C.kIllegalOpMultinameError) : true;
-      case ops.OP_finddef:
-        return isBinding(pool, a) ? true : this.fail(C.kIllegalOpMultinameError);
-      case ops.OP_callproperty:
-      case ops.OP_callproplex:
-      case ops.OP_callpropvoid:
-      case ops.OP_constructprop:
-      case ops.OP_callsuper:
-      case ops.OP_callsupervoid:
-      case ops.OP_getsuper:
-      case ops.OP_setsuper:
-        return isAttribute(pool, a) ? this.fail(C.kIllegalOpMultinameError) : true;
-      case ops.OP_newfunction:
-        return a >= abc.methodCount ? this.fail(C.kMethodInfoExceedsCountError) : true;
-      case ops.OP_newclass:
-        return a >= abc.classCount ? this.fail(C.kClassInfoExceedsCountError) : true;
-      case ops.OP_newactivation:
-        return this.methodFlags & C.METHOD_NeedActivation
-          ? true
-          : this.fail(C.kInvalidNewActivationError);
-      case ops.OP_newcatch:
-        return a >= this.handlerCount ? this.fail(C.kInvalidNewActivationError) : true;
-      case ops.OP_pushscope:
-      case ops.OP_pushwith:
-        if (this.scope + 1 > this.maxScope) {
-          return this.fail(C.kScopeStackOverflowError);
-        }
-
-        this.scope++;
-        return true;
-      case ops.OP_getscopeobject:
-        // The verifier reads the index as the operand's first byte.
-        return <u32>load<u8>(this.start + pc + 1) >= this.scope
-          ? this.fail(C.kGetScopeObjectBoundsError)
-          : true;
-      default:
-        return true;
-    }
-  }
-
-  /**
-   * Whether method `m` of this ABC may be called statically: without types
-   * any may, as the structural checks cannot tell; with them, as avmplus'
-   * AbcEnv, one bound to a traits by a method, getter or setter.
-   */
-  callable(m: u32): bool {
-    const domain = this.domain;
-    if (!this.typed) {
-      return true;
-    }
-
-    return domain.isVirtual(domain.methodStart[this.index] + m);
-  }
-
-  /**
-   * The type effects and type checks of the instruction at `pc`, as in
-   * Verifier::verifyBlock, before the stack depth changes; `scope` is the
-   * scope depth before the instruction.
-   */
-  typeAt(pc: u32, opcode: u8, a: u32, b: u32, scope: u32): bool {
-    const domain = this.domain;
-    const top = this.peek(1);
-    switch (opcode) {
-      case ops.OP_lookupswitch:
-        return this.peekType(1, domain.intType);
-      case ops.OP_pushnull:
-        return this.pushNullish(domain.nullType);
-      case ops.OP_pushundefined:
-        return this.pushNullish(domain.voidType);
-      case ops.OP_pushtrue:
-      case ops.OP_pushfalse:
-        return this.push(domain.booleanType, NOT_NULL);
-      case ops.OP_pushnan:
-      case ops.OP_pushdouble:
-        return this.push(domain.numberType, NOT_NULL);
-      case ops.OP_pushfloat:
-        return domain.floatType < 0
-          ? this.fail(C.kClassNotFoundError)
-          : this.push(domain.floatType, NOT_NULL);
-      case ops.OP_pushbyte:
-      case ops.OP_pushshort:
-      case ops.OP_pushint:
-        return this.push(domain.intType, NOT_NULL);
-      case ops.OP_pushuint:
-        return this.push(domain.uintType, NOT_NULL);
-      case ops.OP_pushstring:
-        return this.push(domain.stringType, NOT_NULL);
-      case ops.OP_pushnamespace:
-        return this.push(domain.namespaceType, NOT_NULL);
-      case ops.OP_setlocal:
-        this.setValue(a, this.typeOf(top), this.valueFlags[top] & KNOWN);
-        return true;
-      case ops.OP_getlocal:
-        return this.pushLocal(a);
-      case ops.OP_newfunction:
-        if (this.emitPass && !this.captureFunction(a)) {
-          return false;
-        }
-
-        this.rowC = <i32>(domain.methodStart[this.index] + a);
-        return this.push(domain.functionType, NOT_NULL);
-      case ops.OP_getlex: {
-        // The scope object found is the receiver of the get.
-        if (!findProperty(this, ops.OP_findpropstrict, a)) {
-          return false;
-        }
-
-        this.stack++;
-        const got = getProperty(this, a, 1);
-        this.stack--;
-        return got;
-      }
-      case ops.OP_findpropstrict:
-      case ops.OP_findproperty:
-        return findProperty(this, opcode, a);
-      case ops.OP_newclass:
-        if (this.emitPass && !this.captureClass(a)) {
-          return false;
-        }
-
-        this.coerce(top, domain.classInstanceType());
-        this.setValue(top, domain.staticTraitsOf(this.index, a), NOT_NULL);
-        this.rowC = domain.staticTraitsOf(this.index, a);
-        return true;
-      case ops.OP_finddef:
-        return findDef(this, a);
-      case ops.OP_setproperty:
-      case ops.OP_initproperty:
-        return setProperty(this, opcode, a);
-      case ops.OP_getproperty: {
-        const n = propertyDepth(this, a, 1);
-        return n > 0 && getProperty(this, a, n);
-      }
-      case ops.OP_getdescendants: {
-        const n = propertyDepth(this, a, 1);
-        if (n === 0) {
-          return false;
-        }
-
-        this.checkNull(this.peek(n));
-        return this.popPush(n, TYPE_Any, 0);
-      }
-      case ops.OP_checkfilter:
-      case ops.OP_convert_o:
-        this.checkNull(top);
-        return true;
-      case ops.OP_deleteproperty: {
-        const n = propertyDepth(this, a, 1);
-        if (n === 0) {
-          return false;
-        }
-
-        this.checkNull(this.peek(n));
-        return this.popPush(n, domain.booleanType, NOT_NULL);
-      }
-      case ops.OP_astype: {
-        const t = typeName(this, a);
-        if (t < TYPE_Any) {
-          return false;
-        }
-
-        if (!canAssign(domain, t, this.typeOf(top))) {
-          const result = t !== TYPE_Any && domain.isMachineType(t) ? domain.objectType() : t;
-          return this.popPush(1, result, domain.typeNotNull(result) ? NOT_NULL : 0);
-        }
-
-        return true;
-      }
-      case ops.OP_astypelate: {
-        let t = domain.instanceTraitsOf(this.typeOf(this.peek(1)));
-        if (t !== TYPE_Any && domain.isMachineType(t)) {
-          t = domain.objectType();
-        }
-
-        return this.popPush(2, t, domain.typeNotNull(t) ? NOT_NULL : 0);
-      }
-      // The conversion is the instruction itself, which only retypes the value.
-      case ops.OP_coerce: {
-        const t = typeName(this, a);
-        if (t < TYPE_Any) {
-          return false;
-        }
-
-        this.rowC = t;
-        this.retype(top, t);
-        return true;
-      }
-      case ops.OP_convert_b:
-      case ops.OP_coerce_b:
-        this.retype(top, domain.booleanType);
-        return true;
-      case ops.OP_coerce_o:
-        this.retype(top, domain.objectType());
-        return true;
-      case ops.OP_coerce_a:
-        this.retype(top, TYPE_Any);
-        return true;
-      case ops.OP_convert_i:
-      case ops.OP_coerce_i:
-        this.retype(top, domain.intType);
-        return true;
-      case ops.OP_convert_u:
-      case ops.OP_coerce_u:
-        this.retype(top, domain.uintType);
-        return true;
-      case ops.OP_convert_f:
-        if (domain.floatType < 0) {
-          return this.fail(C.kClassNotFoundError);
-        }
-
-        this.retype(top, domain.floatType);
-        return true;
-      case ops.OP_unplus:
-        this.retype(top, this.numericType(this.typeOf(top)));
-        return true;
-      case ops.OP_convert_d:
-      case ops.OP_coerce_d:
-        this.retype(top, domain.numberType);
-        return true;
-      case ops.OP_coerce_s:
-        this.retype(top, domain.stringType);
-        return true;
-      case ops.OP_iftrue:
-      case ops.OP_iffalse:
-        this.coerce(top, domain.booleanType);
-        return true;
-      case ops.OP_returnvalue:
-        this.coerce(top, domain.traits.returnType[this.global]);
-        return true;
-      case ops.OP_istype:
-        if (typeName(this, a) < TYPE_Any) {
-          return false;
-        }
-
-        return this.popPush(1, domain.booleanType, NOT_NULL);
-      case ops.OP_istypelate:
-        return this.popPush(2, domain.booleanType, NOT_NULL);
-      case ops.OP_convert_s:
-      case ops.OP_esc_xelem:
-      case ops.OP_esc_xattr:
-      case ops.OP_typeof:
-        return this.popPush(1, domain.stringType, NOT_NULL);
-      case ops.OP_callstatic:
-        return callStatic(this, a, b);
-      case ops.OP_call:
-        return this.popPush(a + 2, TYPE_Any, 0);
-      case ops.OP_construct: {
-        const t = domain.instanceTraitsOf(this.typeOf(this.peek(a + 1)));
-        return this.popPush(a + 1, t, NOT_NULL);
-      }
-      case ops.OP_callmethod: {
-        // Always rejected, as avmplus has done since Flash Player 9.
-        if (a === 0) {
-          return this.fail(C.kZeroDispIdError);
-        }
-
-        return this.fail(
-          this.typeOf(this.peek(b + 1)) === TYPE_Any
-            ? C.kCorruptABCError
-            : C.kIllegalEarlyBindingError,
-        );
-      }
-      case ops.OP_callproperty:
-      case ops.OP_callproplex:
-      case ops.OP_callpropvoid:
-        return callProperty(this, opcode, a, b);
-      case ops.OP_constructprop: {
-        const n = propertyDepth(this, a, b + 1);
-        if (n === 0) {
-          return false;
-        }
-
-        const obj = this.peek(n);
-        const type = this.typeOf(obj);
-        const found = binding(this, type, a);
-        if (found === BIND_Ambiguous) {
-          return false;
-        }
-
-        const ctraits = readBinding(this, type, found);
-        if (ctraits < TYPE_Any) {
-          return false;
-        }
-
-        this.checkNull(obj);
-        this.rowC = ctraits;
-        const itraits = domain.instanceTraitsOf(ctraits);
-        const pushed = this.popPush(n, itraits, itraits === TYPE_Any ? 0 : NOT_NULL);
-        // A name bound to a slot, as `new` of a script's class names one:
-        // what the slot holds, constructed, with no lookup by name.
-        const kind = found & 7;
-        if (pushed && (kind === 2 || kind === 3) && n === b + 1) {
-          return this.emitOn(IR_ConstructSlot, <i32>obj, <i32>obj, n, found >> 3, b, ctraits);
-        }
-
-        return pushed;
-      }
-      case ops.OP_applytype:
-        return this.popPush(a + 1, TYPE_Any, NOT_NULL);
-      case ops.OP_callsuper:
-      case ops.OP_callsupervoid:
-        return callSuper(this, opcode, a, b);
-      case ops.OP_getsuper:
-        return getSuper(this, a);
-      case ops.OP_setsuper: {
-        const n = propertyDepth(this, a, 2);
-        if (n === 0) {
-          return false;
-        }
-
-        const obj = this.peek(n);
-        if (coerceSuper(this, obj) < TYPE_Any) {
-          return false;
-        }
-
-        this.checkNull(obj);
-        return true;
-      }
-      case ops.OP_constructsuper: {
-        const obj = this.peek(a + 1);
-        const base = coerceSuper(this, obj);
-        if (base < TYPE_Any) {
-          return false;
-        }
-
-        const init = domain.traits.init[base];
-        if (init >= 0 && !coerceArgs(this, <u32>init, a)) {
-          return false;
-        }
-
-        this.checkNull(obj);
-        return true;
-      }
-      case ops.OP_newobject:
-        for (let n: u32 = 2; n <= 2 * a; n += 2) {
-          if (!this.peekType(n, domain.stringType)) {
-            return false;
-          }
-        }
-
-        return this.popPush(2 * a, domain.objectType(), NOT_NULL);
-      case ops.OP_newarray:
-        return this.popPush(a, domain.arrayType, NOT_NULL);
-      case ops.OP_pushscope:
-      case ops.OP_pushwith: {
-        const type = this.typeOf(top);
-        const outer = this.outer;
-        if (opcode === ops.OP_pushscope && scope === 0 && outer.extra !== TYPE_Any) {
-          if (type === TYPE_Any || !domain.traits.subtypeOf(<u32>type, <u32>outer.extra)) {
-            return this.fail(C.kIllegalOperandTypeError);
-          }
-        }
-
-        this.setValue(
-          this.localCount + scope,
-          type,
-          opcode === ops.OP_pushwith ? NOT_NULL | WITH : NOT_NULL,
-        );
-        return true;
-      }
-      case ops.OP_newactivation: {
-        const t = domain.bodyTraits[this.index][this.abc.methodBody[this.method]];
-        const error = t >= 0 ? domain.traits.resolve(domain, <u32>t) : 0;
-        if (error) {
-          return this.fail(error);
-        }
-
-        return this.push(t, NOT_NULL);
-      }
-      case ops.OP_newcatch:
-        return this.push(this.handlerScope[a], NOT_NULL);
-      case ops.OP_getscopeobject: {
-        const i = this.localCount + load<u8>(this.start + pc + 1);
-        return this.push(this.typeOf(i), this.valueFlags[i] & NOT_NULL);
-      }
-      case ops.OP_getouterscope: {
-        const outer = this.outer;
-        if (a >= outer.size) {
-          return this.fail(C.kGetScopeObjectBoundsError);
-        }
-
-        return this.push(outer.types[a], NOT_NULL);
-      }
-      case ops.OP_getglobalscope:
-        return globalScope(this) >= TYPE_Any;
-      case ops.OP_getglobalslot: {
-        const global = globalScope(this);
-        if (global < TYPE_Any) {
-          return false;
-        }
-
-        // The global object pushed is replaced by the slot's value.
-        const slotType = slot(this, global, a - 1);
-        return (
-          slotType >= TYPE_Any && this.push(slotType, domain.typeNotNull(slotType) ? NOT_NULL : 0)
-        );
-      }
-      case ops.OP_setglobalslot: {
-        const outer = this.outer;
-        const global = outer.size > 0 ? outer.types[0] : this.typeOf(this.localCount);
-        const slotType = slot(this, global, a - 1);
-        if (slotType < TYPE_Any) {
-          return false;
-        }
-
-        this.coerce(top, slotType);
-        return true;
-      }
-      case ops.OP_getslot: {
-        const slotType = slot(this, this.typeOf(top), a - 1);
-        if (slotType < TYPE_Any) {
-          return false;
-        }
-
-        this.checkNull(top);
-        return this.popPush(1, slotType, domain.typeNotNull(slotType) ? NOT_NULL : 0);
-      }
-      case ops.OP_setslot: {
-        const slotType = slot(this, this.typeOf(this.peek(2)), a - 1);
-        if (slotType < TYPE_Any) {
-          return false;
-        }
-
-        this.coerce(top, slotType);
-        this.checkNull(this.peek(2));
-        return true;
-      }
-      case ops.OP_dup: {
-        const i = this.stackBase + this.stack;
-        this.push(this.typeOf(top), this.valueFlags[top] & KNOWN);
-        this.origin[i] = this.origin[top];
-        this.originWrite[i] = this.originWrite[top];
-        return true;
-      }
-      case ops.OP_swap: {
-        const below = this.peek(2);
-        const type = this.typeOf(top);
-        const flags = this.valueFlags[top] & KNOWN;
-        this.setValue(top, this.typeOf(below), this.valueFlags[below] & KNOWN);
-        this.setValue(below, type, flags);
-        return true;
-      }
-      case ops.OP_lessthan:
-      case ops.OP_greaterthan:
-      case ops.OP_lessequals:
-      case ops.OP_greaterequals: {
-        // A comparison with a number compares numbers.
-        const lhs = this.peek(2);
-        const lt = this.typeOf(lhs);
-        const rt = this.typeOf(top);
-        if (lt !== TYPE_Any && rt !== TYPE_Any) {
-          if (!isNumeric(domain, lt) && isNumeric(domain, rt)) {
-            this.coerce(lhs, domain.numberType);
-          } else if (isNumeric(domain, lt) && !isNumeric(domain, rt)) {
-            this.coerce(top, domain.numberType);
-          }
-        }
-
-        return this.popPush(2, domain.booleanType, NOT_NULL);
-      }
-      case ops.OP_in:
-        this.checkNull(top);
-        return this.popPush(2, domain.booleanType, NOT_NULL);
-      case ops.OP_equals:
-      case ops.OP_strictequals:
-      case ops.OP_instanceof:
-        return this.popPush(2, domain.booleanType, NOT_NULL);
-      case ops.OP_not:
-        this.coerce(top, domain.booleanType);
-        return this.popPush(1, domain.booleanType, NOT_NULL);
-      case ops.OP_add: {
-        const lhs = this.peek(2);
-        const lt = this.typeOf(lhs);
-        const rt = this.typeOf(top);
-        const string = domain.stringType;
-        if ((lt === string && this.isNotNull(lhs)) || (rt === string && this.isNotNull(top))) {
-          return this.popPush(2, string, NOT_NULL);
-        }
-
-        if (domain.floatType >= 0 && lt === domain.floatType && rt === domain.floatType) {
-          return this.popPush(2, domain.floatType, NOT_NULL);
-        }
-
-        if (isNumeric(domain, lt) && isNumeric(domain, rt)) {
-          return this.popPush(2, domain.numberType, NOT_NULL);
-        }
-
-        // A number or a string, but not null either way.
-        return this.popPush(2, domain.objectType(), NOT_NULL);
-      }
-      case ops.OP_modulo:
-      case ops.OP_subtract:
-      case ops.OP_divide:
-      case ops.OP_multiply:
-        if (this.abc.hasFloatSupport) {
-          const lt = this.numericType(this.typeOf(this.peek(2)));
-          const rt = this.numericType(this.typeOf(top));
-          if (lt === domain.floatType && rt === domain.floatType) {
-            return this.popPush(2, domain.floatType, NOT_NULL);
-          }
-
-          if (lt === TYPE_Any || rt === TYPE_Any) {
-            return this.popPush(2, TYPE_Any, NOT_NULL);
-          }
-        }
-
-        this.coerce(this.peek(2), domain.numberType);
-        this.coerce(top, domain.numberType);
-        return this.popPush(2, domain.numberType, NOT_NULL);
-      case ops.OP_negate:
-      case ops.OP_increment:
-      case ops.OP_decrement:
-        if (this.abc.hasFloatSupport) {
-          const numeric = this.numericType(this.typeOf(top));
-          if (numeric !== domain.numberType) {
-            this.retype(top, numeric);
-            return true;
-          }
-        }
-
-        this.coerce(top, domain.numberType);
-        return true;
-      case ops.OP_increment_i:
-      case ops.OP_decrement_i:
-      case ops.OP_negate_i:
-      case ops.OP_bitnot:
-        this.coerce(top, domain.intType);
-        return true;
-      case ops.OP_add_i:
-      case ops.OP_subtract_i:
-      case ops.OP_multiply_i:
-      case ops.OP_bitand:
-      case ops.OP_bitor:
-      case ops.OP_bitxor:
-      case ops.OP_lshift:
-      case ops.OP_rshift:
-        this.coerce(this.peek(2), domain.intType);
-        this.coerce(top, domain.intType);
-        return this.popPush(2, domain.intType, NOT_NULL);
-      case ops.OP_urshift:
-        this.coerce(this.peek(2), domain.intType);
-        this.coerce(top, domain.intType);
-        return this.popPush(2, domain.uintType, NOT_NULL);
-      case ops.OP_nextvalue:
-      case ops.OP_nextname:
-        return this.peekType(1, domain.intType) && this.popPush(2, TYPE_Any, 0);
-      case ops.OP_hasnext:
-        return this.peekType(1, domain.intType) && this.popPush(2, domain.intType, NOT_NULL);
-      case ops.OP_hasnext2:
-        if (this.typeOf(b) !== domain.intType) {
-          return this.fail(C.kIllegalOperandTypeError);
-        }
-
-        this.setValue(a, TYPE_Any, 0);
-        return this.push(domain.booleanType, NOT_NULL);
-      case ops.OP_sxi1:
-      case ops.OP_sxi8:
-      case ops.OP_sxi16:
-      case ops.OP_li8:
-      case ops.OP_li16:
-      case ops.OP_li32:
-        this.coerce(top, domain.intType);
-        return this.popPush(1, domain.intType, NOT_NULL);
-      case ops.OP_lf32:
-      case ops.OP_lf64:
-        this.coerce(top, domain.intType);
-        return this.popPush(1, domain.numberType, NOT_NULL);
-      case ops.OP_si8:
-      case ops.OP_si16:
-      case ops.OP_si32:
-        this.coerce(this.peek(2), domain.intType);
-        this.coerce(top, domain.intType);
-        return true;
-      case ops.OP_sf32:
-      case ops.OP_sf64:
-        this.coerce(this.peek(2), domain.numberType);
-        this.coerce(top, domain.intType);
-        return true;
-      default:
-        break;
-    }
-
-    if (opcode >= ops.OP_setlocal0 && opcode < ops.OP_setlocal0 + 4) {
-      this.setValue(opcode - ops.OP_setlocal0, this.typeOf(top), this.valueFlags[top] & KNOWN);
-    } else if (opcode >= ops.OP_getlocal0 && opcode < ops.OP_getlocal0 + 4) {
-      return this.pushLocal(<u32>(opcode - ops.OP_getlocal0));
-    }
-
-    return true;
-  }
-
-  /** ToNumeric may preserve a float returned by an object's valueOf. */
-  numericType(type: i32): i32 {
-    const domain = this.domain;
-    if (type >= 0 && type === domain.floatType) {
-      return type;
-    }
-
-    if (
-      isNumeric(domain, type) ||
-      type === domain.booleanType ||
-      type === domain.stringType ||
-      type === domain.nullType ||
-      type === domain.voidType
-    ) {
-      return domain.numberType;
-    }
-
-    return TYPE_Any;
-  }
-
   // Typed helpers, working on the stack before the instruction's depth change.
 
   /** Push a value; the instruction's stack effect sets the depth afterwards. */
@@ -2188,112 +1022,6 @@ export class BodyDecoder {
     return true;
   }
 
-  /** The scope chain `outer` and the scopes pushed so far, with an optional last entry and extra. */
-  scopeHere(last: i32, extra: i32): Scope {
-    const outer = this.outer;
-    const scope = new Scope();
-    for (let i: u32 = 0; i < outer.size; i++) {
-      scope.types.push(outer.types[i]);
-      scope.withs.push(outer.withs[i]);
-    }
-
-    for (let i: u32 = 0; i < this.scope; i++) {
-      const v = this.localCount + i;
-      scope.types.push(this.typeOf(v));
-      scope.withs.push(this.valueFlags[v] & WITH ? 1 : 0);
-    }
-
-    if (last !== -2) {
-      scope.types.push(last);
-      scope.withs.push(0);
-    }
-
-    scope.size = scope.types.length;
-    scope.extra = extra;
-    return scope;
-  }
-
-  /**
-   * As the ScopeWriter's OP_newfunction: function m is created in the scope
-   * chain here, once; a method bound to traits cannot be a function, and one
-   * created again must be created alike, unless it creates itself.
-   */
-  captureFunction(m: u32): bool {
-    const domain = this.domain;
-    const traits = domain.traits;
-    const global = domain.methodStart[this.index] + m;
-    const scope = this.scopeHere(-2, TYPE_Any);
-    const current = traits.functionScope[global];
-    // Created again alike, it is still queued, so that verifying the ABC again finds it.
-    if (current !== null) {
-      if (!current.equals(scope) && global !== this.global) {
-        return this.fail(C.kCorruptABCError);
-      }
-
-      this.captured.push(global);
-      return true;
-    }
-
-    if (traits.methodTraits[global] >= 0) {
-      return this.fail(C.kCorruptABCError);
-    }
-
-    traits.methodFunction[global] = 1;
-    const error = traits.sign(domain, global);
-    if (error) {
-      return this.fail(error);
-    }
-
-    traits.functionScope[global] = scope;
-    domain.captures++;
-    this.captured.push(global);
-    return true;
-  }
-
-  /**
-   * As the ScopeWriter's OP_newclass: the innermost scope must be the base
-   * class object; the class's static methods run in the scope chain here,
-   * its instance methods in that and the class object, once, and a class
-   * created again must be created alike. Both traits resolve.
-   */
-  captureClass(i: u32): bool {
-    const domain = this.domain;
-    const traits = domain.traits;
-    const ctraits = domain.staticTraitsOf(this.index, i);
-    const itraits = domain.instanceTraitsOf(ctraits);
-    if (this.scope === 0) {
-      return this.fail(C.kCorruptABCError);
-    }
-
-    const innermost = this.typeOf(this.localCount + this.scope - 1);
-    if (innermost === TYPE_Any || domain.instanceTraitsOf(innermost) !== traits.base[itraits]) {
-      return this.fail(C.kCorruptABCError);
-    }
-
-    const cscope = this.scopeHere(-2, ctraits);
-    const iscope = this.scopeHere(ctraits, itraits);
-    const error = traits.resolve(domain, <u32>ctraits) || traits.resolve(domain, <u32>itraits);
-    if (error) {
-      return this.fail(error);
-    }
-
-    const current = traits.scope[ctraits];
-    if (current !== null) {
-      const instance = traits.scope[itraits];
-      if (instance === null || !current.equals(cscope) || !instance.equals(iscope)) {
-        return this.fail(C.kCorruptABCError);
-      }
-    } else {
-      traits.scope[ctraits] = cscope;
-      traits.scope[itraits] = iscope;
-      domain.captures++;
-    }
-
-    domain.methodsOf(<u32>ctraits, this.captured);
-    domain.methodsOf(<u32>itraits, this.captured);
-    return true;
-  }
-
   checkString(index: u32): bool {
     return index === 0 || index >= this.abc.pool.stringCount
       ? this.fail(C.kCpoolIndexRangeError)
@@ -2331,7 +1059,7 @@ export class BodyDecoder {
  * As avmplus' Multiname::isBinding for a catch variable: a QName or Multiname
  * with a name, not an attribute or runtime name. A TypeName stands for its base.
  */
-function isBinding(pool: ConstantPool, index: u32): bool {
+export function isBinding(pool: ConstantPool, index: u32): bool {
   let mn = index;
   if (pool.mnKind[mn] === C.CONSTANT_TypeName) {
     mn = pool.mnA[mn];
@@ -2343,32 +1071,6 @@ function isBinding(pool: ConstantPool, index: u32): bool {
   }
 
   return kind === C.CONSTANT_Multiname && pool.mnB[mn] !== 0;
-}
-
-/** Values a multiname takes from the stack: a runtime namespace, a runtime name, or both. */
-function runtimeParts(pool: ConstantPool, index: u32): u32 {
-  const kind = pool.mnKind[index];
-  if (
-    kind === C.CONSTANT_RTQname ||
-    kind === C.CONSTANT_RTQnameA ||
-    kind === C.CONSTANT_MultinameL ||
-    kind === C.CONSTANT_MultinameLA
-  ) {
-    return 1;
-  }
-
-  return kind === C.CONSTANT_RTQnameL || kind === C.CONSTANT_RTQnameLA ? 2 : 0;
-}
-
-function isAttribute(pool: ConstantPool, index: u32): bool {
-  const kind = pool.mnKind[index];
-  return (
-    kind === C.CONSTANT_QnameA ||
-    kind === C.CONSTANT_RTQnameA ||
-    kind === C.CONSTANT_RTQnameLA ||
-    kind === C.CONSTANT_MultinameA ||
-    kind === C.CONSTANT_MultinameLA
-  );
 }
 
 /** A multiname's MN_* parts, as avmplus' Multiname flags. */

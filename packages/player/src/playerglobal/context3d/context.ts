@@ -25,6 +25,7 @@ import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
 import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
+import { writeReadback } from "./readback.js";
 
 /** The backend's format for a texture's; the packed and half-float ones are not yet. */
 function textureFormat(format: string): TextureFormat {
@@ -622,6 +623,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     drawToBitmapData(destination: AsObject): void {
       const entry = state(this as unknown as AsObject);
+      if (!destination) {
+        throw s.rt.error("TypeError", 2007, "destination");
+      }
+
+      // AIR reads nothing, and checks nothing more, before the back buffer is configured.
       const backend = entry.backend;
       if (backend.width === 0) {
         return;
@@ -629,25 +635,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
       requireClear(entry);
       const store = storeOf(s, destination);
-      // AIR can preserve alpha in opaque targets, outside BitmapStore's current
-      // opaque-pixel invariant. Different sizes and clipping need separate probes.
-      if (!store.transparent || store.width !== backend.width || store.height !== backend.height) {
-        unsupported(
-          "drawToBitmapData into an opaque BitmapData or one of another size than the back buffer",
-        );
-      }
-
-      const rgba = backend.read();
-      const pixels = store.pixels;
-      for (let i = 0; i < pixels.length; i++) {
-        const at = i * 4;
-        // AIR preserves RGB and raises alpha to cover every channel.
-        // Multiplying RGB here would darken textures twice.
-        const alpha = Math.max(rgba[at], rgba[at + 1], rgba[at + 2], rgba[at + 3]);
-        pixels[i] = (alpha << 24) | (rgba[at] << 16) | (rgba[at + 1] << 8) | rgba[at + 2];
-      }
-
-      store.changed();
+      // AIR copies the back buffer's top-left corner to the destination's,
+      // as much as both hold, and leaves the rest of the destination alone.
+      const width = Math.min(store.width, backend.width);
+      const height = Math.min(store.height, backend.height);
+      writeReadback(store, backend.read(width, height), width, height, backend.height);
     }
 
     present(): void {

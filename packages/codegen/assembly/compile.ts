@@ -16,6 +16,19 @@ import {
   LOG_Sign,
   LOG_Verify,
 } from "./avm2/link/domain";
+import {
+  addWeights,
+  drop,
+  evict,
+  evictedTop,
+  rebuilt,
+  restore,
+  revive,
+  traitsOf,
+  unrevive,
+  wantsRebuild,
+  weigh,
+} from "./avm2/link/lifetime";
 import { TRAITS_Activation, TRAITS_Instance, TRAITS_Script } from "./avm2/link/traits";
 import { handOut, Output } from "./output";
 
@@ -85,7 +98,7 @@ function isLive(appDomain: i32): bool {
  */
 export function domainDrop(appDomain: i32): void {
   if (appDomain >= 0) {
-    domain.drop(<u32>appDomain);
+    drop(domain, <u32>appDomain);
     pruneLazyVerification();
   }
 }
@@ -99,7 +112,7 @@ export function domainDrop(appDomain: i32): void {
  */
 export function domainEvict(appDomain: i32): void {
   if (appDomain >= 0) {
-    domain.evict(<u32>appDomain);
+    evict(domain, <u32>appDomain);
     pruneLazyVerification();
   }
 }
@@ -123,7 +136,7 @@ export function domainRestore(index: i32, bytes: Uint8Array): i32 {
 
   const buffer = new StaticArray<u8>(bytes.length + PADDING);
   memory.copy(changetype<usize>(buffer), bytes.dataStart, bytes.length);
-  return domain.restore(<u32>index, buffer, bytes.length);
+  return restore(domain, <u32>index, buffer, bytes.length);
 }
 
 /**
@@ -140,14 +153,14 @@ export function domainRevive(appDomain: i32): i32 {
   }
 
   const bottom = <u32>appDomain;
-  const top = bottom < <u32>domain.domainState.length ? domain.evictedTop(bottom) : bottom;
-  const revived = domain.revive(bottom);
+  const top = bottom < <u32>domain.domainState.length ? evictedTop(domain, bottom) : bottom;
+  const revived = revive(domain, bottom);
   if (revived <= 0) {
     return revived;
   }
 
   if (!domainRebuild()) {
-    domain.unrevive(bottom, top);
+    unrevive(domain, bottom, top);
     return -1;
   }
 
@@ -157,21 +170,21 @@ export function domainRevive(appDomain: i32): i32 {
 /**
  * Rebuild the domain without the ABCs of domains not live, once memory
  * would otherwise grow and they hold enough to keep it from growing (see
- * Domain.wantsRebuild):
+ * wantsRebuild in avm2/link/lifetime.ts):
  * whether it was, and a collection would free them now. A host calls it
  * when it has time, as when idle, so a batch of drops and evictions costs
  * one rebuild. Later modules come out the same either way.
  */
 export function domainCompact(): bool {
-  return domain.wantsRebuild() && domainRebuild();
+  return wantsRebuild(domain) && domainRebuild();
 }
 
 /**
- * The domain built again from its live ABCs (see Domain.rebuilt), worth it
+ * The domain built again from its live ABCs (see rebuilt in avm2/link/lifetime.ts), worth it
  * or not, as the fuzzers ask; false, leaving it, if one did not link.
  */
 export function domainRebuild(): bool {
-  const fresh = domain.rebuilt();
+  const fresh = rebuilt(domain);
   if (fresh === null) {
     return false;
   }
@@ -307,7 +320,7 @@ function writeModule(
   }
 
   emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly, lazy, results);
-  domain.weigh(<u32>at, rows);
+  weigh(domain, <u32>at, rows);
   if (keep) {
     written = emitter;
   }
@@ -420,18 +433,18 @@ function emitEach(bodies: string, reuse: bool, which: i32): Output {
     entries.byte(2);
   }
 
-  domain.weigh(index, rows);
+  weigh(domain, index, rows);
   return entries;
 }
 
 /**
  * Whether domainCompact would rebuild now: memory would grow before long
  * and the ABCs of dropped and evicted domains hold enough to keep it from
- * growing (see Domain.wantsRebuild). A pure query, so that a host collects
+ * growing (see wantsRebuild in avm2/link/lifetime.ts). A pure query, so that a host collects
  * garbage before a rebuild only when one is due.
  */
 export function domainWantsCompact(): bool {
-  return domain.wantsRebuild();
+  return wantsRebuild(domain);
 }
 
 /**
@@ -443,7 +456,7 @@ export function domainWantsCompact(): bool {
  * to give domainCompact time.
  */
 export function domainUsage(): string {
-  domain.addWeights();
+  addWeights(domain);
   const live = domain.liveWeight + domain.keptWeight;
   return `${live} ${domain.deadWeight} ${(<u64>memory.size()) << 16}`;
 }
@@ -670,11 +683,11 @@ export function domainReplay(log: string, index: i32 = -1): bool {
     ok = replayed(<u8>kind, abc, <u32>a, <u32>b);
   }
 
-  domain.weigh(<u32>at, rows);
+  weigh(domain, <u32>at, rows);
   return ok;
 }
 
-/** Entry `kind` of ABC `abc` done again, as Domain.replay does one, its numbers checked against the ABC first. */
+/** Entry `kind` of ABC `abc` done again, as replay in avm2/link/lifetime.ts does one, its numbers checked against the ABC first. */
 function replayed(kind: u8, abc: u32, a: u32, b: u32): bool {
   const info = domain.abcs[abc];
   if (kind === LOG_Verify) {
@@ -696,7 +709,7 @@ function replayed(kind: u8, abc: u32, a: u32, b: u32): bool {
       : a === TRAITS_Activation
         ? <u32>domain.bodyTraits[abc].length
         : info.classCount;
-  const t = b < owners ? domain.traitsOf(abc, a, b) : -1;
+  const t = b < owners ? traitsOf(domain, abc, a, b) : -1;
   return t >= 0 && domain.traits.resolve(domain, <u32>t) === 0;
 }
 
