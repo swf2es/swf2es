@@ -124,10 +124,15 @@ Each method goes through the same steps, in `codegen`:
    give the same results.
 5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
    JavaScript strings, and names are copied straight from the ABC. A
-   method's instructions are `emit/method.ts`'s; arithmetic, comparisons
-   and conversions `emit/values.ts`'s, domain memory `emit/memory.ts`'s,
-   how types, namespaces and constants are named `emit/refs.ts`'s, and the
-   module around the methods `emit/module.ts`'s.
+   method's frame, its entry checks and how it reads and writes registers
+   are `emit/method.ts`'s; its blocks, written an instruction at a time,
+   `emit/blocks.ts`'s, and its handler regions and catch
+   `emit/handlers.ts`'s. Its instructions are `emit/instructions.ts`'s,
+   those of the object model (scopes, properties, calls, construction)
+   `emit/objects.ts`'s; arithmetic, comparisons and conversions
+   `emit/values.ts`'s, domain memory `emit/memory.ts`'s, how types,
+   namespaces and constants are named `emit/refs.ts`'s, and the module
+   around the methods `emit/module.ts`'s.
 
 ### Generated code
 
