@@ -32,15 +32,26 @@ export class SizedPool<T extends Pooled> {
     return this.takeAt((width * SIZE_KEY + height) * SAMPLES_KEY + samples);
   }
 
-  /** The smallest of at least `width` by `height`, of no samples; none for none. */
-  takeFitting(width: number, height: number): T | null {
+  /** The smallest target that fits, at these samples and within `maxArea`; none for none. */
+  takeFitting(
+    width: number,
+    height: number,
+    samples = 0,
+    maxArea = Number.POSITIVE_INFINITY,
+  ): T | null {
     let best = -1;
     let least = Number.POSITIVE_INFINITY;
     for (const key of this.lists.keys()) {
       const size = Math.floor(key / SAMPLES_KEY);
       const w = Math.floor(size / SIZE_KEY);
       const h = size % SIZE_KEY;
-      if (key % SAMPLES_KEY === 0 && w >= width && h >= height && w * h < least) {
+      if (
+        key % SAMPLES_KEY === samples &&
+        w >= width &&
+        h >= height &&
+        w * h <= maxArea &&
+        w * h < least
+      ) {
         least = w * h;
         best = key;
       }

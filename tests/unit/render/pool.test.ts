@@ -49,3 +49,21 @@ test("a frame's end lets go of the idle, then the least lately freed past the bu
   assert.deepEqual(dropped, ["old", "mid", "new"]);
   assert.equal(pool.takeFitting(1, 1), null);
 });
+
+test("a fitting target keeps its sample count, dimensions and area budget", () => {
+  const pool = new SizedPool<Item>((i) => i.width * i.height);
+  pool.give(item("texture", 80, 48), 0);
+  pool.give(item("two samples", 80, 48), 0, 2);
+  pool.give(item("too narrow", 64, 96), 0, 4);
+  pool.give(item("too short", 128, 32), 0, 4);
+  pool.give(item("large", 128, 96), 0, 4);
+  pool.give(item("fit", 96, 64), 0, 4);
+
+  assert.equal(pool.takeFitting(80, 48, 4, 96 * 64 - 1), null);
+  assert.equal(pool.takeFitting(80, 48, 4, 96 * 64)?.name, "fit");
+  assert.equal(pool.takeFitting(80, 48, 4, 80 * 48 * 2), null);
+  assert.equal(pool.takeFitting(80, 48, 2)?.name, "two samples");
+  assert.equal(pool.takeFitting(80, 48)?.name, "texture");
+  assert.equal(pool.takeFitting(80, 48, 4)?.name, "large");
+  assert.equal(pool.bytes, 64 * 96 + 128 * 32);
+});
