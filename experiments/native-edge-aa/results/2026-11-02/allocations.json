@@ -1,0 +1,138 @@
+[
+  {
+    "name": "main-8",
+    "scenario": "static",
+    "bytes": 5734956,
+    "result": {
+      "value": {
+        "name": "main-8",
+        "scenario": "static",
+        "frames": 240,
+        "count": 640,
+        "setupMs": 100.39000000059605,
+        "cpu": {
+          "median": 0.08500000089406967,
+          "p95": 0.16499999910593033,
+          "mean": 0.0973333333618939
+        },
+        "gpu": {
+          "median": 0.108544,
+          "p95": 0.110592,
+          "mean": 0.11380053333333293
+        },
+        "gpuDisjoint": false,
+        "requestedSamples": 8,
+        "actualSamples": 8,
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "geometryBytes": 46080,
+        "refused": 0,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.351 (NVIDIA NVIDIA GeForce RTX 4060 Laptop GPU (0x000028A0)), NVIDIA)",
+        "error": 0
+      },
+      "exception": null
+    }
+  },
+  {
+    "name": "coverage-4",
+    "scenario": "static",
+    "bytes": 3358880,
+    "result": {
+      "value": {
+        "name": "coverage-4",
+        "scenario": "static",
+        "frames": 240,
+        "count": 640,
+        "setupMs": 9.744999997317791,
+        "cpu": {
+          "median": 0.08999999612569809,
+          "p95": 0.16499999910593033,
+          "mean": 0.1061666665909191
+        },
+        "gpu": {
+          "median": 0.10752,
+          "p95": 0.108544,
+          "mean": 0.10732799999999959
+        },
+        "gpuDisjoint": false,
+        "requestedSamples": 4,
+        "actualSamples": 4,
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "geometryBytes": 179200,
+        "refused": 0,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.351 (NVIDIA NVIDIA GeForce RTX 4060 Laptop GPU (0x000028A0)), NVIDIA)",
+        "error": 0
+      },
+      "exception": null
+    }
+  },
+  {
+    "name": "main-8",
+    "scenario": "scale",
+    "bytes": 4532396,
+    "result": {
+      "value": {
+        "name": "main-8",
+        "scenario": "scale",
+        "frames": 240,
+        "count": 640,
+        "setupMs": 21.320000000298023,
+        "cpu": {
+          "median": 0.08000000566244125,
+          "p95": 0.1850000023841858,
+          "mean": 0.10397916656608383
+        },
+        "gpu": {
+          "median": 0.10752,
+          "p95": 0.110592,
+          "mean": 0.10778026666666612
+        },
+        "gpuDisjoint": false,
+        "requestedSamples": 8,
+        "actualSamples": 8,
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "geometryBytes": 46080,
+        "refused": 0,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.351 (NVIDIA NVIDIA GeForce RTX 4060 Laptop GPU (0x000028A0)), NVIDIA)",
+        "error": 0
+      },
+      "exception": null
+    }
+  },
+  {
+    "name": "coverage-4",
+    "scenario": "scale",
+    "bytes": 127875460,
+    "result": {
+      "value": {
+        "name": "coverage-4",
+        "scenario": "scale",
+        "frames": 240,
+        "count": 640,
+        "setupMs": 9.409999996423721,
+        "cpu": {
+          "median": 1.6450000032782555,
+          "p95": 2.3200000002980232,
+          "mean": 1.7586875001899898
+        },
+        "gpu": {
+          "median": 0.165888,
+          "p95": 0.169984,
+          "mean": 0.14155946666666663
+        },
+        "gpuDisjoint": false,
+        "requestedSamples": 4,
+        "actualSamples": 4,
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "geometryBytes": 179200,
+        "refused": 0,
+        "renderer": "ANGLE (NVIDIA, Vulkan 1.4.351 (NVIDIA NVIDIA GeForce RTX 4060 Laptop GPU (0x000028A0)), NVIDIA)",
+        "error": 0
+      },
+      "exception": null
+    }
+  }
+]
