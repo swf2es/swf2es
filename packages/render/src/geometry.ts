@@ -48,6 +48,8 @@ export interface GeometryData {
  * looked (taken), and keeps its own copies.
  */
 export class Geometries extends Registry {
+  /** Changes only when a handle can have become stale, including expiry and context loss. */
+  removalVersion = 0;
   private readonly data: (GeometryData | null)[] = [];
   /** Each geometry's box: its positions' least x and y, then their greatest. */
   private boxes = new Float32Array(1024);
@@ -129,6 +131,7 @@ export class Geometries extends Registry {
   }
 
   protected override dropped(id: number): void {
+    this.removalVersion++;
     this.data[id] = null;
   }
 }
