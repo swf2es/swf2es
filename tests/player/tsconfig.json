@@ -6,6 +6,6 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["page.ts"],
+  "include": ["page.ts", "render-bench/page.ts"],
   "exclude": []
 }
