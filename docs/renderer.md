@@ -146,7 +146,10 @@ whose entries go once unused for their idle frames:
 - **Render targets:** pooled by size and samples within a budget, the
   least lately freed let go of first past it (`webgl/pool.ts`,
   `webgl/targets.ts`), for layers, held layers' pages (`shelves.ts`) and
-  `BitmapData.draw`.
+  `BitmapData.draw`. MSAA buffers may serve smaller layers at the same
+  sample count, up to twice the requested area: only the layer's rectangle
+  is resolved. This avoids allocating and synchronously validating a new
+  framebuffer for each small size change, without keeping larger pools.
 - **Glyphs:** advanced text's glyph quads, in an atlas of their own, and
   Saffron's outlines in a texture.
 
@@ -265,6 +268,26 @@ recorded from real content: it takes minutes and a private recording,
 so it is run by hand. Its measured mix is about 4,650 Graphics a frame,
 most of them still; bitmap and gradient fills; some 240 filters, most
 with kept outputs; 100 blend layers; and a few masks.
+
+`node tests/player/render-bench.ts <checkout A> <checkout B> --gpu --runs 3`
+compares two built checkouts with the same fixtures, alternating A/B then B/A.
+Its visible, moving, hidden and cached-filter scenes share geometry across 64
+branches of 64 shapes. Thirty frames warm each scene; the measured frames report
+render submission time and the display-list walk separately. It checks pixel
+hashes at two fixed frames across builds and runs. `--branches`, `--frames` and
+`--samples` adjust the workload; without checkout paths it runs this checkout.
+Build both trees first, and keep the GPU idle during measurements. JSON on stdout
+contains every frame's timing, the GPU name, commits and tracked-dirty status;
+the per-run medians go to stderr. These timings are diagnostics, not CI thresholds.
+
+Add `--targets` to isolate MSAA pool churn: 18 varying layer rectangles a frame,
+cleared and resolved under the ordinary pool budget. It reports allocations and
+framebuffer checks, including startup, and checks resolved pixels. The first and
+last frames contain readbacks and are excluded from timing. Scene sample counts
+are requested counts; the target fixture reports the supported count it chose.
+Both fixtures also report a separate time including `gl.finish()`, so driver waits
+are visible rather than attributed to the display-list walk. These deliberately
+small workloads measure particular paths, not whole-game FPS.
 
 For each pull request, `tests/player/bench.ts` builds a synthetic scene
 and times it; `--town N` draws N hairline-outlined characters and

@@ -55,6 +55,7 @@ import { AdvancedTexts } from "./advanced.js";
 import type { FillTessellator } from "./fills.js";
 import { FilterLayers, type KeptOutput } from "./filter-layers.js";
 import { undrawnFilter } from "./filters.js";
+import { syncHidden } from "./hidden.js";
 import { LineCache } from "./lines.js";
 import { Masks } from "./masks.js";
 import { Paints, paintSampler } from "./paints.js";
@@ -391,6 +392,11 @@ export class RenderView implements Drawer {
    * expects of a renderer.
    */
   private walk(o: DisplayObject, tint: ColorTransform | null, hidden: boolean): void {
+    if (hidden) {
+      syncHidden(o, this.snapshotting);
+      return;
+    }
+
     // Its parent's transform from the stack of them, where its own goes for its children: numbers
     // a recursive call passed were boxed, six an object on every frame.
     const depth = this.walkDepth++;

@@ -19,6 +19,7 @@ const QUAD_KEYS = 512;
 export interface Made {
   parts: { part: Part; handle: GeometryHandle }[];
   version: number;
+  checkedAt: number;
 }
 
 /**
@@ -111,8 +112,13 @@ export class Parts {
   partsOf(layer: ShapeLayer, version: number, masking = false): Made["parts"] {
     const cache = masking ? this.maskMade : this.made;
     const made = cache.get(layer);
-    // A loop, not every with a closure: each shape layer drawn asks on every frame.
+    // Additions and frame advances cannot invalidate handles; removals can, even mid-frame.
     if (made && made.version === version) {
+      const removalVersion = this.geometries.removalVersion;
+      if (made.checkedAt === removalVersion) {
+        return made.parts;
+      }
+
       let alive = true;
 
       for (let i = 0; alive && i < made.parts.length; i++) {
@@ -120,6 +126,7 @@ export class Parts {
       }
 
       if (alive) {
+        made.checkedAt = removalVersion;
         return made.parts;
       }
     }
@@ -134,7 +141,7 @@ export class Parts {
       part,
       handle: this.geometries.add(part.geometry),
     }));
-    cache.set(layer, { parts, version });
+    cache.set(layer, { parts, version, checkedAt: this.geometries.removalVersion });
     return parts;
   }
 

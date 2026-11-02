@@ -3,9 +3,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ShapeRecord } from "../../../../packages/format/dist/index.js";
 import { readMorphShape, readPlace, readSwf } from "../../../../packages/format/dist/index.js";
+import { Container } from "../../../../packages/player/dist/display/container.js";
 import { ShapeObject } from "../../../../packages/player/dist/display/display.js";
+import { CLEAN, CONTENT } from "../../../../packages/player/dist/display/displayobject.js";
 import { blend, morphAt } from "../../../../packages/player/dist/display/morph.js";
 import type { MorphCharacter } from "../../../../packages/player/dist/display/timeline.js";
+import { syncHidden } from "../../../../packages/player/dist/scene/hidden.js";
 import * as w from "../../../swf-writer.ts";
 
 // A square whose top and left sides bend into curves, red to blue, its
@@ -239,3 +242,29 @@ test("a MorphShape swapped to a shape and back to its morph at the same ratio dr
   assert.ok(morph);
   assert.equal(shape, morphAt(morph, 30000));
 });
+
+for (const snapshotting of [false, true]) {
+  test(`hidden morph cleanup refreshes bounds, snapshotting=${snapshotting}`, () => {
+    const c = character();
+    const root = new Container();
+    const nested = new Container();
+    const shape = ShapeObject.ofMorph(c);
+    root.addChildAt(nested, 0);
+    nested.addChildAt(shape, 0);
+    shape.ratio = 65535;
+    shape.invalidate(CONTENT);
+    const flags = [root.dirty, nested.dirty, shape.dirty];
+    assert.equal(shape.shape, morphAt(c, 0));
+
+    syncHidden(root, snapshotting);
+
+    assert.equal(shape.shape, morphAt(c, 65535));
+    assert.deepEqual(shape.shape?.shape.bounds, c.morph.endBounds);
+    assert.deepEqual(
+      [root.dirty, nested.dirty, shape.dirty],
+      snapshotting ? flags : [CLEAN, CLEAN, CLEAN],
+    );
+    assert.equal(root.descendantsDirty, snapshotting);
+    assert.equal(nested.descendantsDirty, snapshotting);
+  });
+}
