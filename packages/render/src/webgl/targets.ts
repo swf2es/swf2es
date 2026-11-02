@@ -258,12 +258,23 @@ export class TargetPool {
 
   /**
    * Multisampled buffers to draw `layer` into at `wanted` samples, as many
-   * as fit, free ones of its size or made; none where it takes none, its
-   * own stencil then made if it has none.
+   * as fit, reusing its size or a slightly larger buffer; none where it
+   * takes none, its own stencil then made if it has none.
    */
   layerMsaa(layer: Layer, wanted: number): Multisampled | null {
     const samples = fittingSamples(layer.width, layer.height, wanted);
-    const kept = samples > 1 ? this.freeMsaa.take(layer.width, layer.height, samples) : null;
+    // The resolve copies only the layer's rectangle. A larger MSAA buffer can serve it,
+    // but bounding its area avoids clearing a large page for a small layer.
+    const kept =
+      samples > 1
+        ? (this.freeMsaa.take(layer.width, layer.height, samples) ??
+          this.freeMsaa.takeFitting(
+            layer.width,
+            layer.height,
+            samples,
+            layer.width * layer.height * 2,
+          ))
+        : null;
     if (kept) {
       return kept;
     }

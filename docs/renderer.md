@@ -146,7 +146,10 @@ whose entries go once unused for their idle frames:
 - **Render targets:** pooled by size and samples within a budget, the
   least lately freed let go of first past it (`webgl/pool.ts`,
   `webgl/targets.ts`), for layers, held layers' pages (`shelves.ts`) and
-  `BitmapData.draw`.
+  `BitmapData.draw`. MSAA buffers may serve smaller layers at the same
+  sample count, up to twice the requested area: only the layer's rectangle
+  is resolved. This avoids allocating and synchronously validating a new
+  framebuffer for each small size change, without keeping larger pools.
 - **Glyphs:** advanced text's glyph quads, in an atlas of their own, and
   Saffron's outlines in a texture.
 
