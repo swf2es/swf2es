@@ -1,6 +1,6 @@
 import { GlState } from "../../../packages/context3d/dist/device/index.js";
 import { Container } from "../../../packages/player/dist/display/container.js";
-import { TRANSFORM } from "../../../packages/player/dist/display/displayobject.js";
+import { CONTENT, TRANSFORM } from "../../../packages/player/dist/display/displayobject.js";
 import { Drawing } from "../../../packages/player/dist/display/drawing.js";
 import { filterDefaults } from "../../../packages/player/dist/display/filters.js";
 import { ShapeObject } from "../../../packages/player/dist/display/shapeobject.js";
@@ -62,7 +62,7 @@ export function scene(name: string, options: Options): Result {
     branch.matrix.tx = (i % 8) * 60;
     branch.matrix.ty = (Math.floor(i / 8) % 6) * 60;
     branch.visible = name !== "hidden" || i % 4 === 0;
-    if (name === "filtered") {
+    if (name === "filtered" || name === "rebuilding") {
       branch.filters = [{ ...filterDefaults("blur"), blurX: 4, blurY: 4, quality: 1 }];
     }
 
@@ -92,7 +92,7 @@ export function scene(name: string, options: Options): Result {
       if (name !== "visible") {
         for (let i = 0; i < branches.length; i++) {
           branches[i].matrix.tx = (i % 8) * 60 + ((f + 30) % 8);
-          branches[i].invalidate(TRANSFORM);
+          branches[i].invalidate(name === "rebuilding" ? CONTENT : TRANSFORM);
         }
       }
 

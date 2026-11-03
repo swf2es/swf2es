@@ -289,6 +289,14 @@ Both fixtures also report a separate time including `gl.finish()`, so driver wai
 are visible rather than attributed to the display-list walk. These deliberately
 small workloads measure particular paths, not whole-game FPS.
 
+Add `--rebuild --branches 2048` to invalidate filtered content every frame rather
+than reuse cached outputs. This exercises packed content pages and their MSAA
+targets; compare at the same sample count on each GPU. Content pages aim for
+64 MiB of multisampled storage, while the combined free-target cache stays at
+128 MiB. Active targets are outside that cache budget, and larger individual
+layers retain their separate-target path. Ordinary textures may reuse at most
+twice the requested rounded area, avoiding oversized clears and MSAA allocations.
+
 For each pull request, `tests/player/bench.ts` builds a synthetic scene
 and times it; `--town N` draws N hairline-outlined characters and
 scenery instead, some of them glowing, which is nearer a room's lines and

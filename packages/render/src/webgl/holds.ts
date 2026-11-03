@@ -21,7 +21,6 @@ import {
   LAYER_STEP,
   type Layer,
   layerSide,
-  MSAA_BYTES,
   type Open,
   objectOf,
   type Target,
@@ -30,6 +29,8 @@ import {
 
 /** The width of the pages held layers and their filters' targets are placed on, side by side. */
 const PAGE_WIDTH = 2048;
+/** Keep content pages below the free pool's budget so they can be reused. */
+const CONTENT_PAGE_BYTES = 64 * 1024 * 1024;
 
 /** A rectangle of a page, read and drawn into as a texture of its own (FilterTarget). */
 interface Slot extends FilterTarget {
@@ -179,7 +180,10 @@ export class HeldLayers {
 
     const samples = this.pool.frameSamples;
     let width = this.pageWidth(area, widest);
-    const fitting = Math.floor(MSAA_BYTES / (width * samples * 8) / LAYER_STEP) * LAYER_STEP;
+    const fitting = Math.max(
+      LAYER_STEP,
+      Math.floor(CONTENT_PAGE_BYTES / (width * samples * 8) / LAYER_STEP) * LAYER_STEP,
+    );
     shelves.reset(width, samples > 1 ? Math.min(this.textureMost, fitting) : this.textureMost);
     for (let h = from; h < to; h++) {
       const hold = holds[h];

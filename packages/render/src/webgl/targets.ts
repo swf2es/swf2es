@@ -348,10 +348,10 @@ export class TargetPool {
   takeLayer(width: number, height: number, exact = false): Layer {
     width = layerSide(width);
     height = layerSide(height);
-    // Found by its size, or the smallest size held that holds it.
+    // Bound excess area: oversized texture reuse also enlarges the MSAA target and clears.
     const found =
       this.freeLayers.take(width, height) ??
-      (exact ? null : this.freeLayers.takeFitting(width, height));
+      (exact ? null : this.freeLayers.takeFitting(width, height, 0, width * height * 2));
     if (found) {
       found.usedAt = this.frameCount;
       return found;
