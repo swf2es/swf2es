@@ -91,7 +91,7 @@ flat out vec4 vAdd;
 flat out int vSlot;
 
 void main(void) {
-  int draw = ${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) % ${RUN_MOST}, (uRunBase + gl_DrawID) / ${RUN_MOST}), 0).r` : "uRow"};
+  int draw = ${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
   int row = draw & ${(1 << FILL_SLOT) - 1};
   vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
