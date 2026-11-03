@@ -172,7 +172,12 @@ with the context:
   atlas's index ranges (`WEBGL_multi_draw`, up to 256 draws a call) for
   as long as their textures fit the fill program's eight units, each draw
   reading its row, its texture's unit and whether it snaps by
-  `gl_DrawID` from a uniform array; without the extension, a call a draw.
+  `gl_DrawID` from an integer texture. The table is prepared and uploaded
+  before drawing the frame, so that later runs do not overwrite data earlier
+  draws are still reading. Preparation also saves the index ranges and each
+  run's texture bindings and sampling modes in reusable arrays; drawing uses
+  those ranges directly, including when held layers reorder commands.
+  Without the extension, a call a draw.
 - **Held layers** (`holds.ts`): each level's held layers drawn side by
   side on pages, then their filters' passes in waves, the k-th of every
   chain at once, each wave's targets on pages of their own (`filters.ts`

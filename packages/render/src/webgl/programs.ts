@@ -38,7 +38,11 @@ export const TABLE_ENTRIES = 48;
 /** Segments a row of the outlines' texture, as the player's text/saffron.ts stores them. */
 export const OUTLINE_ROW = 1024;
 
-/** The most draws a multi-draw of the fill program makes, their rows in its uniforms. */
+/**
+ * The most draws a multi-draw of the fill program makes, their rows in its
+ * integer texture, a line of it. A power of two: the vertex shader splits a
+ * draw's place in the table into column and line with a mask and a shift.
+ */
 export const RUN_MOST = 256;
 
 /** Textures the fill program samples in one draw call, each on a unit of its own. */
@@ -62,6 +66,8 @@ export const BACK_UNIT = 3;
 export const OUTLINE_UNIT = 7;
 /** The first of the units the fill program's textures are bound to (FILL_TEXTURES). */
 export const FILL_UNIT = 8;
+/** The multi-draw row table's unit, past the fill textures. */
+export const RUN_UNIT = FILL_UNIT + FILL_TEXTURES;
 
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
@@ -69,7 +75,7 @@ export const FILL_UNIT = 8;
  * snaps (SNAP), then on the target by uView (scale and offset into clip
  * space), and passes on its straight colour, the row's colour transform
  * and the texture it samples. uRow names the draw's row (FILL_SLOT); with
- * `multi` (WEBGL_multi_draw), uRuns names each draw's of a multi-draw by
+ * `multi` (WEBGL_multi_draw), uRunTable names each draw's of a multi-draw by
  * gl_DrawID, which is 0 in a draw of its own.
  */
 export const fillVertex = (multi: boolean) => `#version 300 es
@@ -79,7 +85,7 @@ layout(location = ${POSITION_AT}) in vec2 aPosition;
 layout(location = ${TEXEL_AT}) in vec2 aTexel;
 layout(location = ${COLOR_AT}) in vec4 aColor;
 uniform highp sampler2D uRows;
-${multi ? `uniform ivec4 uRuns[${RUN_MOST / 4}];` : "uniform int uRow;"}
+${multi ? "uniform highp isampler2D uRunTable;\nuniform int uRunBase;" : "uniform int uRow;"}
 uniform vec4 uView;
 uniform float uUnit;
 out vec4 vColor;
@@ -89,7 +95,7 @@ flat out vec4 vAdd;
 flat out int vSlot;
 
 void main(void) {
-  int draw = ${multi ? "uRuns[gl_DrawID >> 2][gl_DrawID & 3]" : "uRow"};
+  int draw = ${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
   int row = draw & ${(1 << FILL_SLOT) - 1};
   vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});
