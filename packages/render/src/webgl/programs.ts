@@ -38,7 +38,11 @@ export const TABLE_ENTRIES = 48;
 /** Segments a row of the outlines' texture, as the player's text/saffron.ts stores them. */
 export const OUTLINE_ROW = 1024;
 
-/** The most draws a multi-draw of the fill program makes, their rows in its integer texture. */
+/**
+ * The most draws a multi-draw of the fill program makes, their rows in its
+ * integer texture, a line of it. A power of two: the vertex shader splits a
+ * draw's place in the table into column and line with a mask and a shift.
+ */
 export const RUN_MOST = 256;
 
 /** Textures the fill program samples in one draw call, each on a unit of its own. */
@@ -91,7 +95,7 @@ flat out vec4 vAdd;
 flat out int vSlot;
 
 void main(void) {
-  int draw = ${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) % ${RUN_MOST}, (uRunBase + gl_DrawID) / ${RUN_MOST}), 0).r` : "uRow"};
+  int draw = ${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
   int row = draw & ${(1 << FILL_SLOT) - 1};
   vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});

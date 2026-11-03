@@ -48,6 +48,9 @@ interface MultiDraw {
   ): void;
 }
 
+/** Last scene entry, table start, draw count, used units, then each unit's texture and sampling. */
+const RUN_STRIDE = 4 + FILL_TEXTURES * 2;
+
 /** The most masks the stencil's eight bits count. */
 const STENCIL_MOST = 255;
 
@@ -87,6 +90,9 @@ export class Draws {
   private runTableHeight = 0;
   private runTableMost = 0;
   private tableRows = new Int32Array(RUN_MOST);
+  private tableCounts = new Int32Array(RUN_MOST);
+  private tableOffsets = new Int32Array(RUN_MOST);
+  private runs = new Int32Array(RUN_STRIDE * 256);
   private commandStarts = new Uint32Array(256);
   private prepared = false;
   /** A run's draws: their index counts, their offsets in bytes, and their rows (FILL_SLOT). */
@@ -238,6 +244,7 @@ export class Draws {
     }
 
     let count = 0;
+    let run = 0;
     const ops = commands.ops;
     for (let k = 0; k < commands.length; k++) {
       const at = k * 4;
@@ -248,9 +255,9 @@ export class Draws {
 
       const stencil = op !== RUN;
       const end = ops[at + 1] + ops[at + 2];
-      this.commandStarts[k] = count;
-      // Held layers execute in a different order. Each command must assign the same slots
-      // when prepared and drawn, independently of the commands executed before it.
+      this.commandStarts[k] = run;
+      // Held layers execute in a different order. Save each run's bindings independently
+      // of the commands executed before it.
       this.unitIds.fill(-1);
       this.unitNext = 0;
       for (let i = ops[at + 1]; i < end; i++) {
@@ -278,10 +285,36 @@ export class Draws {
           const rows = new Int32Array(size);
           rows.set(this.tableRows);
           this.tableRows = rows;
+          const counts = new Int32Array(size);
+          counts.set(this.tableCounts);
+          this.tableCounts = counts;
+          const offsets = new Int32Array(size);
+          offsets.set(this.tableOffsets);
+          this.tableOffsets = offsets;
         }
 
+        if (run + RUN_STRIDE > this.runs.length) {
+          const runs = new Int32Array(this.runs.length * 2);
+          runs.set(this.runs);
+          this.runs = runs;
+        }
+
+        this.runs[run] = i;
+        this.runs[run + 1] = count;
+        this.runs[run + 2] = this.runCount;
+        this.runs[run + 3] = this.runUnits;
+        for (let j = 0; j < FILL_TEXTURES; j++) {
+          if (this.runUnits & (1 << j)) {
+            this.runs[run + 4 + j * 2] = this.unitIds[j];
+            this.runs[run + 5 + j * 2] = this.unitSampling[j];
+          }
+        }
+
+        run += RUN_STRIDE;
         for (let j = 0; j < this.runCount; j++) {
-          this.tableRows[count++] = this.runRows[j];
+          this.tableRows[count] = this.runRows[j];
+          this.tableCounts[count] = this.runCounts[j];
+          this.tableOffsets[count++] = this.runOffsets[j];
         }
       }
     }
@@ -430,12 +463,7 @@ export class Draws {
     const gl = this.gl;
     const state = this.state;
     const places = this.atlas.places;
-    let base = 0;
-    if (this.prepared) {
-      base = this.commandStarts[command];
-      this.unitIds.fill(-1);
-      this.unitNext = 0;
-    }
+    let run = this.prepared ? this.commandStarts[command] : 0;
 
     // Whether the mesh or the glyph program is in use, till the next entry of neither.
     let other = false;
@@ -472,16 +500,32 @@ export class Draws {
         other = false;
       }
 
-      i = this.gatherRun(scene, i, end, stencil);
-      const draws = this.runCount;
+      let base = 0;
+      let draws: number;
+      let units: number;
+      const bindings = run + 4;
+      if (this.prepared) {
+        i = this.runs[run];
+        base = this.runs[run + 1];
+        draws = this.runs[run + 2];
+        units = this.runs[run + 3];
+        run += RUN_STRIDE;
+      } else {
+        i = this.gatherRun(scene, i, end, stencil);
+        draws = this.runCount;
+        units = this.runUnits;
+      }
+
       if (draws === 0) {
         continue;
       }
 
       for (let k = 0; k < FILL_TEXTURES; k++) {
-        if (this.runUnits & (1 << k)) {
-          state.bindTexture(FILL_UNIT + k, this.gpu.textures[this.unitIds[k]] as WebGLTexture);
-          state.bindSampler(FILL_UNIT + k, this.gpu.sampler(this.unitSampling[k]));
+        if (units & (1 << k)) {
+          const id = this.prepared ? this.runs[bindings + k * 2] : this.unitIds[k];
+          const sampling = this.prepared ? this.runs[bindings + k * 2 + 1] : this.unitSampling[k];
+          state.bindTexture(FILL_UNIT + k, this.gpu.textures[id] as WebGLTexture);
+          state.bindSampler(FILL_UNIT + k, this.gpu.sampler(sampling));
         }
       }
 
@@ -505,16 +549,13 @@ export class Draws {
       gl.uniform1i(this.runBaseLocation, base);
       this.multi.multiDrawElementsWEBGL(
         gl.TRIANGLES,
-        this.runCounts,
-        0,
+        this.prepared ? this.tableCounts : this.runCounts,
+        base,
         gl.UNSIGNED_INT,
-        this.runOffsets,
-        0,
+        this.prepared ? this.tableOffsets : this.runOffsets,
+        base,
         draws,
       );
-      if (this.prepared) {
-        base += draws;
-      }
     }
 
     if (other) {

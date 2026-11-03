@@ -1382,7 +1382,7 @@ export class RenderView implements Drawer {
     this.backend.destroy();
     this.releaseOutlines();
     this.ownTessellator?.dispose();
-    if (this.ownCanvas) {
+    if (this.ownCanvas && !this.gl.isContextLost()) {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
