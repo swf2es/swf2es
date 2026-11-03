@@ -35,7 +35,9 @@ const runs = option("runs", 3);
 const gpu = args.includes("--gpu");
 const names = args.includes("--targets")
   ? ["targets"]
-  : ["visible", "moving", "hidden", "filtered"];
+  : args.includes("--rebuild")
+    ? ["rebuilding"]
+    : ["visible", "moving", "hidden", "filtered"];
 const modules = [
   "native",
   "format",
