@@ -522,7 +522,7 @@ export class HeldLayers {
       const at = k * 4;
       switch (ops[at]) {
         case RUN:
-          this.draws.drawRun(scene, ops[at + 1], ops[at + 1] + ops[at + 2]);
+          this.draws.drawRun(scene, ops[at + 1], ops[at + 1] + ops[at + 2], k);
           break;
         case STENCIL_PUSH:
         case STENCIL_POP:
@@ -532,6 +532,7 @@ export class HeldLayers {
             ops[at + 1] + ops[at + 2],
             ops[at] === STENCIL_PUSH,
             masks,
+            k,
           );
           break;
         case HELD:

@@ -128,7 +128,7 @@ export class WebGLBackend {
     // Kernels' programs made again as first used, the context's own gone with it.
     this.kernels.clear();
     const textureMost = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    this.draws.setUp();
+    this.draws.setUp(textureMost);
     this.compositor.setUp();
     this.filters = new FilterRunner(
       gl,
@@ -182,6 +182,7 @@ export class WebGLBackend {
 
     keeps.removed.length = 0;
     this.gpu.uploadRows(rows);
+    this.draws.prepare(commands, scene);
     const state = this.state;
     state.scissor(null);
     state.colorMask(15);
@@ -241,7 +242,7 @@ export class WebGLBackend {
         }
 
         case RUN:
-          this.draws.drawRun(scene, ops[at + 1], ops[at + 1] + ops[at + 2]);
+          this.draws.drawRun(scene, ops[at + 1], ops[at + 1] + ops[at + 2], k);
           break;
         case STENCIL_PUSH:
         case STENCIL_POP:
@@ -251,6 +252,7 @@ export class WebGLBackend {
             ops[at + 1] + ops[at + 2],
             ops[at] === STENCIL_PUSH,
             masks,
+            k,
           );
           break;
 

@@ -1,4 +1,5 @@
 import { type GlState, linkProgram } from "@swf2es/context3d/device";
+import { type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import { FILL_SHADER, type Filters } from "../filters.js";
 import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
 import {
@@ -28,6 +29,7 @@ import {
   meshVertex,
   OUTLINE_UNIT,
   RUN_MOST,
+  RUN_UNIT,
   SNAP_BIT,
   TEXTURE_UNIT,
 } from "./programs.js";
@@ -79,7 +81,14 @@ export class Draws {
   private fillUnitLocation: WebGLUniformLocation | null = null;
   /** WEBGL_multi_draw, which draws a run of fills alike a call (drawEntries), where there is. */
   private multi: MultiDraw | null = null;
-  private runsLocation: WebGLUniformLocation | null = null;
+  /** Avoid the dynamically indexed uniform table used in the Intel GPU hang reproducer. */
+  private runTable: WebGLTexture | null = null;
+  private runBaseLocation: WebGLUniformLocation | null = null;
+  private runTableHeight = 0;
+  private runTableMost = 0;
+  private tableRows = new Int32Array(RUN_MOST);
+  private commandStarts = new Uint32Array(256);
+  private prepared = false;
   /** A run's draws: their index counts, their offsets in bytes, and their rows (FILL_SLOT). */
   private readonly runCounts = new Int32Array(RUN_MOST);
   private readonly runOffsets = new Int32Array(RUN_MOST);
@@ -158,7 +167,7 @@ export class Draws {
   }
 
   /** The fill, mesh and glyph programs made, as the context comes or comes back. */
-  setUp(): void {
+  setUp(textureMost: number): void {
     const gl = this.gl;
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
     try {
@@ -175,7 +184,6 @@ export class Draws {
 
     this.unitIds.fill(-1);
     this.rowLocation = gl.getUniformLocation(this.program, "uRow");
-    this.runsLocation = gl.getUniformLocation(this.program, "uRuns");
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
     this.state.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
@@ -183,6 +191,16 @@ export class Draws {
       gl.getUniformLocation(this.program, "uTextures"),
       Array.from({ length: FILL_TEXTURES }, (_, k) => FILL_UNIT + k),
     );
+    this.runTable = null;
+    this.runTableHeight = 0;
+    this.runTableMost = textureMost;
+    this.prepared = false;
+    this.runBaseLocation = gl.getUniformLocation(this.program, "uRunBase");
+    if (this.multi) {
+      this.sizeRunTable(1);
+      gl.uniform1i(gl.getUniformLocation(this.program, "uRunTable"), RUN_UNIT);
+    }
+
     this.fillUnitLocation = gl.getUniformLocation(this.program, "uUnit");
     this.mesh = linkProgram(gl, meshVertex, meshFragment);
     this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
@@ -206,6 +224,108 @@ export class Draws {
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uSegments"), OUTLINE_UNIT);
     this.glyphStale = true;
     this.lastRow = -1;
+  }
+
+  /** Upload before any draws, so that updating a run cannot stall earlier draws reading it. */
+  prepare(commands: Commands, scene: SceneList): void {
+    this.prepared = false;
+    if (!this.multi) {
+      return;
+    }
+
+    if (commands.length > this.commandStarts.length) {
+      this.commandStarts = new Uint32Array(commands.ops.length / 4);
+    }
+
+    let count = 0;
+    const ops = commands.ops;
+    for (let k = 0; k < commands.length; k++) {
+      const at = k * 4;
+      const op = ops[at];
+      if (op !== RUN && op !== STENCIL_PUSH && op !== STENCIL_POP) {
+        continue;
+      }
+
+      const stencil = op !== RUN;
+      const end = ops[at + 1] + ops[at + 2];
+      this.commandStarts[k] = count;
+      // Held layers execute in a different order. Each command must assign the same slots
+      // when prepared and drawn, independently of the commands executed before it.
+      this.unitIds.fill(-1);
+      this.unitNext = 0;
+      for (let i = ops[at + 1]; i < end; i++) {
+        if (scene.kind[i] !== DRAW) {
+          continue;
+        }
+
+        const place = this.atlas.places[scene.geometry[i]];
+        if (!place || place.glyphs || (!stencil && scene.sampler[i] & (MESH | PLANE | SHADED))) {
+          continue;
+        }
+
+        i = this.gatherRun(scene, i, end, stencil);
+        const needed = count + this.runCount;
+        if (needed > RUN_MOST * this.runTableMost) {
+          // An unusually large frame still draws by updating the first row a run at a time.
+          return;
+        }
+
+        if (needed > this.tableRows.length) {
+          const size = Math.min(
+            RUN_MOST * this.runTableMost,
+            Math.max(needed, this.tableRows.length * 2),
+          );
+          const rows = new Int32Array(size);
+          rows.set(this.tableRows);
+          this.tableRows = rows;
+        }
+
+        for (let j = 0; j < this.runCount; j++) {
+          this.tableRows[count++] = this.runRows[j];
+        }
+      }
+    }
+
+    const height = Math.ceil(count / RUN_MOST);
+    if (height > 0) {
+      this.sizeRunTable(height);
+      const gl = this.gl;
+      this.state.bindTexture(RUN_UNIT, this.runTable);
+      this.state.activeTexture(RUN_UNIT);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        0,
+        RUN_MOST,
+        height,
+        gl.RED_INTEGER,
+        gl.INT,
+        this.tableRows,
+      );
+    }
+
+    this.prepared = true;
+  }
+
+  private sizeRunTable(height: number): void {
+    if (height <= this.runTableHeight) {
+      return;
+    }
+
+    const gl = this.gl;
+    if (this.runTable) {
+      this.state.dropTexture(this.runTable);
+      gl.deleteTexture(this.runTable);
+    }
+
+    this.runTableHeight = Math.min(this.runTableMost, Math.max(height, this.runTableHeight * 2));
+    this.runTable = gl.createTexture();
+    this.state.bindTexture(RUN_UNIT, this.runTable);
+    this.state.activeTexture(RUN_UNIT);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32I, RUN_MOST, this.runTableHeight);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   }
 
   /**
@@ -254,12 +374,12 @@ export class Draws {
   }
 
   /** Entries `first` up to `end` drawn as fills, where the masks pushed pass. */
-  drawRun(scene: SceneList, first: number, end: number): void {
+  drawRun(scene: SceneList, first: number, end: number, command: number): void {
     const gl = this.gl;
     // Premultiplied, as every blend mode will be.
     this.useFill();
     this.state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    this.drawEntries(scene, first, end, false);
+    this.drawEntries(scene, first, end, false, command);
   }
 
   /**
@@ -269,7 +389,14 @@ export class Draws {
    * stencil where the masks pushed before it pass, and back down where it
    * and they did.
    */
-  drawMask(scene: SceneList, first: number, end: number, push: boolean, masks: Masks): void {
+  drawMask(
+    scene: SceneList,
+    first: number,
+    end: number,
+    push: boolean,
+    masks: Masks,
+    command: number,
+  ): void {
     if (push ? masks.depth >= STENCIL_MOST || masks.past > 0 : masks.past > 0) {
       masks.past += push ? 1 : -1;
       return;
@@ -280,7 +407,7 @@ export class Draws {
     this.useFill();
     state.colorMask(0);
     state.stencil(gl.EQUAL, masks.depth, push ? gl.INCR : gl.DECR);
-    this.drawEntries(scene, first, end, true);
+    this.drawEntries(scene, first, end, true, command);
     masks.depth += push ? 1 : -1;
     state.colorMask(15);
     this.maskBy(masks);
@@ -293,10 +420,23 @@ export class Draws {
   }
 
   /** The draws at `scene`'s entries from `first` up to `end`; for the stencil alone, untextured. */
-  drawEntries(scene: SceneList, first: number, end: number, stencil: boolean): void {
+  drawEntries(
+    scene: SceneList,
+    first: number,
+    end: number,
+    stencil: boolean,
+    command: number,
+  ): void {
     const gl = this.gl;
     const state = this.state;
     const places = this.atlas.places;
+    let base = 0;
+    if (this.prepared) {
+      base = this.commandStarts[command];
+      this.unitIds.fill(-1);
+      this.unitNext = 0;
+    }
+
     // Whether the mesh or the glyph program is in use, till the next entry of neither.
     let other = false;
     for (let i = first; i < end; i++) {
@@ -355,7 +495,14 @@ export class Draws {
         continue;
       }
 
-      gl.uniform4iv(this.runsLocation, this.runRows, 0, Math.ceil(draws / 4) * 4);
+      state.bindTexture(RUN_UNIT, this.runTable);
+      state.bindSampler(RUN_UNIT, null);
+      if (!this.prepared) {
+        state.activeTexture(RUN_UNIT);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, draws, 1, gl.RED_INTEGER, gl.INT, this.runRows);
+      }
+
+      gl.uniform1i(this.runBaseLocation, base);
       this.multi.multiDrawElementsWEBGL(
         gl.TRIANGLES,
         this.runCounts,
@@ -365,6 +512,9 @@ export class Draws {
         0,
         draws,
       );
+      if (this.prepared) {
+        base += draws;
+      }
     }
 
     if (other) {
@@ -602,8 +752,14 @@ export class Draws {
     return fragment;
   }
 
-  /** The programs made on the context, deleted. */
+  /** The programs and draw table made on the context, deleted. */
   destroy(): void {
+    if (this.runTable) {
+      this.state.dropTexture(this.runTable);
+      this.gl.deleteTexture(this.runTable);
+      this.runTable = null;
+    }
+
     const gl = this.gl;
     gl.deleteProgram(this.program);
     gl.deleteProgram(this.mesh);
