@@ -7,6 +7,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     const { RenderView } = await import("@swf2es/player/scene");
     const { Container, TRANSFORM } = await import("/player/display/display.js");
     const { Drawing } = await import("/player/display/drawing.js");
+    const { BitmapStore } = await import("/player/bitmap/bitmap.js");
     const options = { width: 256, height: 144, preserveDrawingBuffer: true };
     const multi = new RenderView({ ...options, canvas: document.createElement("canvas") });
     let destroyed = false;
@@ -89,6 +90,68 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
           frames++;
         }
       }
+      // Slot churn, sampling changes and meshes split runs; masks and cached groups
+      // make commands execute in a different order from their preparation.
+      const root = new Container();
+      const images = Array.from({ length: 24 }, (_, i) => {
+        const image = new BitmapStore(2, 2, true, (0xff000000 | ((i + 1) * 65171)) >>> 0);
+        image.setPixel32(0, 0, 0xffffffff);
+        return image;
+      });
+      const shapes = [];
+      for (let group = 0; group < 6; group++) {
+        const held = new Container();
+        held.setCachedAsBitmap(true);
+        root.addChildAt(held, root.children.length);
+        for (let n = 0; n < 48; n++) {
+          const i = group * 48 + n;
+          const shape = new Container();
+          const drawing = new Drawing();
+          drawing.beginFill({
+            type: "image", image: images[i % images.length],
+            matrix: { a: 1.5, b: 0, c: 0, d: 1.5, tx: 0.25, ty: 0.25 },
+            repeat: !!(i & 1), smooth: !!(i & 2),
+          });
+          if (n % 13 === 0) {
+            drawing.drawTriangles([0, 0, 6, 0, 0, 6], null, [0, 0, 1, 0, 0, 1], 0);
+          } else {
+            drawing.drawRect(0, 0, 6, 6);
+          }
+          drawing.endFill();
+          shape.drawing = drawing;
+          shape.matrix.tx = (i % 32) * 8;
+          shape.matrix.ty = Math.floor(i / 32) * 8;
+          held.addChildAt(shape, n);
+          shapes.push(shape);
+        }
+        const mask = new Container();
+        const drawing = new Drawing();
+        drawing.beginFill({ type: "solid", color: 0xffffffff });
+        drawing.drawRect(2, 0, 250, 144);
+        drawing.endFill();
+        mask.drawing = drawing;
+        root.addChildAt(mask, root.children.length);
+        held.setMask(mask);
+      }
+      for (let frame = 0; frame < 3; frame++) {
+        multi.backend.draws.runTableMost = frame === 1 ? 1 : multi.gl.getParameter(multi.gl.MAX_TEXTURE_SIZE);
+        for (const shape of shapes) {
+          shape.matrix.tx += 0.25;
+          shape.invalidate(TRANSFORM);
+        }
+        images[frame].setPixel32(1, 1, 0xffff0080);
+        const expected = capture(single, root);
+        const actual = capture(multi, root);
+        if (!expected.some((value, i) => i % 4 !== 3 && value !== 0)) {
+          throw new Error("Empty textured reference frame");
+        }
+        for (let i = 0; i < actual.length; i++) {
+          if (actual[i] !== expected[i]) {
+            throw new Error("Textured frame " + frame + ", byte " + i + " differs");
+          }
+        }
+        frames++;
+      }
       const table = multi.backend.draws.runTable;
       if (!multi.gl.isTexture(table)) {
         throw new Error("Missing draw table");
@@ -111,5 +174,5 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
   })()`),
 );
 assert.equal(exception, null);
-assert.deepEqual(value, { frames: 15, largest: 256 });
+assert.deepEqual(value, { frames: 18, largest: 256 });
 console.log("multi-draw: ok");
