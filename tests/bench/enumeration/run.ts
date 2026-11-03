@@ -7,6 +7,7 @@
 //
 //   node tests/bench/enumeration/run.ts [runs, 5]                   the builds now
 //   node tests/bench/enumeration/run.ts <dir A> <dir B> [runs, 7]   two snapshots
+//   ... --dictionaries    64/1024/32768-entry Dictionaries, stable and replacing keys
 //
 // Snapshots are tests/programs/ab.ts's (--snapshot <dir>), run interleaved
 // as tests/bench/untyped/run.ts runs them. Medians and ranges per section,
@@ -23,27 +24,29 @@ import { containerEngine, libraries, runOracle } from "../../../oracle/oracle.ts
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
 const read = (p: string) => new Uint8Array(readFileSync(`${out}${p}`));
+const dictionaries = process.argv.includes("--dictionaries");
+const fixture = dictionaries ? "Dictionaries" : "Enumeration";
 
 if (process.argv[2] === "--child") {
   const { runSwf2es } = await import("../../conformance/swf2es.ts");
   const lines = await runSwf2es(
     [read("lib/builtin.abc"), read("lib/shell_toplevel.abc")],
-    read("Enumeration.abc"),
+    read(`${fixture}.abc`),
   );
   console.log(lines.join("\n"));
   process.exit(0);
 }
 
-const args = process.argv.slice(2);
+const args = process.argv.slice(2).filter((arg) => arg !== "--dictionaries");
 const builds = args.length >= 2 ? [args[0], args[1]] : [];
 const runs = Number(args[builds.length] ?? (builds.length ? 7 : 5));
 
 // avmshell's run, which also compiles the ABC, and the builtins it loads.
 const engine = containerEngine();
-const [oracle] = runOracle([`${here}Enumeration.as`], out, { engine, timeoutSeconds: 300 });
+const [oracle] = runOracle([`${here}${fixture}.as`], out, { engine, timeoutSeconds: 300 });
 if (!oracle.compiled || oracle.exitCode !== 0) {
   console.log(
-    `Enumeration.as: avmshell exit ${oracle.exitCode}\n${oracle.compileLog}${oracle.output}`,
+    `${fixture}.as: avmshell exit ${oracle.exitCode}\n${oracle.compileLog}${oracle.output}`,
   );
   process.exit(1);
 }
@@ -77,10 +80,12 @@ for (let run = 0; run < runs; run++) {
           SWF2ES_CODEGEN: resolve(dir, "codegen"),
         }
       : process.env;
-    const lines = execFileSync(process.execPath, [fileURLToPath(import.meta.url), "--child"], {
-      env,
-      encoding: "utf8",
-    }).split("\n");
+    const childArgs = [fileURLToPath(import.meta.url), "--child"];
+    if (dictionaries) {
+      childArgs.push("--dictionaries");
+    }
+
+    const lines = execFileSync(process.execPath, childArgs, { env, encoding: "utf8" }).split("\n");
     const got = checked(lines);
     if (got !== expected && !differs.has(name)) {
       // A build from before a fix may count otherwise: say so once, and
