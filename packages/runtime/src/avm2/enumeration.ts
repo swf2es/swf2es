@@ -119,17 +119,13 @@ function startEnumeration(
     return names;
   }
 
-  if (names.length <= 1 && names.length === e.names.length && names[0] === e.names[0]) {
-    return e.names;
+  // Weak-name wrappers can change on reinsertion while a slot still follows the original key.
+  if (starting && e.names.length >= 32 && !(o.$keys instanceof WeakKeys)) {
+    return refreshEnumeration(e, names);
   }
 
   const free: number[] = [];
-  // Weak-name wrappers can change on reinsertion while a slot still follows the original key.
-  if (starting && e.names.length >= 32 && !(o.$keys instanceof WeakKeys)) {
-    refreshSlots(e, names, free);
-  } else {
-    freeSlots(e, o, free, starting);
-  }
+  freeSlots(e, o, free, starting);
 
   let next = 0;
   for (const name of names) {
@@ -460,7 +456,7 @@ export function pairOf(o: Value): string | null {
 export const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
 
 // A mark per slot avoids a second map lookup for each existing name.
-function refreshSlots(e: Enumeration, names: EnumeratedName[], free: number[]): void {
+function refreshEnumeration(e: Enumeration, names: EnumeratedName[]): (EnumeratedName | null)[] {
   let present = slotMarks.get(e);
   if (present === undefined || present.length < e.names.length) {
     present = new Uint8Array(e.names.length);
@@ -482,6 +478,7 @@ function refreshSlots(e: Enumeration, names: EnumeratedName[], free: number[]): 
 
   names.length = added;
 
+  const free: number[] = [];
   for (let i = 0; i < e.names.length; i++) {
     const name = e.names[i];
     if (name === null) {
@@ -492,4 +489,15 @@ function refreshSlots(e: Enumeration, names: EnumeratedName[], free: number[]): 
       free.push(i);
     }
   }
+
+  let next = 0;
+  for (const name of names) {
+    if (!e.slot.has(name)) {
+      const i = next < free.length ? free[next++] : e.names.length;
+      e.names[i] = name;
+      e.slot.set(name, i);
+    }
+  }
+
+  return e.names;
 }
