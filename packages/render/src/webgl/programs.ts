@@ -38,7 +38,11 @@ export const TABLE_ENTRIES = 48;
 /** Segments a row of the outlines' texture, as the player's text/saffron.ts stores them. */
 export const OUTLINE_ROW = 1024;
 
-/** The most draws a multi-draw of the fill program makes, their rows in its integer texture. */
+/**
+ * The most draws a multi-draw of the fill program makes, their rows in its
+ * integer texture, a line of it. A power of two: the vertex shader splits a
+ * draw's place in the table into column and line with a mask and a shift.
+ */
 export const RUN_MOST = 256;
 
 /** Textures the fill program samples in one draw call, each on a unit of its own. */
