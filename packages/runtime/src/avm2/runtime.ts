@@ -31,8 +31,10 @@ import {
   type TypeRef,
   type Value,
 } from "./descriptors.js";
+import { NAMED } from "./dictionary-keys.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
+  dictionaryAt,
   type Enumeration,
   elementsAt,
   enumerated,
@@ -2644,7 +2646,9 @@ export class Runtime {
       return element < INT_ATOM_LIMIT ? element : String(element);
     }
 
-    const name = enumerated(this.enumerating, o, index - length);
+    const keys = dictionaryAt(o, index);
+    const name =
+      keys !== null ? keys.nameAt(index - length) : enumerated(this.enumerating, o, index - length);
     if (typeof name !== "string") {
       return name;
     }
@@ -2684,11 +2688,20 @@ export class Runtime {
       }
     }
 
-    const name =
-      index <= length ? String(index - 1) : enumerated(this.enumerating, o, index - length);
-    if (typeof name !== "string") {
-      return o.$keys.get(name);
+    // A Dictionary's key gives its value from its slot, without looking it up.
+    const keys = dictionaryAt(o, index);
+    const value = keys?.valueAt(index - length);
+    if (keys !== null && value !== NAMED) {
+      return value;
     }
+
+    // Else a Dictionary's slot holds a dynamic property's name.
+    const name =
+      keys !== null
+        ? (keys.nameAt(index - length) as string)
+        : index <= length
+          ? String(index - 1)
+          : enumerated(this.enumerating, o, index - length);
 
     // These builtins have no bindings over their enumerated own properties.
     // A missing value still needs the full lookup, including the prototype.

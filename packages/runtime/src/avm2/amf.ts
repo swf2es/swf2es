@@ -327,8 +327,8 @@ export class Writer implements ExternalStream {
 
     const rt = this.rt;
     const names = rt.enumerableNames(d);
-    const keys: Map<object, Value> = d.$keys ?? new Map();
-    this.uint29(((names.length + keys.size) << 1) | 1);
+    const keys: [object, Value][] = d.$keys ? [...d.$keys] : [];
+    this.uint29(((names.length + keys.length) << 1) | 1);
     this.u8(d.$weakKeys ? 1 : 0);
     for (const name of names) {
       this.value(name);
