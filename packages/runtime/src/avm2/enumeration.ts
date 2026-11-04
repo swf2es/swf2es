@@ -124,8 +124,7 @@ function startEnumeration(
   }
 
   const free: number[] = [];
-  // Weak-name wrappers can change on reinsertion while a slot still follows the original key.
-  if (starting && e.names.length >= 32 && !(o.$keys instanceof WeakKeys)) {
+  if (starting && e.names.length >= 32) {
     refreshSlots(e, names, free);
   } else {
     freeSlots(e, o, free, starting);
@@ -434,8 +433,10 @@ function nextNameIndex(
 
 function stillThere(o: AsObject, name: EnumeratedName): boolean {
   if (name instanceof WeakName) {
+    // A key deleted and added again has a new name: the old one's slot is gone, or the
+    // key would be walked once for each time it came back.
     const key = name.ref.deref();
-    return key !== undefined && (o.$keys?.has(key) ?? false);
+    return key !== undefined && o.$keys instanceof WeakKeys && o.$keys.nameOf(key) === name;
   }
 
   if (typeof name !== "string") {
