@@ -1,5 +1,6 @@
 // flash.utils.Dictionary.
 import type { AsObject, Value } from "../descriptors.js";
+import { DictionaryKeys } from "../dictionary-keys.js";
 import { WeakKeys } from "../weak-keys.js";
 import { type Natives, plain } from "./define.js";
 
@@ -12,7 +13,7 @@ export const dictionaryNatives: Natives = {
     this: AsObject,
     weakKeys: Value,
   ) {
-    this.$keys = weakKeys ? new WeakKeys() : new Map<object, Value>();
+    this.$keys = weakKeys ? new WeakKeys() : new DictionaryKeys();
     this.$weakKeys = !!weakKeys;
   }),
 };

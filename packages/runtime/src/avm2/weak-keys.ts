@@ -5,6 +5,8 @@
 // for-in, is kept as WeakRefs, those of keys gone dropped as they are met.
 // The Map-like part is what the runtime and AMF use of a Dictionary's keys.
 
+import type { Enumeration } from "./enumeration.js";
+
 /** A for-in's name for a weak Dictionary's key: its key held weakly, one for each key. */
 export class WeakName {
   readonly ref: WeakRef<object>;
@@ -15,6 +17,8 @@ export class WeakName {
 }
 
 export class WeakKeys {
+  /** The record holds WeakName wrappers, never their keys or values. */
+  enumeration: Enumeration | null = null;
   private readonly values = new WeakMap<object, unknown>();
   private readonly names = new WeakMap<object, WeakName>();
   /** Each key's name, in the order the keys were added. */
@@ -32,6 +36,7 @@ export class WeakKeys {
 
   set(key: object, value: unknown): this {
     if (!this.values.has(key)) {
+      this.enumeration = null;
       const name = new WeakName(key);
       this.names.set(key, name);
       this.order.add(name);
@@ -46,6 +51,7 @@ export class WeakKeys {
   }
 
   delete(key: object): boolean {
+    this.enumeration = null;
     const name = this.names.get(key);
     if (!name) {
       return false;

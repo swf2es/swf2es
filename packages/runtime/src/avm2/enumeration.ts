@@ -5,6 +5,7 @@
 // moving the others.
 
 import type { AsObject, Value } from "./descriptors.js";
+import { DictionaryKeys } from "./dictionary-keys.js";
 import { Namespace } from "./names.js";
 import { FloatVector } from "./natives/float-vector.js";
 import { WeakKeys, WeakName } from "./weak-keys.js";
@@ -75,7 +76,9 @@ export function ownNames(o: AsObject): EnumeratedName[] {
 }
 
 /** An object's own names but its elements: its dynamic properties' and a Dictionary's keys. */
-function otherNames(o: AsObject): EnumeratedName[] {
+function otherNames(o: AsObject): EnumeratedName[];
+function otherNames(o: AsObject, current: Enumeration | undefined): EnumeratedName[] | null;
+function otherNames(o: AsObject, current?: Enumeration): EnumeratedName[] | null {
   const names: EnumeratedName[] = [];
   if (o.$d) {
     for (const k of o.$d.keys()) {
@@ -84,16 +87,43 @@ function otherNames(o: AsObject): EnumeratedName[] {
   }
 
   if (o.$keys instanceof WeakKeys) {
+    if (cachedNames(o.$keys, current, names.length)) {
+      return null;
+    }
+
     for (const k of o.$keys.keys()) {
       names.push(o.$keys.nameOf(k) as WeakName);
     }
   } else if (o.$keys !== undefined) {
+    if (o.$keys instanceof DictionaryKeys && cachedNames(o.$keys, current, names.length)) {
+      return null;
+    }
+
     for (const k of o.$keys.keys()) {
       names.push(k);
     }
   }
 
   return names;
+}
+
+/** Only object-key-only walks can reuse slots without tracking dynamic-name mutations. */
+function cachedNames(
+  keys: DictionaryKeys | WeakKeys,
+  current: Enumeration | undefined,
+  dynamicNames: number,
+): boolean {
+  if (current !== undefined && dynamicNames === 0) {
+    if (keys.enumeration === current) {
+      return true;
+    }
+
+    keys.enumeration = current;
+  } else {
+    keys.enumeration = null;
+  }
+
+  return false;
 }
 
 // Keep scratch separate so the per-step name lookups see the same record shapes.
@@ -111,8 +141,12 @@ function startEnumeration(
   o: AsObject,
   starting: boolean,
 ): (EnumeratedName | null)[] {
-  const names = otherNames(o);
   let e = enumerating.get(o);
+  const names = otherNames(o, e);
+  if (names === null) {
+    return e?.names ?? [];
+  }
+
   if (!e) {
     e = { names, slot: new Map(names.map((name, i) => [name, i])) };
     enumerating.set(o, e);
@@ -435,7 +469,12 @@ function nextNameIndex(
 function stillThere(o: AsObject, name: EnumeratedName): boolean {
   if (name instanceof WeakName) {
     const key = name.ref.deref();
-    return key !== undefined && (o.$keys?.has(key) ?? false);
+    if (key === undefined) {
+      o.$keys.enumeration = null;
+      return false;
+    }
+
+    return o.$keys?.has(key) ?? false;
   }
 
   if (typeof name !== "string") {
