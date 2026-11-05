@@ -164,6 +164,8 @@ export class TargetPool {
   private freeMsaa = new SizedPool<Multisampled>(msaaBytes);
   /** The layers kept from frame to frame, by their ids in Keeps. */
   private kept: (Layer | null)[] = [];
+  /** The largest multisampled buffers of each sample count found complete, by the samples. */
+  private completeMsaa = new Map<number, { width: number; height: number }>();
 
   constructor(gl: WebGL2RenderingContext, state: GlState) {
     this.gl = gl;
@@ -175,6 +177,7 @@ export class TargetPool {
     this.freeLayers = new SizedPool<Layer>(layerBytes);
     this.kept = [];
     this.freeMsaa = new SizedPool<Multisampled>(msaaBytes);
+    this.completeMsaa = new Map();
   }
 
   get frame(): number {
@@ -325,11 +328,23 @@ export class TargetPool {
       samples,
       usedAt: this.frameCount,
     };
+    // Asking waits for the GPU process, milliseconds at a time, and the
+    // answer hangs on the formats and the samples, which are always these:
+    // once one is complete, no smaller one of its samples is asked about.
+    const complete = this.completeMsaa.get(samples);
+    if (complete && width <= complete.width && height <= complete.height) {
+      return msaa;
+    }
+
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       this.deleteMultisampled(msaa);
       return null;
     }
 
+    this.completeMsaa.set(samples, {
+      width: Math.max(width, complete?.width ?? 0),
+      height: Math.max(height, complete?.height ?? 0),
+    });
     return msaa;
   }
 

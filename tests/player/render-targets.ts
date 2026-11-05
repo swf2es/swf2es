@@ -6,7 +6,7 @@ import { withPage } from "./chrome.ts";
 const { value, exception } = await withPage(
   "runSwf",
   (evaluate) =>
-    evaluate<{ checks: number; created: number; error: number }>(`(async () => {
+    evaluate<{ checks: number; created: number; asked: number; error: number }>(`(async () => {
     const { GlState } = await import("@swf2es/context3d/device");
     const { TargetPool } = await import("/render/webgl/targets.js");
     const canvas = document.createElement("canvas");
@@ -14,10 +14,13 @@ const { value, exception } = await withPage(
     if (!gl || gl.getParameter(gl.MAX_SAMPLES) < 4) { throw new Error("Four samples required"); }
     const state = new GlState(gl);
     const pool = new TargetPool(gl, state);
-    let checks = 0, created = 0;
+    let checks = 0, created = 0, asked = 0;
     const check = (ok, why) => { if (!ok) { throw new Error(why); } checks++; };
-    const make = gl.checkFramebufferStatus.bind(gl);
-    gl.checkFramebufferStatus = (...args) => { created++; return make(...args); };
+    // Two multisampled renderbuffers, colour and depth-stencil, a buffer made.
+    const store = gl.renderbufferStorageMultisample.bind(gl);
+    gl.renderbufferStorageMultisample = (...args) => { created += 0.5; return store(...args); };
+    const status = gl.checkFramebufferStatus.bind(gl);
+    gl.checkFramebufferStatus = (...args) => { asked++; return status(...args); };
     const paint = (msaa, color) => {
       state.bindFramebuffer(msaa.framebuffer);
       state.scissor(null);
@@ -94,7 +97,7 @@ const { value, exception } = await withPage(
       pool.giveLayer(layer);
       pool.destroy();
       check(!gl.isFramebuffer(last.framebuffer), "destroy must release recycled targets");
-      return {checks, created, error: gl.getError()};
+      return {checks, created, asked, error: gl.getError()};
     } finally {
       pool.destroy();
       gl.getExtension("WEBGL_lose_context")?.loseContext();
@@ -106,4 +109,6 @@ assert.equal(exception, null);
 assert.ok(value);
 assert.equal(value.error, 0);
 assert.equal(value.created, 4);
+// The driver asked about the first alone: the others, no larger, have its formats and samples.
+assert.equal(value.asked, 1);
 console.log(`render-targets: ${value.checks} pixel/reuse checks, bounded allocation and cleanup`);
