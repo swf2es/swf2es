@@ -2673,10 +2673,7 @@ export class Runtime {
     }
 
     const keys = dictionaryAt(o, index);
-    const name =
-      keys !== null
-        ? keys.nameAt(index - length)
-        : enumerated(this.enumerating, o, index - length, index);
+    const name = keys !== null ? keys.nameAt(index - length) : enumerated(o, index - length, index);
     if (typeof name !== "string") {
       return name;
     }
@@ -2735,7 +2732,7 @@ export class Runtime {
         ? (keys.nameAt(index - length) as string)
         : index <= length
           ? String(index - 1)
-          : enumerated(this.enumerating, o, index - length, index);
+          : enumerated(o, index - length, index);
 
     // A dynamic property's value, as avmplus' nextValue reads its slot's:
     // no binding has its name, which setting it would have gone to.
