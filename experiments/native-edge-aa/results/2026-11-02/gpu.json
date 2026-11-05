@@ -1,0 +1,31 @@
+{
+  "value": {
+    "renderer": "ANGLE (NVIDIA, Vulkan 1.4.351 (NVIDIA NVIDIA GeForce RTX 4060 Laptop GPU (0x000028A0)), NVIDIA)",
+    "maxSamples": 8,
+    "rgba8": [8, 4, 2],
+    "depthStencil": [8, 4, 2],
+    "requests": [
+      {
+        "requested": 2,
+        "actual": 2,
+        "error": 0
+      },
+      {
+        "requested": 4,
+        "actual": 4,
+        "error": 0
+      },
+      {
+        "requested": 8,
+        "actual": 8,
+        "error": 0
+      },
+      {
+        "requested": 16,
+        "actual": null,
+        "error": 1282
+      }
+    ]
+  },
+  "exception": null
+}

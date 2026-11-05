@@ -1,0 +1,2027 @@
+[
+  {
+    "candidate": "main-4",
+    "scenario": "static",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.0949999988079071,
+          "mean": 0.07487499974668026
+        },
+        "gpu": {
+          "median": 0.090112,
+          "p95": 0.091136,
+          "mean": 0.08992426666666681
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "static",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.0949999988079071,
+          "mean": 0.07404166658719381
+        },
+        "gpu": {
+          "median": 0.075776,
+          "p95": 0.077824,
+          "mean": 0.0781056000000001
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "static",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 0,
+        "cpu": {
+          "median": 0.07500000298023224,
+          "p95": 0.16499999910593033,
+          "mean": 0.09587499971191088
+        },
+        "gpu": {
+          "median": 0.11776,
+          "p95": 0.119808,
+          "mean": 0.11735893333333342
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "static",
+        "round": 0,
+        "cpu": {
+          "median": 0.07500000298023224,
+          "p95": 0.1599999964237213,
+          "mean": 0.09699999981870254
+        },
+        "gpu": {
+          "median": 0.116736,
+          "p95": 0.118784,
+          "mean": 0.1166677333333335
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "static",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10000000149011612,
+          "mean": 0.07445833298067252
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.115712,
+          "mean": 0.11397119999999984
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "static",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07287499960511923
+        },
+        "gpu": {
+          "median": 0.083968,
+          "p95": 0.084992,
+          "mean": 0.08371199999999977
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "static",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.14000000059604645,
+          "mean": 0.0814166666318973
+        },
+        "gpu": {
+          "median": 0.114688,
+          "p95": 0.116736,
+          "mean": 0.11463679999999994
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "static",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.14000000059604645,
+          "mean": 0.0805416664108634
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.115712,
+          "mean": 0.11386879999999987
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "static",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.09000000357627869,
+          "mean": 0.07295833335568508
+        },
+        "gpu": {
+          "median": 0.105472,
+          "p95": 0.10752,
+          "mean": 0.10588159999999983
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "static",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08999999612569809,
+          "mean": 0.07166666692743699
+        },
+        "gpu": {
+          "median": 0.08192,
+          "p95": 0.082944,
+          "mean": 0.08198826666666671
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "static",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.11500000208616257,
+          "mean": 0.07354166613270839
+        },
+        "gpu": {
+          "median": 0.106496,
+          "p95": 0.10752,
+          "mean": 0.10601813333333315
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "static",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10000000149011612,
+          "mean": 0.07270833378036817
+        },
+        "gpu": {
+          "median": 0.103424,
+          "p95": 0.103424,
+          "mean": 0.1028437333333335
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "static",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10000000149011612,
+          "mean": 0.0733749995008111
+        },
+        "gpu": {
+          "median": 0.106496,
+          "p95": 0.10752,
+          "mean": 0.10634239999999973
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "static",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.0950000062584877,
+          "mean": 0.07304166698207458
+        },
+        "gpu": {
+          "median": 0.08192,
+          "p95": 0.082944,
+          "mean": 0.08219306666666676
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "static",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 2,
+        "cpu": {
+          "median": 0.07500000298023224,
+          "p95": 0.16499999910593033,
+          "mean": 0.08916666600853204
+        },
+        "gpu": {
+          "median": 0.104448,
+          "p95": 0.108544,
+          "mean": 0.08926719999999988
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "static",
+        "round": 2,
+        "cpu": {
+          "median": 0.07500000298023224,
+          "p95": 0.14999999850988388,
+          "mean": 0.08816666652758916
+        },
+        "gpu": {
+          "median": 0.101376,
+          "p95": 0.104448,
+          "mean": 0.09104213333333346
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "static",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.0727083334699273
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.07038293333333316
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "static",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07245833308746417
+        },
+        "gpu": {
+          "median": 0.069632,
+          "p95": 0.07168,
+          "mean": 0.07008426666666656
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "static",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 3,
+        "cpu": {
+          "median": 0.06999999284744263,
+          "p95": 0.07500000298023224,
+          "mean": 0.0686666661252578
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07037439999999985
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "static",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07500000298023224,
+          "mean": 0.0686666661252578
+        },
+        "gpu": {
+          "median": 0.06656,
+          "p95": 0.067584,
+          "mean": 0.06672213333333334
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "static",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07295833316942056
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07039146666666651
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "static",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07254166696220636
+        },
+        "gpu": {
+          "median": 0.069632,
+          "p95": 0.07168,
+          "mean": 0.06978559999999996
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "static",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07070833363880714
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07032319999999984
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "static",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.0700833337381482
+        },
+        "gpu": {
+          "median": 0.04608,
+          "p95": 0.047104,
+          "mean": 0.046097066666666624
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "static",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10999999940395355,
+          "mean": 0.08387499991804362
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.0705706666666665
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "static",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10000000149011612,
+          "mean": 0.07291666648040215
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07014399999999982
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "static",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 4,
+        "cpu": {
+          "median": 0.0650000050663948,
+          "p95": 0.07500000298023224,
+          "mean": 0.06824999966969093
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07047679999999984
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "static",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.06841666692246993
+        },
+        "gpu": {
+          "median": 0.04608,
+          "p95": 0.047104,
+          "mean": 0.04602879999999997
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "static",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "static",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07500000298023224,
+          "mean": 0.06854166655490795
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07037439999999982
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "static",
+        "round": 4,
+        "cpu": {
+          "median": 0.0650000050663948,
+          "p95": 0.07500000298023224,
+          "mean": 0.06812499997516473
+        },
+        "gpu": {
+          "median": 0.06656,
+          "p95": 0.067584,
+          "mean": 0.06673066666666669
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "rotate",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07187500006208818
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07010133333333315
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "rotate",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07137499991804361
+        },
+        "gpu": {
+          "median": 0.06656,
+          "p95": 0.068608,
+          "mean": 0.06704640000000003
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "rotate",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08000000566244125,
+          "mean": 0.07100000015149514
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07222613333333316
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "rotate",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08000000566244125,
+          "mean": 0.07075000026573737
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.07081813333333319
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "rotate",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07050000006953876
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.07168,
+          "mean": 0.07014399999999985
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "rotate",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07133333329111338
+        },
+        "gpu": {
+          "median": 0.04608,
+          "p95": 0.047104,
+          "mean": 0.046199466666666626
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "rotate",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08000000566244125,
+          "mean": 0.0722083330154419
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.07030613333333316
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "rotate",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08000000566244125,
+          "mean": 0.0730416667337219
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.07076693333333317
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "rotate",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 1,
+        "cpu": {
+          "median": 0.07500000298023224,
+          "p95": 0.08999999612569809,
+          "mean": 0.07541666701436042
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.0702378666666665
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "rotate",
+        "round": 1,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08500000089406967,
+          "mean": 0.07487499949832757
+        },
+        "gpu": {
+          "median": 0.04608,
+          "p95": 0.047104,
+          "mean": 0.04625066666666664
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "rotate",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 1,
+        "cpu": {
+          "median": 0.07500000298023224,
+          "p95": 0.08500000089406967,
+          "mean": 0.074875000740091
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.07022933333333313
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "rotate",
+        "round": 1,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08500000089406967,
+          "mean": 0.08825000009189049
+        },
+        "gpu": {
+          "median": 0.067584,
+          "p95": 0.068608,
+          "mean": 0.06715733333333337
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "rotate",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07095833327621222
+        },
+        "gpu": {
+          "median": 0.069632,
+          "p95": 0.07168,
+          "mean": 0.06996479999999984
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "rotate",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07995833357175192
+        },
+        "gpu": {
+          "median": 0.04608,
+          "p95": 0.047104,
+          "mean": 0.046182399999999964
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "rotate",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07104166621963183
+        },
+        "gpu": {
+          "median": 0.070656,
+          "p95": 0.072704,
+          "mean": 0.0701610666666665
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "rotate",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07058333319922289
+        },
+        "gpu": {
+          "median": 0.067584,
+          "p95": 0.068608,
+          "mean": 0.06702933333333337
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "rotate",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07283333335071802
+        },
+        "gpu": {
+          "median": 0.077824,
+          "p95": 0.079872,
+          "mean": 0.07692799999999993
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "rotate",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07341666699697574
+        },
+        "gpu": {
+          "median": 0.0768,
+          "p95": 0.078848,
+          "mean": 0.07681706666666677
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "rotate",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 3,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08500000089406967,
+          "mean": 0.07420833334326744
+        },
+        "gpu": {
+          "median": 0.079872,
+          "p95": 0.08192,
+          "mean": 0.07846399999999995
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "rotate",
+        "round": 3,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08500000089406967,
+          "mean": 0.085125000278155
+        },
+        "gpu": {
+          "median": 0.07168,
+          "p95": 0.073728,
+          "mean": 0.07203839999999992
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "rotate",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08500000089406967,
+          "mean": 0.07324999968210856
+        },
+        "gpu": {
+          "median": 0.079872,
+          "p95": 0.08192,
+          "mean": 0.07877973333333338
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "rotate",
+        "round": 3,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08500000089406967,
+          "mean": 0.07358333381513754
+        },
+        "gpu": {
+          "median": 0.077824,
+          "p95": 0.080896,
+          "mean": 0.07760213333333321
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "rotate",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07087500014652809
+        },
+        "gpu": {
+          "median": 0.080896,
+          "p95": 0.08192,
+          "mean": 0.07914666666666673
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "rotate",
+        "round": 3,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07074999995529652
+        },
+        "gpu": {
+          "median": 0.047104,
+          "p95": 0.048128,
+          "mean": 0.04712960000000006
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "rotate",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.0723749998336037
+        },
+        "gpu": {
+          "median": 0.08192,
+          "p95": 0.083968,
+          "mean": 0.08046080000000012
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "rotate",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08499999344348907,
+          "mean": 0.0724999999627471
+        },
+        "gpu": {
+          "median": 0.077824,
+          "p95": 0.080896,
+          "mean": 0.07836159999999989
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "rotate",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07500000298023224,
+          "mean": 0.07049999975909789
+        },
+        "gpu": {
+          "median": 0.082944,
+          "p95": 0.084992,
+          "mean": 0.0815872
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "rotate",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07500000298023224,
+          "mean": 0.06983333335568508
+        },
+        "gpu": {
+          "median": 0.048128,
+          "p95": 0.049152,
+          "mean": 0.048179200000000116
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "rotate",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "rotate",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.08225000010182461
+        },
+        "gpu": {
+          "median": 0.083968,
+          "p95": 0.086016,
+          "mean": 0.08296106666666667
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "rotate",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07158333373566468
+        },
+        "gpu": {
+          "median": 0.072704,
+          "p95": 0.074752,
+          "mean": 0.07321599999999998
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "scale",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07500000298023224,
+          "mean": 0.07079166701684396
+        },
+        "gpu": {
+          "median": 0.083968,
+          "p95": 0.091136,
+          "mean": 0.0850090666666667
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "scale",
+        "round": 0,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.07999999821186066,
+          "mean": 0.07095833327621222
+        },
+        "gpu": {
+          "median": 0.075776,
+          "p95": 0.077824,
+          "mean": 0.07558826666666686
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "scale",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 0,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.06000000238418579,
+          "mean": 0.05345833320170641
+        },
+        "gpu": {
+          "median": 0.084992,
+          "p95": 0.09728,
+          "mean": 0.08874666666666657
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "scale",
+        "round": 0,
+        "cpu": {
+          "median": 1.469999998807907,
+          "p95": 1.8350000008940697,
+          "mean": 1.6971666665747762
+        },
+        "gpu": {
+          "median": 0.132096,
+          "p95": 1.246208,
+          "mean": 0.27015679999999986
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "scale",
+    "round": 0,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 0,
+        "cpu": {
+          "median": 0.05000000447034836,
+          "p95": 0.06000000238418579,
+          "mean": 0.05241666721800963
+        },
+        "gpu": {
+          "median": 0.119808,
+          "p95": 0.125952,
+          "mean": 0.12097706666666667
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "scale",
+        "round": 0,
+        "cpu": {
+          "median": 1.3950000032782555,
+          "p95": 1.7100000008940697,
+          "mean": 1.4429166669646898
+        },
+        "gpu": {
+          "median": 0.14848,
+          "p95": 0.900096,
+          "mean": 0.24413866666666648
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "scale",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 1,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.09999999403953552,
+          "mean": 0.06170833328117927
+        },
+        "gpu": {
+          "median": 0.123904,
+          "p95": 0.130048,
+          "mean": 0.1252181333333333
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "scale",
+        "round": 1,
+        "cpu": {
+          "median": 1.469999998807907,
+          "p95": 2.059999994933605,
+          "mean": 1.54029166692247
+        },
+        "gpu": {
+          "median": 0.188416,
+          "p95": 1.540096,
+          "mean": 0.3693824
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "scale",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 1,
+        "cpu": {
+          "median": 0.06499999761581421,
+          "p95": 0.11500000208616257,
+          "mean": 0.07458333298563957
+        },
+        "gpu": {
+          "median": 0.128,
+          "p95": 0.134144,
+          "mean": 0.13133653333333326
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "scale",
+        "round": 1,
+        "cpu": {
+          "median": 1.7250000014901161,
+          "p95": 3.125,
+          "mean": 1.9283333335692683
+        },
+        "gpu": {
+          "median": 0.152576,
+          "p95": 2.098176,
+          "mean": 0.5075370666666668
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "scale",
+    "round": 1,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08000000566244125,
+          "mean": 0.07195833312968412
+        },
+        "gpu": {
+          "median": 0.132096,
+          "p95": 0.13824,
+          "mean": 0.1324373333333332
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "scale",
+        "round": 1,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.08499999344348907,
+          "mean": 0.0720416663835446
+        },
+        "gpu": {
+          "median": 0.125952,
+          "p95": 0.129024,
+          "mean": 0.12584106666666672
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "scale",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 2,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.07500000298023224,
+          "mean": 0.059458333626389505
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.125952,
+          "mean": 0.12043093333333334
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "scale",
+        "round": 2,
+        "cpu": {
+          "median": 1.5199999958276749,
+          "p95": 2.3549999967217445,
+          "mean": 1.6289999997864166
+        },
+        "gpu": {
+          "median": 0.1024,
+          "p95": 1.440768,
+          "mean": 0.2881536000000001
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "scale",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.13500000536441803,
+          "mean": 0.07866666670888663
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.125952,
+          "mean": 0.1168469333333333
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "scale",
+        "round": 2,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.13499999791383743,
+          "mean": 0.07895833346992731
+        },
+        "gpu": {
+          "median": 0.090112,
+          "p95": 0.09216,
+          "mean": 0.08998400000000013
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "scale",
+    "round": 2,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 2,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.07999999821186066,
+          "mean": 0.05720833310236533
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.125952,
+          "mean": 0.11673600000000002
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "scale",
+        "round": 2,
+        "cpu": {
+          "median": 1.4500000029802322,
+          "p95": 2.005000002682209,
+          "mean": 1.5285000000769893
+        },
+        "gpu": {
+          "median": 0.152576,
+          "p95": 1.313792,
+          "mean": 0.2683733333333335
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "scale",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 3,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08000000566244125,
+          "mean": 0.0738750002036492
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.125952,
+          "mean": 0.11697493333333334
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "scale",
+        "round": 3,
+        "cpu": {
+          "median": 0.07499999552965164,
+          "p95": 0.08000000566244125,
+          "mean": 0.07354166644314925
+        },
+        "gpu": {
+          "median": 0.090112,
+          "p95": 0.09216,
+          "mean": 0.08993280000000006
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "scale",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 3,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.07499999552965164,
+          "mean": 0.05625000068296989
+        },
+        "gpu": {
+          "median": 0.114688,
+          "p95": 0.126976,
+          "mean": 0.12400640000000003
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "scale",
+        "round": 3,
+        "cpu": {
+          "median": 1.4450000002980232,
+          "p95": 1.844999998807907,
+          "mean": 1.4820416665946443
+        },
+        "gpu": {
+          "median": 0.152576,
+          "p95": 1.288192,
+          "mean": 0.24602453333333335
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "scale",
+    "round": 3,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 3,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.07999999821186066,
+          "mean": 0.0577916664381822
+        },
+        "gpu": {
+          "median": 0.113664,
+          "p95": 0.221184,
+          "mean": 0.12526933333333332
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "scale",
+        "round": 3,
+        "cpu": {
+          "median": 1.4600000008940697,
+          "p95": 1.8450000062584877,
+          "mean": 1.5120833336065214
+        },
+        "gpu": {
+          "median": 0.101376,
+          "p95": 0.930816,
+          "mean": 0.20758186666666675
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-4",
+    "scenario": "scale",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 4,
+        "cpu": {
+          "median": 0.06000000238418579,
+          "p95": 0.07499999552965164,
+          "mean": 0.06016666665673256
+        },
+        "gpu": {
+          "median": 0.218112,
+          "p95": 0.222208,
+          "mean": 0.21848746666666657
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-4",
+        "scenario": "scale",
+        "round": 4,
+        "cpu": {
+          "median": 1.4650000035762787,
+          "p95": 1.8599999994039536,
+          "mean": 1.5538333331545193
+        },
+        "gpu": {
+          "median": 0.32768,
+          "p95": 1.655808,
+          "mean": 0.49283413333333337
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "coverage-1",
+    "scenario": "scale",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 4,
+        "cpu": {
+          "median": 0.054999999701976776,
+          "p95": 0.08500000089406967,
+          "mean": 0.05808333350966374
+        },
+        "gpu": {
+          "median": 0.21504,
+          "p95": 0.221184,
+          "mean": 0.21514240000000004
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "coverage-1",
+        "scenario": "scale",
+        "round": 4,
+        "cpu": {
+          "median": 1.4500000029802322,
+          "p95": 1.7699999958276749,
+          "mean": 1.5085000002135833
+        },
+        "gpu": {
+          "median": 0.27136,
+          "p95": 1.401856,
+          "mean": 0.41105066666666684
+        },
+        "outputBytesPerFrame": 179200,
+        "retainedWasmBytes": 262144,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  },
+  {
+    "candidate": "main-4",
+    "scenario": "scale",
+    "round": 4,
+    "results": [
+      {
+        "name": "main-8",
+        "scenario": "scale",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10500000417232513,
+          "mean": 0.07558333339790503
+        },
+        "gpu": {
+          "median": 0.21504,
+          "p95": 0.222208,
+          "mean": 0.2154410666666668
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      },
+      {
+        "name": "main-4",
+        "scenario": "scale",
+        "round": 4,
+        "cpu": {
+          "median": 0.07000000029802322,
+          "p95": 0.10500000417232513,
+          "mean": 0.07508333319177231
+        },
+        "gpu": {
+          "median": 0.208896,
+          "p95": 0.211968,
+          "mean": 0.20831573333333328
+        },
+        "outputBytesPerFrame": 0,
+        "retainedWasmBytes": 589824,
+        "error": 0,
+        "disjoint": false
+      }
+    ]
+  }
+]
