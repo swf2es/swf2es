@@ -298,7 +298,8 @@ export class DictionaryKeys {
     // Lowest first, so that the names added fill the earliest gaps.
     free.sort((a, b) => a - b);
     let next = 0;
-    if (d?.size) {
+    // Freed, `named` holds only names still there: as many as there are, and none is new.
+    if (d?.size && d.size !== (this.named?.size ?? 0)) {
       this.named ??= new Map();
       for (const name of d.keys()) {
         if (!this.named.has(name)) {
