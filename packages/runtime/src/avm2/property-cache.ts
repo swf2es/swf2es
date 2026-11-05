@@ -9,7 +9,8 @@
 // their prototypes' methods and hooks as a class or a script is set up;
 // each bumps the epoch, which empties every cache. A dynamic property's
 // entry still looks for the property on the object, which may have lost it,
-// and leaves anything else, as its prototypes, to the full lookup.
+// then on its prototypes, which may have gained or lost it, and leaves
+// what neither has to the full lookup.
 
 import type { Method, TypeRef } from "./descriptors.js";
 import type { Multiname } from "./names.js";
@@ -24,7 +25,7 @@ export const IC_GetSet = 5;
 export const IC_Method = 6;
 /** A method a property hook resolves the name of for get and set, as XML's: callproperty only. */
 export const IC_Call = 7;
-/** No binding: an own dynamic property, if the object has it. */
+/** No binding: a dynamic property, the object's own or else a prototype's, if either has it. */
 export const IC_Dynamic = 8;
 
 /** Entries a name keeps, for as many traits, before it replaces the oldest. */
