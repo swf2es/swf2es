@@ -148,8 +148,15 @@ export class Walk {
 export class DynamicProperties extends Map<string, Value> {
   /** The slots, from the first for-in over the object. */
   walk: Walk | null = null;
+  /**
+   * Whether every name was found hidden, as a prototype's methods are, so
+   * that a for-in passing through need not look at each again: until a
+   * name is set, or one shown (setPropertyIsEnumerable).
+   */
+  allHidden = false;
 
   override set(name: string, value: Value): this {
+    this.allHidden = false;
     // Undefined while the Map's constructor runs, before the field is set.
     const walk = this.walk;
     if (walk && !super.has(name)) {

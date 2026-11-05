@@ -44,6 +44,7 @@ import {
   ownNames,
   pairIndex,
   pairOf,
+  walkless,
 } from "./enumeration.js";
 import { AsError, describe, errorMessage, stackOf } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
@@ -828,6 +829,14 @@ export class Runtime {
               return v;
             }
           }
+
+          // Not its own: its prototypes', as a method on Array.prototype.
+          if (mn.key === undefined) {
+            const v = this.protoValue(o, e.key);
+            if (v !== NOT_FOUND) {
+              return v;
+            }
+          }
         }
       }
     }
@@ -1097,6 +1106,22 @@ export class Runtime {
    * A prototype's own dynamic property `name`, or NOT_FOUND: an element
    * too for one with elements, as Array.prototype, an Array, has them.
    */
+  /**
+   * Dynamic property `name` of a prototype of `o`, an object of dynamic
+   * traits with no binding of it, or NOT_FOUND: as the full lookup goes on
+   * from `o` to its prototypes.
+   */
+  private protoValue(o: AsObject, name: string): Value {
+    for (let p = typeof o === "object" ? o.$p : this.protoOf(o); p; p = p.$p) {
+      const v = this.protoOwn(p, name);
+      if (v !== NOT_FOUND) {
+        return v;
+      }
+    }
+
+    return NOT_FOUND;
+  }
+
   private protoOwn(p: AsObject, name: string): Value {
     const a: Value[] | undefined = p.$a;
     if (a !== undefined) {
@@ -1508,6 +1533,15 @@ export class Runtime {
           if (d) {
             const v = d.get(e.key);
             if (v !== undefined || d.has(e.key)) {
+              r = this.callValue(v, o, args, mn);
+              return r;
+            }
+          }
+
+          // Not its own: its prototypes', as a method on Array.prototype.
+          if (mn.key === undefined) {
+            const v = this.protoValue(o, e.key);
+            if (v !== NOT_FOUND) {
               r = this.callValue(v, o, args, mn);
               return r;
             }
@@ -2622,7 +2656,12 @@ export class Runtime {
         return true;
       }
 
+      // Then the prototypes, most of which have nothing to go through.
       obj = this.protoOf(obj);
+      while (obj !== null && obj !== undefined && walkless(obj)) {
+        obj = obj.$p;
+      }
+
       i = 0;
     }
 
