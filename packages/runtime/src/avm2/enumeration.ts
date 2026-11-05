@@ -96,25 +96,46 @@ function startEnumeration(
   o: AsObject,
   starting: boolean,
 ): (string | null)[] {
-  const names = dynamicNames(o);
   let e = enumerating.get(o);
   if (!e) {
+    const names = dynamicNames(o);
     e = { names, slot: new Map(names.map((name, i) => [name, i])) };
     enumerating.set(o, e);
     return names;
   }
 
+  const free: number[] = [];
+  if (starting && e.names.length >= 32) {
+    const names = dynamicNames(o);
+    refreshSlots(e, names, free);
+    takeSlots(e, names, free);
+    return e.names;
+  }
+
+  if (starting) {
+    freeSlots(e, o, free, true);
+    // Freed, the slots hold only names still there: as many as there are, and none is new.
+    if (e.slot.size === (o.$d?.size ?? 0)) {
+      return e.names;
+    }
+
+    takeSlots(e, dynamicNames(o), free);
+    return e.names;
+  }
+
+  // Past an Array's elements: most often one name or none, as at the walk before.
+  const names = dynamicNames(o);
   if (names.length <= 1 && names.length === e.names.length && names[0] === e.names[0]) {
     return e.names;
   }
 
-  const free: number[] = [];
-  if (starting && e.names.length >= 32) {
-    refreshSlots(e, names, free);
-  } else {
-    freeSlots(e, o, free, starting);
-  }
+  freeSlots(e, o, free, false);
+  takeSlots(e, names, free);
+  return e.names;
+}
 
+/** Slots for those of `names` without one: the free ones first, lowest first. */
+function takeSlots(e: Enumeration, names: string[], free: number[]): void {
   let next = 0;
   for (const name of names) {
     if (!e.slot.has(name)) {
@@ -123,8 +144,6 @@ function startEnumeration(
       e.slot.set(name, i);
     }
   }
-
-  return e.names;
 }
 
 /** List each free slot in `free`, `freeing` first those of the names `o` no longer has. */
