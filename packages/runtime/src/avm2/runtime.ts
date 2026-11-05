@@ -136,6 +136,17 @@ export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 const STRING_PRIMITIVE_ORDER = ["toString", "valueOf"] as const;
 const NUMBER_PRIMITIVE_ORDER = ["valueOf", "toString"] as const;
 
+/** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
+function dynamicValue(o: AsObject, name: string): Value {
+  const d: Map<string, Value> | null | undefined = o.$d;
+  if (!d) {
+    return NOT_FOUND;
+  }
+
+  const value = d.get(name);
+  return value !== undefined || d.has(name) ? value : NOT_FOUND;
+}
+
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
@@ -2663,7 +2674,9 @@ export class Runtime {
 
     const keys = dictionaryAt(o, index);
     const name =
-      keys !== null ? keys.nameAt(index - length) : enumerated(this.enumerating, o, index - length);
+      keys !== null
+        ? keys.nameAt(index - length)
+        : enumerated(this.enumerating, o, index - length, index);
     if (typeof name !== "string") {
       return name;
     }
@@ -2722,7 +2735,14 @@ export class Runtime {
         ? (keys.nameAt(index - length) as string)
         : index <= length
           ? String(index - 1)
-          : enumerated(this.enumerating, o, index - length);
+          : enumerated(this.enumerating, o, index - length, index);
+
+    // A dynamic property's value, as avmplus' nextValue reads its slot's:
+    // no binding has its name, which setting it would have gone to.
+    const dynamic = dynamicValue(o, name);
+    if (dynamic !== NOT_FOUND) {
+      return dynamic;
+    }
 
     // These builtins have no bindings over their enumerated own properties.
     // A missing value still needs the full lookup, including the prototype.

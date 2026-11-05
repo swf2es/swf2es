@@ -150,9 +150,15 @@ function freeSlots(e: Enumeration, o: AsObject, free: number[], freeing: boolean
 export function enumerated(
   enumerating: WeakMap<object, Enumeration>,
   o: AsObject,
+  at: number,
   index: number,
 ): string {
-  return enumerating.get(o)?.names[index - 1] ?? "";
+  // The names the step itself went through, without looking them up again.
+  const names =
+    o === lastStep.o && index === lastStep.index && lastStep.names !== null
+      ? lastStep.names
+      : enumerating.get(o)?.names;
+  return names?.[at - 1] ?? "";
 }
 
 /**
@@ -170,18 +176,22 @@ export function nextIndex(
   // An object without elements never gains them: past its first step, no need to look again.
   const known = o === lastStep.o && index === lastStep.index;
   const a: Value[] | FloatVector | undefined = known && lastStep.none ? undefined : o.$a;
-  if (a !== undefined && !known) {
-    // Not the keys of a Dictionary whose for-in was left off.
-    lastStep.keys = null;
+  if (!known) {
+    lastStep.names = null;
+    if (a !== undefined) {
+      // Not the keys of a Dictionary whose for-in was left off.
+      lastStep.keys = null;
+    }
   }
 
   const next =
     a === undefined
       ? nextOfNames(enumerating, o, index, known)
-      : nextOfElements(enumerating, o, a, index);
+      : nextOfElements(enumerating, o, a, index, known);
   if (next === 0) {
     lastStep.o = null;
     lastStep.keys = null;
+    lastStep.names = null;
   } else {
     lastStep.o = o;
     lastStep.index = next;
@@ -204,7 +214,9 @@ function nextOfNames(
   // One is a Dictionary or not for good: past its first step, no need to look again.
   const keys = known ? lastStep.keys : dictionaryKeys(o);
   lastStep.keys = keys;
-  return keys !== null ? keys.next(o, index) : nextNameIndex(enumerating, o, index, index === 0);
+  return keys !== null
+    ? keys.next(o, index)
+    : nextNameIndex(enumerating, o, index, index === 0, known);
 }
 
 function dictionaryKeys(o: AsObject): DictionaryKeys | null {
@@ -227,11 +239,19 @@ export function dictionaryAt(o: AsObject, index: number): DictionaryKeys | null 
  * them again, which misses, at a cost, on the many objects that have
  * neither, and never gain any. Let go when a for-in ends.
  */
-const lastStep: { o: AsObject; index: number; none: boolean; keys: DictionaryKeys | null } = {
+const lastStep: {
+  o: AsObject;
+  index: number;
+  none: boolean;
+  keys: DictionaryKeys | null;
+  /** The list of names it went through, past any elements: the object's, as it never changes. */
+  names: (string | null)[] | null;
+} = {
   o: null,
   index: 0,
   none: false,
   keys: null,
+  names: null,
 };
 
 /**
@@ -257,6 +277,7 @@ function nextOfElements(
   o: AsObject,
   a: Value[] | FloatVector,
   index: number,
+  known: boolean,
 ): number {
   if (index === 0) {
     const e = enumerating.get(o);
@@ -281,7 +302,7 @@ function nextOfElements(
     return 0;
   }
 
-  const next = nextNameIndex(enumerating, o, at, false);
+  const next = nextNameIndex(enumerating, o, at, false, known);
   if (next === 0) {
     // The for-in is over: its indices go with it.
     const e = enumerating.get(o);
@@ -444,6 +465,7 @@ function nextNameIndex(
   o: AsObject,
   index: number,
   starting: boolean,
+  known: boolean,
 ): number {
   // As the prototypes a for-in goes on to, whose methods are all hidden:
   // nothing to go through, and no list of names to keep for it.
@@ -452,7 +474,12 @@ function nextNameIndex(
   }
 
   const names =
-    index === 0 ? startEnumeration(enumerating, o, starting) : (enumerating.get(o)?.names ?? []);
+    index === 0
+      ? startEnumeration(enumerating, o, starting)
+      : known && lastStep.names !== null
+        ? lastStep.names
+        : (enumerating.get(o)?.names ?? []);
+  lastStep.names = names;
 
   // A name deleted since the for-in started is skipped.
   for (let i = index; i < names.length; i++) {
