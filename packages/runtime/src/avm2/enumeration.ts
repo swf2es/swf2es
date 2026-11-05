@@ -234,6 +234,14 @@ const lastStep: { o: AsObject; index: number; none: boolean; keys: DictionaryKey
   keys: null,
 };
 
+/**
+ * Whether a for-in's step over `o` at `index` goes on from the last one
+ * nextIndex gave, so that `o` is an ordinary object: no hook, no QName.
+ */
+export function continues(o: Value, index: number): boolean {
+  return o === lastStep.o && index === lastStep.index;
+}
+
 /** The length of the elements of `o` at a for-in's index: where those end and its other names start. */
 export function elementsAt(o: AsObject, index: number): number {
   if (o === lastStep.o && index === lastStep.index && lastStep.none) {

@@ -34,6 +34,7 @@ import {
 import { NAMED } from "./dictionary-keys.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import {
+  continues,
   dictionaryAt,
   type Enumeration,
   elementsAt,
@@ -204,6 +205,9 @@ export class Runtime {
   private booleanTraits: Traits | undefined = undefined;
   /** The names for-ins go through, per object (see Enumeration). */
   private readonly enumerating = new WeakMap<object, Enumeration>();
+  /** Where hasNextIn leaves the object and the index a for-in goes on from. */
+  enumObject: Value = null;
+  enumIndex = 0;
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
@@ -2589,29 +2593,37 @@ export class Runtime {
   // or not, so hiding one during a for-in (as _dontEnumPrototype does) does
   // not move the others.
 
-  hasNext2(o: Value, index: number): [boolean, Value, number] {
+  /**
+   * hasnext2: whether `o` or an object on its prototype chain has a name
+   * past `index`, the object and the index then in enumObject and
+   * enumIndex, which compiled code reads back rather than taking them apart
+   * from an array at every step.
+   */
+  hasNextIn(o: Value, index: number): boolean {
     let obj = o;
     let i = index;
     while (obj !== null && obj !== undefined) {
-      const properties: PropertyHook | null | undefined =
-        typeof obj === "object" ? obj.$traits?.properties : null;
-      const next =
-        typeof obj !== "object"
-          ? 0
-          : properties
-            ? properties.nextIndex(this, obj, i)
-            : pairOf(obj)
-              ? pairIndex(i)
-              : nextIndex(this.enumerating, obj, i);
+      // A step that goes on from the last is over an ordinary object: no hook, no QName.
+      const next = continues(obj, i) ? nextIndex(this.enumerating, obj, i) : this.hasNext(obj, i);
       if (next) {
-        return [true, obj, next];
+        this.enumObject = obj;
+        this.enumIndex = next;
+        return true;
       }
 
       obj = this.protoOf(obj);
       i = 0;
     }
 
-    return [false, null, 0];
+    this.enumObject = null;
+    this.enumIndex = 0;
+    return false;
+  }
+
+  /** hasNextIn's results as one array, as modules compiled before it take them. */
+  hasNext2(o: Value, index: number): [boolean, Value, number] {
+    const has = this.hasNextIn(o, index);
+    return [has, this.enumObject, this.enumIndex];
   }
 
   hasNext(o: Value, index: number): number {
@@ -2629,14 +2641,17 @@ export class Runtime {
 
   /** As avmplus gives a for-in's name: an index as a number while an int atom holds it, a Dictionary's object key as itself. */
   nextName(o: Value, index: number): Value {
-    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
-    if (properties) {
-      return properties.nextName(this, o, index);
-    }
+    // The step the last hasNextIn took is over an ordinary object: no hook, no QName.
+    if (!continues(o, index)) {
+      const properties: PropertyHook | null | undefined = o?.$traits?.properties;
+      if (properties) {
+        return properties.nextName(this, o, index);
+      }
 
-    const pair = pairOf(o);
-    if (pair) {
-      return index === 1 ? "uri" : index === 2 ? pair : null;
+      const pair = pairOf(o);
+      if (pair) {
+        return index === 1 ? "uri" : index === 2 ? pair : null;
+      }
     }
 
     // As avmplus' ArrayObject and TypedVectorObject: the elements, then the other names.
@@ -2659,21 +2674,23 @@ export class Runtime {
 
   nextValue(o: Value, index: number): Value {
     const traits: Traits | undefined = o?.$traits;
-    const properties = traits?.properties;
-    if (properties) {
-      return properties.nextValue(this, o, index);
-    }
+    if (!continues(o, index)) {
+      const properties = traits?.properties;
+      if (properties) {
+        return properties.nextValue(this, o, index);
+      }
 
-    // As avmplus: a QName's values come localName first, though its names come uri first.
-    const pair = pairOf(o);
-    if (pair === "prefix") {
-      return index === 1 ? o.uri : index === 2 ? prefixOf(o) : undefined;
-    }
+      // As avmplus: a QName's values come localName first, though its names come uri first.
+      const pair = pairOf(o);
+      if (pair === "prefix") {
+        return index === 1 ? o.uri : index === 2 ? prefixOf(o) : undefined;
+      }
 
-    if (pair === "localName") {
-      const uri = o.$ns ? o.$ns.uri : null;
-      const local = o.$local ?? "*";
-      return index === 1 ? local : index === 2 ? uri : null;
+      if (pair === "localName") {
+        const uri = o.$ns ? o.$ns.uri : null;
+        const local = o.$local ?? "*";
+        return index === 1 ? local : index === 2 ? uri : null;
+      }
     }
 
     const length = elementsAt(o, index);
@@ -2683,8 +2700,12 @@ export class Runtime {
         return traits.getIndex(o, element, this);
       }
 
-      if (traits === this.arrayTraits && element in o.$a) {
-        return o.$a[element];
+      if (traits === this.arrayTraits) {
+        // A hole reads undefined too: only then is `in` asked.
+        const value = o.$a[element];
+        if (value !== undefined || element in o.$a) {
+          return value;
+        }
       }
     }
 
