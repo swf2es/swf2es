@@ -5,27 +5,28 @@
 // moving the others.
 
 import type { AsObject, Value } from "./descriptors.js";
+import { DictionaryKeys } from "./dictionary-keys.js";
 import { Namespace } from "./names.js";
 import { FloatVector } from "./natives/float-vector.js";
-import { WeakKeys, WeakName } from "./weak-keys.js";
 
 /**
  * What for-ins over one object keep. Elements are walked by index and get
- * no slots: `names` and `slot` hold only the other names, dynamic
- * properties and a Dictionary's keys, each in a slot, as in avmplus'
- * hashtable. A name keeps its slot while it is there, so a for-in started
- * inside another never moves the outer one's names. One deleted stays in
- * its slot, which the outer one skips, until a for-in next starts: then its
- * slot is free, and it takes one again only if it is back, as a new name,
- * which takes a free slot; only with none free does the list grow. So it is
- * at most as long as the most names the object had at once, as avmplus'
- * table, and nothing a for-in goes through is ever moved or dropped.
+ * no slots: `names` and `slot` hold only its dynamic properties' names,
+ * each in a slot, as in avmplus' hashtable; a Dictionary keeps its own
+ * slots, in its keys' store (dictionary-keys.ts), by the same rules. A name
+ * keeps its slot while it is there, so a for-in started inside another
+ * never moves the outer one's names. One deleted stays in its slot, which
+ * the outer one skips, until a for-in next starts: then its slot is free,
+ * and it takes one again only if it is back, as a new name, which takes a
+ * free slot; only with none free does the list grow. So it is at most as
+ * long as the most names the object had at once, as avmplus' table, and
+ * nothing a for-in goes through is ever moved or dropped.
  */
 export interface Enumeration {
-  /** The name in each slot, null in one free: a string, or a Dictionary's object key. */
-  names: (EnumeratedName | null)[];
+  /** The name in each slot, null in one free. */
+  names: (string | null)[];
   /** Each name's slot. */
-  slot: Map<EnumeratedName, number>;
+  slot: Map<string, number>;
   /** A sparse Array's indices, while a for-in walks it. */
   sparse?: SparseIndices;
 }
@@ -47,11 +48,7 @@ interface SparseIndices {
   retaken: boolean;
 }
 
-/**
- * A name a for-in goes through: a string, or an object a Dictionary is
- * keyed by, held weakly (a WeakName) where the Dictionary's keys are weak,
- * so that a for-in left off keeps no key alive.
- */
+/** A name a for-in goes through: a string, or an object a Dictionary is keyed by. */
 export type EnumeratedName = string | object;
 
 /** The names below this come back from a for-in as numbers: avmplus' int atoms, of 29 bits. */
@@ -70,24 +67,8 @@ export function ownNames(o: AsObject): EnumeratedName[] {
     }
   }
 
-  names.push(...otherNames(o));
-  return names;
-}
-
-/** An object's own names but its elements: its dynamic properties' and a Dictionary's keys. */
-function otherNames(o: AsObject): EnumeratedName[] {
-  const names: EnumeratedName[] = [];
-  if (o.$d) {
-    for (const k of o.$d.keys()) {
-      names.push(k);
-    }
-  }
-
-  if (o.$keys instanceof WeakKeys) {
-    for (const k of o.$keys.keys()) {
-      names.push(o.$keys.nameOf(k) as WeakName);
-    }
-  } else if (o.$keys !== undefined) {
+  names.push(...dynamicNames(o));
+  if (o.$keys !== undefined) {
     for (const k of o.$keys.keys()) {
       names.push(k);
     }
@@ -95,6 +76,13 @@ function otherNames(o: AsObject): EnumeratedName[] {
 
   return names;
 }
+
+function dynamicNames(o: AsObject): string[] {
+  return o.$d ? [...o.$d.keys()] : [];
+}
+
+// Keep scratch separate so the per-step name lookups see the same record shapes.
+const slotMarks = new WeakMap<Enumeration, Uint8Array>();
 
 /**
  * The names of `o` past its elements, for a for-in starting over it: those
@@ -107,8 +95,8 @@ function startEnumeration(
   enumerating: WeakMap<object, Enumeration>,
   o: AsObject,
   starting: boolean,
-): (EnumeratedName | null)[] {
-  const names = otherNames(o);
+): (string | null)[] {
+  const names = dynamicNames(o);
   let e = enumerating.get(o);
   if (!e) {
     e = { names, slot: new Map(names.map((name, i) => [name, i])) };
@@ -116,8 +104,16 @@ function startEnumeration(
     return names;
   }
 
+  if (names.length <= 1 && names.length === e.names.length && names[0] === e.names[0]) {
+    return e.names;
+  }
+
   const free: number[] = [];
-  freeSlots(e, o, free, starting);
+  if (starting && e.names.length >= 32) {
+    refreshSlots(e, names, free);
+  } else {
+    freeSlots(e, o, free, starting);
+  }
 
   let next = 0;
   for (const name of names) {
@@ -148,16 +144,15 @@ function freeSlots(e: Enumeration, o: AsObject, free: number[], freeing: boolean
 }
 
 /**
- * The name of `o` at a for-in's index among the names past its elements,
- * the index less their length: a weak key itself, "" once it is gone.
+ * The name of `o`, not a Dictionary, at a for-in's index among the names
+ * past its elements, the index less their length.
  */
 export function enumerated(
   enumerating: WeakMap<object, Enumeration>,
   o: AsObject,
   index: number,
-): EnumeratedName {
-  const name = enumerating.get(o)?.names[index - 1] ?? "";
-  return name instanceof WeakName ? (name.ref.deref() ?? "") : name;
+): string {
+  return enumerating.get(o)?.names[index - 1] ?? "";
 }
 
 /**
@@ -173,14 +168,20 @@ export function nextIndex(
   index: number,
 ): number {
   // An object without elements never gains them: past its first step, no need to look again.
-  const none = o === lastStep.o && index === lastStep.index && lastStep.none;
-  const a: Value[] | FloatVector | undefined = none ? undefined : o.$a;
+  const known = o === lastStep.o && index === lastStep.index;
+  const a: Value[] | FloatVector | undefined = known && lastStep.none ? undefined : o.$a;
+  if (a !== undefined && !known) {
+    // Not the keys of a Dictionary whose for-in was left off.
+    lastStep.keys = null;
+  }
+
   const next =
     a === undefined
-      ? nextNameIndex(enumerating, o, index, index === 0)
+      ? nextOfNames(enumerating, o, index, known)
       : nextOfElements(enumerating, o, a, index);
   if (next === 0) {
     lastStep.o = null;
+    lastStep.keys = null;
   } else {
     lastStep.o = o;
     lastStep.index = next;
@@ -191,13 +192,47 @@ export function nextIndex(
 }
 
 /**
- * The step a for-in last took: the object, the index it gave and whether
- * the object has no elements, so that the next step and the nextName and
- * nextValue right after it need not look for them again, which misses, at
- * a cost, on the many objects that have none, and never gain any. Let go
- * when a for-in ends.
+ * As nextIndex, over an object without elements: a Dictionary by its keys,
+ * any other by the names of its dynamic properties.
  */
-const lastStep: { o: AsObject; index: number; none: boolean } = { o: null, index: 0, none: false };
+function nextOfNames(
+  enumerating: WeakMap<object, Enumeration>,
+  o: AsObject,
+  index: number,
+  known: boolean,
+): number {
+  // One is a Dictionary or not for good: past its first step, no need to look again.
+  const keys = known ? lastStep.keys : dictionaryKeys(o);
+  lastStep.keys = keys;
+  return keys !== null ? keys.next(o, index) : nextNameIndex(enumerating, o, index, index === 0);
+}
+
+function dictionaryKeys(o: AsObject): DictionaryKeys | null {
+  const keys = o?.$keys;
+  return keys instanceof DictionaryKeys ? keys : null;
+}
+
+/**
+ * The keys of Dictionary `o` at a for-in's index, which hold its names and
+ * values there; null for any other object.
+ */
+export function dictionaryAt(o: AsObject, index: number): DictionaryKeys | null {
+  return o === lastStep.o && index === lastStep.index ? lastStep.keys : dictionaryKeys(o);
+}
+
+/**
+ * The step a for-in last took: the object, the index it gave, whether the
+ * object has no elements and its keys if a Dictionary, so that the next
+ * step and the nextName and nextValue right after it need not look for
+ * them again, which misses, at a cost, on the many objects that have
+ * neither, and never gain any. Let go when a for-in ends.
+ */
+const lastStep: { o: AsObject; index: number; none: boolean; keys: DictionaryKeys | null } = {
+  o: null,
+  index: 0,
+  none: false,
+  keys: null,
+};
 
 /** The length of the elements of `o` at a for-in's index: where those end and its other names start. */
 export function elementsAt(o: AsObject, index: number): number {
@@ -408,11 +443,7 @@ function nextNameIndex(
   // A name deleted since the for-in started is skipped.
   for (let i = index; i < names.length; i++) {
     const name = names[i];
-    if (
-      name !== null &&
-      !(typeof name === "string" && o.$dontEnum?.has(name)) &&
-      stillThere(o, name)
-    ) {
+    if (name !== null && !o.$dontEnum?.has(name) && stillThere(o, name)) {
       return i + 1;
     }
   }
@@ -420,16 +451,7 @@ function nextNameIndex(
   return 0;
 }
 
-function stillThere(o: AsObject, name: EnumeratedName): boolean {
-  if (name instanceof WeakName) {
-    const key = name.ref.deref();
-    return key !== undefined && (o.$keys?.has(key) ?? false);
-  }
-
-  if (typeof name !== "string") {
-    return o.$keys?.has(name) ?? false;
-  }
-
+function stillThere(o: AsObject, name: string): boolean {
   return o.$d?.has(name) ?? false;
 }
 
@@ -446,3 +468,38 @@ export function pairOf(o: Value): string | null {
 }
 
 export const pairIndex = (index: number) => (index < 2 ? index + 1 : 0);
+
+// A mark per slot avoids a second map lookup for each existing name.
+function refreshSlots(e: Enumeration, names: string[], free: number[]): void {
+  let present = slotMarks.get(e);
+  if (present === undefined || present.length < e.names.length) {
+    present = new Uint8Array(e.names.length);
+    slotMarks.set(e, present);
+  }
+
+  present.fill(0);
+  let added = 0;
+
+  for (let n = 0; n < names.length; n++) {
+    const name = names[n];
+    const slot = e.slot.get(name);
+    if (slot === undefined) {
+      names[added++] = name;
+    } else {
+      present[slot] = 1;
+    }
+  }
+
+  names.length = added;
+
+  for (let i = 0; i < e.names.length; i++) {
+    const name = e.names[i];
+    if (name === null) {
+      free.push(i);
+    } else if (present[i] === 0) {
+      e.slot.delete(name);
+      e.names[i] = null;
+      free.push(i);
+    }
+  }
+}
