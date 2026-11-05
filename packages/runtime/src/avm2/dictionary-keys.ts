@@ -52,16 +52,18 @@ export class DictionaryKeys {
   /**
    * Each key's entry. One deleted before it had a slot stays, GONE, so that
    * the key set again takes it back: deleting and setting a key over and
-   * over between for-ins makes nothing.
+   * over between for-ins makes nothing. A strong key deleted so stays alive
+   * until a for-in starts or `added` is settled, which keeps that bounded by
+   * twice the keys there, and 64.
    */
   private readonly map: Map<object, Entry> | WeakMap<object, Entry>;
   /** Each slot: a key's entry, a dynamic property's name, or null where free. */
   private readonly slots: (Held | string | null)[] = [];
   /** The entries added since a for-in last started, which take slots when one next does. */
   private added: Held[] = [];
-  /** The count of those at which the ones deleted or collected are dropped, so that none pile up. */
+  /** The count of those at which the ones deleted or collected are dropped, so none pile up. */
   private addedLimit = 64;
-  /** The entries deleted since a for-in last started that have slots, to free when one next does. */
+  /** The entries with slots deleted since a for-in last started, freed when one next does. */
   private readonly deleted: Entry[] = [];
   /** The slots of keys collected that a for-in has come across since one last started. */
   private readonly collected: number[] = [];
@@ -180,7 +182,7 @@ export class DictionaryKeys {
     return 0;
   }
 
-  /** The name at a for-in's index: a key itself, a dynamic property's name, or "" once a key is gone. */
+  /** The name at a for-in's index: a key, a dynamic property's name, or "" once a key is gone. */
   nameAt(index: number): object | string {
     const held = this.slots[index - 1];
     if (held === null || held === undefined) {

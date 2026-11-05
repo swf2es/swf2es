@@ -13,13 +13,14 @@ import { FloatVector } from "./natives/float-vector.js";
  * What for-ins over one object keep. Elements are walked by index and get
  * no slots: `names` and `slot` hold only its dynamic properties' names,
  * each in a slot, as in avmplus' hashtable; a Dictionary keeps its own
- * slots, in its keys' store (dictionary-keys.ts), by the same rules. A name keeps its slot while it is there, so a for-in started
- * inside another never moves the outer one's names. One deleted stays in
- * its slot, which the outer one skips, until a for-in next starts: then its
- * slot is free, and it takes one again only if it is back, as a new name,
- * which takes a free slot; only with none free does the list grow. So it is
- * at most as long as the most names the object had at once, as avmplus'
- * table, and nothing a for-in goes through is ever moved or dropped.
+ * slots, in its keys' store (dictionary-keys.ts), by the same rules. A name
+ * keeps its slot while it is there, so a for-in started inside another
+ * never moves the outer one's names. One deleted stays in its slot, which
+ * the outer one skips, until a for-in next starts: then its slot is free,
+ * and it takes one again only if it is back, as a new name, which takes a
+ * free slot; only with none free does the list grow. So it is at most as
+ * long as the most names the object had at once, as avmplus' table, and
+ * nothing a for-in goes through is ever moved or dropped.
  */
 export interface Enumeration {
   /** The name in each slot, null in one free. */
@@ -190,7 +191,10 @@ export function nextIndex(
   return next;
 }
 
-/** As nextIndex, over an object without elements: a Dictionary by its keys, or by the names of its dynamic properties. */
+/**
+ * As nextIndex, over an object without elements: a Dictionary by its keys,
+ * any other by the names of its dynamic properties.
+ */
 function nextOfNames(
   enumerating: WeakMap<object, Enumeration>,
   o: AsObject,
@@ -208,7 +212,10 @@ function dictionaryKeys(o: AsObject): DictionaryKeys | null {
   return keys instanceof DictionaryKeys ? keys : null;
 }
 
-/** The keys of Dictionary `o` at a for-in's index, which hold its names and values there; null for any other object. */
+/**
+ * The keys of Dictionary `o` at a for-in's index, which hold its names and
+ * values there; null for any other object.
+ */
 export function dictionaryAt(o: AsObject, index: number): DictionaryKeys | null {
   return o === lastStep.o && index === lastStep.index ? lastStep.keys : dictionaryKeys(o);
 }
