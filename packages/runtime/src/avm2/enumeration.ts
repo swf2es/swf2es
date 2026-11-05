@@ -445,6 +445,12 @@ function nextNameIndex(
   index: number,
   starting: boolean,
 ): number {
+  // As the prototypes a for-in goes on to, whose methods are all hidden:
+  // nothing to go through, and no list of names to keep for it.
+  if (index === 0 && !anyEnumerable(o)) {
+    return 0;
+  }
+
   const names =
     index === 0 ? startEnumeration(enumerating, o, starting) : (enumerating.get(o)?.names ?? []);
 
@@ -457,6 +463,28 @@ function nextNameIndex(
   }
 
   return 0;
+}
+
+/** Whether any dynamic property of `o` is not hidden. */
+function anyEnumerable(o: AsObject): boolean {
+  const d: Map<string, unknown> | undefined = o.$d;
+  if (!d?.size) {
+    return false;
+  }
+
+  // Fewer hidden than there are names leaves one shown, whatever else is hidden.
+  const hidden: Set<string> | undefined = o.$dontEnum;
+  if (hidden === undefined || hidden.size < d.size) {
+    return true;
+  }
+
+  for (const name of d.keys()) {
+    if (!hidden.has(name)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function stillThere(o: AsObject, name: string): boolean {
