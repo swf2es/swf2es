@@ -13,6 +13,7 @@ import type {
   Value,
 } from "./descriptors.js";
 import type { Domain } from "./domain.js";
+import { DynamicProperties } from "./dynamic-properties.js";
 import type { ClassHook, IndexHook, PropertyHook } from "./hooks.js";
 import type { Multiname, Namespace } from "./names.js";
 import { invalidate } from "./property-cache.js";
@@ -293,7 +294,7 @@ export class Traits {
   /** A new object with these traits, its slots at their initial values. */
   instance(): AsObject {
     const o = this.create ? this.create(this) : Object.create(this.proto);
-    o.$d = this.dynamic ? new Map() : null;
+    o.$d = this.dynamic ? new DynamicProperties() : null;
     if (!this.allDefaults) {
       this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
       this.filler = this.fillOf();

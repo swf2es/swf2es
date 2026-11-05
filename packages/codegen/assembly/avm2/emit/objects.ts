@@ -528,19 +528,20 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       call2(em, "rt.hasNext(", i);
       return true;
     case ops.OP_hasnext2: {
-      // hasnext2 updates its two locals: the object and the index.
+      // hasnext2 updates its two locals: the object and the index, which
+      // the runtime leaves in two fields; taking them apart from an array
+      // would cost more than the step.
       const b = ir.b[i];
-      out.text("[");
       em.regName(ir.dst[i]);
-      out.text(", ");
-      em.regName(<i32>a);
-      out.text(", ");
-      em.regName(<i32>b);
-      out.text("] = rt.hasNext2(");
+      out.text(" = rt.hasNextIn(");
       em.reg(<i32>a);
       out.text(", ");
       em.reg(<i32>b);
-      out.text(")");
+      out.text("), ");
+      em.regName(<i32>a);
+      out.text(" = rt.enumObject, ");
+      em.regName(<i32>b);
+      out.text(" = rt.enumIndex");
       return true;
     }
     case ops.OP_nextname:

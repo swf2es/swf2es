@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { avm2 } from "@swf2es/runtime";
+import { DynamicProperties } from "../../../packages/runtime/dist/avm2/dynamic-properties.js";
 import { Traits } from "../../../packages/runtime/dist/avm2/traits.js";
 
 test("int() and uint() coerce like AS3", () => {
@@ -99,7 +100,7 @@ test("domain memory with none set is 1024 bytes of scratch memory, as avmplus' D
 
 test("for-ins over an object whose names come and go keep a slot for each at once", () => {
   const rt = avm2.createRuntime();
-  const o = { $d: new Map<string, unknown>() };
+  const o = { $d: new DynamicProperties() };
   const names = () => {
     const seen: string[] = [];
     for (let i = rt.hasNext(o, 0); i; i = rt.hasNext(o, i)) {
@@ -116,15 +117,14 @@ test("for-ins over an object whose names come and go keep a slot for each at onc
   }
 
   // Each new name took the slot of the one before it.
-  const e = (rt as unknown as { enumerating: WeakMap<object, { names: string[] }> }).enumerating;
-  assert.equal(e.get(o)?.names.length, 1);
+  assert.equal(o.$d.walk?.slots.length, 1);
 });
 
 test("a for-in goes on through its own names however many for-ins inside it come and go", () => {
   // [10, 20, 30]: at 0, delete it, then 150 times add a name, go through
   // them all and delete it again; the outer for-in still finds 1 and 2.
   const rt = avm2.createRuntime();
-  const o = { $a: [10, 20, 30], $d: new Map<string, unknown>() };
+  const o = { $a: [10, 20, 30], $d: new DynamicProperties() };
   const seen: string[] = [];
   for (let i = rt.hasNext(o, 0); i; i = rt.hasNext(o, i)) {
     const name = String(rt.nextName(o, i));
