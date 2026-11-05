@@ -413,8 +413,8 @@ function nextNameIndex(o: AsObject, index: number, starting: boolean, known: boo
 
 /** Whether any dynamic property of `o` is not hidden. */
 function anyEnumerable(o: AsObject): boolean {
-  const d: Map<string, unknown> | undefined = o.$d;
-  if (!d?.size) {
+  const d: DynamicProperties | null | undefined = o.$d;
+  if (!d?.size || d.allHidden) {
     return false;
   }
 
@@ -430,6 +430,7 @@ function anyEnumerable(o: AsObject): boolean {
     }
   }
 
+  d.allHidden = true;
   return false;
 }
 
