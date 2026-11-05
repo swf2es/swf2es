@@ -38,6 +38,27 @@ interface SparseIndices {
   retaken: boolean;
 }
 
+/**
+ * How many Arrays keep sparse indices, across runtimes, so that a for-in
+ * over a dense one, as nearly all are, never looks for them. One collected
+ * while it keeps them, its for-in left off, is never taken off: then they
+ * are looked for, as before.
+ */
+let sparseKept = 0;
+
+/** Drop the sparse indices `o` keeps, if any: its for-in is over, or another starts. */
+function dropSparse(enumerating: WeakMap<object, Enumeration>, o: AsObject): void {
+  if (sparseKept === 0) {
+    return;
+  }
+
+  const e = enumerating.get(o);
+  if (e?.sparse !== undefined) {
+    e.sparse = undefined;
+    sparseKept--;
+  }
+}
+
 /** A name a for-in goes through: a string, or an object a Dictionary is keyed by. */
 export type EnumeratedName = string | object;
 
@@ -200,11 +221,7 @@ function nextOfElements(
   known: boolean,
 ): number {
   if (index === 0) {
-    const e = enumerating.get(o);
-    if (e !== undefined) {
-      e.sparse = undefined;
-    }
-
+    dropSparse(enumerating, o);
     walkOf(o)?.freeDeleted();
   }
 
@@ -219,18 +236,10 @@ function nextOfElements(
   const at = Math.max(index - length, 0);
 
   // An Array that has never had other names needs no list of them.
-  if (at === 0 && !o.$d?.size && !enumerating.has(o)) {
-    return 0;
-  }
-
-  const next = nextNameIndex(o, at, false, known);
+  const next = at === 0 && !o.$d?.size ? 0 : nextNameIndex(o, at, false, known);
   if (next === 0) {
     // The for-in is over: its indices go with it.
-    const e = enumerating.get(o);
-    if (e !== undefined) {
-      e.sparse = undefined;
-    }
-
+    dropSparse(enumerating, o);
     return 0;
   }
 
@@ -256,7 +265,7 @@ function nextElement(
     return from;
   }
 
-  const e = enumerating.get(o);
+  const e = sparseKept !== 0 ? enumerating.get(o) : undefined;
   if (e?.sparse !== undefined) {
     return nextSparse(o, a, e.sparse, from);
   }
@@ -273,8 +282,9 @@ function nextElement(
     return -1;
   }
 
-  const keeper: Enumeration = e ?? {};
+  const keeper: Enumeration = e ?? enumerating.get(o) ?? {};
   enumerating.set(o, keeper);
+  sparseKept++;
   keeper.sparse = {
     indices: indicesOf(a, 0),
     length,
@@ -411,10 +421,32 @@ function nextNameIndex(o: AsObject, index: number, starting: boolean, known: boo
   return 0;
 }
 
+/**
+ * Whether prototype `p` has nothing a for-in goes through, as most have:
+ * no names but hidden methods, no elements, keys or hook. Then a for-in
+ * passes over it with nothing to set up, as one starting over it does
+ * nothing, but for an Array's, whose start frees its deleted names'
+ * slots: one that has kept slots is left to that.
+ */
+export function walkless(p: AsObject): boolean {
+  const d: DynamicProperties | null | undefined = p.$d;
+  if (d === null || d === undefined || (d.size !== 0 && !d.allHidden)) {
+    return false;
+  }
+
+  const a: Value[] | FloatVector | undefined = p.$a;
+  return (
+    (a === undefined || (a.length === 0 && d.walk === null)) &&
+    p.$keys === undefined &&
+    p.$local === undefined &&
+    !p.$traits?.properties
+  );
+}
+
 /** Whether any dynamic property of `o` is not hidden. */
 function anyEnumerable(o: AsObject): boolean {
-  const d: Map<string, unknown> | undefined = o.$d;
-  if (!d?.size) {
+  const d: DynamicProperties | null | undefined = o.$d;
+  if (!d?.size || d.allHidden) {
     return false;
   }
 
@@ -430,6 +462,7 @@ function anyEnumerable(o: AsObject): boolean {
     }
   }
 
+  d.allHidden = true;
   return false;
 }
 

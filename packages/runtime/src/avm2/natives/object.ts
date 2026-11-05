@@ -46,6 +46,10 @@ export const objectNatives: Natives = {
     const name = rt.toString(v);
     if (enumerable) {
       o.$dontEnum?.delete(name);
+      if (o.$d) {
+        // A name shown: the for-ins that found them all hidden look again.
+        o.$d.allHidden = false;
+      }
     } else {
       o.$dontEnum ??= new Set();
       o.$dontEnum.add(name);

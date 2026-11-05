@@ -44,6 +44,7 @@ import {
   ownNames,
   pairIndex,
   pairOf,
+  walkless,
 } from "./enumeration.js";
 import { AsError, describe, errorMessage, stackOf } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
@@ -2622,7 +2623,12 @@ export class Runtime {
         return true;
       }
 
+      // Then the prototypes, most of which have nothing to go through.
       obj = this.protoOf(obj);
+      while (obj !== null && obj !== undefined && walkless(obj)) {
+        obj = obj.$p;
+      }
+
       i = 0;
     }
 
