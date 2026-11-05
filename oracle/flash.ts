@@ -145,7 +145,7 @@ function encodeJob(id: number, job: FlashJob): Buffer {
 }
 
 /** Run the jobs in one adl, until one is `timeout` ms without word from the harness. */
-async function runAdl(jobs: FlashJob[], timeout: number): Promise<FlashResult[]> {
+async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promise<FlashResult[]> {
   const results: FlashResult[] = jobs.map(() => ({
     output: [],
     errors: [],
@@ -163,7 +163,10 @@ async function runAdl(jobs: FlashJob[], timeout: number): Promise<FlashResult[]>
   let adl: ChildProcess | null = null;
   try {
     // Relative paths from oracle/out/flash: adl under Wine does not take absolute ones.
-    adl = spawn(tool("adl"), [`${id}.xml`, ".", "--", String(port)], {
+    // The debugger's bookkeeping slows the JIT's code (object creation
+    // about 1.7 times): a timing runs without it, its traces as before.
+    const flags = timed ? ["-nodebug"] : [];
+    adl = spawn(tool("adl"), [...flags, `${id}.xml`, ".", "--", String(port)], {
       cwd: out,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -336,12 +339,18 @@ function writeCache(key: string, result: FlashResult): void {
  * Run each job in Flash, from the cache where it ran before. Uncached jobs
  * run in one adl; those after a job whose content leaked, running on after
  * it was unloaded, run again in another, clean of it. A job that sends nothing for `timeout` ms beyond its
- * frames' time comes back incomplete, and is not cached.
+ * frames' time comes back incomplete, and is not cached. A `timed` run, whose
+ * SWFs time themselves, runs without the debugger and neither reads nor
+ * writes the cache.
  */
-export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<FlashResult[]> {
+export async function runFlash(
+  jobs: FlashJob[],
+  timeout = 20_000,
+  { timed = false } = {},
+): Promise<FlashResult[]> {
   const keys = jobs.map(jobKey);
   // SWF2ES_FLASH_FRESH=1 runs every job again, as when checking the harness.
-  const fresh = process.env.SWF2ES_FLASH_FRESH === "1";
+  const fresh = timed || process.env.SWF2ES_FLASH_FRESH === "1";
   const results: (FlashResult | null)[] = keys.map((key) => (fresh ? null : readCache(key)));
   let todo = jobs.flatMap((job, i) => (results[i] ? [] : [{ job, i, tries: 0 }]));
   // A SWF that hangs or crashes Flash ends the run, and those after it run
@@ -357,6 +366,7 @@ export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<Flas
     const ran = await runAdl(
       batch.map((t) => t.job),
       timeout + longest,
+      timed,
     );
     let failed = ran.findIndex((r) => r.incomplete);
     if (failed < 0) {
@@ -370,7 +380,9 @@ export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<Flas
       for (let k = 0; k <= leaked; k++) {
         const { i } = batch[k];
         results[i] = ran[k];
-        writeCache(keys[i], ran[k]);
+        if (!timed) {
+          writeCache(keys[i], ran[k]);
+        }
       }
 
       todo = [...batch.slice(leaked + 1), ...later];
@@ -380,7 +392,9 @@ export async function runFlash(jobs: FlashJob[], timeout = 20_000): Promise<Flas
     for (let k = 0; k < Math.min(failed, batch.length); k++) {
       const { i } = batch[k];
       results[i] = ran[k];
-      writeCache(keys[i], ran[k]);
+      if (!timed) {
+        writeCache(keys[i], ran[k]);
+      }
     }
 
     const rest = batch.slice(failed + 1);

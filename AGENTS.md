@@ -145,6 +145,9 @@ node tests/bench/bitmap-draws.ts <checkout A> <checkout B> [cases] [seed] [--big
                               # BitmapData draws and copies in two built checkouts, every pixel compared
 node tests/bench/enumeration/run.ts [<dir A> <dir B>] [runs]   # for-in and for each over Arrays,
                               # Vectors, Objects and Dictionaries, as the two above
+node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash] [bench...]
+                              # the enumeration and dictionary benchmarks as SWFs, timed in swf2es
+                              # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
