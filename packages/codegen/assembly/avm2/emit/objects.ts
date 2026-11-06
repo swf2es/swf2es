@@ -967,7 +967,14 @@ function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32, ctrait
     args(em, src + 1, argc);
   }
 
-  out.text("), $o) : rt.construct($c");
+  // A slot still empty is a null constructor: avmplus' JIT, which binds a
+  // known constructor that takes the count, checks it first (1009); its
+  // interpreter, which runs static initializers, constructs late (1007).
+  out.text(
+    !em.staticInit && knownConstructor(em, ctraits, argc) >= 0
+      ? "), $o) : rt.construct($c ?? nn($c)"
+      : "), $o) : rt.construct($c",
+  );
   args(em, src + 1, argc);
   out.text(")");
 }
@@ -985,24 +992,35 @@ function superEntry(em: MethodEmitter, base: i32): string {
 }
 
 /**
- * The instance initializer, domain-wide, of the class whose class traits
- * are `ctraits`, where `new` of it with `argc` arguments can call its
- * entry for bound calls with them coerced: one the verifier resolved
- * (see OP_constructprop), that takes the count, as avmplus' JIT binds
- * it, and that has the entry (hasBoundEntry); else -1.
+ * The instance initializer of the class whose class traits are
+ * `ctraits`, where `new` of it with `argc` arguments can call its entry
+ * for bound calls with them coerced: one avmplus' JIT binds
+ * (knownConstructor) that has the entry (hasBoundEntry, which takes no
+ * rest, so no more arguments than its parameters); else -1.
  */
 function boundConstructor(em: MethodEmitter, ctraits: i32, argc: u32): i32 {
+  const init = knownConstructor(em, ctraits, argc);
+  return init >= 0 && hasBoundEntry(em, <u32>init) ? init : -1;
+}
+
+/**
+ * The instance initializer, domain-wide, of the class whose class traits
+ * are `ctraits`, where avmplus' JIT binds `new` of it with `argc`
+ * arguments: one the verifier resolved (see OP_constructprop) that takes
+ * the count; else -1.
+ */
+function knownConstructor(em: MethodEmitter, ctraits: i32, argc: u32): i32 {
   const domain = em.domain;
   const traits = domain.traits;
   const itraits = domain.instanceTraitsOf(ctraits);
   const init = itraits >= 0 ? traits.init[itraits] : -1;
-  if (init < 0 || !traits.signed[init] || !hasBoundEntry(em, <u32>init)) {
+  if (init < 0 || !traits.signed[init]) {
     return -1;
   }
 
-  // An entry for bound calls takes no rest, so no more than its parameters.
   const count = traits.paramCount[init];
-  return argc >= count - traits.optionalCount[init] && argc <= count ? init : -1;
+  const required = count - traits.optionalCount[init];
+  return argc >= required && (argc <= count || domain.allowsExtraArgs(<u32>init)) ? init : -1;
 }
 
 /**

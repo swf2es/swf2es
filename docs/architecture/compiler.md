@@ -314,7 +314,10 @@ which `newclass` builds from the module's layout:
   not uninstantiable, which the runtime marks `$new` on the class): its
   traits' `instance()`, then its `$init` called with the arguments as
   they are (`$binit` with them coerced, see above), so each site's
-  constructor can be inlined. Anything else goes to `rt.construct`.
+  constructor can be inlined. Anything else goes to `rt.construct`; a
+  slot still empty, where avmplus' JIT binds the constructor (it takes
+  the count, outside static initializers, which avmplus interprets), is
+  null checked first, TypeError 1009 as avmshell's, not 1007.
   `super()` calls the base's `$init` (or `$binit`) directly.
 - **Dynamic properties** of dynamic classes live in their own map, apart
   from slots and methods.
