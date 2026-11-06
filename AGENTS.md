@@ -148,6 +148,8 @@ node tests/bench/enumeration/run.ts [<dir A> <dir B>] [runs]   # for-in and for 
 node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash] [bench...]
                               # the enumeration and dictionary benchmarks as SWFs, timed in swf2es
                               # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug
+node tests/bench/players.ts --only swf2es,flash vector   # indexed reads, writes, push and pop on
+                              # Vectors of int, Number, String, Object and a class, and on Arrays
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
