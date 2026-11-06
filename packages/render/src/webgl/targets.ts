@@ -164,6 +164,8 @@ export class TargetPool {
   private freeMsaa = new SizedPool<Multisampled>(msaaBytes);
   /** The layers kept from frame to frame, by their ids in Keeps. */
   private kept: (Layer | null)[] = [];
+  /** The widest and the tallest multisampled buffers found complete, by their samples. */
+  private completeMsaa = new Map<number, { width: number; height: number }>();
 
   constructor(gl: WebGL2RenderingContext, state: GlState) {
     this.gl = gl;
@@ -175,6 +177,7 @@ export class TargetPool {
     this.freeLayers = new SizedPool<Layer>(layerBytes);
     this.kept = [];
     this.freeMsaa = new SizedPool<Multisampled>(msaaBytes);
+    this.completeMsaa = new Map();
   }
 
   get frame(): number {
@@ -248,6 +251,11 @@ export class TargetPool {
     const gl = this.gl;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaa.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, layer.framebuffer);
+    // The blit writes the whole rectangle, so what the layer held there goes:
+    // said so, as ANGLE's Vulkan back end, SwiftShader's and a GPU's alike,
+    // otherwise left a reused layer's old pixels where the blit had written
+    // (tests/player/packed-filters.ts, once the pool keeps layers a frame).
+    gl.invalidateSubFramebuffer(gl.DRAW_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0], 0, 0, width, height);
     gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     // Bound as the state cache has it.
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
@@ -325,11 +333,25 @@ export class TargetPool {
       samples,
       usedAt: this.frameCount,
     };
+    // Asking waits for the GPU process, milliseconds at a time, and the
+    // answer hangs on the formats and the samples, which are always these,
+    // and on each side against the largest a renderbuffer may have: one no
+    // wider than the widest found complete of its samples, and no taller
+    // than the tallest, which may be another, is not asked about.
+    const complete = this.completeMsaa.get(samples);
+    if (complete && width <= complete.width && height <= complete.height) {
+      return msaa;
+    }
+
     if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
       this.deleteMultisampled(msaa);
       return null;
     }
 
+    this.completeMsaa.set(samples, {
+      width: Math.max(width, complete?.width ?? 0),
+      height: Math.max(height, complete?.height ?? 0),
+    });
     return msaa;
   }
 

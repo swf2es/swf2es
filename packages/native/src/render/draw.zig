@@ -347,7 +347,6 @@ fn drawAligned(q: *const DrawParams) usize {
     const from = @as([*]const u32, @ptrFromInt(q.src))[0 .. @as(usize, q.src_w) * q.src_rows];
     const into = @as([*]u32, @ptrFromInt(q.dst))[0 .. @as(usize, q.w) * q.h];
     const sw: f64 = @floatFromInt(q.src_w);
-    const sh: f64 = @floatFromInt(q.src_h);
     const x0: f64 = @floatFromInt(q.x);
     const y0: f64 = @floatFromInt(q.y);
     const n: f64 = @floatFromInt(q.w);
@@ -357,13 +356,18 @@ fn drawAligned(q: *const DrawParams) usize {
     const opaque_bits: u32 = if (q.flags & OPAQUE != 0) 0xff000000 else 0;
     var transformer: Transformer = .{ .q = q };
     const transform = q.flags & TRANSFORM != 0;
+    // coveredSpan's along x is the same in every row, the matrix neither
+    // turning nor skewing, so it is worked out once; along y, b a zero, it
+    // narrows a row to nothing unless all four of its sample lines are
+    // inside the source, which is what rows.inside counts.
+    var x_from = -std.math.inf(f64);
+    var x_to = std.math.inf(f64);
+    const x_spans = coveredSpan(q.ia, q.ic, q.itx, sw, y0, &x_from, &x_to);
     var wrote = false;
     for (0..q.h) |r| {
-        const y = y0 + @as(f64, @floatFromInt(r));
-        var span_from = -std.math.inf(f64);
-        var span_to = std.math.inf(f64);
-        const spans = coveredSpan(q.ia, q.ic, q.itx, sw, y, &span_from, &span_to) and
-            coveredSpan(q.ib, q.id, q.ity, sh, y, &span_from, &span_to);
+        const span_from = if (rows.inside[r] == 4) x_from else std.math.inf(f64);
+        const span_to = x_to;
+        const spans = x_spans;
         // Whole within, [k_from, k_to) of the row's pixels.
         const full_from = if (spans) maxf(x0, span_from) else 0;
         const full_to = if (spans) minf(x0 + n, span_to) else 0;
@@ -379,6 +383,20 @@ fn drawAligned(q: *const DrawParams) usize {
         var at: usize = 0;
         while (at < q.w) : (at += chunk) {
             const count = @min(chunk, q.w - at);
+            // Wholly inside the source, every pixel's 16 samples are: none to
+            // count or pass over, and each pixel is put, a clear one too.
+            if (at >= k_from and at + count <= k_to) {
+                for (buffer[0..count], at..) |*b, k| {
+                    var p = if (smooth) blend4(q, from, k, r) else from[base + columns.near[k]];
+                    if (transform) p = transformer.of(p);
+                    b.* = p;
+                }
+
+                putRow(row[at..][0..count], buffer[0..count], null, opaque_bits);
+                wrote = true;
+                continue;
+            }
+
             var any: bool = false;
             for (buffer[0..count], skip[0..count], at..) |*b, *kept, k| {
                 const hit: u32 = if (k >= k_from and k < k_to) 16 else columns.inside[k] * inside_y;
@@ -529,7 +547,15 @@ fn putRow(dst: []u32, src: []const u32, skip: ?[]const u32, opaque_bits: u32) vo
     while (i + lanes <= dst.len) : (i += lanes) {
         const s: P = src[i..][0..lanes].*;
         const d: P = dst[i..][0..lanes].*;
-        const out = put4(s, d, opaque_bits);
+        // Four opaque, or four clear, as a sprite's inside and its margins
+        // mostly are: put4's answer without its blend.
+        const sa = s >> @splat(24);
+        const out = if (@reduce(.And, sa == @as(P, @splat(255))))
+            s
+        else if (@reduce(.And, sa == @as(P, @splat(0))))
+            d | @as(P, @splat(opaque_bits))
+        else
+            put4(s, d, opaque_bits);
         if (skip) |kept| {
             const keep: P = kept[i..][0..lanes].*;
             dst[i..][0..lanes].* = @select(u32, keep != @as(P, @splat(0)), d, out);
