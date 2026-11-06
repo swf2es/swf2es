@@ -451,6 +451,18 @@ function makeVector(rt: Runtime, param: AsObject | null): AsObject {
     cls = rt.specializeVector(base, param);
     prepareVector(rt, cls, convert, fill);
     rt.specialized.set(param, cls);
+    // A class's instances, as coerce checks them, by the traits found once.
+    const ref = cls.$param;
+    if (typeof ref === "object") {
+      const traits = param.$it;
+      cls.$convert = (rt: Runtime, _cls: AsObject, v: Value) => {
+        if (v === null || v === undefined) {
+          return null;
+        }
+
+        return v.$traits === traits || rt.isInstanceOf(v, traits) ? v : rt.coerce(v, ref);
+      };
+    }
   }
 
   return cls;
