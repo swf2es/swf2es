@@ -139,10 +139,6 @@ export { NOT_FOUND } from "./descriptors.js";
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 
-// Object coercions use the same two lookup orders without allocating per call.
-const STRING_PRIMITIVE_ORDER = ["toString", "valueOf"] as const;
-const NUMBER_PRIMITIVE_ORDER = ["valueOf", "toString"] as const;
-
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
@@ -174,6 +170,13 @@ export class Runtime {
   readonly userVersions: readonly number[];
   /** JSON.stringify's toJSON, at user code's version, made once. */
   readonly toJSONName: Multiname;
+  /**
+   * What [[DefaultValue]] calls, in each hint's order: toString and valueOf
+   * at user code's version, made once, so that their caches keep the
+   * methods of the traits converted most, as a Dictionary's object keys.
+   */
+  private readonly stringPrimitiveOrder: readonly Multiname[];
+  private readonly numberPrimitiveOrder: readonly Multiname[];
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
@@ -253,6 +256,12 @@ export class Runtime {
     this.apiVersion = checkApiVersion(options.apiVersion ?? API_VERSION);
     this.userVersions = [this.apiVersion];
     this.toJSONName = publicQname("toJSON", this.userVersions);
+    const toStringName = publicQname("toString", this.userVersions);
+    const valueOfName = publicQname("valueOf", this.userVersions);
+    toStringName.cache = UNFILLED;
+    valueOfName.cache = UNFILLED;
+    this.stringPrimitiveOrder = [toStringName, valueOfName];
+    this.numberPrimitiveOrder = [valueOfName, toStringName];
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
     this.objectTraits.testsValues = true;
@@ -2473,9 +2482,9 @@ export class Runtime {
 
     // As ScriptObject::defaultValue: each called as a property, so one
     // that is not a function is TypeError 1006; a Namespace is a primitive.
-    const order = hint === "string" ? STRING_PRIMITIVE_ORDER : NUMBER_PRIMITIVE_ORDER;
-    for (const name of order) {
-      const v = this.callProperty(o, publicQname(name, this.userVersions));
+    const order = hint === "string" ? this.stringPrimitiveOrder : this.numberPrimitiveOrder;
+    for (let i = 0; i < order.length; i++) {
+      const v = this.callProperty(o, order[i]);
       if (
         v === null ||
         typeof v !== "object" ||
