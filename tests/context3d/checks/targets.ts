@@ -24,7 +24,9 @@ export async function renderTargets() {
     const fresh = c.createTexture(16, 32);
     const tiny = c.createTexture(1, 1);
     const cube = c.createTexture(8, 8, true);
-    rejects(() => c.setRenderTarget(tiny));
+    // As small as AIR takes (RenderTargets.as, small-*).
+    c.setRenderTarget(tiny);
+    c.setRenderTarget(null);
     rejects(() => c.setRenderTarget(cube, false, 6));
     rejects(() => other.backend.setRenderTarget(texture));
     tiny.dispose();

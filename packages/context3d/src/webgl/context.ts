@@ -1130,12 +1130,6 @@ export class WebGLContext3D implements Context3D {
           "Context3D experiment: compressed textures are no render targets",
         );
       }
-      if (texture.width < 8 || texture.height < 8) {
-        throw new Context3DError(
-          "operation",
-          "Context3D experiment: render targets must be at least 8 by 8",
-        );
-      }
     }
     const samples = texture ? this.multisamples(antiAlias, depth) : 0;
     this.finishTarget();
