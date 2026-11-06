@@ -1360,10 +1360,12 @@ export class Runtime {
 
   /** The `in` operator: whether `o` has the public property `name`. */
   in(name: Value, o: Value): boolean {
+    // As isDictionaryLookup: a Dictionary looks for any object itself, a
+    // QName too. A Namespace is no object to avmplus: on a miss,
+    // dictionaryHas looks for its uri as a name.
     if (
       typeof name === "object" &&
       name !== null &&
-      name.$local === undefined &&
       !(name instanceof FloatValue) &&
       o?.$keys !== undefined
     ) {
@@ -1407,11 +1409,16 @@ export class Runtime {
 
   /**
    * Whether Dictionary `o` has object key `key`, as in_operator finds it:
-   * the key itself, then, made a string, on its prototype chain.
+   * the key itself, then, made a string, on its prototype chain. A
+   * Namespace names its uri, the Dictionary's own or its prototypes'.
    */
   private dictionaryHas(o: AsObject, key: object): boolean {
     if (o.$keys.has(key)) {
       return true;
+    }
+
+    if (key instanceof Namespace) {
+      return this.hasProperty(o, publicQname(this.nameString(key), this.userVersions));
     }
 
     const name = this.toString(key);
