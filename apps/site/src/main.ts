@@ -236,6 +236,7 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
   stats.watch(null, 0);
   ask.hidden = true;
   showFacts(name, f);
+  stage.classList.remove("authored");
   stage.style.setProperty("--w", String(f.width || 550));
   stage.style.setProperty("--h", String(f.height || 400));
   empty.hidden = true;
@@ -424,6 +425,13 @@ stage.addEventListener("keydown", (e) => {
 
 quality.addEventListener("change", () => player.setAttribute("quality", quality.value));
 scale.addEventListener("change", () => player.setAttribute("scale", scale.value));
+// A SWF that asks for noScale is shown at its own size, as a page embedding it at that size
+// shows it, not stretched across the box with the rest left empty.
+player.addEventListener("stagelayout", (e) => {
+  const { scaleMode } = (e as CustomEvent<{ scaleMode: string }>).detail;
+  stage.classList.toggle("authored", scaleMode === "noScale");
+});
+
 stage3D.addEventListener("change", () => {
   if (current && !player.hidden) {
     void play(current.bytes, current.name, current.facts.origin, current.base);
