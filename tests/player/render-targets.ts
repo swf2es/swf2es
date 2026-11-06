@@ -1,5 +1,6 @@
 // Reusing a larger multisampled framebuffer must resolve only the requested rectangle,
-// clear old pixels, and release it when idle or destroyed.
+// clear old pixels, and release it when idle or destroyed; a filter's exact layer may use a
+// larger texture as one of its own size.
 import assert from "node:assert/strict";
 import { withPage } from "./chrome.ts";
 
@@ -87,9 +88,11 @@ const { value, exception } = await withPage(
       check(undersized !== wide, "tiny layers must not inherit oversized textures and MSAA");
       pool.giveLayer(undersized);
       const exact = pool.takeLayer(64, 64, true);
-      check(exact !== wide && exact.width === 64, "exact requests must not take fitting textures");
+      check(exact === wide && exact.width === 64 && exact.textureWidth === 128,
+        "exact requests use a fitting texture as one of their own size");
       pool.giveLayer(exact);
-      check(pool.takeLayer(128, 64) === wide, "rejected oversized textures remain reusable");
+      const whole = pool.takeLayer(128, 64);
+      check(whole === wide && whole.width === 128, "a texture used smaller is taken again whole");
       pool.giveLayer(wide);
       const layer = pool.takeLayer(96, 64, true);
       const last = pool.layerMsaa(layer, 4);

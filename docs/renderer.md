@@ -150,6 +150,15 @@ whose entries go once unused for their idle frames:
   sample count, up to twice the requested area: only the layer's rectangle
   is resolved. This avoids allocating and synchronously validating a new
   framebuffer for each small size change, without keeping larger pools.
+  A filter's layer and its passes' targets are used as just their rounded
+  size, which filters read them as, but may take a texture up to four
+  times that area: a filtered object whose size changes as it animates
+  finds one free. Layers and multisampled buffers share one budget, the
+  least lately freed of either going first, and of one frame the largest;
+  what the last frame drew with is kept on top of it, to 512 MiB in all.
+  On a busy recorded scene trimming each pool against the other's bytes
+  let go of a frame's small layers while full-screen multisampled buffers
+  stayed, making 7.3 layers a frame again; now 1.6.
 - **Glyphs:** advanced text's glyph quads, in an atlas of their own, and
   Saffron's outlines in a texture.
 
@@ -302,10 +311,11 @@ small workloads measure particular paths, not whole-game FPS.
 Add `--rebuild --branches 2048` to invalidate filtered content every frame rather
 than reuse cached outputs. This exercises packed content pages and their MSAA
 targets; compare at the same sample count on each GPU. Content pages aim for
-64 MiB of multisampled storage, while the combined free-target cache stays at
-128 MiB. Active targets are outside that cache budget, and larger individual
-layers retain their separate-target path. Ordinary textures may reuse at most
-twice the requested rounded area, avoiding oversized clears and MSAA allocations.
+64 MiB of multisampled storage, while the combined free-target cache keeps
+128 MiB past what the last frame drew with. Active targets are outside that
+cache budget, and larger individual layers retain their separate-target path.
+Ordinary textures may reuse at most twice the requested rounded area, avoiding
+oversized clears and MSAA allocations; a filter's, four times.
 
 For each pull request, `tests/player/bench.ts` builds a synthetic scene
 and times it; `--town N` draws N hairline-outlined characters and

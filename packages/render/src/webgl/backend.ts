@@ -338,8 +338,9 @@ export class WebGLBackend {
           gl.clearColor(0, 0, 0, 0);
           gl.clearStencil(0);
           gl.stencilMask(0xff);
-          // Its rectangle alone, as a layer taken may be larger, unless filters read past it.
-          state.scissor(filtered ? null : [0, 0, width, height]);
+          // Its rectangle alone, as a layer taken may be larger, unless filters read past it, as far
+          // as they read.
+          state.scissor(filtered ? [0, 0, layer.width, layer.height] : [0, 0, width, height]);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
           state.scissor(null);
           break;

@@ -1,6 +1,6 @@
 import type { GlState } from "@swf2es/context3d/device";
 import type { KernelObject } from "../filter-plan.js";
-import { SizedPool } from "./pool.js";
+import { SizedPool, trimTogether } from "./pool.js";
 import { LAYER_UNIT } from "./programs.js";
 
 /** Where a frame is drawn: the target's size in pixels, and how stage pixels map onto it. */
@@ -30,8 +30,15 @@ export interface Layer {
   texture: WebGLTexture;
   /** Its stencil, made as it is first drawn into unmultisampled; filters' targets take none. */
   stencil: WebGLRenderbuffer | null;
+  /**
+   * The size it is used as, which filters read it as a texture of: its
+   * texture's, or less where a filter's target takes a larger one (takeLayer).
+   */
   width: number;
   height: number;
+  /** Its texture's size, and its stencil's. */
+  textureWidth: number;
+  textureHeight: number;
   /** The frame it was last drawn into. */
   usedAt: number;
 }
@@ -88,11 +95,15 @@ export const LAYER_STEP = 128;
  */
 const SMALL_STEP = 16;
 /**
- * The most the free layers and multisampled buffers may take between
- * frames, past which the least lately freed go as a frame ends; within a
- * frame its own working set may pass it.
+ * The free layers and multisampled buffers kept between frames past what
+ * the last frame drew with, the least lately freed going first as a frame
+ * ends; and the most kept in all. A stretch of frames each drawing
+ * full-screen multisampled layers drew with 150 to 300 MiB a frame, and
+ * trimmed to 128 MiB in all, made seven targets a frame again, as many as
+ * it let go of.
  */
 const FREE_BYTES = 128 * 1024 * 1024;
+const WORKING_BYTES = 512 * 1024 * 1024;
 
 /** A side of a layer made for `n` pixels: rounded up to SMALL_STEP, past LAYER_STEP to that. */
 export function layerSide(n: number): number {
@@ -107,8 +118,8 @@ function msaaBytes(msaa: { width: number; height: number; samples: number }): nu
 }
 
 /** The bytes a layer takes: its colour, and its stencil where it has one. */
-function layerBytes(layer: { width: number; height: number; stencil: unknown }): number {
-  return layer.width * layer.height * (layer.stencil ? 8 : 4);
+function layerBytes(layer: Layer): number {
+  return layer.textureWidth * layer.textureHeight * (layer.stencil ? 8 : 4);
 }
 /** Frames a free layer is kept undrawn into before it is let go of. */
 export const LAYER_IDLE_FRAMES = 60;
@@ -198,17 +209,23 @@ export class TargetPool {
    * undrawn into for LAYER_IDLE_FRAMES let go of, and the frame counted.
    */
   endFrame(): void {
-    this.freeLayers.trim(
-      this.frameCount,
-      LAYER_IDLE_FRAMES,
-      FREE_BYTES - this.freeMsaa.bytes,
-      (l) => this.deleteLayer(l),
-    );
-    this.freeMsaa.trim(
-      this.frameCount,
-      LAYER_IDLE_FRAMES,
-      FREE_BYTES - this.freeLayers.bytes,
-      (m) => this.deleteMultisampled(m),
+    const drop = (l: Layer) => this.deleteLayer(l);
+    const dropMsaa = (m: Multisampled) => this.deleteMultisampled(m);
+    this.freeLayers.trimIdle(this.frameCount, LAYER_IDLE_FRAMES, drop);
+    this.freeMsaa.trimIdle(this.frameCount, LAYER_IDLE_FRAMES, dropMsaa);
+    trimTogether(
+      [
+        { pool: this.freeLayers, drop },
+        { pool: this.freeMsaa, drop: dropMsaa },
+      ],
+      // What this frame drew with stays for the next, which likely draws alike: holding it adds
+      // nothing to what the frame itself took.
+      Math.min(
+        WORKING_BYTES,
+        FREE_BYTES +
+          this.freeLayers.bytesFreedIn(this.frameCount) +
+          this.freeMsaa.bytesFreedIn(this.frameCount),
+      ),
     );
     this.frameCount++;
   }
@@ -292,7 +309,12 @@ export class TargetPool {
       const gl = this.gl;
       const stencil = gl.createRenderbuffer() as WebGLRenderbuffer;
       gl.bindRenderbuffer(gl.RENDERBUFFER, stencil);
-      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, layer.width, layer.height);
+      gl.renderbufferStorage(
+        gl.RENDERBUFFER,
+        gl.DEPTH24_STENCIL8,
+        layer.textureWidth,
+        layer.textureHeight,
+      );
       this.state.bindFramebuffer(layer.framebuffer);
       gl.framebufferRenderbuffer(
         gl.FRAMEBUFFER,
@@ -364,18 +386,23 @@ export class TargetPool {
   /**
    * A layer of at least `width` by `height`, the smallest of those free
    * that is, or one made, its sides rounded as layerSide rounds them;
-   * `exact`, of just the rounded size, which filters take so that a frame's
-   * targets are alike, and no larger than it needs.
+   * `exact`, used as just the rounded size, which filters take so that a
+   * frame's targets are alike: a larger texture serves it as one of that
+   * size, as filters read it within its size (FilterTarget), so that a
+   * layer whose size changes as its content moves finds one free.
    */
   takeLayer(width: number, height: number, exact = false): Layer {
     width = layerSide(width);
     height = layerSide(height);
-    // Bound excess area: oversized texture reuse also enlarges the MSAA target and clears.
+    // Bound excess area: oversized texture reuse also enlarges the MSAA target and clears. An
+    // exact one takes its multisampled buffers and clears at its own size, so may go further.
     const found =
       this.freeLayers.take(width, height) ??
-      (exact ? null : this.freeLayers.takeFitting(width, height, 0, width * height * 2));
+      this.freeLayers.takeFitting(width, height, 0, width * height * (exact ? 4 : 2));
     if (found) {
       found.usedAt = this.frameCount;
+      found.width = exact ? width : found.textureWidth;
+      found.height = exact ? height : found.textureHeight;
       return found;
     }
 
@@ -395,7 +422,16 @@ export class TargetPool {
     const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
     this.state.bindFramebuffer(framebuffer);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    return { framebuffer, texture, stencil: null, width, height, usedAt: this.frameCount };
+    return {
+      framebuffer,
+      texture,
+      stencil: null,
+      width,
+      height,
+      textureWidth: width,
+      textureHeight: height,
+      usedAt: this.frameCount,
+    };
   }
 
   /** A layer free again, kept for the layers after it while it is drawn into often enough. */
