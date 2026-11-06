@@ -10,7 +10,7 @@
 // steady scene's. The site's crowd and bounce demos play, and three SWFs made
 // here: a crowd of filled, stroked, bitmap and gradient parts under colour
 // transforms, half of it still; blend modes, a mask, a glow left still and
-// a filtered sprite multiplied between shapes; and a timeline that
+// a filtered sprite multiplied between shapes; pictures blended alone; and a timeline that
 // replaces, removes and adds shapes and morphs every frame. Software GL
 // and a GPU must count the same. Buffers made anew and copied on the GPU,
 // as a growing geometry atlas makes them, are printed too.
@@ -271,6 +271,60 @@ function blendMask(): Uint8Array {
 }
 
 /**
+ * Pictures blended alone, as an authoring tool places a bitmap: a
+ * rectangle filled with it, in add, screen, multiply, lighten, overlay,
+ * hard light, difference and darken in turn, every other one moving each
+ * frame; each drawn straight onto what is below, with no layer of its own.
+ */
+function blendBitmaps(): Uint8Array {
+  const modes = [8, 4, 3, 5, 13, 14, 7, 6];
+  const tags: Uint8Array[] = [
+    w.backgroundColor(0x6080a0),
+    checkerBitmap(1),
+    w.shape({
+      id: 2,
+      bounds: [0, 800, 0, 800],
+      fills: [{ bitmap: 1, type: 0x43, matrix: { a: 100, d: 100 } }],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [800, 0] },
+            { line: [800, 800] },
+            { line: [0, 800] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+    }),
+  ];
+  const pictures = 24;
+  const frames = 120;
+  const at = (i: number, frame: number) => ({
+    tx: Math.round((20 + (i % 8) * 60 + (i % 2 ? Math.sin(frame / 7 + i) * 15 : 0)) * 20),
+    ty: Math.round((30 + Math.floor(i / 8) * 100) * 20),
+  });
+  for (let i = 0; i < pictures; i++) {
+    tags.push(
+      w.place({ depth: i + 1, character: 2, matrix: at(i, 0), blendMode: modes[i % modes.length] }),
+    );
+  }
+
+  tags.push(w.showFrame());
+  for (let frame = 1; frame < frames; frame++) {
+    for (let i = 1; i < pictures; i += 2) {
+      tags.push(w.place({ depth: i + 1, move: true, matrix: at(i, frame) }));
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 520, height: 360, frameRate: 30, frameCount: frames, tags });
+}
+
+/**
  * 24 depths whose shapes are replaced, removed and added again on the
  * timeline every frame, and six morphs whose ratio changes every frame,
  * each a shape the player has not drawn before.
@@ -365,6 +419,7 @@ function cases(): Map<string, Uint8Array> {
     ["bounce", demo("bounce.swf")],
     ["mixed-crowd", mixedCrowd()],
     ["blend-mask", blendMask()],
+    ["blend-bitmaps", blendBitmaps()],
     ["swap", swap()],
   ]);
 }

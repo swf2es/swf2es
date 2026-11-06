@@ -114,9 +114,10 @@ node tests/site/run.ts [--serve]   # the built site in Chrome under /swf2es/: th
                               # at (part of pnpm test)
 node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
                               # socket, a drop (part of pnpm test; skipped without Electron's binary)
-node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--gpu]   # time the player on a
-                              # busy synthetic timeline in Chrome (--town: a busy room's mix, see
-                              # docs/renderer.md); keep a change only for a gain that repeats;
+node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--gpu]   # time the
+                              # player on a busy synthetic timeline in Chrome (--town: a busy room's
+                              # mix, see docs/renderer.md; --blends: shapes alone in blend modes);
+                              # keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh

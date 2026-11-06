@@ -120,6 +120,8 @@ class Gathered {
   private corners = 0;
   private paint: ImageFill | GradientFill | ShaderPaint | null = null;
   private region: Area | null = null;
+  /** The fills in the part open, which is flat (GeometryData.flat) with one alone. */
+  private fills = 0;
 
   /**
    * Open a part for `paint`, the one open first closed, unless both are
@@ -167,6 +169,11 @@ class Gathered {
     this.vertices = n + 1;
   }
 
+  /** A fill begun in the part open: its vertices and triangles follow. */
+  fill(): void {
+    this.fills++;
+  }
+
   /** A triangle of the part's vertices `a`, `b` and `c`, in room reserve made. */
   triangle(a: number, b: number, c: number): void {
     const n = this.corners;
@@ -188,6 +195,8 @@ class Gathered {
           texels: this.paint ? scratchTexels.slice(0, n * 2) : undefined,
           depths: shader ? new Float32Array(n).fill(1) : undefined,
           indices: scratchIndices.slice(0, this.corners),
+          // One fill's triangles cover each point of it once; fills of a drawing may overlap.
+          flat: this.fills === 1,
         },
         paint: this.paint,
         region: this.region,
@@ -197,6 +206,7 @@ class Gathered {
 
     this.vertices = 0;
     this.corners = 0;
+    this.fills = 0;
   }
 }
 
@@ -339,6 +349,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     if (geometry && geometry.vertices.length > 0) {
       const { vertices, indices, indexOffset = 0 } = geometry;
       out.reserve(vertices.length / 2, indices.length);
+      out.fill();
       const first = out.next;
       for (let k = 0; k < vertices.length; k += 2) {
         const x = vertices[k];
@@ -370,5 +381,6 @@ export function bitmapQuad(width: number, height: number): GeometryData {
     colors: Uint32Array.of(WHITE, WHITE, WHITE, WHITE),
     texels: Float32Array.of(0, 0, width, 0, width, height, 0, height),
     indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
+    flat: true,
   };
 }

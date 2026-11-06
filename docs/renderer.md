@@ -184,7 +184,12 @@ with the context:
   runs a pass). A pass reads a target within its rectangle as a texture
   of its own size.
 - **Composites** of layers in their blend modes (`composite.ts`), and
-  the stage's way onto the canvas (`stage.ts`).
+  the stage's way onto the canvas (`stage.ts`). A blend layer of one
+  flat fill alone (a bitmap's quad or one fill of a shape, no part of it
+  over another: `GeometryData.flat`) has no layer: the fill is drawn
+  straight onto what is below in its mode (`WebGLBackend.blendDirect`),
+  as its layer composited would be, the modes that read what is below
+  from the same copy of it.
 - **One state cache.** The backend sets GL state through context3d's
   device layer (`@swf2es/context3d/device`'s `GlState`), so no bind,
   blend or stencil state is set twice.
