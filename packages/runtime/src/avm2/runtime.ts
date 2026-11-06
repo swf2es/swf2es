@@ -1422,10 +1422,14 @@ export class Runtime {
    * Namespace names its uri, the Dictionary's own or its prototypes'.
    */
   private dictionaryHas(o: AsObject, key: object): boolean {
-    if (o.$keys.has(key)) {
-      return true;
-    }
+    return o.$keys.has(key) || this.dictionaryHasName(o, key);
+  }
 
+  /**
+   * dictionaryHas once `key` is not there, apart so that the lookup of one
+   * that is stays small enough to inline.
+   */
+  private dictionaryHasName(o: AsObject, key: object): boolean {
     if (key instanceof Namespace) {
       return this.hasProperty(o, publicQname(this.nameString(key), this.userVersions));
     }
