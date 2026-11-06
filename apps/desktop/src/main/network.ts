@@ -122,8 +122,13 @@ const LIMITS: Limits = {
   policyFiles: 64,
 };
 
-/** The movie whose requests are judged: a remote SWF by its URL, or a local one with networking. */
-export type Movie = { kind: "remote"; url: string } | { kind: "local" };
+/**
+ * The movie whose requests are judged: a remote SWF by its URL, a local
+ * one with networking, or an AIR application, whose sandbox reaches the
+ * network unjudged, as AIR's application sandbox does: any address, no
+ * policy file.
+ */
+export type Movie = { kind: "remote"; url: string } | { kind: "local" } | { kind: "application" };
 
 export interface NetworkOptions {
   /** A host name's addresses, in order of preference: the system's resolver by default. */
@@ -593,7 +598,13 @@ export class Network {
     let requester: Requester;
     let rank: number;
     let origin: string | null;
-    if (session.movie.kind === "local") {
+    const application = session.movie.kind === "application";
+    if (application) {
+      requester = { host: null, scheme: null };
+      // Nothing is more private than an application: it reaches its own machine too.
+      rank = Number.POSITIVE_INFINITY;
+      origin = null;
+    } else if (session.movie.kind === "local") {
       requester = { host: null, scheme: null };
       // A local SWF stands for nothing on the network: it reaches no private address of itself.
       rank = RANK.public;
@@ -613,8 +624,8 @@ export class Network {
       const same = origin === url.origin;
       const morePrivate = target.rank > rank;
       const custom = headers.map(([n]) => n).filter((n) => n.toLowerCase() !== "content-type");
-      const needsAccess = morePrivate || (!same && request.purpose === "data");
-      const needsHeaders = !same && custom.length > 0;
+      const needsAccess = !application && (morePrivate || (!same && request.purpose === "data"));
+      const needsHeaders = !application && !same && custom.length > 0;
       if (needsAccess || needsHeaders) {
         const policies = await abortable(this.policiesFor(session, url, target.address), signal);
         if (needsAccess && !allowsAccess(policies, requester, url)) {

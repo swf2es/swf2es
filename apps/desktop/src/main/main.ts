@@ -3,8 +3,11 @@
 // few requests (shared/api.ts), each checked to come from that page.
 //
 //   electron apps/desktop [--trace] [file.swf | http(s)://host/movie.swf]
+//   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
+//
+// The second runs an AIR application by its descriptor, as adl does.
 import { statSync } from "node:fs";
-import { open as openFile } from "node:fs/promises";
+import { open as openFile, readFile, realpath } from "node:fs/promises";
 import { basename, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fileAttributes } from "@swf2es/format";
@@ -21,7 +24,14 @@ import {
   shell,
   type WebContents,
 } from "electron";
-import type { LibraryName, NetworkResponse, OpenedMovie, StartState } from "../shared/api.js";
+import type {
+  AirWindowState,
+  LibraryName,
+  NetworkResponse,
+  OpenedMovie,
+  StartState,
+} from "../shared/api.js";
+import { type AirCommand, airCommand, airLaunch, listOf, statOf } from "./air.ts";
 import { bridgeFiles } from "./files.ts";
 import { type Movie, Network, Refused } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
@@ -76,6 +86,8 @@ let listening = false;
 
 /** The longest URL a SWF is opened by. */
 const MAX_URL = 8192;
+/** The AIR application playing, as its command line asked for it; null for none. */
+let air: AirCommand | null = null;
 
 /**
  * `text` as the URL of a remote SWF: http or https, with a host and no
@@ -214,9 +226,67 @@ function refuse(message: string, detail: string): void {
   }
 }
 
-/** Open what the recent list, the command line or a reload names: a URL or a file's path. */
+/** Open what the recent list, the command line or a reload names: a URL, a SWF's path or a descriptor's. */
 function openEntry(entry: string): Promise<void> {
-  return remoteUrl(entry) ? openUrl(entry) : open(entry);
+  if (remoteUrl(entry)) {
+    return openUrl(entry);
+  }
+
+  // A descriptor reopened from the recent list or a reload, with the arguments it was run with.
+  if (/\.xml$/i.test(entry)) {
+    return openAir(
+      air?.descriptor === entry ? air : { descriptor: entry, root: null, arguments: [] },
+      process.cwd(),
+    );
+  }
+
+  return open(entry);
+}
+
+/**
+ * Run the AIR application `command` names, as adl does: its content SWF in
+ * the window, at the descriptor's size, in AIR's application sandbox, with
+ * its launch (shared/api.ts AirLaunch), from `cwd`.
+ */
+async function openAir(command: AirCommand, cwd: string): Promise<void> {
+  const name = basename(command.descriptor);
+  let opened: ReturnType<typeof airLaunch>;
+  try {
+    opened = airLaunch(command, cwd, app.getPath("userData"), {
+      documents: app.getPath("documents"),
+      desktop: app.getPath("desktop"),
+      cache: app.getPath("temp"),
+    });
+  } catch (error) {
+    refuse(`${name} could not be opened.`, String(error));
+    return;
+  }
+
+  const head = await readStart(opened.content, START);
+  const signature = head ? String.fromCharCode(...head.subarray(0, 3)) : "";
+  if (!head || (signature !== "FWS" && signature !== "CWS" && signature !== "ZWS")) {
+    refuse(`${name}'s content is not a SWF.`, opened.content);
+    return;
+  }
+
+  const content = await realpath(opened.content);
+  sandbox.playApplication(content);
+  air = command;
+  if (window && opened.width && opened.height) {
+    window.setSize(opened.width, opened.height);
+  }
+
+  // Played from app:/, as AIR plays it: its relative URLs, and loaderInfo.url, are the application's.
+  const url = `app:/${opened.relative
+    .split("/")
+    .filter((s) => s !== "")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  show(
+    command.descriptor,
+    { url, name: opened.title, sandbox: "application", air: opened.launch },
+    { kind: "application" },
+  );
 }
 
 /** Play `movie` in the window, in place of what plays: what the user opened, as `entry`. */
@@ -228,7 +298,8 @@ function show(entry: string, movie: OpenedMovie, onNetwork: Movie | null): void 
   settings.opened(entry);
   buildMenu();
   if (window) {
-    window.setTitle(`${movie.name} — ${TITLE}`);
+    // An AIR application's window is its own: its title alone, as adl shows it.
+    window.setTitle(movie.air ? movie.name : `${movie.name} — ${TITLE}`);
     if (listening) {
       window.webContents.send("desktop:open", movie);
     }
@@ -255,6 +326,7 @@ async function openUrl(text: string): Promise<void> {
     name = last;
   }
 
+  air = null;
   sandbox.playRemote(url.href);
   show(url.href, { url: url.href, name, sandbox: "remote" }, { kind: "remote", url: url.href });
 }
@@ -275,6 +347,7 @@ async function open(path: string): Promise<void> {
 
   let url: string;
   try {
+    air = null;
     url = sandbox.play(path, useNetwork);
   } catch (error) {
     // Gone, or unreadable, since it was read.
@@ -298,6 +371,7 @@ function playOnNetwork(movie: Movie | null): void {
 
 function closeMovie(): void {
   current = null;
+  air = null;
   sandbox.stop();
   playOnNetwork(null);
   buildMenu();
@@ -315,6 +389,11 @@ function closeMovie(): void {
  * Denied where no one can be asked.
  */
 async function permitSocket(host: string, port: number): Promise<{ address?: string } | null> {
+  // AIR's application sandbox connects where it likes, unasked, with no socket policy.
+  if (sandbox.application) {
+    return {};
+  }
+
   const playing = current;
   const swf = sandbox.swf;
   const endpoint = `${host}:${port}`;
@@ -746,6 +825,109 @@ function listen(): void {
       network.addPolicyFile(url);
     }
   });
+  listenForAir();
+}
+
+/** The window as an AIR application's NativeWindow reads it. */
+function windowState(w: BrowserWindow): AirWindowState {
+  const bounds = w.getBounds();
+  const content = w.getContentBounds();
+  return {
+    bounds,
+    contentOffset: { x: content.x - bounds.x, y: content.y - bounds.y },
+    title: w.getTitle(),
+    displayState: w.isMinimized() ? "minimized" : w.isMaximized() ? "maximized" : "normal",
+    active: w.isFocused(),
+    visible: w.isVisible(),
+  };
+}
+
+/**
+ * An AIR application's reach, shared/api.ts DesktopAir: the file system
+ * and the window, only while one the user opened plays and only for its
+ * page. The file system is read synchronously where File reads it so.
+ */
+function listenForAir(): void {
+  const playing = (event: IpcMainEvent | IpcMainInvokeEvent) =>
+    trusted(event) && sandbox.application;
+  ipcMain.on("air:stat", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" ? statOf(path) : null;
+  });
+  ipcMain.on("air:list", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" ? listOf(path) : null;
+  });
+  // A read is what starts the application's grant: the page reads its content SWF first.
+  ipcMain.handle("air:read", async (event, path: unknown) => {
+    if (!trusted(event) || typeof path !== "string" || !air) {
+      return null;
+    }
+
+    try {
+      const real = await realpath(path);
+      return sandbox.startApplication(real) ? new Uint8Array(await readFile(real)) : null;
+    } catch {
+      return null;
+    }
+  });
+  ipcMain.on("air:window", (event) => {
+    event.returnValue = playing(event) && window ? windowState(window) : null;
+  });
+  ipcMain.on("air:set-bounds", (event, bounds: unknown) => {
+    const b = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null);
+    const [x, y, width, height] = [n(b?.x), n(b?.y), n(b?.width), n(b?.height)];
+    if (
+      playing(event) &&
+      window &&
+      x !== null &&
+      y !== null &&
+      width &&
+      height &&
+      width > 0 &&
+      height > 0
+    ) {
+      window.setBounds({ x, y, width, height });
+    }
+  });
+  ipcMain.on("air:set-title", (event, title: unknown) => {
+    if (playing(event) && window && typeof title === "string") {
+      window.setTitle(title.slice(0, 1024));
+    }
+  });
+  ipcMain.on("air:window-do", (event, what: unknown) => {
+    if (!playing(event) || !window) {
+      return;
+    }
+
+    switch (what) {
+      case "minimize":
+        window.minimize();
+        break;
+      case "maximize":
+        window.maximize();
+        break;
+      case "restore":
+        window.restore();
+        break;
+      case "activate":
+        window.focus();
+        break;
+      case "show":
+        window.show();
+        break;
+      case "hide":
+        window.hide();
+        break;
+      case "close":
+        window.close();
+        break;
+    }
+  });
+  ipcMain.on("air:exit", (event, code: unknown) => {
+    if (playing(event)) {
+      app.exit(typeof code === "number" ? code | 0 : 0);
+    }
+  });
 }
 
 /**
@@ -802,6 +984,12 @@ app.on("second-instance", (_event, argv, workingDirectory) => {
     window.focus();
   }
 
+  const application = airCommand(argv.slice(1), workingDirectory);
+  if (application && settings) {
+    void openAir(application, workingDirectory);
+    return;
+  }
+
   const entry = movieFromArguments(argv, workingDirectory);
   if (entry && settings) {
     void openEntry(entry);
@@ -809,6 +997,8 @@ app.on("second-instance", (_event, argv, workingDirectory) => {
 });
 
 let pending = movieFromArguments(process.argv);
+// An AIR application named adl's way, which the command line's SWF gives way to.
+const pendingAir = airCommand(process.argv.slice(process.defaultApp ? 2 : 1), process.cwd());
 // macOS hands a file opened from the Finder as an event, perhaps before the app is ready.
 app.on("open-file", (event, path) => {
   event.preventDefault();
@@ -852,7 +1042,9 @@ void app.whenReady().then(() => {
   listen();
   createWindow();
   buildMenu();
-  if (pending) {
+  if (pendingAir) {
+    void openAir(pendingAir, process.cwd());
+  } else if (pending) {
     void openEntry(pending);
   }
 });

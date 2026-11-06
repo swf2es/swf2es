@@ -285,6 +285,15 @@ const NEWER = new Set([
   "flash.net.drm::DRMDeviceGroup instance getter serverURL",
 ]);
 
+// What Harman's AIR added to a class Flash Player has, after either
+// playerglobal: ours has it too, marked AIR_15_0 (41), so that only an AIR
+// application's code sees it. Not a later version: as for NEWER, a builtin's
+// highest mark is the VM's internal one, which would hide it and make 42 public.
+const AIR_NEWER = new Set([
+  "flash.net::Socket instance getter tcpNoDelay",
+  "flash.net::Socket instance setter tcpNoDelay",
+]);
+
 /**
  * A class's shape as AIR_ONLY has it: the class's name, in its one package
  * namespace, AIR 1.0's where Flash Player's is unversioned, and nothing
@@ -325,7 +334,9 @@ export function check(ours: Uint8Array, flash: Uint8Array): string[] {
     }
 
     for (const key of shape.keys()) {
-      if (!ref.has(key) && !NEWER.has(`${name} ${key.replace(/\{[^}]*\}::/, "")}`)) {
+      const plain = `${name} ${key.replace(/\{[^}]*\}::/, "")}`;
+      const airNewer = key.includes("@v41}::") && AIR_NEWER.has(plain);
+      if (!ref.has(key) && !NEWER.has(plain) && !airNewer) {
         out.push(`${name} ${key}: only ours`);
       }
     }

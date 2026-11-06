@@ -2,7 +2,8 @@
 // do when nothing plays, and what to say when the libraries are missing.
 // It reaches the shell only through window.swf2esDesktop (shared/api.ts).
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
-import type { DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
+import type { AirLaunch, DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
+import { airHosts, airPath } from "./air.js";
 import { shellFiles } from "./files.js";
 import { shellFetch } from "./network.js";
 import { shellSocketHost } from "./sockets.js";
@@ -14,12 +15,22 @@ declare global {
 }
 
 const desktop = window.swf2esDesktop;
+/** The AIR application playing, whose local URLs are read through the shell; null for a SWF. */
+let airLaunch: AirLaunch | null = null;
 
 configure({
   cache: true,
   fileHost: shellFiles(desktop.files),
   sockets: shellSocketHost(desktop.sockets),
-  fetch: shellFetch(desktop.network),
+  fetch: shellFetch(desktop.network, () => {
+    const launch = airLaunch;
+    return launch
+      ? (url) => {
+          const path = airPath(launch, url);
+          return path === null ? null : desktop.air.read(path);
+        }
+      : null;
+  }),
   loadPolicyFile: (url) => desktop.network.loadPolicyFile(url),
 });
 
@@ -57,7 +68,11 @@ let loadGeneration = 0;
 
 function play(movie: OpenedMovie): void {
   const generation = ++loadGeneration;
-  configure({ sandboxType: movie.sandbox });
+  airLaunch = movie.air ?? null;
+  configure({
+    sandboxType: movie.sandbox,
+    air: movie.air ? airHosts(movie.air, desktop.air) : null,
+  });
   showFailure(null);
   welcome.hidden = true;
   player.hidden = false;

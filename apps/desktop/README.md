@@ -9,6 +9,7 @@ a checkout of the repository.
 pnpm install && pnpm build
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once (about 100 MB)
 pnpm --filter @swf2es/desktop start [--trace] [file.swf | https://host/movie.swf]
+pnpm --filter @swf2es/desktop start [--trace] app.xml [root-dir] [-- arguments...]
 ```
 
 `pnpm install` does not download Electron's binary (pnpm-workspace.yaml
@@ -74,6 +75,18 @@ own installer. A relative path is taken from the directory pnpm was run in.
 - **Sockets** (`flash.net.Socket`) connect over TCP through the main
   process. The first connection to each server asks: Allow Once, Always
   Allow for This SWF (remembered in `settings.json`) or Deny.
+- **AIR applications** run by their descriptor (`app.xml`), as adl runs
+  them: its first window's content SWF, from the descriptor's directory
+  or the root directory given after it, at the descriptor's size and with
+  its title, the arguments after `--` handed to its InvokeEvent. It plays
+  with AIR's API (NativeApplication, the window, `flash.filesystem.File`)
+  in AIR's application sandbox: it is played from `app:/`, reads any
+  local file through File, its `app:`, `app-storage:` and `file:` URLs,
+  and reaches the network and sockets without Flash's policy files or a
+  prompt, as an installed application does. Its storage directory is
+  under the app's user data, by its id. Only the application playing has
+  that reach, and only while it plays; run one you trust, as you would
+  install it.
 - **File dialogs** requested by AS2 or AS3 FileReference use native open
   and save dialogs after a click or key. Uploads and downloads use the
   same network permissions as other data requests.

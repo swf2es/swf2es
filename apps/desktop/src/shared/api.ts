@@ -2,8 +2,73 @@
 // window.swf2esDesktop. The renderer knows the shell only through it, so
 // another shell (Tauri, later) plays the same page by giving the same API.
 
-/** Flash's sandboxes, as Security.sandboxType names them. */
-export type SandboxType = "localWithFile" | "localWithNetwork" | "remote";
+/** Flash's sandboxes, as Security.sandboxType names them, and AIR's application sandbox. */
+export type SandboxType = "localWithFile" | "localWithNetwork" | "remote" | "application";
+
+/**
+ * An AIR application the shell opened by its descriptor, as adl runs one:
+ * what NativeApplication and File see of it.
+ */
+export interface AirLaunch {
+  /** The descriptor's XML and its id. */
+  descriptor: string;
+  id: string;
+  /** What followed `--` on the command line. */
+  arguments: string[];
+  /** Where the shell was started, a native path. */
+  currentDirectory: string;
+  /** The system's path separator. */
+  separator: string;
+  /** The directories AIR names: the application's (the descriptor's) and its storage's among them. */
+  directories: {
+    application: string;
+    applicationStorage: string;
+    user: string;
+    documents: string;
+    desktop: string;
+    cache: string;
+  };
+}
+
+/** What is at a path, as the player's FileStat has it. */
+export interface AirFileStat {
+  directory: boolean;
+  size: number;
+  modified: number;
+  created: number;
+  hidden?: boolean;
+  symbolicLink?: boolean;
+}
+
+/** The window as NativeWindow reads it: bounds frame included, and the content's corner in it. */
+export interface AirWindowState {
+  bounds: { x: number; y: number; width: number; height: number };
+  contentOffset: { x: number; y: number };
+  title: string;
+  displayState: string;
+  active: boolean;
+  visible: boolean;
+}
+
+/**
+ * An AIR application's own reach, only while one the user opened plays:
+ * the file system, read synchronously as File reads it, and the window.
+ */
+export interface DesktopAir {
+  stat(path: string): AirFileStat | null;
+  list(path: string): string[] | null;
+  read(path: string): Promise<Uint8Array | null>;
+  window(): AirWindowState;
+  setBounds(bounds: { x: number; y: number; width: number; height: number }): void;
+  setTitle(title: string): void;
+  minimize(): void;
+  maximize(): void;
+  restore(): void;
+  activate(): void;
+  setVisible(visible: boolean): void;
+  close(): void;
+  exit(code: number): void;
+}
 
 /** A SWF the shell opened, by the URL the page fetches it from. */
 export interface OpenedMovie {
@@ -12,6 +77,8 @@ export interface OpenedMovie {
   name: string;
   /** The sandbox it plays in, for Security.sandboxType. */
   sandbox: SandboxType;
+  /** For an AIR application opened by its descriptor: its launch, which plays it as AIR's. */
+  air?: AirLaunch;
 }
 
 /** The libraries' paths on disk, null for one the shell has not found. */
@@ -120,4 +187,5 @@ export interface DesktopApi {
   chooseLibrary(name: LibraryName): void;
   sockets: DesktopSockets;
   network: DesktopNetwork;
+  air: DesktopAir;
 }

@@ -46,6 +46,7 @@ const NAMES = [
 const LOOKUPS = `package {
   import flash.desktop.NativeApplication;
   import flash.display.Sprite;
+  import flash.net.Socket;
   import flash.system.ApplicationDomain;
   import flash.system.Security;
   import flash.utils.describeType;
@@ -69,6 +70,12 @@ const LOOKUPS = `package {
         trace("class", e.name, e.errorID);
       }
       trace("stage.nativeWindow", describeType(stage).toXMLString().indexOf("nativeWindow") >= 0);
+      // A member Harman's AIR added to a class Flash Player has.
+      try {
+        trace("tcpNoDelay", new Socket()["tcpNoDelay"]);
+      } catch (e:Error) {
+        trace("tcpNoDelay", e.name, e.errorID);
+      }
       trace("sandbox", Security.sandboxType);
     }
   }
@@ -129,6 +136,7 @@ test("on the web AIR's classes are not defined, by name or by code", { skip }, a
     "flash.net.URLRequestDefaults true [class URLRequestDefaults]",
     "class ReferenceError 1065",
     "stage.nativeWindow false",
+    "tcpNoDelay ReferenceError 1069",
     "sandbox remote",
   ]);
 });
@@ -149,6 +157,7 @@ test("in AIR they are", { skip }, async () => {
     // AIR-versioned members, as describeType lists them at AIR's version.
     "supportsMenu true",
     "stage.nativeWindow true",
+    "tcpNoDelay false",
     "sandbox application",
   ]);
 });
@@ -172,5 +181,5 @@ test("a class that extends one links in AIR alone", { skip }, async () => {
 
   // Flash Player's plugin stops the SWF at the DoABC, Class not found.
   await assert.rejects(play(swf, false), /VerifyError #1014/);
-  assert.equal((await play(swf, true)).length, 12);
+  assert.equal((await play(swf, true)).length, 13);
 });

@@ -87,6 +87,58 @@ const source = `package {
   }
 }`;
 
+// An AIR application's SWF, run adl's way by its descriptor: it names its
+// URL and sandbox, its launch's arguments and directory, what File finds
+// in its directory and outside it, reads a file by an app: URL and one
+// outside by its file: URL, connects a socket to the port its argument
+// names, unasked, and names its window's title.
+const airSource = `package {
+  import flash.desktop.NativeApplication;
+  import flash.display.Sprite;
+  import flash.events.*;
+  import flash.filesystem.File;
+  import flash.net.*;
+  import flash.system.Security;
+  public class AirSmoke extends Sprite {
+    private var socket:Socket;
+    public function AirSmoke() {
+      trace("air: url " + loaderInfo.url);
+      trace("air: sandbox " + Security.sandboxType);
+      trace("air: title " + stage.nativeWindow.title);
+      NativeApplication.nativeApplication.addEventListener(InvokeEvent.INVOKE, function (e:InvokeEvent):void {
+        trace("air: invoke " + e.arguments.join("|") + " " + e.currentDirectory.exists);
+        // app:/ has no parent, as adl's: up from its native path, under file:.
+        var outside:File = new File(File.applicationDirectory.nativePath).parent.resolvePath("air-outside.txt");
+        trace("air: files " + File.applicationDirectory.resolvePath("data.txt").exists + " " + outside.exists + " " + outside.url.indexOf("file:///"));
+        load("app", "data.txt");
+        load("file", outside.url);
+        socket = new Socket();
+        socket.addEventListener(Event.CONNECT, function (e:Event):void {
+          socket.writeUTFBytes("ping");
+          socket.flush();
+        });
+        socket.addEventListener(ProgressEvent.SOCKET_DATA, function (e:ProgressEvent):void {
+          trace("air: socket " + socket.readUTFBytes(socket.bytesAvailable));
+        });
+        socket.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
+          trace("air: socket refused");
+        });
+        socket.connect("127.0.0.1", int(e.arguments[0]));
+      });
+    }
+    private function load(label:String, url:String):void {
+      var loader:URLLoader = new URLLoader();
+      loader.addEventListener(Event.COMPLETE, function (e:Event):void {
+        trace("air: " + label + " " + loader.data);
+      });
+      loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
+        trace("air: " + label + " refused");
+      });
+      loader.load(new URLRequest(url));
+    }
+  }
+}`;
+
 // A remote SWF: it names its URL and sandbox, reads its own origin, two
 // others and two local files, as its query names them, and connects two
 // sockets, one to a server with a socket policy and one without.
@@ -140,7 +192,12 @@ const remoteSource = `package {
 const libraries = `${out}libraries/`;
 libraryAbcs(libraries);
 const abcs = compileScripts(
-  [{ name: "DesktopSmoke", source }, { name: "RemoteSmoke", source: remoteSource }, "WorkerMutex"],
+  [
+    { name: "DesktopSmoke", source },
+    { name: "RemoteSmoke", source: remoteSource },
+    { name: "AirSmoke", source: airSource },
+    "WorkerMutex",
+  ],
   out,
 );
 const abc = abcs.get("DesktopSmoke");
@@ -375,6 +432,70 @@ const screen = await display();
 const withApp = (settings: object, args: string[], run: Parameters<typeof runApp>[3]) =>
   runApp(screen.env, settings, args, run);
 
+/**
+ * An AIR application, its descriptor and content SWF in a directory of
+ * their own, run adl's way with the socket server's port after "--": it
+ * reads what Flash's local sandboxes refuse, and connects unasked.
+ */
+async function air(): Promise<void> {
+  const app = `${out}air-app/`;
+  rmSync(app, { recursive: true, force: true });
+  mkdirSync(app, { recursive: true });
+  writeFileSync(`${app}data.txt`, "beside");
+  writeFileSync(`${out}air-outside.txt`, "outside");
+  writeFileSync(
+    `${app}AirSmoke-app.xml`,
+    `<?xml version="1.0" encoding="utf-8" ?>
+<application xmlns="http://ns.adobe.com/air/application/51.3">
+  <id>org.swf2es.smoke</id>
+  <filename>AirSmoke</filename>
+  <versionNumber>1.0</versionNumber>
+  <initialWindow><content>AirSmoke.swf</content><title>Air Smoke</title><width>320</width><height>200</height></initialWindow>
+</application>`,
+  );
+  writeFileSync(
+    `${app}AirSmoke.swf`,
+    w.swf({
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        w.doAbc(abcs.get("AirSmoke") as Uint8Array, "AirSmoke"),
+        w.symbolClass([[0, "AirSmoke"]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+
+  // No socket allowed in the settings: an application asks no one.
+  await withApp(
+    { ...both, sockets: {} },
+    [`${app}AirSmoke-app.xml`, "--", String(port), "two words"],
+    async ({ stdout, until }) => {
+      const settled = () =>
+        ["app", "file", "socket"].every((what) =>
+          stdout.some((l) => l.startsWith(`air: ${what} `)),
+        );
+      await until("the AIR application", settled);
+      for (const line of [
+        "air: url app:/AirSmoke.swf",
+        "air: sandbox application",
+        "air: title Air Smoke",
+        `air: invoke ${port}|two words true`,
+        "air: files true true 0",
+        "air: app beside",
+        "air: file outside",
+        "air: socket pong",
+      ]) {
+        assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
+      }
+    },
+  );
+}
+
 // builtin.abc, and the playerglobal the tests play on: the app's own, or
 // Flash Player's under SWF2ES_PLAYERGLOBAL=adobe.
 const both = {
@@ -593,6 +714,7 @@ try {
   });
 
   await remote();
+  await air();
 
   console.log("desktop smoke test: ok");
 } finally {
