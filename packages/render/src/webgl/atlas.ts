@@ -32,6 +32,8 @@ export interface Place {
   indexStart: number;
   indices: number;
   glyphs: { mode: Float32Array; table: Float32Array } | null;
+  /** Its geometry's flat (GeometryData.flat). */
+  flat: boolean;
 }
 
 /**
@@ -295,6 +297,7 @@ export class GeometryAtlas {
       indexStart: this.indexTop,
       indices: indices.length,
       glyphs: null,
+      flat: data.flat === true,
     };
     this.vertexTop += count;
     this.indexTop += indices.length;
@@ -347,6 +350,7 @@ export class GeometryAtlas {
       indexStart: g.indexTop,
       indices: indices.length,
       glyphs: { mode: glyphs.mode, table: glyphs.table },
+      flat: false,
     };
     g.top += count;
     g.indexTop += indices.length;

@@ -12,6 +12,11 @@ import {
 } from "./programs.js";
 import { framebufferOf, LAYER_STEP, type Layer, type Open } from "./targets.js";
 
+/** Whether blend mode `mode` reads what is below, which GL's blending does not compute. */
+export function readsBelow(mode: number): boolean {
+  return !(mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN);
+}
+
 /** Where a compositor finds the frame's blend shaders and the textures they read. */
 export interface CompositeHost extends KernelHost {
   filters(): Filters | null;
@@ -85,120 +90,12 @@ export class Compositor {
     const kernel = given >= KERNEL ? this.useKernel(given - KERNEL) : null;
     const mode = given >= KERNEL && !kernel ? NORMAL : given;
     const state = this.state;
-    const dx = open.x - under.x;
-    const dy = open.y - under.y;
-    const flip = !under.layer;
-    const y = flip ? under.height - dy - open.height : dy;
-    const x0 = Math.max(0, dx);
-    const y0 = Math.max(0, y);
-    const width = Math.min(under.width, dx + open.width) - x0;
-    const height = Math.min(under.height, y + open.height) - y0;
-    if (width <= 0 || height <= 0) {
+    if (!this.cover(open, under) || (readsBelow(mode) && !this.copyBelow(under))) {
       return;
     }
 
-    const direct = mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN;
-    // The rectangle's corner in the target's framebuffer, where the target is a held layer's
-    // rectangle of a page (HOLD_PUSH).
-    const fx = x0 + (under.ox ?? 0);
-    const fy = y0 + (under.oy ?? 0);
-    // Where the copy of what is below has the rectangle's corner, less where the target has it.
-    let backX = 0;
-    let backY = 0;
-    if (!direct) {
-      // Out of a multisampled page, its rectangle resolved into the page's own texture first, which
-      // a blit may then copy anywhere: copied where it lies, the copy would stay as large as the
-      // page's far corner.
-      let from = framebufferOf(under);
-      const paged = under.msaa !== null && under.layer !== null && under.ox !== undefined;
-      if (paged) {
-        gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, (under.layer as Layer).framebuffer);
-        gl.blitFramebuffer(
-          fx,
-          fy,
-          fx + width,
-          fy + height,
-          fx,
-          fy,
-          fx + width,
-          fy + height,
-          gl.COLOR_BUFFER_BIT,
-          gl.NEAREST,
-        );
-        from = (under.layer as Layer).framebuffer;
-      }
-
-      // Copied from its corner, or out of a multisampled target to where it lies, as a blit
-      // resolving must keep its rectangle: then as large as the rectangle's far corner.
-      const bx = under.msaa && !paged ? fx : 0;
-      const by = under.msaa && !paged ? fy : 0;
-      backX = fx - bx;
-      backY = fy - by;
-      const right = bx + width;
-      const top = by + height;
-      if (!this.back || this.backWidth < right || this.backHeight < top) {
-        if (this.back) {
-          state.dropTexture(this.back);
-          gl.deleteTexture(this.back);
-          gl.deleteFramebuffer(this.backFramebuffer);
-          this.backFramebuffer = null;
-        }
-
-        this.back = gl.createTexture() as WebGLTexture;
-        this.backWidth = Math.max(this.backWidth, Math.ceil(right / LAYER_STEP) * LAYER_STEP);
-        this.backHeight = Math.max(this.backHeight, Math.ceil(top / LAYER_STEP) * LAYER_STEP);
-        state.bindTexture(BACK_UNIT, this.back);
-        state.activeTexture(BACK_UNIT);
-        gl.texImage2D(
-          gl.TEXTURE_2D,
-          0,
-          gl.RGBA8,
-          this.backWidth,
-          this.backHeight,
-          0,
-          gl.RGBA,
-          gl.UNSIGNED_BYTE,
-          null,
-        );
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      }
-
-      // Blitted, not copied: the canvas' colour may have no alpha, which copyTexSubImage2D into an
-      // RGBA texture refuses, where a blit fills it in.
-      // Out of a multisampled target the blit resolves the rectangle alone.
-      if (!this.backFramebuffer) {
-        this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
-        gl.framebufferTexture2D(
-          gl.DRAW_FRAMEBUFFER,
-          gl.COLOR_ATTACHMENT0,
-          gl.TEXTURE_2D,
-          this.back,
-          0,
-        );
-      } else {
-        gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
-      }
-
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
-      gl.blitFramebuffer(
-        fx,
-        fy,
-        fx + width,
-        fy + height,
-        bx,
-        by,
-        right,
-        top,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
-      // Both bindings back as the state cache has them.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, framebufferOf(under));
-    }
-
+    const { dx, dy, x0, y0, width, height, fx, fy, backX, backY } = this.place;
+    const flip = !under.layer;
     state.bindTexture(LAYER_UNIT, (open.layer as Layer).texture);
     state.bindSampler(LAYER_UNIT, null);
     state.bindSampler(BACK_UNIT, null);
@@ -255,6 +152,151 @@ export class Compositor {
     state.scissor([fx, fy, width, height]);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     state.scissor(null);
+  }
+
+  /** Where cover last found a rectangle on its target, and where copyBelow copied what is below it. */
+  readonly place = {
+    dx: 0,
+    dy: 0,
+    x0: 0,
+    y0: 0,
+    width: 0,
+    height: 0,
+    fx: 0,
+    fy: 0,
+    backX: 0,
+    backY: 0,
+  };
+
+  /**
+   * Where `rect` lies on `under`, into place: cut to `under`'s, as a
+   * filtered layer may reach past the canvas; in `under`'s framebuffer its
+   * rows run up on the canvas and down in a layer. Whether any of it does.
+   */
+  cover(rect: { x: number; y: number; width: number; height: number }, under: Open): boolean {
+    const place = this.place;
+    const dx = rect.x - under.x;
+    const dy = rect.y - under.y;
+    const y = under.layer ? dy : under.height - dy - rect.height;
+    place.dx = dx;
+    place.dy = dy;
+    place.x0 = Math.max(0, dx);
+    place.y0 = Math.max(0, y);
+    place.width = Math.min(under.width, dx + rect.width) - place.x0;
+    place.height = Math.min(under.height, y + rect.height) - place.y0;
+    // The rectangle's corner in the target's framebuffer, where the target is a held layer's
+    // rectangle of a page (HOLD_PUSH).
+    place.fx = place.x0 + (under.ox ?? 0);
+    place.fy = place.y0 + (under.oy ?? 0);
+    // Where the copy of what is below has the rectangle's corner, less where the target has it.
+    place.backX = 0;
+    place.backY = 0;
+    return place.width > 0 && place.height > 0;
+  }
+
+  /**
+   * What is below the rectangle cover found copied, for a blend that reads
+   * it: bound to BACK_UNIT, where the copy has the rectangle's corner, less
+   * where the target has it, into place, and `under`'s framebuffer bound again.
+   */
+  copyBelow(under: Open): boolean {
+    const gl = this.gl;
+    const state = this.state;
+    const { fx, fy, width, height } = this.place;
+    // Out of a multisampled page, its rectangle resolved into the page's own texture first, which
+    // a blit may then copy anywhere: copied where it lies, the copy would stay as large as the
+    // page's far corner.
+    let from = framebufferOf(under);
+    const paged = under.msaa !== null && under.layer !== null && under.ox !== undefined;
+    if (paged) {
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, (under.layer as Layer).framebuffer);
+      gl.blitFramebuffer(
+        fx,
+        fy,
+        fx + width,
+        fy + height,
+        fx,
+        fy,
+        fx + width,
+        fy + height,
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+      from = (under.layer as Layer).framebuffer;
+    }
+
+    // Copied from its corner, or out of a multisampled target to where it lies, as a blit
+    // resolving must keep its rectangle: then as large as the rectangle's far corner.
+    const bx = under.msaa && !paged ? fx : 0;
+    const by = under.msaa && !paged ? fy : 0;
+    this.place.backX = fx - bx;
+    this.place.backY = fy - by;
+    const right = bx + width;
+    const top = by + height;
+    if (!this.back || this.backWidth < right || this.backHeight < top) {
+      if (this.back) {
+        state.dropTexture(this.back);
+        gl.deleteTexture(this.back);
+        gl.deleteFramebuffer(this.backFramebuffer);
+        this.backFramebuffer = null;
+      }
+
+      this.back = gl.createTexture() as WebGLTexture;
+      this.backWidth = Math.max(this.backWidth, Math.ceil(right / LAYER_STEP) * LAYER_STEP);
+      this.backHeight = Math.max(this.backHeight, Math.ceil(top / LAYER_STEP) * LAYER_STEP);
+      state.bindTexture(BACK_UNIT, this.back);
+      state.activeTexture(BACK_UNIT);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        this.backWidth,
+        this.backHeight,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    }
+
+    // Blitted, not copied: the canvas' colour may have no alpha, which copyTexSubImage2D into an
+    // RGBA texture refuses, where a blit fills it in.
+    // Out of a multisampled target the blit resolves the rectangle alone.
+    if (!this.backFramebuffer) {
+      this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
+      gl.framebufferTexture2D(
+        gl.DRAW_FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT0,
+        gl.TEXTURE_2D,
+        this.back,
+        0,
+      );
+    } else {
+      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
+    }
+
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
+    gl.blitFramebuffer(
+      fx,
+      fy,
+      fx + width,
+      fy + height,
+      bx,
+      by,
+      right,
+      top,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    // Both bindings back as the state cache has them.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, framebufferOf(under));
+    state.bindTexture(BACK_UNIT, this.back);
+    state.bindSampler(BACK_UNIT, null);
+    return true;
   }
 
   /**

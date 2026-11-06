@@ -39,6 +39,12 @@ export interface GeometryData {
    */
   glyphs?: { vertices: Float32Array; mode: Float32Array; table: Float32Array };
   indices: Uint32Array;
+  /**
+   * No part of it over another: a bitmap's quad, or one fill's triangles.
+   * Alone in a blend mode's layer, such a geometry is drawn straight onto
+   * what is below it, as blending it pixel by pixel blends each pixel once.
+   */
+  flat?: boolean;
 }
 
 /**

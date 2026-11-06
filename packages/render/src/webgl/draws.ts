@@ -3,12 +3,14 @@ import { type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import { FILL_SHADER, type Filters } from "../filters.js";
 import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
 import {
+  ADD,
   CLAMP,
   DRAW,
   MESH,
   MIRROR,
   PLANE,
   REPEAT,
+  SCREEN,
   type SceneList,
   SHADED,
   SMOOTH,
@@ -18,6 +20,8 @@ import type { GeometryAtlas, Place } from "./atlas.js";
 import type { GpuTextures } from "./gpu-textures.js";
 import type { KernelHost, KernelPrograms } from "./kernels.js";
 import {
+  BACK_UNIT,
+  blendFillFragment,
   FILL_SLOT,
   FILL_TEXTURES,
   FILL_UNIT,
@@ -82,6 +86,19 @@ export class Draws {
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
   private fillUnitLocation: WebGLUniformLocation | null = null;
+  /**
+   * The fill program that blends a fill straight onto what is below it
+   * (drawBlended), a draw a call, and where it takes what the fill program
+   * does and the blend's mode, its layer's row and where the copy of what
+   * is below lies.
+   */
+  private blendProgram!: WebGLProgram;
+  private blendRowLocation: WebGLUniformLocation | null = null;
+  private blendViewLocation: WebGLUniformLocation | null = null;
+  private blendUnitLocation: WebGLUniformLocation | null = null;
+  private blendModeLocation: WebGLUniformLocation | null = null;
+  private blendLayerRowLocation: WebGLUniformLocation | null = null;
+  private blendBackLocation: WebGLUniformLocation | null = null;
   /** WEBGL_multi_draw, which draws a run of fills alike a call (drawEntries), where there is. */
   private multi: MultiDraw | null = null;
   /** Avoid the dynamically indexed uniform table used in the Intel GPU hang reproducer. */
@@ -208,6 +225,20 @@ export class Draws {
     }
 
     this.fillUnitLocation = gl.getUniformLocation(this.program, "uUnit");
+    this.blendProgram = linkProgram(gl, fillVertex(false), blendFillFragment);
+    this.blendRowLocation = gl.getUniformLocation(this.blendProgram, "uRow");
+    this.blendViewLocation = gl.getUniformLocation(this.blendProgram, "uView");
+    this.blendUnitLocation = gl.getUniformLocation(this.blendProgram, "uUnit");
+    this.blendModeLocation = gl.getUniformLocation(this.blendProgram, "uMode");
+    this.blendLayerRowLocation = gl.getUniformLocation(this.blendProgram, "uLayerRow");
+    this.blendBackLocation = gl.getUniformLocation(this.blendProgram, "uBackOffset");
+    this.state.useProgram(this.blendProgram);
+    gl.uniform1i(gl.getUniformLocation(this.blendProgram, "uRows"), 0);
+    gl.uniform1i(gl.getUniformLocation(this.blendProgram, "uBack"), BACK_UNIT);
+    gl.uniform1iv(
+      gl.getUniformLocation(this.blendProgram, "uTextures"),
+      Array.from({ length: FILL_TEXTURES }, (_, k) => FILL_UNIT + k),
+    );
     this.mesh = linkProgram(gl, meshVertex, meshFragment);
     this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
     this.meshViewLocation = gl.getUniformLocation(this.mesh, "uView");
@@ -413,6 +444,75 @@ export class Draws {
     this.useFill();
     this.state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     this.drawEntries(scene, first, end, false, command);
+  }
+
+  /**
+   * Whether entry `i` is a flat fill (GeometryData.flat), a bitmap's quad or
+   * one fill of a shape, of no mesh, shader fill or text, whose texture, if
+   * it samples one, is there. Drawn straight onto what is below in a blend
+   * mode, it is as its layer would be composited, as no part of it is over
+   * another.
+   */
+  blendable(scene: SceneList, i: number): boolean {
+    if (scene.kind[i] !== DRAW || scene.sampler[i] & (MESH | PLANE | SHADED)) {
+      return false;
+    }
+
+    const place = this.atlas.places[scene.geometry[i]];
+    const id = scene.texture[i];
+    return !!place && place.flat && !place.glyphs && (id < 0 || !!this.gpu.textures[id]);
+  }
+
+  /**
+   * Entry `i`, blendable, drawn onto the target bound in blend mode `mode`,
+   * coloured by its layer's row `layerRow` (or -1), where the masks pushed
+   * pass: GL's blending computing add and screen, the program the rest
+   * from the copy of what is below (Compositor.copyBelow), whose texel at a
+   * fragment is (`backX`, `backY`) short of it.
+   */
+  drawBlended(
+    scene: SceneList,
+    i: number,
+    mode: number,
+    layerRow: number,
+    backX: number,
+    backY: number,
+  ): void {
+    const gl = this.gl;
+    const state = this.state;
+    state.useProgram(this.blendProgram);
+    state.bindVertexArray(this.atlas.vertexArray);
+    state.bindTexture(0, this.gpu.rowsTexture);
+    gl.uniform4fv(this.blendViewLocation, this.view);
+    gl.uniform1f(this.blendUnitLocation, this.unit);
+    gl.uniform1i(this.blendModeLocation, mode);
+    gl.uniform1i(this.blendLayerRowLocation, layerRow);
+    gl.uniform2i(this.blendBackLocation, backX, backY);
+    this.gatherRun(scene, i, i + 1, false);
+    if (this.runCount === 0) {
+      return;
+    }
+
+    for (let k = 0; k < FILL_TEXTURES; k++) {
+      if (this.runUnits & (1 << k)) {
+        state.bindTexture(FILL_UNIT + k, this.gpu.textures[this.unitIds[k]] as WebGLTexture);
+        state.bindSampler(FILL_UNIT + k, this.gpu.sampler(this.unitSampling[k]));
+      }
+    }
+
+    gl.uniform1i(this.blendRowLocation, this.runRows[0]);
+    switch (mode) {
+      case ADD:
+        state.setBlend(gl.ONE, gl.ONE);
+        break;
+      case SCREEN:
+        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
+        break;
+      default:
+        state.setBlend(null);
+    }
+
+    gl.drawElements(gl.TRIANGLES, this.runCounts[0], gl.UNSIGNED_INT, this.runOffsets[0]);
   }
 
   /**

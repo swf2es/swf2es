@@ -17,10 +17,22 @@ import type { Filters } from "../filters.js";
 import type { Geometries } from "../geometry.js";
 import type { Keeps } from "../keeps.js";
 import type { Rows } from "../rows.js";
-import type { SceneList } from "../scene.js";
+import {
+  ADD,
+  DARKEN,
+  DIFFERENCE,
+  HARDLIGHT,
+  INVERT,
+  LIGHTEN,
+  MULTIPLY,
+  NORMAL,
+  OVERLAY,
+  SCREEN,
+  type SceneList,
+} from "../scene.js";
 import type { Textures } from "../textures.js";
 import { GeometryAtlas } from "./atlas.js";
-import { Compositor } from "./composite.js";
+import { Compositor, readsBelow } from "./composite.js";
 import { Draws, type Masks } from "./draws.js";
 import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
@@ -30,6 +42,24 @@ import { Stage } from "./stage.js";
 import { type Layer, type Open, objectOf, type Target, TargetPool } from "./targets.js";
 
 export type { Target } from "./targets.js";
+
+/** The blend modes a flat fill may be drawn in straight onto what is below (blendDirect). */
+function direct(mode: number): boolean {
+  switch (mode) {
+    case ADD:
+    case SCREEN:
+    case MULTIPLY:
+    case LIGHTEN:
+    case DARKEN:
+    case DIFFERENCE:
+    case OVERLAY:
+    case HARDLIGHT:
+    case INVERT:
+      return true;
+    default:
+      return false;
+  }
+}
 
 /**
  * Executes a frame's commands on a WebGL 2 context it owns, through one
@@ -69,6 +99,8 @@ export class WebGLBackend {
   samples = 1;
   /** The masks pushed on the target drawn into now (execute). */
   private readonly masks: Masks = { depth: 0, past: 0 };
+  /** A layer's rectangle, as blendDirect reads it. */
+  private readonly rect = { x: 0, y: 0, width: 0, height: 0 };
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
 
@@ -274,6 +306,12 @@ export class WebGLBackend {
           break;
 
         case LAYER_PUSH: {
+          if (this.blendDirect(commands, k, scene, canvas)) {
+            // Its run and its pop with it.
+            k += 2;
+            break;
+          }
+
           below.push(masks.depth, masks.past);
           masks.depth = 0;
           masks.past = 0;
@@ -547,5 +585,67 @@ export class WebGLBackend {
     this.stage.destroy();
     this.gpu.destroy();
     this.state.forget();
+  }
+
+  /**
+   * The layer pushed at command `k` drawn straight onto the target below,
+   * if it may be: unfiltered and not kept, one run of a flat fill alone
+   * (Draws.blendable) drawn normally in it, and a mode whose blend of the
+   * fill pixel by pixel, its edges covering the pixels in part, is that
+   * of the layer's pixels covered alike, as each is linear in what covers it
+   * (add short of its sums' clamp); its colour on the quad's. A layer and its
+   * resolve and composite left out, what reads what is below copies it as
+   * the composite would. Whether it was.
+   */
+  private blendDirect(commands: Commands, k: number, scene: SceneList, canvas: Open): boolean {
+    const ops = commands.ops;
+    const at = k * 4;
+    const run = at + 4;
+    const pop = at + 8;
+    if (
+      k + 2 >= commands.length ||
+      ops[at + 2] !== 0 ||
+      ops[run] !== RUN ||
+      ops[run + 2] !== 1 ||
+      ops[run + 3] !== NORMAL ||
+      ops[pop] !== LAYER_POP ||
+      ops[pop + 3] >= 0 ||
+      !direct(ops[pop + 1]) ||
+      !this.draws.blendable(scene, ops[run + 1])
+    ) {
+      return false;
+    }
+
+    const p = commands.params;
+    const from = ops[at + 1];
+    const under = this.layers.at(-1) ?? canvas;
+    const rect = this.rect;
+    rect.x = p[from];
+    rect.y = p[from + 1];
+    rect.width = p[from + 2];
+    rect.height = p[from + 3];
+    const mode = ops[pop + 1];
+    const compositor = this.compositor;
+    if (!compositor.cover(rect, under)) {
+      return true;
+    }
+
+    // Drawn into already, as a kept output is composited (COMPOSITE); a copy of what is below
+    // binds its framebuffer back.
+    const back = readsBelow(mode) && compositor.copyBelow(under);
+    this.draws.maskBy(this.masks);
+    const place = compositor.place;
+    // Kept to the layer's rectangle, as the composite is, past which nothing below is copied.
+    this.state.scissor([place.fx, place.fy, place.width, place.height]);
+    this.draws.drawBlended(
+      scene,
+      ops[run + 1],
+      mode,
+      ops[pop + 2],
+      back ? place.backX : 0,
+      back ? place.backY : 0,
+    );
+    this.state.scissor(null);
+    return true;
   }
 }
