@@ -218,8 +218,12 @@ export class Runtime {
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
   readonly functionTraits: Traits;
-  /** Method closures, by receiver, so that o.f === o.f. */
-  private readonly closures = new WeakMap<object, Map<number, AsObject>>();
+  /**
+   * Method closures, by receiver and method, so that o.f === o.f; by the
+   * method, not its dispatch id, which an override shares with the method
+   * super.f names, a closure of its own.
+   */
+  private readonly closures = new WeakMap<object, Map<Method, AsObject>>();
   private readonly builtinTraitsByName = new Map<string, Traits>();
   /** The primitives' traits, once a lookup has needed them, for the caches (receiverTraits). */
   private stringTraits: Traits | undefined = undefined;
@@ -1217,16 +1221,16 @@ export class Runtime {
 
   /** Method `id` of `o` bound to it, the same function each time. */
   methodClosure(o: Value, traits: Traits, id: number): AsObject {
+    const method: Method = traits.proto[methodKey(id)];
     const key = typeof o === "object" ? o : traits.proto;
-    let byId = this.closures.get(key);
-    if (!byId) {
-      byId = new Map();
-      this.closures.set(key, byId);
+    let byMethod = this.closures.get(key);
+    if (!byMethod) {
+      byMethod = new Map();
+      this.closures.set(key, byMethod);
     }
 
-    let f = typeof o === "object" ? byId.get(id) : undefined;
+    let f = typeof o === "object" ? byMethod.get(method) : undefined;
     if (!f) {
-      const method: Method = traits.proto[methodKey(id)];
       f = this.newFunctionObject(
         (method as CountedMethod).$min === undefined
           ? (...args: Value[]) => {
@@ -1244,7 +1248,7 @@ export class Runtime {
       f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
       if (typeof o === "object") {
-        byId.set(id, f);
+        byMethod.set(method, f);
       }
     }
 
