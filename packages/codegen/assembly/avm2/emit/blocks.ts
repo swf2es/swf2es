@@ -117,6 +117,23 @@ export function blockBody(em: MethodEmitter, k: u32): void {
       copyFor(em, ir.a[i], frame);
     }
 
+    // A swap of two values neither of which is written yet, copies or
+    // held texts, swaps what the registers stand for and writes nothing.
+    // Not with float's raw values, which a branch boxes by register.
+    if (op === ops.OP_swap && !em.abc.hasFloatSupport && em.pendingNull < 0) {
+      // Where one is written, it is written to the other register: a
+      // text that reads that register is written first.
+      const x = ir.src[i];
+      if (virtual(em, x) !== virtual(em, x + 1)) {
+        em.clobber(virtual(em, x) ? x : x + 1, -1, -1);
+      }
+
+      if (virtual(em, x) || virtual(em, x + 1)) {
+        swapVirtual(em, x);
+        continue;
+      }
+    }
+
     // A value the next instruction only moves to a local or scope goes
     // there straight, if the instruction assigns it; one it duplicates to
     // set a local goes to the local, and stays on the stack as its copy.
@@ -330,6 +347,67 @@ export function blockBody(em: MethodEmitter, k: u32): void {
 
   // What is held after a return or throw, nothing reads.
   em.drop(0);
+}
+
+/** Whether register r stands for a value not written to it: a copy, or a held text. */
+function virtual(em: MethodEmitter, r: i32): bool {
+  return em.copyOf[r] !== NONE || em.held[r] !== 0;
+}
+
+/**
+ * Swap registers x and x + 1, one or both virtual: what each stands for,
+ * and its type. A value written moves to the other register, which then
+ * holds it as written.
+ */
+function swapVirtual(em: MethodEmitter, x: i32): void {
+  const y = x + 1;
+  const out = em.out;
+  // A dup's copy below its original: the same value either way round.
+  if (em.copyOf[y] === x) {
+    const type = em.regType[x];
+    em.regType[x] = em.regType[y];
+    em.regType[y] = type;
+    return;
+  }
+
+  if (!virtual(em, x) || !virtual(em, y)) {
+    const to = virtual(em, x) ? x : y;
+    em.regName(to);
+    out.text(" = ");
+    em.regName(to === x ? y : x);
+    out.text(";\n");
+  }
+
+  const cx = em.copyOf[x];
+  em.setCopy(x, em.copyOf[y]);
+  em.setCopy(y, cx);
+
+  const held = em.held[x];
+  em.held[x] = em.held[y];
+  em.held[y] = held;
+  const at = em.heldAt[x];
+  em.heldAt[x] = em.heldAt[y];
+  em.heldAt[y] = at;
+  const end = em.heldEnd[x];
+  em.heldEnd[x] = em.heldEnd[y];
+  em.heldEnd[y] = end;
+  const low = em.heldLow[x];
+  em.heldLow[x] = em.heldLow[y];
+  em.heldLow[y] = low;
+  const high = em.heldHigh[x];
+  em.heldHigh[x] = em.heldHigh[y];
+  em.heldHigh[y] = high;
+  if (em.held[y]) {
+    em.heldTop = max(em.heldTop, y + 1);
+  }
+
+  const type = em.regType[x];
+  em.regType[x] = em.regType[y];
+  em.regType[y] = type;
+  em.promoted[x] = 0;
+  em.promoted[y] = 0;
+  em.checked[x] = 0;
+  em.checked[y] = 0;
 }
 
 /**
