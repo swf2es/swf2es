@@ -544,14 +544,10 @@ vec3 hardlight(vec3 cb, vec3 cf) {
 /**
  * A layer composited onto what is below over its rectangle, pixel for
  * pixel: its rows run down, as the filters read them, and the target's up
- * where it is the canvas (uFlip), from uOffset in its framebuffer; what is
- * below copied with the rectangle's corner uBackOffset short of where it
- * lies. Coloured by its
- * row's colour transform where it has one (uRow not -1), on its straight
- * colour where it covers anything; then blended by its mode. Normal, layer,
- * add and screen are left to GL's blending; the rest read what is below
- * (uBack, a copy of it) and give the whole result: the separable modes blend straight
- * colours and composite source over, the others have formulas of their own.
+ * where it is the canvas (uFlip), from uOffset in its framebuffer. Coloured
+ * by its row's colour transform where it has one (uRow not -1), on its
+ * straight colour where it covers anything; then blended by its mode
+ * (BLEND_FRONT).
  */
 export const compositeFragment = `#version 300 es
 precision highp float;
@@ -576,9 +572,9 @@ ${BLEND_FRONT}}
 
 /**
  * A fill drawn straight onto what is below it in a blend mode, where its
- * layer would hold it alone (a flat fill, GeometryData.flat): its pixel as fillFragment
- * has it, then as compositeFragment composites its layer's, coloured by the
- * layer's row (uLayerRow, -1 for none) and blended by uMode.
+ * layer would hold it alone (a flat fill, GeometryData.flat): its pixel as
+ * fillFragment has it, then as compositeFragment composites its layer's,
+ * coloured by the layer's row (uLayerRow, -1 for none) and blended by uMode.
  */
 export const blendFillFragment = `#version 300 es
 precision highp float;
