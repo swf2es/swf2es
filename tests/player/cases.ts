@@ -10008,6 +10008,22 @@ export const cases: PlayerCase[] = [
     maxOutliers: 640,
   },
   {
+    // A fill's edges as Flash covers them at high quality, at 1 and 3 times
+    // (scripts/EdgeCoverage.as): curves, sharp corners, a sliver, a
+    // translucent fill, and abutting fills within a Shape and across two,
+    // without a seam either way. Each rasteriser shades its edge pixels its
+    // own way: with SwiftShader's 4 samples some 780 are off Flash's 16 levels
+    // by more than 16.
+    name: "edge-coverage",
+    swf: (abc) => bare(abc, 1, "EdgeCoverage", 400, 240),
+    script: "EdgeCoverage",
+    frames: 1,
+    capture: [1],
+    quality: "high",
+    tolerance: 16,
+    maxOutliers: 900,
+  },
+  {
     name: "addChild",
     swf: added,
     script: "AddChild",
