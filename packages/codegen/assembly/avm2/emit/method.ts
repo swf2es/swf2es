@@ -74,6 +74,9 @@ export function isConstructor(em: MethodEmitter, m: u32): bool {
 export const MAX_NESTING: u32 = 500;
 /** The length of the end of a reset, ` = void 0;\n`. */
 const RESET_END: u32 = 11;
+/** The longest text a register holds, and all of them together, in bytes. */
+const MAX_HELD: u32 = 1024;
+const MAX_HELD_TEXT: u32 = 1 << 20;
 
 @final
 export class MethodEmitter {
@@ -215,6 +218,16 @@ export class MethodEmitter {
     for (let r: u32 = 0; r < ir.frameSize; r++) {
       this.copyOf[r] = NONE;
     }
+
+    if (<u32>this.held.length < ir.frameSize) {
+      this.held = new StaticArray<u8>(ir.frameSize);
+      this.heldAt = new StaticArray<u32>(ir.frameSize);
+      this.heldEnd = new StaticArray<u32>(ir.frameSize);
+      this.heldLow = new StaticArray<i32>(ir.frameSize);
+      this.heldHigh = new StaticArray<i32>(ir.frameSize);
+    }
+
+    this.drop(0);
 
     this.recount();
     if (<u32>this.checked.length < ir.frameSize) {
@@ -597,6 +610,12 @@ export class MethodEmitter {
   /** What a copy reads: a register, or the constant instruction `CONSTANT - copy` pushed. */
   copied(copy: i32, boxed: bool = true): void {
     if (copy >= 0) {
+      if (this.held[copy]) {
+        this.inline(copy);
+        return;
+      }
+
+      this.readsAt(copy, copy);
       const wrap = boxed && (this.unboxedLocal(copy) || this.rawFloat[copy] !== 0);
       if (wrap) {
         this.out.text("rt.float(");
@@ -674,6 +693,7 @@ export class MethodEmitter {
 
   /** Forget every copy from register `from` up: none is needed. */
   uncopy(from: i32): void {
+    this.drop(from);
     this.clearRaw(from);
     const top = min(this.copyTop, <i32>this.ir.frameSize);
     for (let r = from; r < top; r++) {
@@ -1025,6 +1045,176 @@ export class MethodEmitter {
   resetEnd: i32 = -1;
   resetMarks: i32 = 0;
   resets: bool = false;
+
+  // Folding (see blocks.ts): a stack register whose value is a pure
+  // expression, one that can neither throw nor be seen, holds its text
+  // instead of being written, and the instruction that reads it reads the
+  // text in its place, so that `s0 = l1 + 4; l2 = rt.view.getInt32(s0 | 0,
+  // true);` is one statement. Its text reads registers, never the heap, so
+  // it has the same value wherever it is read until one of those is
+  // written: before that, and before a branch, it is written to its
+  // register after all.
+
+  /** By register: whether it holds its value's text, which is heldText[heldAt .. heldEnd]. */
+  held: StaticArray<u8> = new StaticArray<u8>(0);
+  heldAt: StaticArray<u32> = new StaticArray<u32>(0);
+  heldEnd: StaticArray<u32> = new StaticArray<u32>(0);
+  /** The registers a held text reads, heldLow .. heldHigh, low > high for none. */
+  heldLow: StaticArray<i32> = new StaticArray<i32>(0);
+  heldHigh: StaticArray<i32> = new StaticArray<i32>(0);
+  heldCount: u32 = 0;
+  /** A register from which up none is held. */
+  heldTop: i32 = 0;
+  /** The held texts. */
+  heldText: Output = new Output();
+  /** The registers the instruction being written reads, low > high for none. */
+  readLow: i32 = i32.MAX_VALUE;
+  readHigh: i32 = -1;
+
+  /** Note that what is being written reads registers low .. high. */
+  readsAt(low: i32, high: i32): void {
+    if (low > high) {
+      return;
+    }
+
+    this.readLow = min(this.readLow, low);
+    this.readHigh = max(this.readHigh, high);
+  }
+
+  /** Register r's held text, read where it is written, in parentheses; r holds it no more. */
+  inline(r: i32): void {
+    const out = this.out;
+    this.held[r] = 0;
+    this.heldCount--;
+    this.readsAt(this.heldLow[r], this.heldHigh[r]);
+    out.byte(0x28); // (
+    out.append(this.heldText, this.heldAt[r], this.heldEnd[r] - this.heldAt[r]);
+    out.byte(0x29); // )
+  }
+
+  /**
+   * Register r to hold the text instruction i wrote to the output from
+   * `start`, `r = text;\n`, which is taken out; false if what it wrote is
+   * not that one assignment, as written.
+   */
+  hold(r: i32, start: u32): bool {
+    const out = this.out;
+    const bytes = out.bytes;
+    const end = out.length;
+    // `s`, its number, ` = `, at least a byte, `;\n`.
+    let at = start;
+    if (end < at + 7 || bytes[at] !== 0x73) {
+      return false;
+    }
+
+    at++;
+    let n: u32 = 0;
+    while (at < end && bytes[at] >= 0x30 && bytes[at] <= 0x39) {
+      n = n * 10 + (bytes[at++] - 0x30);
+      if (n > <u32>this.ir.frameSize) {
+        return false;
+      }
+    }
+
+    if (
+      <i32>(n + this.ir.localCount + this.ir.maxScope) !== r ||
+      at + 6 > end ||
+      bytes[at] !== 0x20 ||
+      bytes[at + 1] !== 0x3d ||
+      bytes[at + 2] !== 0x20 ||
+      bytes[end - 2] !== 0x3b ||
+      bytes[end - 1] !== 0x0a
+    ) {
+      return false;
+    }
+
+    at += 3;
+    // One statement on one line, of no more than a few lines' text: a long
+    // one would be copied again by each that reads it.
+    const length = end - 2 - at;
+    if (length > MAX_HELD || this.heldText.length + length > MAX_HELD_TEXT) {
+      return false;
+    }
+
+    for (let k = at; k < end - 1; k++) {
+      if (bytes[k] === 0x0a) {
+        return false;
+      }
+    }
+
+    if (this.heldCount === 0) {
+      this.heldText.length = 0;
+    }
+
+    this.heldAt[r] = this.heldText.length;
+    this.heldText.append(out, at, length);
+    this.heldEnd[r] = this.heldText.length;
+    this.heldLow[r] = this.readLow;
+    this.heldHigh[r] = this.readHigh;
+    this.held[r] = 1;
+    this.heldCount++;
+    this.heldTop = max(this.heldTop, r + 1);
+    out.length = start;
+    return true;
+  }
+
+  /** Write register r's held text to it, `r = text;`, first writing what holds a text that reads r. */
+  release(r: i32): void {
+    if (!this.held[r]) {
+      return;
+    }
+
+    this.held[r] = 0;
+    this.heldCount--;
+    this.clobber(r, -1, -1);
+    const out = this.out;
+    this.regName(r);
+    out.text(" = ");
+    out.append(this.heldText, this.heldAt[r], this.heldEnd[r] - this.heldAt[r]);
+    out.text(";\n");
+    this.checked[r] = 0;
+  }
+
+  /** Before register w is written: write each held text that reads it, but those of registers from .. to - 1. */
+  clobber(w: i32, from: i32, to: i32): void {
+    if (this.heldCount === 0) {
+      return;
+    }
+
+    for (let r = <i32>this.ir.localCount; r < this.heldTop; r++) {
+      if (this.held[r] && (r < from || r >= to) && this.heldLow[r] <= w && w <= this.heldHigh[r]) {
+        this.release(r);
+      }
+    }
+  }
+
+  /** Write every held text, but those of registers from .. to - 1. */
+  releaseAll(from: i32, to: i32): void {
+    for (let r = <i32>this.ir.localCount; r < this.heldTop; r++) {
+      if (r < from || r >= to) {
+        this.release(r);
+      }
+    }
+  }
+
+  /** Forget register r's held text, a value no instruction reads. */
+  forget(r: i32): void {
+    if (this.held[r]) {
+      this.held[r] = 0;
+      this.heldCount--;
+    }
+  }
+
+  /** Forget the texts held from register `from` up, values no instruction reads. */
+  drop(from: i32): void {
+    for (let r = max(from, 0); r < this.heldTop; r++) {
+      this.forget(r);
+    }
+
+    if (from < this.heldTop) {
+      this.heldTop = max(from, 0);
+    }
+  }
 
   /**
    * `r = void 0`, as a kill or popscope leaves a register; one right after

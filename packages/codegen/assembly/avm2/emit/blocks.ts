@@ -5,13 +5,21 @@
 // not know (see copies.ts).
 
 import * as ops from "../abc/opcodes";
-import { IR_CheckNull, IR_Coerce } from "../ir/ir";
-import { NONE, setsLocal } from "./copies";
+import {
+  IR_CallInterface,
+  IR_CallSetter,
+  IR_CallSuper,
+  IR_CheckNull,
+  IR_Coerce,
+  IR_Nip,
+} from "../ir/ir";
+import { BUILTIN_Boolean, BUILTIN_Int, BUILTIN_Number, BUILTIN_Uint } from "../link/traits";
+import { getsLocal, NONE, pushesConstant, setsLocal } from "./copies";
 import { regionOf } from "./handlers";
 import { instruction } from "./instructions";
 import { MethodEmitter } from "./method";
 import { conditional, enclosed, terminates } from "./structure";
-import { conversionType, keeps } from "./values";
+import { conversionType, isNumeric, keeps } from "./values";
 
 /** Write block k: its case label, then its instructions, following register types. */
 export function block(em: MethodEmitter, k: u32): void {
@@ -67,6 +75,7 @@ export function blockBody(em: MethodEmitter, k: u32): void {
   }
 
   em.inPlace = false;
+  em.drop(0);
   em.pendingNull = -1;
   em.file = em.blockFile[k];
   em.line = em.blockLine[k];
@@ -177,12 +186,44 @@ export function blockBody(em: MethodEmitter, k: u32): void {
       }
     }
 
+    if (em.heldCount) {
+      releaseFor(em, i);
+    }
+
+    // A pure value on the stack is held, not written, for what reads it:
+    // not a float, which may stay raw (MethodEmitter.rawFloat).
+    const holds =
+      dst >= stack &&
+      em.target < 0 &&
+      em.pendingNull < 0 &&
+      ir.type[i] !== em.domain.floatType &&
+      pureValue(em, i);
+    const start = out.length;
+    const marks = em.map.count;
+    em.readLow = i32.MAX_VALUE;
+    em.readHigh = -1;
+
     // A branch's own target, written in place, sinks its own values: only
     // an instruction given a local here can have assigned it.
     const sinking = em.target;
     em.kept = false;
     em.sunk = false;
     instruction(em, i);
+    if (!em.kept && dst >= stack) {
+      if (
+        holds &&
+        !em.rawResult &&
+        !em.unboxResult &&
+        em.map.count === marks &&
+        em.pendingNull < 0 &&
+        em.hold(dst, start)
+      ) {
+        // Held: written nowhere.
+      } else {
+        // A value nothing read, overwritten.
+        em.forget(dst);
+      }
+    }
     if (em.pendingNull >= 0 && i >= em.pendingUntil) {
       em.unpend();
     }
@@ -282,8 +323,275 @@ export function blockBody(em: MethodEmitter, k: u32): void {
   }
 
   if (!terminates(em, k) && k + 1 < ir.blockCount) {
+    em.releaseAll(-1, -1);
     boxRaw(em, <i32>ir.frameSize);
     copyFor(em, k + 1, <i32>ir.frameSize);
+  }
+
+  // What is held after a return or throw, nothing reads.
+  em.drop(0);
+}
+
+/**
+ * Before instruction i: write the held texts it cannot read in place, its
+ * own operands' but those it reads each once as a value (heldFrom); all
+ * others too if it branches, as its target reads registers; else those
+ * that read a register it writes.
+ */
+function releaseFor(em: MethodEmitter, i: u32): void {
+  const ir = em.ir;
+  const op = ir.op[i];
+  const dst = ir.dst[i];
+  const stack = <i32>(ir.localCount + ir.maxScope);
+  const src = ir.src[i];
+  const count = <i32>ir.srcCount[i];
+  let from = -1;
+  let to = -1;
+  if (src >= 0 && count > 0) {
+    from = heldFrom(em, i);
+    to = src + count;
+    for (let r = src; r < from; r++) {
+      em.release(r);
+    }
+  }
+
+  if (conditional(op) || op === ops.OP_jump || op === ops.OP_lookupswitch) {
+    em.releaseAll(from, to);
+    return;
+  }
+
+  if (dst >= 0 && !(dst >= stack && copiesOnly(op))) {
+    em.clobber(dst, from, to);
+  }
+
+  if (em.target >= 0) {
+    em.clobber(em.target, from, to);
+  }
+
+  if (op === ops.OP_hasnext2) {
+    em.clobber(<i32>ir.a[i], from, to);
+    em.clobber(<i32>ir.b[i], from, to);
+  } else if (op === ops.OP_popscope) {
+    em.clobber(src, from, to);
+  }
+}
+
+/** Whether op only makes its stack register a copy, which writes it only when a copy is written (writeCopy). */
+function copiesOnly(op: u16): bool {
+  return (
+    pushesConstant(op) ||
+    getsLocal(op) ||
+    op === ops.OP_dup ||
+    op === ops.OP_getscopeobject ||
+    op === IR_Nip
+  );
+}
+
+/**
+ * The first of instruction i's operands from which it reads each once, as
+ * a value (MethodEmitter.reg), before it writes anything, and never by a
+ * null check: an operand held as text is read there in place. A call's
+ * arguments, not its receiver, which it may read twice; past its last
+ * operand for none.
+ */
+function heldFrom(em: MethodEmitter, i: u32): i32 {
+  const ir = em.ir;
+  const op = ir.op[i];
+  const src = ir.src[i];
+  const end = src + <i32>ir.srcCount[i];
+  if (readsHeld(op)) {
+    return src;
+  }
+
+  switch (op) {
+    case ops.OP_newarray:
+      return src;
+    case ops.OP_callmethod:
+    case IR_CallInterface:
+    case IR_CallSetter:
+    case IR_CallSuper:
+    case ops.OP_callstatic:
+    case ops.OP_construct:
+    case ops.OP_constructsuper:
+      return src + 1;
+    case ops.OP_call:
+      return src + 2;
+    case ops.OP_callproperty:
+    case ops.OP_callproplex:
+    case ops.OP_callpropvoid:
+    case ops.OP_constructprop:
+      // The receiver and the name's run-time parts, then the arguments.
+      return end - <i32>ir.b[i];
+    default:
+      return end;
+  }
+}
+
+/** Whether op reads each of its operands once, as a value (see heldFrom). */
+function readsHeld(op: u16): bool {
+  switch (op) {
+    case ops.OP_add:
+    case ops.OP_subtract:
+    case ops.OP_multiply:
+    case ops.OP_divide:
+    case ops.OP_modulo:
+    case ops.OP_add_i:
+    case ops.OP_subtract_i:
+    case ops.OP_multiply_i:
+    case ops.OP_bitand:
+    case ops.OP_bitor:
+    case ops.OP_bitxor:
+    case ops.OP_lshift:
+    case ops.OP_rshift:
+    case ops.OP_urshift:
+    case ops.OP_bitnot:
+    case ops.OP_negate:
+    case ops.OP_negate_i:
+    case ops.OP_increment:
+    case ops.OP_decrement:
+    case ops.OP_increment_i:
+    case ops.OP_decrement_i:
+    case ops.OP_not:
+    case ops.OP_typeof:
+    case ops.OP_equals:
+    case ops.OP_strictequals:
+    case ops.OP_lessthan:
+    case ops.OP_lessequals:
+    case ops.OP_greaterthan:
+    case ops.OP_greaterequals:
+    case ops.OP_convert_i:
+    case ops.OP_coerce_i:
+    case ops.OP_convert_u:
+    case ops.OP_coerce_u:
+    case ops.OP_convert_d:
+    case ops.OP_coerce_d:
+    case ops.OP_convert_b:
+    case ops.OP_coerce_b:
+    case ops.OP_convert_s:
+    case ops.OP_coerce_s:
+    case ops.OP_coerce_a:
+    case ops.OP_coerce_o:
+    case ops.OP_coerce:
+    case ops.OP_convert_o:
+    case IR_Coerce:
+    case ops.OP_setlocal:
+    case ops.OP_setlocal0:
+    case ops.OP_setlocal0 + 1:
+    case ops.OP_setlocal0 + 2:
+    case ops.OP_setlocal0 + 3:
+    case ops.OP_iftrue:
+    case ops.OP_iffalse:
+    case ops.OP_ifeq:
+    case ops.OP_ifne:
+    case ops.OP_ifstricteq:
+    case ops.OP_ifstrictne:
+    case ops.OP_iflt:
+    case ops.OP_ifle:
+    case ops.OP_ifgt:
+    case ops.OP_ifge:
+    case ops.OP_ifnlt:
+    case ops.OP_ifnle:
+    case ops.OP_ifngt:
+    case ops.OP_ifnge:
+    case ops.OP_lookupswitch:
+    case ops.OP_returnvalue:
+    case ops.OP_throw:
+    case ops.OP_pop:
+    case ops.OP_li8:
+    case ops.OP_li16:
+    case ops.OP_li32:
+    case ops.OP_lf32:
+    case ops.OP_lf64:
+    case ops.OP_si8:
+    case ops.OP_si16:
+    case ops.OP_si32:
+    case ops.OP_sf32:
+    case ops.OP_sf64:
+    case ops.OP_sxi1:
+    case ops.OP_sxi8:
+    case ops.OP_sxi16:
+    case ops.OP_setslot:
+    case ops.OP_setglobalslot:
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Whether instruction i gives a value whose text can neither throw nor do
+ * anything seen, and reads only registers: JavaScript's own arithmetic,
+ * comparisons and conversions on numbers and Booleans, which call no
+ * valueOf. Such a text may be read anywhere until a register it reads is
+ * written.
+ */
+function pureValue(em: MethodEmitter, i: u32): bool {
+  const ir = em.ir;
+  const op = ir.op[i];
+  const src = ir.src[i];
+  switch (op) {
+    case ops.OP_add:
+    case ops.OP_subtract:
+    case ops.OP_multiply:
+    case ops.OP_divide:
+    case ops.OP_modulo:
+    case ops.OP_add_i:
+    case ops.OP_subtract_i:
+    case ops.OP_multiply_i:
+    case ops.OP_bitand:
+    case ops.OP_bitor:
+    case ops.OP_bitxor:
+    case ops.OP_lshift:
+    case ops.OP_rshift:
+    case ops.OP_urshift:
+    case ops.OP_equals:
+    case ops.OP_strictequals:
+    case ops.OP_lessthan:
+    case ops.OP_lessequals:
+    case ops.OP_greaterthan:
+    case ops.OP_greaterequals:
+      return ir.srcCount[i] === 2 && isNumeric(em, src) && isNumeric(em, src + 1);
+    case ops.OP_bitnot:
+    case ops.OP_negate:
+    case ops.OP_negate_i:
+    case ops.OP_increment:
+    case ops.OP_decrement:
+    case ops.OP_increment_i:
+    case ops.OP_decrement_i:
+    case ops.OP_sxi1:
+    case ops.OP_sxi8:
+    case ops.OP_sxi16:
+      return ir.srcCount[i] === 1 && isNumeric(em, src);
+    case ops.OP_not:
+      return ir.srcCount[i] === 1;
+    case ops.OP_convert_i:
+    case ops.OP_coerce_i:
+    case ops.OP_convert_u:
+    case ops.OP_coerce_u:
+    case ops.OP_convert_d:
+    case ops.OP_coerce_d:
+    case ops.OP_convert_b:
+    case ops.OP_coerce_b:
+      return ir.srcCount[i] === 1 && converts(em, conversionType(em, <u8>op, i), src);
+    case IR_Coerce:
+      return ir.srcCount[i] === 1 && converts(em, ir.c[i], src);
+    default:
+      return false;
+  }
+}
+
+/** Whether converting register r to `type` is plain JavaScript on a number or Boolean: to int, uint, Number or Boolean. */
+function converts(em: MethodEmitter, type: i32, r: i32): bool {
+  const from = em.builtinOf(r);
+  switch (em.domain.builtin(type)) {
+    case BUILTIN_Int:
+    case BUILTIN_Uint:
+    case BUILTIN_Boolean:
+      return isNumeric(em, r);
+    case BUILTIN_Number:
+      return from === BUILTIN_Int || from === BUILTIN_Uint || from === BUILTIN_Number;
+    default:
+      return false;
   }
 }
 
@@ -361,6 +669,7 @@ function copyAll(em: MethodEmitter, w: i32, limit: i32): void {
  */
 function writeCopy(em: MethodEmitter, r: i32): void {
   const out = em.out;
+  em.clobber(r, -1, -1);
   const from = em.copyOf[r];
   em.setCopy(r, NONE);
   em.checked[r] = 0;
