@@ -88,12 +88,30 @@ export class DictionaryKeys {
   }
 
   set(key: object, value: Value): this {
-    const known = this.map.get(key);
-    if (known !== undefined) {
-      known.value = value;
-      return this;
+    if (!this.replace(key, value)) {
+      this.add(key, value);
     }
 
+    return this;
+  }
+
+  /**
+   * Sets the value of a key that has an entry, there or deleted, and says
+   * whether it had one; set's first half, so that a caller can look at a
+   * key before it is added.
+   */
+  replace(key: object, value: Value): boolean {
+    const known = this.map.get(key);
+    if (known === undefined) {
+      return false;
+    }
+
+    known.value = value;
+    return true;
+  }
+
+  /** Adds a key that has no entry (replace said so). */
+  add(key: object, value: Value): void {
     const entry = this.spare.pop() ?? (this.weak ? new WeakEntry() : new Entry());
     entry.key = key;
     entry.value = value;
@@ -103,8 +121,6 @@ export class DictionaryKeys {
       this.added = this.settle(this.added);
       this.addedLimit = Math.max(64, this.added.length * 2);
     }
-
-    return this;
   }
 
   delete(key: object): boolean {

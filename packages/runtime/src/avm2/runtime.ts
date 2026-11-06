@@ -31,7 +31,7 @@ import {
   type TypeRef,
   type Value,
 } from "./descriptors.js";
-import { NAMED } from "./dictionary-keys.js";
+import { type DictionaryKeys, NAMED } from "./dictionary-keys.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import { isViewRangeError, SharedMemoryView } from "./domain-memory.js";
 import {
@@ -697,7 +697,12 @@ export class Runtime {
     }
 
     if (mn.key !== undefined && d?.$keys !== undefined) {
-      return d.$keys.has(mn.key);
+      if (d.$keys.has(mn.key)) {
+        return true;
+      }
+
+      const named = this.namespaceKeyName(mn);
+      return named !== null && this.delegateHas(d, named, scope);
     }
 
     if (traits.properties !== null) {
@@ -858,7 +863,13 @@ export class Runtime {
 
     // A Dictionary's object key, before its traits, as DictionaryObject's.
     if (mn.key !== undefined && o?.$keys !== undefined) {
-      return o.$keys.get(mn.key);
+      const v = o.$keys.get(mn.key);
+      if (v !== undefined) {
+        return v;
+      }
+
+      const named = this.namespaceKeyName(mn);
+      return named === null ? undefined : this.getProperty(o, named);
     }
 
     const traits = this.traitsOf(o);
@@ -1261,7 +1272,18 @@ export class Runtime {
     }
 
     if (mn.key !== undefined && o?.$keys !== undefined) {
-      o.$keys.set(mn.key, v);
+      const keys: DictionaryKeys = o.$keys;
+      if (keys.replace(mn.key as object, v)) {
+        return;
+      }
+
+      const named = this.namespaceKeyName(mn);
+      if (named === null) {
+        keys.add(mn.key as object, v);
+      } else {
+        this.setProperty(o, named, v, init);
+      }
+
       return;
     }
 
@@ -1326,8 +1348,12 @@ export class Runtime {
 
   deleteProperty(o: Value, mn: Multiname): boolean {
     if (mn.key !== undefined && o?.$keys !== undefined) {
-      o.$keys.delete(mn.key);
-      return true;
+      if (o.$keys.delete(mn.key)) {
+        return true;
+      }
+
+      const named = this.namespaceKeyName(mn);
+      return named === null || this.deleteProperty(o, named);
     }
 
     // A primitive's property cannot be deleted, as MethodEnv's delproperty has it.
@@ -1365,6 +1391,23 @@ export class Runtime {
     }
 
     return false;
+  }
+
+  /**
+   * The name a Dictionary's key stands for when it is a Namespace, else
+   * null. avmplus keys a Dictionary by an object only (isDictionaryLookup),
+   * and a Namespace is none: it names its uri, as AvmCore::intern has it.
+   * Asked only once the key is not there, as a Namespace never is, so that
+   * a key found pays nothing for it.
+   */
+  private namespaceKeyName(mn: Multiname): Multiname | null {
+    if (!(mn.key instanceof Namespace)) {
+      return null;
+    }
+
+    const named = new Multiname(mn.kind, mn.namespaces, mn.versions, mn.name, mn.attribute);
+    named.domain = mn.domain;
+    return named;
   }
 
   /** The `in` operator: whether `o` has the public property `name`. */
