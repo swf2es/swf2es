@@ -121,6 +121,16 @@ function fieldOffset(d: DisplayObject): [number, number] {
  * `at` in pixels moved by `offset` in twips, summed in twips: Flash's
  * positions are whole twips, without a pixel sum's noise.
  */
+/**
+ * A position as Flash keeps it, in whole twips: truncated toward zero, and
+ * past int's range int's least, as x86 converts it (the bitmap-sampling
+ * case's traces, from adl). NaN is 0.
+ */
+function wholeTwips(v: number): number {
+  const twips = Math.trunc((v || 0) * 20);
+  return (twips >= -0x80000000 && twips <= 0x7fffffff ? twips : -0x80000000) / 20;
+}
+
 function withOffset(at: number, offset: number): number {
   return offset === 0 ? at : (at * 20 + offset) / 20;
 }
@@ -253,7 +263,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       return withOffset(this.$display.matrix.tx, fieldOffset(this.$display)[0]);
     }
 
-    // A NaN position is 0, as Flash has it (the corpus's `displayobject_invalid_floats`).
+    // A NaN position is 0, as Flash has it (the corpus's `displayobject_invalid_floats`), and
+    // any other in whole twips.
     set x(v: Value) {
       const offset = fieldOffset(this.$display)[0];
       if (this.$display.space) {
@@ -263,7 +274,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       transform(this.$display, (m) => {
-        m.tx = withOffset(Number(v) || 0, -offset);
+        m.tx = withOffset(wholeTwips(Number(v)), -offset);
       });
     }
 
@@ -280,7 +291,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       }
 
       transform(this.$display, (m) => {
-        m.ty = withOffset(Number(v) || 0, -offset);
+        m.ty = withOffset(wholeTwips(Number(v)), -offset);
       });
     }
 

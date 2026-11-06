@@ -8674,6 +8674,27 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "bitmap-placement",
+    swf: (abc) => bare(abc, 1, "BitmapPlacement", 480, 100),
+    script: "BitmapPlacement",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bitmap-sampling",
+    swf: (abc) => bare(abc, 1, "BitmapSampling", 480, 250),
+    script: "BitmapSampling",
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+    gap:
+      "a scaled or turned bitmap is read at each of the page's samples, sixteen a pixel of " +
+      "Flash's at high quality, not once a pixel at its centre; its unsmoothed edges are antialiased",
+  },
+  {
     name: "bitmap-ops",
     swf: bare,
     script: "BitmapOps",
