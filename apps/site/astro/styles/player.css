@@ -105,6 +105,10 @@
   overflow: hidden;
 }
 
+.player-app .stage.authored {
+  width: min(100%, calc(70vh * var(--w) / var(--h)), calc(var(--w) * 1px));
+}
+
 .player-app .stage:fullscreen {
   width: 100%;
   height: 100%;
