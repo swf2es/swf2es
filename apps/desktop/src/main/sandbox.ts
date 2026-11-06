@@ -3,8 +3,11 @@
 // files in the SWF's own directory and below, and reaches no network;
 // local-with-networking reaches the network, and no local file but
 // itself. A SWF opened by its URL is remote: no local file at all, and
-// the network as its origin's (network.ts judges it). Only the SWF
-// playing now has a grant: opening another, or closing it, revokes it.
+// the network as its origin's (network.ts judges it). An AIR application
+// opened by its descriptor plays in AIR's application sandbox: any local
+// file, through File and its URLs, and the network as an application's,
+// unjudged. Only the SWF playing now has a grant: opening another, or
+// closing it, revokes it.
 // What the SWF loads plays in its sandbox too.
 // Apart from Electron, so that node tests it (tests/desktop/sandbox.test.ts).
 import { createHash } from "node:crypto";
@@ -15,7 +18,7 @@ import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:
 
 export const FILE_ORIGIN = "swf2es://file";
 
-export type SandboxType = "localWithFile" | "localWithNetwork" | "remote";
+export type SandboxType = "localWithFile" | "localWithNetwork" | "remote" | "application";
 
 interface Grant {
   /** The SWF's real path, links followed; a remote SWF's URL. */
@@ -134,15 +137,46 @@ export class Sandbox {
     return this.grant?.type === "remote" && this.grant.swf === url && this.pending === null;
   }
 
+  /**
+   * Grant the AIR application whose content SWF is at `content` its
+   * sandbox, in place of the last SWF's. It takes effect as the page reads
+   * that file (startApplication).
+   */
+  playApplication(content: string): void {
+    this.grant = null;
+    this.pending = { swf: content, root: null, token: null, type: "application" };
+  }
+
+  /**
+   * The page reads the local file at `path`: whether an AIR application
+   * plays that may, its grant taking effect as the page reads its content SWF.
+   */
+  startApplication(path: string): boolean {
+    const pending = this.pending;
+    if (pending?.type === "application" && pending.swf === path) {
+      this.grant = pending;
+      this.pending = null;
+      return true;
+    }
+
+    return this.application;
+  }
+
+  /** Whether an AIR application plays, whose File reads the file system. */
+  get application(): boolean {
+    return this.grant?.type === "application" && this.pending === null;
+  }
+
   /** Nothing plays: every grant revoked. */
   stop(): void {
     this.grant = null;
     this.pending = null;
   }
 
-  /** Whether the SWF playing may reach the network: in local-with-networking, or remote. */
+  /** Whether the SWF playing may reach the network: in local-with-networking, remote, or an AIR application. */
   networkAllowed(): boolean {
-    return this.grant?.type === "localWithNetwork" || this.grant?.type === "remote";
+    const type = this.grant?.type;
+    return type === "localWithNetwork" || type === "remote" || type === "application";
   }
 
   /**

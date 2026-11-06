@@ -217,6 +217,25 @@ writes, the dialogs and the asynchronous methods are not supported yet.
 `File.test.ts` holds all of it to what adl traced for the same scripts,
 with a POSIX host's paths in place of Windows'.
 
+## AIR applications in the desktop app
+
+The desktop app (`apps/desktop`) runs an AIR application by its
+descriptor, adl's way (`app.xml [root-dir] [-- arguments...]`; the
+descriptor read in `main/descriptor.ts`, the launch in `main/air.ts`).
+`@swf2es/web`'s `configure({ air })` makes the element play as AIR does:
+AIR's library loaded after playerglobal, `air: true`, the host's
+`AirApplication` and `FileSystemHost`, and Security.sandboxType
+"application". The renderer gives them over the shell
+(`renderer/air.ts`): the window's state, and `stat` and `list`, by
+synchronous messages, as File and NativeWindow read; its app:,
+app-storage: and file: URLs are read through the shell too. The main
+process answers them only while the application the user opened plays
+(`Sandbox.playApplication`, granted as the page reads its content SWF),
+and its requests and sockets go unjudged, without policy files or a
+prompt, as AIR's application sandbox has them (`network.ts`'s
+"application" movie). `tests/desktop/smoke.ts` runs one in headless
+Electron.
+
 ## Screen capabilities
 
 `flash.system.Capabilities` reads screen resolution, pixel aspect ratio and
