@@ -84,7 +84,7 @@ import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { accelerometerNatives } from "./flash/sensors/Accelerometer.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
-import { fsCommandNatives } from "./flash/system/FSCommand.js";
+import { fsCommandNatives } from "./flash/system/FSCommandHost.js";
 import { securityNatives } from "./flash/system/Security.js";
 import { securityDomainNatives } from "./flash/system/SecurityDomain.js";
 import { systemNatives } from "./flash/system/System.js";
