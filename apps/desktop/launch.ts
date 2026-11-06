@@ -1,6 +1,7 @@
 // Starts the desktop app in Electron, with a SWF if one is named:
 //
 //   pnpm --filter @swf2es/desktop start [--trace] [file.swf | https://host/movie.swf]
+//   pnpm --filter @swf2es/desktop start [--trace] app.xml [root-dir] [-- arguments...]
 //
 // pnpm runs this in apps/desktop; a relative path is the caller's, from
 // the directory pnpm was run in.
@@ -17,10 +18,15 @@ if (why) {
 }
 
 const cwd = process.env.INIT_CWD ?? process.cwd();
-// Switches and URLs as they are; a path from where pnpm was run.
-const args = process.argv
-  .slice(2)
-  .map((a) => (a.startsWith("-") || /^https?:\/\//i.test(a) ? a : resolve(cwd, a)));
+// Switches and URLs as they are; a path from where pnpm was run. What follows "--" is an AIR
+// application's own arguments, as they are.
+const given = process.argv.slice(2);
+const end = given.indexOf("--");
+const own = end < 0 ? given : given.slice(0, end);
+const args = [
+  ...own.map((a) => (a.startsWith("-") || /^https?:\/\//i.test(a) ? a : resolve(cwd, a))),
+  ...(end < 0 ? [] : given.slice(end)),
+];
 // The checkout's commit, which the context menu's About item names.
 let build = "";
 try {

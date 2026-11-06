@@ -3,9 +3,12 @@
 // compiled code is cached. Each is fetched once a page, on first use.
 import { type Codegen, createCodegen } from "@swf2es/codegen";
 import {
+  type AirApplication,
+  airLibrary,
   type FetchRequest,
   type FetchResult,
   type FileHost,
+  type FileSystemHost,
   type ModuleCache,
   playerglobalLibrary,
   type SocketHost,
@@ -83,6 +86,14 @@ export interface Configuration {
   workerUrl?: string | URL;
   /** The page's build, a short commit or a version, which the context menu's About item names. */
   build?: string;
+  /**
+   * Play the SWFs the element plays next as an AIR application's, as a
+   * desktop app runs one: AIR's library loaded after playerglobal, its API
+   * and its application sandbox, with the application the host runs and
+   * the file system its File reads. Null or absent: as Flash Player's
+   * plugin, AIR's API not defined.
+   */
+  air?: { application: AirApplication; fileSystem?: FileSystemHost | null } | null;
 }
 
 let config: Configuration = {};
@@ -147,6 +158,12 @@ export async function workerHostForPlayer(ahead: boolean): Promise<WebWorkerHost
     url: config.workerUrl,
     spares: ahead ? undefined : 0,
   });
+}
+
+/** The libraries a player loads: builtin and playerglobal, and AIR's after them for an AIR application. */
+export async function playerLibraries(): Promise<Uint8Array[]> {
+  const abcs = await libraries();
+  return config.air ? [...abcs, airLibrary] : abcs;
 }
 
 /** builtin.abc and playerglobal, fetched once a page; every player reads the same bytes. */

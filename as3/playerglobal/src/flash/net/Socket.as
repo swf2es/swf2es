@@ -11,6 +11,7 @@ package flash.net
 	public class Socket extends EventDispatcher implements IDataInput, IDataOutput
 	{
 		private var _timeout:uint = 20000;
+		private var _tcpNoDelay:Boolean = false;
 
 		public function Socket(host:String = null, port:int = 0)
 		{
@@ -112,6 +113,20 @@ package flash.net
 		public native function set objectEncoding(value:uint):void;
 
 		public native function get endian():String;
+
+		// Harman's AIR's: whether small writes go at once. Kept, as the host's sockets
+		// send what is flushed at once already.
+		[API("701")]
+		public function get tcpNoDelay():Boolean
+		{
+			return _tcpNoDelay;
+		}
+
+		[API("701")]
+		public function set tcpNoDelay(value:Boolean):void
+		{
+			_tcpNoDelay = value;
+		}
 
 		public native function set endian(value:String):void;
 

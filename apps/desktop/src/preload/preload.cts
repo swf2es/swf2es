@@ -79,6 +79,22 @@ const api: DesktopApi = {
     },
     loadPolicyFile: (url) => ipcRenderer.send("net:policy-file", String(url)),
   },
+  // Synchronous where File and NativeWindow read: their properties answer at once.
+  air: {
+    stat: (path) => ipcRenderer.sendSync("air:stat", String(path)),
+    list: (path) => ipcRenderer.sendSync("air:list", String(path)),
+    read: (path) => ipcRenderer.invoke("air:read", String(path)),
+    window: () => ipcRenderer.sendSync("air:window"),
+    setBounds: (bounds) => ipcRenderer.send("air:set-bounds", bounds),
+    setTitle: (title) => ipcRenderer.send("air:set-title", String(title)),
+    minimize: () => ipcRenderer.send("air:window-do", "minimize"),
+    maximize: () => ipcRenderer.send("air:window-do", "maximize"),
+    restore: () => ipcRenderer.send("air:window-do", "restore"),
+    activate: () => ipcRenderer.send("air:window-do", "activate"),
+    setVisible: (visible) => ipcRenderer.send("air:window-do", visible ? "show" : "hide"),
+    close: () => ipcRenderer.send("air:window-do", "close"),
+    exit: (code) => ipcRenderer.send("air:exit", Number(code) | 0),
+  },
 };
 
 contextBridge.exposeInMainWorld("swf2esDesktop", api);

@@ -15,8 +15,8 @@ import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import {
   codegenForPlayer,
   configuration,
-  libraries,
   moduleCacheOptions,
+  playerLibraries,
   socketHost,
   workerHostForPlayer,
 } from "./config.js";
@@ -443,7 +443,7 @@ export class Swf2esPlayerElement extends ElementBase {
       const scripted =
         isAs3(swf) && swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
       if (scripted) {
-        const [codegen, abcs] = await Promise.all([codegenForPlayer(), libraries()]);
+        const [codegen, abcs] = await Promise.all([codegenForPlayer(), playerLibraries()]);
         if (!current()) {
           return;
         }
@@ -577,6 +577,10 @@ export class Swf2esPlayerElement extends ElementBase {
         : (configuration().fetch ?? browserFetch),
       loadPolicyFile: configuration().loadPolicyFile,
       sandboxType: configuration().sandboxType,
+      // An AIR application's: AIR's API, its application and its file system.
+      air: !!configuration().air,
+      application: configuration().air?.application,
+      fileSystem: configuration().air?.fileSystem,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
