@@ -10,6 +10,7 @@ import {
   IR_CallGetter,
   IR_CallInterface,
   IR_CallSetter,
+  IR_CallSuper,
   IR_CheckNull,
   IR_Coerce,
   IR_ConstructSlot,
@@ -543,6 +544,7 @@ function readsFirst(op: u16): bool {
     case IR_ConstructSlot:
     case ops.OP_callsuper:
     case ops.OP_callsupervoid:
+    case IR_CallSuper:
     case ops.OP_getsuper:
     case ops.OP_setsuper:
     case ops.OP_callstatic:

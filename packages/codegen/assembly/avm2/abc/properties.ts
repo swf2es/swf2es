@@ -6,6 +6,7 @@ import {
   IR_CallGetter,
   IR_CallInterface,
   IR_CallSetter,
+  IR_CallSuper,
   IR_FindPropGlobal,
   IR_FindPropGlobalStrict,
   IR_GetGlobalScope,
@@ -639,13 +640,14 @@ export function callSuper(bd: BodyDecoder, opcode: u8, mn: u32, argc: u32): bool
   }
 
   let result = TYPE_Any;
+  let m: i32 = -1;
   if ((b & 7) === 1) {
     const error = traits.resolve(domain, <u32>base);
     if (error) {
       return bd.fail(error);
     }
 
-    const m = traits.dispatch[traits.dispatchStart[base] + (b >> 3)];
+    m = traits.dispatch[traits.dispatchStart[base] + (b >> 3)];
     if (m < 0) {
       return bd.fail(C.kCorruptABCError);
     }
@@ -659,9 +661,26 @@ export function callSuper(bd: BodyDecoder, opcode: u8, mn: u32, argc: u32): bool
   }
 
   bd.checkNull(obj);
-  return opcode === ops.OP_callsupervoid
-    ? true
-    : bd.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
+  const voidCall = opcode === ops.OP_callsupervoid;
+  // As CodegenLIR's callsuper: a method of the base that takes the count,
+  // its arguments coerced here and the method called directly.
+  if (m >= 0 && n === argc + 1) {
+    const count = traits.paramCount[m];
+    const required = count - traits.optionalCount[m];
+    if (argc >= required && (argc <= count || domain.allowsExtraArgs(<u32>m))) {
+      if (!coerceArgs(bd, <u32>m, argc)) {
+        return false;
+      }
+
+      if (!voidCall && !bd.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0)) {
+        return false;
+      }
+
+      return bd.emitOn(IR_CallSuper, voidCall ? -1 : <i32>obj, <i32>obj, n, b >> 3, argc, m);
+    }
+  }
+
+  return voidCall ? true : bd.popPush(n, result, domain.typeNotNull(result) ? NOT_NULL : 0);
 }
 
 /** As Verifier's OP_getsuper. */

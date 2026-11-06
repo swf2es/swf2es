@@ -11,6 +11,7 @@ import {
   IR_CallGetter,
   IR_CallInterface,
   IR_CallSetter,
+  IR_CallSuper,
   IR_ConstructSlot,
   IR_FindPropGlobal,
   IR_FindPropGlobalStrict,
@@ -229,7 +230,13 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         em.assign(i);
       }
 
-      // By the interface's dispatch id, which its layout maps to a name.
+      if (ir.b[i] <= em.domain.traits.paramCount[ir.c[i]]) {
+        interfaceCall(em, a, src, ir.b[i]);
+        return true;
+      }
+
+      // More arguments than the method declares, which its rest takes:
+      // by name, as the class's method, which may have none, counts them.
       out.text("rt.callInterface(");
       typeRef(em, em.regType[src]);
       out.text(", ");
@@ -444,9 +451,27 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text(")");
       return true;
     }
+    case IR_CallSuper:
+      if (ir.dst[i] >= 0) {
+        em.assign(i);
+      }
+
+      // The base's method itself, its arguments coerced already: its entry
+      // for bound calls, where it has one.
+      out.text("sup.$it.proto.");
+      out.text(hasBoundEntry(em, ir.c[i]) ? "$b" : "$m");
+      out.uint(a);
+      out.text(".call(");
+      em.usesSup = true;
+      em.reg(src);
+      args(em, src + 1, ir.b[i]);
+      out.text(")");
+      return true;
     case ops.OP_constructsuper:
-      // As rt.constructSuper, without an array of the arguments to apply.
-      out.text("sup.$it.proto.$init.call(");
+      // As rt.constructSuper, without an array of the arguments to apply;
+      // the verifier coerced them to the base's constructor, so they may
+      // go to its entry for bound calls.
+      out.text(superEntry(em, ir.c[i]));
       em.usesSup = true;
       em.reg(src);
       args(em, src + 1, a);
@@ -461,7 +486,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     case IR_ConstructSlot:
       em.assign(i);
-      constructSlot(em, src, a, ir.b[i]);
+      constructSlot(em, src, a, ir.b[i], ir.c[i]);
       return true;
     case ops.OP_call:
       em.assign(i);
@@ -917,17 +942,107 @@ function receiver(em: MethodEmitter, r: i32): void {
  * class's instance initializer itself, with its arguments as they are;
  * anything else, a class not yet made among them, by rt.construct.
  */
-function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32): void {
+function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: i32): void {
   const out = em.out;
   em.constructsInPlace = true;
   out.text("($c = ");
   em.member(src);
   out.text(".$");
   out.uint(slot);
-  out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.$init.call($o");
+  out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.");
+  const init = boundConstructor(em, ctraits, argc);
+  if (init >= 0) {
+    // As avmplus' JIT, which coerces a known constructor's arguments at
+    // the call site and calls it: its entry for bound calls.
+    out.text("$binit.call($o");
+    const traits = em.domain.traits;
+    const start = traits.paramStart[init];
+    for (let k: u32 = 0; k < argc; k++) {
+      const r = src + 1 + <i32>k;
+      out.text(", ");
+      convert(em, "", r, traits.paramType[start + k], em.regType[r]);
+    }
+  } else {
+    out.text("$init.call($o");
+    args(em, src + 1, argc);
+  }
+
+  // A slot still empty is a null constructor: avmplus' JIT, which binds a
+  // known constructor that takes the count, checks it first (1009); its
+  // interpreter, which runs static initializers, constructs late (1007).
+  out.text(
+    !em.staticInit && knownConstructor(em, ctraits, argc) >= 0
+      ? "), $o) : rt.construct($c ?? nn($c)"
+      : "), $o) : rt.construct($c",
+  );
   args(em, src + 1, argc);
-  out.text("), $o) : rt.construct($c");
-  args(em, src + 1, argc);
+  out.text(")");
+}
+
+/**
+ * How `super()` calls the constructor of `base`, whose arguments the
+ * verifier coerced to it and counted: by its entry for bound calls, if it
+ * has one.
+ */
+function superEntry(em: MethodEmitter, base: i32): string {
+  const init = base >= 0 ? em.domain.traits.init[base] : -1;
+  return init >= 0 && hasBoundEntry(em, <u32>init)
+    ? "sup.$it.proto.$binit.call("
+    : "sup.$it.proto.$init.call(";
+}
+
+/**
+ * The instance initializer of the class whose class traits are
+ * `ctraits`, where `new` of it with `argc` arguments can call its entry
+ * for bound calls with them coerced: one avmplus' JIT binds
+ * (knownConstructor) that has the entry (hasBoundEntry, which takes no
+ * rest, so no more arguments than its parameters); else -1.
+ */
+function boundConstructor(em: MethodEmitter, ctraits: i32, argc: u32): i32 {
+  const init = knownConstructor(em, ctraits, argc);
+  return init >= 0 && hasBoundEntry(em, <u32>init) ? init : -1;
+}
+
+/**
+ * The instance initializer, domain-wide, of the class whose class traits
+ * are `ctraits`, where avmplus' JIT binds `new` of it with `argc`
+ * arguments: one the verifier resolved (see OP_constructprop) that takes
+ * the count; else -1.
+ */
+function knownConstructor(em: MethodEmitter, ctraits: i32, argc: u32): i32 {
+  const domain = em.domain;
+  const traits = domain.traits;
+  const itraits = domain.instanceTraitsOf(ctraits);
+  const init = itraits >= 0 ? traits.init[itraits] : -1;
+  if (init < 0 || !traits.signed[init]) {
+    return -1;
+  }
+
+  const count = traits.paramCount[init];
+  const required = count - traits.optionalCount[init];
+  return argc >= required && (argc <= count || domain.allowsExtraArgs(<u32>init)) ? init : -1;
+}
+
+/**
+ * A call of an interface's method, dispatch id `disp` in the interface's
+ * layout, on the receiver in `src`, with `argc` arguments after it, no
+ * more than the method declares: by the key the runtime finds for the
+ * receiver's class, its entry for bound calls, as the class's method has
+ * the interface's signature and the arguments are coerced to it. The
+ * call is made here, so that each site keeps its own feedback in the
+ * engine.
+ */
+function interfaceCall(em: MethodEmitter, disp: u32, src: i32, argc: u32): void {
+  const out = em.out;
+  em.member(src);
+  out.text("[rt.interfaceKey(");
+  typeRef(em, em.regType[src]);
+  out.text(", ");
+  out.uint(disp);
+  out.text(", ");
+  em.read(src);
+  out.text(")](");
+  list(em, src + 1, argc);
   out.text(")");
 }
 

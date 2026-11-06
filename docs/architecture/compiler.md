@@ -219,9 +219,38 @@ its checked entry, which counts and coerces them as above and calls the
 other. The factory gives the checked one, with the other on it as
 `$bound`, and the runtime keeps that under `$b<id>` beside `$m<id>` (the
 method itself where it has none). Bound calls of such a method call
-`$b<id>`; every other path, `*`, closures, `apply`, interfaces, `super`,
-calls `$m<id>`. Whether a method has one is read from its signature, the
-same in its module and its callers'.
+`$b<id>`; every other path, `*`, closures, `apply`, calls `$m<id>`.
+Whether a method has one is read from its signature, the same in its
+module and its callers'.
+
+`callsuper` of a name the base class binds to a method, given a count
+the method takes, is bound as avmplus' JIT binds it (`OP_callsuperid`):
+its arguments are coerced at the call site and the base's method called
+directly, `sup.$it.proto.$b<id>.call(this, ...)` (`$m<id>` for a method
+with no entry for bound calls). Any other count, and a name bound to
+anything else, goes by name through `rt.callSuper`, as before.
+
+A class's instance initializer has the two entries too, under the same
+rule, and the runtime keeps the second as `$binit` beside `$init`.
+`super(...)`, whose arguments the verifier coerces to the base's
+constructor, calls it; and so does `new` of a known class constructed in
+place (see below), whose arguments the emitter coerces there to the
+constructor's parameter types, as avmplus' JIT coerces them for a
+constructor it binds, where the constructor takes the count. What else
+constructs the class, `rt.construct` and its hooks among it, is given
+the arguments as they are and calls `$init`.
+
+A call through an interface coerces its arguments to the interface
+method's signature, which the class's method has too (avmplus refuses a
+class whose method does not match, VerifyError 1053), but the class may
+place the method at any dispatch id. Such a call, given no more arguments
+than the method declares, is `o[rt.interfaceKey(T[k], disp, o)](...)`:
+the runtime finds the `$b<id>` the class binds the interface's name to
+once for each class and interface, and keeps it on the class's traits,
+the last interface apart; the call itself is the module's, so that each
+site keeps its own feedback in the engine. More arguments, which a rest
+parameter takes, go by name through `rt.callInterface`, as the class's
+method counts them.
 
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the
@@ -284,8 +313,12 @@ which `newclass` builds from the module's layout:
   only allocates and initializes (no construct hook, not an interface,
   not uninstantiable, which the runtime marks `$new` on the class): its
   traits' `instance()`, then its `$init` called with the arguments as
-  they are, so each site's constructor can be inlined. Anything else goes
-  to `rt.construct`. `super()` calls the base's `$init` directly.
+  they are (`$binit` with them coerced, see above), so each site's
+  constructor can be inlined. Anything else goes to `rt.construct`; a
+  slot still empty, where avmplus' JIT binds the constructor (it takes
+  the count, outside static initializers, which avmplus interprets), is
+  null checked first, TypeError 1009 as avmshell's, not 1007.
+  `super()` calls the base's `$init` (or `$binit`) directly.
 - **Dynamic properties** of dynamic classes live in their own map, apart
   from slots and methods.
 - **Names**: each traits has its own bindings by namespace and name, and

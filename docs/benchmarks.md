@@ -380,8 +380,12 @@ classes it finds in a slot (a small class, one three levels deep, a
 method returning a new instance), and calls of methods it knows whose
 class-typed parameters are given the class's own instances, a
 subclass's, an interface's and null, besides int, Number, Boolean and
-String parameters and a final class's method. One section calls through
-an interface. Its other lines must match avmshell's:
+String parameters and a final class's method. Two sections call through
+an interface, on one class (`interfaceCall`) and on four, at two
+dispatch ids (`interfacePoly`); one calls a base's method through
+`super` (`superCall`); one constructs a class whose constructor takes
+class-typed parameters, given a subclass's instances (`newArgs`). Its
+other lines must match avmshell's:
 
     node tests/bench/typed/run.ts [runs]
     node tests/bench/typed/run.ts <dir A> <dir B> [runs]
@@ -405,10 +409,48 @@ medians of 7 interleaved pairs, in ms (as3pb of 11):
 | as3pb bytes / memory | 114 / 109 | 111 / 105 | −2.6% / −3.7% | |
 
 lz4 (total of its sections 725 → 731 ms), Untyped.as and Enumeration.as
-are unchanged within their noise. A call through an interface is still
-an order of magnitude slower than avmshell's: on every call,
-`rt.callInterface` searches the interface's bindings for the dispatch
-id, makes a QName of what it finds and calls it by name.
+are unchanged within their noise.
+
+A call through an interface was then still an order of magnitude slower
+than avmshell's: on every call, `rt.callInterface` searched the
+interface's bindings for the dispatch id, made a QName of what it found
+and called it by name, with no inline cache, the QName being new. Now
+the call is the module's, by the key `rt.interfaceKey` keeps for the
+receiver's class (see docs/architecture/compiler.md), medians of 7
+interleaved pairs, in ms (as3pb of 9):
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| interfaceCall | 244 | 16 | −93.4% | 21 |
+| interfacePoly | 254 | 56 | −78.0% | 12 |
+| as3pb bytes / memory | 109 / 107 | 111 / 106 | +1.8% / −0.9% | |
+
+The other sections are unchanged. On four classes, the key is the same
+lookup, but the call's feedback sees four shapes and two keys.
+
+`callsuper` went by name through `rt.callSuper` too, a lookup on the
+base's traits and the arguments in an array on every call. Bound where
+the base binds the name to a method, as avmplus binds it (see
+docs/architecture/compiler.md), medians of 7 interleaved pairs:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| superCall | 71 | 17 | −76.1% | 21 |
+| as3pb bytes / memory (11) | 109 / 105 | 112 / 104 | +2.8% / −1.0% | |
+| lz4 total (7) | 732 | 728 | −0.5% | |
+
+as3pb's ranges overlap (107–128 against 107–129); a run of 9 pairs
+before it had bytes even and memory +2.8%.
+
+A constructor's arguments were coerced on entry, after `new` of a known
+class had already found it: `rt.coerceTo` for a subclass's instances.
+With an entry for bound calls (`$binit`), which `new` and `super()` call
+with the arguments coerced at the site, medians of 7 interleaved pairs:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| newArgs | 186 | 88 | −52.7% | 125 |
+| as3pb bytes / memory (11) | 110 / 104 | 109 / 104 | −0.9% / 0% | |
 
 ### The AssemblyScript runtime
 

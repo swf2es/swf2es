@@ -264,6 +264,15 @@ export function typeAt(bd: BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32, sco
       // what the slot holds, constructed, with no lookup by name.
       const kind = found & 7;
       if (pushed && (kind === 2 || kind === 3) && n === b + 1) {
+        // The constructor's signature, which the emitter coerces the
+        // arguments to: one that does not resolve fails no method here, as
+        // avmplus' JIT binds only a constructor it has resolved, but leaves
+        // the construction late bound.
+        const init = itraits >= 0 ? domain.traits.init[itraits] : -1;
+        if (init >= 0) {
+          domain.traits.sign(domain, <u32>init);
+        }
+
         return bd.emitOn(IR_ConstructSlot, <i32>obj, <i32>obj, n, found >> 3, b, ctraits);
       }
 

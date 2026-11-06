@@ -34,9 +34,9 @@
 // A dispatch id is a slot in a class's own layout: a subclass keeps its
 // base's, so an early bound call by one is right for any receiver of the
 // type; an interface's are its own, which an implementing class need not
-// share (IR_CallInterface, and an interface's accessors, go by name); and a
-// primitive, which a value of type Object can be, has none (the emitter
-// calls its class prototype's method).
+// share (IR_CallInterface goes by a key the runtime finds by name, an
+// interface's accessors by name); and a primitive, which a value of type
+// Object can be, has none (the emitter calls its class prototype's method).
 import { OP_lookupswitch } from "../abc/opcodes";
 
 // Instructions beyond the ABC's opcodes.
@@ -67,6 +67,12 @@ export const IR_Nip: u16 = 0x108;
  * script's class is on its global object; c the slot's type.
  */
 export const IR_ConstructSlot: u16 = 0x109;
+/**
+ * dst = the base class's method of dispatch id `a`, called on src with the
+ * `b` arguments after it, coerced to its signature: callsuper of a name the
+ * base binds to a method; c the method (domain-wide id).
+ */
+export const IR_CallSuper: u16 = 0x10a;
 
 @final
 export class Ir {
