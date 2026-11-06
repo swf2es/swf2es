@@ -42,6 +42,13 @@ export class Output {
     this.length -= n;
   }
 
+  /** The `n` bytes of `from` from offset `at`, appended. */
+  append(from: Output, at: u32, n: u32): void {
+    this.reserve(n);
+    memory.copy(changetype<usize>(this.bytes) + this.length, changetype<usize>(from.bytes) + at, n);
+    this.length += n;
+  }
+
   byte(b: u8): void {
     this.reserve(1);
     this.bytes[this.length++] = b;
