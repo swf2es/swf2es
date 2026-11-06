@@ -72,6 +72,13 @@ export interface ClassDesc {
   ctor?: [TypeRef[], number];
   /** The class's own metadata, from the trait that defines it. */
   meta?: Metadata[];
+  /**
+   * For each method of its interfaces that it does not inherit an alias
+   * of, the name calls through the interface use and the dispatch id of
+   * the class's method, flat: the prototype's alias of its entry for
+   * bound calls (newClass).
+   */
+  aliases?: (string | number)[];
   /** The module, set when it loads. */
   abc?: Abc;
 }

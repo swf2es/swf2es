@@ -1774,7 +1774,9 @@ export class Runtime {
    * the class's method has too (checkInterfaces), and passes a count the
    * method takes. Generated code calls `o[key](...)` itself, so that each
    * site keeps its own feedback in the engine. Found by name once for
-   * each class and interface, and kept on the class's traits.
+   * each class and interface, and kept on the class's traits. Only for a
+   * member in a private namespace, which has no alias every implementing
+   * class shares (see the codegen's interfaceCall).
    */
   interfaceKey(iface: TypeRef, disp: number, o: Value): string {
     const traits: Traits | undefined = o.$traits;

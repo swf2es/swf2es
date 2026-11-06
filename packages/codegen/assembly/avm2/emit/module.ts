@@ -33,9 +33,18 @@ import { Output } from "../../output";
 import { BodyDecoder, bodyDecoder, verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
-import { TRAITS_Class, TRAITS_Instance } from "../link/traits";
+import { BKIND_Method, TRAITS_Class, TRAITS_Instance } from "../link/traits";
 import { MethodEmitter } from "./method";
-import { className, constant, namespace, poolString, qualified, typeExpr, uri } from "./refs";
+import {
+  className,
+  constant,
+  interfaceAlias,
+  namespace,
+  poolString,
+  qualified,
+  typeExpr,
+  uri,
+} from "./refs";
 
 /**
  * The most slots a traits' fill sets. V8 counts only fields already
@@ -61,6 +70,8 @@ export class ModuleEmitter {
   fillAbc: i32[] = [];
   fillTrait: u32[] = [];
   fillChain: u32[] = [];
+  /** aliases' scratch: the interface members whose aliases it wrote for a class. */
+  aliasMembers: u32[] = [];
 
   constructor(domain: Domain, index: u32) {
     const methods = new MethodEmitter(domain, index);
@@ -831,6 +842,10 @@ export class ModuleEmitter {
       out.text("], cinit: F[");
       out.uint(abc.classInit[i]);
       out.text("]");
+      if (!(flags & C.INSTANCE_Interface)) {
+        this.aliases(<u32>domain.classTraits[classStart + i]);
+      }
+
       const init = domain.methodStart[this.index] + abc.instanceInit[i];
       if (domain.traits.sign(domain, init) === 0 && domain.traits.paramCount[init] > 0) {
         out.text(", ctor: [");
@@ -846,6 +861,90 @@ export class ModuleEmitter {
 
       out.text(" }");
     }
+  }
+
+  /**
+   * Instance traits t's `aliases`, where it needs any: for each method of
+   * the interfaces it implements, the name calls through the interface use
+   * (interfaceAlias) and the dispatch id t binds the method's name to, in
+   * the order of its interfaces, which the runtime sets on the prototype
+   * as the class is made, before any instance exists, so that the
+   * prototype's shape is fixed from then on. Members in private namespaces
+   * have none (aliasedMember). A base that implements the interface has
+   * the alias already, which t inherits unless it overrides the method.
+   */
+  aliases(t: u32): void {
+    const out = this.out;
+    const domain = this.domain;
+    const traits = domain.traits;
+    if (traits.resolve(domain, t)) {
+      return;
+    }
+
+    const base = traits.base[t];
+    const dispatch = traits.dispatchStart[t];
+    const baseDispatch = base >= 0 ? traits.dispatchStart[base] : 0;
+    const baseMethods: u32 = base >= 0 ? traits.methodCount[base] : 0;
+    const all = traits.allInterfaces(t);
+    const baseAll = base >= 0 ? traits.allInterfaces(<u32>base) : all;
+    const written = this.aliasMembers;
+    written.length = 0;
+    for (let k = 0; k < all.length; k++) {
+      const ifc = all[k];
+      const inherited = base >= 0 && baseAll.includes(ifc);
+      const last = traits.memberEnd[ifc];
+      for (let m = traits.memberStart[ifc]; m < last; m++) {
+        const ns = traits.memberNs[m];
+        if ((traits.memberBinding[m] & 7) !== BKIND_Method || domain.nsType[ns] === NS_Private) {
+          continue;
+        }
+
+        const name = traits.memberName[m];
+        const version = traits.memberVersion[m];
+        const b = traits.find(t, ns, name, version);
+        if ((b & 7) !== BKIND_Method) {
+          continue;
+        }
+
+        const d = b >> 3;
+        if (
+          inherited &&
+          traits.find(base, ns, name, version) === b &&
+          d < baseMethods &&
+          traits.dispatch[dispatch + d] === traits.dispatch[baseDispatch + d]
+        ) {
+          continue;
+        }
+
+        if (this.aliasWritten(ns, name)) {
+          continue;
+        }
+
+        out.text(written.length ? ", " : ", aliases: [");
+        written.push(m);
+        interfaceAlias(out, domain, ns, name);
+        out.text(", ");
+        out.uint(d);
+      }
+    }
+
+    if (written.length) {
+      out.text("]");
+    }
+  }
+
+  /** Whether aliases() wrote the alias of `name` in `ns` for the class already, through another interface. */
+  aliasWritten(ns: u32, name: u32): bool {
+    const traits = this.domain.traits;
+    const written = this.aliasMembers;
+    for (let k = 0; k < written.length; k++) {
+      const m = written[k];
+      if (traits.memberNs[m] === ns && traits.memberName[m] === name) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /** The trait of a script of this ABC that defines class i, whose metadata is the class's, as avmplus has it; -1 for none. */

@@ -428,6 +428,29 @@ interleaved pairs, in ms (as3pb of 9):
 The other sections are unchanged. On four classes, the key is the same
 lookup, but the call's feedback sees four shapes and two keys.
 
+Calls through an interface now read an alias of the class's method that
+every implementing class has under one name, set on the prototype as the
+class is made (see docs/architecture/compiler.md), so a site sees one
+key whatever the receiver. Two runs of 9 interleaved pairs, medians and
+ranges, in ms:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| interfacePoly, run 1 | 56 (54–62) | 16 (16–19) | −71.4% | 12 |
+| interfacePoly, run 2 | 55 (53–109) | 16 (16–18) | −70.9% | 19 |
+| interfaceCall, run 1 | 16 (15–18) | 15 (14–15) | −6.3% | 22 |
+| interfaceCall, run 2 | 15 (15–30) | 15 (14–16) | 0% | 21 |
+| as3pb bytes / memory (11) | 113 / 107 | 112 / 107 | −0.9% / 0% | |
+| as3pb bytes / memory (9) | 111 / 105 | 111 / 105 | 0% / 0% | |
+| lz4 total (7) | 805 | 804 | −0.1% | |
+
+The other typed sections, `tests/bench/untyped` (7 pairs) and
+`tests/bench/enumeration` (5 pairs) are unchanged within their noise.
+Installed lazily, once prototypes and instances were in use, the same
+aliases had made the times unstable (interfaceCall 17–66 ms,
+interfacePoly 35–136 ms over 5 pairs); installed with the methods, before
+any instance exists, they are as steady as the rest.
+
 `callsuper` went by name through `rt.callSuper` too, a lookup on the
 base's traits and the arguments in an array on every call. Bound where
 the base binds the name to a method, as avmplus binds it (see
