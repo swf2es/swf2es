@@ -4,7 +4,7 @@ import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook } from "../hooks.js";
 import { arrayIndex, NS_Public, namespace, qname } from "../names.js";
 import type { Runtime } from "../runtime.js";
-import { methodKey } from "../traits.js";
+import { boundKey, methodKey } from "../traits.js";
 import {
   AS3,
   eachElement,
@@ -505,6 +505,7 @@ function floatSearchMethods(rt: Runtime, cls: AsObject): void {
     Object.assign(search, { $min: 1, $max: 2, $length: 2 });
     const binding = cls.$it.find(qname(namespace(NS_Public, AS3), name));
     cls.$it.proto[methodKey(binding >> 3)] = search;
+    cls.$it.proto[boundKey(binding >> 3)] = search;
     proto.$d.set(name, rt.newFunctionObject(search, null));
   }
 }

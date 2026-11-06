@@ -373,6 +373,43 @@ poly's 8 classes fit in eight entries. With 8 more classes in its array,
 the build before; without the stop, four took 347 → 445, a miss on every
 lookup paying for its replacement.
 
+### Typed construction and bound calls
+
+`tests/bench/typed/Typed.as` times what the compiler binds: `new` of
+classes it finds in a slot (a small class, one three levels deep, a
+method returning a new instance), and calls of methods it knows whose
+class-typed parameters are given the class's own instances, a
+subclass's, an interface's and null, besides int, Number, Boolean and
+String parameters and a final class's method. One section calls through
+an interface. Its other lines must match avmshell's:
+
+    node tests/bench/typed/run.ts [runs]
+    node tests/bench/typed/run.ts <dir A> <dir B> [runs]
+
+Constructing in place (`$new`) and the entry for bound calls (`$b`, see
+docs/architecture/compiler.md), together against the build before them,
+medians of 7 interleaved pairs, in ms (as3pb of 11):
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| newSmall | 104 | 100 | −3.8% | 110 |
+| newDeep | 167 | 130 | −22.2% | 140 |
+| newChained | 129 | 87 | −32.6% | 120 |
+| callClass | 43 | 42 | −2.3% | 39 |
+| callSubclass | 160 | 43 | −73.1% | 39 |
+| callInterface (parameter) | 225 | 13 | −94.2% | 50 |
+| interfaceCall (`rt.callInterface`) | 302 | 233 | −22.8% | 26 |
+| callNull | 18 | 4 | −77.8% | 29 |
+| callNumbers | 121 | 122 | +0.8% | 118 |
+| callFinal | 14 | 14 | 0% | 27 |
+| as3pb bytes / memory | 114 / 109 | 111 / 105 | −2.6% / −3.7% | |
+
+lz4 (total of its sections 725 → 731 ms), Untyped.as and Enumeration.as
+are unchanged within their noise. A call through an interface is still
+an order of magnitude slower than avmshell's: on every call,
+`rt.callInterface` searches the interface's bindings for the dispatch
+id, makes a QName of what it finds and calls it by name.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

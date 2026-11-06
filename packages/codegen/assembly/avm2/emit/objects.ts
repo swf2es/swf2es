@@ -30,7 +30,7 @@ import {
 } from "../link/traits";
 import { NONE } from "./copies";
 import { isAddress, viewMethod } from "./memory";
-import { MethodEmitter } from "./method";
+import { hasBoundEntry, MethodEmitter } from "./method";
 import { isClassRef, poolString, typeRef } from "./refs";
 import { CONVERTS, call2, convert, isNumber, isNumeric, keeps } from "./values";
 
@@ -212,17 +212,17 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
-      virtual(em, a, src, 0);
+      virtual(em, a, src, 0, -1);
       return true;
     case IR_CallSetter:
-      virtual(em, a, src, 1);
+      virtual(em, a, src, 1, ir.c[i]);
       return true;
     case ops.OP_callmethod:
       if (ir.dst[i] >= 0) {
         em.assign(i);
       }
 
-      virtual(em, a, src, ir.b[i]);
+      virtual(em, a, src, ir.b[i], ir.c[i]);
       return true;
     case IR_CallInterface:
       if (ir.dst[i] >= 0) {
@@ -445,7 +445,8 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     }
     case ops.OP_constructsuper:
-      out.text("rt.constructSuper(sup, ");
+      // As rt.constructSuper, without an array of the arguments to apply.
+      out.text("sup.$it.proto.$init.call(");
       em.usesSup = true;
       em.reg(src);
       args(em, src + 1, a);
@@ -460,12 +461,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     case IR_ConstructSlot:
       em.assign(i);
-      out.text("rt.construct(");
-      em.member(src);
-      out.text(".$");
-      out.uint(a);
-      args(em, src + 1, ir.b[i]);
-      out.text(")");
+      constructSlot(em, src, a, ir.b[i]);
       return true;
     case ops.OP_call:
       em.assign(i);
@@ -913,6 +909,28 @@ function receiver(em: MethodEmitter, r: i32): void {
   em.out.byte(0x29); // )
 }
 
+/**
+ * `new` of what slot `slot` of register `src` holds, with `argc`
+ * arguments after it: a class the runtime has marked as one constructClass
+ * would only allocate and initialize (no hook, interface or restriction,
+ * `$new`), in place, as constructClass does it, so that each site calls its
+ * class's instance initializer itself, with its arguments as they are;
+ * anything else, a class not yet made among them, by rt.construct.
+ */
+function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32): void {
+  const out = em.out;
+  em.constructsInPlace = true;
+  out.text("($c = ");
+  em.member(src);
+  out.text(".$");
+  out.uint(slot);
+  out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.$init.call($o");
+  args(em, src + 1, argc);
+  out.text("), $o) : rt.construct($c");
+  args(em, src + 1, argc);
+  out.text(")");
+}
+
 /** `, r, r+1, ...` for `count` arguments from register `from`. */
 function args(em: MethodEmitter, from: i32, count: u32): void {
   for (let k: u32 = 0; k < count; k++) {
@@ -933,11 +951,13 @@ function list(em: MethodEmitter, from: i32, count: u32): void {
 
 /**
  * A call by dispatch id `disp` on the receiver in `src`, with `argc`
- * arguments after it: a method of the receiver's prototype, or for a
- * primitive receiver, or a namespace, which the runtime represents
- * itself, of its class's.
+ * arguments after it, which the verifier bound to method `m` (-1 for
+ * none): a method of the receiver's prototype, or for a primitive
+ * receiver, or a namespace, which the runtime represents itself, of its
+ * class's. Where m has an entry for bound calls, an object's own method
+ * is called by it, `$b`, as the arguments are coerced already.
  */
-function virtual(em: MethodEmitter, disp: u32, src: i32, argc: u32): void {
+function virtual(em: MethodEmitter, disp: u32, src: i32, argc: u32, m: i32): void {
   const out = em.out;
   const type = em.regType[src];
   // XML's methods look names up in the default XML namespace.
@@ -985,7 +1005,7 @@ function virtual(em: MethodEmitter, disp: u32, src: i32, argc: u32): void {
   }
 
   em.member(src);
-  out.text(".$m");
+  out.text(m >= 0 && hasBoundEntry(em, <u32>m) ? ".$b" : ".$m");
   out.uint(disp);
   out.text("(");
   list(em, src + 1, argc);

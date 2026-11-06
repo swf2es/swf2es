@@ -479,3 +479,10 @@ const untypedSetKeys: string[] = [];
  * called as it is.
  */
 export const untypedSetKey = (id: number): string => (untypedSetKeys[id] ??= `$u${id}`);
+const boundKeys: string[] = [];
+/**
+ * Where a method, dispatch id `id`, is kept as calls the compiler bound
+ * call it, their arguments coerced and counted already: its entry for
+ * them if it has one (a compiled method's `$bound`), else itself.
+ */
+export const boundKey = (id: number): string => (boundKeys[id] ??= `$b${id}`);

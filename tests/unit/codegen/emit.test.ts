@@ -701,7 +701,10 @@ test("registers reset one after another are reset in one statement", { skip }, (
 test("a factory names only the parameters its method uses", { skip }, () => {
   testing.domainReset(50);
   const js = module("builtin.abc", true);
-  const factories = js.match(/\(([^()]*)\) => function \$\w*\([^)]*\) \{\n(.*\n){2}/g) ?? [];
+  // A method with an entry for bound calls is a block of two functions,
+  // each checking on entry.
+  const factories =
+    js.match(/\(([^()]*)\) => (\{\n)?function \$[\w$]*\([^)]*\) \{\n(.*\n){2}/g) ?? [];
   const named = (params: string) => factories.filter((f) => f.startsWith(`(${params}) =>`));
   assert.ok(named("").length > 0, "() =>");
   assert.ok(named("scope, sup").length > 0, "(scope, sup) =>");
@@ -709,7 +712,8 @@ test("a factory names only the parameters its method uses", { skip }, () => {
   const dx = named("scope, sup, $dx = rt.defaultXmlNamespace");
   assert.ok(dx.length > 0);
   assert.ok(dx.every((f) => f.includes("rt.defaultXmlNamespace !== $dx")));
-  assert.equal(js.match(/!== \$dx\)/g)?.length, dx.length);
+  const bound = dx.filter((f) => f.includes("=> {\n"));
+  assert.equal(js.match(/!== \$dx\)/g)?.length, dx.length + bound.length);
 });
 
 test("a module's code has no empty statements or trailing spaces", { skip }, () => {

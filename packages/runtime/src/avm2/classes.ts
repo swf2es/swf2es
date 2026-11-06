@@ -9,7 +9,7 @@ import { installMethod } from "./method-factories.js";
 import { formatClassName, type Multiname, NS_Public, qualifiedName } from "./names.js";
 import { invalidate } from "./property-cache.js";
 import type { Runtime } from "./runtime.js";
-import { BIND_Set, methodKey, Traits, VALUE_TESTS } from "./traits.js";
+import { BIND_Set, boundKey, methodKey, Traits, VALUE_TESTS } from "./traits.js";
 
 /**
  * As OP_newclass: a class from its module's descriptor, extending `base`,
@@ -163,10 +163,13 @@ export function newClass(
   if (hooks?.setOnlySlots) {
     for (const [name, slot] of Object.entries(hooks.setOnlySlots)) {
       const binding = itraits.find(rt.publicName(name));
-      if ((binding & 7) === BIND_Set) {
-        itraits.proto[methodKey((binding >> 3) + 1)] ??= function (this: AsObject, value: Value) {
+      const d = (binding >> 3) + 1;
+      if ((binding & 7) === BIND_Set && itraits.proto[methodKey(d)] == null) {
+        const set = function (this: AsObject, value: Value) {
           this[slot] = value;
         };
+        itraits.proto[methodKey(d)] = set;
+        itraits.proto[boundKey(d)] = set;
       }
     }
   }
@@ -174,6 +177,9 @@ export function newClass(
   // Caches keep the methods and what the hooks decide.
   invalidate();
   itraits.proto.$init = desc.init(iscope, base);
+  // A class constructClass only allocates and initializes, which compiled
+  // code constructs itself (see the codegen's constructSlot).
+  cls.$new = !hooks?.construct && !desc.interface && !itraits.uninstantiable;
   // Its static initializer may name the class as a type, as avmplus
   // resolves from traits, before initproperty has stored it anywhere.
   rt.defining.set(qualified, cls);

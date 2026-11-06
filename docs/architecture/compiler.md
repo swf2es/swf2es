@@ -208,6 +208,21 @@ nn(s1);`. A method's count of arguments is checked first, as avmplus'
 to three. Neither `nn`'s frame nor `ac`'s is named with a `$`, so the
 stack a host is shown starts at the method, as before.
 
+A call the verifier binds (`callmethod`, a bound setter) has coerced its
+arguments to the callee's parameter types and passes a count the callee
+takes, as avmplus' JIT coerces at the call site. So a method of some
+traits with a parameter of a class's type, the costly coercion on entry
+(`rt.coerceTo` for anything but the class's own instances), and with no
+rest, `arguments` or float parameter, is written as two functions in its
+factory: `$C_m$u`, its code, taking its parameters as given, and `$C_m`,
+its checked entry, which counts and coerces them as above and calls the
+other. The factory gives the checked one, with the other on it as
+`$bound`, and the runtime keeps that under `$b<id>` beside `$m<id>` (the
+method itself where it has none). Bound calls of such a method call
+`$b<id>`; every other path, `*`, closures, `apply`, interfaces, `super`,
+calls `$m<id>`. Whether a method has one is read from its signature, the
+same in its module and its callers'.
+
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the
 method emitter marks where the code for each AS3 line starts as it writes
@@ -263,7 +278,14 @@ which `newclass` builds from the module's layout:
   fast; of 5 slots, made a third faster.
 - **Methods, getters and setters** are on the prototype, named by dispatch
   id, so `callmethod` is a direct call and overriding is JavaScript's own
-  inheritance.
+  inheritance: `$m<id>`, and `$b<id>` for calls the verifier bound (see
+  above).
+- **`new`** of a class found in a slot is done in place where the class
+  only allocates and initializes (no construct hook, not an interface,
+  not uninstantiable, which the runtime marks `$new` on the class): its
+  traits' `instance()`, then its `$init` called with the arguments as
+  they are, so each site's constructor can be inlined. Anything else goes
+  to `rt.construct`. `super()` calls the base's `$init` directly.
 - **Dynamic properties** of dynamic classes live in their own map, apart
   from slots and methods.
 - **Names**: each traits has its own bindings by namespace and name, and
@@ -352,7 +374,8 @@ runtime, `rt`, that returns:
   so that each `newclass` or `newfunction` binds the scope chain it
   captured, and a class's methods the base class their super instructions
   use; a factory names only the parameters its method uses, `() =>` for
-  one that uses neither;
+  one that uses neither; one whose method has an entry for bound calls is
+  a block declaring both entries that returns the checked one;
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
@@ -403,7 +426,7 @@ of natives written with `registerNativeClass` does.
 
 Generated methods follow one calling convention. A slot is the field `$n`,
 by its slot id from 0, and a method, getter or setter is `$mn` on the
-prototype, by its dispatch id; dynamic properties are kept apart from
+prototype, by its dispatch id (`$bn` too, for bound calls); dynamic properties are kept apart from
 both. A method of a primitive receiver is called through its class's
 prototype, `rt.prototypeOf(int).$mn.call(x, ...)`. A method's own scope
 registers and the chain it captured are passed to the runtime together
