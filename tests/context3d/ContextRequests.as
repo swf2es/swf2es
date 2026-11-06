@@ -23,7 +23,7 @@ package {
         if (events == 1) {
           previous = slot.context3D;
           previous.enableErrorChecking = true;
-          slot.requestContext3D("auto", "baseline");
+          slot.requestContext3D("auto", "baselineConstrained");
         } else if (events == 2) {
           replaced = previous !== slot.context3D;
           slot.context3D.configureBackBuffer(32, 32, 0, false);
@@ -36,7 +36,9 @@ package {
       test("matching-null", function():void { other.requestContext3DMatchingProfiles(null); });
       test("matching-empty", function():void { other.requestContext3DMatchingProfiles(Vector.<String>([])); });
       test("matching-invalid", function():void { other.requestContext3DMatchingProfiles(Vector.<String>(["bad"])); });
-      test("matching-baseline", function():void { other.requestContext3DMatchingProfiles(Vector.<String>(["baseline"])); });
+      test("matching-baseline", function():void {
+        other.requestContext3DMatchingProfiles(Vector.<String>(["baselineConstrained", "baseline"]));
+      });
       test("mode-null", function():void { slot.requestContext3D(null, "baseline"); });
       test("mode-invalid", function():void { slot.requestContext3D("bad", "baseline"); });
       test("profile-null", function():void { slot.requestContext3D("auto", null); });
@@ -53,6 +55,7 @@ package {
     private function finish():void {
       if (!matched || events != 2 || complete) { return; }
       trace("contextrequests events", events, matched, replaced, disposedCode);
+      trace("contextrequests profiles", stage.stage3Ds[0].context3D.profile, stage.stage3Ds[1].context3D.profile);
       stage.stage3Ds[0].context3D.dispose(false);
       stage.stage3Ds[1].context3D.dispose(false);
       complete = true;

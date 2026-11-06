@@ -14,6 +14,9 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
   const natives: avm2.Natives = {};
   const bindings = createBindings(s, host);
   const { slots, place, request, unavailable } = bindings;
+  // The profiles the backend serves, best first: baselineConstrained asks for less of it than
+  // baseline does, and is Starling 1.x's default.
+  const served = ["baseline", "baselineConstrained"];
   const profileName = (value: string | null): string => {
     switch (value) {
       case null:
@@ -48,12 +51,12 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       if (bindings.closed) {
         throw s.rt.error("Error", 3694);
       }
-      if (mode !== "auto" || selected !== "baseline") {
+      if (mode !== "auto" || !served.includes(selected)) {
         unavailable(slot);
         return;
       }
 
-      request(slot);
+      request(slot, selected);
     }
 
     requestContext3DMatchingProfiles(profiles: AsObject | null): void {
@@ -65,15 +68,17 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       if (!values.length) {
         throw s.rt.error("ArgumentError", 2008, "profiles");
       }
-      let baseline = false;
+      const asked = new Set<string>();
       for (let i = 0; i < values.length; i++) {
-        baseline = profileName(values[i]) === "baseline" || baseline;
+        asked.add(profileName(values[i]));
       }
       if (bindings.closed) {
         throw s.rt.error("Error", 3694);
       }
-      if (baseline) {
-        request(this as unknown as AsObject);
+      // The best of them the backend serves, as Flash takes the best its device has.
+      const best = served.find((p) => asked.has(p));
+      if (best) {
+        request(this as unknown as AsObject, best);
       } else {
         unavailable(this as unknown as AsObject);
       }

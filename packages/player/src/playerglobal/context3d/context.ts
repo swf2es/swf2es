@@ -62,7 +62,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     }
 
     get profile(): string | null {
-      return contexts.has(this as unknown as AsObject) ? "baseline" : null;
+      return contexts.get(this as unknown as AsObject)?.profile ?? null;
     }
 
     declare $checking: boolean;
