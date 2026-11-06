@@ -144,6 +144,19 @@ package {
       c.setRenderToTexture(tiny); c.clear(0,0,0,1);
       c.setTextureAt(0,other); c.setProgram(mip); c.drawTriangles(indices); c.setTextureAt(0,null);
       show(tiny,"unoptimized-mips"); tiny.dispose();
+      // Targets smaller than 8 by 8, as a bloom's chain of halvings ends in.
+      for each (var side:int in [4, 2, 1]) {
+        var small:Texture = c.createTexture(side,side,"bgra",true);
+        c.setRenderToTexture(small); c.clear(0,1,1,1);
+        show(small,"small-clear-" + side);
+        c.setRenderToTexture(small); c.clear(0,0,0,1); fill(1,0,1);
+        show(small,"small-fill-" + side);
+        c.setRenderToTexture(small); c.clear(0,0,0,1);
+        c.setVertexBufferAt(1,v,4,"float2"); c.setTextureAt(0,t); c.setProgram(sampled);
+        c.drawTriangles(indices); c.setTextureAt(0,null);
+        show(small,"small-sampled-" + side);
+        small.dispose();
+      }
       var upload:BitmapData = new BitmapData(32,16,true,0xff0000ff);
       t.uploadFromBitmapData(upload); upload.dispose();
       c.setRenderToTexture(t); c.setScissorRectangle(new Rectangle(0,0,16,8)); fill(1,0,0);

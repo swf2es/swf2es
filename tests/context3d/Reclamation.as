@@ -104,7 +104,8 @@ package {
         case 0: context.setVertexBufferAt(8, context.createVertexBuffer(3, 4)); break;
         case 1: context.setTextureAt(8, context.createTexture(8, 8, "bgra", false)); break;
         case 2: context.setProgram(context.createProgram()); break;
-        case 3: context.setRenderToTexture(context.createTexture(4, 4, "bgra", true)); break;
+        // A face a 2D texture does not have.
+        case 3: context.setRenderToTexture(context.createTexture(8, 8, "bgra", true), false, 0, 1); break;
       }
     }
 

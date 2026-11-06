@@ -20,7 +20,7 @@ package {
         slot.context3D.present();
         ready = true;
       });
-      slot.requestContext3D("auto", "baselineConstrained");
+      slot.requestContext3D("auto", "standard");
       returned = true;
     }
   }
