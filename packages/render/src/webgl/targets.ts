@@ -141,6 +141,8 @@ export interface Open {
   oy?: number;
   /** Where a whole layer's object lies in it, which its ShaderFilters read (filter-plan.ts). */
   object?: KernelObject | null;
+  /** Whether it is opaque throughout, as the stage is (Commands.opaqueStage). */
+  opaque?: boolean;
 }
 
 /** A whole layer's object from params `p` from `at` (plan.ts, layerParams): null for none. */

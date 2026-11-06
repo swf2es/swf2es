@@ -198,7 +198,8 @@ with the context:
   over another: `GeometryData.flat`) has no layer: the fill is drawn
   straight onto what is below in its mode (`WebGLBackend.blendDirect`),
   as its layer composited would be, the modes that read what is below
-  from the same copy of it.
+  from the same copy of it, and multiply onto the opaque stage by GL's
+  blending, as its composite.
 - **One state cache.** The backend sets GL state through context3d's
   device layer (`@swf2es/context3d/device`'s `GlState`), so no bind,
   blend or stencil state is set twice.

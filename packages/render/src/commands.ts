@@ -54,11 +54,18 @@ export class Commands {
    * stage, for the blends after it to read.
    */
   clearsTarget = false;
+  /**
+   * Whether the stage stays opaque throughout: cleared to an opaque colour,
+   * and nothing composited onto it that leaves less, erase, alpha or a
+   * blend shader. GL's blending computes more of Flash's blends over it.
+   */
+  opaqueStage = false;
 
   reset(): void {
     this.length = 0;
     this.paramLength = 0;
     this.clearsTarget = false;
+    this.opaqueStage = false;
   }
 
   push(op: number, a = 0, b = 0, c = 0): void {

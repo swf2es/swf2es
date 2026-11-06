@@ -17,6 +17,7 @@ import {
   DRAW,
   ERASE,
   KEPT,
+  KERNEL,
   LAYER_BEGIN,
   LAYER_END,
   MASK_BEGIN,
@@ -84,6 +85,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
       alpha,
     ),
   );
+  out.opaqueStage = alpha === 1;
   emit(scene, 0, scene.length, out, true);
 }
 
@@ -294,10 +296,17 @@ function layerParams(out: Commands, scene: SceneList, layer: number): number {
 /** The layers pushed and not yet popped, by number, innermost last. */
 const open: number[] = [];
 
-/** A layer composited in `mode` noted where it clears the target itself (Commands.clearsTarget). */
+/**
+ * A layer composited in `mode` noted where it clears the target itself
+ * (Commands.clearsTarget), or may leave it less than opaque (opaqueStage).
+ */
 function noteClearing(out: Commands, mode: number): void {
   if (open.length === 0 && (mode === ERASE || mode === ALPHA)) {
     out.clearsTarget = true;
+  }
+
+  if (open.length === 0 && (mode === ERASE || mode === ALPHA || mode >= KERNEL)) {
+    out.opaqueStage = false;
   }
 }
 

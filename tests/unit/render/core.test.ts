@@ -17,6 +17,7 @@ import {
   HOLD_PUSH,
   IDLE_FRAMES,
   KEEP_IDLE_FRAMES,
+  KERNEL,
   Keeps,
   LAYER_END,
   LAYER_POP,
@@ -273,6 +274,33 @@ test("an erase or alpha layer composited onto the target itself clears it, one i
   assert.equal(planned(NORMAL, ERASE, ALPHA), true);
   // Planning again starts afresh.
   assert.equal(planned(MULTIPLY, NORMAL, NORMAL), false);
+});
+
+test("the stage stays opaque on an opaque background unless erased, alphaed or shaded onto", () => {
+  const commands = new Commands();
+  const planned = (background: number, outer: number, inner: number) => {
+    const scene = new SceneList();
+    scene.layerBegin();
+    scene.layerBegin();
+    scene.draw(0, 0, 0);
+    scene.layerEnd(inner, -1);
+    scene.layerEnd(outer, -1);
+    for (let layer = 0; layer < 2; layer++) {
+      scene.layerRect(layer, 0, 0, 10, 10);
+    }
+
+    plan(scene, background, commands);
+    return commands.opaqueStage;
+  };
+
+  assert.equal(planned(0xffffffff, MULTIPLY, NORMAL), true);
+  // Inside a layer, an erase leaves the layer clear, not the stage.
+  assert.equal(planned(0xffffffff, NORMAL, ERASE), true);
+  assert.equal(planned(0xffffffff, ERASE, NORMAL), false);
+  assert.equal(planned(0xffffffff, ALPHA, NORMAL), false);
+  assert.equal(planned(0xffffffff, KERNEL, NORMAL), false);
+  assert.equal(planned(0x80ffffff, MULTIPLY, NORMAL), false);
+  assert.equal(planned(0, NORMAL, NORMAL), false);
 });
 
 test("a geometry changed in place is measured again and noted for the backend, a removed one not", () => {
