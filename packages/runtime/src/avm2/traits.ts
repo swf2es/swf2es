@@ -418,7 +418,10 @@ export class Traits {
 /** A class named in a module, resolved the first time it is needed. */
 export class ClassRef {
   cls: AsObject | null = null;
-  /** Its instances' traits, once coerceTo has found them. */
+  /**
+   * Its instances' traits, once coerceTo has found them; a compiled
+   * method's parameter of the type reads them by name on entry.
+   */
   traits: Traits | null = null;
 
   constructor(
@@ -432,7 +435,10 @@ export class ClassRef {
 /** Vector.<T>, resolved the first time it is needed. */
 export class VectorRef {
   cls: AsObject | null = null;
-  /** Its instances' traits, once coerceTo has found them. */
+  /**
+   * Its instances' traits, once coerceTo has found them; a compiled
+   * method's parameter of the type reads them by name on entry.
+   */
   traits: Traits | null = null;
 
   constructor(readonly param: TypeRef) {}
