@@ -174,6 +174,9 @@ export function newClass(
   // Caches keep the methods and what the hooks decide.
   invalidate();
   itraits.proto.$init = desc.init(iscope, base);
+  // A class constructClass only allocates and initializes, which compiled
+  // code constructs itself (see the codegen's constructSlot).
+  cls.$new = !hooks?.construct && !desc.interface && !itraits.uninstantiable;
   // Its static initializer may name the class as a type, as avmplus
   // resolves from traits, before initproperty has stored it anywhere.
   rt.defining.set(qualified, cls);

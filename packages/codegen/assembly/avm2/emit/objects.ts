@@ -445,7 +445,8 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     }
     case ops.OP_constructsuper:
-      out.text("rt.constructSuper(sup, ");
+      // As rt.constructSuper, without an array of the arguments to apply.
+      out.text("sup.$it.proto.$init.call(");
       em.usesSup = true;
       em.reg(src);
       args(em, src + 1, a);
@@ -460,12 +461,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     case IR_ConstructSlot:
       em.assign(i);
-      out.text("rt.construct(");
-      em.member(src);
-      out.text(".$");
-      out.uint(a);
-      args(em, src + 1, ir.b[i]);
-      out.text(")");
+      constructSlot(em, src, a, ir.b[i]);
       return true;
     case ops.OP_call:
       em.assign(i);
@@ -911,6 +907,28 @@ function receiver(em: MethodEmitter, r: i32): void {
   }
 
   em.out.byte(0x29); // )
+}
+
+/**
+ * `new` of what slot `slot` of register `src` holds, with `argc`
+ * arguments after it: a class the runtime has marked as one constructClass
+ * would only allocate and initialize (no hook, interface or restriction,
+ * `$new`), in place, as constructClass does it, so that each site calls its
+ * class's instance initializer itself, with its arguments as they are;
+ * anything else, a class not yet made among them, by rt.construct.
+ */
+function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32): void {
+  const out = em.out;
+  em.constructsInPlace = true;
+  out.text("($c = ");
+  em.member(src);
+  out.text(".$");
+  out.uint(slot);
+  out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.$init.call($o");
+  args(em, src + 1, argc);
+  out.text("), $o) : rt.construct($c");
+  args(em, src + 1, argc);
+  out.text(")");
 }
 
 /** `, r, r+1, ...` for `count` arguments from register `from`. */

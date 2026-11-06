@@ -84,6 +84,8 @@ export class MethodEmitter {
   /** Whether the method reads its factory's scope chain, and its base class. */
   usesScope: bool = false;
   usesSup: bool = false;
+  /** Whether the method constructs a class in place, in the temporaries `$c` and `$o` (see constructSlot). */
+  constructsInPlace: bool = false;
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
   /** The method's name in its own code, for running it again (see checkEntry). */
@@ -193,6 +195,7 @@ export class MethodEmitter {
     this.seesDxns = false;
     this.usesScope = false;
     this.usesSup = false;
+    this.constructsInPlace = false;
     this.prologue(method, global, flags);
     // A method that sets the default XML namespace gives its caller's
     // back when it returns or throws.
@@ -292,18 +295,19 @@ export class MethodEmitter {
    * caller's: else it runs again with it, and the caller's is back after.
    * With both, one test, as V8 counts each against inlining: rt.enter
    * throws the count's error or runs the method again, which counts again.
+   * Before them, the temporaries of the classes it constructs in place.
    */
   checkEntry(): void {
     const args = this.argsTest;
     const dxns = "rt.defaultXmlNamespace !== $dx";
-    let check = "";
+    let check = this.constructsInPlace ? "var $c, $o;\n" : "";
     if (this.seesDxns && args.length) {
-      check = `if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
+      check += `if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
     } else if (this.seesDxns) {
-      check = `if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
+      check += `if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
     } else if (args.length) {
-      check = `if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
-    } else {
+      check += `if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
+    } else if (!check.length) {
       return;
     }
 
