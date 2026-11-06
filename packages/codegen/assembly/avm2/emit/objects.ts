@@ -31,8 +31,8 @@ import {
 import { NONE } from "./copies";
 import { inRange, isAddress, viewMethod } from "./memory";
 import { MethodEmitter } from "./method";
-import { poolString, typeRef } from "./refs";
-import { call2, isNumber, isNumeric } from "./values";
+import { isClassRef, poolString, typeRef } from "./refs";
+import { CONVERTS, call2, convert, isNumber, isNumeric, keeps } from "./values";
 
 /** Whether register r may hold XML or an XMLList: untyped, Object, or either. */
 function mayBeXml(em: MethodEmitter, r: i32): bool {
@@ -206,6 +206,12 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     case IR_CallGetter:
       em.assign(i);
+      if (vectorLength(em, src, ir.c[i])) {
+        receiver(em, src);
+        out.text(".$a.length");
+        return true;
+      }
+
       virtual(em, a, src, 0);
       return true;
     case IR_CallSetter:
@@ -255,8 +261,11 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
 
         // An Array's element read in place, so that each site keeps its own
         // feedback in the engine: a hole, a number that is no index, null
-        // and undefined read none, and getIndexed finds them as before.
-        if (arrayElements(em, a, src)) {
+        // and undefined read none, and getIndexed finds them as before. A
+        // Vector's too, whose elements are never undefined: null, and what
+        // is past its end, go to the helper, which throws the RangeError; a
+        // float Vector's elements are elsewhere.
+        if (arrayElements(em, a, src) || vectorElements(em, a, kind)) {
           receiver(em, src);
           out.text(".$a[");
           em.reg(src + 1);
@@ -294,8 +303,15 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         const kind = vectorKind(em, em.regType[src]);
         // An Array's element below its length written in place, as
         // setIndexed writes it; the receiver read first, as the call
-        // reads it first. Anything else goes to setIndexed.
-        if (arrayElements(em, a, src)) {
+        // reads it first. Anything else goes to setIndexed. A Vector's
+        // too, converted to its element type, where the conversion runs no
+        // AS3 and so cannot change the Vector after its length is read:
+        // below its length a write needs no check of fixedness; at it and
+        // past it, the helper grows the Vector or throws.
+        const array = arrayElements(em, a, src);
+        const element =
+          array || !vectorElements(em, a, kind) ? CONVERTS : storedType(em, kind, src);
+        if (array || element !== CONVERTS) {
           const index = em.builtinOf(src + 1);
           out.text("if (");
           receiver(em, src);
@@ -317,7 +333,12 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
           out.text(".$a[");
           em.reg(src + 1);
           out.text("] = ");
-          em.reg(src + 2);
+          if (array) {
+            em.reg(src + 2);
+          } else {
+            convert(em, "", src + 2, element, em.regType[src + 2]);
+          }
+
           out.text("; else ");
         }
 
@@ -750,11 +771,6 @@ function name(em: MethodEmitter, a: u32, from: i32): void {
   out.text(")");
 }
 
-/**
- * Whether multiname `a` is a runtime name alone, not an attribute, whose
- * name in register r is a number: an element's index, which the runtime
- * reads and writes without making the name.
- */
 /** The kind of a Vector's elements, as the runtime's vectorGet and vectorSet name it, for type t; "" if not a Vector's. */
 function vectorKind(em: MethodEmitter, t: i32): string {
   const domain = em.domain;
@@ -784,6 +800,78 @@ function vectorKind(em: MethodEmitter, t: i32): string {
     : "";
 }
 
+/**
+ * Whether `getter` on register r reads a Vector's length, which is its
+ * elements': the Vector classes are final, and of their getters, length
+ * alone gives a uint (fixed a Boolean).
+ */
+function vectorLength(em: MethodEmitter, r: i32, getter: i32): bool {
+  return (
+    getter >= 0 &&
+    vectorKind(em, em.regType[r]).length > 0 &&
+    em.domain.traits.returnType[getter] === em.domain.uintType
+  );
+}
+
+/**
+ * Whether the indexed access by multiname `a` on a Vector of `kind` reads
+ * its elements, as the runtime's vectorGet and vectorSet do: a public
+ * namespace in the set, and elements in an Array, which a float Vector's
+ * are not.
+ */
+function vectorElements(em: MethodEmitter, a: u32, kind: string): bool {
+  return kind.length > 0 && kind !== "Float" && em.domain.hasPublicNamespace(em.index, a);
+}
+
+/**
+ * The element type the value in register src + 2 converts to when it is
+ * written into the Vector of `kind` in register `src`, where the
+ * conversion runs no AS3, as valueOf and toString can; else CONVERTS. A
+ * Vector.<*> may be a Vector of any type, so has no element type to write.
+ */
+function storedType(em: MethodEmitter, kind: string, src: i32): i32 {
+  const domain = em.domain;
+  const t = em.regType[src];
+  let type = CONVERTS;
+  if (kind === "Int") {
+    type = domain.intType;
+  } else if (kind === "Uint") {
+    type = domain.uintType;
+  } else if (kind === "Double") {
+    type = domain.numberType;
+  } else if (kind === "Object" && t !== domain.vectorObjectType) {
+    type = domain.traits.param[t];
+  }
+
+  const from = em.regType[src + 2];
+  const fromBt = domain.builtin(from);
+  if (type === CONVERTS || fromBt === BUILTIN_Float) {
+    return CONVERTS;
+  }
+
+  const numeric = fromBt === BUILTIN_Int || fromBt === BUILTIN_Uint || fromBt === BUILTIN_Number;
+  switch (domain.builtin(type)) {
+    case BUILTIN_Int:
+    case BUILTIN_Uint:
+      return numeric || fromBt === BUILTIN_Boolean ? type : CONVERTS;
+    case BUILTIN_Number:
+      return numeric ? type : CONVERTS;
+    case BUILTIN_Boolean:
+    case BUILTIN_Object:
+      return type;
+    case BUILTIN_String:
+      return keeps(em, type, from) ? type : CONVERTS;
+    default:
+      // A class's instances: an instance check, which throws as the helper would.
+      return isClassRef(em, type) ? type : CONVERTS;
+  }
+}
+
+/**
+ * Whether multiname `a` is a runtime name alone, not an attribute, whose
+ * name in register r is a number: an element's index, which the runtime
+ * reads and writes without making the name.
+ */
 function indexed(em: MethodEmitter, a: u32, r: i32): bool {
   return em.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && isNumber(em, r);
 }

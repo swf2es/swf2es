@@ -22,7 +22,7 @@ import { MethodEmitter } from "./method";
 import { isClassRef, typeRef } from "./refs";
 
 /** No type: a conversion, convert_s or convert_o, that always calls the runtime. */
-const CONVERTS: i32 = -2;
+export const CONVERTS: i32 = -2;
 
 /**
  * The comparison `op` of instruction i's two operands, negated if `not`:
