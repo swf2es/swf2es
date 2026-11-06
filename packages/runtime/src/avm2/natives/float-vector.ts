@@ -87,7 +87,7 @@ export class FloatVector {
 /** Conversion precedes this check: valueOf may change the vector's size or fixedness. */
 export function setFloatElement(rt: Runtime, o: AsObject, i: number, value: number): void {
   const a: FloatVector = o.$a;
-  if (i > a.length || (i === a.length && o.$fixed)) {
+  if (i >>> 0 !== i || i > a.length || (i === a.length && o.$fixed)) {
     throw rt.error("RangeError", 1125, i, a.length);
   }
 
