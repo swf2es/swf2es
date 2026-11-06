@@ -40,6 +40,7 @@ import {
   type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
+  type FileSystemHost,
   globalWebSocketHost,
   hostTouchPoints,
   type ModuleCache,
@@ -208,6 +209,8 @@ export class Scripting {
   readonly air: boolean;
   /** The AIR application the SWFs are, in AIR: its launch and window (NativeApplication). */
   readonly application: AirApplication | null;
+  /** In AIR, the host's file system, which flash.filesystem.File reads. */
+  readonly fileSystem: FileSystemHost | null;
   /**
    * Takes the policy files Security.loadPolicyFile names, resolved, for a
    * host that judges requests by them; nothing does by default, as a
@@ -331,6 +334,8 @@ export class Scripting {
        * Stage.nativeWindow give; without one, there is no window.
        */
       application?: AirApplication | null;
+      /** With `air`, the file system flash.filesystem.File reads; without one, a File finds nothing. */
+      fileSystem?: FileSystemHost | null;
       /** Takes the URLs Security.loadPolicyFile names, resolved: an "xmlsocket:" one as given. */
       loadPolicyFile?: (url: string) => void;
       /**
@@ -466,6 +471,7 @@ export class Scripting {
     this.url = options.url ?? this.url;
     this.air = options.air ?? false;
     this.application = this.air ? (options.application ?? null) : null;
+    this.fileSystem = this.air ? (options.fileSystem ?? null) : null;
     this.sandboxType = options.sandboxType ?? (this.air ? "application" : "remote");
     this.loadPolicyFile = options.loadPolicyFile ?? null;
     this.base = options.base ?? null;

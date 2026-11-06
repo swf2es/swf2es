@@ -33,6 +33,8 @@ export type {
   ExternalInterfaceHost,
   FetchRequest,
   FetchResult,
+  FileStat,
+  FileSystemHost,
   ModuleCache,
   Navigate,
   PlatformCapabilities,

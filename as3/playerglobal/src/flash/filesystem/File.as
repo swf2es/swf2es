@@ -10,7 +10,14 @@ package flash.filesystem
 	{
 		public function File(path:String = null)
 		{
+			if (path != null)
+			{
+				_init(path);
+			}
 		}
+
+		// A native path, or a file:, app: or app-storage: URL, as AIR takes either.
+		private native function _init(path:String):void;
 
 		public static native function get systemCharset():String;
 

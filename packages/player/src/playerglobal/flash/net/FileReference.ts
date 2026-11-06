@@ -4,9 +4,19 @@ import { type FileFilter, FileReference, type SelectedFile } from "../../../file
 import type { FetchRequest } from "../../../hosts.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
+import { fileEntry } from "../filesystem/File.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+
+/** What FileReference's properties read of a file: a selected one's, or a File's on disk. */
+interface Described {
+  name: string;
+  size: number;
+  modificationDate: number;
+  creationDate?: number;
+  directory?: boolean;
+}
 
 export function fileReferenceNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
@@ -108,9 +118,39 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
     return request as AsObject;
   };
 
+  /**
+   * What a File with a path has on disk, as a selected file's fields: its
+   * name whether or not it is there, the rest Error 3003 where it is not.
+   */
+  const onDisk = (target: AsObject): Described | null => {
+    const entry = fileEntry(s, target);
+    if (!entry) {
+      return null;
+    }
+
+    const stat = entry.stat;
+    const missing = (): never => {
+      throw s.rt.error("Error", 3003);
+    };
+    return {
+      name: entry.name,
+      get size() {
+        return stat ? (stat.directory ? 0 : stat.size) : missing();
+      },
+      get modificationDate() {
+        return stat ? stat.modified : missing();
+      },
+      get creationDate() {
+        return stat ? stat.created : missing();
+      },
+      directory: stat?.directory ?? false,
+    };
+  };
+  const described = (target: AsObject): Described => onDisk(target) ?? file(target);
+
   class FileReferenceNatives {
     get creationDate(): Value {
-      const selected = file(this);
+      const selected = described(this);
       return s.rt.construct(
         s.rt.classNamed("Date"),
         selected.creationDate ?? selected.modificationDate,
@@ -118,17 +158,22 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
     }
 
     get modificationDate(): Value {
-      return s.rt.construct(s.rt.classNamed("Date"), file(this).modificationDate);
+      return s.rt.construct(s.rt.classNamed("Date"), described(this).modificationDate);
     }
 
     get name(): Value {
-      return file(this).name;
+      return described(this).name;
     }
     get size(): Value {
-      return file(this).size;
+      return described(this).size;
     }
     get type(): Value {
-      const name = file(this).name;
+      const { name, directory } = described(this);
+      // A directory's is empty, a file's its extension with the dot, as adl's.
+      if (directory) {
+        return "";
+      }
+
       const dot = name.lastIndexOf(".");
       return dot < 0 ? "" : name.slice(dot);
     }
