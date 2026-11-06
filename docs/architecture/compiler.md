@@ -243,14 +243,25 @@ the arguments as they are and calls `$init`.
 A call through an interface coerces its arguments to the interface
 method's signature, which the class's method has too (avmplus refuses a
 class whose method does not match, VerifyError 1053), but the class may
-place the method at any dispatch id. Such a call, given no more arguments
-than the method declares, is `o[rt.interfaceKey(T[k], disp, o)](...)`:
-the runtime finds the `$b<id>` the class binds the interface's name to
-once for each class and interface, and keeps it on the class's traits,
-the last interface apart; the call itself is the module's, so that each
-site keeps its own feedback in the engine. More arguments, which a rest
-parameter takes, go by name through `rt.callInterface`, as the class's
-method counts them.
+place the method at any dispatch id. So each class that implements an
+interface has an alias of its `$b<id>` for each of the interface's
+methods, under one name for all classes, made from the method's name and
+namespace (`"$i0.5:Shape:area"`: the namespace's kind, its URI's length,
+the URI and the name). The module lists them in the class's descriptor
+(`aliases`), and `newClass` sets them on the prototype with its methods,
+before any instance exists, so that the prototype's shape is fixed from
+then on; a class inherits its base's aliases, and lists those its own
+methods override and those of interfaces its base does not implement. A
+call given no more arguments than the method declares is then
+`o["$i0.5:Shape:area"](...)`: a named property, which a site that sees
+several classes keeps polymorphic in the engine, where keys that differ
+by class make it megamorphic. A private namespace is not compared by its
+URI, so a member in one has no alias, and its calls are
+`o[rt.interfaceKey(T[k], disp, o)](...)`: the runtime finds the `$b<id>`
+the class binds the interface's name to once for each class and
+interface, and keeps it on the class's traits, the last interface apart.
+More arguments, which a rest parameter takes, go by name through
+`rt.callInterface`, as the class's method counts them.
 
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the

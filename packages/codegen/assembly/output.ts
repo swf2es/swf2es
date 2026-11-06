@@ -116,6 +116,13 @@ export class Output {
   string(ptr: usize, length: u32): void {
     this.reserve(length + 2);
     this.byte(0x22);
+    this.chars(ptr, length);
+    this.byte(0x22);
+  }
+
+  /** What string() writes between the quotes, for a literal made of several strings. */
+  chars(ptr: usize, length: u32): void {
+    this.reserve(length);
     let i: u32 = 0;
     while (i < length) {
       const b = load<u8>(ptr + i);
@@ -152,8 +159,6 @@ export class Output {
         i += n;
       }
     }
-
-    this.byte(0x22);
   }
 
   /**

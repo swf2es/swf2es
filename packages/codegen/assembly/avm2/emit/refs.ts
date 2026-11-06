@@ -1,9 +1,12 @@
 // How a method or module names what it refers to: types, as the runtime
 // knows them across modules or through the module's table T; namespaces and
 // qualified names; and the constants a slot or parameter starts as.
+
+import { Output } from "../../output";
 import * as C from "../abc/constants";
-import { NS_Private, URI_None } from "../link/domain";
+import { Domain, NS_Private, URI_None } from "../link/domain";
 import {
+  BKIND_Method,
   BUILTIN_Any,
   BUILTIN_Boolean,
   BUILTIN_Float,
@@ -149,6 +152,52 @@ export function uri(e: MethodEmitter, id: u32): void {
 
   const domain = e.domain;
   e.out.string(domain.stringPtr[id], domain.stringLength[id]);
+}
+
+/**
+ * The member of interface traits `ifc` that dispatch id `disp` of its
+ * layout binds a method to, whose name every class implementing it has an
+ * alias of (interfaceAlias); -1 where there is none to call by, a private
+ * namespace's member among them, as private namespaces are not compared by
+ * their URI.
+ */
+export function aliasedMember(domain: Domain, ifc: u32, disp: u32): i32 {
+  const traits = domain.traits;
+  const last = traits.memberEnd[ifc];
+  for (let m = traits.memberStart[ifc]; m < last; m++) {
+    const b = traits.memberBinding[m];
+    if ((b & 7) === BKIND_Method && b >> 3 === disp) {
+      return domain.nsType[traits.memberNs[m]] === NS_Private ? -1 : <i32>m;
+    }
+  }
+
+  return -1;
+}
+
+/**
+ * The name, as a string literal, under which every class that implements
+ * an interface has the entry for bound calls of the method it binds the
+ * interface's member `name` in `ns` to, ns being no private namespace: one
+ * name for all classes, so that a call through the interface reads one
+ * property whatever the receiver's class. A namespace is its kind and URI,
+ * as the domain interns it; the URI's length keeps the parts apart.
+ */
+export function interfaceAlias(out: Output, domain: Domain, ns: u32, name: u32): void {
+  out.text('"$i');
+  out.uint(domain.nsType[ns]);
+  const id = domain.nsUri[ns];
+  if (id === URI_None) {
+    out.text("n:");
+  } else {
+    out.text(".");
+    out.uint(domain.stringLength[id]);
+    out.text(":");
+    out.chars(domain.stringPtr[id], domain.stringLength[id]);
+    out.text(":");
+  }
+
+  out.chars(domain.stringPtr[name], domain.stringLength[name]);
+  out.text('"');
 }
 
 /** "uri::name", or just the name in a public namespace with an empty URI. */

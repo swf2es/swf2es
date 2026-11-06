@@ -32,7 +32,7 @@ import {
 import { NONE } from "./copies";
 import { isAddress, viewMethod } from "./memory";
 import { hasBoundEntry, MethodEmitter } from "./method";
-import { isClassRef, poolString, typeRef } from "./refs";
+import { aliasedMember, interfaceAlias, isClassRef, poolString, typeRef } from "./refs";
 import { CONVERTS, call2, convert, isNumber, isNumeric, keeps } from "./values";
 
 /** Whether register r may hold XML or an XMLList: untyped, Object, or either. */
@@ -1026,22 +1026,34 @@ function knownConstructor(em: MethodEmitter, ctraits: i32, argc: u32): i32 {
 /**
  * A call of an interface's method, dispatch id `disp` in the interface's
  * layout, on the receiver in `src`, with `argc` arguments after it, no
- * more than the method declares: by the key the runtime finds for the
- * receiver's class, its entry for bound calls, as the class's method has
- * the interface's signature and the arguments are coerced to it. The
- * call is made here, so that each site keeps its own feedback in the
- * engine.
+ * more than the method declares: the receiver's class's entry for bound
+ * calls, as the class's method has the interface's signature and the
+ * arguments are coerced to it. It is called by the alias every class
+ * implementing the interface has of it (interfaceAlias), one name
+ * whatever the class, so that a site that sees several classes stays
+ * polymorphic in the engine; a member in a private namespace, which has
+ * none, by the key the runtime finds for the receiver's class.
  */
 function interfaceCall(em: MethodEmitter, disp: u32, src: i32, argc: u32): void {
   const out = em.out;
+  const domain = em.domain;
+  const ifc = em.regType[src];
+  const m = aliasedMember(domain, <u32>ifc, disp);
   em.member(src);
-  out.text("[rt.interfaceKey(");
-  typeRef(em, em.regType[src]);
-  out.text(", ");
-  out.uint(disp);
-  out.text(", ");
-  em.read(src);
-  out.text(")](");
+  if (m >= 0) {
+    out.text("[");
+    interfaceAlias(out, domain, domain.traits.memberNs[m], domain.traits.memberName[m]);
+    out.text("](");
+  } else {
+    out.text("[rt.interfaceKey(");
+    typeRef(em, ifc);
+    out.text(", ");
+    out.uint(disp);
+    out.text(", ");
+    em.read(src);
+    out.text(")](");
+  }
+
   list(em, src + 1, argc);
   out.text(")");
 }
