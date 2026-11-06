@@ -4100,6 +4100,63 @@ function avm1Depths(version: number): Uint8Array {
   );
 }
 
+// A shape test inside a clip whose timeline masks part of it: what the mask
+// covers is hit, what it leaves out is not, nothing where its frame is
+// empty, as a clip hides a part by playing its mask to nothing.
+function avm1HitTestUnderMask(version: number): Uint8Array {
+  const half = w.shape({
+    id: 5,
+    bounds: [0, 500, 0, 1000],
+    fills: [0x000000],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [500, 0] },
+          { line: [500, 1000] },
+          { line: [0, 1000] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+  const mask = avm1Sprite(4, [
+    [w.place({ depth: 1, character: 1 }), as1("stop();", version)],
+    [w.remove(1)],
+    [w.place({ depth: 1, character: 5 })],
+  ]);
+  const block = avm1Sprite(3, [
+    [
+      w.place({ depth: 1, character: 4, name: "m", clipDepth: 5 }),
+      w.place({ depth: 3, character: 2 }),
+    ],
+  ]);
+  return avm1Swf(
+    version,
+    [square(1, 0x000000), square(2, 0x3366cc), half, mask, block],
+    [
+      [
+        w.place({ depth: 1, character: 3, name: "b", matrix: { tx: 200, ty: 200 } }),
+        as1(
+          `function probe(label) {
+  trace(label + " left " + _root.hitTest(20, 35, true) + " " + b.hitTest(20, 35, true) +
+    " right " + _root.hitTest(50, 35, true) + " " + b.hitTest(50, 35, true) +
+    " bounds " + b.hitTest(50, 35, false));
+}
+probe("covered");
+b.m.gotoAndStop(2);
+probe("empty");
+b.m.gotoAndStop(3);
+probe("half");
+stop();`,
+          version,
+        ),
+      ],
+    ],
+  );
+}
+
 // #initclip, the root's DoInitAction blocks (docs/avm1.md, "The frame"):
 // a frame's run as the root enters it, before its places and its actions,
 // in tag order, a sprite's once; a sprite attached before its own runs.
@@ -10472,6 +10529,15 @@ export const cases: PlayerCase[] = [
       maxOutliers: 0,
     }),
   ),
+  {
+    name: "avm1-hit-test-under-mask",
+    swf: avm1HitTestUnderMask(10),
+    traced: true,
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   ...[5, 6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-depths-swf${version}`,
