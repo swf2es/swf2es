@@ -330,6 +330,55 @@ export interface SocketHost {
   connect(host: string, port: number, events: SocketEvents): SocketTransport;
 }
 
+/** A window's place and size on the screen, in pixels, its frame included. */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * An AIR application's window, which Stage.nativeWindow reads and moves:
+ * its bounds take the frame in, as AIR's do. What it has no setter for
+ * stays as it is, as a window manager may refuse a size or a state.
+ */
+export interface AirWindow {
+  bounds(): WindowBounds;
+  setBounds?(bounds: WindowBounds): void;
+  title(): string;
+  setTitle?(title: string): void;
+  /** NativeWindowDisplayState's: "normal", "maximized" or "minimized". */
+  displayState(): string;
+  minimize?(): void;
+  maximize?(): void;
+  restore?(): void;
+  /** Whether it has the focus, as NativeWindow.active. */
+  active(): boolean;
+  activate?(): void;
+  visible(): boolean;
+  setVisible?(visible: boolean): void;
+  close?(): void;
+  /** Where the stage's corner is on the screen, the frame's border and title bar from the window's. */
+  stageOffset(): { x: number; y: number };
+}
+
+/**
+ * What an AIR application's host gives NativeApplication: the descriptor
+ * it was launched from, the launch's arguments, which its InvokeEvent
+ * carries, and its one window.
+ */
+export interface AirApplication {
+  /** The application descriptor's XML, as applicationDescriptor gives it, and its id. */
+  descriptor: string;
+  id: string;
+  /** What followed the descriptor on the command line, as adl's `--` passes it. */
+  arguments: readonly string[];
+  window?: AirWindow | null;
+  /** NativeApplication.exit's code; a host without it stops nothing. */
+  exit?(code: number): void;
+}
+
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */
 export interface WebSocketTransport {
   /** A text message as a string, a binary one as bytes. */

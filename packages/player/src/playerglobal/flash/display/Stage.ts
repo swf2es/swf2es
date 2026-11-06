@@ -8,6 +8,7 @@ import type { Scripting } from "../../../scripting.js";
 import { stageAlignment } from "../../../stage.js";
 import { displayOf } from "./DisplayObject.js";
 import { containerNatives } from "./DisplayObjectContainer.js";
+import { nativeWindowOf } from "./NativeWindow.js";
 
 type Value = avm2.Value;
 
@@ -21,6 +22,11 @@ export function stageNatives(s: Scripting): avm2.Natives {
 
     get frameRate(): number {
       return s.frameRate;
+    }
+
+    /** The AIR application's window the stage is in; null outside AIR, or where the host has none. */
+    get nativeWindow(): Value {
+      return nativeWindowOf(s);
     }
 
     set frameRate(v: Value) {

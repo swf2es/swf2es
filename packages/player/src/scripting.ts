@@ -31,6 +31,7 @@ import {
 import type { ButtonCharacter, DisplayCharacter, Library } from "./display/timeline.js";
 import { browserFileHost, type FileHost } from "./files.js";
 import {
+  type AirApplication,
   browserClipboard,
   browserNavigate,
   type ClipboardHost,
@@ -205,6 +206,8 @@ export class Scripting {
   readonly sandboxType: string;
   /** Whether the SWFs see AIR's API, as in AIR, rather than Flash Player's plugin's. */
   readonly air: boolean;
+  /** The AIR application the SWFs are, in AIR: its launch and window (NativeApplication). */
+  readonly application: AirApplication | null;
   /**
    * Takes the policy files Security.loadPolicyFile names, resolved, for a
    * host that judges requests by them; nothing does by default, as a
@@ -322,6 +325,12 @@ export class Scripting {
        * not in AIR. Capabilities stay the host's.
        */
       air?: boolean;
+      /**
+       * With `air`, the application the SWFs are: its descriptor, its
+       * launch's arguments and its window, which NativeApplication and
+       * Stage.nativeWindow give; without one, there is no window.
+       */
+      application?: AirApplication | null;
       /** Takes the URLs Security.loadPolicyFile names, resolved: an "xmlsocket:" one as given. */
       loadPolicyFile?: (url: string) => void;
       /**
@@ -456,6 +465,7 @@ export class Scripting {
       : null;
     this.url = options.url ?? this.url;
     this.air = options.air ?? false;
+    this.application = this.air ? (options.application ?? null) : null;
     this.sandboxType = options.sandboxType ?? (this.air ? "application" : "remote");
     this.loadPolicyFile = options.loadPolicyFile ?? null;
     this.base = options.base ?? null;
