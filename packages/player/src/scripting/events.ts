@@ -130,6 +130,27 @@ export function dispatchTo(s: Scripting, target: AsObject, event: AsObject): voi
 }
 
 /**
+ * Give `event` to one of `target`'s listeners, `fn`, at the target: as AIR
+ * gives each InvokeEvent listener the application's launch once it listens.
+ */
+export function dispatchToListener(
+  s: Scripting,
+  target: AsObject,
+  event: AsObject,
+  fn: Value,
+): void {
+  const f = eventFields(s);
+  event[f.target] = target.$target ?? target;
+  event[f.currentTarget] = target;
+  event[f.phase] = AT_TARGET;
+  try {
+    s.rt.call(fn, null, event);
+  } catch (error) {
+    s.reportUncaught(error);
+  }
+}
+
+/**
  * Dispatch `event` from `target`, as EventDispatcher.dispatchEvent does; whether no listener
  * prevented its default. A dispatcher that stands in for another, an
  * EventDispatcher made with a target, dispatches as that one, along its

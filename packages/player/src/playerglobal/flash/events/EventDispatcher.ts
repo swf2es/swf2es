@@ -26,16 +26,79 @@ function listeners(o: AsObject): Map<string, Listener[]> {
   return o.$listeners;
 }
 
+/** An event type, declared String: refused as null, as Flash refuses it. */
+function eventType(s: Scripting, type: Value): string {
+  if (type === null || type === undefined) {
+    throw s.rt.error("TypeError", 2007, "type");
+  }
+
+  return type as string;
+}
+
+/** `fn` added to `o`'s listeners for `type`, as EventDispatcher.addEventListener adds it; whether it was new. */
+export function addListener(
+  s: Scripting,
+  o: AsObject,
+  type: Value,
+  fn: Value,
+  useCapture: Value,
+  priority: Value,
+): boolean {
+  const key = eventType(s, type);
+  if (typeof fn !== "object" && typeof fn !== "function") {
+    return false;
+  }
+
+  const list = listeners(o).get(key) ?? [];
+  const capture = !!useCapture;
+  if (list.some((l) => l.fn === fn && l.capture === capture)) {
+    return false;
+  }
+
+  const listener = { fn, capture, priority: Number(priority) | 0 };
+  // Higher priority first; the same priority in the order added.
+  let at = list.length;
+  while (at > 0 && list[at - 1].priority < listener.priority) {
+    at--;
+  }
+
+  list.splice(at, 0, listener);
+  listeners(o).set(key, list);
+  // A display object listening for a frame event is broadcast to, wherever it is; any
+  // dispatcher listening for activation is, held weakly.
+  if (BROADCAST.has(key) && o.$display) {
+    s.broadcastTargets(key).add(o);
+  } else if (ACTIVATION.has(key)) {
+    s.activationTargets(key).add(o);
+  }
+
+  return true;
+}
+
+/** `fn` taken from `o`'s listeners for `type`, as EventDispatcher.removeEventListener takes it. */
+export function removeListener(
+  s: Scripting,
+  o: AsObject,
+  type: Value,
+  fn: Value,
+  useCapture: Value,
+): void {
+  const key = eventType(s, type);
+  const list = o.$listeners?.get(key);
+  const at = list?.findIndex((l: Listener) => l.fn === fn && l.capture === !!useCapture) ?? -1;
+  if (list && at >= 0) {
+    list.splice(at, 1);
+    if (list.length === 0 && BROADCAST.has(key)) {
+      s.broadcastTargets(key).delete(o);
+    } else if (list.length === 0 && ACTIVATION.has(key)) {
+      s.activationTargets(key).delete(o);
+    }
+  }
+}
+
 export function eventDispatcherNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
-  /** An event type, declared String: refused as null, as Flash refuses it. */
-  const typeOf = (type: Value): string => {
-    if (type === null || type === undefined) {
-      throw s.rt.error("TypeError", 2007, "type");
-    }
-
-    return type as string;
-  };
+  const typeOf = (type: Value) => eventType(s, type);
 
   class EventDispatcherNatives {
     /** The IEventDispatcher a composed dispatcher stands in for, as events' target. */
@@ -48,47 +111,11 @@ export function eventDispatcherNatives(s: Scripting): avm2.Natives {
     }
 
     addEventListener(type: Value, fn: Value, useCapture: Value, priority: Value): void {
-      const key = typeOf(type);
-      if (typeof fn !== "object" && typeof fn !== "function") {
-        return;
-      }
-
-      const list = listeners(this).get(key) ?? [];
-      const capture = !!useCapture;
-      if (list.some((l) => l.fn === fn && l.capture === capture)) {
-        return;
-      }
-
-      const listener = { fn, capture, priority: Number(priority) | 0 };
-      // Higher priority first; the same priority in the order added.
-      let at = list.length;
-      while (at > 0 && list[at - 1].priority < listener.priority) {
-        at--;
-      }
-
-      list.splice(at, 0, listener);
-      listeners(this).set(key, list);
-      // A display object listening for a frame event is broadcast to, wherever it is; any
-      // dispatcher listening for activation is, held weakly.
-      if (BROADCAST.has(key) && this.$display) {
-        s.broadcastTargets(key).add(this);
-      } else if (ACTIVATION.has(key)) {
-        s.activationTargets(key).add(this);
-      }
+      addListener(s, this, type, fn, useCapture, priority);
     }
 
     removeEventListener(type: Value, fn: Value, useCapture: Value): void {
-      const key = typeOf(type);
-      const list = this.$listeners?.get(key);
-      const at = list?.findIndex((l) => l.fn === fn && l.capture === !!useCapture) ?? -1;
-      if (list && at >= 0) {
-        list.splice(at, 1);
-        if (list.length === 0 && BROADCAST.has(key)) {
-          s.broadcastTargets(key).delete(this);
-        } else if (list.length === 0 && ACTIVATION.has(key)) {
-          s.activationTargets(key).delete(this);
-        }
-      }
+      removeListener(s, this, type, fn, useCapture);
     }
 
     hasEventListener(type: Value): boolean {
