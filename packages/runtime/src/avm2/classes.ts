@@ -176,7 +176,11 @@ export function newClass(
 
   // Caches keep the methods and what the hooks decide.
   invalidate();
-  itraits.proto.$init = desc.init(iscope, base);
+  const init = desc.init(iscope, base);
+  itraits.proto.$init = init;
+  // Its entry for `new` and `super()` of the class where the compiler
+  // coerced the arguments, as for bound calls (installMethod).
+  itraits.proto.$binit = (init as Method & { $bound?: Method }).$bound ?? init;
   // A class constructClass only allocates and initializes, which compiled
   // code constructs itself (see the codegen's constructSlot).
   cls.$new = !hooks?.construct && !desc.interface && !itraits.uninstantiable;

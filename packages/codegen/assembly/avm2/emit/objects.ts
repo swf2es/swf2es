@@ -468,8 +468,10 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text(")");
       return true;
     case ops.OP_constructsuper:
-      // As rt.constructSuper, without an array of the arguments to apply.
-      out.text("sup.$it.proto.$init.call(");
+      // As rt.constructSuper, without an array of the arguments to apply;
+      // the verifier coerced them to the base's constructor, so they may
+      // go to its entry for bound calls.
+      out.text(superEntry(em, ir.c[i]));
       em.usesSup = true;
       em.reg(src);
       args(em, src + 1, a);
@@ -484,7 +486,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       return true;
     case IR_ConstructSlot:
       em.assign(i);
-      constructSlot(em, src, a, ir.b[i]);
+      constructSlot(em, src, a, ir.b[i], ir.c[i]);
       return true;
     case ops.OP_call:
       em.assign(i);
@@ -940,18 +942,67 @@ function receiver(em: MethodEmitter, r: i32): void {
  * class's instance initializer itself, with its arguments as they are;
  * anything else, a class not yet made among them, by rt.construct.
  */
-function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32): void {
+function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32, ctraits: i32): void {
   const out = em.out;
   em.constructsInPlace = true;
   out.text("($c = ");
   em.member(src);
   out.text(".$");
   out.uint(slot);
-  out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.$init.call($o");
-  args(em, src + 1, argc);
+  out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.");
+  const init = boundConstructor(em, ctraits, argc);
+  if (init >= 0) {
+    // As avmplus' JIT, which coerces a known constructor's arguments at
+    // the call site and calls it: its entry for bound calls.
+    out.text("$binit.call($o");
+    const traits = em.domain.traits;
+    const start = traits.paramStart[init];
+    for (let k: u32 = 0; k < argc; k++) {
+      const r = src + 1 + <i32>k;
+      out.text(", ");
+      convert(em, "", r, traits.paramType[start + k], em.regType[r]);
+    }
+  } else {
+    out.text("$init.call($o");
+    args(em, src + 1, argc);
+  }
+
   out.text("), $o) : rt.construct($c");
   args(em, src + 1, argc);
   out.text(")");
+}
+
+/**
+ * How `super()` calls the constructor of `base`, whose arguments the
+ * verifier coerced to it and counted: by its entry for bound calls, if it
+ * has one.
+ */
+function superEntry(em: MethodEmitter, base: i32): string {
+  const init = base >= 0 ? em.domain.traits.init[base] : -1;
+  return init >= 0 && hasBoundEntry(em, <u32>init)
+    ? "sup.$it.proto.$binit.call("
+    : "sup.$it.proto.$init.call(";
+}
+
+/**
+ * The instance initializer, domain-wide, of the class whose class traits
+ * are `ctraits`, where `new` of it with `argc` arguments can call its
+ * entry for bound calls with them coerced: one the verifier resolved
+ * (see OP_constructprop), that takes the count, as avmplus' JIT binds
+ * it, and that has the entry (hasBoundEntry); else -1.
+ */
+function boundConstructor(em: MethodEmitter, ctraits: i32, argc: u32): i32 {
+  const domain = em.domain;
+  const traits = domain.traits;
+  const itraits = domain.instanceTraitsOf(ctraits);
+  const init = itraits >= 0 ? traits.init[itraits] : -1;
+  if (init < 0 || !traits.signed[init] || !hasBoundEntry(em, <u32>init)) {
+    return -1;
+  }
+
+  // An entry for bound calls takes no rest, so no more than its parameters.
+  const count = traits.paramCount[init];
+  return argc >= count - traits.optionalCount[init] && argc <= count ? init : -1;
 }
 
 /**

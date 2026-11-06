@@ -230,6 +230,16 @@ directly, `sup.$it.proto.$b<id>.call(this, ...)` (`$m<id>` for a method
 with no entry for bound calls). Any other count, and a name bound to
 anything else, goes by name through `rt.callSuper`, as before.
 
+A class's instance initializer has the two entries too, under the same
+rule, and the runtime keeps the second as `$binit` beside `$init`.
+`super(...)`, whose arguments the verifier coerces to the base's
+constructor, calls it; and so does `new` of a known class constructed in
+place (see below), whose arguments the emitter coerces there to the
+constructor's parameter types, as avmplus' JIT coerces them for a
+constructor it binds, where the constructor takes the count. What else
+constructs the class, `rt.construct` and its hooks among it, is given
+the arguments as they are and calls `$init`.
+
 A call through an interface coerces its arguments to the interface
 method's signature, which the class's method has too (avmplus refuses a
 class whose method does not match, VerifyError 1053), but the class may
@@ -303,8 +313,9 @@ which `newclass` builds from the module's layout:
   only allocates and initializes (no construct hook, not an interface,
   not uninstantiable, which the runtime marks `$new` on the class): its
   traits' `instance()`, then its `$init` called with the arguments as
-  they are, so each site's constructor can be inlined. Anything else goes
-  to `rt.construct`. `super()` calls the base's `$init` directly.
+  they are (`$binit` with them coerced, see above), so each site's
+  constructor can be inlined. Anything else goes to `rt.construct`.
+  `super()` calls the base's `$init` (or `$binit`) directly.
 - **Dynamic properties** of dynamic classes live in their own map, apart
   from slots and methods.
 - **Names**: each traits has its own bindings by namespace and name, and

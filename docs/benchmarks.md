@@ -442,6 +442,16 @@ docs/architecture/compiler.md), medians of 7 interleaved pairs:
 as3pb's ranges overlap (107–128 against 107–129); a run of 9 pairs
 before it had bytes even and memory +2.8%.
 
+A constructor's arguments were coerced on entry, after `new` of a known
+class had already found it: `rt.coerceTo` for a subclass's instances.
+With an entry for bound calls (`$binit`), which `new` and `super()` call
+with the arguments coerced at the site, medians of 7 interleaved pairs:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| newArgs | 186 | 88 | −52.7% | 125 |
+| as3pb bytes / memory (11) | 110 / 104 | 109 / 104 | −0.9% / 0% | |
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

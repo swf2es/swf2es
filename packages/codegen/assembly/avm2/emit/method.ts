@@ -13,7 +13,14 @@ import * as C from "../abc/constants";
 import * as ops from "../abc/opcodes";
 import { IR_Coerce, Ir } from "../ir/ir";
 import { Domain } from "../link/domain";
-import { BUILTIN_Float, BUILTIN_Int, BUILTIN_Number, BUILTIN_Uint, TYPE_Any } from "../link/traits";
+import {
+  BUILTIN_Float,
+  BUILTIN_Int,
+  BUILTIN_Number,
+  BUILTIN_Uint,
+  TRAITS_Instance,
+  TYPE_Any,
+} from "../link/traits";
 import { block } from "./blocks";
 import { CONSTANT, flowCopies, NONE } from "./copies";
 import { floatLocals } from "./floats";
@@ -26,7 +33,8 @@ import { convert, isStaticInit } from "./values";
 /**
  * Whether method m (domain-wide) has an entry for bound calls besides its
  * checked one (see MethodEmitter.boundEntry): a method, getter or setter
- * of some traits, which a call the verifier binds can reach, with a
+ * of some traits, or a class's instance initializer, which a call the
+ * verifier binds, `new` of a known class and `super()` can reach, with a
  * parameter of a class's type, whose coercion on entry is the costly kind,
  * and none of float's, which a method may keep unboxed; and with no rest
  * or arguments, which are made from the arguments as given. The method's
@@ -35,7 +43,7 @@ import { convert, isStaticInit } from "./values";
 export function hasBoundEntry(em: MethodEmitter, m: u32): bool {
   const domain = em.domain;
   const traits = domain.traits;
-  if (!domain.isVirtual(m) || domain.allowsExtraArgs(m)) {
+  if (!(domain.isVirtual(m) || isConstructor(em, m)) || domain.allowsExtraArgs(m)) {
     return false;
   }
 
@@ -53,6 +61,13 @@ export function hasBoundEntry(em: MethodEmitter, m: u32): bool {
   }
 
   return classes;
+}
+
+/** Whether method m (domain-wide) is a class's instance initializer. */
+export function isConstructor(em: MethodEmitter, m: u32): bool {
+  const traits = em.domain.traits;
+  const t = traits.methodTraits[m];
+  return t >= 0 && traits.kind[t] === TRAITS_Instance && traits.init[t] === <i32>m;
 }
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
