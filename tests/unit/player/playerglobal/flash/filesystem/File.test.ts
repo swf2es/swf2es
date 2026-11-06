@@ -177,6 +177,7 @@ test("a File's path and URL, and what it reads, as adl's", { skip }, async () =>
       ["chars", 'return app.resolvePath("a!\'()*~-_.b&=+,;$@[]").url;'],
       ["unicode", 'return app.resolvePath("ä ö#?%.txt").url;'],
       ["resolve app url", 'return app.resolvePath("app:/sub dir").url;'],
+      ["colon name", 'return app.resolvePath("a:b.txt").url;'],
       [
         "storage",
         'var s:File = File.applicationStorageDirectory; return [s.url, s.resolvePath("x").url].join(" | ");',
@@ -219,6 +220,8 @@ test("a File's path and URL, and what it reads, as adl's", { skip }, async () =>
     "chars app:/a!'()*~-_.b%26%3D%2B%2C%3B%24%40%5B%5D",
     "unicode app:/%C3%A4%20%C3%B6%23%3F%25.txt",
     "resolve app url app:/sub%20dir",
+    // A name with a colon, as POSIX allows, is no URL.
+    "colon name app:/a%3Ab.txt",
     "storage app-storage:/ | app-storage:/x",
     "flags false | false | false",
     "toString [object File]",

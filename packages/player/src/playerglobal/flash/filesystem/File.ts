@@ -222,8 +222,9 @@ export function fileNatives(s: Scripting): avm2.Natives {
     resolvePath(given: Value): Value {
       const at = locationOf(this);
       const text = String(given ?? "");
-      // A URL or an absolute path names its own place, whatever this File's is.
-      if (/^[a-z][a-z0-9+.-]*:/i.test(text) && !paths.isAbsolute(text)) {
+      // A File's URL or an absolute path names its own place, whatever this File's is; "a:b" is
+      // a name, as on a system that allows a colon in one.
+      if (/^(file|app|app-storage):/i.test(text) && !paths.isAbsolute(text)) {
         return make(parse(text) ?? refuse());
       }
 
