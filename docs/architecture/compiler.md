@@ -352,13 +352,13 @@ runtime, `rt`, that returns:
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
-  getters and setters by dispatch id; and, for traits of up to 128 slots,
+  getters and setters by dispatch id; and, for traits of up to 1000 slots,
   `fill: (o, v) => { o.$n = ...; ... o.$0 = ...; }`, which sets a new
   object's slots, its base's too. A value is a literal where it is one
   however the module is compiled, a type's default or a constant of the
   module's own ABC; a namespace, or a base's constant from another ABC, it
   takes from `v`, the runtime's initial values by slot. Traits without one,
-  a catch scope's or past 128 slots where V8 keeps no object fast, are set
+  a catch scope's or past 1000 slots where V8 keeps no object fast, are set
   by key;
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
