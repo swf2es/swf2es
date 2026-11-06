@@ -8,6 +8,7 @@ import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
 import { clipboardHooks, clipboardNatives } from "./flash/desktop/Clipboard.js";
+import { nativeApplicationNatives } from "./flash/desktop/NativeApplication.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
 import { bitmapNatives } from "./flash/display/Bitmap.js";
 import { bitmapDataHooks, bitmapDataNatives } from "./flash/display/BitmapData.js";
@@ -18,6 +19,7 @@ import { interactiveObjectNatives } from "./flash/display/InteractiveObject.js";
 import { loaderNatives } from "./flash/display/Loader.js";
 import { loaderInfoNatives } from "./flash/display/LoaderInfo.js";
 import { movieClipNatives } from "./flash/display/MovieClip.js";
+import { nativeWindowNatives } from "./flash/display/NativeWindow.js";
 import { shaderNatives } from "./flash/display/Shader.js";
 import { shaderDataNatives } from "./flash/display/ShaderData.js";
 import { shaderInputNatives } from "./flash/display/ShaderInput.js";
@@ -38,6 +40,7 @@ import { pressAndTapGestureEventNatives } from "./flash/events/PressAndTapGestur
 import { timerEventNatives } from "./flash/events/TimerEvent.js";
 import { touchEventNatives } from "./flash/events/TouchEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
+import { fileNatives } from "./flash/filesystem/File.js";
 import { bevelFilterNatives } from "./flash/filters/BevelFilter.js";
 import { bitmapFilterHooks } from "./flash/filters/BitmapFilter.js";
 import { blurFilterNatives } from "./flash/filters/BlurFilter.js";
@@ -114,6 +117,9 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...cryptoNatives(),
     ...byteArrayNatives(s),
     ...clipboardNatives(s),
+    ...nativeApplicationNatives(s),
+    ...fileNatives(s),
+    ...nativeWindowNatives(s),
     ...eventNatives(s),
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),

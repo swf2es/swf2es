@@ -168,6 +168,55 @@ Not done yet: one is not closed when its SWF alone is unloaded. Where adl is at 
 player is not: adl stops reading at an empty message, which the player
 dispatches, and a close frame without a code throws #2030 in it.
 
+
+## AIR's application and its window
+
+In AIR (`air: true`), `NativeApplication.nativeApplication` and
+`Stage.nativeWindow` stand for the application the host runs, which it
+describes with an `AirApplication` (`hosts.ts`, Scripting's
+`application`): the descriptor's XML and id, which `applicationDescriptor`
+and `applicationID` give, the launch's arguments, a window, and what
+`exit` does. Without one, the application has no window, as a player in
+a page has none, and was launched with no arguments.
+
+The launch reaches each `InvokeEvent.INVOKE` listener once it listens,
+as adl hands it out: one added in the document class's constructor has
+it before the first frame's ENTER_FRAME, one added in a frame's scripts
+at that frame's end (`afterExitFrame`), each once and the others not
+again; a script's own InvokeEvent goes to every listener, as any event
+does (`playerglobal/flash/desktop/NativeApplication.ts`). The window
+(`playerglobal/flash/display/NativeWindow.ts`) reads and sets the host's
+`AirWindow`: its bounds on the screen, frame included, as AIR's are,
+while the stage keeps the size its scale mode gives it; its title, state,
+visibility and focus; and `globalToScreen` past the frame's border and
+title bar, by the window's `stageOffset`. A window a script opens itself
+is not supported. Where the host does not say, the values are adl's
+(`NativeApplication.test.ts` holds them to what adl traced); a browser's
+or Electron's window has no menu, dock icon or tray of AIR's, so the
+`supports` flags are false.
+
+## AIR's file system
+
+In AIR, `flash.filesystem.File` reads the host's file system through a
+`FileSystemHost` (`hosts.ts`, Scripting's `fileSystem`): synchronous, as
+File's properties are, with native absolute paths of the host's system,
+POSIX or Windows by its separator, and the directories AIR names. A File
+keeps a native path and where its URL starts
+(`playerglobal/flash/filesystem/File.ts`, the paths in `paths.ts`): the
+file system's root (`file:`), the application's directory (`app:/`) or its
+storage's (`app-storage:/`). It keeps that start as paths resolve and as
+it goes up, never climbing out of `app:/`, whose `parent` is null; URLs
+encode each segment as `encodeURIComponent` does. The constructor, `url`
+and `resolvePath` take a native path or a `file:`, `app:` or
+`app-storage:` URL. A relative path is refused with ArgumentError 2004, a
+File made with no path throws Error 2037, and what reads a file that is
+not there throws Error 3003 (3007 for listing a file). FileReference's
+`name`, `size`, dates and `type` read a File's on disk. The launch's
+`InvokeEvent` carries the directory it was launched from as a File. What
+writes, the dialogs and the asynchronous methods are not supported yet.
+`File.test.ts` holds all of it to what adl traced for the same scripts,
+with a POSIX host's paths in place of Windows'.
+
 ## Screen capabilities
 
 `flash.system.Capabilities` reads screen resolution, pixel aspect ratio and

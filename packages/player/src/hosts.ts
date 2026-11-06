@@ -330,6 +330,92 @@ export interface SocketHost {
   connect(host: string, port: number, events: SocketEvents): SocketTransport;
 }
 
+/** A window's place and size on the screen, in pixels, its frame included. */
+export interface WindowBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * An AIR application's window, which Stage.nativeWindow reads and moves:
+ * its bounds take the frame in, as AIR's do. What it has no setter for
+ * stays as it is, as a window manager may refuse a size or a state.
+ */
+export interface AirWindow {
+  bounds(): WindowBounds;
+  setBounds?(bounds: WindowBounds): void;
+  title(): string;
+  setTitle?(title: string): void;
+  /** NativeWindowDisplayState's: "normal", "maximized" or "minimized". */
+  displayState(): string;
+  minimize?(): void;
+  maximize?(): void;
+  restore?(): void;
+  /** Whether it has the focus, as NativeWindow.active. */
+  active(): boolean;
+  activate?(): void;
+  visible(): boolean;
+  setVisible?(visible: boolean): void;
+  close?(): void;
+  /** Where the stage's corner is on the screen, the frame's border and title bar from the window's. */
+  stageOffset(): { x: number; y: number };
+}
+
+/**
+ * What an AIR application's host gives NativeApplication: the descriptor
+ * it was launched from, the launch's arguments, which its InvokeEvent
+ * carries, and its one window.
+ */
+export interface AirApplication {
+  /** The application descriptor's XML, as applicationDescriptor gives it, and its id. */
+  descriptor: string;
+  id: string;
+  /** What followed the descriptor on the command line, as adl's `--` passes it. */
+  arguments: readonly string[];
+  /** The directory it was launched from, a native path: InvokeEvent's currentDirectory. */
+  currentDirectory?: string | null;
+  window?: AirWindow | null;
+  /** NativeApplication.exit's code; a host without it stops nothing. */
+  exit?(code: number): void;
+}
+
+/** What is at a path on the host's file system, as flash.filesystem.File reads it. */
+export interface FileStat {
+  directory: boolean;
+  /** In bytes; 0 for a directory. */
+  size: number;
+  /** When it was last changed and when it was made, in ms since 1970. */
+  modified: number;
+  created: number;
+  hidden?: boolean;
+  symbolicLink?: boolean;
+}
+
+/**
+ * The host's file system, as an AIR application's flash.filesystem.File
+ * sees it: synchronous, as File's properties are, its paths native and
+ * absolute. The directories are those AIR names, its application's (where
+ * its descriptor is) and the application's storage among them.
+ */
+export interface FileSystemHost {
+  /** The system's separator: "/", or "\\" on Windows. */
+  readonly separator: string;
+  readonly directories: {
+    application: string;
+    applicationStorage: string;
+    user: string;
+    documents: string;
+    desktop: string;
+    cache?: string;
+  };
+  /** What is at `path`, or null where nothing is. */
+  stat(path: string): FileStat | null;
+  /** The names in the directory at `path`, or null where it is none. */
+  list(path: string): string[] | null;
+}
+
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */
 export interface WebSocketTransport {
   /** A text message as a string, a binary one as bytes. */

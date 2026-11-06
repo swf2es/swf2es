@@ -24,6 +24,8 @@ export {
   type SelectedFile,
 } from "./files.js";
 export type {
+  AirApplication,
+  AirWindow,
   CachedModule,
   ClipboardHost,
   ClipboardText,
@@ -31,6 +33,8 @@ export type {
   ExternalInterfaceHost,
   FetchRequest,
   FetchResult,
+  FileStat,
+  FileSystemHost,
   ModuleCache,
   Navigate,
   PlatformCapabilities,
@@ -43,6 +47,7 @@ export type {
   WebSocketEvents,
   WebSocketHost,
   WebSocketTransport,
+  WindowBounds,
   WorkerHost,
   WorkerThread,
 } from "./hosts.js";
