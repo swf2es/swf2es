@@ -123,6 +123,7 @@ import {
   BIND_Method,
   BIND_Set,
   BIND_Var,
+  boundKey,
   ClassRef,
   methodKey,
   slotKey,
@@ -1763,6 +1764,65 @@ export class Runtime {
     }
 
     throw this.error("TypeError", 1006, "method");
+  }
+
+  /**
+   * The key of the method an interface's method, dispatch id `disp` in
+   * the interface's layout, is on `o`, an object of a class that
+   * implements it: its entry for bound calls, as a call through the
+   * interface coerces its arguments to the interface's signature, which
+   * the class's method has too (checkInterfaces), and passes a count the
+   * method takes. Generated code calls `o[key](...)` itself, so that each
+   * site keeps its own feedback in the engine. Found by name once for
+   * each class and interface, and kept on the class's traits.
+   */
+  interfaceKey(iface: TypeRef, disp: number, o: Value): string {
+    const traits: Traits | undefined = o.$traits;
+    const cls: AsObject = (iface as ClassRef).cls ?? this.classOf(iface);
+    if (traits !== undefined && traits.lastInterface === cls.$it) {
+      const key = traits.lastInterfaceKeys[disp];
+      if (key !== undefined) {
+        return key;
+      }
+    }
+
+    return this.findInterfaceKey(cls, disp, o);
+  }
+
+  private findInterfaceKey(cls: AsObject, disp: number, o: Value): string {
+    const it: Traits = cls.$it;
+    const traits = this.traitsOf(o);
+    traits.interfaceKeys ??= new Map();
+    let keys = traits.interfaceKeys.get(it);
+    if (!keys) {
+      keys = [];
+      traits.interfaceKeys.set(it, keys);
+    }
+
+    traits.lastInterface = it;
+    traits.lastInterfaceKeys = keys;
+    let key = keys[disp];
+    if (key === undefined) {
+      const desc = cls.$desc as ClassDesc;
+      for (const [ns, , name, b] of desc.instance.bindings) {
+        if (b >> 3 === disp && (b & 7) === BIND_Method) {
+          // A class that implements the interface binds its name to a
+          // method (checkInterfaces); anything else is not a function.
+          const own = traits.find(qname(ns, name));
+          if ((own & 7) !== BIND_Method) {
+            throw this.error("TypeError", 1006, name);
+          }
+
+          key = boundKey(own >> 3);
+          keys[disp] = key;
+          return key;
+        }
+      }
+
+      throw this.error("TypeError", 1006, "method");
+    }
+
+    return key;
   }
 
   callStatic(_abc: Abc, m: number, ..._args: Value[]): Value {

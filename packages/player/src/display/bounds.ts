@@ -318,6 +318,17 @@ function clippedAbove(d: DisplayObject, probe: Probe): boolean {
   return false;
 }
 
+/** Whether any of the first `n` clip layers open leaves the probe out. */
+function outsideLayers(clips: Clips, n: number, probe: Probe): boolean {
+  for (let i = 0; i < n; i++) {
+    if (!inMask(clips.masks[i], probe)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** Whether a timeline's mask over `d` or over a container above it leaves the probe out. */
 function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
   for (let o = d; o.parent; o = o.parent) {
@@ -328,10 +339,8 @@ function clippedByLayers(d: DisplayObject, probe: Probe): boolean {
         continue;
       }
 
-      for (let i = 0; i < n; i++) {
-        if (!inMask(clips.masks[i], probe)) {
-          return true;
-        }
+      if (outsideLayers(clips, n, probe)) {
+        return true;
       }
 
       break;
@@ -469,14 +478,25 @@ function drawnAt(
   }
 
   if (children && d instanceof Container) {
-    // Masks are not drawn; a timeline's clip no hit test, as Flash's do not.
+    // Masks are not drawn; a timeline's clip no hit test, as Flash's do not. What a clip
+    // layer clips is hit only where the layer covers the probe: a clip that plays its mask
+    // to an empty frame hides a part from a shape test too (adl, avm1-hit-test-under-mask).
+    let clips: Clips | null = null;
     for (const child of d.children) {
+      if (child.clipDepth > 0) {
+        clips ??= new Clips();
+      }
+
+      const n = clips ? clips.enter(child) : 0;
+      if (child.clipDepth !== 0 || child.maskOf !== null) {
+        continue;
+      }
+
       const toChild = invert(child.placed);
       if (
         toChild &&
         !(child.space && hidden3D(child)) &&
-        child.clipDepth === 0 &&
-        child.maskOf === null &&
+        !(clips && !mask && outsideLayers(clips, n, probe)) &&
         drawnAt(child, ...apply(toChild, x, y), probe, mask)
       ) {
         return true;
