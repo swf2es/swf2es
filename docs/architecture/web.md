@@ -65,8 +65,7 @@ canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
 finer than CSS pixels takes fewer for each of its own (`denseSamples`): at
 a device pixel ratio of 2 or 3, 4 for 8 or 16, as many as cover a stage
 pixel with what one takes; a stage only zoomed takes the quality's. A
-BitmapData's draw at low
-quality smooths no bitmap either.
+BitmapData's draw at low quality smooths no bitmap either.
 
 ## The page's configuration
 
