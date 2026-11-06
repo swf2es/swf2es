@@ -38,5 +38,13 @@
     "bindVertexArray": 0,
     "bindFramebuffer": 0,
     "uniforms": 3
+  },
+  "blend-bitmaps": {
+    "calls": 24,
+    "subDraws": 24,
+    "useProgram": 2,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 54,
+    "uniforms": 146
   }
 }

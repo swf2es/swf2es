@@ -9418,6 +9418,26 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "blend-bitmaps",
+    swf: (abc) => bare(abc, 1, "BlendBitmaps", 400, 140),
+    script: "BlendBitmaps",
+    frames: 3,
+    capture: [1, 3],
+    // Within 7 a channel: adl's rounding of overlay.
+    tolerance: 7,
+    maxOutliers: 0,
+  },
+  {
+    name: "blend-shapes",
+    swf: (abc) => bare(abc, 1, "BlendShapes", 400, 200),
+    script: "BlendShapes",
+    frames: 3,
+    capture: [1, 3],
+    // Their edges, anti-aliased otherwise than adl's; within, each blend as adl's.
+    tolerance: 32,
+    maxOutliers: 150,
+  },
+  {
     name: "stage-erase",
     swf: (abc) => bare(abc, 1, "StageErase", 240, 80),
     script: "StageErase",

@@ -472,9 +472,12 @@ void main(void) {
 }
 `;
 
-/** A composited layer's pixel, `front`, coloured by its row's colour transform where it has one (uRow not -1). */
-export const LAYER_COLOR = `  if (uRow >= 0 && front.a > 0.0) {
-    ivec2 row = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
+/**
+ * A composited layer's pixel, `front`, coloured by its row's colour
+ * transform where it has one (`row` not -1).
+ */
+const layerColor = (row: string) => `  if (${row} >= 0 && front.a > 0.0) {
+    ivec2 row = ivec2((${row} & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, ${row} >> ${Math.log2(ROWS_A_LINE)});
     vec4 mul = texelFetch(uRows, row + ivec2(2, 0), 0);
     vec4 add = texelFetch(uRows, row + ivec2(3, 0), 0);
     vec4 c = clamp(vec4(front.rgb / front.a, front.a) * mul + add, 0.0, 1.0);
@@ -482,48 +485,22 @@ export const LAYER_COLOR = `  if (uRow >= 0 && front.a > 0.0) {
   }
 `;
 
+/** A composited layer's pixel, `front`, coloured by its row's colour transform where it has one (uRow not -1). */
+export const LAYER_COLOR = layerColor("uRow");
+
 /**
- * A layer composited onto what is below over its rectangle, pixel for
- * pixel: its rows run down, as the filters read them, and the target's up
- * where it is the canvas (uFlip), from uOffset in its framebuffer; what is
- * below copied with the rectangle's corner uBackOffset short of where it
- * lies. Coloured by its
- * row's colour transform where it has one (uRow not -1), on its straight
- * colour where it covers anything; then blended by its mode. Normal, layer,
- * add and screen are left to GL's blending; the rest read what is below
- * (uBack, a copy of it) and give the whole result: the separable modes blend straight
- * colours and composite source over, the others have formulas of their own.
+ * `front`, premultiplied, blended in mode uMode onto what is below it
+ * (uBack, a copy of it, whose texel at the fragment is uBackOffset short of
+ * it) into finalColor: normal, layer, add and screen as `front` alone, GL's
+ * blending computing them; the separable modes blend straight colours and
+ * composite source over, the others have formulas of their own.
  */
-export const compositeFragment = `#version 300 es
-precision highp float;
-uniform sampler2D uLayer;
-uniform sampler2D uBack;
-uniform highp sampler2D uRows;
-uniform int uRow;
-uniform int uMode;
-uniform ivec2 uOffset;
-uniform bool uFlip;
-uniform ivec2 uBackOffset;
-out vec4 finalColor;
-
-vec3 straight(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
-vec3 hardlight(vec3 cb, vec3 cf) {
-  vec3 multiply = 2.0 * cb * cf;
-  vec3 screen = 1.0 - 2.0 * (1.0 - cb) * (1.0 - cf);
-  return mix(multiply, screen, step(0.5, cf));
-}
-
-void main(void) {
-  ivec2 frag = ivec2(gl_FragCoord.xy);
-  ivec2 at = ivec2(frag.x - uOffset.x, uFlip ? uOffset.y - frag.y : frag.y - uOffset.y);
-  vec4 front = texelFetch(uLayer, at, 0);
-${LAYER_COLOR}
-  if (uMode == ${NORMAL} || uMode == ${LAYER} || uMode == ${SCREEN} || uMode == ${ADD}) {
+const BLEND_FRONT = `  if (uMode == ${NORMAL} || uMode == ${LAYER} || uMode == ${SCREEN} || uMode == ${ADD}) {
     finalColor = front;
     return;
   }
 
-  vec4 back = texelFetch(uBack, frag - uBackOffset, 0);
+  vec4 back = texelFetch(uBack, ivec2(gl_FragCoord.xy) - uBackOffset, 0);
   vec3 cb = straight(back);
   vec3 cf = straight(front);
   vec3 b;
@@ -553,5 +530,95 @@ ${LAYER_COLOR}
 
   vec3 co = front.rgb * (1.0 - back.a) + back.rgb * (1.0 - front.a) + front.a * back.a * b;
   finalColor = vec4(co, front.a + back.a * (1.0 - front.a));
+`;
+
+/** BLEND_FRONT's helpers. */
+const BLEND_HELPERS = `vec3 straight(vec4 c) { return c.a > 0.0 ? c.rgb / c.a : vec3(0.0); }
+vec3 hardlight(vec3 cb, vec3 cf) {
+  vec3 multiply = 2.0 * cb * cf;
+  vec3 screen = 1.0 - 2.0 * (1.0 - cb) * (1.0 - cf);
+  return mix(multiply, screen, step(0.5, cf));
 }
+`;
+
+/**
+ * A layer composited onto what is below over its rectangle, pixel for
+ * pixel: its rows run down, as the filters read them, and the target's up
+ * where it is the canvas (uFlip), from uOffset in its framebuffer; what is
+ * below copied with the rectangle's corner uBackOffset short of where it
+ * lies. Coloured by its
+ * row's colour transform where it has one (uRow not -1), on its straight
+ * colour where it covers anything; then blended by its mode. Normal, layer,
+ * add and screen are left to GL's blending; the rest read what is below
+ * (uBack, a copy of it) and give the whole result: the separable modes blend straight
+ * colours and composite source over, the others have formulas of their own.
+ */
+export const compositeFragment = `#version 300 es
+precision highp float;
+uniform sampler2D uLayer;
+uniform sampler2D uBack;
+uniform highp sampler2D uRows;
+uniform int uRow;
+uniform int uMode;
+uniform ivec2 uOffset;
+uniform bool uFlip;
+uniform ivec2 uBackOffset;
+out vec4 finalColor;
+
+${BLEND_HELPERS}
+void main(void) {
+  ivec2 frag = ivec2(gl_FragCoord.xy);
+  ivec2 at = ivec2(frag.x - uOffset.x, uFlip ? uOffset.y - frag.y : frag.y - uOffset.y);
+  vec4 front = texelFetch(uLayer, at, 0);
+${LAYER_COLOR}
+${BLEND_FRONT}}
+`;
+
+/**
+ * A fill drawn straight onto what is below it in a blend mode, where its
+ * layer would hold it alone (a flat fill, GeometryData.flat): its pixel as fillFragment
+ * has it, then as compositeFragment composites its layer's, coloured by the
+ * layer's row (uLayerRow, -1 for none) and blended by uMode.
+ */
+export const blendFillFragment = `#version 300 es
+precision highp float;
+in vec4 vColor;
+in vec2 vTexel;
+flat in vec4 vMul;
+flat in vec4 vAdd;
+flat in int vSlot;
+uniform sampler2D uTextures[${FILL_TEXTURES}];
+uniform sampler2D uBack;
+uniform highp sampler2D uRows;
+uniform int uLayerRow;
+uniform int uMode;
+uniform ivec2 uBackOffset;
+out vec4 finalColor;
+
+${BLEND_HELPERS}
+vec4 texel(vec2 at) {
+  switch (vSlot) {
+${slotTexel}
+  }
+
+  return vec4(0.0);
+}
+
+void main(void) {
+  vec4 front = vec4(0.0);
+  vec4 fill = vColor;
+  bool clear = false;
+  if (vSlot != 0) {
+    vec4 t = texel(vTexel);
+    clear = t.a == 0.0;
+    fill = clear ? fill : vec4(t.rgb / t.a * vColor.rgb, t.a * vColor.a);
+  }
+
+  if (!clear) {
+    vec4 c = clamp(fill * vMul + vAdd, 0.0, 1.0);
+    front = vec4(c.rgb * c.a, c.a);
+  }
+
+${layerColor("uLayerRow")}
+${BLEND_FRONT}}
 `;
