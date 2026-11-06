@@ -1,0 +1,3 @@
+covered left true true right true true bounds true
+empty left false false right false false bounds true
+half left true true right false false bounds true
