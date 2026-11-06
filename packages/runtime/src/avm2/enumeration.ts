@@ -340,7 +340,8 @@ function nextSparse(o: AsObject, a: Value[], sparse: SparseIndices, from: number
         }
       }
     } else {
-      sparse.indices.push(...indicesOf(a, sparse.length));
+      // Appended one by one: spread as arguments, many would overflow the stack.
+      indicesOf(a, sparse.length, sparse.indices);
     }
 
     sparse.length = length;
@@ -379,9 +380,8 @@ function retake(a: Value[], sparse: SparseIndices): void {
   sparse.sinceTaken = 0;
 }
 
-/** An Array's indices from `from` on, in order, as Object.keys gives them. */
-function indicesOf(a: Value[], from: number): number[] {
-  const indices: number[] = [];
+/** An Array's indices from `from` on, in order, as Object.keys gives them, appended to `indices`. */
+function indicesOf(a: Value[], from: number, indices: number[] = []): number[] {
   for (const k of Object.keys(a)) {
     const i = Number(k);
     if (i >= from) {
