@@ -83,6 +83,12 @@ import {
 } from "./names.js";
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import type { SyncInit } from "./natives/sync.js";
+import {
+  type ElementStore,
+  storeDouble,
+  storeInt,
+  storeObject,
+} from "./natives/vector-elements.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
@@ -945,39 +951,42 @@ export class Runtime {
    * Element i of Vector o set to x, already converted, as
    * VectorBaseObject::setUintProperty checks it: against the length and
    * fixedness as they are after the conversion, which can run AS3 that
-   * changes them, into the elements the Vector has then.
+   * changes them, into the elements the Vector has then, through its
+   * kind's store (see vector-elements.ts). A number that is no index, as
+   * NaN, is out of range too, as _setDoubleProperty finds it.
    */
-  setElement(o: AsObject, i: number, x: Value): void {
+  setElement(o: AsObject, i: number, x: Value, store: ElementStore): void {
     const a: Value[] = o.$a;
-    if (i > a.length || (i === a.length && o.$fixed)) {
+    if (i >>> 0 !== i || i > a.length || (i === a.length && o.$fixed)) {
       throw this.error("RangeError", 1125, i, a.length);
     }
 
-    a[i] = x;
+    store(a, i, x);
   }
 
   // obj[i] for a Vector the code was compiled against, by the kind of its
   // elements: a function for each, so that each sees one kind of array. As
-  // the Vector's getIndex and setIndex hooks, with getIndexed's checks, a
-  // set converting the value before it checks the index (setElement); for
+  // TypedVectorObject's _getDoubleProperty and _setDoubleProperty: an index
+  // past the end, or a number that is no index, NaN among them, is a
+  // RangeError, a set's after it converts the value (setElement); for
   // anything else, such as a null Vector, getIndexed and setIndexed.
 
   vectorGetInt(o: Value, mn: Multiname, i: number): Value {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       const a: Value[] = o.$a;
-      if (i >= a.length) {
-        throw this.error("RangeError", 1125, i, a.length);
+      if (i >>> 0 === i && i < a.length) {
+        return a[i];
       }
 
-      return a[i];
+      throw this.error("RangeError", 1125, i, a.length);
     }
 
     return this.getIndexed(o, mn, i);
   }
 
   vectorSetInt(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      this.setElement(o, i, this.toInt(v));
+    if (o !== null && o !== undefined && mn.elementName) {
+      this.setElement(o, i, this.toInt(v), storeInt);
       return;
     }
 
@@ -985,21 +994,21 @@ export class Runtime {
   }
 
   vectorGetUint(o: Value, mn: Multiname, i: number): Value {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       const a: Value[] = o.$a;
-      if (i >= a.length) {
-        throw this.error("RangeError", 1125, i, a.length);
+      if (i >>> 0 === i && i < a.length) {
+        return a[i];
       }
 
-      return a[i];
+      throw this.error("RangeError", 1125, i, a.length);
     }
 
     return this.getIndexed(o, mn, i);
   }
 
   vectorSetUint(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      this.setElement(o, i, this.toUint(v));
+    if (o !== null && o !== undefined && mn.elementName) {
+      this.setElement(o, i, this.toUint(v), storeDouble);
       return;
     }
 
@@ -1007,21 +1016,21 @@ export class Runtime {
   }
 
   vectorGetDouble(o: Value, mn: Multiname, i: number): Value {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       const a: Value[] = o.$a;
-      if (i >= a.length) {
-        throw this.error("RangeError", 1125, i, a.length);
+      if (i >>> 0 === i && i < a.length) {
+        return a[i];
       }
 
-      return a[i];
+      throw this.error("RangeError", 1125, i, a.length);
     }
 
     return this.getIndexed(o, mn, i);
   }
 
   vectorSetDouble(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
-      this.setElement(o, i, this.toNumber(v));
+    if (o !== null && o !== undefined && mn.elementName) {
+      this.setElement(o, i, this.toNumber(v), storeDouble);
       return;
     }
 
@@ -1029,25 +1038,25 @@ export class Runtime {
   }
 
   vectorGetObject(o: Value, mn: Multiname, i: number): Value {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       const a: Value[] = o.$a;
-      if (i >= a.length) {
-        throw this.error("RangeError", 1125, i, a.length);
+      if (i >>> 0 === i && i < a.length) {
+        return a instanceof FloatVector ? this.float(a.data[i]) : a[i];
       }
 
-      return a instanceof FloatVector ? this.float(a.data[i]) : a[i];
+      throw this.error("RangeError", 1125, i, a.length);
     }
 
     return this.getIndexed(o, mn, i);
   }
 
   vectorSetObject(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       const value = o.$traits.cls.$convert(this, o.$traits.cls, v);
       if (o.$a instanceof FloatVector) {
         setFloatElement(this, o, i, value);
       } else {
-        this.setElement(o, i, value);
+        this.setElement(o, i, value, storeObject);
       }
 
       return;
@@ -1058,20 +1067,20 @@ export class Runtime {
 
   /** Unboxed access for code compiled against Vector.<float>; dynamic access uses its hooks. */
   vectorGetFloat(o: Value, mn: Multiname, i: number): number {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       const a: FloatVector = o.$a;
-      if (i >= a.length) {
-        throw this.error("RangeError", 1125, i, a.length);
+      if (i >>> 0 === i && i < a.length) {
+        return a.data[i];
       }
 
-      return a.data[i];
+      throw this.error("RangeError", 1125, i, a.length);
     }
 
     return this.toNumber(this.getIndexed(o, mn, i));
   }
 
   vectorSetFloat(o: Value, mn: Multiname, i: number, v: Value): void {
-    if (o !== null && o !== undefined && i >>> 0 === i && i !== 0xffffffff && mn.elementName) {
+    if (o !== null && o !== undefined && mn.elementName) {
       setFloatElement(this, o, i, this.toNumber(v));
       return;
     }
