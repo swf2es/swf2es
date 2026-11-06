@@ -163,6 +163,8 @@ export class RenderView implements Drawer {
   private walkDepth = 0;
   /** Each depth's transform on the stage, a b c d tx ty, which its children are placed under. */
   private places = new Float64Array(6 * 64);
+  /** A Bitmap's placement moved onto whole pixels (wholePixels). */
+  private moved = new Float64Array(6);
   private readonly colorSlots: ColorTransform[] = [];
   /** The sliced owner whose children are walked now, its slice, and its parent's linear transform. */
   private sliceOwner: DisplayObject | null = null;
@@ -818,13 +820,21 @@ export class RenderView implements Drawer {
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
       const quad = this.parts.quad(store.width, store.height);
       const texture = this.paints.storeTexture(store);
-      if (row < 0) {
+      const moved = wholePixels(
+        this.places,
+        at + 6,
+        this.target.scale / this.target.pixel,
+        this.moved,
+      );
+      if (moved) {
+        row = this.rows.addPlaced(this.moved, 0, color);
+      } else if (row < 0) {
         row = this.rows.addPlaced(this.places, at + 6, color);
       }
 
       this.geometries.use(quad.id);
       this.textures.use(texture.id);
-      const smooth = (o as BitmapObject).smoothing && this.smoothing;
+      const smooth = !moved && (o as BitmapObject).smoothing && this.smoothing;
       this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
     }
 
@@ -1393,6 +1403,32 @@ function noteUnsupported(o: DisplayObject): void {
   if (o.filters.length > 0 && undrawnFilter(o.filters)) {
     unsupported.filters++;
   }
+}
+
+/**
+ * Whether the placement at `places[at]` only moves a Bitmap, at `unit` of
+ * Flash's pixels a stage pixel; if so, `out` is it moved onto whole pixels
+ * of Flash's. Flash draws such a bitmap texel for pixel, smoothed or not,
+ * on the pixel its twips round to, a fraction of 8 twips (0.4 of a pixel)
+ * or more up (the bitmap-sampling case, drawn in adl).
+ */
+function wholePixels(places: Float64Array, at: number, unit: number, out: Float64Array): boolean {
+  if (
+    places[at + 1] !== 0 ||
+    places[at + 2] !== 0 ||
+    Math.abs(places[at] * unit - 1) > 1e-9 ||
+    Math.abs(places[at + 3] * unit - 1) > 1e-9
+  ) {
+    return false;
+  }
+
+  out[0] = places[at];
+  out[1] = 0;
+  out[2] = 0;
+  out[3] = places[at + 3];
+  out[4] = Math.floor((Math.round(places[at + 4] * unit * 20) + 12) / 20) / unit;
+  out[5] = Math.floor((Math.round(places[at + 5] * unit * 20) + 12) / 20) / unit;
+  return true;
 }
 
 /** Where `o` stands on the stage, its matrices as the walk takes them, after their scroll's shift. */

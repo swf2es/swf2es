@@ -9,7 +9,7 @@ type Value = avm2.Value;
 export function fsCommandNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
-  class FSCommandNatives {
+  class FSCommandHostNatives {
     static _fscommand(command: Value, args: Value): void {
       // With the calling SWF's URL, or every loaded SWF's where the caller
       // cannot be told, for a host that lets some SWFs command it and not
@@ -18,6 +18,6 @@ export function fsCommandNatives(s: Scripting): avm2.Natives {
     }
   }
 
-  avm2.registerNativeClass(natives, "flash.system::FSCommand", FSCommandNatives);
+  avm2.registerNativeClass(natives, "flash.system::FSCommandHost", FSCommandHostNatives);
   return natives;
 }

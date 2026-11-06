@@ -18,10 +18,42 @@ import { block } from "./blocks";
 import { CONSTANT, flowCopies, NONE } from "./copies";
 import { floatLocals } from "./floats";
 import { handlers, regions } from "./handlers";
-import { constant, poolString } from "./refs";
+import { constant, isClassRef, poolString } from "./refs";
 import { SourceMap } from "./sourcemap";
 import { analyze, branchTo, node } from "./structure";
 import { convert, isStaticInit } from "./values";
+
+/**
+ * Whether method m (domain-wide) has an entry for bound calls besides its
+ * checked one (see MethodEmitter.boundEntry): a method, getter or setter
+ * of some traits, which a call the verifier binds can reach, with a
+ * parameter of a class's type, whose coercion on entry is the costly kind,
+ * and none of float's, which a method may keep unboxed; and with no rest
+ * or arguments, which are made from the arguments as given. The method's
+ * own code and its callers decide it alike, from its signature alone.
+ */
+export function hasBoundEntry(em: MethodEmitter, m: u32): bool {
+  const domain = em.domain;
+  const traits = domain.traits;
+  if (!domain.isVirtual(m) || domain.allowsExtraArgs(m)) {
+    return false;
+  }
+
+  const start = traits.paramStart[m];
+  let classes = false;
+  for (let p: u32 = 0; p < traits.paramCount[m]; p++) {
+    const type = traits.paramType[start + p];
+    if (domain.builtin(type) === BUILTIN_Float) {
+      return false;
+    }
+
+    if (isClassRef(em, type)) {
+      classes = true;
+    }
+  }
+
+  return classes;
+}
 
 /** The deepest structured code a method is given; one deeper keeps the dispatcher. */
 export const MAX_NESTING: u32 = 500;
@@ -84,6 +116,10 @@ export class MethodEmitter {
   /** Whether the method reads its factory's scope chain, and its base class. */
   usesScope: bool = false;
   usesSup: bool = false;
+  /** Whether the method constructs a class in place, in the temporaries `$c` and `$o` (see constructSlot). */
+  constructsInPlace: bool = false;
+  /** Whether the method being written has an entry for bound calls (see hasBoundEntry and boundEntry). */
+  bound: bool = false;
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
   /** The method's name in its own code, for running it again (see checkEntry). */
@@ -175,7 +211,15 @@ export class MethodEmitter {
     const count = traits.paramCount[global];
     // Named, for stacks and profiles: a name its code never binds.
     const name = this.functionName.length ? this.functionName : "$method";
-    out.text(`function ${name}(`);
+    this.bound = hasBoundEntry(this, global);
+    // A method with an entry for bound calls is that entry, `name$u`, then
+    // its checked entry, `name` (see boundEntry).
+    const entry = this.bound ? `${name}$u` : name;
+    if (this.bound) {
+      out.text("{\n");
+    }
+
+    out.text(`function ${entry}(`);
     for (let p: u32 = 1; p <= count; p++) {
       out.text(p > 1 ? ", p" : "p");
       out.uint(p);
@@ -189,10 +233,11 @@ export class MethodEmitter {
     out.text(") {\n");
     this.dxnsAt = out.length;
     this.dxnsMarks = this.map.count;
-    this.entryName = name;
+    this.entryName = entry;
     this.seesDxns = false;
     this.usesScope = false;
     this.usesSup = false;
+    this.constructsInPlace = false;
     this.prologue(method, global, flags);
     // A method that sets the default XML namespace gives its caller's
     // back when it returns or throws.
@@ -232,6 +277,7 @@ export class MethodEmitter {
         this.leaveDxns(dxns);
         out.text("}");
         this.checkEntry();
+        this.boundEntry(method, global);
         return;
       }
 
@@ -262,6 +308,7 @@ export class MethodEmitter {
     this.leaveDxns(dxns);
     out.text("}");
     this.checkEntry();
+    this.boundEntry(method, global);
   }
 
   /**
@@ -292,23 +339,69 @@ export class MethodEmitter {
    * caller's: else it runs again with it, and the caller's is back after.
    * With both, one test, as V8 counts each against inlining: rt.enter
    * throws the count's error or runs the method again, which counts again.
+   * Before them, the temporaries of the classes it constructs in place.
    */
   checkEntry(): void {
-    const args = this.argsTest;
-    const dxns = "rt.defaultXmlNamespace !== $dx";
-    let check = "";
-    if (this.seesDxns && args.length) {
-      check = `if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
-    } else if (this.seesDxns) {
-      check = `if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
-    } else if (args.length) {
-      check = `if (${args}) ac(${this.argsRequired}, arguments.length);\n`;
-    } else {
+    let check = this.constructsInPlace ? "var $c, $o;\n" : "";
+    // A method with an entry for bound calls leaves the count to that entry.
+    check += this.entryCheck(this.bound ? "" : this.argsTest);
+    if (!check.length) {
       return;
     }
 
     this.out.insert(this.dxnsAt, check);
     this.map.shift(this.dxnsMarks, <u32>check.length);
+  }
+
+  /** The statement that checks `args` and the default XML namespace on entry, "" for none. */
+  entryCheck(args: string): string {
+    const dxns = "rt.defaultXmlNamespace !== $dx";
+    if (this.seesDxns && args.length) {
+      return `if (${args} || ${dxns}) return rt.enter($dx, ${this.entryName}, this, arguments, ${this.argsRequired}, ${this.argsMax});\n`;
+    }
+
+    if (this.seesDxns) {
+      return `if (${dxns}) return rt.callInDxns($dx, ${this.entryName}, this, arguments);\n`;
+    }
+
+    return args.length ? `if (${args}) ac(${this.argsRequired}, arguments.length);\n` : "";
+  }
+
+  /**
+   * After a method with an entry for bound calls, `name$u`, the code just
+   * written, whose parameters are as its callers give them: its checked
+   * entry, `name`, which all else calls, and which checks the count and
+   * coerces each argument as the code would have, then calls it. A call
+   * the verifier binds has coerced its arguments to the parameters' types
+   * and passes a count the method takes, so it calls `name$u`, which the
+   * runtime keeps beside the method (installMethod). The factory gives
+   * the checked entry, with the other on it as `$bound`.
+   */
+  boundEntry(method: u32, global: u32): void {
+    if (!this.bound) {
+      return;
+    }
+
+    const out = this.out;
+    const count = this.domain.traits.paramCount[global];
+    const unchecked = this.entryName;
+    const name = unchecked.slice(0, unchecked.length - 2);
+    this.entryName = name;
+    out.text(`\nfunction ${name}(`);
+    for (let p: u32 = 1; p <= count; p++) {
+      out.text(p > 1 ? ", p" : "p");
+      out.uint(p);
+    }
+
+    out.text(") {\n");
+    out.text(this.entryCheck(this.argsTest));
+    out.text(`return ${unchecked}.call(this`);
+    for (let p: u32 = 1; p <= count; p++) {
+      out.text(", ");
+      this.parameter(method, global, p, true);
+    }
+
+    out.text(`);\n}\n${name}.$bound = ${unchecked};\nreturn ${name};\n}`);
   }
 
   /** The end of a method that sets the default XML namespace: its caller's back. */
@@ -352,11 +445,7 @@ export class MethodEmitter {
     const out = this.out;
     const ir = this.ir;
     const traits = this.domain.traits;
-    const abc = this.abc;
     const count = traits.paramCount[global];
-    // The parameters with default values: an untyped function's others are
-    // optional too, as avmplus' are, but a missing one is just undefined.
-    const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
 
     // As MethodEnv's argcOk, before any coercion: fewer arguments than it
     // requires, or more than it declares unless it takes the rest; both, as
@@ -385,27 +474,7 @@ export class MethodEmitter {
       out.text(", l");
       out.uint(p);
       out.text(" = ");
-      const type = traits.paramType[traits.paramStart[global] + p - 1];
-      const first = count - optional;
-      if (p > first) {
-        // A missing optional argument takes its default.
-        out.text("arguments.length < ");
-        out.uint(p);
-        out.text(" ? ");
-        const o = abc.methodOptionalStart[method] + p - first - 1;
-        if (this.unboxed[p]) {
-          out.text("rt.toNumber(");
-        }
-
-        constant(this, abc.optionalValue[o], abc.optionalKind[o], type);
-        if (this.unboxed[p]) {
-          out.text(")");
-        }
-
-        out.text(" : ");
-      }
-
-      convert(this, "p", <i32>p, type, TYPE_Any, this.unboxed[p] !== 0);
+      this.parameter(method, global, p, !this.bound);
     }
 
     let local = count + 1;
@@ -428,6 +497,46 @@ export class MethodEmitter {
     }
 
     out.text(";\n");
+  }
+
+  /**
+   * Parameter p's value on entry: argument p, coerced to the parameter's
+   * type if `coerce`, or the parameter's default where it was not given.
+   */
+  parameter(method: u32, global: u32, p: u32, coerce: bool): void {
+    const out = this.out;
+    const abc = this.abc;
+    const traits = this.domain.traits;
+    const count = traits.paramCount[global];
+    const type = traits.paramType[traits.paramStart[global] + p - 1];
+    // The parameters with default values: an untyped function's others are
+    // optional too, as avmplus' are, but a missing one is just undefined.
+    const optional = abc.methodOptionalStart[method + 1] - abc.methodOptionalStart[method];
+    const first = count - optional;
+    if (p > first) {
+      // A missing optional argument takes its default.
+      out.text("arguments.length < ");
+      out.uint(p);
+      out.text(" ? ");
+      const o = abc.methodOptionalStart[method] + p - first - 1;
+      if (this.unboxed[p]) {
+        out.text("rt.toNumber(");
+      }
+
+      constant(this, abc.optionalValue[o], abc.optionalKind[o], type);
+      if (this.unboxed[p]) {
+        out.text(")");
+      }
+
+      out.text(" : ");
+    }
+
+    if (coerce) {
+      convert(this, "p", <i32>p, type, TYPE_Any, this.unboxed[p] !== 0);
+    } else {
+      out.text("p");
+      out.uint(p);
+    }
   }
 
   /**
