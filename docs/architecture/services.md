@@ -195,6 +195,28 @@ is not supported. Where the host does not say, the values are adl's
 or Electron's window has no menu, dock icon or tray of AIR's, so the
 `supports` flags are false.
 
+## AIR's file system
+
+In AIR, `flash.filesystem.File` reads the host's file system through a
+`FileSystemHost` (`hosts.ts`, Scripting's `fileSystem`): synchronous, as
+File's properties are, with native absolute paths of the host's system,
+POSIX or Windows by its separator, and the directories AIR names. A File
+keeps a native path and where its URL starts
+(`playerglobal/flash/filesystem/File.ts`, the paths in `paths.ts`): the
+file system's root (`file:`), the application's directory (`app:/`) or its
+storage's (`app-storage:/`). It keeps that start as paths resolve and as
+it goes up, never climbing out of `app:/`, whose `parent` is null; URLs
+encode each segment as `encodeURIComponent` does. The constructor, `url`
+and `resolvePath` take a native path or a `file:`, `app:` or
+`app-storage:` URL. A relative path is refused with ArgumentError 2004, a
+File made with no path throws Error 2037, and what reads a file that is
+not there throws Error 3003 (3007 for listing a file). FileReference's
+`name`, `size`, dates and `type` read a File's on disk. The launch's
+`InvokeEvent` carries the directory it was launched from as a File. What
+writes, the dialogs and the asynchronous methods are not supported yet.
+`File.test.ts` holds all of it to what adl traced for the same scripts,
+with a POSIX host's paths in place of Windows'.
+
 ## Screen capabilities
 
 `flash.system.Capabilities` reads screen resolution, pixel aspect ratio and

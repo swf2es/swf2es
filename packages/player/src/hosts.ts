@@ -374,9 +374,46 @@ export interface AirApplication {
   id: string;
   /** What followed the descriptor on the command line, as adl's `--` passes it. */
   arguments: readonly string[];
+  /** The directory it was launched from, a native path: InvokeEvent's currentDirectory. */
+  currentDirectory?: string | null;
   window?: AirWindow | null;
   /** NativeApplication.exit's code; a host without it stops nothing. */
   exit?(code: number): void;
+}
+
+/** What is at a path on the host's file system, as flash.filesystem.File reads it. */
+export interface FileStat {
+  directory: boolean;
+  /** In bytes; 0 for a directory. */
+  size: number;
+  /** When it was last changed and when it was made, in ms since 1970. */
+  modified: number;
+  created: number;
+  hidden?: boolean;
+  symbolicLink?: boolean;
+}
+
+/**
+ * The host's file system, as an AIR application's flash.filesystem.File
+ * sees it: synchronous, as File's properties are, its paths native and
+ * absolute. The directories are those AIR names, its application's (where
+ * its descriptor is) and the application's storage among them.
+ */
+export interface FileSystemHost {
+  /** The system's separator: "/", or "\\" on Windows. */
+  readonly separator: string;
+  readonly directories: {
+    application: string;
+    applicationStorage: string;
+    user: string;
+    documents: string;
+    desktop: string;
+    cache?: string;
+  };
+  /** What is at `path`, or null where nothing is. */
+  stat(path: string): FileStat | null;
+  /** The names in the directory at `path`, or null where it is none. */
+  list(path: string): string[] | null;
 }
 
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */

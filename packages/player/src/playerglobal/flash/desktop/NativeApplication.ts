@@ -3,14 +3,16 @@
 // launch, which adl hands each InvokeEvent listener once it listens. A
 // listener added in the document class's constructor has it before the
 // first frame's ENTER_FRAME; one added in a frame's scripts, at that
-// frame's end; each once, those that had it before not again. Without a
-// host the application has no window and was launched with no arguments.
+// frame's end; each once, those that had it before not again, with the
+// directory it was launched from as a File. Without a host the application
+// has no window and was launched with no arguments, from nowhere.
 // What the values are where no host says: adl's (AIR 51.3).
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent, dispatchToListener } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 import { nativeWindowOf } from "../display/NativeWindow.js";
 import { addListener, removeListener } from "../events/EventDispatcher.js";
+import { fileAt } from "../filesystem/File.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -46,7 +48,7 @@ export function nativeApplicationNatives(s: Scripting): avm2.Natives {
         INVOKE,
         false,
         false,
-        null,
+        s.application?.currentDirectory ? fileAt(s, s.application.currentDirectory) : null,
         s.rt.array([...(s.application?.arguments ?? [])]),
         "standard",
       ) as AsObject;
