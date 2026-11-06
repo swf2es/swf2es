@@ -61,7 +61,11 @@ remade at the next frame. Flash covers an edge with 16 at high; 8 look alike but
 the longest, shallowest edges, at half the memory, and best takes 16.
 Every sample costs its pixels 8 bytes, colour and depth-stencil, so a
 canvas larger than about 1080p takes fewer (`fittingSamples`: what fits
-256 MB, 4 at least): 8 at 1440p, 4 at 4K. A BitmapData's draw at low
+256 MB, 4 at least): 8 at 1440p, 4 at 4K. A screen whose pixels are
+finer than CSS pixels takes fewer for each of its own (`denseSamples`): at
+a device pixel ratio of 2 or 3, 4 for 8 or 16, as many as cover a stage
+pixel with what one takes; a stage only zoomed takes the quality's. A
+BitmapData's draw at low
 quality smooths no bitmap either.
 
 ## The page's configuration
