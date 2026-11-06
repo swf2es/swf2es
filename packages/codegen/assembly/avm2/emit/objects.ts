@@ -29,7 +29,7 @@ import {
   BUILTIN_Uint,
 } from "../link/traits";
 import { NONE } from "./copies";
-import { inRange, isAddress, viewMethod } from "./memory";
+import { isAddress, viewMethod } from "./memory";
 import { MethodEmitter } from "./method";
 import { isClassRef, poolString, typeRef } from "./refs";
 import { CONVERTS, call2, convert, isNumber, isNumeric, keeps } from "./values";
@@ -594,11 +594,11 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.uint(a);
       out.text("])");
       return true;
-    // Domain memory: in place at an int address, else through the
-    // runtime, which checks the range and converts the address; also
-    // what the code in place calls for an address out of range, so that
-    // the runtime rejects it as avmplus does. Sign extensions in plain
-    // JavaScript.
+    // Domain memory: in place at an int or uint address, where the view's
+    // own range check rejects what avmplus does, with a RangeError the
+    // method's code turns into avmplus' (see inPlaceMemory); else through
+    // the runtime, which checks the range and converts the address. Sign
+    // extensions in plain JavaScript.
     case ops.OP_li8:
     case ops.OP_li16:
     case ops.OP_li32:
@@ -606,14 +606,13 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
     case ops.OP_lf64:
       em.assign(i);
       if (isAddress(em, src)) {
-        out.text("(");
-        inRange(em, src, op);
-        out.text(" ? rt.view.");
+        em.inPlaceMemory = true;
+        out.text("rt.view.");
         out.text(viewMethod(op));
         out.text("(");
         em.reg(src);
         out.text(op === ops.OP_li8 ? ")" : ", true)");
-        out.text(" : ");
+        return true;
       }
 
       out.text("rt.");
@@ -621,27 +620,24 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text("(");
       em.reg(src);
       out.text(")");
-      if (isAddress(em, src)) {
-        out.text(")");
-      }
-
       return true;
     case ops.OP_si8:
     case ops.OP_si16:
     case ops.OP_si32:
     case ops.OP_sf32:
     case ops.OP_sf64:
-      // The value's conversion is DataView's own for a number or Boolean.
+      // The value's conversion is DataView's own for a number or Boolean,
+      // which has no effect to come before the range check.
       if (isAddress(em, src + 1) && isNumeric(em, src)) {
-        out.text("if (");
-        inRange(em, src + 1, op);
-        out.text(") rt.view.");
+        em.inPlaceMemory = true;
+        out.text("rt.view.");
         out.text(viewMethod(op));
         out.text("(");
         em.reg(src + 1);
         out.text(", ");
         em.reg(src);
-        out.text(op === ops.OP_si8 ? "); else " : ", true); else ");
+        out.text(op === ops.OP_si8 ? ")" : ", true)");
+        return true;
       }
 
       out.text("rt.");

@@ -72,6 +72,15 @@ export class MethodEmitter {
    * it runs with its scope's (see checkEntry).
    */
   seesDxns: bool = false;
+  /**
+   * Whether the method loads or stores domain memory in place, where an
+   * address out of range throws the view's own RangeError: its code is in a
+   * try that throws avmplus' for it instead, before any caller sees it (see
+   * memoryEnd). Where the try starts.
+   */
+  inPlaceMemory: bool = false;
+  memoryAt: u32 = 0;
+  memoryMarks: i32 = 0;
   /** Whether the method reads its factory's scope chain, and its base class. */
   usesScope: bool = false;
   usesSup: bool = false;
@@ -192,6 +201,10 @@ export class MethodEmitter {
       out.text("const $dxns = rt.enterDxns();\ntry {\n");
     }
 
+    this.inPlaceMemory = false;
+    this.memoryAt = out.length;
+    this.memoryMarks = this.map.count;
+
     const handled = ir.handlerCount > 0;
     if (handled) {
       regions(this);
@@ -215,6 +228,7 @@ export class MethodEmitter {
       node(this, 0);
       this.structured = false;
       if (!this.unenclosed) {
+        this.memoryEnd();
         this.leaveDxns(dxns);
         out.text("}");
         this.checkEntry();
@@ -244,9 +258,29 @@ export class MethodEmitter {
     }
 
     out.text("\n");
+    this.memoryEnd();
     this.leaveDxns(dxns);
     out.text("}");
     this.checkEntry();
+  }
+
+  /**
+   * The end of a method that loads or stores domain memory in place: its
+   * code in a try whose catch makes the view's RangeError avmplus' (see
+   * Runtime.memoryError), so that its callers, and the handlers of the
+   * method's own code, which see it first (Runtime.caught), never see the
+   * view's. A try costs V8 nothing where nothing throws.
+   */
+  memoryEnd(): void {
+    if (!this.inPlaceMemory) {
+      return;
+    }
+
+    const start = "try {\n";
+    this.out.insert(this.memoryAt, start);
+    this.map.shift(this.memoryMarks, <u32>start.length);
+    this.space();
+    this.out.text("} catch (e) {\nthrow rt.memoryError(e);\n}\n");
   }
 
   /**
