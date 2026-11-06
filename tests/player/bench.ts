@@ -52,6 +52,12 @@
 // plain shape instead, the same art with no mask, which bounds what any
 // cheaper clip (a scissor) could gain.
 //
+// --blends N plays instead N shapes alone in a blend mode each, over bands
+// of colour: half filled with a bitmap, half with a colour part clear, in
+// add, screen, multiply, lighten, overlay and hard light in turn, every
+// other one gliding each frame, as a game's effects and tinted art are:
+// what a blend mode costs an object that is one fill.
+//
 // --hover holds the mouse still over the stage's middle, as a user's often
 // is, for what a SWF with scripts does for it each frame: with --scripted
 // only, as the other SWFs have no scripts, and so no pointer.
@@ -133,7 +139,8 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --scripted N [--still] | --town N | --scroll N
+//     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
+//     | --scroll N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
@@ -141,6 +148,7 @@
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
 import { readFileSync, writeFileSync } from "node:fs";
+import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
 import { stemFont } from "./cases.ts";
 import { benchPlayer } from "./chrome.ts";
@@ -164,6 +172,7 @@ const toggleEvery = Math.max(1, option("toggle-every", 1));
 const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const masks = option("masks", 0);
+const blends = option("blends", 0);
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
@@ -581,6 +590,109 @@ function toggleStaticSwf(count: number): Uint8Array {
 
   tags.push(w.showFrame(), w.end());
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
+/** A closed polygon of `sides` about (cx, cy), `r` twips out, as a path's commands. */
+function polygonPath(cx: number, cy: number, r: number, sides: number): w.PathCommand[] {
+  const commands: w.PathCommand[] = [{ move: [cx + r, cy] }];
+  for (let k = 1; k <= sides; k++) {
+    const t = (2 * Math.PI * k) / sides;
+    commands.push({ line: [Math.round(cx + r * Math.cos(t)), Math.round(cy + r * Math.sin(t))] });
+  }
+
+  return commands;
+}
+
+/**
+ * `count` shapes alone in a blend mode each over four bands of colour, on a
+ * loop of 48 frames: half a polygon filled with a 16 by 16 bitmap, half one
+ * of a colour part clear, in add, screen, multiply, lighten, overlay and
+ * hard light in turn, every other one gliding (--blends).
+ */
+function blendsSwf(count: number): Uint8Array {
+  const pixels: number[] = [];
+  for (let y = 0; y < 16; y++) {
+    for (let x = 0; x < 16; x++) {
+      // Premultiplied ARGB: opaque squares and half-clear ones.
+      pixels.push(...((x >> 2) % 2 === (y >> 2) % 2 ? [255, 230, 120, 40] : [128, 20, 60, 110]));
+    }
+  }
+
+  const bandH = (HEIGHT / 4) * TWIPS;
+  const bands = [0x203050, 0xc08040, 0x60a0c0, 0xe0e0d0];
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0x808080),
+    w.shape({
+      id: 1,
+      bounds: [0, WIDTH * TWIPS, 0, HEIGHT * TWIPS],
+      fills: bands,
+      paths: bands.map((_, k) => ({
+        fill1: k + 1,
+        commands: [
+          { move: [0, k * bandH] },
+          { line: [WIDTH * TWIPS, k * bandH] },
+          { line: [WIDTH * TWIPS, (k + 1) * bandH] },
+          { line: [0, (k + 1) * bandH] },
+          { line: [0, k * bandH] },
+        ],
+      })),
+    }),
+    w.tag(
+      36,
+      Uint8Array.from([2, 0, 5, 16, 0, 16, 0, ...zlibCompress(Uint8Array.from(pixels))]),
+      true,
+    ),
+  ];
+  const r = 30 * TWIPS;
+  tags.push(
+    w.shape({
+      id: 3,
+      bounds: [-r, r, -r, r],
+      fills: [{ bitmap: 2, type: 0x42, matrix: { a: 40, d: 40 } }],
+      paths: [{ fill1: 1, commands: polygonPath(0, 0, r, 24) }],
+    }),
+    w.shape({
+      id: 4,
+      bounds: [-r, r, -r, r],
+      fills: [0xb0d06030],
+      paths: [{ fill1: 1, commands: polygonPath(0, 0, r, 24) }],
+    }),
+  );
+  const modes = [8, 4, 3, 5, 13, 14];
+  const loop = 48;
+  const columns = Math.ceil(Math.sqrt(count * (WIDTH / HEIGHT)));
+  const rows = Math.ceil(count / columns);
+  const at = (i: number, f: number) => ({
+    tx: Math.round(
+      ((i % columns) + 0.5) * (WIDTH / columns) * TWIPS +
+        (i % 2 ? Math.sin((2 * Math.PI * f) / loop + i) * 20 * TWIPS : 0),
+    ),
+    ty: Math.round((Math.floor(i / columns) + 0.5) * (HEIGHT / rows) * TWIPS),
+  });
+  tags.push(w.place({ depth: 1, character: 1 }));
+  for (let i = 0; i < count; i++) {
+    tags.push(
+      w.place({
+        depth: i + 2,
+        character: 3 + (i % 2),
+        matrix: at(i, 0),
+        blendMode: modes[Math.floor(i / 2) % modes.length],
+      }),
+    );
+  }
+
+  tags.push(w.showFrame());
+  for (let f = 1; f < loop; f++) {
+    for (let i = 1; i < count; i += 2) {
+      tags.push(w.place({ depth: i + 2, move: true, matrix: at(i, f) }));
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: loop, tags });
 }
 
 /**
@@ -1312,17 +1424,19 @@ const swf =
                     ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
                     : masks > 0
                       ? masksSwf(masks, args.includes("--unmasked"))
-                      : branches > 0
-                        ? branchSwf(branches)
-                        : rig > 0
-                          ? rigSwf(
-                              rig,
-                              args.includes("--swap"),
-                              args.includes("--fresh"),
-                              args.includes("--blurred") || filtered > 0,
-                              args.includes("--glide"),
-                            )
-                          : synthetic();
+                      : blends > 0
+                        ? blendsSwf(blends)
+                        : branches > 0
+                          ? branchSwf(branches)
+                          : rig > 0
+                            ? rigSwf(
+                                rig,
+                                args.includes("--swap"),
+                                args.includes("--fresh"),
+                                args.includes("--blurred") || filtered > 0,
+                                args.includes("--glide"),
+                              )
+                            : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1389,11 +1503,13 @@ const summary = {
                       ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
                       : masks > 0
                         ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                        : branches > 0
-                          ? `${branches} branches`
-                          : rig > 0
-                            ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                            : shapes,
+                        : blends > 0
+                          ? `${blends} blended shapes`
+                          : branches > 0
+                            ? `${branches} branches`
+                            : rig > 0
+                              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                              : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {
