@@ -520,6 +520,11 @@ export function convert(
         return;
       }
 
+      if (prefix.length && isClassRef(em, type)) {
+        classParameter(em, prefix, r, type);
+        return;
+      }
+
       // A class's instances, by T: no builtin for the runtime to look for.
       out.text(isClassRef(em, type) ? "rt.coerceTo(" : "rt.coerce(");
       operand(em, prefix, r);
@@ -527,6 +532,31 @@ export function convert(
       typeRef(em, type);
       out.text(")");
   }
+}
+
+/**
+ * Parameter r (`prefix` + r) coerced to class type `type` on entry: an
+ * instance of the class itself, which a caller passes far more often than
+ * not, found inline by the traits coerceTo keeps on the reference once it
+ * has resolved them, so that each method's test sees only the shapes of
+ * its own arguments; anything else, null and a subclass's instances among
+ * them, as coerceTo has it.
+ */
+function classParameter(em: MethodEmitter, prefix: string, r: i32, type: i32): void {
+  const out = em.out;
+  out.text("(");
+  operand(em, prefix, r);
+  out.text(" != null && ");
+  operand(em, prefix, r);
+  out.text(".$traits === ");
+  typeRef(em, type);
+  out.text(".traits ? ");
+  operand(em, prefix, r);
+  out.text(" : rt.coerceTo(");
+  operand(em, prefix, r);
+  out.text(", ");
+  typeRef(em, type);
+  out.text("))");
 }
 
 function operand(em: MethodEmitter, prefix: string, r: i32): void {
