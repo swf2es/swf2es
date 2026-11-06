@@ -219,9 +219,21 @@ its checked entry, which counts and coerces them as above and calls the
 other. The factory gives the checked one, with the other on it as
 `$bound`, and the runtime keeps that under `$b<id>` beside `$m<id>` (the
 method itself where it has none). Bound calls of such a method call
-`$b<id>`; every other path, `*`, closures, `apply`, interfaces, `super`,
-calls `$m<id>`. Whether a method has one is read from its signature, the
-same in its module and its callers'.
+`$b<id>`; every other path, `*`, closures, `apply`, `super`, calls
+`$m<id>`. Whether a method has one is read from its signature, the same
+in its module and its callers'.
+
+A call through an interface coerces its arguments to the interface
+method's signature, which the class's method has too (avmplus refuses a
+class whose method does not match, VerifyError 1053), but the class may
+place the method at any dispatch id. Such a call, given no more arguments
+than the method declares, is `o[rt.interfaceKey(T[k], disp, o)](...)`:
+the runtime finds the `$b<id>` the class binds the interface's name to
+once for each class and interface, and keeps it on the class's traits,
+the last interface apart; the call itself is the module's, so that each
+site keeps its own feedback in the engine. More arguments, which a rest
+parameter takes, go by name through `rt.callInterface`, as the class's
+method counts them.
 
 Each module has a source map (version 3) from the ABC's `debugfile` and
 `debugline`, where an ABC compiled with them has them (asc's `-d`): the

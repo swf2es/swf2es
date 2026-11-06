@@ -34,9 +34,9 @@
 // A dispatch id is a slot in a class's own layout: a subclass keeps its
 // base's, so an early bound call by one is right for any receiver of the
 // type; an interface's are its own, which an implementing class need not
-// share (IR_CallInterface, and an interface's accessors, go by name); and a
-// primitive, which a value of type Object can be, has none (the emitter
-// calls its class prototype's method).
+// share (IR_CallInterface goes by a key the runtime finds by name, an
+// interface's accessors by name); and a primitive, which a value of type
+// Object can be, has none (the emitter calls its class prototype's method).
 import { OP_lookupswitch } from "../abc/opcodes";
 
 // Instructions beyond the ABC's opcodes.

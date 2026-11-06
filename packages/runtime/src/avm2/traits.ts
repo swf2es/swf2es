@@ -144,6 +144,16 @@ export class Traits {
    * not hash it anew.
    */
   objectString: string | null = null;
+  /**
+   * The keys of the methods its instances are called by through each
+   * interface, as Runtime.interfaceKey finds them: by the interface's
+   * traits, an array by the interface's dispatch ids. The last interface
+   * looked up, and its keys, are kept apart, as most receivers are called
+   * through one.
+   */
+  interfaceKeys: Map<Traits, (string | undefined)[]> | null = null;
+  lastInterface: Traits | null = null;
+  lastInterfaceKeys: (string | undefined)[] = [];
 
   constructor(
     readonly name: string,

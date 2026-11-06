@@ -2,8 +2,9 @@ package {
   // Typed code as the compiler binds it: `new` of classes it resolves,
   // shallow and deep in a hierarchy, and calls of methods it knows,
   // with parameters typed as classes, interfaces and numbers, given
-  // instances of the class itself, of a subclass, and null; and a call
-  // through an interface.
+  // instances of the class itself, of a subclass, and null; calls through
+  // an interface, of one class and of several; calls of a base's method
+  // through super; and constructors with class-typed parameters.
   public class Vec {
     public var x:Number;
     public var y:Number;
@@ -45,6 +46,29 @@ class Leaf extends Middle {
 class Vec3 extends Vec {
   public var z:Number = 0;
   public function Vec3(x:Number, y:Number) { super(x, y); }
+}
+// Shape's area at another dispatch id than Base's, and a class that has
+// it from its base.
+class Square implements Shape {
+  public var side:Number;
+  public function Square(side:Number) { this.side = side; }
+  public function perimeter():Number { return 4 * side; }
+  public function area():Number { return side * side; }
+}
+class Tile extends Square {
+  public function Tile() { super(2); }
+}
+class Pair {
+  public var a:Vec;
+  public var b:Vec;
+  public function Pair(a:Vec, b:Vec) {
+    this.a = a;
+    this.b = b;
+  }
+}
+class Weighted extends Vec {
+  public function Weighted(x:Number, y:Number) { super(x, y); }
+  override public function dot(v:Vec):Number { return super.dot(v) * 2; }
 }
 final class Counter {
   private var _n:int = 0;
@@ -126,6 +150,37 @@ time("interfaceCall", function ():* {
   var s:Number = 0;
   for (var i:int = 0; i < N; i++) {
     s += c.area(l);
+  }
+  return s;
+});
+
+time("interfacePoly", function ():* {
+  var shapes:Vector.<Shape> = new <Shape>[new Base(2), new Leaf(1, "x", 3), new Square(4), new Tile()];
+  var s:Number = 0;
+  for (var i:int = 0; i < N; i++) {
+    var shape:Shape = shapes[i & 3];
+    s += shape.area();
+  }
+  return s;
+});
+
+time("superCall", function ():* {
+  var a:Weighted = new Weighted(1, 2);
+  var b:Vec = new Vec(3, 4);
+  var s:Number = 0;
+  for (var i:int = 0; i < N; i++) {
+    s += a.dot(b);
+  }
+  return s;
+});
+
+time("newArgs", function ():* {
+  var a:Vec3 = new Vec3(1, 2);
+  var b:Vec3 = new Vec3(3, 4);
+  var s:Number = 0;
+  for (var i:int = 0; i < N; i++) {
+    var p:Pair = new Pair(a, b);
+    s += p.b.y;
   }
   return s;
 });

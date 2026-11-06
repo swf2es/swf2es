@@ -229,7 +229,13 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         em.assign(i);
       }
 
-      // By the interface's dispatch id, which its layout maps to a name.
+      if (ir.b[i] <= em.domain.traits.paramCount[ir.c[i]]) {
+        interfaceCall(em, a, src, ir.b[i]);
+        return true;
+      }
+
+      // More arguments than the method declares, which its rest takes:
+      // by name, as the class's method, which may have none, counts them.
       out.text("rt.callInterface(");
       typeRef(em, em.regType[src]);
       out.text(", ");
@@ -928,6 +934,29 @@ function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32): void 
   args(em, src + 1, argc);
   out.text("), $o) : rt.construct($c");
   args(em, src + 1, argc);
+  out.text(")");
+}
+
+/**
+ * A call of an interface's method, dispatch id `disp` in the interface's
+ * layout, on the receiver in `src`, with `argc` arguments after it, no
+ * more than the method declares: by the key the runtime finds for the
+ * receiver's class, its entry for bound calls, as the class's method has
+ * the interface's signature and the arguments are coerced to it. The
+ * call is made here, so that each site keeps its own feedback in the
+ * engine.
+ */
+function interfaceCall(em: MethodEmitter, disp: u32, src: i32, argc: u32): void {
+  const out = em.out;
+  em.member(src);
+  out.text("[rt.interfaceKey(");
+  typeRef(em, em.regType[src]);
+  out.text(", ");
+  out.uint(disp);
+  out.text(", ");
+  em.read(src);
+  out.text(")](");
+  list(em, src + 1, argc);
   out.text(")");
 }
 
