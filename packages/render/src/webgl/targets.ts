@@ -248,6 +248,11 @@ export class TargetPool {
     const gl = this.gl;
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, msaa.framebuffer);
     gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, layer.framebuffer);
+    // The blit writes the whole rectangle, so what the layer held there goes:
+    // said so, as ANGLE's Vulkan back end, SwiftShader's and a GPU's alike,
+    // otherwise left a reused layer's old pixels where the blit had written
+    // (tests/player/packed-filters.ts, once the pool keeps layers a frame).
+    gl.invalidateSubFramebuffer(gl.DRAW_FRAMEBUFFER, [gl.COLOR_ATTACHMENT0], 0, 0, width, height);
     gl.blitFramebuffer(0, 0, width, height, 0, 0, width, height, gl.COLOR_BUFFER_BIT, gl.NEAREST);
     // Bound as the state cache has it.
     gl.bindFramebuffer(gl.FRAMEBUFFER, msaa.framebuffer);
