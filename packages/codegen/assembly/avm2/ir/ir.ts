@@ -67,6 +67,12 @@ export const IR_Nip: u16 = 0x108;
  * script's class is on its global object; c the slot's type.
  */
 export const IR_ConstructSlot: u16 = 0x109;
+/**
+ * dst = the base class's method of dispatch id `a`, called on src with the
+ * `b` arguments after it, coerced to its signature: callsuper of a name the
+ * base binds to a method; c the method (domain-wide id).
+ */
+export const IR_CallSuper: u16 = 0x10a;
 
 @final
 export class Ir {

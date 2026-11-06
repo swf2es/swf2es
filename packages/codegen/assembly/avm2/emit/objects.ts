@@ -11,6 +11,7 @@ import {
   IR_CallGetter,
   IR_CallInterface,
   IR_CallSetter,
+  IR_CallSuper,
   IR_ConstructSlot,
   IR_FindPropGlobal,
   IR_FindPropGlobalStrict,
@@ -450,6 +451,22 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text(")");
       return true;
     }
+    case IR_CallSuper:
+      if (ir.dst[i] >= 0) {
+        em.assign(i);
+      }
+
+      // The base's method itself, its arguments coerced already: its entry
+      // for bound calls, where it has one.
+      out.text("sup.$it.proto.");
+      out.text(hasBoundEntry(em, ir.c[i]) ? "$b" : "$m");
+      out.uint(a);
+      out.text(".call(");
+      em.usesSup = true;
+      em.reg(src);
+      args(em, src + 1, ir.b[i]);
+      out.text(")");
+      return true;
     case ops.OP_constructsuper:
       // As rt.constructSuper, without an array of the arguments to apply.
       out.text("sup.$it.proto.$init.call(");

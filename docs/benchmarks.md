@@ -428,6 +428,20 @@ interleaved pairs, in ms (as3pb of 9):
 The other sections are unchanged. On four classes, the key is the same
 lookup, but the call's feedback sees four shapes and two keys.
 
+`callsuper` went by name through `rt.callSuper` too, a lookup on the
+base's traits and the arguments in an array on every call. Bound where
+the base binds the name to a method, as avmplus binds it (see
+docs/architecture/compiler.md), medians of 7 interleaved pairs:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| superCall | 71 | 17 | −76.1% | 21 |
+| as3pb bytes / memory (11) | 109 / 105 | 112 / 104 | +2.8% / −1.0% | |
+| lz4 total (7) | 732 | 728 | −0.5% | |
+
+as3pb's ranges overlap (107–128 against 107–129); a run of 9 pairs
+before it had bytes even and memory +2.8%.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator

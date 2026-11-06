@@ -9,6 +9,7 @@ import {
   IR_CallGetter,
   IR_CallInterface,
   IR_CallSetter,
+  IR_CallSuper,
   IR_CheckNull,
   IR_Coerce,
   IR_ConstructSlot,
@@ -415,6 +416,8 @@ function irName(op: u16): string {
       return "callsetter";
     case IR_CallInterface:
       return "callinterface";
+    case IR_CallSuper:
+      return "callsuperid";
     case IR_FindPropGlobal:
       return "findpropglobal";
     case IR_FindPropGlobalStrict:

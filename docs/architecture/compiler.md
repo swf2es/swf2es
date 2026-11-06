@@ -219,9 +219,16 @@ its checked entry, which counts and coerces them as above and calls the
 other. The factory gives the checked one, with the other on it as
 `$bound`, and the runtime keeps that under `$b<id>` beside `$m<id>` (the
 method itself where it has none). Bound calls of such a method call
-`$b<id>`; every other path, `*`, closures, `apply`, `super`, calls
-`$m<id>`. Whether a method has one is read from its signature, the same
-in its module and its callers'.
+`$b<id>`; every other path, `*`, closures, `apply`, calls `$m<id>`.
+Whether a method has one is read from its signature, the same in its
+module and its callers'.
+
+`callsuper` of a name the base class binds to a method, given a count
+the method takes, is bound as avmplus' JIT binds it (`OP_callsuperid`):
+its arguments are coerced at the call site and the base's method called
+directly, `sup.$it.proto.$b<id>.call(this, ...)` (`$m<id>` for a method
+with no entry for bound calls). Any other count, and a name bound to
+anything else, goes by name through `rt.callSuper`, as before.
 
 A call through an interface coerces its arguments to the interface
 method's signature, which the class's method has too (avmplus refuses a
