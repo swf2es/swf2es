@@ -4,6 +4,6 @@ package flash.system
 {
 	public function fscommand(command:String, args:String = ""):void
 	{
-		FSCommand._fscommand(command, args);
+		FSCommandHost._fscommand(command, args);
 	}
 }

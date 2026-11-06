@@ -1448,7 +1448,7 @@
     "flash.net::NetConnection.get:defaultObjectEncoding",
     "flash.net::NetConnection.set:defaultObjectEncoding",
     "flash.net::Responder#flash.net:Responder::ctor",
-    "flash.system::FSCommand._fscommand",
+    "flash.system::FSCommandHost._fscommand",
     "flash.xml::XMLNode.flash.xml:XMLNode::escapeXML",
     "flash.xml::XMLParser#getNext",
     "flash.xml::XMLParser#startParse",
