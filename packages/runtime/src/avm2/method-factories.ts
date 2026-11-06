@@ -4,7 +4,7 @@
 
 import type { AsObject, Factory, Method, TypeRef, Value } from "./descriptors.js";
 import type { Runtime } from "./runtime.js";
-import { methodKey, untypedSetKey } from "./traits.js";
+import { boundKey, methodKey, untypedSetKey } from "./traits.js";
 
 /**
  * A native with argument counts to check, when it has any, its declared
@@ -83,6 +83,7 @@ export function installMethod(
   params: TypeRef[],
 ): void {
   proto[methodKey(d)] = f;
+  proto[boundKey(d)] = (f as Method & { $bound?: Method }).$bound ?? f;
   const key = untypedSetKey(d);
   if (!natives.has(factory) || !params.some((t) => COERCED.has(t))) {
     if (key in proto) {
