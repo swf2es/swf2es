@@ -51,7 +51,10 @@ for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
 The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
 and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
-`fscommand` events.
+`fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
+and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
+holds both): a page may size the element to the SWF's own size while it
+asks for `noScale`, as an embedding at that size shows it.
 
 ## WebAssembly and CSP
 

@@ -553,10 +553,12 @@ textures, framebuffer/depth allocation failures, incomplete attachments,
 feedback rejection, disposal and context loss. Failed switches preserve the
 previous target; all tracked GPU handles are released on teardown.
 
-This slice limits render targets to power-of-two 2D textures from 8×8 through
-2048×2048 and cube faces from 8×8 through 1024×1024, with optional target
-antialiasing and a single color output.
-A 1×1 AIR rasterization probe differed; smaller targets remain unverified.
+This slice limits render targets to power-of-two 2D textures up to
+2048×2048 and cube faces up to 1024×1024, with optional target antialiasing
+and a single color output. Targets from 4×4 down to 1×1, as a bloom's chain of
+halvings ends in, are cleared, filled and drawn into as AIR does
+(`RenderTargets.as`); a 1×1 probe of partial triangle coverage once differed
+from AIR, so edge rasterization at those sizes is unverified.
 Resizing the back buffer while a texture is selected is explicitly rejected.
 Target depth storage has a separate 64 MiB budget. Full validation/error parity
 and fractional clear-color rounding across GPU drivers remain future work.
@@ -656,7 +658,6 @@ uploads do not allocate an intermediate clipped image.
 
 This remains a BGRA-only slice. Other formats, broader profile/dimension and
 validation coverage, and hardware-dependent filtering precision remain open.
-The experimental render-target minimum of 8×8 still applies.
 
 `CubeTextures.as` compares all six cube faces with AIR, including asymmetric
 quadrants to detect flips, nearest/linear filtering, all three mip modes,

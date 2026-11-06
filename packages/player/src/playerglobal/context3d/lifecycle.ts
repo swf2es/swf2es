@@ -28,6 +28,8 @@ export interface TextureResource extends Resource<Texture3D> {
 export interface ContextState {
   backend: Context3D;
   slot: AsObject;
+  /** The profile it was made for, as Context3D.profile reads it. */
+  profile: string;
   cleared: number;
   depth: boolean;
   aa: number;
@@ -49,6 +51,8 @@ export function unsupported(what: string): never {
 export function createBindings(s: Scripting, host: Stage3DHost) {
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
+  // The profile each slot last asked for, which a context restored after a loss keeps.
+  const profiles = new WeakMap<AsObject, string>();
   const generations = new WeakMap<AsObject, object>();
   const lost = new Map<AsObject, object>();
   const contexts = new Map<AsObject, ContextState>();
@@ -269,11 +273,12 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       }
     });
   };
-  const request = (slot: AsObject): void => {
+  const request = (slot: AsObject, profile = profiles.get(slot) ?? "baseline"): void => {
     if (pending.has(slot) || lost.has(slot)) {
       return;
     }
 
+    profiles.set(slot, profile);
     pending.add(slot);
     deferEvent(() => {
       pending.delete(slot);
@@ -346,6 +351,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       contexts.set(object, {
         backend,
         slot,
+        profile: profiles.get(slot) ?? "baseline",
         cleared: 0,
         depth: false,
         aa: 0,

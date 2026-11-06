@@ -159,5 +159,44 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         assert.equal(await value(backendRequests), 0, "a fresh page eagerly fetched the backend");
       },
     ],
+    [
+      "a SWF asking for noScale is shown at its own size with Stage3D, filling the box without",
+      async () => {
+        await navigate("play/");
+        const abc = compileScripts(
+          [
+            {
+              name: "SiteNoScale",
+              source: readFileSync(new URL("SiteNoScale.as", import.meta.url), "utf8"),
+            },
+          ],
+          `${out}noscale`,
+        ).get("SiteNoScale") as Uint8Array;
+        const file = `${out}noscale.swf`;
+        writeFileSync(file, bare(abc, 1, "SiteNoScale", 96, 96));
+        const { result } = await send<{ result: { objectId: string } }>("Runtime.evaluate", {
+          expression: "document.getElementById('file')",
+        });
+        await send("DOM.setFileInputFiles", { objectId: result.objectId, files: [file] });
+        const width = () =>
+          value<number>("document.getElementById('stage').getBoundingClientRect().width");
+        const authored = "document.getElementById('stage').classList.contains('authored')";
+        await until(logHas("site-noscale ready"));
+        const filled = await width();
+        assert.ok(filled > 200, `the box is ${filled} wide without Stage3D`);
+
+        await clear();
+        await click("stage3d");
+        await until(logHas("site-noscale ready"));
+        await until(authored);
+        assert.ok(Math.abs((await width()) - 96) <= 2, `the box is ${await width()} wide`);
+
+        await clear();
+        await click("stage3d");
+        await until(logHas("site-noscale ready"));
+        assert.equal(await value(authored), false);
+        assert.equal(await width(), filled);
+      },
+    ],
   ];
 }

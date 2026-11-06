@@ -213,7 +213,29 @@ export class Playback {
     this.view.render(this.player.stage);
   }
 
-  private readonly stageLayout = () => this.layout();
+  /**
+   * The SWF set its stage's scaleMode or align, or began: placed again, and
+   * the page told by a stagelayout event, once the script that set it
+   * returns, so that no listener runs inside it.
+   */
+  private readonly stageLayout = () => {
+    this.layout();
+    const scripting = this.scripting;
+    if (!scripting) {
+      return;
+    }
+
+    queueMicrotask(() => {
+      if (this.destroyed) {
+        return;
+      }
+
+      const detail = { scaleMode: scripting.stageScaleMode, align: scripting.stageAlign };
+      this.box.dispatchEvent(
+        new CustomEvent("stagelayout", { bubbles: true, composed: true, detail }),
+      );
+    });
+  };
 
   /** The canvas placed in the box by the look, and drawn at the device's pixels. */
   private layout(): void {

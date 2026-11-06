@@ -174,6 +174,16 @@ export function newClass(
     }
   }
 
+  // Calls through an interface read one name whatever the class; set
+  // here, before any instance exists, so that the prototype keeps its shape.
+  const aliases = desc.aliases;
+  if (aliases) {
+    const proto = itraits.proto;
+    for (let i = 0; i < aliases.length; i += 2) {
+      proto[aliases[i] as string] = proto[boundKey(aliases[i + 1] as number)];
+    }
+  }
+
   // Caches keep the methods and what the hooks decide.
   invalidate();
   const init = desc.init(iscope, base);

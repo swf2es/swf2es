@@ -847,3 +847,88 @@ test("traits of no slots have no fill", { skip }, () => {
   assert.equal(fills(js).length, 1);
   assert.match(js, /\{ traits: \{[^\n]*, fill: \(o, v\) => \{ o\.\$0 = null; \} \}, init/);
 });
+
+/**
+ * Interface I, its method m in a namespace of `kind` (URI "p:I"), class A
+ * implementing it, and a script that calls m on a new A through I.
+ */
+function interfaceCall(kind: number): Uint8Array {
+  const pool = {
+    strings: ["", "Object", "I", "A", "m", "p:I"],
+    namespaces: [
+      [0x16, ...u30(1)],
+      [kind, ...u30(6)],
+    ],
+    // public::Object, public::I, public::A, I's namespace::m, public::m.
+    multinames: [
+      [0x07, 1, 2],
+      [0x07, 1, 3],
+      [0x07, 1, 4],
+      [0x07, 2, 5],
+      [0x07, 1, 5],
+    ],
+  };
+  // newclass I, newclass A, then new A() coerced to I and its m called through I.
+  const code = [0xd0, 0x30, 0xd0, 0x20, 0x58, 0, 0x68, 2];
+  code.push(0xd0, 0x60, 1, 0x30, 0x60, 1, 0x58, 1, 0x1d, 0x68, 3);
+  code.push(0x5d, 3, 0x4a, 3, 0, 0x80, 2, 0x46, 4, 0, RETURNVALUE);
+  return abc(
+    pool,
+    tables({
+      methods: [{}, {}, {}, {}, {}, {}, {}],
+      classes: [
+        {
+          instance: { name: 2, flags: 0x04, init: 0, traits: [{ name: 4, kind: 1, index: 4 }] },
+          init: 1,
+        },
+        {
+          instance: {
+            name: 3,
+            base: 1,
+            interfaces: [2],
+            init: 2,
+            traits: [{ name: 5, kind: 1, index: 5 }],
+          },
+          init: 3,
+        },
+      ],
+      scripts: [
+        {
+          init: 6,
+          traits: [
+            { name: 2, kind: 4, id: 1, index: 0 },
+            { name: 3, kind: 4, id: 2, index: 1 },
+          ],
+        },
+      ],
+      bodies: [
+        { method: 1, code: [0x47] },
+        { method: 2, code: [0xd0, 0x49, 0, 0x47], maxStack: 1, localCount: 1 },
+        { method: 3, code: [0x47] },
+        { method: 5, code: [PUSHBYTE, 7, RETURNVALUE], maxStack: 1, localCount: 1 },
+        { method: 6, code, maxStack: 4, localCount: 1, maxScopeDepth: 2 },
+      ],
+    }),
+  );
+}
+
+test("a call through an interface reads the alias every implementing class has", { skip }, () => {
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  assert.equal(testing.domainAdd(interfaceCall(0x08), false), 0);
+  const js = testing.domainModule("") as string;
+  assert.match(js, /aliases: \["\$i0\.3:p:I:m", \d+\]/);
+  assert.match(js, /\["\$i0\.3:p:I:m"\]\(\)/);
+  assert.doesNotMatch(js, /interfaceKey/);
+});
+
+test("a member in a private namespace has no alias, and is called by the key the runtime finds", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  assert.equal(testing.domainAdd(interfaceCall(0x05), false), 0);
+  const js = testing.domainModule("") as string;
+  assert.doesNotMatch(js, /aliases:|"\$i/);
+  assert.match(js, /\[rt\.interfaceKey\(T\[\d+\], 0, \w+\)\]\(\)/);
+});
