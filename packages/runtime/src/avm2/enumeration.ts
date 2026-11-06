@@ -46,6 +46,15 @@ interface SparseIndices {
  */
 let sparseKept = 0;
 
+/**
+ * The Array whose sparse indices a for-in last took or went on by, and
+ * those, so that each of its steps past a gap finds them without a lookup
+ * in the WeakMap. Let go when they are dropped; until then held, as
+ * lastStep holds its object.
+ */
+let sparseOwner: AsObject = null;
+let ownerSparse: SparseIndices | null = null;
+
 /** Drop the sparse indices `o` keeps, if any: its for-in is over, or another starts. */
 function dropSparse(enumerating: WeakMap<object, Enumeration>, o: AsObject): void {
   if (sparseKept === 0) {
@@ -56,6 +65,11 @@ function dropSparse(enumerating: WeakMap<object, Enumeration>, o: AsObject): voi
   if (e?.sparse !== undefined) {
     e.sparse = undefined;
     sparseKept--;
+  }
+
+  if (o === sparseOwner) {
+    sparseOwner = null;
+    ownerSparse = null;
   }
 }
 
@@ -265,9 +279,18 @@ function nextElement(
     return from;
   }
 
-  const e = sparseKept !== 0 ? enumerating.get(o) : undefined;
-  if (e?.sparse !== undefined) {
-    return nextSparse(o, a, e.sparse, from);
+  let e: Enumeration | undefined;
+  if (sparseKept !== 0) {
+    if (o === sparseOwner) {
+      return nextSparse(o, a, ownerSparse as SparseIndices, from);
+    }
+
+    e = enumerating.get(o);
+    if (e?.sparse !== undefined) {
+      sparseOwner = o;
+      ownerSparse = e.sparse;
+      return nextSparse(o, a, e.sparse, from);
+    }
   }
 
   // From the hole at `from`, up to HOLE_SCAN_LIMIT of them one by one.
@@ -293,6 +316,8 @@ function nextElement(
     sinceTaken: 0,
     retaken: false,
   };
+  sparseOwner = o;
+  ownerSparse = keeper.sparse;
   return nextSparse(o, a, keeper.sparse, scanned);
 }
 
@@ -315,7 +340,8 @@ function nextSparse(o: AsObject, a: Value[], sparse: SparseIndices, from: number
         }
       }
     } else {
-      sparse.indices.push(...indicesOf(a, sparse.length));
+      // Appended one by one: spread as arguments, many would overflow the stack.
+      indicesOf(a, sparse.length, sparse.indices);
     }
 
     sparse.length = length;
@@ -354,9 +380,8 @@ function retake(a: Value[], sparse: SparseIndices): void {
   sparse.sinceTaken = 0;
 }
 
-/** An Array's indices from `from` on, in order, as Object.keys gives them. */
-function indicesOf(a: Value[], from: number): number[] {
-  const indices: number[] = [];
+/** An Array's indices from `from` on, in order, as Object.keys gives them, appended to `indices`. */
+function indicesOf(a: Value[], from: number, indices: number[] = []): number[] {
   for (const k of Object.keys(a)) {
     const i = Number(k);
     if (i >= from) {
