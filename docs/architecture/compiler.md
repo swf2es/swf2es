@@ -225,10 +225,14 @@ field access, a method bound early a direct call, a coercion to a class
 Vector's element `rt.vectorGetInt` and the like, one for each kind of
 element, so that each sees one kind of array. A domain memory load or
 store at an `int` or `uint` address is in place, on the runtime's view
-of the memory after a range check, and calls the runtime (`rt.li32` and
-the like) only for an address out of range, which it rejects as avmplus
-does. Anything typed `*` goes through the runtime, which does what
-avmplus does at run time.
+of the memory, a DataView whose own range check rejects the addresses
+avmplus rejects; a method that has one is in a `try` whose `catch` makes
+the view's RangeError avmplus' 1506 (`rt.memoryError`, and `rt.caught`
+for the method's own handlers), so no caller sees the view's. A second
+check of its own made each access cost twice, and the code of a large C
+function too long for V8 to optimize (60 KB of bytecode). Other
+addresses go through the runtime (`rt.li32` and the like). Anything typed
+`*` goes through the runtime, which does what avmplus does at run time.
 
 Two ints or uints multiplied and the product made an int or uint by the
 next instruction, in the same block, are `Math.imul`: avmplus' JIT
@@ -352,13 +356,13 @@ runtime, `rt`, that returns:
 - **traits**: for each class, its base class and interfaces by name,
   resolved when the class is created as avmplus resolves them, its own
   bindings by namespace and name, its slots' defaults, and its methods,
-  getters and setters by dispatch id; and, for traits of up to 128 slots,
+  getters and setters by dispatch id; and, for traits of up to 1000 slots,
   `fill: (o, v) => { o.$n = ...; ... o.$0 = ...; }`, which sets a new
   object's slots, its base's too. A value is a literal where it is one
   however the module is compiled, a type's default or a constant of the
   module's own ABC; a namespace, or a base's constant from another ABC, it
   takes from `v`, the runtime's initial values by slot. Traits without one,
-  a catch scope's or past 128 slots where V8 keeps no object fast, are set
+  a catch scope's or past 1000 slots where V8 keeps no object fast, are set
   by key;
 - **scripts**: each script's traits and initializer, run the first time
   something asks for a name it defines, as avmplus runs them.
