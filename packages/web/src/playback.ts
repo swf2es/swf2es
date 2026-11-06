@@ -177,16 +177,21 @@ export class Playback {
    * a large canvas takes fewer: at most what fits STAGE_BYTES, and 4 at least,
    * as before samples could be chosen. Those are a stage pixel's: a canvas
    * finer than the stage, as at a device pixel ratio of 2 or 3, takes fewer
-   * for each of its pixels (denseSamples).
+   * for each of its pixels (denseSamples). Only as fine as the screen makes
+   * it, though: a stage zoomed into a large window on a screen of ratio 1
+   * shows each canvas pixel at its full size, where 4 levels of coverage
+   * show as rough edges.
    */
   private resample(): void {
     const canvas = this.view.canvas;
-    const fits = fittingSamples(canvas.width * canvas.height);
     const quality = this.player.quality;
-    const samples = Math.min(quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16, fits);
     this.view.quality = quality;
-    // As fine as the stage's pixels on the canvas: fewer where each spans several.
-    this.view.samples = denseSamples(samples, this.view.canvasResolution);
+    this.view.samples = stageSamples(
+      quality,
+      canvas.width * canvas.height,
+      this.view.canvasResolution,
+      devicePixelRatio || 1,
+    );
   }
 
   private draw(): void {
@@ -316,8 +321,24 @@ export class Playback {
 const STAGE_BYTES = 256 * 1024 * 1024;
 
 /**
+ * The samples a canvas of `pixels` takes at `quality`, at `resolution` of its
+ * pixels to a stage pixel on a screen of `ratio` device pixels to a CSS pixel.
+ */
+export function stageSamples(
+  quality: string,
+  pixels: number,
+  resolution: number,
+  ratio: number,
+): number {
+  const samples = quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16;
+  // Fewer where a stage pixel spans several of the screen's, not where it is only zoomed.
+  return denseSamples(Math.min(samples, fittingSamples(pixels)), Math.min(resolution, ratio));
+}
+
+/**
  * The samples a pixel of the canvas takes for `samples` a stage pixel, at
- * `resolution` of the canvas's pixels to a stage pixel: where a stage pixel
+ * `resolution` of the canvas's pixels to a stage pixel, at most the
+ * screen's pixels to a CSS pixel: where a stage pixel
  * spans several, as many as cover it with as many samples as at one, a
  * power of two, 4 at least and `samples` at most. At three device pixels a
  * stage pixel, 4 samples each are 36 a stage pixel, more than best's 16 at
