@@ -83,6 +83,12 @@ import {
 } from "./names.js";
 import { FloatVector, setFloatElement } from "./natives/float-vector.js";
 import type { SyncInit } from "./natives/sync.js";
+import {
+  type ElementStore,
+  storeDouble,
+  storeInt,
+  storeObject,
+} from "./natives/vector-elements.js";
 import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
@@ -945,16 +951,17 @@ export class Runtime {
    * Element i of Vector o set to x, already converted, as
    * VectorBaseObject::setUintProperty checks it: against the length and
    * fixedness as they are after the conversion, which can run AS3 that
-   * changes them, into the elements the Vector has then. A number that is
-   * no index, as NaN, is out of range too, as _setDoubleProperty finds it.
+   * changes them, into the elements the Vector has then, through its
+   * kind's store (see vector-elements.ts). A number that is no index, as
+   * NaN, is out of range too, as _setDoubleProperty finds it.
    */
-  setElement(o: AsObject, i: number, x: Value): void {
+  setElement(o: AsObject, i: number, x: Value, store: ElementStore): void {
     const a: Value[] = o.$a;
     if (i >>> 0 !== i || i > a.length || (i === a.length && o.$fixed)) {
       throw this.error("RangeError", 1125, i, a.length);
     }
 
-    a[i] = x;
+    store(a, i, x);
   }
 
   // obj[i] for a Vector the code was compiled against, by the kind of its
@@ -979,7 +986,7 @@ export class Runtime {
 
   vectorSetInt(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && mn.elementName) {
-      this.setElement(o, i, this.toInt(v));
+      this.setElement(o, i, this.toInt(v), storeInt);
       return;
     }
 
@@ -1001,7 +1008,7 @@ export class Runtime {
 
   vectorSetUint(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && mn.elementName) {
-      this.setElement(o, i, this.toUint(v));
+      this.setElement(o, i, this.toUint(v), storeDouble);
       return;
     }
 
@@ -1023,7 +1030,7 @@ export class Runtime {
 
   vectorSetDouble(o: Value, mn: Multiname, i: number, v: Value): void {
     if (o !== null && o !== undefined && mn.elementName) {
-      this.setElement(o, i, this.toNumber(v));
+      this.setElement(o, i, this.toNumber(v), storeDouble);
       return;
     }
 
@@ -1049,7 +1056,7 @@ export class Runtime {
       if (o.$a instanceof FloatVector) {
         setFloatElement(this, o, i, value);
       } else {
-        this.setElement(o, i, value);
+        this.setElement(o, i, value, storeObject);
       }
 
       return;
