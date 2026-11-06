@@ -38,11 +38,14 @@ import { MethodEmitter } from "./method";
 import { className, constant, namespace, poolString, qualified, typeExpr, uri } from "./refs";
 
 /**
- * The most slots a traits' fill sets: V8 keeps an object's properties
- * fast up to 128 added by name, and past them it is a dictionary however
- * they are set.
+ * The most slots a traits' fill sets. V8 counts only fields already
+ * written twice against its limit of 128 outside the object, and a fill
+ * writes each once, so an object stays fast up to its limit of 1020
+ * properties in all; past this one, with room for the runtime's own, it is
+ * a dictionary however they are set. A Crossbridge program's global, of
+ * some 550 slots, keeps its stack pointer and registers in them.
  */
-const FILL_SLOTS: u32 = 128;
+const FILL_SLOTS: u32 = 1000;
 
 @final
 export class ModuleEmitter {

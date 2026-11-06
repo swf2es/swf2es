@@ -137,6 +137,13 @@ export class Traits {
    * which takes primitives: those builtins' own, not a class named as one.
    */
   testsValues = false;
+  /**
+   * Object.prototype.toString's "[object Name]" for its instances, once
+   * made: the same string each time, whose hash V8 keeps, so that looking
+   * it up, as `in` a Dictionary does for each object key it misses, does
+   * not hash it anew.
+   */
+  objectString: string | null = null;
 
   constructor(
     readonly name: string,

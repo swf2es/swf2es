@@ -79,7 +79,9 @@ export const objectNatives: Natives = {
       return `[object Function-${o.$id}]`;
     }
 
-    return `[object ${shortName(rt.traitsOf(o).name)}]`;
+    const traits = rt.traitsOf(o);
+    traits.objectString ??= `[object ${shortName(traits.name)}]`;
+    return traits.objectString;
   },
 
   // Class and Function

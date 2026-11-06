@@ -33,6 +33,7 @@ import {
 } from "./descriptors.js";
 import { NAMED } from "./dictionary-keys.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
+import { isViewRangeError, SharedMemoryView } from "./domain-memory.js";
 import {
   continues,
   dictionaryAt,
@@ -139,10 +140,6 @@ export { NOT_FOUND } from "./descriptors.js";
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 
-// Object coercions use the same two lookup orders without allocating per call.
-const STRING_PRIMITIVE_ORDER = ["toString", "valueOf"] as const;
-const NUMBER_PRIMITIVE_ORDER = ["valueOf", "toString"] as const;
-
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
@@ -174,6 +171,13 @@ export class Runtime {
   readonly userVersions: readonly number[];
   /** JSON.stringify's toJSON, at user code's version, made once. */
   readonly toJSONName: Multiname;
+  /**
+   * What [[DefaultValue]] calls, in each hint's order: toString and valueOf
+   * at user code's version, made once, so that their caches keep the
+   * methods of the traits converted most, as a Dictionary's object keys.
+   */
+  private readonly stringPrimitiveOrder: readonly Multiname[];
+  private readonly numberPrimitiveOrder: readonly Multiname[];
   readonly natives: Record<string, (rt: Runtime) => Method>;
   /** The root application domain, the builtins' and the main SWF's; and the one modules load into now. */
   readonly root = new Domain(null, 0);
@@ -190,20 +194,19 @@ export class Runtime {
    * as it, or, as avmplus' DomainEnv, 1024 bytes of scratch memory.
    */
   readonly scratchMemory = new DataView(new ArrayBuffer(1024));
-  /**
-   * The domain memory, and its length kept with it for mops: fields, not an
-   * accessor and DataView's getter. Generated code reads both for the loads
-   * and stores it writes in place, and calls li8 and the others only for an
-   * address out of range, which they reject.
-   */
-  view: DataView = this.scratchMemory;
+  /** The domain memory, and its length kept with it for mops: fields, not an accessor and DataView's getter. */
+  private memoryView: DataView = this.scratchMemory;
   memoryLength: number = this.scratchMemory.byteLength;
-  memoryProvider: AsObject | null = null;
   /**
-   * For domain memory another worker shares: its length read again, which
-   * that worker may have changed, before an address past it is rejected.
+   * What generated code loads and stores in place through, at an int or
+   * uint address: the domain memory itself, whose own range check throws
+   * the RangeError memoryError makes avmplus'. Or, where another worker
+   * shares the memory, a view that reads its length again before it
+   * rejects an address, as mops does.
    */
-  refreshMemory: (() => void) | null = null;
+  view: DataView | SharedMemoryView = this.scratchMemory;
+  memoryProvider: AsObject | null = null;
+  private refresh: (() => void) | null = null;
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */
@@ -253,6 +256,12 @@ export class Runtime {
     this.apiVersion = checkApiVersion(options.apiVersion ?? API_VERSION);
     this.userVersions = [this.apiVersion];
     this.toJSONName = publicQname("toJSON", this.userVersions);
+    const toStringName = publicQname("toString", this.userVersions);
+    const valueOfName = publicQname("valueOf", this.userVersions);
+    toStringName.cache = UNFILLED;
+    valueOfName.cache = UNFILLED;
+    this.stringPrimitiveOrder = [toStringName, valueOfName];
+    this.numberPrimitiveOrder = [valueOfName, toStringName];
     this.objectTraits = new Traits("Object", null);
     this.objectTraits.dynamic = true;
     this.objectTraits.testsValues = true;
@@ -1360,10 +1369,12 @@ export class Runtime {
 
   /** The `in` operator: whether `o` has the public property `name`. */
   in(name: Value, o: Value): boolean {
+    // As isDictionaryLookup: a Dictionary looks for any object itself, a
+    // QName too. A Namespace is no object to avmplus: on a miss,
+    // dictionaryHas looks for its uri as a name.
     if (
       typeof name === "object" &&
       name !== null &&
-      name.$local === undefined &&
       !(name instanceof FloatValue) &&
       o?.$keys !== undefined
     ) {
@@ -1407,11 +1418,20 @@ export class Runtime {
 
   /**
    * Whether Dictionary `o` has object key `key`, as in_operator finds it:
-   * the key itself, then, made a string, on its prototype chain.
+   * the key itself, then, made a string, on its prototype chain. A
+   * Namespace names its uri, the Dictionary's own or its prototypes'.
    */
   private dictionaryHas(o: AsObject, key: object): boolean {
-    if (o.$keys.has(key)) {
-      return true;
+    return o.$keys.has(key) || this.dictionaryHasName(o, key);
+  }
+
+  /**
+   * dictionaryHas once `key` is not there, apart so that the lookup of one
+   * that is stays small enough to inline.
+   */
+  private dictionaryHasName(o: AsObject, key: object): boolean {
+    if (key instanceof Namespace) {
+      return this.hasProperty(o, publicQname(this.nameString(key), this.userVersions));
     }
 
     const name = this.toString(key);
@@ -2466,9 +2486,9 @@ export class Runtime {
 
     // As ScriptObject::defaultValue: each called as a property, so one
     // that is not a function is TypeError 1006; a Namespace is a primitive.
-    const order = hint === "string" ? STRING_PRIMITIVE_ORDER : NUMBER_PRIMITIVE_ORDER;
-    for (const name of order) {
-      const v = this.callProperty(o, publicQname(name, this.userVersions));
+    const order = hint === "string" ? this.stringPrimitiveOrder : this.numberPrimitiveOrder;
+    for (let i = 0; i < order.length; i++) {
+      const v = this.callProperty(o, order[i]);
       if (
         v === null ||
         typeof v !== "object" ||
@@ -2851,6 +2871,11 @@ export class Runtime {
       return this.error("Error", 1023);
     }
 
+    // Domain memory's, in the handler's own method (see memoryError).
+    if (isViewRangeError(e)) {
+      return this.error("RangeError", 1506);
+    }
+
     if (e instanceof Error && !(e instanceof AsError)) {
       throw e;
     }
@@ -2920,12 +2945,37 @@ export class Runtime {
 
   /** The domain memory: where li8 and the other opcodes read and write, with its length. */
   get memory(): DataView {
-    return this.view;
+    return this.memoryView;
   }
 
   set memory(view: DataView) {
-    this.view = view;
+    this.memoryView = view;
     this.memoryLength = view.byteLength;
+    if (!this.refresh) {
+      this.view = view;
+    }
+  }
+
+  /**
+   * For domain memory another worker shares: its length read again, which
+   * that worker may have changed, before an address past it is rejected.
+   */
+  get refreshMemory(): (() => void) | null {
+    return this.refresh;
+  }
+
+  set refreshMemory(refresh: (() => void) | null) {
+    this.refresh = refresh;
+    this.view = refresh ? new SharedMemoryView(this) : this.memoryView;
+  }
+
+  /**
+   * An exception thrown in a method that loads or stores domain memory in
+   * place, as its callers see it: the view's RangeError for an address out
+   * of range made avmplus', anything else as it is.
+   */
+  memoryError(e: unknown): unknown {
+    return isViewRangeError(e) ? this.error("RangeError", 1506) : e;
   }
 
   /** `address` as an int, once checked that the domain memory holds `size` bytes there. */
@@ -2943,52 +2993,52 @@ export class Runtime {
 
   li8(address: Value): number {
     const at = this.mops(address, 1);
-    return this.view.getUint8(at);
+    return this.memoryView.getUint8(at);
   }
 
   li16(address: Value): number {
     const at = this.mops(address, 2);
-    return this.view.getUint16(at, true);
+    return this.memoryView.getUint16(at, true);
   }
 
   li32(address: Value): number {
     const at = this.mops(address, 4);
-    return this.view.getInt32(at, true);
+    return this.memoryView.getInt32(at, true);
   }
 
   lf32(address: Value): number {
     const at = this.mops(address, 4);
-    return this.view.getFloat32(at, true);
+    return this.memoryView.getFloat32(at, true);
   }
 
   lf64(address: Value): number {
     const at = this.mops(address, 8);
-    return this.view.getFloat64(at, true);
+    return this.memoryView.getFloat64(at, true);
   }
 
   si8(value: Value, address: Value): void {
     const at = this.mops(address, 1);
-    this.view.setUint8(at, this.toInt(value));
+    this.memoryView.setUint8(at, this.toInt(value));
   }
 
   si16(value: Value, address: Value): void {
     const at = this.mops(address, 2);
-    this.view.setUint16(at, this.toInt(value), true);
+    this.memoryView.setUint16(at, this.toInt(value), true);
   }
 
   si32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    this.view.setInt32(at, this.toInt(value), true);
+    this.memoryView.setInt32(at, this.toInt(value), true);
   }
 
   sf32(value: Value, address: Value): void {
     const at = this.mops(address, 4);
-    this.view.setFloat32(at, this.toNumber(value), true);
+    this.memoryView.setFloat32(at, this.toNumber(value), true);
   }
 
   sf64(value: Value, address: Value): void {
     const at = this.mops(address, 8);
-    this.view.setFloat64(at, this.toNumber(value), true);
+    this.memoryView.setFloat64(at, this.toNumber(value), true);
   }
 
   // E4X.

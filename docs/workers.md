@@ -402,13 +402,14 @@ ByteArray for an id, as avmplus interns one for a Buffer:
   grows again.
   Writes past the end raise the length by a compare and swap, never
   lowering what another worker made it.
-- Domain memory over it keeps the loads and stores generated code makes in
-  place, against `rt.memoryLength`, the length this thread last saw: only
-  an address past it reads the length again (`Runtime.refreshMemory`)
-  before it is rejected, so another worker's growth is seen, and memory
-  that is not shared costs nothing more (as3pb's memory path and
-  Crossbridge's LZ4 measure the same as before). A worker that shrinks it
-  is seen at the next access past the old length, not at once.
+- Domain memory over it is reached by the loads and stores generated code
+  makes in place through a view of its own (`SharedMemoryView`), which
+  calls `rt.li32` and the like, against `rt.memoryLength`, the length this
+  thread last saw: only an address past it reads the length again
+  (`Runtime.refreshMemory`) before it is rejected, so another worker's
+  growth is seen, and memory that is not shared is reached through its
+  DataView as before. A worker that shrinks it is seen at the next access
+  past the old length, not at once.
 
 The player's workers (`scripting/workers.ts`) pass the memory in their
 messages, a shared property or a channel's, which a structured clone
