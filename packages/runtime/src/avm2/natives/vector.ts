@@ -14,10 +14,18 @@ import {
   lengthOf,
   type Natives,
   plain,
-  withStorage,
 } from "./define.js";
 import { FloatVector, setFloatElement } from "./float-vector.js";
 import { sort } from "./sort.js";
+import {
+  doubleElements,
+  type ElementStore,
+  intElements,
+  objectElements,
+  storeDouble,
+  storeInt,
+  storeObject,
+} from "./vector-elements.js";
 
 const VEC = "__AS3__.vec";
 
@@ -32,16 +40,25 @@ export const vectorHooks: Record<string, ClassHook> = {
   },
 };
 
-// The Vectors: one implementation, over their element conversions.
-const VECTORS: [string, (rt: Runtime, cls: AsObject, v: Value) => Value, Value][] = [
-  ["Vector$int", (rt, _cls, v) => rt.toInt(v), 0],
-  ["Vector$uint", (rt, _cls, v) => rt.toUint(v), 0],
-  ["Vector$double", (rt, _cls, v) => rt.toNumber(v), 0],
+type Convert = (rt: Runtime, cls: AsObject, v: Value) => Value;
+
+// The Vectors: one implementation, over their element conversions, and
+// their elements as each kind keeps them (see vector-elements.ts).
+const VECTORS: [string, Convert, Value, (length: number) => Value[], ElementStore][] = [
+  ["Vector$int", (rt, _cls, v) => rt.toInt(v), 0, intElements, storeInt],
+  ["Vector$uint", (rt, _cls, v) => rt.toUint(v), 0, doubleElements, storeDouble],
+  ["Vector$double", (rt, _cls, v) => rt.toNumber(v), 0, doubleElements, storeDouble],
   // Vector.<*> holds Objects, as ObjectVectorObject does: undefined is null there.
-  ["Vector$object", (rt, cls, v) => rt.coerce(v, cls.$param ?? "Object"), null],
+  [
+    "Vector$object",
+    (rt, cls, v) => rt.coerce(v, cls.$param ?? "Object"),
+    null,
+    objectElements,
+    storeObject,
+  ],
 ];
 
-for (const [kind] of VECTORS) {
+for (const [kind, , , elementsOf, store] of VECTORS) {
   const c = `${VEC}::${kind}`;
   const own = `${VEC}:${kind}`;
   vectorNatives[`${c}#get:length`] = plain(function (this: AsObject) {
@@ -59,7 +76,7 @@ for (const [kind] of VECTORS) {
         a.length = length;
       } else if (length === 0) {
         // A new array: V8 empties one by a call into its runtime.
-        this.$a = [];
+        this.$a = elementsOf(0);
       } else if (length < a.length) {
         a.length = length;
       } else if (length > a.length) {
@@ -97,7 +114,7 @@ for (const [kind] of VECTORS) {
         if (a instanceof FloatVector) {
           setFloatElement(rt, this, i, x);
         } else {
-          a[i] = x;
+          store(a, i, x);
         }
       }
 
@@ -162,7 +179,7 @@ for (const [kind] of VECTORS) {
       const cls = this.$traits.cls;
       this.$a.unshift(...args.map(() => cls.$fill));
       for (let k = 0; k < args.length; k++) {
-        writeElement(this, k, cls.$convert(rt, cls, args[k]));
+        writeElement(this, k, cls.$convert(rt, cls, args[k]), store);
       }
       return this.$a.length;
     };
@@ -196,7 +213,7 @@ for (const [kind] of VECTORS) {
           items instanceof FloatVector
             ? rt.getProperty(args, rt.publicName(from + k))
             : items[from + k];
-        writeElement(this, at + k, cls.$convert(rt, cls, value));
+        writeElement(this, at + k, cls.$convert(rt, cls, value), store);
       }
     };
   vectorNatives[`${c}.${own}::_sort`] = (rt) => (o: AsObject, args: Value) =>
@@ -225,7 +242,7 @@ for (const [kind] of VECTORS) {
           if (r.$a instanceof FloatVector) {
             r.$a.data[i++] = value;
           } else {
-            r.$a[i++] = value;
+            store(r.$a, i++, value);
           }
         },
         true,
@@ -251,9 +268,14 @@ for (const [kind] of VECTORS) {
     };
 }
 
-for (const [kind, convert, fill] of VECTORS) {
+for (const [kind, convert, fill, elementsOf, store] of VECTORS) {
   vectorHooks[`${VEC}::${kind}`] = {
-    create: withStorage,
+    create: (traits) => {
+      const o = Object.create(traits.proto);
+      o.$a = elementsOf(0);
+      o.$fixed = false;
+      return o;
+    },
     // As VectorBaseObject: any name but an index is refused, 1069 or 1056.
     refusesNames: true,
     getIndex: (o, i, rt) => {
@@ -288,12 +310,12 @@ for (const [kind, convert, fill] of VECTORS) {
 
       throw rt.error("RangeError", 1125, rt.toString(d), o.$a.length);
     },
-    setIndex: (o, i, v, rt) => rt.setElement(o, i, convert(rt, o.$traits.cls, v)),
+    setIndex: (o, i, v, rt) => rt.setElement(o, i, convert(rt, o.$traits.cls, v), store),
     construct: (rt, cls, args) => {
       prepareVector(rt, cls, convert, fill);
       const o = cls.$it.instance();
       const length = args.length ? rt.toUint(args[0]) : 0;
-      o.$a = cls.$param === "float" ? new FloatVector(length) : new Array(length).fill(cls.$fill);
+      o.$a = cls.$param === "float" ? new FloatVector(length) : elementsOf(length);
       o.$fixed = rt.toBoolean(args[1]);
       return o;
     },
@@ -319,7 +341,7 @@ for (const [kind, convert, fill] of VECTORS) {
       // the source: past a Vector's end, a RangeError.
       const o = cls.$it.instance();
       const length = lengthOf(rt, source);
-      const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : [];
+      const a: Value[] | FloatVector = cls.$param === "float" ? new FloatVector() : elementsOf(0);
       for (let i = 0; i < length; i++) {
         // The storage read here too, where only this loop's sources are
         // seen, as getElement reads it for every walk's.
@@ -340,7 +362,7 @@ for (const [kind, convert, fill] of VECTORS) {
  * insert, into the elements it has after the conversion, grown to it with
  * the fill value if the conversion shrank them.
  */
-function writeElement(o: AsObject, i: number, x: Value): void {
+function writeElement(o: AsObject, i: number, x: Value, store: ElementStore): void {
   const a: Value[] = o.$a;
   if (a instanceof FloatVector) {
     if (i >= a.length) {
@@ -355,7 +377,7 @@ function writeElement(o: AsObject, i: number, x: Value): void {
     a.push(o.$traits.cls.$fill);
   }
 
-  a[i] = x;
+  store(a, i, x);
 }
 
 /**
@@ -429,6 +451,18 @@ function makeVector(rt: Runtime, param: AsObject | null): AsObject {
     cls = rt.specializeVector(base, param);
     prepareVector(rt, cls, convert, fill);
     rt.specialized.set(param, cls);
+    // A class's instances, as coerce checks them, by the traits found once.
+    const ref = cls.$param;
+    if (typeof ref === "object") {
+      const traits = param.$it;
+      cls.$convert = (rt: Runtime, _cls: AsObject, v: Value) => {
+        if (v === null || v === undefined) {
+          return null;
+        }
+
+        return v.$traits === traits || rt.isInstanceOf(v, traits) ? v : rt.coerce(v, ref);
+      };
+    }
   }
 
   return cls;
