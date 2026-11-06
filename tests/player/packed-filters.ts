@@ -1,4 +1,6 @@
-// Repacking filtered content onto smaller pages must preserve the large-page output.
+// Repacking filtered content onto smaller pages must preserve the large-page output, both
+// where the pages a frame takes pass the free targets' budget and are made again each frame,
+// and where they stay under it and the next frame takes them back, old pixels and all.
 import assert from "node:assert/strict";
 import { withPage } from "./chrome.ts";
 
@@ -7,6 +9,7 @@ interface Result {
   frame: number;
   samples: number;
   resolution: number;
+  count: number;
   different: number;
   worst: number;
   pages: number;
@@ -38,7 +41,8 @@ const { value, exception } = await withPage(
   );
   probe.getExtension("WEBGL_lose_context")?.loseContext();
   for (const samples of supported) {
-    for (const resolution of [1, 2]) {
+    // Content dense at both resolutions; at 1, also half as much, whose pages the pool keeps.
+    for (const [resolution, count] of [[1, 2048], [1, 1024], [2, 512]]) {
       const images = [];
       let pages = 0,
         rebuilds = 0;
@@ -99,8 +103,6 @@ const { value, exception } = await withPage(
           }
         }
         drawing.endFill();
-        // Keep total content area dense at both resolutions, without duplicating geometry.
-        const count = resolution === 1 ? 2048 : 512;
         for (let i = 0; i < count; i++) {
           const branch = new Container();
           const shape = new ShapeObject(null);
@@ -150,6 +152,7 @@ const { value, exception } = await withPage(
                 frame,
                 samples,
                 resolution,
+                count,
                 different,
                 worst,
                 pages,
