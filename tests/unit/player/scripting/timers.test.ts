@@ -666,3 +666,202 @@ test("a delay is whole milliseconds, as Flash truncates it", { skip }, async () 
   // Started at 41.7 by the frame clock: 10 ms apart, not 10.9; delay still tells 10.9.
   assert.deepEqual(lines, ["10.9 52", "10.9 62", "10.9 72", "10.9 82"]);
 });
+
+/**
+ * A SWF whose constructor runs `body`, an AS3 statement list with
+ * getTimer imported and `start` its first reading, then traces `result`.
+ */
+function spinSwf(name: string, body: string, result: string): Uint8Array {
+  return bare(
+    compiler(out)(
+      name,
+      `package {
+        import flash.display.Sprite;
+        import flash.utils.getTimer;
+        public class ${name} extends Sprite {
+          public function ${name}() {
+            var start:int = getTimer();
+            ${body}
+            trace(${result});
+          }
+        }
+      }`,
+    ),
+    1,
+    name,
+  );
+}
+
+/**
+ * `swf` started on a clock that moves `perRead` ms at each reading, as a
+ * loop that does nothing else between them sees it: its trace, the
+ * readings made, the real time passed, and how far the clock ran ahead.
+ */
+async function spinRun(
+  swf: Uint8Array,
+  perRead: number,
+): Promise<{ lines: string[]; reads: number; real: number; ahead: number }> {
+  const lines: string[] = [];
+  let now = 0;
+  let reads = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: () => {
+      reads++;
+      now += perRead;
+      return now;
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  const from = now;
+  await player.start();
+  const real = now - from;
+  return { lines, reads, real, ahead: scripting.timers.ahead() };
+}
+
+test("a spin on getTimer has the clock skip to the time it waits for, the real clock then behind", {
+  skip,
+}, async () => {
+  const swf = spinSwf("SpinWait", "while (getTimer() - start < 200) {}", "getTimer() - start");
+  // 10,000 readings a ms: a loop that only reads the clock.
+  const { lines, reads, real, ahead } = await spinRun(swf, 1e-4);
+
+  // Done within a ms past its time, without spinning through the 200 ms.
+  const waited = Number(lines[0]);
+  assert.ok(waited >= 200 && waited <= 201, lines.join(" "));
+  assert.ok(reads < 100_000, `${reads} readings`);
+  assert.ok(real < 10, `${real} ms`);
+  // The clock is ahead by what was skipped, until the real clock has caught up.
+  assert.ok(ahead > 190 && ahead <= 201, `${ahead} ahead`);
+});
+
+test("a loop that works between its readings of getTimer runs in real time", { skip }, async () => {
+  const swf = spinSwf("SpinWork", "while (getTimer() - start < 50) {}", "getTimer() - start");
+  // 500 readings a ms: two microseconds of work between them.
+  const { lines, reads, ahead } = await spinRun(swf, 2e-3);
+
+  assert.equal(lines[0], "50");
+  assert.ok(reads >= 25_000, `${reads} readings`);
+  assert.equal(ahead, 0);
+});
+
+test("dense readings of getTimer from two places, as a profiler's, run in real time", {
+  skip,
+}, async () => {
+  const swf = spinSwf(
+    "SpinTwoPlaces",
+    `var spent:int = 0;
+     while (getTimer() - start < 50) { var a:int = getTimer(); spent += getTimer() - a; }`,
+    "getTimer() - start",
+  );
+  const { lines, reads, ahead } = await spinRun(swf, 1e-4);
+
+  assert.equal(lines[0], "50");
+  assert.ok(reads >= 500_000, `${reads} readings`);
+  assert.equal(ahead, 0);
+});
+
+test("a spin skips a second at most, then waits out the rest in real time", { skip }, async () => {
+  const swf = spinSwf("SpinLong", "while (getTimer() - start < 1500) {}", "getTimer() - start");
+  // 2,000 readings a ms, still a spin.
+  const { lines, real, ahead } = await spinRun(swf, 5e-4);
+
+  const waited = Number(lines[0]);
+  assert.ok(waited >= 1500 && waited <= 1501, lines.join(" "));
+  // About 500 ms of the wait spun in real time, the clock a second ahead.
+  assert.ok(real > 450 && real < 520, `${real} ms`);
+  assert.ok(ahead > 980 && ahead <= 1000, `${ahead} ahead`);
+});
+
+test("a SWF that holds itself to 30 fps by spinning keeps its pace, its frames and timers on one clock", {
+  skip,
+}, async () => {
+  const name = "SpinPace";
+  const swf = bare(
+    compiler(out)(
+      name,
+      `package {
+        import flash.display.Sprite;
+        import flash.events.Event;
+        import flash.events.TimerEvent;
+        import flash.utils.Timer;
+        import flash.utils.getTimer;
+        public class ${name} extends Sprite {
+          private var last:int;
+          public function ${name}() {
+            stage.frameRate = 120;
+            last = getTimer();
+            var t:Timer = new Timer(5);
+            t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("T " + getTimer()); });
+            t.start();
+            addEventListener(Event.ENTER_FRAME, function(e:Event):void {
+              trace("F " + getTimer());
+              var now:int = getTimer();
+              while (Math.abs(now - last) < 33) { now = getTimer(); }
+              last = getTimer();
+            });
+          }
+        }
+      }`,
+    ),
+    1,
+    name,
+  );
+
+  // A 60 Hz host whose calls come at the first refresh after the last
+  // call's work: each reading of the clock costs 0.1 µs.
+  const lines: { line: string; real: number }[] = [];
+  let now = 0;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push({ line, real: now }),
+    realTime: () => (now += 1e-4),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await player.start();
+  const refresh = 1000 / 60;
+  let last = now;
+  let busiest = 0;
+  const begin = now;
+  while (now - begin < 3000) {
+    const call = Math.ceil((now + 1e-9) / refresh) * refresh;
+    now = call;
+    player.advance(call - last);
+    busiest = Math.max(busiest, now - call);
+    last = call;
+  }
+
+  const frames = lines.filter((l) => l.line[0] === "F");
+  const times = lines.map((l) => Number(l.line.slice(2)));
+  // About 30 frames a second by getTimer, as the SWF asks. A frame waits
+  // for the spin's time but may start up to half a refresh before it, and
+  // the limiter counting from the frame before then lets the next come early.
+  assert.ok(frames.length >= 85 && frames.length <= 95, `${frames.length} frames`);
+  const gaps = frames
+    .slice(1)
+    .map((f, i) => Number(f.line.slice(2)) - Number(frames[i].line.slice(2)));
+  const sorted = gaps.slice(1).sort((a, b) => a - b);
+  assert.ok(sorted[0] >= 16 && sorted[sorted.length - 1] <= 35, gaps.join(" "));
+  assert.ok([33, 34].includes(sorted[sorted.length >> 1]), gaps.join(" "));
+  // No call spins through its frame's wait.
+  assert.ok(busiest < 5, `${busiest} ms`);
+  // getTimer never goes back, frames' and timers' alike, and the clock is
+  // never ahead of the real one by more than half a refresh as a frame starts.
+  for (let i = 1; i < times.length; i++) {
+    assert.ok(times[i] >= times[i - 1], lines.map((l) => l.line).join(" "));
+  }
+
+  for (const f of frames) {
+    assert.ok(Number(f.line.slice(2)) - f.real <= refresh / 2 + 1, `${f.line} at ${f.real}`);
+  }
+
+  // The 5 ms timer, shorter than a frame, by the same clock: not between
+  // frames while the clock waits at a spin's time, as Flash's would be
+  // spinning still, so in each frame, never sooner than its delay.
+  const fired = lines.filter((l) => l.line[0] === "T").map((l) => Number(l.line.slice(2)));
+  assert.ok(fired.length >= frames.length - 1, `${fired.length} firings`);
+  for (let i = 1; i < fired.length; i++) {
+    assert.ok(fired[i] - fired[i - 1] >= 5, fired.join(" "));
+  }
+});

@@ -394,7 +394,9 @@ export class Player {
    * Flash runs the frame after an overrun alone. The interval cannot tell
    * that from a display's: a SWF that spins on getTimer to hold itself to
    * a slower rate makes the calls a display's interval apart, and two
-   * frames a call would wait twice as long. A `dt` that is
+   * frames a call would wait twice as long. Where the clock skipped to
+   * the time such a spin waited for, sparing the host the spin, no frame
+   * plays until the real clock has caught up with it. A `dt` that is
    * not a finite positive number counts as none. A host playing in real
    * time calls this each animation frame; the tests step frames with
    * tick(). A stream's device cursor can request a bounded batch of frames
@@ -431,6 +433,18 @@ export class Player {
     // seconds to itself: one asked as the last comes does not inherit its
     // wait.
     const timers = this.scripting?.timers;
+    // A spin on getTimer had the clock skip ahead to the time it waited
+    // for (scripting/timers.ts): no frame until the real clock is there, or
+    // nearer than the next call would be, as Flash's next frame would wait
+    // for the spin. What is owed meanwhile is kept, not dropped: the frame
+    // after the spin is due at once, as after an overrun.
+    const early = typical / 2;
+    const ahead = timers?.ahead() ?? 0;
+    const waiting = ahead > early;
+    if (waiting) {
+      most = 0;
+    }
+
     let holding = false;
     let resuming = false;
     if (!this.scripting?.heldTime()) {
@@ -465,7 +479,7 @@ export class Player {
     // Whole frames lost are dropped, the part of one kept for the grid's
     // phase; but not within half an interval of the next, where a call
     // that came a little early leaves one owed under ordinary jitter.
-    if (rest >= frame + Math.min(frame, typical) / 2) {
+    if (!waiting && rest >= frame + Math.min(frame, typical) / 2) {
       rest %= frame;
     }
 
@@ -473,7 +487,7 @@ export class Player {
     // up in bounded batches, without drawing the intermediate frames or
     // changing the pacing of movies with only event sounds.
     const ordinary = n;
-    if (!holding && !resuming) {
+    if (!holding && !resuming && !waiting) {
       n = Math.max(n, Math.min(MAX_STREAM_FRAMES, this.streamFrames()));
     }
 
@@ -505,6 +519,11 @@ export class Player {
         timers?.frameAt((n - 1 - i) * frame, rest);
         ran = true;
         this.tick(!deferRender);
+        // The frame spun to wait: the next waits for the real clock.
+        if (i + 1 < n && timers && timers.ahead() > early) {
+          n = i + 1;
+          break;
+        }
       }
     } catch (error) {
       if (ran && deferRender) {
@@ -525,10 +544,14 @@ export class Player {
     }
 
     // Flash fires timers shorter than a frame between frames too: a call
-    // that played none checks them.
+    // that played none checks them. Not while the clock waits at a spin's
+    // time, though: Flash's would be spinning still, and a timer the frame
+    // fired would fire again at the same time.
     if (n === 0) {
       this.owed = rest;
-      timers?.betweenFrames(frame);
+      if (ahead <= 0) {
+        timers?.betweenFrames(frame);
+      }
       // An AVM1 SWF's setInterval timers too.
       this.avm1?.idle();
       this.scripting?.renderPending();
