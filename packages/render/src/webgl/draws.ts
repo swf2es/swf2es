@@ -3,20 +3,20 @@ import { type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import { FILL_SHADER, type Filters } from "../filters.js";
 import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
 import {
-  ADD,
   CLAMP,
   DRAW,
   MESH,
   MIRROR,
+  NORMAL,
   PLANE,
   REPEAT,
-  SCREEN,
   type SceneList,
   SHADED,
   SMOOTH,
   SNAP,
 } from "../scene.js";
 import type { GeometryAtlas, Place } from "./atlas.js";
+import { setModeBlend } from "./composite.js";
 import type { GpuTextures } from "./gpu-textures.js";
 import type { KernelHost, KernelPrograms } from "./kernels.js";
 import {
@@ -466,14 +466,16 @@ export class Draws {
   /**
    * Entry `i`, blendable, drawn onto the target bound in blend mode `mode`,
    * coloured by its layer's row `layerRow` (or -1), where the masks pushed
-   * pass: GL's blending computing add and screen, the program the rest
-   * from the copy of what is below (Compositor.copyBelow), whose texel at a
-   * fragment is (`backX`, `backY`) short of it.
+   * pass: GL's blending computing add, screen and, where it does not
+   * `reads` below, multiply, the program the rest from the copy of what is
+   * below (Compositor.copyBelow), whose texel at a fragment is (`backX`,
+   * `backY`) short of it.
    */
   drawBlended(
     scene: SceneList,
     i: number,
     mode: number,
+    reads: boolean,
     layerRow: number,
     backX: number,
     backY: number,
@@ -485,7 +487,8 @@ export class Draws {
     state.bindTexture(0, this.gpu.rowsTexture);
     gl.uniform4fv(this.blendViewLocation, this.view);
     gl.uniform1f(this.blendUnitLocation, this.unit);
-    gl.uniform1i(this.blendModeLocation, mode);
+    // Its pixel alone where GL's blending computes the mode (readsBelow).
+    gl.uniform1i(this.blendModeLocation, reads ? mode : NORMAL);
     gl.uniform1i(this.blendLayerRowLocation, layerRow);
     gl.uniform2i(this.blendBackLocation, backX, backY);
     this.gatherRun(scene, i, i + 1, false);
@@ -501,17 +504,7 @@ export class Draws {
     }
 
     gl.uniform1i(this.blendRowLocation, this.runRows[0]);
-    switch (mode) {
-      case ADD:
-        state.setBlend(gl.ONE, gl.ONE);
-        break;
-      case SCREEN:
-        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
-        break;
-      default:
-        state.setBlend(null);
-    }
-
+    setModeBlend(gl, state, reads ? -1 : mode);
     gl.drawElements(gl.TRIANGLES, this.runCounts[0], gl.UNSIGNED_INT, this.runOffsets[0]);
   }
 

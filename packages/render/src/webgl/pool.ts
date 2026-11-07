@@ -1,7 +1,12 @@
-/** What a pool holds: its size, and the frame it was last freed in. */
+/**
+ * What a pool holds: its size, and the frame it was last freed in; where
+ * it may be used as smaller than it is, its own size, which it is pooled by.
+ */
 export interface Pooled {
   width: number;
   height: number;
+  textureWidth?: number;
+  textureHeight?: number;
   usedAt: number;
 }
 
@@ -79,7 +84,10 @@ export class SizedPool<T extends Pooled> {
   /** `item` free again, freed in frame `frame`, of `samples` where they count. */
   give(item: T, frame: number, samples = 0): void {
     item.usedAt = frame;
-    const key = (item.width * SIZE_KEY + item.height) * SAMPLES_KEY + samples;
+    const key =
+      ((item.textureWidth ?? item.width) * SIZE_KEY + (item.textureHeight ?? item.height)) *
+        SAMPLES_KEY +
+      samples;
     let list = this.lists.get(key);
     if (!list) {
       list = [];
@@ -95,6 +103,12 @@ export class SizedPool<T extends Pooled> {
    * least lately freed till they take `budget` bytes at most, each `drop`ped.
    */
   trim(frame: number, idle: number, budget: number, drop: (item: T) => void): void {
+    this.trimIdle(frame, idle, drop);
+    trimTogether([{ pool: this, drop }], budget);
+  }
+
+  /** Those freed more than `idle` frames before `frame` let go of, each `drop`ped. */
+  trimIdle(frame: number, idle: number, drop: (item: T) => void): void {
     for (const [key, list] of this.lists) {
       let gone = 0;
       while (gone < list.length && frame - list[gone].usedAt > idle) {
@@ -109,29 +123,61 @@ export class SizedPool<T extends Pooled> {
         list.splice(0, gone);
       }
     }
+  }
 
-    while (this.bytes > budget) {
-      // The list whose head was freed first; its head goes.
-      let oldest: T[] | null = null;
-      let oldestKey = 0;
-      for (const [key, list] of this.lists) {
-        if (!oldest || list[0].usedAt < oldest[0].usedAt) {
-          oldest = list;
-          oldestKey = key;
-        }
-      }
-
-      if (!oldest) {
-        break;
-      }
-
-      const item = oldest.shift() as T;
-      this.bytes -= this.bytesOf(item);
-      drop(item);
-      if (oldest.length === 0) {
-        this.lists.delete(oldestKey);
+  /**
+   * The key of the list whose head goes first past a budget: the least
+   * lately freed, and of those freed in one frame the largest, so that as
+   * few go as may; -1 for none.
+   */
+  firstOut(): number {
+    let best = -1;
+    let bestAt = 0;
+    let bestBytes = 0;
+    for (const [key, list] of this.lists) {
+      const head = list[0];
+      const bytes = this.bytesOf(head);
+      if (best < 0 || head.usedAt < bestAt || (head.usedAt === bestAt && bytes > bestBytes)) {
+        best = key;
+        bestAt = head.usedAt;
+        bestBytes = bytes;
       }
     }
+
+    return best;
+  }
+
+  /** The head of list `key` (firstOut), as `firstOut` found it. */
+  headOf(key: number): T {
+    return (this.lists.get(key) as T[])[0];
+  }
+
+  /** The head of list `key` (firstOut) let go of, `drop`ped. */
+  dropHead(key: number, drop: (item: T) => void): void {
+    const list = this.lists.get(key) as T[];
+    const item = list.shift() as T;
+    this.bytes -= this.bytesOf(item);
+    drop(item);
+    if (list.length === 0) {
+      this.lists.delete(key);
+    }
+  }
+
+  /** The bytes those freed in frame `frame` take, which that frame drew with. */
+  bytesFreedIn(frame: number): number {
+    let bytes = 0;
+    for (const list of this.lists.values()) {
+      for (let i = list.length - 1; i >= 0 && list[i].usedAt === frame; i--) {
+        bytes += this.bytesOf(list[i]);
+      }
+    }
+
+    return bytes;
+  }
+
+  /** The bytes `item` takes, as this pool counts them. */
+  bytesFor(item: T): number {
+    return this.bytesOf(item);
   }
 
   /** Every one held let go of, as the context goes. */
@@ -144,5 +190,56 @@ export class SizedPool<T extends Pooled> {
 
     this.lists.clear();
     this.bytes = 0;
+  }
+}
+
+/** A pool and how what it lets go of is deleted. */
+interface Trimmed {
+  // biome-ignore lint/suspicious/noExplicitAny: pools of any kind share one budget.
+  pool: SizedPool<any>;
+  // biome-ignore lint/suspicious/noExplicitAny: as the pool's.
+  drop: (item: any) => void;
+}
+
+/**
+ * `pools` let go of till together they take `budget` bytes at most: the
+ * least lately freed of all first, of those freed in one frame the
+ * largest. One budget for all, as trimming one pool against what another
+ * holds dropped a frame's own small layers while large multisampled
+ * buffers idle for many frames stayed, each frame making them again.
+ */
+export function trimTogether(pools: readonly Trimmed[], budget: number): void {
+  let bytes = 0;
+  for (const { pool } of pools) {
+    bytes += pool.bytes;
+  }
+
+  while (bytes > budget) {
+    let from: Trimmed | null = null;
+    let key = -1;
+    let at = 0;
+    let size = 0;
+    for (const trimmed of pools) {
+      const k = trimmed.pool.firstOut();
+      if (k < 0) {
+        continue;
+      }
+
+      const head = trimmed.pool.headOf(k);
+      const headBytes = trimmed.pool.bytesFor(head);
+      if (!from || head.usedAt < at || (head.usedAt === at && headBytes > size)) {
+        from = trimmed;
+        key = k;
+        at = head.usedAt;
+        size = headBytes;
+      }
+    }
+
+    if (!from) {
+      break;
+    }
+
+    bytes -= size;
+    from.pool.dropHead(key, from.drop);
   }
 }

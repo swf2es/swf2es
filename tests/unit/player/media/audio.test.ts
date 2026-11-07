@@ -321,3 +321,108 @@ test("embedded MP3 loops and cursors use the SWF origin at the source sample rat
     }
   }
 });
+
+test("a sound looped near forever plays, takes its mix and stops where a browser refuses far stop times", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  // As Firefox: a stop time past 2^23 s is a RangeError.
+  const stopped: (number | undefined)[] = [];
+  let disconnected = 0;
+  const gains: { gain: { value: number }; connect: () => void; disconnect: () => void }[] = [];
+  const sourceNode = {
+    buffer: null as unknown,
+    loop: false,
+    loopStart: 0,
+    loopEnd: 0,
+    onended: null as (() => void) | null,
+    connect: () => {},
+    disconnect: () => disconnected++,
+    start: () => {},
+    stop: (when?: number) => {
+      if (when !== undefined && when > 2 ** 23) {
+        throw new RangeError("The value for the stop time is outside the valid range.");
+      }
+
+      stopped.push(when);
+    },
+  };
+  const node = { connect: () => {}, disconnect: () => disconnected++ };
+  class FakeAudioContext {
+    currentTime = 5;
+    destination = {};
+    createBuffer(count: number, samples: number, rate: number) {
+      return {
+        duration: samples / rate,
+        numberOfChannels: count,
+        getChannelData: () => new Float32Array(samples),
+      };
+    }
+    createBufferSource() {
+      return sourceNode;
+    }
+    createChannelSplitter() {
+      return node;
+    }
+    createChannelMerger() {
+      return node;
+    }
+    createGain() {
+      const gain = { gain: { value: 0 }, connect: () => {}, disconnect: () => disconnected++ };
+      gains.push(gain);
+      return gain;
+    }
+    async resume() {}
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host);
+    // 18.375 s of silence at 5512 Hz, mono.
+    const samples = 101283;
+    const clip = await host.decode({
+      id: 1,
+      format: 3,
+      sampleRate: 5512,
+      sampleSize: 16,
+      channels: 1,
+      sampleCount: samples,
+      seekSamples: 0,
+      data: new Uint8Array(samples * 2),
+    });
+    const mix = (volume: number) => ({
+      volume,
+      leftToLeft: 1,
+      leftToRight: 0,
+      rightToLeft: 0,
+      rightToRight: 1,
+    });
+    const playing = clip.play(0, 999999, mix(0.24));
+    assert.ok(playing, "it plays, though no stop time could be set for its last loop");
+    assert.equal(sourceNode.loop, true);
+    assert.deepEqual(stopped, []);
+
+    playing.setMix(mix(1));
+    assert.equal(gains[0].gain.value, 1);
+
+    playing.stop();
+    assert.deepEqual(stopped, [undefined]);
+    assert.equal(playing.ended, true);
+    assert.ok(disconnected > 0);
+
+    // A loop that ends within the browser's range still has its stop time set.
+    stopped.length = 0;
+    const short = clip.play(0, 3, mix(1));
+    assert.ok(short);
+    assert.equal(stopped.length, 1);
+    assert.ok(Math.abs((stopped[0] ?? 0) - (5 + 3 * (samples / 5512))) < 1e-6);
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      delete (globalThis as Record<string, unknown>).AudioContext;
+    }
+  }
+});

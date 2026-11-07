@@ -246,6 +246,7 @@ export class WebGLBackend {
       y: 0,
       width: target.width,
       height: target.height,
+      opaque: commands.opaqueStage,
     };
     this.layers.length = 0;
     this.draws.drawInto(canvas, target);
@@ -338,8 +339,9 @@ export class WebGLBackend {
           gl.clearColor(0, 0, 0, 0);
           gl.clearStencil(0);
           gl.stencilMask(0xff);
-          // Its rectangle alone, as a layer taken may be larger, unless filters read past it.
-          state.scissor(filtered ? null : [0, 0, width, height]);
+          // Its rectangle alone, as a layer taken may be larger, unless filters read past it, as far
+          // as they read.
+          state.scissor(filtered ? [0, 0, layer.width, layer.height] : [0, 0, width, height]);
           gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
           state.scissor(null);
           break;
@@ -632,7 +634,8 @@ export class WebGLBackend {
 
     // Drawn into already, as a kept output is composited (COMPOSITE); a copy of what is below
     // binds its framebuffer back.
-    const back = readsBelow(mode) && compositor.copyBelow(under);
+    const reads = readsBelow(mode, under.opaque);
+    const back = reads && compositor.copyBelow(under);
     this.draws.maskBy(this.masks);
     const place = compositor.place;
     // Kept to the layer's rectangle, as the composite is, past which nothing below is copied.
@@ -641,6 +644,7 @@ export class WebGLBackend {
       scene,
       ops[run + 1],
       mode,
+      reads,
       ops[pop + 2],
       back ? place.backX : 0,
       back ? place.backY : 0,

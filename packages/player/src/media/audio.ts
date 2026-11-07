@@ -6,6 +6,9 @@ import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
 import { mp3HeaderFrame } from "./mp3.js";
 import { browserStream } from "./streaming-audio.js";
 
+/** Below Firefox's limit for a scheduled stop, 2^23 s, with room for the context's own clock. */
+const SCHEDULED_STOP_LIMIT = 2 ** 22;
+
 export interface SoundMix {
   volume: number;
   leftToLeft: number;
@@ -253,7 +256,13 @@ export function browserAudioHost(): AudioHost | null {
 
             if (loops > 1) {
               sourceNode.start(0, origin + offset + (from % length));
-              sourceNode.stop(ctx.currentTime + total - from);
+              // Firefox refuses a stop time past 2^23 s (about 97 days) with a RangeError,
+              // which a loop count such as 999999 asks for; a loop that long is ended by
+              // stop() instead, and the channel's completion is timed by the player's clock.
+              const remaining = total - from;
+              if (ctx.currentTime + remaining < SCHEDULED_STOP_LIMIT) {
+                sourceNode.stop(ctx.currentTime + remaining);
+              }
             } else if (origin + end < buffer.duration) {
               sourceNode.start(0, origin + offset + from, length - from);
             } else {
@@ -281,7 +290,11 @@ export function browserAudioHost(): AudioHost | null {
             stop: () => {
               if (!ended) {
                 if (started) {
-                  sourceNode.stop();
+                  try {
+                    sourceNode.stop();
+                  } catch {
+                    // Already stopped, or stopped by the browser: disconnected all the same.
+                  }
                 }
 
                 finish();
