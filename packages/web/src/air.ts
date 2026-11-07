@@ -25,7 +25,7 @@ import {
   type FileStat,
   type FileSystemHost,
 } from "@swf2es/player";
-import type { AirFiles } from "./air-files.js";
+import { AirFiles } from "./air-files.js";
 
 /** One of an application's files, its path relative to the folder it came in, "/"-separated. */
 export interface AirAppFile {
@@ -36,7 +36,7 @@ export interface AirAppFile {
 }
 
 /** Where AIR's directories are on the file system File sees. */
-export const DIRECTORIES = {
+const DIRECTORIES = {
   application: "/app",
   applicationStorage: "/app-storage",
   user: "/user",
@@ -44,6 +44,14 @@ export const DIRECTORIES = {
   desktop: "/user/Desktop",
   cache: "/cache",
 };
+
+/** AIR's directories but the application's, there before it writes, as paths from the root. */
+export const AIR_DIRECTORIES: readonly string[] = [
+  DIRECTORIES.applicationStorage,
+  DIRECTORIES.documents,
+  DIRECTORIES.desktop,
+  DIRECTORIES.cache,
+].map((d) => d.slice(1));
 
 /** Where an AIR package keeps its descriptor; its root is the application's directory. */
 const PACKAGE_DESCRIPTOR = "META-INF/AIR/application.xml";
@@ -101,9 +109,10 @@ export class AirApp {
 
   /**
    * The file system File sees: the application's files under its
-   * directory, which it does not write, and `files` for the rest.
+   * directory, which it does not write, and `files` for the rest, by
+   * default its own, in memory.
    */
-  fileSystem(files: AirFiles): FileSystemHost {
+  fileSystem(files = new AirFiles(this.descriptor.id, AIR_DIRECTORIES, null)): FileSystemHost {
     // A native path's place: under the application's directory, or else in `files`; null for neither.
     const place = (native: string): { app: string } | { files: string } | null => {
       const path = normalize(native);
@@ -193,17 +202,18 @@ export class AirApp {
   /**
    * What the application's SWFs load from it: an app: URL, or a file: URL
    * under its directory, from memory, and an app-storage: URL or a file:
-   * URL elsewhere from `files`, a missing one as a 404 is. Null for any
-   * other URL, which the page's fetch loads.
+   * URL elsewhere from `files`, if given, a missing one as a 404 is. Null
+   * for any other URL, which the page's fetch loads.
    */
-  fetch(request: FetchRequest, files: AirFiles): FetchResult | null {
+  fetch(request: FetchRequest, files?: AirFiles): FetchResult | null {
     const path = this.#pathOf(request.url);
     if (path === undefined) {
       return null;
     }
 
     const inApp = path === null ? null : under(path, DIRECTORIES.application);
-    const bytes = path === null ? null : inApp !== null ? this.read(inApp) : files.read(path);
+    const bytes =
+      path === null ? null : inApp !== null ? this.read(inApp) : (files?.read(path) ?? null);
     return { bytes, status: bytes ? 200 : 404, headers: [] };
   }
 

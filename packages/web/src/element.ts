@@ -14,7 +14,7 @@ import {
   type WorkerHost,
 } from "@swf2es/player";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
-import { AirApp, airAppForSwf, DIRECTORIES, elementWindow, namesAir } from "./air.js";
+import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
 import { type AirFiles, airFiles } from "./air-files.js";
 import {
   codegenForPlayer,
@@ -269,7 +269,7 @@ function fetchFor(
   }
 
   return (request, signal) => {
-    const local = app.fetch(request, (session.air as { files: AirFiles }).files);
+    const local = app.fetch(request, session.air?.files);
     if (!local) {
       return fetchOf(request, signal);
     }
@@ -492,16 +492,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       });
     };
-    const { files, release } = airFiles(
-      app.descriptor.id,
-      [
-        DIRECTORIES.applicationStorage,
-        DIRECTORIES.documents,
-        DIRECTORIES.desktop,
-        DIRECTORIES.cache,
-      ].map((d) => d.slice(1)),
-      keep,
-    );
+    const { files, release } = airFiles(app.descriptor.id, AIR_DIRECTORIES, keep);
     session.air = {
       app,
       application: app.application(elementWindow(this, app.descriptor.title), args, exit),
