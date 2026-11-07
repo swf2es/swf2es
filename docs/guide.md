@@ -231,9 +231,12 @@ await movie.loadAir(app, { arguments: ["--level", "3"] }); // InvokeEvent's argu
 The application's files are held in memory. `File` sees them under its
 directory, `FileStream` reads them (at once, or over frames with
 `openAsync`), `app:` and `file:` URLs into it load from there, and any
-other URL goes to the network as a page's would. Its storage directory
-and the user's directories are there but empty, and nothing is written
-yet: `FileStream`'s writing modes are not supported.
+other URL goes to the network as a page's would. Its own directory is
+read-only, as an installed application's is. What it writes elsewhere,
+in its storage directory (`app-storage:`) or the user's directories, is
+kept in the browser's IndexedDB by the application's id, and is there
+the next time the page plays it; `loadAir(app, { keepFiles: false })`
+keeps it in memory alone, for that play.
 The element is its one window, at the descriptor's size; the play page
 opens `.air` and `.zip` files too.
 

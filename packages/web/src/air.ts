@@ -2,9 +2,11 @@
 // package (`.air`), a ZIP of its folder, or the files of one the page was
 // given. Its descriptor names the content SWF the element plays, as adl
 // does, under AIR's API and its application sandbox. File sees the files
-// under the application's directory, with the user's directories empty and
-// nothing outside; app: and file: URLs into the application load from
-// memory, and any other goes to the network as the page's would.
+// under the application's directory, which it does not write, as an
+// installed application's; the rest of the file system, its storage and
+// the user's directories among them, is what it writes (air-files.ts).
+// app:, app-storage: and file: URLs load from memory, and any other goes
+// to the network as the page's would.
 import {
   type AirDescriptor,
   abcReferences,
@@ -23,6 +25,7 @@ import {
   type FileStat,
   type FileSystemHost,
 } from "@swf2es/player";
+import type { AirFiles } from "./air-files.js";
 
 /** One of an application's files, its path relative to the folder it came in, "/"-separated. */
 export interface AirAppFile {
@@ -33,7 +36,7 @@ export interface AirAppFile {
 }
 
 /** Where AIR's directories are on the file system File sees. */
-const DIRECTORIES = {
+export const DIRECTORIES = {
   application: "/app",
   applicationStorage: "/app-storage",
   user: "/user",
@@ -44,6 +47,10 @@ const DIRECTORIES = {
 
 /** Where an AIR package keeps its descriptor; its root is the application's directory. */
 const PACKAGE_DESCRIPTOR = "META-INF/AIR/application.xml";
+
+/** Where the application's directory and its storage are, as paths from the root. */
+const ROOT_APP = DIRECTORIES.application.slice(1);
+const ROOT_STORAGE = DIRECTORIES.applicationStorage.slice(1);
 
 interface Entry {
   size: number;
@@ -92,17 +99,74 @@ export class AirApp {
     return this.#files.get(path)?.bytes() ?? null;
   }
 
-  /** The file system File sees: the application's files under its directory, AIR's others empty. */
-  fileSystem(): FileSystemHost {
+  /**
+   * The file system File sees: the application's files under its
+   * directory, which it does not write, and `files` for the rest.
+   */
+  fileSystem(files: AirFiles): FileSystemHost {
+    // A native path's place: under the application's directory, or else in `files`; null for neither.
+    const place = (native: string): { app: string } | { files: string } | null => {
+      const path = normalize(native);
+      if (path === null) {
+        return null;
+      }
+
+      const inApp = under(path, DIRECTORIES.application);
+      return inApp === null ? { files: path } : { app: inApp };
+    };
+    const writable = (native: string): string | null => {
+      const at = place(native);
+      return at && "files" in at ? at.files : null;
+    };
     return {
       separator: "/",
       directories: DIRECTORIES,
-      stat: (path) => this.#stat(path),
-      list: (path) => this.#list(path),
+      stat: (native) => {
+        const at = place(native);
+        if (!at) {
+          return null;
+        }
+
+        return "app" in at ? this.#stat(at.app) : files.stat(at.files);
+      },
+      list: (native) => {
+        const at = place(native);
+        if (!at) {
+          return null;
+        }
+
+        if ("app" in at) {
+          return this.#list(at.app);
+        }
+
+        const names = files.list(at.files);
+        // The root holds the application's directory too.
+        return names && at.files === "" ? [...new Set([...names, ROOT_APP])].sort() : names;
+      },
       read: (native) => {
-        const path = normalize(native);
-        const inApp = path === null ? null : under(path, DIRECTORIES.application);
-        return inApp === null ? null : this.read(inApp);
+        const at = place(native);
+        if (!at) {
+          return null;
+        }
+
+        return "app" in at ? this.read(at.app) : files.read(at.files);
+      },
+      write: (native, bytes, offset, length) => {
+        const path = writable(native);
+        return path !== null && files.write(path, bytes, offset, length);
+      },
+      createDirectory: (native) => {
+        const path = writable(native);
+        return path !== null && files.createDirectory(path);
+      },
+      remove: (native) => {
+        const path = writable(native);
+        return path !== null && files.remove(path);
+      },
+      move: (from, to) => {
+        const a = writable(from);
+        const b = writable(to);
+        return a !== null && b !== null && files.move(a, b);
       },
     };
   }
@@ -128,33 +192,39 @@ export class AirApp {
 
   /**
    * What the application's SWFs load from it: an app: URL, or a file: URL
-   * under its directory, from memory, a missing one as a 404 is; an
-   * app-storage: one fails, as its storage starts empty. Null for any
+   * under its directory, from memory, and an app-storage: URL or a file:
+   * URL elsewhere from `files`, a missing one as a 404 is. Null for any
    * other URL, which the page's fetch loads.
    */
-  fetch(request: FetchRequest): FetchResult | null {
+  fetch(request: FetchRequest, files: AirFiles): FetchResult | null {
     const path = this.#pathOf(request.url);
     if (path === undefined) {
       return null;
     }
 
-    const bytes = path === null ? null : this.read(path);
+    const inApp = path === null ? null : under(path, DIRECTORIES.application);
+    const bytes = path === null ? null : inApp !== null ? this.read(inApp) : files.read(path);
     return { bytes, status: bytes ? 200 : 404, headers: [] };
   }
 
   /** Where on the network `url`, an app: URL of a file not in memory, is under `base`; null for none. */
   remote(url: string): string | null {
     const path = this.#pathOf(url);
-    if (this.base === null || path === null || path === undefined || this.#files.has(path)) {
+    const inApp = path ? under(path, DIRECTORIES.application) : null;
+    if (this.base === null || inApp === null || this.#files.has(inApp)) {
       return null;
     }
 
     return /^app:/i.test(url)
-      ? new URL(path.split("/").map(encodeURIComponent).join("/"), this.base).href
+      ? new URL(inApp.split("/").map(encodeURIComponent).join("/"), this.base).href
       : null;
   }
 
-  /** The path under the application's directory `url` names; null for a local URL outside it; undefined for a URL that is not local. */
+  /**
+   * The path `url` names on the file system File sees, "/"-separated with
+   * no leading separator; null for a local URL that names none; undefined
+   * for a URL that is not local.
+   */
   #pathOf(url: string): string | null | undefined {
     const m = /^(app|app-storage|file):(.*)$/i.exec(url);
     if (!m) {
@@ -171,66 +241,43 @@ export class AirApp {
 
     switch (m[1].toLowerCase()) {
       case "app":
-        return normalize(rest);
-      case "file": {
-        const path = normalize(rest.replace(/^\/\/[^/]*/, ""));
-        const root = `${DIRECTORIES.application.slice(1)}/`;
-        return path?.startsWith(root) ? path.slice(root.length) : null;
+      case "app-storage": {
+        // Never above the directory the URL starts from.
+        const path = normalize(rest);
+        const root = m[1].toLowerCase() === "app" ? ROOT_APP : ROOT_STORAGE;
+        return path === null ? null : path === "" ? root : `${root}/${path}`;
       }
       default:
-        return null;
+        return normalize(rest.replace(/^\/\/[^/]*/, ""));
     }
   }
 
-  #stat(native: string): FileStat | null {
-    const path = normalize(native);
-    if (path === null) {
-      return null;
+  /** What is at `path` under the application's directory. */
+  #stat(path: string): FileStat | null {
+    const file = this.#files.get(path);
+    if (file) {
+      return {
+        directory: false,
+        size: file.size,
+        modified: file.modified,
+        created: file.modified,
+      };
     }
 
-    const inApp = under(path, DIRECTORIES.application);
-    if (inApp !== null) {
-      const file = this.#files.get(inApp);
-      if (file) {
-        return {
-          directory: false,
-          size: file.size,
-          modified: file.modified,
-          created: file.modified,
-        };
-      }
-
-      return this.#directories.has(inApp) ? this.#directory() : null;
-    }
-
-    // "/" and AIR's other directories, and the directories they are in, are there and empty.
-    const isDirectory =
-      path === "" ||
-      Object.values(DIRECTORIES).some((d) => d.slice(1) === path || d.startsWith(`/${path}/`));
-    return isDirectory ? this.#directory() : null;
+    return this.#directories.has(path) ? this.#directory() : null;
   }
 
-  #list(native: string): string[] | null {
-    const path = normalize(native);
-    if (path === null || this.#stat(native)?.directory !== true) {
+  /** The names in the directory at `path` under the application's directory. */
+  #list(path: string): string[] | null {
+    if (this.#stat(path)?.directory !== true) {
       return null;
     }
 
     const names = new Set<string>();
-    const inApp = under(path, DIRECTORIES.application);
-    if (inApp !== null) {
-      const prefix = inApp === "" ? "" : `${inApp}/`;
-      for (const name of [...this.#files.keys(), ...this.#directories]) {
-        if (name.startsWith(prefix) && name.length > prefix.length) {
-          names.add(name.slice(prefix.length).split("/")[0]);
-        }
-      }
-    } else {
-      const prefix = path === "" ? "/" : `/${path}/`;
-      for (const directory of Object.values(DIRECTORIES)) {
-        if (directory.startsWith(prefix)) {
-          names.add(directory.slice(prefix.length).split("/")[0]);
-        }
+    const prefix = path === "" ? "" : `${path}/`;
+    for (const name of [...this.#files.keys(), ...this.#directories]) {
+      if (name.startsWith(prefix) && name.length > prefix.length) {
+        names.add(name.slice(prefix.length).split("/")[0]);
       }
     }
 
