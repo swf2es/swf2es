@@ -109,6 +109,29 @@ test("a shape's styles and edges read as written", () => {
   ]);
 });
 
+test("a bitmap fill is smoothed as its type says from SWF 8, and never before it", () => {
+  const types = [0x40, 0x41, 0x42, 0x43] as const;
+  const tag = w.shape({
+    id: 1,
+    bounds: [0, 400, 0, 400],
+    fills: types.map((type) => ({ bitmap: 2, type, matrix: { a: 20, d: 20 } })),
+    paths: [{ fill1: 1, commands: [{ move: [0, 0] }, { line: [400, 0] }, { line: [0, 0] }] }],
+    version: 3,
+  });
+  const swf = readSwf(
+    w.swf({ width: 10, height: 10, frameRate: 1, frameCount: 0, tags: [tag, w.end()] }),
+  );
+  const t = swf.tags[0];
+  const smooth = (version?: number) =>
+    readShape(swf.bytes, t.code, t.offset, t.length, version).fills.map(
+      (fill) => fill.type === "bitmap" && fill.smooth,
+    );
+
+  assert.deepEqual(smooth(), [true, true, false, false]);
+  assert.deepEqual(smooth(8), [true, true, false, false]);
+  assert.deepEqual(smooth(7), [false, false, false, false]);
+});
+
 test("places, removes, sprites, scaling grids and symbols read as written", () => {
   const swf = readSwf(movie);
   const first = readPlace(swf.bytes, swf.tags[3]);
