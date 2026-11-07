@@ -1,7 +1,7 @@
 import { type GlState, linkProgram } from "@swf2es/context3d/device";
 import { BLEND, type Filters } from "../filters.js";
 import { blendKernel, kernelImagesFit } from "../kernel-shaders.js";
-import { ADD, KERNEL, LAYER, NORMAL, SCREEN } from "../scene.js";
+import { ADD, KERNEL, LAYER, MULTIPLY, NORMAL, SCREEN } from "../scene.js";
 import type { KernelHost, KernelProgram, KernelPrograms } from "./kernels.js";
 import {
   BACK_UNIT,
@@ -12,9 +12,45 @@ import {
 } from "./programs.js";
 import { framebufferOf, LAYER_STEP, type Layer, type Open } from "./targets.js";
 
-/** Whether blend mode `mode` reads what is below, which GL's blending does not compute. */
-export function readsBelow(mode: number): boolean {
-  return !(mode === NORMAL || mode === LAYER || mode === ADD || mode === SCREEN);
+/**
+ * Whether blend mode `mode` reads what is below, which GL's blending does
+ * not compute, onto a target `opaque` throughout or not. Over an opaque
+ * one, multiply's src × (1 − da) term is none, and premultiplied it is
+ * s × d + d × (1 − sa), alpha as normal's: GL's blending (setModeBlend).
+ */
+export function readsBelow(mode: number, opaque = false): boolean {
+  return !(
+    mode === NORMAL ||
+    mode === LAYER ||
+    mode === ADD ||
+    mode === SCREEN ||
+    (mode === MULTIPLY && opaque)
+  );
+}
+
+/**
+ * GL's blending set for `mode` where it computes it (readsBelow false),
+ * the fragment then its pixel alone (BLEND_FRONT's normal); else off, the
+ * fragment the blend itself.
+ */
+export function setModeBlend(gl: WebGL2RenderingContext, state: GlState, mode: number): void {
+  switch (mode) {
+    case ADD:
+      state.setBlend(gl.ONE, gl.ONE);
+      break;
+    case SCREEN:
+      state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
+      break;
+    case NORMAL:
+    case LAYER:
+      state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      break;
+    case MULTIPLY:
+      state.setBlend(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      break;
+    default:
+      state.setBlend(null);
+  }
 }
 
 /** Where a compositor finds the frame's blend shaders and the textures they read. */
@@ -90,7 +126,8 @@ export class Compositor {
     const kernel = given >= KERNEL ? this.useKernel(given - KERNEL) : null;
     const mode = given >= KERNEL && !kernel ? NORMAL : given;
     const state = this.state;
-    if (!this.cover(open, under) || (readsBelow(mode) && !this.copyBelow(under))) {
+    const reads = readsBelow(mode, under.opaque);
+    if (!this.cover(open, under) || (reads && !this.copyBelow(under))) {
       return;
     }
 
@@ -117,28 +154,15 @@ export class Compositor {
       this.kernels.setUniforms(kernel, filters, entry, this.host);
     } else {
       state.useProgram(this.composite);
-      gl.uniform1i(this.modeLocation, mode);
+      // Its pixel alone where GL's blending computes the mode (MULTIPLY over an opaque target).
+      gl.uniform1i(this.modeLocation, reads ? mode : NORMAL);
       gl.uniform1i(this.compositeRowLocation, row);
       gl.uniform2i(this.offsetLocation, dx + ox, offsetY);
       gl.uniform1i(this.flipLocation, flip ? 1 : 0);
       gl.uniform2i(this.backOffsetLocation, backX, backY);
     }
 
-    switch (mode) {
-      case ADD:
-        state.setBlend(gl.ONE, gl.ONE);
-        break;
-      case SCREEN:
-        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_COLOR);
-        break;
-      case NORMAL:
-      case LAYER:
-        state.setBlend(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        break;
-      default:
-        state.setBlend(null);
-    }
-
+    setModeBlend(gl, state, reads ? -1 : mode);
     // Over the rectangle alone, in the target's clip space; the scissor keeps it to whole pixels.
     const tw = under.width;
     const th = under.height;

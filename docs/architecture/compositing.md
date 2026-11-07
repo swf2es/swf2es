@@ -58,9 +58,16 @@ draw past their shapes, as adl's holds a child's glow whole
 (`blend-nested`). The backend composites a layer over its rectangle
 alone (`compositeLayer`, `webgl/composite.ts`): through the GPU's
 blending where it computes Flash's blend (`normal`, `layer`, `add`,
-`screen`), else with the composite program reading a copy of what is
-below that rectangle, its result replacing it; out of a multisampled
-target, the rectangle is resolved before it is copied. The formulas are
+`screen`, and `multiply` onto the stage while it stays opaque), else with
+the composite program reading a copy of what is below that rectangle, its
+result replacing it; out of a multisampled target, the rectangle is
+resolved before it is copied. Over an opaque target multiply's term for
+the object where nothing is below is none, and premultiplied it is the
+object times what is below plus what is below times what the object
+leaves, which GL's blending computes from the target itself, sample by
+sample: the stage cleared to an opaque colour stays opaque unless an
+erase, alpha or blend shader composites onto it (`Commands.opaqueStage`).
+On a busy recorded scene that took 15 of the 34 copies a frame. The formulas are
 the composite program's (`packages/render/src/webgl/programs.ts`).
 Multiply, screen, lighten, darken, difference, overlay and hardlight are
 the separable blends of the straight colours, composited source over;

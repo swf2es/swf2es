@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { SizedPool } from "../../../packages/render/dist/webgl/pool.js";
+import { SizedPool, trimTogether } from "../../../packages/render/dist/webgl/pool.js";
 
 interface Item {
   width: number;
@@ -66,4 +66,44 @@ test("a fitting target keeps its sample count, dimensions and area budget", () =
   assert.equal(pool.takeFitting(80, 48)?.name, "texture");
   assert.equal(pool.takeFitting(80, 48, 4)?.name, "large");
   assert.equal(pool.bytes, 64 * 96 + 128 * 32);
+});
+
+test("pools trimmed together let go of the least lately freed of all, of one frame the largest", () => {
+  const layers = new SizedPool<Item>((i) => i.width * i.height);
+  const msaa = new SizedPool<Item>((i) => i.width * i.height * 4);
+  const dropped: string[] = [];
+  const drop = (i: Item) => dropped.push(i.name);
+  msaa.give(item("old big", 100, 100), 1, 4);
+  layers.give(item("small", 10, 10), 5);
+  layers.give(item("other small", 20, 10), 5);
+  msaa.give(item("new big", 50, 10), 5, 4);
+  // 40000 + 100 + 200 + 2000 bytes: the old buffer goes, though the layers are the ones over.
+  trimTogether(
+    [
+      { pool: layers, drop },
+      { pool: msaa, drop },
+    ],
+    3000,
+  );
+  assert.deepEqual(dropped, ["old big"]);
+  assert.equal(layers.bytesFreedIn(5) + msaa.bytesFreedIn(5), 2300);
+  // Of one frame, the largest first.
+  trimTogether(
+    [
+      { pool: layers, drop },
+      { pool: msaa, drop },
+    ],
+    250,
+  );
+  assert.deepEqual(dropped, ["old big", "new big", "other small"]);
+  assert.equal(layers.take(10, 10)?.name, "small");
+});
+
+test("a layer used smaller than its texture is pooled by its texture's size", () => {
+  const pool = new SizedPool<Item & { textureWidth: number; textureHeight: number }>(
+    (i) => i.textureWidth * i.textureHeight,
+  );
+  pool.give({ ...item("used small", 64, 64), textureWidth: 128, textureHeight: 64 }, 0);
+  assert.equal(pool.take(64, 64), null);
+  assert.equal(pool.take(128, 64)?.name, "used small");
 });
