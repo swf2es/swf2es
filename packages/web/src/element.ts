@@ -15,6 +15,7 @@ import {
 } from "@swf2es/player";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import { AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
+import { type AirItems, airItems } from "./air-items.js";
 import {
   codegenForPlayer,
   configuration,
@@ -75,7 +76,14 @@ interface Session {
   /** The Web Workers its SWF starts, let go of with it. */
   workers: WebWorkerHost | null;
   /** The AIR application it plays (`loadAir`), its hosts made for this element; null for a SWF. */
-  air: { app: AirApp; application: AirApplication; fileSystem: FileSystemHost } | null;
+  air: {
+    app: AirApp;
+    application: AirApplication;
+    fileSystem: FileSystemHost;
+    /** Its EncryptedLocalStore, read back from IndexedDB once `ready`, and its release. */
+    items: AirItems;
+    release(): void;
+  } | null;
 }
 
 interface Deferred {
@@ -480,6 +488,7 @@ export class Swf2esPlayerElement extends ElementBase {
       app,
       application: app.application(elementWindow(this, app.descriptor.title), args, exit),
       fileSystem: app.fileSystem(),
+      ...airItems(app.descriptor.id),
     };
   }
 
@@ -516,6 +525,14 @@ export class Swf2esPlayerElement extends ElementBase {
         const app = airAppForSwf(bytes, url);
         this.#playAsAir(session, app, []);
         url = `app:/${encodeURIComponent(app.descriptor.content)}`;
+      }
+
+      // What the application kept when it last played, before it plays.
+      if (session.air) {
+        await session.air.items.ready;
+        if (!current()) {
+          return;
+        }
       }
 
       // An AIR application's window is the size its descriptor gives, where it gives one.
@@ -665,6 +682,7 @@ export class Swf2esPlayerElement extends ElementBase {
       air: session.air !== null || !!configuration().air,
       application: session.air?.application ?? configuration().air?.application,
       fileSystem: session.air?.fileSystem ?? configuration().air?.fileSystem,
+      encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
@@ -840,6 +858,7 @@ export class Swf2esPlayerElement extends ElementBase {
     session.scripting?.destroy();
     // Its scripting let it go already, if it had any: a release counts once.
     session.workers?.release?.();
+    session.air?.release();
     this.#box.style.background = "";
   }
 }

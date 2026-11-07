@@ -3,14 +3,18 @@
 // File reads, all through the shell (window.swf2esDesktop.air), which
 // answers only while that application plays. Its SWFs' app:, app-storage:
 // and file: URLs are read from disk the same way (`airPath`).
-import type { AirApplication, FileSystemHost } from "@swf2es/player";
+import type { AirApplication, EncryptedStoreHost, FileSystemHost } from "@swf2es/player";
 import type { AirLaunch, DesktopAir } from "../shared/api.js";
 
 /** The player's view of `launch`: its application and window, and its file system. */
 export function airHosts(
   launch: AirLaunch,
   air: DesktopAir,
-): { application: AirApplication; fileSystem: FileSystemHost } {
+): {
+  application: AirApplication;
+  fileSystem: FileSystemHost;
+  encryptedStore: EncryptedStoreHost;
+} {
   return {
     application: {
       descriptor: launch.descriptor,
@@ -41,6 +45,13 @@ export function airHosts(
       stat: (path) => air.stat(path),
       list: (path) => air.list(path),
       read: (path) => air.readSync(path),
+    },
+    encryptedStore: {
+      getItem: (name) => air.getItem(name),
+      // A copy of the bytes alone: IPC would carry all of a view's buffer.
+      setItem: (name, bytes) => air.setItem(name, bytes.slice()),
+      removeItem: (name) => air.removeItem(name),
+      reset: () => air.resetItems(),
     },
   };
 }

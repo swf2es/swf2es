@@ -233,7 +233,10 @@ directory, `FileStream` reads them (at once, or over frames with
 `openAsync`), `app:` and `file:` URLs into it load from there, and any
 other URL goes to the network as a page's would. Its storage directory
 and the user's directories are there but empty, and nothing is written
-yet: `FileStream`'s writing modes are not supported.
+yet: `FileStream`'s writing modes are not supported. `EncryptedLocalStore`
+keeps its items in the browser's IndexedDB by the application's id, for
+the next time the page plays it: a page has no keychain to encrypt them
+by, and the browser keeps them as it keeps the site's other data.
 The element is its one window, at the descriptor's size; the play page
 opens `.air` and `.zip` files too.
 

@@ -8,7 +8,7 @@
 // The second runs an AIR application by its descriptor, as adl does.
 import { statSync } from "node:fs";
 import { open as openFile, readFile, realpath } from "node:fs/promises";
-import { basename, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { fileAttributes } from "@swf2es/format";
 import {
@@ -20,6 +20,7 @@ import {
   ipcMain,
   Menu,
   type MenuItemConstructorOptions,
+  safeStorage,
   session,
   shell,
   type WebContents,
@@ -31,7 +32,15 @@ import type {
   OpenedMovie,
   StartState,
 } from "../shared/api.js";
-import { type AirCommand, airCommand, airLaunch, listOf, readOf, statOf } from "./air.ts";
+import {
+  type AirCommand,
+  airCommand,
+  airLaunch,
+  EncryptedItems,
+  listOf,
+  readOf,
+  statOf,
+} from "./air.ts";
 import { bridgeFiles } from "./files.ts";
 import { type Movie, Network, Refused } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
@@ -88,6 +97,8 @@ let listening = false;
 const MAX_URL = 8192;
 /** The AIR application playing, as its command line asked for it; null for none. */
 let air: AirCommand | null = null;
+/** The EncryptedLocalStore of the AIR application playing, if one is. */
+let encryptedItems: EncryptedItems | null = null;
 
 /**
  * `text` as the URL of a remote SWF: http or https, with a host and no
@@ -272,6 +283,16 @@ async function openAir(command: AirCommand, cwd: string): Promise<void> {
   const content = await realpath(opened.content);
   sandbox.playApplication(content);
   air = command;
+  // Beside its storage directory, by its id, as AIR keeps it; encrypted by the system's keychain where it has one.
+  encryptedItems = new EncryptedItems(
+    join(dirname(opened.launch.directories.applicationStorage), "EncryptedLocalStore"),
+    safeStorage.isEncryptionAvailable()
+      ? {
+          encrypt: (text) => new Uint8Array(safeStorage.encryptString(text)),
+          decrypt: (data) => safeStorage.decryptString(Buffer.from(data)),
+        }
+      : null,
+  );
   if (window && opened.width && opened.height) {
     window.setSize(opened.width, opened.height);
   }
@@ -859,6 +880,29 @@ function listenForAir(): void {
   // FileStream's open, which reads a file at once, as stat does: only once the application plays.
   ipcMain.on("air:read-sync", (event, path: unknown) => {
     event.returnValue = playing(event) && typeof path === "string" ? readOf(path) : null;
+  });
+  // EncryptedLocalStore, at once as its methods are: only the application playing's.
+  const items = (event: IpcMainEvent) => (playing(event) ? encryptedItems : null);
+  ipcMain.on("air:item-get", (event, name: unknown) => {
+    event.returnValue = typeof name === "string" ? (items(event)?.get(name) ?? null) : null;
+  });
+  ipcMain.on("air:item-set", (event, name: unknown, bytes: unknown) => {
+    if (typeof name === "string" && bytes instanceof Uint8Array) {
+      items(event)?.set(name, bytes);
+    }
+
+    event.returnValue = null;
+  });
+  ipcMain.on("air:item-remove", (event, name: unknown) => {
+    if (typeof name === "string") {
+      items(event)?.remove(name);
+    }
+
+    event.returnValue = null;
+  });
+  ipcMain.on("air:items-reset", (event) => {
+    items(event)?.reset();
+    event.returnValue = null;
   });
   // A read is what starts the application's grant: the page reads its content SWF first.
   ipcMain.handle("air:read", async (event, path: unknown) => {

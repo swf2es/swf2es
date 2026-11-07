@@ -84,7 +84,9 @@ own installer. A relative path is taken from the directory pnpm was run in.
   local file through File, its `app:`, `app-storage:` and `file:` URLs,
   and reaches the network and sockets without Flash's policy files or a
   prompt, as an installed application does. Its storage directory is
-  under the app's user data, by its id. Only the application playing has
+  under the app's user data, by its id, and its `EncryptedLocalStore`
+  beside it, encrypted by the system's keychain (Electron's
+  `safeStorage`) where there is one. Only the application playing has
   that reach, and only while it plays; run one you trust, as you would
   install it.
 - **File dialogs** requested by AS2 or AS3 FileReference use native open
