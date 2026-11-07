@@ -527,7 +527,7 @@
   "avm1/shared_stack": {"matched":16,"lines":16,"traced":16,"error":null},
   "avm1/single_frame": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm1/slash_syntax": {"matched":14,"lines":14,"traced":14,"error":null},
-  "avm1/sound": {"matched":628,"lines":628,"traced":628,"error":null},
+  "avm1/sound": {"matched":42,"lines":628,"traced":628,"error":null},
   "avm1/sound_getters": {"matched":100,"lines":100,"traced":100,"error":null},
   "avm1/sound_gettransform_props": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm1/sound_id3": {"matched":11,"lines":633,"traced":11,"error":null},
