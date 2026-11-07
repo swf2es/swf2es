@@ -84,6 +84,7 @@ const api: DesktopApi = {
     stat: (path) => ipcRenderer.sendSync("air:stat", String(path)),
     list: (path) => ipcRenderer.sendSync("air:list", String(path)),
     read: (path) => ipcRenderer.invoke("air:read", String(path)),
+    readSync: (path) => ipcRenderer.sendSync("air:read-sync", String(path)),
     window: () => ipcRenderer.sendSync("air:window"),
     setBounds: (bounds) => ipcRenderer.send("air:set-bounds", bounds),
     setTitle: (title) => ipcRenderer.send("air:set-title", String(title)),

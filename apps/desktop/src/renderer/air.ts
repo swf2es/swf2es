@@ -40,6 +40,7 @@ export function airHosts(
       directories: launch.directories,
       stat: (path) => air.stat(path),
       list: (path) => air.list(path),
+      read: (path) => air.readSync(path),
     },
   };
 }

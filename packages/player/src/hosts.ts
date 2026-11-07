@@ -414,6 +414,12 @@ export interface FileSystemHost {
   stat(path: string): FileStat | null;
   /** The names in the directory at `path`, or null where it is none. */
   list(path: string): string[] | null;
+  /**
+   * The bytes of the file at `path`, read at once, as FileStream's open
+   * reads it; null where none can be read. Without it, FileStream finds
+   * nothing to read.
+   */
+  read?(path: string): Uint8Array | null;
 }
 
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */

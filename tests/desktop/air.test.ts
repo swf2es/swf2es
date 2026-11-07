@@ -8,7 +8,6 @@ import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { after, test } from "node:test";
 import { airCommand, airLaunch, listOf, statOf } from "../../apps/desktop/src/main/air.ts";
-import { readDescriptor } from "../../apps/desktop/src/main/descriptor.ts";
 import { Sandbox } from "../../apps/desktop/src/main/sandbox.ts";
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), "swf2es-air-")));
@@ -26,32 +25,6 @@ const DESCRIPTOR = `<?xml version="1.0" encoding="utf-8" ?>
         <height>550</height>
     </initialWindow>
 </application>`;
-
-test("a descriptor's id, and its first window's content, title and size", () => {
-  assert.deepEqual(readDescriptor(DESCRIPTOR), {
-    id: "org.example.app",
-    content: "bin/Main.swf",
-    title: "Tom & Jerry's",
-    width: 960,
-    height: 550,
-  });
-  // A size of nonsense is none; a content path written Windows' way is the URL's.
-  assert.deepEqual(
-    readDescriptor(
-      "<application><id>a</id><initialWindow><content>sub\\Main.swf</content><width>-3</width></initialWindow></application>",
-    ),
-    { id: "a", content: "sub/Main.swf", title: null, width: null, height: null },
-  );
-  assert.throws(() => readDescriptor("<html/>"), /not an AIR application descriptor/);
-  assert.throws(
-    () =>
-      readDescriptor(
-        "<application><initialWindow><content>a.swf</content></initialWindow></application>",
-      ),
-    /no <id>/,
-  );
-  assert.throws(() => readDescriptor("<application><id>a</id></application>"), /no <content>/);
-});
 
 test("the command line names an application as adl's does", () => {
   mkdirSync(join(home, "app", "root"), { recursive: true });

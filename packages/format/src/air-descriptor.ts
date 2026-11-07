@@ -2,10 +2,10 @@
 // needs of one to run it: the application's id, and its first window's
 // content SWF, title and size. Elements are found by name, whatever
 // namespace the descriptor's AIR version gives them; what is not there is
-// left to its default. Apart from Electron, so that node tests it
-// (tests/desktop/descriptor.test.ts).
+// left to its default. A desktop app reads it from disk, a page from an
+// AIR package (`.air`) or the files of one.
 
-export interface Descriptor {
+export interface AirDescriptor {
   id: string;
   /** The content SWF's path, relative to the application's directory, "/"-separated. */
   content: string;
@@ -56,7 +56,7 @@ function size(text: string | null): number | null {
 }
 
 /** What `xml`, a descriptor, says; an Error naming what it lacks that adl requires. */
-export function readDescriptor(xml: string): Descriptor {
+export function readAirDescriptor(xml: string): AirDescriptor {
   if (!/<(?:[\w.-]+:)?application[\s>]/.test(xml)) {
     throw new Error("not an AIR application descriptor: no <application>");
   }

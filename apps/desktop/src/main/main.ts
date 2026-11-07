@@ -31,7 +31,7 @@ import type {
   OpenedMovie,
   StartState,
 } from "../shared/api.js";
-import { type AirCommand, airCommand, airLaunch, listOf, statOf } from "./air.ts";
+import { type AirCommand, airCommand, airLaunch, listOf, readOf, statOf } from "./air.ts";
 import { bridgeFiles } from "./files.ts";
 import { type Movie, Network, Refused } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
@@ -855,6 +855,10 @@ function listenForAir(): void {
   });
   ipcMain.on("air:list", (event, path: unknown) => {
     event.returnValue = playing(event) && typeof path === "string" ? listOf(path) : null;
+  });
+  // FileStream's open, which reads a file at once, as stat does: only once the application plays.
+  ipcMain.on("air:read-sync", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" ? readOf(path) : null;
   });
   // A read is what starts the application's grant: the page reads its content SWF first.
   ipcMain.handle("air:read", async (event, path: unknown) => {
