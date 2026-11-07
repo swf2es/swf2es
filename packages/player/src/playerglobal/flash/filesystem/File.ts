@@ -6,12 +6,23 @@
 // 2004), a File of no path is unusable (Error 2037), and what reads a file
 // that is not there fails (Error 3003). Reading what is there is
 // synchronous, as File's properties are; FileStream reads a file's bytes
-// (FileStream.ts). Writing, dialogs and File's asynchronous methods are
-// not supported yet. Without a host, nothing is there.
+// (FileStream.ts). It makes and deletes directories and deletes, copies
+// and moves files and directories (writes.ts), at once or on the next
+// frame with an event, as the asynchronous methods do; dialogs are not
+// supported yet. Without a host, nothing is there.
 import { avm2 } from "@swf2es/runtime";
 import type { FileStat } from "../../../hosts.js";
+import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 import { NativePaths, type Root } from "./paths.js";
+import {
+  copyOrMove,
+  createDirectory,
+  deleteDirectory,
+  deleteFile,
+  ioErrorEvent,
+  refuseApp,
+} from "./writes.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -117,6 +128,30 @@ export function fileNatives(s: Scripting): avm2.Natives {
 
     const path = paths.normalize(given);
     return path ? { root: "file", path } : null;
+  };
+
+  /** Throws the IOError `id`, unless it is 0. */
+  const check = (id: number): void => {
+    if (id) {
+      throw s.rt.error("flash.errors::IOError", id);
+    }
+  };
+  /** `file`'s location, to be written: a SecurityError for one of the app: URL. */
+  const writable = (file: Value): FileLocation => {
+    if (file === null || file === undefined) {
+      throw s.rt.error("TypeError", 2007, "newLocation");
+    }
+
+    const at = locationOf(file);
+    refuseApp(s, at);
+    return at;
+  };
+  /** Runs `change` on the next frame, then tells `file` complete, or ioError for the IOError it gives. */
+  const later = (file: unknown, change: () => number): void => {
+    s.loads.deferHostEvent(() => {
+      const id = change();
+      dispatchEvent(s, file as AsObject, id ? ioErrorEvent(s, id) : s.event("complete"));
+    });
   };
 
   /** What is at `at`; Error 3003 where nothing is. */
@@ -315,6 +350,76 @@ export function fileNatives(s: Scripting): avm2.Natives {
       return s.rt.array(
         names.map((name) => make({ root: at.root, path: paths.resolve(at.path, name, null) })),
       );
+    }
+
+    getDirectoryListingAsync(): void {
+      const at = locationOf(this);
+      s.loads.deferHostEvent(() => {
+        const stat = host?.stat(at.path);
+        if (!stat?.directory) {
+          dispatchEvent(s, this as unknown as AsObject, ioErrorEvent(s, stat ? 3007 : 3003));
+          return;
+        }
+
+        const files = (host?.list(at.path) ?? []).map((name) =>
+          make({ root: at.root, path: paths.resolve(at.path, name, null) }),
+        );
+        dispatchEvent(
+          s,
+          this as unknown as AsObject,
+          s.rt.construct(
+            s.rt.classNamed("flash.events::FileListEvent"),
+            "directoryListing",
+            false,
+            false,
+            s.rt.array(files),
+          ) as AsObject,
+        );
+      });
+    }
+
+    createDirectory(): void {
+      check(createDirectory(s, writable(this).path));
+    }
+
+    deleteFile(): void {
+      check(deleteFile(s, writable(this).path));
+    }
+
+    deleteFileAsync(): void {
+      const at = writable(this);
+      later(this, () => deleteFile(s, at.path));
+    }
+
+    deleteDirectory(contents: Value = false): void {
+      check(deleteDirectory(s, writable(this).path, !!contents));
+    }
+
+    deleteDirectoryAsync(contents: Value = false): void {
+      const at = writable(this);
+      later(this, () => deleteDirectory(s, at.path, !!contents));
+    }
+
+    copyTo(to: Value, overwrite: Value = false): void {
+      const from = locationOf(this);
+      check(copyOrMove(s, from.path, writable(to).path, !!overwrite, false));
+    }
+
+    copyToAsync(to: Value, overwrite: Value = false): void {
+      const from = locationOf(this);
+      const into = writable(to);
+      later(this, () => copyOrMove(s, from.path, into.path, !!overwrite, false));
+    }
+
+    moveTo(to: Value, overwrite: Value = false): void {
+      const from = writable(this);
+      check(copyOrMove(s, from.path, writable(to).path, !!overwrite, true));
+    }
+
+    moveToAsync(to: Value, overwrite: Value = false): void {
+      const from = writable(this);
+      const into = writable(to);
+      later(this, () => copyOrMove(s, from.path, into.path, !!overwrite, true));
     }
 
     clone(): Value {
