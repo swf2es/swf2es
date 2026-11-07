@@ -1,0 +1,5 @@
+a[NaN] undefined a[0.5] undefined a['NaN'] undefined
+o[NaN] nan hasOwnProperty(NaN) true
+b[NaN] = 5: b[0] undefined length 0 keys NaN,
+deleted: length 0 b[0] undefined
+this[NaN] undefined
