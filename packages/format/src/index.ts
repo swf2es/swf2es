@@ -8,6 +8,7 @@
  * DOM and node APIs.
  */
 
+export { abcReferences } from "./abc-names.js";
 export {
   type ActionBlock,
   type ActionList,

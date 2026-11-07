@@ -5,14 +5,23 @@
 // under the application's directory, with the user's directories empty and
 // nothing outside; app: and file: URLs into the application load from
 // memory, and any other goes to the network as the page's would.
-import { type AirDescriptor, readAirDescriptor, readZip } from "@swf2es/format";
-import type {
-  AirApplication,
-  AirWindow,
-  FetchRequest,
-  FetchResult,
-  FileStat,
-  FileSystemHost,
+import {
+  type AirDescriptor,
+  abcReferences,
+  readAirDescriptor,
+  readDoAbc,
+  readZip,
+  type Swf,
+  tags,
+} from "@swf2es/format";
+import {
+  AIR_DEFINITIONS,
+  type AirApplication,
+  type AirWindow,
+  type FetchRequest,
+  type FetchResult,
+  type FileStat,
+  type FileSystemHost,
 } from "@swf2es/player";
 
 /** One of an application's files, its path relative to the folder it came in, "/"-separated. */
@@ -52,9 +61,16 @@ export class AirApp {
   /** Every directory the files are in, the application's own ("") among them. */
   readonly #directories: Set<string>;
   readonly #opened = Date.now();
+  /**
+   * Where the files not in memory are on the network, the directory a SWF
+   * played alone came from (`airAppForSwf`): an app: URL loads from there
+   * what the application does not hold, as its folder on a server is.
+   */
+  readonly base: string | null;
 
-  constructor(xml: string, files: Map<string, Entry>) {
+  constructor(xml: string, files: Map<string, Entry>, base: string | null = null) {
     this.xml = xml;
+    this.base = base;
     this.descriptor = readAirDescriptor(xml);
     this.#files = files;
     this.#directories = new Set([""]);
@@ -124,6 +140,18 @@ export class AirApp {
 
     const bytes = path === null ? null : this.read(path);
     return { bytes, status: bytes ? 200 : 404, headers: [] };
+  }
+
+  /** Where on the network `url`, an app: URL of a file not in memory, is under `base`; null for none. */
+  remote(url: string): string | null {
+    const path = this.#pathOf(url);
+    if (this.base === null || path === null || path === undefined || this.#files.has(path)) {
+      return null;
+    }
+
+    return /^app:/i.test(url)
+      ? new URL(path.split("/").map(encodeURIComponent).join("/"), this.base).href
+      : null;
   }
 
   /** The path under the application's directory `url` names; null for a local URL outside it; undefined for a URL that is not local. */
@@ -260,6 +288,68 @@ export function openAirApp(source: Uint8Array | ArrayBuffer | Iterable<AirAppFil
 
   const xml = new TextDecoder().decode(all.get(descriptor)?.bytes());
   return new AirApp(xml, files);
+}
+
+/**
+ * Whether `swf` is an AIR application's, though it came alone: its
+ * ActionScript names a definition only AIR has (AIR_DEFINITIONS), which a
+ * browser's Flash Player would refuse it for.
+ */
+export function namesAir(swf: Swf): boolean {
+  for (const tag of swf.tags) {
+    if (tag.code === tags.DoABC || tag.code === tags.DoABC2) {
+      for (const name of abcReferences(readDoAbc(swf.bytes, tag).abc)) {
+        if (AIR_DEFINITIONS.has(name)) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * The AIR application of `bytes`, a SWF played alone from `url`, as adl
+ * runs one from a descriptor that names only it: its id and title from
+ * its file's name, its directory holding it alone, and the directory it
+ * came from, if from a server, where its app: URLs load what else it has.
+ */
+export function airAppForSwf(bytes: Uint8Array, url: string): AirApp {
+  let name = "Main.swf";
+  let base: string | null = null;
+  try {
+    const at = new URL(url);
+    const last = decodeURIComponent(at.pathname.slice(at.pathname.lastIndexOf("/") + 1));
+    if (last) {
+      name = last;
+    }
+
+    if (at.protocol === "http:" || at.protocol === "https:") {
+      base = new URL(".", at).href;
+    }
+  } catch {
+    // A page's own bytes, of no URL: the defaults.
+  }
+
+  const stem = name.replace(/\.[^.]*$/, "") || "Main";
+  const xmlText = (text: string) =>
+    text.replace(
+      /[&<>"]/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string,
+    );
+  const id = `swf2es.${stem.replace(/[^A-Za-z0-9.-]/g, "-")}`;
+  const xml = `<?xml version="1.0" encoding="utf-8" ?>
+<application xmlns="http://ns.adobe.com/air/application/51.3">
+  <id>${xmlText(id)}</id>
+  <filename>${xmlText(stem)}</filename>
+  <versionNumber>1.0</versionNumber>
+  <initialWindow><content>${xmlText(name)}</content><title>${xmlText(stem)}</title></initialWindow>
+</application>`;
+  const files = new Map<string, Entry>([
+    [name, { size: bytes.length, modified: Date.now(), bytes: () => bytes }],
+  ]);
+  return new AirApp(xml, files, base);
 }
 
 /** The shallowest `*-app.xml` or `application.xml` among `files`, outside META-INF; null for none. */
