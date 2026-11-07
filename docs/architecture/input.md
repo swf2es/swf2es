@@ -87,6 +87,29 @@ pass, and a game's motion follows the time between frames. `realTime:
 null` makes it tell the frame clock instead, rounded as it was, the same
 on every run: the player's cases and the corpus (`tests/player/page.ts`)
 and the node tests that trace it ask for that.
+A game that caps its frame rate by spinning on `getTimer`, a loop that
+reads it until the frame's budget has passed, costs nothing in Flash but
+blocks a browser's main thread: one declaring 120 fps and holding itself
+to 30 spent 82 % of its time in `getTimer`, the browser drawing and
+taking input only between its frames. So the player tells such a spin
+from other reads by their density, at least 1,000 calls a millisecond
+(only reading the clock makes 5,000 to 10,000 in Chrome; a microsecond's
+work between reads makes it at most 1,000), kept up for 2 ms and all from
+one place in the script, as the stacks of three calls in a row tell (a
+profiler's begin and end are two). Then each call moves the clock 1/8 ms
+on, so the wait ends at once and within that of its time, a second at
+most a pass. The skipped time is the clock's lead on the real one: once
+the pass is over the clock holds there, getTimer and the timers alike,
+until the real clock passes it, and `advance` plays no frame until the
+lead is less than half the host's interval, keeping what is owed, so the
+frame after the spin runs at once as Flash's would after it. Nor do
+timers fire between frames meanwhile, where Flash's would still be
+spinning. The SWF keeps the pace it asked for (its own frames 33 ms apart
+by getTimer, by the real clock 33 on average) with the main thread 90 %
+idle rather than all busy. What AS3 can see is getTimer running faster
+than real time in the spin and then waiting, by up to the frame budget,
+never going back; `Date` stays the wall clock, which in Flash too is a
+clock apart from `getTimer`, and differs from it by that lead at most.
 Timers follow the same choice. With a real clock they fire as Flash
 fires them, measured in adl: in each frame right after ENTER_FRAME and
 before the frame's construction, every timer due fires once, in the
