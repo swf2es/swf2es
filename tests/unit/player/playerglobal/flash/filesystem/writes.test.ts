@@ -285,6 +285,45 @@ const streams = `package {${preamble}
       a5.openAsync(m, FileMode.UPDATE);
       trace("a5: opened " + m.exists);
       a5.writeByte(1);
+
+      // Opened again and written in one frame, never closed.
+      var r:File = store.resolvePath("r.bin");
+      var re:FileStream = new FileStream();
+      re.open(store.resolvePath("other.bin"), FileMode.WRITE);
+      re.writeByte(1);
+      re.open(r, FileMode.WRITE);
+      re.writeByte(5);
+      re.writeByte(6);
+      var later:Function = function (e:Event):void {
+        trace("reopened: next frame " + r.size);
+        removeEventListener(Event.ENTER_FRAME, later);
+      };
+      addEventListener(Event.ENTER_FRAME, later);
+
+      // UPDATE over frames, written before the file is read in, and closed before it is.
+      var e1:File = store.resolvePath("e1.bin");
+      put(e1, [1, 2, 3, 4]);
+      var a6:FileStream = new FileStream();
+      a6.addEventListener(Event.COMPLETE, function (e:Event):void { a6.close(); });
+      a6.addEventListener(Event.CLOSE, function (e:Event):void { trace("a6: closed " + bytes(e1)); });
+      a6.openAsync(e1, FileMode.UPDATE);
+      a6.position = 1;
+      a6.writeByte(9);
+      var e2:File = store.resolvePath("e2.bin");
+      put(e2, [1, 2, 3, 4]);
+      var a7:FileStream = new FileStream();
+      a7.addEventListener(Event.CLOSE, function (e:Event):void { trace("a7: closed early " + bytes(e2)); });
+      a7.openAsync(e2, FileMode.UPDATE);
+      a7.position = 2;
+      a7.writeByte(8);
+      a7.close();
+
+      // A failed open stops what the open before it had yet to do.
+      var a8:FileStream = new FileStream();
+      a8.addEventListener(Event.COMPLETE, function (e:Event):void { trace("a8: stale complete"); });
+      a8.addEventListener(ProgressEvent.PROGRESS, function (e:Event):void { trace("a8: stale progress"); });
+      a8.openAsync(e1, FileMode.READ);
+      t("a8", function ():* { a8.open(store.resolvePath("missing.bin"), FileMode.READ); return "opened"; });
     }
   }
 }
@@ -297,7 +336,7 @@ test("FileStream writes as adl's, at once and over frames", { skip }, async () =
   writeFileSync(`${app}/data.bin`, Uint8Array.of(1, 2, 3));
 
   const lines = await play("Writes", streams, 10);
-  const sync = lines.filter((l) => !/^(held( next frame)?|a[1245]):/.test(l));
+  const sync = lines.filter((l) => !/^(held( next frame)?|a[1245-7]|reopened):/.test(l));
   assert.deepEqual(sync, [
     "write missing directories: true 0",
     "write position: 0",
@@ -334,6 +373,7 @@ test("FileStream writes as adl's, at once and over frames", { skip }, async () =
     "write under a file: THROWS IOError 3003",
     "update a directory: THROWS IOError 3006",
     "a3: THROWS SecurityError 0 fileWriteResource",
+    "a8: THROWS IOError 3003",
   ]);
 
   // What is written reaches the file at the end of the frame.
@@ -358,6 +398,14 @@ test("FileStream writes as adl's, at once and over frames", { skip }, async () =
     lines.filter((l) => l.startsWith("a5:")),
     ["a5: opened false", "a5: outputProgress 0/1", "a5: complete 0 true"],
   );
+  // What is written before the file is read in stands, around what it held; a stream opened
+  // again flushes as it did; and nothing of an open a failed one replaced arrives (adl's, from
+  // Probe5; adl's complete then reads nothing back, which swf2es does not copy).
+  assert.deepEqual(lines.filter((l) => /^(a[67]|reopened):/.test(l)).sort(), [
+    "a6: closed 1,9,3,4",
+    "a7: closed early 1,2,8,4",
+    "reopened: next frame 2",
+  ]);
 });
 
 const files = `package {${preamble}

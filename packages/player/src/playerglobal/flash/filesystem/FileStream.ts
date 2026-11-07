@@ -57,11 +57,10 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
     s.rt.callProperty(reading(stream), s.rt.publicName(method), ...args);
   const write = (stream: FileStreamNatives, method: string, ...args: Value[]): void => {
     const bytes = avm2.bytesOf(s.rt, writing(stream));
-    // A write past the end fills the bytes before it with zeros, which the file gets too.
-    const from = Math.min(bytes.position, bytes.length);
-    const before = bytes.position;
+    // A write past the end leaves zeros before it, which the file, made as long, has too.
+    const from = bytes.position;
     s.rt.callProperty(stream.$buffer as AsObject, s.rt.publicName(method), ...args);
-    stream.$written = (stream.$written ?? 0) + (bytes.position - before);
+    stream.$written = (stream.$written ?? 0) + (bytes.position - from);
     changed(stream, from, bytes.position);
   };
   const event = (stream: FileStreamNatives, e: AsObject) =>
@@ -90,8 +89,13 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
     stream.$flushing = true;
     const generation = stream.$generation;
     s.loads.deferHostEvent(() => {
+      // An open since has its own.
+      if (stream.$generation !== generation) {
+        return;
+      }
+
       stream.$flushing = false;
-      if (stream.$generation === generation && flush(stream) && stream.$async) {
+      if (flush(stream) && stream.$async) {
         outputProgress(stream);
       }
     });
@@ -161,7 +165,13 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
       return refusal;
     }
 
-    const before = mode === "write" ? EMPTY : (host?.read?.(path) ?? EMPTY);
+    // A file there that cannot be read is not emptied by a mode that keeps it.
+    const there = !!host?.stat(path);
+    const before = mode === "write" || !there ? EMPTY : host?.read?.(path);
+    if (!before) {
+      return 3001;
+    }
+
     return writeFile(s, path, EMPTY, before.length, before.length) ? before : 3001;
   };
 
@@ -183,8 +193,36 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
     stream.$made = !async;
     stream.$from = undefined;
     stream.$to = undefined;
+    stream.$flushing = false;
     stream.$written = 0;
     return buffer;
+  };
+  /** Closes `stream`, what it wrote given to its file, and stops what its open had yet to do. */
+  const shut = (stream: FileStreamNatives): boolean => {
+    const wrote = flush(stream);
+    stream.$buffer = null;
+    stream.$generation = (stream.$generation ?? 0) + 1;
+    return wrote;
+  };
+  /**
+   * Puts `bytes`, the file's from `at`, in the buffer of `stream`, its
+   * position kept: but where the stream wrote before the file was read in,
+   * what it wrote stands.
+   */
+  const merge = (stream: FileStreamNatives, bytes: Uint8Array, at: number): void => {
+    const into = avm2.bytesOf(s.rt, stream.$buffer as AsObject);
+    const position = into.position;
+    const from = Math.max(at, stream.$from ?? Number.POSITIVE_INFINITY);
+    const to = Math.min(at + bytes.length, stream.$to ?? 0, into.length);
+    const written = from < to ? into.buffer.slice(from, to) : null;
+    into.position = at;
+    into.write(bytes);
+    if (written) {
+      into.position = from;
+      into.write(written);
+    }
+
+    into.position = position;
   };
   /** Puts `bytes` in the buffer of `stream`, its position at their start, or for APPEND their end. */
   const fill = (stream: FileStreamNatives, bytes: Uint8Array): void => {
@@ -194,9 +232,9 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
   };
 
   /**
-   * Hands `bytes` to `stream` a chunk a frame, each appended where its
-   * reads have not reached with a progress event, then complete, while
-   * the open of `generation` lasts; `done` before complete.
+   * Hands `bytes` to `stream` a chunk a frame, each in its place with a
+   * progress event, then complete, while the open of `generation` lasts;
+   * `done` before complete.
    */
   const deliver = (
     stream: FileStreamNatives,
@@ -211,12 +249,8 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const into = avm2.bytesOf(s.rt, stream.$buffer as AsObject);
-      const position = into.position;
       const end = Math.min(loaded + CHUNK, bytes.length);
-      into.position = into.length;
-      into.write(bytes.subarray(loaded, end));
-      into.position = position;
+      merge(stream, bytes.subarray(loaded, end), loaded);
       loaded = end;
       event(
         stream,
@@ -271,8 +305,7 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
       const at = target(file, mode);
       const bytes = at.mode === "read" ? contents(at.path) : make(at.path, at.mode);
       if (typeof bytes === "number") {
-        flush(this);
-        this.$buffer = null;
+        shut(this);
         throw s.rt.error("flash.errors::IOError", bytes);
       }
 
@@ -285,7 +318,7 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
       reopen(this, true, at.path, at.mode);
       const generation = this.$generation as number;
       const failed = (id: number) => {
-        this.$buffer = null;
+        shut(this);
         event(this, ioErrorEvent(s, id, ` file: ${at.path}`));
       };
       if (at.mode === "read") {
@@ -338,14 +371,20 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // A file an asynchronous open had yet to make is made now, to take what was written.
-      if (!this.$made && this.$mode !== "read" && this.$mode !== "update") {
-        this.$made = typeof make(this.$path as string, this.$mode as Mode) !== "number";
+      // A file an asynchronous open had yet to make, or to read in, is made
+      // now to take what was written, around what it held.
+      if (!this.$made && this.$mode !== "read") {
+        const before = make(this.$path as string, this.$mode as Mode);
+        if (typeof before !== "number") {
+          if (this.$mode === "update") {
+            merge(this, before, 0);
+          }
+
+          this.$made = true;
+        }
       }
 
-      const wrote = flush(this);
-      this.$buffer = null;
-      this.$generation = (this.$generation ?? 0) + 1;
+      const wrote = shut(this);
       // An asynchronous stream says so on a later frame; a synchronous one says nothing.
       if (this.$async) {
         const generation = this.$generation;

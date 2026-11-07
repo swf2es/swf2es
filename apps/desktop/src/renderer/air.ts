@@ -41,7 +41,8 @@ export function airHosts(
       stat: (path) => air.stat(path),
       list: (path) => air.list(path),
       read: (path) => air.readSync(path),
-      write: (path, bytes, offset, length) => air.writeSync(path, bytes, offset, length),
+      // A copy of the bytes alone: IPC would carry all of a view's buffer.
+      write: (path, bytes, offset, length) => air.writeSync(path, bytes.slice(), offset, length),
       createDirectory: (path) => air.createDirectory(path),
       remove: (path) => air.remove(path),
       move: (from, to) => air.move(from, to),
