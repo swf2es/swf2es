@@ -76,13 +76,16 @@ export function readZip(zip: Uint8Array): ZipEntry[] {
   return entries;
 }
 
-/** Where the end of central directory record starts: the last signature with room for its comment. */
+/**
+ * Where the end of central directory record starts: the last signature
+ * whose comment the archive holds, as some tools leave bytes after it.
+ */
 function findEnd(zip: Uint8Array, view: DataView): number {
   const last = zip.length - END_SIZE;
   for (let at = last; at >= 0 && at >= last - MAX_COMMENT; at--) {
     if (
       view.getUint32(at, true) === END_SIGNATURE &&
-      at + END_SIZE + view.getUint16(at + 20, true) === zip.length
+      at + END_SIZE + view.getUint16(at + 20, true) <= zip.length
     ) {
       return at;
     }

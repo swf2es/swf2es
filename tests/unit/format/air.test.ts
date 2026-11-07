@@ -66,6 +66,12 @@ test("a ZIP's files read stored and deflated, with their sizes and times", () =>
   assert.equal(text(entries[0].bytes()), "<application/>");
   assert.equal(text(entries[2].bytes()), "stored stored stored ");
   assert.equal(entries[0].modified, new Date(2026, 10, 7, 12, 34, 56).getTime());
+
+  // Bytes some tool left after the archive's end do not hide it.
+  const archive = zip([{ name: "a.txt", data: "after" }]);
+  const trailed = new Uint8Array(archive.length + 5);
+  trailed.set(archive);
+  assert.equal(text(readZip(trailed)[0].bytes()), "after");
 });
 
 test("what is no ZIP, or one cut short, is refused with a ZipError", () => {

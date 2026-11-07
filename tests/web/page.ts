@@ -341,7 +341,7 @@ async function embedderFetch() {
 
 /**
  * Open the AIR package the runner wrote and play it with two launch
- * arguments until it exits or 20 s pass: what it traced and reported, the
+ * arguments, its network allowed none, until it exits or 20 s pass: what it traced and reported, the
  * code its exit gave, and whether a player is left.
  */
 async function airRun() {
@@ -354,6 +354,8 @@ async function airRun() {
   console.log = (...args: unknown[]) => traces.push(args.join(" "));
   console.error = (...args: unknown[]) => errors.push(args.join(" "));
   const p = document.createElement("swf2es-player") as Player;
+  // No network: the application's own files are none of it, and still load.
+  p.setAttribute("allownetworking", "none");
   let exit: number | null = null;
   p.addEventListener("airexit", (e) => {
     exit = (e as CustomEvent<{ code: number }>).detail.code;

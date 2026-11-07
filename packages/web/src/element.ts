@@ -243,11 +243,18 @@ async function fetchMovie(
   return { bytes: new Uint8Array(await response.arrayBuffer()), url: response.url || url };
 }
 
-/** What a session's SWFs load by: its AIR application's files, then the embedder's fetch or the browser's. */
+/**
+ * What a session's SWFs load by: its AIR application's files, then the
+ * embedder's fetch or the browser's; `offline` (allowNetworking "none"),
+ * nothing past the application's own files, which are no network.
+ */
 function fetchFor(
   session: Session,
+  offline: boolean,
 ): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
-  const fetchOf = configuration().fetch ?? browserFetch;
+  const fetchOf: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> = offline
+    ? () => Promise.reject(new Error("allowNetworking is none"))
+    : (configuration().fetch ?? browserFetch);
   const app = session.air?.app;
   if (!app) {
     return fetchOf;
@@ -553,9 +560,7 @@ export class Swf2esPlayerElement extends ElementBase {
           url,
           base: base ? new URL(base, pageUrl).href : undefined,
           // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
-          fetch: offline
-            ? () => Promise.reject(new Error("allowNetworking is none"))
-            : fetchFor(session),
+          fetch: fetchFor(session, offline),
           socket: offline ? undefined : socketHost(),
           sendToUrl: !internal,
           onUncaught: (error) => this.#report(session, error),
@@ -634,9 +639,7 @@ export class Swf2esPlayerElement extends ElementBase {
       url,
       base: base ? new URL(base, pageUrl).href : undefined,
       parameters: parseFlashVars(attribute(this, "flashvars")),
-      fetch: offline
-        ? () => Promise.reject(new Error("allowNetworking is none"))
-        : fetchFor(session),
+      fetch: fetchFor(session, offline),
       loadPolicyFile: configuration().loadPolicyFile,
       sandboxType: session.air ? "application" : configuration().sandboxType,
       // An AIR application's: AIR's API, its application and its file system.
