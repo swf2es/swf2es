@@ -140,8 +140,9 @@ export function decompressSwfPrefix(swf: Uint8Array, length: number): Uint8Array
     return swf.subarray(0, length);
   }
 
-  const want = Math.max(0, length - 8);
   const fileLength = new DataView(swf.buffer, swf.byteOffset, swf.byteLength).getUint32(4, true);
+  // No further than the header's length, where decompressSwf stops too.
+  const want = Math.max(0, Math.min(length, fileLength) - 8);
   const options = { offset: 8, partial: true };
   let out: Uint8Array = new Uint8Array(8);
   // A kilobyte of the body first, as a header and the first tags need, and
@@ -192,20 +193,22 @@ export function decompressSwf(swf: Uint8Array): Uint8Array {
 
   let result: Decoded;
   if (signature === "CWS") {
-    // A byte past the header's length tells a longer body from one that fits.
+    // A byte past the header's length tells a longer body from one that
+    // fits, which then ends with its checksum checked.
     result = inflate(swf.subarray(8), false, fileLength - 8 + 1, { offset: 8 });
     if (result.status === TRUNCATED) {
       // Some SWFs omit the Adler-32 trailer despite holding a complete deflate stream.
       const raw = inflate(swf.subarray(10), true, fileLength - 8 + 1, { offset: 8 });
-      if (raw.status === DONE && 10 + raw.used + 4 > swf.length) {
+      if ((raw.status === DONE || raw.status === FULL) && 10 + raw.used + 4 > swf.length) {
         result = raw;
       }
     }
 
+    // A longer body, as a packer may leave bytes after the End tag inside
+    // the stream, is read as far as the header's length and no further, as
+    // Flash Player plays it, and as a ZWS's decoding stops.
     if (result.status === FULL) {
-      throw new CompressedDataError(
-        `a body of more than ${fileLength - 8} bytes where the header says ${fileLength - 8}`,
-      );
+      result = { ...result, status: DONE, bytes: result.bytes.subarray(0, fileLength) };
     }
   } else if (signature === "ZWS") {
     if (swf.length < 17) {

@@ -58,6 +58,18 @@ test("an FWS, a CWS and a ZWS SWF all read as the same uncompressed SWF", () => 
   }
 });
 
+test("a CWS whose stream holds more than its header says reads as far as the header", () => {
+  // A game's packer left 204 bytes after its End tag inside the stream; Flash Player plays it.
+  const plain = fws(body);
+  const junk = new Uint8Array(204).fill(0x5a);
+  const longer = new Uint8Array(plain.length + junk.length);
+  longer.set(plain);
+  longer.set(junk, plain.length);
+  const compressed = cws(longer);
+  new DataView(compressed.buffer).setUint32(4, plain.length, true);
+  assert.deepEqual(decompressSwf(compressed), plain);
+});
+
 test("a SWF's start decompresses alone, as far as asked", () => {
   const plain = fws(body);
   for (const swf of [plain, cws(plain), zws(plain)]) {
