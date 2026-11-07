@@ -1,4 +1,4 @@
-import { GlState } from "@swf2es/context3d/device";
+import { GlState, linkProgram } from "@swf2es/context3d/device";
 import {
   CLEAR,
   COMPOSITE,
@@ -38,6 +38,7 @@ import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
 import { KernelPrograms } from "./kernels.js";
+import { LAYER_UNIT, TEXTURE_UNIT } from "./programs.js";
 import { Stage } from "./stage.js";
 import { type Layer, type Open, objectOf, type Target, TargetPool } from "./targets.js";
 
@@ -74,6 +75,41 @@ function direct(mode: number): boolean {
  * layers (holds.ts), the composites (composite.ts) and the stage's way onto
  * the canvas (stage.ts).
  */
+/** compositeOver's program and its uniforms. */
+interface OverProgram {
+  program: WebGLProgram;
+  at: WebGLUniformLocation | null;
+  opaque: WebGLUniformLocation | null;
+}
+
+/** A triangle over the viewport, of no attributes. */
+const OVER_VERTEX = `#version 300 es
+void main() {
+  vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2));
+  gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+}`;
+
+/** Flash's source over on whole bytes (WebGLBackend.compositeOver), both textures read at the pixel's own texel. */
+const OVER_FRAGMENT = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uSource;
+uniform sampler2D uBelow;
+uniform ivec2 uAt;
+uniform bool uOpaque;
+out vec4 finalColor;
+void main() {
+  ivec2 p = ivec2(gl_FragCoord.xy) - uAt;
+  ivec4 s = ivec4(round(texelFetch(uSource, p, 0) * 255.0));
+  ivec4 d = ivec4(round(texelFetch(uBelow, p, 0) * 255.0));
+  ivec4 o = s.a == 255 ? s : s.a == 0 ? d : min(ivec4(255), s + ((d * (256 - s.a)) >> 8));
+  if (uOpaque) {
+    o.a = 255;
+  }
+
+  finalColor = vec4(o) / 255.0;
+}`;
+
 export class WebGLBackend {
   readonly gl: WebGL2RenderingContext;
   readonly state: GlState;
@@ -103,6 +139,8 @@ export class WebGLBackend {
   private readonly rect = { x: 0, y: 0, width: 0, height: 0 };
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
+  /** The program `compositeOver` draws with, linked as first used; null till then and after a lost context. */
+  private overProgram: OverProgram | null = null;
   /** Framebuffers onto registry textures, drawn into or read, by texture id, with the texture they were made for. */
   private textureFramebuffers: ({ texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null)[] =
     [];
@@ -184,6 +222,7 @@ export class WebGLBackend {
     this.gpu.setUp();
     // The context's own, gone with it.
     this.textureFramebuffers = [];
+    this.overProgram = null;
   }
 
   /**
@@ -485,8 +524,9 @@ export class WebGLBackend {
   /**
    * BitmapData.draw on the GPU: the commands drawn as `snapshot` draws
    * them, into a layer of their own (the object may show the texture
-   * itself), then over texture `id` of the registry at (x, y), source over,
-   * texel for texel, where it stays: nothing is read back. Pending
+   * itself), then over texture `id` of the registry at (x, y), as Flash's
+   * store composites source over (compositeOver), where it stays: nothing
+   * is read back; `opaque` for an opaque store's texture. Pending
    * textures, the one drawn into among them, are uploaded first. Whether
    * it was drawn; not on a lost context or without the texture.
    */
@@ -505,6 +545,7 @@ export class WebGLBackend {
     id: number,
     x: number,
     y: number,
+    opaque: boolean,
   ): boolean {
     const gl = this.gl;
     if (gl.isContextLost()) {
@@ -526,24 +567,72 @@ export class WebGLBackend {
     );
     const into = this.textureFramebuffer(id);
     if (into) {
-      const size = textures.get(id);
-      this.filters.over(
-        layer,
-        width,
-        height,
-        {
-          framebuffer: into,
-          texture: this.gpu.textures[id] as WebGLTexture,
-          width: size?.width ?? 0,
-          height: size?.height ?? 0,
-        },
-        x,
-        y,
-      );
+      this.compositeOver(layer, into, x, y, width, height, opaque);
     }
 
     this.pool.giveLayer(layer);
     return into !== null;
+  }
+
+  /**
+   * `layer`'s first `width` by `height` texels over those of `into` at
+   * (x, y), as Flash's store composites source over, a channel at a time
+   * on whole bytes: s + ((d * (256 - sa)) >> 8), at most 255, a source of
+   * alpha 255 put as it is and one of 0 leaving what was there; an opaque
+   * store's alpha 255 after. GL's own blending rounds where Flash floors,
+   * a level apart: the destination's rectangle is copied into a layer of
+   * its own first, and both read exactly.
+   */
+  private compositeOver(
+    layer: Layer,
+    into: WebGLFramebuffer,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    opaque: boolean,
+  ): void {
+    const gl = this.gl;
+    const state = this.state;
+    state.scissor(null);
+    const below = this.pool.takeLayer(width, height);
+    this.blit(into, x, y, below.framebuffer, 0, 0, width, height);
+    const over = this.overProgramMade();
+    state.bindFramebuffer(into);
+    state.viewport(x, y, width, height);
+    state.colorMask(15);
+    state.stencil(null);
+    state.setBlend(null);
+    state.useProgram(over.program);
+    state.bindVertexArray(null);
+    const nearest = this.gpu.sampler(0);
+    state.bindTexture(TEXTURE_UNIT, layer.texture);
+    state.bindSampler(TEXTURE_UNIT, nearest);
+    state.bindTexture(LAYER_UNIT, below.texture);
+    state.bindSampler(LAYER_UNIT, nearest);
+    gl.uniform2i(over.at, x, y);
+    gl.uniform1i(over.opaque, opaque ? 1 : 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    this.pool.giveLayer(below);
+  }
+
+  /** compositeOver's program, linked as first asked for. */
+  private overProgramMade(): OverProgram {
+    if (this.overProgram) {
+      return this.overProgram;
+    }
+
+    const gl = this.gl;
+    const program = linkProgram(gl, OVER_VERTEX, OVER_FRAGMENT);
+    this.state.useProgram(program);
+    gl.uniform1i(gl.getUniformLocation(program, "uSource"), TEXTURE_UNIT);
+    gl.uniform1i(gl.getUniformLocation(program, "uBelow"), LAYER_UNIT);
+    this.overProgram = {
+      program,
+      at: gl.getUniformLocation(program, "uAt"),
+      opaque: gl.getUniformLocation(program, "uOpaque"),
+    };
+    return this.overProgram;
   }
 
   /**
@@ -809,6 +898,11 @@ export class WebGLBackend {
     }
 
     this.textureFramebuffers = [];
+    if (this.overProgram) {
+      this.gl.deleteProgram(this.overProgram.program);
+      this.overProgram = null;
+    }
+
     this.gpu.destroy();
     this.state.forget();
   }

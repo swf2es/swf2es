@@ -10161,9 +10161,34 @@ export const cases: PlayerCase[] = [
     script: "DrawScroll",
     frames: 6,
     capture: [2, 4, 6],
-    // The half-green square drawn over the opaque bitmap's blue rounds a level apart: the
-    // draw's own compositing, the same whether the operations after it run on the GPU or not.
-    tolerance: 1,
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // Drawn bitmaps unshown for longer than an idle texture is kept, then read and shown
+    // (scripts/DrawIdle.as).
+    name: "draw-idle",
+    // At 60 frames a second, as adl's job ends 20 s without a word from it.
+    swf: (abc) =>
+      w.swf({
+        width: 120,
+        height: 50,
+        frameRate: 60,
+        frameCount: 1,
+        tags: [
+          w.fileAttributes(true),
+          w.backgroundColor(0xffffff),
+          w.doAbc(abc, "DrawIdle"),
+          w.symbolClass([[0, "DrawIdle"]]),
+          w.showFrame(),
+          w.end(),
+        ],
+      }),
+    script: "DrawIdle",
+    traced: true,
+    frames: 322,
+    capture: [100, 200, 322],
+    tolerance: 0,
     maxOutliers: 0,
   },
   {

@@ -1275,6 +1275,7 @@ export class RenderView implements Drawer {
         handle.id,
         x,
         y,
+        !store.transparent,
       ),
     );
     if (!drawn) {

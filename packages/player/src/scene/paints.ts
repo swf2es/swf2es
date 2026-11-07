@@ -70,7 +70,12 @@ class StoreCopy implements GpuCopy {
   read(): Uint32Array {
     const bytes = this.paints.readStore(this.handle, this.store.width, this.store.height);
     // Gone with a lost context: what the CPU held before the draws.
-    return bytes ? argbOf(bytes) : this.store.lostOnGpu(this);
+    if (!bytes) {
+      return this.store.lostOnGpu(this);
+    }
+
+    this.paints.readBack(this.store);
+    return argbOf(bytes);
   }
 
   copy(source: BitmapStore, rect: PixelRect, dx: number, dy: number): boolean {
@@ -135,16 +140,10 @@ export class Paints {
     const kept = this.stores.get(store);
     if (kept && this.textures.alive(kept.handle)) {
       const id = kept.handle.id;
-      // What was drawn into the texture is newest there: shown as it is.
+      // What was drawn, filled or copied into the texture is newest there: shown as it is.
       if (kept.copy !== null && store.gpu === kept.copy && store.newerOnGpu) {
+        kept.version = store.version;
         return kept.handle;
-      }
-
-      // Read back since: idle again as any other.
-      if (kept.pinned) {
-        kept.pinned = false;
-        this.collected.unregister(kept);
-        this.textures.idleFor(id, idle ?? IDLE_FRAMES);
       }
 
       if (kept.version !== store.version) {
@@ -195,6 +194,19 @@ export class Paints {
       kept.pinned = true;
       this.textures.idleFor(kept.handle.id, Number.POSITIVE_INFINITY);
       this.collected.register(store, kept.handle, kept);
+    }
+  }
+
+  /**
+   * `store`'s texture read back: the CPU holds the pixels again, and the
+   * texture goes idle as any other.
+   */
+  readBack(store: BitmapStore): void {
+    const kept = this.stores.get(store);
+    if (kept?.pinned) {
+      kept.pinned = false;
+      this.collected.unregister(kept);
+      this.textures.idleFor(kept.handle.id, IDLE_FRAMES);
     }
   }
 
