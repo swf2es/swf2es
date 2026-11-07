@@ -14,7 +14,7 @@ import {
   type WorkerHost,
 } from "@swf2es/player";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
-import { AirApp, elementWindow } from "./air.js";
+import { AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
 import {
   codegenForPlayer,
   configuration,
@@ -262,7 +262,13 @@ function fetchFor(
 
   return (request, signal) => {
     const local = app.fetch(request);
-    return local ? Promise.resolve(local) : fetchOf(request, signal);
+    if (!local) {
+      return fetchOf(request, signal);
+    }
+
+    // A file the application does not hold, from the directory it came from.
+    const remote = local.bytes ? null : app.remote(request.url);
+    return remote ? fetchOf({ ...request, url: remote }, signal) : Promise.resolve(local);
   };
 }
 
@@ -450,26 +456,31 @@ export class Swf2esPlayerElement extends ElementBase {
       air: null,
     };
     if (source instanceof AirApp) {
-      const exit = (code: number) => {
-        // After the script that called it, which a destroy would pull from under it.
-        queueMicrotask(() => {
-          if (this.#session === session) {
-            this.#destroy();
-            dispatch(this, new CustomEvent("airexit", { detail: { code } }));
-          }
-        });
-      };
-      session.air = {
-        app: source,
-        application: source.application(elementWindow(this, source.descriptor.title), args, exit),
-        fileSystem: source.fileSystem(),
-      };
+      this.#playAsAir(session, source, args);
     }
 
     this.#session = session;
     this.#loaded = typeof source === "string" || source instanceof URL ? String(source) : null;
     void this.#start(source instanceof AirApp ? null : source, session, ready);
     return ready.promise;
+  }
+
+  /** `session` playing `app`, with `args` its launch's arguments and this element its window. */
+  #playAsAir(session: Session, app: AirApp, args: readonly string[]): void {
+    const exit = (code: number) => {
+      // After the script that called it, which a destroy would pull from under it.
+      queueMicrotask(() => {
+        if (this.#session === session) {
+          this.#destroy();
+          dispatch(this, new CustomEvent("airexit", { detail: { code } }));
+        }
+      });
+    };
+    session.air = {
+      app,
+      application: app.application(elementWindow(this, app.descriptor.title), args, exit),
+      fileSystem: app.fileSystem(),
+    };
   }
 
   async #start(source: SwfSource | null, session: Session, ready: Deferred): Promise<void> {
@@ -499,6 +510,14 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       const swf = readSwf(bytes);
+      // A SWF that names what only AIR has plays as an AIR application, as
+      // adl would run it, rather than fail as Flash Player's plugin does.
+      if (!session.air && !configuration().air && isAs3(swf) && namesAir(swf)) {
+        const app = airAppForSwf(bytes, url);
+        this.#playAsAir(session, app, []);
+        url = `app:/${encodeURIComponent(app.descriptor.content)}`;
+      }
+
       // An AIR application's window is the size its descriptor gives, where it gives one.
       const descriptor = session.air?.app.descriptor;
       this.#stageSize = [
