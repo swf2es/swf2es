@@ -3694,6 +3694,32 @@ function avm1Swf(version: number, defs: Uint8Array[], frames: Uint8Array[][]): U
   });
 }
 
+// A NaN used as a property's name in a SWF of `version`: an array's
+// element read and written, an object holding both "0" and "NaN", what
+// for-in lists, a deletion and a member of this. Windows' Flash Player (and
+// AIR) name it "0" in a SWF 7's member actions, as a maze game's wall checks
+// rely on, though hasOwnProperty still names it "NaN"; SWF 6 and 8 name it
+// "NaN", as does Linux's plugin in all three.
+function avm1NanNames(version: number): Uint8Array {
+  const source = `var n = 0 / 0;
+var a = [10, 11, 12];
+trace("a[NaN] " + a[n] + " a[0.5] " + a[0.5] + " a['NaN'] " + a["NaN"]);
+var o = new Object();
+o["0"] = "zero";
+o["NaN"] = "nan";
+trace("o[NaN] " + o[n] + " hasOwnProperty(NaN) " + o.hasOwnProperty(n));
+var b = [];
+b[n] = 5;
+var keys = "";
+for (var k in b) { keys += k + ","; }
+trace("b[NaN] = 5: b[0] " + b[0] + " length " + b.length + " keys " + keys);
+delete b[n];
+trace("deleted: length " + b.length + " b[0] " + b[0]);
+this["0"] = "this zero";
+trace("this[NaN] " + this[n]);`;
+  return avm1Swf(version, [], [[as1(source, version)]]);
+}
+
 // Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
 // "Clips and paths"): `a` and `c` of a clip of three frames, which places
 // `b` of another, beside an unnamed square and `Beta`; each clip traces its
@@ -10670,6 +10696,17 @@ export const cases: PlayerCase[] = [
       traced: true,
       frames: 8,
       capture: [8],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-nan-names-swf${version}`,
+      swf: avm1NanNames(version),
+      traced: true,
+      frames: 1,
+      capture: [],
       tolerance: 0,
       maxOutliers: 0,
     }),

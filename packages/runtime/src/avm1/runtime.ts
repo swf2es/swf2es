@@ -315,6 +315,17 @@ function operations(version: number): Operations {
     const text = extract(stringOf(s, version), i, n);
     return bytes ? text : wellFormed(text);
   };
+  /**
+   * A member's name, as GetMember, SetMember and Delete take it: in a SWF
+   * 7, a NaN names element 0 ("0"), as Windows' Flash Player and AIR read,
+   * write and delete it (avm1-nan-names-swf7); SWF 6's and 8's, and any
+   * name a method converts (hasOwnProperty's), name it "NaN".
+   */
+  const memberName =
+    version === 7
+      ? (name: Value) =>
+          typeof name === "number" && Number.isNaN(name) ? "0" : nameOf(name, version)
+      : (name: Value) => nameOf(name, version);
 
   return {
     version,
@@ -468,7 +479,7 @@ function operations(version: number): Operations {
         }
       }
 
-      const key = nameOf(name, version);
+      const key = memberName(name);
       if (object instanceof Avm1Super) {
         return get(object, key, version, object.self);
       }
@@ -496,7 +507,7 @@ function operations(version: number): Operations {
         }
       }
 
-      const key = nameOf(name, version);
+      const key = memberName(name);
       if (object instanceof Avm1Super) {
         set(object.self, key, value, version);
       } else if (object instanceof Avm1Object) {
@@ -509,7 +520,7 @@ function operations(version: number): Operations {
       }
     },
     deleteMember(_, name, object) {
-      const key = nameOf(name, version);
+      const key = memberName(name);
       const o = live(object);
       return o instanceof Avm1Object && removeOwn(o, key, version);
     },
