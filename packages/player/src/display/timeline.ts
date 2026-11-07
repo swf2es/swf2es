@@ -442,6 +442,7 @@ function shapeOf(
   bytes: Uint8Array,
   t: Tag,
   bitmap: (id: number) => BitmapCharacter | null,
+  version: number,
 ): ShapeCharacter {
   const tag = bytes.subarray(t.offset, t.offset + t.length);
   const hash = tagHash(t.code, tag);
@@ -452,7 +453,7 @@ function shapeOf(
     }
   }
 
-  const shape = readShape(bytes, t.code, t.offset, t.length);
+  const shape = readShape(bytes, t.code, t.offset, t.length, version);
   // Its bitmap fills' bitmaps as the SWF has them now, which defines them before the shapes that
   // use them; a shape with any is the SWF's own, not shared.
   // The parse is not kept: no function made here refers to it, so its records go.
@@ -481,7 +482,7 @@ function shapeOf(
     // application's SWFs define are never shown, and their layers were most of its memory.
     get layers() {
       layers ??= shapeLayers(
-        readShape(bytes, t.code, t.offset, t.length),
+        readShape(bytes, t.code, t.offset, t.length, version),
         (id) => bitmaps.get(id) ?? null,
       );
       return layers;
@@ -505,6 +506,8 @@ function timelineOf(
   library: Map<number, Character>,
   jpeg: { tables: Uint8Array | null },
   actions: ActionList | null,
+  // The SWF's version, which its shapes' bitmap fills are read by.
+  version: number,
 ): Timeline {
   const avm1 = actions !== null;
   const frames: FrameCommand[][] = [[]];
@@ -575,13 +578,13 @@ function timelineOf(
           const c = library.get(id);
           return c?.type === "bitmap" ? c : null;
         };
-        const shape = shapeOf(bytes, t, bitmap);
+        const shape = shapeOf(bytes, t, bitmap, version);
         library.set(shape.id, shape);
         break;
       }
       case tags.DefineMorphShape:
       case tags.DefineMorphShape2: {
-        const morph = readMorphShape(bytes, t.code, t.offset, t.length);
+        const morph = readMorphShape(bytes, t.code, t.offset, t.length, version);
         library.set(morph.id, {
           type: "morph",
           id: morph.id,
@@ -600,7 +603,7 @@ function timelineOf(
           type: "sprite",
           id: sprite.id,
           timeline: {
-            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, actions),
+            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, actions, version),
             length: t.length - 4,
           },
           grid: null,
@@ -802,6 +805,7 @@ export function readLibrary(swf: Swf): Library {
     characters,
     { tables: null },
     actions,
+    swf.header.version,
   );
   const fonts = new FontSet();
   for (const c of characters.values()) {

@@ -5841,6 +5841,67 @@ function bitmapFills(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Bitmap fills in an AVM1 SWF of `version`: a 4 x 4 bitmap, every pixel
+// its own colour, at four times its size in a smoothed (0x41) and an
+// unsmoothed (0x43) clipped fill, and a smoothed one the timeline moves a
+// pixel in each of frames 2 to 4 and then leaves. Flash Player 32 (the
+// browser plugin) leaves every bitmap fill of a SWF before 8 unsmoothed,
+// still or moving, as Ruffle does, and smooths 0x41 from SWF 8 on; AIR's
+// runtime smooths it in SWF 7 too, so adl draws the SWF 7 case from the same
+// movie with `smoothed` an unsmoothed fill (0x43), as the plugin shows it.
+function avm1BitmapSmoothing(version: number, smoothed: 0x41 | 0x43 = 0x41): Uint8Array {
+  const pixels: number[] = [];
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      pixels.push(0xff, x * 80, y * 80, (x + y) % 2 === 0 ? 0xc0 : 0x20);
+    }
+  }
+
+  const bitmap = w.tag(
+    36,
+    Uint8Array.from([1, 0, 5, 4, 0, 4, 0, ...zlibCompress(Uint8Array.from(pixels))]),
+    true,
+  );
+  const square = (id: number, type: 0x41 | 0x43) =>
+    w.shape({
+      id,
+      bounds: [0, 320, 0, 320],
+      fills: [{ bitmap: 1, type, matrix: { a: 80, d: 80 } }],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [320, 0] },
+            { line: [320, 320] },
+            { line: [0, 320] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+      version: 3,
+    });
+  const moved = (frame: number) =>
+    w.place({ depth: 3, move: true, matrix: { tx: (10 + frame) * 20, ty: 60 * 20 } });
+
+  return avm1Swf(
+    version,
+    [bitmap, square(10, smoothed), square(11, 0x43)],
+    [
+      [
+        w.place({ depth: 1, character: 10, matrix: { tx: 10 * 20, ty: 10 * 20 } }),
+        w.place({ depth: 2, character: 11, matrix: { tx: 50 * 20, ty: 10 * 20 } }),
+        w.place({ depth: 3, character: 10, matrix: { tx: 11 * 20, ty: 60 * 20 } }),
+      ],
+      [moved(2)],
+      [moved(3)],
+      [moved(4)],
+      [],
+      [as1("stop();", version)],
+    ],
+  );
+}
+
 // Gradient fills (scripts/Gradients.as): the SWF's linear, radial and
 // focal gradients, the gradient square scaled into 60 by 30 pixel rects.
 function gradients(abc: Uint8Array): Uint8Array {
@@ -9204,6 +9265,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-bitmap-smoothing-swf${version}`,
+      swf: avm1BitmapSmoothing(version),
+      ...(version < 8 ? { flash: avm1BitmapSmoothing(version, 0x43) } : {}),
+      frames: 6,
+      capture: [1, 4, 6],
+      tolerance: 2,
+      maxOutliers: 0,
+    }),
+  ),
   {
     name: "bitmap-fills",
     swf: bitmapFills,
