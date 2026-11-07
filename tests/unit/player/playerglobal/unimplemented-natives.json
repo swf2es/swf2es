@@ -591,11 +591,6 @@
   "air": {
     "why": "AIR's API, which Flash Player lacks: an [API] version of AIR's alone on the member or its class, as our playerglobal gives the classes only AIR has that Flash's leaves unmarked (tools/playerglobal-air.ts). A SWF for the browser does not call them.",
     "natives": [
-      "flash.data::EncryptedLocalStore.get:isSupported",
-      "flash.data::EncryptedLocalStore.getItem",
-      "flash.data::EncryptedLocalStore.removeItem",
-      "flash.data::EncryptedLocalStore.reset",
-      "flash.data::EncryptedLocalStore.setItem",
       "flash.data::SQLColumnSchema#get:allowNull",
       "flash.data::SQLColumnSchema#get:autoIncrement",
       "flash.data::SQLColumnSchema#get:dataType",
