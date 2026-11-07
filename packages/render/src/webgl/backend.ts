@@ -103,6 +103,9 @@ export class WebGLBackend {
   private readonly rect = { x: 0, y: 0, width: 0, height: 0 };
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
+  /** Framebuffers onto registry textures, drawn into or read, by texture id, with the texture they were made for. */
+  private textureFramebuffers: ({ texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null)[] =
+    [];
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
@@ -179,6 +182,8 @@ export class WebGLBackend {
     this.stage.setUp();
     this.atlas.setUp();
     this.gpu.setUp();
+    // The context's own, gone with it.
+    this.textureFramebuffers = [];
   }
 
   /**
@@ -478,6 +483,218 @@ export class WebGLBackend {
   }
 
   /**
+   * BitmapData.draw on the GPU: the commands drawn as `snapshot` draws
+   * them, into a layer of their own (the object may show the texture
+   * itself), then over texture `id` of the registry at (x, y), source over,
+   * texel for texel, where it stays: nothing is read back. Pending
+   * textures, the one drawn into among them, are uploaded first. Whether
+   * it was drawn; not on a lost context or without the texture.
+   */
+  drawIntoTexture(
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    width: number,
+    height: number,
+    samples: number,
+    id: number,
+    x: number,
+    y: number,
+  ): boolean {
+    const gl = this.gl;
+    if (gl.isContextLost()) {
+      return false;
+    }
+
+    const layer = this.drawSampled(
+      commands,
+      scene,
+      rows,
+      geometries,
+      textures,
+      filters,
+      keeps,
+      target,
+      width,
+      height,
+      samples,
+    );
+    const into = this.textureFramebuffer(id);
+    if (into) {
+      const size = textures.get(id);
+      this.filters.over(
+        layer,
+        width,
+        height,
+        {
+          framebuffer: into,
+          texture: this.gpu.textures[id] as WebGLTexture,
+          width: size?.width ?? 0,
+          height: size?.height ?? 0,
+        },
+        x,
+        y,
+      );
+    }
+
+    this.pool.giveLayer(layer);
+    return into !== null;
+  }
+
+  /**
+   * Texture `id`'s `width` by `height` texels read back, premultiplied RGBA
+   * row by row; null on a lost context or without the texture.
+   */
+  readTexture(id: number, width: number, height: number): Uint8Array | null {
+    const framebuffer = this.gl.isContextLost() ? null : this.textureFramebuffer(id);
+    if (!framebuffer) {
+      return null;
+    }
+
+    const bytes = new Uint8Array(width * height * 4);
+    this.state.bindFramebuffer(framebuffer);
+    this.gl.readPixels(0, 0, width, height, this.gl.RGBA, this.gl.UNSIGNED_BYTE, bytes);
+    return bytes;
+  }
+
+  /**
+   * Texture `id`'s `width` by `height` texels at (x, y) cleared to `pixel`,
+   * premultiplied ARGB, which comes back exactly; false on a lost context
+   * or without the texture.
+   */
+  fillTexture(
+    textures: Textures,
+    id: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    pixel: number,
+  ): boolean {
+    const gl = this.gl;
+    this.gpu.uploadTextures(textures);
+    const framebuffer = gl.isContextLost() ? null : this.textureFramebuffer(id);
+    if (!framebuffer) {
+      return false;
+    }
+
+    this.state.bindFramebuffer(framebuffer);
+    this.state.colorMask(15);
+    this.state.scissor([x, y, width, height]);
+    gl.clearColor(
+      ((pixel >>> 16) & 0xff) / 255,
+      ((pixel >>> 8) & 0xff) / 255,
+      (pixel & 0xff) / 255,
+      (pixel >>> 24) / 255,
+    );
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    this.state.scissor(null);
+    return true;
+  }
+
+  /**
+   * Texture `from`'s `width` by `height` texels at (x, y) copied to (dx, dy)
+   * of texture `to`, replacing what was there: as a memmove where they are
+   * one texture, through a layer of its own, as a texture copied into
+   * itself is GL's feedback loop. Pending textures are uploaded first.
+   * False on a lost context or without either texture.
+   */
+  copyTexture(
+    textures: Textures,
+    from: number,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    to: number,
+    dx: number,
+    dy: number,
+  ): boolean {
+    const gl = this.gl;
+    this.gpu.uploadTextures(textures);
+    const source = gl.isContextLost() ? null : this.textureFramebuffer(from);
+    const target = source ? this.textureFramebuffer(to) : null;
+    if (!source || !target) {
+      return false;
+    }
+
+    this.state.scissor(null);
+    if (from !== to) {
+      this.blit(source, x, y, target, dx, dy, width, height);
+      return true;
+    }
+
+    const between = this.pool.takeLayer(width, height);
+    this.state.bindFramebuffer(between.framebuffer);
+    gl.invalidateSubFramebuffer(gl.FRAMEBUFFER, [gl.COLOR_ATTACHMENT0], 0, 0, width, height);
+    this.blit(source, x, y, between.framebuffer, 0, 0, width, height);
+    this.blit(between.framebuffer, 0, 0, target, dx, dy, width, height);
+    this.pool.giveLayer(between);
+    return true;
+  }
+
+  /** `width` by `height` texels at (x, y) of `from` blitted to (dx, dy) of `to`, the state cache's binding `to` after. */
+  private blit(
+    from: WebGLFramebuffer,
+    x: number,
+    y: number,
+    to: WebGLFramebuffer,
+    dx: number,
+    dy: number,
+    width: number,
+    height: number,
+  ): void {
+    const gl = this.gl;
+    this.state.bindFramebuffer(to);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
+    gl.blitFramebuffer(
+      x,
+      y,
+      x + width,
+      y + height,
+      dx,
+      dy,
+      dx + width,
+      dy + height,
+      gl.COLOR_BUFFER_BIT,
+      gl.NEAREST,
+    );
+    // Bound as the state cache has it.
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, to);
+  }
+
+  /** A framebuffer onto texture `id`, made as first asked for; null for an id of no texture. */
+  private textureFramebuffer(id: number): WebGLFramebuffer | null {
+    const gl = this.gl;
+    const texture = this.gpu.textures[id] ?? null;
+    const known = this.textureFramebuffers[id] ?? null;
+    if (known?.texture === texture) {
+      return known.framebuffer;
+    }
+
+    // The id names another texture now: its framebuffer goes with the one it was made for.
+    if (known) {
+      gl.deleteFramebuffer(known.framebuffer);
+      this.textureFramebuffers[id] = null;
+    }
+
+    if (!texture) {
+      return null;
+    }
+
+    const framebuffer = gl.createFramebuffer() as WebGLFramebuffer;
+    this.state.bindFramebuffer(framebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    this.textureFramebuffers[id] = { texture, framebuffer };
+    return framebuffer;
+  }
+
+  /**
    * A 3D object's bitmap drawn (PLANE): the commands, as `execute` draws
    * them, into a layer `samples` times the size of a `width` by `height`
    * bitmap a side, halved till a sample a texel, and kept as kept output
@@ -585,6 +802,13 @@ export class WebGLBackend {
 
     this.pool.destroy();
     this.stage.destroy();
+    for (const known of this.textureFramebuffers) {
+      if (known) {
+        this.gl.deleteFramebuffer(known.framebuffer);
+      }
+    }
+
+    this.textureFramebuffers = [];
     this.gpu.destroy();
     this.state.forget();
   }

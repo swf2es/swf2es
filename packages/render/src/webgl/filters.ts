@@ -193,6 +193,26 @@ export class FilterRunner<T extends FilterTarget> {
   }
 
   /**
+   * `input`'s first `width` by `height` texels drawn over `output`'s at
+   * (x, y), texel for texel, premultiplied source over what is there:
+   * BitmapData.draw's object, drawn apart, into the bitmap's texture.
+   */
+  over(input: T, width: number, height: number, output: FilterTarget, x: number, y: number): void {
+    this.resolution = 1;
+    this.draw(
+      this.use("copy", COPY),
+      input,
+      width,
+      height,
+      { ...output, x, y },
+      width,
+      height,
+      false,
+      this.gl.ONE_MINUS_SRC_ALPHA,
+    );
+  }
+
+  /**
    * `plan`'s passes drawn in order, its slot 0 `input`: each slot's target
    * taken as a pass first draws into it and given back after the last pass
    * that reads it, but the one the plan leaves its output in.
@@ -398,7 +418,8 @@ export class FilterRunner<T extends FilterTarget> {
   /**
    * `pass` drawn into `output`'s first `width` by `height` texels, the rest
    * of it cleared, reading `input` from its corner over `readWidth` by
-   * `readHeight` texels.
+   * `readHeight` texels; with `over`, the destination factor of a
+   * premultiplied blend over what is there, uncleared, else replacing it.
    */
   private draw(
     pass: Pass,
@@ -409,6 +430,7 @@ export class FilterRunner<T extends FilterTarget> {
     width: number,
     height: number,
     clear = true,
+    over: number | null = null,
   ): void {
     const gl = this.gl;
     const state = this.state;
@@ -418,7 +440,11 @@ export class FilterRunner<T extends FilterTarget> {
     state.viewport(x, y, width, height);
     state.colorMask(15);
     state.stencil(null);
-    state.setBlend(null);
+    if (over === null) {
+      state.setBlend(null);
+    } else {
+      state.setBlend(gl.ONE, over);
+    }
     if (clear) {
       state.scissor([x, y, output.width, output.height]);
       gl.clearColor(0, 0, 0, 0);

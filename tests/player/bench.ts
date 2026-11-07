@@ -118,6 +118,12 @@
 // its meshes: what drawing them anew each frame costs, and whether it
 // leaks. --culled has it cull half of them.
 //
+// --stamps N plays instead a stage-sized BitmapData shown in a Bitmap,
+// into which a script draws N small shapes each frame, each at a place of
+// its own, and never reads it, as a game stamps its blood and decals into
+// its level's backdrop: what a draw costs that only shows (with --counts,
+// perFrame.readbacks).
+//
 // --text N plays instead N TextFields of an embedded font, with advanced
 // anti-aliasing (--normal: normal), white and black at four sizes; each
 // frame a tenth of them take new text and a seventh move half a pixel:
@@ -140,7 +146,7 @@
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
-//     | --scroll N
+//     | --scroll N | --stamps N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
@@ -177,6 +183,7 @@ const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
 const scrolled = option("scroll", 0);
+const stamps = option("stamps", 0);
 const triangles = option("triangles", 0);
 const texts = option("text", 0);
 const cpuProfile = args.includes("--cpu-profile")
@@ -935,6 +942,69 @@ const SCROLL_SOURCE = `package {
 }
 `;
 
+/** The stamps' class (--stamps): COUNT shapes drawn each frame into a bitmap the stage's size. */
+const STAMPS_SOURCE = `package {
+  import flash.display.Bitmap;
+  import flash.display.BitmapData;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.geom.Matrix;
+
+  public class Main extends Sprite {
+    private var data:BitmapData;
+    private var stamp:Shape = new Shape();
+    private var at:Matrix = new Matrix();
+    private var frame:int = 0;
+
+    public function Main() {
+      data = new BitmapData(WIDTH, HEIGHT, false, 0x203040);
+      addChild(new Bitmap(data));
+      stamp.graphics.beginFill(0x900010, 0.7);
+      stamp.graphics.drawCircle(0, 0, 9);
+      stamp.graphics.drawCircle(12, 5, 5);
+      stamp.graphics.drawCircle(-8, 9, 4);
+      stamp.graphics.endFill();
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      for (var i:int = 0; i < COUNT; i++) {
+        var k:int = frame * COUNT + i;
+        at.identity();
+        at.rotate(k);
+        at.translate((k * 7919) % data.width, (k * 104729) % data.height);
+        data.draw(stamp, at);
+      }
+    }
+  }
+}
+`;
+
+/** The stamps (--stamps): `count` shapes drawn into a stage-sized bitmap each frame, never read. */
+function stampsSwf(count: number): Uint8Array {
+  const source = STAMPS_SOURCE.replaceAll("COUNT", String(count))
+    .replace("WIDTH", String(WIDTH))
+    .replace("HEIGHT", String(HEIGHT));
+  const abc = compiler()(`BenchStamps${count}`, source);
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x102040),
+      w.doAbc(abc, `BenchStamps${count}`),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** N TextFields in Stem (cases.ts), advanced or normal; a tenth take new text a frame, a seventh move. */
 function textSwf(count: number, normal: boolean): Uint8Array {
   const source = `package {
@@ -1410,33 +1480,35 @@ const swf =
       ? trianglesSwf(triangles, args.includes("--culled"))
       : scrolled > 0
         ? scrollSwf(scrolled)
-        : town > 0
-          ? townSwf(town)
-          : toggleBranches > 0
-            ? branchSwf(toggleBranches)
-            : toggle > 0
-              ? toggleSwf(toggle)
-              : toggleStatic > 0
-                ? toggleStaticSwf(toggleStatic)
-                : scripted > 0
-                  ? scriptedSwf(scripted, args.includes("--still"))
-                  : pulse > 0
-                    ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
-                    : masks > 0
-                      ? masksSwf(masks, args.includes("--unmasked"))
-                      : blends > 0
-                        ? blendsSwf(blends)
-                        : branches > 0
-                          ? branchSwf(branches)
-                          : rig > 0
-                            ? rigSwf(
-                                rig,
-                                args.includes("--swap"),
-                                args.includes("--fresh"),
-                                args.includes("--blurred") || filtered > 0,
-                                args.includes("--glide"),
-                              )
-                            : synthetic();
+        : stamps > 0
+          ? stampsSwf(stamps)
+          : town > 0
+            ? townSwf(town)
+            : toggleBranches > 0
+              ? branchSwf(toggleBranches)
+              : toggle > 0
+                ? toggleSwf(toggle)
+                : toggleStatic > 0
+                  ? toggleStaticSwf(toggleStatic)
+                  : scripted > 0
+                    ? scriptedSwf(scripted, args.includes("--still"))
+                    : pulse > 0
+                      ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
+                      : masks > 0
+                        ? masksSwf(masks, args.includes("--unmasked"))
+                        : blends > 0
+                          ? blendsSwf(blends)
+                          : branches > 0
+                            ? branchSwf(branches)
+                            : rig > 0
+                              ? rigSwf(
+                                  rig,
+                                  args.includes("--swap"),
+                                  args.includes("--fresh"),
+                                  args.includes("--blurred") || filtered > 0,
+                                  args.includes("--glide"),
+                                )
+                              : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);

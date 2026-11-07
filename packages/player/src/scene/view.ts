@@ -148,7 +148,13 @@ export class RenderView implements Drawer {
   private filters = new Filters();
   private readonly lineCache: LineCache;
   private readonly parts: Parts;
-  private readonly paints = new Paints(this.textures);
+  private readonly paints = new Paints(this.textures, {
+    read: (id, width, height) => this.backend.readTexture(id, width, height),
+    fill: (id, r, pixel) =>
+      this.backend.fillTexture(this.textures, id, r.x, r.y, r.width, r.height, pixel),
+    copy: (from, r, to, dx, dy) =>
+      this.backend.copyTexture(this.textures, from, r.x, r.y, r.width, r.height, to, dx, dy),
+  });
   private readonly staleShapes = new StaleShapes();
   private readonly textItems: TextItems;
   private readonly advancedTexts: AdvancedTexts;
@@ -1205,6 +1211,93 @@ export class RenderView implements Drawer {
     height: number,
     samples = 4,
   ): Uint32Array {
+    const pixels = this.drawAlone(o, m, width, height, samples, (n) =>
+      argbOf(
+        this.backend.snapshot(
+          this.commands,
+          this.scene,
+          this.rows,
+          this.geometries,
+          this.textures,
+          this.filters,
+          this.keeps,
+          this.target,
+          width,
+          height,
+          n,
+        ),
+      ),
+    );
+    return pixels ?? new Uint32Array(Math.max(0, width * height));
+  }
+
+  /**
+   * `o` drawn as `snapshot` draws it, then composited source over into
+   * `store` at (x, y) on the GPU, into the store's texture, where it stays
+   * till a script reads the pixels (Paints): nothing is read back, nor the
+   * store uploaded again to show it. Not for a store too large for a
+   * texture, nor an opaque one holding alpha, whose pixels read two ways
+   * (BitmapStore.holdsAlpha); false, having drawn nothing, for those.
+   */
+  drawInto(
+    store: BitmapStore,
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    samples: number,
+  ): boolean {
+    if (
+      store.disposed ||
+      store.holdsAlpha ||
+      Math.max(store.width, store.height) > this.textureLimit ||
+      this.gl.isContextLost()
+    ) {
+      return false;
+    }
+
+    const handle = this.paints.storeTexture(store);
+    const drawn = this.drawAlone(o, m, width, height, samples, (n) =>
+      this.backend.drawIntoTexture(
+        this.commands,
+        this.scene,
+        this.rows,
+        this.geometries,
+        this.textures,
+        this.filters,
+        this.keeps,
+        this.target,
+        width,
+        height,
+        n,
+        handle.id,
+        x,
+        y,
+      ),
+    );
+    if (!drawn) {
+      return false;
+    }
+
+    this.paints.drawn(store);
+    return true;
+  }
+
+  /**
+   * `o` walked and planned alone, through `m` into a `width` by `height`
+   * bitmap at `samples` a side, as few as a texture holds, then `draw`n
+   * with the samples taken; null for a size no texture holds.
+   */
+  private drawAlone<T>(
+    o: DisplayObject,
+    m: { a: number; b: number; c: number; d: number; tx: number; ty: number },
+    width: number,
+    height: number,
+    samples: number,
+    draw: (samples: number) => T,
+  ): T | null {
     // As many samples as a texture holds, halved as BitmapData.draw's are.
     let n = Math.max(1, samples);
     while (n > 1 && Math.max(width, height) * n > this.textureLimit) {
@@ -1212,7 +1305,7 @@ export class RenderView implements Drawer {
     }
 
     if (width <= 0 || height <= 0 || Math.max(width, height) > this.textureLimit) {
-      return new Uint32Array(Math.max(0, width * height));
+      return null;
     }
 
     const stage = this.passState();
@@ -1244,20 +1337,7 @@ export class RenderView implements Drawer {
       measureLayers(this.scene, this.rows, this.geometries, this.target);
       plan(this.scene, 0, this.commands);
       this.uploadOutlines();
-      const bytes = this.backend.snapshot(
-        this.commands,
-        this.scene,
-        this.rows,
-        this.geometries,
-        this.textures,
-        this.filters,
-        this.keeps,
-        this.target,
-        width,
-        height,
-        n,
-      );
-      return argbOf(bytes);
+      return draw(n);
     } finally {
       allowResets(true);
       this.restorePass(stage);
@@ -1372,19 +1452,6 @@ export class RenderView implements Drawer {
    * Drawn on the GPU into a store, which this renderer does not keep there:
    * BitmapData.draw takes a snapshot.
    */
-  drawInto(
-    _store: BitmapStore,
-    _o: DisplayObject,
-    _m: unknown,
-    _x: number,
-    _y: number,
-    _width: number,
-    _height: number,
-    _samples: number,
-  ): boolean {
-    return false;
-  }
-
   /** What the view made on its context let go of, the context with it if the canvas is its own, and its tessellator. */
   destroy(): void {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
