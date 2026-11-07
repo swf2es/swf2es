@@ -4157,6 +4157,59 @@ stop();`,
   );
 }
 
+// A rewind over clips that swapped depths, as a fighting game's lesson
+// loop has them: the template fighter swaps under the hero, a copy of it
+// at a script's depth swaps under the hero in turn, and beaten, it is
+// removed (which leaves a clip at the timeline's depths) and the timeline
+// goes back to the frame after the one that placed both. The frames
+// replayed place the hero at its depth, where the template now is: whether
+// the template stays there or a new hero is made beside the one swapped
+// away.
+function avm1RewindSwapped(version: number, heroSwaps: boolean): Uint8Array {
+  const hero = avm1Sprite(3, [[w.place({ depth: 1, character: 1 })]]);
+  const fighter = avm1Sprite(4, [[w.place({ depth: 1, character: 2 })], [], []]);
+  const describe = `_root.describe = function (label) {
+  var clips = [];
+  for (var k in _root) {
+    if (typeof _root[k] == "movieclip" && k != "hero" && k != "template") { clips.push(_root.describe1(_root[k])); }
+  }
+  clips.sort();
+  trace(label + ": em=" + _root.describe1(_root.em) + " hero=" + _root.describe1(_root.hero) +
+    " template=" + _root.describe1(_root.template) + " em is hero=" + (_root.em == _root.hero) +
+    " clips=" + clips.join(" "));
+};
+_root.describe1 = function (c) {
+  return c == undefined ? "none" : c._name + "@" + c.getDepth() + "/" + (c.tag == undefined ? "new" : c.tag) + "/x" + c._x;
+};`;
+  return avm1Swf(
+    version,
+    [square(1, 0x00cccc), square(2, 0x000000, 600), hero, fighter],
+    [
+      [
+        w.place({ depth: 29, character: 3, name: "em", ratio: 1, matrix: { tx: 200, ty: 400 } }),
+        w.place({ depth: 45, character: 4, name: "m", ratio: 1, matrix: { tx: 1200, ty: 400 } }),
+        as1(
+          `${describe} em.tag = "hero"; m.tag = "template"; _root.hero = em; _root.template = m; _root.describe("placed"); ${heroSwaps ? "_root.em.swapDepths(m)" : "m.swapDepths(_root.em)"}; _root.describe("template");`,
+          version,
+        ),
+      ],
+      [as1(`_root.describe("lesson"); if (_root.done) { stop(); }`, version)],
+      [
+        as1(
+          `duplicateMovieClip("m", "m1", 16385);
+setProperty("m1", _x, 2000);
+m1.tag = "copy";
+m1.swapDepths(_root.em);
+_root.describe("swapped");`,
+          version,
+        ),
+      ],
+      [as1(`removeMovieClip(m1); _root.describe("beaten");`, version)],
+      [as1(`_root.done = true; gotoAndStop(2); _root.describe("back");`, version)],
+    ],
+  );
+}
+
 // #initclip, the root's DoInitAction blocks (docs/avm1.md, "The frame"):
 // a frame's run as the root enters it, before its places and its actions,
 // in tag order, a sprite's once; a sprite attached before its own runs.
@@ -5839,6 +5892,67 @@ function bitmapFills(abc: Uint8Array): Uint8Array {
       w.end(),
     ],
   });
+}
+
+// Bitmap fills in an AVM1 SWF of `version`: a 4 x 4 bitmap, every pixel
+// its own colour, at four times its size in a smoothed (0x41) and an
+// unsmoothed (0x43) clipped fill, and a smoothed one the timeline moves a
+// pixel in each of frames 2 to 4 and then leaves. Flash Player 32 (the
+// browser plugin) leaves every bitmap fill of a SWF before 8 unsmoothed,
+// still or moving, as Ruffle does, and smooths 0x41 from SWF 8 on; AIR's
+// runtime smooths it in SWF 7 too, so adl draws the SWF 7 case from the same
+// movie with `smoothed` an unsmoothed fill (0x43), as the plugin shows it.
+function avm1BitmapSmoothing(version: number, smoothed: 0x41 | 0x43 = 0x41): Uint8Array {
+  const pixels: number[] = [];
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      pixels.push(0xff, x * 80, y * 80, (x + y) % 2 === 0 ? 0xc0 : 0x20);
+    }
+  }
+
+  const bitmap = w.tag(
+    36,
+    Uint8Array.from([1, 0, 5, 4, 0, 4, 0, ...zlibCompress(Uint8Array.from(pixels))]),
+    true,
+  );
+  const square = (id: number, type: 0x41 | 0x43) =>
+    w.shape({
+      id,
+      bounds: [0, 320, 0, 320],
+      fills: [{ bitmap: 1, type, matrix: { a: 80, d: 80 } }],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [320, 0] },
+            { line: [320, 320] },
+            { line: [0, 320] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+      version: 3,
+    });
+  const moved = (frame: number) =>
+    w.place({ depth: 3, move: true, matrix: { tx: (10 + frame) * 20, ty: 60 * 20 } });
+
+  return avm1Swf(
+    version,
+    [bitmap, square(10, smoothed), square(11, 0x43)],
+    [
+      [
+        w.place({ depth: 1, character: 10, matrix: { tx: 10 * 20, ty: 10 * 20 } }),
+        w.place({ depth: 2, character: 11, matrix: { tx: 50 * 20, ty: 10 * 20 } }),
+        w.place({ depth: 3, character: 10, matrix: { tx: 11 * 20, ty: 60 * 20 } }),
+      ],
+      [moved(2)],
+      [moved(3)],
+      [moved(4)],
+      [],
+      [as1("stop();", version)],
+    ],
+  );
 }
 
 // Gradient fills (scripts/Gradients.as): the SWF's linear, radial and
@@ -9204,6 +9318,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-bitmap-smoothing-swf${version}`,
+      swf: avm1BitmapSmoothing(version),
+      ...(version < 8 ? { flash: avm1BitmapSmoothing(version, 0x43) } : {}),
+      frames: 6,
+      capture: [1, 4, 6],
+      tolerance: 2,
+      maxOutliers: 0,
+    }),
+  ),
   {
     name: "bitmap-fills",
     swf: bitmapFills,
@@ -10538,6 +10663,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[false, true].map(
+    (heroSwaps): PlayerCase => ({
+      name: `avm1-rewind-swapped${heroSwaps ? "-other" : ""}`,
+      swf: avm1RewindSwapped(6, heroSwaps),
+      traced: true,
+      frames: 8,
+      capture: [8],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   ...[5, 6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-depths-swf${version}`,

@@ -1,0 +1,7 @@
+placed: em=em@-16355/hero/x10 hero=em@-16355/hero/x10 template=m@-16339/template/x60 em is hero=true clips=em@-16355/hero/x10 m@-16339/template/x60
+template: em=em@-16339/hero/x10 hero=em@-16339/hero/x10 template=m@-16355/template/x60 em is hero=true clips=em@-16339/hero/x10 m@-16355/template/x60
+lesson: em=em@-16339/hero/x10 hero=em@-16339/hero/x10 template=m@-16355/template/x60 em is hero=true clips=em@-16339/hero/x10 m@-16355/template/x60
+swapped: em=em@16385/hero/x10 hero=em@16385/hero/x10 template=m@-16355/template/x60 em is hero=true clips=em@16385/hero/x10 m1@-16339/copy/x2000 m@-16355/template/x60
+beaten: em=em@16385/hero/x10 hero=em@16385/hero/x10 template=m@-16355/template/x60 em is hero=true clips=em@16385/hero/x10 m1@-16339/copy/x2000 m@-16355/template/x60
+back: em=em@16385/hero/x10 hero=em@16385/hero/x10 template=m@-16355/template/x60 em is hero=true clips=em@16385/hero/x10 m@-16355/template/x60 m@-16355/template/x60
+lesson: em=em@16385/hero/x10 hero=em@16385/hero/x10 template=m@-16355/template/x60 em is hero=true clips=em@16385/hero/x10 m@-16355/template/x60 m@-16355/template/x60

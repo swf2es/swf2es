@@ -345,8 +345,40 @@ export function readRecords(
   }
 }
 
-/** A DefineShape tag's body, of the version its code gives. */
-export function readShape(bytes: Uint8Array, code: number, offset: number, length: number): Shape {
+/**
+ * SWF 8 brought the unsmoothed bitmap fills (0x42, 0x43). In an older SWF
+ * Flash Player draws the others unsmoothed as well, still or moving, as
+ * Ruffle reads them; AIR's runtime smooths them (`avm1-bitmap-smoothing-swf7`).
+ */
+const SMOOTHED_FILLS_VERSION = 8;
+
+function unsmooth(fill: Fill | null): void {
+  if (fill?.type === "bitmap") {
+    fill.smooth = false;
+  }
+}
+
+function unsmoothStyles(fills: Fill[], lines: Line[]): void {
+  for (let i = 0; i < fills.length; i++) {
+    unsmooth(fills[i]);
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    unsmooth(lines[i].fill);
+  }
+}
+
+/**
+ * A DefineShape tag's body, of the version its code gives, from a SWF of
+ * `swfVersion`, which decides whether its bitmap fills may be smoothed.
+ */
+export function readShape(
+  bytes: Uint8Array,
+  code: number,
+  offset: number,
+  length: number,
+  swfVersion = SMOOTHED_FILLS_VERSION,
+): Shape {
   const version =
     code === DefineShape ? 1 : code === DefineShape2 ? 2 : code === DefineShape3 ? 3 : 4;
   if (
@@ -371,6 +403,16 @@ export function readShape(bytes: Uint8Array, code: number, offset: number, lengt
   const fills = readFills(r, version);
   const lines = readLines(r, version);
   const { records, truncated } = readRecords(r, version);
+  if (swfVersion < SMOOTHED_FILLS_VERSION) {
+    unsmoothStyles(fills, lines);
+    for (let i = 0; i < records.length; i++) {
+      const record = records[i];
+      if (record.type === "style" && record.styles) {
+        unsmoothStyles(record.styles.fills, record.styles.lines);
+      }
+    }
+  }
+
   return { id, bounds, edgeBounds, fills, lines, records, truncated };
 }
 
@@ -502,12 +544,16 @@ function readMorphLines(r: SwfReader, version: number): { start: Line; end: Line
   return lines;
 }
 
-/** A DefineMorphShape or DefineMorphShape2 tag's body, of the version its code gives. */
+/**
+ * A DefineMorphShape or DefineMorphShape2 tag's body, of the version its
+ * code gives, from a SWF of `swfVersion` (as `readShape`).
+ */
 export function readMorphShape(
   bytes: Uint8Array,
   code: number,
   offset: number,
   length: number,
+  swfVersion = SMOOTHED_FILLS_VERSION,
 ): MorphShape {
   if (code !== DefineMorphShape && code !== DefineMorphShape2) {
     throw new Error(`tag ${code} is not a morph shape`);
@@ -545,6 +591,18 @@ export function readMorphShape(
   }
 
   const end = readRecords(r, 1);
+  if (swfVersion < SMOOTHED_FILLS_VERSION) {
+    for (let i = 0; i < fills.length; i++) {
+      unsmooth(fills[i].start);
+      unsmooth(fills[i].end);
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      unsmooth(lines[i].start.fill);
+      unsmooth(lines[i].end.fill);
+    }
+  }
+
   return {
     id,
     startBounds,
