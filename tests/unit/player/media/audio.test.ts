@@ -173,7 +173,7 @@ test("Nellymoser decodes to mono PCM at its format's rate, cut to the sound's co
     const data = new Uint8Array(
       readFileSync(new URL("../../../player/sounds/tone22.nelly", import.meta.url)),
     );
-    const sound = {
+    const sound: Omit<Sound, "format" | "sampleRate"> = {
       id: 1,
       sampleSize: 16,
       channels: 1,
