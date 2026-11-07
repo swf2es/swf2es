@@ -310,22 +310,28 @@ const SINE = Float32Array.from({ length: BUF_LEN }, (_, i) =>
   Math.sin((i + 0.5) * (Math.PI / (2 * BUF_LEN))),
 );
 
-/**
- * The middle half of a 256-point inverse MDCT of 128 coefficients, as
- * FFmpeg's imdct_half: COSINES[n * 128 + k] for output n and coefficient k.
- */
-const COSINES = (() => {
-  const n2 = BUF_LEN;
-  const table = new Float32Array(n2 * n2);
-  for (let n = 0; n < n2; n++) {
-    for (let k = 0; k < n2; k++) {
-      // Negated, as FFmpeg's transform's twiddles are.
-      table[n * n2 + k] = -Math.cos((Math.PI / n2) * (n + n2 / 2 + 0.5 + n2 / 2) * (k + 0.5));
-    }
+/** The inverse MDCT's twiddles, FFmpeg's ff_mdct_init's for 256 points at a scale of 1. */
+const N4 = BUF_LEN / 2;
+const TCOS = Float64Array.from(
+  { length: N4 },
+  (_, i) => -Math.cos((2 * Math.PI * (i + 1 / 8)) / 256),
+);
+const TSIN = Float64Array.from(
+  { length: N4 },
+  (_, i) => -Math.sin((2 * Math.PI * (i + 1 / 8)) / 256),
+);
+/** Where each of the FFT's 64 points goes in its bit-reversed order. */
+const REVERSED = Uint8Array.from({ length: N4 }, (_, i) => {
+  let r = 0;
+  for (let b = 0; b < 6; b++) {
+    r |= ((i >> b) & 1) << (5 - b);
   }
 
-  return table;
-})();
+  return r;
+});
+/** The FFT's roots: e^(2 pi i k / 64), an inverse transform's. */
+const ROOT_RE = Float64Array.from({ length: N4 / 2 }, (_, k) => Math.cos((2 * Math.PI * k) / N4));
+const ROOT_IM = Float64Array.from({ length: N4 / 2 }, (_, k) => Math.sin((2 * Math.PI * k) / N4));
 
 /** A short, as C's stores wrap it. */
 const short = (v: number) => (v << 16) >> 16;
@@ -469,6 +475,9 @@ export class NellymoserDecoder {
   #out = new Float32Array(BUF_LEN);
   #prev = new Float32Array(BUF_LEN);
   #random = 1;
+  /** The FFT's points. */
+  readonly #re = new Float64Array(N4);
+  readonly #im = new Float64Array(N4);
 
   /** `data`'s whole 64-byte blocks as samples from -1 to 1, 256 a block. */
   decode(data: Uint8Array): Float32Array {
@@ -548,17 +557,54 @@ export class NellymoserDecoder {
     }
   }
 
-  /** The inverse MDCT of `a` into the current half's output. */
+  /**
+   * The middle half of the 256-point inverse MDCT of `a`'s 128
+   * coefficients into the current half's output, as FFmpeg's imdct_half:
+   * rotated into 64 complex points, an inverse FFT, rotated back.
+   */
   #imdct(a: Float32Array): void {
-    const out = this.#out;
-    for (let n = 0; n < BUF_LEN; n++) {
-      let sum = 0;
-      const row = n * BUF_LEN;
-      for (let k = 0; k < BUF_LEN; k++) {
-        sum += a[k] * COSINES[row + k];
-      }
+    const re = this.#re;
+    const im = this.#im;
+    for (let k = 0; k < N4; k++) {
+      const x = a[BUF_LEN - 1 - 2 * k];
+      const y = a[2 * k];
+      const j = REVERSED[k];
+      re[j] = x * TCOS[k] - y * TSIN[k];
+      im[j] = x * TSIN[k] + y * TCOS[k];
+    }
 
-      out[n] = sum;
+    for (let size = 2; size <= N4; size *= 2) {
+      const half = size / 2;
+      const step = N4 / size;
+      for (let start = 0; start < N4; start += size) {
+        for (let k = 0; k < half; k++) {
+          const wr = ROOT_RE[k * step];
+          const wi = ROOT_IM[k * step];
+          const p = start + k;
+          const q = p + half;
+          const tr = re[q] * wr - im[q] * wi;
+          const ti = re[q] * wi + im[q] * wr;
+          re[q] = re[p] - tr;
+          im[q] = im[p] - ti;
+          re[p] += tr;
+          im[p] += ti;
+        }
+      }
+    }
+
+    const out = this.#out;
+    const n8 = N4 / 2;
+    for (let k = 0; k < n8; k++) {
+      const lo = n8 - k - 1;
+      const hi = n8 + k;
+      const r0 = im[lo] * TSIN[lo] - re[lo] * TCOS[lo];
+      const i1 = im[lo] * TCOS[lo] + re[lo] * TSIN[lo];
+      const r1 = im[hi] * TSIN[hi] - re[hi] * TCOS[hi];
+      const i0 = im[hi] * TCOS[hi] + re[hi] * TSIN[hi];
+      out[2 * lo] = r0;
+      out[2 * lo + 1] = i0;
+      out[2 * hi] = r1;
+      out[2 * hi + 1] = i1;
     }
   }
 }
