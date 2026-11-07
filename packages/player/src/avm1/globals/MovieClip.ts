@@ -1326,6 +1326,9 @@ function swapDepths(movie: Movie, clip: MovieClip, arg: Value, version: number):
     parent.swapChildren(clip, other);
     parent.depths.set(from, other);
     other.depth = from;
+    // The clip swapped away is the script's too: the timeline no longer
+    // moves it, nor makes it anew on a rewind (`avm1-rewind-swapped-other`).
+    other.touch();
   } else {
     parent.removeChild(clip);
     parent.placeAtDepth(clip, depth);

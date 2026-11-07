@@ -4157,6 +4157,59 @@ stop();`,
   );
 }
 
+// A rewind over clips that swapped depths, as a fighting game's lesson
+// loop has them: the template fighter swaps under the hero, a copy of it
+// at a script's depth swaps under the hero in turn, and beaten, it is
+// removed (which leaves a clip at the timeline's depths) and the timeline
+// goes back to the frame after the one that placed both. The frames
+// replayed place the hero at its depth, where the template now is: whether
+// the template stays there or a new hero is made beside the one swapped
+// away.
+function avm1RewindSwapped(version: number, heroSwaps: boolean): Uint8Array {
+  const hero = avm1Sprite(3, [[w.place({ depth: 1, character: 1 })]]);
+  const fighter = avm1Sprite(4, [[w.place({ depth: 1, character: 2 })], [], []]);
+  const describe = `_root.describe = function (label) {
+  var clips = [];
+  for (var k in _root) {
+    if (typeof _root[k] == "movieclip" && k != "hero" && k != "template") { clips.push(_root.describe1(_root[k])); }
+  }
+  clips.sort();
+  trace(label + ": em=" + _root.describe1(_root.em) + " hero=" + _root.describe1(_root.hero) +
+    " template=" + _root.describe1(_root.template) + " em is hero=" + (_root.em == _root.hero) +
+    " clips=" + clips.join(" "));
+};
+_root.describe1 = function (c) {
+  return c == undefined ? "none" : c._name + "@" + c.getDepth() + "/" + (c.tag == undefined ? "new" : c.tag) + "/x" + c._x;
+};`;
+  return avm1Swf(
+    version,
+    [square(1, 0x00cccc), square(2, 0x000000, 600), hero, fighter],
+    [
+      [
+        w.place({ depth: 29, character: 3, name: "em", ratio: 1, matrix: { tx: 200, ty: 400 } }),
+        w.place({ depth: 45, character: 4, name: "m", ratio: 1, matrix: { tx: 1200, ty: 400 } }),
+        as1(
+          `${describe} em.tag = "hero"; m.tag = "template"; _root.hero = em; _root.template = m; _root.describe("placed"); ${heroSwaps ? "_root.em.swapDepths(m)" : "m.swapDepths(_root.em)"}; _root.describe("template");`,
+          version,
+        ),
+      ],
+      [as1(`_root.describe("lesson"); if (_root.done) { stop(); }`, version)],
+      [
+        as1(
+          `duplicateMovieClip("m", "m1", 16385);
+setProperty("m1", _x, 2000);
+m1.tag = "copy";
+m1.swapDepths(_root.em);
+_root.describe("swapped");`,
+          version,
+        ),
+      ],
+      [as1(`removeMovieClip(m1); _root.describe("beaten");`, version)],
+      [as1(`_root.done = true; gotoAndStop(2); _root.describe("back");`, version)],
+    ],
+  );
+}
+
 // #initclip, the root's DoInitAction blocks (docs/avm1.md, "The frame"):
 // a frame's run as the root enters it, before its places and its actions,
 // in tag order, a sprite's once; a sprite attached before its own runs.
@@ -10538,6 +10591,17 @@ export const cases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  ...[false, true].map(
+    (heroSwaps): PlayerCase => ({
+      name: `avm1-rewind-swapped${heroSwaps ? "-other" : ""}`,
+      swf: avm1RewindSwapped(6, heroSwaps),
+      traced: true,
+      frames: 8,
+      capture: [8],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   ...[5, 6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-depths-swf${version}`,

@@ -541,8 +541,22 @@ export class MovieClip extends Container {
       // Forward, the child stays for a place with the move flag, whatever
       // character it names, as frame by frame; on a rewind it stays only
       // for its own character, and another, however the frames between went,
-      // makes a new child (the corpus's `place_object_replace_2`). Placed
-      // anew it is a new child.
+      // makes a new child (`place_object_replace_2`, and AVM1's
+      // `goto_rewind_movieclip_replace`). But an AVM1 clip a script took
+      // over, as swapDepths does both clips it moves, stays whatever its
+      // character, under its own name and where the script left it
+      // (`avm1-rewind-swapped`). Placed anew it is a new child.
+      if (
+        rewind &&
+        existing instanceof MovieClip &&
+        this.library.avm1 &&
+        existing.transformed &&
+        existing.character !== character
+      ) {
+        existing.applyPlace({ ...jump.place, name: null });
+        continue;
+      }
+
       const same = existing?.character === character;
       if (existing && (rewind ? same : jump.place.move)) {
         swap(existing, character);
