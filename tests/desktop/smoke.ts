@@ -89,14 +89,16 @@ const source = `package {
 
 // An AIR application's SWF, run adl's way by its descriptor: it names its
 // URL and sandbox, its launch's arguments and directory, what File finds
-// in its directory and outside it, reads a file by an app: URL and one
-// outside by its file: URL, connects a socket to the port its argument
-// names, unasked, and names its window's title.
+// in its directory and outside it, reads a file by an app: URL, by a
+// FileStream, and one outside by its file: URL, connects a socket to the
+// port its argument names, unasked, and names its window's title.
 const airSource = `package {
   import flash.desktop.NativeApplication;
   import flash.display.Sprite;
   import flash.events.*;
   import flash.filesystem.File;
+  import flash.filesystem.FileMode;
+  import flash.filesystem.FileStream;
   import flash.net.*;
   import flash.system.Security;
   public class AirSmoke extends Sprite {
@@ -110,6 +112,10 @@ const airSource = `package {
         // app:/ has no parent, as adl's: up from its native path, under file:.
         var outside:File = new File(File.applicationDirectory.nativePath).parent.resolvePath("air-outside.txt");
         trace("air: files " + File.applicationDirectory.resolvePath("data.txt").exists + " " + outside.exists + " " + outside.url.indexOf("file:///"));
+        var stream:FileStream = new FileStream();
+        stream.open(File.applicationDirectory.resolvePath("data.txt"), FileMode.READ);
+        trace("air: stream " + stream.readUTFBytes(stream.bytesAvailable));
+        stream.close();
         load("app", "data.txt");
         load("file", outside.url);
         socket = new Socket();
@@ -486,6 +492,7 @@ async function air(): Promise<void> {
         "air: title Air Smoke",
         `air: invoke ${port}|two words true`,
         "air: files true true 0",
+        "air: stream beside",
         "air: app beside",
         "air: file outside",
         "air: socket pong",

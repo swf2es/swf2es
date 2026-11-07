@@ -41,6 +41,7 @@ import { timerEventNatives } from "./flash/events/TimerEvent.js";
 import { touchEventNatives } from "./flash/events/TouchEvent.js";
 import { externalInterfaceNatives } from "./flash/external/ExternalInterface.js";
 import { fileNatives } from "./flash/filesystem/File.js";
+import { fileStreamNatives } from "./flash/filesystem/FileStream.js";
 import { bevelFilterNatives } from "./flash/filters/BevelFilter.js";
 import { bitmapFilterHooks } from "./flash/filters/BitmapFilter.js";
 import { blurFilterNatives } from "./flash/filters/BlurFilter.js";
@@ -119,6 +120,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...clipboardNatives(s),
     ...nativeApplicationNatives(s),
     ...fileNatives(s),
+    ...fileStreamNatives(s),
     ...nativeWindowNatives(s),
     ...eventNatives(s),
     ...keyboardEventNatives(s),

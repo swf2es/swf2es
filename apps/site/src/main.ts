@@ -4,7 +4,13 @@
 // origin to), from ?swf=, or from the demos the build made. Its traces and
 // errors reach the page's console, which the panel shows.
 import { isAs3, readSwf, readSwfHeader } from "@swf2es/format";
-import { configure, filtersGreyOutFiles, type Swf2esPlayerElement } from "@swf2es/web";
+import {
+  type AirApp,
+  configure,
+  filtersGreyOutFiles,
+  openAirApp,
+  type Swf2esPlayerElement,
+} from "@swf2es/web";
 import { isolate } from "./isolation.js";
 import { bindFullscreen } from "./presentation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
@@ -165,6 +171,8 @@ let current: {
   facts: SwfFacts;
   base: string | null;
   stage3D: boolean;
+  /** The AIR application `bytes` is the content SWF of; null for a SWF. */
+  air: AirApp | null;
 } | null = null;
 let loadGeneration = 0;
 const stats = new Stats(
@@ -219,8 +227,18 @@ function showFacts(name: string, f: SwfFacts): void {
   );
 }
 
-/** Play `bytes`, read from `name`; `base` is the URL it came from, which its own loads resolve against. */
-async function play(bytes: Uint8Array, name: string, origin: string, base: string | null) {
+/**
+ * Play `bytes`, read from `name`; `base` is the URL it came from, which its
+ * own loads resolve against. With `air`, `bytes` is that application's
+ * content SWF, and the application plays.
+ */
+async function play(
+  bytes: Uint8Array,
+  name: string,
+  origin: string,
+  base: string | null,
+  air: AirApp | null = null,
+) {
   let f: SwfFacts;
   try {
     f = describe(bytes, origin);
@@ -231,14 +249,15 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
 
   const generation = ++loadGeneration;
   const enabled = stage3D.checked;
-  current = { bytes, name, facts: f, base, stage3D: enabled };
+  current = { bytes, name, facts: f, base, stage3D: enabled, air };
   close.disabled = false;
   stats.watch(null, 0);
   ask.hidden = true;
   showFacts(name, f);
   stage.classList.remove("authored");
-  stage.style.setProperty("--w", String(f.width || 550));
-  stage.style.setProperty("--h", String(f.height || 400));
+  // An AIR application's window is the size its descriptor gives, where it gives one.
+  stage.style.setProperty("--w", String(air?.descriptor.width ?? (f.width || 550)));
+  stage.style.setProperty("--h", String(air?.descriptor.height ?? (f.height || 400)));
   empty.hidden = true;
   player.hidden = false;
   if (base) {
@@ -247,7 +266,10 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
     player.removeAttribute("base");
   }
 
-  write("info", `Loading ${name} (${f.avm}, SWF ${f.version})`);
+  write(
+    "info",
+    `Loading ${name} (${air ? `AIR application ${air.descriptor.id}, ` : ""}${f.avm}, SWF ${f.version})`,
+  );
   showStatus(`Loading ${name}…`);
   try {
     const factory = enabled ? (await import("./stage3d.js")).createStage3D : null;
@@ -256,7 +278,7 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
     }
 
     configure({ stage3D: factory });
-    await player.load(bytes);
+    await (air ? player.loadAir(air) : player.load(bytes));
     if (generation !== loadGeneration) {
       return;
     }
@@ -282,10 +304,16 @@ async function play(bytes: Uint8Array, name: string, origin: string, base: strin
 async function playFile(file: File): Promise<void> {
   history.replaceState(null, "", location.pathname);
   urlInput.value = "";
-  // Read whole only once its first bytes say it's a SWF: where the picker takes any file (iOS),
-  // it may be a video of gigabytes.
+  // Read whole only once its first bytes say it's a SWF or an AIR package: where the picker
+  // takes any file (iOS), it may be a video of gigabytes.
+  const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+  if (isZip(head)) {
+    await playAirFile(file);
+    return;
+  }
+
   try {
-    readSwfHeader(new Uint8Array(await file.slice(0, 8).arrayBuffer()));
+    readSwfHeader(head);
   } catch (error) {
     showStatus(
       `${file.name} is not a SWF: ${error instanceof Error ? error.message : error}`,
@@ -300,6 +328,29 @@ async function playFile(file: File): Promise<void> {
   const base = new URL(`local/${encodeURIComponent(file.name)}`, SITE).href;
   localNames.add(file.name).add(encodeURIComponent(file.name)).add(base);
   await play(new Uint8Array(await file.arrayBuffer()), file.name, LOCAL, base);
+}
+
+/** Whether `head`, a file's first bytes, starts a ZIP archive, as an AIR package is. */
+function isZip(head: Uint8Array): boolean {
+  return head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
+}
+
+/** Play the AIR application in `file`, an AIR package (.air) or a ZIP of its folder. */
+async function playAirFile(file: File): Promise<void> {
+  let app: AirApp;
+  try {
+    app = openAirApp(new Uint8Array(await file.arrayBuffer()));
+  } catch (error) {
+    showStatus(
+      `${file.name} is not an AIR application: ${error instanceof Error ? error.message : error}`,
+      true,
+    );
+    return;
+  }
+
+  const base = new URL(`local/${encodeURIComponent(file.name)}`, SITE).href;
+  localNames.add(file.name).add(encodeURIComponent(file.name)).add(base);
+  await play(app.read(app.descriptor.content) as Uint8Array, file.name, LOCAL, base, app);
 }
 
 /** `url` resolved against the page, or null, said why, for one the page does not load. */
@@ -434,13 +485,13 @@ player.addEventListener("stagelayout", (e) => {
 
 stage3D.addEventListener("change", () => {
   if (current && !player.hidden) {
-    void play(current.bytes, current.name, current.facts.origin, current.base);
+    void play(current.bytes, current.name, current.facts.origin, current.base, current.air);
   }
 });
 
 reload.addEventListener("click", () => {
   if (current) {
-    void play(current.bytes, current.name, current.facts.origin, current.base);
+    void play(current.bytes, current.name, current.facts.origin, current.base, current.air);
   }
 });
 

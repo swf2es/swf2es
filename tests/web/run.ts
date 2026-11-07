@@ -28,6 +28,7 @@ import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { importMap, importMapSource } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
+import { zip } from "../zip-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -61,6 +62,7 @@ const abcs = compileScripts(
       name: "NativeBitmapTest",
       source: readFileSync(`${here}scripts/NativeBitmapTest.as`, "utf8"),
     },
+    { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
   ],
   out,
 );
@@ -101,6 +103,41 @@ writeFileSync(
       w.end(),
     ],
   }),
+);
+// An AIR package, as adt writes one: its descriptor under META-INF/AIR, its
+// content SWF and a file of its own at the root, the application's directory.
+writeFileSync(
+  `${site}air-app.air`,
+  zip([
+    {
+      name: "META-INF/AIR/application.xml",
+      data: `<?xml version="1.0" encoding="utf-8" ?>
+<application xmlns="http://ns.adobe.com/air/application/51.3">
+  <id>org.swf2es.web</id>
+  <filename>AirWebTest</filename>
+  <versionNumber>1.0</versionNumber>
+  <initialWindow><content>bin/AirWebTest.swf</content><title>Air on the Web</title><width>240</width><height>160</height></initialWindow>
+</application>`,
+      deflated: true,
+    },
+    {
+      name: "bin/AirWebTest.swf",
+      data: w.swf({
+        width: 100,
+        height: 50,
+        frameRate: 24,
+        frameCount: 1,
+        tags: [
+          w.fileAttributes(true),
+          w.doAbc(abcs.get("AirWebTest") as Uint8Array, "AirWebTest"),
+          w.symbolClass([[0, "AirWebTest"]]),
+          w.showFrame(),
+          w.end(),
+        ],
+      }),
+    },
+    { name: "data/hello.txt", data: "hello from the package", deflated: true },
+  ]),
 );
 writeFileSync(
   `${site}context-menu.swf`,
@@ -559,6 +596,37 @@ check("the element follows its size and the device's pixels", async (evaluate) =
   const r = await call<{ dpr: number; canvas: number[]; css: string[] }>(evaluate, "resize()");
   // exactFit to 320 by 120, twice as wide: drawn as fine as that axis needs, twice that for the device.
   assert.deepEqual(r, { dpr: 2, canvas: [640, 480], css: ["320px", "120px"] });
+});
+
+check("an AIR package plays as adl runs it, its files read from memory", async (evaluate) => {
+  const r = await call<{
+    traces: string[];
+    errors: string[];
+    exit: number | null;
+    playing: boolean;
+  }>(evaluate, "airRun()");
+  assert.deepEqual(r.errors, []);
+  // What it traces at once, in order; then what arrives on later frames, in any.
+  assert.deepEqual(r.traces.slice(0, 8), [
+    "air: url app:/bin/AirWebTest.swf",
+    "air: sandbox application",
+    "air: id org.swf2es.web",
+    "air: window Air on the Web 240x160",
+    "air: invoke one|two words true",
+    "air: files true 22 false true true",
+    "air: listing META-INF,bin,data",
+    "air: stream hello from the package",
+  ]);
+  assert.deepEqual(r.traces.slice(8, -1).sort(), [
+    "air: app hello from the package",
+    "air: async stream hello from the package",
+    "air: file hello from the package",
+    "air: missing refused",
+  ]);
+  assert.equal(r.traces.at(-1), "air: exit");
+  // NativeApplication.exit stopped it, and the page heard the code.
+  assert.equal(r.exit, 3);
+  assert.equal(r.playing, false);
 });
 
 check("an embedder's fetch loads the SWF, asked for as the movie", async (evaluate) => {

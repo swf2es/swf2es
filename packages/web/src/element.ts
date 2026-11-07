@@ -3,15 +3,18 @@
 // SWF's ExternalInterface callbacks as methods on the element.
 import { isAs3, readActions, readSwf, type Swf, tags } from "@swf2es/format";
 import {
+  type AirApplication,
   Avm1,
   type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
+  type FileSystemHost,
   Player,
   Scripting,
   type WorkerHost,
 } from "@swf2es/player";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
+import { AirApp, elementWindow } from "./air.js";
 import {
   codegenForPlayer,
   configuration,
@@ -71,6 +74,8 @@ interface Session {
   abort: AbortController;
   /** The Web Workers its SWF starts, let go of with it. */
   workers: WebWorkerHost | null;
+  /** The AIR application it plays (`loadAir`), its hosts made for this element; null for a SWF. */
+  air: { app: AirApp; application: AirApplication; fileSystem: FileSystemHost } | null;
 }
 
 interface Deferred {
@@ -238,6 +243,29 @@ async function fetchMovie(
   return { bytes: new Uint8Array(await response.arrayBuffer()), url: response.url || url };
 }
 
+/**
+ * What a session's SWFs load by: its AIR application's files, then the
+ * embedder's fetch or the browser's; `offline` (allowNetworking "none"),
+ * nothing past the application's own files, which are no network.
+ */
+function fetchFor(
+  session: Session,
+  offline: boolean,
+): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
+  const fetchOf: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> = offline
+    ? () => Promise.reject(new Error("allowNetworking is none"))
+    : (configuration().fetch ?? browserFetch);
+  const app = session.air?.app;
+  if (!app) {
+    return fetchOf;
+  }
+
+  return (request, signal) => {
+    const local = app.fetch(request);
+    return local ? Promise.resolve(local) : fetchOf(request, signal);
+  };
+}
+
 /** The host's fetch for what a SWF loads: the browser's, its status and headers as they come. */
 async function browserFetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
   const response = await fetch(request.url, {
@@ -393,7 +421,18 @@ export class Swf2esPlayerElement extends ElementBase {
     return this.#load(source);
   }
 
-  #load(source: SwfSource): Promise<void> {
+  /**
+   * Play `app`, an AIR application (`openAirApp`), in place of what plays
+   * now, as adl runs it: its descriptor's content SWF under AIR's API and
+   * its application sandbox, `args` its launch's arguments, this element
+   * its window. Resolves and rejects as `load` does. Its NativeApplication's
+   * exit stops it, and the element dispatches `airexit` with the code.
+   */
+  loadAir(app: AirApp, options: { arguments?: readonly string[] } = {}): Promise<void> {
+    return this.#load(app, options.arguments ?? []);
+  }
+
+  #load(source: SwfSource | AirApp, args: readonly string[] = []): Promise<void> {
     this.#release();
     if (this.#readiness.settled) {
       this.#readiness = deferred();
@@ -408,21 +447,46 @@ export class Swf2esPlayerElement extends ElementBase {
       callbacks: new Set(),
       workers: null,
       abort: new AbortController(),
+      air: null,
     };
+    if (source instanceof AirApp) {
+      const exit = (code: number) => {
+        // After the script that called it, which a destroy would pull from under it.
+        queueMicrotask(() => {
+          if (this.#session === session) {
+            this.#destroy();
+            dispatch(this, new CustomEvent("airexit", { detail: { code } }));
+          }
+        });
+      };
+      session.air = {
+        app: source,
+        application: source.application(elementWindow(this, source.descriptor.title), args, exit),
+        fileSystem: source.fileSystem(),
+      };
+    }
+
     this.#session = session;
     this.#loaded = typeof source === "string" || source instanceof URL ? String(source) : null;
-    void this.#start(source, session, ready);
+    void this.#start(source instanceof AirApp ? null : source, session, ready);
     return ready.promise;
   }
 
-  async #start(source: SwfSource, session: Session, ready: Deferred): Promise<void> {
+  async #start(source: SwfSource | null, session: Session, ready: Deferred): Promise<void> {
     const current = () => this.#session === session;
     try {
       const pageUrl = document.baseURI;
       const base = attribute(this, "base");
       let bytes: Uint8Array;
       let url: string;
-      if (typeof source === "string" || source instanceof URL) {
+      if (session.air) {
+        // The content SWF, by the app: URL adl names it with.
+        const content = session.air.app.descriptor.content;
+        bytes = session.air.app.read(content) as Uint8Array;
+        url = `app:/${content.split("/").map(encodeURIComponent).join("/")}`;
+      } else if (source === null) {
+        throw new Error("swf2es: nothing to play");
+      } else if (typeof source === "string" || source instanceof URL) {
         ({ bytes, url } = await fetchMovie(new URL(source, pageUrl).href, session.abort.signal));
       } else {
         // A copy: the page may reuse its buffer.
@@ -435,15 +499,20 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       const swf = readSwf(bytes);
+      // An AIR application's window is the size its descriptor gives, where it gives one.
+      const descriptor = session.air?.app.descriptor;
       this.#stageSize = [
-        Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
-        Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
+        descriptor?.width ?? Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
+        descriptor?.height ?? Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
       ];
       this.#size();
       const scripted =
         isAs3(swf) && swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
       if (scripted) {
-        const [codegen, abcs] = await Promise.all([codegenForPlayer(), playerLibraries()]);
+        const [codegen, abcs] = await Promise.all([
+          codegenForPlayer(),
+          playerLibraries(session.air !== null || !!configuration().air),
+        ]);
         if (!current()) {
           return;
         }
@@ -491,9 +560,7 @@ export class Swf2esPlayerElement extends ElementBase {
           url,
           base: base ? new URL(base, pageUrl).href : undefined,
           // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
-          fetch: offline
-            ? () => Promise.reject(new Error("allowNetworking is none"))
-            : (configuration().fetch ?? browserFetch),
+          fetch: fetchFor(session, offline),
           socket: offline ? undefined : socketHost(),
           sendToUrl: !internal,
           onUncaught: (error) => this.#report(session, error),
@@ -572,15 +639,13 @@ export class Swf2esPlayerElement extends ElementBase {
       url,
       base: base ? new URL(base, pageUrl).href : undefined,
       parameters: parseFlashVars(attribute(this, "flashvars")),
-      fetch: offline
-        ? () => Promise.reject(new Error("allowNetworking is none"))
-        : (configuration().fetch ?? browserFetch),
+      fetch: fetchFor(session, offline),
       loadPolicyFile: configuration().loadPolicyFile,
-      sandboxType: configuration().sandboxType,
+      sandboxType: session.air ? "application" : configuration().sandboxType,
       // An AIR application's: AIR's API, its application and its file system.
-      air: !!configuration().air,
-      application: configuration().air?.application,
-      fileSystem: configuration().air?.fileSystem,
+      air: session.air !== null || !!configuration().air,
+      application: session.air?.application ?? configuration().air?.application,
+      fileSystem: session.air?.fileSystem ?? configuration().air?.fileSystem,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,

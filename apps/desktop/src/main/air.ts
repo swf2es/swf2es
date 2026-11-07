@@ -5,8 +5,8 @@
 import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import { readAirDescriptor } from "@swf2es/format";
 import type { AirFileStat, AirLaunch } from "../shared/api.js";
-import { readDescriptor } from "./descriptor.ts";
 
 /** What the command line asks adl's way: the descriptor, the application's directory, the arguments. */
 export interface AirCommand {
@@ -52,7 +52,7 @@ export function airLaunch(
   height: number | null;
 } {
   const xml = readFileSync(command.descriptor, "utf8");
-  const descriptor = readDescriptor(xml);
+  const descriptor = readAirDescriptor(xml);
   const application = command.root ?? dirname(command.descriptor);
   // Each application's own, as AIR keeps one under the user's data by its id.
   const applicationStorage = join(
@@ -102,6 +102,15 @@ export function statOf(path: string): AirFileStat | null {
 export function listOf(path: string): string[] | null {
   try {
     return readdirSync(path);
+  } catch {
+    return null;
+  }
+}
+
+/** The bytes of the file at `path`, as FileStream's open reads them at once; null where none can be read. */
+export function readOf(path: string): Uint8Array | null {
+  try {
+    return new Uint8Array(readFileSync(path));
   } catch {
     return null;
   }

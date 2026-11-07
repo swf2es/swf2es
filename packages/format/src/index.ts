@@ -2,7 +2,8 @@
  * Parsers for the SWF container and its tags: shapes, fonts, text, bitmaps,
  * sounds, buttons and filters, a DoABC's bytes, which codegen parses, and
  * the AVM1 action blocks, which it compiles; and Pixel Bender's bytecode,
- * which a script hands flash.display.Shader.
+ * which a script hands flash.display.Shader. Also an AIR application's
+ * descriptor, and the ZIP archives AIR packages are.
  * The compiler and the player both use this package, so it must stay free of
  * DOM and node APIs.
  */
@@ -15,6 +16,7 @@ export {
   ClipEvent,
   readActions,
 } from "./actions.js";
+export { type AirDescriptor, readAirDescriptor } from "./air-descriptor.js";
 export { AIR_API_VERSION, API_VERSION, checkApiVersion } from "./api-versions.js";
 export { type Bitmap, isBitmapTag, readBitmap } from "./bitmap.js";
 export {
@@ -145,3 +147,4 @@ export {
   type StaticText,
   type TextRecord,
 } from "./text.js";
+export { readZip, type ZipEntry, ZipError } from "./zip.js";

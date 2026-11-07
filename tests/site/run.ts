@@ -22,6 +22,7 @@ import { withPage } from "../player/chrome.ts";
 import { compileScripts } from "../player/scripts.ts";
 import { serve } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
+import { zip } from "../zip-writer.ts";
 import { fullscreenChecks } from "./fullscreen.ts";
 import { stage3DChecks } from "./stage3d.ts";
 
@@ -538,6 +539,70 @@ async function check(): Promise<void> {
           },
         ],
         [
+          "a ZIP of an AIR application's folder opened with the picker plays as the application",
+          async () => {
+            const source = `package {
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.filesystem.File;
+  import flash.net.URLLoader;
+  import flash.net.URLRequest;
+  import flash.system.Security;
+  public class SiteAir extends Sprite {
+    public function SiteAir() {
+      trace("site air: " + loaderInfo.url + " " + Security.sandboxType + " " + File.applicationDirectory.resolvePath("data.txt").exists);
+      var loader:URLLoader = new URLLoader();
+      loader.addEventListener(Event.COMPLETE, function (e:Event):void {
+        trace("site air data: " + loader.data);
+      });
+      loader.load(new URLRequest("app:/data.txt"));
+    }
+  }
+}`;
+            const abc = compileScripts([{ name: "SiteAir", source }], `${out}scripts`).get(
+              "SiteAir",
+            ) as Uint8Array;
+            const swf = w.swf({
+              width: 100,
+              height: 100,
+              frameRate: 30,
+              frameCount: 1,
+              tags: [
+                w.fileAttributes(true),
+                w.doAbc(abc, "SiteAir"),
+                w.symbolClass([[0, "SiteAir"]]),
+                w.showFrame(),
+                w.end(),
+              ],
+            });
+            writeFileSync(
+              `${out}my-app.zip`,
+              zip([
+                {
+                  name: "MyApp/MyApp-app.xml",
+                  data: `<application xmlns="http://ns.adobe.com/air/application/51.3"><id>org.example.site</id><initialWindow><content>MyApp.swf</content><width>300</width><height>200</height></initialWindow></application>`,
+                },
+                { name: "MyApp/MyApp.swf", data: swf },
+                { name: "MyApp/data.txt", data: "from the zip", deflated: true },
+              ]),
+            );
+            const { result } = await send<{ result: { objectId: string } }>("Runtime.evaluate", {
+              expression: "document.getElementById('file')",
+            });
+            await send("DOM.setFileInputFiles", {
+              objectId: result.objectId,
+              files: [`${out}my-app.zip`],
+            });
+            await until(playing("my-app.zip"));
+            await until(logHas("site air data: from the zip"));
+            assert.equal(
+              await value<boolean>(logHas("site air: app:/MyApp.swf application true")),
+              true,
+            );
+            assert.equal(await value<boolean>(logHas("AIR application org.example.site")), true);
+          },
+        ],
+        [
           "a SWF's workers share a Mutex and memory, the page isolated by its service worker",
           async () => {
             const abc = compileScripts(["WorkerMutex"], `${out}scripts`).get(
@@ -664,7 +729,7 @@ async function check(): Promise<void> {
             await navigate("play/");
             assert.equal(
               await value<string>("document.getElementById('file').accept"),
-              ".swf,application/x-shockwave-flash",
+              ".swf,.air,.zip,application/x-shockwave-flash",
             );
 
             const own = await value<string>("navigator.userAgent");
