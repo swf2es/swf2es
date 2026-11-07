@@ -1,8 +1,22 @@
 // An AIR application opened by its descriptor, as adl runs one
 // (`adl app.xml [root-dir] [-- arguments...]`): its launch, which the page
-// plays it with, and the file system its File reads, while it plays.
+// plays it with, and the file system its File reads and writes, while it
+// plays.
 // Apart from Electron, so that node tests it (tests/desktop/air.test.ts).
-import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  cpSync,
+  ftruncateSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { readAirDescriptor } from "@swf2es/format";
@@ -113,5 +127,62 @@ export function readOf(path: string): Uint8Array | null {
     return new Uint8Array(readFileSync(path));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Writes `bytes` into the file at `path` from `offset`, which is then
+ * `length` long, made with its directories where it is not: FileStream's
+ * writes. False where it cannot be written.
+ */
+export function writeOf(path: string, bytes: Uint8Array, offset: number, length: number): boolean {
+  return attempt(() => {
+    mkdirSync(dirname(path), { recursive: true });
+    // "a+" would only append; "r+" needs the file there, which "a" makes without emptying it.
+    closeSync(openSync(path, "a"));
+    const fd = openSync(path, "r+");
+    try {
+      writeSync(fd, bytes, 0, bytes.length, offset);
+      ftruncateSync(fd, length);
+    } finally {
+      closeSync(fd);
+    }
+  });
+}
+
+/** Makes the directory at `path` and those it is in; false where it cannot. */
+export function createDirectoryOf(path: string): boolean {
+  return attempt(() => mkdirSync(path, { recursive: true }));
+}
+
+/** Removes the file or directory at `path`, with all in it; false where it cannot. */
+export function removeOf(path: string): boolean {
+  return attempt(() => rmSync(path, { recursive: true }));
+}
+
+/** Moves what is at `from` to `to`, its directories made; false where it cannot. */
+export function moveOf(from: string, to: string): boolean {
+  return attempt(() => {
+    mkdirSync(dirname(to), { recursive: true });
+    try {
+      renameSync(from, to);
+    } catch (e) {
+      // Onto another disk, which a rename cannot reach.
+      if ((e as NodeJS.ErrnoException).code !== "EXDEV") {
+        throw e;
+      }
+
+      cpSync(from, to, { recursive: true });
+      rmSync(from, { recursive: true });
+    }
+  });
+}
+
+function attempt(change: () => void): boolean {
+  try {
+    change();
+    return true;
+  } catch {
+    return false;
   }
 }
