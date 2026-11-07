@@ -5,9 +5,9 @@
 // never climbing out of app:/. Relative paths are refused (ArgumentError
 // 2004), a File of no path is unusable (Error 2037), and what reads a file
 // that is not there fails (Error 3003). Reading what is there is
-// synchronous, as File's properties are; writing, dialogs and the
-// asynchronous methods are not supported yet. Without a host, nothing is
-// there.
+// synchronous, as File's properties are; FileStream reads a file's bytes
+// (FileStream.ts). Writing, dialogs and File's asynchronous methods are
+// not supported yet. Without a host, nothing is there.
 import { avm2 } from "@swf2es/runtime";
 import type { FileStat } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";

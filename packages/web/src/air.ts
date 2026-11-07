@@ -83,6 +83,11 @@ export class AirApp {
       directories: DIRECTORIES,
       stat: (path) => this.#stat(path),
       list: (path) => this.#list(path),
+      read: (native) => {
+        const path = normalize(native);
+        const inApp = path === null ? null : under(path, DIRECTORIES.application);
+        return inApp === null ? null : this.read(inApp);
+      },
     };
   }
 

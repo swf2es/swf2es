@@ -58,6 +58,8 @@ export interface DesktopAir {
   stat(path: string): AirFileStat | null;
   list(path: string): string[] | null;
   read(path: string): Promise<Uint8Array | null>;
+  /** A file's bytes at once, as FileStream's open reads them; null where none can be read. */
+  readSync(path: string): Uint8Array | null;
   window(): AirWindowState;
   setBounds(bounds: { x: number; y: number; width: number; height: number }): void;
   setTitle(title: string): void;

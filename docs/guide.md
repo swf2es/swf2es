@@ -229,9 +229,11 @@ await movie.loadAir(app, { arguments: ["--level", "3"] }); // InvokeEvent's argu
 ```
 
 The application's files are held in memory. `File` sees them under its
-directory, `app:` and `file:` URLs into it load from there, and any
+directory, `FileStream` reads them (at once, or over frames with
+`openAsync`), `app:` and `file:` URLs into it load from there, and any
 other URL goes to the network as a page's would. Its storage directory
-and the user's directories are there but empty, and nothing is written.
+and the user's directories are there but empty, and nothing is written
+yet: `FileStream`'s writing modes are not supported.
 The element is its one window, at the descriptor's size; the play page
 opens `.air` and `.zip` files too. The desktop app runs an application
 from its descriptor on disk instead, with the real file system.

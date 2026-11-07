@@ -106,3 +106,12 @@ export function listOf(path: string): string[] | null {
     return null;
   }
 }
+
+/** The bytes of the file at `path`, as FileStream's open reads them at once; null where none can be read. */
+export function readOf(path: string): Uint8Array | null {
+  try {
+    return new Uint8Array(readFileSync(path));
+  } catch {
+    return null;
+  }
+}

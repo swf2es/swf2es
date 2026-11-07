@@ -606,7 +606,8 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
     playing: boolean;
   }>(evaluate, "airRun()");
   assert.deepEqual(r.errors, []);
-  assert.deepEqual(r.traces, [
+  // What it traces at once, in order; then what arrives on later frames, in any.
+  assert.deepEqual(r.traces.slice(0, 8), [
     "air: url app:/bin/AirWebTest.swf",
     "air: sandbox application",
     "air: id org.swf2es.web",
@@ -614,11 +615,15 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
     "air: invoke one|two words true",
     "air: files true 22 false true true",
     "air: listing META-INF,bin,data",
+    "air: stream hello from the package",
+  ]);
+  assert.deepEqual(r.traces.slice(8, -1).sort(), [
     "air: app hello from the package",
+    "air: async stream hello from the package",
     "air: file hello from the package",
     "air: missing refused",
-    "air: exit",
   ]);
+  assert.equal(r.traces.at(-1), "air: exit");
   // NativeApplication.exit stopped it, and the page heard the code.
   assert.equal(r.exit, 3);
   assert.equal(r.playing, false);
