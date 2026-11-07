@@ -378,6 +378,39 @@ async function airRun() {
   return { traces: traces.filter((t) => t.startsWith("air: ")), errors, exit, playing };
 }
 
+/**
+ * Play the AIR SWF the runner served alone by its URL, as a page's
+ * element plays any SWF, until it exits or 20 s pass: what it traced and
+ * reported, and the code its exit gave.
+ */
+async function airAloneRun() {
+  const traces: string[] = [];
+  const errors: string[] = [];
+  const { log, error } = console;
+  console.log = (...args: unknown[]) => traces.push(args.join(" "));
+  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+  const p = document.createElement("swf2es-player") as Player;
+  let exit: number | null = null;
+  p.addEventListener("airexit", (e) => {
+    exit = (e as CustomEvent<{ code: number }>).detail.code;
+  });
+  document.body.append(p);
+  try {
+    await p.load("/web-test/air-alone.swf");
+    const start = performance.now();
+    while (exit === null && errors.length === 0 && performance.now() - start < 20_000) {
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  } finally {
+    console.log = log;
+    console.error = error;
+    p.destroy();
+    p.remove();
+  }
+
+  return { traces: traces.filter((t) => t.startsWith("alone: ")), errors, exit };
+}
+
 /** The shapes element playing `src` if given, then its quality attribute set while it plays: where it is drawn. */
 async function requality(quality: string, src?: string) {
   const shapes = element("shapes");
@@ -953,6 +986,7 @@ Object.assign(globalThis, {
   requality,
   embedderFetch,
   airRun,
+  airAloneRun,
   watched,
   churn,
   lazyChurn,

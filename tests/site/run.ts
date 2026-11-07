@@ -175,6 +175,25 @@ async function check(): Promise<void> {
         await send("Page.navigate", { url: `${base}${path}` });
         await until("document.readyState === 'complete' && !!customElements.get('swf2es-player')");
       };
+      /**
+       * Until the page that `path`'s navigation sends on to is at
+       * `pathname` and loaded: asked while a page moves on, the document
+       * may answer nothing, or the target navigate away mid-question.
+       */
+      const redirected = async (path: string, pathname: string) => {
+        await send("Page.navigate", { url: `${base}${path}` });
+        for (let tries = 0; ; tries++) {
+          const at = await evaluate<string>("location.pathname").catch(() => null);
+          if (at?.value === pathname) {
+            break;
+          }
+
+          assert.ok(tries < 100, `${path} stayed at ${at?.value}`);
+          await new Promise((done) => setTimeout(done, 100));
+        }
+
+        await until("document.readyState === 'complete'");
+      };
 
       const base = (await value<string>("location.origin")).concat("/swf2es/");
       await send("Emulation.setDeviceMetricsOverride", {
@@ -769,25 +788,12 @@ async function check(): Promise<void> {
         [
           "the home page sends the player's old links to it, and notices.html to the licences",
           async () => {
-            await navigate("index.html?swf=demos%2Fbounce.swf");
-            assert.equal(await value<string>("location.pathname"), "/swf2es/play/");
+            await redirected("index.html?swf=demos%2Fbounce.swf", "/swf2es/play/");
             assert.equal(await value<string>("location.search"), "?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
 
             // The licences' old page sends its links on too.
-            await send("Page.navigate", { url: `${base}notices.html` });
-            // Asked while the page moves on, a document may answer nothing.
-            for (let tries = 0; ; tries++) {
-              const at = await evaluate<string>("location.pathname").catch(() => null);
-              if (at?.value === "/swf2es/notices/") {
-                break;
-              }
-
-              assert.ok(tries < 100, `notices.html stayed at ${at?.value}`);
-              await new Promise((done) => setTimeout(done, 100));
-            }
-
-            await until("document.readyState === 'complete'");
+            await redirected("notices.html", "/swf2es/notices/");
             assert.match(
               await value<string>("document.querySelector('h1').textContent"),
               /Licences/,

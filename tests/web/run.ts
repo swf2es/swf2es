@@ -63,6 +63,7 @@ const abcs = compileScripts(
       source: readFileSync(`${here}scripts/NativeBitmapTest.as`, "utf8"),
     },
     { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
+    { name: "AirAloneTest", source: readFileSync(`${here}scripts/AirAloneTest.as`, "utf8") },
   ],
   out,
 );
@@ -139,6 +140,25 @@ writeFileSync(
     { name: "data/hello.txt", data: "hello from the package", deflated: true },
   ]),
 );
+// A SWF that names AIR's classes, served alone, with a file of its own beside it.
+writeFileSync(
+  `${site}air-alone.swf`,
+  w.swf({
+    width: 120,
+    height: 80,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(abcs.get("AirAloneTest") as Uint8Array, "AirAloneTest"),
+      w.symbolClass([[0, "AirAloneTest"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+mkdirSync(`${site}data`, { recursive: true });
+writeFileSync(`${site}data/hello.txt`, "hello from beside it");
 writeFileSync(
   `${site}context-menu.swf`,
   bare(abcs.get("ContextMenuTest") as Uint8Array, 1, "ContextMenuTest", 200, 120),
@@ -627,6 +647,23 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
   // NativeApplication.exit stopped it, and the page heard the code.
   assert.equal(r.exit, 3);
   assert.equal(r.playing, false);
+});
+
+check("a SWF that names AIR's classes plays alone as an AIR application", async (evaluate) => {
+  const r = await call<{ traces: string[]; errors: string[]; exit: number | null }>(
+    evaluate,
+    "airAloneRun()",
+  );
+  assert.deepEqual(r.errors, []);
+  assert.deepEqual(r.traces, [
+    "alone: url app:/air-alone.swf",
+    "alone: sandbox application",
+    "alone: id swf2es.air-alone",
+    "alone: title air-alone",
+    "alone: listing air-alone.swf",
+    "alone: beside hello from beside it",
+  ]);
+  assert.equal(r.exit, 5);
 });
 
 check("an embedder's fetch loads the SWF, asked for as the movie", async (evaluate) => {

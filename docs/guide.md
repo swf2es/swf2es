@@ -235,7 +235,13 @@ other URL goes to the network as a page's would. Its storage directory
 and the user's directories are there but empty, and nothing is written
 yet: `FileStream`'s writing modes are not supported.
 The element is its one window, at the descriptor's size; the play page
-opens `.air` and `.zip` files too. The desktop app runs an application
+opens `.air` and `.zip` files too.
+
+A SWF played on its own that names a class only AIR has, such as
+`NativeApplication` or `File`, plays as an AIR application too: the
+browser's Flash Player would refuse it (VerifyError #1014). Its directory
+holds it alone, and its `app:` URLs load any other file from beside it on
+the server. The desktop app runs an application
 from its descriptor on disk instead, with the real file system.
 
 ## Sockets and files
