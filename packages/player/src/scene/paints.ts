@@ -161,8 +161,11 @@ export class Paints {
       store.lostOnGpu(kept.copy);
     }
 
+    if (kept?.copy) {
+      store.copies.delete(kept.copy);
+    }
+
     if (kept) {
-      store.copies.delete(kept.copy as GpuCopy);
       this.collected.unregister(kept);
     }
 
