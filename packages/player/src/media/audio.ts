@@ -111,7 +111,7 @@ export function browserAudioHost(): AudioHost | null {
           ? given
           : given.format === 1
             ? adpcmSound(given)
-            : nellymoserRate(given.format, 0)
+            : isNellymoser(given.format)
               ? nellymoserSound(given)
               : given;
       let buffer: AudioBuffer;
@@ -456,22 +456,14 @@ function pcmBytes(samples: Int16Array): Uint8Array {
   return bytes;
 }
 
-/**
- * The sample rate of Nellymoser in `format`, 16 or 8 kHz for formats 4
- * and 5 whatever their flags say, and `flagged` for format 6; 0 for a
- * format that is not Nellymoser.
- */
+/** Whether `format` is Nellymoser's: 4 and 5 at 16 and 8 kHz, 6 at any rate. */
+function isNellymoser(format: number): boolean {
+  return format === 4 || format === 5 || format === 6;
+}
+
+/** The sample rate of Nellymoser in `format`: 16 or 8 kHz for 4 and 5 whatever their flags say, `flagged` for 6. */
 function nellymoserRate(format: number, flagged: number): number {
-  switch (format) {
-    case 4:
-      return 16000;
-    case 5:
-      return 8000;
-    case 6:
-      return flagged || 1;
-    default:
-      return 0;
-  }
+  return format === 4 ? 16000 : format === 5 ? 8000 : flagged;
 }
 
 /** Samples from -1 to 1 as 16-bit ones. */
@@ -526,7 +518,7 @@ export function streamSound(
   const parts: Uint8Array[] = [];
   const starts = [0];
   const adpcm = head.format === 1;
-  const nellymoser = nellymoserRate(head.format, 0) !== 0 ? new NellymoserDecoder() : null;
+  const nellymoser = isNellymoser(head.format) ? new NellymoserDecoder() : null;
   const decoded = adpcm || nellymoser !== null;
   const sampleSize = decoded ? 16 : head.sampleSize;
   const channels = nellymoser ? 1 : head.channels;
