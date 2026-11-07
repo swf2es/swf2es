@@ -304,7 +304,7 @@ test("a host without a device cursor retains ordinary pacing without restarting 
   player.destroy();
 });
 
-test("MP3 block gaps do not turn sample offsets into jumps past intervening frames", async (t) => {
+test("an MP3 stream's gap is silence, and its next block starts it again from its own samples", async (t) => {
   const frames = [w.soundStreamHead({ format: 2, rate: 1, samplesPerBlock: 441 })];
   for (let i = 0; i < 100; i++) {
     if (i < 10 || (i >= 40 && i < 50)) {
@@ -334,18 +334,27 @@ test("MP3 block gaps do not turn sample offsets into jumps past intervening fram
   clock.pass(400);
   player.advance(400);
   assert.equal(player.root.currentFrame, 11);
-  clock.pass(1600);
-  player.advance(1600);
+  assert.equal(player.root.stream, null, "the stream ends where its blocks do");
+  const tick = (frames: number) => {
+    for (let i = 0; i < frames; i++) {
+      clock.pass(40);
+      player.advance(40);
+    }
+  };
+  // No jump past the gap's frames: its silence is the timeline's own, a frame a tick.
+  tick(10);
   assert.equal(player.root.currentFrame, 21);
-  for (let i = 0; i < 29; i++) {
-    clock.pass(100);
-    player.advance(100);
-  }
-
+  tick(20);
+  assert.equal(player.root.currentFrame, 41);
+  // A stream plays once its sound is decoded, a promise's turn later.
+  await settle();
+  assert.equal(clock.plays.length, 2, "the block after the gap starts the stream again");
+  // From the samples its block starts at, not from where the first run left the device.
+  assert.equal(clock.plays[1].start, (10 * 441 * 1000) / 11025);
+  tick(9);
   assert.equal(player.root.currentFrame, 50);
-  assert.equal(clock.plays.length, 1, "the ended stream remains attached through its last block");
-  clock.pass(100);
-  player.advance(100);
+  assert.ok(player.root.stream, "the second run lasts through its last block");
+  tick(1);
   assert.equal(player.root.stream, null);
   player.destroy();
 });

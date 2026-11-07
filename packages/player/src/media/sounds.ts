@@ -495,12 +495,7 @@ function startSoundCharacter(library: Library, start: StartSound): SoundCharacte
 function streamOf(stream: SoundStream): NonNullable<SoundStream["sound"]> {
   if (!stream.sound) {
     const { sound, starts } = streamSound(stream.head, stream.blocks);
-    let endFrame = 0;
-    for (const frame of stream.byFrame.keys()) {
-      endFrame = frame + 1;
-    }
-
-    stream.sound = { character: { type: "sound", id: 0, definition: sound }, starts, endFrame };
+    stream.sound = { character: { type: "sound", id: 0, definition: sound }, starts };
   }
 
   return stream.sound;
@@ -509,9 +504,13 @@ function streamOf(stream: SoundStream): NonNullable<SoundStream["sound"]> {
 /**
  * The block on `frame` of a playing clip with no stream playing starts it
  * from there, as Ruffle's sound_stream_block does, to the end of the run of
- * frames with blocks after it, where Ruffle's stream ends; MP3's runs on
- * over gaps, to its last block. Its device cursor lets the player advance
- * overdue frames together, drawing only after the batch.
+ * frames with blocks after it, where Ruffle's stream ends, whatever its
+ * format: a gap is silence, as the frames carry no sound there, and the
+ * next block starts the stream again from its own samples. An MP3 stream
+ * that played on over a gap ran ahead of its timeline by the gap's length,
+ * a scene's narration heard before its pictures. Its device cursor lets
+ * the player advance overdue frames together, drawing only after the
+ * batch.
  */
 function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: number): void {
   const block = stream.byFrame.get(frame);
@@ -536,14 +535,10 @@ function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: 
     }
   }
 
-  const { character, starts, endFrame } = streamOf(stream);
+  const { character, starts } = streamOf(stream);
   let last = block + 1;
-  if (stream.head.format === 2) {
-    last = stream.blocks.length;
-  } else {
-    while (stream.byFrame.get(frame + last - block) === last) {
-      last++;
-    }
+  while (stream.byFrame.get(frame + last - block) === last) {
+    last++;
   }
 
   const rate = character.definition.sampleRate;
@@ -554,7 +549,7 @@ function startStream(h: SoundHost, clip: MovieClip, stream: SoundStream, frame: 
   if (sound) {
     sound.stream = {
       elapsedMs: 0,
-      endFrame: stream.head.format === 2 ? endFrame : frame + last - block,
+      endFrame: frame + last - block,
     };
     let active = streamSounds.get(h);
     if (!active) {
