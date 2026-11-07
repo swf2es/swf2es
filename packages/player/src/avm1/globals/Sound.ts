@@ -69,9 +69,14 @@ interface State {
 
 const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.READ_ONLY;
 
-/** A number as Ruffle's clamp_to_i32 makes it: cut where it is in range, else, NaN too, -2^31 (the corpus's `sound`). */
-function clampInt(n: number): number {
-  return n >= -0x80000000 && n <= 0x7fffffff ? Math.trunc(n) : -0x80000000;
+/**
+ * A volume or pan as Windows' Flash Player 32 and AIR take it: a 32-bit
+ * integer, wrapped, NaN 0. Ruffle's corpus (`sound`) expects another
+ * player's, which saturates, NaN to -2^31: a game that sets its sounds'
+ * volume from a setting not yet loaded, undefined, gets 0 from Flash.
+ */
+function int32(n: number): number {
+  return n | 0;
 }
 
 /** loops as Rust's `as u16` casts it, at least 1. */
@@ -186,7 +191,7 @@ export function soundClass(host: SoundClassHost): Obj {
   });
   method("getVolume", (state, _, v) => transformOf(state, v)?.volume);
   method("setPan", (state, args, v) => {
-    const pan = clampInt(avm1.toNumber(args.length > 0 ? args[0] : 0, v));
+    const pan = int32(avm1.toNumber(args.length > 0 ? args[0] : 0, v));
     setTransform(state, v, (t) => {
       t.leftToLeft = pan >= 0 ? 100 - pan : 100;
       t.rightToRight = pan >= 0 ? 100 : 100 + pan;
@@ -213,7 +218,7 @@ export function soundClass(host: SoundClassHost): Obj {
     return undefined;
   });
   method("setVolume", (state, args, v) => {
-    const volume = clampInt(avm1.toNumber(args.length > 0 ? args[0] : 0, v));
+    const volume = int32(avm1.toNumber(args.length > 0 ? args[0] : 0, v));
     setTransform(state, v, (t) => {
       t.volume = volume;
     });

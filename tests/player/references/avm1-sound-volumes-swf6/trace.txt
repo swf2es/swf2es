@@ -1,0 +1,15 @@
+fresh 100
+50 50
+undefined 0
+none 0
+null 0
+NaN 0
+string 70 70
+string x 0
+-5 -5
+150 150
+33.7 33
+1e10 1410065408
+pan undefined 0
+pan NaN 0
+clip undefined 0
