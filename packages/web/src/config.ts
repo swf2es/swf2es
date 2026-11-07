@@ -160,10 +160,10 @@ export async function workerHostForPlayer(ahead: boolean): Promise<WebWorkerHost
   });
 }
 
-/** The libraries a player loads: builtin and playerglobal, and AIR's after them for an AIR application. */
-export async function playerLibraries(): Promise<Uint8Array[]> {
+/** The libraries a player loads: builtin and playerglobal, and AIR's after them for an AIR application (`air`). */
+export async function playerLibraries(air: boolean): Promise<Uint8Array[]> {
   const abcs = await libraries();
-  return config.air ? [...abcs, airLibrary] : abcs;
+  return air ? [...abcs, airLibrary] : abcs;
 }
 
 /** builtin.abc and playerglobal, fetched once a page; every player reads the same bytes. */

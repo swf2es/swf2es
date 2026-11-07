@@ -210,6 +210,32 @@ In a checkout the app takes builtin.abc from the avmplus submodule and
 plays on its own playerglobal; elsewhere the first ActionScript 3 SWF asks
 for builtin.abc, and the app remembers where it is. [apps/desktop/README.md](../apps/desktop/README.md) has the rest.
 
+## Play an AIR application in a page
+
+The element also plays an AIR application from its package (`.air`), a
+ZIP of its folder, or the files of one. `openAirApp` finds the
+descriptor: the package's `META-INF/AIR/application.xml`, or else the
+shallowest `*-app.xml`. `loadAir` then plays its content SWF under AIR's
+API and the application sandbox, as adl does:
+
+```js
+import { openAirApp } from "@swf2es/web";
+
+const response = await fetch("/games/MyGame.air");
+const app = openAirApp(new Uint8Array(await response.arrayBuffer()));
+const movie = document.querySelector("swf2es-player");
+movie.addEventListener("airexit", (e) => console.log("exit", e.detail.code));
+await movie.loadAir(app, { arguments: ["--level", "3"] }); // InvokeEvent's arguments
+```
+
+The application's files are held in memory. `File` sees them under its
+directory, `app:` and `file:` URLs into it load from there, and any
+other URL goes to the network as a page's would. Its storage directory
+and the user's directories are there but empty, and nothing is written.
+The element is its one window, at the descriptor's size; the play page
+opens `.air` and `.zip` files too. The desktop app runs an application
+from its descriptor on disk instead, with the real file system.
+
 ## Sockets and files
 
 A browser cannot open TCP connections. Each `flash.net.Socket` goes

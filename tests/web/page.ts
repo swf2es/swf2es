@@ -339,6 +339,43 @@ async function embedderFetch() {
   return { asked, played };
 }
 
+/**
+ * Open the AIR package the runner wrote and play it with two launch
+ * arguments until it exits or 20 s pass: what it traced and reported, the
+ * code its exit gave, and whether a player is left.
+ */
+async function airRun() {
+  const { web } = await loading;
+  const bytes = new Uint8Array(await (await pageFetch("/web-test/air-app.air")).arrayBuffer());
+  const app = web.openAirApp(bytes);
+  const traces: string[] = [];
+  const errors: string[] = [];
+  const { log, error } = console;
+  console.log = (...args: unknown[]) => traces.push(args.join(" "));
+  console.error = (...args: unknown[]) => errors.push(args.join(" "));
+  const p = document.createElement("swf2es-player") as Player;
+  let exit: number | null = null;
+  p.addEventListener("airexit", (e) => {
+    exit = (e as CustomEvent<{ code: number }>).detail.code;
+  });
+  document.body.append(p);
+  try {
+    await p.loadAir(app, { arguments: ["one", "two words"] });
+    const start = performance.now();
+    while (exit === null && errors.length === 0 && performance.now() - start < 20_000) {
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  } finally {
+    console.log = log;
+    console.error = error;
+  }
+
+  const playing = p.player !== null;
+  p.destroy();
+  p.remove();
+  return { traces: traces.filter((t) => t.startsWith("air: ")), errors, exit, playing };
+}
+
 /** The shapes element playing `src` if given, then its quality attribute set while it plays: where it is drawn. */
 async function requality(quality: string, src?: string) {
   const shapes = element("shapes");
@@ -913,6 +950,7 @@ Object.assign(globalThis, {
   resize,
   requality,
   embedderFetch,
+  airRun,
   watched,
   churn,
   lazyChurn,
