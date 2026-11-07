@@ -152,6 +152,58 @@ test("format-0 PCM is little-endian and a short tag pads missing samples with si
   }
 });
 
+test("Nellymoser decodes to mono PCM at its format's rate, cut to the sound's count", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const made: { channels: number; count: number; rate: number; samples: Float32Array }[] = [];
+  class FakeAudioContext {
+    createBuffer(channels: number, count: number, rate: number) {
+      const samples = new Float32Array(count);
+      made.push({ channels, count, rate, samples });
+      return { duration: count / rate, numberOfChannels: channels, getChannelData: () => samples };
+    }
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host);
+    const data = new Uint8Array(
+      readFileSync(new URL("../../../player/sounds/tone22.nelly", import.meta.url)),
+    );
+    const sound = {
+      id: 1,
+      sampleSize: 16,
+      channels: 1,
+      sampleCount: 5000,
+      seekSamples: 0,
+      data,
+    };
+    // Format 6 at its flags' rate; 4 and 5 at 16 and 8 kHz whatever they say.
+    await host.decode({ ...sound, format: 6, sampleRate: 22050 });
+    await host.decode({ ...sound, format: 4, sampleRate: 5512 });
+    await host.decode({ ...sound, format: 5, sampleRate: 44100, sampleCount: 1e6 });
+    assert.deepEqual(
+      made.map(({ channels, count, rate }) => [channels, count, rate]),
+      [
+        [1, 5000, 22050],
+        [1, 5000, 16000],
+        [1, 22 * 256, 8000],
+      ],
+    );
+    // FFmpeg's tones are an eighth of full scale, its decode peaking at 0.09.
+    assert.ok(made[0].samples.some((v) => Math.abs(v) > 0.05));
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});
+
 test("MP3 playback gives the browser the original file for its own gapless decode", async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
   const bytes = new Uint8Array(
