@@ -7,19 +7,19 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
-import { containerEngine } from "../../../../oracle/oracle.ts";
-import { AIR_DEFINITIONS } from "../../../../packages/player/dist/air-definitions.js";
+import { containerEngine } from "../../../oracle/oracle.ts";
+import { AIR_DEFINITIONS } from "../../../packages/player/dist/air-definitions.js";
 import {
   airLibrary,
   playerglobalLibrary,
-} from "../../../../packages/player/dist/playerglobal/index.js";
-import { Scripting } from "../../../../packages/player/dist/scripting.js";
-import { libraryAbcs } from "../../../player/libraries.ts";
+} from "../../../packages/player/dist/playerglobal/index.js";
+import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { libraryAbcs } from "../../player/libraries.ts";
 
 // This file's own out directory: the other test files compile at the same time.
-const out = fileURLToPath(new URL("../../out/player-air-definitions/", import.meta.url));
+const out = fileURLToPath(new URL("../out/player-air-definitions/", import.meta.url));
 const source = fileURLToPath(
-  new URL("../../../../packages/player/src/air-definitions.ts", import.meta.url),
+  new URL("../../../packages/player/src/air-definitions.ts", import.meta.url),
 );
 
 let skip: string | false = false;

@@ -4,6 +4,8 @@
  * with @swf2es/codegen as the SWF loads (its JIT), or takes their modules from a
  * module cache, those the swf2es command compiled ahead of time included.
  */
+
+export { AIR_DEFINITIONS } from "./air-definitions.js";
 export { Avm1, type Avm1Options } from "./avm1/avm1.js";
 export {
   Container,
@@ -58,7 +60,6 @@ export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js"
 export type { Pointer, PointerState } from "./input/pointer.js";
 export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
-export { AIR_DEFINITIONS } from "./air-definitions.js";
 export type { FillTessellator } from "./scene/fills.js";
 export { airLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
 export type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
