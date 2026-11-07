@@ -151,11 +151,11 @@ export function newClass(
 
   const iscope = rt.scope(scope, [cls], 0);
   for (const [d, factory, id, , params] of desc.static.methods) {
-    installMethod(rt, straits.proto, d, withId(factory(scope, base), id), factory, params);
+    installMethod(rt, straits.methodHome(3), d, withId(factory(scope, base), id), factory, params);
   }
 
   for (const [d, factory, id, , params] of desc.instance.methods) {
-    installMethod(rt, itraits.proto, d, withId(factory(iscope, base), id), factory, params);
+    installMethod(rt, itraits.methodHome(3), d, withId(factory(iscope, base), id), factory, params);
   }
 
   // Playerglobal can declare an accessor whose setter has no ABC body.

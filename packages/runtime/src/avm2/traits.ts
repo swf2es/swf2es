@@ -91,6 +91,12 @@ export class Traits {
   private slotValues: Value[] = [];
   /** The JavaScript prototype of objects with these traits. */
   proto: AsObject;
+  /** The object its methods go into now (methodHome): its prototype, or one chained below it. */
+  private home: AsObject | null = null;
+  /** How many properties `home` has taken, a few counted in advance for the prototype's own. */
+  private homeSize = HOME_SLACK;
+  /** Whether it declares a slot its objects keep in their array `$S` (SPILL_SLOTS). */
+  private spills = false;
   /** The class whose instances these are the traits of, once it exists. */
   cls: AsObject | null = null;
   interfaces = new Set<Traits>();
@@ -175,6 +181,31 @@ export class Traits {
     }
   }
 
+  /**
+   * The object a method and its entries, `count` properties, go into:
+   * the prototype, till it holds HOME_PROPERTIES, then an object chained
+   * below it, above the base's, and so on. V8 keeps an object of more
+   * than 1020 properties as a dictionary, which hashes every name looked
+   * up in it: a script of thousands of functions, as Crossbridge compiles
+   * C, called each through such a prototype ran five times as slow as
+   * through one that is not. A prototype chain of objects V8 keeps fast
+   * looks a name up as fast as one object.
+   */
+  methodHome(count: number): AsObject {
+    let home = this.home ?? this.proto;
+    if (this.homeSize + count > HOME_PROPERTIES) {
+      // Chained before it takes its methods: V8 keeps an object fast that is a prototype first.
+      const below = Object.create(Object.getPrototypeOf(home));
+      Object.setPrototypeOf(home, below);
+      home = below;
+      this.homeSize = 0;
+    }
+
+    this.home = home;
+    this.homeSize += count;
+    return home;
+  }
+
   /** Add a traits' own bindings and slots from its descriptor. */
   describe(desc: TraitsDesc): void {
     invalidate();
@@ -191,6 +222,10 @@ export class Traits {
     for (const [slot, value, type] of desc.defaults) {
       this.slotTypes[slot] = type;
       this.own.push([slotKey(slot), value]);
+      if (slot >= SPILL_SLOTS) {
+        this.spills = true;
+        spilledSlot(this.methodHome(1), slot);
+      }
     }
 
     for (const [d, , , returnType, params, required] of desc.methods) {
@@ -268,6 +303,17 @@ export class Traits {
     return false;
   }
 
+  /** Whether it or a base declares a slot kept in the array `$S`. */
+  private spillsAny(): boolean {
+    for (let t: Traits | null = this; t; t = t.base) {
+      if (t.spills) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   /** The type of slot `id`, declared here or by a base. */
   slotType(id: number): TypeRef {
     for (let t: Traits | null = this; t; t = t.base) {
@@ -321,6 +367,11 @@ export class Traits {
     if (this.filler) {
       this.filler(o, this.slotValues);
     } else {
+      // Those past SPILL_SLOTS through their accessors, into the array.
+      if (this.spillsAny()) {
+        o.$S = [];
+      }
+
       // Traits no module compiled a fill for: a catch scope's, or past
       // FILL_SLOTS, where V8 keeps no object fast anyway.
       const defaults = this.allDefaults;
@@ -478,6 +529,41 @@ function valuesBySlot(defaults: [string, Value][]): Value[] {
 
 // The names of slot and method properties by id, made once each, for the
 // runtime's dynamic paths; generated code names them itself.
+/**
+ * The properties a prototype object takes before its traits' methods go
+ * on in another below it (Traits.methodHome), well short of V8's 1020; a
+ * few counted in advance for the prototype's own ($traits, $p, $init).
+ */
+const HOME_PROPERTIES = 768;
+const HOME_SLACK = 16;
+
+/**
+ * The first slot an object keeps in its array `$S` rather than in a
+ * property of its own, as the codegen's SPILL_SLOTS (emit/refs.ts), which
+ * compiled code reads and writes there (`o.$S[n - SPILL_SLOTS]`): V8
+ * keeps an object of more than 1020 properties as a dictionary, which
+ * hashes every name looked up in it. A Crossbridge program's global, of
+ * thousands of slots, its stack pointer and registers among the first,
+ * ran five times as slow as one that is not. The slot's name reaches the
+ * array through an accessor on the prototype (spilledSlot), so that what
+ * looks slots up by name finds them as any other.
+ */
+export const SPILL_SLOTS = 900;
+
+/** Slot `slot`'s accessor in `home`, a prototype of its objects: the object's `$S` at its place. */
+function spilledSlot(home: AsObject, slot: number): void {
+  const at = slot - SPILL_SLOTS;
+  Object.defineProperty(home, slotKey(slot), {
+    get(this: AsObject) {
+      return this.$S[at];
+    },
+    set(this: AsObject, v: Value) {
+      this.$S[at] = v;
+    },
+    configurable: true,
+  });
+}
+
 const slotKeys: string[] = [];
 const methodKeys: string[] = [];
 export const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);

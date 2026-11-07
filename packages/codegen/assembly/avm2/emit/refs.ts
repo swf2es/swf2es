@@ -23,6 +23,28 @@ import {
 } from "../link/traits";
 import { MethodEmitter } from "./method";
 
+/**
+ * The first slot an object keeps in its array `$S` rather than in a
+ * property of its own, as the runtime's SPILL_SLOTS (traits.ts): V8 keeps
+ * an object of more than 1020 properties as a dictionary, which hashes
+ * every name looked up in it, and a Crossbridge program's script global
+ * has thousands of slots, its stack pointer and registers among the first.
+ */
+export const SPILL_SLOTS: u32 = 900;
+
+/** Slot `slot`'s member, `.$n`, or `.$S[n - SPILL_SLOTS]` past them. */
+export function slotMember(out: Output, slot: u32): void {
+  if (slot < SPILL_SLOTS) {
+    out.text(".$");
+    out.uint(slot);
+    return;
+  }
+
+  out.text(".$S[");
+  out.uint(slot - SPILL_SLOTS);
+  out.text("]");
+}
+
 /** Whether typeRef writes type t as T[k], a class's instances; else a literal. */
 export function isClassRef(e: MethodEmitter, t: i32): bool {
   // What typeExpr writes as a literal stays one: *, the builtins it names
