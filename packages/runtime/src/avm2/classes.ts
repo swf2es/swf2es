@@ -180,7 +180,7 @@ export function newClass(
   if (aliases) {
     const proto = itraits.proto;
     for (let i = 0; i < aliases.length; i += 2) {
-      proto[aliases[i] as string] = proto[boundKey(aliases[i + 1] as number)];
+      itraits.methodHome(1)[aliases[i] as string] = proto[boundKey(aliases[i + 1] as number)];
     }
   }
 

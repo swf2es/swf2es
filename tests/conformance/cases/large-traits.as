@@ -3,7 +3,10 @@
 // properties as a slow dictionary: a script's global of that many
 // variables, as Crossbridge compiles C, a class's instances and a
 // subclass's, and a class's statics, read and written typed, by name, by
-// a closure, through `in`, hasOwnProperty, describeType, JSON and AMF.
+// a closure, through `in`, hasOwnProperty, describeType, JSON and AMF; and
+// hundreds of a script's functions and a class's methods, which swf2es
+// keeps in prototypes chained below the first, called typed, untyped,
+// through an interface, as closures and overridden.
 package {
   public var g0:int = 0, g1:int = 1, g2:int = 2, g3:int = 3, g4:int = 4, g5:int = 5, g6:int = 6, g7:int = 7, g8:int = 8, g9:int = 9, g10:int = 10, g11:int = 11;
   public var g12:int = 12, g13:int = 13, g14:int = 14, g15:int = 15, g16:int = 16, g17:int = 17, g18:int = 18, g19:int = 19, g20:int = 20, g21:int = 21, g22:int = 22, g23:int = 23;
@@ -82,13 +85,617 @@ package {
   public var g888:int = 15, g889:int = 16, g890:int = 17, g891:int = 18, g892:int = 19, g893:int = 20, g894:int = 21, g895:int = 22, g896:int = 23, g897:int = 24, g898:int = 25, g899:int = 26;
   public var g900:int = 27, g901:int = 28, g902:int = 29, g903:int = 30, g904:int = 31, g905:int = 32, g906:int = 33, g907:int = 34, g908:int = 35, g909:int = 36, g910:int = 37, g911:int = 38;
   public var g912:int = 39, g913:int = 40, g914:int = 41, g915:int = 42, g916:int = 43, g917:int = 44, g918:int = 45, g919:int = 46;
+  public function p0(a:int):int { return a + 0; }
+  public function p1(a:int):int { return a + 3; }
+  public function p2(a:int):int { return a + 6; }
+  public function p3(a:int):int { return a + 9; }
+  public function p4(a:int):int { return a + 12; }
+  public function p5(a:int):int { return a + 15; }
+  public function p6(a:int):int { return a + 18; }
+  public function p7(a:int):int { return a + 21; }
+  public function p8(a:int):int { return a + 24; }
+  public function p9(a:int):int { return a + 27; }
+  public function p10(a:int):int { return a + 30; }
+  public function p11(a:int):int { return a + 33; }
+  public function p12(a:int):int { return a + 36; }
+  public function p13(a:int):int { return a + 39; }
+  public function p14(a:int):int { return a + 42; }
+  public function p15(a:int):int { return a + 45; }
+  public function p16(a:int):int { return a + 48; }
+  public function p17(a:int):int { return a + 51; }
+  public function p18(a:int):int { return a + 54; }
+  public function p19(a:int):int { return a + 57; }
+  public function p20(a:int):int { return a + 60; }
+  public function p21(a:int):int { return a + 63; }
+  public function p22(a:int):int { return a + 66; }
+  public function p23(a:int):int { return a + 69; }
+  public function p24(a:int):int { return a + 72; }
+  public function p25(a:int):int { return a + 75; }
+  public function p26(a:int):int { return a + 78; }
+  public function p27(a:int):int { return a + 81; }
+  public function p28(a:int):int { return a + 84; }
+  public function p29(a:int):int { return a + 87; }
+  public function p30(a:int):int { return a + 90; }
+  public function p31(a:int):int { return a + 93; }
+  public function p32(a:int):int { return a + 96; }
+  public function p33(a:int):int { return a + 99; }
+  public function p34(a:int):int { return a + 102; }
+  public function p35(a:int):int { return a + 105; }
+  public function p36(a:int):int { return a + 108; }
+  public function p37(a:int):int { return a + 111; }
+  public function p38(a:int):int { return a + 114; }
+  public function p39(a:int):int { return a + 117; }
+  public function p40(a:int):int { return a + 120; }
+  public function p41(a:int):int { return a + 123; }
+  public function p42(a:int):int { return a + 126; }
+  public function p43(a:int):int { return a + 129; }
+  public function p44(a:int):int { return a + 132; }
+  public function p45(a:int):int { return a + 135; }
+  public function p46(a:int):int { return a + 138; }
+  public function p47(a:int):int { return a + 141; }
+  public function p48(a:int):int { return a + 144; }
+  public function p49(a:int):int { return a + 147; }
+  public function p50(a:int):int { return a + 150; }
+  public function p51(a:int):int { return a + 153; }
+  public function p52(a:int):int { return a + 156; }
+  public function p53(a:int):int { return a + 159; }
+  public function p54(a:int):int { return a + 162; }
+  public function p55(a:int):int { return a + 165; }
+  public function p56(a:int):int { return a + 168; }
+  public function p57(a:int):int { return a + 171; }
+  public function p58(a:int):int { return a + 174; }
+  public function p59(a:int):int { return a + 177; }
+  public function p60(a:int):int { return a + 180; }
+  public function p61(a:int):int { return a + 183; }
+  public function p62(a:int):int { return a + 186; }
+  public function p63(a:int):int { return a + 189; }
+  public function p64(a:int):int { return a + 192; }
+  public function p65(a:int):int { return a + 195; }
+  public function p66(a:int):int { return a + 198; }
+  public function p67(a:int):int { return a + 201; }
+  public function p68(a:int):int { return a + 204; }
+  public function p69(a:int):int { return a + 207; }
+  public function p70(a:int):int { return a + 210; }
+  public function p71(a:int):int { return a + 213; }
+  public function p72(a:int):int { return a + 216; }
+  public function p73(a:int):int { return a + 219; }
+  public function p74(a:int):int { return a + 222; }
+  public function p75(a:int):int { return a + 225; }
+  public function p76(a:int):int { return a + 228; }
+  public function p77(a:int):int { return a + 231; }
+  public function p78(a:int):int { return a + 234; }
+  public function p79(a:int):int { return a + 237; }
+  public function p80(a:int):int { return a + 240; }
+  public function p81(a:int):int { return a + 243; }
+  public function p82(a:int):int { return a + 246; }
+  public function p83(a:int):int { return a + 249; }
+  public function p84(a:int):int { return a + 252; }
+  public function p85(a:int):int { return a + 255; }
+  public function p86(a:int):int { return a + 258; }
+  public function p87(a:int):int { return a + 261; }
+  public function p88(a:int):int { return a + 264; }
+  public function p89(a:int):int { return a + 267; }
+  public function p90(a:int):int { return a + 270; }
+  public function p91(a:int):int { return a + 273; }
+  public function p92(a:int):int { return a + 276; }
+  public function p93(a:int):int { return a + 279; }
+  public function p94(a:int):int { return a + 282; }
+  public function p95(a:int):int { return a + 285; }
+  public function p96(a:int):int { return a + 288; }
+  public function p97(a:int):int { return a + 291; }
+  public function p98(a:int):int { return a + 294; }
+  public function p99(a:int):int { return a + 297; }
+  public function p100(a:int):int { return a + 300; }
+  public function p101(a:int):int { return a + 303; }
+  public function p102(a:int):int { return a + 306; }
+  public function p103(a:int):int { return a + 309; }
+  public function p104(a:int):int { return a + 312; }
+  public function p105(a:int):int { return a + 315; }
+  public function p106(a:int):int { return a + 318; }
+  public function p107(a:int):int { return a + 321; }
+  public function p108(a:int):int { return a + 324; }
+  public function p109(a:int):int { return a + 327; }
+  public function p110(a:int):int { return a + 330; }
+  public function p111(a:int):int { return a + 333; }
+  public function p112(a:int):int { return a + 336; }
+  public function p113(a:int):int { return a + 339; }
+  public function p114(a:int):int { return a + 342; }
+  public function p115(a:int):int { return a + 345; }
+  public function p116(a:int):int { return a + 348; }
+  public function p117(a:int):int { return a + 351; }
+  public function p118(a:int):int { return a + 354; }
+  public function p119(a:int):int { return a + 357; }
+  public function p120(a:int):int { return a + 360; }
+  public function p121(a:int):int { return a + 363; }
+  public function p122(a:int):int { return a + 366; }
+  public function p123(a:int):int { return a + 369; }
+  public function p124(a:int):int { return a + 372; }
+  public function p125(a:int):int { return a + 375; }
+  public function p126(a:int):int { return a + 378; }
+  public function p127(a:int):int { return a + 381; }
+  public function p128(a:int):int { return a + 384; }
+  public function p129(a:int):int { return a + 387; }
+  public function p130(a:int):int { return a + 390; }
+  public function p131(a:int):int { return a + 393; }
+  public function p132(a:int):int { return a + 396; }
+  public function p133(a:int):int { return a + 399; }
+  public function p134(a:int):int { return a + 402; }
+  public function p135(a:int):int { return a + 405; }
+  public function p136(a:int):int { return a + 408; }
+  public function p137(a:int):int { return a + 411; }
+  public function p138(a:int):int { return a + 414; }
+  public function p139(a:int):int { return a + 417; }
+  public function p140(a:int):int { return a + 420; }
+  public function p141(a:int):int { return a + 423; }
+  public function p142(a:int):int { return a + 426; }
+  public function p143(a:int):int { return a + 429; }
+  public function p144(a:int):int { return a + 432; }
+  public function p145(a:int):int { return a + 435; }
+  public function p146(a:int):int { return a + 438; }
+  public function p147(a:int):int { return a + 441; }
+  public function p148(a:int):int { return a + 444; }
+  public function p149(a:int):int { return a + 447; }
+  public function p150(a:int):int { return a + 450; }
+  public function p151(a:int):int { return a + 453; }
+  public function p152(a:int):int { return a + 456; }
+  public function p153(a:int):int { return a + 459; }
+  public function p154(a:int):int { return a + 462; }
+  public function p155(a:int):int { return a + 465; }
+  public function p156(a:int):int { return a + 468; }
+  public function p157(a:int):int { return a + 471; }
+  public function p158(a:int):int { return a + 474; }
+  public function p159(a:int):int { return a + 477; }
+  public function p160(a:int):int { return a + 480; }
+  public function p161(a:int):int { return a + 483; }
+  public function p162(a:int):int { return a + 486; }
+  public function p163(a:int):int { return a + 489; }
+  public function p164(a:int):int { return a + 492; }
+  public function p165(a:int):int { return a + 495; }
+  public function p166(a:int):int { return a + 498; }
+  public function p167(a:int):int { return a + 501; }
+  public function p168(a:int):int { return a + 504; }
+  public function p169(a:int):int { return a + 507; }
+  public function p170(a:int):int { return a + 510; }
+  public function p171(a:int):int { return a + 513; }
+  public function p172(a:int):int { return a + 516; }
+  public function p173(a:int):int { return a + 519; }
+  public function p174(a:int):int { return a + 522; }
+  public function p175(a:int):int { return a + 525; }
+  public function p176(a:int):int { return a + 528; }
+  public function p177(a:int):int { return a + 531; }
+  public function p178(a:int):int { return a + 534; }
+  public function p179(a:int):int { return a + 537; }
+  public function p180(a:int):int { return a + 540; }
+  public function p181(a:int):int { return a + 543; }
+  public function p182(a:int):int { return a + 546; }
+  public function p183(a:int):int { return a + 549; }
+  public function p184(a:int):int { return a + 552; }
+  public function p185(a:int):int { return a + 555; }
+  public function p186(a:int):int { return a + 558; }
+  public function p187(a:int):int { return a + 561; }
+  public function p188(a:int):int { return a + 564; }
+  public function p189(a:int):int { return a + 567; }
+  public function p190(a:int):int { return a + 570; }
+  public function p191(a:int):int { return a + 573; }
+  public function p192(a:int):int { return a + 576; }
+  public function p193(a:int):int { return a + 579; }
+  public function p194(a:int):int { return a + 582; }
+  public function p195(a:int):int { return a + 585; }
+  public function p196(a:int):int { return a + 588; }
+  public function p197(a:int):int { return a + 591; }
+  public function p198(a:int):int { return a + 594; }
+  public function p199(a:int):int { return a + 597; }
+  public function p200(a:int):int { return a + 600; }
+  public function p201(a:int):int { return a + 603; }
+  public function p202(a:int):int { return a + 606; }
+  public function p203(a:int):int { return a + 609; }
+  public function p204(a:int):int { return a + 612; }
+  public function p205(a:int):int { return a + 615; }
+  public function p206(a:int):int { return a + 618; }
+  public function p207(a:int):int { return a + 621; }
+  public function p208(a:int):int { return a + 624; }
+  public function p209(a:int):int { return a + 627; }
+  public function p210(a:int):int { return a + 630; }
+  public function p211(a:int):int { return a + 633; }
+  public function p212(a:int):int { return a + 636; }
+  public function p213(a:int):int { return a + 639; }
+  public function p214(a:int):int { return a + 642; }
+  public function p215(a:int):int { return a + 645; }
+  public function p216(a:int):int { return a + 648; }
+  public function p217(a:int):int { return a + 651; }
+  public function p218(a:int):int { return a + 654; }
+  public function p219(a:int):int { return a + 657; }
+  public function p220(a:int):int { return a + 660; }
+  public function p221(a:int):int { return a + 663; }
+  public function p222(a:int):int { return a + 666; }
+  public function p223(a:int):int { return a + 669; }
+  public function p224(a:int):int { return a + 672; }
+  public function p225(a:int):int { return a + 675; }
+  public function p226(a:int):int { return a + 678; }
+  public function p227(a:int):int { return a + 681; }
+  public function p228(a:int):int { return a + 684; }
+  public function p229(a:int):int { return a + 687; }
+  public function p230(a:int):int { return a + 690; }
+  public function p231(a:int):int { return a + 693; }
+  public function p232(a:int):int { return a + 696; }
+  public function p233(a:int):int { return a + 699; }
+  public function p234(a:int):int { return a + 702; }
+  public function p235(a:int):int { return a + 705; }
+  public function p236(a:int):int { return a + 708; }
+  public function p237(a:int):int { return a + 711; }
+  public function p238(a:int):int { return a + 714; }
+  public function p239(a:int):int { return a + 717; }
+  public function p240(a:int):int { return a + 720; }
+  public function p241(a:int):int { return a + 723; }
+  public function p242(a:int):int { return a + 726; }
+  public function p243(a:int):int { return a + 729; }
+  public function p244(a:int):int { return a + 732; }
+  public function p245(a:int):int { return a + 735; }
+  public function p246(a:int):int { return a + 738; }
+  public function p247(a:int):int { return a + 741; }
+  public function p248(a:int):int { return a + 744; }
+  public function p249(a:int):int { return a + 747; }
+  public function p250(a:int):int { return a + 750; }
+  public function p251(a:int):int { return a + 753; }
+  public function p252(a:int):int { return a + 756; }
+  public function p253(a:int):int { return a + 759; }
+  public function p254(a:int):int { return a + 762; }
+  public function p255(a:int):int { return a + 765; }
+  public function p256(a:int):int { return a + 768; }
+  public function p257(a:int):int { return a + 771; }
+  public function p258(a:int):int { return a + 774; }
+  public function p259(a:int):int { return a + 777; }
+  public function p260(a:int):int { return a + 780; }
+  public function p261(a:int):int { return a + 783; }
+  public function p262(a:int):int { return a + 786; }
+  public function p263(a:int):int { return a + 789; }
+  public function p264(a:int):int { return a + 792; }
+  public function p265(a:int):int { return a + 795; }
+  public function p266(a:int):int { return a + 798; }
+  public function p267(a:int):int { return a + 801; }
+  public function p268(a:int):int { return a + 804; }
+  public function p269(a:int):int { return a + 807; }
+  public function p270(a:int):int { return a + 810; }
+  public function p271(a:int):int { return a + 813; }
+  public function p272(a:int):int { return a + 816; }
+  public function p273(a:int):int { return a + 819; }
+  public function p274(a:int):int { return a + 822; }
+  public function p275(a:int):int { return a + 825; }
+  public function p276(a:int):int { return a + 828; }
+  public function p277(a:int):int { return a + 831; }
+  public function p278(a:int):int { return a + 834; }
+  public function p279(a:int):int { return a + 837; }
+  public function p280(a:int):int { return a + 840; }
+  public function p281(a:int):int { return a + 843; }
+  public function p282(a:int):int { return a + 846; }
+  public function p283(a:int):int { return a + 849; }
+  public function p284(a:int):int { return a + 852; }
+  public function p285(a:int):int { return a + 855; }
+  public function p286(a:int):int { return a + 858; }
+  public function p287(a:int):int { return a + 861; }
+  public function p288(a:int):int { return a + 864; }
+  public function p289(a:int):int { return a + 867; }
+  public function p290(a:int):int { return a + 870; }
+  public function p291(a:int):int { return a + 873; }
+  public function p292(a:int):int { return a + 876; }
+  public function p293(a:int):int { return a + 879; }
+  public function p294(a:int):int { return a + 882; }
+  public function p295(a:int):int { return a + 885; }
+  public function p296(a:int):int { return a + 888; }
+  public function p297(a:int):int { return a + 891; }
+  public function p298(a:int):int { return a + 894; }
+  public function p299(a:int):int { return a + 897; }
   public function bumpGlobals():int { g0 += 1; g905 += 2; g919 = g905 + g0; return g919; }
   public function readGlobal(name:String):* { return this[name]; }
 }
 import avmplus.describeType;
 import avmplus.FLASH10_FLAGS;
 import flash.utils.ByteArray;
-class Big {
+interface Late {
+  function m250(a:int):int;
+  function m299(a:int):int;
+}
+class Big implements Late {
+  public function m0(a:int):int { return a * 2 + 0; }
+  public function m1(a:int):int { return a * 2 + 1; }
+  public function m2(a:int):int { return a * 2 + 2; }
+  public function m3(a:int):int { return a * 2 + 3; }
+  public function m4(a:int):int { return a * 2 + 4; }
+  public function m5(a:int):int { return a * 2 + 5; }
+  public function m6(a:int):int { return a * 2 + 6; }
+  public function m7(a:int):int { return a * 2 + 7; }
+  public function m8(a:int):int { return a * 2 + 8; }
+  public function m9(a:int):int { return a * 2 + 9; }
+  public function m10(a:int):int { return a * 2 + 10; }
+  public function m11(a:int):int { return a * 2 + 11; }
+  public function m12(a:int):int { return a * 2 + 12; }
+  public function m13(a:int):int { return a * 2 + 13; }
+  public function m14(a:int):int { return a * 2 + 14; }
+  public function m15(a:int):int { return a * 2 + 15; }
+  public function m16(a:int):int { return a * 2 + 16; }
+  public function m17(a:int):int { return a * 2 + 17; }
+  public function m18(a:int):int { return a * 2 + 18; }
+  public function m19(a:int):int { return a * 2 + 19; }
+  public function m20(a:int):int { return a * 2 + 20; }
+  public function m21(a:int):int { return a * 2 + 21; }
+  public function m22(a:int):int { return a * 2 + 22; }
+  public function m23(a:int):int { return a * 2 + 23; }
+  public function m24(a:int):int { return a * 2 + 24; }
+  public function m25(a:int):int { return a * 2 + 25; }
+  public function m26(a:int):int { return a * 2 + 26; }
+  public function m27(a:int):int { return a * 2 + 27; }
+  public function m28(a:int):int { return a * 2 + 28; }
+  public function m29(a:int):int { return a * 2 + 29; }
+  public function m30(a:int):int { return a * 2 + 30; }
+  public function m31(a:int):int { return a * 2 + 31; }
+  public function m32(a:int):int { return a * 2 + 32; }
+  public function m33(a:int):int { return a * 2 + 33; }
+  public function m34(a:int):int { return a * 2 + 34; }
+  public function m35(a:int):int { return a * 2 + 35; }
+  public function m36(a:int):int { return a * 2 + 36; }
+  public function m37(a:int):int { return a * 2 + 37; }
+  public function m38(a:int):int { return a * 2 + 38; }
+  public function m39(a:int):int { return a * 2 + 39; }
+  public function m40(a:int):int { return a * 2 + 40; }
+  public function m41(a:int):int { return a * 2 + 41; }
+  public function m42(a:int):int { return a * 2 + 42; }
+  public function m43(a:int):int { return a * 2 + 43; }
+  public function m44(a:int):int { return a * 2 + 44; }
+  public function m45(a:int):int { return a * 2 + 45; }
+  public function m46(a:int):int { return a * 2 + 46; }
+  public function m47(a:int):int { return a * 2 + 47; }
+  public function m48(a:int):int { return a * 2 + 48; }
+  public function m49(a:int):int { return a * 2 + 49; }
+  public function m50(a:int):int { return a * 2 + 50; }
+  public function m51(a:int):int { return a * 2 + 51; }
+  public function m52(a:int):int { return a * 2 + 52; }
+  public function m53(a:int):int { return a * 2 + 53; }
+  public function m54(a:int):int { return a * 2 + 54; }
+  public function m55(a:int):int { return a * 2 + 55; }
+  public function m56(a:int):int { return a * 2 + 56; }
+  public function m57(a:int):int { return a * 2 + 57; }
+  public function m58(a:int):int { return a * 2 + 58; }
+  public function m59(a:int):int { return a * 2 + 59; }
+  public function m60(a:int):int { return a * 2 + 60; }
+  public function m61(a:int):int { return a * 2 + 61; }
+  public function m62(a:int):int { return a * 2 + 62; }
+  public function m63(a:int):int { return a * 2 + 63; }
+  public function m64(a:int):int { return a * 2 + 64; }
+  public function m65(a:int):int { return a * 2 + 65; }
+  public function m66(a:int):int { return a * 2 + 66; }
+  public function m67(a:int):int { return a * 2 + 67; }
+  public function m68(a:int):int { return a * 2 + 68; }
+  public function m69(a:int):int { return a * 2 + 69; }
+  public function m70(a:int):int { return a * 2 + 70; }
+  public function m71(a:int):int { return a * 2 + 71; }
+  public function m72(a:int):int { return a * 2 + 72; }
+  public function m73(a:int):int { return a * 2 + 73; }
+  public function m74(a:int):int { return a * 2 + 74; }
+  public function m75(a:int):int { return a * 2 + 75; }
+  public function m76(a:int):int { return a * 2 + 76; }
+  public function m77(a:int):int { return a * 2 + 77; }
+  public function m78(a:int):int { return a * 2 + 78; }
+  public function m79(a:int):int { return a * 2 + 79; }
+  public function m80(a:int):int { return a * 2 + 80; }
+  public function m81(a:int):int { return a * 2 + 81; }
+  public function m82(a:int):int { return a * 2 + 82; }
+  public function m83(a:int):int { return a * 2 + 83; }
+  public function m84(a:int):int { return a * 2 + 84; }
+  public function m85(a:int):int { return a * 2 + 85; }
+  public function m86(a:int):int { return a * 2 + 86; }
+  public function m87(a:int):int { return a * 2 + 87; }
+  public function m88(a:int):int { return a * 2 + 88; }
+  public function m89(a:int):int { return a * 2 + 89; }
+  public function m90(a:int):int { return a * 2 + 90; }
+  public function m91(a:int):int { return a * 2 + 91; }
+  public function m92(a:int):int { return a * 2 + 92; }
+  public function m93(a:int):int { return a * 2 + 93; }
+  public function m94(a:int):int { return a * 2 + 94; }
+  public function m95(a:int):int { return a * 2 + 95; }
+  public function m96(a:int):int { return a * 2 + 96; }
+  public function m97(a:int):int { return a * 2 + 97; }
+  public function m98(a:int):int { return a * 2 + 98; }
+  public function m99(a:int):int { return a * 2 + 99; }
+  public function m100(a:int):int { return a * 2 + 100; }
+  public function m101(a:int):int { return a * 2 + 101; }
+  public function m102(a:int):int { return a * 2 + 102; }
+  public function m103(a:int):int { return a * 2 + 103; }
+  public function m104(a:int):int { return a * 2 + 104; }
+  public function m105(a:int):int { return a * 2 + 105; }
+  public function m106(a:int):int { return a * 2 + 106; }
+  public function m107(a:int):int { return a * 2 + 107; }
+  public function m108(a:int):int { return a * 2 + 108; }
+  public function m109(a:int):int { return a * 2 + 109; }
+  public function m110(a:int):int { return a * 2 + 110; }
+  public function m111(a:int):int { return a * 2 + 111; }
+  public function m112(a:int):int { return a * 2 + 112; }
+  public function m113(a:int):int { return a * 2 + 113; }
+  public function m114(a:int):int { return a * 2 + 114; }
+  public function m115(a:int):int { return a * 2 + 115; }
+  public function m116(a:int):int { return a * 2 + 116; }
+  public function m117(a:int):int { return a * 2 + 117; }
+  public function m118(a:int):int { return a * 2 + 118; }
+  public function m119(a:int):int { return a * 2 + 119; }
+  public function m120(a:int):int { return a * 2 + 120; }
+  public function m121(a:int):int { return a * 2 + 121; }
+  public function m122(a:int):int { return a * 2 + 122; }
+  public function m123(a:int):int { return a * 2 + 123; }
+  public function m124(a:int):int { return a * 2 + 124; }
+  public function m125(a:int):int { return a * 2 + 125; }
+  public function m126(a:int):int { return a * 2 + 126; }
+  public function m127(a:int):int { return a * 2 + 127; }
+  public function m128(a:int):int { return a * 2 + 128; }
+  public function m129(a:int):int { return a * 2 + 129; }
+  public function m130(a:int):int { return a * 2 + 130; }
+  public function m131(a:int):int { return a * 2 + 131; }
+  public function m132(a:int):int { return a * 2 + 132; }
+  public function m133(a:int):int { return a * 2 + 133; }
+  public function m134(a:int):int { return a * 2 + 134; }
+  public function m135(a:int):int { return a * 2 + 135; }
+  public function m136(a:int):int { return a * 2 + 136; }
+  public function m137(a:int):int { return a * 2 + 137; }
+  public function m138(a:int):int { return a * 2 + 138; }
+  public function m139(a:int):int { return a * 2 + 139; }
+  public function m140(a:int):int { return a * 2 + 140; }
+  public function m141(a:int):int { return a * 2 + 141; }
+  public function m142(a:int):int { return a * 2 + 142; }
+  public function m143(a:int):int { return a * 2 + 143; }
+  public function m144(a:int):int { return a * 2 + 144; }
+  public function m145(a:int):int { return a * 2 + 145; }
+  public function m146(a:int):int { return a * 2 + 146; }
+  public function m147(a:int):int { return a * 2 + 147; }
+  public function m148(a:int):int { return a * 2 + 148; }
+  public function m149(a:int):int { return a * 2 + 149; }
+  public function m150(a:int):int { return a * 2 + 150; }
+  public function m151(a:int):int { return a * 2 + 151; }
+  public function m152(a:int):int { return a * 2 + 152; }
+  public function m153(a:int):int { return a * 2 + 153; }
+  public function m154(a:int):int { return a * 2 + 154; }
+  public function m155(a:int):int { return a * 2 + 155; }
+  public function m156(a:int):int { return a * 2 + 156; }
+  public function m157(a:int):int { return a * 2 + 157; }
+  public function m158(a:int):int { return a * 2 + 158; }
+  public function m159(a:int):int { return a * 2 + 159; }
+  public function m160(a:int):int { return a * 2 + 160; }
+  public function m161(a:int):int { return a * 2 + 161; }
+  public function m162(a:int):int { return a * 2 + 162; }
+  public function m163(a:int):int { return a * 2 + 163; }
+  public function m164(a:int):int { return a * 2 + 164; }
+  public function m165(a:int):int { return a * 2 + 165; }
+  public function m166(a:int):int { return a * 2 + 166; }
+  public function m167(a:int):int { return a * 2 + 167; }
+  public function m168(a:int):int { return a * 2 + 168; }
+  public function m169(a:int):int { return a * 2 + 169; }
+  public function m170(a:int):int { return a * 2 + 170; }
+  public function m171(a:int):int { return a * 2 + 171; }
+  public function m172(a:int):int { return a * 2 + 172; }
+  public function m173(a:int):int { return a * 2 + 173; }
+  public function m174(a:int):int { return a * 2 + 174; }
+  public function m175(a:int):int { return a * 2 + 175; }
+  public function m176(a:int):int { return a * 2 + 176; }
+  public function m177(a:int):int { return a * 2 + 177; }
+  public function m178(a:int):int { return a * 2 + 178; }
+  public function m179(a:int):int { return a * 2 + 179; }
+  public function m180(a:int):int { return a * 2 + 180; }
+  public function m181(a:int):int { return a * 2 + 181; }
+  public function m182(a:int):int { return a * 2 + 182; }
+  public function m183(a:int):int { return a * 2 + 183; }
+  public function m184(a:int):int { return a * 2 + 184; }
+  public function m185(a:int):int { return a * 2 + 185; }
+  public function m186(a:int):int { return a * 2 + 186; }
+  public function m187(a:int):int { return a * 2 + 187; }
+  public function m188(a:int):int { return a * 2 + 188; }
+  public function m189(a:int):int { return a * 2 + 189; }
+  public function m190(a:int):int { return a * 2 + 190; }
+  public function m191(a:int):int { return a * 2 + 191; }
+  public function m192(a:int):int { return a * 2 + 192; }
+  public function m193(a:int):int { return a * 2 + 193; }
+  public function m194(a:int):int { return a * 2 + 194; }
+  public function m195(a:int):int { return a * 2 + 195; }
+  public function m196(a:int):int { return a * 2 + 196; }
+  public function m197(a:int):int { return a * 2 + 197; }
+  public function m198(a:int):int { return a * 2 + 198; }
+  public function m199(a:int):int { return a * 2 + 199; }
+  public function m200(a:int):int { return a * 2 + 200; }
+  public function m201(a:int):int { return a * 2 + 201; }
+  public function m202(a:int):int { return a * 2 + 202; }
+  public function m203(a:int):int { return a * 2 + 203; }
+  public function m204(a:int):int { return a * 2 + 204; }
+  public function m205(a:int):int { return a * 2 + 205; }
+  public function m206(a:int):int { return a * 2 + 206; }
+  public function m207(a:int):int { return a * 2 + 207; }
+  public function m208(a:int):int { return a * 2 + 208; }
+  public function m209(a:int):int { return a * 2 + 209; }
+  public function m210(a:int):int { return a * 2 + 210; }
+  public function m211(a:int):int { return a * 2 + 211; }
+  public function m212(a:int):int { return a * 2 + 212; }
+  public function m213(a:int):int { return a * 2 + 213; }
+  public function m214(a:int):int { return a * 2 + 214; }
+  public function m215(a:int):int { return a * 2 + 215; }
+  public function m216(a:int):int { return a * 2 + 216; }
+  public function m217(a:int):int { return a * 2 + 217; }
+  public function m218(a:int):int { return a * 2 + 218; }
+  public function m219(a:int):int { return a * 2 + 219; }
+  public function m220(a:int):int { return a * 2 + 220; }
+  public function m221(a:int):int { return a * 2 + 221; }
+  public function m222(a:int):int { return a * 2 + 222; }
+  public function m223(a:int):int { return a * 2 + 223; }
+  public function m224(a:int):int { return a * 2 + 224; }
+  public function m225(a:int):int { return a * 2 + 225; }
+  public function m226(a:int):int { return a * 2 + 226; }
+  public function m227(a:int):int { return a * 2 + 227; }
+  public function m228(a:int):int { return a * 2 + 228; }
+  public function m229(a:int):int { return a * 2 + 229; }
+  public function m230(a:int):int { return a * 2 + 230; }
+  public function m231(a:int):int { return a * 2 + 231; }
+  public function m232(a:int):int { return a * 2 + 232; }
+  public function m233(a:int):int { return a * 2 + 233; }
+  public function m234(a:int):int { return a * 2 + 234; }
+  public function m235(a:int):int { return a * 2 + 235; }
+  public function m236(a:int):int { return a * 2 + 236; }
+  public function m237(a:int):int { return a * 2 + 237; }
+  public function m238(a:int):int { return a * 2 + 238; }
+  public function m239(a:int):int { return a * 2 + 239; }
+  public function m240(a:int):int { return a * 2 + 240; }
+  public function m241(a:int):int { return a * 2 + 241; }
+  public function m242(a:int):int { return a * 2 + 242; }
+  public function m243(a:int):int { return a * 2 + 243; }
+  public function m244(a:int):int { return a * 2 + 244; }
+  public function m245(a:int):int { return a * 2 + 245; }
+  public function m246(a:int):int { return a * 2 + 246; }
+  public function m247(a:int):int { return a * 2 + 247; }
+  public function m248(a:int):int { return a * 2 + 248; }
+  public function m249(a:int):int { return a * 2 + 249; }
+  public function m250(a:int):int { return a * 2 + 250; }
+  public function m251(a:int):int { return a * 2 + 251; }
+  public function m252(a:int):int { return a * 2 + 252; }
+  public function m253(a:int):int { return a * 2 + 253; }
+  public function m254(a:int):int { return a * 2 + 254; }
+  public function m255(a:int):int { return a * 2 + 255; }
+  public function m256(a:int):int { return a * 2 + 256; }
+  public function m257(a:int):int { return a * 2 + 257; }
+  public function m258(a:int):int { return a * 2 + 258; }
+  public function m259(a:int):int { return a * 2 + 259; }
+  public function m260(a:int):int { return a * 2 + 260; }
+  public function m261(a:int):int { return a * 2 + 261; }
+  public function m262(a:int):int { return a * 2 + 262; }
+  public function m263(a:int):int { return a * 2 + 263; }
+  public function m264(a:int):int { return a * 2 + 264; }
+  public function m265(a:int):int { return a * 2 + 265; }
+  public function m266(a:int):int { return a * 2 + 266; }
+  public function m267(a:int):int { return a * 2 + 267; }
+  public function m268(a:int):int { return a * 2 + 268; }
+  public function m269(a:int):int { return a * 2 + 269; }
+  public function m270(a:int):int { return a * 2 + 270; }
+  public function m271(a:int):int { return a * 2 + 271; }
+  public function m272(a:int):int { return a * 2 + 272; }
+  public function m273(a:int):int { return a * 2 + 273; }
+  public function m274(a:int):int { return a * 2 + 274; }
+  public function m275(a:int):int { return a * 2 + 275; }
+  public function m276(a:int):int { return a * 2 + 276; }
+  public function m277(a:int):int { return a * 2 + 277; }
+  public function m278(a:int):int { return a * 2 + 278; }
+  public function m279(a:int):int { return a * 2 + 279; }
+  public function m280(a:int):int { return a * 2 + 280; }
+  public function m281(a:int):int { return a * 2 + 281; }
+  public function m282(a:int):int { return a * 2 + 282; }
+  public function m283(a:int):int { return a * 2 + 283; }
+  public function m284(a:int):int { return a * 2 + 284; }
+  public function m285(a:int):int { return a * 2 + 285; }
+  public function m286(a:int):int { return a * 2 + 286; }
+  public function m287(a:int):int { return a * 2 + 287; }
+  public function m288(a:int):int { return a * 2 + 288; }
+  public function m289(a:int):int { return a * 2 + 289; }
+  public function m290(a:int):int { return a * 2 + 290; }
+  public function m291(a:int):int { return a * 2 + 291; }
+  public function m292(a:int):int { return a * 2 + 292; }
+  public function m293(a:int):int { return a * 2 + 293; }
+  public function m294(a:int):int { return a * 2 + 294; }
+  public function m295(a:int):int { return a * 2 + 295; }
+  public function m296(a:int):int { return a * 2 + 296; }
+  public function m297(a:int):int { return a * 2 + 297; }
+  public function m298(a:int):int { return a * 2 + 298; }
+  public function m299(a:int):int { return a * 2 + 299; }
   public var v0:int = 0, v1:int = 1, v2:int = 2, v3:int = 3, v4:int = 4, v5:int = 5, v6:int = 6, v7:int = 7, v8:int = 8, v9:int = 9, v10:int = 10, v11:int = 11;
   public var v12:int = 12, v13:int = 13, v14:int = 14, v15:int = 15, v16:int = 16, v17:int = 17, v18:int = 18, v19:int = 19, v20:int = 20, v21:int = 21, v22:int = 22, v23:int = 23;
   public var v24:int = 24, v25:int = 25, v26:int = 26, v27:int = 27, v28:int = 28, v29:int = 29, v30:int = 30, v31:int = 31, v32:int = 32, v33:int = 33, v34:int = 34, v35:int = 35;
@@ -172,6 +779,8 @@ class Big {
 class Bigger extends Big {
   public var w0:int = 5, w1:String = "bigger";
   override public function sum():int { return super.sum() + w0 + v910; }
+  override public function m10(a:int):int { return super.m10(a) + 1000; }
+  override public function m280(a:int):int { return super.m280(a) + 2000; }
 }
 class Statics {
   public static var t0:int = 0, t1:int = 1, t2:int = 2, t3:int = 3, t4:int = 4, t5:int = 5, t6:int = 6, t7:int = 0, t8:int = 1, t9:int = 2, t10:int = 3, t11:int = 4;
@@ -297,4 +906,8 @@ trace("amf", back.v900, back.v905, back.v919, back.v0);
 var keys:Array = [];
 for (var k:String in b) { keys.push(k); }
 trace("for-in", keys.length);
-
+trace("functions", p0(1), p150(1), p299(1), self["p298"](2));
+var late:Late = c;
+var m:Function = b.m290;
+var u:* = c;
+trace("methods", b.m0(1), b.m299(1), c.m10(1), c.m280(1), d.m280(1), late.m250(1), late.m299(2), m(3), u.m280(4), u["m10"](5));
