@@ -434,12 +434,14 @@ export class Player {
     // wait.
     const timers = this.scripting?.timers;
     // A spin on getTimer had the clock skip ahead to the time it waited
-    // for (scripting/timers.ts): no frame until the real clock is there, or
-    // nearer than the next call would be, as Flash's next frame would wait
-    // for the spin. What is owed meanwhile is kept, not dropped: the frame
-    // after the spin is due at once, as after an overrun.
+    // for (clock.ts), AS3's or an AVM1 movie's: no frame until the real
+    // clock is there, or nearer than the next call would be, as Flash's
+    // next frame would wait for the spin. What is owed meanwhile is kept,
+    // not dropped: the frame after the spin is due at once, as after an
+    // overrun.
     const early = typical / 2;
-    const ahead = timers?.ahead() ?? 0;
+    const clock = timers ?? this.avm1?.timers;
+    const ahead = clock?.ahead() ?? 0;
     const waiting = ahead > early;
     if (waiting) {
       most = 0;
@@ -520,7 +522,7 @@ export class Player {
         ran = true;
         this.tick(!deferRender);
         // The frame spun to wait: the next waits for the real clock.
-        if (i + 1 < n && timers && timers.ahead() > early) {
+        if (i + 1 < n && clock && clock.ahead() > early) {
           n = i + 1;
           break;
         }
@@ -551,9 +553,10 @@ export class Player {
       this.owed = rest;
       if (ahead <= 0) {
         timers?.betweenFrames(frame);
+        // An AVM1 SWF's setInterval timers too.
+        this.avm1?.idle();
       }
-      // An AVM1 SWF's setInterval timers too.
-      this.avm1?.idle();
+
       this.scripting?.renderPending();
     }
 
