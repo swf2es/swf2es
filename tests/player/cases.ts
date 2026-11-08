@@ -9601,6 +9601,50 @@ export const cases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "size-of-empty",
+    swf: (abc) => bare(abc, 1, "SizeOfEmpty", 400, 300),
+    script: "SizeOfEmpty",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  // AVM1's _width and _height on what has nothing to measure, as AS3's in
+  // size-of-empty: an empty clip's scale is 0 both ways, a hairline's 0
+  // across.
+  {
+    name: "avm1-size-of-empty",
+    swf: () =>
+      avm1Swf(
+        8,
+        [],
+        [
+          [
+            as1(
+              `var a = _root.createEmptyMovieClip("a", 1);
+a._width = 42;
+trace("avm1 empty after _width " + a._xscale + " " + a._yscale + " " + a._width + " " + a._height);
+a.beginFill(0xff0000); a.moveTo(0, 0); a.lineTo(100, 0); a.lineTo(100, 100); a.lineTo(0, 100); a.endFill();
+trace("avm1 filled later " + a._xscale + " " + a._yscale + " " + a._width + " " + a._height);
+var b = _root.createEmptyMovieClip("b", 2);
+b._height = 69;
+trace("avm1 empty after _height " + b._xscale + " " + b._yscale);
+var c = _root.createEmptyMovieClip("c", 3);
+c.lineStyle(0, 0); c.moveTo(0, 0); c.lineTo(0, 100);
+c._width = 42;
+trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._width + " " + c._height);`,
+              8,
+            ),
+          ],
+        ],
+      ),
+    traced: true,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "masks",
     swf: (abc) => bare(abc, 3, "Masks", 400, 300),
     script: "Masks",
