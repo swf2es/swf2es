@@ -1449,10 +1449,6 @@ export class RenderView implements Drawer {
     });
   }
 
-  /**
-   * Drawn on the GPU into a store, which this renderer does not keep there:
-   * BitmapData.draw takes a snapshot.
-   */
   /** What the view made on its context let go of, the context with it if the canvas is its own, and its tessellator. */
   destroy(): void {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
