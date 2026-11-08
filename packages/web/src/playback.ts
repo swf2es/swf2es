@@ -2,7 +2,14 @@
 // the element and the device's pixels, the pointer, the keys and the
 // focus, and the loop that plays and draws, all of which destroy lets go.
 
-import { bindActivation, bindKeyboard, type Player, type Scripting } from "@swf2es/player";
+import {
+  bindActivation,
+  bindKeyboard,
+  bindTextInput,
+  type Player,
+  type Scripting,
+  type TextInput,
+} from "@swf2es/player";
 import type { RenderView } from "@swf2es/player/scene";
 import { place, type ScaleMode, viewport } from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
@@ -32,6 +39,8 @@ export class Playback {
   private dpr = 0;
   private readonly resize: ResizeObserver;
   private readonly unbind: (() => void)[] = [];
+  /** The hidden textarea that takes an IME's text, focused while an input field has focus. */
+  private readonly textInput: TextInput;
   private destroyed = false;
   /** The stage's quality it last drew by. */
   private quality = "";
@@ -68,6 +77,8 @@ export class Playback {
     // The element's keys alone, as a plug-in had them only while focused.
     const host = (box.getRootNode() as ShadowRoot).host ?? box;
     this.unbind.push(bindKeyboard(player, host));
+    this.textInput = bindTextInput(player, host as HTMLElement, box);
+    this.unbind.push(() => this.textInput.destroy());
     // Its keys' releases are lost when the window or the element loses focus: the player lets them go.
     this.unbind.push(bindActivation(player, window, host as HTMLElement));
     this.resize = new ResizeObserver(() => this.layout());
@@ -147,6 +158,8 @@ export class Playback {
     }
 
     this.busy = performance.now() - start;
+    // The frame's clicks, Tabs and scripts may have moved the SWF's focus into or out of a field.
+    this.textInput.sync();
 
     if (this.player.quality !== this.quality) {
       this.requality();

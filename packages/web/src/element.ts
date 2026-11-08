@@ -349,7 +349,12 @@ export class Swf2esPlayerElement extends ElementBase {
     this.#box.className = "box";
     shadow.append(style, this.#sizing, this.#box);
     this.#size();
-    this.addEventListener("pointerdown", () => focus(this));
+    // Unless its input field's textarea has the focus, which an IME's composition would lose.
+    this.addEventListener("pointerdown", () => {
+      if (!(shadow.activeElement instanceof HTMLTextAreaElement)) {
+        focus(this);
+      }
+    });
   }
 
   /** Resolves once the SWF loading, or the next one asked for, plays; rejects if it fails. */

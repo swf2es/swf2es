@@ -228,6 +228,32 @@ writeFileSync(
     ],
   }),
 );
+// An AS2 input field, as the clipboard SWF's for AS3, which the page focuses and reads.
+const avm1Field = `_root.createTextField("field", 1, 0, 0, 140, 20);
+field.type = "input";
+field.border = true;
+var log = [];
+field.onChanged = function() { log.push("change " + field.text); };
+var EI = flash.external.ExternalInterface;
+EI.addCallback("focusField", null, function() { Selection.setFocus(field); });
+EI.addCallback("blurField", null, function() { Selection.setFocus(null); });
+EI.addCallback("text", null, function() { return field.text; });
+EI.addCallback("takeLog", null, function() { var taken = log; log = []; return taken; });
+stop();`;
+writeFileSync(
+  `${site}avm1-field.swf`,
+  w.swf({
+    version: 8,
+    width: 160,
+    height: 120,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(avm1Field, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
@@ -861,6 +887,57 @@ check(
     await call(evaluate, "clipDestroy()");
   },
 );
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `an IME's or a soft keyboard's text reaches an ${vm} input field once, as typed keys do`,
+    async (evaluate, send) => {
+      type State = { log: string[]; text: string };
+      const state = () => call<State>(evaluate, "imeState()");
+      // AS3's field hears a TextEvent for what was inserted, then its change; AS2's its change.
+      const typed = (text: string, inserted: string) =>
+        vm === "AS3" ? [`textInput ${inserted}`, `change ${text}`] : [`change ${text}`];
+      const key = async (type: string) =>
+        send("Input.dispatchKeyEvent", {
+          type,
+          key: "a",
+          code: "KeyA",
+          windowsVirtualKeyCode: 65,
+          ...(type === "keyDown" ? { text: "a" } : {}),
+        });
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      const focused = await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Text inserted with no key, as an IME's commit or a soft keyboard's word.
+        await send("Input.insertText", { text: "日本語" });
+        assert.deepEqual(await state(), { log: typed("日本語", "日本語"), text: "日本語" });
+        // The field focused, the player's hidden textarea took the page's focus, where an IME types.
+        assert.equal(focused, "TEXTAREA");
+
+        // A composition: nothing while it composes, its text once as it ends.
+        await send("Input.imeSetComposition", { text: "かな", selectionStart: 2, selectionEnd: 2 });
+        assert.deepEqual(await state(), { log: [], text: "日本語" });
+        await send("Input.insertText", { text: "仮名" });
+        assert.deepEqual(await state(), { log: typed("日本語仮名", "仮名"), text: "日本語仮名" });
+
+        // A key types its character by its keydown, and the textarea's insertion adds no other.
+        await key("keyDown");
+        await key("keyUp");
+        assert.deepEqual(await state(), { log: typed("日本語仮名a", "a"), text: "日本語仮名a" });
+
+        // The field's focus gone, the player itself has the page's focus again.
+        assert.equal(await call(evaluate, "imeBlur()"), "HOST");
+        await send("Input.insertText", { text: "x" });
+        assert.deepEqual(await state(), { log: [], text: "日本語仮名a" });
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
 
 check(
   "the window's blur and focus and the page taking the focus deactivate and activate the SWF",

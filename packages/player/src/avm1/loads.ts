@@ -25,6 +25,7 @@ import {
   type Timeline,
 } from "../display/timeline.js";
 import type { FetchResult } from "../hosts.js";
+import { warmAudioFor } from "../media/sounds.js";
 import { resolve } from "../scripting/loads.js";
 import type { Avm1 } from "./avm1.js";
 import { formRequest } from "./globals/LoadVars.js";
@@ -237,6 +238,8 @@ export class MovieLoads {
           return SKIPPED;
         }
 
+        // Its sounds' device opens as it arrives, before the frame that shows it.
+        warmAudioFor(this.movie.audio, a.library);
         return { ...a, blocks: await this.movie.compile(a.swf, a.library.actions ?? null) };
       })
       .catch((): Arrived => ({ type: "unknown", status: 0 }));

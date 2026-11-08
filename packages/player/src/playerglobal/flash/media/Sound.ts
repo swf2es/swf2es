@@ -431,6 +431,9 @@ export function soundNatives(s: Scripting): avm2.Natives {
       }
 
       sound.used = true;
+      // What it loads is decoded as it arrives, which may be mid-play: the
+      // device opens now, as it is asked for, rather than then.
+      s.audio?.warm?.();
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
