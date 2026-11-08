@@ -1,9 +1,11 @@
 // Every binary of the package, each its own wasm32-freestanding module in
-// zig-out/bin/: mp3 (minimp3), compress (zlib and the LZMA SDK), render
+// zig-out/bin/: mp3 (minimp3), audio (ADPCM and Nellymoser), compress
+// (zlib and the LZMA SDK), render
 // (bitmap's SIMD kernels, libtess2's fills and the lines) and atf
 // (jxrlib's JPEG XR decoder). build.ts runs
 // this with the pinned Zig and checks the results in as base64; `zig build
-// test` runs the bitmap kernel's, the fill flattener's, the band filler's and the blurs' tests on the host.
+// test` runs the bitmap kernel's, the fill flattener's, the band filler's,
+// the blurs' and the sound decoders' tests on the host.
 const std = @import("std");
 
 /// The C libraries are pinned git submodules of the repository, under
@@ -17,6 +19,7 @@ pub fn build(b: *std.Build) void {
 
     tests(b);
     mp3(b, wasm(b, &.{.bulk_memory}), optimize, include);
+    audio(b, wasm(b, &.{.bulk_memory}), optimize);
     compress(b, wasm(b, &.{.bulk_memory}), optimize, include);
     // Wasm SIMD, which every engine the player runs on has, for the bitmap kernels.
     render(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
@@ -32,10 +35,10 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
     });
 }
 
-/// The kernels', the fill flattener's, the band filler's and the blurs' tests, on the host.
+/// The kernels', the fill flattener's, the band filler's, the blurs' and the sound decoders' tests, on the host.
 fn tests(b: *std.Build) void {
-    const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's, the band filler's and the blurs' tests on the host");
-    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" } }) |unit| {
+    const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's, the band filler's, the blurs' and the sound decoders' tests on the host");
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" } }) |unit| {
         const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
     }
@@ -108,6 +111,27 @@ fn mp3(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Op
     module.stack_size = 64 * 1024;
     module.initial_memory = memory;
     module.max_memory = memory;
+    b.installArtifact(module);
+}
+
+/// ADPCM and Nellymoser sound: src/audio/, Zig alone.
+fn audio(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize) void {
+    const exports = [_][]const u8{
+        "reset", "alloc", "resultPointer", "decodeAdpcm", "nellymoserStateSize", "nellymoserStart", "decodeNellymoser",
+    };
+
+    const root = b.createModule(.{
+        .root_source_file = b.path("src/audio/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .single_threaded = true,
+        .strip = true,
+    });
+    root.export_symbol_names = &exports;
+
+    const module = b.addExecutable(.{ .name = "audio", .root_module = root });
+    module.entry = .disabled;
+    module.stack_size = 64 * 1024;
     b.installArtifact(module);
 }
 

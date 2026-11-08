@@ -4,8 +4,8 @@
 // the host decodes as it decodes any other: PCM, or MP3 frames back to
 // back.
 import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
+import { decodeAdpcm, NellymoserDecoder } from "@swf2es/native/audio";
 import { mp3HeaderFrame } from "./mp3.js";
-import { NellymoserDecoder } from "./nellymoser.js";
 import { browserStream } from "./streaming-audio.js";
 
 /** Below Firefox's limit for a scheduled stop, 2^23 s, with room for the context's own clock. */
@@ -359,90 +359,6 @@ function envelopeLevels(
       right.linearRampToValueAtTime(point.right, now + (point.ms - ms) / 1000);
     }
   }
-}
-
-const ADPCM_INDEX = [
-  [-1, 2],
-  [-1, -1, 2, 4],
-  [-1, -1, -1, -1, 2, 4, 6, 8],
-  [-1, -1, -1, -1, -1, -1, -1, -1, 1, 2, 4, 6, 8, 10, 13, 16],
-];
-
-const ADPCM_STEPS = [
-  7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45, 50, 55, 60, 66, 73,
-  80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230, 253, 279, 307, 337, 371, 408, 449, 494,
-  544, 598, 658, 724, 796, 876, 963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499,
-  2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442, 11487,
-  12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794, 32767,
-];
-
-/**
- * SWF's ADPCM as 16-bit samples, channels interleaved: a code size, then
- * packets of a header per channel (a 16-bit sample and a 6-bit step index)
- * and 4095 codes, the header's sample the packet's first, as adl gives it
- * (Ruffle's decoder leaves it out). It ends where the bits do.
- */
-export function decodeAdpcm(data: Uint8Array, channels: 1 | 2): Int16Array {
-  const total = data.length * 8;
-  let bit = 0;
-  const read = (n: number): number => {
-    let v = 0;
-    for (let i = 0; i < n; i++, bit++) {
-      v = v * 2 + ((data[bit >> 3] >> (7 - (bit & 7))) & 1);
-    }
-
-    return v;
-  };
-
-  if (total < 2) {
-    return new Int16Array(0);
-  }
-
-  const bits = read(2) + 2;
-  const signBit = 1 << (bits - 1);
-  const index = ADPCM_INDEX[bits - 2];
-  const out = new Int16Array(Math.ceil(total / bits) + channels);
-  const sample = [0, 0];
-  const step = [0, 0];
-  let n = 0;
-  for (let k = 0; ; k = (k + 1) % 4096) {
-    if (k === 0) {
-      if (bit + 22 * channels > total) {
-        break;
-      }
-
-      for (let c = 0; c < channels; c++) {
-        sample[c] = (read(16) << 16) >> 16;
-        step[c] = read(6);
-        out[n++] = sample[c];
-      }
-
-      continue;
-    }
-
-    if (bit + bits * channels > total) {
-      break;
-    }
-
-    for (let c = 0; c < channels; c++) {
-      const value = read(bits);
-      const magnitude = value & (signBit - 1);
-      const size = ADPCM_STEPS[step[c]];
-      let delta = size >> (bits - 1);
-      for (let k = 0; k < bits - 1; k++) {
-        if (magnitude & (1 << k)) {
-          delta += size >> (bits - 2 - k);
-        }
-      }
-
-      sample[c] =
-        value & signBit ? Math.max(-32768, sample[c] - delta) : Math.min(32767, sample[c] + delta);
-      step[c] = Math.max(0, Math.min(ADPCM_STEPS.length - 1, step[c] + index[magnitude]));
-      out[n++] = sample[c];
-    }
-  }
-
-  return out.subarray(0, n);
 }
 
 /** 16-bit samples as uncompressed little-endian bytes, SWF's format 3. */

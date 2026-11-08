@@ -96,7 +96,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `render` (fills with libtess2, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
@@ -149,7 +149,7 @@ unchanged, against the libc stubs in `include/`), writes each module into
 its `binary.ts` with a digest of its inputs, and the vendored
 C's notices, verbatim, into `LICENSE.third-party`. `pnpm build` checks the
 digests and the notices; CI rebuilds the binaries and requires them
-unchanged. `compress` and `mp3` each compile their own module; the
+unchanged. `compress`, `mp3` and `audio` each compile their own module; the
 renderer's tessellator and line builder and BitmapData's kernel share
 one, `render`, which each instantiates apart, with its own memory and
 lifetime. `codegen` knows the runtime's function names and signatures
