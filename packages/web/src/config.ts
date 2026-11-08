@@ -5,6 +5,7 @@ import { type Codegen, createCodegen } from "@swf2es/codegen";
 import {
   type AirApplication,
   airLibrary,
+  type EncryptedStoreHost,
   type FetchRequest,
   type FetchResult,
   type FileHost,
@@ -90,10 +91,15 @@ export interface Configuration {
    * Play the SWFs the element plays next as an AIR application's, as a
    * desktop app runs one: AIR's library loaded after playerglobal, its API
    * and its application sandbox, with the application the host runs and
-   * the file system its File reads. Null or absent: as Flash Player's
+   * the file system its File reads, and where its EncryptedLocalStore
+   * keeps its items, in memory if not given. Null or absent: as Flash Player's
    * plugin, AIR's API not defined.
    */
-  air?: { application: AirApplication; fileSystem?: FileSystemHost | null } | null;
+  air?: {
+    application: AirApplication;
+    fileSystem?: FileSystemHost | null;
+    encryptedStore?: EncryptedStoreHost | null;
+  } | null;
 }
 
 let config: Configuration = {};

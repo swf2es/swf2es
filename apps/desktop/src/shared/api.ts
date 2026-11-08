@@ -61,6 +61,11 @@ export interface DesktopAir {
   read(path: string): Promise<Uint8Array | null>;
   /** A file's bytes at once, as FileStream's open reads them; null where none can be read. */
   readSync(path: string): Uint8Array | null;
+  /** EncryptedLocalStore's items, at once, as the player's EncryptedStoreHost has them. */
+  getItem(name: string): Uint8Array | null;
+  setItem(name: string, bytes: Uint8Array): void;
+  removeItem(name: string): void;
+  resetItems(): void;
   /** FileStream's writes and File's changes, at once, as FileSystemHost's; false where they fail. */
   writeSync(path: string, bytes: Uint8Array, offset: number, length: number): boolean;
   createDirectory(path: string): boolean;

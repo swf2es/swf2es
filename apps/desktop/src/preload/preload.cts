@@ -85,6 +85,10 @@ const api: DesktopApi = {
     list: (path) => ipcRenderer.sendSync("air:list", String(path)),
     read: (path) => ipcRenderer.invoke("air:read", String(path)),
     readSync: (path) => ipcRenderer.sendSync("air:read-sync", String(path)),
+    getItem: (name) => ipcRenderer.sendSync("air:item-get", String(name)),
+    setItem: (name, bytes) => ipcRenderer.sendSync("air:item-set", String(name), bytes),
+    removeItem: (name) => ipcRenderer.sendSync("air:item-remove", String(name)),
+    resetItems: () => ipcRenderer.sendSync("air:items-reset"),
     writeSync: (path, bytes, offset, length) =>
       ipcRenderer.sendSync("air:write-sync", String(path), bytes, Number(offset), Number(length)),
     createDirectory: (path) => ipcRenderer.sendSync("air:create-directory", String(path)),

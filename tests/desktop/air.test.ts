@@ -1,7 +1,8 @@
 // The desktop app's AIR applications in node (apps/desktop/src/main/air.ts
 // and descriptor.ts): an application named adl's way on the command line,
 // what its descriptor says, its launch and storage, the file system its
-// File reads and writes, and the sandbox it plays in (sandbox.ts).
+// File reads and writes, its EncryptedLocalStore, and the sandbox it
+// plays in (sandbox.ts).
 import assert from "node:assert/strict";
 import {
   existsSync,
@@ -20,6 +21,7 @@ import {
   airCommand,
   airLaunch,
   createDirectoryOf,
+  EncryptedItems,
   listOf,
   moveOf,
   removeOf,
@@ -100,6 +102,43 @@ test("an application's launch, its storage made, and the file system its File re
   assert.equal(statOf(join(app, "nope")), null);
   assert.deepEqual(listOf(join(app, "bin")), ["Main.swf"]);
   assert.equal(listOf(join(app, "nope")), null);
+});
+
+test("an application's EncryptedLocalStore, kept encrypted from one run to the next", () => {
+  const path = join(home, "items", "EncryptedLocalStore");
+  // A stand-in for safeStorage: its text reversed.
+  const cipher = {
+    encrypt: (text: string) => new TextEncoder().encode([...text].reverse().join("")),
+    decrypt: (data: Uint8Array) => [...new TextDecoder().decode(data)].reverse().join(""),
+  };
+  const first = new EncryptedItems(path, cipher);
+  assert.equal(first.get("token"), null);
+  first.set("token", Uint8Array.of(1, 2, 3));
+  first.set("other", Uint8Array.of(9));
+  first.remove("other");
+  const kept = readFileSync(path);
+  assert.equal(String.fromCharCode(kept[0]), "E");
+  assert.ok(!kept.includes("token"), "the name is not in the file as written");
+
+  const second = new EncryptedItems(path, cipher);
+  assert.deepEqual([...(second.get("token") ?? [])], [1, 2, 3]);
+  assert.equal(second.get("other"), null);
+  // Another keychain cannot read it: none.
+  const stranger = new EncryptedItems(path, {
+    encrypt: cipher.encrypt,
+    decrypt: () => {
+      throw new Error("not ours");
+    },
+  });
+  assert.equal(stranger.get("token"), null);
+  second.reset();
+  assert.equal(new EncryptedItems(path, cipher).get("token"), null);
+
+  // Without a keychain, kept as it is.
+  const plain = join(home, "items", "Plain");
+  new EncryptedItems(plain, null).set("a", Uint8Array.of(7));
+  assert.equal(String.fromCharCode(readFileSync(plain)[0]), "P");
+  assert.deepEqual([...(new EncryptedItems(plain, null).get("a") ?? [])], [7]);
 });
 
 test("the file system an application's FileStream and File write", () => {

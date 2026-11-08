@@ -441,6 +441,35 @@ export interface FileSystemHost {
   move?(from: string, to: string): boolean;
 }
 
+/**
+ * An AIR application's EncryptedLocalStore, as the host keeps it: its
+ * items' bytes by name, for the next time it runs, encrypted where the
+ * host can. Synchronous, as the class's methods are.
+ */
+export interface EncryptedStoreHost {
+  /** The bytes kept as `name`; null for none. */
+  getItem(name: string): Uint8Array | null;
+  setItem(name: string, bytes: Uint8Array): void;
+  removeItem(name: string): void;
+  /** Every item gone. */
+  reset(): void;
+}
+
+/** An EncryptedLocalStore of an application's items held in memory, for as long as it plays. */
+export function memoryStore(): EncryptedStoreHost {
+  const items = new Map<string, Uint8Array>();
+  return {
+    getItem: (name) => items.get(name) ?? null,
+    setItem: (name, bytes) => {
+      items.set(name, bytes);
+    },
+    removeItem: (name) => {
+      items.delete(name);
+    },
+    reset: () => items.clear(),
+  };
+}
+
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */
 export interface WebSocketTransport {
   /** A text message as a string, a binary one as bytes. */

@@ -16,6 +16,7 @@ import {
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
 import { type AirFiles, airFiles } from "./air-files.js";
+import { type AirItems, airItems } from "./air-items.js";
 import {
   codegenForPlayer,
   configuration,
@@ -80,8 +81,10 @@ interface Session {
     app: AirApp;
     application: AirApplication;
     fileSystem: FileSystemHost;
-    /** What it writes, and its release once the session is done with them. */
+    /** What it writes, and its EncryptedLocalStore, each read back from IndexedDB once `ready`. */
     files: AirFiles;
+    items: AirItems;
+    /** Lets go of both once the session is done with them. */
     release(): void;
   } | null;
 }
@@ -492,13 +495,18 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       });
     };
-    const { files, release } = airFiles(app.descriptor.id, AIR_DIRECTORIES, keep);
+    const files = airFiles(app.descriptor.id, AIR_DIRECTORIES, keep);
+    const items = airItems(app.descriptor.id);
     session.air = {
       app,
       application: app.application(elementWindow(this, app.descriptor.title), args, exit),
-      fileSystem: app.fileSystem(files),
-      files,
-      release,
+      fileSystem: app.fileSystem(files.files),
+      files: files.files,
+      items: items.items,
+      release: () => {
+        files.release();
+        items.release();
+      },
     };
   }
 
@@ -537,9 +545,9 @@ export class Swf2esPlayerElement extends ElementBase {
         url = `app:/${encodeURIComponent(app.descriptor.content)}`;
       }
 
-      // What the application wrote when it last played, before it plays.
+      // What the application wrote and kept when it last played, before it plays.
       if (session.air) {
-        await session.air.files.ready;
+        await Promise.all([session.air.files.ready, session.air.items.ready]);
         if (!current()) {
           return;
         }
@@ -692,6 +700,7 @@ export class Swf2esPlayerElement extends ElementBase {
       air: session.air !== null || !!configuration().air,
       application: session.air?.application ?? configuration().air?.application,
       fileSystem: session.air?.fileSystem ?? configuration().air?.fileSystem,
+      encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
