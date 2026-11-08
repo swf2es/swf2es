@@ -97,6 +97,34 @@ let resolvers = false;
 /** The sequence number the next property added takes. */
 let added = 0;
 
+/**
+ * Names, folded, whose adding marks an object (Avm1Object.marked), as a
+ * host asks (markNames), and their first characters in either case, which
+ * most names added fail before they are folded.
+ */
+const markedNames = new Set<string>();
+const markedFirsts = new Set<number>();
+
+/**
+ * Mark from now on each object a property named `names` is added to, in
+ * any case: so that a host that asks every object of a chain for those
+ * names, as the pointer asks each clip for onPress and the rest, passes
+ * by those never given one.
+ */
+export function markNames(names: readonly string[]): void {
+  for (const name of names) {
+    const first = name.charCodeAt(0);
+    // Folding a first character outside ASCII can make one of another, which this would not see.
+    if (!(first < 0x80)) {
+      throw new Error(`markNames: ${name} does not begin in ASCII`);
+    }
+
+    markedNames.add(fold(name));
+    markedFirsts.add(fold(name[0]).charCodeAt(0));
+    markedFirsts.add(name[0].toUpperCase().charCodeAt(0));
+  }
+}
+
 /** A property: a value, or a getter and maybe a setter (addProperty), and its attributes. */
 export class Property {
   get: Avm1Object | null = null;
@@ -223,6 +251,8 @@ export class Avm1Object {
   interfaces: Avm1Object[] | null = null;
   /** A display object's side, where it is a clip's, a button's or a text field's AVM1 object (host.ts). */
   display: DisplayNative | null = null;
+  /** Whether it has ever had a property named as markNames asks, in any case: it may have one still. */
+  marked = false;
 
   /** An object whose `__proto__` is `proto`, or without one. */
   constructor(proto?: Value) {
@@ -330,6 +360,10 @@ export class Avm1Object {
       this.protoProp = p;
     } else if (name.length === 9 && !resolvers && fold(name) === "__resolve") {
       resolvers = true;
+    }
+
+    if (!this.marked && markedFirsts.has(name.charCodeAt(0)) && markedNames.has(fold(name))) {
+      this.marked = true;
     }
 
     const folded = this.folded;

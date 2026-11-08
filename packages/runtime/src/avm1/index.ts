@@ -27,6 +27,7 @@ export {
   has,
   invoke,
   keys,
+  markNames,
   type Native,
   Property,
   READ_ONLY,

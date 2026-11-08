@@ -146,6 +146,9 @@ node tests/bench/bitmap-draws.ts <checkout A> <checkout B> [cases] [seed] [--big
                               # BitmapData draws and copies in two built checkouts, every pixel compared
 node tests/bench/enumeration/run.ts [<dir A> <dir B>] [runs]   # for-in and for each over Arrays,
                               # Vectors, Objects and Dictionaries, as the two above
+node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs]   # AVM1 names on clips of many
+                              # children: the pointer moved over a thousand clips, each asked for
+                              # onPress and the rest, and a script's member reads, two checkouts
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above
