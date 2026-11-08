@@ -186,6 +186,21 @@ trace(line.join(" "));`,
   );
 });
 
+test("cacheAsBitmap reads what is set, or true for a filtered clip, from SWF 8", async () => {
+  assert.deepEqual(
+    await traces(
+      `var line = [a.cacheAsBitmap];
+a.cacheAsBitmap = 1; line.push(a.cacheAsBitmap);
+a.cacheAsBitmap = ""; line.push(a.cacheAsBitmap);
+a.filters = [new flash.filters.BlurFilter()]; line.push(a.cacheAsBitmap);
+trace(line.join(" "));`,
+      8,
+    ),
+    ["false true false true"],
+  );
+  assert.deepEqual(await traces("trace(a.cacheAsBitmap);", 7), ["undefined"]);
+});
+
 test("the timeline's methods move a clip, play and stop it", async () => {
   assert.deepEqual(
     await traces(

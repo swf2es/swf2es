@@ -49,6 +49,7 @@ export { type ColorRow, ROW_FLOATS, ROWS_A_LINE, Rows } from "./rows.js";
 export {
   ADD,
   ALPHA,
+  ALPHA_MASK,
   BLEND_NAMES,
   CLAMP,
   DARKEN,

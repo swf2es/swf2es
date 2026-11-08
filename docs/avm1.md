@@ -1800,7 +1800,12 @@ renderer draws them as AS3's (the corpus's `bitmap_filters`, the
 name and takes BlendMode's name or PlaceObject3's number of one, a byte,
 undefined and null as normal; anything else leaves it as it was, where
 BitmapData's `draw` takes it as normal (the corpus's
-`movieclip_blend_mode_property`, adl).
+`movieclip_blend_mode_property`, adl). Their `cacheAsBitmap`, from SWF 8
+too, reads whether Flash draws the object from a bitmap it keeps, which
+a filtered one always is, as AS3's reads it, and takes what the script
+asks for, as Ruffle has it; with `setMask`, both cached make an alpha
+mask ([architecture/compositing.md](architecture/compositing.md#masks-and-scroll-rectangles),
+the `alpha-masks-avm1` case).
 
 ### getURL and fscommand
 

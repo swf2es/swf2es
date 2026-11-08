@@ -4,6 +4,7 @@
 import { type ColorTransform, IDENTITY, type Matrix } from "@swf2es/format";
 import { Tessellator } from "@swf2es/native/render";
 import {
+  ALPHA_MASK,
   BLEND,
   BLEND_NAMES,
   CLAMP,
@@ -31,13 +32,13 @@ import {
 import { WebGLBackend } from "@swf2es/render/webgl";
 import { argbOf, type BitmapStore } from "../bitmap/bitmap.js";
 import { BitmapObject } from "../display/bitmapobject.js";
-import { concatColorInto, IDENTITY_COLOR, sameColor } from "../display/color.js";
+import { concatColor, concatColorInto, IDENTITY_COLOR, sameColor } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 import { concat, invert, shifted } from "../display/geometry.js";
 import { bitmapScale, drawnRect, outsideMaskMap, placeQuad } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import { ShapeObject } from "../display/shapeobject.js";
+import { cached, ShapeObject } from "../display/shapeobject.js";
 import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, TextObject } from "../display/textobjects.js";
@@ -201,6 +202,17 @@ export class RenderView implements Drawer {
   /** Target pixels a pixel of what filters run on, where not the scale: in a 3D object's bitmap. */
   private filterUnits: number | null = null;
   private drawMatrix: Matrix = IDENTITY;
+  /**
+   * The alpha mask drawn for what it masks (drawAlphaMask), which the walk
+   * places where it stands on the stage and draws though it is a mask.
+   */
+  private placedAlphaMask: DisplayObject | null = null;
+  /**
+   * Whether an alpha mask's objects are walked, whose flags their own place
+   * on the list may have cleared first: their filters run anew, keeping no
+   * output, as nothing would say when one changed.
+   */
+  private inAlphaMask = false;
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
   private readonly stretchScratch: Linear = [0, 0, 0, 0];
 
@@ -417,7 +429,9 @@ export class RenderView implements Drawer {
     const ptx = places[at + 4];
     const pty = places[at + 5];
     const root = o === this.drawRoot;
-    const m = root ? this.drawMatrix : o.flatPlaced;
+    // An alpha mask drawn for what it masks is placed by its parent's slot alone (drawAlphaMask).
+    const placing = o === this.placedAlphaMask;
+    const m = root ? this.drawMatrix : placing ? IDENTITY : o.flatPlaced;
     const a = pa * m.a + pc * m.b;
     const b = pb * m.a + pd * m.b;
     const c = pa * m.c + pc * m.d;
@@ -444,21 +458,29 @@ export class RenderView implements Drawer {
     }
 
     // What BitmapData.draw takes is drawn though hidden, or a mask.
-    hidden ||= !root && (!o.visible || o.maskOf !== null || o.clipDepth > 0);
+    hidden ||= !root && !placing && (!o.visible || o.maskOf !== null || o.clipDepth > 0);
 
     // BitmapData.draw takes its object without its own colour transform, as adl draws it.
     const own = root ? null : o.colorTransform;
     // Into a slot of its depth's, which its subtree's walk alone reads: rows copy what they take.
     let color = own ? (tint ? this.concatAt(depth, tint, own) : own) : tint;
     // Its mask, drawn where it stands on the stage, then its scroll's rectangle, clip all it draws;
-    // a 3D mask, or one inside what it masks, masks nothing in Flash.
+    // a 3D mask, or one inside what it masks, masks nothing in Flash. A script's mask on the display
+    // list masks by its alpha where both are cached as bitmaps, as adl draws it (the `alpha-masks`
+    // case): what it masks drawn as a layer, the mask's own layer composited onto it by its alpha
+    // (drawAlphaMask). A timeline's masks clip by their shapes, cached or not (`alpha-masks-avm1`).
+    // One met while an alpha mask is drawn clips by its shape: two masks each holding what the other
+    // masks would otherwise draw each other without end.
     let clipped = false;
+    let alphaMask: DisplayObject | null = null;
     // A 3D object's content is drawn into its bitmap (drawPlane), which a 2D mask clips there, in
     // its pass, not its quad on the stage.
     const plane = !hidden && !root && o.space !== null;
     if (!hidden && !plane && o.mask) {
       const mask = !o.maskOf && !o.mask.encloses(o) && !o.mask.space ? o.mask : null;
-      if (mask) {
+      if (mask?.parent && !this.inAlphaMask && cached(o) && cached(mask)) {
+        alphaMask = mask;
+      } else if (mask) {
         const w = this.placedMask(mask);
         const first = this.masks.maskBegin(this.scene);
         this.masks.walkMask(
@@ -545,7 +567,15 @@ export class RenderView implements Drawer {
     let layer = -1;
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
-    if (mode !== NORMAL || filtering) {
+    // Its filters run before its alpha mask is applied, as Flash masks the bitmap they make: then in
+    // a layer of their own, composited as normal into the one the mask is, which takes its mode.
+    const wrapped = alphaMask !== null && filtering !== null;
+    const inner = wrapped ? NORMAL : mode;
+    if (wrapped) {
+      this.scene.layerBegin();
+    }
+
+    if (mode !== NORMAL || filtering || alphaMask) {
       if (mode === LAYER || filtering) {
         layerRow = color ? this.rows.add(1, 0, 0, 1, 0, 0, color) : -1;
         color = null;
@@ -555,7 +585,7 @@ export class RenderView implements Drawer {
       // moved to, and all in it walked hidden, as Flash draws a filtered object's bitmap again.
       // A blend shader's layer is composited anew each frame: a kept one's mode is a byte.
       output =
-        filtering && !this.drawRoot && mode < KERNEL
+        filtering && !this.drawRoot && mode < KERNEL && !this.inAlphaMask
           ? this.filterLayers.keptOutput(
               o,
               filtering,
@@ -575,7 +605,7 @@ export class RenderView implements Drawer {
       if (output?.reused) {
         const k = output.handle as KeepHandle;
         const rect = this.filterLayers.keptRect;
-        this.scene.keptLayer(k.id, mode, layerRow, rect[0], rect[1], rect[2], rect[3]);
+        this.scene.keptLayer(k.id, inner, layerRow, rect[0], rect[1], rect[2], rect[3]);
         this.keeps.use(k.id);
         hidden = true;
       } else {
@@ -929,12 +959,17 @@ export class RenderView implements Drawer {
         this.textureLimit,
       );
       this.scene.padLayer(layer, fitted.padding);
-      this.scene.layerEnd(mode, layerRow, this.filterLayers.chainOf(fitted, this.filters));
+      this.scene.layerEnd(inner, layerRow, this.filterLayers.chainOf(fitted, this.filters));
       if (output) {
         output.pad = fitted.padding;
         this.filterLayers.ranLayer(output, layer);
       }
-    } else if (mode !== NORMAL) {
+    }
+
+    if (alphaMask) {
+      this.drawAlphaMask(alphaMask);
+      this.scene.layerEnd(mode, wrapped ? -1 : layerRow);
+    } else if (!filtering && mode !== NORMAL) {
       this.scene.layerEnd(mode, layerRow);
     }
 
@@ -947,6 +982,43 @@ export class RenderView implements Drawer {
     if (!this.snapshotting) {
       o.dirty = CLEAN;
     }
+  }
+
+  /**
+   * `mask`, an alpha mask, drawn into a layer of its own as it would be
+   * drawn where it stands on the stage, though it is a mask: in its colour
+   * and its ancestors', its filters run, from a slot of the walk's above
+   * the object it masks. The layer is composited onto that object's
+   * (ALPHA_MASK), which ends after it.
+   */
+  private drawAlphaMask(mask: DisplayObject): void {
+    const w = this.placedMask(mask);
+    const depth = this.walkDepth;
+    const at = depth + 1;
+    if ((at + 2) * 6 > this.places.length) {
+      const grown = new Float64Array(this.places.length * 2);
+      grown.set(this.places);
+      this.places = grown;
+    }
+
+    const places = this.places;
+    places[at * 6] = w.a;
+    places[at * 6 + 1] = w.b;
+    places[at * 6 + 2] = w.c;
+    places[at * 6 + 3] = w.d;
+    places[at * 6 + 4] = w.tx;
+    places[at * 6 + 5] = w.ty;
+    const placed = this.placedAlphaMask;
+    const inMask = this.inAlphaMask;
+    this.walkDepth = at;
+    this.placedAlphaMask = mask;
+    this.inAlphaMask = true;
+    this.scene.layerBegin();
+    this.walk(mask, ancestorsColor(mask), false);
+    this.scene.layerEnd(ALPHA_MASK, -1);
+    this.placedAlphaMask = placed;
+    this.inAlphaMask = inMask;
+    this.walkDepth = depth;
   }
 
   /**
@@ -1503,4 +1575,17 @@ function toStageFlat(o: DisplayObject): Matrix {
   }
 
   return m;
+}
+
+/** The colour `o`'s ancestors give what it draws, as the walk concatenates it; null for none. */
+function ancestorsColor(o: DisplayObject): ColorTransform | null {
+  let color: ColorTransform | null = null;
+  for (let p = o.parent; p; p = p.parent) {
+    const own = p.colorTransform;
+    if (own) {
+      color = color ? concatColor(own, color) : own;
+    }
+  }
+
+  return color;
 }
