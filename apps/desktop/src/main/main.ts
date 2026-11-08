@@ -31,7 +31,18 @@ import type {
   OpenedMovie,
   StartState,
 } from "../shared/api.js";
-import { type AirCommand, airCommand, airLaunch, listOf, readOf, statOf } from "./air.ts";
+import {
+  type AirCommand,
+  airCommand,
+  airLaunch,
+  createDirectoryOf,
+  listOf,
+  moveOf,
+  readOf,
+  removeOf,
+  statOf,
+  writeOf,
+} from "./air.ts";
 import { bridgeFiles } from "./files.ts";
 import { type Movie, Network, Refused } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
@@ -859,6 +870,31 @@ function listenForAir(): void {
   // FileStream's open, which reads a file at once, as stat does: only once the application plays.
   ipcMain.on("air:read-sync", (event, path: unknown) => {
     event.returnValue = playing(event) && typeof path === "string" ? readOf(path) : null;
+  });
+  // FileStream's writes and File's changes, at once as adl's: only once the application plays.
+  ipcMain.on(
+    "air:write-sync",
+    (event, path: unknown, bytes: unknown, offset: unknown, length: unknown) => {
+      event.returnValue =
+        playing(event) &&
+        typeof path === "string" &&
+        bytes instanceof Uint8Array &&
+        Number.isSafeInteger(offset) &&
+        Number.isSafeInteger(length) &&
+        (offset as number) >= 0 &&
+        (length as number) >= 0 &&
+        writeOf(path, bytes, offset as number, length as number);
+    },
+  );
+  ipcMain.on("air:create-directory", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" && createDirectoryOf(path);
+  });
+  ipcMain.on("air:remove", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" && removeOf(path);
+  });
+  ipcMain.on("air:move", (event, from: unknown, to: unknown) => {
+    event.returnValue =
+      playing(event) && typeof from === "string" && typeof to === "string" && moveOf(from, to);
   });
   // A read is what starts the application's grant: the page reads its content SWF first.
   ipcMain.handle("air:read", async (event, path: unknown) => {

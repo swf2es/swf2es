@@ -420,6 +420,25 @@ export interface FileSystemHost {
    * nothing to read.
    */
   read?(path: string): Uint8Array | null;
+  /**
+   * Writes `bytes` into the file at `path` from `offset`, then makes the
+   * file `length` bytes long, cut short or filled with zeros: FileStream's
+   * writes as they reach the file. A file not there is made, and the
+   * directories it is in. False where it cannot be written. Without it,
+   * the file system is read-only, and what writes fails as on a disk that
+   * refuses it (IOError 3001).
+   */
+  write?(path: string, bytes: Uint8Array, offset: number, length: number): boolean;
+  /** Makes the directory at `path`, and those it is in; false where it cannot. */
+  createDirectory?(path: string): boolean;
+  /** Removes the file or the directory at `path`, with all in it; false where it cannot. */
+  remove?(path: string): boolean;
+  /**
+   * Moves what is at `from` to `to`, where nothing is, making the
+   * directories `to` is in; false where it cannot. Without it, File's
+   * moveTo copies and removes.
+   */
+  move?(from: string, to: string): boolean;
 }
 
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */

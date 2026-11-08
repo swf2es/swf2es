@@ -81,7 +81,8 @@ own installer. A relative path is taken from the directory pnpm was run in.
   its title, the arguments after `--` handed to its InvokeEvent. It plays
   with AIR's API (NativeApplication, the window, `flash.filesystem.File`)
   in AIR's application sandbox: it is played from `app:/`, reads any
-  local file through File, its `app:`, `app-storage:` and `file:` URLs,
+  local file through File, FileStream and its `app:`, `app-storage:` and
+  `file:` URLs, writes any file but through its `app:` URLs, as AIR does,
   and reaches the network and sockets without Flash's policy files or a
   prompt, as an installed application does. Its storage directory is
   under the app's user data, by its id. Only the application playing has

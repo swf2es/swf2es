@@ -1,13 +1,31 @@
 // The desktop app's AIR applications in node (apps/desktop/src/main/air.ts
 // and descriptor.ts): an application named adl's way on the command line,
 // what its descriptor says, its launch and storage, the file system its
-// File reads, and the sandbox it plays in (sandbox.ts).
+// File reads and writes, and the sandbox it plays in (sandbox.ts).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { after, test } from "node:test";
-import { airCommand, airLaunch, listOf, statOf } from "../../apps/desktop/src/main/air.ts";
+import {
+  airCommand,
+  airLaunch,
+  createDirectoryOf,
+  listOf,
+  moveOf,
+  removeOf,
+  statOf,
+  writeOf,
+} from "../../apps/desktop/src/main/air.ts";
 import { Sandbox } from "../../apps/desktop/src/main/sandbox.ts";
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), "swf2es-air-")));
@@ -82,6 +100,30 @@ test("an application's launch, its storage made, and the file system its File re
   assert.equal(statOf(join(app, "nope")), null);
   assert.deepEqual(listOf(join(app, "bin")), ["Main.swf"]);
   assert.equal(listOf(join(app, "nope")), null);
+});
+
+test("the file system an application's FileStream and File write", () => {
+  const at = join(home, "writes");
+  const file = join(at, "a", "b", "data.bin");
+  assert.ok(writeOf(file, Uint8Array.of(1, 2, 3), 0, 3));
+  assert.deepEqual([...readFileSync(file)], [1, 2, 3]);
+  // Into the middle, then past the end with zeros between; then cut.
+  assert.ok(writeOf(file, Uint8Array.of(9), 1, 3));
+  assert.ok(writeOf(file, Uint8Array.of(8), 5, 6));
+  assert.deepEqual([...readFileSync(file)], [1, 9, 3, 0, 0, 8]);
+  assert.ok(writeOf(file, new Uint8Array(0), 2, 2));
+  assert.deepEqual([...readFileSync(file)], [1, 9]);
+  assert.equal(writeOf(join(file, "under"), Uint8Array.of(1), 0, 1), false);
+
+  assert.ok(createDirectoryOf(join(at, "c", "d")));
+  assert.ok(statSync(join(at, "c", "d")).isDirectory());
+  assert.ok(moveOf(join(at, "a"), join(at, "moved", "a")));
+  assert.deepEqual([...readFileSync(join(at, "moved", "a", "b", "data.bin"))], [1, 9]);
+  assert.equal(existsSync(join(at, "a")), false);
+  assert.equal(moveOf(join(at, "nope"), join(at, "x")), false);
+  assert.ok(removeOf(join(at, "moved")));
+  assert.equal(existsSync(join(at, "moved")), false);
+  assert.equal(removeOf(join(at, "moved")), false);
 });
 
 test("an application's sandbox: granted as its content is read, reaching the network, gone as it stops", () => {
