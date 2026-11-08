@@ -20,6 +20,7 @@ import {
   TRANSFORM,
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
+import { cached } from "../../display/shapeobject.js";
 import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
 import { blendModeOf, storeOf } from "./BitmapData.js";
@@ -906,6 +907,29 @@ export function blendModeProperty(
   });
 }
 
+/**
+ * A display object's `cacheAsBitmap` on its class's prototype, of `flags`:
+ * whether Flash draws it from a bitmap it keeps, as it does any filtered
+ * one whatever was set (as AS3's reads it); one set is what the script asks
+ * for, as Ruffle has it.
+ */
+export function cacheAsBitmapProperty(
+  realm: avm1.Realm,
+  proto: avm1.Avm1Object,
+  flags: number,
+  targetOf: (self: avm1.Avm1Object) => DisplayObject | null,
+): void {
+  const p = proto.add("cacheAsBitmap", undefined, flags);
+  p.get = realm.method((self) => {
+    const d = targetOf(self);
+    return d === null ? undefined : cached(d);
+  });
+  p.set = realm.method((self, args, version) => {
+    targetOf(self)?.setCachedAsBitmap(avm1.toBoolean(args[0], version));
+    return undefined;
+  });
+}
+
 /** The display object a method's argument names from `start`: a clip's AVM1 object, or a path. */
 export function targetOf(
   movie: Movie,
@@ -1174,6 +1198,7 @@ export function movieClipClass(movie: Movie): {
     () => movie.filterFaces,
   );
   blendModeProperty(realm, proto, avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8, clipOf);
+  cacheAsBitmapProperty(realm, proto, avm1.DONT_DELETE | avm1.DONT_ENUM | avm1.VERSION_8, clipOf);
   // A BitmapData, disposed or not, at a depth; anything else does nothing. pixelSnapping is
   // not read (Ruffle).
   method("attachBitmap", avm1.VERSION_8, (clip, args, version) => {

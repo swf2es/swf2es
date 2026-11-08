@@ -6,7 +6,7 @@
 import { avm1 } from "@swf2es/runtime";
 import { ButtonObject } from "../../display/display.js";
 import { filtersProperty } from "./filters.js";
-import { blendModeProperty, DEPTH_BIAS, type Movie } from "./MovieClip.js";
+import { blendModeProperty, cacheAsBitmapProperty, DEPTH_BIAS, type Movie } from "./MovieClip.js";
 
 /** Button: its constructor and its prototype, as `_global.Button`. */
 export function buttonClass(movie: Movie): {
@@ -38,5 +38,6 @@ export function buttonClass(movie: Movie): {
   // Read-only as Ruffle declares them, which their setters still take; listed (adl).
   filtersProperty(realm, proto, avm1.READ_ONLY | avm1.VERSION_8, buttonOf, () => movie.filterFaces);
   blendModeProperty(realm, proto, avm1.READ_ONLY | avm1.VERSION_8, buttonOf);
+  cacheAsBitmapProperty(realm, proto, avm1.READ_ONLY | avm1.VERSION_8, buttonOf);
   return { constr, proto };
 }

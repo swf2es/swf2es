@@ -1,7 +1,7 @@
 import { type GlState, linkProgram } from "@swf2es/context3d/device";
 import { BLEND, type Filters } from "../filters.js";
 import { blendKernel, kernelImagesFit } from "../kernel-shaders.js";
-import { ADD, KERNEL, LAYER, MULTIPLY, NORMAL, SCREEN } from "../scene.js";
+import { ADD, ALPHA_MASK, KERNEL, LAYER, MULTIPLY, NORMAL, SCREEN } from "../scene.js";
 import type { KernelHost, KernelProgram, KernelPrograms } from "./kernels.js";
 import {
   BACK_UNIT,
@@ -17,10 +17,12 @@ import { framebufferOf, LAYER_STEP, type Layer, type Open } from "./targets.js";
  * not compute, onto a target `opaque` throughout or not. Over an opaque
  * one, multiply's src × (1 − da) term is none, and premultiplied it is
  * s × d + d × (1 − sa), alpha as normal's: GL's blending (setModeBlend).
+ * An alpha mask's is d × sa (ALPHA_MASK).
  */
 export function readsBelow(mode: number, opaque = false): boolean {
   return !(
     mode === NORMAL ||
+    mode === ALPHA_MASK ||
     mode === LAYER ||
     mode === ADD ||
     mode === SCREEN ||
@@ -47,6 +49,9 @@ export function setModeBlend(gl: WebGL2RenderingContext, state: GlState, mode: n
       break;
     case MULTIPLY:
       state.setBlend(gl.DST_COLOR, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      break;
+    case ALPHA_MASK:
+      state.setBlend(gl.ZERO, gl.SRC_ALPHA);
       break;
     default:
       state.setBlend(null);

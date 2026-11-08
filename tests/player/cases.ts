@@ -3676,6 +3676,95 @@ stop();`,
   });
 }
 
+/**
+ * Alpha masks on the timeline and in AVM1 (alpha-masks-avm1): a red square
+ * masked by a half-transparent one, the mask a timeline layer's (clipDepth)
+ * with both cached by PlaceObject3, and neither; then by setMask from a SWF
+ * 8's script, both cached, and neither. A mask whose alpha counts shows the
+ * red at half strength, a stencil's at full.
+ */
+function alphaMasksAvm1(): Uint8Array {
+  const red = (id: number) =>
+    w.shape({
+      id,
+      bounds: [0, 1600, 0, 1600],
+      fills: [0xffff0000],
+      version: 3,
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [1600, 0] },
+            { line: [1600, 1600] },
+            { line: [0, 1600] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+    });
+  const half = w.shape({
+    id: 2,
+    bounds: [0, 1600, 0, 1600],
+    fills: [0x800000ff],
+    version: 3,
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [1600, 0] },
+          { line: [1600, 1600] },
+          { line: [0, 1600] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+  const layer = (depth: number, x: number, cached: boolean) => [
+    w.place({
+      depth,
+      character: 2,
+      clipDepth: depth + 1,
+      cacheAsBitmap: cached,
+      matrix: { tx: x, ty: 200 },
+    }),
+    w.place({ depth: depth + 1, character: 1, cacheAsBitmap: cached, matrix: { tx: x, ty: 200 } }),
+  ];
+  return w.swf({
+    version: 8,
+    width: 400,
+    height: 100,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      red(1),
+      half,
+      ...layer(1, 200, true),
+      ...layer(3, 2200, false),
+      as1(
+        `function pair(n, x, cached) {
+  var r = _root.createEmptyMovieClip("r" + n, 10 + n * 2);
+  r.beginFill(0xff0000); r.moveTo(x, 10); r.lineTo(x + 80, 10); r.lineTo(x + 80, 90); r.lineTo(x, 90); r.endFill();
+  var m = _root.createEmptyMovieClip("m" + n, 11 + n * 2);
+  m.beginFill(0x0000ff, 50); m.moveTo(x, 10); m.lineTo(x + 80, 10); m.lineTo(x + 80, 90); m.lineTo(x, 90); m.endFill();
+  r.setMask(m);
+  r.cacheAsBitmap = cached;
+  m.cacheAsBitmap = cached;
+}
+pair(0, 210, true);
+pair(1, 310, false);`,
+        8,
+      ),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** An AVM1 SWF of `version`, its root's frames' tags after the definitions. */
 function avm1Swf(version: number, defs: Uint8Array[], frames: Uint8Array[][]): Uint8Array {
   return w.swf({
@@ -9486,6 +9575,29 @@ export const cases: PlayerCase[] = [
     frames: 6,
     capture: [2, 3, 4, 5, 6],
     tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "alpha-masks",
+    swf: (abc) => bare(abc, 2, "AlphaMasks", 400, 300),
+    script: "AlphaMasks",
+    frames: 2,
+    capture: [2],
+    // Flash rounds a mask's alpha on whole bytes, a level or two from the
+    // GPU's: a half-transparent mask leaves 129 of green and blue over the
+    // white where swf2es leaves 127, the container's overlap 66 where it
+    // leaves 64. No edge differs.
+    tolerance: 2,
+    maxOutliers: 0,
+  },
+  {
+    name: "alpha-masks-avm1",
+    swf: alphaMasksAvm1,
+    frames: 2,
+    capture: [2],
+    // The half-transparent mask's alpha rounded as alpha-masks' is: 129
+    // of green and blue in Flash, 128 here.
+    tolerance: 1,
     maxOutliers: 0,
   },
   {

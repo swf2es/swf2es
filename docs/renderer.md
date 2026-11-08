@@ -86,7 +86,10 @@ order, an entry a drawable or a boundary:
 - **Boundaries:** push and pop of a filter layer, a blend layer, a mask
   (its drawing between push and use), a scroll rectangle's clip, and a
   kept layer (`cacheAsBitmap`, or a filter's output kept while its object
-  stands still). Each push names its filter records and its bounds.
+  stands still). Each push names its filter records and its bounds. An
+  alpha mask is a layer of its own at the end of the layer it masks,
+  ended in `ALPHA_MASK`, which composites it onto that layer by its alpha
+  ([architecture/compositing.md](architecture/compositing.md#masks-and-scroll-rectangles)).
 
 The view writes the list and its rows anew each frame. Keeping a span of
 the list for a subtree that did not change, and writing only rows on a
@@ -116,7 +119,9 @@ commands (`tests/unit/render`). It decides:
   and composited where it stood (`HELD`). Its filters' passes are
   planned ahead as data (`filter-plan.ts`): each pass's program, the
   slots it reads and draws into, their frames and its uniforms.
-- **Masks and clips.** Stencil push, mask drawing and pop.
+- **Masks and clips.** Stencil push, mask drawing and pop. An alpha
+  mask's layer is planned as any other; measuring cuts the layer it masks
+  to its rectangle rather than growing it.
 
 The command buffer (`commands.ts`) is an `Int32Array` of operations
 (clear, run, stencil push and pop, layer push and pop, filter, composite,

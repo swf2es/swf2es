@@ -22,6 +22,14 @@ export const HARDLIGHT = 13;
  * alone takes it, never a draw or a kept layer, whose modes are bytes.
  */
 export const KERNEL = 14;
+/**
+ * Not Flash's: an alpha mask's layer composited onto the unfiltered layer
+ * that ends after it, the layer of what it masks, keeping only what the
+ * mask covers, scaled by the mask's alpha. measureLayers cuts that layer to
+ * the mask's rectangle, past which nothing of it shows. A LAYER_END alone
+ * takes it; negative, as no blend mode's number is.
+ */
+export const ALPHA_MASK = -2;
 
 /** Flash's blend mode names, by their number here. */
 export const BLEND_NAMES = [

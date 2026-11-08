@@ -387,10 +387,32 @@ rectangle. The view writes each mask
 into the scene list as a stencil: its drawing between a push and its
 use, then what it masks, then a pop (`scene/masks.ts`, `walkMask`), a
 timeline's range so clipped by its clip-depth child, and a mask's lines
-left out. When both objects are cached as bitmaps Flash clips by the
-mask's alpha; that, and a text field as a mask, are still to come.
-What would clip a mask's own coverage (its own mask, scroll rectangle or
-a field's gutter) is drawn without, and counted (`unsupported.masks`).
+left out. A text field as a mask is still to come. What would clip a
+mask's own coverage (its own mask, scroll rectangle or a field's gutter)
+is drawn without, and counted (`unsupported.masks`).
+
+A script's mask (`mask`, or AVM1's `setMask`) masks by its alpha
+instead, where it and what it masks are both cached as bitmaps
+(`cacheAsBitmap`, or filters) and the mask is on the display list, as adl
+draws it (the `alpha-masks` case): a gradient mask fades what it masks,
+the mask's alpha and colour transform scale it, and a container mask's
+children composite as they would be drawn, two half-transparent squares
+masking at three quarters where they overlap. A parent cached, or a mask
+off the list, clips by the shape; so does a timeline's mask, even with
+both cached by their places (`alpha-masks-avm1`). The view draws what is
+masked as a layer, then the mask, as it would be drawn where it stands,
+into a layer of its own inside it, which is composited onto it by its
+alpha (`ALPHA_MASK`, GL's blending keeping d × sa), and the masked layer
+is cut to the mask's rectangle, past which nothing of it shows
+(`measureLayers`). A filtered object's filters run first, in a layer of
+their own inside the masked one, which then takes its blend mode, as
+Flash masks the bitmap the filters make. A mask met while an alpha mask
+is drawn clips by its shape, so that no two masks draw each other without
+end. The mask is drawn in its ancestors' colour as well as its own, which
+adl was not asked about, and its filters run each frame, keeping no
+output: its own place on the list may clear its objects' flags before the
+mask is drawn, which would leave a changed output unnoticed. adl rounds
+the mask's alpha on whole bytes, a level or two from the GPU's.
 
 `scrollRect` is kept as set, its edges rounded to whole pixels half to
 even, so its width and height are the rounded right and bottom less the
