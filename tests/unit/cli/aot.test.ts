@@ -121,6 +121,15 @@ test("the command's modules are the player's for its cases' SWFs", { skip }, asy
     assertSame(cliModules(path, libPaths, name), await playerModules(swf, libs));
   }
 
+  // With no --lib, the libraries the packages ship: these, unless the tests play on Flash Player's.
+  if (process.env.SWF2ES_PLAYERGLOBAL !== "adobe") {
+    const path = `${out}swfs/scripted.swf`;
+    assert.deepEqual(
+      cliModules(path, [], "scripted-default"),
+      cliModules(path, libPaths, "scripted"),
+    );
+  }
+
   // Again into the same directory, without the libraries: theirs are gone,
   // what else is there stays.
   const dir = `${out}aot/two-abcs/`;

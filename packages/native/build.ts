@@ -149,6 +149,34 @@ DEALINGS IN THE SOFTWARE.
 implementers' names, of nelly2pcm.)
 `;
 
+/** Zig's own code in every binary: its standard library and compiler-rt, which the pinned Zig compiles in. */
+const ZIG = `Every binary holds code from Zig 0.17.0 (https://ziglang.org), compiled in
+by the pinned Zig that builds it: parts of its standard library, and
+compiler-rt's routines the C calls (memcmp, strlen). Zig's licence:
+
+The MIT License (Expat)
+
+Copyright (c) Zig contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+`;
+
 /** pixels.zig's perlinNoise noise, derived from SVG 1.1's feTurbulence reference implementation. */
 const FE_TURBULENCE = `src/render/pixels.zig's noise for BitmapData.perlinNoise is derived from
 the reference implementation of feTurbulence in Scalable Vector Graphics
@@ -171,6 +199,7 @@ function notices(): string {
     ["@swf2es/native/render: libtess2", readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8")],
     ["@swf2es/native/render: SVG's feTurbulence (perlinNoise)", FE_TURBULENCE],
     ["@swf2es/native/atf: jxrlib", readFileSync(join(vendor, "jxrlib/LICENSE"), "utf8")],
+    ["@swf2es/native: Zig's standard library and compiler-rt", ZIG],
   ];
 
   return [

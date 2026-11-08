@@ -1,8 +1,24 @@
 {
   "name": "@swf2es/runtime",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "AVM2 and AVM1 language runtime used by generated code",
-  "license": "Apache-2.0",
+  "keywords": [
+    "actionscript",
+    "as3",
+    "as2",
+    "avm1",
+    "avm2",
+    "flash",
+    "runtime"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "packages/runtime"
+  },
+  "license": "Apache-2.0 AND MPL-2.0 AND (Apache-2.0 OR MIT)",
   "type": "module",
   "exports": {
     ".": {
@@ -19,7 +35,10 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "src",
+    "LICENSE.third-party"
   ],
   "dependencies": {
     "@swf2es/format": "workspace:*"

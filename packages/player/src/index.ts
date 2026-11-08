@@ -62,5 +62,5 @@ export type { Pointer, PointerState } from "./input/pointer.js";
 export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
 export type { FillTessellator } from "./scene/fills.js";
-export { airLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
+export { airLibrary, builtinLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
 export type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";

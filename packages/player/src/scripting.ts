@@ -62,6 +62,7 @@ import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, soundHostOf, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
 import {
   airLibrary,
+  builtinLibrary,
   playerglobalLibrary,
   playerHooks,
   playerNatives,
@@ -78,7 +79,7 @@ import { type ParentLink, Workers } from "./scripting/workers.js";
 import { type StageScaleMode, stageAlignment } from "./stage.js";
 
 // For index.ts, which reaches playerglobal only through here.
-export { airLibrary, playerglobalLibrary };
+export { airLibrary, builtinLibrary, playerglobalLibrary };
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

@@ -5,6 +5,7 @@ import { type Codegen, createCodegen } from "@swf2es/codegen";
 import {
   type AirApplication,
   airLibrary,
+  builtinLibrary,
   type EncryptedStoreHost,
   type FetchRequest,
   type FetchResult,
@@ -28,12 +29,11 @@ export interface SocketProxy {
 
 export interface Configuration {
   /**
-   * The ABCs a SWF's ActionScript 3 links against, by URL: avmplus'
-   * builtin.abc, and a playerglobal in place of the one swf2es ships
-   * (playerglobalLibrary), if one is given. Without builtin only SWFs with
-   * no ActionScript 3 play.
+   * The ABCs a SWF's ActionScript 3 links against, by URL, each in place
+   * of the one swf2es ships: avmplus' builtin.abc (builtinLibrary) and a
+   * playerglobal (playerglobalLibrary). Either left out is the shipped one.
    */
-  libraries?: { builtin: string; playerglobal?: string };
+  libraries?: { builtin?: string; playerglobal?: string };
   /** codegen.wasm's URL: by default what the page's import map gives `@swf2es/codegen/codegen.wasm`. */
   codegen?: string;
   /**
@@ -172,19 +172,19 @@ export async function playerLibraries(air: boolean): Promise<Uint8Array[]> {
   return air ? [...abcs, airLibrary] : abcs;
 }
 
-/** builtin.abc and playerglobal, fetched once a page; every player reads the same bytes. */
+/**
+ * builtin.abc and playerglobal: the shipped ones, or those configured,
+ * fetched once a page; every player reads the same bytes.
+ */
 export function libraries(): Promise<Uint8Array[]> {
-  const urls = config.libraries;
-  if (!urls) {
-    return Promise.reject(
-      new Error("swf2es: this SWF has ActionScript 3; configure({ libraries }) to play it"),
-    );
-  }
-
+  const urls = config.libraries ?? {};
   libraryBytes ??= Promise.all(
-    [urls.builtin, urls.playerglobal ?? null].map(async (url) => {
-      if (url === null) {
-        return playerglobalLibrary;
+    [
+      [urls.builtin, builtinLibrary] as const,
+      [urls.playerglobal, playerglobalLibrary] as const,
+    ].map(async ([url, shipped]) => {
+      if (url === undefined) {
+        return shipped;
       }
 
       const response = await fetch(url);

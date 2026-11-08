@@ -103,7 +103,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
 | `render`  | the renderer ([renderer.md](../renderer.md)): scene list, planner and WebGL 2 backend | context3d |
 | `player`  | display list, timeline, playerglobal, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
-| `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, runtime |
+| `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, player (its libraries alone, `@swf2es/player/libraries`), runtime |
 | `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, native, player, player-hosts |
 

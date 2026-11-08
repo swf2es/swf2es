@@ -59,8 +59,9 @@ virtual modules (`astro/site.ts`), as Astro bundles them away from
 `facts.ts`'s own URL.
 
 `build.ts` stages what the player loads in Astro's public directory
-(`dist/public/`): the packages, `codegen.wasm`, `builtin.abc`, the demos,
-the licence texts and the service worker. Then it runs Astro, which writes
+(`dist/public/`): the packages (builtin.abc and playerglobal inside the
+runtime's and the player's), `codegen.wasm`, the demos, the licence texts
+and the service worker. Then it runs Astro, which writes
 the pages, with Pagefind's index for the search, into
 `apps/site/dist/site/`, the folder Pages publishes.
 

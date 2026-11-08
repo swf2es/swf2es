@@ -63,13 +63,12 @@ const report = byId<HTMLAnchorElement>("report");
 const build = document.querySelector<HTMLElement>("[data-build]")?.dataset.build ?? "unknown";
 /**
  * The site's root, which this script is served under (app/main.js): what
- * the page names by a relative URL, a demo, a library or ?swf=, is there,
- * wherever the page itself is.
+ * the page names by a relative URL, a demo or ?swf=, is there, wherever
+ * the page itself is.
  */
 const SITE = new URL("../", import.meta.url).href;
 
 configure({
-  libraries: { builtin: new URL("libraries/builtin.abc", SITE).href },
   cache: true,
   build: build === "unknown" ? undefined : build,
 });
