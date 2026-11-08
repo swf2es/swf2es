@@ -52,7 +52,8 @@ export interface AirWindowState {
 
 /**
  * An AIR application's own reach, only while one the user opened plays:
- * the file system, read synchronously as File reads it, and the window.
+ * the file system, read and written synchronously as File does, and the
+ * window.
  */
 export interface DesktopAir {
   stat(path: string): AirFileStat | null;
@@ -65,6 +66,11 @@ export interface DesktopAir {
   setItem(name: string, bytes: Uint8Array): void;
   removeItem(name: string): void;
   resetItems(): void;
+  /** FileStream's writes and File's changes, at once, as FileSystemHost's; false where they fail. */
+  writeSync(path: string, bytes: Uint8Array, offset: number, length: number): boolean;
+  createDirectory(path: string): boolean;
+  remove(path: string): boolean;
+  move(from: string, to: string): boolean;
   window(): AirWindowState;
   setBounds(bounds: { x: number; y: number; width: number; height: number }): void;
   setTitle(title: string): void;

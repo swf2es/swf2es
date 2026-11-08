@@ -1,9 +1,11 @@
 // Browser audio behind a small host boundary. A player can run without an
 // audio device, as the trace tests do, and an embedding page may supply one.
-// ADPCM and the blocks of a timeline's stream become a sound the host
-// decodes as it decodes any other: PCM, or MP3 frames back to back.
+// ADPCM, Nellymoser and the blocks of a timeline's stream become a sound
+// the host decodes as it decodes any other: PCM, or MP3 frames back to
+// back.
 import type { Sound, SoundStreamBlock, SoundStreamHead } from "@swf2es/format";
 import { mp3HeaderFrame } from "./mp3.js";
+import { NellymoserDecoder } from "./nellymoser.js";
 import { browserStream } from "./streaming-audio.js";
 
 /** Below Firefox's limit for a scheduled stop, 2^23 s, with room for the context's own clock. */
@@ -104,7 +106,14 @@ export function browserAudioHost(): AudioHost | null {
     },
     async decode(given) {
       const ctx = getContext();
-      const source = given instanceof Uint8Array || given.format !== 1 ? given : adpcmSound(given);
+      const source =
+        given instanceof Uint8Array
+          ? given
+          : given.format === 1
+            ? adpcmSound(given)
+            : isNellymoser(given.format)
+              ? nellymoserSound(given)
+              : given;
       let buffer: AudioBuffer;
       if (source instanceof Uint8Array || source.format === 2) {
         const data = (source instanceof Uint8Array ? source : source.data).slice();
@@ -447,6 +456,42 @@ function pcmBytes(samples: Int16Array): Uint8Array {
   return bytes;
 }
 
+/** Whether `format` is Nellymoser's: 4 and 5 at 16 and 8 kHz, 6 at any rate. */
+function isNellymoser(format: number): boolean {
+  return format === 4 || format === 5 || format === 6;
+}
+
+/** The sample rate of Nellymoser in `format`: 16 or 8 kHz for 4 and 5 whatever their flags say, `flagged` for 6. */
+function nellymoserRate(format: number, flagged: number): number {
+  return format === 4 ? 16000 : format === 5 ? 8000 : flagged;
+}
+
+/** Samples from -1 to 1 as 16-bit ones. */
+function int16Samples(samples: Float32Array): Int16Array {
+  const out = new Int16Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    const v = Math.round(samples[i] * 32768);
+    out[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : v;
+  }
+
+  return out;
+}
+
+/** A Nellymoser DefineSound, which is mono, as the uncompressed sound it decodes to, cut to its count. */
+function nellymoserSound(sound: Sound): Sound {
+  const decoded = new NellymoserDecoder().decode(sound.data);
+  const samples = decoded.subarray(0, Math.min(decoded.length, sound.sampleCount));
+  return {
+    ...sound,
+    format: 3,
+    sampleRate: nellymoserRate(sound.format, sound.sampleRate),
+    sampleSize: 16,
+    channels: 1,
+    sampleCount: samples.length,
+    data: pcmBytes(int16Samples(samples)),
+  };
+}
+
 /** An ADPCM DefineSound as the uncompressed sound it decodes to. */
 function adpcmSound(sound: Sound): Sound {
   const samples = decodeAdpcm(sound.data, sound.channels);
@@ -463,7 +508,8 @@ function adpcmSound(sound: Sound): Sound {
  * A timeline's stream as one sound, its blocks back to back, and the
  * sample each block starts at, the last entry the end. MP3 blocks give
  * their counts; PCM's are whole frames of their bytes; each ADPCM block
- * is a sound of its own, headers and all.
+ * is a sound of its own, headers and all; Nellymoser's decode one after
+ * another, each block's overlap carried into the next.
  */
 export function streamSound(
   head: SoundStreamHead,
@@ -472,8 +518,11 @@ export function streamSound(
   const parts: Uint8Array[] = [];
   const starts = [0];
   const adpcm = head.format === 1;
-  const sampleSize = adpcm ? 16 : head.sampleSize;
-  const frameBytes = head.channels * (sampleSize / 8);
+  const nellymoser = isNellymoser(head.format) ? new NellymoserDecoder() : null;
+  const decoded = adpcm || nellymoser !== null;
+  const sampleSize = decoded ? 16 : head.sampleSize;
+  const channels = nellymoser ? 1 : head.channels;
+  const frameBytes = channels * (sampleSize / 8);
   let samples = 0;
   for (const block of blocks) {
     let data = block.data;
@@ -483,6 +532,8 @@ export function streamSound(
     } else {
       if (adpcm) {
         data = pcmBytes(decodeAdpcm(data, head.channels));
+      } else if (nellymoser) {
+        data = pcmBytes(int16Samples(nellymoser.decode(data)));
       }
 
       count = Math.floor(data.length / frameBytes);
@@ -504,10 +555,10 @@ export function streamSound(
   return {
     sound: {
       id: 0,
-      format: adpcm ? 3 : head.format,
-      sampleRate: head.sampleRate,
+      format: decoded ? 3 : head.format,
+      sampleRate: nellymoser ? nellymoserRate(head.format, head.sampleRate) : head.sampleRate,
       sampleSize,
-      channels: head.channels,
+      channels,
       sampleCount: samples,
       seekSamples: 0,
       data,

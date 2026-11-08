@@ -36,10 +36,14 @@ import {
   type AirCommand,
   airCommand,
   airLaunch,
+  createDirectoryOf,
   EncryptedItems,
   listOf,
+  moveOf,
   readOf,
+  removeOf,
   statOf,
+  writeOf,
 } from "./air.ts";
 import { bridgeFiles } from "./files.ts";
 import { type Movie, Network, Refused } from "./network.ts";
@@ -903,6 +907,31 @@ function listenForAir(): void {
   ipcMain.on("air:items-reset", (event) => {
     items(event)?.reset();
     event.returnValue = null;
+  });
+  // FileStream's writes and File's changes, at once as adl's: only once the application plays.
+  ipcMain.on(
+    "air:write-sync",
+    (event, path: unknown, bytes: unknown, offset: unknown, length: unknown) => {
+      event.returnValue =
+        playing(event) &&
+        typeof path === "string" &&
+        bytes instanceof Uint8Array &&
+        Number.isSafeInteger(offset) &&
+        Number.isSafeInteger(length) &&
+        (offset as number) >= 0 &&
+        (length as number) >= 0 &&
+        writeOf(path, bytes, offset as number, length as number);
+    },
+  );
+  ipcMain.on("air:create-directory", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" && createDirectoryOf(path);
+  });
+  ipcMain.on("air:remove", (event, path: unknown) => {
+    event.returnValue = playing(event) && typeof path === "string" && removeOf(path);
+  });
+  ipcMain.on("air:move", (event, from: unknown, to: unknown) => {
+    event.returnValue =
+      playing(event) && typeof from === "string" && typeof to === "string" && moveOf(from, to);
   });
   // A read is what starts the application's grant: the page reads its content SWF first.
   ipcMain.handle("air:read", async (event, path: unknown) => {

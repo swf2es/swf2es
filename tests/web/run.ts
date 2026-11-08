@@ -627,7 +627,7 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
   }>(evaluate, "airRun(true)");
   assert.deepEqual(r.errors, []);
   // What it traces at once, in order; then what arrives on later frames, in any.
-  assert.deepEqual(r.traces.slice(0, 9), [
+  assert.deepEqual(r.traces.slice(0, 10), [
     "air: url app:/bin/AirWebTest.swf",
     "air: sandbox application",
     "air: id org.swf2es.web",
@@ -637,12 +637,14 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
     "air: listing META-INF,bin,data",
     "air: stream hello from the package",
     "air: items 0",
+    "air: saved 0",
   ]);
-  assert.deepEqual(r.traces.slice(9, -1).sort(), [
+  assert.deepEqual(r.traces.slice(10, -1).sort(), [
     "air: app hello from the package",
     "air: async stream hello from the package",
     "air: file hello from the package",
     "air: missing refused",
+    "air: storage 1",
   ]);
   assert.equal(r.traces.at(-1), "air: exit");
   // NativeApplication.exit stopped it, and the page heard the code.
@@ -650,14 +652,16 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
   assert.equal(r.playing, false);
 });
 
-check("an AIR application finds its EncryptedLocalStore when it plays again", async (evaluate) => {
+check("an AIR application finds what it wrote and kept when it plays again", async (evaluate) => {
   const r = await call<{ traces: string[]; errors: string[]; exit: number | null }>(
     evaluate,
     "airRun()",
   );
   assert.deepEqual(r.errors, []);
-  // Its item from the last play, read back from IndexedDB.
+  // Its files and item from the last play, read back from IndexedDB.
   assert.ok(r.traces.includes("air: items 1"), r.traces.join("\n"));
+  assert.ok(r.traces.includes("air: saved 1"), r.traces.join("\n"));
+  assert.ok(r.traces.includes("air: storage 2"), r.traces.join("\n"));
   assert.equal(r.exit, 3);
 });
 

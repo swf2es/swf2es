@@ -1,10 +1,11 @@
 // The desktop app's AIR applications in node (apps/desktop/src/main/air.ts
 // and descriptor.ts): an application named adl's way on the command line,
 // what its descriptor says, its launch and storage, the file system its
-// File reads, its EncryptedLocalStore, and the sandbox it plays in
-// (sandbox.ts).
+// File reads and writes, its EncryptedLocalStore, and the sandbox it
+// plays in (sandbox.ts).
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -19,9 +20,13 @@ import { after, test } from "node:test";
 import {
   airCommand,
   airLaunch,
+  createDirectoryOf,
   EncryptedItems,
   listOf,
+  moveOf,
+  removeOf,
   statOf,
+  writeOf,
 } from "../../apps/desktop/src/main/air.ts";
 import { Sandbox } from "../../apps/desktop/src/main/sandbox.ts";
 
@@ -134,6 +139,30 @@ test("an application's EncryptedLocalStore, kept encrypted from one run to the n
   new EncryptedItems(plain, null).set("a", Uint8Array.of(7));
   assert.equal(String.fromCharCode(readFileSync(plain)[0]), "P");
   assert.deepEqual([...(new EncryptedItems(plain, null).get("a") ?? [])], [7]);
+});
+
+test("the file system an application's FileStream and File write", () => {
+  const at = join(home, "writes");
+  const file = join(at, "a", "b", "data.bin");
+  assert.ok(writeOf(file, Uint8Array.of(1, 2, 3), 0, 3));
+  assert.deepEqual([...readFileSync(file)], [1, 2, 3]);
+  // Into the middle, then past the end with zeros between; then cut.
+  assert.ok(writeOf(file, Uint8Array.of(9), 1, 3));
+  assert.ok(writeOf(file, Uint8Array.of(8), 5, 6));
+  assert.deepEqual([...readFileSync(file)], [1, 9, 3, 0, 0, 8]);
+  assert.ok(writeOf(file, new Uint8Array(0), 2, 2));
+  assert.deepEqual([...readFileSync(file)], [1, 9]);
+  assert.equal(writeOf(join(file, "under"), Uint8Array.of(1), 0, 1), false);
+
+  assert.ok(createDirectoryOf(join(at, "c", "d")));
+  assert.ok(statSync(join(at, "c", "d")).isDirectory());
+  assert.ok(moveOf(join(at, "a"), join(at, "moved", "a")));
+  assert.deepEqual([...readFileSync(join(at, "moved", "a", "b", "data.bin"))], [1, 9]);
+  assert.equal(existsSync(join(at, "a")), false);
+  assert.equal(moveOf(join(at, "nope"), join(at, "x")), false);
+  assert.ok(removeOf(join(at, "moved")));
+  assert.equal(existsSync(join(at, "moved")), false);
+  assert.equal(removeOf(join(at, "moved")), false);
 });
 
 test("an application's sandbox: granted as its content is read, reaching the network, gone as it stops", () => {

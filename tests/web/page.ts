@@ -348,10 +348,12 @@ async function embedderFetch() {
 async function airRun(fresh = false) {
   const { web } = await loading;
   if (fresh) {
-    await new Promise((done) => {
-      const deleting = indexedDB.deleteDatabase("swf2es-air-items");
-      deleting.onsuccess = deleting.onerror = deleting.onblocked = done;
-    });
+    for (const name of ["swf2es-air", "swf2es-air-items"]) {
+      await new Promise((done) => {
+        const deleting = indexedDB.deleteDatabase(name);
+        deleting.onsuccess = deleting.onerror = deleting.onblocked = done;
+      });
+    }
   }
 
   const bytes = new Uint8Array(await (await pageFetch("/web-test/air-app.air")).arrayBuffer());
