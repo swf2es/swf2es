@@ -164,7 +164,10 @@ test("an empty SharedObject writes nothing, clear removes its file, and a destro
 
 test("a player's SharedObjects are written as its page goes, and again only once changed, the player playing on", async () => {
   const { stored, storage } = memory();
-  const { player } = await play(`var so = SharedObject.getLocal("save"); so.data.coins = 7;`, storage);
+  const { player } = await play(
+    `var so = SharedObject.getLocal("save"); so.data.coins = 7;`,
+    storage,
+  );
   assert.equal(stored.size, 0);
 
   player.saveSharedObjects();
