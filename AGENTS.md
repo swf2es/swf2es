@@ -94,6 +94,9 @@ node tools/notices.ts [--update]   # each package's LICENSE, LICENSE.third-party
                               # a unit test holds to what its files' headers say came from elsewhere
 node tools/avmplus-libraries.ts [--update]   # avmplus' builtin.abc and shell_toplevel.abc embedded
                               # in @swf2es/runtime and @swf2es/cli, from the submodule (after a bump)
+node tools/version.ts <version>   # every published package at that version (docs/releasing.md)
+node tools/publish.ts [--dry-run] # pack and publish the packages to npm in dependency order, passing
+                              # by versions npm has; release.yml runs it on a tag v<version> on main
 node tests/player/module-cache.ts   # the IndexedDB module cache in Chrome (part of pnpm test)
 node tests/player/precompiled.ts    # AOT modules played in Chrome, imported under a policy
                               # without 'unsafe-eval' too (part of pnpm test)

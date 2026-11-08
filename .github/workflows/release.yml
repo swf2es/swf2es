@@ -1,0 +1,47 @@
+name: Release
+# Publishes the packages to npm (docs/releasing.md) when a tag v<version> on
+# main is pushed. Run from the Actions tab, it is a dry run: it packs and
+# checks everything and publishes nothing. A release that failed half way is
+# finished by re-running its job, which passes by what is on npm already.
+# npm trusts this workflow by its name (trusted publishing), so there is no
+# token: the job's OIDC identity publishes, and npm attests where each
+# package was built.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+permissions:
+  contents: read
+# One release at a time, and none cancelled half way.
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    # Named in each package's trusted publisher on npmjs.com, so that only this
+    # job can publish, and its protection rules (reviewers) apply first.
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          # The whole history, to tell whether the tag is on main.
+          fetch-depth: 0
+      - if: github.event_name == 'push'
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME is not on main"
+            exit 1
+          fi
+      - uses: ./.github/actions/setup
+      - run: node tests/packages/run.ts
+      # Trusted publishing needs npm 11.5.1 or later; Node 24's own may be older.
+      - run: npm install --global npm@^11.5.1
+      - run: node tools/publish.ts ${{ github.event_name == 'push' && '--provenance' || '--dry-run' }}
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
