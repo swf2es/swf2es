@@ -1132,6 +1132,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return this.classes.registeredName(constr);
   }
 
+  /** SharedObject writes what its scripts changed, as Flash did as a SWF closed: the page may be going. */
+  saveSharedObjects(): void {
+    this.sharedObjects?.flush(this.swfVersion);
+  }
+
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(closeAudio = true): void {
     for (const bytes of this.codeLive) {
