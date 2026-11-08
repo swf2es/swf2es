@@ -595,7 +595,6 @@ function buildMenu(): void {
         },
         { type: "separator" },
         { label: "Choose playerglobal.abc…", click: () => void chooseLibrary("playerglobal") },
-        { label: "Choose builtin.abc…", click: () => void chooseLibrary("builtin") },
         { type: "separator" },
         { role: "quit" },
       ],
@@ -815,7 +814,7 @@ function listen(): void {
     }
   });
   ipcMain.on("desktop:choose-library", (event, name: unknown) => {
-    if (trusted(event) && (name === "builtin" || name === "playerglobal")) {
+    if (trusted(event) && name === "playerglobal") {
       void chooseLibrary(name);
     }
   });

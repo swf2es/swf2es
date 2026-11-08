@@ -5,16 +5,28 @@ on the desktop, and give it sockets and files. The
 [README](../README.md) has the short version; [architecture.md](architecture.md)
 how it all works.
 
+## Install
+
+```sh
+npm install @swf2es/web     # the element, for a page; it brings the rest
+npm install -g @swf2es/cli  # the swf2es command, for node
+```
+
+The packages are ES modules with no dependencies outside `@swf2es/*`.
+Each package's README says what it is for.
+
 ## Libraries
 
 A SWF's ActionScript 3 links against `builtin.abc` (avmplus' standard
 library, MPL-2.0) and a playerglobal (the `flash.*` classes). swf2es ships
-its own playerglobal, `playerglobalLibrary` in `@swf2es/player`: Flash
-Player's API, compiled from `as3/playerglobal` (Ruffle's AS3 and the
-player's own, see [as3/README.md](../as3/README.md)). You supply
-`builtin.abc`; the repository's tests take it from the avmplus submodule
-(`oracle/avmplus/generated/`) into `tests/player/out/libraries/`
-(`tests/player/libraries.ts`).
+both: `builtinLibrary` in `@swf2es/runtime`, the avmplus submodule's
+`oracle/avmplus/generated/builtin.abc` (`tools/avmplus-libraries.ts`
+embeds it), and its own playerglobal, `playerglobalLibrary` in
+`@swf2es/player`: Flash Player's API, compiled from `as3/playerglobal`
+(Ruffle's AS3 and the player's own, see [as3/README.md](../as3/README.md)).
+`@swf2es/player` and `@swf2es/player/libraries` export all three
+libraries the player loads, `airLibrary` among them, so nothing needs
+setting up.
 
 ## Embed a SWF in a page
 
@@ -31,7 +43,6 @@ first player loads:
   import { configure } from "@swf2es/web";
 
   configure({
-    libraries: { builtin: "/flash/builtin.abc" },
     cache: true, // keep compiled modules in IndexedDB for the next visit
   });
 
@@ -45,6 +56,10 @@ The packages are ES modules, so serve them with a bundler or an import map
 for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
 `@swf2es/player/scene`, `@swf2es/render/webgl` and
 `@swf2es/context3d/device` among them.
+
+`configure({ libraries: { builtin, playerglobal } })` takes URLs of
+other ABCs to load in place of the shipped ones, each optional: a page
+that would rather play on Flash Player's own playerglobal gives its URL.
 
 ## The element and its options
 
@@ -88,7 +103,6 @@ pass messages, and sharing throws an error that says so
 ```js
 import { configure, watchFlash } from "@swf2es/web";
 
-configure({ libraries: { builtin: "/flash/builtin.abc" } });
 // Each Flash <object>/<embed> becomes a <swf2es-player> with its params, now and as the
 // page adds more, until stop(). replaceFlash() does it once, for the tags there now.
 const stop = watchFlash();
@@ -122,20 +136,21 @@ The `swf2es` command (`packages/cli`) writes the same modules the player
 would compile, a log for each, and a `manifest.json` of their keys:
 
 ```sh
-node packages/cli/dist/main.js movie.swf -o movie.swf2es \
-  --lib builtin.abc --lib playerglobal.abc --emit-libraries
+swf2es movie.swf -o movie.swf2es --emit-libraries
 ```
 
-with the playerglobal the player loads: its own, which the repository's
-tests write to `tests/player/out/libraries/playerglobal-swf2es.abc`, and the command takes
-by default there.
+against the libraries the player loads: builtin.abc and swf2es's
+playerglobal, and AIR's library too with `--air`, all shipped with the
+command. `--lib` names others in their place, in order, such as Flash
+Player's playerglobal for a player given that one. In a checkout,
+`node packages/cli/dist/main.js` is the command.
 
 The player reads them as a module cache. Chain an IndexedDB cache behind
 it to keep whatever the command did not compile:
 
 ```js
 import { createCodegen } from "@swf2es/codegen";
-import { Player, playerglobalLibrary, Scripting } from "@swf2es/player";
+import { builtinLibrary, Player, playerglobalLibrary, Scripting } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { chainCaches, precompiledModules } from "@swf2es/player-hosts/precompiled";
 
@@ -148,7 +163,7 @@ const scripting = new Scripting(codegen, {
     indexedDbModuleCache(),
   ),
 });
-await scripting.loadLibraries([await bytes("/flash/builtin.abc"), playerglobalLibrary]);
+await scripting.loadLibraries([builtinLibrary, playerglobalLibrary]);
 const player = new Player(await bytes("movie.swf"), scripting);
 await player.start(); // nothing compiled: every module came from movie.swf2es
 ```
@@ -169,14 +184,14 @@ To draw the player, see `RenderView` (`@swf2es/player/scene`,
 ```ts
 import { readFile } from "node:fs/promises";
 import { createCodegen } from "@swf2es/codegen";
-import { Player, playerglobalLibrary, Scripting } from "@swf2es/player";
+import { builtinLibrary, Player, playerglobalLibrary, Scripting } from "@swf2es/player";
 
 const wasm = await readFile(new URL(import.meta.resolve("@swf2es/codegen/codegen.wasm")));
 const scripting = new Scripting(await createCodegen(await WebAssembly.compile(wasm)), {
   print: (line) => console.log(line), // trace()
   realTime: null, // getTimer() follows the frames, so every run prints the same
 });
-await scripting.loadLibraries([await readFile("builtin.abc"), playerglobalLibrary]);
+await scripting.loadLibraries([builtinLibrary, playerglobalLibrary]);
 
 const player = new Player(await readFile("movie.swf"), scripting);
 await player.start(); // the document class and the first frame

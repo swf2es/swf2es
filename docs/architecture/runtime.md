@@ -213,14 +213,19 @@ into `builtin.abc`; only its `native` methods are C++. swf2es compiles
 class and method name as avmplus matches its C++ ones. The `builtin.abc`
 and `shell_toplevel.abc` the runtime, the player and the tests load are
 the avmplus submodule's own, `oracle/avmplus/generated/`, built by its
-`core/builtin.py` from its sources; the oracle's SDK ships older ones,
+`core/builtin.py` and `shell/shell_toplevel.py` from its sources, and
+shipped as `builtinLibrary` in `@swf2es/runtime` and
+`shellToplevelLibrary` in `@swf2es/cli`, each in an MPL-2.0 file of its
+own that `tools/avmplus-libraries.ts` writes from the submodule's and a
+unit test holds to them; the oracle's SDK ships older ones,
 of AIR 15's time, without `Array.removeAt` and `insertAt` and their
 Vector counterparts (SWF 30's), and its avmshell keeps its own copy
 inside the binary, so what avmshell runs is the older library whatever
 file is beside it. The two differ in those ten natives alone, and where
 the submodule's library is newer than the oracle's avmshell, the oracle
 cannot judge; Flash's traces in Ruffle's corpus do. A host gives the
-libraries' bytes, and the player compiles them as any ABC, or takes their
+libraries' bytes, the shipped ones or others, and the player compiles
+them as any ABC, or takes their
 modules from a module cache, as the swf2es command writes them with
 `--emit-libraries`. builtin.abc's AS3 sources are MPL-2.0, and so are its
 compiled modules.
@@ -245,7 +250,7 @@ a builtin's highest mark from 42 up is the VM's internal one
 
 `swf2es run file.abc [more.abc ...]` (`packages/cli`, `commands/run.ts`)
 is avmshell in node: avmshell's libraries, builtin.abc and
-shell_toplevel.abc (from `oracle/avmplus/generated/`, or `--lib`), each
+shell_toplevel.abc (the command's own, or `--lib`), each
 compiled by `codegen.wasm` and loaded into one runtime, their scripts run
 on first use; then each ABC in the order given, added to the root domain,
 compiled and its entry point run, as avmshell runs each file once the one

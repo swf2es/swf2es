@@ -37,14 +37,11 @@ own installer. A relative path is taken from the directory pnpm was run in.
   Buffer and texture byte allowances follow the shared backend's AIR-backed
   limits, with separate host budgets for target attachments. Supported
   formats and remaining gaps are in [Context3D](../../packages/context3d/README.md).
-- **Libraries.** ActionScript 3 needs `builtin.abc` (avmplus', MPL-2.0)
-  and a playerglobal, which the app has of its own (`playerglobalLibrary`).
-  builtin.abc is taken from beside a chosen playerglobal.abc, else from the
-  checkout's `oracle/avmplus/generated/`; without either, the first
-  ActionScript 3 SWF shows what is missing and a button to choose it. File ›
-  Choose playerglobal.abc… plays on another playerglobal in place of the
-  app's own. The app keeps the paths in `settings.json` in Electron's user
-  data directory.
+- **Libraries.** ActionScript 3 plays on the `builtin.abc` (avmplus',
+  MPL-2.0) and playerglobal that ship with the player, with nothing to set
+  up. File › Choose playerglobal.abc… plays on another playerglobal, such
+  as Flash Player's, in place of the app's own; the app keeps its path in
+  `settings.json` in Electron's user data directory.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
 - **Sandbox.** A SWF plays in the sandbox Flash Player gave a local SWF,

@@ -4,6 +4,8 @@ import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
 export { Reader as Amf3Reader, Writer as Amf3Writer } from "./amf.js";
+/** avmplus' builtin.abc (MPL-2.0), which every runtime loads first. */
+export { builtinLibrary } from "./builtin-library.js";
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
 export { FloatValue, hasFloatLibrary } from "./float.js";

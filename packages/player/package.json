@@ -1,8 +1,23 @@
 {
   "name": "@swf2es/player",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Browser SWF player: display list, timeline, playerglobal and renderer adapters",
-  "license": "Apache-2.0",
+  "keywords": [
+    "swf",
+    "flash",
+    "flash-player",
+    "actionscript",
+    "player",
+    "webgl2"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "packages/player"
+  },
+  "license": "Apache-2.0 AND (Apache-2.0 OR MIT) AND W3C-20150513",
   "type": "module",
   "exports": {
     ".": {
@@ -12,6 +27,10 @@
     "./context3d": {
       "types": "./dist/playerglobal/context3d.d.ts",
       "default": "./dist/playerglobal/context3d.js"
+    },
+    "./libraries": {
+      "types": "./dist/playerglobal/libraries.d.ts",
+      "default": "./dist/playerglobal/libraries.js"
     },
     "./scene": {
       "types": "./dist/scene/view.d.ts",
@@ -23,7 +42,10 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "src",
+    "LICENSE.third-party"
   ],
   "dependencies": {
     "@swf2es/context3d": "workspace:*",

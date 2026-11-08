@@ -1,15 +1,13 @@
 // What the app remembers between runs, in settings.json under its user
-// data: where the user's libraries are, and the SWFs opened last.
+// data: a playerglobal.abc the user chose, and the SWFs opened last.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import type { LibraryName, LibraryState } from "../shared/api.js";
 
 export interface Settings {
   stage3D: boolean;
   playerglobal?: string;
-  builtin?: string;
   /** Most recent first. */
   recent: string[];
   /**
@@ -19,15 +17,6 @@ export interface Settings {
 }
 
 const RECENT = 10;
-
-/**
- * builtin.abc is avmplus' (MPL-2.0), and in a checkout of the repository
- * the avmplus submodule has it built; the app uses that when the user has
- * named none and there is none beside their playerglobal.abc.
- */
-const checkoutBuiltin = fileURLToPath(
-  new URL("../../../../oracle/avmplus/generated/builtin.abc", import.meta.url),
-);
 
 const strings = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((v): v is string => typeof v === "string") : [];
@@ -45,16 +34,9 @@ export class SettingsFile {
     return this.current;
   }
 
-  /**
-   * The libraries the app can find, by the user's choice, else beside playerglobal.abc, else the
-   * checkout's builtin.abc.
-   */
+  /** The playerglobal.abc the user chose, where it still is; builtin.abc ships with the player. */
   libraries(): LibraryState {
-    const playerglobal = this.found(this.current.playerglobal);
-    const besideIt = playerglobal ? join(dirname(playerglobal), "builtin.abc") : undefined;
-    const builtin =
-      this.found(this.current.builtin) ?? this.found(besideIt) ?? this.found(checkoutBuiltin);
-    return { builtin, playerglobal };
+    return { playerglobal: this.found(this.current.playerglobal) };
   }
 
   /** Whether it was saved; it holds for this run either way. */
@@ -99,7 +81,6 @@ export class SettingsFile {
       return {
         stage3D: read.stage3D === true,
         playerglobal: text(read.playerglobal),
-        builtin: text(read.builtin),
         recent: strings(read.recent),
         sockets: Object.fromEntries(
           Object.entries(

@@ -21,8 +21,8 @@ as https, has two hosts. `swf2es://app/` is the page,
 `static/index.html` and its stylesheet, the renderer's build,
 `/modules/<package>/` for the packages' builds, which the page's import
 map names as
-`tests/player/serve.ts`'s does, and `/libraries/builtin.abc` and
-`/libraries/playerglobal.abc`, read from where the settings say.
+`tests/player/serve.ts`'s does, and `/libraries/playerglobal.abc`, read
+from where the settings say.
 `swf2es://file/` is the local files the SWF playing may read, by its
 sandbox (below); its answers carry `Access-Control-Allow-Origin:
 swf2es://app`. The two hosts are two origins: a SWF's files are never
@@ -262,15 +262,13 @@ fetch reaches any address, as the user chose it, and the dialog keeps
 that choice the user's. Only http and https URLs open, with a host and
 without credentials, their fragment dropped. It keeps `settings.json` in
 Electron's user data directory (`SWF2ES_DESKTOP_USER_DATA` names
-another, for the tests): the libraries' paths, the last ten SWFs, by
+another, for the tests): a chosen playerglobal's path, the last ten SWFs, by
 path or URL, and the servers each SWF, by path or URL, may always reach.
 A settings file that cannot be written keeps them for the run, with a
-word. playerglobal.abc is the user's to give; builtin.abc is taken from
-beside it, else from the checkout's avmplus submodule, else given too.
-Without them, the page shows what is missing and why the app cannot
-include playerglobal, and an ActionScript 3 SWF that fails for want of
-them says so rather than showing the 404; choosing one reloads the page,
-which fetches the libraries once.
+word. ActionScript 3 plays on the builtin.abc and playerglobal the player
+ships; a playerglobal.abc the user chooses, such as Flash Player's, takes
+the place of swf2es's own, and choosing one reloads the page, which
+fetches it once.
 
 ## Sockets
 

@@ -1,8 +1,25 @@
 {
   "name": "@swf2es/codegen",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "ABC and AVM1 bytecode to ES module compiler (AssemblyScript → wasm); identical output in JIT and AOT modes",
-  "license": "Apache-2.0",
+  "keywords": [
+    "swf",
+    "flash",
+    "actionscript",
+    "avm1",
+    "avm2",
+    "abc",
+    "compiler",
+    "webassembly"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "packages/codegen"
+  },
+  "license": "Apache-2.0 AND (Apache-2.0 OR MIT) AND MIT AND BSD-3-Clause",
   "type": "module",
   "exports": {
     ".": {
@@ -12,7 +29,10 @@
     "./codegen.wasm": "./dist/codegen.wasm"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "src",
+    "LICENSE.third-party"
   ],
   "dependencies": {
     "@swf2es/format": "workspace:*"

@@ -7,8 +7,8 @@ player adding and compiling ABCs exactly as the command does.
 
 ## Ahead-of-time compilation
 
-`swf2es compile <file.swf|file.abc> --lib builtin.abc --lib
-playerglobal.abc [-o dir]` (`packages/cli`, `commands/compile.ts`; a bare
+`swf2es compile <file.swf|file.abc> [--lib x.abc ...] [-o dir]`
+(`packages/cli`, `commands/compile.ts`; a bare
 `swf2es <file>` is the same) compiles a SWF's DoABCs, or a bare ABC, as the
 player compiles them for a SWF it loads as its main movie, so that each
 module is byte for byte the player's (`compileAhead` in `aot.ts`, which
@@ -24,16 +24,14 @@ cases, a SWF of two DoABCs, one lazy, and as3pb's ABC against avmshell's
 libraries, the command's modules, the libraries' included, are the
 player's, which its own `Code.link` compiles in node.
 
-The libraries are the host's, so `--lib` names them, in load order; the
-command does not depend on the player, so it cannot take the player's
-playerglobalLibrary itself. With none given, it takes builtin.abc
-and playerglobal-swf2es.abc from `tests/player/out/libraries/`, where the
-player's tests write them, and
-says what to pass when they are not there. The player loads only the
-libraries its host gives `loadLibraries`, builtin and playerglobal by
-default: a host that also loads one of the player's own, as
-`airLibrary`, gets the same modules only from a command given the same
-libraries in the same order. A file that ends inside a DoABC is refused.
+The libraries are the host's, so `--lib` names them, in load order. With
+none given, it takes what `@swf2es/web` gives the player, from
+`@swf2es/player/libraries`, which holds the libraries alone, so that the
+command loads none of the player: `builtinLibrary` (the runtime's
+builtin.abc) and `playerglobalLibrary`, and `airLibrary` after them with
+`--air`. The player loads only the libraries its host gives
+`loadLibraries`: a host that loads others gets the same modules only from
+a command given the same libraries in the same order. A file that ends inside a DoABC is refused.
 An AVM1 SWF, whose FileAttributes lacks the ActionScript 3 flag, compiles
 to one module of its action blocks, `avm1.js`, and takes no library
 (`compileActionsAhead`): the player runs its code as AVM1 and never

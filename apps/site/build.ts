@@ -1,8 +1,9 @@
 // Assembles the site into apps/site/dist/site/, a static directory GitHub Pages serves as it is,
 // at /swf2es/: Astro builds the pages (astro/: the home page, the player, the guide from
 // docs/guide.md and the licences) around what this stages in dist/public/ first: the built
-// packages as tsc wrote them, under the player's import map, codegen.wasm, builtin.abc, the
-// demo SWFs, the licence texts and the service worker. Run after `pnpm build`:
+// packages as tsc wrote them, under the player's import map (builtin.abc and playerglobal
+// among them), codegen.wasm, the demo SWFs, the licence texts and the service worker. Run
+// after `pnpm build`:
 //
 //   pnpm --filter @swf2es/site build      (or node apps/site/build.ts)
 //
@@ -84,12 +85,6 @@ copyTree(
 writeFileSync(
   join(pub, "service-worker.js"),
   readFileSync(join(here, "dist/js/service-worker.js"), "utf8").replace(/^export \{\};\n/m, ""),
-);
-
-mkdirSync(join(pub, "libraries"), { recursive: true });
-copyFileSync(
-  join(root, "oracle/avmplus/generated/builtin.abc"),
-  join(pub, "libraries/builtin.abc"),
 );
 
 // The demos, built from the repository's sources, and their list for the player.
@@ -188,16 +183,7 @@ await astro({ root: here, logLevel: "warn" });
 
 const kb = (n: number) => `${(n / 1024).toFixed(0)} KB`;
 console.log(`site: ${relative(process.cwd(), out) || "."}, ${kb(sizeOf(out))} at ${build}`);
-for (const part of [
-  "modules",
-  "app",
-  "libraries",
-  "demos",
-  "licenses",
-  "docs",
-  "_astro",
-  "pagefind",
-]) {
+for (const part of ["modules", "app", "demos", "licenses", "docs", "_astro", "pagefind"]) {
   if (existsSync(join(out, part))) {
     console.log(`  ${part}/ ${kb(sizeOf(join(out, part)))}`);
   }
