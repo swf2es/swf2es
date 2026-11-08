@@ -1,0 +1,14 @@
+empty after width scale 0 0 size 0 0
+empty after height scale 0 0 size 0 0
+filled later scale 0 0 size 0 0
+pre-scaled empty after width scale 0 0 size 0 0
+pre-scaled filled later scale 0 0 size 0 0
+rotated empty after width scale 0 0 size 0 0
+rotated filled later scale 0 0 size 0 0
+filled width 0 scale 0 1 size 0 100
+then width 42 scale 0.42 1 size 42 100
+empty after height only scale 0 0 size 0 0
+empty child after width scale 0 0 size 0 0
+empty shape after width scale 0 0 size 0 0
+empty shape scaleX back scale 1 0 size 0 0
+empty width 0 scale 0 0 size 0 0

@@ -448,15 +448,18 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
       const r = bounds(d, true);
       const base = r ? twips(r.xMax - r.xMin) : 0;
-      if (d.rotation === 0 && d.skew === 0) {
-        if (base > 0) {
-          d.setScaleX(value / base);
+      const current = d.rotation === 0 && d.skew === 0 ? base : size(d)[0];
+      // Nothing to measure that way: a scale of 0, as adl gives it, and of 0 the other way too
+      // where there is nothing at all, so that content drawn later stays unseen (size-of-empty).
+      if (!(current > 0)) {
+        d.setScaleX(0);
+        if (r === null) {
+          d.setScaleY(0);
         }
+      } else if (d.rotation === 0 && d.skew === 0) {
+        d.setScaleX(value / base);
       } else {
-        const current = size(d)[0];
-        if (current > 0) {
-          d.setScaleX((d.scaleX * value) / current);
-        }
+        d.setScaleX((d.scaleX * value) / current);
       }
     }
 
@@ -482,15 +485,18 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
 
       const r = bounds(d, true);
       const base = r ? twips(r.yMax - r.yMin) : 0;
-      if (d.rotation === 0 && d.skew === 0) {
-        if (base > 0) {
-          d.setScaleY(value / base);
+      const current = d.rotation === 0 && d.skew === 0 ? base : size(d)[1];
+      // Nothing to measure that way: a scale of 0, as adl gives it, and of 0 the other way too
+      // where there is nothing at all, so that content drawn later stays unseen (size-of-empty).
+      if (!(current > 0)) {
+        d.setScaleY(0);
+        if (r === null) {
+          d.setScaleX(0);
         }
+      } else if (d.rotation === 0 && d.skew === 0) {
+        d.setScaleY(value / base);
       } else {
-        const current = size(d)[1];
-        if (current > 0) {
-          d.setScaleY((d.scaleY * value) / current);
-        }
+        d.setScaleY((d.scaleY * value) / current);
       }
     }
 
