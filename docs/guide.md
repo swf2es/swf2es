@@ -15,6 +15,54 @@ npm install -g @swf2es/cli  # the swf2es command, for node
 The packages are ES modules with no dependencies outside `@swf2es/*`.
 Each package's README says what it is for.
 
+## From a CDN
+
+A page without a bundler loads `swf2es`, the browser build: `@swf2es/web`
+and everything it loads, bundled by Rspack into a folder of ES modules
+that find one another by relative URL (`packages/swf2es`). One tag
+defines the element:
+
+```html
+<script type="module" src="https://unpkg.com/swf2es@0.1.0"></script>
+
+<swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
+```
+
+The module exports what `@swf2es/web` does; import it from the same URL
+to call `configure` or `watchFlash`, so that the page has one copy.
+Players in the markup start as it loads, before such a script runs, so a
+page that configures its players adds them from that script. Until
+1.0 a minor release may break a page, so pin a version: on unpkg at least
+the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
+files then load together); on jsDelivr the exact one
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.0`), as it serves a range
+without redirecting, and the files loaded later would follow the range.
+`swf2es.js` defines the element; `codegen.wasm`, the renderer and the
+workers' host load with the first player, `worker.js` for a SWF that uses
+workers, and Stage3D's code only on a page that configures it.
+
+A page with a Content-Security-Policy allows, in `script-src`, the CDN's
+origin, `'wasm-unsafe-eval'` and `'unsafe-eval'`: the player evaluates
+the JavaScript it compiles a SWF's ActionScript to, so without
+`'unsafe-eval'` only modules compiled ahead of time play
+([below](#compile-ahead-of-time)). Flash Workers also need `worker-src`
+with the CDN's origin and `blob:` ([Workers](#workers)):
+
+```
+script-src 'self' https://unpkg.com 'unsafe-eval' 'wasm-unsafe-eval'; worker-src https://unpkg.com blob:
+```
+
+A policy that sets `connect-src` or `default-src` lists the CDN there too,
+for `codegen.wasm`. A cross-origin isolated page, which workers sharing
+memory need, works with either CDN: both send
+`Cross-Origin-Resource-Policy: cross-origin` and CORS headers.
+
+To host it yourself, serve the package's `dist/` folder as it is
+(`npm pack swf2es` has it) and load `dist/swf2es.js` from it; serve
+`.wasm` as `application/wasm`, and from another origin, with
+`Access-Control-Allow-Origin`. In a checkout, `pnpm build` builds the
+folder (`packages/swf2es/build.ts`).
+
 ## Libraries
 
 A SWF's ActionScript 3 links against `builtin.abc` (avmplus' standard
@@ -88,8 +136,10 @@ the page, and `workers="false"` or `"true"` on an element for its own
 SWFs. Under an import map, map `@swf2es/player-hosts/workers` too, or
 SWFs play without workers (the console says why). The
 workers load `@swf2es/player-hosts`' `dist/thread/`, which needs no import
-map, from wherever the package is served (a CDN's needs CORS, and a
-Content-Security-Policy that allows `blob:` workers);
+map, from wherever the package is served (a CDN's needs CORS, and under a
+Content-Security-Policy, `worker-src` with the CDN's origin and `blob:`:
+the worker starts on a `blob:` module of the page's that imports the
+script, and a module worker's imports are held to `worker-src` too);
 `configure({ workerUrl })` names another script, such as a bundler's.
 Sharing memory between workers (a shareable ByteArray, Mutex, Condition)
 needs a cross-origin isolated page: serve it with

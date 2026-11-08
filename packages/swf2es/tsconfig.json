@@ -1,0 +1,16 @@
+{
+  // The bundle's sources, checked, not emitted: build.ts compiles them, with what they import.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "types": [],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"]
+  },
+  "include": ["src"],
+  "references": [{ "path": "../codegen" }, { "path": "../player-hosts" }, { "path": "../web" }]
+}

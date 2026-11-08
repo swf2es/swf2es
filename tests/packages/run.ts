@@ -5,7 +5,9 @@
 // the repository, offline, as they need nothing but each other. There every
 // export path imports, every source map finds its sources, and the
 // installed swf2es command compiles an AS3 SWF and runs an ABC with no
-// --lib, on the libraries it ships. Run after `pnpm build`; it builds nothing.
+// --lib, on the libraries it ships. The browser build, swf2es, has the
+// files a CDN serves, and installs alone with nothing else. Run after
+// `pnpm build`; it builds nothing.
 //
 //   node tests/packages/run.ts
 import assert from "node:assert/strict";
@@ -41,6 +43,7 @@ after(() => rmSync(work, { recursive: true, force: true }));
 const NOT_IMPORTED = new Set(["@swf2es/codegen/codegen.wasm", "@swf2es/player-hosts/node-worker"]);
 
 interface Packed {
+  /** Its folder under packages/. */
   name: string;
   tarball: string;
   files: Set<string>;
@@ -65,15 +68,19 @@ mkdirSync(tarballs, { recursive: true });
 const packed: Packed[] = await Promise.all(
   PUBLIC_PACKAGES.map(async (name) => {
     const dir = join(root, `packages/${name}`);
-    const { version } = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+    const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
     await run("pnpm", ["pack", "--pack-destination", tarballs], { cwd: dir });
-    const tarball = join(tarballs, `swf2es-${name}-${version}.tgz`);
+    // @swf2es/web's swf2es-web-0.1.0.tgz, swf2es's swf2es-0.1.0.tgz.
+    const tarball = join(
+      tarballs,
+      `${pkg.name.replace(/^@/, "").replace("/", "-")}-${pkg.version}.tgz`,
+    );
     const listing = (await run("tar", ["-tzf", tarball], { maxBuffer: 64 << 20 })).stdout;
     const files = new Set(listing.split("\n").filter(Boolean));
-    const pkg = JSON.parse(
+    const packedPkg = JSON.parse(
       (await run("tar", ["-xzOf", tarball, "package/package.json"])).stdout,
     ) as Packed["pkg"];
-    return { name, tarball, files, pkg };
+    return { name, tarball, files, pkg: packedPkg };
   }),
 );
 
@@ -129,7 +136,8 @@ if (install.status !== 0) {
   throw new Error(`npm install failed:\n${install.stdout}${install.stderr}`);
 }
 
-const installed = (name: string) => join(project, "node_modules/@swf2es", name);
+const installed = (name: string) =>
+  join(project, "node_modules", name === "swf2es" ? name : `@swf2es/${name}`);
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 /** The files an exports map names. */
@@ -140,7 +148,7 @@ function exportTargets(exports: Packed["pkg"]["exports"]): string[] {
 }
 
 for (const p of packed) {
-  test(`@swf2es/${p.name}'s tarball has its licence, notices and README, and no build state`, () => {
+  test(`${p.pkg.name}'s tarball has its licence, notices and README, and no build state`, () => {
     assert.ok(p.files.has("package/README.md"));
     assert.equal(
       readFileSync(join(installed(p.name), "LICENSE"), "utf8"),
@@ -159,7 +167,7 @@ for (const p of packed) {
     assert.deepEqual(unwanted, []);
   });
 
-  test(`@swf2es/${p.name}'s package.json is what npm is to publish`, () => {
+  test(`${p.pkg.name}'s package.json is what npm is to publish`, () => {
     assert.equal(p.pkg.license, spdx(p.name));
     assert.equal(p.pkg.repository?.directory, `packages/${p.name}`);
     assert.ok(!p.pkg.private);
@@ -221,11 +229,16 @@ test("every source map of the installed packages finds its sources", () => {
 
       maps++;
       const map = JSON.parse(readFileSync(join(dir, file), "utf8"));
-      for (const source of map.sources as string[]) {
+      for (const [i, source] of (map.sources as string[]).entries()) {
         const path = resolve(dirname(join(dir, file)), map.sourceRoot ?? "", source);
+        // The browser build's maps hold their sources, the modules it bundled.
+        if (typeof map.sourcesContent?.[i] === "string") {
+          continue;
+        }
+
         // native leaves out its binaries' base64, which dist holds again.
         if (!existsSync(path) && !(p.name === "native" && path.endsWith("/binary.ts"))) {
-          missing.push(`@swf2es/${p.name}/${file}: ${source}`);
+          missing.push(`${p.pkg.name}/${file}: ${source}`);
         }
       }
     }
@@ -238,7 +251,7 @@ test("every source map of the installed packages finds its sources", () => {
 const swf2es = (...args: string[]) =>
   spawnSync(join(project, "node_modules/.bin/swf2es"), args, { cwd: project, encoding: "utf8" });
 
-test("the installed swf2es compiles an AS3 SWF with the libraries it ships", () => {
+test("the installed swf2es command compiles an AS3 SWF with the libraries it ships", () => {
   const r = swf2es("compile", "hello.swf", "-o", "hello.swf2es", "--emit-libraries");
   assert.equal(r.status, 0, r.stderr);
   const manifest = JSON.parse(readFileSync(join(project, "hello.swf2es/manifest.json"), "utf8"));
@@ -267,7 +280,41 @@ test("the installed swf2es compiles an AS3 SWF with the libraries it ships", () 
   );
 });
 
-test("the installed swf2es runs an ABC on avmshell's libraries, which it ships", () => {
+test("the installed swf2es command runs an ABC on avmshell's libraries, which it ships", () => {
   const r = swf2es("run", "hello.abc");
   assert.deepEqual([r.status, r.stdout, r.stderr], [0, "hello\n", ""]);
+});
+
+test("swf2es has the files a CDN serves, and installs alone with nothing else", () => {
+  const p = packed.find((q) => q.name === "swf2es") as Packed;
+  for (const file of ["dist/swf2es.js", "dist/worker.js", "dist/codegen.wasm"]) {
+    assert.ok(p.files.has(`package/${file}`), file);
+  }
+
+  // The chunks it imports by relative URL, each with the content hash it is named by.
+  const chunks = [...p.files].filter((f) => /^package\/dist\/chunks\/[0-9a-f]{16}\.js$/.test(f));
+  assert.ok(chunks.length > 0);
+  const main = readFileSync(join(installed("swf2es"), "dist/swf2es.js"), "utf8");
+  for (const chunk of chunks) {
+    assert.ok(main.includes(chunk.slice("package/dist/chunks/".length, -".js".length)), chunk);
+  }
+
+  // https://unpkg.com/swf2es and https://cdn.jsdelivr.net/npm/swf2es serve these.
+  assert.equal(p.pkg.unpkg, "dist/swf2es.js");
+  assert.equal(p.pkg.jsdelivr, "dist/swf2es.js");
+  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+    assert.deepEqual(p.pkg[field] ?? {}, {}, field);
+  }
+
+  const alone = join(work, "alone");
+  mkdirSync(alone, { recursive: true });
+  writeFileSync(join(alone, "package.json"), `${JSON.stringify({ private: true })}\n`);
+  const r = spawnSync(
+    "npm",
+    ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", p.tarball],
+    { cwd: alone, encoding: "utf8" },
+  );
+  assert.equal(r.status, 0, `${r.stdout}${r.stderr}`);
+  const modules = readdirSync(join(alone, "node_modules")).filter((n) => !n.startsWith("."));
+  assert.deepEqual(modules, ["swf2es"]);
 });
