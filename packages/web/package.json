@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/web",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Plays SWFs on any web page: the <swf2es-player> element, replaceFlash and ExternalInterface",
   "keywords": [
     "swf",
