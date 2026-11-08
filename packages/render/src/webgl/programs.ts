@@ -119,10 +119,14 @@ void main(void) {
  * samplers. At level 0: the textures have no mipmaps and sample alike up
  * close and far off, and so no derivatives are taken in the switch.
  */
+// Each case sets the texel and breaks rather than returning from inside the
+// switch: Direct3D's compiler, which ANGLE hands it to on Windows, cannot
+// tell every path sets the result of such a function and warns (X4000).
 const slotTexel = Array.from(
   { length: FILL_TEXTURES },
   (_, k) => `    case ${k + 1}:
-      return textureLod(uTextures[${k}], at / vec2(textureSize(uTextures[${k}], 0)), 0.0);`,
+      t = textureLod(uTextures[${k}], at / vec2(textureSize(uTextures[${k}], 0)), 0.0);
+      break;`,
 ).join("\n");
 
 /**
@@ -142,11 +146,12 @@ uniform sampler2D uTextures[${FILL_TEXTURES}];
 out vec4 finalColor;
 
 vec4 texel(vec2 at) {
+  vec4 t = vec4(0.0);
   switch (vSlot) {
 ${slotTexel}
   }
 
-  return vec4(0.0);
+  return t;
 }
 
 void main(void) {
@@ -593,11 +598,12 @@ out vec4 finalColor;
 
 ${BLEND_HELPERS}
 vec4 texel(vec2 at) {
+  vec4 t = vec4(0.0);
   switch (vSlot) {
 ${slotTexel}
   }
 
-  return vec4(0.0);
+  return t;
 }
 
 void main(void) {
