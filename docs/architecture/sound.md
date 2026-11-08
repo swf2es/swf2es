@@ -11,8 +11,8 @@ browser's left and right outputs through Web Audio. `Sound` classes bound by
 SymbolClass to a DefineSound tag find its encoded samples in the library.
 The player decodes MP3, uncompressed 8/16-bit, ADPCM or Nellymoser sound
 on first play (ADPCM as Ruffle's decoder does and Nellymoser as FFmpeg's,
-to 16-bit samples the browser host in `media/audio.ts` plays as
-uncompressed ones), sharing
+both in Zig in `@swf2es/native/audio`, to 16-bit samples the browser host
+in `media/audio.ts` plays as uncompressed ones), sharing
 a decode when separate loads contain the same sound (`scripting/symbols.ts`). The shared cache holds
 decoded audio while a sound uses it; entries leave when no SWF holds their
 sound definition, so unused audio can be collected. The parser leaves the
@@ -110,7 +110,8 @@ nothing plays: the player reads no output back from the device. AIR's
 AIR checks them; their API version hides them from a SWF.
 Nellymoser is DefineSound's and a stream's formats 4, 5 and 6, mono, the
 first two at 16 and 8 kHz whatever their flags say. Its decoder is
-FFmpeg's translated (`media/nellymoser.ts`, under FFmpeg's MIT notice),
+FFmpeg's translated (`@swf2es/native/audio`'s `nellymoser.zig`, under
+FFmpeg's MIT notice),
 but for the signs of the bands it gives no bits, which are noise; a
 stream's blocks decode one after another, each one's overlap carried
 into the next. `extract` does not read Nellymoser yet. Speex, ByteArray
