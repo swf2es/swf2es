@@ -27,6 +27,7 @@ export const PUBLIC_PACKAGES = [
   "player-hosts",
   "render",
   "runtime",
+  "swf2es",
   "web",
 ];
 
@@ -36,8 +37,21 @@ export const PUBLIC_PACKAGES = [
  */
 export const THREAD_PACKAGES = ["codegen", "format", "native", "player", "runtime"];
 
-/** Code from elsewhere, by what its files' headers say. */
-export type Origin = "avmplus" | "ruffle" | "w3c" | "assemblyscript" | "native";
+/** The packages the browser build, swf2es, bundles (its build.ts): it carries their notices too. */
+export const BUNDLED_PACKAGES = [
+  "codegen",
+  "context3d",
+  "format",
+  "native",
+  "player",
+  "player-hosts",
+  "render",
+  "runtime",
+  "web",
+];
+
+/** Code from elsewhere, by what its files' headers say, or what bundled it. */
+export type Origin = "avmplus" | "ruffle" | "w3c" | "assemblyscript" | "native" | "rspack";
 
 interface Notice {
   title: string;
@@ -155,6 +169,19 @@ ${read("packages/native/LICENSE.third-party")}`,
   };
 }
 
+/** The runtime Rspack writes into a bundle. */
+function rspack(): Notice {
+  return {
+    title: "Rspack",
+    spdx: ["MIT"],
+    text: `dist/swf2es.js, dist/worker.js and dist/chunks/ are bundled by Rspack,
+https://github.com/web-infra-dev/rspack, and hold the runtime it writes
+into a bundle, under the MIT License:
+
+${read("packages/swf2es/node_modules/@rspack/core/LICENSE")}`,
+  };
+}
+
 /** What each package holds from elsewhere, besides its own Apache-2.0 code. */
 function notices(name: string): Notice[] {
   switch (name) {
@@ -225,6 +252,31 @@ them compiled.`,
 or ported from Ruffle, Copyright (c) 2018-2022 Ruffle LLC and Ruffle
 contributors: each file's header says so.`),
       ];
+    case "swf2es":
+      return [
+        ruffle(`dist/swf2es.js, dist/worker.js and dist/chunks/ bundle the modules of
+swf2es's packages, @swf2es/codegen, @swf2es/format, @swf2es/player and
+@swf2es/runtime among them. Parts of them are taken or ported from Ruffle,
+Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors, as each file's
+header in those packages says, and playerglobal's ABC is compiled from
+ActionScript much of which is Ruffle's. Where Flash's readings of
+malformed AVM1 actions are not documented, dist/codegen.wasm's decoder
+follows Ruffle's: swf/src/avm1/read.rs and core/src/avm1/activation.rs.`),
+        avmplus(
+          `The bundle holds @swf2es/runtime's modules: avmplus' builtin.abc, and the
+files whose headers say they are translated from avmplus.`,
+          `Their TypeScript is @swf2es/runtime's src/, and
+the repository's packages/runtime/src/; the bundle's source maps hold the
+modules they were bundled from.`,
+        ),
+        w3c(`The bundle holds @swf2es/player's bitmap/turbulence.js, which derives
+from the reference implementation of feTurbulence in Scalable Vector
+Graphics (SVG) 1.1 (Second Edition),
+https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement`),
+        assemblyScript(),
+        native("The bundle holds @swf2es/native's modules, with their WebAssembly."),
+        rspack(),
+      ];
     default:
       return [];
   }
@@ -238,6 +290,7 @@ export function origins(name: string): Origin[] {
     "SVG's feTurbulence": "w3c",
     AssemblyScript: "assemblyscript",
     "@swf2es/native": "native",
+    Rspack: "rspack",
   };
   return notices(name).map((n) => titles[n.title]);
 }
@@ -266,7 +319,8 @@ function thirdParty(name: string): string | null {
   }
 
   const sections = list.map((n) => `${n.title}\n${"=".repeat(n.title.length)}\n\n${n.text}`);
-  return `Code from elsewhere in @swf2es/${name}, and its terms. The package's own
+  const pkg = name === "swf2es" ? name : `@swf2es/${name}`;
+  return `Code from elsewhere in ${pkg}, and its terms. The package's own
 code is under the Apache License 2.0 (LICENSE).
 
 

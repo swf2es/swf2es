@@ -1,5 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
   "ignore": ["oracle/avmplus/**", "vendor/**", "packages/codegen/assembly/**"],
-  "ignoreExportsUsedInFile": { "interface": true, "type": true }
+  "ignoreExportsUsedInFile": { "interface": true, "type": true },
+  "workspaces": {
+    "packages/swf2es": { "entry": ["src/swf2es.ts", "src/worker.ts"] }
+  }
 }

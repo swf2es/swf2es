@@ -18,6 +18,8 @@ const allowed: Record<string, string[]> = {
   "player-hosts": ["player"],
   web: ["codegen", "format", "native", "player", "player-hosts"],
   cli: ["codegen", "format", "player", "runtime"],
+  // The browser build: it bundles them, so at build time alone.
+  swf2es: ["codegen", "player-hosts", "web"],
 };
 
 // vendor/ holds C libraries alone, compiled into native's binaries rather than linked by pnpm:

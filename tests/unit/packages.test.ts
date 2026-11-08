@@ -12,6 +12,7 @@ import { builtinLibrary } from "@swf2es/runtime/avm2";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { abcOf, embedded, LIBRARIES } from "../../tools/avmplus-libraries.ts";
 import {
+  BUNDLED_PACKAGES,
   expected,
   type Origin,
   origins,
@@ -104,9 +105,14 @@ const sourcesOf = (name: string) => [
 test("each package's notices cover what its files' headers say came from elsewhere", () => {
   // native's notices are its build's, which checks them against what it compiles.
   for (const name of PUBLIC_PACKAGES.filter((n) => n !== "native")) {
-    // player-hosts' dist/thread/ holds the modules of the others.
+    // player-hosts' dist/thread/ holds the modules of the others, and swf2es' bundle theirs.
+    const others = (list: string[]) => [name, ...list.filter((n) => n !== "native")];
     const held =
-      name === "player-hosts" ? [name, ...THREAD_PACKAGES.filter((n) => n !== "native")] : [name];
+      name === "player-hosts"
+        ? others(THREAD_PACKAGES)
+        : name === "swf2es"
+          ? others(BUNDLED_PACKAGES)
+          : [name];
     const found = new Set(held.flatMap(sourcesOf).flatMap((dir) => [...headerOrigins(dir)]));
     for (const origin of found) {
       assert.ok(origins(name).includes(origin), `${name} holds ${origin}'s code but no notice`);
@@ -114,12 +120,33 @@ test("each package's notices cover what its files' headers say came from elsewhe
   }
 
   assert.ok(origins("player-hosts").includes("native"));
+  assert.ok(origins("swf2es").includes("native"));
 });
 
 test("player-hosts' dist/thread/ holds the packages whose notices it carries", () => {
   const thread = `${root}packages/player-hosts/dist/thread`;
   const held = readdirSync(thread).filter((name) => name !== "player-hosts");
   assert.deepEqual(held.sort(), [...THREAD_PACKAGES].sort());
+});
+
+test("swf2es' bundle holds the packages whose notices it carries", () => {
+  const dist = `${root}packages/swf2es/dist/`;
+  const held = new Set<string>();
+  for (const file of readdirSync(dist, { recursive: true, encoding: "utf8" })) {
+    if (!file.endsWith(".js.map")) {
+      continue;
+    }
+
+    const { sources } = JSON.parse(readFileSync(dist + file, "utf8")) as { sources: string[] };
+    for (const source of sources) {
+      const match = source.match(/^webpack:\/\/swf2es\/\.\.\/([^/]+)\/dist\//);
+      if (match) {
+        held.add(match[1]);
+      }
+    }
+  }
+
+  assert.deepEqual([...held].sort(), [...BUNDLED_PACKAGES].sort());
 });
 
 test("the embedded avmplus ABCs are the submodule's", { skip }, () => {

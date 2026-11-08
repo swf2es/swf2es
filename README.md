@@ -55,6 +55,14 @@ and `@swf2es/native/render`, which the player loads with itself. The page
 must let it compile WebAssembly (SIMD, and `'wasm-unsafe-eval'` under a
 CSP).
 
+Without a bundler, load the browser build from a CDN instead, one tag
+that defines the element (CSP, isolation and self-hosting in
+[the guide](docs/guide.md#from-a-cdn)):
+
+```html
+<script type="module" src="https://unpkg.com/swf2es@0.1.0"></script>
+```
+
 Or turn an existing page's Flash tags into players:
 
 ```js
@@ -96,6 +104,7 @@ packages/
   player-hosts/  optional hosts: Web Workers, sockets (WebSocket relay, Node TCP),
                  IndexedDB and precompiled module caches
   web/           <swf2es-player>, replaceFlash and ExternalInterface for any page
+  swf2es/        the browser build: web/ bundled into one folder for a page's <script> tag
   context3d/     Stage3D's Context3D on WebGL 2
   cli/           the swf2es command: ahead-of-time compiler, avmshell-style runner
 apps/
