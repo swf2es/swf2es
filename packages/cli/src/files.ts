@@ -1,11 +1,9 @@
 // Reading the commands' inputs and writing their outputs, a failure said
-// as such rather than as a stack; and where the repository keeps the
-// libraries a command takes when given none.
-import { existsSync } from "node:fs";
+// as such rather than as a stack.
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { fail, USAGE_ERROR } from "./output.js";
+import { fail } from "./output.js";
 
 export async function read(path: string, what: string): Promise<Uint8Array> {
   try {
@@ -21,24 +19,6 @@ export async function writing(path: string, write: () => Promise<unknown>): Prom
   } catch (e) {
     fail(`cannot write ${path}: ${(e as NodeJS.ErrnoException).code ?? e}`);
   }
-}
-
-const repository = (path: string) => fileURLToPath(new URL(`../../../${path}`, import.meta.url));
-
-/**
- * The libraries named `names`, from the first of the repository's
- * directories `dirs` that has them all; with none, a usage error that
- * says what to pass, as `missing` explains.
- */
-export function defaultLibraries(names: string[], dirs: string[], missing: string): string[] {
-  for (const dir of dirs) {
-    const paths = names.map((n) => repository(dir) + n);
-    if (paths.every((p) => existsSync(p))) {
-      return paths;
-    }
-  }
-
-  fail(missing, USAGE_ERROR);
 }
 
 /** The libraries at `paths`, read, each named by its file. */

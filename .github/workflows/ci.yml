@@ -61,7 +61,9 @@ jobs:
               --filter ./tests/libraries --filter ./tests/desktop test
             determinism: true
           - name: pages and fuzz
-            run: pnpm -r --filter ./tests/web --filter ./tests/site --filter ./tests/fuzz test
+            run: >-
+              pnpm -r --filter ./tests/web --filter ./tests/site --filter ./tests/fuzz
+              --filter ./tests/packages test
     env:
       SWF2ES_CHECKED: ${{ matrix.mode == 'checked' && '1' || '' }}
     steps:

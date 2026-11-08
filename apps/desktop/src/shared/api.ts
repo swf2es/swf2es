@@ -95,8 +95,8 @@ export interface OpenedMovie {
 }
 
 /** The libraries' paths on disk, null for one the shell has not found. */
+/** A playerglobal.abc the user chose in place of swf2es's own; builtin.abc ships with the player. */
 export interface LibraryState {
-  builtin: string | null;
   playerglobal: string | null;
 }
 

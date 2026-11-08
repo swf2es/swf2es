@@ -10,7 +10,7 @@ import { createRequire } from "node:module";
 import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { protocol, type Session } from "electron";
-import type { LibraryName, LibraryState } from "../shared/api.js";
+import type { LibraryState } from "../shared/api.js";
 import { FILE_ORIGIN, type Sandbox } from "./sandbox.ts";
 
 const SCHEME = "swf2es";
@@ -185,8 +185,7 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
         break;
       }
       case "libraries": {
-        const name = /^(builtin|playerglobal)\.abc$/.exec(rest.join("/"))?.[1];
-        file = name ? libraries()[name as LibraryName] : null;
+        file = rest.join("/") === "playerglobal.abc" ? libraries().playerglobal : null;
         break;
       }
       default:

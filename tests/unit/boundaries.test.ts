@@ -17,7 +17,7 @@ const allowed: Record<string, string[]> = {
   player: ["codegen", "context3d", "format", "native", "render", "runtime"],
   "player-hosts": ["player"],
   web: ["codegen", "format", "native", "player", "player-hosts"],
-  cli: ["codegen", "format", "runtime"],
+  cli: ["codegen", "format", "player", "runtime"],
 };
 
 // vendor/ holds C libraries alone, compiled into native's binaries rather than linked by pnpm:

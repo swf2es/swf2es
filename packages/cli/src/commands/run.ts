@@ -4,12 +4,13 @@ import { readFileSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { basename, extname, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createCodegen } from "@swf2es/codegen";
-import { createRuntime, type ShellFiles } from "@swf2es/runtime/avm2";
+import { builtinLibrary, createRuntime, type ShellFiles } from "@swf2es/runtime/avm2";
 import { InputError, RejectedError, readInput } from "../aot.js";
 import { COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
-import { codegenModule, defaultLibraries, read, readLibraries } from "../files.js";
+import { codegenModule, read, readLibraries } from "../files.js";
 import { fail, usageError } from "../output.js";
 import { runShell } from "../shell.js";
+import { shellToplevelLibrary } from "../shell-toplevel-library.js";
 import { nodeShellThreads } from "../threads.js";
 
 const USAGE = `usage: swf2es run <file.abc> [more.abc ...] [options]
@@ -25,15 +26,20 @@ its workers run on threads of their own, stopped when the ABCs end.
 options:
   --lib <file.abc>     a library to load first, into the root domain, in
                        the order given; repeat for each. Default:
-                       avmshell's builtin.abc and shell_toplevel.abc, from
-                       the repository's oracle/avmplus/generated/, if there
+                       avmshell's builtin.abc and shell_toplevel.abc,
+                       which swf2es ships
 ${COMMON_USAGE}
 
 exit status: 0 when every ABC ran to its end, 1 as avmshell's for a
-VerifyError or an uncaught exception, 2 for a mistake in the command line
-or missing default libraries, and 1 for what stopped it besides (an
-unreadable input or library, a SWF, a library rejected, an error of
-swf2es' own), said on stderr`;
+VerifyError or an uncaught exception, 2 for a mistake in the command line,
+and 1 for what stopped it besides (an unreadable input or library, a SWF,
+a library rejected, an error of swf2es' own), said on stderr`;
+
+/** avmshell's libraries, as its own build has them. */
+const SHELL_LIBRARIES = [
+  { name: "builtin", abc: builtinLibrary },
+  { name: "shell_toplevel", abc: shellToplevelLibrary },
+];
 
 const SWF_SIGNATURES = new Set(["FWS", "CWS", "ZWS"]);
 
@@ -83,16 +89,6 @@ export const run: Command = {
       usageError("expected an ABC file to run", "run");
     }
 
-    const libraries =
-      values.lib ??
-      defaultLibraries(
-        ["builtin.abc", "shell_toplevel.abc"],
-        ["oracle/avmplus/generated/", "tests/libraries/out/", "tests/conformance/out/lib/"],
-        "no --lib given, and no builtin.abc and shell_toplevel.abc in the repository's\n" +
-          "oracle/avmplus/generated/. Pass avmshell's libraries with --lib, or check out the\n" +
-          "submodule: git submodule update --init oracle/avmplus",
-      );
-
     const abcs: { name: string; abc: Uint8Array }[] = [];
     for (const file of positionals) {
       const abc = await read(file, "input");
@@ -109,7 +105,7 @@ export const run: Command = {
       abcs.push({ name: basename(file, extname(file)), abc });
     }
 
-    const libs = await readLibraries(libraries);
+    const libs = values.lib ? await readLibraries(values.lib) : SHELL_LIBRARIES;
     const codegen = await codegenModule();
     const compiler = await createCodegen(codegen);
     // A line at a time, as avmshell's console writes it; its workers' threads write their own.

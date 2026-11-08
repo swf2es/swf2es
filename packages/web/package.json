@@ -1,7 +1,23 @@
 {
   "name": "@swf2es/web",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Plays SWFs on any web page: the <swf2es-player> element, replaceFlash and ExternalInterface",
+  "keywords": [
+    "swf",
+    "flash",
+    "flash-player",
+    "embed",
+    "custom-element",
+    "actionscript",
+    "player"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "packages/web"
+  },
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -11,7 +27,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "src"
   ],
   "dependencies": {
     "@swf2es/codegen": "workspace:*",

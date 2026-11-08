@@ -1,8 +1,24 @@
 {
   "name": "@swf2es/native",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "swf2es's WebAssembly modules: bitmap kernels, MP3, ADPCM and Nellymoser decoding, zlib and LZMA, fill and line tessellation, and ATF textures",
-  "license": "Apache-2.0 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT",
+  "keywords": [
+    "swf",
+    "flash",
+    "webassembly",
+    "zlib",
+    "lzma",
+    "mp3",
+    "tessellation"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "packages/native"
+  },
+  "license": "Apache-2.0 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT AND W3C-20150513",
   "type": "module",
   "exports": {
     "./atf": {
@@ -28,6 +44,9 @@
   },
   "files": [
     "dist",
+    "!dist/**/.tsbuildinfo",
+    "src/**/*.ts",
+    "!src/**/binary.ts",
     "LICENSE.third-party"
   ],
   "scripts": {

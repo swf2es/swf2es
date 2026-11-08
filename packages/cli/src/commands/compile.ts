@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { COMPILER_VERSION, createCodegen } from "@swf2es/codegen";
+import { airLibrary, builtinLibrary, playerglobalLibrary } from "@swf2es/player/libraries";
 import {
   AIR_API_VERSION,
   API_VERSION,
@@ -18,7 +19,7 @@ import {
   sha256,
 } from "../aot.js";
 import { COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
-import { codegenModule, defaultLibraries, read, readLibraries, writing } from "../files.js";
+import { codegenModule, read, readLibraries, writing } from "../files.js";
 import { fail, usageError } from "../output.js";
 
 const USAGE = `usage: swf2es compile <file.swf|file.abc> [options]
@@ -37,9 +38,9 @@ options:
   -o, --out <dir>      where to write (default: <file name>.swf2es)
   --lib <file.abc>     a library the code links against, loaded into the
                        root domain in the order given; repeat for each.
-                       Default: builtin.abc and playerglobal-swf2es.abc,
-                       the player's own, from the repository's
-                       tests/player/out/libraries/, if there
+                       Default: what the player loads, which swf2es ships:
+                       avmplus' builtin.abc and the player's playerglobal,
+                       and with --air AIR's library after them
   --emit-libraries     write the libraries' modules too
   --air                compile for a player that plays the SWF as AIR does
                        (its \`air\` option), AIR's API defined; a player
@@ -48,9 +49,9 @@ options:
   -q, --quiet          print nothing but errors
 ${COMMON_USAGE}
 
-exit status: 0 on success, 2 for a mistake in the command line or missing
-default libraries, 1 for anything else (an unreadable or rejected input or
-library, or an output that cannot be written)`;
+exit status: 0 on success, 2 for a mistake in the command line, 1 for
+anything else (an unreadable or rejected input or library, or an output
+that cannot be written)`;
 
 const OPTIONS = {
   out: { type: "string", short: "o" },
@@ -92,6 +93,19 @@ async function removeModules(out: string): Promise<void> {
   }
 }
 
+/**
+ * The libraries the player loads, as @swf2es/web gives them, AIR's after
+ * the rest for an AIR player; the manifest's names tell swf2es's
+ * playerglobal from Flash Player's.
+ */
+function playerLibraries(air = false): { name: string; abc: Uint8Array }[] {
+  const libraries = [
+    { name: "builtin", abc: builtinLibrary },
+    { name: "playerglobal-swf2es", abc: playerglobalLibrary },
+  ];
+  return air ? [...libraries, { name: "air", abc: airLibrary }] : libraries;
+}
+
 export const compile: Command = {
   name: "compile",
   summary: "compile a SWF's or an ABC's modules ahead of time, with a manifest",
@@ -129,17 +143,7 @@ export const compile: Command = {
       return;
     }
 
-    const libraries =
-      values.lib ??
-      defaultLibraries(
-        ["builtin.abc", "playerglobal-swf2es.abc"],
-        ["tests/player/out/libraries/"],
-        "no --lib given, and no builtin.abc and playerglobal-swf2es.abc in the repository's\n" +
-          "tests/player/out/libraries/. Pass builtin.abc and a playerglobal with --lib, or run\n" +
-          "the player's tests once, which write them there.",
-      );
-
-    const libs = await readLibraries(libraries);
+    const libs = values.lib ? await readLibraries(values.lib) : playerLibraries(values.air);
     if (input.abcs.length === 0) {
       fail(`${file}: no DoABC or DoABC2 tag, so no ActionScript 3 to compile`);
     }

@@ -1,8 +1,23 @@
 {
   "name": "@swf2es/player-hosts",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Optional Node and WebSocket transports, worker threads, an IndexedDB module cache and precompiled modules for the swf2es player",
-  "license": "Apache-2.0",
+  "keywords": [
+    "swf",
+    "flash",
+    "player",
+    "websocket",
+    "web-worker",
+    "indexeddb"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "packages/player-hosts"
+  },
+  "license": "Apache-2.0 AND (Apache-2.0 OR MIT) AND MPL-2.0 AND W3C-20150513 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT",
   "type": "module",
   "exports": {
     "./stage3d": {
@@ -39,7 +54,10 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "src",
+    "LICENSE.third-party"
   ],
   "dependencies": {
     "@swf2es/player": "workspace:*"

@@ -175,9 +175,8 @@ page.report = (value: unknown) => {
 // checks, and a load that fails is their error, not a page that never ran.
 const loading = import("@swf2es/web").then((web) => {
   web.configure({
+    // The packages' own builtin and playerglobal, unless SWF2ES_PLAYERGLOBAL=adobe (chrome.ts).
     libraries: {
-      builtin: "/libraries/builtin.abc",
-      // The package's own playerglobal, unless SWF2ES_PLAYERGLOBAL=adobe (chrome.ts).
       playerglobal: new URLSearchParams(location.search).has("adobe")
         ? "/libraries/playerglobal-adobe.abc"
         : undefined,

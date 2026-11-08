@@ -18,21 +18,5 @@
   </p>
 </main>
 <p id="failure" role="alert" hidden></p>
-<section id="libraries" hidden>
-  <h2>ActionScript 3 needs builtin.abc</h2>
-  <p>
-    A SWF's ActionScript 3 links against <code>builtin.abc</code>, avmplus' standard library,
-    and a playerglobal, the <code>flash.*</code> classes, which swf2es brings its own of.
-    Point swf2es at <code>builtin.abc</code> once, and it remembers where it is; choose a
-    <code>playerglobal.abc</code> only to use it in place of swf2es's own.
-    SWFs without ActionScript 3 play without either.
-  </p>
-  <dl>
-    <dt>playerglobal.abc</dt><dd id="playerglobal-path"></dd>
-    <dt>builtin.abc</dt><dd id="builtin-path"></dd>
-  </dl>
-  <button id="choose-playerglobal" type="button">Choose playerglobal.abc…</button>
-  <button id="choose-builtin" type="button">Choose builtin.abc…</button>
-</section>
 </body>
 </html>

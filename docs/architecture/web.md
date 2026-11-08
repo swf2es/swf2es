@@ -81,8 +81,9 @@ is left out. The renderer's geometry owns its buffers independently of
 Wasm scratch, including for context restoration.
 
 `configure` (`config.ts`) sets what every player on the page shares:
-`libraries`, the URLs of builtin.abc and playerglobal.abc, which the page
-gives, as playerglobal is Adobe's and cannot ship with swf2es; `codegen`, codegen.wasm's URL, by
+`libraries`, the URLs of a builtin.abc and a playerglobal.abc to load in
+place of those swf2es ships (`builtinLibrary` and `playerglobalLibrary`),
+either optional; `codegen`, codegen.wasm's URL, by
 default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused

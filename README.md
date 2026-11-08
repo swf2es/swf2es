@@ -26,6 +26,10 @@ select **Stage3D (experimental)** in the player controls.
 
 ## Quick start
 
+```sh
+npm install @swf2es/web
+```
+
 `@swf2es/web` defines a `<swf2es-player>` element that takes an
 `<embed>`'s attributes:
 
@@ -34,9 +38,7 @@ select **Stage3D (experimental)** in the player controls.
   scale="showAll" allowscriptaccess="sameDomain"></swf2es-player>
 
 <script type="module">
-  import { configure } from "@swf2es/web";
-
-  configure({ libraries: { builtin: "/flash/builtin.abc" } });
+  import "@swf2es/web";
 
   const movie = document.getElementById("movie");
   movie.addEventListener("error", (e) => console.error(e.detail.error));
@@ -44,38 +46,37 @@ select **Stage3D (experimental)** in the player controls.
 </script>
 ```
 
-Call `configure()` once, before the first player loads. You supply
-`builtin.abc` (avmplus' standard library); swf2es ships its own
-playerglobal. The packages are ES modules: serve them through a bundler or
-an import map that also maps `@swf2es/player/scene`, `@swf2es/render/webgl`,
-`@swf2es/context3d/device` and `@swf2es/native/render`, which the player
-loads with itself. The page must let it compile WebAssembly (SIMD, and
-`'wasm-unsafe-eval'` under a CSP).
+`configure()` sets the page's options, once, before the first player
+loads. ActionScript 3 needs no setup: swf2es ships `builtin.abc` (avmplus'
+standard library) and its own playerglobal. The packages are ES modules:
+serve them through a bundler or an import map that also maps
+`@swf2es/player/scene`, `@swf2es/render/webgl`, `@swf2es/context3d/device`
+and `@swf2es/native/render`, which the player loads with itself. The page
+must let it compile WebAssembly (SIMD, and `'wasm-unsafe-eval'` under a
+CSP).
 
 Or turn an existing page's Flash tags into players:
 
 ```js
-import { configure, watchFlash } from "@swf2es/web";
+import { watchFlash } from "@swf2es/web";
 
-configure({ libraries: { builtin: "/flash/builtin.abc" } });
 watchFlash(); // each <object>/<embed> becomes a <swf2es-player>, those the page adds later too
 ```
 
-Compile ahead of time, so the page loads modules instead of compiling them,
-against the libraries the player loads (the player's own playerglobal, which
-the repository's tests write to `tests/player/out/libraries/`):
+Compile ahead of time with the `swf2es` command (`npm install -g
+@swf2es/cli`; in a checkout, `node packages/cli/dist/main.js`), so the page
+loads modules instead of compiling them, against the libraries the player
+loads, which the command ships too:
 
 ```sh
-node packages/cli/dist/main.js movie.swf -o movie.swf2es \
-  --lib builtin.abc --lib playerglobal-swf2es.abc --emit-libraries
+swf2es movie.swf -o movie.swf2es --emit-libraries
 ```
 
-Or run AS3 bytecode as avmshell does, its `trace()` on stdout (in a
-checkout it takes avmshell's libraries from the avmplus submodule;
-elsewhere give them with `--lib`):
+Or run AS3 bytecode as avmshell does, its `trace()` on stdout, after
+avmshell's libraries, which the command also ships:
 
 ```sh
-node packages/cli/dist/main.js run program.abc
+swf2es run program.abc
 ```
 
 [docs/guide.md](docs/guide.md) covers the rest: the element's options,
