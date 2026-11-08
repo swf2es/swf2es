@@ -363,6 +363,33 @@ test("a destroyed player writes the SharedObjects its scripts left unflushed, as
   assert.ok(stored.has("example.test/main.swf/later"));
 });
 
+test("a player writes the SharedObjects its scripts left unflushed as its page goes, and plays on", {
+  skip,
+}, async () => {
+  const abc = compileScripts(
+    [script("SharedUnflushed", `SharedObject.getLocal("later").data.n = 3;`, "SharedUnflushed")],
+    out,
+  ).get("SharedUnflushed") as Uint8Array;
+  const { stored, storage } = mapStorage();
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    storage,
+    url: "http://example.test/main.swf",
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "SharedUnflushed"), scripting);
+  await player.start();
+  assert.equal(stored.size, 0);
+
+  player.saveSharedObjects();
+  const written = stored.get("example.test/main.swf/later");
+  assert.ok(written);
+  player.saveSharedObjects();
+  assert.equal(stored.get("example.test/main.swf/later"), written);
+  player.tick();
+  player.destroy();
+});
+
 test("destroy leaves a save it could not read, and one the SWF did not change, as they were", {
   skip,
 }, async () => {
