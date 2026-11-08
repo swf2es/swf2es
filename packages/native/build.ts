@@ -48,6 +48,13 @@ const BINARIES: Binary[] = [
     note: "; minimp3 is CC0-1.0",
   },
   {
+    path: "audio",
+    modules: { binary: "audio" },
+    imports: [],
+    vendored: [],
+    note: "; its Nellymoser decoder is translated from FFmpeg's, under the MIT licence",
+  },
+  {
     path: "compress",
     modules: { binary: "compress" },
     imports: [],
@@ -110,6 +117,38 @@ This notice records where they come from.
 https://www.7-zip.org/sdk.html
 `;
 
+/** src/audio/nellymoser.zig's notice, FFmpeg's for the code it translates. */
+const FFMPEG_NELLYMOSER = `src/audio/nellymoser.zig is translated from FFmpeg's
+libavcodec/nellymoser.c and nellymoserdec.c, which carry this notice:
+
+Copyright (c) 2007 a840bda5870ba11f19698ff6eb9581dfb0f95fa5,
+                   539459aeb7d425140b62a3ec7dbf6dc8e408a306, and
+                   520e17cd55896441042b14df2566a6eb610ed444
+Copyright (c) 2007 Loic Minier <lool at dooz.org>
+                   Benjamin Larsson
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+(The three alphanumeric notices are the MD5 sums of the original
+implementers' names, of nelly2pcm.)
+`;
+
 /** pixels.zig's perlinNoise noise, derived from SVG 1.1's feTurbulence reference implementation. */
 const FE_TURBULENCE = `src/render/pixels.zig's noise for BitmapData.perlinNoise is derived from
 the reference implementation of feTurbulence in Scalable Vector Graphics
@@ -128,6 +167,7 @@ function notices(): string {
     ["@swf2es/native/compress: zlib", readFileSync(join(vendor, "zlib/LICENSE"), "utf8")],
     ["@swf2es/native/compress: the LZMA SDK", LZMA_SDK],
     ["@swf2es/native/mp3: minimp3", readFileSync(join(vendor, "minimp3/LICENSE"), "utf8")],
+    ["@swf2es/native/audio: FFmpeg's Nellymoser decoder", FFMPEG_NELLYMOSER],
     ["@swf2es/native/render: libtess2", readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8")],
     ["@swf2es/native/render: SVG's feTurbulence (perlinNoise)", FE_TURBULENCE],
     ["@swf2es/native/atf: jxrlib", readFileSync(join(vendor, "jxrlib/LICENSE"), "utf8")],

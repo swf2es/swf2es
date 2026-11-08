@@ -9,11 +9,13 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
   and whole-level DXT1/DXT5 texture encoding (`DxtEncoder`).
 - `@swf2es/native/compress`: synchronous zlib and LZMA.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
+- `@swf2es/native/audio`: synchronous ADPCM and Nellymoser decoding, in
+  Zig alone.
 - `@swf2es/native/atf`: Stage3D's ATF textures, read and decoded to what a
   desktop GPU takes, their JPEG XR images by jxrlib.
 
 The package depends on no other package and uses no DOM or node APIs.
-`compress`, `mp3` and `atf` each compile their own module. What the renderer
+`compress`, `mp3`, `audio` and `atf` each compile their own module. What the renderer
 computes is one module, `render` (`src/render/`), compiled once; each user
 instantiates it apart, so each has its own memory and lifetime, and a large
 bitmap job never grows the tessellator's memory, nor does disposing one
@@ -61,7 +63,8 @@ The wrappers, the Zig and the build are Apache-2.0. `LICENSE.third-party`
 carries each vendored library's notice: zlib is under the zlib license,
 the LZMA SDK files are in the public domain, minimp3 is CC0-1.0,
 libtess2 is under SGI Free Software License B, and jxrlib is under the BSD
-2-Clause License; and that of the code
+2-Clause License; and those of the code derived from FFmpeg's Nellymoser
+decoder (`src/audio/nellymoser.zig`), under the MIT License, and of the code
 derived from SVG 1.1's feTurbulence (`src/render/pixels.zig`'s
 perlinNoise), under the W3C Software and Document License.
 
@@ -273,6 +276,28 @@ is SSE and NEON only, which `MINIMP3_NO_SIMD` keeps off.
 Where the module does not compile, `prepareMp3()` still resolves,
 `mp3Available()` is false, and the player plays on: `Sound.extract()`
 writes no samples for an MP3, as Flash does for a sound it cannot decode.
+
+## audio
+
+SWF's other compressed sound, decoded synchronously in Zig alone
+(`src/audio/`), in one module that imports nothing, compiled the first
+time it is called and kept as `compress`'s is:
+
+- `decodeAdpcm(data, channels)`: ADPCM (`adpcm.zig`) as 16-bit samples,
+  channels interleaved, each packet's header sample first, as adl gives it.
+- `NellymoserDecoder.decode(data)`: Nellymoser (`nellymoser.zig`, FFmpeg's
+  decoder translated) as samples from -1 to 1, 256 for each whole 64-byte
+  block; a decoder carries its stream's overlap and noise from one call to
+  the next, its state copied in and out of the module with each call.
+
+Each call copies its input into the module's memory, decodes there in an
+arena reset first, and copies the samples out. Both give the samples the
+TypeScript decoders they replaced gave, bit for bit: Nellymoser's
+coefficients and samples are rounded to single precision, and its
+transform done in double, where that decoder stored them. Decoding is
+about 1.7 times as fast as that decoder for Nellymoser and 2.6 times for
+ADPCM, where copying the samples out is most of the time. `zig build test`
+runs each decoder's own test on the host.
 
 ## tessellate
 
