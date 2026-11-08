@@ -527,8 +527,6 @@ function valuesBySlot(defaults: [string, Value][]): Value[] {
   return values;
 }
 
-// The names of slot and method properties by id, made once each, for the
-// runtime's dynamic paths; generated code names them itself.
 /**
  * The properties a prototype object takes before its traits' methods go
  * on in another below it (Traits.methodHome), well short of V8's 1020; a
@@ -564,6 +562,8 @@ function spilledSlot(home: AsObject, slot: number): void {
   });
 }
 
+// The names of slot and method properties by id, made once each, for the
+// runtime's dynamic paths; generated code names them itself.
 const slotKeys: string[] = [];
 const methodKeys: string[] = [];
 export const slotKey = (id: number): string => (slotKeys[id] ??= `$${id}`);
