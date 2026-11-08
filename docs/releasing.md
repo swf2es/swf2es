@@ -60,6 +60,13 @@ node tools/publish.ts
 
 These packages carry no provenance, because only CI can attest one.
 
+npm creates a new package by staging its first version. The package shows
+only a `0.0.0-stage` placeholder until npm releases that version, which can
+take several minutes after `tools/publish.ts` has moved on. While the
+version is held, publishing it again fails with "Cannot publish over
+previously staged version". Wait, and check with `npm view <package>
+versions`, rather than publishing again.
+
 Then, on npmjs.com, configure each package under Settings › Trusted
 publishing:
 
