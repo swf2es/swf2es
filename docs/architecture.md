@@ -48,5 +48,5 @@ topic each:
 
 Elsewhere in `docs/`: [the renderer](renderer.md), [AVM1](avm1.md),
 [workers](workers.md), [coverage](coverage.md),
-[benchmarks](benchmarks.md), [references](references.md), the
+[benchmarks](benchmarks.md), [releasing](releasing.md), [references](references.md), the
 [roadmap](roadmap.md), and the [user's guide](guide.md).
