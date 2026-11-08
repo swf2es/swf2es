@@ -5,7 +5,7 @@
 // those it writes. Ruffle's extract writes zeros (sound.rs's extract is a
 // stub).
 import type { Sound } from "@swf2es/format";
-import { decodeAdpcm } from "@swf2es/native/audio";
+import { decodeAdpcm, NellymoserDecoder } from "@swf2es/native/audio";
 import { Mp3Decoder, mp3Available } from "@swf2es/native/mp3";
 import { mp3Frames } from "./mp3.js";
 
@@ -62,12 +62,24 @@ export function mp3Source(bytes: Uint8Array): ExtractSource | null {
   return { rate: mp3.rate, channels, skip: 0, whole: false };
 }
 
-/** An uncompressed or ADPCM DefineSound's samples to extract, or null for another format. */
+/** An uncompressed, ADPCM or Nellymoser DefineSound's samples to extract, or null for another format. */
 export function embeddedSource(sound: Sound): ExtractSource | null {
   const n = sound.channels;
   const source = { rate: sound.sampleRate, skip: 0, whole: true };
   if (sound.format === 1) {
     return { ...source, ...adpcmSource(sound.data, n) };
+  }
+
+  // Mono, at the rate its flags give, as adl extracts it, formats 4 and 5
+  // too, which play at 16 and 8 kHz (audio.ts). adl's own extract of it is
+  // erratic past 4096 samples a call and near the sound's end
+  // (scripts/SoundExtractNellymoser.as): those are not copied.
+  if (sound.format === 4 || sound.format === 5 || sound.format === 6) {
+    const samples = new NellymoserDecoder().decode(sound.data);
+    return {
+      ...source,
+      channels: [samples.subarray(0, Math.min(samples.length, sound.sampleCount))],
+    };
   }
 
   if (sound.format !== 0 && sound.format !== 3) {

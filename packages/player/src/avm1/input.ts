@@ -36,6 +36,16 @@ const BUTTON_METHODS = [
   "onDragOut",
 ];
 
+/** BUTTON_METHODS as a SWF from 7 names them, and as one up to 6 does, folded. */
+const BUTTON_NAMES = new Set(BUTTON_METHODS);
+const BUTTON_NAMES_FOLDED = new Set(BUTTON_METHODS.map((name) => avm1.fold(name)));
+
+// Objects never given one of them are passed by (buttonMode).
+avm1.markNames(BUTTON_METHODS);
+
+/** The most prototypes a lookup walks, as the runtime's. */
+const DEPTH = 255;
+
 /** The button transition each of the pointer's events is, by the event's bit (Ruffle's Avm1Button). */
 const CONDITIONS = new Map<number, number>([
   [ClipEvent.rollOver, ButtonCondition.idleToOverUp],
@@ -358,14 +368,45 @@ export class Avm1Input implements InputState {
     }
 
     const face = clip.avm1;
-    if (face === null || clip === this.movie.root || this.movie.version < 6) {
+    const version = this.movie.version;
+    if (face === null || clip === this.movie.root || version < 6) {
       return false;
     }
 
-    for (const name of BUTTON_METHODS) {
-      if (avm1.has(face, name, this.movie.version)) {
-        return true;
+    // avm1.has for each name, the pointer asking it of every clip it passes:
+    // the clip's children by name, which its object finds after its own
+    // properties, looked over once for all the names; then along the chain
+    // only the objects ever given one of them, and any with locals it
+    // makes as asked, an activation's, or a display object's own side.
+    const names = version > 6 ? BUTTON_NAMES : BUTTON_NAMES_FOLDED;
+    if (face.display !== null) {
+      for (const child of clip.children) {
+        const name = child.name;
+        if (name !== "" && names.has(version > 6 ? name : avm1.fold(name))) {
+          return true;
+        }
       }
+    }
+
+    let o: avm1.Value = face;
+    for (let depth = 0; o instanceof avm1.Avm1Object && depth < DEPTH; depth++) {
+      if (o.marked || o.lazy !== null) {
+        for (const name of BUTTON_METHODS) {
+          if (o.own(name, version) !== undefined) {
+            return true;
+          }
+        }
+      }
+
+      if (depth > 0 && o.display !== null) {
+        for (const name of BUTTON_METHODS) {
+          if (o.display.get(name, version) !== avm1.ABSENT) {
+            return true;
+          }
+        }
+      }
+
+      o = o.protoFor(version);
     }
 
     return false;
