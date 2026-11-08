@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/render",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "swf2es's own renderer: a scene list, a planner and a WebGL 2 backend (docs/renderer.md)",
   "keywords": [
     "swf",
