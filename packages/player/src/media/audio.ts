@@ -60,6 +60,12 @@ export interface AudioHost {
   decode(source: Sound | Uint8Array): Promise<DecodedSound>;
   /** Stereo float PCM at 44.1 kHz, supplied as SampleDataEvent requests are answered. */
   stream?(mix: SoundMix, refill: () => void): StreamingSound;
+  /**
+   * Open the device now, where a sound is to come: opening it can take half
+   * a second on some systems (PulseAudio or PipeWire under Linux), better
+   * spent as the movie loads than at its first sound. Nothing once closed.
+   */
+  warm?(): void;
   /** Let the device go, as the player is destroyed: nothing plays on it after. */
   close?(): void;
 }
@@ -94,6 +100,17 @@ export function browserAudioHost(): AudioHost | null {
       const stream = browserStream(getContext(), mix, refill, () => streams.delete(stream));
       streams.add(stream);
       return stream;
+    },
+    warm() {
+      if (closed) {
+        return;
+      }
+
+      try {
+        context ??= new Context();
+      } catch {
+        // A browser out of contexts refuses one: the first decode asks again, and fails there.
+      }
     },
     close() {
       // A browser keeps a context, and its thread, until it is closed.

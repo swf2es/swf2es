@@ -478,3 +478,66 @@ test("a sound looped near forever plays, takes its mix and stops where a browser
     }
   }
 });
+
+test("the browser host's warm opens its context once, which decodes use, and none once closed", async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  let made = 0;
+  let refuse = false;
+  class FakeAudioContext {
+    constructor() {
+      if (refuse) {
+        throw new Error("no more contexts");
+      }
+
+      made++;
+    }
+    createBuffer(count: number, samples: number, rate: number) {
+      return {
+        duration: samples / rate,
+        numberOfChannels: count,
+        getChannelData: () => new Float32Array(samples),
+      };
+    }
+    async close() {}
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host?.warm);
+    host.warm();
+    assert.equal(made, 1);
+    host.warm();
+    await host.decode({
+      id: 1,
+      format: 3,
+      sampleRate: 5512,
+      sampleSize: 8,
+      channels: 1,
+      sampleCount: 4,
+      seekSamples: 0,
+      data: new Uint8Array(4).fill(128),
+    });
+    assert.equal(made, 1, "a decode after warming opens no second context");
+
+    host.close?.();
+    host.warm();
+    assert.equal(made, 1, "a closed host opens nothing more");
+
+    // A browser that refuses a context leaves warm quiet; the decode asks again and fails there.
+    refuse = true;
+    const refused = browserAudioHost();
+    assert.ok(refused?.warm);
+    refused.warm();
+    await assert.rejects(refused.decode(new Uint8Array(4).fill(128)), /no more contexts/);
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});

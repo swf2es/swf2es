@@ -13,7 +13,7 @@ import { type Container, MovieClip, rootOf, unloads } from "../display/display.j
 import { type BitmapPixels, type Library, readLibrary } from "../display/timeline.js";
 import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import { LoadedAvm1Input } from "../input/avm1.js";
-import { streamFrames } from "../media/sounds.js";
+import { streamFrames, warmAudioFor } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
@@ -335,6 +335,7 @@ export class Loads {
   private avm1Library(swf: Swf, domain: avm2.Domain): Library {
     const library = readLibrary(swf);
     library.domain = domain;
+    warmAudioFor(this.s.audio, library);
     return library;
   }
 
@@ -714,6 +715,8 @@ export class Loads {
 
     const library = readLibrary(swf);
     library.domain = load.domain;
+    // Its sounds' device opens as it arrives, before the frame that shows it.
+    warmAudioFor(this.s.audio, library);
     // Its images first: once its code is linked, a script in the domain can
     // make its symbols, whose bitmaps take the pixels there are then.
     await decodeImages(library, this.s.decodeImage);
