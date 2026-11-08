@@ -57,6 +57,17 @@ export class Registry {
     }
   }
 
+  /**
+   * `id` let go of after `idle` unused frames, more or fewer than before:
+   * Infinity keeps it till it is removed, as a texture that alone holds what
+   * was drawn into it is kept.
+   */
+  idleFor(id: number, idle: number): void {
+    if (this.held[id]) {
+      this.idleFrames[id] = idle;
+    }
+  }
+
   /** `id` used this frame. */
   use(id: number): void {
     this.usedAt[id] = this.frame;

@@ -1,0 +1,2 @@
+hidden ffff0000 ff807f00 7f00ff00 0
+shown ffff0000 ff807f00 ff19b24d

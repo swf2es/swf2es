@@ -1,8 +1,12 @@
 // The textures a shape's paints sample (RenderView): a bitmap store's
 // pixels, uploaded again as they change, and a gradient's ramp or radial
-// texture, kept by the region it covers.
+// texture, kept by the region it covers. A store's texture is also its GPU
+// copy (GpuCopy), which BitmapData.draw draws into on the GPU (RenderView's
+// drawInto): it then holds the store's pixels alone, is shown as it is and
+// never let go of for being idle, till a script reads the pixels back.
 import {
   CLAMP,
+  IDLE_FRAMES,
   MESH,
   MIRROR,
   REPEAT,
@@ -10,7 +14,14 @@ import {
   type TextureHandle,
   type Textures,
 } from "@swf2es/render";
-import { BitmapStore, characterStore, rgbaInto } from "../bitmap/bitmap.js";
+import {
+  argbOf,
+  BitmapStore,
+  characterStore,
+  type GpuCopy,
+  type PixelRect,
+  rgbaInto,
+} from "../bitmap/bitmap.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
@@ -30,6 +41,54 @@ const GRADIENT_REGIONS = 8;
 interface Kept {
   handle: TextureHandle;
   version: number;
+  /** The texture as the store's GPU copy, once drawn into on the GPU. */
+  copy: StoreCopy | null;
+  /** Whether it is kept however long it goes undrawn, as it holds what was drawn alone. */
+  pinned: boolean;
+}
+
+/** What a store's GPU copy asks of the renderer, on textures by id; each null or false where it cannot. */
+export interface StoreGpu {
+  /** Texture `id`'s `width` by `height` texels read back, premultiplied RGBA. */
+  read(id: number, width: number, height: number): Uint8Array | null;
+  /** A rectangle of texture `id` cleared to `pixel`, premultiplied ARGB. */
+  fill(id: number, rect: PixelRect, pixel: number): boolean;
+  /** A rectangle of texture `from` copied to (dx, dy) of `to`, as a memmove where they are one. */
+  copy(from: number, rect: PixelRect, to: number, dx: number, dy: number): boolean;
+}
+
+/** A store's texture as its GPU copy: what a draw left there, read back as a script reads the store. */
+class StoreCopy implements GpuCopy {
+  version = -1;
+
+  constructor(
+    private readonly paints: Paints,
+    private readonly store: BitmapStore,
+    readonly handle: TextureHandle,
+  ) {}
+
+  read(): Uint32Array {
+    const bytes = this.paints.readStore(this.handle, this.store.width, this.store.height);
+    // Gone with a lost context: what the CPU held before the draws.
+    if (!bytes) {
+      return this.store.lostOnGpu(this);
+    }
+
+    this.paints.readBack(this.store);
+    return argbOf(bytes);
+  }
+
+  copy(source: BitmapStore, rect: PixelRect, dx: number, dy: number): boolean {
+    return this.paints.copyStore(source, rect, this.handle, dx, dy);
+  }
+
+  fill(rect: PixelRect, pixel: number): boolean {
+    return this.paints.fillStore(this.handle, rect, pixel);
+  }
+
+  destroy(): void {
+    this.paints.release(this.store, this.handle);
+  }
 }
 
 /** Bitmaps' and gradients' textures, made as first drawn and kept while they are. */
@@ -41,7 +100,17 @@ export class Paints {
     { region: Area | null; handle: TextureHandle }[]
   >();
 
-  constructor(private readonly textures: Textures) {}
+  /** A store's texture held for draws alone let go of if the store is collected undisposed. */
+  private readonly collected = new FinalizationRegistry<TextureHandle>((handle) => {
+    if (this.textures.alive(handle)) {
+      this.textures.remove(handle.id);
+    }
+  });
+
+  constructor(
+    private readonly textures: Textures,
+    private readonly gpu: StoreGpu | null = null,
+  ) {}
 
   /**
    * The texture a part's paint or mesh samples: its bitmap's, else null till
@@ -71,6 +140,12 @@ export class Paints {
     const kept = this.stores.get(store);
     if (kept && this.textures.alive(kept.handle)) {
       const id = kept.handle.id;
+      // What was drawn, filled or copied into the texture is newest there: shown as it is.
+      if (kept.copy !== null && store.gpu === kept.copy && store.newerOnGpu) {
+        kept.version = store.version;
+        return kept.handle;
+      }
+
       if (kept.version !== store.version) {
         kept.version = store.version;
         this.textures.set(id, store.width, store.height, this.bytesOf(store, id), idle);
@@ -81,10 +156,105 @@ export class Paints {
       return kept.handle;
     }
 
+    // A texture a draw alone wrote, gone with a lost context: the CPU's pixels are the store's again.
+    if (kept?.copy && store.gpu === kept.copy) {
+      store.lostOnGpu(kept.copy);
+    }
+
+    if (kept?.copy) {
+      store.copies.delete(kept.copy);
+    }
+
+    if (kept) {
+      this.collected.unregister(kept);
+    }
+
     const bytes = this.bytesOf(store, -1);
     const handle = this.textures.add(store.width, store.height, bytes, idle);
-    this.stores.set(store, { handle, version: store.version });
+    this.stores.set(store, { handle, version: store.version, copy: null, pinned: false });
     return handle;
+  }
+
+  /**
+   * `store` drawn into on the GPU, its texture (`storeTexture`) the newest
+   * of its pixels now: kept however long it goes undrawn, till they are
+   * read back, the store disposed or collected.
+   */
+  drawn(store: BitmapStore): void {
+    const kept = this.stores.get(store);
+    if (!kept) {
+      return;
+    }
+
+    if (!kept.copy) {
+      kept.copy = new StoreCopy(this, store, kept.handle);
+      store.copies.add(kept.copy);
+    }
+
+    store.drawnOnGpu(kept.copy);
+    kept.version = store.version;
+    if (!kept.pinned) {
+      kept.pinned = true;
+      this.textures.idleFor(kept.handle.id, Number.POSITIVE_INFINITY);
+      this.collected.register(store, kept.handle, kept);
+    }
+  }
+
+  /**
+   * `store`'s texture read back: the CPU holds the pixels again, and the
+   * texture goes idle as any other.
+   */
+  readBack(store: BitmapStore): void {
+    const kept = this.stores.get(store);
+    if (kept?.pinned) {
+      kept.pinned = false;
+      this.collected.unregister(kept);
+      this.textures.idleFor(kept.handle.id, IDLE_FRAMES);
+    }
+  }
+
+  /** Texture `handle`'s pixels read back for a store `width` by `height`; null once it is gone. */
+  readStore(handle: TextureHandle, width: number, height: number): Uint8Array | null {
+    return this.gpu && this.textures.alive(handle) ? this.gpu.read(handle.id, width, height) : null;
+  }
+
+  /** `rect` of texture `handle` cleared to `pixel`: a store's fill on the GPU. */
+  fillStore(handle: TextureHandle, rect: PixelRect, pixel: number): boolean {
+    return !!this.gpu && this.textures.alive(handle) && this.gpu.fill(handle.id, rect, pixel);
+  }
+
+  /**
+   * `rect` of `source` copied to (dx, dy) of texture `handle`, a store's
+   * copy on the GPU: the source's texture first made of its pixels where
+   * they are newer, as when it is drawn. Not from an opaque store holding
+   * alpha, whose texture holds its pixels as drawn, not as they are.
+   */
+  copyStore(
+    source: BitmapStore,
+    rect: PixelRect,
+    handle: TextureHandle,
+    dx: number,
+    dy: number,
+  ): boolean {
+    if (!this.gpu || !this.textures.alive(handle) || source.disposed || source.holdsAlpha) {
+      return false;
+    }
+
+    const from = this.storeTexture(source);
+    return this.textures.alive(handle) && this.gpu.copy(from.id, rect, handle.id, dx, dy);
+  }
+
+  /** `store`'s texture let go of, as the store is disposed. */
+  release(store: BitmapStore, handle: TextureHandle): void {
+    const kept = this.stores.get(store);
+    if (kept?.handle === handle) {
+      this.stores.delete(store);
+      this.collected.unregister(kept);
+    }
+
+    if (this.textures.alive(handle)) {
+      this.textures.remove(handle.id);
+    }
   }
 
   /**
