@@ -51,6 +51,46 @@ trace(mc.v + " " + mc._url);`,
   ]);
 });
 
+test("a loaded SWF's class keeps working after its clip is removed, its methods' calls returning", async () => {
+  const played = await play(
+    `var a = createEmptyMovieClip("a", 1);
+a.loadMovie("lib.swf");
+var frames = 0;
+this.onEnterFrame = function () {
+  frames++;
+  if (frames == 2) {
+    a.removeMovieClip();
+  }
+  if (frames == 4) {
+    var f = new _global.Foo(7);
+    trace(f.twice() + " " + f.x);
+    delete this.onEnterFrame;
+  }
+};`,
+    {
+      url: "http://example.test/t/test.swf",
+      fetch: files({
+        "lib.swf": movie(
+          `if (!_global.Foo) {
+  _global.Foo = function (x) { this.x = this.half(x * 2); };
+  _global.Foo.prototype.half = function (n) { return n / 2; };
+  _global.Foo.prototype.twice = function () { return this.half(this.x * 4); };
+}`,
+          9,
+        ),
+      }),
+    },
+    9,
+  );
+
+  for (let i = 0; i < 6; i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played), ["14 7"]);
+});
+
 test("a load into a level makes it, its _root and _target its own, and unloading it unloads what it shows a frame on", async () => {
   const played = await play(
     `trace(typeof _level1);
