@@ -5,12 +5,12 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { containerEngine } from "../../../../oracle/oracle.ts";
 import { readSwf, type Sound, tags } from "../../../../packages/format/dist/index.js";
+import { decodeAdpcm } from "../../../../packages/native/dist/audio/index.js";
 import { ButtonObject } from "../../../../packages/player/dist/display/display.js";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
 import {
   type AudioHost,
   browserAudioHost,
-  decodeAdpcm,
   type PlayShape,
   type SoundMix,
   streamSound,
