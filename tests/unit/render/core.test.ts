@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   ALPHA,
+  ALPHA_MASK,
   BLUR,
   CLEAR,
   COLOR_MATRIX,
@@ -375,6 +376,42 @@ test("a mask cuts what it clips in a layer to its own draws, which the layer doe
   scene.marker(LAYER_END, MULTIPLY, -1);
   measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
   assert.deepEqual(Array.from(scene.layers.subarray(0, 8)), [39, 39, 12, 12, 0, 0, 101, 101]);
+});
+
+test("an alpha mask's layer cuts the layer it ends to its own rectangle, an empty one to nothing", () => {
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const scene = new SceneList();
+  const big = spanning(geometries, 0, 0, 100, 100);
+  const small = spanning(geometries, 40, 40, 50, 50);
+  const row = rows.add(1, 0, 0, 1, 0, 0, null);
+  scene.layerBegin();
+  scene.draw(big, row, 0);
+  scene.layerBegin();
+  scene.draw(small, row, 0);
+  scene.marker(LAYER_END, ALPHA_MASK, -1);
+  scene.marker(LAYER_END, NORMAL, -1);
+  // A mask that draws nothing.
+  scene.layerBegin();
+  scene.draw(big, row, 0);
+  scene.layerBegin();
+  scene.marker(LAYER_END, ALPHA_MASK, -1);
+  scene.marker(LAYER_END, NORMAL, -1);
+  measureLayers(scene, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  assert.deepEqual(
+    Array.from(scene.layers.subarray(0, 16)),
+    [39, 39, 12, 12, 39, 39, 12, 12, 0, 0, 0, 0, 0, 0, 0, 0],
+  );
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  assert.deepEqual(ops(commands).slice(1), [
+    [LAYER_PUSH, 4, 0, 0],
+    [RUN, 1, 1, 0],
+    [LAYER_PUSH, 12, 0, 0],
+    [RUN, 3, 1, 0],
+    [LAYER_POP, ALPHA_MASK, -1, -1],
+    [LAYER_POP, NORMAL, -1, -1],
+  ]);
 });
 
 test("a filter list closes its filters into chains, each one's values after the last's", () => {

@@ -1,6 +1,7 @@
 import type { Geometries } from "./geometry.js";
 import { ROW_FLOATS, type Rows } from "./rows.js";
 import {
+  ALPHA_MASK,
   DRAW,
   KEPT,
   LAYER_BEGIN,
@@ -32,14 +33,18 @@ const TEXEL_SNAP = 1e-6;
 const areas: number[] = [];
 const clips: number[] = [];
 const open: number[] = [];
+// Each open layer's cut, four numbers as an area's: an alpha mask's rectangle in it (ALPHA_MASK).
+const cuts: number[] = [];
 
 /**
  * Each layer's rectangle of the target (SceneList.layerRect), from what is
  * drawn in it: its draws' geometries placed by their rows, a mask's own
  * draws apart, what a mask clips cut to that mask's draws as it pops, and
  * the rectangles of the layers in it; out to whole pixels and a pixel more
- * each way, cut to the target. What is drawn is what is measured, so a
- * layer covers its draws however they came to be where they are. A
+ * each way, cut to the target. An alpha mask's layer is no part of the
+ * unfiltered layer it ends, which it cuts to its own rectangle instead, as
+ * nothing of that layer shows past it. What is drawn is what is measured,
+ * so a layer covers its draws however they came to be where they are. A
  * filtered layer is measured as PixiJS's filter system measures it, which
  * the filters' exactness rules were found with: cut to the target, out to
  * whole pixels, then padded, not cut again; where nothing is drawn in it,
@@ -58,6 +63,7 @@ export function measureLayers(
   areas.length = 0;
   clips.length = 0;
   open.length = 0;
+  cuts.length = 0;
   pushEmpty(areas);
   const k = target.scale;
   const box = geometries.box;
@@ -76,6 +82,12 @@ export function measureLayers(
       case LAYER_BEGIN:
         open.push(scene.geometry[i]);
         pushEmpty(areas);
+        cuts.push(
+          Number.NEGATIVE_INFINITY,
+          Number.NEGATIVE_INFINITY,
+          Number.POSITIVE_INFINITY,
+          Number.POSITIVE_INFINITY,
+        );
         break;
       case MASK_USE:
         // The mask's draws clip what follows, measured apart till it pops.
@@ -102,12 +114,32 @@ export function measureLayers(
         const n = areas.length;
         const layer = open.pop() as number;
         const pad = scene.pads[layer];
+        const c = cuts.length - 4;
         if (pad < 0) {
-          const left = Math.max(0, Math.floor(areas[n - 4]) - 1);
-          const top = Math.max(0, Math.floor(areas[n - 3]) - 1);
-          const right = Math.min(target.width, Math.ceil(areas[n - 2]) + 1);
-          const bottom = Math.min(target.height, Math.ceil(areas[n - 1]) + 1);
+          const left = Math.max(0, Math.floor(areas[n - 4]) - 1, cuts[c]);
+          const top = Math.max(0, Math.floor(areas[n - 3]) - 1, cuts[c + 1]);
+          const right = Math.min(target.width, Math.ceil(areas[n - 2]) + 1, cuts[c + 2]);
+          const bottom = Math.min(target.height, Math.ceil(areas[n - 1]) + 1, cuts[c + 3]);
           areas.length = n - 4;
+          cuts.length = c;
+          if (scene.geometry[i] === ALPHA_MASK) {
+            // Not taken into the layer it ends, which it cuts to its rectangle: to nothing, where it
+            // has none.
+            if (right > left && bottom > top) {
+              scene.layerRect(layer, left, top, right - left, bottom - top);
+            }
+
+            const p = c - 4;
+            if (p >= 0) {
+              cuts[p] = Math.max(cuts[p], left);
+              cuts[p + 1] = Math.max(cuts[p + 1], top);
+              cuts[p + 2] = Math.min(cuts[p + 2], right);
+              cuts[p + 3] = Math.min(cuts[p + 3], bottom);
+            }
+
+            break;
+          }
+
           if (right > left && bottom > top) {
             scene.layerRect(layer, left, top, right - left, bottom - top);
             unionTop(left, top, right, bottom);
@@ -116,6 +148,9 @@ export function measureLayers(
           break;
         }
 
+        // The view puts no alpha mask straight in a filtered layer, which would run its filters on
+        // what the mask left (cuts).
+        cuts.length = c;
         const kept = scene.areas;
         for (let k = 0; k < 4; k++) {
           kept[layer * 4 + k] = areas[n - 4 + k];
