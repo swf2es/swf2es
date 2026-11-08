@@ -221,6 +221,29 @@ test("a key without edits sends its events and moves focus; text edits with no k
   assert.equal(scripting.focus, second);
 });
 
+test("an input method's text is typed whole, with one TextEvent and no key events", () => {
+  const { fields, scripting, keyboard, heard, listen } = setUp("name");
+  const [field] = fields;
+  assert.equal(keyboard.editing, false);
+  assert.equal(keyboard.insert("x"), false);
+  setFocus(scripting, field);
+  assert.equal(keyboard.editing, true);
+  listen(field, "keyDown", () => heard.push("down"));
+  listen(field, "textInput", (e) => heard.push(`text ${e.args[0]}`));
+  listen(field, "change", () => heard.push("change"));
+
+  assert.ok(keyboard.insert("日本語"));
+  // A single-line field drops the line break, as a paste's.
+  assert.ok(keyboard.insert("a\nb"));
+  assert.equal(field.model.text, "日本語ab");
+  assert.deepEqual(heard, ["text 日本語", "change", "text ab", "change"]);
+
+  field.type = "dynamic";
+  assert.equal(keyboard.editing, false);
+  assert.equal(keyboard.insert("c"), false);
+  assert.equal(field.model.text, "日本語ab");
+});
+
 test("maxChars cuts what is typed to the room left, and a full field hears nothing", () => {
   const { fields, scripting, heard, listen, type } = setUp("name");
   const [field] = fields;

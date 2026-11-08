@@ -106,6 +106,22 @@ test("read-only and password fields protect their text; removed fields take no e
   assert.deepEqual(take(p), []);
 });
 
+test("an input method's text is typed whole into the focused input field", async () => {
+  const p = await play(`${source}Selection.setFocus(name);`);
+  const k = p.player.keyboard;
+  const field = p.avm1.focused;
+  assert.ok(k && field instanceof TextObject);
+  assert.equal(k.editing, true);
+  assert.equal(k.insert("日本語"), true);
+  assert.equal(field.model.text, "日本語");
+  assert.deepEqual(take(p), ["name:日本語:日本語"]);
+
+  field.type = "dynamic";
+  assert.equal(k.editing, false);
+  assert.equal(k.insert("x"), false);
+  assert.equal(field.model.text, "日本語");
+});
+
 test("text input accepts Unicode code points and an empty field's vertical caret moves", async () => {
   const p = await play(`${source}Selection.setFocus(name);`);
   const k = p.player.keyboard;
