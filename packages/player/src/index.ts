@@ -59,6 +59,7 @@ export { bindActivation } from "./input/activation.js";
 export type { MenuItem } from "./input/context-menu.js";
 export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js";
 export type { Pointer, PointerState } from "./input/pointer.js";
+export { bindTextInput, type TextInput } from "./input/text-input.js";
 export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
 export type { FillTessellator } from "./scene/fills.js";

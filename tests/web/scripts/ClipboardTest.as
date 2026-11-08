@@ -12,8 +12,8 @@ package {
 
   // The web test's clipboard SWF: an input field and a sprite, either of
   // which the page focuses through ExternalInterface, logging what each
-  // hears of copy, cut and paste; a press on the stage writes the
-  // clipboard with System.setClipboard.
+  // hears of copy, cut and paste, and of text typed; a press on the stage
+  // writes the clipboard with System.setClipboard.
   public class ClipboardTest extends Sprite {
     private var field:TextField = new TextField();
     private var log:Array = [];
@@ -56,6 +56,9 @@ package {
 
       ExternalInterface.addCallback("focusField", function ():void {
         stage.focus = field;
+      });
+      ExternalInterface.addCallback("blurField", function ():void {
+        stage.focus = null;
       });
       ExternalInterface.addCallback("focusBox", function ():void {
         stage.focus = box;

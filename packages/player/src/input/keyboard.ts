@@ -21,6 +21,7 @@ import { TEXT } from "../scripting/clipboard.js";
 import { dispatchEvent } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { caretAt, pasteable, selectionAt, TextEditor } from "./text-editor.js";
+import { isTextInput } from "./text-input.js";
 
 /** A key as the host gives it, in Flash's terms. */
 export interface KeyState {
@@ -160,6 +161,14 @@ export interface Keyboard {
   handle(type: "down" | "up", k: KeyState, edits?: boolean): boolean;
   /** Text typed, or a field's editing key, with no key events. Whether the SWF used it. */
   text(k: KeyState): boolean;
+  /** Whether what has focus takes text: an input field, into which `insert` types. */
+  readonly editing: boolean;
+  /**
+   * Text an input method committed, an IME's or a soft keyboard's, with no
+   * key of its own: the input field with focus takes it as typed, with one
+   * TextEvent for all of it. Whether a field took it.
+   */
+  insert(text: string): boolean;
   /** A copy or cut: what goes to the system's clipboard, or null for nothing. */
   copy(cut?: boolean): ClipboardText | null;
   /** A paste of the system's clipboard. Whether the SWF used it. */
@@ -237,6 +246,24 @@ export class KeyboardInput implements Keyboard {
       return focus instanceof TextObject && (focus.type === "input" || focus.selectable)
         ? this.editor.edit(focus, k)
         : false;
+    });
+  }
+
+  get editing(): boolean {
+    const focus = this.focused();
+    return focus instanceof TextObject && focus.type === "input";
+  }
+
+  insert(text: string): boolean {
+    this.handled++;
+    return this.scripting.clipboard.gesture(() => {
+      const focus = this.focused();
+      if (!(focus instanceof TextObject) || focus.type !== "input") {
+        return false;
+      }
+
+      const typed = pasteable(focus.multiline, text);
+      return typed !== "" && this.editor.type(focus, typed);
     });
   }
 
@@ -543,6 +570,10 @@ function charCodeOf(e: KeyboardEvent): number {
 /** Whether a browser event is the page's own: typed into its input or button, or editable content. */
 function pagesOwn(e: Event): boolean {
   const into = e.target as HTMLElement | null;
+  if (isTextInput(into)) {
+    return false;
+  }
+
   return (
     !!into?.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON|A)$/.test(into?.tagName ?? "")
   );
@@ -551,7 +582,7 @@ function pagesOwn(e: Event): boolean {
 /**
  * Send the browser's keys on `target` (the window, say) to the player. A
  * key goes to the SWF unless it is typed into the page's own input or
- * button, or comes from an IME, which the player cannot compose; the
+ * button, or composes an IME's text, which comes by bindTextInput; the
  * browser is kept from acting on a field's edit or caret, Tab moving the
  * SWF's focus, or a scrolling key meant for the SWF. Its shortcuts stay.
  * The copy, cut and paste events the browser sends for Ctrl+C, X and V,

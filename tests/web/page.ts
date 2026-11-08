@@ -702,6 +702,38 @@ function clipDestroy() {
   return true;
 }
 
+/**
+ * A player of `src`, an input field and a box or nothing to focus in it,
+ * focused with its field: which element of its own has the page's focus a
+ * frame or two later.
+ */
+async function imePlayer(src: string) {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "ime";
+  p.setAttribute("src", src);
+  p.setAttribute("allowscriptaccess", "always");
+  document.body.append(p);
+  await p.ready;
+  await frames(2);
+  p.focus();
+  element("ime").focusField();
+  await frames(2);
+  return imeFocus();
+}
+
+/** The player's element with the page's focus: its own textarea, or itself. */
+function imeFocus() {
+  const p = element("ime");
+  return document.activeElement === p ? (p.shadowRoot?.activeElement?.tagName ?? "HOST") : null;
+}
+
+/** The SWF's focus taken from its field: which element of the player's has the focus a frame or two later. */
+async function imeBlur() {
+  element("ime").blurField();
+  await frames(2);
+  return imeFocus();
+}
+
 function touchDestroy() {
   element("touch").destroy();
   // Gone from the page too: the next check makes a player of its own by the same id.
@@ -985,6 +1017,14 @@ Object.assign(globalThis, {
   clipFocus,
   clipState,
   clipDestroy,
+  imePlayer,
+  imeBlur,
+  imeState: () => ({ log: element("ime").takeLog(), text: element("ime").text() }),
+  imeDestroy: () => {
+    element("ime").destroy();
+    element("ime").remove();
+    return true;
+  },
   loaded,
   databases,
   booted,

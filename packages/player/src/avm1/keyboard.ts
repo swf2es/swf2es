@@ -74,6 +74,22 @@ export class Avm1Keyboard implements Keyboard {
     return used || this.edit(k);
   }
 
+  get editing(): boolean {
+    return this.field()?.type === "input";
+  }
+
+  /** An input method's text: no key went with it, so no keyPress, only the field's edit. */
+  insert(text: string): boolean {
+    this.handled++;
+    const field = this.field();
+    if (field?.type !== "input") {
+      return false;
+    }
+
+    const typed = pasteable(field.multiline, text);
+    return typed !== "" && this.editor.type(field, typed);
+  }
+
   private field(): TextObject | null {
     const d = this.avm1.focused;
     return !this.avm1.halted && d instanceof TextObject && !this.avm1.removed(d) ? d : null;
