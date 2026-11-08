@@ -7,6 +7,7 @@ import type { Scripting } from "../scripting.js";
 import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
+import { encryptedLocalStoreNatives } from "./flash/data/EncryptedLocalStore.js";
 import { clipboardHooks, clipboardNatives } from "./flash/desktop/Clipboard.js";
 import { nativeApplicationNatives } from "./flash/desktop/NativeApplication.js";
 import { avm1MovieNatives } from "./flash/display/AVM1Movie.js";
@@ -121,6 +122,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...nativeApplicationNatives(s),
     ...fileNatives(s),
     ...fileStreamNatives(s),
+    ...encryptedLocalStoreNatives(s),
     ...nativeWindowNatives(s),
     ...eventNatives(s),
     ...keyboardEventNatives(s),

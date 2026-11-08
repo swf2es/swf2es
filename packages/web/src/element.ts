@@ -14,7 +14,9 @@ import {
   type WorkerHost,
 } from "@swf2es/player";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
-import { AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
+import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
+import { type AirFiles, airFiles } from "./air-files.js";
+import { type AirItems, airItems } from "./air-items.js";
 import {
   codegenForPlayer,
   configuration,
@@ -75,7 +77,16 @@ interface Session {
   /** The Web Workers its SWF starts, let go of with it. */
   workers: WebWorkerHost | null;
   /** The AIR application it plays (`loadAir`), its hosts made for this element; null for a SWF. */
-  air: { app: AirApp; application: AirApplication; fileSystem: FileSystemHost } | null;
+  air: {
+    app: AirApp;
+    application: AirApplication;
+    fileSystem: FileSystemHost;
+    /** What it writes, and its EncryptedLocalStore, each read back from IndexedDB once `ready`. */
+    files: AirFiles;
+    items: AirItems;
+    /** Lets go of both once the session is done with them. */
+    release(): void;
+  } | null;
 }
 
 interface Deferred {
@@ -261,7 +272,7 @@ function fetchFor(
   }
 
   return (request, signal) => {
-    const local = app.fetch(request);
+    const local = app.fetch(request, session.air?.files);
     if (!local) {
       return fetchOf(request, signal);
     }
@@ -431,14 +442,19 @@ export class Swf2esPlayerElement extends ElementBase {
    * Play `app`, an AIR application (`openAirApp`), in place of what plays
    * now, as adl runs it: its descriptor's content SWF under AIR's API and
    * its application sandbox, `args` its launch's arguments, this element
-   * its window. Resolves and rejects as `load` does. Its NativeApplication's
-   * exit stops it, and the element dispatches `airexit` with the code.
+   * its window. What it writes outside its directory is kept in IndexedDB
+   * by its id for the next time it plays, unless `keepFiles` is false.
+   * Resolves and rejects as `load` does. Its NativeApplication's exit stops
+   * it, and the element dispatches `airexit` with the code.
    */
-  loadAir(app: AirApp, options: { arguments?: readonly string[] } = {}): Promise<void> {
-    return this.#load(app, options.arguments ?? []);
+  loadAir(
+    app: AirApp,
+    options: { arguments?: readonly string[]; keepFiles?: boolean } = {},
+  ): Promise<void> {
+    return this.#load(app, options.arguments ?? [], options.keepFiles ?? true);
   }
 
-  #load(source: SwfSource | AirApp, args: readonly string[] = []): Promise<void> {
+  #load(source: SwfSource | AirApp, args: readonly string[] = [], keep = true): Promise<void> {
     this.#release();
     if (this.#readiness.settled) {
       this.#readiness = deferred();
@@ -456,7 +472,7 @@ export class Swf2esPlayerElement extends ElementBase {
       air: null,
     };
     if (source instanceof AirApp) {
-      this.#playAsAir(session, source, args);
+      this.#playAsAir(session, source, args, keep);
     }
 
     this.#session = session;
@@ -465,8 +481,11 @@ export class Swf2esPlayerElement extends ElementBase {
     return ready.promise;
   }
 
-  /** `session` playing `app`, with `args` its launch's arguments and this element its window. */
-  #playAsAir(session: Session, app: AirApp, args: readonly string[]): void {
+  /**
+   * `session` playing `app`, with `args` its launch's arguments and this
+   * element its window, its files kept in IndexedDB where `keep`.
+   */
+  #playAsAir(session: Session, app: AirApp, args: readonly string[], keep: boolean): void {
     const exit = (code: number) => {
       // After the script that called it, which a destroy would pull from under it.
       queueMicrotask(() => {
@@ -476,10 +495,18 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       });
     };
+    const files = airFiles(app.descriptor.id, AIR_DIRECTORIES, keep);
+    const items = airItems(app.descriptor.id);
     session.air = {
       app,
       application: app.application(elementWindow(this, app.descriptor.title), args, exit),
-      fileSystem: app.fileSystem(),
+      fileSystem: app.fileSystem(files.files),
+      files: files.files,
+      items: items.items,
+      release: () => {
+        files.release();
+        items.release();
+      },
     };
   }
 
@@ -514,8 +541,16 @@ export class Swf2esPlayerElement extends ElementBase {
       // adl would run it, rather than fail as Flash Player's plugin does.
       if (!session.air && !configuration().air && isAs3(swf) && namesAir(swf)) {
         const app = airAppForSwf(bytes, url);
-        this.#playAsAir(session, app, []);
+        this.#playAsAir(session, app, [], true);
         url = `app:/${encodeURIComponent(app.descriptor.content)}`;
+      }
+
+      // What the application wrote and kept when it last played, before it plays.
+      if (session.air) {
+        await Promise.all([session.air.files.ready, session.air.items.ready]);
+        if (!current()) {
+          return;
+        }
       }
 
       // An AIR application's window is the size its descriptor gives, where it gives one.
@@ -665,6 +700,7 @@ export class Swf2esPlayerElement extends ElementBase {
       air: session.air !== null || !!configuration().air,
       application: session.air?.application ?? configuration().air?.application,
       fileSystem: session.air?.fileSystem ?? configuration().air?.fileSystem,
+      encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : undefined,
       navigate: internal ? null : undefined,
@@ -840,6 +876,7 @@ export class Swf2esPlayerElement extends ElementBase {
     session.scripting?.destroy();
     // Its scripting let it go already, if it had any: a release counts once.
     session.workers?.release?.();
+    session.air?.release();
     this.#box.style.background = "";
   }
 }

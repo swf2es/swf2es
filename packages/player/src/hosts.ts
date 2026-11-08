@@ -420,6 +420,54 @@ export interface FileSystemHost {
    * nothing to read.
    */
   read?(path: string): Uint8Array | null;
+  /**
+   * Writes `bytes` into the file at `path` from `offset`, then makes the
+   * file `length` bytes long, cut short or filled with zeros: FileStream's
+   * writes as they reach the file. A file not there is made, and the
+   * directories it is in. False where it cannot be written. Without it,
+   * the file system is read-only, and what writes fails as on a disk that
+   * refuses it (IOError 3001).
+   */
+  write?(path: string, bytes: Uint8Array, offset: number, length: number): boolean;
+  /** Makes the directory at `path`, and those it is in; false where it cannot. */
+  createDirectory?(path: string): boolean;
+  /** Removes the file or the directory at `path`, with all in it; false where it cannot. */
+  remove?(path: string): boolean;
+  /**
+   * Moves what is at `from` to `to`, where nothing is, making the
+   * directories `to` is in; false where it cannot. Without it, File's
+   * moveTo copies and removes.
+   */
+  move?(from: string, to: string): boolean;
+}
+
+/**
+ * An AIR application's EncryptedLocalStore, as the host keeps it: its
+ * items' bytes by name, for the next time it runs, encrypted where the
+ * host can. Synchronous, as the class's methods are.
+ */
+export interface EncryptedStoreHost {
+  /** The bytes kept as `name`; null for none. */
+  getItem(name: string): Uint8Array | null;
+  setItem(name: string, bytes: Uint8Array): void;
+  removeItem(name: string): void;
+  /** Every item gone. */
+  reset(): void;
+}
+
+/** An EncryptedLocalStore of an application's items held in memory, for as long as it plays. */
+export function memoryStore(): EncryptedStoreHost {
+  const items = new Map<string, Uint8Array>();
+  return {
+    getItem: (name) => items.get(name) ?? null,
+    setItem: (name, bytes) => {
+      items.set(name, bytes);
+    },
+    removeItem: (name) => {
+      items.delete(name);
+    },
+    reset: () => items.clear(),
+  };
 }
 
 /** A WebSocket client connection opened by the host for air.net.WebSocket. */

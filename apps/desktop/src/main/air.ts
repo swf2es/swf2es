@@ -1,8 +1,23 @@
 // An AIR application opened by its descriptor, as adl runs one
 // (`adl app.xml [root-dir] [-- arguments...]`): its launch, which the page
-// plays it with, and the file system its File reads, while it plays.
+// plays it with, and the file system its File reads and writes, while it
+// plays.
 // Apart from Electron, so that node tests it (tests/desktop/air.test.ts).
-import { lstatSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  closeSync,
+  cpSync,
+  ftruncateSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { readAirDescriptor } from "@swf2es/format";
@@ -113,5 +128,148 @@ export function readOf(path: string): Uint8Array | null {
     return new Uint8Array(readFileSync(path));
   } catch {
     return null;
+  }
+}
+
+/** How the main process encrypts what it keeps: Electron's safeStorage where the system offers it. */
+export interface Cipher {
+  encrypt(text: string): Uint8Array;
+  decrypt(data: Uint8Array): string;
+}
+
+/**
+ * An AIR application's EncryptedLocalStore items, as AIR keeps them for
+ * it apart from its files: in one file at `path`, beside its storage
+ * directory, of the items' bytes by name, encrypted whole by `cipher`
+ * where one is given, as Electron's safeStorage encrypts by the system's
+ * keychain. Its first byte says which: "E" encrypted, "P" plain. Written
+ * whole as each item changes, through a file beside it renamed over it.
+ */
+export class EncryptedItems {
+  private readonly path: string;
+  private readonly cipher: Cipher | null;
+  private readonly items: Map<string, Uint8Array>;
+
+  constructor(path: string, cipher: Cipher | null) {
+    this.path = path;
+    this.cipher = cipher;
+    this.items = this.load();
+  }
+
+  get(name: string): Uint8Array | null {
+    return this.items.get(name) ?? null;
+  }
+
+  set(name: string, bytes: Uint8Array): void {
+    this.items.set(name, new Uint8Array(bytes));
+    this.save();
+  }
+
+  remove(name: string): void {
+    if (this.items.delete(name)) {
+      this.save();
+    }
+  }
+
+  reset(): void {
+    this.items.clear();
+    this.save();
+  }
+
+  /** What the file holds; nothing where there is none, or it cannot be read, as by another keychain. */
+  private load(): Map<string, Uint8Array> {
+    const items = new Map<string, Uint8Array>();
+    let text: string;
+    try {
+      const data = readFileSync(this.path);
+      if (data[0] === 0x45 && this.cipher) {
+        text = this.cipher.decrypt(new Uint8Array(data.subarray(1)));
+      } else if (data[0] === 0x50) {
+        text = data.subarray(1).toString("utf8");
+      } else {
+        return items;
+      }
+
+      const saved = JSON.parse(text) as Record<string, string>;
+      for (const [name, base64] of Object.entries(saved)) {
+        items.set(name, new Uint8Array(Buffer.from(base64, "base64")));
+      }
+    } catch {
+      // None yet, or unreadable: an empty store, as AIR's after a reset.
+    }
+
+    return items;
+  }
+
+  private save(): void {
+    const saved: Record<string, string> = {};
+    for (const [name, bytes] of this.items) {
+      saved[name] = Buffer.from(bytes).toString("base64");
+    }
+
+    const text = JSON.stringify(saved);
+    const data = this.cipher
+      ? Buffer.concat([Buffer.from("E"), this.cipher.encrypt(text)])
+      : Buffer.concat([Buffer.from("P"), Buffer.from(text, "utf8")]);
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(`${this.path}.new`, data);
+    renameSync(`${this.path}.new`, this.path);
+  }
+}
+
+/**
+ * Writes `bytes` into the file at `path` from `offset`, which is then
+ * `length` long, made with its directories where it is not: FileStream's
+ * writes. False where it cannot be written.
+ */
+export function writeOf(path: string, bytes: Uint8Array, offset: number, length: number): boolean {
+  return attempt(() => {
+    mkdirSync(dirname(path), { recursive: true });
+    // "a+" would only append; "r+" needs the file there, which "a" makes without emptying it.
+    closeSync(openSync(path, "a"));
+    const fd = openSync(path, "r+");
+    try {
+      writeSync(fd, bytes, 0, bytes.length, offset);
+      ftruncateSync(fd, length);
+    } finally {
+      closeSync(fd);
+    }
+  });
+}
+
+/** Makes the directory at `path` and those it is in; false where it cannot. */
+export function createDirectoryOf(path: string): boolean {
+  return attempt(() => mkdirSync(path, { recursive: true }));
+}
+
+/** Removes the file or directory at `path`, with all in it; false where it cannot. */
+export function removeOf(path: string): boolean {
+  return attempt(() => rmSync(path, { recursive: true }));
+}
+
+/** Moves what is at `from` to `to`, its directories made; false where it cannot. */
+export function moveOf(from: string, to: string): boolean {
+  return attempt(() => {
+    mkdirSync(dirname(to), { recursive: true });
+    try {
+      renameSync(from, to);
+    } catch (e) {
+      // Onto another disk, which a rename cannot reach.
+      if ((e as NodeJS.ErrnoException).code !== "EXDEV") {
+        throw e;
+      }
+
+      cpSync(from, to, { recursive: true });
+      rmSync(from, { recursive: true });
+    }
+  });
+}
+
+function attempt(change: () => void): boolean {
+  try {
+    change();
+    return true;
+  } catch {
+    return false;
   }
 }

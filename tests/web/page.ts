@@ -342,10 +342,20 @@ async function embedderFetch() {
 /**
  * Open the AIR package the runner wrote and play it with two launch
  * arguments, its network allowed none, until it exits or 20 s pass: what it traced and reported, the
- * code its exit gave, and whether a player is left.
+ * code its exit gave, and whether a player is left. With `fresh`, what
+ * AIR applications kept in IndexedDB is gone first.
  */
-async function airRun() {
+async function airRun(fresh = false) {
   const { web } = await loading;
+  if (fresh) {
+    for (const name of ["swf2es-air", "swf2es-air-items"]) {
+      await new Promise((done) => {
+        const deleting = indexedDB.deleteDatabase(name);
+        deleting.onsuccess = deleting.onerror = deleting.onblocked = done;
+      });
+    }
+  }
+
   const bytes = new Uint8Array(await (await pageFetch("/web-test/air-app.air")).arrayBuffer());
   const app = web.openAirApp(bytes);
   const traces: string[] = [];

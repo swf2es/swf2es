@@ -492,7 +492,7 @@ export class Runtime {
       for (const [d, factory, id, , params] of script.desc.traits.methods) {
         installMethod(
           this,
-          traits.proto,
+          traits.methodHome(3),
           d,
           withId(factory(this.empty, null), id),
           factory,

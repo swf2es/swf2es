@@ -32,6 +32,7 @@ export type {
   ClipboardHost,
   ClipboardText,
   Drawer,
+  EncryptedStoreHost,
   ExternalInterfaceHost,
   FetchRequest,
   FetchResult,

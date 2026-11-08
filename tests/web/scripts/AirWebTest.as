@@ -1,4 +1,5 @@
 package {
+  import flash.data.EncryptedLocalStore;
   import flash.desktop.NativeApplication;
   import flash.display.Sprite;
   import flash.events.Event;
@@ -10,14 +11,17 @@ package {
   import flash.net.URLLoader;
   import flash.net.URLRequest;
   import flash.system.Security;
+  import flash.utils.ByteArray;
 
   // An AIR application a page plays from its package: its URL, sandbox,
   // window and launch; what File finds in its directory and AIR's others;
   // a file read by its app: URL, by its file: URL, and a missing one, and
-  // by a FileStream at once and over frames; and its exit, once the reads
-  // are done.
+  // by a FileStream at once and over frames; a file in its storage, which
+  // counts its runs, written and loaded by its app-storage: URL; an
+  // EncryptedLocalStore item counting them too; and its exit, once the
+  // reads are done.
   public class AirWebTest extends Sprite {
-    private var _pending:int = 4;
+    private var _pending:int = 5;
 
     public function AirWebTest() {
       trace("air: url " + loaderInfo.url);
@@ -42,6 +46,24 @@ package {
       stream.open(data, FileMode.READ);
       trace("air: stream " + stream.readUTFBytes(stream.bytesAvailable));
       stream.close();
+      var before:ByteArray = EncryptedLocalStore.getItem("runs");
+      var itemRuns:int = before ? before.readInt() : 0;
+      var after:ByteArray = new ByteArray();
+      after.writeInt(itemRuns + 1);
+      EncryptedLocalStore.setItem("runs", after);
+      trace("air: items " + itemRuns);
+      var saved:File = File.applicationStorageDirectory.resolvePath("saves/runs.txt");
+      var runs:int = 0;
+      if (saved.exists) {
+        stream.open(saved, FileMode.READ);
+        runs = int(stream.readUTFBytes(stream.bytesAvailable));
+        stream.close();
+      }
+
+      stream.open(saved, FileMode.WRITE);
+      stream.writeUTFBytes(String(runs + 1));
+      stream.close();
+      trace("air: saved " + runs);
       var async:FileStream = new FileStream();
       async.addEventListener(Event.COMPLETE, function (e:Event):void {
         trace("air: async stream " + async.readUTFBytes(async.bytesAvailable));
@@ -52,6 +74,7 @@ package {
       load("app", data.url);
       load("file", new File(data.nativePath).url);
       load("missing", "app:/missing.txt");
+      load("storage", saved.url);
     }
 
     private function load(label:String, url:String):void {

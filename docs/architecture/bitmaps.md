@@ -170,16 +170,31 @@ frame, within 2 a channel.
 
 ## Bitmaps on the GPU
 
-A bitmap's pixels are the CPU's: every operation, `draw` included, which
-reads its snapshot back (above), writes the store, and the renderer
-uploads a store's premultiplied ARGB, as it is, into a texture of its
-own when a Bitmap or a bitmap fill first shows it, and again when the
-store's version has moved since (`scene/paints.ts`, `storeTexture`). Every
-Bitmap showing a store samples that one texture, smoothed or not as each
-asks. A texture not drawn for a while is let go of, and made again from
-the store when shown again; after a lost context, every texture is
-added again as it is drawn. Without a renderer, as in node, a store is
-the CPU's alone.
+The renderer uploads a store's premultiplied ARGB, as it is, into a
+texture of its own when a Bitmap or a bitmap fill first shows it, and
+again when the store's version has moved since (`scene/paints.ts`,
+`storeTexture`). Every Bitmap showing a store samples that one texture,
+smoothed or not as each asks.
+
+A `draw` of a display object in the normal blend mode, with no colour
+transform, goes on the GPU instead of through a snapshot read back
+(`RenderView.drawInto`): the object is drawn as the snapshot draws it,
+into a layer of its own, as it may show the store itself, and that layer
+over the store's texture, source over, texel for texel. The texture is
+then the store's newest pixels, its GPU copy (`GpuCopy`): shown as it
+is, with nothing read back nor uploaded, and kept however long it goes
+undrawn. The CPU's pixels are behind it till an operation reads them,
+which brings the texture back once (`BitmapStore.readable`). A scroll, a
+fill and a copy that only moves whole pixels or replaces them with a
+colour run on the texture too (`onGpu`), as copies and clears the GPU
+does exactly, so that a SWF that draws and then scrolls on every frame,
+or stamps clips into a backdrop, never waits for the GPU. An opaque
+store holding alpha, whose pixels read two ways, and a store larger than
+a texture draw through the snapshot. A texture not drawn for a while is
+let go of, and made again from the store when shown again, but not one
+that alone holds what was drawn; after a lost context, every texture is
+added again as it is drawn, and what only a lost texture held is lost
+with it. Without a renderer, as in node, a store is the CPU's alone.
 
 ## A SWF's bitmaps
 

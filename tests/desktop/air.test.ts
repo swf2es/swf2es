@@ -1,13 +1,33 @@
 // The desktop app's AIR applications in node (apps/desktop/src/main/air.ts
 // and descriptor.ts): an application named adl's way on the command line,
 // what its descriptor says, its launch and storage, the file system its
-// File reads, and the sandbox it plays in (sandbox.ts).
+// File reads and writes, its EncryptedLocalStore, and the sandbox it
+// plays in (sandbox.ts).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { after, test } from "node:test";
-import { airCommand, airLaunch, listOf, statOf } from "../../apps/desktop/src/main/air.ts";
+import {
+  airCommand,
+  airLaunch,
+  createDirectoryOf,
+  EncryptedItems,
+  listOf,
+  moveOf,
+  removeOf,
+  statOf,
+  writeOf,
+} from "../../apps/desktop/src/main/air.ts";
 import { Sandbox } from "../../apps/desktop/src/main/sandbox.ts";
 
 const home = realpathSync(mkdtempSync(join(tmpdir(), "swf2es-air-")));
@@ -82,6 +102,67 @@ test("an application's launch, its storage made, and the file system its File re
   assert.equal(statOf(join(app, "nope")), null);
   assert.deepEqual(listOf(join(app, "bin")), ["Main.swf"]);
   assert.equal(listOf(join(app, "nope")), null);
+});
+
+test("an application's EncryptedLocalStore, kept encrypted from one run to the next", () => {
+  const path = join(home, "items", "EncryptedLocalStore");
+  // A stand-in for safeStorage: its text reversed.
+  const cipher = {
+    encrypt: (text: string) => new TextEncoder().encode([...text].reverse().join("")),
+    decrypt: (data: Uint8Array) => [...new TextDecoder().decode(data)].reverse().join(""),
+  };
+  const first = new EncryptedItems(path, cipher);
+  assert.equal(first.get("token"), null);
+  first.set("token", Uint8Array.of(1, 2, 3));
+  first.set("other", Uint8Array.of(9));
+  first.remove("other");
+  const kept = readFileSync(path);
+  assert.equal(String.fromCharCode(kept[0]), "E");
+  assert.ok(!kept.includes("token"), "the name is not in the file as written");
+
+  const second = new EncryptedItems(path, cipher);
+  assert.deepEqual([...(second.get("token") ?? [])], [1, 2, 3]);
+  assert.equal(second.get("other"), null);
+  // Another keychain cannot read it: none.
+  const stranger = new EncryptedItems(path, {
+    encrypt: cipher.encrypt,
+    decrypt: () => {
+      throw new Error("not ours");
+    },
+  });
+  assert.equal(stranger.get("token"), null);
+  second.reset();
+  assert.equal(new EncryptedItems(path, cipher).get("token"), null);
+
+  // Without a keychain, kept as it is.
+  const plain = join(home, "items", "Plain");
+  new EncryptedItems(plain, null).set("a", Uint8Array.of(7));
+  assert.equal(String.fromCharCode(readFileSync(plain)[0]), "P");
+  assert.deepEqual([...(new EncryptedItems(plain, null).get("a") ?? [])], [7]);
+});
+
+test("the file system an application's FileStream and File write", () => {
+  const at = join(home, "writes");
+  const file = join(at, "a", "b", "data.bin");
+  assert.ok(writeOf(file, Uint8Array.of(1, 2, 3), 0, 3));
+  assert.deepEqual([...readFileSync(file)], [1, 2, 3]);
+  // Into the middle, then past the end with zeros between; then cut.
+  assert.ok(writeOf(file, Uint8Array.of(9), 1, 3));
+  assert.ok(writeOf(file, Uint8Array.of(8), 5, 6));
+  assert.deepEqual([...readFileSync(file)], [1, 9, 3, 0, 0, 8]);
+  assert.ok(writeOf(file, new Uint8Array(0), 2, 2));
+  assert.deepEqual([...readFileSync(file)], [1, 9]);
+  assert.equal(writeOf(join(file, "under"), Uint8Array.of(1), 0, 1), false);
+
+  assert.ok(createDirectoryOf(join(at, "c", "d")));
+  assert.ok(statSync(join(at, "c", "d")).isDirectory());
+  assert.ok(moveOf(join(at, "a"), join(at, "moved", "a")));
+  assert.deepEqual([...readFileSync(join(at, "moved", "a", "b", "data.bin"))], [1, 9]);
+  assert.equal(existsSync(join(at, "a")), false);
+  assert.equal(moveOf(join(at, "nope"), join(at, "x")), false);
+  assert.ok(removeOf(join(at, "moved")));
+  assert.equal(existsSync(join(at, "moved")), false);
+  assert.equal(removeOf(join(at, "moved")), false);
 });
 
 test("an application's sandbox: granted as its content is read, reaching the network, gone as it stops", () => {
