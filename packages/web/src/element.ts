@@ -612,6 +612,7 @@ export class Swf2esPlayerElement extends ElementBase {
         const base = attribute(this, "base");
         avm1 = new Avm1(codegen, {
           url,
+          parameters: parseFlashVars(attribute(this, "flashvars")),
           base: base ? new URL(base, pageUrl).href : undefined,
           // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
           fetch: fetchFor(session, offline),

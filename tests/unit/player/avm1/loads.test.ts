@@ -7,6 +7,18 @@ import { test } from "node:test";
 import type { FetchRequest } from "../../../../packages/player/dist/hosts.js";
 import { files, movie, play, take } from "./network.ts";
 
+test("the main SWF's URL query and flashvars are its root's variables before its first frame, the flashvars' names winning", async () => {
+  const played = await play(
+    `trace(_root.q + "|" + _root.shared + "|" + lang + "|" + typeof _root.empty + "|" + typeof _root.n);`,
+    {
+      url: "http://example.test/t/test.swf?q=a+b&shared=query&empty#frag",
+      parameters: { shared: "flashvars", lang: "en", n: "3" },
+    },
+  );
+
+  assert.deepEqual(take(played), ["a b|flashvars|en|string|string"]);
+});
+
 test("loadMovie fills the clip between frames: it keeps its name and depth, its variables go, the query's come, and the SWF's actions run with its own _url", async () => {
   const asked: FetchRequest[] = [];
   const played = await play(
