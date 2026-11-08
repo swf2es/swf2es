@@ -5666,6 +5666,48 @@ export const toneScript =
     });
   };
 
+// Sound.extract of Nellymoser (scripts/SoundExtractNellymoser.as): FFmpeg's
+// encoding of two tones (sounds/tone22.nelly) as format 6 with the rate
+// flags of 22 and 11 kHz, and as formats 4 and 5, which play at 16 and 8
+// kHz but extract at their flags' 44 and 5.5 kHz.
+function extractNellymoser(compile: Compile): Uint8Array {
+  const nelly = soundFile("tone22.nelly");
+  const samples = (nelly.length / 64) * 256;
+  const sounds: [string, Uint8Array][] = [
+    ["Nelly22", w.defineSound(1, { format: 6, rate: 2, sixteen: true, samples }, nelly)],
+    ["Nelly11", w.defineSound(2, { format: 6, rate: 1, sixteen: true, samples }, nelly)],
+    ["Nelly16", w.defineSound(3, { format: 4, rate: 3, sixteen: true, samples }, nelly)],
+    ["Nelly8", w.defineSound(4, { format: 5, rate: 0, sixteen: true, samples }, nelly)],
+  ];
+  const script = "SoundExtractNellymoser";
+  return w.swf({
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      ...sounds.map(([, tag]) => tag),
+      ...sounds.map(([name]) =>
+        w.doAbc(
+          compile(
+            name,
+            `package { import flash.media.Sound; public class ${name} extends Sound {} }`,
+          ),
+          name,
+        ),
+      ),
+      w.doAbc(compile(script)),
+      w.symbolClass([
+        [0, script],
+        ...sounds.map(([name, tag]): [number, string] => [tag[6] | (tag[7] << 8), name]),
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** A sound the tests made (sounds/README.md). */
 const soundFile = (name: string): Uint8Array =>
   new Uint8Array(readFileSync(new URL(`sounds/${name}`, import.meta.url)));
@@ -9334,6 +9376,14 @@ export const cases: PlayerCase[] = [
     name: "sound-extract",
     build: extractSounds("SoundExtract"),
     frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "sound-extract-nellymoser",
+    build: extractNellymoser,
+    frames: 1,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
