@@ -51,8 +51,7 @@ swf2es-player {
   font-weight: 600;
 }
 
-#failure,
-#libraries {
+#failure {
   position: fixed;
   left: 16px;
   right: 16px;
@@ -66,27 +65,6 @@ swf2es-player {
 #failure {
   top: 16px;
   color: var(--error);
-}
-
-#libraries {
-  bottom: 16px;
-}
-
-#libraries h2 {
-  margin: 0 0 0.5em;
-  font-size: 1.1em;
-}
-
-#libraries dl {
-  display: grid;
-  grid-template-columns: max-content 1fr;
-  gap: 4px 12px;
-}
-
-#libraries dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: var(--muted);
 }
 
 /* The URL dialog. */

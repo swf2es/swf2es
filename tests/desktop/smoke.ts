@@ -503,10 +503,9 @@ async function air(): Promise<void> {
   );
 }
 
-// builtin.abc, and the playerglobal the tests play on: the app's own, or
+// The playerglobal the tests play on: the app's own, or
 // Flash Player's under SWF2ES_PLAYERGLOBAL=adobe.
 const both = {
-  builtin: `${libraries}builtin.abc`,
   ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe"
     ? { playerglobal: `${libraries}playerglobal-adobe.abc` }
     : {}),
@@ -695,16 +694,12 @@ try {
     assert.equal(stderr().match(noGesture)?.length, 3);
   });
 
-  // With no library chosen, the checkout's builtin.abc and the app's own
-  // playerglobal play an ActionScript 3 SWF, and the page asks for nothing.
-  await withApp({ recent: [] }, [local], async ({ stdout, until, evaluate }) => {
-    await until("the local SWF on the app's playerglobal", () => stdout.includes("smoke: started"));
-    const panel = await evaluate<{ hidden: boolean; playerglobal: string }>(`({
-      hidden: document.getElementById("libraries").hidden,
-      playerglobal: document.getElementById("playerglobal-path").textContent,
-    })`);
-    assert.equal(panel.hidden, true);
-    assert.equal(panel.playerglobal, "swf2es's own");
+  // With no library chosen, the builtin.abc and playerglobal swf2es ships
+  // play an ActionScript 3 SWF.
+  await withApp({ recent: [] }, [local], async ({ stdout, until }) => {
+    await until("the local SWF on the app's own libraries", () =>
+      stdout.includes("smoke: started"),
+    );
   });
 
   // A SWF's workers run on Web Workers whose script the app's protocol serves, sharing a Mutex
