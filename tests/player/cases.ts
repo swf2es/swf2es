@@ -3720,6 +3720,33 @@ trace("this[NaN] " + this[n]);`;
   return avm1Swf(version, [], [[as1(source, version)]]);
 }
 
+// A Sound's volume and pan in a SWF of `version` set to what is no number:
+// undefined, nothing, null, NaN and strings, beside numbers out of range,
+// as a game that sets its sounds' volume from a saved setting it never
+// saved does every frame.
+function avm1SoundVolumes(version: number): Uint8Array {
+  const source = `var s = new Sound();
+function v(label) { trace(label + " " + s.getVolume()); }
+v("fresh");
+s.setVolume(50); v("50");
+s.setVolume(undefined); v("undefined");
+s.setVolume(50); s.setVolume(); v("none");
+s.setVolume(50); s.setVolume(null); v("null");
+s.setVolume(50); s.setVolume(0 / 0); v("NaN");
+s.setVolume(50); s.setVolume("70"); v("string 70");
+s.setVolume(50); s.setVolume("x"); v("string x");
+s.setVolume(-5); v("-5");
+s.setVolume(150); v("150");
+s.setVolume(33.7); v("33.7");
+s.setVolume(1e10); v("1e10");
+s.setPan(40); s.setPan(undefined); trace("pan undefined " + s.getPan());
+s.setPan(40); s.setPan(0 / 0); trace("pan NaN " + s.getPan());
+var t = new Sound(this);
+t.setVolume(60); t.setVolume(undefined); trace("clip undefined " + t.getVolume());
+s.setVolume(100); s.setPan(0);`;
+  return avm1Swf(version, [], [[as1(source, version)]]);
+}
+
 // Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
 // "Clips and paths"): `a` and `c` of a clip of three frames, which places
 // `b` of another, beside an unnamed square and `Beta`; each clip traces its
@@ -10704,6 +10731,17 @@ export const cases: PlayerCase[] = [
     (version): PlayerCase => ({
       name: `avm1-nan-names-swf${version}`,
       swf: avm1NanNames(version),
+      traced: true,
+      frames: 1,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
+  ...[6, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-sound-volumes-swf${version}`,
+      swf: avm1SoundVolumes(version),
       traced: true,
       frames: 1,
       capture: [],
