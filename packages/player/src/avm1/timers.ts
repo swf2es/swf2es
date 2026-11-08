@@ -1,9 +1,12 @@
 // An AVM1 movie's clock: the time getTimer and setInterval's timers go by,
 // the real clock's or the frames', and the script timeout's start and end
-// around the scripts that run.
+// around the scripts that run. On the real clock, a script that spins on
+// getTimer to wait has the clock skip to the time it waits for, as AS3's
+// does (clock.ts).
 // GetTime's frame clock follows Ruffle's (https://github.com/ruffle-rs/
 // ruffle): MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle
 // contributors.
+import { SpinClock } from "../clock.js";
 import { MovieClip } from "../display/display.js";
 import type { Avm1 } from "./avm1.js";
 
@@ -28,17 +31,36 @@ export class Timers {
   private readonly start: number;
   /** How deep begin() is: only the outermost begin and end start and stop the scripts' clock. */
   private beginDepth = 0;
+  /** getTimer on the real clock, skipping a spin on it; none on the frame clock. */
+  private readonly spin: SpinClock | null;
 
   constructor(
     private readonly movie: Avm1,
     private readonly realTime: (() => number) | null,
   ) {
     this.start = this.realTime?.() ?? 0;
+    const real = this.realTime;
+    this.spin = real === null ? null : new SpinClock(() => real() - this.start);
   }
 
   /** A frame starts: GetTime's calls are counted afresh. */
   frameStarted(): void {
     this.timeCalls = 0;
+    this.spin?.settle();
+  }
+
+  /** Timers fire between frames: a spin's calls are counted afresh. */
+  idleStarted(): void {
+    this.spin?.settle();
+  }
+
+  /**
+   * How far getTimer and the timers run ahead of the real clock, in ms,
+   * since a spin had the clock skip to the time it waited for: the frames
+   * wait for the real clock (Player.advance). Ends the pass that ran.
+   */
+  ahead(): number {
+    return this.spin?.ahead() ?? 0;
   }
 
   /** A frame's actions have run: until the next frame, its time passes and the timers due fire. */
@@ -47,9 +69,18 @@ export class Timers {
     this.fire();
   }
 
-  /** The time on the player's clock: the real clock's since the start, or the frame clock. */
+  /**
+   * The time on the player's clock: the real clock's since the start, and
+   * what a spin skipped on getTimer, so that the timers keep to it; or the
+   * frame clock.
+   */
   now(): number {
-    return this.realTime === null ? this.frameClock : this.realTime() - this.start;
+    if (this.realTime === null || this.spin === null) {
+      return this.frameClock;
+    }
+
+    const real = this.realTime() - this.start;
+    return real + this.spin.lead(real);
   }
 
   /**
@@ -58,8 +89,8 @@ export class Timers {
    * waiting for it to move, sees a ms pass every fifth call from the 20th.
    */
   getTime(): number {
-    if (this.realTime !== null) {
-      return Math.floor(this.realTime() - this.start);
+    if (this.spin !== null) {
+      return Math.floor(this.spin.read());
     }
 
     this.timeCalls++;
