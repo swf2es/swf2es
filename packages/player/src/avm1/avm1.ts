@@ -791,6 +791,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       return;
     }
 
+    this.timers.idleStarted();
     this.timers.begin();
     try {
       this.timers.fire();

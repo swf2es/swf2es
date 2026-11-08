@@ -106,9 +106,16 @@ frame after the spin runs at once as Flash's would after it. Nor do
 timers fire between frames meanwhile, where Flash's would still be
 spinning. The SWF keeps the pace it asked for (its own frames 33 ms apart
 by getTimer, by the real clock 33 on average) with the main thread 90 %
-idle rather than all busy. What AS3 can see is getTimer running faster
-than real time in the spin and then waiting, by up to the frame budget,
-never going back; `Date` stays the wall clock, which in Flash too is a
+idle rather than all busy. AS2 content spins the same way, often with a
+loop count as well (`while (getTimer() <= hold && ++n < 2000000)`), and
+an AVM1 movie's getTimer and setInterval clock skips alike: the detection,
+skip and lead are one piece (`clock.ts`) that AS3's clock and AVM1's
+each have, `advance` holding the frames of either. An AS2 movie of 60 fps
+that held itself to 30 this way, its spin cut short by a count of 20,000
+readings, spent 39 % of its time in frames and ran at 37 frames a second;
+it spends 3 % and runs at the 30 it asks for. What a script can see is
+getTimer running faster than real time in the spin and then waiting, by
+up to the frame budget, never going back; `Date` stays the wall clock, which in Flash too is a
 clock apart from `getTimer`, and differs from it by that lead at most.
 Timers follow the same choice. With a real clock they fire as Flash
 fires them, measured in adl: in each frame right after ENTER_FRAME and
