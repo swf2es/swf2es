@@ -118,6 +118,13 @@ export class Loads {
     return frames;
   }
 
+  /** The AVM1 movies' SharedObjects written, as the page may be going. */
+  saveAvm1SharedObjects(): void {
+    for (const movie of this.avm1Movies.values()) {
+      movie.vm.saveSharedObjects();
+    }
+  }
+
   destroyAvm1(): void {
     for (const movie of this.avm1Movies.values()) {
       movie.vm.destroy(false);

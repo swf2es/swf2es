@@ -273,6 +273,17 @@ export class Player {
    * for the player, its renderer, its input bindings and its loop, is the
    * host's to let go.
    */
+  /**
+   * Write what scripts changed in their SharedObjects, as Flash did as a
+   * SWF closed, without stopping anything: a host calls it as its page goes
+   * away, where destroy() may never run.
+   */
+  saveSharedObjects(): void {
+    this.scripting?.flushSharedObjects?.();
+    this.scripting?.loads.saveAvm1SharedObjects();
+    this.avm1?.saveSharedObjects();
+  }
+
   destroy(): void {
     if (!this.stopped) {
       drawKernelLetGo();

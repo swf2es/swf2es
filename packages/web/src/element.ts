@@ -632,6 +632,21 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.player = new Player(bytes, session.scripting, avm1);
+      // A page reloaded or closed never destroys its players: SharedObjects
+      // a script did not flush are written as it goes, as Flash wrote them as
+      // a SWF closed, and as it is hidden, the last a phone may tell.
+      const save = () => session.player?.saveSharedObjects();
+      const { signal } = session.abort;
+      globalThis.addEventListener("pagehide", save, { signal });
+      document.addEventListener(
+        "visibilitychange",
+        () => {
+          if (document.visibilityState === "hidden") {
+            save();
+          }
+        },
+        { signal },
+      );
       session.player.quality = quality(attribute(this, "quality"));
       session.player.showDefaultContextMenu = attribute(this, "menu")?.toLowerCase() !== "false";
       session.player.build = configuration().build ?? null;

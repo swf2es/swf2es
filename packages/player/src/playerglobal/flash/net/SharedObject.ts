@@ -293,8 +293,8 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     }
   }
 
-  // Flash wrote each open object as its SWF went: a destroyed player
-  // writes those a script changed since they were read or written. Never
+  // Flash wrote each open object as its SWF went: a player hidden or
+  // destroyed writes those a script changed since they were read or written. Never
   // a removal: an object whose stored file it could not read starts empty,
   // and an unchanged one would take the file away.
   s.flushSharedObjects = () => {
@@ -303,6 +303,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
         const file = serialize(o);
         if (file.length && !sameBytes(file, o.$saved)) {
           s.storage.set(o.$key, file);
+          o.$saved = file;
         }
       } catch {
         // One that cannot be written, AMF0's or a full quota's, keeps the others from nothing.

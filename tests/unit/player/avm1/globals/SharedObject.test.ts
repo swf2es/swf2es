@@ -162,6 +162,26 @@ test("an empty SharedObject writes nothing, clear removes its file, and a destro
   assert.deepEqual(read, ["7"]);
 });
 
+test("a player's SharedObjects are written as its page goes, and again only once changed, the player playing on", async () => {
+  const { stored, storage } = memory();
+  const { player } = await play(
+    `var so = SharedObject.getLocal("save"); so.data.coins = 7;`,
+    storage,
+  );
+  assert.equal(stored.size, 0);
+
+  player.saveSharedObjects();
+  assert.equal(stored.size, 1);
+  const [key] = stored.keys();
+  const written = stored.get(key);
+  player.saveSharedObjects();
+  assert.equal(stored.get(key), written);
+
+  player.tick();
+  const { lines } = await play(`trace(SharedObject.getLocal("save").data.coins);`, storage);
+  assert.deepEqual(lines, ["7"]);
+});
+
 test("the data inside itself is written unsupported and a getter never called, as Flash writes them", async () => {
   const fixture = async (name: string) =>
     new Uint8Array(await readFile(new URL(`fixtures/shared-object-${name}.sol`, import.meta.url)));
