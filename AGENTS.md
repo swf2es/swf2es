@@ -20,7 +20,7 @@ git submodule update --init   # oracle/avmplus (Tamarin tests), tests/programs/a
                               # vendor/minimp3, vendor/zlib, vendor/lzma-sdk, vendor/libtess2 and vendor/jxrlib
                               # (C compiled into packages/native's wasm)
 pnpm install
-pnpm build       # asc → codegen.wasm, then tsc -b for all packages
+pnpm build       # asc → codegen.wasm, then tsc -b for all packages, then the browser build
 pnpm build:debug # the same with unoptimized wasm, names and source maps
 pnpm check       # Biome format + lint; `pnpm format` applies fixes
 pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
@@ -88,7 +88,8 @@ node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   #
 node packages/cli/dist/main.js help [command]   # the commands, or one's options
 node tests/packages/run.ts    # the packages as npm gets them: packed by pnpm, their tarballs' licences,
                               # notices, READMEs and files checked, installed offline into an empty
-                              # project, every export imported, the command run (part of pnpm test)
+                              # project, every export imported, the command run, the browser build
+                              # installed alone with no dependencies (part of pnpm test)
 node tools/notices.ts [--update]   # each package's LICENSE, LICENSE.third-party and `license`, which
                               # a unit test holds to what its files' headers say came from elsewhere
 node tools/avmplus-libraries.ts [--update]   # avmplus' builtin.abc and shell_toplevel.abc embedded
@@ -109,6 +110,11 @@ node tests/player/pixel-bender.ts [--gpu]   # Pixel Bender kernels as GLSL in Ch
                               # interpreter on random images (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
+node packages/swf2es/build.ts       # the browser build, swf2es: @swf2es/web bundled by Rspack into
+                              # packages/swf2es/dist/ for a CDN (the last step of pnpm build)
+node tests/web/cdn.ts               # that folder served as a CDN serves it, from another origin, and
+                              # pages that load it by one <script> tag under a CSP: AS3, AVM1 and
+                              # Flash Workers on an isolated page in Chrome (part of pnpm test)
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
 pnpm --filter @swf2es/desktop start [--trace] [file.swf]   # the desktop app (apps/desktop);
                               # --trace prints the SWF's trace() to the terminal
@@ -179,7 +185,8 @@ of its own.
   `render` on `context3d`, `codegen` and `runtime` on `format`, `cli` on `format`, `codegen`,
   `runtime` and `player` (its libraries alone), `player` on `format`, `codegen`, `runtime`,
   `context3d`, `native` and `render`, `player-hosts` on `player`, `web` on
-  `codegen`, `format`, `native`, `player` and `player-hosts`. `codegen` never imports the
+  `codegen`, `format`, `native`, `player` and `player-hosts`, and `swf2es`, the browser build,
+  on `codegen`, `player-hosts` and `web`, which it bundles. `codegen` never imports the
   runtime implementation. `native`, `format`, `codegen`, `runtime`, and `context3d`'s and
   `render`'s cores load no DOM or node types. Apps
   (`apps/*`) may use any package; no package may use an app.
