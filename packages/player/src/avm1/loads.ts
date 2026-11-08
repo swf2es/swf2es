@@ -78,11 +78,11 @@ async function arrive(result: FetchResult, decode: ImageDecode | null): Promise<
 }
 
 /**
- * A URL's query as a loaded SWF's root gets it, each name a variable, as
+ * A URL's query as a SWF's root gets it, each name a variable, as
  * Ruffle's movie_loader_complete defines a movie's parameters: decoded,
  * `+` a space, a name without `=` an empty value.
  */
-function queryVariables(url: string): [name: string, value: string][] {
+export function queryVariables(url: string): [name: string, value: string][] {
   const path = url.split("#", 1)[0];
   const at = path.indexOf("?");
   if (at < 0) {
