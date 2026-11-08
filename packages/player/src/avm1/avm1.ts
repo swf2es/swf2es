@@ -99,7 +99,7 @@ import { xmlClass } from "./globals/XML.js";
 import { type XmlNodes, xmlNodeClass, serialize as xmlString } from "./globals/XMLNode.js";
 import { xmlSocketClass } from "./globals/XMLSocket.js";
 import { Avm1Input } from "./input.js";
-import { MovieLoads } from "./loads.js";
+import { MovieLoads, queryVariables } from "./loads.js";
 import { Avm1Net, textFor } from "./net.js";
 import { asciiLower, atPath, childByName, pathOf, under } from "./paths.js";
 import {
@@ -133,6 +133,12 @@ export interface Avm1Options {
   onUncaught?: (error: unknown) => void;
   /** The SWF's URL, which `_url` gives. */
   url?: string;
+  /**
+   * The SWF's flashvars, as a page's FlashVars give them: variables of its
+   * root before its first frame, after its URL's query, whose names they
+   * override, as AS3's loaderInfo.parameters.
+   */
+  parameters?: Readonly<Record<string, string>>;
   /**
    * The real clock, in ms, getTimer's and the timers' time: performance's
    * by default. With null they go by the frames, each a frame's duration
@@ -339,6 +345,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The focus, what Tab moves it through and Selection's listeners. */
   readonly focusTracker = new FocusTracker(this);
   readonly url: string;
+  /** The page's flashvars for the main SWF's root. */
+  private readonly parameters: Readonly<Record<string, string>>;
   readonly storage: SharedObjectStorage;
   /** SharedObject's writes of what its scripts changed, as the player goes: none before attach. */
   private sharedObjects: { flush(version: number): void } | null = null;
@@ -365,6 +373,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.url = options.url ?? "";
+    this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
@@ -586,6 +595,18 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
     this.made(root);
+    // Its parameters, as Flash defines them on the root before the first frame's actions run.
+    const face = root.avm1;
+    if (face !== null) {
+      const parameters = new Map(queryVariables(this.url));
+      for (const [name, value] of Object.entries(this.parameters)) {
+        parameters.set(name, String(value));
+      }
+
+      for (const [name, value] of parameters) {
+        face.define(name, textFor(value, this.swfVersion), 0);
+      }
+    }
   }
 
   /** A SWF's timelines told to this: their clips are made and play through it from now on. */
