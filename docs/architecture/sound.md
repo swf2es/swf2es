@@ -114,7 +114,10 @@ FFmpeg's translated (`@swf2es/native/audio`'s `nellymoser.zig`, under
 FFmpeg's MIT notice),
 but for the signs of the bands it gives no bits, which are noise; a
 stream's blocks decode one after another, each one's overlap carried
-into the next. `extract` does not read Nellymoser yet. Speex, ByteArray
+into the next. `extract` reads it at the rate its flags give, as adl
+does, formats 4 and 5 too; adl's own Nellymoser extract is erratic past
+4096 samples a call and near the sound's end, and can fail reading on past
+it, which the player does not copy. Speex, ByteArray
 sound loading and ID3 are later slices. MP3 seek samples are parsed but not yet applied to decoded
 browser audio.
 
