@@ -60,6 +60,11 @@ export class ScriptFunction extends Avm1Function {
     super(proto, world, notNative);
   }
 
+  /** The realm's count of removals as it last asked whether `target` was removed, -1 before. */
+  private looked = -1;
+  /** Whether `target` was removed as it last asked. */
+  private gone = false;
+
   /**
    * Run its body with `self` as `this`, `depth` how far up `this`'s
    * prototypes it was found (which `super` starts from), in an activation
@@ -89,7 +94,23 @@ export class ScriptFunction extends Avm1Function {
     let scope = this.scope;
     let target = this.target;
     let clip = this.clip;
-    if (this.version < 6) {
+    if (this.version >= 6 && caller.host.removed !== undefined) {
+      // A clip whose code defined it may since be gone, a loaded SWF's
+      // classes after it was unloaded among them: it runs on `this` where
+      // that is a clip, else on the caller's target, rather than returning
+      // at its first call, as code returns whose clip a call removes
+      // (Ruffle's resolve_reference of its base clip, then this_do).
+      if (this.looked !== realm.removals) {
+        this.looked = realm.removals;
+        this.gone = caller.host.removed(target);
+      }
+
+      if (this.gone) {
+        const own = self instanceof Avm1Object ? caller.host.clipOf?.(self) : undefined;
+        target = own ?? targetOrRoot(caller);
+        clip = own !== undefined ? (self as Avm1Object) : caller.clip;
+      }
+    } else if (this.version < 6) {
       const own = self instanceof Avm1Object ? caller.host.clipOf?.(self) : undefined;
       if (own !== undefined) {
         target = own;
