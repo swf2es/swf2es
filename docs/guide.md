@@ -23,7 +23,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.0"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.1"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -35,7 +35,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.0`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.1`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses

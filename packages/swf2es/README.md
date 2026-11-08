@@ -9,18 +9,18 @@ modules that loads from a CDN, with nothing to install or build. A page
 that has a bundler installs `@swf2es/web` instead.
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.0"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.1"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
 
-jsDelivr serves it too, at `https://cdn.jsdelivr.net/npm/swf2es@0.1.0`.
+jsDelivr serves it too, at `https://cdn.jsdelivr.net/npm/swf2es@0.1.1`.
 The module exports what `@swf2es/web` does. To call it, import it from the
 same URL, so that the page has one copy:
 
 ```html
 <script type="module">
-  import { configure, watchFlash } from "https://unpkg.com/swf2es@0.1.0";
+  import { configure, watchFlash } from "https://unpkg.com/swf2es@0.1.1";
 
   configure({ cache: true }); // keep compiled modules in IndexedDB
   watchFlash(); // the page's Flash <object> and <embed> tags become players
@@ -37,7 +37,7 @@ Name a version in the URL. Until 1.0, a minor release (0.2) may change
 what a page sees, so pin at least the minor version: unpkg's
 `swf2es@0.1` takes 0.1's fixes as they are released, and redirects to the
 exact version, whose files the page then loads together. On jsDelivr, pin
-the exact version (`swf2es@0.1.0`): it serves a range without
+the exact version (`swf2es@0.1.1`): it serves a range without
 redirecting, so the files the main one loads later would come from
 whatever version the range names by then.
 

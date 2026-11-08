@@ -60,6 +60,12 @@ node tools/publish.ts
 
 These packages carry no provenance, because only CI can attest one.
 
+npm creates a new package by staging its first version. If that version's
+publish fails (as `@swf2es/native`'s 0.1.0 did), the
+package is left with only a `0.0.0-stage` placeholder. npm then refuses that
+version for good ("Cannot publish over previously staged version"), so the
+fix is to release the next patch version of every package.
+
 Then, on npmjs.com, configure each package under Settings › Trusted
 publishing:
 
