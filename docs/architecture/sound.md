@@ -71,6 +71,14 @@ on a frame. A stopped channel's `position` stays where it stopped. A page
 may provide an `AudioHost` to `Scripting`; without one, the player keeps
 the script-visible sound state but emits no audio.
 
+Opening the browser's audio device (`new AudioContext()`) blocks the main
+thread, for about half a second under Linux's PulseAudio or PipeWire. So
+that it does not land on a frame mid-play, `AudioHost.warm` opens it
+early: as the player is made, for a SWF whose library has a DefineSound or
+a timeline stream; as a loadMovie, MovieClipLoader or Loader load is read,
+before the frame that shows it, for one that has; and as `Sound.load` asks
+for its URL. A SWF with none of them opens no device until a sound plays.
+
 An empty `Sound` with a `sampleData` listener streams stereo float PCM at
 44.1 kHz. `media/dynamic-sound.ts` requests samples synchronously on first
 play, then refills against the audio device's consumed samples. Each channel

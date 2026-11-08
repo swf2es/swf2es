@@ -106,6 +106,29 @@ export function outputMix(local: SoundMix, global: SoundMix): SoundMix {
 
 export const mixerMix = (s: Scripting): SoundMix => mixerMixes.get(s) ?? mixOf(null);
 
+/**
+ * Has `audio` open its device as `library` arrives, if the library has a
+ * sound or a stream to play: before its first frame, not at its first sound
+ * mid-play. A movie without either opens no device for it.
+ */
+export function warmAudioFor(audio: AudioHost | null, library: Library): void {
+  if (!audio?.warm) {
+    return;
+  }
+
+  if (library.root.stream) {
+    audio.warm();
+    return;
+  }
+
+  for (const character of library.characters.values()) {
+    if (character.type === "sound" || (character.type === "sprite" && character.timeline.stream)) {
+      audio.warm();
+      return;
+    }
+  }
+}
+
 const hosts = new WeakMap<Scripting, SoundHost>();
 
 /** An AS3 movie's SoundHost: its device, clock and symbols, its sprites' and SoundMixer's transforms. */

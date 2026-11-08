@@ -26,7 +26,7 @@ import { customContextMenu, type MenuItem } from "./input/context-menu.js";
 import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
 import { type Pointer, PointerInput, type PointerState } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
-import { soundHostOf, streamFrames } from "./media/sounds.js";
+import { soundHostOf, streamFrames, warmAudioFor } from "./media/sounds.js";
 import type { Scripting } from "./scripting.js";
 
 /** Ordinary frames one advance() may run at most, however fast the SWF and slow the display. */
@@ -129,6 +129,8 @@ export class Player {
   ) {
     this.swf = readSwf(bytes);
     this.library = readLibrary(this.swf);
+    // The audio device opens while the page waits for the movie, not at its first sound.
+    warmAudioFor(scripting?.audio ?? avm1?.audio ?? null, this.library);
     this.width = Math.round((this.swf.frameSize.xMax - this.swf.frameSize.xMin) / 20);
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
     setStageSize(this.stage, this.width, this.height);
