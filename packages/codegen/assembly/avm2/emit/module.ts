@@ -42,6 +42,7 @@ import {
   namespace,
   poolString,
   qualified,
+  SPILL_SLOTS,
   typeExpr,
   uri,
 } from "./refs";
@@ -50,11 +51,12 @@ import {
  * The most slots a traits' fill sets. V8 counts only fields already
  * written twice against its limit of 128 outside the object, and a fill
  * writes each once, so an object stays fast up to its limit of 1020
- * properties in all; past this one, with room for the runtime's own, it is
- * a dictionary however they are set. A Crossbridge program's global, of
- * some 550 slots, keeps its stack pointer and registers in them.
+ * properties in all: a fill sets the slots below SPILL_SLOTS by name and
+ * the rest in the object's array `$S`, so that one of thousands of slots,
+ * as a Crossbridge program's global, stays fast. Past this many the
+ * runtime sets them, as for traits no module filled.
  */
-const FILL_SLOTS: u32 = 1000;
+const FILL_SLOTS: u32 = 1 << 16;
 
 @final
 export class ModuleEmitter {
@@ -640,36 +642,65 @@ export class ModuleEmitter {
     }
 
     const out = this.out;
-    const slotStart = traits.slotStart[t];
     out.text(", fill: (o, v) => {");
-    for (let s = <i32>count - 1; s >= 0; s--) {
-      const index = fillAbc[s];
-      if (index < 0) {
+    // Those kept apart first, as an array literal, which V8 keeps packed.
+    if (count > SPILL_SLOTS) {
+      out.text(" o.$S = [");
+      for (let s = SPILL_SLOTS; s < count; s++) {
+        if (s > SPILL_SLOTS) {
+          out.text(", ");
+        }
+
+        this.fillValue(t, s);
+      }
+
+      out.text("];");
+    }
+
+    for (let s = <i32>min(count, SPILL_SLOTS) - 1; s >= 0; s--) {
+      if (this.fillAbc[s] < 0) {
         continue;
       }
 
       out.text(" o.$");
       out.uint(<u32>s);
       out.text(" = ");
-      const abc = domain.abcs[index];
-      const i = fillTrait[s];
-      const kind = abc.traitTag[i] & 0x0f;
-      const value = abc.traitValue[i];
-      const valueKind = abc.traitValueKind[i];
-      if (kind === C.TRAIT_Class) {
-        out.text("null");
-      } else if (value === 0 || (<u32>index === this.index && literal(valueKind))) {
-        constant(this.methods, value, valueKind, traits.slotType[slotStart + s]);
-      } else {
-        out.text("v[");
-        out.uint(<u32>s);
-        out.text("]");
-      }
-
+      this.fillValue(t, <u32>s);
       out.text(";");
     }
 
     out.text(" }");
+  }
+
+  /**
+   * Slot `s`'s initial value in traits t's fill: a literal where it is one
+   * wherever the module is compiled, else the runtime's, `v[s]`; undefined
+   * for a slot no trait declares.
+   */
+  private fillValue(t: u32, s: u32): void {
+    const out = this.out;
+    const index = this.fillAbc[s];
+    if (index < 0) {
+      out.text("undefined");
+      return;
+    }
+
+    const domain = this.domain;
+    const traits = domain.traits;
+    const abc = domain.abcs[index];
+    const i = this.fillTrait[s];
+    const kind = abc.traitTag[i] & 0x0f;
+    const value = abc.traitValue[i];
+    const valueKind = abc.traitValueKind[i];
+    if (kind === C.TRAIT_Class) {
+      out.text("null");
+    } else if (value === 0 || (<u32>index === this.index && literal(valueKind))) {
+      constant(this.methods, value, valueKind, traits.slotType[traits.slotStart[t] + s]);
+    } else {
+      out.text("v[");
+      out.uint(s);
+      out.text("]");
+    }
   }
 
   /**

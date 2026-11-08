@@ -32,7 +32,7 @@ import {
 import { NONE } from "./copies";
 import { isAddress, viewMethod } from "./memory";
 import { hasBoundEntry, MethodEmitter } from "./method";
-import { aliasedMember, interfaceAlias, isClassRef, poolString, typeRef } from "./refs";
+import { aliasedMember, interfaceAlias, isClassRef, poolString, slotMember, typeRef } from "./refs";
 import { CONVERTS, call2, convert, isNumber, isNumeric, keeps } from "./values";
 
 /** Whether register r may hold XML or an XMLList: untyped, Object, or either. */
@@ -182,26 +182,22 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
     case ops.OP_getslot:
       em.assign(i);
       em.member(src);
-      out.text(".$");
-      out.uint(a);
+      slotMember(out, a);
       return true;
     case ops.OP_setslot:
       em.member(src);
-      out.text(".$");
-      out.uint(a);
+      slotMember(out, a);
       out.text(" = ");
       em.reg(src + 1);
       return true;
     case ops.OP_getglobalslot:
       em.assign(i);
       globalScope(em);
-      out.text(".$");
-      out.uint(a);
+      slotMember(out, a);
       return true;
     case ops.OP_setglobalslot:
       globalScope(em);
-      out.text(".$");
-      out.uint(a);
+      slotMember(out, a);
       out.text(" = ");
       em.reg(src);
       return true;
@@ -947,8 +943,7 @@ function constructSlot(em: MethodEmitter, src: i32, slot: u32, argc: u32, ctrait
   em.constructsInPlace = true;
   out.text("($c = ");
   em.member(src);
-  out.text(".$");
-  out.uint(slot);
+  slotMember(out, slot);
   out.text(")?.$new === true ? ($o = $c.$it.instance(), $c.$it.proto.");
   const init = boundConstructor(em, ctraits, argc);
   if (init >= 0) {
