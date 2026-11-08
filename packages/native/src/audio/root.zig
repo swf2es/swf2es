@@ -55,6 +55,12 @@ export fn alloc(n: usize) usize {
     return @intCast(start);
 }
 
+/// `count` items of `size` bytes; 0 when they cannot be had, as when they are past memory's reach.
+fn allocArray(count: u64, size: u64) usize {
+    const bytes = count * size;
+    return if (bytes > 0xffff_0000) 0 else alloc(@intCast(bytes));
+}
+
 export fn resultPointer() usize {
     return result;
 }
@@ -63,14 +69,14 @@ export fn resultPointer() usize {
 /// samples, channels interleaved: how many; -1 when memory runs out.
 export fn decodeAdpcm(input: usize, length: usize, channels: u32) i32 {
     const capacity = adpcm.capacity(length, channels);
-    const out = alloc(capacity * 2);
+    const out = allocArray(capacity, 2);
     if (out == 0) {
         return -1;
     }
 
     result = out;
     const data = @as([*]const u8, @ptrFromInt(input))[0..length];
-    const samples = @as([*]i16, @ptrFromInt(out))[0..capacity];
+    const samples = @as([*]i16, @ptrFromInt(out))[0..@intCast(capacity)];
     return @intCast(adpcm.decode(data, channels, samples));
 }
 
@@ -89,14 +95,14 @@ export fn nellymoserStart(state: usize) void {
 /// carried from its last call to its next: how many; -1 when memory runs
 /// out.
 export fn decodeNellymoser(input: usize, length: usize, state: usize) i32 {
-    const count = length / nellymoser.block_len * nellymoser.block_samples;
-    const out = alloc(count * 4);
+    const count = @as(u64, length / nellymoser.block_len) * nellymoser.block_samples;
+    const out = allocArray(count, 4);
     if (out == 0) {
         return -1;
     }
 
     result = out;
     const data = @as([*]const u8, @ptrFromInt(input))[0..length];
-    const samples = @as([*]f32, @ptrFromInt(out))[0..count];
+    const samples = @as([*]f32, @ptrFromInt(out))[0..@intCast(count)];
     return @intCast(nellymoser.decode(@ptrFromInt(state), data, samples));
 }

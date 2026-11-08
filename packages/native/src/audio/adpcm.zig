@@ -39,9 +39,9 @@ const Reader = struct {
 };
 
 /// The most samples `length` bytes of `channels` decode to: what `out` must hold.
-pub fn capacity(length: usize, channels: u32) usize {
+pub fn capacity(length: usize, channels: u32) u64 {
     // The fewest bits a sample takes, 2, and a header's sample per channel besides.
-    return (length * 8 + 1) / 2 + channels;
+    return (@as(u64, length) * 8 + 1) / 2 + channels;
 }
 
 /// `data` decoded into `out`, which holds capacity(); how many samples.

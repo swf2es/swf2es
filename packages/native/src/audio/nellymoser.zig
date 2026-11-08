@@ -35,8 +35,8 @@
 //! bits are noise of the band's energy, its signs from a generator of this
 //! file's own rather than FFmpeg's, as the ear cannot tell. Coefficients
 //! and samples are single precision and the transform double, each value
-//! rounded where the TypeScript decoder this replaces stored it, so that it
-//! gives that decoder's samples.
+//! rounded where the TypeScript decoder this one replaced stored it, so
+//! that it gives that decoder's samples.
 const std = @import("std");
 
 const bands = 23;
