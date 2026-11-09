@@ -11,7 +11,8 @@
 // the same way. Their other lines must be as Flash traces them.
 //
 //   node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11 EXE]
-//     [--wine COMMAND] [--only swf2es,ruffle,adl,flash32,flash11] [--write-swf DIR] [bench...]
+//     [--wine COMMAND] [--only swf2es,ruffle,adl,flash32,flash11] [--json FILE] [--write-swf DIR]
+//     [bench...]
 //
 // DIR is Ruffle's self-hosted web build, unpacked (its ruffle.js inside),
 // or RUFFLE names it; without one Ruffle is left out. adl is found as
@@ -27,13 +28,16 @@
 //
 // The players take turns, in an order that changes each run, so that none
 // always runs after another; the table gives each section's median in
-// each, and the others against swf2es.
+// each, and the others against swf2es. --json FILE keeps every run's times
+// too, with the commit, the machine and each player's version, and the
+// lines a player traced otherwise than Flash.
 
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { relative, resolve } from "node:path";
+import { cpus, release, totalmem, type } from "node:os";
+import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runFlash } from "../../oracle/flash.ts";
@@ -50,6 +54,8 @@ const out = `${here}out/players`;
 const PLAYERS = ["swf2es", "ruffle", "adl", "flash32", "flash11"] as const;
 type PlayerName = (typeof PLAYERS)[number];
 const DONE = "players: done";
+// What each player's Capabilities.version says, traced before DONE.
+const VERSION = "players: version ";
 // A script may run for this long in any of them: the sections run in one
 // frame, and the slowest player takes minutes over some benchmarks.
 const SCRIPT_SECONDS = 1200;
@@ -83,6 +89,7 @@ function playersReport(...parts):void {
 }
 
 function playersFinish():void {
+  playersReport(${JSON.stringify(VERSION)} + Capabilities.version);
   playersReport(${JSON.stringify(DONE)});
   if (Capabilities.playerType != "StandAlone") {
     return;
@@ -212,6 +219,7 @@ const { values, positionals } = parseArgs({
     wine: { type: "string", default: process.env.WINE ?? "wine" },
     only: { type: "string", default: PLAYERS.join(",") },
     "write-swf": { type: "string" },
+    json: { type: "string" },
   },
 });
 const runs = Number(values.runs);
@@ -237,6 +245,11 @@ const players = values.only
 
     return !missing;
   });
+
+if (players.length === 0) {
+  console.log(`no players: ${PLAYERS.join(", ")}`);
+  process.exit(1);
+}
 
 const benches = positionals.length ? positionals : Object.keys(BENCHES);
 for (const bench of benches) {
@@ -420,7 +433,7 @@ const play: Record<PlayerName, (swf: Uint8Array) => Promise<string[]>> = {
 };
 
 const checked = (lines: string[]) =>
-  lines.filter((l) => l && !l.startsWith("time: ") && l !== DONE);
+  lines.filter((l) => l && !l.startsWith("time: ") && !l.startsWith("players: "));
 const median = (v: number[]) => {
   const s = [...v].sort((x, y) => x - y);
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
@@ -441,6 +454,59 @@ if (values["write-swf"]) {
 // The player's libraries, which its page loads from tests/player/out.
 libraryAbcs();
 
+// What --json writes: every run's times, not only their medians, and what they ran on.
+const git = (...args: string[]) =>
+  execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+const session = {
+  date: new Date().toISOString(),
+  commit: git("rev-parse", "HEAD"),
+  uncommitted: git("status", "--porcelain").length > 0,
+  machine: {
+    cpu: cpus()[0]?.model ?? "",
+    cores: cpus().length,
+    memoryGb: Math.round(totalmem() / 2 ** 30),
+    os: `${type()} ${release()}`,
+  },
+  runs,
+  players: Object.fromEntries(
+    players.map((p) => [p, { version: "", ...playerDetails(p) }]),
+  ) as Record<PlayerName, { version: string; [detail: string]: string }>,
+  benchmarks: {} as Record<
+    string,
+    {
+      times: Partial<Record<PlayerName, Record<string, number[]>>>;
+      /** The player whose lines the others' are held to. */
+      reference: PlayerName;
+      /** The lines a player traced otherwise than it. */
+      differs: Partial<Record<PlayerName, string[]>>;
+    }
+  >,
+};
+
+/** What a player's own version leaves out: the browser it runs in, Ruffle's release, the projector. */
+function playerDetails(player: PlayerName): Record<string, string> {
+  switch (player) {
+    case "swf2es":
+      return { browser: chromeVersion() };
+    case "ruffle":
+      return {
+        browser: chromeVersion(),
+        release: JSON.parse(readFileSync(`${ruffle}/package.json`, "utf8")).version,
+      };
+    case "adl":
+      return {};
+    case "flash32":
+    case "flash11":
+      return { projector: basename(projectors[player] as string) };
+  }
+}
+
+function chromeVersion(): string {
+  return execFileSync(process.env.CHROME ?? "google-chrome", ["--version"], {
+    encoding: "utf8",
+  }).trim();
+}
+
 for (const bench of benches) {
   const { abc, sections: timed } = BENCHES[bench];
   const swf = benchSwf(abc());
@@ -456,6 +522,8 @@ for (const bench of benches) {
       }
 
       traced.set(player, checked(lines));
+      session.players[player].version =
+        lines.find((l) => l.startsWith(VERSION))?.slice(VERSION.length) ?? "";
       const sections = times.get(player) as Map<string, number[]>;
       for (const [section, ms] of timed(lines)) {
         sections.set(section, [...(sections.get(section) ?? []), ms]);
@@ -467,9 +535,11 @@ for (const bench of benches) {
   const referenceName =
     (["flash32", "adl", "flash11"] as const).find((p) => traced.has(p)) ?? players[0];
   const reference = traced.get(referenceName) as string[];
+  const differs: Partial<Record<PlayerName, string[]>> = {};
   for (const [player, lines] of traced) {
     const wrong = lines.filter((l, i) => l !== reference[i]);
     if (wrong.length || lines.length !== reference.length) {
+      differs[player] = wrong;
       console.log(`${bench}: ${player} traces otherwise than ${referenceName}:`);
       for (const line of wrong.slice(0, 10)) {
         console.log(`  ${line}`);
@@ -506,4 +576,18 @@ for (const bench of benches) {
   }
 
   row("total", totals);
+
+  // Written after each benchmark, so that one that fails later loses none before it.
+  session.benchmarks[bench] = {
+    times: Object.fromEntries([...times].map(([p, s]) => [p, Object.fromEntries(s)])),
+    reference: referenceName,
+    differs,
+  };
+  if (values.json) {
+    writeFileSync(resolve(values.json), `${JSON.stringify(session, null, 2)}\n`);
+  }
+}
+
+if (values.json) {
+  console.log(`\n${resolve(values.json)}`);
 }
