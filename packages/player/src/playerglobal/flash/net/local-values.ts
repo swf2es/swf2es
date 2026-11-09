@@ -10,12 +10,27 @@ type Obj = avm2.AsObject;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
-  // The original AMF3 payload is already bounded; AMF0 can expand small integers.
-  const out = new A.Writer(() => null, 8, null, null);
-  const references = new Map<Obj, number>();
-  let next = 1;
-  const write = (value: Value, depth: number): void => {
+/**
+ * AS3 values as AMF0, through the AS2 codec's writer: LocalConnection's
+ * arguments, and Flash Remoting's in AMF0. `limit` bounds strings and
+ * arrays (LocalConnection's message size); `next` is the reference the
+ * first object takes: 1 where the strict array of arguments is itself the
+ * first, as LocalConnection numbers them, 0 for remoting's (adl).
+ */
+export class Amf0Writer {
+  readonly out = new A.Writer(() => null, 8, null, null);
+  private readonly references = new Map<Obj, number>();
+
+  constructor(
+    private readonly rt: avm2.Runtime,
+    private readonly limit = LOCAL_MESSAGE_LIMIT,
+    private next = 1,
+    private readonly what = "LocalConnection",
+  ) {}
+
+  value(value: Value, depth = 0): void {
+    const out = this.out;
+    const rt = this.rt;
     if (depth >= A.MAX_DEPTH - 2) {
       out.bytes(A.UNDEFINED);
       return;
@@ -48,8 +63,8 @@ export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
       const text = rt.toString(
         rt.callProperty(value, rt.publicName(traits.name === "XML" ? "toXMLString" : "toString")),
       );
-      if (text.length > LOCAL_MESSAGE_LIMIT) {
-        throw new RangeError("LocalConnection message too large");
+      if (text.length > this.limit) {
+        throw new RangeError(`${this.what} message too large`);
       }
 
       const bytes = encoder.encode(text);
@@ -59,14 +74,14 @@ export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
       return;
     }
 
-    const seen = references.get(value);
+    const seen = this.references.get(value);
     if (seen !== undefined) {
       out.bytes(A.REFERENCE);
       out.u16(seen);
       return;
     }
 
-    references.set(value, next++);
+    this.references.set(value, this.next++);
     if (value.$a) {
       const array = value.$a as Value[];
       const properties = value.$d;
@@ -75,25 +90,25 @@ export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
         out.u32(array.length);
         for (const key of Object.keys(array)) {
           out.name(key);
-          write(array[Number(key)], depth + 1);
+          this.value(array[Number(key)], depth + 1);
         }
         for (const [key, field] of properties) {
           out.name(key);
-          write(field, depth + 1);
+          this.value(field, depth + 1);
         }
 
         out.bytes(0, 0, A.OBJECT_END);
         return;
       }
 
-      if (array.length > LOCAL_MESSAGE_LIMIT) {
-        throw new RangeError("LocalConnection message too large");
+      if (array.length > this.limit) {
+        throw new RangeError(`${this.what} message too large`);
       }
 
       out.bytes(A.STRICT_ARRAY);
       out.u32(array.length);
       for (let i = 0; i < array.length; i++) {
-        write(array[i], depth + 1);
+        this.value(array[i], depth + 1);
       }
       return;
     }
@@ -128,84 +143,134 @@ export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
       }
 
       out.name(name);
-      write(field, depth + 1);
+      this.value(field, depth + 1);
     }
     out.bytes(0, 0, A.OBJECT_END);
-  };
-  out.bytes(A.STRICT_ARRAY);
-  out.u32(args.length);
-  for (const value of args) {
-    write(value, 0);
   }
-
-  return out.finish();
 }
 
-export function readLocalValues(rt: avm2.Runtime, bytes: Uint8Array): Value[] {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const references: Value[] = [];
-  let at = 0;
-  const u16 = () => {
-    const n = view.getUint16(at);
-    at += 2;
+export function writeLocalValues(rt: avm2.Runtime, args: Value[]): Uint8Array {
+  // The original AMF3 payload is already bounded; AMF0 can expand small integers.
+  const w = new Amf0Writer(rt);
+  w.out.bytes(A.STRICT_ARRAY);
+  w.out.u32(args.length);
+  for (const value of args) {
+    w.value(value);
+  }
+
+  return w.out.finish();
+}
+
+/** AMF0's marker for an AMF3 value after it, which Flash Remoting writes and reads. */
+export const AVMPLUS = 0x11;
+
+/**
+ * AMF0 read as AS3 values from `at`: LocalConnection's arguments, and
+ * Flash Remoting's answers, whose AMF3 values after 0x11 (with `amf3`)
+ * share one AMF3 reader's tables.
+ */
+export class Amf0Reader {
+  at: number;
+  private readonly view: DataView;
+  private readonly references: Value[] = [];
+  private amf3Reader: avm2.Amf3Reader | null = null;
+  private amf3Bytes: avm2.Bytes | null = null;
+
+  constructor(
+    private readonly rt: avm2.Runtime,
+    private readonly bytes: Uint8Array,
+    at = 0,
+    private readonly amf3 = false,
+    private readonly what = "LocalConnection",
+  ) {
+    this.at = at;
+    this.view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+
+  private u16(): number {
+    const n = this.view.getUint16(this.at);
+    this.at += 2;
     return n;
-  };
-  const u32 = () => {
-    const n = view.getUint32(at);
-    at += 4;
+  }
+
+  private u32(): number {
+    const n = this.view.getUint32(this.at);
+    this.at += 4;
     return n;
-  };
-  const utf = (length: number) => {
-    if (length > bytes.length - at) {
-      throw new RangeError("LocalConnection message ended early");
+  }
+
+  private utf(length: number): string {
+    if (length > this.bytes.length - this.at) {
+      throw new RangeError(`${this.what} message ended early`);
     }
-    const text = decoder.decode(bytes.subarray(at, at + length));
-    at += length;
+    const text = decoder.decode(this.bytes.subarray(this.at, this.at + length));
+    this.at += length;
 
     return text;
-  };
-  const name = () => utf(u16());
-  const read = (depth: number): Value => {
-    if (depth >= A.MAX_DEPTH) {
-      throw new RangeError("LocalConnection arguments nested too deeply");
+  }
+
+  name(): string {
+    return this.utf(this.u16());
+  }
+
+  /** An AMF3 value at the reader's place, its tables those of the values before it. */
+  private amf3Value(): Value {
+    if (this.amf3Bytes === null) {
+      this.amf3Bytes = new avm2.Bytes(this.rt, {});
+      this.amf3Bytes.write(this.bytes);
+      this.amf3Reader = new avm2.Amf3Reader(this.rt, this.amf3Bytes);
     }
 
-    const marker = bytes[at++];
+    this.amf3Bytes.position = this.at;
+    const value = (this.amf3Reader as avm2.Amf3Reader).value();
+    this.at = this.amf3Bytes.position;
+    return value;
+  }
+
+  value(depth = 0): Value {
+    const rt = this.rt;
+    const bytes = this.bytes;
+    const view = this.view;
+    if (depth >= A.MAX_DEPTH) {
+      throw new RangeError(`${this.what} arguments nested too deeply`);
+    }
+
+    const marker = bytes[this.at++];
     switch (marker) {
       case A.NUMBER: {
-        const n = view.getFloat64(at);
-        at += 8;
+        const n = view.getFloat64(this.at);
+        this.at += 8;
         return n;
       }
       case A.BOOLEAN:
-        return bytes[at++] !== 0;
+        return bytes[this.at++] !== 0;
       case A.STRING:
-        return name();
+        return this.name();
       case A.LONG_STRING:
-        return utf(u32());
+        return this.utf(this.u32());
       case A.NULL:
         return null;
       case A.UNDEFINED:
       case A.UNSUPPORTED:
         return undefined;
       case A.REFERENCE:
-        return references[u16()];
+        return this.references[this.u16()];
       case A.DATE: {
-        const time = view.getFloat64(at);
-        at += 10;
+        const time = view.getFloat64(this.at);
+        this.at += 10;
         return rt.construct(rt.classNamed("Date"), time);
       }
       case A.XML:
-        return rt.construct(rt.classNamed("flash.xml::XMLDocument"), utf(u32()));
+        return rt.construct(rt.classNamed("flash.xml::XMLDocument"), this.utf(this.u32()));
       case A.STRICT_ARRAY: {
-        const count = u32();
-        if (count > bytes.length - at) {
-          throw new RangeError("LocalConnection message ended early");
+        const count = this.u32();
+        if (count > bytes.length - this.at) {
+          throw new RangeError(`${this.what} message ended early`);
         }
         const result = rt.newArray([]);
-        references.push(result);
+        this.references.push(result);
         for (let i = 0; i < count; i++) {
-          result.$a.push(read(depth + 1));
+          result.$a.push(this.value(depth + 1));
         }
 
         return result;
@@ -215,19 +280,19 @@ export function readLocalValues(rt: avm2.Runtime, bytes: Uint8Array): Value[] {
       case A.ECMA_ARRAY: {
         let result: Obj;
         if (marker === A.TYPED_OBJECT) {
-          result = rt.allocate(rt.classByAlias(name(), true)) ?? rt.newObject([]);
+          result = rt.allocate(rt.classByAlias(this.name(), true)) ?? rt.newObject([]);
         } else {
           result = marker === A.ECMA_ARRAY ? rt.newArray([]) : rt.newObject([]);
         }
-        const length = marker === A.ECMA_ARRAY ? u32() : 0;
-        references.push(result);
+        const length = marker === A.ECMA_ARRAY ? this.u32() : 0;
+        this.references.push(result);
         for (;;) {
-          const key = name();
-          if (key === "" && bytes[at] === A.OBJECT_END) {
-            at++;
+          const key = this.name();
+          if (key === "" && bytes[this.at] === A.OBJECT_END) {
+            this.at++;
             break;
           }
-          rt.setProperty(result, rt.publicName(key), read(depth + 1));
+          rt.setProperty(result, rt.publicName(key), this.value(depth + 1));
         }
         if (marker === A.ECMA_ARRAY && length > result.$a.length) {
           result.$a.length = length;
@@ -235,11 +300,20 @@ export function readLocalValues(rt: avm2.Runtime, bytes: Uint8Array): Value[] {
 
         return result;
       }
+      case AVMPLUS:
+        if (this.amf3) {
+          return this.amf3Value();
+        }
+
+        throw new RangeError(`Invalid ${this.what} AMF0 marker`);
       default:
-        throw new RangeError("Invalid LocalConnection AMF0 marker");
+        throw new RangeError(`Invalid ${this.what} AMF0 marker`);
     }
-  };
-  const result = read(0) as Obj;
+  }
+}
+
+export function readLocalValues(rt: avm2.Runtime, bytes: Uint8Array): Value[] {
+  const result = new Amf0Reader(rt, bytes).value() as Obj;
 
   return result.$a as Value[];
 }

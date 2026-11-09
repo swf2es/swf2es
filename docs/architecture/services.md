@@ -413,8 +413,20 @@ Once `getEnhancedMicrophone` is called, whatever it gives, every
 Microphone shares one MicrophoneEnhancedOptions, copied in and out.
 NetConnection has its local mode, `connect(null)`, with Flash's status
 events and its properties, ArgumentError 2126 for those of a connection
-it does not have; an HTTP URI is kept, and a `call` over it, Flash
-Remoting, is not supported yet. `fscommand` goes to the host's
+it does not have; and Flash Remoting over an HTTP URI
+(`playerglobal/flash/net/remoting.ts`), as adl sends and reads it: a
+frame's calls POSTed together at its end, numbered `/1`, `/2`... on the
+connection from each `connect`, with its headers (one of a name, the
+last set). In AMF0 every value is AMF0, a call's arguments one table of
+references whose first object is 0; in AMF3, the default, strings,
+numbers, booleans, null and undefined stay AMF0, and the rest is 0x11
+and AMF3, a call's arguments sharing its tables, a header's value its
+own. An answer's `/n/onResult` and `/n/onStatus` go to the call's
+Responder; an HTTP error is `Call.Failed` ("HTTP: Status n", or "HTTP:
+Failed" with no answer), one that is no packet `Call.BadVersion`, an
+empty one nothing; a call on a local connection, or on none, sends
+nothing. In a browser the gateway must allow the page's origin (CORS).
+`fscommand` goes to the host's
 `fsCommand` if it gives one; the SWF chooses both strings, so a host must
 never evaluate them or use them as a URL or as HTML. `Stage.color` is the
 SWF's background until set, opaque; `Player.background` follows it, and
