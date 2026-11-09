@@ -9,15 +9,14 @@ import type { ClassHook } from "../hooks.js";
 import type { ShellThread } from "../options.js";
 import type { Runtime } from "../runtime.js";
 import { setStaticVar } from "../traits.js";
+import { fromUtf8, utf8 } from "../utf8.js";
 import {
   byteArrayCapacity,
   bytesOf,
-  fromUtf8,
   GLOBAL_MEMORY_MIN_SIZE,
   knownSharedByteArray,
   setDomainMemory,
   sharedByteArray,
-  utf8,
 } from "./bytearray.js";
 import { syncObject, syncOf, syncRef } from "./concurrent.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
