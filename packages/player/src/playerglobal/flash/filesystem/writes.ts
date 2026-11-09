@@ -13,7 +13,7 @@ import { NativePaths } from "./paths.js";
 type AsObject = avm2.AsObject;
 
 /** "Error #id: message", as an IOErrorEvent's text begins. */
-export function errorText(id: number): string {
+function errorText(id: number): string {
   return `Error #${id}: ${avm2.errorMessages[id]}`;
 }
 

@@ -782,12 +782,16 @@ export class Runtime {
     if (!traits) {
       traits = this.builtinClass(name).$it as Traits;
       this.builtinTraitsByName.set(name, traits);
-      if (name === "String") {
-        this.stringTraits = traits;
-      } else if (name === "Number") {
-        this.numberTraits = traits;
-      } else if (name === "Boolean") {
-        this.booleanTraits = traits;
+      switch (name) {
+        case "String":
+          this.stringTraits = traits;
+          break;
+        case "Number":
+          this.numberTraits = traits;
+          break;
+        case "Boolean":
+          this.booleanTraits = traits;
+          break;
       }
     }
 

@@ -30,24 +30,34 @@ export function readAll(bytes: Uint8Array, kinds: Uint8Array): Float64Array {
   for (let i = 0; i < kinds.length; i++) {
     const kind = kinds[i];
     let value: f64 = 0;
-    if (kind === U8) {
-      value = r.u8();
-    } else if (kind === U16) {
-      value = r.u16();
-    } else if (kind === S24) {
-      value = r.s24();
-    } else if (kind === U30) {
-      value = r.u30();
-    } else if (kind === U32) {
-      value = r.u32();
-    } else if (kind === S32) {
-      value = r.s32();
-    } else if (kind === D64) {
-      value = r.d64();
-    } else if (kind === UTF8) {
-      const length = r.utf8Length();
-      r.skip(length);
-      value = length;
+    switch (kind) {
+      case U8:
+        value = r.u8();
+        break;
+      case U16:
+        value = r.u16();
+        break;
+      case S24:
+        value = r.s24();
+        break;
+      case U30:
+        value = r.u30();
+        break;
+      case U32:
+        value = r.u32();
+        break;
+      case S32:
+        value = r.s32();
+        break;
+      case D64:
+        value = r.d64();
+        break;
+      case UTF8: {
+        const length = r.utf8Length();
+        r.skip(length);
+        value = length;
+        break;
+      }
     }
     values[i] = value;
   }

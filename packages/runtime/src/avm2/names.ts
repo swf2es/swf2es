@@ -11,9 +11,6 @@ import { NO_CACHE, type PropertyCache } from "./property-cache.js";
 /** Namespace kinds, numbered as the compiler's NS_* constants. */
 export const NS_Public = 0;
 export const NS_PackageInternal = 1;
-export const NS_Protected = 2;
-export const NS_Explicit = 3;
-export const NS_StaticProtected = 4;
 export const NS_Private = 5;
 
 export class Namespace {
@@ -87,7 +84,6 @@ export const CONSTANT_Multiname = 0x09;
 export const CONSTANT_MultinameA = 0x0e;
 export const CONSTANT_MultinameL = 0x1b;
 export const CONSTANT_MultinameLA = 0x1c;
-export const CONSTANT_TypeName = 0x1d;
 
 /**
  * A name as a property lookup uses it: its namespaces, each with the API

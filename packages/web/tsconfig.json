@@ -11,7 +11,6 @@
     { "path": "../format" },
     { "path": "../codegen" },
     { "path": "../player" },
-    { "path": "../player-hosts" },
-    { "path": "../native" }
+    { "path": "../player-hosts" }
   ]
 }

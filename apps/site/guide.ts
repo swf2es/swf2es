@@ -8,7 +8,7 @@ import { dirname, join, normalize } from "node:path/posix";
 import type { Loader } from "astro/loaders";
 
 /** The guide, by its path in the repository. */
-export const GUIDE = "docs/guide.md";
+const GUIDE = "docs/guide.md";
 
 export interface GuidePage {
   /** Its path under the site, "docs/<slug>" by its section's heading ("docs" for a guide of none). */
@@ -20,7 +20,7 @@ export interface GuidePage {
 }
 
 /** A heading's anchor as GitHub and Astro make it, before a repeated one is numbered. */
-export function slug(heading: string): string {
+function slug(heading: string): string {
   return heading
     .toLowerCase()
     .trim()

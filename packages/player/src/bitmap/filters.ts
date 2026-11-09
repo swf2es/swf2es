@@ -69,19 +69,16 @@ function spreadOf(blur: number, quality: number, kind: string): number {
 
 /** How far a filter's rect reaches past what it filters, each way, before any offset: [x, y], whole pixels. */
 function reach(f: Filter): [number, number] {
-  if (f.kind === "convolution") {
-    return [f.matrixX >> 1, f.matrixY >> 1];
-  }
-
-  if (f.kind === "colorMatrix") {
-    return [0, 0];
-  }
-
-  // A displacement map's reach, by its scale, as adl reckons it: a quarter of it, whole; none with no map.
-  if (f.kind === "displacementMap") {
-    return f.mapBitmap
-      ? [Math.floor(Math.abs(f.scaleX) / 4) || 0, Math.floor(Math.abs(f.scaleY) / 4) || 0]
-      : [0, 0];
+  switch (f.kind) {
+    case "convolution":
+      return [f.matrixX >> 1, f.matrixY >> 1];
+    case "colorMatrix":
+      return [0, 0];
+    // A displacement map's reach, by its scale, as adl reckons it: a quarter of it, whole; none with no map.
+    case "displacementMap":
+      return f.mapBitmap
+        ? [Math.floor(Math.abs(f.scaleX) / 4) || 0, Math.floor(Math.abs(f.scaleY) / 4) || 0]
+        : [0, 0];
   }
 
   return [spreadOf(f.blurX, f.quality, f.kind), spreadOf(f.blurY, f.quality, f.kind)];
@@ -352,34 +349,33 @@ export function applyFilter(
     return true;
   }
 
-  if (f.kind === "convolution" && (f.matrixX === 0 || f.matrixY === 0)) {
-    copyEmpty(dest, source, rect, out, shown, mx, my);
-    return true;
-  }
+  switch (f.kind) {
+    case "convolution": {
+      if (f.matrixX === 0 || f.matrixY === 0) {
+        copyEmpty(dest, source, rect, out, shown, mx, my);
+        return true;
+      }
 
-  if (f.kind === "convolution") {
-    const pixels = convolve(source, shown, f, dest.transparent);
-    if (pixels) {
-      write(dest, pixels, shown, shown, mx, my);
+      const pixels = convolve(source, shown, f, dest.transparent);
+      if (pixels) {
+        write(dest, pixels, shown, shown, mx, my);
+      }
+
+      return true;
     }
+    case "colorMatrix":
+      colorMatrix(dest, source, rect, dx, dy, f.matrix);
+      return true;
+    case "blur": {
+      // What is shown, blurred as far round it as the blur reaches into it, which may be past the
+      // rect, whose edge cuts what is written alone.
+      const pixels = bitmapKernel()?.blur(source, shown, f.blurX, f.blurY, f.quality);
+      if (pixels) {
+        write(dest, pixels, shown, shown, mx, my);
+      }
 
-    return true;
-  }
-
-  if (f.kind === "colorMatrix") {
-    colorMatrix(dest, source, rect, dx, dy, f.matrix);
-    return true;
-  }
-
-  if (f.kind === "blur") {
-    // What is shown, blurred as far round it as the blur reaches into it, which may be past the
-    // rect, whose edge cuts what is written alone.
-    const pixels = bitmapKernel()?.blur(source, shown, f.blurX, f.blurY, f.quality);
-    if (pixels) {
-      write(dest, pixels, shown, shown, mx, my);
+      return true;
     }
-
-    return true;
   }
 
   // The source's pixels where they are shown, and its alpha blurred and read
