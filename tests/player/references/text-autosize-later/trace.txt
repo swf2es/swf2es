@@ -1,0 +1,14 @@
+width, wordWrap: kept, wrapped
+width, width read, wordWrap: fitted
+width, height read, wordWrap: fitted
+width, numLines read, wordWrap: kept, wrapped
+width, textWidth read, wordWrap: kept, wrapped
+width, getBounds, wordWrap: fitted
+width, parent's width, wordWrap: fitted
+width, new text, wordWrap: kept, wrapped
+width, x, wordWrap: fitted
+width, then read: fitted
+width, autoSize again, wordWrap: kept, wrapped
+width, multiline, wordWrap: kept, wrapped
+width, a frame drawn, wordWrap: fitted
+width, a frame drawn, read: fitted

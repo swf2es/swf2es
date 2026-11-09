@@ -54,7 +54,7 @@ export class Lifecycle {
    * order, as Flash dispatches them.
    */
   added(display: DisplayObject): void {
-    this.orphans.delete(display.serial);
+    this.dropOrphan(display.serial);
     this.dispatch(display.object, "added", true);
     if (this.onStage(display)) {
       this.eachObject(display, (o) => this.dispatch(o, "addedToStage", false));
@@ -152,6 +152,7 @@ export class Lifecycle {
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
       this.orphans.set(display.serial, { ref: display.ref, keep, since: this.s.frames });
+      this.sortedOrphans = null;
       scriptWork.changes++;
     }
   }
@@ -170,27 +171,48 @@ export class Lifecycle {
     }
   }
 
-  /** The orphans still there, newest first, as Flash runs their frames. */
-  orphanRoots(): DisplayObject[] {
-    const roots: DisplayObject[] = [];
-    for (const [serial, orphan] of this.orphans) {
-      const display = orphan.ref.deref();
+  /**
+   * The orphans, newest first, as Flash runs their frames: kept sorted
+   * until one comes or goes, as the player walks them twice a frame.
+   */
+  private sortedOrphans: { serial: number; ref: WeakRef<DisplayObject> }[] | null = null;
+
+  private dropOrphan(serial: number): void {
+    if (this.orphans.delete(serial)) {
+      this.sortedOrphans = null;
+    }
+  }
+
+  /** Each orphan still there, newest first, to `f`, which must leave the orphans as they are. */
+  eachOrphanRoot(f: (display: DisplayObject) => void): void {
+    let sorted = this.sortedOrphans;
+    if (!sorted) {
+      sorted = [];
+      for (const [serial, orphan] of this.orphans) {
+        sorted.push({ serial, ref: orphan.ref });
+      }
+
+      sorted.sort((a, b) => b.serial - a.serial);
+      this.sortedOrphans = sorted;
+    }
+
+    for (let i = 0; i < sorted.length; i++) {
+      const display = sorted[i].ref.deref();
       if (!display) {
-        this.orphans.delete(serial);
+        this.dropOrphan(sorted[i].serial);
         continue;
       }
 
-      roots.push(display);
+      f(display);
     }
-
-    return roots.sort((a, b) => b.serial - a.serial);
   }
 
   /** Whether `display` or anything under it listens for a frame's broadcast events. */
   private hearsFrames(display: DisplayObject): boolean {
     if (display.object) {
-      for (const targets of this.s.broadcasts.values()) {
-        if (targets.has(display.object)) {
+      const sets = this.s.broadcastSets;
+      for (let i = 0; i < sets.length; i++) {
+        if (sets[i].has(display.object)) {
           return true;
         }
       }
@@ -211,7 +233,7 @@ export class Lifecycle {
    * does: timelines stopped, frame broadcasts no longer heard, no orphan.
    */
   stopAll(display: DisplayObject): void {
-    this.orphans.delete(display.serial);
+    this.dropOrphan(display.serial);
     stopTimelineSoundsUnder(this.s, display);
     const stop = (o: DisplayObject) => {
       if (o instanceof MovieClip) {
@@ -260,27 +282,28 @@ export class Lifecycle {
     // What the timeline took off this frame has had its frame; it stops here. So
     // does one that has played ORPHAN_FRAMES off the list, but for one that
     // listens for a frame's events, which hold it in Flash too.
-    for (const [serial, orphan] of this.orphans) {
+    // forEach, as for-of makes an entry for each of what may be thousands, every frame.
+    this.orphans.forEach((orphan, serial) => {
       if (!orphan.keep) {
-        this.orphans.delete(serial);
-        continue;
+        this.dropOrphan(serial);
+        return;
       }
 
       if (this.s.frames - orphan.since < ORPHAN_FRAMES) {
-        continue;
+        return;
       }
 
       const display = orphan.ref.deref();
       if (display && this.hearsFrames(display)) {
         orphan.since = this.s.frames;
-        continue;
+        return;
       }
 
-      this.orphans.delete(serial);
+      this.dropOrphan(serial);
       if (display) {
         stopTimelineSoundsUnder(this.s, display);
       }
-    }
+    });
     // What scripts made this frame and left off the display list plays on as an orphan.
     const made = this.madeThisFrame.splice(0);
     if (made.length > 0) {

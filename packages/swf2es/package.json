@@ -1,6 +1,6 @@
 {
   "name": "swf2es",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Plays SWF files on a web page from one <script> tag: the <swf2es-player> element, replaceFlash and ExternalInterface, bundled for a CDN",
   "keywords": [
     "swf",
