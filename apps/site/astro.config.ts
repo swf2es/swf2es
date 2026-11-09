@@ -6,7 +6,9 @@ import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { compatibility } from "./compatibility.ts";
 import {
+  AS3PB,
   AVMPLUS,
+  as3pbCommit,
   avmplus,
   BASE,
   blob,
@@ -47,6 +49,7 @@ const facts = virtual("virtual:swf2es/facts", {
   blob,
   avmplusSource: avmplus ? `${AVMPLUS}/tree/${avmplus}` : AVMPLUS,
   avmplusCommit: avmplus ? avmplus.slice(0, 12) : "its default branch",
+  as3pbSource: as3pbCommit ? `${AS3PB}/tree/${as3pbCommit}` : AS3PB,
   mpl: mplFiles(),
   ruffle: ruffleFiles(),
 });
