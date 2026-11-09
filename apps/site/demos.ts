@@ -220,8 +220,7 @@ function as3pbBench(out: string): Demo {
   return {
     file: "as3pb-bench.swf",
     title: "as3pb benchmark (ActionScript 3)",
-    description:
-      "Protocol Buffers over ByteArray and domain memory against AMF3 and JSON, timed as it runs; Run Benchmark runs it again.",
+    description: "Protocol Buffers over ByteArray and domain memory against AMF3 and JSON.",
     source: `${AS3PB}/blob/${as3pbCommit || "main"}/runtime/test/bench/Main.as`,
     bytes: w.swf({
       width: 640,
