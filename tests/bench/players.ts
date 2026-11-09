@@ -28,9 +28,10 @@
 //
 // The players take turns, in an order that changes each run, so that none
 // always runs after another; the table gives each section's median in
-// each, and the others against swf2es. --json FILE keeps every run's times
-// too, with the commit, the machine and each player's version, and the
-// lines a player traced otherwise than Flash.
+// each, and the others against swf2es. --json FILE keeps every run: its
+// times and all it traced, as3pb's sizes and ratios too, with the commit,
+// the machine, each player's version, and the lines a player traced
+// otherwise than Flash.
 
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -475,6 +476,8 @@ const session = {
     string,
     {
       times: Partial<Record<PlayerName, Record<string, number[]>>>;
+      /** Everything each run traced, in order: as3pb's sizes and ratios as well as its times. */
+      output: Partial<Record<PlayerName, string[][]>>;
       /** The player whose lines the others' are held to. */
       reference: PlayerName;
       /** The lines a player traced otherwise than it. */
@@ -512,6 +515,7 @@ for (const bench of benches) {
   const swf = benchSwf(abc());
   const times = new Map<PlayerName, Map<string, number[]>>(players.map((p) => [p, new Map()]));
   const traced = new Map<PlayerName, string[]>();
+  const output = new Map<PlayerName, string[][]>(players.map((p) => [p, []]));
   for (let run = 0; run < runs; run++) {
     // Each run starts at another player.
     const order = players.map((_, i) => players[(i + run) % players.length]);
@@ -522,6 +526,7 @@ for (const bench of benches) {
       }
 
       traced.set(player, checked(lines));
+      output.get(player)?.push(lines);
       session.players[player].version =
         lines.find((l) => l.startsWith(VERSION))?.slice(VERSION.length) ?? "";
       const sections = times.get(player) as Map<string, number[]>;
@@ -580,6 +585,7 @@ for (const bench of benches) {
   // Written after each benchmark, so that one that fails later loses none before it.
   session.benchmarks[bench] = {
     times: Object.fromEntries([...times].map(([p, s]) => [p, Object.fromEntries(s)])),
+    output: Object.fromEntries(output),
     reference: referenceName,
     differs,
   };
