@@ -19,7 +19,7 @@
 // draws: the samples are then each resolved from the multisampled targets,
 // blends' backdrops and the stage alike, before the page averages them.
 import { createCodegen } from "@swf2es/codegen";
-import { isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   Avm1,
   Container,
@@ -95,7 +95,9 @@ async function scriptingFor(
   } = {},
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
-  if (!isAs3(swf) || !swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2)) {
+  // As the element: a SWF with no code that defines buttons or fields gets its VM for their input.
+  const code = swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
+  if (!isAs3(swf) || !(code || definesInput(swf))) {
     return null;
   }
 
@@ -286,7 +288,7 @@ async function avm1For(
   socket: SocketStep[] | null,
 ): Promise<Avm1 | null> {
   const swf = readSwf(bytes);
-  if (isAs3(swf) || readActions(swf).blocks.length === 0) {
+  if (isAs3(swf) || (readActions(swf).blocks.length === 0 && !definesInput(swf))) {
     return null;
   }
 

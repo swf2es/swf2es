@@ -1,7 +1,7 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
-import { isAs3, readActions, readSwf, type Swf, tags } from "@swf2es/format";
+import { definesInput, isAs3, readActions, readSwf, type Swf, tags } from "@swf2es/format";
 import {
   type AirApplication,
   Avm1,
@@ -565,8 +565,11 @@ export class Swf2esPlayerElement extends ElementBase {
         descriptor?.height ?? Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
       ];
       this.#size();
+      // A SWF with no code still needs its VM for the input its buttons and fields take.
       const scripted =
-        isAs3(swf) && swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2);
+        isAs3(swf) &&
+        (definesInput(swf) ||
+          swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2));
       if (scripted) {
         const [codegen, abcs] = await Promise.all([
           codegenForPlayer(),
@@ -603,7 +606,7 @@ export class Swf2esPlayerElement extends ElementBase {
 
       // An AVM1 SWF's actions, compiled by the same codegen.
       let avm1: Avm1 | null = null;
-      if (!isAs3(swf) && readActions(swf).blocks.length > 0) {
+      if (!isAs3(swf) && (readActions(swf).blocks.length > 0 || definesInput(swf))) {
         const codegen = await codegenForPlayer();
         if (!current()) {
           return;

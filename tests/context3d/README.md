@@ -950,12 +950,11 @@ checks cross-origin isolation and the green presentation after the worker reply.
 It also aborts the optional backend import: the movie must keep playing with
 ErrorEvent #3702, and a page reload must allow the backend to load successfully.
 
-Live Stage getters, setter validation, resize events and leading-edge alignment
-are gated by the Context3D opt-in. Default playback keeps dev's ignored Stage
-setters, fixed getters and authored dimensions. The host regression loads the
-same StageLayout fixture without a surface factory and checks the 96×96 Stage
-in a 192×144 embed, no RESIZE and no artwork in the margin. Shared embedding
-alignment retains the old LR/TB centering for ordinary AS3 and AVM1 loads.
+Live Stage getters, setter validation and resize events hold without the
+Context3D opt-in too: the host loads the same StageLayout fixture without a
+surface factory and checks noScale's 192×144 Stage in a 192×144 embed, its one
+RESIZE, and the artwork past the stage in the margin. Only leading-edge
+alignment is the opt-in's: ordinary AS3 and AVM1 loads keep the LR/TB centering.
 
 Pointer, touch and context-menu picking use the translated viewport rectangle.
 The host test clicks the visible negative-coordinate artwork under bottom-right
