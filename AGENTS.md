@@ -173,8 +173,9 @@ node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11
                               # the enumeration, dictionary, vector and as3pb benchmarks as SWFs, timed
                               # in swf2es and Ruffle's web build (DIR, or RUFFLE) in Chrome, in adl
                               # -nodebug, and in Flash Player's Windows projectors under Wine (FLASH32,
-                              # FLASH11, WINE); --json keeps every run with the commit, machine and
-                              # versions; --write-swf only writes the SWFs
+                              # FLASH11, WINE); drawing, scenes at three loads, their fps, frame times
+                              # and memory (not in adl); --json keeps every run with the commit,
+                              # machine and versions; --write-swf only writes the SWFs
 node tests/bench/players.ts --only swf2es,adl vector   # indexed reads, writes, push and pop on
                               # Vectors of int, Number, String, Object and a class, and on Arrays
 ```

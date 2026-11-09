@@ -8,7 +8,14 @@
 // against playerglobal into a SWF whose document class is empty: their
 // script runs as it is loaded, its sections tracing their times
 // ("time: dense1k-in 120") by the Date or getTimer, which each player keeps
-// the same way. Their other lines must be as Flash traces them.
+// the same way. Their other lines must be as Flash traces them. And
+// drawing (drawing/Drawing.as): scenes of vectors, bitmaps, filters, text
+// and redrawn graphics at three loads each, played at 60 frames a second
+// on the GPU, swf2es in its browser build's element as a page has it; each
+// level's fps and frame times, by getTimer, and memory: what System says,
+// and in Chrome its JS heap and its ArrayBuffers apart (wasm's memory is
+// there; the GPU's and other processes' nowhere), not to be set against
+// Flash's figures. adl, not Flash Player, does not draw them.
 //
 //   node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11 EXE]
 //     [--wine COMMAND] [--only swf2es,ruffle,adl,flash32,flash11] [--json FILE] [--write-swf DIR]
@@ -34,7 +41,7 @@
 // otherwise than Flash.
 
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { cpus, release, totalmem, type } from "node:os";
@@ -112,15 +119,22 @@ function playersFinish():void {
 const MAIN = "package {\nimport flash.display.Sprite;\npublic class Main extends Sprite {}\n}\n";
 
 interface Bench {
+  /**
+   * A script's run as it loads, in one frame, timed by its sections; or
+   * drawing (drawing/Drawing.as), frames played in real time at 60 a second
+   * on the GPU, which adl, not Flash Player, is left out of.
+   */
+  kind: "script" | "drawing";
   /** The ABC: the benchmark with the document class, and the report before it. */
   abc(): Uint8Array;
-  /** Each timed section's name and milliseconds, in the order traced. */
+  /** Each section's name and value, in the order traced: milliseconds, or a drawing's measures. */
   sections(lines: string[]): (readonly [string, number])[];
 }
 
 /** One of the benchmarks here: a script that times its sections by the Date. */
 function script(path: string): Bench {
   return {
+    kind: "script",
     abc() {
       const source = readFileSync(`${here}${path}`, "utf8").replace(/\btrace\(/g, "playersReport(");
       const name = `Players${path.replace(/^.*\//, "").replace(/\.as$/, "")}`;
@@ -139,6 +153,7 @@ function script(path: string): Bench {
 
 /** as3pb's benchmark: its library and messages as -in files, in the order avmshell's build lists them. */
 const as3pb: Bench = {
+  kind: "script",
   abc() {
     const dir = `${root}tests/programs/as3pb/`;
     const sources = readFileSync(`${dir}runtime/test/bench/shell-sources.txt`, "utf8")
@@ -203,11 +218,47 @@ playersFinish();
   },
 };
 
+/**
+ * Drawing's scenes, each at three loads: a line a level, "frames: vectors-500 fps 59.9 p50 17 ...",
+ * and in a browser "memory: vectors-500 heap 1234 buffers 5678" after it (heapAfter).
+ */
+const drawing: Bench = {
+  kind: "drawing",
+  abc() {
+    const source = readFileSync(`${here}drawing/Drawing.as`, "utf8");
+    return compileScripts([{ name: "PlayersDrawing", source: `${source}\n${REPORT}` }], out).get(
+      "PlayersDrawing",
+    ) as Uint8Array;
+  },
+  // Frame times in milliseconds, memory in MB; a player that keeps no memory figure has none.
+  sections(lines) {
+    const found: (readonly [string, number])[] = [];
+    for (const l of lines) {
+      const [kind, level, ...pairs] = l.split(" ");
+      if (kind !== "frames:" && kind !== "memory:") {
+        continue;
+      }
+
+      for (let i = 0; i + 1 < pairs.length; i += 2) {
+        const value = Number(pairs[i + 1]);
+        if (kind === "frames:" && pairs[i] !== "total" && pairs[i] !== "private") {
+          found.push([`${level} ${pairs[i]}`, value]);
+        } else if (value > 0) {
+          found.push([`${level} ${pairs[i]}-mb`, Math.round((value / 2 ** 20) * 10) / 10]);
+        }
+      }
+    }
+
+    return found;
+  },
+};
+
 const BENCHES: Record<string, Bench> = {
   enumeration: script("enumeration/Enumeration.as"),
   dictionary: script("dictionary/DictionaryAccess.as"),
   vector: script("vector/VectorAccess.as"),
   as3pb,
+  drawing,
 };
 
 const { values, positionals } = parseArgs({
@@ -265,15 +316,16 @@ for (const bench of benches) {
  * Player 11.5's, for the APIs as3pb uses (JSON is 11's): Flash shows a SWF
  * only those of its version.
  */
-function benchSwf(abc: Uint8Array): Uint8Array {
+function benchSwf(abc: Uint8Array, kind: Bench["kind"]): Uint8Array {
   const limits = new Uint8Array(4);
   new DataView(limits.buffer).setUint16(0, 1000, true);
   new DataView(limits.buffer).setUint16(2, SCRIPT_SECONDS, true);
+  const drawn = kind === "drawing";
   return w.swf({
     version: 18,
-    width: 100,
-    height: 50,
-    frameRate: 24,
+    width: drawn ? 800 : 100,
+    height: drawn ? 600 : 50,
+    frameRate: drawn ? 60 : 24,
     frameCount: 2,
     tags: [
       w.fileAttributes(true),
@@ -287,7 +339,11 @@ function benchSwf(abc: Uint8Array): Uint8Array {
   });
 }
 
-async function playSwf2es(swf: Uint8Array): Promise<string[]> {
+async function playSwf2es(swf: Uint8Array, kind: Bench["kind"]): Promise<string[]> {
+  if (kind === "drawing") {
+    return playSwf2esLive(swf);
+  }
+
   const [result] = await runPlayer([{ swf, frames: 2, capture: [] }], {
     timeout: SCRIPT_SECONDS * 1000,
   });
@@ -298,10 +354,119 @@ async function playSwf2es(swf: Uint8Array): Promise<string[]> {
   return result.trace;
 }
 
-async function playRuffle(swf: Uint8Array): Promise<string[]> {
+/**
+ * A level's line from Drawing.as, the page's memory after it, which a SWF in
+ * a browser cannot read: the JS heap, and the ArrayBuffers' backing stores
+ * apart, where wasm memory is (Ruffle's nearly all). The GPU's is in
+ * neither.
+ */
+function heapAfter(
+  line: string,
+  send: <R>(method: string, params?: object) => Promise<R>,
+): Promise<string> | null {
+  const level = /^frames: (\S+)/.exec(line)?.[1];
+  if (!level) {
+    return null;
+  }
+
+  return send<{ usedSize: number; backingStorageSize?: number }>("Runtime.getHeapUsage").then(
+    ({ usedSize, backingStorageSize = 0 }) =>
+      `memory: ${level} heap ${usedSize} buffers ${backingStorageSize}`,
+  );
+}
+
+/**
+ * The console's lines on the page, the memory after each level's, until
+ * DONE, an error, or SCRIPT_SECONDS: the evaluation's timeout does not cover
+ * a wait for the console.
+ */
+function consoleLines(
+  listen: (method: string, listener: (params: Record<string, unknown>) => void) => void,
+  send: <R>(method: string, params?: object) => Promise<R>,
+): Promise<string[]> {
+  const lines: string[] = [];
+  const heaps: Promise<string>[] = [];
+  return new Promise((done, failed) => {
+    const timer = setTimeout(
+      () => failed(new Error(`no ${DONE} in ${SCRIPT_SECONDS} s`)),
+      SCRIPT_SECONDS * 1000,
+    );
+    listen("Runtime.consoleAPICalled", (params) => {
+      if (params.type !== "log") {
+        return;
+      }
+
+      const args = params.args as { value?: unknown; description?: string }[];
+      const line = args.map((arg) => String(arg.value ?? arg.description ?? "")).join(" ");
+      lines.push(line);
+      const heap = heapAfter(line, send);
+      if (heap) {
+        heaps.push(heap);
+      }
+
+      if (line === DONE) {
+        clearTimeout(timer);
+        Promise.all(heaps).then((found) => done([...lines, ...found]), failed);
+      }
+    });
+    listen("Runtime.exceptionThrown", (params) => {
+      const details = params.exceptionDetails as {
+        exception?: { description?: string };
+        text: string;
+      };
+      clearTimeout(timer);
+      failed(new Error(details.exception?.description ?? details.text));
+    });
+  });
+}
+
+/**
+ * Drawing in swf2es as a page has it: the browser build's <swf2es-player>,
+ * playing as the display's frames come, on the GPU. The SWF's traces reach
+ * the console.
+ */
+async function playSwf2esLive(swf: Uint8Array): Promise<string[]> {
+  const dist = `${root}packages/swf2es/dist/`;
+  if (!existsSync(`${dist}swf2es.js`)) {
+    throw new Error(`swf2es: no ${dist}swf2es.js; pnpm build makes it`);
+  }
+
+  const dir = `${out}/live/`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}bench.swf`, swf);
   return withPage(
     "runSwf",
-    async (evaluate) => {
+    async (evaluate, send, _fresh, listen) => {
+      const lines = consoleLines(listen, send);
+      const answer = await evaluate(`(async () => {
+        await import("/swf2es/swf2es.js");
+        document.body.innerHTML =
+          '<swf2es-player src="/bench/bench.swf" width="800" height="600"></swf2es-player>';
+      })()`);
+      if (answer.exception) {
+        throw new Error(`swf2es: ${answer.exception}`);
+      }
+
+      return lines;
+    },
+    true,
+    {
+      timeout: SCRIPT_SECONDS * 1000,
+      mounts: [
+        ["/swf2es/", dist],
+        ["/bench/", dir],
+      ],
+    },
+  );
+}
+
+async function playRuffle(swf: Uint8Array, kind: Bench["kind"]): Promise<string[]> {
+  const drawn = kind === "drawing";
+  return withPage(
+    "runSwf",
+    async (evaluate, send, _fresh, listen) => {
+      // A drawing's lines come by the console too, for the heap after each level.
+      const logged = drawn ? consoleLines(listen, send) : null;
       const answer = await evaluate<string[]>(`(async () => {
         await new Promise((loaded, failed) => {
           const script = document.createElement("script");
@@ -314,11 +479,12 @@ async function playRuffle(swf: Uint8Array): Promise<string[]> {
         let finish;
         const finished = new Promise((f) => (finish = f));
         const player = window.RufflePlayer.newest().createPlayer();
-        player.style.cssText = "width: 100px; height: 50px";
+        player.style.cssText = "${drawn ? "width: 800px; height: 600px" : "width: 100px; height: 50px"}";
         document.body.append(player);
         // Set before the load too: the script runs as the first frame does.
         const observe = (line) => {
           lines.push(line);
+          ${drawn ? "console.log(line);" : ""}
           if (line === ${JSON.stringify(DONE)}) {
             finish();
           }
@@ -342,9 +508,9 @@ async function playRuffle(swf: Uint8Array): Promise<string[]> {
         throw new Error(`Ruffle: ${answer.exception}`);
       }
 
-      return answer.value as string[];
+      return logged ? await logged : (answer.value as string[]);
     },
-    false,
+    drawn,
     { timeout: SCRIPT_SECONDS * 1000, mounts: [["/ruffle/", `${ruffle}/`]] },
   );
 }
@@ -425,16 +591,17 @@ async function playProjector(player: PlayerName, swf: Uint8Array): Promise<strin
   }
 }
 
-const play: Record<PlayerName, (swf: Uint8Array) => Promise<string[]>> = {
+const play: Record<PlayerName, (swf: Uint8Array, kind: Bench["kind"]) => Promise<string[]>> = {
   swf2es: playSwf2es,
   ruffle: playRuffle,
-  adl: playAdl,
+  adl: (swf) => playAdl(swf),
   flash32: (swf) => playProjector("flash32", swf),
   flash11: (swf) => playProjector("flash11", swf),
 };
 
+// The lines every player must trace alike: not times, a drawing's measures, or the harness's own.
 const checked = (lines: string[]) =>
-  lines.filter((l) => l && !l.startsWith("time: ") && !l.startsWith("players: "));
+  lines.filter((l) => l && !/^(time|frames|memory|players): /.test(l));
 const median = (v: number[]) => {
   const s = [...v].sort((x, y) => x - y);
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
@@ -445,7 +612,7 @@ if (values["write-swf"]) {
   const dir = resolve(values["write-swf"]);
   mkdirSync(dir, { recursive: true });
   for (const bench of benches) {
-    writeFileSync(`${dir}/${bench}.swf`, benchSwf(BENCHES[bench].abc()));
+    writeFileSync(`${dir}/${bench}.swf`, benchSwf(BENCHES[bench].abc(), BENCHES[bench].kind));
     console.log(`${dir}/${bench}.swf`);
   }
 
@@ -511,16 +678,21 @@ function chromeVersion(): string {
 }
 
 for (const bench of benches) {
-  const { abc, sections: timed } = BENCHES[bench];
-  const swf = benchSwf(abc());
-  const times = new Map<PlayerName, Map<string, number[]>>(players.map((p) => [p, new Map()]));
+  const { abc, sections: timed, kind } = BENCHES[bench];
+  const swf = benchSwf(abc(), kind);
+  const playing = kind === "drawing" ? players.filter((p) => p !== "adl") : players;
+  if (playing.length < players.length) {
+    console.log(`${bench}: adl left out, as it is not Flash Player`);
+  }
+
+  const times = new Map<PlayerName, Map<string, number[]>>(playing.map((p) => [p, new Map()]));
   const traced = new Map<PlayerName, string[]>();
-  const output = new Map<PlayerName, string[][]>(players.map((p) => [p, []]));
+  const output = new Map<PlayerName, string[][]>(playing.map((p) => [p, []]));
   for (let run = 0; run < runs; run++) {
     // Each run starts at another player.
-    const order = players.map((_, i) => players[(i + run) % players.length]);
+    const order = playing.map((_, i) => playing[(i + run) % playing.length]);
     for (const player of order) {
-      const lines = await play[player](swf);
+      const lines = await play[player](swf, kind);
       if (!lines.includes(DONE)) {
         throw new Error(`${player} did not finish ${bench}:\n${lines.join("\n")}`);
       }
@@ -530,15 +702,15 @@ for (const bench of benches) {
       session.players[player].version =
         lines.find((l) => l.startsWith(VERSION))?.slice(VERSION.length) ?? "";
       const sections = times.get(player) as Map<string, number[]>;
-      for (const [section, ms] of timed(lines)) {
-        sections.set(section, [...(sections.get(section) ?? []), ms]);
+      for (const [section, value] of timed(lines)) {
+        sections.set(section, [...(sections.get(section) ?? []), value]);
       }
     }
   }
 
   // Flash is the reference, the newest there is; what another traces otherwise is shown, and timed all the same.
   const referenceName =
-    (["flash32", "adl", "flash11"] as const).find((p) => traced.has(p)) ?? players[0];
+    (["flash32", "adl", "flash11"] as const).find((p) => traced.has(p)) ?? playing[0];
   const reference = traced.get(referenceName) as string[];
   const differs: Partial<Record<PlayerName, string[]>> = {};
   for (const [player, lines] of traced) {
@@ -552,35 +724,43 @@ for (const bench of benches) {
     }
   }
 
-  // Each section's median in each player, and the others' against swf2es.
-  const others = players.includes("swf2es") ? players.filter((p) => p !== "swf2es") : [];
-  const sections = [...(times.get(players[0]) as Map<string, number[]>).keys()];
+  // Each section's median in each player, and the others' against swf2es. A
+  // drawing's sections are fps, frame times and memory, which a player may
+  // not report: every player's, in the order first seen.
+  const others = playing.includes("swf2es") ? playing.filter((p) => p !== "swf2es") : [];
+  const sections = [...new Set(playing.flatMap((p) => [...(times.get(p)?.keys() ?? [])]))];
   const width = Math.max(...sections.map((s) => s.length)) + 2;
-  const row = (name: string, ms: Map<PlayerName, number>) => {
-    const mine = ms.get("swf2es") as number;
-    const cells = players.map((p) => String(ms.get(p)).padStart(10));
-    const ratios = others.map((p) => `${((ms.get(p) as number) / mine).toFixed(2)}×`.padStart(16));
+  const row = (name: string, measured: Map<PlayerName, number>) => {
+    const mine = measured.get("swf2es") as number;
+    const cells = playing.map((p) => String(measured.get(p)).padStart(10));
+    const ratios = others.map((p) =>
+      `${((measured.get(p) as number) / mine).toFixed(2)}×`.padStart(16),
+    );
     console.log(`${name.padEnd(width)}${cells.join("")}${ratios.join("")}`);
   };
-  console.log(`\n${bench}, median of ${runs} runs, ms`);
+  const unit = kind === "drawing" ? "fps; frame times in ms; memory in MB" : "ms";
+  console.log(`\n${bench}, median of ${runs} runs, ${unit}`);
   console.log(
-    `${"".padEnd(width)}${players.map((p) => p.padStart(10)).join("")}${others
+    `${"".padEnd(width)}${playing.map((p) => p.padStart(10)).join("")}${others
       .map((p) => `${p}/swf2es`.padStart(16))
       .join("")}`,
   );
-  const totals = new Map<PlayerName, number>(players.map((p) => [p, 0]));
+  const totals = new Map<PlayerName, number>(playing.map((p) => [p, 0]));
   for (const section of sections) {
     const medians = new Map(
-      players.map((p) => [p, median(times.get(p)?.get(section) ?? [Number.NaN])] as const),
+      playing.map((p) => [p, median(times.get(p)?.get(section) ?? [Number.NaN])] as const),
     );
-    for (const [p, ms] of medians) {
-      totals.set(p, (totals.get(p) as number) + ms);
+    for (const [p, value] of medians) {
+      totals.set(p, (totals.get(p) as number) + value);
     }
 
     row(section, medians);
   }
 
-  row("total", totals);
+  // A drawing's measures do not add up.
+  if (kind === "script") {
+    row("total", totals);
+  }
 
   // Written after each benchmark, so that one that fails later loses none before it.
   session.benchmarks[bench] = {
