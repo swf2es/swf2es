@@ -10,7 +10,14 @@
 // after it, and the shader scene's kernel, a plasma of a sine and a cosine
 // of each pixel moving with its time, in KERNEL as hex. The shader
 // scene's levels are the width of the one fill it redraws each frame, of
-// the stage's shape. Each level reports a line:
+// the stage's shape. The stage3d scene's are the drawTriangles calls a
+// frame, of 100 triangles each, every one moved by a constant; its AGAL,
+// VERTEX and FRAGMENT, is hex too. It plays in a SWF of its own, ONLY
+// naming it, and asks for its context only as it comes: a Stage3D layer
+// changes how a player composites the display list, which other scenes
+// would be timed with, and a page that turns Stage3D on does so for all
+// its SWF. A player that gives no context in STAGE3D_WAIT_MS, or refuses,
+// skips the scene, as it says. Each level reports a line:
 //   frames: vectors-500 fps 59.9 p50 17 p95 17 p99 18 max 33 total 41943040 private 0
 // total and private are System.totalMemoryNumber and System.privateMemory,
 // 0 in a player that does not keep them.
@@ -21,8 +28,14 @@ import flash.display.DisplayObject;
 import flash.display.Shader;
 import flash.display.Shape;
 import flash.display.Sprite;
+import flash.display.Stage3D;
 import flash.display.StageAlign;
 import flash.display.StageScaleMode;
+import flash.display3D.Context3D;
+import flash.display3D.IndexBuffer3D;
+import flash.display3D.Program3D;
+import flash.display3D.VertexBuffer3D;
+import flash.events.ErrorEvent;
 import flash.events.Event;
 import flash.filters.BlurFilter;
 import flash.filters.GlowFilter;
@@ -45,9 +58,17 @@ public class Main extends Sprite {
     ["text", [50, 200, 800]],
     ["redraw", [50, 200, 800]],
     ["shader", [200, 400, 800]],
+    ["stage3d", [50, 500, 2000]],
   ];
+  // The scenes this SWF plays, by name, which players.ts gives: stage3d alone in a SWF of its own.
+  private static const ONLY:String = "PLAYERS_ONLY";
   private static const KERNEL:String = "PLAYERS_KERNEL";
+  private static const VERTEX:String = "PLAYERS_VERTEX";
+  private static const FRAGMENT:String = "PLAYERS_FRAGMENT";
+  private static const TRIANGLES:int = 100;
+  private static const STAGE3D_WAIT_MS:int = 10000;
 
+  private var _levels:Array = [];
   private var _scene:int = 0;
   private var _level:int = -1;
   private var _layer:Sprite;
@@ -58,13 +79,27 @@ public class Main extends Sprite {
   private var _intervals:Vector.<int>;
   private var _texture:BitmapData;
   private var _shader:Shader;
+  private var _context:Context3D;
+  private var _asked:Boolean = false;
+  private var _askedAt:int = 0;
+  private var _refused:Boolean = false;
+  private var _vertices:VertexBuffer3D;
+  private var _indices:IndexBuffer3D;
+  private var _offset:Vector.<Number> = new <Number>[0, 0, 0, 0];
 
   public function Main() {
     stage.scaleMode = StageScaleMode.NO_SCALE;
     stage.align = StageAlign.TOP_LEFT;
     stage.frameRate = 60;
     _texture = texture();
-    _shader = new Shader(kernel());
+    _shader = new Shader(bytes(KERNEL));
+    var only:Array = ONLY.split(",");
+    for (var i:int = 0; i < LEVELS.length; i++) {
+      if (only.indexOf(LEVELS[i][0]) >= 0) {
+        _levels.push(LEVELS[i]);
+      }
+    }
+
     next();
     addEventListener(Event.ENTER_FRAME, frame);
   }
@@ -85,14 +120,65 @@ public class Main extends Sprite {
     return bitmap;
   }
 
-  private static function kernel():ByteArray {
-    var bytes:ByteArray = new ByteArray();
-    for (var i:int = 0; i < KERNEL.length; i += 2) {
-      bytes.writeByte(parseInt(KERNEL.substr(i, 2), 16));
+  private static function bytes(hex:String):ByteArray {
+    var out:ByteArray = new ByteArray();
+    for (var i:int = 0; i < hex.length; i += 2) {
+      out.writeByte(parseInt(hex.substr(i, 2), 16));
     }
 
-    bytes.position = 0;
-    return bytes;
+    out.position = 0;
+    return out;
+  }
+
+  /** A context for the stage3d scene, as it comes; frame() waits for it. */
+  private function requestStage3D():void {
+    _asked = true;
+    _askedAt = getTimer();
+    if (stage.stage3Ds.length === 0) {
+      playersReport("players: stage3d none");
+      _refused = true;
+      return;
+    }
+
+    var slot:Stage3D = stage.stage3Ds[0];
+    slot.addEventListener(ErrorEvent.ERROR, function(event:ErrorEvent):void {
+      playersReport("players: stage3d error " + event.errorID);
+      _refused = true;
+    });
+    slot.addEventListener(Event.CONTEXT3D_CREATE, function(event:Event):void {
+      _context = slot.context3D;
+      playersReport("players: stage3d " + _context.driverInfo);
+      _context.configureBackBuffer(WIDTH, HEIGHT, 0, false);
+      _context.setCulling("none");
+      // Each triangle a little one somewhere near the middle, of a colour of its own.
+      var data:Vector.<Number> = new Vector.<Number>();
+      for (var i:int = 0; i < TRIANGLES; i++) {
+        var x:Number = Math.cos(i * 2.4) * 0.15;
+        var y:Number = Math.sin(i * 1.7) * 0.15;
+        var r:Number = (i % 5) / 4;
+        var g:Number = (i % 7) / 6;
+        var b:Number = (i % 3) / 2;
+        data.push(x, y, 0.5, 1, r, g, b, 1);
+        data.push(x + 0.04, y, 0.5, 1, r, g, b, 1);
+        data.push(x, y + 0.05, 0.5, 1, r, g, b, 1);
+      }
+
+      _vertices = _context.createVertexBuffer(TRIANGLES * 3, 8);
+      _vertices.uploadFromVector(data, 0, TRIANGLES * 3);
+      var order:Vector.<uint> = new Vector.<uint>();
+      for (var k:int = 0; k < TRIANGLES * 3; k++) {
+        order.push(k);
+      }
+
+      _indices = _context.createIndexBuffer(TRIANGLES * 3);
+      _indices.uploadFromVector(order, 0, TRIANGLES * 3);
+      var program:Program3D = _context.createProgram();
+      program.upload(bytes(VERTEX), bytes(FRAGMENT));
+      _context.setProgram(program);
+      _context.setVertexBufferAt(0, _vertices, 0, "float4");
+      _context.setVertexBufferAt(1, _vertices, 4, "float4");
+    });
+    slot.requestContext3D("auto", "baseline");
   }
 
   /** The next level, or the next scene's first; the report once there is none. */
@@ -102,12 +188,16 @@ public class Main extends Sprite {
     }
 
     _level++;
-    if (_level >= LEVELS[_scene][1].length) {
+    if (_level >= _levels[_scene][1].length) {
       _scene++;
       _level = 0;
     }
 
-    if (_scene >= LEVELS.length) {
+    if (_scene < _levels.length && _levels[_scene][0] === "stage3d" && !_asked) {
+      requestStage3D();
+    }
+
+    if (_scene >= _levels.length) {
       removeEventListener(Event.ENTER_FRAME, frame);
       playersFinish();
       return;
@@ -116,9 +206,10 @@ public class Main extends Sprite {
     _layer = new Sprite();
     addChild(_layer);
     _objects = new Vector.<DisplayObject>();
-    var count:int = LEVELS[_scene][0] === "shader" ? 1 : LEVELS[_scene][1][_level];
+    var scene:String = _levels[_scene][0];
+    var count:int = scene === "shader" ? 1 : scene === "stage3d" ? 0 : _levels[_scene][1][_level];
     for (var i:int = 0; i < count; i++) {
-      var object:DisplayObject = make(LEVELS[_scene][0], i);
+      var object:DisplayObject = make(scene, i);
       _objects.push(object);
       _layer.addChild(object);
     }
@@ -172,10 +263,27 @@ public class Main extends Sprite {
 
   private function frame(event:Event):void {
     var now:int = getTimer();
-    var scene:String = LEVELS[_scene][0];
+    var scene:String = _levels[_scene][0];
+    // The stage3d scene's time starts once its context has come; without one in time, it is left out.
+    if (scene === "stage3d" && !_context) {
+      if (_refused || now - _askedAt >= STAGE3D_WAIT_MS) {
+        playersReport("players: stage3d skipped");
+        _scene = _levels.length - 1;
+        _level = _levels[_scene][1].length;
+        next();
+      } else {
+        // Its settling starts when the context has come.
+        _started = now;
+      }
+
+      return;
+    }
+
     var count:int = _objects.length;
     if (scene === "shader") {
-      fill(Shape(_objects[0]), LEVELS[_scene][1][_level], _frame);
+      fill(Shape(_objects[0]), _levels[_scene][1][_level], _frame);
+    } else if (scene === "stage3d") {
+      draw(_levels[_scene][1][_level], _frame);
     } else {
       for (var i:int = 0; i < count; i++) {
         move(scene, _objects[i], i, _frame);
@@ -193,9 +301,23 @@ public class Main extends Sprite {
 
     _last = now;
     if (now - _started >= SETTLE_MS + MEASURE_MS) {
-      report(scene + "-" + LEVELS[_scene][1][_level]);
+      report(scene + "-" + _levels[_scene][1][_level]);
       next();
     }
+  }
+
+  /** A frame of the stage3d scene: its triangles drawn `draws` times, each at its own place. */
+  private function draw(draws:int, frame:int):void {
+    _context.clear(0.1, 0.1, 0.1, 1);
+    for (var i:int = 0; i < draws; i++) {
+      var t:Number = frame * 0.02 + i * 0.37;
+      _offset[0] = Math.cos(t * 1.3 + i) * 0.8;
+      _offset[1] = Math.sin(t * 0.9 + i * 0.5) * 0.8;
+      _context.setProgramConstantsFromVector("vertex", 0, _offset, 1);
+      _context.drawTriangles(_indices);
+    }
+
+    _context.present();
   }
 
   /** The kernel's fill of a width, at the stage's shape, at a frame's time: every pixel anew. */

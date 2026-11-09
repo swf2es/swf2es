@@ -173,8 +173,8 @@ node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11
                               # the enumeration, dictionary, vector, as3pb and lz4 benchmarks as SWFs, timed
                               # in swf2es and Ruffle's web build (DIR, or RUFFLE) in Chrome, in adl
                               # -nodebug, and in Flash Player's Windows projectors under Wine (FLASH32,
-                              # FLASH11, WINE); lz4, C built by Crossbridge; drawing, scenes at three
-                              # loads, their fps, frame times and memory; startup-*, the time to a
+                              # FLASH11, WINE); lz4, C built by Crossbridge; drawing and stage3d, scenes
+                              # at three loads, their fps, frame times and memory; startup-*, the time to a
                               # SWF's first line and the player's bytes; cpu, the CPU a still and a
                               # light scene take (none of the three in adl); --json keeps
                               # every run with the commit, machine and versions; --write-swf only

@@ -10,7 +10,8 @@
 // ("time: dense1k-in 120") by the Date or getTimer, which each player keeps
 // the same way. Their other lines must be as Flash traces them. And
 // drawing (drawing/Drawing.as): scenes of vectors, bitmaps, filters, text,
-// redrawn graphics and a Pixel Bender fill at three loads each, played at 60 frames a second
+// redrawn graphics and a Pixel Bender fill at three loads each, and
+// stage3d, Stage3D's alone, on a page that turns it on for it alone, played at 60 frames a second
 // on the GPU, swf2es in its browser build's element as a page has it; each
 // level's fps and frame times, by getTimer, and memory: what System says,
 // and in Chrome its JS heap and its ArrayBuffers apart (wasm's memory is
@@ -60,6 +61,7 @@ import { parseArgs } from "node:util";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { runFlash } from "../../oracle/flash.ts";
 import { container, runOracle } from "../../oracle/oracle.ts";
+import { translate } from "../../packages/context3d/dist/index.js";
 import { readSwf, tags } from "../../packages/format/dist/index.js";
 import { PbjAssembler } from "../pbj-assembler.ts";
 import { runPlayer, withPage } from "../player/chrome.ts";
@@ -164,6 +166,8 @@ interface Bench {
    * player's processes between its marks.
    */
   kind: "script" | "drawing" | "startup" | "cpu";
+  /** Whether its page turns Stage3D on for it. */
+  stage3D?: boolean;
   /** The SWF: the benchmark, its document class, and the report. */
   swf(): Uint8Array;
   /** Each section's name and value, in the order traced: milliseconds, or a drawing's measures. */
@@ -248,18 +252,26 @@ playersFinish();
 };
 
 /**
- * Drawing's scenes, each at three loads: a line a level, "frames: vectors-500 fps 59.9 p50 17 ...",
- * and in a browser "memory: vectors-500 heap 1234 buffers 5678" after it (heapAfter).
+ * Drawing.as playing `scenes`, each at three loads: a line a level,
+ * "frames: vectors-500 fps 59.9 p50 17 ...", and in a browser
+ * "memory: vectors-500 heap 1234 buffers 5678" after it (heapAfter).
+ * Stage3D plays in a SWF of its own, on a page that turns it on for it
+ * alone: swf2es composites its stage otherwise where a page has Stage3D.
  */
-const drawing: Bench = {
+const drawing = (name: string, scenes: string[], stage3D = false): Bench => ({
   kind: "drawing",
+  stage3D,
   swf() {
-    const hex = Buffer.from(plasma()).toString("hex");
-    const source = readFileSync(`${here}drawing/Drawing.as`, "utf8").replace("PLAYERS_KERNEL", hex);
-    const abc = compileScripts(
-      [{ name: "PlayersDrawing", source: `${source}\n${REPORT}` }],
-      out,
-    ).get("PlayersDrawing") as Uint8Array;
+    const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+    const [vertex, fragment] = stage3DProgram();
+    const source = readFileSync(`${here}drawing/Drawing.as`, "utf8")
+      .replace("PLAYERS_KERNEL", hex(plasma()))
+      .replace("PLAYERS_VERTEX", hex(vertex))
+      .replace("PLAYERS_FRAGMENT", hex(fragment))
+      .replace("PLAYERS_ONLY", scenes.join(","));
+    const abc = compileScripts([{ name, source: `${source}\n${REPORT}` }], out).get(
+      name,
+    ) as Uint8Array;
     return benchSwf(abc, "drawing");
   },
   // Frame times in milliseconds, memory in MB; a player that keeps no memory figure has none.
@@ -283,7 +295,7 @@ const drawing: Bench = {
 
     return found;
   },
-};
+});
 
 /**
  * LZ4 in C (tests/programs/lz4) as Crossbridge builds a SWF of it: gcc as
@@ -562,13 +574,49 @@ function cpuMark(line: string): string | null {
   return `cpu: ${m[2]} percent ${Math.round(share * 10) / 10}`;
 }
 
+/**
+ * Drawing's stage3d program, in AGAL 1: each vertex moved by the draw's
+ * constant, `add vt0, va0, vc0; mov op, vt0; mov v0, va1`, and its colour
+ * passed on, `mov oc, v0`. The player's own translator reads both first,
+ * so that a slip here fails the build, not a player.
+ */
+function stage3DProgram(): [Uint8Array, Uint8Array] {
+  // A token: opcode, destination, then two sources of two words each, as AGAL lays them out.
+  const program = (fragment: boolean, tokens: number[][]) => {
+    const bytes = new Uint8Array(7 + tokens.length * 24);
+    const view = new DataView(bytes.buffer);
+    bytes[0] = 0xa0;
+    view.setUint32(1, 1, true);
+    bytes[5] = 0xa1;
+    bytes[6] = fragment ? 1 : 0;
+    for (const [i, token] of tokens.entries()) {
+      for (const [k, word] of token.entries()) {
+        view.setUint32(7 + i * 24 + k * 4, word, true);
+      }
+    }
+
+    return bytes;
+  };
+  // Register types: 0 attribute, 1 constant, 2 temporary, 3 output, 4 varying; 0xe4 is xyzw.
+  const vertex = program(false, [
+    [0x01, 0x020f0000, 0xe4000000, 0, 0xe4000000, 1],
+    [0x00, 0x030f0000, 0xe4000000, 2, 0, 0],
+    [0x00, 0x040f0000, 0xe4000001, 0, 0, 0],
+  ]);
+  const fragment = program(true, [[0x00, 0x030f0000, 0xe4000000, 4, 0, 0]]);
+  translate(vertex, "vertex");
+  translate(fragment, "fragment");
+  return [vertex, fragment];
+}
+
 const BENCHES: Record<string, Bench> = {
   enumeration: script("enumeration/Enumeration.as"),
   dictionary: script("dictionary/DictionaryAccess.as"),
   vector: script("vector/VectorAccess.as"),
   as3pb,
   lz4,
-  drawing,
+  drawing: drawing("PlayersDrawing", ["vectors", "bitmaps", "filters", "text", "redraw", "shader"]),
+  stage3d: drawing("PlayersStage3D", ["stage3d"], true),
   cpu,
   "startup-hello": startup("PlayersStartupHello", ""),
   // as3pb's classes, a message made: its library loaded and its first methods compiled.
@@ -654,9 +702,9 @@ function benchSwf(abc: Uint8Array, kind: Bench["kind"]): Uint8Array {
   });
 }
 
-async function playSwf2es(swf: Uint8Array, kind: Bench["kind"]): Promise<string[]> {
+async function playSwf2es(swf: Uint8Array, { kind, stage3D = false }: Bench): Promise<string[]> {
   if (kind === "drawing" || kind === "cpu") {
-    return playSwf2esLive(swf);
+    return playSwf2esLive(swf, stage3D);
   }
 
   if (kind === "startup") {
@@ -890,11 +938,39 @@ async function withRenderer(
 }
 
 /**
+ * Stage3D turned on in a page as the site turns it on
+ * (apps/site/src/stage3d.ts): the browser build has no surface of its own.
+ * This context3d is not the build's copy, so an error it threw would not be
+ * the build's Context3DError and would reach the SWF unmapped; the
+ * benchmark's scene makes none.
+ */
+const STAGE3D_SURFACE = `
+  const { WebGLContext3D } = await import("/context3d/webgl/index.js");
+  configure({
+    stage3D: () => {
+      const canvas = document.createElement("canvas");
+      const gl = canvas.getContext("webgl2", {
+        alpha: false,
+        antialias: false,
+        depth: false,
+        stencil: false,
+        preserveDrawingBuffer: true,
+      });
+      return {
+        canvas,
+        context: new WebGLContext3D(gl),
+        destroy: () => gl.getExtension("WEBGL_lose_context")?.loseContext(),
+      };
+    },
+  });
+`;
+
+/**
  * Drawing in swf2es as a page has it: the browser build's <swf2es-player>,
  * playing as the display's frames come, on the GPU. The SWF's traces reach
  * the console.
  */
-async function playSwf2esLive(swf: Uint8Array): Promise<string[]> {
+async function playSwf2esLive(swf: Uint8Array, stage3D: boolean): Promise<string[]> {
   const dist = `${root}packages/swf2es/dist/`;
   if (!existsSync(`${dist}swf2es.js`)) {
     throw new Error(`swf2es: no ${dist}swf2es.js; pnpm build makes it`);
@@ -908,7 +984,8 @@ async function playSwf2esLive(swf: Uint8Array): Promise<string[]> {
     async (evaluate, send, _fresh, listen) => {
       const lines = consoleLines(listen, send);
       const answer = await evaluate(`(async () => {
-        await import("/swf2es/swf2es.js");
+        const { configure } = await import("/swf2es/swf2es.js");
+        ${stage3D ? STAGE3D_SURFACE : ""}
         document.body.innerHTML =
           '<swf2es-player src="/bench/bench.swf" width="800" height="600"></swf2es-player>';
       })()`);
@@ -923,13 +1000,14 @@ async function playSwf2esLive(swf: Uint8Array): Promise<string[]> {
       timeout: SCRIPT_SECONDS * 1000,
       mounts: [
         ["/swf2es/", dist],
+        ["/context3d/", `${root}packages/context3d/dist/`],
         ["/bench/", dir],
       ],
     },
   );
 }
 
-async function playRuffle(swf: Uint8Array, kind: Bench["kind"]): Promise<string[]> {
+async function playRuffle(swf: Uint8Array, { kind }: Bench): Promise<string[]> {
   if (kind === "startup") {
     return playStartup("ruffle", swf);
   }
@@ -1095,12 +1173,12 @@ async function playProjector(
   }
 }
 
-const play: Record<PlayerName, (swf: Uint8Array, kind: Bench["kind"]) => Promise<string[]>> = {
+const play: Record<PlayerName, (swf: Uint8Array, bench: Bench) => Promise<string[]>> = {
   swf2es: playSwf2es,
   ruffle: playRuffle,
   adl: (swf) => playAdl(swf),
-  flash32: (swf, kind) => playProjector("flash32", swf, kind),
-  flash11: (swf, kind) => playProjector("flash11", swf, kind),
+  flash32: (swf, { kind }) => playProjector("flash32", swf, kind),
+  flash11: (swf, { kind }) => playProjector("flash11", swf, kind),
 };
 
 // The lines every player must trace alike: not times, a drawing's measures, or the harness's own.
@@ -1201,7 +1279,7 @@ for (const bench of benches) {
     // Each run starts at another player.
     const order = playing.map((_, i) => playing[(i + run) % playing.length]);
     for (const player of order) {
-      const lines = await play[player](swf, kind);
+      const lines = await play[player](swf, BENCHES[bench]);
       if (!lines.includes(DONE)) {
         throw new Error(`${player} did not finish ${bench}:\n${lines.join("\n")}`);
       }

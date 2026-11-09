@@ -33,8 +33,15 @@ medians.
   access, as3pb (protobuf over ByteArray and domain memory, AMF3, JSON),
   and LZ4 in C as Crossbridge builds it. Milliseconds per section.
 - **Drawing:** vectors, bitmaps, filters, text, graphics redrawn every
-  frame, and a Pixel Bender fill computed anew each frame (`beginShaderFill`,
-  at three sizes), each at three loads, at 60 frames a second. Fps and frame times
+  frame, a Pixel Bender fill computed anew each frame (`beginShaderFill`,
+  at three sizes), each at three loads, at 60 frames a second; and
+  Stage3D in a SWF of its own (50 to 2,000 `drawTriangles` calls a frame,
+  of 100 triangles each), as a page that turns Stage3D on composites
+  every scene of its SWF for it; each
+  player says which Stage3D driver it got (`driverInfo`), as Flash under
+  Wine may fall back to its software one. Ruffle does not draw Pixel
+  Bender fills as Flash does, so its times for the shader scene are not
+  of the same work. Fps and frame times
   (p50, p95, p99, worst) for each level, and memory where a player tells
   it. Not uncapped: swf2es runs up to five SWF frames for each display
   frame when a SWF is faster than the display, so a faster rate would
@@ -43,9 +50,6 @@ medians.
   still stage and a light animation (a hundred shapes) at 60 frames a
   second: a browser's page, GPU and other processes, or Wine's; the GPU's
   own work is not in it.
-- **Not yet:** Stage3D. swf2es draws it through a surface the page gives
-  it (the site's `stage3d.ts`), which the browser build does not include,
-  so a scene of it needs that in the benchmark's page first.
 - **Startup:** from making the player to a SWF's first line, cold and
   warm, for a SWF of nothing and one of as3pb's classes; and the bytes of
   the player's files a page fetched, raw, gzipped and in brotli.
@@ -76,7 +80,7 @@ measured by us alone:
 | AVM1 | yes, compiled to JavaScript | yes | to check |
 | AS3 | yes, compiled to JavaScript, in the browser or ahead of time | yes, JIT | to check |
 | Stage3D | experimental | yes | to check |
-| Pixel Bender | on the GPU: filters, blends, fills; ShaderJob on the CPU | yes; JIT until 11.7 | to check |
+| Pixel Bender | on the GPU: filters, blends, fills; ShaderJob on the CPU | yes; JIT until 11.7 | no: a `beginShaderFill` SWF draws wrongly |
 | Workers | yes, on Web Workers | yes | to check |
 | AIR's APIs | in the desktop app and in a page: files, encrypted store, WebSocket | in AIR, not Flash Player | to check |
 | Sockets | through a WebSocket proxy | yes | through a WebSocket proxy |
