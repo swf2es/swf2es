@@ -2,14 +2,18 @@
 // so each is as redistributable as the rest of it: an ActionScript 3 SWF
 // from demos/Bounce.as, compiled by ASC in the oracle's image as the
 // player's tests compile theirs; an ActionScript 1 SWF whose actions the
-// tests' AVM1 compiler writes; and a busy timeline with no scripts, the
-// one the player's benchmark plays.
+// tests' AVM1 compiler writes; a busy timeline with no scripts, the one
+// the player's benchmark plays; and as3pb's benchmark (MIT), from its
+// submodule, as the program tests build it.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
+import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
+import { runOracle } from "../../oracle/oracle.ts";
 import { flashAssembler, script } from "../../tests/avm1-script.ts";
 import { compileScripts } from "../../tests/player/scripts.ts";
 import * as w from "../../tests/swf-writer.ts";
+import { AS3PB, as3pbCommit } from "./facts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -19,7 +23,7 @@ export interface Demo {
   file: string;
   title: string;
   description: string;
-  /** The file it is made from, by its path in the repository. */
+  /** The file it is made from, by its path in the repository, or its URL where it is elsewhere. */
   source: string;
   bytes: Uint8Array;
 }
@@ -180,8 +184,63 @@ function crowd(out: string): Demo {
   };
 }
 
+/**
+ * as3pb's benchmark: its Flash entry point, which logs each timing to a
+ * text field, with the files the program tests build its avmshell one
+ * from, but for that build's stand-in for ApplicationDomain, which Flash
+ * has; compiled as they compile it.
+ */
+function as3pbBench(out: string): Demo {
+  const dir = `${root}tests/programs/as3pb/`;
+  const sources = readFileSync(`${dir}runtime/test/bench/shell-sources.txt`, "utf8")
+    .split("\n")
+    .filter((l) => l && !l.startsWith("#") && !l.startsWith("runtime/test/shell/"));
+  const [result] = runOracle(
+    [
+      {
+        source: `${dir}runtime/test/bench/Main.as`,
+        name: "as3pb-bench/Main",
+        ascArgs: [
+          "-AS3",
+          "-optimize",
+          "-inline",
+          "-strict",
+          ...sources.flatMap((s) => ["-in", relative(root, `${dir}${s}`)]),
+        ],
+      },
+    ],
+    out,
+    { imports: ["builtin", "playerglobal"], run: false },
+  );
+  if (!result.compiled) {
+    throw new Error(`as3pb's benchmark did not compile:\n${result.compileLog}`);
+  }
+
+  const abc = new Uint8Array(readFileSync(`${out}as3pb-bench/Main.abc`));
+  return {
+    file: "as3pb-bench.swf",
+    title: "as3pb benchmark (ActionScript 3)",
+    description: "Protocol Buffers over ByteArray and domain memory against AMF3 and JSON.",
+    source: `${AS3PB}/blob/${as3pbCommit || "main"}/runtime/test/bench/Main.as`,
+    bytes: w.swf({
+      width: 640,
+      height: 480,
+      frameRate: 30,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        w.backgroundColor(0x000000),
+        w.doAbc(abc, "bench.Main"),
+        w.symbolClass([[0, "bench.Main"]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  };
+}
+
 /** Every demo, built under `out`, a scratch directory. */
 export function buildDemos(out: string): Demo[] {
   mkdirSync(out, { recursive: true });
-  return [bounce(out), orbit(), crowd(out)];
+  return [bounce(out), orbit(), crowd(out), as3pbBench(out)];
 }

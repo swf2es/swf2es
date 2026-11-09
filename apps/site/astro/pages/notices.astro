@@ -5,7 +5,7 @@
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { base, facts } from "../site.ts";
 
-const { build, blob, avmplusSource, avmplusCommit, mpl, ruffle } = facts;
+const { build, blob, avmplusSource, avmplusCommit, as3pbSource, mpl, ruffle } = facts;
 const licence = (file: string) => `${base}licenses/${file}`;
 const sourceUrl = (file: string) => `${blob}${file}`;
 ---
@@ -58,6 +58,14 @@ const sourceUrl = (file: string) => `${blob}${file}`;
     <summary>{ruffle.length} files from Ruffle</summary>
     <ul>{ruffle.map((f) => <li><a href={sourceUrl(f)}><code>{f}</code></a></li>)}</ul>
   </details>
+
+  <h2>as3pb</h2>
+  <p>
+    The as3pb benchmark demo is built from
+    <a href={as3pbSource}>as3pb</a>, MIT, Copyright (c) 2026 33TU:
+    its runtime and its benchmark, compiled into the demo's SWF.
+    <a href={licence("as3pb-MIT.txt")}>MIT licence text</a>.
+  </p>
 
   <h2>minimp3</h2>
   <p>
