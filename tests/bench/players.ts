@@ -15,7 +15,10 @@
 // level's fps and frame times, by getTimer, and memory: what System says,
 // and in Chrome its JS heap and its ArrayBuffers apart (wasm's memory is
 // there; the GPU's and other processes' nowhere), not to be set against
-// Flash's figures. adl, not Flash Player, does not draw them.
+// Flash's figures. adl, not Flash Player, does not draw them. And startup
+// (startup-hello, startup-as3pb): the time from making the player to a
+// SWF's first line, cold and warm, and the bytes of the player's files a
+// page fetched for it, raw, gzipped and in brotli.
 //
 //   node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11 EXE]
 //     [--wine COMMAND] [--only swf2es,ruffle,adl,flash32,flash11] [--json FILE] [--write-swf DIR]
@@ -52,6 +55,7 @@ import { cpus, release, totalmem, type } from "node:os";
 import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { runFlash } from "../../oracle/flash.ts";
 import { container, runOracle } from "../../oracle/oracle.ts";
 import { readSwf, tags } from "../../packages/format/dist/index.js";
@@ -134,9 +138,10 @@ interface Bench {
   /**
    * A script's run as it loads, in one frame, timed by its sections; or
    * drawing (drawing/Drawing.as), frames played in real time at 60 a second
-   * on the GPU, which adl, not Flash Player, is left out of.
+   * on the GPU, which adl, not Flash Player, is left out of; or startup, a
+   * SWF that reports at once, timed from the player's making to its report.
    */
-  kind: "script" | "drawing";
+  kind: "script" | "drawing" | "startup";
   /** The SWF: the benchmark, its document class, and the report. */
   swf(): Uint8Array;
   /** Each section's name and value, in the order traced: milliseconds, or a drawing's measures. */
@@ -168,11 +173,6 @@ function script(path: string): Bench {
 const as3pb: Bench = {
   kind: "script",
   swf() {
-    const dir = `${root}tests/programs/as3pb/`;
-    const sources = readFileSync(`${dir}runtime/test/bench/shell-sources.txt`, "utf8")
-      .split("\n")
-      // Not avmshell's stand-ins for playerglobal's classes.
-      .filter((l) => l && !l.startsWith("#") && !l.startsWith("runtime/test/shell/"));
     mkdirSync(`${out}/sources`, { recursive: true });
     const source = `${out}/sources/PlayersAs3pb.as`;
     writeFileSync(
@@ -191,13 +191,7 @@ playersFinish();
         {
           source,
           name: "PlayersAs3pb",
-          ascArgs: [
-            "-AS3",
-            "-optimize",
-            "-inline",
-            "-strict",
-            ...sources.flatMap((s) => ["-in", relative(root, `${dir}${s}`)]),
-          ],
+          ascArgs: ["-AS3", "-optimize", "-inline", "-strict", ...as3pbInputs()],
         },
       ],
       out,
@@ -364,6 +358,69 @@ function scriptLimits(): Uint8Array {
   return limits;
 }
 
+/**
+ * How long a player takes to start a SWF and how much it downloads: a SWF
+ * that reports as its script runs, its own or after as3pb's classes.
+ * In a browser, the time is from the page's making the player, its code
+ * fetched too, to the line: cold in a new profile, then warm, a second
+ * player in the same page. In a projector, from its request for the SWF to
+ * the report, without Wine's start: a launch is always cold. Lines
+ * "startup: cold 812" and "startup: warm 95", and in a browser
+ * "startup: bytes 4096000", what the page fetched of the player's files.
+ */
+function startup(name: string, entry: string, ascArgs: () => string[] = () => []): Bench {
+  return {
+    kind: "startup",
+    swf() {
+      mkdirSync(`${out}/sources`, { recursive: true });
+      const source = `${out}/sources/${name}.as`;
+      writeFileSync(
+        source,
+        `${MAIN}${REPORT}\n${entry}\nplayersReport("started");\nplayersFinish();\n`,
+      );
+      const [result] = runOracle([{ source, name, ascArgs: ascArgs() }], out, {
+        imports: ["builtin", "playerglobal"],
+        run: false,
+      });
+      if (!result.compiled) {
+        throw new Error(`${name} did not compile:\n${result.compileLog}`);
+      }
+
+      return benchSwf(new Uint8Array(readFileSync(`${out}/${name}.abc`)), "script");
+    },
+    sections(lines) {
+      const found: (readonly [string, number])[] = [];
+      for (const l of lines) {
+        const m = /^startup: (cold|warm|bytes) (\d+)/.exec(l);
+        if (m?.[1] === "bytes") {
+          found.push(["kb", Math.round(Number(m[2]) / 1024)]);
+          const packed = / gzip (\d+) brotli (\d+)$/.exec(l);
+          if (packed) {
+            found.push(["gzip-kb", Math.round(Number(packed[1]) / 1024)]);
+            found.push(["brotli-kb", Math.round(Number(packed[2]) / 1024)]);
+          }
+        } else if (m) {
+          found.push([`${m[1]}-ms`, Number(m[2])]);
+        }
+      }
+
+      return found;
+    },
+  };
+}
+
+/** as3pb's sources as -in files, for its SWF and its startup's. */
+function as3pbInputs(): string[] {
+  const dir = `${root}tests/programs/as3pb/`;
+  return (
+    readFileSync(`${dir}runtime/test/bench/shell-sources.txt`, "utf8")
+      .split("\n")
+      // Not avmshell's stand-ins for playerglobal's classes.
+      .filter((l) => l && !l.startsWith("#") && !l.startsWith("runtime/test/shell/"))
+      .flatMap((s) => ["-in", relative(root, `${dir}${s}`)])
+  );
+}
+
 const BENCHES: Record<string, Bench> = {
   enumeration: script("enumeration/Enumeration.as"),
   dictionary: script("dictionary/DictionaryAccess.as"),
@@ -371,6 +428,13 @@ const BENCHES: Record<string, Bench> = {
   as3pb,
   lz4,
   drawing,
+  "startup-hello": startup("PlayersStartupHello", ""),
+  // as3pb's classes, a message made: its library loaded and its first methods compiled.
+  "startup-as3pb": startup(
+    "PlayersStartupAs3pb",
+    "import bench.BenchMessage;\nnew BenchMessage();",
+    () => ["-AS3", "-optimize", "-inline", "-strict", ...as3pbInputs()],
+  ),
 };
 
 const { values, positionals } = parseArgs({
@@ -453,6 +517,10 @@ async function playSwf2es(swf: Uint8Array, kind: Bench["kind"]): Promise<string[
     return playSwf2esLive(swf);
   }
 
+  if (kind === "startup") {
+    return playStartup("swf2es", swf);
+  }
+
   // A script runs in the first frame; LZ4's from the second, after Crossbridge's preloader.
   const [result] = await runPlayer([{ swf, frames: 4, capture: [] }], {
     timeout: SCRIPT_SECONDS * 1000,
@@ -530,6 +598,141 @@ function consoleLines(
   });
 }
 
+/**
+ * What a page does to start the SWF in a player, and to wait for its
+ * "started": in swf2es the browser build's element, whose traces reach
+ * console.log; in Ruffle its player, by its trace observer. Each resolves
+ * with the time "started" came.
+ */
+const STARTERS = {
+  swf2es: `async (heard) => {
+    const log = console.log;
+    console.log = (...args) => {
+      log.apply(console, args);
+      heard(args.map(String).join(" "));
+    };
+    if (!customElements.get("swf2es-player")) {
+      await import("/swf2es/swf2es.js");
+    }
+
+    const player = document.createElement("swf2es-player");
+    player.setAttribute("src", "/bench/bench.swf");
+    player.setAttribute("width", "100");
+    player.setAttribute("height", "50");
+    document.body.append(player);
+    return () => {
+      console.log = log;
+      player.remove();
+    };
+  }`,
+  ruffle: `async (heard) => {
+    if (!window.RufflePlayer?.newest) {
+      await new Promise((loaded, failed) => {
+        const script = document.createElement("script");
+        script.src = "/ruffle/ruffle.js";
+        script.onload = loaded;
+        script.onerror = failed;
+        document.head.append(script);
+      });
+    }
+
+    const player = window.RufflePlayer.newest().createPlayer();
+    player.style.cssText = "width: 100px; height: 50px";
+    document.body.append(player);
+    // Set before the load too: the script runs as the first frame does.
+    player.ruffle().traceObserver = heard;
+    await player.ruffle().load({
+      url: "/bench/bench.swf",
+      autoplay: "on",
+      unmuteOverlay: "hidden",
+      splashScreen: false,
+      logLevel: "error",
+    });
+    player.ruffle().traceObserver = heard;
+    return () => player.remove();
+  }`,
+};
+
+/**
+ * A startup in a browser player, cold in a new profile and then warm in the
+ * same page, and the player's files the page fetched: their bytes as they
+ * are, and gzipped and in brotli as a server would send them.
+ */
+async function playStartup(player: "swf2es" | "ruffle", swf: Uint8Array): Promise<string[]> {
+  const code =
+    player === "swf2es"
+      ? { at: "/swf2es/", dir: `${root}packages/swf2es/dist/` }
+      : { at: "/ruffle/", dir: `${ruffle}/` };
+  const dir = `${out}/live/`;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(`${dir}bench.swf`, swf);
+  return withPage(
+    "runSwf",
+    async (evaluate, send, _fresh, listen) => {
+      const fetched = new Set<string>();
+      listen("Network.responseReceived", (params) => {
+        const { pathname } = new URL((params.response as { url: string }).url);
+        if (pathname.startsWith(code.at)) {
+          fetched.add(pathname.slice(code.at.length));
+        }
+      });
+      await send("Network.enable");
+      const answer = await evaluate<{ cold: number; warm: number; lines: string[] }>(`(async () => {
+        const start = ${STARTERS[player]};
+        const lines = [];
+        const once = async () => {
+          const begun = performance.now();
+          let started;
+          const heard = new Promise((r) => (started = r));
+          const stop = await start((line) => {
+            lines.push(line);
+            if (line === "started") {
+              started(performance.now());
+            }
+          });
+          const at = await heard;
+          // The line after, which the report sends last.
+          await new Promise((r) => setTimeout(r, 100));
+          stop();
+          return Math.round(at - begun);
+        };
+        const cold = await once();
+        const warm = await once();
+        return { cold, warm, lines };
+      })()`);
+      if (answer.exception || !answer.value) {
+        throw new Error(`${player}: ${answer.exception}`);
+      }
+
+      const { cold, warm, lines } = answer.value;
+      const files = [...fetched].map((f) => readFileSync(`${code.dir}${f}`));
+      const sum = (sizes: number[]) => sizes.reduce((n, m) => n + m, 0);
+      const raw = sum(files.map((f) => f.length));
+      const gzip = sum(files.map((f) => gzipSync(f, { level: 9 }).length));
+      const brotli = sum(
+        files.map(
+          (f) => brotliCompressSync(f, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } }).length,
+        ),
+      );
+      return [
+        ...lines,
+        `startup: cold ${cold}`,
+        `startup: warm ${warm}`,
+        `startup: bytes ${raw} gzip ${gzip} brotli ${brotli}`,
+        `players: files ${[...fetched].sort().join(" ")}`,
+      ];
+    },
+    true,
+    {
+      timeout: SCRIPT_SECONDS * 1000,
+      mounts: [
+        [code.at, code.dir],
+        ["/bench/", dir],
+      ],
+    },
+  );
+}
+
 /** A drawing's lines, and after them the GPU the page drew on. */
 async function withRenderer(
   lines: string[],
@@ -580,6 +783,10 @@ async function playSwf2esLive(swf: Uint8Array): Promise<string[]> {
 }
 
 async function playRuffle(swf: Uint8Array, kind: Bench["kind"]): Promise<string[]> {
+  if (kind === "startup") {
+    return playStartup("ruffle", swf);
+  }
+
   const drawn = kind === "drawing";
   return withPage(
     "runSwf",
@@ -650,17 +857,26 @@ async function playAdl(swf: Uint8Array): Promise<string[]> {
 }
 
 /** A projector under Wine: it opens the SWF from a server here, posts its lines back, and quits. */
-async function playProjector(player: PlayerName, swf: Uint8Array): Promise<string[]> {
+async function playProjector(
+  player: PlayerName,
+  swf: Uint8Array,
+  kind: Bench["kind"],
+): Promise<string[]> {
   let reported!: (body: string) => void;
   const report = new Promise<string>((r) => (reported = r));
+  // A startup's time: from the projector's request for the SWF to its report's.
+  let requested = 0;
+  let reporting = 0;
   const server = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/bench.swf") {
+      requested = performance.now();
       response.writeHead(200, { "content-type": "application/x-shockwave-flash" });
       response.end(swf);
       return;
     }
 
     if (request.method === "POST" && request.url === "/report") {
+      reporting = performance.now();
       const chunks: Buffer[] = [];
       request.on("data", (chunk: Buffer) => chunks.push(chunk));
       request.on("end", () => {
@@ -703,7 +919,10 @@ async function playProjector(player: PlayerName, swf: Uint8Array): Promise<strin
     // It quits once the report is sent; given a while, and stopped if it has not.
     clearTimeout(timer);
     await Promise.race([exited, new Promise((r) => (timer = setTimeout(r, 10_000)))]);
-    return body.split("\n");
+    const lines = body.split("\n");
+    return kind === "startup"
+      ? [...lines, `startup: cold ${Math.round(reporting - requested)}`]
+      : lines;
   } finally {
     clearTimeout(timer);
     if (child.exitCode === null && child.signalCode === null) {
@@ -718,8 +937,8 @@ const play: Record<PlayerName, (swf: Uint8Array, kind: Bench["kind"]) => Promise
   swf2es: playSwf2es,
   ruffle: playRuffle,
   adl: (swf) => playAdl(swf),
-  flash32: (swf) => playProjector("flash32", swf),
-  flash11: (swf) => playProjector("flash11", swf),
+  flash32: (swf, kind) => playProjector("flash32", swf, kind),
+  flash11: (swf, kind) => playProjector("flash11", swf, kind),
 };
 
 // The lines every player must trace alike: not times, a drawing's measures, or the harness's own.
@@ -807,7 +1026,8 @@ function chromeVersion(): string {
 for (const bench of benches) {
   const { sections: timed, kind } = BENCHES[bench];
   const swf = BENCHES[bench].swf();
-  const playing = kind === "drawing" ? players.filter((p) => p !== "adl") : players;
+  // adl is AIR: a script runs in it as in Flash Player, but it neither draws nor starts as one.
+  const playing = kind === "script" ? players : players.filter((p) => p !== "adl");
   if (playing.length < players.length) {
     console.log(`${bench}: adl left out, as it is not Flash Player`);
   }
@@ -889,10 +1109,10 @@ for (const bench of benches) {
     row(section, medians);
   }
 
-  // A drawing's measures do not add up; what it shows is what drew them.
+  // A drawing's measures do not add up, nor a startup's; a drawing shows what drew it.
   if (kind === "script") {
     row("total", totals);
-  } else {
+  } else if (kind === "drawing") {
     for (const p of playing) {
       console.log(`${p}: ${session.players[p].renderer ?? "the CPU"}`);
     }
