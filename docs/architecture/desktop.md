@@ -193,7 +193,7 @@ roots and the system's. A response is read up to 128 MB, and a movie's
 responses under way hold 256 MB at most all told (no compression is
 asked for, and a body a server compresses anyway, gzip, deflate or br,
 is decompressed as it comes, the limits counting what comes out, so a
-small bomb stops at them; gzip's header is read by the main process and
+small bomb stops at them (`decompress.ts`); gzip's header is read by the main process and
 its stream inflated raw, so what follows the stream is ignored, as
 Chromium ignores it, deflate is zlib's or raw as its first two bytes
 tell, and a body coded twice is refused), past which the next is refused
