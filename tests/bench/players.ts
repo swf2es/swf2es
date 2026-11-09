@@ -53,8 +53,8 @@ import { basename, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runFlash } from "../../oracle/flash.ts";
-import { runOracle } from "../../oracle/oracle.ts";
-import { tags } from "../../packages/format/dist/index.js";
+import { container, runOracle } from "../../oracle/oracle.ts";
+import { readSwf, tags } from "../../packages/format/dist/index.js";
 import { runPlayer, withPage } from "../player/chrome.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
@@ -137,8 +137,8 @@ interface Bench {
    * on the GPU, which adl, not Flash Player, is left out of.
    */
   kind: "script" | "drawing";
-  /** The ABC: the benchmark with the document class, and the report before it. */
-  abc(): Uint8Array;
+  /** The SWF: the benchmark, its document class, and the report. */
+  swf(): Uint8Array;
   /** Each section's name and value, in the order traced: milliseconds, or a drawing's measures. */
   sections(lines: string[]): (readonly [string, number])[];
 }
@@ -147,13 +147,14 @@ interface Bench {
 function script(path: string): Bench {
   return {
     kind: "script",
-    abc() {
+    swf() {
       const source = readFileSync(`${here}${path}`, "utf8").replace(/\btrace\(/g, "playersReport(");
       const name = `Players${path.replace(/^.*\//, "").replace(/\.as$/, "")}`;
-      return compileScripts(
+      const abc = compileScripts(
         [{ name, source: `${MAIN}${REPORT}\n${source}\nplayersFinish();\n` }],
         out,
       ).get(name) as Uint8Array;
+      return benchSwf(abc, "script");
     },
     sections: (lines) =>
       lines.flatMap((l) => {
@@ -166,7 +167,7 @@ function script(path: string): Bench {
 /** as3pb's benchmark: its library and messages as -in files, in the order avmshell's build lists them. */
 const as3pb: Bench = {
   kind: "script",
-  abc() {
+  swf() {
     const dir = `${root}tests/programs/as3pb/`;
     const sources = readFileSync(`${dir}runtime/test/bench/shell-sources.txt`, "utf8")
       .split("\n")
@@ -206,7 +207,7 @@ playersFinish();
       throw new Error(`as3pb did not compile:\n${result.compileLog}`);
     }
 
-    return new Uint8Array(readFileSync(`${out}/PlayersAs3pb.abc`));
+    return benchSwf(new Uint8Array(readFileSync(`${out}/PlayersAs3pb.abc`)), "script");
   },
   // "time: AS3PB bytes: 128ms" under "--- Serialize ---" and "--- Deserialize ---";
   // its totals are their sums, and its ratios are worked out from them.
@@ -236,11 +237,13 @@ playersFinish();
  */
 const drawing: Bench = {
   kind: "drawing",
-  abc() {
+  swf() {
     const source = readFileSync(`${here}drawing/Drawing.as`, "utf8");
-    return compileScripts([{ name: "PlayersDrawing", source: `${source}\n${REPORT}` }], out).get(
-      "PlayersDrawing",
-    ) as Uint8Array;
+    const abc = compileScripts(
+      [{ name: "PlayersDrawing", source: `${source}\n${REPORT}` }],
+      out,
+    ).get("PlayersDrawing") as Uint8Array;
+    return benchSwf(abc, "drawing");
   },
   // Frame times in milliseconds, memory in MB; a player that keeps no memory figure has none.
   sections(lines) {
@@ -265,11 +268,108 @@ const drawing: Bench = {
   },
 };
 
+/**
+ * LZ4 in C (tests/programs/lz4) as Crossbridge builds a SWF of it: gcc as
+ * tests/programs/run.ts runs it for avmshell, but -emit-swf, with
+ * lz4/Console.as and the report as its console. Its whole run is in its
+ * first frame, so the SWF is given room as the others are.
+ */
+const lz4: Bench = {
+  kind: "script",
+  swf() {
+    const dir = `${out}/lz4`;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      `${dir}/Console.as`,
+      `${readFileSync(`${here}lz4/Console.as`, "utf8")}\n${REPORT}`,
+    );
+    const at = relative(root, dir);
+    const vendor = "tests/programs/com-lz4-as3/native/vendor";
+    const sdk = "/opt/crossbridge/sdk/usr";
+    const imports = [
+      "builtin",
+      "playerglobal",
+      "BinaryData",
+      "ISpecialFile",
+      "IBackingStore",
+      "IVFS",
+      "InMemoryBackingStore",
+      "PlayerKernel",
+      "CModule",
+    ].flatMap((abc) => ["-import", `${sdk}/lib/${abc}.abc`]);
+    const gcc = [
+      "-O4",
+      "-DNDEBUG",
+      "-flto-api=tests/programs/com-lz4-as3/native/exports.txt",
+      "-fllvm-opt-opt=-strip",
+      "-disable-telemetry",
+      `-I${vendor}`,
+      "tests/programs/lz4/main.c",
+      ...["lz4", "lz4hc", "lz4frame", "xxhash"].map((f) => `${vendor}/${f}.c`),
+      `-symbol-abc=${at}/Console.abc`,
+      "-emit-swf",
+      "-swf-version=18",
+      "-swf-size=100x50",
+    ];
+    writeFileSync(
+      `${dir}/build.sh`,
+      [
+        "set -e",
+        `rm -f ${at}/Console.abc ${at}/lz4.swf`,
+        `java -jar ${sdk}/lib/asc2.jar -merge -md -AS3 -strict -optimize ${imports.join(" ")} ${at}/Console.as -outdir ${at} -out Console`,
+        `${sdk}/bin/gcc ${gcc.join(" ")} -o ${at}/lz4.swf`,
+        "",
+      ].join("\n"),
+    );
+    const built = container(undefined, [`${at}/build.sh`]);
+    if (built.status !== 0) {
+      throw new Error(`lz4 did not build:\n${built.stdout}${built.stderr}`);
+    }
+
+    return withScriptLimits(new Uint8Array(readFileSync(`${dir}/lz4.swf`)));
+  },
+  // "time: prose compress: 12 ms".
+  sections: (lines) =>
+    lines.flatMap((l) => {
+      const m = /^time: (.+): (\d+) ms$/.exec(l);
+      return m ? [[m[1].replace(/ /g, "-"), Number(m[2])] as const] : [];
+    }),
+};
+
+/** A SWF another tool made, with ScriptLimits after its FileAttributes, as benchSwf gives its own. */
+function withScriptLimits(file: Uint8Array): Uint8Array {
+  const swf = readSwf(file);
+  const first = swf.tags[0];
+  if (first?.code !== tags.FileAttributes) {
+    throw new Error("a SWF that does not start with FileAttributes");
+  }
+
+  const at = first.offset + first.length;
+  const limits = w.tag(tags.ScriptLimits, scriptLimits());
+  const bytes = new Uint8Array(swf.bytes.length + limits.length);
+  bytes.set(swf.bytes.subarray(0, at));
+  bytes.set(limits, at);
+  bytes.set(swf.bytes.subarray(at), at + limits.length);
+  // Uncompressed, of its new length.
+  bytes.set([0x46, 0x57, 0x53], 0);
+  new DataView(bytes.buffer).setUint32(4, bytes.length, true);
+  return bytes;
+}
+
+/** ScriptLimits' body: Flash's deepest recursion, and SCRIPT_SECONDS for a script to run. */
+function scriptLimits(): Uint8Array {
+  const limits = new Uint8Array(4);
+  new DataView(limits.buffer).setUint16(0, 1000, true);
+  new DataView(limits.buffer).setUint16(2, SCRIPT_SECONDS, true);
+  return limits;
+}
+
 const BENCHES: Record<string, Bench> = {
   enumeration: script("enumeration/Enumeration.as"),
   dictionary: script("dictionary/DictionaryAccess.as"),
   vector: script("vector/VectorAccess.as"),
   as3pb,
+  lz4,
   drawing,
 };
 
@@ -329,9 +429,6 @@ for (const bench of benches) {
  * only those of its version.
  */
 function benchSwf(abc: Uint8Array, kind: Bench["kind"]): Uint8Array {
-  const limits = new Uint8Array(4);
-  new DataView(limits.buffer).setUint16(0, 1000, true);
-  new DataView(limits.buffer).setUint16(2, SCRIPT_SECONDS, true);
   const drawn = kind === "drawing";
   return w.swf({
     version: 18,
@@ -341,7 +438,7 @@ function benchSwf(abc: Uint8Array, kind: Bench["kind"]): Uint8Array {
     frameCount: 2,
     tags: [
       w.fileAttributes(true),
-      w.tag(tags.ScriptLimits, limits),
+      w.tag(tags.ScriptLimits, scriptLimits()),
       w.doAbc(abc, "Main"),
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
@@ -356,7 +453,8 @@ async function playSwf2es(swf: Uint8Array, kind: Bench["kind"]): Promise<string[
     return playSwf2esLive(swf);
   }
 
-  const [result] = await runPlayer([{ swf, frames: 2, capture: [] }], {
+  // A script runs in the first frame; LZ4's from the second, after Crossbridge's preloader.
+  const [result] = await runPlayer([{ swf, frames: 4, capture: [] }], {
     timeout: SCRIPT_SECONDS * 1000,
   });
   if (result.error) {
@@ -541,7 +639,7 @@ async function playRuffle(swf: Uint8Array, kind: Bench["kind"]): Promise<string[
 }
 
 async function playAdl(swf: Uint8Array): Promise<string[]> {
-  const [result] = await runFlash([{ swf, frames: 2, capture: [], alone: true }], 60_000, {
+  const [result] = await runFlash([{ swf, frames: 4, capture: [], alone: true }], 60_000, {
     timed: true,
   });
   if (result.incomplete || result.errors.length) {
@@ -637,7 +735,7 @@ if (values["write-swf"]) {
   const dir = resolve(values["write-swf"]);
   mkdirSync(dir, { recursive: true });
   for (const bench of benches) {
-    writeFileSync(`${dir}/${bench}.swf`, benchSwf(BENCHES[bench].abc(), BENCHES[bench].kind));
+    writeFileSync(`${dir}/${bench}.swf`, BENCHES[bench].swf());
     console.log(`${dir}/${bench}.swf`);
   }
 
@@ -707,8 +805,8 @@ function chromeVersion(): string {
 }
 
 for (const bench of benches) {
-  const { abc, sections: timed, kind } = BENCHES[bench];
-  const swf = benchSwf(abc(), kind);
+  const { sections: timed, kind } = BENCHES[bench];
+  const swf = BENCHES[bench].swf();
   const playing = kind === "drawing" ? players.filter((p) => p !== "adl") : players;
   if (playing.length < players.length) {
     console.log(`${bench}: adl left out, as it is not Flash Player`);
