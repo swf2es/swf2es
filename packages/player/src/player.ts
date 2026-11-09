@@ -677,9 +677,7 @@ export class Player {
       }
     };
     collect(this.stage);
-    for (const orphan of this.scripting?.lifecycle.orphanRoots() ?? []) {
-      collect(orphan);
-    }
+    this.scripting?.lifecycle.eachOrphanRoot(collect);
 
     // Let go of once advanced, so that the kept list holds none past the tick.
     try {

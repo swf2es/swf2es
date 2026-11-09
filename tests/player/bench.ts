@@ -124,6 +124,15 @@
 // its level's backdrop: what a draw costs that only shows (with --counts,
 // perFrame.readbacks).
 //
+// --pen N plays instead a project player's pen: each frame a script
+// clears a Shape and draws N filled and lined dots and N lines into it,
+// stamps it into a stage-sized BitmapData, and moves N/4 sprites inside a
+// scrolled pane, asking each its getRect on the stage, as a player keeps
+// its sprites on the stage; 500 sprites it made stay off the display list
+// with a listener for a frame's events, as an editor keeps its hidden
+// parts. What drawing a pen's strokes anew and measuring sprites costs,
+// and allocates (with --allocs).
+//
 // --text N plays instead N TextFields of an embedded font, with advanced
 // anti-aliasing (--normal: normal), white and black at four sizes; each
 // frame a tenth of them take new text and a seventh move half a pixel:
@@ -146,7 +155,7 @@
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
-//     | --scroll N | --stamps N
+//     | --scroll N | --stamps N | --pen N
 //     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
@@ -184,6 +193,7 @@ const pulse = option("pulse", 0);
 const town = option("town", 0);
 const scrolled = option("scroll", 0);
 const stamps = option("stamps", 0);
+const pen = option("pen", 0);
 const triangles = option("triangles", 0);
 const texts = option("text", 0);
 const cpuProfile = args.includes("--cpu-profile")
@@ -1005,6 +1015,100 @@ function stampsSwf(count: number): Uint8Array {
   });
 }
 
+/** The pen (--pen): COUNT dots and lines drawn and stamped each frame, sprites measured, others kept off the list. */
+const PEN_SOURCE = `package {
+  import flash.display.BitmapData;
+  import flash.display.Bitmap;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.geom.Rectangle;
+
+  public class Main extends Sprite {
+    private var data:BitmapData = new BitmapData(WIDTH, HEIGHT, true, 0);
+    private var pen:Shape = new Shape();
+    private var pane:Sprite = new Sprite();
+    private var sprites:Array = [];
+    private var hidden:Array = [];
+    private var frame:int = 0;
+
+    public function Main() {
+      addChild(new Bitmap(data));
+      pane.scrollRect = new Rectangle(0, 0, WIDTH, HEIGHT);
+      addChild(pane);
+      for (var i:int = 0; i < COUNT / 4; i++) {
+        var s:Sprite = new Sprite();
+        s.graphics.beginFill(0xffcc00);
+        s.graphics.drawRect(-8, -8, 16, 16);
+        pane.addChild(s);
+        sprites.push(s);
+      }
+
+      // Kept off the display list, heard for a frame's events, as an editor's hidden parts are.
+      for (i = 0; i < 500; i++) {
+        var part:Sprite = new Sprite();
+        part.addEventListener(Event.RENDER, idle);
+        hidden.push(part);
+      }
+
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function idle(e:Event):void {}
+
+    private function step(e:Event):void {
+      frame++;
+      data.fillRect(data.rect, 0);
+      pen.graphics.clear();
+      for (var i:int = 0; i < COUNT; i++) {
+        var x:Number = (i * 37 + frame * 3) % WIDTH;
+        var y:Number = (i * 53 + frame * 2) % HEIGHT;
+        pen.graphics.lineStyle(2, 0x3060c0 + i);
+        pen.graphics.beginFill(0x30c060 + i);
+        pen.graphics.drawCircle(x, y, 3 + i % 5);
+        pen.graphics.endFill();
+        pen.graphics.moveTo(x, y);
+        pen.graphics.lineTo(x + 20, y + 10);
+      }
+
+      data.draw(pen);
+      for (i = 0; i < sprites.length; i++) {
+        var s:Sprite = sprites[i];
+        s.x = (i * 41 + frame * 4) % WIDTH;
+        s.y = (i * 29 + frame * 3) % HEIGHT;
+        var r:Rectangle = s.getRect(stage);
+        if (r.right > WIDTH) {
+          s.x -= r.right - WIDTH;
+        }
+      }
+    }
+  }
+}
+`;
+
+/** The pen (--pen): `count` dots and lines drawn and stamped each frame, sprites measured, others kept. */
+function penSwf(count: number): Uint8Array {
+  const source = PEN_SOURCE.replaceAll("COUNT", String(count))
+    .replaceAll("WIDTH", String(WIDTH))
+    .replaceAll("HEIGHT", String(HEIGHT));
+  const abc = compiler()(`BenchPen${count}`, source);
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x102040),
+      w.doAbc(abc, `BenchPen${count}`),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** N TextFields in Stem (cases.ts), advanced or normal; a tenth take new text a frame, a seventh move. */
 function textSwf(count: number, normal: boolean): Uint8Array {
   const source = `package {
@@ -1474,41 +1578,48 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  texts > 0
-    ? textSwf(texts, args.includes("--normal"))
-    : triangles > 0
-      ? trianglesSwf(triangles, args.includes("--culled"))
-      : scrolled > 0
-        ? scrollSwf(scrolled)
-        : stamps > 0
-          ? stampsSwf(stamps)
-          : town > 0
-            ? townSwf(town)
-            : toggleBranches > 0
-              ? branchSwf(toggleBranches)
-              : toggle > 0
-                ? toggleSwf(toggle)
-                : toggleStatic > 0
-                  ? toggleStaticSwf(toggleStatic)
-                  : scripted > 0
-                    ? scriptedSwf(scripted, args.includes("--still"))
-                    : pulse > 0
-                      ? pulseSwf(pulse, option("loop", 96), option("line", 1), option("squash", 1))
-                      : masks > 0
-                        ? masksSwf(masks, args.includes("--unmasked"))
-                        : blends > 0
-                          ? blendsSwf(blends)
-                          : branches > 0
-                            ? branchSwf(branches)
-                            : rig > 0
-                              ? rigSwf(
-                                  rig,
-                                  args.includes("--swap"),
-                                  args.includes("--fresh"),
-                                  args.includes("--blurred") || filtered > 0,
-                                  args.includes("--glide"),
-                                )
-                              : synthetic();
+  pen > 0
+    ? penSwf(pen)
+    : texts > 0
+      ? textSwf(texts, args.includes("--normal"))
+      : triangles > 0
+        ? trianglesSwf(triangles, args.includes("--culled"))
+        : scrolled > 0
+          ? scrollSwf(scrolled)
+          : stamps > 0
+            ? stampsSwf(stamps)
+            : town > 0
+              ? townSwf(town)
+              : toggleBranches > 0
+                ? branchSwf(toggleBranches)
+                : toggle > 0
+                  ? toggleSwf(toggle)
+                  : toggleStatic > 0
+                    ? toggleStaticSwf(toggleStatic)
+                    : scripted > 0
+                      ? scriptedSwf(scripted, args.includes("--still"))
+                      : pulse > 0
+                        ? pulseSwf(
+                            pulse,
+                            option("loop", 96),
+                            option("line", 1),
+                            option("squash", 1),
+                          )
+                        : masks > 0
+                          ? masksSwf(masks, args.includes("--unmasked"))
+                          : blends > 0
+                            ? blendsSwf(blends)
+                            : branches > 0
+                              ? branchSwf(branches)
+                              : rig > 0
+                                ? rigSwf(
+                                    rig,
+                                    args.includes("--swap"),
+                                    args.includes("--fresh"),
+                                    args.includes("--blurred") || filtered > 0,
+                                    args.includes("--glide"),
+                                  )
+                                : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1555,33 +1666,35 @@ const total = tick.map((t, i) => t + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    texts > 0
-      ? `${texts} text fields, ${args.includes("--normal") ? "normal" : "advanced"}`
-      : triangles > 0
-        ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
-        : scrolled > 0
-          ? `scrolled bitmap of ${scrolled}`
-          : town > 0
-            ? `town of ${town}`
-            : toggleBranches > 0
-              ? `toggle of ${toggleBranches} branches`
-              : toggle > 0
-                ? `toggle of ${toggle}`
-                : toggleStatic > 0
-                  ? `static toggle of ${toggleStatic}`
-                  : scripted > 0
-                    ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                    : pulse > 0
-                      ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                      : masks > 0
-                        ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                        : blends > 0
-                          ? `${blends} blended shapes`
-                          : branches > 0
-                            ? `${branches} branches`
-                            : rig > 0
-                              ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                              : shapes,
+    pen > 0
+      ? `pen of ${pen}`
+      : texts > 0
+        ? `${texts} text fields, ${args.includes("--normal") ? "normal" : "advanced"}`
+        : triangles > 0
+          ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+          : scrolled > 0
+            ? `scrolled bitmap of ${scrolled}`
+            : town > 0
+              ? `town of ${town}`
+              : toggleBranches > 0
+                ? `toggle of ${toggleBranches} branches`
+                : toggle > 0
+                  ? `toggle of ${toggle}`
+                  : toggleStatic > 0
+                    ? `static toggle of ${toggleStatic}`
+                    : scripted > 0
+                      ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                      : pulse > 0
+                        ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                        : masks > 0
+                          ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                          : blends > 0
+                            ? `${blends} blended shapes`
+                            : branches > 0
+                              ? `${branches} branches`
+                              : rig > 0
+                                ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {

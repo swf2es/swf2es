@@ -264,6 +264,8 @@ export class Scripting {
   inFrameScript: MovieClip | null = null;
   /** The display objects listening for each frame event, in the order they first listened; a broadcast reaches these. */
   readonly broadcasts = new Map<string, Set<AsObject>>();
+  /** The same sets, for a walk by index that makes no iterator; the map never lets one go. */
+  readonly broadcastSets: Set<AsObject>[] = [];
   /** The dispatchers listening for ACTIVATE or DEACTIVATE, held weakly. */
   private readonly activation = new Map<string, WeakTargets>();
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
@@ -804,6 +806,7 @@ export class Scripting {
     if (!targets) {
       targets = new Set();
       this.broadcasts.set(type, targets);
+      this.broadcastSets.push(targets);
     }
 
     return targets;
@@ -1048,9 +1051,7 @@ export class Scripting {
         }
       }
     };
-    for (const orphan of this.lifecycle.orphanRoots()) {
-      visit(orphan);
-    }
+    this.lifecycle.eachOrphanRoot(visit);
 
     visit(root);
     for (const display of this.lifecycle.fresh) {
