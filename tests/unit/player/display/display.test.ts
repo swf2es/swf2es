@@ -948,14 +948,18 @@ test("the walks' kept lists follow every clip, container and button that comes, 
       }
 
       const which = states[random(4)];
-      if (which === "up") {
-        button.upState = state;
-      } else if (which === "over") {
-        button.overState = state;
-      } else if (which === "down") {
-        button.downState = state;
-      } else {
-        button.hitTestState = state;
+      switch (which) {
+        case "up":
+          button.upState = state;
+          break;
+        case "over":
+          button.overState = state;
+          break;
+        case "down":
+          button.downState = state;
+          break;
+        default:
+          button.hitTestState = state;
       }
 
       button.show();

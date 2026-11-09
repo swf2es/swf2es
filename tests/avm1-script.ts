@@ -1181,51 +1181,51 @@ class Parser {
           place: { kind: "var", name: t.value },
         };
       case "op":
-        if (t.value === "(") {
-          const e = this.expression();
-          this.expect(")");
-          return { emit: e, place: null };
-        }
-
-        if (t.value === "[") {
-          const elements: Emit[] = [];
-          while (!this.eat("]")) {
-            elements.push(this.expression());
-            this.eat(",");
+        switch (t.value) {
+          case "(": {
+            const e = this.expression();
+            this.expect(")");
+            return { emit: e, place: null };
           }
-
-          return {
-            emit: (a) => {
-              pushArgs(a, elements);
-              a.op("InitArray");
-            },
-            place: null,
-          };
-        }
-
-        if (t.value === "{") {
-          const pairs: [string, Emit][] = [];
-          while (!this.eat("}")) {
-            const k = this.next();
-            if (k.kind === "end" || k.kind === "op") {
-              throw new Error("bad object literal");
+          case "[": {
+            const elements: Emit[] = [];
+            while (!this.eat("]")) {
+              elements.push(this.expression());
+              this.eat(",");
             }
 
-            this.expect(":");
-            pairs.push([String(k.value), this.expression()]);
-            this.eat(",");
+            return {
+              emit: (a) => {
+                pushArgs(a, elements);
+                a.op("InitArray");
+              },
+              place: null,
+            };
           }
-
-          return {
-            emit: (a) => {
-              for (const [name, value] of pairs) {
-                a.push(name);
-                value(a);
+          case "{": {
+            const pairs: [string, Emit][] = [];
+            while (!this.eat("}")) {
+              const k = this.next();
+              if (k.kind === "end" || k.kind === "op") {
+                throw new Error("bad object literal");
               }
-              a.push(pairs.length).op("InitObject");
-            },
-            place: null,
-          };
+
+              this.expect(":");
+              pairs.push([String(k.value), this.expression()]);
+              this.eat(",");
+            }
+
+            return {
+              emit: (a) => {
+                for (const [name, value] of pairs) {
+                  a.push(name);
+                  value(a);
+                }
+                a.push(pairs.length).op("InitObject");
+              },
+              place: null,
+            };
+          }
         }
     }
 
