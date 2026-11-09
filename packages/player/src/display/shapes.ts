@@ -92,21 +92,103 @@ export function inside(points: number[], px: number, py: number): boolean {
   return hit;
 }
 
+// The running box of extent: one for every call, as bounds are asked of every drawn shape.
+const box = new Float64Array(4);
+
+function take(x: number, y: number): void {
+  box[0] = Math.min(box[0], x);
+  box[1] = Math.min(box[1], y);
+  box[2] = Math.max(box[2], x);
+  box[3] = Math.max(box[3], y);
+}
+
+/** The quadratic curve from (x, y) through (cx, cy) to (ax, ay), at `t`, into the box. */
+function takeCurveAt(
+  t: number,
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  ax: number,
+  ay: number,
+): void {
+  const u = 1 - t;
+  take(u * u * x + 2 * u * t * cx + t * t * ax, u * u * y + 2 * u * t * cy + t * t * ay);
+}
+
+/** The cubic curve from (x, y) by (c1x, c1y) and (c2x, c2y) to (ax, ay), at `t`, into the box. */
+function takeCubicAt(
+  t: number,
+  x: number,
+  y: number,
+  c1x: number,
+  c1y: number,
+  c2x: number,
+  c2y: number,
+  ax: number,
+  ay: number,
+): void {
+  if (!(t > 0 && t < 1)) {
+    return;
+  }
+
+  const u = 1 - t;
+  take(
+    u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
+    u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
+  );
+}
+
+/**
+ * Where the cubic's derivative on one axis, from p0 by c1 and c2 to p3, is
+ * zero within it: the roots of a t² + b t + c, each into the box.
+ */
+function takeCubicTurns(
+  p0: number,
+  c1: number,
+  c2: number,
+  p3: number,
+  x: number,
+  y: number,
+  c1x: number,
+  c1y: number,
+  c2x: number,
+  c2y: number,
+  ax: number,
+  ay: number,
+): void {
+  const a = -p0 + 3 * c1 - 3 * c2 + p3;
+  const b = 2 * (p0 - 2 * c1 + c2);
+  const c = c1 - p0;
+  if (a === 0) {
+    if (b !== 0) {
+      takeCubicAt(-c / b, x, y, c1x, c1y, c2x, c2y, ax, ay);
+    }
+
+    return;
+  }
+
+  const d = b * b - 4 * a * c;
+  if (d < 0) {
+    return;
+  }
+
+  const s = Math.sqrt(d);
+  takeCubicAt((-b + s) / (2 * a), x, y, c1x, c1y, c2x, c2y, ax, ay);
+  takeCubicAt((-b - s) / (2 * a), x, y, c1x, c1y, c2x, c2y, ax, ay);
+}
+
 /**
  * The path's extent, each curve at its true extremes, as [xMin, yMin,
- * xMax, yMax]; null for a path with no points.
+ * xMax, yMax]; null for a path with no points. It allocates only its
+ * answer: the bounds of every shape drawn, a pen's redrawn each frame
+ * among them, are asked again and again.
  */
 export function extent(path: Path): [number, number, number, number] | null {
-  let xMin = Number.POSITIVE_INFINITY;
-  let yMin = Number.POSITIVE_INFINITY;
-  let xMax = Number.NEGATIVE_INFINITY;
-  let yMax = Number.NEGATIVE_INFINITY;
-  const take = (x: number, y: number) => {
-    xMin = Math.min(xMin, x);
-    yMin = Math.min(yMin, y);
-    xMax = Math.max(xMax, x);
-    yMax = Math.max(yMax, y);
-  };
+  box[0] = Number.POSITIVE_INFINITY;
+  box[1] = Number.POSITIVE_INFINITY;
+  box[2] = Number.NEGATIVE_INFINITY;
+  box[3] = Number.NEGATIVE_INFINITY;
   let x = 0;
   let y = 0;
   for (let i = 0; i < path.length; ) {
@@ -121,53 +203,37 @@ export function extent(path: Path): [number, number, number, number] | null {
 
     take(x, y);
     if (command === CURVE) {
-      const [cx, cy, ax, ay] = path.slice(i + 1, i + 5);
+      const cx = path[i + 1];
+      const cy = path[i + 2];
+      const ax = path[i + 3];
+      const ay = path[i + 4];
       take(ax, ay);
       // Where the derivative is zero on either axis, if within the curve.
-      const at = (t: number) => {
-        const u = 1 - t;
-        take(u * u * x + 2 * u * t * cx + t * t * ax, u * u * y + 2 * u * t * cy + t * t * ay);
-      };
-      for (const [p0, c, p2] of [
-        [x, cx, ax],
-        [y, cy, ay],
-      ]) {
-        const denominator = p0 - 2 * c + p2;
-        const t = denominator === 0 ? -1 : (p0 - c) / denominator;
-        if (t > 0 && t < 1) {
-          at(t);
-        }
+      const dx = x - 2 * cx + ax;
+      const tx = dx === 0 ? -1 : (x - cx) / dx;
+      if (tx > 0 && tx < 1) {
+        takeCurveAt(tx, x, y, cx, cy, ax, ay);
+      }
+
+      const dy = y - 2 * cy + ay;
+      const ty = dy === 0 ? -1 : (y - cy) / dy;
+      if (ty > 0 && ty < 1) {
+        takeCurveAt(ty, x, y, cx, cy, ax, ay);
       }
 
       x = ax;
       y = ay;
       i += 5;
     } else if (command === CUBIC) {
-      const [c1x, c1y, c2x, c2y, ax, ay] = path.slice(i + 1, i + 7);
+      const c1x = path[i + 1];
+      const c1y = path[i + 2];
+      const c2x = path[i + 3];
+      const c2y = path[i + 4];
+      const ax = path[i + 5];
+      const ay = path[i + 6];
       take(ax, ay);
-      const at = (t: number) => {
-        const u = 1 - t;
-        take(
-          u * u * u * x + 3 * u * u * t * c1x + 3 * u * t * t * c2x + t * t * t * ax,
-          u * u * u * y + 3 * u * u * t * c1y + 3 * u * t * t * c2y + t * t * t * ay,
-        );
-      };
-      for (const [p0, c1, c2, p3] of [
-        [x, c1x, c2x, ax],
-        [y, c1y, c2y, ay],
-      ]) {
-        // The derivative's roots: a t² + b t + c = 0.
-        const a = -p0 + 3 * c1 - 3 * c2 + p3;
-        const b = 2 * (p0 - 2 * c1 + c2);
-        const c = c1 - p0;
-        const roots = a === 0 ? (b === 0 ? [] : [-c / b]) : quadraticRoots(a, b, c);
-        for (const t of roots) {
-          if (t > 0 && t < 1) {
-            at(t);
-          }
-        }
-      }
-
+      takeCubicTurns(x, c1x, c2x, ax, x, y, c1x, c1y, c2x, c2y, ax, ay);
+      takeCubicTurns(y, c1y, c2y, ay, x, y, c1x, c1y, c2x, c2y, ax, ay);
       x = ax;
       y = ay;
       i += 7;
@@ -179,17 +245,7 @@ export function extent(path: Path): [number, number, number, number] | null {
     }
   }
 
-  return xMin <= xMax ? [xMin, yMin, xMax, yMax] : null;
-}
-
-function quadraticRoots(a: number, b: number, c: number): number[] {
-  const d = b * b - 4 * a * c;
-  if (d < 0) {
-    return [];
-  }
-
-  const s = Math.sqrt(d);
-  return [(-b + s) / (2 * a), (-b - s) / (2 * a)];
+  return box[0] <= box[2] ? [box[0], box[1], box[2], box[3]] : null;
 }
 
 /**

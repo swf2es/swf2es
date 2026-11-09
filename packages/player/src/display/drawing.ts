@@ -52,6 +52,13 @@ function fillsOnly(layer: ShapeLayer): boolean {
 const LINE_POINTS = [0, 0];
 const CURVE_POINTS = [0, 0, 0, 0];
 const CUBIC_POINTS = [0, 0, 0, 0, 0, 0];
+// Each quarter's start and end directions, (sx, sy) and (ex, ey), for arc.
+const QUARTERS = [
+  [1, 0, 0, 1],
+  [0, 1, -1, 0],
+  [-1, 0, 0, -1],
+  [0, -1, 1, 0],
+];
 
 /** `kind` and `points` onto the last of `paths`. */
 function append(paths: Path[], kind: number, points: readonly number[]): void {
@@ -78,8 +85,13 @@ export class Drawing {
   /** Where the open fill's entries begin in its layer, which fills before it may share. */
   private fillStart = 0;
   private stroke: Stroke | null = null;
-  /** The line closing the open contour, or the one endFill closed, while a line drawn on may take it away. */
-  private closing: { stroke: Stroke; close: Close } | null = null;
+  /**
+   * The stroke whose last closing line closes the open contour, or the one
+   * endFill closed, while a line drawn on may take it away.
+   */
+  private closing: Stroke | null = null;
+  /** The closing line last taken away, for the next: a filled, lined pen makes one a segment. */
+  private spareClose: Close | null = null;
   /**
    * A point of the open contour off its start, for whether it leaves the
    * line through them: its offset from the start, while `heading`.
@@ -271,12 +283,11 @@ export class Drawing {
       return;
     }
 
-    const [sx, sy, ex, ey] = [
-      [1, 0, 0, 1],
-      [0, 1, -1, 0],
-      [-1, 0, 0, -1],
-      [0, -1, 1, 0],
-    ][quarter];
+    const turn = QUARTERS[quarter];
+    const sx = turn[0];
+    const sy = turn[1];
+    const ex = turn[2];
+    const ey = turn[3];
     this.curveTo(
       cx + (sx + ex * TAN_22_5) * rx,
       cy + (sy + ey * TAN_22_5) * ry,
@@ -720,7 +731,7 @@ export class Drawing {
   private unclose(): void {
     if (this.closing) {
       this.version++;
-      this.closing.stroke.closes?.pop();
+      this.spareClose = this.closing.closes?.pop() ?? null;
       this.closing = null;
     }
   }
@@ -734,10 +745,14 @@ export class Drawing {
     }
 
     if (contour[1] !== this.x || contour[2] !== this.y) {
-      const close = { at: stroke.paths.length - 1, x: contour[1], y: contour[2] };
+      const close = this.spareClose ?? { at: 0, x: 0, y: 0 };
+      this.spareClose = null;
+      close.at = stroke.paths.length - 1;
+      close.x = contour[1];
+      close.y = contour[2];
       stroke.closes = stroke.closes ?? [];
       stroke.closes.push(close);
-      this.closing = { stroke, close };
+      this.closing = stroke;
       this.version++;
     }
   }
