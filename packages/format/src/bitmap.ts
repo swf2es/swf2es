@@ -144,22 +144,19 @@ function cleanJpeg(data: Uint8Array): Uint8Array | null {
       return null;
     }
 
-    const marker = data[at + 1];
-    if (marker === 0xd8 || marker === 0xd9) {
-      at += 2;
-      continue;
-    }
-
-    if (marker === 0xff) {
-      // Fill bytes before a marker.
-      at++;
-      continue;
-    }
-
-    if (marker === 0xda) {
-      // The scan, and everything after it, as it is.
-      out.push(data.subarray(at));
-      return concatAll(out);
+    switch (data[at + 1]) {
+      case 0xd8:
+      case 0xd9:
+        at += 2;
+        continue;
+      case 0xff:
+        // Fill bytes before a marker.
+        at++;
+        continue;
+      case 0xda:
+        // The scan, and everything after it, as it is.
+        out.push(data.subarray(at));
+        return concatAll(out);
     }
 
     if (at + 3 >= data.length) {

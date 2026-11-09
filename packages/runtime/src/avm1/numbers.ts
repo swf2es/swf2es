@@ -52,16 +52,13 @@ export function numberToString(n: number): string {
     return "NaN";
   }
 
-  if (n === Number.POSITIVE_INFINITY) {
-    return "Infinity";
-  }
-
-  if (n === Number.NEGATIVE_INFINITY) {
-    return "-Infinity";
-  }
-
-  if (n === 0) {
-    return "0";
+  switch (n) {
+    case Number.POSITIVE_INFINITY:
+      return "Infinity";
+    case Number.NEGATIVE_INFINITY:
+      return "-Infinity";
+    case 0:
+      return "0";
   }
 
   if (n >= -2147483648 && n <= 2147483647 && Number.isInteger(n)) {

@@ -350,44 +350,30 @@ export class Symbols {
         return display;
       }
 
-      if (t.name === "flash.display::SimpleButton") {
-        return new ButtonObject();
-      }
-
-      if (t.name === "flash.display::MovieClip") {
-        return new MovieClip(EMPTY_TIMELINE, library);
-      }
-
-      if (t.name === "flash.display::Shape") {
-        return new ShapeObject(null);
-      }
-
-      // Only a timeline makes a MorphShape or a StaticText.
-      if (t.name === "flash.display::MorphShape") {
-        throw this.s.rt.error("ArgumentError", 2012, "MorphShape$");
-      }
-
-      if (t.name === "flash.text::StaticText") {
-        throw this.s.rt.error("ArgumentError", 2012, "StaticText$");
-      }
-
-      // Only a load of an AVM1 SWF makes one (requestLoad).
-      if (t.name === "flash.display::AVM1Movie") {
-        throw this.s.rt.error("ArgumentError", 2012, "AVM1Movie$");
-      }
-
-      if (t.name === "flash.display::Bitmap") {
-        return new BitmapObject(null);
-      }
-
-      if (t.name === "flash.media::Video") {
-        return new VideoObject();
-      }
-
-      if (t.name === "flash.text::TextField") {
-        const text = new TextObject(null);
-        text.fonts = (this.s.code.codeLibrary() ?? library).fonts;
-        return text;
+      switch (t.name) {
+        case "flash.display::SimpleButton":
+          return new ButtonObject();
+        case "flash.display::MovieClip":
+          return new MovieClip(EMPTY_TIMELINE, library);
+        case "flash.display::Shape":
+          return new ShapeObject(null);
+        // Only a timeline makes a MorphShape or a StaticText.
+        case "flash.display::MorphShape":
+          throw this.s.rt.error("ArgumentError", 2012, "MorphShape$");
+        case "flash.text::StaticText":
+          throw this.s.rt.error("ArgumentError", 2012, "StaticText$");
+        // Only a load of an AVM1 SWF makes one (requestLoad).
+        case "flash.display::AVM1Movie":
+          throw this.s.rt.error("ArgumentError", 2012, "AVM1Movie$");
+        case "flash.display::Bitmap":
+          return new BitmapObject(null);
+        case "flash.media::Video":
+          return new VideoObject();
+        case "flash.text::TextField": {
+          const text = new TextObject(null);
+          text.fonts = (this.s.code.codeLibrary() ?? library).fonts;
+          return text;
+        }
       }
     }
 
