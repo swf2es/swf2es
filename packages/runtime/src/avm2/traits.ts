@@ -546,7 +546,7 @@ const HOME_SLACK = 16;
  * array through an accessor on the prototype (spilledSlot), so that what
  * looks slots up by name finds them as any other.
  */
-export const SPILL_SLOTS = 900;
+const SPILL_SLOTS = 900;
 
 /** Slot `slot`'s accessor in `home`, a prototype of its objects: the object's `$S` at its place. */
 function spilledSlot(home: AsObject, slot: number): void {

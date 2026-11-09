@@ -176,7 +176,7 @@ export async function playerLibraries(air: boolean): Promise<Uint8Array[]> {
  * builtin.abc and playerglobal: the shipped ones, or those configured,
  * fetched once a page; every player reads the same bytes.
  */
-export function libraries(): Promise<Uint8Array[]> {
+function libraries(): Promise<Uint8Array[]> {
   const urls = config.libraries ?? {};
   libraryBytes ??= Promise.all(
     [

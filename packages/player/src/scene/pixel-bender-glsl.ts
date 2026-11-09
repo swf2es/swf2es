@@ -176,7 +176,10 @@ export function kernelGlslOf(kernel: PbjKernel): KernelGlsl {
   return glsl;
 }
 
-/** `kernel`'s operations as GLSL (KernelGlsl). */
+/**
+ * `kernel`'s operations as GLSL (KernelGlsl).
+ * @public tests/player/pixel-bender.ts imports it into Chrome by name.
+ */
 export function kernelGlsl(kernel: PbjKernel): KernelGlsl {
   const w = new Writer();
   for (const op of kernel.operations) {

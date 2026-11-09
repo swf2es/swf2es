@@ -33,7 +33,7 @@ const TYPES: Record<string, number> = {
 };
 
 /** The opcodes of the operations of one destination and one source. */
-export const OPS: Record<string, number> = {
+const OPS: Record<string, number> = {
   nop: 0x00,
   add: 0x01,
   sub: 0x02,
