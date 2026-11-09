@@ -167,9 +167,6 @@ importers:
       '@swf2es/format':
         specifier: workspace:*
         version: link:../format
-      '@swf2es/native':
-        specifier: workspace:*
-        version: link:../native
       '@swf2es/player':
         specifier: workspace:*
         version: link:../player

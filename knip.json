@@ -18,9 +18,6 @@
       "entry": ["src/main.ts", "src/service-worker.ts"],
       "ignoreDependencies": ["@swf2es/render"]
     },
-    "packages/web": {
-      "ignoreDependencies": ["@swf2es/native"]
-    },
     "packages/swf2es": {
       "entry": ["src/swf2es.ts", "src/worker.ts"]
     },
