@@ -823,6 +823,16 @@ export const textCases: PlayerCase[] = [
     tolerance: 0,
     maxOutliers: 0,
   },
+  // A size set on a field that fits itself, fitted again only when asked or drawn (adl).
+  {
+    name: "text-autosize-later",
+    swf: (abc) => bare(abc, 1, "TextAutoSizeLater"),
+    script: "TextAutoSizeLater",
+    frames: 3,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   // A field's selection after text, htmlText, appendText and replaceText.
   {
     name: "text-field-selection-moves",

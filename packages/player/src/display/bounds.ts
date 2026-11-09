@@ -64,6 +64,7 @@ export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
   }
 
   if (d instanceof TextObject) {
+    d.settle();
     return { xMin: d.left, yMin: d.top, xMax: d.left + d.width, yMax: d.top + d.height };
   }
 
