@@ -86,12 +86,15 @@ async function scriptingFor(
     onCompile,
     lazyCompilation = false,
     air = false,
+    logFetch = false,
   }: {
     moduleCache?: ModuleCache | null;
     onCompile?: () => void;
     lazyCompilation?: boolean;
     /** Played as AIR plays it (Scripting's `air`). */
     air?: boolean;
+    /** Its fetches traced, for a test with log_fetch (testFetch). */
+    logFetch?: boolean;
   } = {},
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
@@ -134,7 +137,7 @@ async function scriptingFor(
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
     onUncaught: (error) => uncaught.push(error),
-    fetch: pageFetch,
+    fetch: testFetch(url ? new URL(url, location.href).href : undefined, trace, logFetch, true),
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
   });
@@ -151,6 +154,38 @@ async function scriptingFor(
   );
   await scripting.loadLibraries(libraries);
   return scripting;
+}
+
+/**
+ * A test's fetch: logged as Ruffle's test navigator logs it where the test
+ * asks (log_fetch), and a test's server at localhost:8000 answering from
+ * its localhost/ directory, as that navigator has it; a path it has no
+ * file for fails. `later` logs it once the script that asked returns, as
+ * Ruffle's AS3 loads start: after the script's own traces.
+ */
+function testFetch(
+  swfUrl: string | undefined,
+  trace: string[],
+  logFetch: boolean,
+  later = false,
+): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
+  return (request, signal) => {
+    if (logFetch) {
+      if (later) {
+        queueMicrotask(() => logRequest(request, swfUrl, trace));
+      } else {
+        logRequest(request, swfUrl, trace);
+      }
+    }
+
+    const served = new URL(request.url);
+    if (swfUrl && served.host === "localhost:8000") {
+      const local = new URL(`localhost${served.pathname}`, swfUrl).href;
+      return pageFetch({ ...request, url: local }, signal);
+    }
+
+    return pageFetch(request, signal);
+  };
 }
 
 /** The page's fetch, a test's files served from the corpus as Flash loaded them from disk. */
@@ -307,21 +342,7 @@ async function avm1For(
     realTime: null,
     url: fileName === undefined ? undefined : `file:///${fileName}`,
     base: swfUrl,
-    fetch: (request, signal) => {
-      if (logFetch) {
-        logRequest(request, swfUrl, trace);
-      }
-
-      // A test's server at localhost:8000 answers from its localhost/ directory, as Ruffle's
-      // test navigator has it; a path it has no file for fails.
-      const served = new URL(request.url);
-      if (swfUrl && served.host === "localhost:8000") {
-        const local = new URL(`localhost${served.pathname}`, swfUrl).href;
-        return pageFetch({ ...request, url: local }, signal);
-      }
-
-      return pageFetch(request, signal);
-    },
+    fetch: testFetch(swfUrl, trace, logFetch),
     socket: scriptedSockets(socket, trace, logFetch, uncaught),
     // A page is never opened: a test that logs fetches traces it as Ruffle's navigator logs it.
     navigate: logFetch
@@ -446,7 +467,7 @@ async function runSwf(
     }
   };
   try {
-    scripting = await scriptingFor(bytes, trace, url, uncaught, { lazyCompilation, air });
+    scripting = await scriptingFor(bytes, trace, url, uncaught, { lazyCompilation, air, logFetch });
     const player = new Player(
       bytes,
       scripting,
