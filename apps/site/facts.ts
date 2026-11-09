@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 export const root = fileURLToPath(new URL("../../", import.meta.url));
 const SOURCE = "https://github.com/swf2es/swf2es/blob/";
 export const AVMPLUS = "https://github.com/swf2es/avmplus";
+/** as3pb, whose benchmark is a demo, at the commit its submodule is at. */
+export const AS3PB = "https://github.com/33TU/as3pb";
 
 const trimmed = (process.env.SITE_BASE ?? "/swf2es/").replace(/^\/+|\/+$/g, "");
 /**
@@ -37,6 +39,7 @@ export const blob = sourceUrl("");
 // The avmplus commit builtin.abc and the translated files come from: the
 // MPL asks that recipients be told where its source form is.
 export const avmplus = head(join(root, "oracle/avmplus"));
+export const as3pbCommit = head(join(root, "tests/programs/as3pb"));
 
 /** The files under `dirs` whose names `extensions` takes and that say `marker`, relative to the repository. */
 function filesSaying(dirs: string[], marker: RegExp, extensions: RegExp): string[] {

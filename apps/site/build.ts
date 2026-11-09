@@ -101,8 +101,8 @@ writeFileSync(
       file,
       title,
       description,
-      // At the commit the site is built from, which is what it plays.
-      source: sourceUrl(source),
+      // At the commit the site is built from, which is what it plays; one from elsewhere as it is.
+      source: /^https:\/\//.test(source) ? source : sourceUrl(source),
       bytes: bytes.length,
     })),
     null,
@@ -119,6 +119,8 @@ copyFileSync(join(root, "vendor/minimp3/LICENSE"), join(licenses, "minimp3-CC0.t
 copyFileSync(join(root, "vendor/zlib/LICENSE"), join(licenses, "zlib.txt"));
 copyFileSync(join(root, "vendor/libtess2/LICENSE.txt"), join(licenses, "libtess2-SGI.txt"));
 copyFileSync(join(root, "vendor/jxrlib/LICENSE"), join(licenses, "jxrlib-BSD-2-Clause.txt"));
+// as3pb's runtime is in its benchmark's demo SWF.
+copyFileSync(join(root, "tests/programs/as3pb/LICENSE"), join(licenses, "as3pb-MIT.txt"));
 // Every notice of the C in @swf2es/native's binaries, the LZMA SDK's among them.
 copyFileSync(
   join(root, "packages/native/LICENSE.third-party"),
