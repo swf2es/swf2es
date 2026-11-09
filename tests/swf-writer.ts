@@ -1315,6 +1315,28 @@ export function button2(
   return tag(34, w.done());
 }
 
+/**
+ * DefineButton2 of records without actions: each the states it is in (up 1,
+ * over 2, down 4, hit test 8), its character, at a depth of its own, moved
+ * by (tx, ty) in twips.
+ */
+export function button2Records(
+  id: number,
+  records: { states: number; character: number; tx?: number; ty?: number }[],
+): Uint8Array {
+  const w = new BitWriter().u16(id).u8(0).u16(0);
+  records.forEach((r, i) => {
+    w.u8(r.states)
+      .u16(r.character)
+      .u16(i + 1);
+    matrix(w, { tx: r.tx, ty: r.ty });
+    // A CXFORMWITHALPHA of no terms.
+    w.ub(1, 0).ub(1, 0).ub(4, 0).align();
+  });
+
+  return tag(34, w.u8(0).done());
+}
+
 /** DefineButton of one character in every state, at depth 1, with its actions' bytes. */
 export function button(id: number, character: number, actions: number[]): Uint8Array {
   const w = new BitWriter().u16(id);

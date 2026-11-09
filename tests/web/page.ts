@@ -796,6 +796,20 @@ async function marginsPlayer(salign: string) {
   return [box.left, box.top, ...(element("margins").stageSize() as number[])];
 }
 
+/** A player of `src` at the page's top left, over the other elements; where it is. */
+async function scriptFreePlayer(src: string) {
+  document.getElementById("script-free")?.remove();
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "script-free";
+  p.setAttribute("src", src);
+  p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  document.body.append(p);
+  await p.ready;
+  await frames(3);
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top];
+}
+
 /** A player of the activation SWF, focused, and a textarea of the page's beside it. */
 async function activationPlayer() {
   const p = document.createElement("swf2es-player") as Player;
@@ -1005,6 +1019,13 @@ Object.assign(globalThis, {
   marginsDestroy: () => {
     element("margins").destroy();
     element("margins").remove();
+    return true;
+  },
+  frames,
+  scriptFreePlayer,
+  scriptFreeDestroy: () => {
+    element("script-free").destroy();
+    element("script-free").remove();
     return true;
   },
   touchPlayer,

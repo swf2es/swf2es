@@ -204,6 +204,49 @@ writeFileSync(
     ],
   }),
 );
+// Buttons in SWFs with no code, AS3 and AVM1: up a red square at (10, 20), over and down a
+// green one at (60, 20), where the hit test is too.
+const square = (id: number, color: number) =>
+  w.shape({
+    id,
+    bounds: [0, 400, 0, 400],
+    fills: [color],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [400, 0] },
+          { line: [400, 400] },
+          { line: [0, 400] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+const scriptFreeButton = (as3: boolean) =>
+  w.swf({
+    version: as3 ? 10 : 8,
+    width: 100,
+    height: 60,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      square(2, 0x00ff00),
+      w.button2Records(3, [
+        { states: 1, character: 1, tx: 200, ty: 400 },
+        { states: 6, character: 2, tx: 1200, ty: 400 },
+        { states: 8, character: 1, tx: 1200, ty: 400 },
+      ]),
+      w.place({ character: 3, depth: 1 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+writeFileSync(`${site}button-as3.swf`, scriptFreeButton(true));
+writeFileSync(`${site}button-avm1.swf`, scriptFreeButton(false));
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 // An AS2 SWF that calls the page, tells it what came back, and takes its calls.
@@ -1045,6 +1088,59 @@ check(
     await call(evaluate, "marginsDestroy()");
   },
 );
+
+check("a SWF with no code has buttons the pointer reaches", async (evaluate, send) => {
+  const shot = async () => {
+    const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+    return decodePng(new Uint8Array(Buffer.from(data, "base64")));
+  };
+  const only = (image: Image, rect: number[]) => [...colours(image, rect, 2).keys()];
+  const move = (x: number, y: number) =>
+    send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
+  const press = async (x: number, y: number) => {
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await send("Input.dispatchMouseEvent", {
+        type,
+        x,
+        y,
+        button: "left",
+        buttons: type === "mousePressed" ? 1 : 0,
+        clickCount: 1,
+      });
+    }
+  };
+
+  for (const vm of ["as3", "avm1"]) {
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `scriptFreePlayer("/web-test/button-${vm}.swf")`,
+    );
+    const up = [left + 12, top + 22, 16, 16];
+    const over = [left + 62, top + 22, 16, 16];
+    // On the up state's square, outside the hit test: still up.
+    await move(left + 20, top + 30);
+    await call(evaluate, "frames(2).then(() => true)");
+    let image = await shot();
+    assert.deepEqual(only(image, up), [0xff0000], `${vm}: up off the hit test`);
+    assert.deepEqual(only(image, over), [0xffffff], `${vm}: over off the hit test`);
+
+    // On the hit test: over, drawn there, and the up state gone.
+    await move(left + 70, top + 30);
+    await call(evaluate, "frames(2).then(() => true)");
+    image = await shot();
+    assert.deepEqual(only(image, up), [0xffffff], `${vm}: up on the hit test`);
+    assert.deepEqual(only(image, over), [0x00ff00], `${vm}: over on the hit test`);
+
+    // A press and a release there leave it over, and moving off puts it up again.
+    await press(left + 70, top + 30);
+    await move(left + 95, top + 5);
+    await call(evaluate, "frames(2).then(() => true)");
+    image = await shot();
+    assert.deepEqual(only(image, up), [0xff0000], `${vm}: up once off`);
+    assert.deepEqual(only(image, over), [0xffffff], `${vm}: over once off`);
+    await call(evaluate, "scriptFreeDestroy()");
+  }
+});
 
 check(
   "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",

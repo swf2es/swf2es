@@ -17,7 +17,10 @@ rejects with what kept it from playing; `destroy()`; and the events
 `load`, `error` (the error in `detail`) and `fscommand`, which also goes
 to the page's `<id>_DoFSCommand` as the plug-in's did. Its size is its
 attributes', or its SWF's stage, in `:host` rules the page's own styles
-override. A SWF with no ActionScript 3 plays with no Scripting.
+override. A SWF with no code plays with no VM, unless it defines a
+button or a text field: those take the pointer and the keys with no
+script, as Flash's do, so such a SWF gets the VM its FileAttributes
+name, Scripting or AVM1, with nothing to run in it.
 
 ## Showing a player
 
