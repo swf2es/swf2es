@@ -16,7 +16,7 @@ const allowed: Record<string, string[]> = {
   render: ["context3d"],
   player: ["codegen", "context3d", "format", "native", "render", "runtime"],
   "player-hosts": ["player"],
-  web: ["codegen", "format", "native", "player", "player-hosts"],
+  web: ["codegen", "format", "player", "player-hosts"],
   cli: ["codegen", "format", "player", "runtime"],
   // The browser build: it bundles them, so at build time alone.
   swf2es: ["codegen", "player-hosts", "web"],

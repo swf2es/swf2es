@@ -5,7 +5,7 @@ import { usageError } from "../output.js";
 import { compile } from "./compile.js";
 import { run } from "./run.js";
 
-export const help: Command = {
+const help: Command = {
   name: "help",
   summary: "show the commands, or a command's usage",
   usage: `usage: swf2es help [command]

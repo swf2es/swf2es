@@ -16,7 +16,7 @@ const BYTE = "0.003921568859368563";
 const HEADER = "#version 300 es\nprecision highp float;\n";
 
 /** The most images a kernel's program binds besides its layer's: one with more is not drawn. */
-export const KERNEL_IMAGES = 8;
+const KERNEL_IMAGES = 8;
 
 /**
  * An image a kernel samples: its texture number; whether it is the
@@ -127,7 +127,7 @@ ${sampling(t, "p", float)}`;
  * ownImage for the others; `layerAt` takes a kernel's coordinate to the
  * layer's texels.
  */
-export function withImages(
+function withImages(
   kernel: string,
   images: readonly KernelImage[],
   layerTexel: (t: number, back: boolean) => string,
@@ -150,7 +150,7 @@ export function withImages(
 const MADE = 64;
 
 /** A kernel's shader for its images, made once: a frame asks for it again on each of its uses. */
-export function madeOnce(
+function madeOnce(
   made: Map<string, Map<string, string>>,
   kernel: string,
   images: readonly KernelImage[],

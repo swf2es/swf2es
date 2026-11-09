@@ -27,7 +27,7 @@ export interface KernelHost {
  * use (programs.ts's, and the filter passes' 4 to 6), as WebGL 2 has 32
  * for a draw's programs together.
  */
-export const KERNEL_UNIT = 16;
+const KERNEL_UNIT = 16;
 
 /** The most kernels' programs kept, the one used longest ago deleted for another. */
 const KERNEL_PROGRAMS = 32;

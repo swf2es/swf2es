@@ -7,7 +7,7 @@ import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
-export const SOURCE = "https://github.com/swf2es/swf2es/blob/";
+const SOURCE = "https://github.com/swf2es/swf2es/blob/";
 export const AVMPLUS = "https://github.com/swf2es/avmplus";
 
 const trimmed = (process.env.SITE_BASE ?? "/swf2es/").replace(/^\/+|\/+$/g, "");
@@ -26,7 +26,7 @@ function head(cwd: string): string {
   }
 }
 
-export const commit = head(root) || "unknown";
+const commit = head(root) || "unknown";
 export const build = commit === "unknown" ? commit : commit.slice(0, 12);
 /** A file of the repository at the commit the site is built from. */
 export const sourceUrl = (path: string) =>
