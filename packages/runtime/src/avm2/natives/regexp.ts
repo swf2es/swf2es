@@ -212,30 +212,28 @@ function variableLookbehind(source: string): boolean {
   /** The length of the item at i, which it steps past. */
   const item = (): number => {
     const c = source[i++];
-    if (c === "(") {
-      return group();
-    }
+    switch (c) {
+      case "(":
+        return group();
+      case "^":
+      case "$":
+        return 0;
+      case "[":
+        if (source[i] === "^") {
+          i++;
+        }
 
-    if (c === "^" || c === "$") {
-      return 0;
-    }
+        // A ] first is a literal.
+        if (source[i] === "]") {
+          i++;
+        }
 
-    if (c === "[") {
-      if (source[i] === "^") {
+        while (i < source.length && source[i] !== "]") {
+          i += source[i] === "\\" ? 2 : 1;
+        }
+
         i++;
-      }
-
-      // A ] first is a literal.
-      if (source[i] === "]") {
-        i++;
-      }
-
-      while (i < source.length && source[i] !== "]") {
-        i += source[i] === "\\" ? 2 : 1;
-      }
-
-      i++;
-      return 1;
+        return 1;
     }
 
     if (c !== "\\") {
@@ -324,62 +322,66 @@ function nestedTooDeep(source: string): boolean {
   for (let i = 0; i < source.length; i++) {
     const c = source[i];
     let item = 2;
-    if (c === "(") {
-      const capture = source[i + 1] !== "?" || source.startsWith("(?P<", i);
-      outer.push(held);
-      held += previous + (capture ? 5 : 3);
-      previous = 0;
-      if (held > WORKSPACE) {
-        return true;
+    switch (c) {
+      case "(": {
+        const capture = source[i + 1] !== "?" || source.startsWith("(?P<", i);
+        outer.push(held);
+        held += previous + (capture ? 5 : 3);
+        previous = 0;
+        if (held > WORKSPACE) {
+          return true;
+        }
+
+        // Past the group's kind: ?: ?= ?! ?<= ?<! ?P<name> or flags.
+        if (source[i + 1] === "?") {
+          const end = source.slice(i + 2).search(/[:=!>)]/);
+          i = end < 0 ? source.length : i + 2 + end;
+        }
+
+        continue;
       }
-
-      // Past the group's kind: ?: ?= ?! ?<= ?<! ?P<name> or flags.
-      if (source[i + 1] === "?") {
-        const end = source.slice(i + 2).search(/[:=!>)]/);
-        i = end < 0 ? source.length : i + 2 + end;
-      }
-
-      continue;
-    }
-
-    if (c === ")") {
-      held = outer.pop() ?? held;
-      // The group is the next one's previous item, but what it holds is gone.
-      previous = 0;
-      continue;
-    }
-
-    if (c === "|") {
-      previous = 0;
-      continue;
-    }
-
-    if (c === "\\") {
-      i++;
-    } else if (c === "[") {
-      // A class is its opcode and a 32-byte bitmap.
-      item = 33;
-      i++;
-      if (source[i] === "^") {
+      case ")":
+        held = outer.pop() ?? held;
+        // The group is the next one's previous item, but what it holds is gone.
+        previous = 0;
+        continue;
+      case "|":
+        previous = 0;
+        continue;
+      case "\\":
         i++;
-      }
-
-      // A ] first is a literal.
-      if (source[i] === "]") {
+        break;
+      case "[":
+        // A class is its opcode and a 32-byte bitmap.
+        item = 33;
         i++;
-      }
-
-      while (i < source.length && source[i] !== "]") {
-        if (source[i] === "\\") {
+        if (source[i] === "^") {
           i++;
         }
 
-        i++;
-      }
-    } else if (c === "." || c === "^" || c === "$") {
-      item = 1;
-    } else if ("*+?{".includes(c)) {
-      continue;
+        // A ] first is a literal.
+        if (source[i] === "]") {
+          i++;
+        }
+
+        while (i < source.length && source[i] !== "]") {
+          if (source[i] === "\\") {
+            i++;
+          }
+
+          i++;
+        }
+        break;
+      case ".":
+      case "^":
+      case "$":
+        item = 1;
+        break;
+      case "*":
+      case "+":
+      case "?":
+      case "{":
+        continue;
     }
 
     previous = item;

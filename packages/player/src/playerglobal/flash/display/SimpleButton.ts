@@ -31,14 +31,18 @@ export function simpleButtonNatives(s: Scripting): avm2.Natives {
       d.parent.removeChild(d);
     }
 
-    if (state === "up") {
-      b.upState = d;
-    } else if (state === "over") {
-      b.overState = d;
-    } else if (state === "down") {
-      b.downState = d;
-    } else {
-      b.hitTestState = d;
+    switch (state) {
+      case "up":
+        b.upState = d;
+        break;
+      case "over":
+        b.overState = d;
+        break;
+      case "down":
+        b.downState = d;
+        break;
+      default:
+        b.hitTestState = d;
     }
 
     b.show();
