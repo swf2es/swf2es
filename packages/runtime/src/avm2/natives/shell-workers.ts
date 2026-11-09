@@ -11,7 +11,7 @@
 
 import type { Value } from "../descriptors.js";
 import type { ShellWorkerInit, ShellWorkersMemory } from "../options.js";
-import { fromUtf8, utf8 } from "./bytearray.js";
+import { fromUtf8, utf8 } from "../utf8.js";
 import { Sync, type SyncMemory } from "./sync.js";
 
 /** avmplus' Isolate::State. */

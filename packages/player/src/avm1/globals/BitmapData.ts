@@ -9,16 +9,15 @@
 // -4 for a rectangle that is none.
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore, pixelRect, spanRect } from "../../bitmap/bitmap.js";
+import { type ColorTransformValues, drawBitmap } from "../../bitmap/composite.js";
 import { drawDisplayObject } from "../../bitmap/draw.js";
 import { applyFilter, filterRefusal, GLOWS, generatedRect } from "../../bitmap/filters.js";
 import {
   alphaAt,
-  type ColorTransformValues,
   colorBounds,
   colorTransform,
   comparePixels,
   copyChannel,
-  drawBitmap,
   floodFill,
   isThresholdOperation,
   merge,

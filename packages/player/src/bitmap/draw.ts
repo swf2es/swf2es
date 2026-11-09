@@ -1,6 +1,6 @@
 // A display object drawn into a bitmap: rendered by the host's renderer
-// over its own bounds alone, then composited as a bitmap is (ops.ts
-// drawBitmap). AS3's BitmapData.draw and AVM1's share it.
+// over its own bounds alone, then composited as a bitmap is
+// (composite.ts). AS3's BitmapData.draw and AVM1's share it.
 
 import { bounds } from "../display/bounds.js";
 import { type DisplayObject, pickWork } from "../display/display.js";
@@ -8,7 +8,7 @@ import { transformRect } from "../display/geometry.js";
 import { drawnAsStage } from "../display/perspective.js";
 import type { Drawer } from "../hosts.js";
 import { BitmapStore, type PixelRect } from "./bitmap.js";
-import { type Affine, type ColorTransformValues, drawBitmap } from "./ops.js";
+import { type Affine, type ColorTransformValues, drawBitmap } from "./composite.js";
 
 /** `d` drawn into `store` through `m`, as drawInto draws a display object. */
 function drawObject(

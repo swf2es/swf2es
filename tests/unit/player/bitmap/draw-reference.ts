@@ -1,5 +1,5 @@
 // drawBitmap as the player computed it a pixel at a time, before it drew a
-// row at a time (bitmap/ops.ts): every pixel's 16 samples tested, sampled,
+// row at a time (bitmap/composite.ts): every pixel's 16 samples tested, sampled,
 // colour transformed, scaled by its coverage and blended in turn, kept as
 // the row passes' reference for a BitmapData drawn without a layer.
 import {

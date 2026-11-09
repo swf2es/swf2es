@@ -13,7 +13,8 @@ import {
   spanRect,
   unmultiply,
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
-import { drawBitmap, merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
+import { drawBitmap } from "../../../../packages/player/dist/bitmap/composite.js";
+import { merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
 import { BitmapObject } from "../../../../packages/player/dist/display/display.js";
 import { type Affine, referenceDraw, storeOf } from "./draw-reference.ts";
 
