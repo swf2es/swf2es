@@ -168,10 +168,13 @@ node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs]   # AVM1 names
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above
-node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash] [bench...]
-                              # the enumeration and dictionary benchmarks as SWFs, timed in swf2es
-                              # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug
-node tests/bench/players.ts --only swf2es,flash vector   # indexed reads, writes, push and pop on
+node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11 EXE] [--wine CMD]
+    [--only swf2es,ruffle,adl,flash32,flash11] [--write-swf DIR] [bench...]
+                              # the enumeration, dictionary, vector and as3pb benchmarks as SWFs, timed
+                              # in swf2es and Ruffle's web build (DIR, or RUFFLE) in Chrome, in adl
+                              # -nodebug, and in Flash Player's Windows projectors under Wine (FLASH32,
+                              # FLASH11, WINE); --write-swf only writes the SWFs
+node tests/bench/players.ts --only swf2es,adl vector   # indexed reads, writes, push and pop on
                               # Vectors of int, Number, String, Object and a class, and on Arrays
 ```
 
