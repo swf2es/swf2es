@@ -43,7 +43,7 @@ export function kernelOfShader(shader: Value): { data: AsObject; kernel: PbjKern
  * number, or ArgumentError 2004, as many as its type holds, 0 past the
  * Array's end.
  */
-export function parameterValues(s: Scripting, data: AsObject, p: PbjParameter): number[] {
+function parameterValues(s: Scripting, data: AsObject, p: PbjParameter): number[] {
   const classes = shaderClasses(s);
   const size = PBJ_TYPE_SIZES[p.type] ?? 0;
   const float = pbjFloatType(p.type);

@@ -1,8 +1,50 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "ignore": ["oracle/avmplus/**", "vendor/**", "packages/codegen/assembly/**"],
-  "ignoreExportsUsedInFile": { "interface": true, "type": true },
+  "ignore": ["oracle/avmplus/**", "packages/codegen/assembly/**"],
+  "ignoreBinaries": ["amxmlc", "import", "openssl", "wine", "zig"],
+  "ignoreExportsUsedInFile": {
+    "interface": true,
+    "type": true
+  },
   "workspaces": {
-    "packages/swf2es": { "entry": ["src/swf2es.ts", "src/worker.ts"] }
+    ".": {
+      "entry": ["tools/**/*.ts"]
+    },
+    "apps/desktop": {
+      "entry": ["src/renderer/index.ts", "src/renderer/open-url.ts"],
+      "ignoreDependencies": ["@swf2es/codegen", "@swf2es/player-hosts"]
+    },
+    "apps/site": {
+      "entry": ["src/main.ts", "src/service-worker.ts"],
+      "ignoreDependencies": ["@swf2es/render"]
+    },
+    "packages/swf2es": {
+      "entry": ["src/swf2es.ts", "src/worker.ts"]
+    },
+    "tests/bench": {
+      "entry": ["**/*.ts"]
+    },
+    "tests/conformance": {
+      "entry": ["*.ts"]
+    },
+    "tests/context3d": {
+      "entry": ["*.ts", "atf/make.ts"]
+    },
+    "tests/desktop": {
+      "ignoreDependencies": ["@swf2es/desktop"]
+    },
+    "tests/player": {
+      "entry": ["*.ts", "corpus/*.ts", "render-bench/*.ts"],
+      "ignoreDependencies": ["@swf2es/runtime"]
+    },
+    "tests/programs": {
+      "entry": ["*.ts"]
+    },
+    "tests/tamarin": {
+      "entry": ["*.ts"]
+    },
+    "tests/web": {
+      "entry": ["*.ts"]
+    }
   }
 }

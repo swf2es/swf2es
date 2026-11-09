@@ -64,18 +64,23 @@ export function decodePng(png: Uint8Array): Image {
   for (let i = 0; i < width * height; i++) {
     const s = i * channels;
     const d = i * 4;
-    if (colorType === 6) {
-      data.set(rows.subarray(s, s + 4), d);
-    } else if (colorType === 2) {
-      data.set(rows.subarray(s, s + 3), d);
-      data[d + 3] = 255;
-    } else if (colorType === 3) {
-      const p = rows[s];
-      data.set(palette.subarray(p * 3, p * 3 + 3), d);
-      data[d + 3] = p < transparency.length ? transparency[p] : 255;
-    } else {
-      data[d] = data[d + 1] = data[d + 2] = rows[s];
-      data[d + 3] = colorType === 4 ? rows[s + 1] : 255;
+    switch (colorType) {
+      case 6:
+        data.set(rows.subarray(s, s + 4), d);
+        break;
+      case 2:
+        data.set(rows.subarray(s, s + 3), d);
+        data[d + 3] = 255;
+        break;
+      case 3: {
+        const p = rows[s];
+        data.set(palette.subarray(p * 3, p * 3 + 3), d);
+        data[d + 3] = p < transparency.length ? transparency[p] : 255;
+        break;
+      }
+      default:
+        data[d] = data[d + 1] = data[d + 2] = rows[s];
+        data[d + 3] = colorType === 4 ? rows[s + 1] : 255;
     }
   }
 
@@ -94,18 +99,24 @@ function unfilter(raw: Uint8Array, stride: number, height: number, bpp: number):
       const b = y > 0 ? out[row - stride + x] : 0;
       const c = x >= bpp && y > 0 ? out[row - stride + x - bpp] : 0;
       let v = line[x];
-      if (filter === 1) {
-        v += a;
-      } else if (filter === 2) {
-        v += b;
-      } else if (filter === 3) {
-        v += (a + b) >> 1;
-      } else if (filter === 4) {
-        const p = a + b - c;
-        const pa = Math.abs(p - a);
-        const pb = Math.abs(p - b);
-        const pc = Math.abs(p - c);
-        v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+      switch (filter) {
+        case 1:
+          v += a;
+          break;
+        case 2:
+          v += b;
+          break;
+        case 3:
+          v += (a + b) >> 1;
+          break;
+        case 4: {
+          const p = a + b - c;
+          const pa = Math.abs(p - a);
+          const pb = Math.abs(p - b);
+          const pc = Math.abs(p - c);
+          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+          break;
+        }
       }
 
       out[row + x] = v & 0xff;

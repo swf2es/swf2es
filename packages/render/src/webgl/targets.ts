@@ -63,7 +63,7 @@ export interface Multisampled {
  * together, 8 bytes a sample, as web's fittingSamples has for the
  * canvas.
  */
-export const MSAA_BYTES = 256 * 1024 * 1024;
+const MSAA_BYTES = 256 * 1024 * 1024;
 
 /**
  * The samples a target of `width` by `height` takes for `samples`, a power

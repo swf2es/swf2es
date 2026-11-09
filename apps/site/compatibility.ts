@@ -54,7 +54,7 @@ export interface TamarinScore {
 }
 
 /** The suites the page names; the rest are a test or a few each. */
-export const SUITES = ["ecma3", "spidermonkey", "as3", "e4x", "regress"];
+const SUITES = ["ecma3", "spidermonkey", "as3", "e4x", "regress"];
 
 /**
  * Score swf2es against avmshell from the two baselines, by score.ts's rules

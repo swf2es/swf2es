@@ -16,42 +16,36 @@ export function displayFor(
   library: Library,
   hasImage = false,
 ): DisplayObject {
-  if (character.type === "shape") {
-    return new ShapeObject(character);
-  }
-
-  if (character.type === "morph") {
-    return ShapeObject.ofMorph(character);
-  }
-
-  if (character.type === "bitmap") {
-    // With scripts, its Bitmap's constructor gives it its data; without, a copy of the pixels.
-    const bitmap = new BitmapObject(
-      library.construct ? null : BitmapStore.of(character.pixels ?? INVALID_PIXELS),
-    );
-    bitmap.character = character;
-    bitmap.hasImage = hasImage;
-    return bitmap;
-  }
-
-  if (character.type === "static") {
-    return new StaticTextObject(character, library.characters);
-  }
-
-  if (character.type === "text") {
-    const text = new TextObject(character);
-    text.fonts = library.fonts;
-    return text;
-  }
-
-  // Its states are made where it is constructed (Scripting.construct).
-  if (character.type === "button") {
-    const button = new ButtonObject();
-    button.character = character;
-    button.library = library;
-    button.trackAsMenu = character.trackAsMenu;
-    button.scale9Grid = character.grid;
-    return button;
+  switch (character.type) {
+    case "shape":
+      return new ShapeObject(character);
+    case "morph":
+      return ShapeObject.ofMorph(character);
+    case "bitmap": {
+      // With scripts, its Bitmap's constructor gives it its data; without, a copy of the pixels.
+      const bitmap = new BitmapObject(
+        library.construct ? null : BitmapStore.of(character.pixels ?? INVALID_PIXELS),
+      );
+      bitmap.character = character;
+      bitmap.hasImage = hasImage;
+      return bitmap;
+    }
+    case "static":
+      return new StaticTextObject(character, library.characters);
+    case "text": {
+      const text = new TextObject(character);
+      text.fonts = library.fonts;
+      return text;
+    }
+    // Its states are made where it is constructed (Scripting.construct).
+    case "button": {
+      const button = new ButtonObject();
+      button.character = character;
+      button.library = library;
+      button.trackAsMenu = character.trackAsMenu;
+      button.scale9Grid = character.grid;
+      return button;
+    }
   }
 
   const clip = new MovieClip(character.timeline, library);

@@ -176,6 +176,6 @@ export class NativePaths {
 }
 
 /** A path segment in a URL: UTF-8, percent-encoded as adl writes them ("#?%" and spaces among them). */
-export function encodeSegment(segment: string): string {
+function encodeSegment(segment: string): string {
   return encodeURIComponent(segment);
 }

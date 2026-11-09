@@ -125,7 +125,7 @@ from the x one (adl).
 
 `draw` and `drawWithQuality` take one of two paths. A
 BitmapData or a Bitmap drawn is composited on the CPU, by `drawBitmap`
-in `bitmap/ops.ts`: through the matrix by the inverse of each destination
+in `bitmap/composite.ts`: through the matrix by the inverse of each destination
 pixel's centre, nearest or bilinear as `smoothing` asks, the colour
 transform as `colorTransform` applies it, then the blend mode (normal,
 `alpha`, `erase`, `multiply`, `screen`, `lighten`, `darken`,

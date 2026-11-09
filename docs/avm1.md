@@ -1712,7 +1712,7 @@ colour transform of the Transform's clip.
 `flash.display.BitmapData` (`globals/BitmapData.ts`), as Ruffle's
 bitmap_data.rs has it: each object holds a BitmapStore, the player's
 bitmap, whose operations AS3's BitmapData shares (bitmap/bitmap.ts,
-bitmap/ops.ts). What AS3 throws, AS2 answers with a number: -1 for too
+bitmap/ops.ts, bitmap/composite.ts). What AS3 throws, AS2 answers with a number: -1 for too
 few arguments or a disposed bitmap, -2 for a source that is none, -3 for a
 disposed one, -4 for a rectangle that is none. The constructor takes at
 least two arguments and sizes Flash makes (0 never; up to SWF 9 2880 a

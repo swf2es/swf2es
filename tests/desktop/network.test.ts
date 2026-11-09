@@ -27,9 +27,8 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import { addressClass } from "../../apps/desktop/src/main/addresses.ts";
+import { GZIP_HEADER_MAX, GzipHeader } from "../../apps/desktop/src/main/decompress.ts";
 import {
-  GZIP_HEADER_MAX,
-  GzipHeader,
   type Limits,
   Network,
   type NetworkOptions,

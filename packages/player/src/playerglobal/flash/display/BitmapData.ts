@@ -3,6 +3,7 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
+import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
 import { drawDisplayObject } from "../../../bitmap/draw.js";
 import {
   applyFilter,
@@ -12,13 +13,11 @@ import {
   generatedRect,
 } from "../../../bitmap/filters.js";
 import {
-  type Affine,
   alphaAt,
   colorBounds,
   colorTransform,
   comparePixels,
   copyChannel,
-  drawBitmap,
   floodFill,
   histogram,
   isThresholdOperation,
@@ -116,7 +115,7 @@ function sourceOf(s: Scripting, v: Value): BitmapStore {
 
 /**
  * draw: a BitmapData, or a Bitmap as its data, its own transform ignored,
- * composited on the CPU (bitmap/ops.ts drawBitmap); any other display
+ * composited on the CPU (bitmap/composite.ts); any other display
  * object rendered by the Scripting's drawer at `samples` a side, over its
  * own bounds alone, then composited the same way. A null source is
  * ArgumentError 2005, as Flash words it.

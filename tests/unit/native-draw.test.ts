@@ -9,13 +9,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DrawKernel } from "@swf2es/native/render";
 import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
+import { drawBitmap } from "../../packages/player/dist/bitmap/composite.js";
 import {
   drawKernel,
   drawKernelFrame,
   drawKernelLetGo,
   drawKernelUsed,
 } from "../../packages/player/dist/bitmap/kernel.js";
-import { drawBitmap } from "../../packages/player/dist/bitmap/ops.js";
 import {
   type Affine,
   type ColorTransformValues,

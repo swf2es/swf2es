@@ -188,7 +188,7 @@ of its own.
   `render` on `context3d`, `codegen` and `runtime` on `format`, `cli` on `format`, `codegen`,
   `runtime` and `player` (its libraries alone), `player` on `format`, `codegen`, `runtime`,
   `context3d`, `native` and `render`, `player-hosts` on `player`, `web` on
-  `codegen`, `format`, `native`, `player` and `player-hosts`, and `swf2es`, the browser build,
+  `codegen`, `format`, `player` and `player-hosts`, and `swf2es`, the browser build,
   on `codegen`, `player-hosts` and `web`, which it bundles. `codegen` never imports the
   runtime implementation. `native`, `format`, `codegen`, `runtime`, and `context3d`'s and
   `render`'s cores load no DOM or node types. Apps

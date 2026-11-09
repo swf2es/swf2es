@@ -15,10 +15,11 @@
 import type { AsObject, Value } from "./descriptors.js";
 import { FloatValue } from "./float.js";
 import { NS_PackageInternal, NS_Public, namespace, publicQname, qname } from "./names.js";
-import { type Bytes, bytesOf, fromUtf8, utf8 } from "./natives/bytearray.js";
+import { type Bytes, bytesOf } from "./natives/bytearray.js";
 import { xmlToXMLString } from "./natives/xml/strings.js";
 import type { Runtime } from "./runtime.js";
 import type { Traits } from "./traits.js";
+import { fromUtf8, utf8 } from "./utf8.js";
 
 const kUndefined = 0;
 const kNull = 1;

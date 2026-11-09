@@ -911,7 +911,10 @@ export class PixelBender {
   }
 }
 
-/** A float as a bitmap's byte: clamped, NaN as 0, then rounded to the nearest, a half to the even. */
+/**
+ * A float as a bitmap's byte: clamped, NaN as 0, then rounded to the nearest, a half to the even.
+ * @public tests/player/pixel-bender.ts imports it into Chrome by name.
+ */
 export function outputByte(v: number): number {
   const c = v > 0 ? (v < 1 ? v : 1) : 0;
   return nearest(Math.fround(c * 255));

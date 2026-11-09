@@ -11,6 +11,7 @@
 //
 // Each checkout must be built (packages/player/dist). --big draws half the
 // cases up to 400 by 300 pixels, where the row passes keep their buffers.
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const args = process.argv.slice(2);
@@ -22,13 +23,18 @@ if (!dirA || !dirB) {
 }
 
 interface Build {
-  ops: typeof import("../../packages/player/dist/bitmap/ops.js");
+  composite: typeof import("../../packages/player/dist/bitmap/composite.js");
   bitmap: typeof import("../../packages/player/dist/bitmap/bitmap.js");
 }
 
 async function load(dir: string): Promise<Build> {
   const dist = `${resolve(dir)}/packages/player/dist/bitmap`;
-  return { ops: await import(`${dist}/ops.js`), bitmap: await import(`${dist}/bitmap.js`) };
+  // A checkout from before composite.ts has drawBitmap in ops.ts.
+  const composite = existsSync(`${dist}/composite.js`) ? "composite" : "ops";
+  return {
+    composite: await import(`${dist}/${composite}.js`),
+    bitmap: await import(`${dist}/bitmap.js`),
+  };
 }
 
 const builds = [await load(dirA), await load(dirB)];
@@ -142,7 +148,7 @@ for (let c = 0; c < cases; c++) {
     ay: below(4),
   };
 
-  const results = builds.map(({ ops, bitmap }) => {
+  const results = builds.map(({ composite, bitmap }) => {
     const store = (
       width: number,
       height: number,
@@ -166,7 +172,7 @@ for (let c = 0; c < cases; c++) {
       const { rect, dx, dy, merge, alpha, ax, ay } = copyArgs;
       d.copyPixels(s, rect, dx, dy, merge, alpha ? s : null, ax, ay);
     } else {
-      ops.drawBitmap(d, s, m, ct, mode, clip, smooth, rows, layer);
+      composite.drawBitmap(d, s, m, ct, mode, clip, smooth, rows, layer);
     }
 
     return [...d.pixels, d.holdsAlpha ? 1 : 0];
