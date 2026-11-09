@@ -39,6 +39,18 @@ export class StaticTextObject extends DisplayObject {
   }
 }
 
+/** The fields whose fit a set size left pending, for the frame to settle before it is drawn. */
+const pendingFits = new Set<TextObject>();
+
+/** Every pending fit applied, as Flash applies them before it draws. */
+export function settleFits(): void {
+  for (const field of pendingFits) {
+    field.settle();
+  }
+
+  pendingFits.clear();
+}
+
 /**
  * A TextField: placed by DefineEditText, or made by a script. Its text and
  * formats are a TextModel; a timeline's starts with its tag's text, read
@@ -63,6 +75,12 @@ export class TextObject extends DisplayObject {
   type = "dynamic";
   embedFonts = false;
   autoSize = "none";
+  /**
+   * A script set the size of a field that fits itself: as in Flash, the fit
+   * waits for its size to be asked, its transform to change or the frame to
+   * be drawn, and a wordWrap set meanwhile wraps at the size set (adl).
+   */
+  private fitPending = false;
   selectable = true;
   maxChars = 0;
   displayAsPassword = false;
@@ -180,7 +198,7 @@ export class TextObject extends DisplayObject {
    * centre or right edge where it was.
    */
   fit(): void {
-    if (this.autoSize === "none") {
+    if (this.autoSize === "none" || this.fitPending) {
       return;
     }
 
@@ -204,6 +222,27 @@ export class TextObject extends DisplayObject {
 
     this.height = height;
     this.invalidate(CONTENT);
+  }
+
+  /** A script set its size: under autoSize, the fit waits (fitPending). */
+  sizeSet(): void {
+    if (this.autoSize !== "none") {
+      this.fitPending = true;
+      pendingFits.add(this);
+    }
+  }
+
+  /** The fit a set size left pending, applied: its size asked, its transform changed, the frame drawn. */
+  settle(): void {
+    if (this.fitPending) {
+      this.fitPending = false;
+      this.fit();
+    }
+  }
+
+  override touch(): void {
+    super.touch();
+    this.settle();
   }
 
   /** The text, \r between its lines. */
