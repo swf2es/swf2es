@@ -10,9 +10,8 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-async function stage(live = true) {
+async function stage() {
   const scripting = new Scripting(await createCodegen(wasm));
-  scripting.liveStageLayout = live;
   const natives = playerNatives(scripting);
   return {
     scripting,
@@ -78,8 +77,8 @@ test("Stage script settings override embedding defaults independently, including
   assert.equal(scripting.onStageLayout, null);
 });
 
-test("default Stage layout retains the dev getters, ignored setters and authored dimensions", async () => {
-  const { scripting, get, set } = await stage(false);
+test("every SWF's Stage takes its settings and the host's size, not only with Stage3D", async () => {
+  const { scripting, get, set } = await stage();
   try {
     scripting.stageWidth = 96;
     scripting.stageHeight = 96;
@@ -87,17 +86,16 @@ test("default Stage layout retains the dev getters, ignored setters and authored
     scripting.onStageLayout = () => {
       changes++;
     };
-    scripting.setStageDefaults("noScale", "BR");
-    for (const value of ["noScale", "NOSCALE", "", null, undefined]) {
-      set("scaleMode", value);
-      set("align", value);
-    }
+    scripting.setStageDefaults("showAll", "");
+    set("scaleMode", "noScale");
+    set("align", "TL");
+    assert.equal(get("scaleMode"), "noScale");
+    assert.equal(get("align"), "TL");
+    assert.equal(changes, 2);
+    // In noScale the host gives the box's size, which the Stage then reports.
     scripting.resizeStage(192, 144);
-    assert.equal(get("scaleMode"), "showAll");
-    assert.equal(get("align"), "");
-    assert.equal(scripting.stageWidth, 96);
-    assert.equal(scripting.stageHeight, 96);
-    assert.equal(changes, 0);
+    assert.equal(get("stageWidth"), 192);
+    assert.equal(get("stageHeight"), 144);
   } finally {
     scripting.destroy();
   }

@@ -269,8 +269,6 @@ export class Scripting {
   /** What flash.display.Stage reports and sets; the player copies the frame rate back each frame. */
   stageWidth = 0;
   stageHeight = 0;
-  /** Live Stage layout is part of the opt-in Context3D installation. */
-  liveStageLayout = false;
   stageScaleMode: StageScaleMode = "showAll";
   stageAlign = "";
   /** A script's setting takes precedence over the embedding's defaults. */
@@ -813,10 +811,6 @@ export class Scripting {
 
   /** Embedding defaults apply until ActionScript sets the corresponding property. */
   setStageDefaults(scaleMode: StageScaleMode, align: string): void {
-    if (!this.liveStageLayout) {
-      return;
-    }
-
     if (!this.stageScaleModeSet) {
       this.stageScaleMode = scaleMode;
     }
@@ -827,7 +821,7 @@ export class Scripting {
 
   /** The host's visible size in noScale, the authored size in other modes. */
   resizeStage(width: number, height: number): void {
-    if (!this.liveStageLayout || (width === this.stageWidth && height === this.stageHeight)) {
+    if (width === this.stageWidth && height === this.stageHeight) {
       return;
     }
 

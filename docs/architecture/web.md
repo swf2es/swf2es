@@ -233,10 +233,11 @@ removal let go: 20 elements made and destroyed leave no player and no
 codegen instance after a collection, no WebSocket or AudioContext
 open, and the heap within 256 KB of each.
 
-Not done yet: the SWF's scripts see Flash Player's showAll, the stage
-the SWF's size, whatever the element's `scale`, and noScale does not
-resize the stage or dispatch Event.RESIZE (but under the Stage3D
-opt-in's live Stage layout); AVM1 custom context menus are not implemented; a
+An AS3 SWF's scripts see the element's `scale` and `salign` as Stage's
+scaleMode and align, and what they set there places the stage again; in
+noScale the stage is the box's size, and Event.RESIZE follows it.
+
+Not done yet: AVM1 custom context menus are not implemented; a
 `javascript:` URL from navigateToURL never runs, allowed or not; and
 `document[name]`, which found an `<embed>` by its name, does not find
 the element. Nor can a page give the element modules compiled ahead of
