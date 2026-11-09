@@ -223,6 +223,9 @@ function as3pbBench(out: string): Demo {
     description: "Protocol Buffers over ByteArray and domain memory against AMF3 and JSON.",
     source: `${AS3PB}/blob/${as3pbCommit || "main"}/runtime/test/bench/Main.as`,
     bytes: w.swf({
+      // Flash Player 11's, the first whose API has the JSON class it times: a SWF of 10
+      // would not see it in Flash Player, which gives a SWF only its version's API.
+      version: 13,
       width: 640,
       height: 480,
       frameRate: 30,
