@@ -27,7 +27,11 @@
 // release one, as the debugger slows it), or FLASH32 and FLASH11 name them;
 // each is left out without one. COMMAND runs a Windows program, "wine" by
 // default, or WINE names it ("flatpak run --filesystem=home
-// org.winehq.Wine"). A release projector traces nowhere, so it opens the
+// org.winehq.Wine"). Chrome draws on the GPU the Vulkan loader gives it; on
+// a machine with two, VK_DRIVER_FILES picks one for a session
+// (/usr/share/vulkan/icd.d/intel_icd.x86_64.json or nvidia_icd.x86_64.json),
+// and the WebGL renderer each drawing ran on is kept with the results. A
+// projector draws on the CPU. A release projector traces nowhere, so it opens the
 // SWF from a server here, and the SWF, seeing it plays in a projector,
 // sends what it traced back to it and quits. --write-swf writes the
 // benchmarks' SWFs into DIR and plays none, to open them elsewhere; outside
@@ -64,6 +68,14 @@ type PlayerName = (typeof PLAYERS)[number];
 const DONE = "players: done";
 // What each player's Capabilities.version says, traced before DONE.
 const VERSION = "players: version ";
+// The GPU Chrome drew a drawing with, as WebGL names it, added after DONE.
+const RENDERER = "players: renderer ";
+// The page's WebGL renderer: the GPU the players' contexts are on, which Chrome may have fallen back from.
+const RENDERER_EXPRESSION = `(() => {
+  const gl = document.createElement("canvas").getContext("webgl2");
+  const info = gl && gl.getExtension("WEBGL_debug_renderer_info");
+  return info ? gl.getParameter(info.UNMASKED_RENDERER_WEBGL) : gl ? gl.getParameter(gl.RENDERER) : "none";
+})()`;
 // A script may run for this long in any of them: the sections run in one
 // frame, and the slowest player takes minutes over some benchmarks.
 const SCRIPT_SECONDS = 1200;
@@ -420,6 +432,15 @@ function consoleLines(
   });
 }
 
+/** A drawing's lines, and after them the GPU the page drew on. */
+async function withRenderer(
+  lines: string[],
+  evaluate: <R>(expression: string) => Promise<{ value?: R; exception: string | null }>,
+): Promise<string[]> {
+  const renderer = await evaluate<string>(RENDERER_EXPRESSION);
+  return [...lines, `${RENDERER}${renderer.value ?? renderer.exception}`];
+}
+
 /**
  * Drawing in swf2es as a page has it: the browser build's <swf2es-player>,
  * playing as the display's frames come, on the GPU. The SWF's traces reach
@@ -447,7 +468,7 @@ async function playSwf2esLive(swf: Uint8Array): Promise<string[]> {
         throw new Error(`swf2es: ${answer.exception}`);
       }
 
-      return lines;
+      return withRenderer(await lines, evaluate);
     },
     true,
     {
@@ -508,7 +529,11 @@ async function playRuffle(swf: Uint8Array, kind: Bench["kind"]): Promise<string[
         throw new Error(`Ruffle: ${answer.exception}`);
       }
 
-      return logged ? await logged : (answer.value as string[]);
+      if (!logged) {
+        return answer.value as string[];
+      }
+
+      return withRenderer(await logged, evaluate);
     },
     drawn,
     { timeout: SCRIPT_SECONDS * 1000, mounts: [["/ruffle/", `${ruffle}/`]] },
@@ -634,6 +659,10 @@ const session = {
     cores: cpus().length,
     memoryGb: Math.round(totalmem() / 2 ** 30),
     os: `${type()} ${release()}`,
+    // Chrome's GPU, where the Vulkan loader is held to one driver: VK_DRIVER_FILES (or the
+    // older VK_ICD_FILENAMES) names it, for a machine with two. Each browser player's renderer
+    // says which drew.
+    vulkanDriver: process.env.VK_DRIVER_FILES ?? process.env.VK_ICD_FILENAMES ?? "",
   },
   runs,
   players: Object.fromEntries(
@@ -701,6 +730,11 @@ for (const bench of benches) {
       output.get(player)?.push(lines);
       session.players[player].version =
         lines.find((l) => l.startsWith(VERSION))?.slice(VERSION.length) ?? "";
+      const renderer = lines.find((l) => l.startsWith(RENDERER))?.slice(RENDERER.length);
+      if (renderer) {
+        session.players[player].renderer = renderer;
+      }
+
       const sections = times.get(player) as Map<string, number[]>;
       for (const [section, value] of timed(lines)) {
         sections.set(section, [...(sections.get(section) ?? []), value]);
@@ -757,9 +791,13 @@ for (const bench of benches) {
     row(section, medians);
   }
 
-  // A drawing's measures do not add up.
+  // A drawing's measures do not add up; what it shows is what drew them.
   if (kind === "script") {
     row("total", totals);
+  } else {
+    for (const p of playing) {
+      console.log(`${p}: ${session.players[p].renderer ?? "the CPU"}`);
+    }
   }
 
   // Written after each benchmark, so that one that fails later loses none before it.
