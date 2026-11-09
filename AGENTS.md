@@ -174,8 +174,9 @@ node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11
                               # in swf2es and Ruffle's web build (DIR, or RUFFLE) in Chrome, in adl
                               # -nodebug, and in Flash Player's Windows projectors under Wine (FLASH32,
                               # FLASH11, WINE); lz4, C built by Crossbridge; drawing, scenes at three
-                              # loads, their fps, frame times and memory, and startup-*, the time to a
-                              # SWF's first line and the player's bytes (neither in adl); --json keeps
+                              # loads, their fps, frame times and memory; startup-*, the time to a
+                              # SWF's first line and the player's bytes; cpu, the CPU a still and a
+                              # light scene take (none of the three in adl); --json keeps
                               # every run with the commit, machine and versions; --write-swf only
                               # writes the SWFs
 node tests/bench/players.ts --only swf2es,adl vector   # indexed reads, writes, push and pop on

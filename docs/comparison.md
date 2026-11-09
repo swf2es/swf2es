@@ -32,12 +32,20 @@ medians.
 - **ActionScript:** enumeration, Dictionary access, Vector and Array
   access, as3pb (protobuf over ByteArray and domain memory, AMF3, JSON),
   and LZ4 in C as Crossbridge builds it. Milliseconds per section.
-- **Drawing:** vectors, bitmaps, filters, text, and graphics redrawn every
-  frame, each at three loads, at 60 frames a second. Fps and frame times
+- **Drawing:** vectors, bitmaps, filters, text, graphics redrawn every
+  frame, and a Pixel Bender fill computed anew each frame (`beginShaderFill`,
+  at three sizes), each at three loads, at 60 frames a second. Fps and frame times
   (p50, p95, p99, worst) for each level, and memory where a player tells
   it. Not uncapped: swf2es runs up to five SWF frames for each display
   frame when a SWF is faster than the display, so a faster rate would
   count frames not drawn.
+- **CPU:** the share of a core the player's processes take to keep a
+  still stage and a light animation (a hundred shapes) at 60 frames a
+  second: a browser's page, GPU and other processes, or Wine's; the GPU's
+  own work is not in it.
+- **Not yet:** Stage3D. swf2es draws it through a surface the page gives
+  it (the site's `stage3d.ts`), which the browser build does not include,
+  so a scene of it needs that in the benchmark's page first.
 - **Startup:** from making the player to a SWF's first line, cold and
   warm, for a SWF of nothing and one of as3pb's classes; and the bytes of
   the player's files a page fetched, raw, gzipped and in brotli.

@@ -9,8 +9,8 @@
 // script runs as it is loaded, its sections tracing their times
 // ("time: dense1k-in 120") by the Date or getTimer, which each player keeps
 // the same way. Their other lines must be as Flash traces them. And
-// drawing (drawing/Drawing.as): scenes of vectors, bitmaps, filters, text
-// and redrawn graphics at three loads each, played at 60 frames a second
+// drawing (drawing/Drawing.as): scenes of vectors, bitmaps, filters, text,
+// redrawn graphics and a Pixel Bender fill at three loads each, played at 60 frames a second
 // on the GPU, swf2es in its browser build's element as a page has it; each
 // level's fps and frame times, by getTimer, and memory: what System says,
 // and in Chrome its JS heap and its ArrayBuffers apart (wasm's memory is
@@ -18,7 +18,9 @@
 // Flash's figures. adl, not Flash Player, does not draw them. And startup
 // (startup-hello, startup-as3pb): the time from making the player to a
 // SWF's first line, cold and warm, and the bytes of the player's files a
-// page fetched for it, raw, gzipped and in brotli.
+// page fetched for it, raw, gzipped and in brotli. And cpu (cpu/Cpu.as):
+// the CPU time the player's processes take to keep a still stage and a
+// light animation going, a core's whole being 100%, read from /proc (Linux).
 //
 //   node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11 EXE]
 //     [--wine COMMAND] [--only swf2es,ruffle,adl,flash32,flash11] [--json FILE] [--write-swf DIR]
@@ -48,7 +50,7 @@
 // otherwise than Flash.
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { cpus, release, totalmem, type } from "node:os";
@@ -59,6 +61,7 @@ import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 import { runFlash } from "../../oracle/flash.ts";
 import { container, runOracle } from "../../oracle/oracle.ts";
 import { readSwf, tags } from "../../packages/format/dist/index.js";
+import { PbjAssembler } from "../pbj-assembler.ts";
 import { runPlayer, withPage } from "../player/chrome.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
@@ -99,6 +102,7 @@ import flash.system.fscommand;
 
 var playersLines:Array = [];
 var playersLoader:URLLoader;
+var playersMarks:Array = [];
 
 // As trace joins them: String(null) is "null", where join would give "".
 function playersReport(...parts):void {
@@ -110,6 +114,22 @@ function playersReport(...parts):void {
   var line:String = strings.join(" ");
   trace(line);
   playersLines.push(line);
+}
+
+// A line the runner acts on as it comes, which a projector sends at once.
+function playersMark(line:String):void {
+  playersReport(line);
+  if (Capabilities.playerType != "StandAlone") {
+    return;
+  }
+
+  var request:URLRequest = new URLRequest("mark");
+  request.method = URLRequestMethod.POST;
+  request.data = line;
+  var loader:URLLoader = new URLLoader();
+  loader.addEventListener(IOErrorEvent.IO_ERROR, function(event:Event):void {});
+  playersMarks.push(loader);
+  loader.load(request);
 }
 
 function playersFinish():void {
@@ -139,9 +159,11 @@ interface Bench {
    * A script's run as it loads, in one frame, timed by its sections; or
    * drawing (drawing/Drawing.as), frames played in real time at 60 a second
    * on the GPU, which adl, not Flash Player, is left out of; or startup, a
-   * SWF that reports at once, timed from the player's making to its report.
+   * SWF that reports at once, timed from the player's making to its report;
+   * or cpu (cpu/Cpu.as), played as drawing is, the CPU time of the
+   * player's processes between its marks.
    */
-  kind: "script" | "drawing" | "startup";
+  kind: "script" | "drawing" | "startup" | "cpu";
   /** The SWF: the benchmark, its document class, and the report. */
   swf(): Uint8Array;
   /** Each section's name and value, in the order traced: milliseconds, or a drawing's measures. */
@@ -232,7 +254,8 @@ playersFinish();
 const drawing: Bench = {
   kind: "drawing",
   swf() {
-    const source = readFileSync(`${here}drawing/Drawing.as`, "utf8");
+    const hex = Buffer.from(plasma()).toString("hex");
+    const source = readFileSync(`${here}drawing/Drawing.as`, "utf8").replace("PLAYERS_KERNEL", hex);
     const abc = compileScripts(
       [{ name: "PlayersDrawing", source: `${source}\n${REPORT}` }],
       out,
@@ -421,6 +444,124 @@ function as3pbInputs(): string[] {
   );
 }
 
+/** Drawing's shader: a plasma, the sine of x and the cosine of y, scaled and moved by `time`. */
+function plasma(): Uint8Array {
+  return new PbjAssembler()
+    .version(1)
+    .name("Plasma")
+    .param("in", "float2", "f0.rg", "_OutCoord")
+    .param("out", "float4", "f1.rgba", "dst")
+    .param("in", "float", "f2.r", "time")
+    .ld("f3.r", 0.031)
+    .op("mov", "f4.rg", "f0.rg")
+    .op("mul", "f4.rg", "f3.rr")
+    .op("add", "f4.rg", "f2.rr")
+    .op("sin", "f5.r", "f4.r")
+    .op("cos", "f5.g", "f4.g")
+    .op("mov", "f5.b", "f5.r")
+    .op("mul", "f5.b", "f5.g")
+    .ld("f6.r", 0.5)
+    .op("mul", "f5.rgb", "f6.rrr")
+    .op("add", "f5.rgb", "f6.rrr")
+    .op("mov", "f1.rgb", "f5.rgb")
+    .ld("f1.a", 1)
+    .bytes();
+}
+
+/**
+ * The CPU a player takes to keep a still stage and a light animation going
+ * (cpu/Cpu.as): "cpu: still percent 12.5", a core's whole being 100, from
+ * every process the runner started between the scene's marks (cpuMark).
+ */
+const cpu: Bench = {
+  kind: "cpu",
+  swf() {
+    const source = readFileSync(`${here}cpu/Cpu.as`, "utf8");
+    const abc = compileScripts([{ name: "PlayersCpu", source: `${source}\n${REPORT}` }], out).get(
+      "PlayersCpu",
+    ) as Uint8Array;
+    return benchSwf(abc, "drawing");
+  },
+  sections: (lines) =>
+    lines.flatMap((l) => {
+      const m = /^cpu: (\S+) percent ([\d.]+)$/.exec(l);
+      return m ? [[`${m[1]} cpu-%`, Number(m[2])] as const] : [];
+    }),
+};
+
+/** The clock ticks a second /proc counts CPU time in. */
+const CLOCK_TICKS =
+  process.platform === "linux"
+    ? Number(execFileSync("getconf", ["CLK_TCK"], { encoding: "utf8" }))
+    : 100;
+
+/**
+ * The CPU time, in clock ticks, of every process this one started and
+ * theirs: Chrome's, or the projector's under Wine. Null but on Linux.
+ */
+function descendantTicks(): number | null {
+  if (process.platform !== "linux") {
+    return null;
+  }
+
+  const parents = new Map<number, number>();
+  const ticks = new Map<number, number>();
+  for (const name of readdirSync("/proc")) {
+    if (!/^\d+$/.test(name)) {
+      continue;
+    }
+
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+      // After the name, which may hold spaces: state, ppid, ..., utime and stime, the 14th and 15th.
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      parents.set(Number(name), Number(fields[1]));
+      ticks.set(Number(name), Number(fields[11]) + Number(fields[12]));
+    } catch {
+      // Gone since the directory was read.
+    }
+  }
+
+  let sum = 0;
+  for (const [pid, t] of ticks) {
+    let parent = parents.get(pid);
+    while (parent && parent !== process.pid) {
+      parent = parents.get(parent);
+    }
+
+    if (parent === process.pid) {
+      sum += t;
+    }
+  }
+
+  return sum;
+}
+
+const cpuBegun = new Map<string, readonly [number, number]>();
+
+/** At a "cpu: begin" mark, the time and CPU time; at its "cpu: end", the line of the share between them. */
+function cpuMark(line: string): string | null {
+  const m = /^cpu: (begin|end) (\S+)$/.exec(line);
+  const ticks = m ? descendantTicks() : null;
+  if (!m || ticks === null) {
+    return null;
+  }
+
+  if (m[1] === "begin") {
+    cpuBegun.set(m[2], [ticks, performance.now()]);
+    return null;
+  }
+
+  const begun = cpuBegun.get(m[2]);
+  if (!begun) {
+    return null;
+  }
+
+  const seconds = (performance.now() - begun[1]) / 1000;
+  const share = ((ticks - begun[0]) / CLOCK_TICKS / seconds) * 100;
+  return `cpu: ${m[2]} percent ${Math.round(share * 10) / 10}`;
+}
+
 const BENCHES: Record<string, Bench> = {
   enumeration: script("enumeration/Enumeration.as"),
   dictionary: script("dictionary/DictionaryAccess.as"),
@@ -428,6 +569,7 @@ const BENCHES: Record<string, Bench> = {
   as3pb,
   lz4,
   drawing,
+  cpu,
   "startup-hello": startup("PlayersStartupHello", ""),
   // as3pb's classes, a message made: its library loaded and its first methods compiled.
   "startup-as3pb": startup(
@@ -513,7 +655,7 @@ function benchSwf(abc: Uint8Array, kind: Bench["kind"]): Uint8Array {
 }
 
 async function playSwf2es(swf: Uint8Array, kind: Bench["kind"]): Promise<string[]> {
-  if (kind === "drawing") {
+  if (kind === "drawing" || kind === "cpu") {
     return playSwf2esLive(swf);
   }
 
@@ -577,6 +719,11 @@ function consoleLines(
       const args = params.args as { value?: unknown; description?: string }[];
       const line = args.map((arg) => String(arg.value ?? arg.description ?? "")).join(" ");
       lines.push(line);
+      const share = cpuMark(line);
+      if (share) {
+        lines.push(share);
+      }
+
       const heap = heapAfter(line, send);
       if (heap) {
         heaps.push(heap);
@@ -787,7 +934,7 @@ async function playRuffle(swf: Uint8Array, kind: Bench["kind"]): Promise<string[
     return playStartup("ruffle", swf);
   }
 
-  const drawn = kind === "drawing";
+  const drawn = kind === "drawing" || kind === "cpu";
   return withPage(
     "runSwf",
     async (evaluate, send, _fresh, listen) => {
@@ -867,11 +1014,26 @@ async function playProjector(
   // A startup's time: from the projector's request for the SWF to its report's.
   let requested = 0;
   let reporting = 0;
+  // What its marks gave: the CPU between them.
+  const marked: string[] = [];
   const server = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/bench.swf") {
       requested = performance.now();
       response.writeHead(200, { "content-type": "application/x-shockwave-flash" });
       response.end(swf);
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/mark") {
+      const chunks: Buffer[] = [];
+      request.on("data", (chunk: Buffer) => chunks.push(chunk));
+      request.on("end", () => {
+        response.end("ok");
+        const share = cpuMark(Buffer.concat(chunks).toString("utf8"));
+        if (share) {
+          marked.push(share);
+        }
+      });
       return;
     }
 
@@ -919,7 +1081,7 @@ async function playProjector(
     // It quits once the report is sent; given a while, and stopped if it has not.
     clearTimeout(timer);
     await Promise.race([exited, new Promise((r) => (timer = setTimeout(r, 10_000)))]);
-    const lines = body.split("\n");
+    const lines = [...body.split("\n"), ...marked];
     return kind === "startup"
       ? [...lines, `startup: cold ${Math.round(reporting - requested)}`]
       : lines;
@@ -943,7 +1105,7 @@ const play: Record<PlayerName, (swf: Uint8Array, kind: Bench["kind"]) => Promise
 
 // The lines every player must trace alike: not times, a drawing's measures, or the harness's own.
 const checked = (lines: string[]) =>
-  lines.filter((l) => l && !/^(time|frames|memory|players): /.test(l));
+  lines.filter((l) => l && !/^(time|frames|memory|cpu|startup|players): /.test(l));
 const median = (v: number[]) => {
   const s = [...v].sort((x, y) => x - y);
   return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
@@ -1090,7 +1252,12 @@ for (const bench of benches) {
     );
     console.log(`${name.padEnd(width)}${cells.join("")}${ratios.join("")}`);
   };
-  const unit = kind === "drawing" ? "fps; frame times in ms; memory in MB" : "ms";
+  const unit = {
+    script: "ms",
+    drawing: "fps; frame times in ms; memory in MB",
+    startup: "ms and KB",
+    cpu: "% of a core",
+  }[kind];
   console.log(`\n${bench}, median of ${runs} runs, ${unit}`);
   console.log(
     `${"".padEnd(width)}${playing.map((p) => p.padStart(10)).join("")}${others
@@ -1109,7 +1276,7 @@ for (const bench of benches) {
     row(section, medians);
   }
 
-  // A drawing's measures do not add up, nor a startup's; a drawing shows what drew it.
+  // Only times add up; a drawing shows what drew it.
   if (kind === "script") {
     row("total", totals);
   } else if (kind === "drawing") {

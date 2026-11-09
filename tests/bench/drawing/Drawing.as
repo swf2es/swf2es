@@ -7,7 +7,10 @@
 // players run without drawing.
 //
 // Built only by players.ts, which puts playersReport and playersFinish
-// after it. Each level reports a line:
+// after it, and the shader scene's kernel, a plasma of a sine and a cosine
+// of each pixel moving with its time, in KERNEL as hex. The shader
+// scene's levels are the width of the one fill it redraws each frame, of
+// the stage's shape. Each level reports a line:
 //   frames: vectors-500 fps 59.9 p50 17 p95 17 p99 18 max 33 total 41943040 private 0
 // total and private are System.totalMemoryNumber and System.privateMemory,
 // 0 in a player that does not keep them.
@@ -15,6 +18,7 @@ package {
 import flash.display.Bitmap;
 import flash.display.BitmapData;
 import flash.display.DisplayObject;
+import flash.display.Shader;
 import flash.display.Shape;
 import flash.display.Sprite;
 import flash.display.StageAlign;
@@ -25,6 +29,7 @@ import flash.filters.GlowFilter;
 import flash.system.System;
 import flash.text.TextField;
 import flash.text.TextFormat;
+import flash.utils.ByteArray;
 import flash.utils.getTimer;
 
 public class Main extends Sprite {
@@ -39,7 +44,9 @@ public class Main extends Sprite {
     ["filters", [25, 100, 400]],
     ["text", [50, 200, 800]],
     ["redraw", [50, 200, 800]],
+    ["shader", [200, 400, 800]],
   ];
+  private static const KERNEL:String = "PLAYERS_KERNEL";
 
   private var _scene:int = 0;
   private var _level:int = -1;
@@ -50,12 +57,14 @@ public class Main extends Sprite {
   private var _last:int = 0;
   private var _intervals:Vector.<int>;
   private var _texture:BitmapData;
+  private var _shader:Shader;
 
   public function Main() {
     stage.scaleMode = StageScaleMode.NO_SCALE;
     stage.align = StageAlign.TOP_LEFT;
     stage.frameRate = 60;
     _texture = texture();
+    _shader = new Shader(kernel());
     next();
     addEventListener(Event.ENTER_FRAME, frame);
   }
@@ -74,6 +83,16 @@ public class Main extends Sprite {
     }
 
     return bitmap;
+  }
+
+  private static function kernel():ByteArray {
+    var bytes:ByteArray = new ByteArray();
+    for (var i:int = 0; i < KERNEL.length; i += 2) {
+      bytes.writeByte(parseInt(KERNEL.substr(i, 2), 16));
+    }
+
+    bytes.position = 0;
+    return bytes;
   }
 
   /** The next level, or the next scene's first; the report once there is none. */
@@ -97,7 +116,7 @@ public class Main extends Sprite {
     _layer = new Sprite();
     addChild(_layer);
     _objects = new Vector.<DisplayObject>();
-    var count:int = LEVELS[_scene][1][_level];
+    var count:int = LEVELS[_scene][0] === "shader" ? 1 : LEVELS[_scene][1][_level];
     for (var i:int = 0; i < count; i++) {
       var object:DisplayObject = make(LEVELS[_scene][0], i);
       _objects.push(object);
@@ -144,6 +163,7 @@ public class Main extends Sprite {
         field.text = "text " + i;
         return field;
       case "redraw":
+      case "shader":
         return new Shape();
     }
 
@@ -154,8 +174,12 @@ public class Main extends Sprite {
     var now:int = getTimer();
     var scene:String = LEVELS[_scene][0];
     var count:int = _objects.length;
-    for (var i:int = 0; i < count; i++) {
-      move(scene, _objects[i], i, _frame);
+    if (scene === "shader") {
+      fill(Shape(_objects[0]), LEVELS[_scene][1][_level], _frame);
+    } else {
+      for (var i:int = 0; i < count; i++) {
+        move(scene, _objects[i], i, _frame);
+      }
     }
 
     _frame++;
@@ -169,9 +193,18 @@ public class Main extends Sprite {
 
     _last = now;
     if (now - _started >= SETTLE_MS + MEASURE_MS) {
-      report(scene + "-" + count);
+      report(scene + "-" + LEVELS[_scene][1][_level]);
       next();
     }
+  }
+
+  /** The kernel's fill of a width, at the stage's shape, at a frame's time: every pixel anew. */
+  private function fill(shape:Shape, width:int, frame:int):void {
+    _shader.data.time.value = [frame * 0.05];
+    shape.graphics.clear();
+    shape.graphics.beginShaderFill(_shader);
+    shape.graphics.drawRect(0, 0, width, width * HEIGHT / WIDTH);
+    shape.graphics.endFill();
   }
 
   /** Where each object is in a frame: across the stage on its own path, turning. */
