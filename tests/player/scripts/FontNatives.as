@@ -2,6 +2,7 @@ package {
   import flash.display.Sprite;
   import flash.text.Font;
   import flash.utils.getDefinitionByName;
+  import flash.utils.getQualifiedClassName;
 
   public class FontNatives extends Sprite {
     public function FontNatives() {
@@ -15,6 +16,18 @@ package {
       Font.registerFont(cls);
       trace("twice", listed());
       trace("device flag", listedWithDevice());
+      // Each listed font's class, found by its name, registers again, as a font mapper does.
+      for each (var listedFont:Font in Font.enumerateFonts(false)) {
+        if (listedFont.fontName == "Probe") {
+          try {
+            Font.registerFont(getDefinitionByName(getQualifiedClassName(listedFont)) as Class);
+            trace("by name", getQualifiedClassName(listedFont), "accepted");
+          } catch (e:Error) {
+            trace("by name", getQualifiedClassName(listedFont), e.toString());
+          }
+        }
+      }
+
       var plain:Font = new Font();
       trace("plain", plain.fontName, plain.fontStyle, plain.fontType,
         plain.hasGlyphs("a"), plain.hasGlyphs(""));
@@ -30,7 +43,7 @@ package {
       var result:Array = [];
       for each (var font:Font in Font.enumerateFonts(false)) {
         if (font.fontName == "Probe") {
-          result.push(font.fontName + ":" + font.fontStyle + ":" + font.fontType);
+          result.push(font.fontName + ":" + font.fontStyle + ":" + font.fontType + ":" + getQualifiedClassName(font));
         }
       }
       return result.join(",");
@@ -40,7 +53,7 @@ package {
       var result:Array = [];
       for each (var font:Font in Font.enumerateFonts(true)) {
         if (font.fontName == "Probe") {
-          result.push(font.fontName + ":" + font.fontStyle + ":" + font.fontType);
+          result.push(font.fontName + ":" + font.fontStyle + ":" + font.fontType + ":" + getQualifiedClassName(font));
         }
       }
       return result.join(",");
