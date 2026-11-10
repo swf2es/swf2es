@@ -456,9 +456,70 @@ async function check(): Promise<void> {
 
               await value(`document.getElementById("url").focus({ preventScroll: true })`);
               assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
-              await value(`document.getElementById("report").focus({ preventScroll: true })`);
-              assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
-              await until("scrollY > 300", 5000);
+              // DIAGNOSTICS (not for merging): the step again and again, and the page's state
+              // where the page does not scroll.
+              for (let attempt = 0; attempt < 12; attempt++) {
+                await value(`(() => {
+                  scrollTo({ left: 300, top: 300, behavior: "instant" });
+                  document.getElementById("report").focus({ preventScroll: true });
+                  window.diagnosticKeys = [];
+                  window.addEventListener("keydown", (e) => setTimeout(() => window.diagnosticKeys.push(
+                    e.key + ":" + e.defaultPrevented + ":" + (e.target.id || e.target.tagName))), { once: true });
+                  return true;
+                })()`);
+                assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
+                try {
+                  await until("scrollY > 300", 5000);
+                } catch (error) {
+                  const before = await value(`(async () => {
+                    let frames = 0;
+                    const started = performance.now();
+                    await new Promise((done) => {
+                      const tick = () => {
+                        frames++;
+                        if (performance.now() - started < 500) requestAnimationFrame(tick); else done();
+                      };
+                      requestAnimationFrame(tick);
+                    });
+                    const player = document.getElementById("player");
+                    return {
+                      attempt: ${attempt},
+                      active: document.activeElement?.id || document.activeElement?.tagName,
+                      scroll: [scrollX, scrollY],
+                      keys: window.diagnosticKeys,
+                      visibility: document.visibilityState,
+                      focused: document.hasFocus(),
+                      framesIn500ms: frames,
+                      changes: player.player?.changes,
+                      scrollHeight: document.documentElement.scrollHeight,
+                      innerHeight,
+                    };
+                  })()`);
+                  await send("Input.dispatchKeyEvent", {
+                    type: "keyDown",
+                    key: "ArrowDown",
+                    code: "ArrowDown",
+                    windowsVirtualKeyCode: 40,
+                  });
+                  await send("Input.dispatchKeyEvent", {
+                    type: "keyUp",
+                    key: "ArrowDown",
+                    code: "ArrowDown",
+                    windowsVirtualKeyCode: 40,
+                  });
+                  const timeline: number[] = [];
+                  for (let i = 0; i < 20; i++) {
+                    await new Promise((done) => setTimeout(done, 100));
+                    timeline.push(await value<number>("scrollY"));
+                  }
+                  const programmatic = await value(
+                    `(() => { scrollBy({ top: 40, behavior: "instant" }); return scrollY; })()`,
+                  );
+                  throw new Error(
+                    `${error instanceof Error ? error.message : error}\nDIAGNOSTICS ${JSON.stringify({ before, timeline, programmatic })}`,
+                  );
+                }
+              }
             } finally {
               await value(`(() => {
                 document.body.style.minHeight = "";
