@@ -140,6 +140,9 @@
 // fields of 90 by 20 in the device font, _sans 12, every one of which
 // takes new text each frame, as a page of counters does.
 //
+// --vectors N plays N shapes built once, each a lined rounded rectangle and a translucent circle.
+// They move and turn each frame, isolating submission and GPU work from rebuilding geometry.
+//
 // --redraw N plays instead N shapes that a script clears and draws again
 // each frame, a half-transparent fill of two curves under a 2-pixel line
 // whose curves bend with the frame, each moving on a path of its own: what
@@ -163,7 +166,7 @@
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
 //     | --scroll N | --stamps N | --pen N
-//     | --triangles N [--culled] | --redraw N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
+//     | --triangles N [--culled] | --redraw N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
@@ -202,6 +205,7 @@ const scrolled = option("scroll", 0);
 const stamps = option("stamps", 0);
 const pen = option("pen", 0);
 const redraws = option("redraw", 0);
+const vectors = option("vectors", 0);
 const triangles = option("triangles", 0);
 const texts = option("text", 0);
 const cpuProfile = args.includes("--cpu-profile")
@@ -1176,6 +1180,66 @@ function textSwf(count: number, normal: boolean): Uint8Array {
   });
 }
 
+/** N shapes built once, moving and turning each frame (--vectors). */
+function vectorsSwf(count: number): Uint8Array {
+  const source = `package {
+  import flash.display.Shape;
+  import flash.display.Graphics;
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Main extends Sprite {
+    private var shapes:Vector.<Shape> = new Vector.<Shape>();
+    private var frame:int = 0;
+
+    public function Main() {
+      for (var i:int = 0; i < ${count}; i++) {
+        var shape:Shape = new Shape();
+        var g:Graphics = shape.graphics;
+        g.lineStyle(1, 0x202020);
+        g.beginFill(0x3060c0 + (i * 2654435761 & 0x3f3f3f));
+        g.drawRoundRect(-12, -8, 24, 16, 6, 6);
+        g.endFill();
+        g.beginFill(0xffffff, 0.6);
+        g.drawCircle(0, 0, 5);
+        g.endFill();
+        addChild(shape);
+        shapes.push(shape);
+      }
+
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      for (var i:int = 0; i < shapes.length; i++) {
+        var t:Number = frame * 0.02 + i * 0.37;
+        var shape:Shape = shapes[i];
+        shape.x = ${WIDTH / 2} + Math.cos(t * 1.3 + i) * ${WIDTH / 2 - 40};
+        shape.y = ${HEIGHT / 2} + Math.sin(t * 0.9 + i * 0.5) * ${HEIGHT / 2 - 30};
+        shape.rotation = (frame * 2 + i * 7) % 360;
+      }
+    }
+  }
+}`;
+  const abc = compiler()(`BenchVectors${count}`, source);
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** N shapes cleared and drawn again each frame, moving (--redraw). */
 function redrawSwf(count: number): Uint8Array {
   const source = `package {
@@ -1696,52 +1760,54 @@ function branchSwf(count: number): Uint8Array {
 }
 
 const swf =
-  redraws > 0
-    ? redrawSwf(redraws)
-    : pen > 0
-      ? penSwf(pen)
-      : texts > 0
-        ? args.includes("--device")
-          ? deviceTextSwf(texts)
-          : textSwf(texts, args.includes("--normal"))
-        : triangles > 0
-          ? trianglesSwf(triangles, args.includes("--culled"))
-          : scrolled > 0
-            ? scrollSwf(scrolled)
-            : stamps > 0
-              ? stampsSwf(stamps)
-              : town > 0
-                ? townSwf(town)
-                : toggleBranches > 0
-                  ? branchSwf(toggleBranches)
-                  : toggle > 0
-                    ? toggleSwf(toggle)
-                    : toggleStatic > 0
-                      ? toggleStaticSwf(toggleStatic)
-                      : scripted > 0
-                        ? scriptedSwf(scripted, args.includes("--still"))
-                        : pulse > 0
-                          ? pulseSwf(
-                              pulse,
-                              option("loop", 96),
-                              option("line", 1),
-                              option("squash", 1),
-                            )
-                          : masks > 0
-                            ? masksSwf(masks, args.includes("--unmasked"))
-                            : blends > 0
-                              ? blendsSwf(blends)
-                              : branches > 0
-                                ? branchSwf(branches)
-                                : rig > 0
-                                  ? rigSwf(
-                                      rig,
-                                      args.includes("--swap"),
-                                      args.includes("--fresh"),
-                                      args.includes("--blurred") || filtered > 0,
-                                      args.includes("--glide"),
-                                    )
-                                  : synthetic();
+  vectors > 0
+    ? vectorsSwf(vectors)
+    : redraws > 0
+      ? redrawSwf(redraws)
+      : pen > 0
+        ? penSwf(pen)
+        : texts > 0
+          ? args.includes("--device")
+            ? deviceTextSwf(texts)
+            : textSwf(texts, args.includes("--normal"))
+          : triangles > 0
+            ? trianglesSwf(triangles, args.includes("--culled"))
+            : scrolled > 0
+              ? scrollSwf(scrolled)
+              : stamps > 0
+                ? stampsSwf(stamps)
+                : town > 0
+                  ? townSwf(town)
+                  : toggleBranches > 0
+                    ? branchSwf(toggleBranches)
+                    : toggle > 0
+                      ? toggleSwf(toggle)
+                      : toggleStatic > 0
+                        ? toggleStaticSwf(toggleStatic)
+                        : scripted > 0
+                          ? scriptedSwf(scripted, args.includes("--still"))
+                          : pulse > 0
+                            ? pulseSwf(
+                                pulse,
+                                option("loop", 96),
+                                option("line", 1),
+                                option("squash", 1),
+                              )
+                            : masks > 0
+                              ? masksSwf(masks, args.includes("--unmasked"))
+                              : blends > 0
+                                ? blendsSwf(blends)
+                                : branches > 0
+                                  ? branchSwf(branches)
+                                  : rig > 0
+                                    ? rigSwf(
+                                        rig,
+                                        args.includes("--swap"),
+                                        args.includes("--fresh"),
+                                        args.includes("--blurred") || filtered > 0,
+                                        args.includes("--glide"),
+                                      )
+                                    : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1788,37 +1854,39 @@ const total = tick.map((t, i) => t + draw[i] + gl[i]);
 const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
 const summary = {
   shapes:
-    redraws > 0
-      ? `${redraws} shapes drawn anew each frame`
-      : pen > 0
-        ? `pen of ${pen}`
-        : texts > 0
-          ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
-          : triangles > 0
-            ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
-            : scrolled > 0
-              ? `scrolled bitmap of ${scrolled}`
-              : town > 0
-                ? `town of ${town}`
-                : toggleBranches > 0
-                  ? `toggle of ${toggleBranches} branches`
-                  : toggle > 0
-                    ? `toggle of ${toggle}`
-                    : toggleStatic > 0
-                      ? `static toggle of ${toggleStatic}`
-                      : scripted > 0
-                        ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                        : pulse > 0
-                          ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                          : masks > 0
-                            ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                            : blends > 0
-                              ? `${blends} blended shapes`
-                              : branches > 0
-                                ? `${branches} branches`
-                                : rig > 0
-                                  ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                                  : shapes,
+    vectors > 0
+      ? `${vectors} shapes built once, moving and turning`
+      : redraws > 0
+        ? `${redraws} shapes drawn anew each frame`
+        : pen > 0
+          ? `pen of ${pen}`
+          : texts > 0
+            ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
+            : triangles > 0
+              ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+              : scrolled > 0
+                ? `scrolled bitmap of ${scrolled}`
+                : town > 0
+                  ? `town of ${town}`
+                  : toggleBranches > 0
+                    ? `toggle of ${toggleBranches} branches`
+                    : toggle > 0
+                      ? `toggle of ${toggle}`
+                      : toggleStatic > 0
+                        ? `static toggle of ${toggleStatic}`
+                        : scripted > 0
+                          ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                          : pulse > 0
+                            ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                            : masks > 0
+                              ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                              : blends > 0
+                                ? `${blends} blended shapes`
+                                : branches > 0
+                                  ? `${branches} branches`
+                                  : rig > 0
+                                    ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                    : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {
