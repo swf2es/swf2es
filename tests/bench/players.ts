@@ -1081,7 +1081,29 @@ async function playAdl(swf: Uint8Array): Promise<string[]> {
   return result.output;
 }
 
-/** A projector under Wine: it opens the SWF from a server here, posts its lines back, and quits. */
+/**
+ * Every process whose command line names `url`: a projector Wine runs in a
+ * sandbox (flatpak's) is not the child spawned, which a kill leaves it
+ * running past, and a projector ignores a quit from a SWF it loaded from a
+ * server. Each run's URL has a port of its own, so only its own go.
+ */
+function killNaming(url: string): void {
+  for (const pid of readdirSync("/proc")) {
+    if (!/^\d+$/.test(pid)) {
+      continue;
+    }
+
+    try {
+      if (readFileSync(`/proc/${pid}/cmdline`, "utf8").includes(url)) {
+        process.kill(Number(pid), "SIGKILL");
+      }
+    } catch {
+      // Gone already, or not ours to read.
+    }
+  }
+}
+
+/** A projector under Wine: it opens the SWF from a server here, posts its lines back, and is stopped. */
 async function playProjector(
   player: PlayerName,
   swf: Uint8Array,
@@ -1133,14 +1155,11 @@ async function playProjector(
   const { port } = server.address() as AddressInfo;
 
   const [command, ...args] = wine;
-  const child = spawn(
-    command,
-    [...args, projectors[player] as string, `http://127.0.0.1:${port}/bench.swf`],
-    {
-      env: { ...process.env, WINEDEBUG: "-all" },
-      stdio: "ignore",
-    },
-  );
+  const url = `http://127.0.0.1:${port}/bench.swf`;
+  const child = spawn(command, [...args, projectors[player] as string, url], {
+    env: { ...process.env, WINEDEBUG: "-all" },
+    stdio: "ignore",
+  });
   const exited = new Promise<null>((r) => child.once("exit", () => r(null)));
   let timer: NodeJS.Timeout | undefined;
   const expired = new Promise<undefined>(
@@ -1156,9 +1175,9 @@ async function playProjector(
       throw new Error(`${player} did not report in ${SCRIPT_SECONDS} s`);
     }
 
-    // It quits once the report is sent; given a while, and stopped if it has not.
+    // It may quit once the report is sent: given a moment, and stopped after, as it may not.
     clearTimeout(timer);
-    await Promise.race([exited, new Promise((r) => (timer = setTimeout(r, 10_000)))]);
+    await Promise.race([exited, new Promise((r) => (timer = setTimeout(r, 2_000)))]);
     const lines = [...body.split("\n"), ...marked];
     return kind === "startup"
       ? [...lines, `startup: cold ${Math.round(reporting - requested)}`]
@@ -1169,6 +1188,7 @@ async function playProjector(
       child.kill();
     }
 
+    killNaming(url);
     server.close();
   }
 }
