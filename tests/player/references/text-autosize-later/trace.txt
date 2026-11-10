@@ -10,5 +10,21 @@ width, x, wordWrap: fitted
 width, then read: fitted
 width, autoSize again, wordWrap: kept, wrapped
 width, multiline, wordWrap: kept, wrapped
+autoSize, wordWrap, text: kept, wrapped
+left autoSize, wordWrap, text: kept, wrapped
+autoSize, x read, wordWrap, text: fitted
+autoSize, x set as it was, wordWrap, text: fitted
+autoSize, width read, wordWrap, text: fitted
+autoSize, y read, wordWrap, text: fitted
+autoSize, scaleX read, wordWrap, text: kept, wrapped
+autoSize, rotation read, wordWrap, text: kept, wrapped
+autoSize, alpha set, wordWrap, text: kept, wrapped
+autoSize, visible set, wordWrap, text: kept, wrapped
+autoSize, y set, wordWrap, text: fitted
+autoSize, scaleX set, wordWrap, text: kept, wrapped
+autoSize, rotation set, wordWrap, text: kept, wrapped
+autoSize, transform.matrix set, wordWrap, text: kept, wrapped
+text, autoSize, wordWrap, text: kept, wrapped
 width, a frame drawn, wordWrap: fitted
 width, a frame drawn, read: fitted
+autoSize, a frame drawn, wordWrap, text: fitted
