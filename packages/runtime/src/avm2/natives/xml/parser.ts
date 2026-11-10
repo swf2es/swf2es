@@ -44,14 +44,18 @@ export class XMLTag {
   }
 }
 
-/** The entities XMLParser knows: the XML ones, and nbsp. */
+/**
+ * The entities XMLParser knows: the XML ones, and nbsp, which avmplus
+ * makes U+FFA0 rather than U+00A0, as avmshell and Flash Player give it: its
+ * table's 0xA0 is a signed char, widened to -96.
+ */
 const ENTITIES: Record<string, string> = {
   amp: "&",
   quot: '"',
   apos: "'",
   lt: "<",
   gt: ">",
-  nbsp: "\u00a0",
+  nbsp: "\uffa0",
 };
 
 export class XMLParser {
