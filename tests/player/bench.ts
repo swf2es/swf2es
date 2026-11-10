@@ -136,7 +136,9 @@
 // --text N plays instead N TextFields of an embedded font, with advanced
 // anti-aliasing (--normal: normal), white and black at four sizes; each
 // frame a tenth of them take new text and a seventh move half a pixel:
-// what drawing text, and drawing it again, costs.
+// what drawing text, and drawing it again, costs. --device makes them
+// fields of 90 by 20 in the device font, _sans 12, every one of which
+// takes new text each frame, as a page of counters does.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
@@ -156,7 +158,7 @@
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
 //     | --scroll N | --stamps N | --pen N
-//     | --triangles N [--culled] | --text N [--normal]] [--toggle-every K] [--frames N] [--idle K]
+//     | --triangles N [--culled] | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //
@@ -1168,6 +1170,59 @@ function textSwf(count: number, normal: boolean): Uint8Array {
   });
 }
 
+/** N TextFields of 90 by 20 in _sans 12 (--text N --device), every one taking new text each frame. */
+function deviceTextSwf(count: number): Uint8Array {
+  const source = `package {
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.text.*;
+
+  public class Main extends Sprite {
+    private var fields:Array = [];
+    private var n:int = 0;
+
+    public function Main() {
+      for (var i:int = 0; i < ${count}; i++) {
+        var t:TextField = new TextField();
+        t.defaultTextFormat = new TextFormat("_sans", 12, 0x000000);
+        t.width = 90;
+        t.height = 20;
+        t.text = "text " + i;
+        t.x = (i % 8) * 100;
+        t.y = (int(i / 8) * 20) % 600;
+        addChild(t);
+        fields.push(t);
+      }
+
+      addEventListener(Event.ENTER_FRAME, frame);
+    }
+
+    private function frame(e:Event):void {
+      n++;
+      for (var i:int = 0; i < fields.length; i++) {
+        fields[i].text = "text " + i + " " + n;
+      }
+    }
+  }
+}`;
+  const abc = compiler()("BenchDeviceText", source);
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /** The scrolling trail (--scroll): a bitmap of `size` a side that a script draws into and scrolls each frame. */
 function scrollSwf(size: number): Uint8Array {
   const abc = compiler()(`BenchScroll${size}`, SCROLL_SOURCE.replace("SIZE", String(size)));
@@ -1581,7 +1636,9 @@ const swf =
   pen > 0
     ? penSwf(pen)
     : texts > 0
-      ? textSwf(texts, args.includes("--normal"))
+      ? args.includes("--device")
+        ? deviceTextSwf(texts)
+        : textSwf(texts, args.includes("--normal"))
       : triangles > 0
         ? trianglesSwf(triangles, args.includes("--culled"))
         : scrolled > 0
@@ -1669,7 +1726,7 @@ const summary = {
     pen > 0
       ? `pen of ${pen}`
       : texts > 0
-        ? `${texts} text fields, ${args.includes("--normal") ? "normal" : "advanced"}`
+        ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
         : triangles > 0
           ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
           : scrolled > 0
