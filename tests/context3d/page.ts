@@ -12,7 +12,7 @@ export { lifetime } from "./checks/lifetime.ts";
 export { resourceLimits } from "./checks/limits.ts";
 export { multisampling, targetMultisampling } from "./checks/multisampling.ts";
 export { lifecycle, recovery, shaderFixture, triangle } from "./checks/playback.ts";
-export { indirectConstants } from "./checks/shaders.ts";
+export { indirectConstants, uniformUploads } from "./checks/shaders.ts";
 export { colorMasks, reconfiguration, stencil } from "./checks/state.ts";
 export { cubeTargets, renderTargets } from "./checks/targets.ts";
 export { rectangleTextures, samplerStates, textureBytes } from "./checks/textures.ts";

@@ -5,7 +5,7 @@ import type { Options, Result } from "./bench-results.ts";
 type Source = [type: number, index: number];
 
 /** AGAL operands use full xyzw masks and swizzles throughout this fixture. */
-function shaders(): [Uint8Array, Uint8Array] {
+function shaders(indirect: boolean): [Uint8Array, Uint8Array] {
   const make = (fragment: boolean) => {
     const ops: number[][] = [];
     const op = (code: number, dest: Source, a: Source, b?: Source) => {
@@ -18,7 +18,14 @@ function shaders(): [Uint8Array, Uint8Array] {
         b?.[0] ?? 0,
       ]);
     };
-    if (fragment) {
+    if (indirect) {
+      if (fragment) {
+        op(0, [3, 0], [4, 0]);
+      } else {
+        op(0, [3, 0], [0, 0]);
+        op(0, [4, 0], [1, 0]);
+      }
+    } else if (fragment) {
       op(0, [2, 0], [1, 0]);
       for (let i = 1; i < 8; i++) {
         op(1, [2, 0], [2, 0], [1, i]);
@@ -39,6 +46,11 @@ function shaders(): [Uint8Array, Uint8Array] {
       for (let j = 0; j < 6; j++) {
         view.setUint32(7 + i * 24 + j * 4, ops[i][j], true);
       }
+    }
+
+    if (indirect && !fragment) {
+      // The second mov reads vc[va0.w]; each vertex's w is 1.
+      view.setUint32(43, 0x80030001, true);
     }
 
     return bytes;
@@ -81,7 +93,8 @@ export function bench(name: string, options: Options): Result {
   const indices = context.createBuffer(index.length, 0);
   indices.upload(index, 0, index.length);
   context.setVertex(0, vertices, 0, "float4");
-  const source = shaders();
+  const indirect = name.startsWith("indirect");
+  const source = shaders(indirect);
   const programs = Array.from({ length: name === "programs" ? 8 : 1 }, () => {
     const program = context.createProgram();
     program.upload(...source);
@@ -97,6 +110,10 @@ export function bench(name: string, options: Options): Result {
 
   context.setConstants("vertex", 0, matrix, 4);
   context.setConstants("fragment", 0, material, 8);
+  if (indirect) {
+    context.setConstants("vertex", 1, material, 1);
+  }
+
   const render = (frame: number) => {
     if (target) {
       context.setRenderTarget(target, false, options.samples);
@@ -106,17 +123,28 @@ export function bench(name: string, options: Options): Result {
 
     context.clear(0, 0, 0, 1);
     for (let i = 0; i < options.draws; i++) {
-      if (name === "transform" || name === "material") {
+      if (name === "transform" || name === "material" || name === "all-changing") {
         matrix[3] = ((frame + i) % 16) / 1024;
+        if (name === "all-changing") {
+          for (let j = 0; j < 4; j++) {
+            matrix[j * 5] = 1 + ((frame + i) % 16) / 1024;
+          }
+        }
+
         context.setConstants("vertex", 0, matrix, 4);
       }
 
-      if (name === "material") {
+      if (name === "material" || name === "all-changing") {
         for (let j = 0; j < material.length; j++) {
           material[j] = 0.01 + ((frame + i + j) % 64) / 1024;
         }
 
         context.setConstants("fragment", 0, material, 8);
+      }
+
+      if (name === "indirect-changing") {
+        material[0] = 0.01 + ((frame + i) % 64) / 1024;
+        context.setConstants("vertex", 1, material, 1);
       }
 
       if (name === "programs") {

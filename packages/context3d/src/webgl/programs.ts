@@ -11,6 +11,9 @@ export interface ProgramState {
   fragment: (WebGLUniformLocation | null)[];
   samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
   samplerMask: number;
+  vertexVersions: Float64Array;
+  fragmentVersions: Float64Array;
+  vertexVersion: number;
 }
 
 export interface CopyProgram {
@@ -77,6 +80,11 @@ export function uploadProgram(
       location: gl.getUniformLocation(handle, `fs${source.index}`),
     });
   }
+
+  // A fresh link has GL's defaults, even when the context's constants were never written.
+  state.vertexVersions = new Float64Array(state.vertex.length).fill(-1);
+  state.fragmentVersions = new Float64Array(state.fragment.length).fill(-1);
+  state.vertexVersion = -1;
 }
 
 /** A program linked as the device links one, its failures Context3D's errors as before. */

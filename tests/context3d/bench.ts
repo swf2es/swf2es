@@ -34,24 +34,33 @@ assert.ok(options.draws > 0 && options.draws <= 21845, "--draws must fit 16-bit 
 assert.ok(options.frames >= 2, "--frames must be at least 2");
 const runs = option("runs", 3);
 assert.ok(runs > 0, "--runs must be positive");
-const names = ["static", "transform", "material", "programs", "targets"];
+const names = [
+  "static",
+  "transform",
+  "material",
+  "all-changing",
+  "programs",
+  "targets",
+  "indirect",
+  "indirect-changing",
+];
 const only = args.indexOf("--only");
 const selected = only < 0 ? names : (args[only + 1] ?? "").split(",");
 assert.ok(selected.length && selected.every((name) => names.includes(name)), "invalid --only");
 const results: { run: number; root: string; commit: string; dirty: boolean; result: Result }[] = [];
 const references = new Map<string, Pick<Result, "renderer" | "pixels">>();
 for (let run = 0; run < runs; run++) {
-  for (const root of run % 2 === 0 ? roots : [...roots].reverse()) {
-    const commit = execFileSync("git", ["rev-parse", "HEAD"], {
-      cwd: root,
-      encoding: "utf8",
-    }).trim();
-    const dirty =
-      execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+  for (const name of selected) {
+    for (const root of run % 2 === 0 ? roots : [...roots].reverse()) {
+      const commit = execFileSync("git", ["rev-parse", "HEAD"], {
         cwd: root,
         encoding: "utf8",
-      }).trim().length > 0;
-    for (const name of selected) {
+      }).trim();
+      const dirty =
+        execFileSync("git", ["status", "--porcelain", "--untracked-files=no"], {
+          cwd: root,
+          encoding: "utf8",
+        }).trim().length > 0;
       const { value, exception } = await withPage(
         "runSwf",
         (evaluate) =>
@@ -80,7 +89,7 @@ for (let run = 0; run < runs; run++) {
       results.push({ run, root, commit, dirty, result: value });
       const median = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1];
       console.error(
-        `${run + 1} ${commit.slice(0, 8)} ${name}: CPU ${median(value.cpu).toFixed(3)} ms, completed ${median(value.completed).toFixed(3)} ms, calls ${JSON.stringify(value.calls)}`,
+        `${run + 1} ${commit.slice(0, 8)}${dirty ? "*" : ""} ${name}: CPU ${median(value.cpu).toFixed(3)} ms, completed ${median(value.completed).toFixed(3)} ms, calls ${JSON.stringify(value.calls)}`,
       );
     }
   }

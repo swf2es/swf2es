@@ -218,3 +218,13 @@ vertex prefixes need no per-attribute index scan; sparse validation caches also
 include the vertex version. Uploads, changed ranges/bindings and disposal
 invalidate the relevant records. Warm draws add no validation arrays or GPU
 handles.
+
+Each linked program remembers the write versions last uploaded for its constants.
+Draws upload only active registers written since that program's preceding draw;
+indirectly addressed vertex constants are uploaded as one bank after a write.
+Switching programs or targets preserves those versions, while successful program
+replacement resets them. Rewriting equal values still counts as a write. Version
+arrays retain at most 1,248 bytes per program and are released on disposal;
+the context's two banks retain another 1,248 bytes of versions together.
+Shader translation and arithmetic are unchanged. See the
+[backend benchmark](../../tests/context3d/README.md) for upload counts and timings.

@@ -67,6 +67,13 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
   compressedAlpha: 2,
 };
 
+interface Constants {
+  data: Float32Array;
+  versions: Float64Array;
+  version: number;
+  writing: number;
+}
+
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
 export class WebGLContext3D implements Context3D {
   readonly gl: WebGL2RenderingContext;
@@ -125,8 +132,18 @@ export class WebGLContext3D implements Context3D {
   private scissorRight = 0;
   private scissorBottom = 0;
   private scissorOutside = false;
-  private readonly vertexConstants = new Float32Array(128 * 4);
-  private readonly fragmentConstants = new Float32Array(28 * 4);
+  private readonly vertexConstants: Constants = {
+    data: new Float32Array(128 * 4),
+    versions: new Float64Array(128),
+    version: 0,
+    writing: 0,
+  };
+  private readonly fragmentConstants: Constants = {
+    data: new Float32Array(28 * 4),
+    versions: new Float64Array(28),
+    version: 0,
+    writing: 0,
+  };
   private pixels = new Uint8Array(0);
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
@@ -686,6 +703,9 @@ export class WebGLContext3D implements Context3D {
       fragment: [],
       samplers: [],
       samplerMask: 0,
+      vertexVersions: new Float64Array(0),
+      fragmentVersions: new Float64Array(0),
+      vertexVersion: -1,
     };
     const program: Program3D = {
       upload: (vertex, fragment) => {
@@ -716,6 +736,8 @@ export class WebGLContext3D implements Context3D {
         state.fragment.length = 0;
         state.samplers.length = 0;
         state.samplerMask = 0;
+        state.vertexVersions = new Float64Array(0);
+        state.fragmentVersions = new Float64Array(0);
         if (this.selected === program) {
           this.selected = null;
         }
@@ -1521,10 +1543,20 @@ export class WebGLContext3D implements Context3D {
   setConstants(stage: ProgramType, first: number, values: ArrayLike<number>, count: number): void {
     this.alive();
     const dest = stage === "vertex" ? this.vertexConstants : this.fragmentConstants;
-    range(first, count, dest.length / 4);
+    range(first, count, dest.data.length / 4);
     range(0, count * 4, values.length);
-    for (let i = 0; i < count * 4; i++) {
-      dest[first * 4 + i] = values[i];
+
+    dest.writing++;
+    try {
+      for (let i = 0; i < count * 4; i++) {
+        dest.data[first * 4 + i] = values[i];
+      }
+    } finally {
+      // Source getters can draw, nest setters or throw after partially writing the bank.
+      dest.writing--;
+      if (count) {
+        dest.versions.fill(++dest.version, first, first + count);
+      }
     }
   }
 
@@ -1661,20 +1693,28 @@ export class WebGLContext3D implements Context3D {
     }
 
     if (state.vertexBank) {
-      gl.uniform4fv(state.vertexBank, this.vertexConstants);
+      if (this.vertexConstants.writing || state.vertexVersion !== this.vertexConstants.version) {
+        gl.uniform4fv(state.vertexBank, this.vertexConstants.data);
+        state.vertexVersion = this.vertexConstants.version;
+      }
     } else {
-      this.uniforms(state.vertex, this.vertexConstants);
+      this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions);
     }
-    this.uniforms(state.fragment, this.fragmentConstants);
+    this.uniforms(state.fragment, this.fragmentConstants, state.fragmentVersions);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);
     this.changedTarget();
   }
 
-  private uniforms(locations: (WebGLUniformLocation | null)[], data: Float32Array): void {
+  private uniforms(
+    locations: (WebGLUniformLocation | null)[],
+    bank: Constants,
+    previous: Float64Array,
+  ): void {
     for (let i = 0; i < locations.length; i++) {
-      if (locations[i]) {
-        this.gl.uniform4fv(locations[i], data, i * 4, 4);
+      if (locations[i] && (bank.writing || previous[i] !== bank.versions[i])) {
+        this.gl.uniform4fv(locations[i], bank.data, i * 4, 4);
+        previous[i] = bank.versions[i];
       }
     }
   }
