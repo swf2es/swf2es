@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/cli",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "swf2es command line: ahead-of-time compile SWF and ABC files, and run ABCs as avmshell does",
   "keywords": [
     "swf",
