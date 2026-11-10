@@ -467,6 +467,12 @@ async function check(): Promise<void> {
                     e.key + ":" + e.defaultPrevented + ":" + (e.target.id || e.target.tagName))), { once: true });
                   return true;
                 })()`);
+                // A frame painted after the focus moved, as a person's click or Tab would paint it.
+                await value(`new Promise((done) => {
+                  document.body.style.backgroundColor =
+                    document.body.style.backgroundColor === "rgb(254, 254, 254)" ? "rgb(253, 253, 253)" : "rgb(254, 254, 254)";
+                  requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+                })`);
                 assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
                 try {
                   await until("scrollY > 300", 5000);
