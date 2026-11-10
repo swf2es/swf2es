@@ -219,11 +219,11 @@ and input use the same presentation scale. Leaving fullscreen restores responsiv
 layout; ordinary playback retains its existing fullscreen resizing.
 Best-resolution buffers and default enablement remain separate work.
 
-The opt-in Context3D installation enables live Stage scale/alignment settings.
-The web host then shares them with player natives through Scripting's synchronous
-`onStageLayout` callback. Ordinary loads retain fixed Stage getters, ignored
-setters and authored dimensions; AVM1 and default embedding alignment keep their
-existing behavior when both opposite edges are named. It resizes the display
+An AS3 SWF's Stage scale and alignment settings are live: the web host shares
+them with player natives through Scripting's synchronous `onStageLayout`
+callback, with or without Context3D. Only the opt-in gives AIR's top and left
+edges precedence when an alignment names both opposite edges; other loads,
+and AVM1's, centre between them. It resizes the display
 viewport before `resizeStage` dispatches a Stage-only RESIZE event in noScale;
 other scale modes retain the SWF's authored dimensions. RenderView's viewport
 (`setViewport`) keeps the display list's translation and pointer coordinates

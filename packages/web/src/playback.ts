@@ -63,9 +63,7 @@ export class Playback {
     box.append(canvas);
     if (scripting) {
       scripting.drawer = view;
-      if (stage3D) {
-        scripting.onStageLayout = this.stageLayout;
-      }
+      scripting.onStageLayout = this.stageLayout;
     }
 
     // An AVM1 movie's BitmapData draws display objects by it too.
@@ -257,7 +255,7 @@ export class Playback {
     }
 
     const look = this.look();
-    const scripting = this.stage3D ? this.scripting : null;
+    const scripting = this.scripting;
     scripting?.setStageDefaults(look.scale, look.salign ?? "");
     const mode = scripting?.stageScaleMode ?? look.scale;
     const align = scripting?.stageAlign ?? look.salign;
@@ -274,7 +272,8 @@ export class Playback {
       mode,
       align,
       this.dpr,
-      !!scripting,
+      // AIR's top and left edges win where both are named; checked with Stage3D only.
+      !!this.stage3D,
     );
     const view = viewport(
       this.player.width || 1,

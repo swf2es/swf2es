@@ -300,10 +300,10 @@ await withPage(
     try {
       await call("layout", "noScale", "TL", 192, 144);
       assert.equal((await call<Status>("status")).canvases, 1);
-      assert.equal(await call("scriptState"), "showAll||96|96|");
+      // Without the opt-in the script sees the embedding's layout and the box's size, as with
+      // it, and noScale's margins show the artwork past the stage.
+      assert.equal(await call("scriptState"), "noScale|TL|192|144|192,144,false,false,2,true;");
       assert.equal((await call<Status>("status")).overlayWidth, 192);
-      // Without the opt-in the script sees showAll, but noScale's margins still show the
-      // artwork past the stage, as the opt-in's noScale TL state does.
       await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
     } finally {
       await call("close");

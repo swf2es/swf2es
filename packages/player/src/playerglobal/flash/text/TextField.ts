@@ -383,7 +383,8 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     }
     set autoSize(v: Value) {
       this.$display.autoSize = choice(v, ["none", "left", "right", "center"], "autoSize");
-      this.$display.fit();
+      // Its fit waits for its size to be asked, or the frame, as one a set width leaves (adl).
+      this.$display.deferFit();
     }
     get antiAliasType(): string {
       return this.$display.antiAliasType;

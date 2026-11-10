@@ -3,7 +3,14 @@
 // decompression, the frame size as a RECT, the frame rate as 8.8 fixed
 // point, the frame count, then tags to an End tag or the body's end.
 import { decompressSwf, decompressSwfPrefix } from "./compression.js";
-import { End, FileAttributes, SetBackgroundColor } from "./tags.js";
+import {
+  DefineButton,
+  DefineButton2,
+  DefineEditText,
+  End,
+  FileAttributes,
+  SetBackgroundColor,
+} from "./tags.js";
 
 export type SwfCompression = "none" | "zlib" | "lzma";
 
@@ -231,4 +238,17 @@ export function fileAttributes(file: Uint8Array): number {
 export function isAs3(swf: Swf): boolean {
   const tag = swf.tags.find((t) => t.code === FileAttributes);
   return !!tag && tag.length >= 1 && (swf.bytes[tag.offset] & 0x08) !== 0;
+}
+
+/**
+ * Whether the SWF defines what the pointer or the keys reach with no script
+ * of its own: a button, which shows its over and down states, or a text
+ * field, which may be selected or typed in. Flash plays such a SWF's
+ * buttons and fields as any other's, so a host gives it the VM that takes
+ * input even when it has no code to run.
+ */
+export function definesInput(swf: Swf): boolean {
+  return swf.tags.some(
+    (t) => t.code === DefineButton || t.code === DefineButton2 || t.code === DefineEditText,
+  );
 }

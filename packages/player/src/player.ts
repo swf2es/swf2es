@@ -21,6 +21,7 @@ import {
   walkList,
 } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
+import { settleFits } from "./display/textobjects.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { customContextMenu, type MenuItem } from "./input/context-menu.js";
 import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
@@ -677,9 +678,7 @@ export class Player {
       }
     };
     collect(this.stage);
-    for (const orphan of this.scripting?.lifecycle.orphanRoots() ?? []) {
-      collect(orphan);
-    }
+    this.scripting?.lifecycle.eachOrphanRoot(collect);
 
     // Let go of once advanced, so that the kept list holds none past the tick.
     try {
@@ -695,5 +694,8 @@ export class Player {
       this.scripting.frame(this.stage, true, render);
       this.frameRate = this.scripting.frameRate;
     }
+
+    // The fits a set size left pending happen before the frame is drawn, as in Flash.
+    settleFits();
   }
 }

@@ -124,6 +124,7 @@ export {
 } from "./sound.js";
 export {
   backgroundColor,
+  definesInput,
   fileAttributes,
   isAs3,
   type Rect,

@@ -268,12 +268,29 @@ async function check(): Promise<void> {
             assert.match(facts, /3 \(AVM2\)/);
             assert.match(facts, /480 × 320/);
             const demos = await value<number>("document.querySelectorAll('#demos li').length");
-            assert.equal(demos, 3);
+            assert.equal(demos, 4);
             const source = await value<string>("document.querySelector('#demos a').href");
             assert.match(
               source,
               /^https:\/\/github\.com\/swf2es\/swf2es\/blob\/[0-9a-f]{40}\/apps\/site\//,
             );
+            // Each demo's SWF to download beside its source; as3pb's source in its own repository.
+            const links = await value<[string, string, string][]>(
+              "[...document.querySelectorAll('#demos li')].map((li) => { const [source, download] = li.querySelectorAll('a'); return [source.href, download.getAttribute('download'), download.href]; })",
+            );
+            for (const [, name, href] of links) {
+              assert.match(name, /^[\w-]+\.swf$/);
+              assert.ok(href.endsWith(`/swf2es/demos/${name}`), href);
+              const response = await value<number>(
+                `fetch(${JSON.stringify(href)}).then((r) => r.status)`,
+              );
+              assert.equal(response, 200, `${href} did not download`);
+            }
+            assert.match(
+              links[3][0],
+              /^https:\/\/github\.com\/33TU\/as3pb\/blob\/[0-9a-f]{40}\/runtime\/test\/bench\/Main\.as$/,
+            );
+            assert.equal(links[3][1], "as3pb-bench.swf");
             const box = await value<number[]>(
               "(() => { const r = document.getElementById('stage').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()",
             );

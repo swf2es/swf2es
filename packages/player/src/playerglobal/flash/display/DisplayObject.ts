@@ -195,6 +195,11 @@ function spriteOnly(traits: { name: string; base: unknown }): boolean {
 
 /** Move a display object, by a copy of its matrix, and have it drawn again. */
 function transform(d: DisplayObject, change: (m: Matrix) => void): void {
+  // A field's pending fit first, so that what is set is where it stays.
+  if (d instanceof TextObject) {
+    d.settle();
+  }
+
   const m = { ...d.matrix };
   change(m);
   d.matrix = m;
@@ -260,6 +265,11 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get x(): number {
+      // A field's pending fit moves a centred or right-aligned one (adl).
+      if (this.$display instanceof TextObject) {
+        this.$display.settle();
+      }
+
       return withOffset(this.$display.matrix.tx, fieldOffset(this.$display)[0]);
     }
 
@@ -279,6 +289,10 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     get y(): number {
+      if (this.$display instanceof TextObject) {
+        this.$display.settle();
+      }
+
       return withOffset(this.$display.matrix.ty, fieldOffset(this.$display)[1]);
     }
 
@@ -442,7 +456,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       if (d instanceof TextObject) {
         d.width = value / (Math.abs(d.scaleX) || 1);
         d.invalidate(CONTENT);
-        d.fit();
+        d.deferFit();
         return;
       }
 
@@ -479,7 +493,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       if (d instanceof TextObject) {
         d.height = value / (Math.abs(d.scaleY) || 1);
         d.invalidate(CONTENT);
-        d.fit();
+        d.deferFit();
         return;
       }
 

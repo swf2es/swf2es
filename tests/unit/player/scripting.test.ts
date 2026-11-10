@@ -1277,10 +1277,10 @@ test("a frame whose scripts change nothing a round reads takes one round", {
   // with the orphans. The checked build runs the round left out anyway, to
   // see that it finds nothing.
   let walks = 0;
-  const orphanRoots = scripting.lifecycle.orphanRoots.bind(scripting.lifecycle);
-  scripting.lifecycle.orphanRoots = () => {
+  const eachOrphanRoot = scripting.lifecycle.eachOrphanRoot.bind(scripting.lifecycle);
+  scripting.lifecycle.eachOrphanRoot = (f) => {
     walks++;
-    return orphanRoots();
+    eachOrphanRoot(f);
   };
   for (let i = 0; i < 4; i++) {
     player.tick();

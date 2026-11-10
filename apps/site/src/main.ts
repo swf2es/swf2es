@@ -574,7 +574,12 @@ async function listDemos(): Promise<void> {
       const source = document.createElement("a");
       source.href = demo.source;
       source.textContent = "Source";
-      item.append(button, about, source);
+      // The SWF itself, to keep or to play elsewhere.
+      const download = document.createElement("a");
+      download.href = new URL(`demos/${demo.file}`, SITE).href;
+      download.download = demo.file;
+      download.textContent = "Download";
+      item.append(button, about, source, " · ", download);
       demoList.append(item);
     }
   } catch {

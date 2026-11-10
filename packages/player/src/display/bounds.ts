@@ -64,6 +64,7 @@ export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
   }
 
   if (d instanceof TextObject) {
+    d.settle();
     return { xMin: d.left, yMin: d.top, xMax: d.left + d.width, yMax: d.top + d.height };
   }
 
@@ -145,6 +146,106 @@ export function placedRect(d: DisplayObject, r: Rect, drawn = false): Rect {
   return back ? boxThrough(box, back) : box;
 }
 
+// Scratch matrices for boundsIn's flat case: getRect and getBounds are asked of every moved
+// sprite, every frame, by some movies, and these leave nothing behind for the collector.
+const scratchUp: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+const scratchDown: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+const scratchBoth: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+
+/** `m` set to `p`'s six numbers. */
+function copyInto(m: Matrix, p: Matrix): void {
+  m.a = p.a;
+  m.b = p.b;
+  m.c = p.c;
+  m.d = p.d;
+  m.tx = p.tx;
+  m.ty = p.ty;
+}
+
+/** `m` then `p` into `out`, as concat multiplies two flat matrices; `out` may be `m`. */
+function concatInto(out: Matrix, m: Matrix, p: Matrix): void {
+  const a = m.a * p.a + m.b * p.c;
+  const b = m.a * p.b + m.b * p.d;
+  const c = m.c * p.a + m.d * p.c;
+  const d = m.c * p.b + m.d * p.d;
+  const tx = m.tx * p.a + m.ty * p.c + p.tx;
+  const ty = m.tx * p.b + m.ty * p.d + p.ty;
+  out.a = a;
+  out.b = b;
+  out.c = c;
+  out.d = d;
+  out.tx = tx;
+  out.ty = ty;
+}
+
+// `placed` of one with a scrollRect, shifted as geometry's shifted shifts it, without a new matrix.
+const scratchPlaced: Matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+
+/** `d.placed` if flat, into scratchPlaced where a scroll shifts it; null for a projective one. */
+function flatPlaced(d: DisplayObject): Matrix | null {
+  if (d.space) {
+    const m = d.placed;
+    return isProjective(m) ? null : m;
+  }
+
+  const m = d.matrix;
+  if (isProjective(m)) {
+    return null;
+  }
+
+  const r = d.scroll;
+  if (!r) {
+    return m;
+  }
+
+  copyInto(scratchPlaced, m);
+  scratchPlaced.tx = m.tx - m.a * r.xMin - m.c * r.yMin;
+  scratchPlaced.ty = m.ty - m.b * r.xMin - m.d * r.yMin;
+  return scratchPlaced;
+}
+
+/** toStage into `out`, if every matrix on the way is flat; false, `out` spoilt, otherwise. */
+function flatToStage(d: DisplayObject, stage: DisplayObject | null, out: Matrix): boolean {
+  const own = flatPlaced(d);
+  if (!own) {
+    return false;
+  }
+
+  copyInto(out, own);
+  for (let p = d.parent; p && p !== stage; p = p.parent) {
+    const m = flatPlaced(p);
+    if (!m) {
+      return false;
+    }
+
+    concatInto(out, out, m);
+  }
+
+  return true;
+}
+
+/** `m` inverted in place, as invert does; left as it is, as invert's null is, when flat. */
+function invertFlat(m: Matrix): boolean {
+  const det = m.a * m.d - m.b * m.c;
+  if (det === 0) {
+    return false;
+  }
+
+  const a = m.d / det;
+  const b = -m.b / det;
+  const c = -m.c / det;
+  const d = m.a / det;
+  const tx = (m.c * m.ty - m.d * m.tx) / det;
+  const ty = (m.b * m.tx - m.a * m.ty) / det;
+  m.a = a;
+  m.b = b;
+  m.c = c;
+  m.d = d;
+  m.tx = tx;
+  m.ty = ty;
+  return true;
+}
+
 /** `d`'s bounds in `target`'s space (its own for null), through the stage. */
 export function boundsIn(
   d: DisplayObject,
@@ -157,6 +258,30 @@ export function boundsIn(
     return own;
   }
 
+  // Flat all the way, the common case, the same arithmetic as below's in scratch matrices.
+  if (flatToStage(d, stage, scratchUp)) {
+    if (target === stage) {
+      copyInto(scratchDown, IDENTITY);
+    } else if (!flatToStage(target, stage, scratchDown)) {
+      return boundsInThrough(d, target, stage, own);
+    } else if (!invertFlat(scratchDown)) {
+      copyInto(scratchDown, IDENTITY);
+    }
+
+    concatInto(scratchBoth, scratchUp, scratchDown);
+    return transformRect(own, scratchBoth);
+  }
+
+  return boundsInThrough(d, target, stage, own);
+}
+
+/** boundsIn where a plane is on the way: up or down through a projective matrix. */
+function boundsInThrough(
+  d: DisplayObject,
+  target: DisplayObject,
+  stage: DisplayObject | null,
+  own: Rect,
+): Rect {
   const up = toStage(d, stage);
   const down = target === stage ? IDENTITY : (invert(toStage(target, stage)) ?? IDENTITY);
   if (!isProjective(up)) {
