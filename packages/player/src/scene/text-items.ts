@@ -19,7 +19,11 @@ import { cssFont } from "../text/fonts.js";
 import type { Parts } from "./parts.js";
 import type { DeviceItem, TextItem } from "./text.js";
 
-/** Device texts with runs kept, past which those let go of are looked for and forgotten. */
+/**
+ * Device texts with runs kept, past which those let go of are looked for and
+ * forgotten; the next look waits for twice as many as it kept, so that many
+ * texts drawn at once do not look on every new run.
+ */
 const RUN_KEYS = 512;
 
 /** Runs kept of one text, in its styles, sizes and resolutions. */
@@ -62,6 +66,8 @@ export class TextItems {
   private readonly itemColored: ColorTransform = { ...IDENTITY_COLOR };
   /** Device text rasterized, by its text; among its runs, by style, metrics and resolution. */
   private readonly runs = new Map<string, DeviceRun[]>();
+  /** How many texts' runs are kept before those let go of are next looked for. */
+  private sweepAt = RUN_KEYS;
   /** The canvas device text is rasterized on, made as first needed. */
   private textCanvas: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null =
     null;
@@ -223,7 +229,7 @@ export class TextItems {
     }
 
     // Those let go of are forgotten, so that text typed and scrolled keeps no lists for them.
-    if (this.runs.size > RUN_KEYS) {
+    if (this.runs.size > this.sweepAt) {
       for (const [text, list] of this.runs) {
         let kept = 0;
         for (const r of list) {
@@ -238,6 +244,7 @@ export class TextItems {
         }
       }
 
+      this.sweepAt = Math.max(RUN_KEYS, this.runs.size * 2);
       runs = this.runs.get(item.text);
     }
 
