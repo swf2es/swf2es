@@ -1090,6 +1090,20 @@ check(
 );
 
 check("a SWF with no code has buttons the pointer reaches", async (evaluate, send) => {
+  // The GL clears of the player's canvas from now, which every frame it draws makes.
+  const countClears = (left: number, top: number) =>
+    call(
+      evaluate,
+      `(() => {
+      const canvas = document.elementFromPoint(${left + 1}, ${top + 1}).shadowRoot.querySelector("canvas");
+      const gl = canvas.getContext("webgl2");
+      window.stillClears = 0;
+      const clear = WebGL2RenderingContext.prototype.clear;
+      gl.clear = function (...a) { window.stillClears++; return clear.apply(this, a); };
+      return true;
+    })()`,
+    );
+  const clears = () => call<number>(evaluate, "window.stillClears");
   const shot = async () => {
     const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
     return decodePng(new Uint8Array(Buffer.from(data, "base64")));
@@ -1124,9 +1138,17 @@ check("a SWF with no code has buttons the pointer reaches", async (evaluate, sen
     assert.deepEqual(only(image, up), [0xff0000], `${vm}: up off the hit test`);
     assert.deepEqual(only(image, over), [0xffffff], `${vm}: over off the hit test`);
 
+    // Frames that change nothing draw nothing, the canvas showing what it drew.
+    await countClears(left, top);
+    await call(evaluate, "frames(10).then(() => true)");
+    assert.equal(await clears(), 0, `${vm}: a still stage drawn again`);
+    image = await shot();
+    assert.deepEqual(only(image, up), [0xff0000], `${vm}: up while still`);
+
     // On the hit test: over, drawn there, and the up state gone.
     await move(left + 70, top + 30);
     await call(evaluate, "frames(2).then(() => true)");
+    assert.ok((await clears()) > 0, `${vm}: the over state not drawn`);
     image = await shot();
     assert.deepEqual(only(image, up), [0xffffff], `${vm}: up on the hit test`);
     assert.deepEqual(only(image, over), [0x00ff00], `${vm}: over on the hit test`);

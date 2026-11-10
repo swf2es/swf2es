@@ -79,6 +79,9 @@ export class Playback {
     this.unbind.push(() => this.textInput.destroy());
     // Its keys' releases are lost when the window or the element loses focus: the player lets them go.
     this.unbind.push(bindActivation(player, window, host as HTMLElement));
+    // Shown again, the stage is drawn anew rather than trusted to the canvas a hidden page kept.
+    document.addEventListener("visibilitychange", this.shown);
+    this.unbind.push(() => document.removeEventListener("visibilitychange", this.shown));
     this.resize = new ResizeObserver(() => this.layout());
     this.resize.observe(box);
     this.layout();
@@ -138,6 +141,12 @@ export class Playback {
   invalidate(): void {
     this.dirty = true;
   }
+
+  private readonly shown = () => {
+    if (document.visibilityState === "visible") {
+      this.dirty = true;
+    }
+  };
 
   private readonly tick = (now: number) => {
     this.frame = requestAnimationFrame(this.tick);
@@ -217,11 +226,16 @@ export class Playback {
     const clear = transparent || overlay;
     // What showAll leaves around the stage is the stage's colour, as in Flash.
     this.box.style.background = transparent ? "" : `#${color.toString(16).padStart(6, "0")}`;
+    const forced = this.dirty;
     this.drawn = this.player.changes;
     this.dirty = false;
     this.view.background = background;
     this.view.transparent = clear;
-    this.view.render(this.player.stage);
+    // A frame played that changed nothing drawn is left as it shows: no frame for the browser to
+    // composite, as Flash repaints nothing of a still stage. What the host changed draws anew.
+    if (forced || !this.view.unchanged(this.player.stage)) {
+      this.view.render(this.player.stage);
+    }
   }
 
   /**
