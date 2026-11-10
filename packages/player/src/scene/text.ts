@@ -89,6 +89,8 @@ export interface DeviceItem {
   descent: number;
   x: number;
   top: number;
+  /** Where the layout put each character's pen, in pixels from x. */
+  pens: number[];
 }
 
 export type TextItem = GlyphItem | RectItem | DeviceItem;
@@ -356,5 +358,6 @@ function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number)
     descent: metrics.descent,
     x: (dx + run[0].x) / 20,
     top: baseline - metrics.ascent,
+    pens: run.map((c) => (c.x - run[0].x) / 20),
   };
 }

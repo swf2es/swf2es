@@ -10,8 +10,9 @@
 // steady scene's. The site's crowd and bounce demos play, and three SWFs made
 // here: a crowd of filled, stroked, bitmap and gradient parts under colour
 // transforms, half of it still; blend modes, a mask, a glow left still and
-// a filtered sprite multiplied between shapes; pictures blended alone; and a timeline that
-// replaces, removes and adds shapes and morphs every frame. Software GL
+// a filtered sprite multiplied between shapes; pictures blended alone; a timeline that
+// replaces, removes and adds shapes and morphs every frame; and counters, fields of
+// the device font whose text changes every frame, their glyphs drawn from one atlas. Software GL
 // and a GPU must count the same. Buffers made anew and copied on the GPU,
 // as a growing geometry atlas makes them, are printed too.
 //
@@ -409,6 +410,40 @@ function swap(): Uint8Array {
   return w.swf({ width: 520, height: 360, frameRate: 30, frameCount: frames, tags });
 }
 
+/**
+ * Counters: 40 fields of the device font, _sans, each a new field of new
+ * text every frame, as a timeline of DefineEditTexts swaps them in.
+ */
+function counters(): Uint8Array {
+  const fields = 40;
+  const frames = 60;
+  const tags: Uint8Array[] = [w.backgroundColor(0xffffff), w.fontName(1, "_sans")];
+  for (let frame = 0; frame < frames; frame++) {
+    for (let d = 0; d < fields; d++) {
+      const id = 10 + frame * fields + d;
+      tags.push(
+        w.editText(id, `count ${d} ${frame * 7 + d}`, 1800, 360, 0, {
+          font: 1,
+          fontHeight: 240,
+          color: 0x000000,
+          readOnly: true,
+        }),
+        w.place({
+          depth: d + 1,
+          character: id,
+          ...(frame === 0 ? {} : { move: true }),
+          matrix: { tx: (d % 5) * 100 * 20, ty: Math.floor(d / 5) * 40 * 20 },
+        }),
+      );
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({ width: 520, height: 360, frameRate: 30, frameCount: frames, tags });
+}
+
 /** Every case's SWF, by name: the site's demos built as the site builds them. */
 function cases(): Map<string, Uint8Array> {
   const demos = buildDemos(`${here}out/draw-counts/`);
@@ -421,6 +456,7 @@ function cases(): Map<string, Uint8Array> {
     ["blend-mask", blendMask()],
     ["blend-bitmaps", blendBitmaps()],
     ["swap", swap()],
+    ["counters", counters()],
   ]);
 }
 

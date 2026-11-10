@@ -1,10 +1,13 @@
 // A text's items drawn (RenderView): glyphs as their fills and rectangles
-// as the unit quad, placed by rows of their own, and device text as runs
-// rasterized on a canvas, kept as textures while drawn.
+// as the unit quad, placed by rows of their own, and device text as quads
+// of its glyphs in their atlas (device-glyphs.ts), or, where its characters
+// would not be drawn alike alone, as runs rasterized on a canvas, kept as
+// textures while drawn.
 import type { ColorTransform } from "@swf2es/format";
 import {
   CLAMP,
   type Geometries,
+  type GeometryHandle,
   NORMAL,
   type Rows,
   type SceneList,
@@ -16,6 +19,7 @@ import {
 import { concatColorInto, IDENTITY_COLOR } from "../display/color.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
 import { cssFont } from "../text/fonts.js";
+import { DeviceGlyphs, GLYPH_MOST, PHASES, plainText } from "./device-glyphs.js";
 import type { Parts } from "./parts.js";
 import type { DeviceItem, TextItem } from "./text.js";
 
@@ -36,16 +40,26 @@ const TEXT_RUNS = 8;
  */
 const TEXT_IDLE_FRAMES = 30;
 
+/** How many frames a run of glyph quads may go undrawn, which costs little to place again. */
+const GLYPHS_IDLE_FRAMES = 8;
+
 /** The most texels a run of device text has a side, under every WebGL 2's least texture size. */
 const TEXT_MOST = 4096;
 
+const WHITE = 0xffffffff;
+
 /**
- * A device text run rasterized: its texture, its size and left overhang in
- * canvas pixels at `resolution`; and the style, metrics and resolution it
- * was asked for, which find it again among the runs of its text.
+ * A device text run drawn: its glyphs' quads in the atlas of its
+ * generation, at their pens, or its texture rasterized, with its size and
+ * left overhang in canvas pixels at `resolution`; and the style, metrics
+ * and resolution it was asked for, which find it again among the runs of
+ * its text.
  */
 interface DeviceRun {
-  handle: TextureHandle;
+  glyphs: GeometryHandle | null;
+  generation: number;
+  pens: number[] | null;
+  handle: TextureHandle | null;
   width: number;
   height: number;
   left: number;
@@ -71,12 +85,17 @@ export class TextItems {
   /** The canvas device text is rasterized on, made as first needed. */
   private textCanvas: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D } | null =
     null;
+  private readonly glyphs: DeviceGlyphs;
+  /** The frame the glyph atlas filled in, after which it is emptied; -1 while it has room. */
+  private fullAt = -1;
 
   constructor(
     private readonly geometries: Geometries,
     private readonly textures: Textures,
     private readonly parts: Parts,
-  ) {}
+  ) {
+    this.glyphs = new DeviceGlyphs(textures);
+  }
 
   /** How many device texts' runs it keeps drawn. */
   get runCount(): number {
@@ -129,10 +148,12 @@ export class TextItems {
         b * x + d * item.top + ty,
         colored,
       );
-      const quad = this.parts.quad(run.width, run.height);
-      this.geometries.use(quad.id);
-      this.textures.use(run.handle.id);
-      scene.draw(quad.id, row, NORMAL, run.handle.id, SMOOTH | CLAMP);
+      // Its glyphs' quads on their atlas, or its texture's quad.
+      const texture = run.glyphs ? this.glyphs.texture() : (run.handle as TextureHandle);
+      const geometry = run.glyphs ?? this.parts.quad(run.width, run.height);
+      this.geometries.use(geometry.id);
+      this.textures.use(texture.id);
+      scene.draw(geometry.id, row, NORMAL, texture.id, SMOOTH | CLAMP);
       return;
     }
 
@@ -165,8 +186,16 @@ export class TextItems {
    * drawn, for every colour it is drawn in. Null for nothing to draw.
    */
   private deviceRun(item: DeviceItem, resolution: number): DeviceRun | null {
-    // By its text, a string there is already; then its style compared as values.
-    let runs = this.runs.get(item.text);
+    // The atlas that filled in a frame before is emptied as this one starts, before any run on it
+    // is drawn, which leaves them stale with its generation.
+    if (this.fullAt >= 0 && this.fullAt !== this.textures.frame) {
+      this.glyphs.clear();
+      this.fullAt = -1;
+    }
+
+    // By its text, a string there is already; then its style compared as values, and the pens of
+    // glyph quads, which a justified line spreads.
+    const runs = this.runs.get(item.text);
     for (let i = runs ? runs.length - 1 : -1; i >= 0; i--) {
       const run = (runs as DeviceRun[])[i];
       if (
@@ -178,10 +207,16 @@ export class TextItems {
         same(run.ascent, item.ascent) &&
         same(run.descent, item.descent) &&
         same(run.asked, resolution) &&
-        this.textures.alive(run.handle)
+        (run.pens === null || samePens(run.pens, item.pens)) &&
+        this.runAlive(run)
       ) {
         return i === (runs as DeviceRun[]).length - 1 ? run : moveLast(runs as DeviceRun[], i);
       }
+    }
+
+    const glyphed = this.glyphRun(item, resolution);
+    if (glyphed !== undefined) {
+      return glyphed && this.keepRun(item, glyphed);
     }
 
     if (!this.textCanvas) {
@@ -228,12 +263,141 @@ export class TextItems {
       pixels[i + 2] = Math.round((pixels[i + 2] * alpha) / 255);
     }
 
+    return this.keepRun(item, {
+      glyphs: null,
+      generation: 0,
+      pens: null,
+      handle: this.textures.add(width, height, pixels, TEXT_IDLE_FRAMES),
+      width,
+      height,
+      left,
+      resolution: scale,
+      family: item.family,
+      size: item.size,
+      bold: item.bold,
+      italic: item.italic,
+      letterSpacing: item.letterSpacing,
+      ascent: item.ascent,
+      descent: item.descent,
+      asked: resolution,
+    });
+  }
+
+  /**
+   * A run of plain characters as quads of their glyphs in the atlas, each
+   * pen where the layout put it, to a quarter texel: null for nothing to
+   * draw; undefined for a run drawn rasterized, of other characters, too
+   * large, or past what the atlas holds this frame.
+   */
+  private glyphRun(item: DeviceItem, resolution: number): DeviceRun | null | undefined {
+    const text = item.text;
+    const pens = item.pens;
+    if (
+      this.fullAt >= 0 ||
+      (item.ascent + item.descent) * resolution + 2 > GLYPH_MOST ||
+      !plainText(text)
+    ) {
+      return undefined;
+    }
+
+    const font = cssFont(item.family, item.size * resolution, item.bold, item.italic);
+    // On the baseline as the rasterized run has it, a texel below its ascent.
+    const baseline = Math.round(item.ascent * resolution) + 1;
+    // A quad a character at most, those of no ink left out.
+    let positions = new Float32Array(text.length * 8);
+    let texels = new Float32Array(text.length * 8);
+    let quads = 0;
+    for (let i = 0; i < text.length; i++) {
+      const pen = pens[i] * resolution;
+      let at = Math.floor(pen);
+      let phase = Math.round((pen - at) * PHASES);
+      if (phase === PHASES) {
+        at++;
+        phase = 0;
+      }
+
+      const cell = this.glyphs.cell(font, phase, text[i]);
+      if (cell === undefined) {
+        if (this.glyphs.full) {
+          this.fullAt = this.textures.frame;
+        }
+
+        return undefined;
+      }
+
+      if (cell) {
+        const x = at - cell.left;
+        const y = baseline - cell.up;
+        quad(positions, quads, x, y, cell.width, cell.height);
+        quad(texels, quads, cell.x, cell.y, cell.width, cell.height);
+        quads++;
+      }
+    }
+
+    if (quads === 0) {
+      return null;
+    }
+
+    if (quads < text.length) {
+      positions = positions.slice(0, quads * 8);
+      texels = texels.slice(0, quads * 8);
+    }
+
+    const indices = new Uint32Array(quads * 6);
+    for (let q = 0; q < quads; q++) {
+      const v = q * 4;
+      const at = q * 6;
+      indices[at] = v;
+      indices[at + 1] = v + 1;
+      indices[at + 2] = v + 2;
+      indices[at + 3] = v;
+      indices[at + 4] = v + 2;
+      indices[at + 5] = v + 3;
+    }
+
+    const glyphs = this.geometries.add({
+      positions,
+      colors: new Uint32Array(quads * 4).fill(WHITE),
+      texels,
+      indices,
+    });
+    this.geometries.idleWithin(glyphs.id, GLYPHS_IDLE_FRAMES);
+    return {
+      glyphs,
+      generation: this.glyphs.generation,
+      pens,
+      handle: null,
+      width: 0,
+      height: 0,
+      left: 0,
+      resolution,
+      family: item.family,
+      size: item.size,
+      bold: item.bold,
+      italic: item.italic,
+      letterSpacing: item.letterSpacing,
+      ascent: item.ascent,
+      descent: item.descent,
+      asked: resolution,
+    };
+  }
+
+  /** Whether a run can still be drawn: its quads, on the atlas they were placed on, or its texture. */
+  private runAlive(run: DeviceRun): boolean {
+    return run.glyphs
+      ? run.generation === this.glyphs.generation && this.geometries.alive(run.glyphs)
+      : run.handle !== null && this.textures.alive(run.handle);
+  }
+
+  /** `run` kept among its text's runs, the least lately used past TEXT_RUNS let go of. */
+  private keepRun(item: DeviceItem, run: DeviceRun): DeviceRun {
     // Those let go of are forgotten, so that text typed and scrolled keeps no lists for them.
+    let runs = this.runs.get(item.text);
     if (this.runs.size > this.sweepAt) {
       for (const [text, list] of this.runs) {
         let kept = 0;
         for (const r of list) {
-          if (this.textures.alive(r.handle)) {
+          if (this.runAlive(r)) {
             list[kept++] = r;
           }
         }
@@ -248,21 +412,6 @@ export class TextItems {
       runs = this.runs.get(item.text);
     }
 
-    const run: DeviceRun = {
-      handle: this.textures.add(width, height, pixels, TEXT_IDLE_FRAMES),
-      width,
-      height,
-      left,
-      resolution: scale,
-      family: item.family,
-      size: item.size,
-      bold: item.bold,
-      italic: item.italic,
-      letterSpacing: item.letterSpacing,
-      ascent: item.ascent,
-      descent: item.descent,
-      asked: resolution,
-    };
     if (!runs) {
       runs = [];
       this.runs.set(item.text, runs);
@@ -272,15 +421,20 @@ export class TextItems {
     makeRoom(
       runs,
       TEXT_RUNS,
-      (r) => !this.textures.alive(r.handle),
-      (r) => {
-        if (this.textures.alive(r.handle)) {
-          this.textures.remove(r.handle.id);
-        }
-      },
+      (r) => !this.runAlive(r),
+      (r) => this.dropRun(r),
     );
     runs.push(run);
     return run;
+  }
+
+  /** A run's quads or texture let go of, where they are still its own. */
+  private dropRun(run: DeviceRun): void {
+    if (run.glyphs && this.geometries.alive(run.glyphs)) {
+      this.geometries.remove(run.glyphs.id);
+    } else if (run.handle && this.textures.alive(run.handle)) {
+      this.textures.remove(run.handle.id);
+    }
   }
 
   /** The run's font and spacing set on the canvas at `scale` canvas pixels a stage pixel. */
@@ -305,6 +459,33 @@ export class TextItems {
       height: Math.ceil((item.ascent + item.descent) * scale) + 2,
     };
   }
+}
+
+function samePens(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/** Quad `q`'s corners in `to`, clockwise from its top left at x y, w by h. */
+function quad(to: Float32Array, q: number, x: number, y: number, w: number, h: number): void {
+  const at = q * 8;
+  to[at] = x;
+  to[at + 1] = y;
+  to[at + 2] = x + w;
+  to[at + 3] = y;
+  to[at + 4] = x + w;
+  to[at + 5] = y + h;
+  to[at + 6] = x;
+  to[at + 7] = y + h;
 }
 
 /** A row for what `m` places within an object under the transform (a b c d tx ty). */
