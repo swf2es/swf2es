@@ -457,12 +457,20 @@ async function check(): Promise<void> {
               await value(`document.getElementById("url").focus({ preventScroll: true })`);
               assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
               await value(`document.getElementById("report").focus({ preventScroll: true })`);
+              // A frame painted after the focus moved, as a person's click or Tab paints one. Chrome
+              // scrolls by a key where its last frame had the focus: with the SWF paused, the player
+              // draws no frame, and a key sent at once can find the input field still focused there.
+              await value(`new Promise((done) => {
+                document.body.style.backgroundColor = "rgb(254, 254, 254)";
+                requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
+              })`);
               assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
               await until("scrollY > 300", 5000);
             } finally {
               await value(`(() => {
                 document.body.style.minHeight = "";
                 document.body.style.minWidth = "";
+                document.body.style.backgroundColor = "";
                 scrollTo({ left: 0, top: 0, behavior: "instant" });
                 return true;
               })()`);
