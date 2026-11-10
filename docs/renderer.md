@@ -197,11 +197,16 @@ with the context:
   carry the packed row as an integer attribute, so transforms, colour and
   quarter-pixel snapping use the same shader math. The merged buffers are
   reused while geometry, order and packed rows match; moving an object
-  only updates the row texture. Changed streams are uploaded before any
-  draw. A geometry has at most 256 vertices and 1,024 indices; the extra
-  buffers have room for at most 2,097,152 vertices and 6,291,456 indices
-  (72 MiB each on CPU and GPU). Fresh geometry, masks, short or oversized
-  runs, and frames whose run table does not fit keep the atlas path.
+  only updates the row texture. A changed stream is staged on the CPU only
+  from its first draw that differs, and uploaded there before any draw:
+  the part before it stays on the GPU alone, kept by a copy there when a
+  buffer grows, so the CPU holds no copy of the stream between frames.
+  After 240 frames that used a quarter of the room or less, the GPU
+  buffers and the staging shrink to twice what they used. A geometry has
+  at most 256 vertices and 1,024 indices; the stream has room for at most
+  2,097,152 vertices and 6,291,456 indices (72 MiB). Fresh geometry,
+  masks, short or oversized runs, and frames whose run table does not fit
+  keep the atlas path.
   Context restoration rebuilds the buffers and forgets the cached stream.
 - **Held layers** (`holds.ts`): each level's held layers drawn side by
   side on pages, then their filters' passes in waves, the k-th of every

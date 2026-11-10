@@ -40,6 +40,12 @@ const { value, exception } = await withPage(
       bufferUploads++;
       return bufferUpload.apply(this, args);
     };
+    let copies = 0;
+    const copyBuffer = multi.gl.copyBufferSubData;
+    multi.gl.copyBufferSubData = function (...args) {
+      copies++;
+      return copyBuffer.apply(this, args);
+    };
     const upload = multi.gl.texSubImage2D;
     multi.gl.texSubImage2D = function (...args) {
       if (args[6] === this.RED_INTEGER) {
@@ -188,6 +194,70 @@ const { value, exception } = await withPage(
           frames++;
         }
       }
+      // A merged stream that grows past its buffers keeps its unchanged start on the GPU alone, and
+      // one that then uses far less gives its room back: both draw as individual draws do.
+      {
+        const merged = multi.backend.draws.batches;
+        multi.backend.draws.runTableMost = multi.gl.getParameter(multi.gl.MAX_TEXTURE_SIZE);
+        const make = (i) => {
+          const shape = new Container();
+          const drawing = new Drawing();
+          drawing.beginFill({ type: "solid", color: (0xff000000 | ((i + 7) * 40503)) >>> 0 });
+          drawing.drawRect(0, 0, 5, 5);
+          drawing.endFill();
+          shape.drawing = drawing;
+          shape.matrix.tx = (i * 7) % 250;
+          shape.matrix.ty = (i * 11) % 138;
+          return shape;
+        };
+        const root = new Container();
+        // Past a run of 256, which stays as it was while the stream grows after it.
+        for (let i = 0; i < 300; i++) {
+          root.addChildAt(make(i), i);
+        }
+        const compare = (label) => {
+          const expected = capture(single, root);
+          const actual = capture(multi, root);
+          for (let i = 0; i < actual.length; i++) {
+            if (actual[i] !== expected[i]) {
+              throw new Error(label + ", byte " + i + " differs");
+            }
+          }
+          frames++;
+        };
+        for (let frame = 0; frame < 3; frame++) {
+          compare("small stream, frame " + frame);
+        }
+        const small = merged.vertexCapacity;
+        copies = 0;
+        for (let i = 300; i < 10300; i++) {
+          root.addChildAt(make(i), i);
+        }
+        for (let frame = 0; frame < 3; frame++) {
+          compare("grown stream, frame " + frame);
+        }
+        const grown = merged.vertexCapacity;
+        const grownStaging = merged.words.length;
+        if (!(small > 0 && grown > small) || merged.indexTop === 0 || copies === 0) {
+          throw new Error("The merged stream did not grow, keeping its start");
+        }
+        copies = 0;
+        while (root.children.length > 300) {
+          root.removeChild(root.children[root.children.length - 1]);
+        }
+        // Past two watches of 240 frames, one of them wholly after the large stream.
+        for (let frame = 0; frame < 490; frame++) {
+          compare("shrunk stream, frame " + frame);
+        }
+        if (!(merged.vertexCapacity < grown && merged.words.length < grownStaging) || copies === 0) {
+          throw new Error("The merged stream kept its room");
+        }
+        bufferUploads = 0;
+        compare("still stream");
+        if (bufferUploads !== 0) {
+          throw new Error("An unchanged stream uploaded again after shrinking");
+        }
+      }
       const table = multi.backend.draws.runTable;
       const batches = multi.backend.draws.batches;
       if (!multi.gl.isTexture(table)) {
@@ -205,6 +275,7 @@ const { value, exception } = await withPage(
       extension.multiDrawElementsWEBGL = draw;
       multi.gl.texSubImage2D = upload;
       multi.gl.bufferSubData = bufferUpload;
+      multi.gl.copyBufferSubData = copyBuffer;
       if (!destroyed) {
         multi.destroy();
       }
@@ -215,5 +286,5 @@ const { value, exception } = await withPage(
   process.argv.includes("--gpu"),
 );
 assert.equal(exception, null);
-assert.deepEqual(value, { frames: 48, largest: 256 });
+assert.deepEqual(value, { frames: 48 + 3 + 3 + 490 + 1, largest: 256 });
 console.log("multi-draw: ok");
