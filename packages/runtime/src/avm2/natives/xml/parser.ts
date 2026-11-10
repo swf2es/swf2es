@@ -294,20 +294,20 @@ export class XMLParser {
   }
 
   /**
-   * As XMLParser::unescape: [start, last) with its entity and character
+   * As XMLParser::unescape: [from, to) with its entity and character
    * references decoded: &#dd; and &#xhh; up to 0xFFFF, and ENTITIES. An &
    * without a ; ends the decoding; one that is not a known reference is
-   * kept as it is.
+   * kept as it is. Searched within the value alone: a search of the text
+   * past it, for an & or a ; it would not use, made a document of many
+   * values without them take a scan of the rest of it for each.
    */
-  private unescape(start: number, last: number): string {
-    const str = this.text;
-    if (start === last) {
-      return "";
-    }
-
-    let bgn = str.indexOf("&", start);
-    if (bgn < 0 || bgn >= last) {
-      return str.slice(start, last);
+  private unescape(from: number, to: number): string {
+    const str = this.text.slice(from, to);
+    const start = 0;
+    const last = str.length;
+    let bgn = str.indexOf("&");
+    if (bgn < 0) {
+      return str;
     }
 
     let dest = "";
