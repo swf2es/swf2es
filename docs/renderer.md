@@ -251,7 +251,9 @@ compose with the display list without copies.
   README](../packages/native/README.md)): one module, in Zig, which each
   user instantiates apart. Its `Tessellator` fills with libtess2 in
   double precision, a layer in one call, a single convex contour as a
-  fan, and whatever libtess2 refuses or fails at by bands (`bands.zig`):
+  fan, and a single simple concave contour of at most 64 vertices by ear
+  clipping after checking for crossings and touches (`earclip.zig`).
+  Whatever libtess2 refuses or fails at goes to bands (`bands.zig`):
   each horizontal band between vertices and crossings filled as disjoint
   trapezoids under its winding rule. Its `LineBuilder` builds a layer's
   lines in one call (`strokes.zig`): triangles along the path for a line
