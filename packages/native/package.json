@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/native",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "swf2es's WebAssembly modules: bitmap kernels, MP3, ADPCM and Nellymoser decoding, zlib and LZMA, fill and line tessellation, and ATF textures",
   "keywords": [
     "swf",
