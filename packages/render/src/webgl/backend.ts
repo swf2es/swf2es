@@ -263,7 +263,6 @@ export class WebGLBackend {
     state.scissor(null);
     state.colorMask(15);
     state.useProgram(this.draws.program);
-    state.bindVertexArray(this.atlas.vertexArray);
     state.bindTexture(0, this.gpu.rowsTexture);
     // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
     // does. Its layers take the stage's, so that their edges are the stage's.
