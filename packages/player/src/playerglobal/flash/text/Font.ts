@@ -16,8 +16,11 @@ function style(font: AnyFontCharacter): string {
   return font.italic ? "italic" : "regular";
 }
 
-/** The fonts enumerateFonts lists: the running code's SWF's, with layout or no glyphs, and those registered. */
-export function embeddedFonts(s: Scripting): AnyFontCharacter[] {
+/**
+ * The fonts enumerateFonts lists: the running code's SWF's, with layout or
+ * no glyphs, and, unless `registered` is false, those registered.
+ */
+export function embeddedFonts(s: Scripting, registered = true): AnyFontCharacter[] {
   const fonts: AnyFontCharacter[] = [];
   const library = s.code.codeLibrary();
   if (library) {
@@ -31,7 +34,10 @@ export function embeddedFonts(s: Scripting): AnyFontCharacter[] {
     }
   }
 
-  fonts.push(...s.symbols.registeredFonts.values());
+  if (registered) {
+    fonts.push(...s.symbols.registeredFonts.values());
+  }
+
   return fonts;
 }
 
@@ -79,17 +85,32 @@ export function fontNatives(s: Scripting): avm2.Natives {
       return true;
     }
 
+    /**
+     * The fonts as Font objects, by name: a registered font an instance of
+     * the class it was registered by, as Flash makes it, so that its class
+     * name finds that class again; the SWF's own a plain Font, as Flash
+     * makes those though a class is bound to them.
+     */
     static enumerateFonts(_enumerateDeviceFonts: boolean): AsObject {
-      const cls = s.rt.classNamed("flash.text::Font");
-      const fonts = embeddedFonts(s);
+      const plain = s.rt.classNamed("flash.text::Font");
+      const fonts: { font: AnyFontCharacter; cls: AsObject }[] = [];
+      for (const font of embeddedFonts(s, false)) {
+        fonts.push({ font, cls: plain });
+      }
+
+      for (const [cls, font] of s.symbols.registeredFonts) {
+        fonts.push({ font, cls });
+      }
+
+      // Stable: a SWF's own font before one registered of the same name, as adl lists them.
       fonts.sort((a, b) => {
-        const first = a.name.toLowerCase();
-        const second = b.name.toLowerCase();
+        const first = a.font.name.toLowerCase();
+        const second = b.font.name.toLowerCase();
         return first < second ? -1 : first > second ? 1 : 0;
       });
 
       return s.rt.array(
-        fonts.map((font) => {
+        fonts.map(({ font, cls }) => {
           const object = s.rt.construct(cls) as AsObject;
           object.$font = font;
           return object;

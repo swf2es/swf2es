@@ -46,5 +46,13 @@
     "bindVertexArray": 0,
     "bindFramebuffer": 45,
     "uniforms": 146
+  },
+  "counters": {
+    "calls": 1,
+    "subDraws": 40,
+    "useProgram": 0,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 0,
+    "uniforms": 3
   }
 }

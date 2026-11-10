@@ -1,4 +1,19 @@
 export const tessellationFixtures = [
+  {
+    name: "concave elbow with collinear runs",
+    contours: [[0, 0, 3, 0, 6, 0, 6, 2, 4, 2, 2, 2, 2, 6, 0, 6, 0, 3]],
+    area: [20, 20],
+  },
+  {
+    name: "concave comb",
+    contours: [[0, 0, 10, 0, 10, 8, 8, 8, 8, 2, 6, 2, 6, 8, 4, 8, 4, 2, 2, 2, 2, 8, 0, 8]],
+    area: [56, 56],
+  },
+  {
+    name: "clockwise crescent",
+    contours: [[0, 0, 2, 4, 4, 6, 6, 4, 8, 0, 6, 2, 4, 3, 2, 2]],
+    area: [14, 14],
+  },
   { name: "square", contours: [[0, 0, 100, 0, 100, 100, 0, 100]], area: [10000, 10000] },
   {
     name: "nested rings with the same orientation",
