@@ -116,7 +116,7 @@ export function bench(name: string, options: Options): Result {
 
   const render = (frame: number) => {
     if (target) {
-      context.setRenderTarget(target, false, options.samples);
+      context.setRenderTarget(target, false, 0, options.samples);
       context.clear(0, 0, 0, 1);
       context.setRenderTarget(null);
     }
@@ -152,7 +152,7 @@ export function bench(name: string, options: Options): Result {
       }
 
       if (target && i % 64 === 0) {
-        context.setRenderTarget(i % 128 === 0 ? target : null, false, options.samples);
+        context.setRenderTarget(i % 128 === 0 ? target : null, false, 0, options.samples);
       }
 
       context.draw(indices, i * 3, 1);
