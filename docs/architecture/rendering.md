@@ -44,7 +44,12 @@ one bitmap, sampled alike, make one geometry, each vertex's texels by
 its own fill's matrix. And the module fills a single convex contour as a
 fan, with no sweep: convex when every turn goes the same way and its
 edges reverse along each axis at most twice, so a pentagram still goes
-to libtess2.
+to libtess2. A single concave contour of at most 64 vertices can instead
+use ear clipping (`native/src/render/earclip.zig`), after checking every
+non-adjacent edge pair for crossings and touches. It keeps the input
+vertices and allocates only triangle indices. Repeated points, overlaps,
+non-finite cross products or a stalled ear search leave it to libtess2;
+both fast paths stay within libtess2's coordinate range.
 
 Lines (`scene/strokes.ts`) are stroked in the stage's axes, because
 Flash strokes a transformed line with one width all along, not the local
