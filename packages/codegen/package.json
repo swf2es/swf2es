@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/codegen",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "ABC and AVM1 bytecode to ES module compiler (AssemblyScript → wasm); identical output in JIT and AOT modes",
   "keywords": [
     "swf",
