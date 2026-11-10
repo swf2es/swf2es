@@ -192,6 +192,22 @@ with the context:
   run's texture bindings and sampling modes in reusable arrays; drawing uses
   those ranges directly, including when held layers reorder commands.
   Without the extension, a call a draw.
+- **Merged fills** (`batches.ts`): runs of at least 32 small geometries
+  unchanged since the previous frame use one indexed draw. Their vertices
+  carry the packed row as an integer attribute, so transforms, colour and
+  quarter-pixel snapping use the same shader math. The merged buffers are
+  reused while geometry, order and packed rows match; moving an object
+  only updates the row texture. A changed stream is staged on the CPU only
+  from its first draw that differs, and uploaded there before any draw:
+  the part before it stays on the GPU alone, kept by a copy there when a
+  buffer grows, so the CPU holds no copy of the stream between frames.
+  After 240 frames that used a quarter of the room or less, the GPU
+  buffers and the staging shrink to twice what they used. A geometry has
+  at most 256 vertices and 1,024 indices; the stream has room for at most
+  2,097,152 vertices and 6,291,456 indices (72 MiB). Fresh geometry,
+  masks, short or oversized runs, and frames whose run table does not fit
+  keep the atlas path.
+  Context restoration rebuilds the buffers and forgets the cached stream.
 - **Held layers** (`holds.ts`): each level's held layers drawn side by
   side on pages, then their filters' passes in waves, the k-th of every
   chain at once, each wave's targets on pages of their own (`filters.ts`
@@ -326,7 +342,9 @@ Ordinary textures may reuse at most twice the requested rounded area, avoiding
 oversized clears and MSAA allocations; a filter's, four times.
 
 For each pull request, `tests/player/bench.ts` builds a synthetic scene
-and times it; `--town N` draws N hairline-outlined characters and
+and times it. `--vectors N` builds N outlined rounded rectangles with a
+translucent circle once, then moves and turns them each frame: it measures
+draw submission without rebuilding geometry. `--town N` draws N hairline-outlined characters and
 scenery instead, some of them glowing, which is nearer a room's lines and
 filters but has none of its bitmap or gradient fills, blend layers or
 masks. A synthetic scene built to the replay's whole mix is still to

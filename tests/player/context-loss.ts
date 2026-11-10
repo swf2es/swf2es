@@ -201,4 +201,28 @@ for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt"])
   assert.equal(await playLosingContextPlan(swf, plan), null, plan);
 }
 
+// Long runs use cached merged buffers after their first frame. Restoration must discard those
+// buffers and rebuild them from the live geometry before reusing the batch.
+const batched = w.swf({
+  width: 400,
+  height: 300,
+  frameCount: 1,
+  tags: [
+    w.fileAttributes(false),
+    small,
+    moving,
+    ...Array.from({ length: 128 }, (_, i) =>
+      w.place({
+        depth: i + 1,
+        character: 5,
+        matrix: { tx: (i % 16) * 450, ty: Math.floor(i / 16) * 450 },
+      }),
+    ),
+    w.showFrame(),
+    w.end(),
+  ],
+});
+assert.equal(await playLosingContextPlan(batched, "tttltttrtt"), null, "merged buffers restored");
+assert.equal(await playLosingContextPlan(batched, "ttlstrtstt"), null, "merged buffers resized");
+
 console.log("context-loss: ok");

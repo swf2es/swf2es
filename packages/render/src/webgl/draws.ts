@@ -16,6 +16,7 @@ import {
   SNAP,
 } from "../scene.js";
 import type { GeometryAtlas, Place } from "./atlas.js";
+import { FillBatches } from "./batches.js";
 import { setModeBlend } from "./composite.js";
 import type { GpuTextures } from "./gpu-textures.js";
 import type { KernelHost, KernelPrograms } from "./kernels.js";
@@ -52,8 +53,8 @@ interface MultiDraw {
   ): void;
 }
 
-/** Last scene entry, table start, draw count, used units, then each unit's texture and sampling. */
-const RUN_STRIDE = 4 + FILL_TEXTURES * 2;
+/** Last entry, table start, draws, units, batch start/count, then each unit's texture and sampling. */
+const RUN_STRIDE = 6 + FILL_TEXTURES * 2;
 
 /** The most masks the stencil's eight bits count. */
 const STENCIL_MOST = 255;
@@ -79,6 +80,7 @@ export class Draws {
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
   private readonly atlas: GeometryAtlas;
+  private readonly batches: FillBatches;
   private readonly gpu: GpuTextures;
   private readonly pool: TargetPool;
   /** The fill program, and where it takes its row, view and Flash's pixels a stage pixel. */
@@ -116,6 +118,7 @@ export class Draws {
   private readonly runCounts = new Int32Array(RUN_MOST);
   private readonly runOffsets = new Int32Array(RUN_MOST);
   private readonly runRows = new Int32Array(RUN_MOST);
+  private readonly runPlaces: Place[] = [];
   /** Draws gathered by gatherRun, and the fill units they sample, a bit each. */
   private runCount = 0;
   private runUnits = 0;
@@ -185,6 +188,7 @@ export class Draws {
     this.gl = gl;
     this.state = state;
     this.atlas = atlas;
+    this.batches = new FillBatches(gl, state);
     this.gpu = gpu;
     this.pool = pool;
   }
@@ -220,6 +224,7 @@ export class Draws {
     this.prepared = false;
     this.runBaseLocation = gl.getUniformLocation(this.program, "uRunBase");
     if (this.multi) {
+      this.batches.setUp();
       this.sizeRunTable(1);
       gl.uniform1i(gl.getUniformLocation(this.program, "uRunTable"), RUN_UNIT);
     }
@@ -270,6 +275,7 @@ export class Draws {
       return;
     }
 
+    this.batches.reset();
     if (commands.length > this.commandStarts.length) {
       this.commandStarts = new Uint32Array(commands.ops.length / 4);
     }
@@ -334,10 +340,17 @@ export class Draws {
         this.runs[run + 1] = count;
         this.runs[run + 2] = this.runCount;
         this.runs[run + 3] = this.runUnits;
+        const batchStart = this.batches.indexTop;
+        if (!stencil) {
+          this.batches.add(this.runPlaces, this.runRows, this.runCount, this.atlas.frame);
+        }
+
+        this.runs[run + 4] = batchStart;
+        this.runs[run + 5] = this.batches.indexTop - batchStart;
         for (let j = 0; j < FILL_TEXTURES; j++) {
           if (this.runUnits & (1 << j)) {
-            this.runs[run + 4 + j * 2] = this.unitIds[j];
-            this.runs[run + 5 + j * 2] = this.unitSampling[j];
+            this.runs[run + 6 + j * 2] = this.unitIds[j];
+            this.runs[run + 7 + j * 2] = this.unitSampling[j];
           }
         }
 
@@ -369,6 +382,7 @@ export class Draws {
       );
     }
 
+    this.batches.upload();
     this.prepared = true;
   }
 
@@ -430,10 +444,9 @@ export class Draws {
     this.lastRow = -1;
   }
 
-  /** The fill program, its vertex array and rows bound, as runs and masks draw with them. */
+  /** The fill program and rows bound; each run selects its vertex array. */
   useFill(): void {
     this.state.useProgram(this.program);
-    this.state.bindVertexArray(this.atlas.vertexArray);
     this.state.bindTexture(0, this.gpu.rowsTexture);
   }
 
@@ -596,12 +609,16 @@ export class Draws {
       let base = 0;
       let draws: number;
       let units: number;
-      const bindings = run + 4;
+      let batchStart = 0;
+      let batchCount = 0;
+      const bindings = run + 6;
       if (this.prepared) {
         i = this.runs[run];
         base = this.runs[run + 1];
         draws = this.runs[run + 2];
         units = this.runs[run + 3];
+        batchStart = this.runs[run + 4];
+        batchCount = this.runs[run + 5];
         run += RUN_STRIDE;
       } else {
         i = this.gatherRun(scene, i, end, stencil);
@@ -622,6 +639,15 @@ export class Draws {
         }
       }
 
+      if (batchCount > 0) {
+        state.bindVertexArray(this.batches.vertexArray);
+        state.bindTexture(RUN_UNIT, this.runTable);
+        state.bindSampler(RUN_UNIT, null);
+        gl.drawElements(gl.TRIANGLES, batchCount, gl.UNSIGNED_INT, batchStart * 4);
+        continue;
+      }
+
+      state.bindVertexArray(this.atlas.vertexArray);
       if (!this.multi) {
         if (this.runRows[0] !== this.lastRow) {
           this.lastRow = this.runRows[0];
@@ -701,6 +727,7 @@ export class Draws {
       }
 
       this.runCounts[draws] = place.indices;
+      this.runPlaces[draws] = place;
       this.runOffsets[draws] = place.indexStart * 4;
       this.runRows[draws] =
         scene.row[j] | (slot << FILL_SLOT) | (scene.sampler[j] & SNAP ? SNAP_BIT : 0);
@@ -709,6 +736,7 @@ export class Draws {
     }
 
     this.runCount = draws;
+    this.runPlaces.length = draws;
 
     return last;
   }
@@ -888,6 +916,10 @@ export class Draws {
 
   /** The programs and draw table made on the context, deleted. */
   destroy(): void {
+    if (this.multi) {
+      this.batches.destroy();
+    }
+
     if (this.runTable) {
       this.state.dropTexture(this.runTable);
       this.gl.deleteTexture(this.runTable);
