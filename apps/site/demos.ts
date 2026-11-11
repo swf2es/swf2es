@@ -277,7 +277,7 @@ function mandel(out: string): Demo {
     file: "mandel.swf",
     title: "Mandelbrot (C++ by Crossbridge)",
     description:
-      "Crossbridge's OpenMP sample: C++ compiled to ActionScript bytecode, its threads Flash workers sharing memory. Click for another thread.",
+      "Crossbridge's OpenMP sample: C++ compiled to ActionScript bytecode, its threads Flash workers sharing memory. Click for another thread, right-click for one fewer.",
     source: `${dir}/mandel.cpp`,
     bytes: swf,
   };
