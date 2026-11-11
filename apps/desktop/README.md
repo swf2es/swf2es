@@ -86,7 +86,10 @@ own installer. A relative path is taken from the directory pnpm was run in.
   beside it, encrypted by the system's keychain (Electron's
   `safeStorage`) where there is one. Only the application playing has
   that reach, and only while it plays; run one you trust, as you would
-  install it.
+  install it. A descriptor chosen with Open…, dropped on the window or
+  opened with the app runs the application too, from its own directory
+  with no arguments; the app asks first, once, until the descriptor
+  leaves the recent list.
 - **File dialogs** requested by AS2 or AS3 FileReference use native open
   and save dialogs after a click or key. Uploads and downloads use the
   same network permissions as other data requests.
