@@ -586,6 +586,21 @@ export const bitmapCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // BitmapData.encode as JPEG (scripts/BitmapEncodeJpeg.as): the files' segments and
+    // tables, and the files loaded back and shown. The traces are exact. The frame is not:
+    // Flash's decoder makes a block's chroma by a 16 by 16 inverse DCT and the browser's by
+    // interpolating between samples, which part by up to 56 on a hard edge between colours
+    // and by nothing where the colours change slowly. Decoded Flash's way, the files are
+    // within 10 of this frame (tests/unit/player/bitmap/jpeg.test.ts).
+    name: "bitmap-encode-jpeg",
+    swf: (abc) => bare(abc, 1, "BitmapEncodeJpeg", 400, 68),
+    script: "BitmapEncodeJpeg",
+    frames: 6,
+    capture: [6],
+    tolerance: 32,
+    maxOutliers: 150,
+  },
+  {
     name: "bitmap-fills",
     swf: bitmapFills,
     script: "BitmapFills",

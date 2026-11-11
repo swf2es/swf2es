@@ -303,14 +303,19 @@ const ops: Op[] = [
   ["setVector", () => call(bd(), "setVector", rect(), vector())],
   [
     "encode",
-    () =>
-      call(
+    () => {
+      // A PNG, fast or not, or a JPEG at a quality that Flash takes or refuses.
+      const kind = rand();
+      return call(
         bd(),
         "encode",
         rect(),
-        make("flash.display::PNGEncoderOptions", rand() < 0.5),
+        kind < 0.5
+          ? make("flash.display::PNGEncoderOptions", kind < 0.25)
+          : make("flash.display::JPEGEncoderOptions", Math.floor(kind * 300) - 140),
         rand() < 0.5 ? null : bytes(),
-      ),
+      );
+    },
   ],
   ["noise", () => call(bd(), "noise", num(), num(), num(), num(), rand() < 0.5)],
   [

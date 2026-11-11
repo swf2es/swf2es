@@ -376,6 +376,37 @@ async function openUrl(text: string): Promise<void> {
   show(url.href, { url: url.href, name, sandbox: "remote" }, { kind: "remote", url: url.href });
 }
 
+/**
+ * Open the file the user chose in the dialog, dropped on the window or
+ * opened with the app: an AIR application's descriptor (`.xml`) runs the
+ * application, anything else is played as a SWF.
+ */
+async function openChosen(path: string): Promise<void> {
+  if (!/\.xml$/i.test(path)) {
+    return open(path);
+  }
+
+  // An application has an installed program's reach, which a file chosen in
+  // passing should not get unasked: asked once, until it leaves the recent list.
+  if (window && !settings.settings.recent.includes(path)) {
+    const { response } = await dialog.showMessageBox(window, {
+      type: "question",
+      message: `Run ${basename(path)} as an AIR application?`,
+      detail:
+        "An AIR application reads and writes your files and reaches the network unasked, as an installed program does. Run only one you trust.",
+      buttons: ["Run", "Cancel"],
+      defaultId: 1,
+      cancelId: 1,
+    });
+    if (response !== 0) {
+      return;
+    }
+  }
+
+  // Run from its own directory, with no arguments, as one started by its icon is.
+  return openAir({ descriptor: path, root: null, arguments: [] }, dirname(path));
+}
+
 /** Play the SWF at `path` in the window, in place of what plays, in its sandbox. */
 async function open(path: string): Promise<void> {
   const name = basename(path);
@@ -535,15 +566,15 @@ async function showOpenDialog(): Promise<void> {
   }
 
   const result = await dialog.showOpenDialog(window, {
-    title: "Open a SWF",
+    title: "Open a SWF or an AIR application",
     properties: ["openFile"],
     filters: [
-      { name: "SWF", extensions: ["swf"] },
+      { name: "SWF and AIR application descriptors", extensions: ["swf", "xml"] },
       { name: "All files", extensions: ["*"] },
     ],
   });
   if (!result.canceled && result.filePaths[0]) {
-    await open(result.filePaths[0]);
+    await openChosen(result.filePaths[0]);
   }
 }
 
@@ -830,7 +861,7 @@ function listen(): void {
   });
   ipcMain.on("desktop:open-path", (event, path: unknown) => {
     if (trusted(event) && typeof path === "string" && isAbsolute(path)) {
-      void open(path);
+      void openChosen(path);
     }
   });
   ipcMain.on("desktop:choose-library", (event, name: unknown) => {
@@ -1093,15 +1124,18 @@ app.on("second-instance", (_event, argv, workingDirectory) => {
 });
 
 let pending = movieFromArguments(process.argv);
+// Whether `pending` came from the system's "open with", not the command line: asked as a drop is.
+let pendingChosen = false;
 // An AIR application named adl's way, which the command line's SWF gives way to.
 const pendingAir = airCommand(process.argv.slice(process.defaultApp ? 2 : 1), process.cwd());
 // macOS hands a file opened from the Finder as an event, perhaps before the app is ready.
 app.on("open-file", (event, path) => {
   event.preventDefault();
   if (settings) {
-    void open(path);
+    void openChosen(path);
   } else {
     pending = path;
+    pendingChosen = true;
   }
 });
 
@@ -1141,6 +1175,6 @@ void app.whenReady().then(() => {
   if (pendingAir) {
     void openAir(pendingAir, process.cwd());
   } else if (pending) {
-    void openEntry(pending);
+    void (pendingChosen ? openChosen(pending) : openEntry(pending));
   }
 });

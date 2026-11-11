@@ -12,6 +12,7 @@ import {
   GLOWS,
   generatedRect,
 } from "../../../bitmap/filters.js";
+import { encodeJpeg } from "../../../bitmap/jpeg.js";
 import {
   alphaAt,
   colorBounds,
@@ -454,8 +455,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     /**
      * The rect as an image file, written into `byteArray` from its position
-     * or into a new one, which is returned: PNG; JPEG and JPEG XR, which
-     * Flash also writes, are not supported yet.
+     * or into a new one, which is returned: PNG or JPEG; JPEG XR, which
+     * Flash also writes, is not supported yet.
      */
     encode(rect: Value, compressor: Value, byteArray: Value): Value {
       const store = storeOf(s, this);
@@ -469,9 +470,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
       const options = compressor as AsObject;
       const is = (name: string) => s.rt.isInstance(options, s.rt.classNamed(name));
-      if (!is("flash.display::PNGEncoderOptions")) {
-        if (is("flash.display::JPEGEncoderOptions") || is("flash.display::JPEGXREncoderOptions")) {
-          throw s.rt.unsupported("BitmapData#encode as JPEG");
+      const jpeg = is("flash.display::JPEGEncoderOptions");
+      if (!jpeg && !is("flash.display::PNGEncoderOptions")) {
+        if (is("flash.display::JPEGXREncoderOptions")) {
+          throw s.rt.unsupported("BitmapData#encode as JPEG XR");
         }
 
         throw s.rt.error("ArgumentError", 2004);
@@ -482,12 +484,22 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2006);
       }
 
-      const fast = !!s.rt.getProperty(options, s.rt.publicName("fastCompression"));
+      // A JPEG's quality is a uint, of which Flash takes 0 to 100, 0 as 1, and refuses the
+      // rest once the rect has passed.
+      const quality = jpeg ? Number(s.rt.getProperty(options, s.rt.publicName("quality"))) : 0;
+      if (!(quality >= 0 && quality <= 100)) {
+        throw s.rt.error("RangeError", 2006);
+      }
+
       const out =
         byteArray === null || byteArray === undefined
           ? (s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject)
           : (byteArray as AsObject);
-      out.$bytes.write(encodePng(store, area, fast));
+      out.$bytes.write(
+        jpeg
+          ? encodeJpeg(store, area, quality)
+          : encodePng(store, area, !!s.rt.getProperty(options, s.rt.publicName("fastCompression"))),
+      );
       return out;
     }
 
