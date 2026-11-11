@@ -268,7 +268,7 @@ with nothing to set up:
 npx @swf2es/desktop movie.swf                       # a local SWF
 npx @swf2es/desktop https://example.com/movie.swf   # one by its URL
 npx @swf2es/desktop app.xml                         # an AIR application, by its descriptor
-npx @swf2es/desktop                                 # the window: File › Open, or drop a SWF on it
+npx @swf2es/desktop                                 # the window: File › Open, or drop a SWF or a descriptor on it
 ```
 
 The first run downloads Electron's binary, about 100 MB, once. Installed
@@ -347,7 +347,7 @@ its descriptor on disk instead, with the real file system, sockets and the
 network, as adl runs one:
 
 ```sh
-pnpm --filter @swf2es/desktop start app.xml [root-dir] [-- arguments...]
+npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 ```
 
 The descriptor's first window's content SWF plays from `app:/`, at the
