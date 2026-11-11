@@ -242,7 +242,12 @@ export function bench(name: string, options: Options): Result {
           break;
       }
 
-      context.draw(alternateIndices && i % 2 ? alternateIndices : indices, i * 3, 1);
+      if (name === "index-ranges") {
+        const triangles = Math.max(1, Math.min(64, Math.floor(options.draws / 8)));
+        context.draw(indices, (i % Math.min(8, options.draws)) * triangles * 3, triangles);
+      } else {
+        context.draw(alternateIndices && i % 2 ? alternateIndices : indices, i * 3, 1);
+      }
     }
 
     context.present();

@@ -669,6 +669,7 @@ export class WebGLContext3D implements Context3D {
       checkedFirst: 0,
       checkedCount: 0,
       maximum: -1,
+      ranges: null,
     };
     const buffer: Buffer3D = {
       count,
@@ -711,6 +712,7 @@ export class WebGLContext3D implements Context3D {
           this.vertexBufferBytes -= bytes;
         }
         state.indices = null;
+        state.ranges = null;
         state.uploaded = new Uint8Array(0);
         for (let i = 0; i < this.vertices.length; i++) {
           const binding = this.vertices[i];
