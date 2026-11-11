@@ -268,7 +268,7 @@ async function check(): Promise<void> {
             assert.match(facts, /3 \(AVM2\)/);
             assert.match(facts, /480 × 320/);
             const demos = await value<number>("document.querySelectorAll('#demos li').length");
-            assert.equal(demos, 4);
+            assert.equal(demos, 5);
             const source = await value<string>("document.querySelector('#demos a').href");
             assert.match(
               source,
@@ -291,6 +291,7 @@ async function check(): Promise<void> {
               /^https:\/\/github\.com\/33TU\/as3pb\/blob\/[0-9a-f]{40}\/runtime\/test\/bench\/Main\.as$/,
             );
             assert.equal(links[3][1], "as3pb-bench.swf");
+            assert.equal(links[4][1], "mandel.swf");
             const box = await value<number[]>(
               "(() => { const r = document.getElementById('stage').getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; })()",
             );
@@ -679,6 +680,34 @@ async function check(): Promise<void> {
               lines.filter((l) => expected.includes(l ?? "")),
               expected,
             );
+          },
+        ],
+        [
+          "the Crossbridge demo runs its C++ threads as workers, and a click adds one",
+          async () => {
+            await navigate("play/?swf=demos%2Fmandel.swf");
+            await until(playing("mandel.swf"));
+            // Thread 1 is main's, in a background worker, made before main listens for clicks;
+            // so the stage is clicked until OpenMP makes another.
+            await until(logHas("CRun::newThread: 1,"));
+            const box = await value<number[]>(
+              "(() => { const r = document.getElementById('stage').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; })()",
+            );
+            const added = logHas("CRun::newThread: 2,");
+            for (const start = Date.now(); !(await value<boolean>(added)); ) {
+              assert.ok(Date.now() - start < 60_000, "no click added a thread");
+              for (const type of ["mousePressed", "mouseReleased"]) {
+                await send("Input.dispatchMouseEvent", {
+                  type,
+                  x: box[0],
+                  y: box[1],
+                  button: "left",
+                  clickCount: 1,
+                });
+              }
+
+              await new Promise((done) => setTimeout(done, 1000));
+            }
           },
         ],
         [

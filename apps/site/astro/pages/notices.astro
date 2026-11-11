@@ -67,6 +67,23 @@ const sourceUrl = (file: string) => `${blob}${file}`;
     <a href={licence("as3pb-MIT.txt")}>MIT licence text</a>.
   </p>
 
+  <h2>Crossbridge</h2>
+  <p>
+    The Mandelbrot demo is Crossbridge's OpenMP sample,
+    <a href={sourceUrl("apps/site/demos/mandel/mandel.cpp")}>mandel.cpp</a>, MIT, Copyright (c)
+    2013 Adobe Systems Inc, as its header gives it. It is built with the
+    <a href="https://github.com/adobe-flash/crossbridge">Crossbridge</a> SDK in the oracle's
+    image by <a href={sourceUrl("apps/site/demos.ts")}>demos.ts</a>, and its SWF holds the
+    libraries the SDK links: Adobe's runtime and C++ interop (MIT); FreeBSD's C library and
+    threads, under the licences of <a href={licence("crossbridge-FreeBSD-COPYRIGHT.txt")}>FreeBSD's
+    COPYRIGHT</a>; and from GCC 4.2, libstdc++, under the
+    <a href={licence("crossbridge-libstdc++-GPL-2.0.txt")}>GPL version 2</a> with its runtime
+    exception, and libgomp, under the
+    <a href={licence("crossbridge-libgomp-LGPL-2.1.txt")}>LGPL version 2.1</a> or later. Their
+    sources are in Crossbridge's repository, and the demo's sources and build are in this one, so
+    it can be built again, with a changed library too.
+  </p>
+
   <h2>minimp3</h2>
   <p>
     <code>Sound.extract()</code> decodes MP3 frames synchronously with
