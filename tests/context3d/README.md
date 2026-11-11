@@ -27,7 +27,8 @@ not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShade
 `--draws`, `--frames` and `--samples` control the workload; `--only` selects a
 comma-separated subset of `static`, `transform`, `material`, `all-changing`,
 `programs`, `bindings`, `attributes`, `indices-changing`, `indices-uploading`,
-`indices-uploading-bytes`, `targets`, `textures`, `textures-changing`,
+`indices-uploading-bytes`, `states`, `states-enabled`, `states-changing`,
+`targets`, `textures`, `textures-changing`,
 `textures-cube`, `textures-cube-changing`, `textures-uploading`,
 `textures-uploading-zero`, `indirect` and `indirect-changing`. The controls include unchanged constants, all
 registers changing, program/target switches and indirect vertex addressing. `bindings` switches buffers, strides and offsets every draw;
@@ -38,6 +39,11 @@ The index controls alternate index buffers or upload each triangle's indices
 before drawing it, through numeric arrays or bytes. `checks/indices.ts` checks
 pixel output and index-bind counts across uploads, reentrant source getters,
 failed draws, disposal, program replacement, resize and MSAA seeding.
+
+The state controls call depth, blend and culling setters before every draw:
+repeated defaults, repeated enabled blending/culling, or alternating settings.
+`checks/pipeline-state.ts` checks their pixels and calls through depth rejection,
+blend/cull changes, clears, failed resize, presentation and MSAA seeding.
 
 The texture controls use sampler unit 3, retaining or alternating its texture on
 each draw. The cube variants exercise the same two patterns. The upload controls

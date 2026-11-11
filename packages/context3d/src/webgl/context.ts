@@ -122,8 +122,11 @@ export class WebGLContext3D implements Context3D {
   private depthBuffer: WebGLRenderbuffer | null = null;
   private antiAlias = 0;
   private depthWrite = true;
+  private depthCompare: CompareMode = "less";
   private blendEnabled = false;
-  private cullEnabled = false;
+  private blendSource: BlendFactor = "one";
+  private blendDestination: BlendFactor = "zero";
+  private cullFace: CullFace = "none";
   private colorWrite = 15;
   private readonly stencilFront = new StencilState();
   private readonly stencilBack = new StencilState();
@@ -513,9 +516,15 @@ export class WebGLContext3D implements Context3D {
 
   setDepth(write: boolean, compare: CompareMode): void {
     this.alive();
-    this.depthWrite = write;
-    this.gl.depthMask(write);
-    this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+    if (this.depthWrite !== write) {
+      this.depthWrite = write;
+      this.gl.depthMask(write);
+    }
+
+    if (this.depthCompare !== compare) {
+      this.depthCompare = compare;
+      this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+    }
   }
 
   setScissor(x: number | null, y = 0, width = 0, height = 0): void {
@@ -569,26 +578,42 @@ export class WebGLContext3D implements Context3D {
 
   setBlend(source: BlendFactor, destination: BlendFactor): void {
     this.alive();
+    if (this.blendSource === source && this.blendDestination === destination) {
+      return;
+    }
+
     const gl = this.gl;
+    const enabled = this.blendEnabled;
+    this.blendSource = source;
+    this.blendDestination = destination;
     this.blendEnabled = source !== "one" || destination !== "zero";
-    if (source === "one" && destination === "zero") {
+    if (!this.blendEnabled) {
       gl.disable(gl.BLEND);
     } else {
       gl.blendFunc(gl[BLEND_FUNCTIONS[source]], gl[BLEND_FUNCTIONS[destination]]);
-      gl.enable(gl.BLEND);
+      if (!enabled) {
+        gl.enable(gl.BLEND);
+      }
     }
   }
 
   setCulling(face: CullFace): void {
     this.alive();
+    const previous = this.cullFace;
+    if (previous === face) {
+      return;
+    }
+
     const gl = this.gl;
-    this.cullEnabled = face !== "none";
+    this.cullFace = face;
     if (face === "none") {
       gl.disable(gl.CULL_FACE);
       return;
     }
 
-    gl.enable(gl.CULL_FACE);
+    if (previous === "none") {
+      gl.enable(gl.CULL_FACE);
+    }
     switch (face) {
       case "back":
         gl.cullFace(gl.BACK);
@@ -1100,7 +1125,7 @@ export class WebGLContext3D implements Context3D {
     if (this.blendEnabled) {
       gl.enable(gl.BLEND);
     }
-    if (this.cullEnabled) {
+    if (this.cullFace !== "none") {
       gl.enable(gl.CULL_FACE);
     }
     if (this.scissor) {

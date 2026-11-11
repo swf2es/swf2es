@@ -113,6 +113,9 @@ export function bench(name: string, options: Options): Result {
   const textured = name.startsWith("textures");
   const cube = name.includes("-cube");
   const slot = name.endsWith("-zero") ? 0 : 3;
+  const stateSetters = name.startsWith("states");
+  const stateChanges = name === "states-changing";
+  const stateEnabled = name === "states-enabled";
   const source = shaders(indirect, textured, cube, slot);
   const textures = textured
     ? [context.createTexture(4, 4, cube), context.createTexture(4, 4, cube)]
@@ -178,6 +181,14 @@ export function bench(name: string, options: Options): Result {
 
     context.clear(0, 0, 0, 1);
     for (let i = 0; i < options.draws; i++) {
+      if (stateSetters) {
+        const enabled = stateEnabled || (stateChanges && i % 2 === 0);
+        const write = stateChanges && enabled;
+        context.setDepth(write, write ? "lessEqual" : "always");
+        context.setBlend(enabled ? "sourceAlpha" : "one", enabled ? "oneMinusSourceAlpha" : "zero");
+        context.setCulling(enabled ? "front" : "none");
+      }
+
       if (name === "transform" || name === "material" || name === "all-changing") {
         matrix[3] = ((frame + i) % 16) / 1024;
         if (name === "all-changing") {
@@ -271,6 +282,12 @@ export function bench(name: string, options: Options): Result {
     // Count a separate warm frame so wrappers do not distort the timed loop.
     const methods = [
       "uniform4fv",
+      "depthMask",
+      "depthFunc",
+      "blendFunc",
+      "cullFace",
+      "enable",
+      "disable",
       "uniform1i",
       "uniform1f",
       "useProgram",

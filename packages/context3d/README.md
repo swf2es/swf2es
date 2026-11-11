@@ -230,6 +230,11 @@ replacement invalidate that cache. Each program retains its target-orientation
 uniform and sampler-unit assignments until they change or it is replaced;
 texture and sampler validation still runs on every draw.
 
+Depth-write/compare settings, blend factors and cull faces are retained between
+setters. Repeating a value makes no GL call; changing blend factors or cull faces
+while already enabled does not enable them again. Clears and internal MSAA copies
+restore their temporary state changes before returning.
+
 The owned VAO retains its index-buffer binding across draws, presentation and
 internal copies. Index-buffer allocation, uploads and disposal invalidate that
 binding cache; vertex uploads leave it intact. Draw validation still runs before
