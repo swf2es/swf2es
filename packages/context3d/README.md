@@ -250,8 +250,10 @@ Each linked program remembers the write versions last uploaded for its constants
 Draws upload only active registers written since that program's preceding draw;
 indirectly addressed vertex constants are uploaded as one bank after a write.
 Switching programs or targets preserves those versions, while successful program
-replacement resets them. Rewriting equal values still counts as a write. Version
-arrays retain at most 1,248 bytes per program and are released on disposal;
+replacement resets them. Direct registers also retain their last uploaded float32
+bits, so rewriting equal values or restoring a program's material needs no upload.
+Signed zero and NaN payloads are compared exactly. Version and value
+arrays retain at most 3,744 bytes per program and are released on disposal;
 the context's two banks retain another 1,248 bytes of versions together.
 Shader translation and arithmetic are unchanged. See the
 [backend benchmark](../../tests/context3d/README.md) for upload counts and timings.

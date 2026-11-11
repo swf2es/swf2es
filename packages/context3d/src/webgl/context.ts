@@ -70,9 +70,22 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
 
 interface Constants {
   data: Float32Array;
+  bits: Uint32Array;
   versions: Float64Array;
   version: number;
   writing: number;
+}
+
+function constants(registers: number): Constants {
+  const data = new Float32Array(registers * 4);
+
+  return {
+    data,
+    bits: new Uint32Array(data.buffer),
+    versions: new Float64Array(registers),
+    version: 0,
+    writing: 0,
+  };
 }
 
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
@@ -140,18 +153,8 @@ export class WebGLContext3D implements Context3D {
   private scissorRight = 0;
   private scissorBottom = 0;
   private scissorOutside = false;
-  private readonly vertexConstants: Constants = {
-    data: new Float32Array(128 * 4),
-    versions: new Float64Array(128),
-    version: 0,
-    writing: 0,
-  };
-  private readonly fragmentConstants: Constants = {
-    data: new Float32Array(28 * 4),
-    versions: new Float64Array(28),
-    version: 0,
-    writing: 0,
-  };
+  private readonly vertexConstants = constants(128);
+  private readonly fragmentConstants = constants(28);
   private pixels = new Uint8Array(0);
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
@@ -765,6 +768,8 @@ export class WebGLContext3D implements Context3D {
       samplersSet: false,
       vertexVersions: new Float64Array(0),
       fragmentVersions: new Float64Array(0),
+      vertexValues: new Uint32Array(0),
+      fragmentValues: new Uint32Array(0),
       vertexVersion: -1,
     };
     const program: Program3D = {
@@ -801,6 +806,8 @@ export class WebGLContext3D implements Context3D {
         state.samplerMask = 0;
         state.vertexVersions = new Float64Array(0);
         state.fragmentVersions = new Float64Array(0);
+        state.vertexValues = new Uint32Array(0);
+        state.fragmentValues = new Uint32Array(0);
         if (this.selected === program) {
           this.selected = null;
         }
@@ -1829,9 +1836,14 @@ export class WebGLContext3D implements Context3D {
         state.vertexVersion = this.vertexConstants.version;
       }
     } else {
-      this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions);
+      this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
     }
-    this.uniforms(state.fragment, this.fragmentConstants, state.fragmentVersions);
+    this.uniforms(
+      state.fragment,
+      this.fragmentConstants,
+      state.fragmentVersions,
+      state.fragmentValues,
+    );
     if (this.indexBuffer !== index.handle) {
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
       this.indexBuffer = index.handle;
@@ -1844,10 +1856,29 @@ export class WebGLContext3D implements Context3D {
     locations: (WebGLUniformLocation | null)[],
     bank: Constants,
     previous: Float64Array,
+    values: Uint32Array,
   ): void {
     for (let i = 0; i < locations.length; i++) {
       if (locations[i] && (bank.writing || previous[i] !== bank.versions[i])) {
-        this.gl.uniform4fv(locations[i], bank.data, i * 4, 4);
+        const offset = i * 4;
+        const a = bank.bits[offset];
+        const b = bank.bits[offset + 1];
+        const c = bank.bits[offset + 2];
+        const d = bank.bits[offset + 3];
+        // Compare float32 bits so signed zero and NaN payloads keep reaching GL unchanged.
+        if (
+          previous[i] < 0 ||
+          values[offset] !== a ||
+          values[offset + 1] !== b ||
+          values[offset + 2] !== c ||
+          values[offset + 3] !== d
+        ) {
+          this.gl.uniform4fv(locations[i], bank.data, offset, 4);
+          values[offset] = a;
+          values[offset + 1] = b;
+          values[offset + 2] = c;
+          values[offset + 3] = d;
+        }
         previous[i] = bank.versions[i];
       }
     }

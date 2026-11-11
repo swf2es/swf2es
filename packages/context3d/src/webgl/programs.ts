@@ -16,6 +16,8 @@ export interface ProgramState {
   samplersSet: boolean;
   vertexVersions: Float64Array;
   fragmentVersions: Float64Array;
+  vertexValues: Uint32Array;
+  fragmentValues: Uint32Array;
   vertexVersion: number;
 }
 
@@ -94,6 +96,8 @@ export function uploadProgram(
   // A fresh link has GL's defaults, even when the context's constants were never written.
   state.vertexVersions = new Float64Array(state.vertex.length).fill(-1);
   state.fragmentVersions = new Float64Array(state.fragment.length).fill(-1);
+  state.vertexValues = new Uint32Array(state.vertex.length * 4);
+  state.fragmentValues = new Uint32Array(state.fragment.length * 4);
   state.vertexVersion = -1;
 }
 
