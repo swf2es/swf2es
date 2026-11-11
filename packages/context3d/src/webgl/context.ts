@@ -111,6 +111,7 @@ export class WebGLContext3D implements Context3D {
   private maxAnisotropy = 1;
   private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
   private enabledAttributes = 0;
+  private indexBuffer: WebGLBuffer | null = null;
   private readonly texturesApplied = new Uint8Array(8);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
@@ -627,6 +628,9 @@ export class WebGLContext3D implements Context3D {
     }
 
     const target = stride === 0 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
+    if (stride === 0) {
+      this.indexBuffer = null;
+    }
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(target, handle);
     gl.bufferData(target, bytes, gl.STATIC_DRAW);
@@ -647,18 +651,34 @@ export class WebGLContext3D implements Context3D {
       upload: (values, start, amount) => {
         this.alive();
         this.buffer(buffer);
-        uploadBuffer(gl, this.vao, buffer, state, values, start, amount);
+        try {
+          uploadBuffer(gl, this.vao, buffer, state, values, start, amount);
+        } finally {
+          // Source getters can draw before the upload replaces the VAO's index binding.
+          if (stride === 0) {
+            this.indexBuffer = null;
+          }
+        }
       },
       uploadBytes: (data, offset, start, amount) => {
         this.alive();
         this.buffer(buffer);
-        uploadBufferBytes(gl, this.vao, buffer, state, data, offset, start, amount);
+        try {
+          uploadBufferBytes(gl, this.vao, buffer, state, data, offset, start, amount);
+        } finally {
+          if (stride === 0) {
+            this.indexBuffer = null;
+          }
+        }
       },
       dispose: () => {
         if (!this.buffers.delete(buffer)) {
           return;
         }
 
+        if (this.indexBuffer === handle) {
+          this.indexBuffer = null;
+        }
         gl.deleteBuffer(handle);
         this.bufferBytes -= bytes;
         if (stride !== 0) {
@@ -1785,7 +1805,10 @@ export class WebGLContext3D implements Context3D {
       this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions);
     }
     this.uniforms(state.fragment, this.fragmentConstants, state.fragmentVersions);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
+    if (this.indexBuffer !== index.handle) {
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
+      this.indexBuffer = index.handle;
+    }
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);
     this.changedTarget();
   }
@@ -1924,6 +1947,7 @@ export class WebGLContext3D implements Context3D {
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
     this.texturesApplied.fill(0);
+    this.indexBuffer = null;
     this.drawState.forget();
   }
 }

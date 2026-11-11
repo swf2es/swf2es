@@ -9,6 +9,7 @@ export { contextAttributes } from "./checks/context-attributes.ts";
 export { drawState } from "./checks/draw-state.ts";
 export { dxtUploads } from "./checks/dxt.ts";
 export { canvasHost } from "./checks/host.ts";
+export { indexBindings } from "./checks/indices.ts";
 export { lifetime } from "./checks/lifetime.ts";
 export { resourceLimits } from "./checks/limits.ts";
 export { multisampling, targetMultisampling } from "./checks/multisampling.ts";

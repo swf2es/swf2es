@@ -104,6 +104,10 @@ export function bench(name: string, options: Options): Result {
   vertices.upload(vertex, 0, index.length);
   const indices = context.createBuffer(index.length, 0);
   indices.upload(index, 0, index.length);
+  const alternateIndices =
+    name === "indices-changing" ? context.createBuffer(index.length, 0) : null;
+  alternateIndices?.upload(index, 0, index.length);
+  const indexBytes = new Uint8Array(index.buffer);
   context.setVertex(0, vertices, 0, "float4");
   const indirect = name.startsWith("indirect");
   const textured = name.startsWith("textures");
@@ -218,7 +222,16 @@ export function bench(name: string, options: Options): Result {
         context.setRenderTarget(i % 128 === 0 ? target : null, false, 0, options.samples);
       }
 
-      context.draw(indices, i * 3, 1);
+      switch (name) {
+        case "indices-uploading":
+          indices.upload(index.subarray(i * 3, i * 3 + 3), i * 3, 3);
+          break;
+        case "indices-uploading-bytes":
+          indices.uploadBytes(indexBytes, i * 6, i * 3, 3);
+          break;
+      }
+
+      context.draw(alternateIndices && i % 2 ? alternateIndices : indices, i * 3, 1);
     }
 
     context.present();
