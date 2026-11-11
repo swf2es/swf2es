@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/player-hosts",
-  "version": "0.1.13",
+  "version": "0.1.14",
   "description": "Optional Node and WebSocket transports, worker threads, an IndexedDB module cache and precompiled modules for the swf2es player",
   "keywords": [
     "swf",
