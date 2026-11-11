@@ -33,6 +33,13 @@ export function bindContextMenu(
     }
 
     const keyboard = keyboardEvents.has(event);
+    // A right press the SWF heard is its own: no menu, Flash's or the browser's. Only the
+    // right button's menu: a touch's long press or the keyboard's still opens it.
+    if (!keyboard && event.button === 2 && player.pointer?.taken(2)) {
+      event.preventDefault();
+      return;
+    }
+
     const [x, y] = keyboard
       ? [
           player.scripting?.mouseStageX ?? player.width / 2,

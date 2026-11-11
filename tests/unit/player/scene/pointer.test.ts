@@ -62,7 +62,8 @@ function page(
     f({
       clientX: x,
       clientY: y,
-      button: 0,
+      // A move changes no button, which pointer events give as -1.
+      button: type === "pointermove" ? -1 : 0,
       buttons: 0,
       altKey: false,
       ctrlKey: false,
@@ -134,6 +135,29 @@ test("a press lands on the stage the canvas shows, where the canvas is its targe
     (canvas as unknown as ReturnType<typeof target>).listeners.has("pointerdown"),
     false,
   );
+});
+
+test("a button pressed or let go while another is held, a move as pointer events chord it, is a press or a release", () => {
+  const { canvas, fire } = page(100, 100);
+  const calls: string[] = [];
+  const player = {
+    pointer: {
+      captured: false,
+      post: (p: { x: number }) => calls.push(`post ${p.x}`),
+      flush: () => {},
+      handle: (type: string, p: { button: number }) => calls.push(`${type} ${p.button}`),
+      cursor: () => "default",
+      taken: () => false,
+    },
+  } as unknown as Player;
+  const unbind = bindCanvasPointer(canvas, player, stage(0, 0, 100, 100));
+  fire("pointerdown", 10, 10, { button: 0, buttons: 1 });
+  fire("pointermove", 10, 10, { button: 2, buttons: 3 });
+  fire("pointermove", 10, 10, { button: 2, buttons: 1 });
+  fire("pointermove", 12, 10, { buttons: 1 });
+  fire("pointerup", 12, 10, { button: 0, buttons: 0 });
+  assert.deepEqual(calls, ["down 0", "down 2", "up 2", "post 12", "up 0"]);
+  unbind();
 });
 
 test("pointer moves are posted, flushed by a frame of their own where nothing else did", () => {

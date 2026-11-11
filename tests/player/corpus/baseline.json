@@ -1423,7 +1423,7 @@
   "avm2/modulo": {"matched":1058,"lines":1058,"traced":1058,"error":null},
   "avm2/morph_shape": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/mouse_children": {"matched":98,"lines":192,"traced":192,"error":null},
-  "avm2/mouse_click_events": {"matched":7,"lines":90,"traced":30,"error":null},
+  "avm2/mouse_click_events": {"matched":90,"lines":90,"traced":90,"error":null},
   "avm2/mouse_double_click_events": {"matched":188,"lines":188,"traced":188,"error":null},
   "avm2/mouse_empty_parent": {"matched":1,"lines":4,"traced":4,"error":null},
   "avm2/mouse_over_while_dragging": {"matched":3,"lines":3,"traced":3,"error":null},

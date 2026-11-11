@@ -141,6 +141,11 @@ export class Avm1Pointer implements Pointer {
     }
   }
 
+  /** AVM1 has no events for the middle or right button, so the browser keeps its menu and scroll. */
+  taken(): boolean {
+    return false;
+  }
+
   /**
    * The wheel over the player: a move to `p` first, then Mouse's listeners'
    * onMouseWheel with the delta and what is under the pointer. The SWF
