@@ -178,6 +178,22 @@ function namesLoop(n:int, mask:int):Number {
   return sum;
 }
 
+// A table of objects by whole-number handles, as a program compiled from C keeps its host's.
+import flash.utils.Dictionary;
+var handles:Dictionary = new Dictionary();
+for (var handle:int = 0; handle < 64; handle++) {
+  handles[4278000 + handle * 8] = {index: handle};
+}
+
+function handlesLoop(n:int):Number {
+  var sum:Number = 0;
+  for (var k:int = 0; k < n; k++) {
+    var at:int = 4278000 + (k & 63) * 8;
+    sum += handles[at].index;
+  }
+  return sum;
+}
+
 function runAll(rounds:int):void {
   var t:uint = getTimer();
   var r1:Number = displayLoop(rounds);
@@ -200,7 +216,10 @@ function runAll(rounds:int):void {
   t = getTimer();
   var r7:Number = namesLoop(rounds * 40, 1023);
   trace("time: churn " + (getTimer() - t));
-  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7);
+  t = getTimer();
+  var r8:Number = handlesLoop(rounds * 40);
+  trace("time: handles " + (getTimer() - t));
+  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8);
 }
 
 runAll(20000);
