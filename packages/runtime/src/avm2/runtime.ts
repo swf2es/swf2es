@@ -650,6 +650,32 @@ export class Runtime {
     return this.findProperty(mn, outer, locals, withs, true);
   }
 
+  /**
+   * As MethodEnv::findproperty for a name the verifier found on no scope:
+   * the innermost of `locals` whose traits, as it is now, bind `mn`, else
+   * as findGlobal. A function's `this`, or a subclass instance, may bind
+   * what its type did not.
+   */
+  findLocal(mn: Multiname, locals: Value[], global: AsObject): AsObject {
+    for (let i = locals.length - 1; i >= 0; i--) {
+      if (this.traitsOf(locals[i]).find(mn) !== 0) {
+        return locals[i] as AsObject;
+      }
+    }
+
+    return this.global(mn, global, false);
+  }
+
+  findLocalStrict(mn: Multiname, locals: Value[], global: AsObject): AsObject {
+    for (let i = locals.length - 1; i >= 0; i--) {
+      if (this.traitsOf(locals[i]).find(mn) !== 0) {
+        return locals[i] as AsObject;
+      }
+    }
+
+    return this.global(mn, global, true);
+  }
+
   findGlobal(mn: Multiname, global: AsObject): AsObject {
     return this.global(mn, global, false);
   }

@@ -159,6 +159,25 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
     case IR_FindPropGlobal:
     case IR_FindPropGlobalStrict:
       em.assign(i);
+      if (ir.c[i] > 0) {
+        // The local scopes from c - 1 first, by what each is at run time.
+        out.text(op === IR_FindPropGlobalStrict ? "rt.findLocalStrict(M[" : "rt.findLocal(M[");
+        out.uint(a);
+        out.text("], [");
+        for (let d = <u32>ir.c[i] - 1; d < em.scopeDepth; d++) {
+          if (d > <u32>ir.c[i] - 1) {
+            out.text(", ");
+          }
+
+          em.reg(<i32>(em.ir.localCount + d));
+        }
+
+        out.text("], ");
+        globalScope(em);
+        out.text(")");
+        return true;
+      }
+
       // Not found statically: a script's name, or else the global object's.
       out.text("M[");
       out.uint(a);
