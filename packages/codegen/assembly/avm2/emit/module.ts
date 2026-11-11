@@ -339,6 +339,7 @@ export class ModuleEmitter {
     const at = out.length;
     const marks = methods.map.count;
     methods.functionName = this.functionName(global);
+    methods.claims = decoder.claims;
     methods.method(m, global, decoder.ir);
     methods.functionName = "";
     // Its parameters, up to the last the method uses. $dx: the default XML

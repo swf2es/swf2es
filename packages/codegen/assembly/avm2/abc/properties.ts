@@ -12,7 +12,15 @@ import {
   IR_GetGlobalScope,
   IR_Nip,
 } from "../ir/ir";
-import { BIND_None, TRAITS_Instance, TYPE_Any } from "../link/traits";
+import {
+  BIND_None,
+  TRAITS_Activation,
+  TRAITS_Catch,
+  TRAITS_Class,
+  TRAITS_Instance,
+  TRAITS_Script,
+  TYPE_Any,
+} from "../link/traits";
 import { BIND_Ambiguous, bindingType, getBinding, isBindingName, isNumeric } from "../link/types";
 import {
   BodyDecoder,
@@ -189,12 +197,20 @@ export function globalScope(bd: BodyDecoder): i32 {
  * As Verifier::emitFindProperty: the scope object a name is found on, from
  * the innermost scope out, stopping at a with scope, then the scripts that
  * define it; else an Object, after the runtime name parts are popped.
+ *
+ * Where no scope binds it statically, avmplus' JIT and interpreter both
+ * search again at run time (CodegenLIR turns findpropglobal back into
+ * findproperty), and MethodEnv::findproperty asks each local scope's
+ * traits at run time: a subclass instance, or an object as `this`, may
+ * bind a name its type does not. So the global lookup first asks the
+ * local scopes whose type may be narrower at run time (globalSearch).
  */
 export function findProperty(bd: BodyDecoder, opcode: u8, mn: u32): bool {
   const domain = bd.domain;
   const outer = bd.outer;
   const top = <i32>(bd.stackBase + bd.stack);
   let global = false;
+  let locals = 0;
   if (isBindingName(domain, bd.index, mn)) {
     // With no outer scopes, the global object is a local scope, which is not bound early.
     const base = bd.localCount + (outer.size === 0 ? 1 : 0);
@@ -250,6 +266,7 @@ export function findProperty(bd: BodyDecoder, opcode: u8, mn: u32): bool {
         }
 
         global = true;
+        locals = globalSearch(bd);
       }
     }
   }
@@ -262,7 +279,7 @@ export function findProperty(bd: BodyDecoder, opcode: u8, mn: u32): bool {
   bd.popPush(n - 1, domain.objectType(), NOT_NULL);
   if (global) {
     const op = opcode === ops.OP_findproperty ? IR_FindPropGlobal : IR_FindPropGlobalStrict;
-    return emitFound(bd, op, top, -1, mn, 0);
+    return emitFound(bd, op, top, -1, mn, locals);
   }
 
   const at = <i32>(bd.stackBase + bd.stack) - <i32>(n - 1);
@@ -272,6 +289,38 @@ export function findProperty(bd: BodyDecoder, opcode: u8, mn: u32): bool {
   }
 
   return true;
+}
+
+/**
+ * For a name no scope binds statically: 1 + the first local scope that
+ * MethodEnv::findproperty asks by its traits at run time, if one may bind
+ * more than its type says, else 0. A class method's first scope keeps its
+ * class's type (the Scope's extra), and with no outer scopes the first is
+ * the global object, looked up last; a function's `this` is any object.
+ * A class, script, activation or catch scope is of exactly its type.
+ */
+function globalSearch(bd: BodyDecoder): u32 {
+  const traits = bd.domain.traits;
+  const outer = bd.outer;
+  const from: u32 = outer.size > 0 && outer.extra === TYPE_Any ? 0 : 1;
+  for (let d = from; d < bd.scope; d++) {
+    const t = bd.typeOf(bd.localCount + d);
+    if (t < 0) {
+      return from + 1;
+    }
+
+    switch (traits.kind[t]) {
+      case TRAITS_Class:
+      case TRAITS_Script:
+      case TRAITS_Activation:
+      case TRAITS_Catch:
+        break;
+      default:
+        return from + 1;
+    }
+  }
+
+  return 0;
 }
 
 /** The IR of where a name was found, pushed into register `dst`. */

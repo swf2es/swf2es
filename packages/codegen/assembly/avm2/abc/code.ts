@@ -229,6 +229,12 @@ export class BodyDecoder {
   emitPass: bool = false;
   /** Methods (domain-wide ids) whose scope chain the last decode captured. */
   captured: u32[] = [];
+  /**
+   * The functions the last decode created, each with the index of its
+   * scope chain among those the function was created in (functionScopes),
+   * in pairs: what a creator of a contested function claims as it first runs.
+   */
+  claims: u32[] = [];
   /** The IR the second pass writes, valid until the next decode. */
   ir: Ir = new Ir();
   /** The block number of each block start. */
@@ -276,6 +282,7 @@ export class BodyDecoder {
     // Not the last body's, which may be another ABC's: a body that fails before
     // its second pass captures nothing.
     this.captured.length = 0;
+    this.claims.length = 0;
 
     this.start = this.base + abc.bodyCodeStart[body];
     this.length = abc.bodyCodeLength[body];
@@ -358,6 +365,7 @@ export class BodyDecoder {
   secondPass(): bool {
     this.emitPass = true;
     this.captured.length = 0;
+    this.claims.length = 0;
     const ir = this.ir;
     ir.reset(this.localCount, this.maxScope, this.frameSize);
     // The IR adds a coercion or check here and there to the ABC's instructions.
@@ -1120,7 +1128,11 @@ export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
   const entry = domain.logKind.length;
   const captures = domain.captures;
   domain.logged(LOG_Verify, index, 0, 0);
-  const results = verifyAll(domain, index);
+  let results = verifyAll(domain, index);
+  for (let pass = 0; pass < SETTLE_PASSES && settleContests(domain, index); pass++) {
+    results = verifyAll(domain, index);
+  }
+
   if (!first && domain.captures === captures) {
     if (domain.logKind.length === entry + 1) {
       domain.logKind.length = entry;
@@ -1134,6 +1146,48 @@ export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
   }
 
   return results;
+}
+
+/** Verifications of an ABC again as its contested functions' merged scope chains settle, at most. */
+const SETTLE_PASSES = 8;
+
+/**
+ * After verifying ABC `index`: each contested function's scope chain merged
+ * from those it was created in (Scope.merged). Where one changed, the ABC's
+ * functions' chains are let go of, for verifying it again to capture them
+ * again, a function a contested one creates in the merged chain then: true.
+ */
+function settleContests(domain: Domain, index: u32): bool {
+  const traits = domain.traits;
+  const start = domain.methodStart[index];
+  const end = start + domain.abcs[index].methodCount;
+  let changed = false;
+  for (let g = start; g < end; g++) {
+    const scopes = traits.functionScopes[g];
+    if (!traits.functionContested[g] || scopes === null) {
+      continue;
+    }
+
+    const merged = Scope.merged(scopes);
+    const before = traits.functionMerged[g];
+    if (before === null || !before.equals(merged)) {
+      traits.functionMerged[g] = merged;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return false;
+  }
+
+  for (let g = start; g < end; g++) {
+    if (traits.methodFunction[g]) {
+      traits.functionScope[g] = null;
+      traits.functionScopes[g] = null;
+    }
+  }
+
+  return true;
 }
 
 /**
