@@ -141,6 +141,18 @@ export { NOT_FOUND } from "./descriptors.js";
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 
+/**
+ * The scopes a contested function's chain has past those all its creators'
+ * chains share, in one entry of the chain (Runtime.packScope): `w` has a bit
+ * for each that is a with scope, as a Scope's has.
+ */
+class ScopePack {
+  constructor(
+    readonly scopes: Value[],
+    readonly w: number,
+  ) {}
+}
+
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
@@ -359,25 +371,30 @@ export class Runtime {
     return new TypeName(base, [param]);
   }
 
-  /** A multiname with its runtime namespace and name, from the stack. */
-  runtimeName(mn: Multiname, ...parts: Value[]): Multiname {
+  /**
+   * A multiname with its runtime namespace and name, from the stack: `a`
+   * the namespace where it has one at run time, and then `b` the name,
+   * else `a` the name. Two parameters, not a rest: a lookup by a name made
+   * at run time calls this each time, and a rest is an array each call.
+   */
+  runtimeName(mn: Multiname, a?: Value, b?: Value): Multiname {
     if (
       !mn.runtimeNs &&
       mn.runtimeName &&
       mn.cache !== NO_CACHE &&
-      typeof parts[0] === "string" &&
-      parts[0].length <= 128
+      typeof a === "string" &&
+      a.length <= 128
     ) {
-      return this.stringName(mn, parts[0]);
+      return this.stringName(mn, a);
     }
 
     let namespaces: readonly (Namespace | null)[] = mn.namespaces;
     let versions = mn.versions;
-    let k = 0;
+    let last = a;
     if (mn.runtimeNs) {
-      const ns = parts[k++];
-      namespaces = [this.namespaceOf(ns)];
+      namespaces = [this.namespaceOf(a)];
       versions = [255];
+      last = b;
     }
 
     const kind =
@@ -389,7 +406,7 @@ export class Runtime {
         : mn.kind;
     let name = mn.name;
     if (mn.runtimeName) {
-      const part = parts[k];
+      const part = last;
       if (part?.$local !== undefined && !(part instanceof Namespace)) {
         // A Proxy's QName of a multiname names its namespaces still.
         if (part.$mn) {
@@ -658,6 +675,21 @@ export class Runtime {
   }
 
   /**
+   * `chain` for a contested function whose creators' chains differ in
+   * length (the codegen's Scope.merged): its first `at` entries, which all
+   * of them have, then one entry holding the rest, a ScopePack, searched in
+   * its place. The function's chain is then as long whichever creator made
+   * it, and what it creates finds its own scopes where it was compiled to.
+   * Called by compiled code.
+   */
+  packScope(chain: Scope, at: number): Scope {
+    const packed = chain.slice(0, at) as Scope;
+    packed.push(new ScopePack(chain.slice(at), chain.w >>> at) as never);
+    packed.w = (chain.w & ((1 << at) - 1)) | (1 << at);
+    return packed;
+  }
+
+  /**
    * The global object of the script that defines `mn`, run first if it has
    * not run. A module reads `mn.global` before calling this: once set it
    * stays right, as the defining script never changes and initScript
@@ -693,8 +725,14 @@ export class Runtime {
     }
 
     for (let i = outer.length - 1; i >= 0; i--) {
-      if (this.scopeHas(outer[i], mn, (outer.w >> i) & 1)) {
-        return outer[i];
+      const o = outer[i];
+      if (o instanceof ScopePack) {
+        const found = this.packHas(o, mn);
+        if (found !== undefined) {
+          return found;
+        }
+      } else if (this.scopeHas(o, mn, (outer.w >> i) & 1)) {
+        return o;
       }
     }
 
@@ -756,6 +794,23 @@ export class Runtime {
     }
 
     return global;
+  }
+
+  /** The innermost scope of a pack that has `mn`, a pack in it searched in turn; undefined if none has. */
+  private packHas(pack: ScopePack, mn: Multiname): AsObject | undefined {
+    for (let i = pack.scopes.length - 1; i >= 0; i--) {
+      const o = pack.scopes[i];
+      if (o instanceof ScopePack) {
+        const found = this.packHas(o, mn);
+        if (found !== undefined) {
+          return found;
+        }
+      } else if (this.scopeHas(o as AsObject, mn, (pack.w >> i) & 1)) {
+        return o as AsObject;
+      }
+    }
+
+    return undefined;
   }
 
   private scopeHas(o: AsObject, mn: Multiname, isWith: number): boolean {
@@ -1052,8 +1107,22 @@ export class Runtime {
       }
 
       const a: Value[] | undefined = o.$a;
-      if (a !== undefined && i in a) {
-        return a[i];
+      if (a !== undefined) {
+        if (i in a) {
+          return a[i];
+        }
+      } else if (traits?.dynamic && traits.properties === null && !traits.refusesNames) {
+        // As ScriptObject::getUintProperty: an object with no elements of its own looks the
+        // number up among its dynamic properties first, with no binding asked for; a table
+        // keyed by numbers, as a Dictionary of handles, is read so on every access. One not
+        // there, or there as undefined, is looked up in full.
+        const d: Map<string, Value> | null | undefined = o.$d;
+        if (d) {
+          const v = d.get(`${i}`);
+          if (v !== undefined) {
+            return v;
+          }
+        }
       }
     }
 
