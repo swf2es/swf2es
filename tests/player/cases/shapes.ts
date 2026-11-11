@@ -1,3 +1,4 @@
+import { deflateSync } from "node:zlib";
 // The player's shape cases (cases.ts): fills, lines, morphs, scale9,
 // the drawing API and the stage's quality.
 import { zlibCompress } from "../../../packages/format/dist/index.js";
@@ -952,6 +953,69 @@ const roundedPanel = (id: number) =>
 // grid on a fill's edge, and a sprite in a panel, which scales as ever;
 // scripts/Scale9.as sets grids on what it draws, and on frame 2 rescales a
 // panel of each kind.
+/** Three 30 pixel panels of a bitmap skin, each a shape in a sprite with a grid, scaled 4 by 3. */
+function scale9ShapeFills(): Uint8Array {
+  // A rounded panel: a dark ring of corners round a checker, as premultiplied ARGB.
+  const argb = new Uint8Array(30 * 30 * 4);
+  for (let y = 0; y < 30; y++) {
+    for (let x = 0; x < 30; x++) {
+      const d = Math.hypot(Math.max(0, 9 - x, x - 20), Math.max(0, 9 - y, y - 20));
+      if (d <= 9.5) {
+        const c = d > 6.5 ? 0x204080 : (x + y) & 1 ? 0xffd040 : 0xe06020;
+        argb.set([255, c >> 16, (c >> 8) & 255, c & 255], (y * 30 + x) * 4);
+      }
+    }
+  }
+
+  const image = w.tag(36, Uint8Array.from([6, 0, 5, 30, 0, 30, 0, ...deflateSync(argb)]), true);
+  // Clipped, not smoothed, a pixel 20 twips.
+  const fill = { type: 0x43 as const, bitmap: 6, matrix: { a: 20, d: 20 } };
+  const cells = [0, 1, 2].flatMap((j) => [0, 1, 2].map((i) => [i, j]));
+  const rect = ([i, j]: number[], style: number) => ({
+    fill1: style,
+    commands: [
+      { move: [i * 200, j * 200] as [number, number] },
+      { line: [i * 200 + 200, j * 200] as [number, number] },
+      { line: [i * 200 + 200, j * 200 + 200] as [number, number] },
+      { line: [i * 200, j * 200 + 200] as [number, number] },
+      { line: [i * 200, j * 200] as [number, number] },
+    ],
+  });
+  const bounds: [number, number, number, number] = [0, 600, 0, 600];
+  const shapes = [
+    // Nine styles, one a region.
+    w.shape({
+      id: 1,
+      bounds,
+      fills: cells.map(() => fill),
+      paths: cells.map((c, k) => rect(c, k + 1)),
+    }),
+    // One style, nine rectangles.
+    w.shape({ id: 2, bounds, fills: [fill], paths: cells.map((c) => rect(c, 1)) }),
+    // The corners one style, the rest another.
+    w.shape({
+      id: 3,
+      bounds,
+      fills: [fill, fill],
+      paths: cells.map((c) => rect(c, c[0] !== 1 && c[1] !== 1 ? 1 : 2)),
+    }),
+  ];
+  const tags = [w.fileAttributes(false), w.backgroundColor(0xffffff), image, ...shapes];
+  shapes.forEach((_, k) => {
+    tags.push(
+      w.sprite(10 + k, 1, [w.place({ depth: 1, character: k + 1 }), w.showFrame(), w.end()]),
+      w.scalingGrid(10 + k, 200, 400, 200, 400),
+      w.place({
+        depth: k + 1,
+        character: 10 + k,
+        matrix: { a: 4, d: 3, tx: (5 + k * 132) * 20, ty: 100 },
+      }),
+    );
+  });
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: 400, height: 110, frameCount: 1, tags });
+}
+
 function scale9(abc: Uint8Array): Uint8Array {
   const turn = (15 * Math.PI) / 180;
   return w.swf({
@@ -1280,6 +1344,17 @@ export const shapeCases: PlayerCase[] = [
     // channels a frame.
     tolerance: 3,
     maxOutliers: 800,
+  },
+  {
+    // A SWF's own shapes with bitmap fills in sprites with a DefineScalingGrid: a fill style's
+    // bitmap goes with what the style fills. Nine styles, one a region, keep the corners; one
+    // style for nine rectangles is stretched whole, and so are the corners that share one.
+    name: "scale9-shape-fills",
+    swf: scale9ShapeFills,
+    frames: 2,
+    capture: [2],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     // Bitmap fills in 9-slice panels (scripts/Scale9Fills.as): a fill's bitmap goes with its
