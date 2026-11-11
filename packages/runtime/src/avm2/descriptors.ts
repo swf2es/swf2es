@@ -104,6 +104,8 @@ export interface Abc extends AbcDesc {
   /** The domain it was loaded into, and its position among the ABCs loaded there. */
   domain: Domain;
   index: number;
+  /** Its contested functions, by method, each with the scope chain its first creator claimed it in (Runtime.claim). */
+  claims?: Map<number, number>;
 }
 
 /**

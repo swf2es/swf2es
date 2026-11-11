@@ -270,6 +270,7 @@ export function domainEmit(body: u32): string {
   }
 
   const emitter = new MethodEmitter(domain, index);
+  emitter.claims = decoder.claims;
   emitter.method(method, global, decoder.ir);
   const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);

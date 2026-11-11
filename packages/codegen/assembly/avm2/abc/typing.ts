@@ -617,8 +617,18 @@ function scopeHere(bd: BodyDecoder, last: i32, extra: i32): Scope {
 
 /**
  * As the ScopeWriter's OP_newfunction: function m is created in the scope
- * chain here, once; a method bound to traits cannot be a function, and one
+ * chain here; a method bound to traits cannot be a function, and one
  * created again must be created alike, unless it creates itself.
+ *
+ * avmplus verifies each method as it first runs, and the first method to
+ * create a function gives it its scope chain: another method that creates
+ * it in another fails when it first runs. Verifying every method before any
+ * runs cannot know which runs first, so a function another method creates
+ * in another scope chain is contested rather than failing
+ * either: it is verified and compiled in their merged scope chain, and each
+ * of its creators claims it as it first runs, by its chain's index among
+ * them, the later in another throwing as avmplus would (see claims). One
+ * method that creates it in two chains fails, as avmplus fails it.
  */
 function captureFunction(bd: BodyDecoder, m: u32): bool {
   const domain = bd.domain;
@@ -626,12 +636,38 @@ function captureFunction(bd: BodyDecoder, m: u32): bool {
   const global = domain.methodStart[bd.index] + m;
   const scope = scopeHere(bd, -2, TYPE_Any);
   const current = traits.functionScope[global];
-  // Created again alike, it is still queued, so that verifying the ABC again finds it.
   if (current !== null) {
-    if (!current.equals(scope) && global !== bd.global) {
-      return bd.fail(C.kCorruptABCError);
+    // Created again in its own scope chain, as it may create itself: as created before.
+    if (global === bd.global) {
+      bd.captured.push(global);
+      return true;
     }
 
+    const scopes = traits.functionScopes[global] as Array<Scope>;
+    let index = -1;
+    for (let i = 0; i < scopes.length; i++) {
+      if (scopes[i].equals(scope)) {
+        index = i;
+        break;
+      }
+    }
+
+    if (index < 0) {
+      index = scopes.length;
+      scopes.push(scope);
+      traits.functionContested[global] = 1;
+      domain.captures++;
+    }
+
+    // Created twice by this method, in two chains.
+    for (let c = 0; c < bd.claims.length; c += 2) {
+      if (bd.claims[c] === global && bd.claims[c + 1] !== <u32>index) {
+        return bd.fail(C.kCorruptABCError);
+      }
+    }
+
+    bd.claims.push(global);
+    bd.claims.push(<u32>index);
     bd.captured.push(global);
     return true;
   }
@@ -647,7 +683,12 @@ function captureFunction(bd: BodyDecoder, m: u32): bool {
   }
 
   traits.functionScope[global] = scope;
+  const scopes: Scope[] = [];
+  scopes.push(scope);
+  traits.functionScopes[global] = scopes;
   domain.captures++;
+  bd.claims.push(global);
+  bd.claims.push(0);
   bd.captured.push(global);
   return true;
 }
