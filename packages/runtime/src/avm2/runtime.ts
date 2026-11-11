@@ -1061,12 +1061,7 @@ export class Runtime {
         if (i in a) {
           return a[i];
         }
-      } else if (
-        traits !== undefined &&
-        traits.dynamic &&
-        traits.properties === null &&
-        !traits.refusesNames
-      ) {
+      } else if (traits?.dynamic && traits.properties === null && !traits.refusesNames) {
         // As ScriptObject::getUintProperty: an object with no elements of its own looks the
         // number up among its dynamic properties first, with no binding asked for; a table
         // keyed by numbers, as a Dictionary of handles, is read so on every access. One not
