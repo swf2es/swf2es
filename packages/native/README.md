@@ -160,7 +160,9 @@ level in one call, into DXT1 or DXT5 blocks identical to
 `@swf2es/context3d`'s TypeScript encoder. It takes tightly packed top-down
 RGBA, repeats edge pixels for partial 4×4 blocks, and keeps the reference's
 double arithmetic and tie breaking. Four colour distances are compared
-together with integer SIMD. It returns `null` for invalid dimensions or
+together with integer SIMD. DXT5 alpha endpoints choose their exact palette
+entry directly (entry zero wins equal-endpoint ties); other values retain the
+nearest distance while searching. It returns `null` for invalid dimensions or
 input sizes, failed allocation, a refused module or a trap, so the caller
 can use the TypeScript path.
 
@@ -174,8 +176,16 @@ DXT5 upload's workspace between calls. A trap also drops the instance.
 
 The host Zig tests cover flat blocks and edge repetition;
 `tests/unit/native-dxt.test.ts` compares blocks against the TypeScript
-reference on thousands of levels, checks that each was encoded in wasm,
-and exercises rejection, traps and release.
+reference on thousands of levels and all 32,896 alpha endpoint pairs, including
+nearby palette values. It checks that each was encoded in wasm and exercises
+rejection, traps and release.
+
+`node tests/bench/dxt.ts before-checkout after-checkout --json` compares two built
+native encoders, alternating A/B and B/A after warmup and checking their bytes
+against the TypeScript reference. It includes opaque and binary-alpha textures
+as well as flat, gradient and random RGBA; `--large` selects 2048-square levels.
+Without checkout paths it compares TypeScript with the current native encoder.
+`--crossings` checks one encoding export per warmed level separately from timing.
 
 ## compress
 
