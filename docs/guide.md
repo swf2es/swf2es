@@ -312,8 +312,21 @@ A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
 browser's Flash Player would refuse it (VerifyError #1014). Its directory
 holds it alone, and its `app:` URLs load any other file from beside it on
-the server. The desktop app runs an application
-from its descriptor on disk instead, with the real file system.
+the server.
+
+The [desktop app](#play-a-swf-on-the-desktop) runs an AIR application from
+its descriptor on disk instead, with the real file system, sockets and the
+network, as adl runs one:
+
+```sh
+pnpm --filter @swf2es/desktop start app.xml [root-dir] [-- arguments...]
+```
+
+The descriptor's first window's content SWF plays from `app:/`, at the
+descriptor's size and with its title; the arguments after `--` reach its
+InvokeEvent. File › Open, or a descriptor dropped on the window, runs the
+application too, from its own directory; the app asks first, as an
+application reaches your files and the network unasked.
 
 ## Sockets and files
 
