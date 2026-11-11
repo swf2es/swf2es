@@ -3,13 +3,14 @@
 // from demos/Bounce.as, compiled by ASC in the oracle's image as the
 // player's tests compile theirs; an ActionScript 1 SWF whose actions the
 // tests' AVM1 compiler writes; a busy timeline with no scripts, the one
-// the player's benchmark plays; and as3pb's benchmark (MIT), from its
-// submodule, as the program tests build it.
+// the player's benchmark plays; as3pb's benchmark (MIT), from its
+// submodule, as the program tests build it; and Crossbridge's OpenMP sample
+// (MIT), C++ built by the Crossbridge in the oracle's image.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { runOracle } from "../../oracle/oracle.ts";
+import { buildCrossbridgeSwf, runOracle } from "../../oracle/oracle.ts";
 import { flashAssembler, script } from "../../tests/avm1-script.ts";
 import { compileScripts } from "../../tests/player/scripts.ts";
 import * as w from "../../tests/swf-writer.ts";
@@ -242,8 +243,48 @@ function as3pbBench(out: string): Demo {
   };
 }
 
+/**
+ * Crossbridge's OpenMP sample (samples/11_OpenMP, MIT, Adobe), compiled as
+ * its Makefile compiles it: C++ to ActionScript bytecode, whose OpenMP
+ * threads are Flash workers sharing its memory, which a browser gives only
+ * a cross-origin isolated page (the site's service worker isolates it).
+ */
+function mandel(out: string): Demo {
+  const dir = "apps/site/demos/mandel";
+  const { swf, log } = buildCrossbridgeSwf(
+    {
+      name: "mandel",
+      gccArgs: [
+        `${dir}/mandel.cpp`,
+        "-lAS3++",
+        "-lFlash++",
+        "-pthread",
+        "-fopenmp",
+        "-O4",
+        `-flto-api=${dir}/exports.txt`,
+        "-fno-stack-protector",
+        "-swf-size=1024x768",
+        "-emit-swf",
+      ],
+    },
+    out,
+  );
+  if (!swf) {
+    throw new Error(`The Mandelbrot demo did not build:\n${log}`);
+  }
+
+  return {
+    file: "mandel.swf",
+    title: "Mandelbrot (C++ by Crossbridge)",
+    description:
+      "Crossbridge's OpenMP sample: C++ compiled to ActionScript bytecode, its threads Flash workers sharing memory. Click for another thread, right-click for one fewer.",
+    source: `${dir}/mandel.cpp`,
+    bytes: swf,
+  };
+}
+
 /** Every demo, built under `out`, a scratch directory. */
 export function buildDemos(out: string): Demo[] {
   mkdirSync(out, { recursive: true });
-  return [bounce(out), orbit(), crowd(out), as3pbBench(out)];
+  return [bounce(out), orbit(), crowd(out), as3pbBench(out), mandel(out)];
 }

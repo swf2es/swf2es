@@ -160,6 +160,24 @@ function stringLoop(n:int):Number {
   return sum;
 }
 
+// A renderer's name-to-register table, and changing keys beyond the bounded cache.
+var registerNames:Array = [];
+var registers:Object = {};
+for (var register:int = 0; register < 1024; register++) {
+  var registerName:String = "register" + register;
+  registerNames.push(registerName);
+  registers[registerName] = {index: register};
+}
+
+function namesLoop(n:int, mask:int):Number {
+  var sum:Number = 0;
+  for (var k:int = 0; k < n; k++) {
+    var name:String = registerNames[k & mask];
+    sum += registers[name].index;
+  }
+  return sum;
+}
+
 function runAll(rounds:int):void {
   var t:uint = getTimer();
   var r1:Number = displayLoop(rounds);
@@ -176,7 +194,13 @@ function runAll(rounds:int):void {
   t = getTimer();
   var r5:Number = stringLoop(rounds * 20);
   trace("time: string " + (getTimer() - t));
-  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5);
+  t = getTimer();
+  var r6:Number = namesLoop(rounds * 40, 15);
+  trace("time: names " + (getTimer() - t));
+  t = getTimer();
+  var r7:Number = namesLoop(rounds * 40, 1023);
+  trace("time: churn " + (getTimer() - t));
+  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7);
 }
 
 runAll(20000);

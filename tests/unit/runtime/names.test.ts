@@ -4,9 +4,60 @@ import { AIR_API_VERSION, API_VERSION } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import {
   CONSTANT_MultinameL,
+  CONSTANT_MultinameLA,
   CONSTANT_RTQnameL,
   Multiname,
 } from "../../../packages/runtime/dist/avm2/names.js";
+import { NO_CACHE } from "../../../packages/runtime/dist/avm2/property-cache.js";
+
+test("repeated string names keep bindings, not values, and release them on invalidation", () => {
+  const rt = avm2.createRuntime();
+  const base = rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null);
+  const o = rt.objectTraits.instance();
+  const name = rt.runtimeName(base, "value");
+  rt.setProperty(o, name, 11);
+  assert.equal(rt.getProperty(o, rt.runtimeName(base, "value")), 11);
+  rt.setProperty(o, name, 23);
+  assert.equal(rt.getProperty(o, rt.runtimeName(base, "value")), 23);
+  assert.equal(rt.deleteProperty(o, name), true);
+  assert.equal(rt.getProperty(o, rt.runtimeName(base, "value")), undefined);
+  rt.forgetCaches();
+  assert.notEqual(rt.runtimeName(base, "value"), name);
+  assert.equal(rt.getProperty(o, rt.runtimeName(base, "value")), undefined);
+});
+
+test("distinct or long string keys do not create unbounded retained lookup caches", () => {
+  const rt = avm2.createRuntime();
+  const base = rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null);
+  const retained = [];
+  for (let i = 0; i < 1000; i++) {
+    const name = rt.runtimeName(base, `key${i}`);
+    if (name.cache !== NO_CACHE) {
+      retained.push(name);
+    }
+  }
+
+  assert.equal(retained.length, 64);
+  assert.equal(rt.runtimeName(base, "key0").cache, NO_CACHE);
+  assert.equal(rt.runtimeName(base, "x".repeat(129)).cache, NO_CACHE);
+  assert.equal(rt.runtimeName(base, 42).cache, NO_CACHE);
+  rt.forgetCaches();
+  assert.notEqual(rt.runtimeName(base, "key0").cache, NO_CACHE);
+});
+
+test("cached string names keep their template's namespace and attribute restrictions", () => {
+  const rt = avm2.createRuntime();
+  const o = rt.objectTraits.instance();
+  const publicBase = rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null);
+  rt.setProperty(o, rt.runtimeName(publicBase, "value"), 11);
+  const privateBase = rt.name([rt.privateNs("hidden")], [255], CONSTANT_MultinameL, [0], null);
+  const attributeBase = rt.name([avm2.publicNs], [255], CONSTANT_MultinameLA, [0], null);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(rt.getProperty(o, rt.runtimeName(publicBase, "value")), 11);
+    assert.throws(() => rt.getProperty(o, rt.runtimeName(privateBase, "value")));
+    assert.throws(() => rt.getProperty(o, rt.runtimeName(attributeBase, "value")));
+  }
+});
 
 test("indexed access respects namespaces and attributes, including resolved runtime namespaces", () => {
   const rt = avm2.createRuntime();

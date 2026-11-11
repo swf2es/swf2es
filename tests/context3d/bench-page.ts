@@ -136,7 +136,10 @@ export function bench(name: string, options: Options): Result {
     context.setTexture(slot, textures[0]);
   }
   const programs = Array.from(
-    { length: name === "programs" ? 8 : name === "attributes" ? 2 : 1 },
+    {
+      length:
+        name === "programs" || name === "program-materials" ? 8 : name === "attributes" ? 2 : 1,
+    },
     (_, i) => {
       const program = context.createProgram();
       const vertex = source[0].slice();
@@ -208,12 +211,23 @@ export function bench(name: string, options: Options): Result {
         context.setConstants("fragment", 0, material, 8);
       }
 
+      if (name === "uniforms-repeated" || name === "program-materials") {
+        if (name === "program-materials") {
+          for (let j = 0; j < material.length; j++) {
+            material[j] = 0.01 + (((i % programs.length) + j) % 64) / 1024;
+          }
+        }
+
+        context.setConstants("vertex", 0, matrix, 4);
+        context.setConstants("fragment", 0, material, 8);
+      }
+
       if (name === "indirect-changing") {
         material[0] = 0.01 + ((frame + i) % 64) / 1024;
         context.setConstants("vertex", 1, material, 1);
       }
 
-      if (name === "programs" || name === "attributes") {
+      if (name === "programs" || name === "program-materials" || name === "attributes") {
         context.setProgram(programs[i % programs.length]);
       }
       if (alternate) {
@@ -242,7 +256,12 @@ export function bench(name: string, options: Options): Result {
           break;
       }
 
-      context.draw(alternateIndices && i % 2 ? alternateIndices : indices, i * 3, 1);
+      if (name === "index-ranges") {
+        const triangles = Math.max(1, Math.min(64, Math.floor(options.draws / 8)));
+        context.draw(indices, (i % Math.min(8, options.draws)) * triangles * 3, triangles);
+      } else {
+        context.draw(alternateIndices && i % 2 ? alternateIndices : indices, i * 3, 1);
+      }
     }
 
     context.present();

@@ -683,6 +683,52 @@ function projectorAbc(projector: Uint8Array): Uint8Array {
 }
 
 /**
+ * Build a Crossbridge program as a SWF with the image's g++ (`gccArgs` its
+ * sources and arguments, -emit-swf among them), into <outDir>/<name>.swf,
+ * with g++'s output in <name>.log; reused, as runCrossbridge's projectors
+ * are, while its build key is unchanged. The SWF is null if it did not build.
+ */
+export function buildCrossbridgeSwf(
+  job: CrossbridgeJob,
+  outDir: string,
+  { engine = undefined as string | undefined } = {},
+): { swf: Uint8Array | null; log: string } {
+  mkdirSync(outDir, { recursive: true });
+  const out = rel(outDir);
+  if (out.startsWith("..")) {
+    throw new Error(`outDir must be inside ${root}`);
+  }
+
+  const swf = join(outDir, `${job.name}.swf`);
+  const log = join(outDir, `${job.name}.log`);
+  const key = keyOf("g++ swf", crossbridgeKey(job, `${out}/${job.name}.swf`));
+  if (!(stored(key, "log") && take(key, "swf", swf) && take(key, "log", log))) {
+    rmSync(swf, { force: true });
+    rmSync(log, { force: true });
+    const script = join(outDir, `${job.name}.sh`);
+    writeFileSync(
+      script,
+      `/opt/crossbridge/sdk/usr/bin/g++ ${job.gccArgs.join(" ")} -o "${out}/${job.name}.swf" > "${out}/${job.name}.log" 2>&1\n`,
+    );
+    const r = container(engine, [`${out}/${job.name}.sh`]);
+    if (r.status !== 0 && !existsSync(log)) {
+      throw new Error(`Oracle container failed (${r.status}): ${r.stderr}`);
+    }
+
+    // Only a build that succeeded is stored, its log last, so that with it the entry is whole.
+    if (existsSync(swf)) {
+      put(key, "swf", swf);
+      put(key, "log", log);
+    }
+  }
+
+  return {
+    swf: existsSync(swf) ? new Uint8Array(readFileSync(swf)) : null,
+    log: existsSync(log) ? readFileSync(log, "utf8") : "",
+  };
+}
+
+/**
  * Build each job with the image's gcc and run it, then take its ABC out of
  * the projector and dump it with abcdump, in two containers for the whole
  * batch. A projector whose build key (see crossbridgeKey) is unchanged is

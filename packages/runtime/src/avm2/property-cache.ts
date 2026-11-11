@@ -91,7 +91,7 @@ export function invalidate(): void {
   current++;
 }
 
-/** The cache of a name made at run time, used once: never filled. */
+/** The cache of a transient runtime name: never filled. */
 export const NO_CACHE = new PropertyCache();
 /** The cache of a module's name before its first lookup: filled with an entry of its own. */
 export const UNFILLED = new PropertyCache();

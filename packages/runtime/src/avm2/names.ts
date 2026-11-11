@@ -105,7 +105,7 @@ export class Multiname {
    * module's, or the one of the name it was made from; null for the root.
    */
   domain: Domain | null = null;
-  /** What its lookups found, for a module's name (property-cache.ts); a name made at run time keeps none. */
+  /** What its lookups found (property-cache.ts); transient runtime names keep none. */
   cache: PropertyCache = NO_CACHE;
   /**
    * The script that defines it, once found: the first definition of a name

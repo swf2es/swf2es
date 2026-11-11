@@ -13,6 +13,9 @@ export interface ShownStage {
   readonly bounds: { x: number; y: number; width: number; height: number };
 }
 
+/** The bit of PointerEvent.buttons for each PointerEvent.button: left, middle, right, back, forward. */
+const BUTTON_BITS = [1, 4, 2, 8, 16];
+
 /**
  * The mouse, touches and wheel on `canvas` to `player`'s stage, of which
  * the canvas shows `shown`; what undoes it. An event over the canvas
@@ -150,6 +153,14 @@ export function bindCanvasPointer(
       return;
     }
 
+    // A button pressed or let go while another is held comes as a move that names it, as
+    // pointer events chord buttons: a press or a release to the player.
+    if (e.button >= 0 && (inside || pressed.has(e.pointerId))) {
+      leaveNext = false;
+      send(e.buttons & BUTTON_BITS[e.button] ? "down" : "up", e);
+      return;
+    }
+
     if (inside || player.pointer?.captured) {
       leaveNext = false;
       send("move", e);
@@ -235,7 +246,16 @@ export function bindCanvasPointer(
     }
   };
 
+  // A middle press the SWF hears is its own, not the browser's scroll, which a mousedown starts.
+  // Over the stage only: a press in a letterbox's bars never reached the player.
+  const middle = (e: MouseEvent) => {
+    if (e.button === 1 && place(e)[4] && player.pointer?.taken(1)) {
+      e.preventDefault();
+    }
+  };
+
   page.addEventListener("pointermove", move);
+  canvas.addEventListener("mousedown", middle);
   canvas.addEventListener("pointerdown", down);
   page.addEventListener("pointerup", up);
   canvas.addEventListener("pointerleave", leave);
@@ -269,6 +289,7 @@ export function bindCanvasPointer(
     player.pointer?.flush();
     player.touch?.flush();
     page.removeEventListener("pointermove", move);
+    canvas.removeEventListener("mousedown", middle);
     canvas.removeEventListener("pointerdown", down);
     page.removeEventListener("pointerup", up);
     canvas.removeEventListener("pointerleave", leave);

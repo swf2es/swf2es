@@ -27,6 +27,14 @@ numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
 
+Runtime string names with fixed namespaces reuse at most 64 resolved names per
+module template, each at most 128 UTF-16 code units. These names share the normal
+property binding caches; values and prototype properties are still read afresh.
+After 64 consecutive misses on a full cache, that template stops probing the map
+until the next cache invalidation. Templates are weakly held, and invalidation
+discards their resolved names so retired domains are not kept by this cache.
+Runtime namespaces, object keys and numeric keys retain their transient path.
+
 The builtins' natives are in `natives/`, a file per
 family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
