@@ -10,9 +10,11 @@ how it all works.
 ```sh
 npm install @swf2es/web     # the element, for a page; it brings the rest
 npm install -g @swf2es/cli  # the swf2es command, for node
+npx @swf2es/desktop         # the desktop app, in Electron
 ```
 
-The packages are ES modules with no dependencies outside `@swf2es/*`.
+The packages are ES modules with no dependencies outside `@swf2es/*`, but
+for the desktop app's Electron.
 Each package's README says what it is for.
 
 ## From a CDN
@@ -258,22 +260,48 @@ sockets all run.
 
 ## Play a SWF on the desktop
 
-`apps/desktop` is an Electron app that plays local SWFs in a window,
-the `<swf2es-player>` element inside. Each SWF plays in the sandbox Flash
-Player gave a local SWF, by its UseNetwork bit: it reads the files beside
-it and reaches no network, or reaches the network, and sockets you allow,
-and reads no local file. Electron's binary is fetched once, apart from
-`pnpm install`:
+`@swf2es/desktop` is an Electron app that plays SWFs in a window, the
+`<swf2es-player>` element inside. With Node 22.18 or later, npm runs it
+with nothing to set up:
+
+```sh
+npx @swf2es/desktop movie.swf                       # a local SWF
+npx @swf2es/desktop https://example.com/movie.swf   # one by its URL
+npx @swf2es/desktop app.xml                         # an AIR application, by its descriptor
+npx @swf2es/desktop                                 # the window: File › Open, or drop a SWF or a descriptor on it
+```
+
+The first run downloads Electron's binary, about 100 MB, once. Installed
+(`npm install -g @swf2es/desktop`), the command is `swf2es-desktop`.
+
+Each SWF plays in the sandbox Flash Player gave it. A local SWF goes by its
+UseNetwork bit: it reads the files beside it and reaches no network, or
+reaches the network, and sockets you allow, and reads no local file. A SWF
+opened by its URL plays in Flash's remote sandbox. ActionScript 3 plays on
+the builtin.abc and playerglobal the player ships.
+
+| Option | What it does |
+| --- | --- |
+| `--trace` | Prints what the SWF traces to the terminal: `trace()` to stdout, warnings and errors to stderr. |
+| `--ignore-certificate-errors` | Does not verify any HTTPS server's certificate, for this run. |
+| `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
+| `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
+
+`--ignore-certificate-errors` is for a server of your own whose certificate
+it signed itself. Whoever sits between you and such a host can then read and
+change what the SWF loads from it, so name the hosts you mean, and leave the
+switch off otherwise. It is never remembered: the app says so on stderr each
+time it starts with it.
+
+In a checkout of the repository the app runs from its sources:
 
 ```sh
 pnpm build
-pnpm --filter @swf2es/desktop fetch-electron
-pnpm --filter @swf2es/desktop start movie.swf   # or File › Open, or drop a SWF on the window
+pnpm --filter @swf2es/desktop start movie.swf
 ```
 
-In a checkout the app takes builtin.abc from the avmplus submodule and
-plays on its own playerglobal; elsewhere the first ActionScript 3 SWF asks
-for builtin.abc, and the app remembers where it is. [apps/desktop/README.md](../apps/desktop/README.md) has the rest.
+[apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
+the sandboxes in full, sockets, files and AIR applications.
 
 ## Play an AIR application in a page
 
@@ -319,7 +347,7 @@ its descriptor on disk instead, with the real file system, sockets and the
 network, as adl runs one:
 
 ```sh
-pnpm --filter @swf2es/desktop start app.xml [root-dir] [-- arguments...]
+npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 ```
 
 The descriptor's first window's content SWF plays from `app:/`, at the

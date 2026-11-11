@@ -35,6 +35,7 @@ import {
   type Purpose,
   Refused,
   refererFor,
+  unverifiedHosts,
 } from "../../apps/desktop/src/main/network.ts";
 
 const PUBLIC = "127.0.0.2";
@@ -878,6 +879,37 @@ test("HTTPS: verified, and its policies' secure flag kept", async (t) => {
   // An HTTPS SWF reads its own, and another HTTPS site's under the default.
   net = await playing(`${secure}/movie.swf`, { ca: cert.toString() });
   assert.equal(await outcome(ask(net, `${secure}/data.txt`)), "secure/data.txt");
+
+  // --ignore-certificate-errors: a host named goes unverified, with no authority given, and
+  // no other does.
+  net = await playing(`${swf()}/movie.swf`, {
+    unverified: (host: string) => host === "secure.test",
+  });
+  assert.equal(await outcome(ask(net, `${secure}/image.png`, "content")), "secure/image.png");
+  net = await playing(`${swf()}/movie.swf`, {
+    unverified: (host: string) => host === "other.test",
+  });
+  assert.match(await outcome(ask(net, `${secure}/image.png`, "content")), /refused: .*certificate/);
+});
+
+test("--ignore-certificate-errors names every host, or those it lists, up to an application's own arguments", () => {
+  assert.equal(unverifiedHosts(["movie.swf", "--trace"]), null);
+  assert.deepEqual(unverifiedHosts(["--ignore-certificate-errors", "movie.swf"]), {
+    all: true,
+    hosts: [],
+  });
+  assert.deepEqual(
+    unverifiedHosts(["--ignore-certificate-errors=Dev.Test, localhost", "movie.swf"]),
+    { all: false, hosts: ["dev.test", "localhost"] },
+  );
+  // Named twice, both lists; named with nothing, no host rather than every one.
+  assert.deepEqual(
+    unverifiedHosts(["--ignore-certificate-errors=a.test", "--ignore-certificate-errors=b.test"]),
+    { all: false, hosts: ["a.test", "b.test"] },
+  );
+  assert.deepEqual(unverifiedHosts(["--ignore-certificate-errors="]), { all: false, hosts: [] });
+  // An AIR application's own arguments are not the app's.
+  assert.equal(unverifiedHosts(["app.xml", "--", "--ignore-certificate-errors"]), null);
 });
 
 /** A socket server on PUBLIC that answers a policy request with `policy`, if any, then closes. */

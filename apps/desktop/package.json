@@ -1,14 +1,41 @@
 {
   "name": "@swf2es/desktop",
-  "version": "0.0.0",
-  "private": true,
-  "description": "swf2es's desktop app: local SWFs in an Electron window",
+  "version": "0.1.14",
+  "description": "swf2es's desktop app: local and remote SWFs, and AIR applications, in an Electron window",
+  "keywords": [
+    "swf",
+    "flash",
+    "flash-player",
+    "actionscript",
+    "air",
+    "electron",
+    "desktop"
+  ],
+  "homepage": "https://swf2es.github.io/swf2es/",
+  "bugs": "https://github.com/swf2es/swf2es/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/swf2es/swf2es.git",
+    "directory": "apps/desktop"
+  },
   "license": "Apache-2.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
   "main": "dist/main/main.js",
+  "bin": {
+    "swf2es-desktop": "./dist/launch/launch.js"
+  },
+  "files": [
+    "dist",
+    "!dist/**/.tsbuildinfo",
+    "static",
+    "src"
+  ],
   "scripts": {
     "fetch-electron": "node node_modules/electron/install.js",
-    "start": "node launch.ts"
+    "start": "node dist/launch/launch.js"
   },
   "dependencies": {
     "@swf2es/codegen": "workspace:*",
@@ -16,9 +43,7 @@
     "@swf2es/format": "workspace:*",
     "@swf2es/player": "workspace:*",
     "@swf2es/player-hosts": "workspace:*",
-    "@swf2es/web": "workspace:*"
-  },
-  "devDependencies": {
+    "@swf2es/web": "workspace:*",
     "electron": "44.10.2"
   }
 }

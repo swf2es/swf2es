@@ -136,6 +136,12 @@ export interface NetworkOptions {
   classify?: (address: string) => AddressClass | null;
   /** The certificate authorities HTTPS trusts, in place of Node's and the system's. */
   ca?: string | string[];
+  /**
+   * Hosts whose HTTPS certificate is not verified: a server with one it
+   * signed itself, as a developer's own has (--ignore-certificate-errors).
+   * None by default.
+   */
+  unverified?: (host: string) => boolean;
   limits?: Partial<Limits>;
   /** Where a socket server keeps its master policy: 843. */
   socketPolicyPort?: number;
@@ -196,11 +202,42 @@ function defaultCa(): string[] | undefined {
   }
 }
 
+/**
+ * The hosts --ignore-certificate-errors names, of the app's arguments up to
+ * an AIR application's own after "--": null without the switch; with it
+ * alone, every host; with `=a.test,b.test`, those, whatever their case.
+ * A host is a name or an address, with no port: every port of it.
+ */
+export function unverifiedHosts(argv: string[]): { all: boolean; hosts: string[] } | null {
+  const end = argv.indexOf("--");
+  const own = end < 0 ? argv : argv.slice(0, end);
+  let named = false;
+  let all = false;
+  const hosts: string[] = [];
+  for (const arg of own) {
+    if (arg === "--ignore-certificate-errors") {
+      named = true;
+      all = true;
+    } else if (arg.startsWith("--ignore-certificate-errors=")) {
+      // The switch with nothing named ignores nothing, rather than everything by a slip.
+      named = true;
+      for (const host of arg.slice(arg.indexOf("=") + 1).split(",")) {
+        if (host.trim() !== "") {
+          hosts.push(host.trim().toLowerCase());
+        }
+      }
+    }
+  }
+
+  return named ? { all, hosts } : null;
+}
+
 export class Network {
   private readonly limits: Limits;
   private readonly resolveHost: (host: string) => Promise<string[]>;
   private readonly classify: (address: string) => AddressClass | null;
   private readonly ca: string | string[] | undefined;
+  private readonly unverified: (host: string) => boolean;
   private readonly socketPolicyPort: number;
   private session: Session | null = null;
   private running = 0;
@@ -214,6 +251,7 @@ export class Network {
         (await lookup(host, { all: true, verbatim: true })).map(({ address }) => address));
     this.classify = options.classify ?? addressClass;
     this.ca = options.ca ?? defaultCa();
+    this.unverified = options.unverified ?? (() => false);
     this.socketPolicyPort = options.socketPolicyPort ?? 843;
   }
 
@@ -859,6 +897,8 @@ export class Network {
             }
           },
           ...(https ? { servername: isIP(host) ? undefined : host, ca: this.ca } : {}),
+          // Only where the user asked for this host: its certificate goes unchecked.
+          ...(https && this.unverified(host) ? { rejectUnauthorized: false } : {}),
         });
       } catch (error) {
         // What check() let through and Node still refuses: a refusal like any other.

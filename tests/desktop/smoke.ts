@@ -22,7 +22,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { missing } from "../../apps/desktop/electron.ts";
+import { missing } from "../../apps/desktop/src/launch/electron.ts";
 import { cases } from "../player/cases.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";

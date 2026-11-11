@@ -1,10 +1,12 @@
-// Where Electron and the built app are, for launch.ts and the smoke test.
+// Where Electron and the built app are, for launch.ts and the tests: from the
+// checkout's src/launch or the package's dist/launch, the app two folders up.
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
+/** The app's folder: package.json, dist/ and static/. */
+export const appRoot = fileURLToPath(new URL("../../", import.meta.url));
 
 /**
  * The Electron binary, or null where `pnpm install` skipped its download.
@@ -14,7 +16,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
  */
 export function electronBinary(): string | null {
   try {
-    const root = dirname(createRequire(import.meta.url).resolve("electron/package.json"));
+    const root = electronPackage();
     const name = readFileSync(join(root, "path.txt"), "utf8");
     const path = join(root, "dist", name);
     return existsSync(path) ? path : null;
@@ -23,13 +25,18 @@ export function electronBinary(): string | null {
   }
 }
 
+/** The electron package's folder; throws where it is not installed. */
+export function electronPackage(): string {
+  return dirname(createRequire(import.meta.url).resolve("electron/package.json"));
+}
+
 /** Why the app cannot start yet, or null. */
 export function missing(): string | null {
   if (!electronBinary()) {
     return "Electron is not downloaded: run `pnpm --filter @swf2es/desktop fetch-electron` once.";
   }
 
-  if (!existsSync(`${here}dist/main/main.js`)) {
+  if (!existsSync(`${appRoot}dist/main/main.js`)) {
     return "The app is not built: run `pnpm build`.";
   }
 
