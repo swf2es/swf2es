@@ -138,6 +138,8 @@ export class MethodEmitter {
   constructsInPlace: bool = false;
   /** Whether the method being written has an entry for bound calls (see hasBoundEntry and boundEntry). */
   bound: bool = false;
+  /** The functions the method creates, in pairs with their scope chains' indices (BodyDecoder.claims). */
+  claims: u32[] = [];
   dxnsAt: u32 = 0;
   dxnsMarks: i32 = 0;
   /** The method's name in its own code, for running it again (see checkEntry). */
@@ -259,6 +261,7 @@ export class MethodEmitter {
     }
 
     out.text(") {\n");
+    this.claim(global - method);
     this.dxnsAt = out.length;
     this.dxnsMarks = this.map.count;
     this.entryName = entry;
@@ -422,6 +425,7 @@ export class MethodEmitter {
     }
 
     out.text(") {\n");
+    this.claim(global - method);
     out.text(this.entryCheck(this.argsTest));
     out.text(`return ${unchecked}.call(this`);
     for (let p: u32 = 1; p <= count; p++) {
@@ -430,6 +434,33 @@ export class MethodEmitter {
     }
 
     out.text(`);\n}\n${name}.$bound = ${unchecked};\nreturn ${name};\n}`);
+  }
+
+  /**
+   * The contested functions the method creates claimed, first thing, as
+   * avmplus verifies a method before it checks its arguments (Runtime.claim);
+   * `start` is the ABC's first method's domain-wide id.
+   */
+  claim(start: u32): void {
+    const traits = this.domain.traits;
+    const claims = this.claims;
+    for (let c = 0; c < claims.length; c += 2) {
+      const g = claims[c];
+      let seen = false;
+      for (let d = 0; d < c; d += 2) {
+        seen = seen || claims[d] === g;
+      }
+
+      if (seen || !traits.functionContested[g] || traits.functionMerged[g] === null) {
+        continue;
+      }
+
+      this.out.text("rt.claim(A, ");
+      this.out.uint(g - start);
+      this.out.text(", ");
+      this.out.uint(claims[c + 1]);
+      this.out.text(");\n");
+    }
   }
 
   /** The end of a method that sets the default XML namespace: its caller's back. */

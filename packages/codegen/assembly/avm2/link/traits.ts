@@ -77,6 +77,47 @@ export class Scope {
   withs: u8[] = [];
   extra: i32 = TYPE_Any;
 
+  /**
+   * The scope chains `scopes` merged, for a function created in each: as
+   * long as the shortest, each entry the type all have there; where they
+   * differ, or past the shortest, of no type and a with scope, which binds
+   * nothing early, so that a name found nowhere before it is looked up
+   * along whichever chain the function runs in rather than in the global
+   * object alone (properties.ts, findProperty).
+   */
+  static merged(scopes: Array<Scope>): Scope {
+    const first = scopes[0];
+    let size = first.size;
+    let extra = first.extra;
+    for (let s = 1; s < scopes.length; s++) {
+      size = min(size, scopes[s].size);
+      if (scopes[s].extra !== first.extra) {
+        extra = TYPE_Any;
+      }
+    }
+
+    const merged = new Scope();
+    merged.size = size;
+    merged.extra = extra;
+    for (let i: u32 = 0; i < size; i++) {
+      const type = first.types[i];
+      let withs = first.withs[i];
+      let differs = false;
+      for (let s = 1; s < scopes.length; s++) {
+        if (scopes[s].types[i] !== type || (i === size - 1 && scopes[s].size !== size)) {
+          differs = true;
+        }
+
+        withs |= scopes[s].withs[i];
+      }
+
+      merged.types.push(differs ? TYPE_Any : type);
+      merged.withs.push(differs ? 1 : withs);
+    }
+
+    return merged;
+  }
+
   /** As ScopeTypeChain::equals. */
   equals(other: Scope): bool {
     if (this.size !== other.size || this.extra !== other.extra) {
@@ -149,8 +190,18 @@ export class TraitsTable {
   methodFunction: u8[] = [];
   /** A function that takes extra arguments without a rest array, as avmplus' _ignoreRest. */
   ignoresRest: u8[] = [];
-  /** A function's scope chain, captured by newfunction. */
+  /** A function's scope chain, captured by newfunction: the first one. */
   functionScope: Array<Scope | null> = [];
+  /** Every scope chain a function was created in, the first first (see captureFunction). */
+  functionScopes: Array<Array<Scope> | null> = [];
+  /**
+   * Created in scope chains that differ by methods of their own, which
+   * avmplus verifies as each first runs: the first to run takes the
+   * function and the others fail. Verified and compiled in functionMerged.
+   */
+  functionContested: u8[] = [];
+  /** A contested function's scope chain: its creators' where they agree, of any type where not. */
+  functionMerged: Array<Scope | null> = [];
   signed: u8[] = [];
   returnType: i32[] = [];
   receiverType: i32[] = [];
@@ -219,7 +270,8 @@ export class TraitsTable {
   /** As MethodInfo::declaringScope: the scope chain method m runs in, or null if not yet known. */
   scopeOf(m: u32): Scope | null {
     if (this.methodFunction[m]) {
-      return this.functionScope[m];
+      const merged = this.functionContested[m] ? this.functionMerged[m] : null;
+      return merged !== null ? merged : this.functionScope[m];
     }
 
     const t = this.methodTraits[m];
@@ -234,6 +286,9 @@ export class TraitsTable {
       this.methodVirtual.push(0);
       this.methodFunction.push(0);
       this.functionScope.push(null);
+      this.functionScopes.push(null);
+      this.functionContested.push(0);
+      this.functionMerged.push(null);
       this.ignoresRest.push(0);
       this.signed.push(0);
       this.returnType.push(TYPE_Any);
@@ -250,6 +305,9 @@ export class TraitsTable {
     this.methodVirtual.length = count;
     this.methodFunction.length = count;
     this.functionScope.length = count;
+    this.functionScopes.length = count;
+    this.functionContested.length = count;
+    this.functionMerged.length = count;
     this.ignoresRest.length = count;
     this.signed.length = count;
     this.returnType.length = count;

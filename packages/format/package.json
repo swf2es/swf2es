@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/format",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "SWF, ABC and AVM1 action parsers shared by the compiler and the player",
   "keywords": [
     "swf",

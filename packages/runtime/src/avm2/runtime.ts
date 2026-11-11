@@ -467,6 +467,29 @@ export class Runtime {
     return this.modules.load(desc, this.loading, this.loadingBuiltin ? null : new Error());
   }
 
+  /**
+   * A creator of contested function `m` of `abc` claims it as it first runs,
+   * by its scope chain's index among those the function is created in (the
+   * codegen's captureFunction): the first claim stands, as avmplus' first
+   * verified creator gives the function its scope chain, and a creator in
+   * another fails as avmplus fails it, with VerifyError 1107, each time it is
+   * called. Called by compiled code.
+   */
+  claim(abc: Abc, m: number, scope: number): void {
+    let claims = abc.claims;
+    if (!claims) {
+      claims = new Map();
+      abc.claims = claims;
+    }
+
+    const claimed = claims.get(m);
+    if (claimed === undefined) {
+      claims.set(m, scope);
+    } else if (claimed !== scope) {
+      throw this.error("VerifyError", 1107);
+    }
+  }
+
   /** Run a module's entry point, its last script, as avmshell does. */
   run(abc: Abc): void {
     const scripts = abc.scriptStates;
@@ -625,6 +648,32 @@ export class Runtime {
 
   findPropertyStrict(mn: Multiname, outer: Scope, locals: Value[], withs: number): AsObject {
     return this.findProperty(mn, outer, locals, withs, true);
+  }
+
+  /**
+   * As MethodEnv::findproperty for a name the verifier found on no scope:
+   * the innermost of `locals` whose traits, as it is now, bind `mn`, else
+   * as findGlobal. A function's `this`, or a subclass instance, may bind
+   * what its type did not.
+   */
+  findLocal(mn: Multiname, locals: Value[], global: AsObject): AsObject {
+    for (let i = locals.length - 1; i >= 0; i--) {
+      if (this.traitsOf(locals[i]).find(mn) !== 0) {
+        return locals[i] as AsObject;
+      }
+    }
+
+    return this.global(mn, global, false);
+  }
+
+  findLocalStrict(mn: Multiname, locals: Value[], global: AsObject): AsObject {
+    for (let i = locals.length - 1; i >= 0; i--) {
+      if (this.traitsOf(locals[i]).find(mn) !== 0) {
+        return locals[i] as AsObject;
+      }
+    }
+
+    return this.global(mn, global, true);
   }
 
   findGlobal(mn: Multiname, global: AsObject): AsObject {
