@@ -248,6 +248,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(indices.exception, null, JSON.stringify(indices));
       assert.equal(indices.value?.passed, true);
       console.log("context3d: index reuse survives uploads, disposal and MSAA copies");
+      const pipeline = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.pipelineState())',
+      );
+      assert.equal(pipeline.exception, null, JSON.stringify(pipeline));
+      assert.equal(pipeline.value?.passed, true);
+      console.log("context3d: pipeline state survives clears, resize and MSAA copies");
       const uniforms = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.uniformUploads())',
       );

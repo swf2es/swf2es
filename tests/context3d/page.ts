@@ -13,6 +13,7 @@ export { indexBindings } from "./checks/indices.ts";
 export { lifetime } from "./checks/lifetime.ts";
 export { resourceLimits } from "./checks/limits.ts";
 export { multisampling, targetMultisampling } from "./checks/multisampling.ts";
+export { pipelineState } from "./checks/pipeline-state.ts";
 export { lifecycle, recovery, shaderFixture, triangle } from "./checks/playback.ts";
 export { indirectConstants, uniformUploads } from "./checks/shaders.ts";
 export { colorMasks, reconfiguration, stencil } from "./checks/state.ts";
