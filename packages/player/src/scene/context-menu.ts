@@ -45,6 +45,13 @@ export function bindContextMenu(
     }
 
     event.preventDefault();
+    // A right press the SWF heard is its own: no menu, Flash's or the browser's. Only the
+    // right button's menu over the stage, where the press reached the player: a touch's long
+    // press or the keyboard's still opens it.
+    if (!keyboard && event.button === 2 && player.pointer?.taken(2)) {
+      return;
+    }
+
     openMenus.get(document)?.();
     dismiss?.();
     const items = player.contextMenu({
