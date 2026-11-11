@@ -16,6 +16,7 @@ export { lifecycle, recovery, shaderFixture, triangle } from "./checks/playback.
 export { indirectConstants, uniformUploads } from "./checks/shaders.ts";
 export { colorMasks, reconfiguration, stencil } from "./checks/state.ts";
 export { cubeTargets, renderTargets } from "./checks/targets.ts";
+export { textureBindings } from "./checks/texture-bindings.ts";
 export { rectangleTextures, samplerStates, textureBytes } from "./checks/textures.ts";
 export { drawValidation } from "./checks/validation.ts";
 export { vertexBindings } from "./checks/vertices.ts";

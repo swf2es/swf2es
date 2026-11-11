@@ -230,6 +230,12 @@ if (!process.argv.includes("--build-only")) {
       console.log(
         "context3d: draw state survives readback, presentation, targets and program replacement",
       );
+      const textures = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.textureBindings())',
+      );
+      assert.equal(textures.exception, null, JSON.stringify(textures));
+      assert.equal(textures.value?.passed, true);
+      console.log("context3d: texture bindings survive uploads, cube switches and MSAA copies");
       const vertices = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.vertexBindings())',
       );

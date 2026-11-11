@@ -5,7 +5,12 @@ import type { Options, Result } from "./bench-results.ts";
 type Source = [type: number, index: number];
 
 /** AGAL operands use full xyzw masks and swizzles throughout this fixture. */
-function shaders(indirect: boolean, textured: boolean): [Uint8Array, Uint8Array] {
+function shaders(
+  indirect: boolean,
+  textured: boolean,
+  cube: boolean,
+  slot: number,
+): [Uint8Array, Uint8Array] {
   const make = (fragment: boolean) => {
     const ops: number[][] = [];
     const op = (code: number, dest: Source, a: Source, b?: Source) => {
@@ -19,7 +24,7 @@ function shaders(indirect: boolean, textured: boolean): [Uint8Array, Uint8Array]
       ]);
     };
     if (textured && fragment) {
-      op(0x28, [3, 0], [1, 0], [5, 3]);
+      op(0x28, [3, 0], [1, 0], [5, slot]);
     } else if (indirect) {
       if (fragment) {
         op(0, [3, 0], [4, 0]);
@@ -56,8 +61,8 @@ function shaders(indirect: boolean, textured: boolean): [Uint8Array, Uint8Array]
     }
 
     if (textured && fragment) {
-      view.setUint32(23, 3, true);
-      view.setUint32(27, 5, true);
+      view.setUint32(23, slot, true);
+      view.setUint32(27, cube ? 0x1005 : 5, true);
     }
 
     return bytes;
@@ -102,13 +107,26 @@ export function bench(name: string, options: Options): Result {
   context.setVertex(0, vertices, 0, "float4");
   const indirect = name.startsWith("indirect");
   const textured = name.startsWith("textures");
-  const source = shaders(indirect, textured);
-  const textures = textured ? [context.createTexture(4, 4), context.createTexture(4, 4)] : [];
+  const cube = name.includes("-cube");
+  const slot = name.endsWith("-zero") ? 0 : 3;
+  const source = shaders(indirect, textured, cube, slot);
+  const textures = textured
+    ? [context.createTexture(4, 4, cube), context.createTexture(4, 4, cube)]
+    : [];
+  const uploadedPixels = new Uint32Array(16).fill(0xff00ff00);
   for (let i = 0; i < textures.length; i++) {
-    textures[i].upload(new Uint32Array(16).fill(i === 0 ? 0xff00ff00 : 0xffff0000));
+    for (let face = 0; face < (cube ? 6 : 1); face++) {
+      for (let level = 0; level < (cube ? textures[i].levels : 1); level++) {
+        textures[i].upload(
+          new Uint32Array((4 >> level) ** 2).fill(i === 0 ? 0xff00ff00 : 0xffff0000),
+          level,
+          face,
+        );
+      }
+    }
   }
   if (textured) {
-    context.setTexture(3, textures[0]);
+    context.setTexture(slot, textures[0]);
   }
   const programs = Array.from(
     { length: name === "programs" ? 8 : name === "attributes" ? 2 : 1 },
@@ -187,8 +205,13 @@ export function bench(name: string, options: Options): Result {
         context.setVertex(0, i % 2 === 0 ? vertices : alternate, i % 2 === 0 ? 0 : 4, "float4");
       }
 
-      if (name === "textures-changing") {
-        context.setTexture(3, textures[i % textures.length]);
+      if (name === "textures-changing" || name === "textures-cube-changing") {
+        context.setTexture(slot, textures[i % textures.length]);
+      }
+
+      if (name.startsWith("textures-uploading")) {
+        uploadedPixels.fill(i % 2 === 0 ? 0xff00ff00 : 0xffff0000);
+        textures[0].upload(uploadedPixels);
       }
 
       if (target && i % 64 === 0) {
