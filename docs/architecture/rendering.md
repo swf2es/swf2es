@@ -565,8 +565,15 @@ coloured bars measured to the pixel:
   fraction under 16). Turned, skewed or mirrored, it scales as ever.
 - Only vertices move, curves' control points too: a triangle's long side
   across the regions stays straight, a quadratic from 0 to 40 under a grid
-  at 20 bends to its moved end, and a fill's gradient or bitmap stretches
-  as ever. A line is as wide as the owner's parent's transform makes it,
+  at 20 bends to its moved end. A fill's gradient or bitmap goes with the
+  fill, all that one `beginFill` to its `endFill` draws: from the box
+  around its points to that box as sliced. So a fill inside one region
+  goes as the region does, and a panel drawn as nine bitmap fills, one a
+  region, keeps its corners' bitmap their size and stretches its edges'
+  one way, pixel for pixel as adl draws it (the `scale9-fills` case); one
+  fill of nine rectangles, or one over all the regions, is stretched
+  whole, as unsliced; and one over two regions is stretched over both
+  alike. A line is as wide as the owner's parent's transform makes it,
   for every scale mode, times a `Shape` child's own scale: a 2 pixel line
   in a child scaled 2 is 4 wide whatever the owner's scale.
 - A grid not strictly inside those bounds both ways, as they are when it

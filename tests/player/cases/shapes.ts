@@ -1282,6 +1282,18 @@ export const shapeCases: PlayerCase[] = [
     maxOutliers: 800,
   },
   {
+    // Bitmap fills in 9-slice panels (scripts/Scale9Fills.as): a fill's bitmap goes with its
+    // fill, so a panel of nine fills keeps its corners, and one fill over them all is stretched
+    // whole. Exact: the bitmaps are not smoothed and the edges are on whole pixels.
+    name: "scale9-fills",
+    swf: (abc) => bare(abc, 1, "Scale9Fills", 400, 200),
+    script: "Scale9Fills",
+    frames: 2,
+    capture: [2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "scale9",
     swf: scale9,
     script: "Scale9",
