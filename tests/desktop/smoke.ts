@@ -22,7 +22,7 @@ import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { missing } from "../../apps/desktop/electron.ts";
+import { missing } from "../../apps/desktop/src/launch/electron.ts";
 import { cases } from "../player/cases.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
@@ -496,6 +496,56 @@ async function air(): Promise<void> {
         "air: app beside",
         "air: file outside",
         "air: socket pong",
+      ]) {
+        assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
+      }
+    },
+  );
+
+  // Its descriptor dropped on the window runs it too, with no arguments, from its own
+  // directory. One that has run before, as the recent list has it, is not asked about again:
+  // a prompt cannot be answered here.
+  const descriptor = `${app}AirSmoke-app.xml`;
+  await withApp(
+    { ...both, recent: [descriptor], sockets: {} },
+    [],
+    async ({ stdout, until, evaluate, devtools }) => {
+      // Nothing plays yet to say the page listens for a drop.
+      let ready = false;
+      const poll = setInterval(() => {
+        void evaluate<boolean>(`document.readyState === "complete"`).then(
+          (complete) => {
+            ready = complete;
+          },
+          () => {},
+        );
+      }, 100);
+      try {
+        await until("the app's page", () => ready);
+      } finally {
+        clearInterval(poll);
+      }
+
+      for (const type of ["dragEnter", "dragOver", "drop"]) {
+        await devtools.send("Input.dispatchDragEvent", {
+          type,
+          x: 100,
+          y: 100,
+          data: { items: [], files: [descriptor], dragOperationsMask: 1 },
+        });
+      }
+
+      await until("the dropped AIR application", () =>
+        ["app", "file"].every((what) => stdout.some((l) => l.startsWith(`air: ${what} `))),
+      );
+      for (const line of [
+        "air: url app:/AirSmoke.swf",
+        "air: sandbox application",
+        "air: title Air Smoke",
+        "air: invoke  true",
+        "air: stream beside",
+        "air: app beside",
+        "air: file outside",
       ]) {
         assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
       }

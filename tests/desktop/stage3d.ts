@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { missing } from "../../apps/desktop/electron.ts";
+import { missing } from "../../apps/desktop/src/launch/electron.ts";
 import { bare } from "../player/cases.ts";
 import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";

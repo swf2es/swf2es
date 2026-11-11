@@ -119,8 +119,10 @@ node tests/web/cdn.ts               # that folder served as a CDN serves it, fro
                               # pages that load it by one <script> tag under a CSP: AS3, AVM1 and
                               # Flash Workers on an isolated page in Chrome (part of pnpm test)
 pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once; pnpm install skips it
-pnpm --filter @swf2es/desktop start [--trace] [file.swf]   # the desktop app (apps/desktop);
-                              # --trace prints the SWF's trace() to the terminal
+pnpm --filter @swf2es/desktop start [--trace] [file.swf]   # the desktop app (apps/desktop), which
+                              # npm has as @swf2es/desktop (npx @swf2es/desktop file.swf);
+                              # --trace prints the SWF's trace() to the terminal,
+                              # --ignore-certificate-errors[=host,...] leaves HTTPS unverified
 pnpm --filter @swf2es/site build   # the site (apps/site: Astro + Starlight; home, player at
                               # play/, the guide from docs/guide.md at docs/, licences) into
                               # apps/site/dist/site/, as GitHub Pages serves it (after pnpm

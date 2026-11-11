@@ -10,6 +10,7 @@ const std = @import("std");
 // zlib.h, LzmaEnc.h and LzmaDec.h, as build.zig translates them.
 const c = @import("c");
 const png = @import("png.zig");
+const jpeg = @import("jpeg.zig");
 
 pub const panic = std.debug.no_panic;
 
@@ -273,6 +274,46 @@ export fn pngEncode(input: usize, width: usize, height: usize, channels: usize, 
     }
 
     return finish(out, @intFromPtr(s.next_out) - out, width * height * 4, DONE);
+}
+
+/// A JPEG file of the `width` by `height` pixels at `input`, ARGB, their alpha left out, at
+/// `quality`, 0 to 100, as Flash writes one (jpeg.zig): CORRUPT for a size a JPEG cannot hold
+/// or a quality past 100. Sixteen rows of pixels are encoded at a time, the output grown
+/// where it is whenever the next sixteen might not fit.
+export fn jpegEncode(input: usize, width: usize, height: usize, quality: u32) i32 {
+    const size = jpeg.scratchSize(width);
+    const scratch = alloc(size);
+    if (scratch == 0) {
+        return NO_MEMORY;
+    }
+
+    var encoder = jpeg.Encoder.init(width, height, quality, @as([*]u8, @ptrFromInt(scratch))[0..size]) orelse return CORRUPT;
+    const bound = encoder.rowBound();
+    // A bit a pixel to begin with, past what the next rows may take at their worst.
+    var capacity: usize = jpeg.header_bound + jpeg.finish_bound + bound + (width *| height) / 8;
+    const out = alloc(capacity);
+    if (out == 0) {
+        return NO_MEMORY;
+    }
+
+    const bytes: [*]u8 = @ptrFromInt(out);
+    const pixels = @as([*]const u32, @ptrFromInt(input))[0 .. width * height];
+    var at = encoder.header(bytes[0..capacity]);
+    for (0..encoder.rows) |my| {
+        if (capacity - at < bound + jpeg.finish_bound) {
+            const grown = @max(capacity *| 2, at + bound + jpeg.finish_bound);
+            if (!extend(out, grown)) {
+                return NO_MEMORY;
+            }
+
+            capacity = grown;
+        }
+
+        at += encoder.row(pixels, my, bytes[at..capacity]);
+    }
+
+    at += encoder.finish(bytes[at..capacity]);
+    return finish(out, at, width *| height *| 4, DONE);
 }
 
 /// Deflate `length` bytes at `input` at `level`, as a zlib stream

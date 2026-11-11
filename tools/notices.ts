@@ -32,6 +32,19 @@ export const PUBLIC_PACKAGES = [
 ];
 
 /**
+ * The apps published to npm beside them, by their folders under apps/: the
+ * desktop app, which holds no code from elsewhere and bundles no package,
+ * so that its licence is the repository's alone.
+ */
+export const PUBLIC_APPS = ["desktop"];
+
+/** Every published package's folder in the repository: what a release versions, packs and publishes. */
+export const PUBLISHED = [
+  ...PUBLIC_PACKAGES.map((name) => `packages/${name}`),
+  ...PUBLIC_APPS.map((name) => `apps/${name}`),
+];
+
+/**
  * The packages whose modules player-hosts copies into dist/thread/ for its
  * Web Workers (build-thread.ts): it carries their notices too.
  */
@@ -339,6 +352,10 @@ export function expected(): Map<string, string> {
     }
   }
 
+  for (const name of PUBLIC_APPS) {
+    files.set(`apps/${name}/LICENSE`, license);
+  }
+
   return files;
 }
 
@@ -367,6 +384,21 @@ if (import.meta.main) {
       writeFileSync(path, text.replace(/"license": "[^"]*"/, `"license": "${spdx(name)}"`));
     } else {
       console.error(`packages/${name}/package.json's license is not ${spdx(name)}`);
+      stale++;
+    }
+  }
+
+  for (const name of PUBLIC_APPS) {
+    const path = join(root, `apps/${name}/package.json`);
+    const text = readFileSync(path, "utf8");
+    if (JSON.parse(text).license === "Apache-2.0") {
+      continue;
+    }
+
+    if (update) {
+      writeFileSync(path, text.replace(/"license": "[^"]*"/, '"license": "Apache-2.0"'));
+    } else {
+      console.error(`apps/${name}/package.json's license is not Apache-2.0`);
       stale++;
     }
   }
