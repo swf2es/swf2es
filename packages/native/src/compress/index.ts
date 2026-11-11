@@ -17,6 +17,14 @@ interface Exports {
   errorMessage(): number;
   inflateData(input: number, length: number, windowBits: number, limit: number): number;
   deflateData(input: number, length: number, level: number, windowBits: number): number;
+  pngEncode(
+    input: number,
+    width: number,
+    height: number,
+    channels: number,
+    level: number,
+    filter: number,
+  ): number;
   lzmaDecode(properties: number, input: number, length: number, size: number): number;
   lzmaEncode(input: number, length: number): number;
 }
@@ -158,6 +166,40 @@ export function deflate(data: Uint8Array, level: number, raw: boolean): Uint8Arr
         : output(x, 0);
     if (bytes === null) {
       throw new RangeError(`no memory to deflate ${data.length} bytes`);
+    }
+
+    return bytes;
+  });
+}
+
+/**
+ * A PNG's IDAT stream, a zlib stream at `level`, of `width` by `height`
+ * pixels, premultiplied ARGB as a BitmapData keeps them, as RGBA (4
+ * `channels`) or RGB (3). One pass in the module (png.zig): each row is
+ * made PNG's bytes, its colours divided out of alpha as Flash's encoder
+ * does; with `filter`, given the filter of PNG's five whose output sums
+ * smallest, sixteen bytes at a time, and otherwise none; and deflated.
+ */
+export function pngEncode(
+  pixels: Uint32Array,
+  width: number,
+  height: number,
+  channels: 3 | 4,
+  level: number,
+  filter: boolean,
+): Uint8Array {
+  if (pixels.length !== width * height) {
+    throw new RangeError(`${pixels.length} pixels are no ${width} by ${height}`);
+  }
+
+  return call((x) => {
+    const at = input(x, new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength));
+    const bytes =
+      at === 0 || x.pngEncode(at, width, height, channels, level, filter ? 1 : 0) !== DONE
+        ? null
+        : output(x, 0);
+    if (bytes === null) {
+      throw new RangeError(`no memory to encode ${width} by ${height} pixels as a PNG`);
     }
 
     return bytes;

@@ -371,25 +371,30 @@ export class Runtime {
     return new TypeName(base, [param]);
   }
 
-  /** A multiname with its runtime namespace and name, from the stack. */
-  runtimeName(mn: Multiname, ...parts: Value[]): Multiname {
+  /**
+   * A multiname with its runtime namespace and name, from the stack: `a`
+   * the namespace where it has one at run time, and then `b` the name,
+   * else `a` the name. Two parameters, not a rest: a lookup by a name made
+   * at run time calls this each time, and a rest is an array each call.
+   */
+  runtimeName(mn: Multiname, a?: Value, b?: Value): Multiname {
     if (
       !mn.runtimeNs &&
       mn.runtimeName &&
       mn.cache !== NO_CACHE &&
-      typeof parts[0] === "string" &&
-      parts[0].length <= 128
+      typeof a === "string" &&
+      a.length <= 128
     ) {
-      return this.stringName(mn, parts[0]);
+      return this.stringName(mn, a);
     }
 
     let namespaces: readonly (Namespace | null)[] = mn.namespaces;
     let versions = mn.versions;
-    let k = 0;
+    let last = a;
     if (mn.runtimeNs) {
-      const ns = parts[k++];
-      namespaces = [this.namespaceOf(ns)];
+      namespaces = [this.namespaceOf(a)];
       versions = [255];
+      last = b;
     }
 
     const kind =
@@ -401,7 +406,7 @@ export class Runtime {
         : mn.kind;
     let name = mn.name;
     if (mn.runtimeName) {
-      const part = parts[k];
+      const part = last;
       if (part?.$local !== undefined && !(part instanceof Namespace)) {
         // A Proxy's QName of a multiname names its namespaces still.
         if (part.$mn) {
@@ -1102,8 +1107,22 @@ export class Runtime {
       }
 
       const a: Value[] | undefined = o.$a;
-      if (a !== undefined && i in a) {
-        return a[i];
+      if (a !== undefined) {
+        if (i in a) {
+          return a[i];
+        }
+      } else if (traits?.dynamic && traits.properties === null && !traits.refusesNames) {
+        // As ScriptObject::getUintProperty: an object with no elements of its own looks the
+        // number up among its dynamic properties first, with no binding asked for; a table
+        // keyed by numbers, as a Dictionary of handles, is read so on every access. One not
+        // there, or there as undefined, is looked up in full.
+        const d: Map<string, Value> | null | undefined = o.$d;
+        if (d) {
+          const v = d.get(`${i}`);
+          if (v !== undefined) {
+            return v;
+          }
+        }
       }
     }
 
