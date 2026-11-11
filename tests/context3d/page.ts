@@ -17,3 +17,4 @@ export { colorMasks, reconfiguration, stencil } from "./checks/state.ts";
 export { cubeTargets, renderTargets } from "./checks/targets.ts";
 export { rectangleTextures, samplerStates, textureBytes } from "./checks/textures.ts";
 export { drawValidation } from "./checks/validation.ts";
+export { vertexBindings } from "./checks/vertices.ts";

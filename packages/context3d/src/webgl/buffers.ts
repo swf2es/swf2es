@@ -19,6 +19,8 @@ export interface VertexBinding {
   size: number;
   packed: boolean;
   valid: boolean;
+  /** Layout stored in the owned VAO, independent of whether this attribute is enabled. */
+  applied: boolean;
   checkedIndex: BufferState | null;
   checkedIndexVersion: number;
   checkedVertexVersion: number;

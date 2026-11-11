@@ -26,9 +26,12 @@ frame so instrumentation does not affect timing. These are backend measurements,
 not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShader.
 `--draws`, `--frames` and `--samples` control the workload; `--only` selects a
 comma-separated subset of `static`, `transform`, `material`, `all-changing`,
-`programs`, `targets`, `indirect` and `indirect-changing`. The controls include
+`programs`, `bindings`, `attributes`, `targets`, `indirect` and `indirect-changing`.
+The controls include
 unchanged constants, all registers changing, program/target switches and indirect
-vertex addressing. Every frame checks GL errors and context loss. Results are
+vertex addressing. `bindings` switches buffers, strides and offsets every draw;
+`attributes` switches programs with different active vertex inputs. Every frame
+checks GL errors and context loss. Results are
 JSON on stdout; progress goes to stderr.
 
 `page.ts` retains the browser runners' exports and routes them to `checks/`.

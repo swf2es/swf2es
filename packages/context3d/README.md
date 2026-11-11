@@ -219,6 +219,11 @@ include the vertex version. Uploads, changed ranges/bindings and disposal
 invalidate the relevant records. Warm draws add no validation arrays or GPU
 handles.
 
+The owned VAO keeps each vertex layout until its buffer, offset or format changes.
+Program switches enable and disable only attributes whose use changes. Buffer
+uploads keep the layouts but still invalidate draw validation; every draw checks
+its current bindings and uploaded ranges. This adds no VAOs or GPU buffers.
+
 Each linked program remembers the write versions last uploaded for its constants.
 Draws upload only active registers written since that program's preceding draw;
 indirectly addressed vertex constants are uploaded as one bank after a write.

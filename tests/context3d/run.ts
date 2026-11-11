@@ -222,6 +222,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(reconfiguration.exception, null, JSON.stringify(reconfiguration));
       assert.equal(reconfiguration.value?.passed, true);
       console.log("context3d: unchanged back buffers reuse resources and preserve pixels");
+      const vertices = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.vertexBindings())',
+      );
+      assert.equal(vertices.exception, null, JSON.stringify(vertices));
+      assert.equal(vertices.value?.passed, true);
+      console.log("context3d: vertex reuse preserves layouts, program switches and validation");
       const uniforms = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.uniformUploads())',
       );

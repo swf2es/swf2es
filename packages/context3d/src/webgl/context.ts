@@ -108,6 +108,7 @@ export class WebGLContext3D implements Context3D {
   private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
   private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
+  private enabledAttributes = 0;
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
@@ -698,6 +699,7 @@ export class WebGLContext3D implements Context3D {
       handle: null,
       targetY: null,
       attributes: [],
+      attributeMask: 0,
       vertex: [],
       vertexBank: null,
       fragment: [],
@@ -731,6 +733,7 @@ export class WebGLContext3D implements Context3D {
         state.handle = null;
         state.targetY = null;
         state.attributes.length = 0;
+        state.attributeMask = 0;
         state.vertex.length = 0;
         state.vertexBank = null;
         state.fragment.length = 0;
@@ -1516,6 +1519,15 @@ export class WebGLContext3D implements Context3D {
     const valid = offset >= 0 && offset <= buffer.stride - (packed ? 1 : size);
     const previous = this.vertices[index];
     if (previous) {
+      if (
+        previous.buffer !== buffer ||
+        previous.offset !== offset ||
+        previous.size !== size ||
+        previous.packed !== packed
+      ) {
+        previous.applied = false;
+      }
+
       if (previous.buffer !== buffer) {
         previous.checkedIndex = null;
       }
@@ -1531,6 +1543,7 @@ export class WebGLContext3D implements Context3D {
         size,
         packed,
         valid,
+        applied: false,
         checkedIndex: null,
         checkedIndexVersion: -1,
         checkedVertexVersion: -1,
@@ -1609,7 +1622,11 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     gl.bindVertexArray(this.vao);
     for (let i = 0; i < 8; i++) {
-      gl.disableVertexAttribArray(i);
+      const bit = 1 << i;
+      if (this.enabledAttributes & bit & ~state.attributeMask) {
+        gl.disableVertexAttribArray(i);
+        this.enabledAttributes &= ~bit;
+      }
     }
 
     for (let i = 0; i < state.attributes.length; i++) {
@@ -1626,16 +1643,24 @@ export class WebGLContext3D implements Context3D {
 
       validateVertices(buffer, index, binding, first, count, maximum);
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffer.handle);
-      gl.enableVertexAttribArray(slot);
-      gl.vertexAttribPointer(
-        slot,
-        binding.size,
-        binding.packed ? gl.UNSIGNED_BYTE : gl.FLOAT,
-        binding.packed,
-        binding.buffer.stride * 4,
-        binding.offset * 4,
-      );
+      if (!binding.applied) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer.handle);
+        gl.vertexAttribPointer(
+          slot,
+          binding.size,
+          binding.packed ? gl.UNSIGNED_BYTE : gl.FLOAT,
+          binding.packed,
+          binding.buffer.stride * 4,
+          binding.offset * 4,
+        );
+        binding.applied = true;
+      }
+
+      const bit = 1 << slot;
+      if (!(this.enabledAttributes & bit)) {
+        gl.enableVertexAttribArray(slot);
+        this.enabledAttributes |= bit;
+      }
     }
 
     gl.useProgram(state.handle);
