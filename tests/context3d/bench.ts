@@ -39,6 +39,8 @@ const names = [
   "transform",
   "material",
   "all-changing",
+  "uniforms-repeated",
+  "program-materials",
   "programs",
   "bindings",
   "attributes",

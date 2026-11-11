@@ -47,9 +47,15 @@ export async function uniformUploads() {
     draw(1, "ffff0000");
     c.setProgram(first);
     draw(0, "ffff0000");
+    c.setProgram(second);
+    c.setConstants("fragment", 0, green, 1);
+    draw(1, "ff00ff00");
+    c.setProgram(first);
+    c.setConstants("fragment", 0, red, 1);
+    draw(0, "ffff0000");
     second.upload(vertex, sparse);
     c.setConstants("fragment", 0, red, 1);
-    draw(1, "ffff0000");
+    draw(0, "ffff0000");
     c.setConstants("fragment", 9, green, 1);
     draw(0, "ffff0000");
     c.setProgram(second);
@@ -72,20 +78,31 @@ export async function uniformUploads() {
     c.configure(64, 64);
     draw(0, "ff00ff00");
 
-    // Every explicit write reaches GL, including equal values and the sign of zero.
+    // Equal float32 bits need no upload; the sign of zero and NaN payloads still matter.
     c.setConstants("fragment", 0, [-0, 1, 0, 1], 1);
     draw(1, "ff00ff00");
     c.setConstants("fragment", 0, [-0, 1, 0, 1], 1);
-    draw(1, "ff00ff00");
+    draw(0, "ff00ff00");
     c.setConstants("fragment", 0, [0, 1, 0, 1], 1);
     draw(1, "ff00ff00");
     c.setConstants("fragment", 0, [Number.NaN, 1, 0, 1], 1);
     draw(1);
     draw(0);
+    c.setConstants("fragment", 0, [Number.NaN, 1, 0, 1], 1);
+    draw(0);
+    const payloads = new Uint32Array([0x7fc00001, 0x3f800000, 0, 0x3f800000]);
+    const nan = new Float32Array(payloads.buffer);
+    c.setConstants("fragment", 0, nan, 1);
+    draw(1);
+    c.setConstants("fragment", 0, nan, 1);
+    draw(0);
+    payloads[0] = 0x7fc00002;
+    c.setConstants("fragment", 0, nan, 1);
+    draw(1);
     c.setConstants("fragment", 0, [1 + 2 ** -30, 0, 0, 1], 1);
     draw(1, "ffff0000");
     c.setConstants("fragment", 0, red, 1);
-    draw(1, "ffff0000");
+    draw(0, "ffff0000");
 
     // The public ArrayLike setter can fail after earlier components were already written.
     rejects(() =>
@@ -129,6 +146,11 @@ export async function uniformUploads() {
     );
     draw(1, "ff00ff00");
     draw(0, "ff00ff00");
+    const unwritten = fragment.slice();
+    new DataView(unwritten.buffer).setUint32(15, 0xe400001b, true);
+    first.upload(vertex, unwritten);
+    draw(1);
+    draw(0);
     check(gl.getError() === gl.NO_ERROR, "uniform reuse polluted GL state");
 
     return { passed: true };
