@@ -529,7 +529,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text("rt.newFunction(F[");
       out.uint(a);
       out.text("], ");
-      scopeHere(em);
+      functionScope(em, a);
       // Its method's id, as avmplus writes a function as [object Function-id].
       out.text(", ");
       out.uint(a);
@@ -759,6 +759,28 @@ function localScopes(em: MethodEmitter): void {
 
   out.text("], ");
   out.uint(withs);
+}
+
+/**
+ * The scope chain function `m` of the ABC, created here, runs in: for a
+ * contested function whose creators' chains differ in length, this one's
+ * past those they share packed into the one entry it was compiled with
+ * (Scope.merged).
+ */
+function functionScope(em: MethodEmitter, m: u32): void {
+  const traits = em.domain.traits;
+  const g = em.domain.methodStart[em.index] + m;
+  const merged = traits.functionContested[g] ? traits.functionMerged[g] : null;
+  if (merged === null || merged.pack < 0) {
+    scopeHere(em);
+    return;
+  }
+
+  em.out.text("rt.packScope(");
+  scopeHere(em);
+  em.out.text(", ");
+  em.out.uint(<u32>merged.pack);
+  em.out.text(")");
 }
 
 /** The scope chain a function or class created here runs in. */

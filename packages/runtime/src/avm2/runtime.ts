@@ -141,6 +141,18 @@ export { NOT_FOUND } from "./descriptors.js";
  */
 export const SEALED_ELEMENTS: Value[] = Object.freeze([]) as unknown as Value[];
 
+/**
+ * The scopes a contested function's chain has past those all its creators'
+ * chains share, in one entry of the chain (Runtime.packScope): `w` has a bit
+ * for each that is a with scope, as a Scope's has.
+ */
+class ScopePack {
+  constructor(
+    readonly scopes: Value[],
+    readonly w: number,
+  ) {}
+}
+
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
@@ -658,6 +670,21 @@ export class Runtime {
   }
 
   /**
+   * `chain` for a contested function whose creators' chains differ in
+   * length (the codegen's Scope.merged): its first `at` entries, which all
+   * of them have, then one entry holding the rest, a ScopePack, searched in
+   * its place. The function's chain is then as long whichever creator made
+   * it, and what it creates finds its own scopes where it was compiled to.
+   * Called by compiled code.
+   */
+  packScope(chain: Scope, at: number): Scope {
+    const packed = chain.slice(0, at) as Scope;
+    packed.push(new ScopePack(chain.slice(at), chain.w >>> at) as never);
+    packed.w = (chain.w & ((1 << at) - 1)) | (1 << at);
+    return packed;
+  }
+
+  /**
    * The global object of the script that defines `mn`, run first if it has
    * not run. A module reads `mn.global` before calling this: once set it
    * stays right, as the defining script never changes and initScript
@@ -693,8 +720,14 @@ export class Runtime {
     }
 
     for (let i = outer.length - 1; i >= 0; i--) {
-      if (this.scopeHas(outer[i], mn, (outer.w >> i) & 1)) {
-        return outer[i];
+      const o = outer[i];
+      if (o instanceof ScopePack) {
+        const found = this.packHas(o, mn);
+        if (found !== undefined) {
+          return found;
+        }
+      } else if (this.scopeHas(o, mn, (outer.w >> i) & 1)) {
+        return o;
       }
     }
 
@@ -756,6 +789,23 @@ export class Runtime {
     }
 
     return global;
+  }
+
+  /** The innermost scope of a pack that has `mn`, a pack in it searched in turn; undefined if none has. */
+  private packHas(pack: ScopePack, mn: Multiname): AsObject | undefined {
+    for (let i = pack.scopes.length - 1; i >= 0; i--) {
+      const o = pack.scopes[i];
+      if (o instanceof ScopePack) {
+        const found = this.packHas(o, mn);
+        if (found !== undefined) {
+          return found;
+        }
+      } else if (this.scopeHas(o as AsObject, mn, (pack.w >> i) & 1)) {
+        return o as AsObject;
+      }
+    }
+
+    return undefined;
   }
 
   private scopeHas(o: AsObject, mn: Multiname, isWith: number): boolean {

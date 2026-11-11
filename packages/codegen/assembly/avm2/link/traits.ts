@@ -78,18 +78,33 @@ export class Scope {
   extra: i32 = TYPE_Any;
 
   /**
-   * The scope chains `scopes` merged, for a function created in each: as
-   * long as the shortest, each entry the type all have there; where they
-   * differ, or past the shortest, of no type and a with scope, which binds
-   * nothing early, so that a name found nowhere before it is looked up
-   * along whichever chain the function runs in rather than in the global
-   * object alone (properties.ts, findProperty).
+   * Where a contested function's creators' chains differ in length (merged):
+   * how many entries they share, the index of the one entry after them that
+   * stands for the rest of whichever chain the function runs in; else -1.
+   */
+  pack: i32 = -1;
+
+  /**
+   * The scope chains `scopes` merged, for a function created in each: the
+   * entries of the shortest, each the type all have there; where they
+   * differ, of no type and a with scope, which binds nothing early, so that
+   * a name found nowhere before it is looked up along whichever chain the
+   * function runs in rather than in the global object alone (properties.ts,
+   * findProperty).
+   *
+   * Chains of different lengths get one more such entry, the pack: what the
+   * chain the function runs in has past the shortest is put into it at run
+   * time (Runtime.packScope) and searched there. The function's chain is
+   * then as long whichever creator made it, so that what it creates in
+   * turn finds its own scopes where it was compiled to.
    */
   static merged(scopes: Array<Scope>): Scope {
     const first = scopes[0];
     let size = first.size;
     let extra = first.extra;
+    let uneven = false;
     for (let s = 1; s < scopes.length; s++) {
+      uneven = uneven || scopes[s].size !== first.size;
       size = min(size, scopes[s].size);
       if (scopes[s].extra !== first.extra) {
         extra = TYPE_Any;
@@ -97,14 +112,13 @@ export class Scope {
     }
 
     const merged = new Scope();
-    merged.size = size;
     merged.extra = extra;
     for (let i: u32 = 0; i < size; i++) {
       const type = first.types[i];
       let withs = first.withs[i];
       let differs = false;
       for (let s = 1; s < scopes.length; s++) {
-        if (scopes[s].types[i] !== type || (i === size - 1 && scopes[s].size !== size)) {
+        if (scopes[s].types[i] !== type) {
           differs = true;
         }
 
@@ -115,12 +129,19 @@ export class Scope {
       merged.withs.push(differs ? 1 : withs);
     }
 
+    if (uneven) {
+      merged.pack = <i32>size;
+      merged.types.push(TYPE_Any);
+      merged.withs.push(1);
+    }
+
+    merged.size = merged.types.length;
     return merged;
   }
 
   /** As ScopeTypeChain::equals. */
   equals(other: Scope): bool {
-    if (this.size !== other.size || this.extra !== other.extra) {
+    if (this.size !== other.size || this.extra !== other.extra || this.pack !== other.pack) {
       return false;
     }
 
