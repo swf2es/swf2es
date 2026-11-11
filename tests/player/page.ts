@@ -1175,6 +1175,23 @@ async function resizeSwf(
 }
 
 /**
+ * What is wrong with the context's provoking vertex, or null: where the
+ * browser has WEBGL_provoking_vertex it must be the first, which keeps
+ * Safari's Metal from rewriting every draw's indices (webgl/backend.ts).
+ */
+function provokingProblem(gl: WebGL2RenderingContext): string | null {
+  const ext = gl.getExtension("WEBGL_provoking_vertex") as {
+    readonly FIRST_VERTEX_CONVENTION_WEBGL: number;
+    readonly PROVOKING_VERTEX_WEBGL: number;
+  } | null;
+  if (!ext || gl.getParameter(ext.PROVOKING_VERTEX_WEBGL) === ext.FIRST_VERTEX_CONVENTION_WEBGL) {
+    return null;
+  }
+
+  return "the last vertex provokes, not the first";
+}
+
+/**
  * Play a SWF with no scripts, lose the WebGL context and get it back, and
  * draw the same frame again, then play on: the pixels that differ between
  * the two draws, or what threw. `turned` turns some objects in 3D first.
@@ -1203,6 +1220,11 @@ async function contextLossSwf(
     }
 
     const before = pixelsOf(d.gl);
+    const provoked = provokingProblem(d.gl);
+    if (provoked) {
+      return provoked;
+    }
+
     const restored = new Promise((done) =>
       d.canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
         once: true,
@@ -1212,6 +1234,11 @@ async function contextLossSwf(
     await restored;
     d.render();
     const after = pixelsOf(d.gl);
+    const provokedAgain = provokingProblem(d.gl);
+    if (provokedAgain) {
+      return `after the context came back, ${provokedAgain}`;
+    }
+
     let differ = 0;
     for (let i = 0; i < before.length; i += 4) {
       if (
