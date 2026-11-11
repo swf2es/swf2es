@@ -27,13 +27,20 @@ not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShade
 `--draws`, `--frames` and `--samples` control the workload; `--only` selects a
 comma-separated subset of `static`, `transform`, `material`, `all-changing`,
 `programs`, `bindings`, `attributes`, `targets`, `textures`, `textures-changing`,
-`indirect` and `indirect-changing`. The controls include unchanged constants, all
+`textures-cube`, `textures-cube-changing`, `textures-uploading`,
+`textures-uploading-zero`, `indirect` and `indirect-changing`. The controls include unchanged constants, all
 registers changing, program/target switches and indirect vertex addressing. `bindings` switches buffers, strides and offsets every draw;
 `attributes` switches programs with different active vertex inputs. Every frame
 checks GL errors and context loss. Results are JSON on stdout; progress goes to stderr.
 
 The texture controls use sampler unit 3, retaining or alternating its texture on
-each draw. `checks/draw-state.ts` checks retained GL bindings and per-program
+each draw. The cube variants exercise the same two patterns. The upload controls
+replace the sampled image on every draw, using unit 3 or unit 0 respectively.
+`checks/texture-bindings.ts` checks pixels and binding counts across uploads,
+encoder callbacks, 2D/cube and sampler changes, missing mips, disposal, resize and
+MSAA seeding.
+
+`checks/draw-state.ts` checks retained GL bindings and per-program
 orientation/sampler uniforms through successful and failed shader replacement,
 program/target switches, readback, presentation, resize and MSAA seeding/resolves.
 It checks pixels as well as call counts and releases every tracked GPU handle.

@@ -230,6 +230,11 @@ replacement invalidate that cache. Each program retains its target-orientation
 uniform and sampler-unit assignments until they change or it is replaced;
 texture and sampler validation still runs on every draw.
 
+Each texture unit retains its last texture/sampler pair across draws and
+presentations. Changing either uses the normal three binding calls. Uploads and
+internal copies invalidate unit zero; unbinding and disposal invalidate the
+affected units. The cache uses eight bytes of flags, with no extra GPU resources.
+
 Each linked program remembers the write versions last uploaded for its constants.
 Draws upload only active registers written since that program's preceding draw;
 indirectly addressed vertex constants are uploaded as one bank after a write.
