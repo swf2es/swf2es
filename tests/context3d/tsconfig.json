@@ -4,6 +4,13 @@
     "lib": ["ES2022", "DOM"],
     "types": []
   },
-  "include": ["page.ts", "checks/**/*.ts", "stress-page.ts", "reclamation-page.ts", "host-page.ts"],
+  "include": [
+    "page.ts",
+    "checks/**/*.ts",
+    "stress-page.ts",
+    "reclamation-page.ts",
+    "host-page.ts",
+    "bench-page.ts"
+  ],
   "exclude": []
 }

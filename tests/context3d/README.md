@@ -14,7 +14,22 @@ node tests/context3d/host.ts
 node tests/desktop/stage3d.ts    # normal Electron View-menu opt-in (needs its binary)
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
+# Backend timings, completed draws and GL call counts:
+node tests/context3d/bench.ts --gpu
+node tests/context3d/bench.ts /path/to/before /path/to/after --gpu --runs 3
 ```
+
+`bench.ts` alternates two built checkouts and checks their first/last frame hashes.
+It reports raw CPU submission and completed-frame times separately; a synchronous
+one-pixel readback waits for completion. Call counts come from a separate warmed
+frame so instrumentation does not affect timing. These are backend measurements,
+not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShader.
+`--draws`, `--frames` and `--samples` control the workload; `--only` selects a
+comma-separated subset of `static`, `transform`, `material`, `all-changing`,
+`programs`, `targets`, `indirect` and `indirect-changing`. The controls include
+unchanged constants, all registers changing, program/target switches and indirect
+vertex addressing. Every frame checks GL errors and context loss. Results are
+JSON on stdout; progress goes to stderr.
 
 `page.ts` retains the browser runners' exports and routes them to `checks/`.
 Those modules group playback, composition, resource limits/lifetime, targets,
