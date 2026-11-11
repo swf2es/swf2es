@@ -95,11 +95,29 @@ export function bench(name: string, options: Options): Result {
   context.setVertex(0, vertices, 0, "float4");
   const indirect = name.startsWith("indirect");
   const source = shaders(indirect);
-  const programs = Array.from({ length: name === "programs" ? 8 : 1 }, () => {
-    const program = context.createProgram();
-    program.upload(...source);
-    return program;
-  });
+  const programs = Array.from(
+    { length: name === "programs" ? 8 : name === "attributes" ? 2 : 1 },
+    (_, i) => {
+      const program = context.createProgram();
+      const vertex = source[0].slice();
+      if (name === "attributes" && i === 1) {
+        new DataView(vertex.buffer).setUint32(15, 0xe4000001, true);
+      }
+      program.upload(vertex, source[1]);
+      return program;
+    },
+  );
+  if (name === "attributes") {
+    context.setVertex(1, vertices, 0, "float4");
+  }
+  const alternate = name === "bindings" ? context.createBuffer(index.length, 8) : null;
+  if (alternate) {
+    const data = new Float32Array(vertex.length * 2);
+    for (let i = 0; i < index.length; i++) {
+      data.set(vertex.subarray(i * 4, i * 4 + 4), i * 8 + 4);
+    }
+    alternate.upload(data, 0, index.length);
+  }
   context.setProgram(programs[0]);
   const target = name === "targets" ? context.createTexture(512, 512) : null;
   const matrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
@@ -147,8 +165,11 @@ export function bench(name: string, options: Options): Result {
         context.setConstants("vertex", 1, material, 1);
       }
 
-      if (name === "programs") {
+      if (name === "programs" || name === "attributes") {
         context.setProgram(programs[i % programs.length]);
+      }
+      if (alternate) {
+        context.setVertex(0, i % 2 === 0 ? vertices : alternate, i % 2 === 0 ? 0 : 4, "float4");
       }
 
       if (target && i % 64 === 0) {

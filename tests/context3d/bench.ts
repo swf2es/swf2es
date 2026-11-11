@@ -40,6 +40,8 @@ const names = [
   "material",
   "all-changing",
   "programs",
+  "bindings",
+  "attributes",
   "targets",
   "indirect",
   "indirect-changing",

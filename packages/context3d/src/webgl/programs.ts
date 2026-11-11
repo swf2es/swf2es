@@ -6,6 +6,7 @@ export interface ProgramState {
   handle: WebGLProgram | null;
   targetY: WebGLUniformLocation | null;
   attributes: number[];
+  attributeMask: number;
   vertex: (WebGLUniformLocation | null)[];
   vertexBank: WebGLUniformLocation | null;
   fragment: (WebGLUniformLocation | null)[];
@@ -57,6 +58,11 @@ export function uploadProgram(
   state.handle = handle;
   state.targetY = gl.getUniformLocation(handle, "targetY");
   state.attributes = vs.attributes;
+  state.attributeMask = 0;
+  for (const slot of state.attributes) {
+    state.attributeMask |= 1 << slot;
+  }
+
   state.vertex = [];
   state.vertexBank = vs.indirect ? gl.getUniformLocation(handle, "vc[0]") : null;
   state.fragment = [];
