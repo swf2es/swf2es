@@ -162,7 +162,10 @@ RGBA, repeats edge pixels for partial 4×4 blocks, and keeps the reference's
 double arithmetic and tie breaking. Four colour distances are compared
 together with integer SIMD. DXT5 alpha endpoints choose their exact palette
 entry directly (entry zero wins equal-endpoint ties); other values retain the
-nearest distance while searching. It returns `null` for invalid dimensions or
+nearest distance while searching. Uniform 4×4 blocks emit equal colour endpoints
+and zero indices immediately: DXT1 ignores alpha for this check, while DXT5
+requires all four channels to match. The check stops at the first differing
+pixel; other blocks keep the general colour fit. It returns `null` for invalid dimensions or
 input sizes, failed allocation, a refused module or a trap, so the caller
 can use the TypeScript path.
 
@@ -183,7 +186,8 @@ rejection, traps and release.
 `node tests/bench/dxt.ts before-checkout after-checkout --json` compares two built
 native encoders, alternating A/B and B/A after warmup and checking their bytes
 against the TypeScript reference. It includes opaque and binary-alpha textures
-as well as flat, gradient and random RGBA; `--large` selects 2048-square levels.
+as well as flat, gradient and random RGBA, coloured tiles, mixed flat/noisy
+blocks and constant RGB with varying alpha; `--large` selects 2048-square levels.
 Without checkout paths it compares TypeScript with the current native encoder.
 `--crossings` checks one encoding export per warmed level separately from timing.
 
