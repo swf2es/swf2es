@@ -26,13 +26,17 @@ frame so instrumentation does not affect timing. These are backend measurements,
 not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShader.
 `--draws`, `--frames` and `--samples` control the workload; `--only` selects a
 comma-separated subset of `static`, `transform`, `material`, `all-changing`,
-`programs`, `bindings`, `attributes`, `targets`, `indirect` and `indirect-changing`.
-The controls include
-unchanged constants, all registers changing, program/target switches and indirect
-vertex addressing. `bindings` switches buffers, strides and offsets every draw;
+`programs`, `bindings`, `attributes`, `targets`, `textures`, `textures-changing`,
+`indirect` and `indirect-changing`. The controls include unchanged constants, all
+registers changing, program/target switches and indirect vertex addressing. `bindings` switches buffers, strides and offsets every draw;
 `attributes` switches programs with different active vertex inputs. Every frame
-checks GL errors and context loss. Results are
-JSON on stdout; progress goes to stderr.
+checks GL errors and context loss. Results are JSON on stdout; progress goes to stderr.
+
+The texture controls use sampler unit 3, retaining or alternating its texture on
+each draw. `checks/draw-state.ts` checks retained GL bindings and per-program
+orientation/sampler uniforms through successful and failed shader replacement,
+program/target switches, readback, presentation, resize and MSAA seeding/resolves.
+It checks pixels as well as call counts and releases every tracked GPU handle.
 
 `page.ts` retains the browser runners' exports and routes them to `checks/`.
 Those modules group playback, composition, resource limits/lifetime, targets,

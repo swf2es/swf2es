@@ -42,6 +42,8 @@ const names = [
   "programs",
   "bindings",
   "attributes",
+  "textures",
+  "textures-changing",
   "targets",
   "indirect",
   "indirect-changing",

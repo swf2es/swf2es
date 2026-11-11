@@ -222,6 +222,14 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(reconfiguration.exception, null, JSON.stringify(reconfiguration));
       assert.equal(reconfiguration.value?.passed, true);
       console.log("context3d: unchanged back buffers reuse resources and preserve pixels");
+      const stateCache = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.drawState())',
+      );
+      assert.equal(stateCache.exception, null, JSON.stringify(stateCache));
+      assert.equal(stateCache.value?.passed, true);
+      console.log(
+        "context3d: draw state survives readback, presentation, targets and program replacement",
+      );
       const vertices = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.vertexBindings())',
       );

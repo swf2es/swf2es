@@ -224,6 +224,12 @@ Program switches enable and disable only attributes whose use changes. Buffer
 uploads keep the layouts but still invalidate draw validation; every draw checks
 its current bindings and uploaded ranges. This adds no VAOs or GPU buffers.
 
+The backend also reuses program, VAO, framebuffer and viewport bindings between
+draws. Temporary framebuffer work, read/draw framebuffer splits and program
+replacement invalidate that cache. Each program retains its target-orientation
+uniform and sampler-unit assignments until they change or it is replaced;
+texture and sampler validation still runs on every draw.
+
 Each linked program remembers the write versions last uploaded for its constants.
 Draws upload only active registers written since that program's preceding draw;
 indirectly addressed vertex constants are uploaded as one bank after a write.
