@@ -20,7 +20,8 @@ pub fn build(b: *std.Build) void {
     tests(b);
     mp3(b, wasm(b, &.{.bulk_memory}), optimize, include);
     audio(b, wasm(b, &.{.bulk_memory}), optimize);
-    compress(b, wasm(b, &.{.bulk_memory}), optimize, include);
+    // Wasm SIMD here too, for the PNG encoder's row filters.
+    compress(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
     // Wasm SIMD, which every engine the player runs on has, for the bitmap kernels.
     render(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
     atf(b, wasm(b, &.{.bulk_memory}));
@@ -38,7 +39,7 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
 /// The kernels', the fill flattener's, the band filler's, the blurs' and the sound decoders' tests, on the host.
 fn tests(b: *std.Build) void {
     const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's, the band filler's, the blurs' and the sound decoders' tests on the host");
-    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "earclip", "src/render/earclip.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" } }) |unit| {
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "earclip", "src/render/earclip.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" }, .{ "png", "src/compress/png.zig" } }) |unit| {
         const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
     }
@@ -149,6 +150,7 @@ fn compress(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
     const exports = [_][]const u8{
         "reset",        "alloc",       "resultPointer", "resultSize", "inputUsed",
         "errorMessage", "inflateData", "deflateData",   "lzmaDecode", "lzmaEncode",
+        "pngEncode",
     };
 
     const zlib = b.path(vendor ++ "zlib");
