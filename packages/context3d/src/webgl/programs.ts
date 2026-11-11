@@ -5,6 +5,7 @@ import { Context3DError } from "../errors.js";
 export interface ProgramState {
   handle: WebGLProgram | null;
   targetY: WebGLUniformLocation | null;
+  targetYValue: number;
   attributes: number[];
   attributeMask: number;
   vertex: (WebGLUniformLocation | null)[];
@@ -12,6 +13,7 @@ export interface ProgramState {
   fragment: (WebGLUniformLocation | null)[];
   samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
   samplerMask: number;
+  samplersSet: boolean;
   vertexVersions: Float64Array;
   fragmentVersions: Float64Array;
   vertexVersion: number;
@@ -57,6 +59,7 @@ export function uploadProgram(
   gl.deleteProgram(state.handle);
   state.handle = handle;
   state.targetY = gl.getUniformLocation(handle, "targetY");
+  state.targetYValue = Number.NaN;
   state.attributes = vs.attributes;
   state.attributeMask = 0;
   for (const slot of state.attributes) {
@@ -68,6 +71,7 @@ export function uploadProgram(
   state.fragment = [];
   state.samplers = [];
   state.samplerMask = 0;
+  state.samplersSet = false;
   for (let i = 0; i < vs.constants.length; i++) {
     const index = vs.constants[i];
     state.vertex[index] = gl.getUniformLocation(handle, `vc${index}`);

@@ -5,7 +5,7 @@ import type { Options, Result } from "./bench-results.ts";
 type Source = [type: number, index: number];
 
 /** AGAL operands use full xyzw masks and swizzles throughout this fixture. */
-function shaders(indirect: boolean): [Uint8Array, Uint8Array] {
+function shaders(indirect: boolean, textured: boolean): [Uint8Array, Uint8Array] {
   const make = (fragment: boolean) => {
     const ops: number[][] = [];
     const op = (code: number, dest: Source, a: Source, b?: Source) => {
@@ -18,7 +18,9 @@ function shaders(indirect: boolean): [Uint8Array, Uint8Array] {
         b?.[0] ?? 0,
       ]);
     };
-    if (indirect) {
+    if (textured && fragment) {
+      op(0x28, [3, 0], [1, 0], [5, 3]);
+    } else if (indirect) {
       if (fragment) {
         op(0, [3, 0], [4, 0]);
       } else {
@@ -51,6 +53,11 @@ function shaders(indirect: boolean): [Uint8Array, Uint8Array] {
     if (indirect && !fragment) {
       // The second mov reads vc[va0.w]; each vertex's w is 1.
       view.setUint32(43, 0x80030001, true);
+    }
+
+    if (textured && fragment) {
+      view.setUint32(23, 3, true);
+      view.setUint32(27, 5, true);
     }
 
     return bytes;
@@ -94,7 +101,15 @@ export function bench(name: string, options: Options): Result {
   indices.upload(index, 0, index.length);
   context.setVertex(0, vertices, 0, "float4");
   const indirect = name.startsWith("indirect");
-  const source = shaders(indirect);
+  const textured = name.startsWith("textures");
+  const source = shaders(indirect, textured);
+  const textures = textured ? [context.createTexture(4, 4), context.createTexture(4, 4)] : [];
+  for (let i = 0; i < textures.length; i++) {
+    textures[i].upload(new Uint32Array(16).fill(i === 0 ? 0xff00ff00 : 0xffff0000));
+  }
+  if (textured) {
+    context.setTexture(3, textures[0]);
+  }
   const programs = Array.from(
     { length: name === "programs" ? 8 : name === "attributes" ? 2 : 1 },
     (_, i) => {
@@ -172,6 +187,10 @@ export function bench(name: string, options: Options): Result {
         context.setVertex(0, i % 2 === 0 ? vertices : alternate, i % 2 === 0 ? 0 : 4, "float4");
       }
 
+      if (name === "textures-changing") {
+        context.setTexture(3, textures[i % textures.length]);
+      }
+
       if (target && i % 64 === 0) {
         context.setRenderTarget(i % 128 === 0 ? target : null, false, 0, options.samples);
       }
@@ -219,6 +238,9 @@ export function bench(name: string, options: Options): Result {
       "uniform1i",
       "uniform1f",
       "useProgram",
+      "activeTexture",
+      "bindTexture",
+      "bindSampler",
       "bindBuffer",
       "bindVertexArray",
       "vertexAttribPointer",
