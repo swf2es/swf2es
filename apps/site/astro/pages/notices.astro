@@ -76,10 +76,12 @@ const sourceUrl = (file: string) => `${blob}${file}`;
     image by <a href={sourceUrl("apps/site/demos.ts")}>demos.ts</a>, and its SWF holds the
     libraries the SDK links: Adobe's runtime and C++ interop (MIT); FreeBSD's C library and
     threads, under the licences of <a href={licence("crossbridge-FreeBSD-COPYRIGHT.txt")}>FreeBSD's
-    COPYRIGHT</a>; and from GCC 4.2, libstdc++, under the
-    <a href={licence("crossbridge-libstdc++-GPL-2.0.txt")}>GPL version 2</a> with its runtime
+    COPYRIGHT</a>; from GCC 4.2, libstdc++ and libgcc, under the
+    <a href={licence("crossbridge-gcc-GPL-2.0.txt")}>GPL version 2</a> with their runtime
     exception, and libgomp, under the
-    <a href={licence("crossbridge-libgomp-LGPL-2.1.txt")}>LGPL version 2.1</a> or later. Their
+    <a href={licence("crossbridge-libgomp-LGPL-2.1.txt")}>LGPL version 2.1</a> or later; and
+    LLVM's compiler-rt, which Crossbridge builds its arithmetic helpers from, under
+    <a href={licence("crossbridge-compiler-rt-LICENSE.txt")}>its licence</a>. Their
     sources are in Crossbridge's repository, and the demo's sources and build are in this one, so
     it can be built again, with a changed library too.
   </p>

@@ -124,8 +124,9 @@ copyFileSync(join(root, "tests/programs/as3pb/LICENSE"), join(licenses, "as3pb-M
 // The Mandelbrot demo's SWF holds Crossbridge's libraries, GCC's and FreeBSD's among them.
 for (const [from, to] of [
   ["LGPL-2.1.txt", "crossbridge-libgomp-LGPL-2.1.txt"],
-  ["GPL-2.0.txt", "crossbridge-libstdc++-GPL-2.0.txt"],
+  ["GPL-2.0.txt", "crossbridge-gcc-GPL-2.0.txt"],
   ["FreeBSD-COPYRIGHT.txt", "crossbridge-FreeBSD-COPYRIGHT.txt"],
+  ["compiler-rt-LICENSE.txt", "crossbridge-compiler-rt-LICENSE.txt"],
 ]) {
   copyFileSync(join(here, "demos/mandel", from), join(licenses, to));
 }
