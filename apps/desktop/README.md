@@ -1,21 +1,30 @@
 # @swf2es/desktop
 
-swf2es's desktop app: an Electron window that plays local SWFs, and SWFs
-by their http or https URL, with the `<swf2es-player>` element of
-`@swf2es/web`. Not packaged yet; it runs from
-a checkout of the repository.
+swf2es's desktop app: an Electron window that plays local SWFs, SWFs by
+their http or https URL, and AIR applications, with the `<swf2es-player>`
+element of `@swf2es/web`.
+
+```sh
+npx @swf2es/desktop [options] [file.swf | https://host/movie.swf]
+npx @swf2es/desktop [options] app.xml [root-dir] [-- arguments...]
+```
+
+Node 22.18 or later runs it. The first run downloads Electron's binary
+(about 100 MB), once; installed, the command is `swf2es-desktop`. A
+relative path is taken from the directory the command was run in.
+
+In a checkout of the repository:
 
 ```sh
 pnpm install && pnpm build
-pnpm --filter @swf2es/desktop fetch-electron   # Electron's binary, once (about 100 MB)
-pnpm --filter @swf2es/desktop start [--trace] [file.swf | https://host/movie.swf]
-pnpm --filter @swf2es/desktop start [--trace] app.xml [root-dir] [-- arguments...]
+pnpm --filter @swf2es/desktop start [options] [file.swf | https://host/movie.swf]
 ```
 
 `pnpm install` does not download Electron's binary (pnpm-workspace.yaml
 lists electron under `ignoredBuiltDependencies`), so the rest of the
-repository builds and tests without it; `fetch-electron` runs Electron's
-own installer. A relative path is taken from the directory pnpm was run in.
+repository builds and tests without it. `start` downloads it the first
+time, as the installed command does; `pnpm --filter @swf2es/desktop
+fetch-electron` does so ahead, for the tests.
 
 - **Open** a SWF with File › Open (Ctrl+O), by dropping it on the window,
   by its http or https URL with File › Open URL (Ctrl+L), or on the
@@ -44,6 +53,15 @@ own installer. A relative path is taken from the directory pnpm was run in.
   `settings.json` in Electron's user data directory.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
+- **Certificates.** `--ignore-certificate-errors` leaves every HTTPS
+  server's certificate unverified for this run, and
+  `--ignore-certificate-errors=dev.test,localhost` those hosts' alone, on
+  any port: for a server of your own whose certificate it signed itself.
+  Whoever is between you and such a host can then read and change what the
+  SWF loads from it. It is never kept in the settings, and the app says on
+  stderr, each time it starts with it, which hosts go unverified. The page
+  itself has no network (the main process makes a SWF's requests), so
+  nothing but those requests is affected.
 - **Sandbox.** A SWF plays in the sandbox Flash Player gave a local SWF,
   by its FileAttributes' UseNetwork bit. Without it,
   local-with-filesystem: it reads the files in its own directory and below
@@ -104,7 +122,8 @@ src/renderer/   the page: the element, the welcome and library panels, the socke
                 fetch hosts; and the URL dialog's page
 src/shared/     api.ts, the types of window.swf2esDesktop
 static/         index.html (with the page's import map), open-url.html and style.css
-launch.ts       `start`: finds Electron and runs the app
+src/launch/     the swf2es-desktop command, and `start`: finds Electron, fetching its
+                binary the first time, and runs the app
 ```
 
 The page (`src/renderer`, `static`) knows the shell only through

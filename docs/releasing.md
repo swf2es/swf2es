@@ -1,8 +1,8 @@
 # Releasing
 
-The eleven published packages (`PUBLIC_PACKAGES` in `tools/notices.ts`:
-`swf2es` and the `@swf2es/*` packages under `packages/`) are released
-together, at one version. A page or project that takes several of them takes
+The twelve published packages (`PUBLISHED` in `tools/notices.ts`: `swf2es`
+and the `@swf2es/*` packages under `packages/`, and the desktop app,
+`@swf2es/desktop`, under `apps/`) are released together, at one version. A page or project that takes several of them takes
 them at the same version, and the `workspace:*` ranges between them become
 that exact version when pnpm packs them.
 

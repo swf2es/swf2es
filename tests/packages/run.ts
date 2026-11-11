@@ -6,8 +6,9 @@
 // export path imports, every source map finds its sources, and the
 // installed swf2es command compiles an AS3 SWF and runs an ABC with no
 // --lib, on the libraries it ships. The browser build, swf2es, has the
-// files a CDN serves, and installs alone with nothing else. Run after
-// `pnpm build`; it builds nothing.
+// files a CDN serves, and installs alone with nothing else. The desktop
+// app's tarball is checked too, but not installed: it needs Electron, which
+// is not theirs to give. Run after `pnpm build`; it builds nothing.
 //
 //   node tests/packages/run.ts
 import assert from "node:assert/strict";
@@ -246,6 +247,55 @@ test("every source map of the installed packages finds its sources", () => {
 
   assert.deepEqual(missing.slice(0, 10), []);
   assert.ok(maps > 0);
+});
+
+test("the desktop app's tarball is what npm is to publish: its command, the app and its pages", async () => {
+  const dir = join(root, "apps/desktop");
+  assert.ok(existsSync(join(dir, "dist/launch/launch.js")), "apps/desktop is not built");
+  const out = join(work, "desktop");
+  await run("pnpm", ["pack", "--pack-destination", out], { cwd: dir });
+  const [name] = readdirSync(out).filter((f) => f.endsWith(".tgz"));
+  const tarball = join(out, name);
+  const files = new Set(
+    (await run("tar", ["-tzf", tarball], { maxBuffer: 64 << 20 })).stdout.split("\n"),
+  );
+  const read = async (file: string) => (await run("tar", ["-xzOf", tarball, file])).stdout;
+  const pkg = JSON.parse(await read("package/package.json"));
+  assert.equal(pkg.name, "@swf2es/desktop");
+  assert.equal(pkg.version, packed[0].pkg.version);
+  assert.equal(pkg.license, "Apache-2.0");
+  assert.equal(pkg.repository?.directory, "apps/desktop");
+  assert.ok(!pkg.private);
+  assert.equal(await read("package/LICENSE"), readFileSync(join(root, "LICENSE"), "utf8"));
+  assert.ok(files.has("package/README.md"));
+  // The packages it loads at their release's version, and Electron, pinned: an install
+  // gets the browser the app was tested in.
+  for (const [dep, range] of Object.entries(pkg.dependencies as Record<string, string>)) {
+    assert.match(range, /^\d+\.\d+\.\d+/, `${dep}: ${range}`);
+    if (dep.startsWith("@swf2es/")) {
+      assert.equal(range, pkg.version, dep);
+    }
+  }
+
+  assert.ok(pkg.dependencies.electron);
+  // The command, which node runs as it is, and what Electron then loads.
+  const command = pkg.bin["swf2es-desktop"].replace(/^\.\//, "");
+  assert.match(await read(`package/${command}`), /^#!\/usr\/bin\/env node\n/);
+  for (const file of [
+    command,
+    pkg.main,
+    "dist/launch/electron.js",
+    "dist/preload/preload.cjs",
+    "dist/renderer/index.js",
+    "static/index.html",
+    "static/style.css",
+    "static/icon.png",
+  ]) {
+    assert.ok(files.has(`package/${file}`), file);
+  }
+
+  const unwanted = [...files].filter((f) => /\.tsbuildinfo$|\.test\.ts$|node_modules/.test(f));
+  assert.deepEqual(unwanted, []);
 });
 
 const swf2es = (...args: string[]) =>

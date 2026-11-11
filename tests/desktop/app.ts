@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { electronBinary } from "../../apps/desktop/electron.ts";
+import { electronBinary } from "../../apps/desktop/src/launch/electron.ts";
 import { DevTools } from "../player/chrome.ts";
 
 const appDir = fileURLToPath(new URL("../../apps/desktop/", import.meta.url));

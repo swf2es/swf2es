@@ -43,7 +43,6 @@ importers:
       '@swf2es/web':
         specifier: workspace:*
         version: link:../../packages/web
-    devDependencies:
       electron:
         specifier: 44.10.2
         version: 44.10.2
