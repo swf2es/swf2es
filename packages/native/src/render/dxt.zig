@@ -48,6 +48,35 @@ pub fn encode(rgba: []const u8, dxt5: bool, width: usize, height: usize, out: []
     for (0..down) |by| {
         for (0..across) |bx| {
             const at = (by * across + bx) * size;
+            const first_at = (by * 4 * width + bx * 4) * 4;
+            const first_pixel = std.mem.readInt(u32, rgba[first_at..][0..4], .little);
+            const mask: u32 = if (dxt5) 0xffffffff else 0x00ffffff;
+            const flat = flat: {
+                for (0..4) |y| {
+                    const row = @min(by * 4 + y, height - 1) * width;
+                    for (0..4) |x| {
+                        const p = (row + @min(bx * 4 + x, width - 1)) * 4;
+                        if ((first_pixel ^ std.mem.readInt(u32, rgba[p..][0..4], .little)) & mask != 0) break :flat false;
+                    }
+                }
+                break :flat true;
+            };
+            // Equal endpoints choose index zero throughout, without fitting a colour axis.
+            if (flat) {
+                @memset(out[at..][0..size], 0);
+                const c = pack(rgba[first_at], rgba[first_at + 1], rgba[first_at + 2]);
+                const colour = if (dxt5) at + 8 else at;
+                byte(out, colour, c);
+                byte(out, colour + 1, c >> 8);
+                byte(out, colour + 2, c);
+                byte(out, colour + 3, c >> 8);
+                if (dxt5) {
+                    byte(out, at, first_pixel >> 24);
+                    byte(out, at + 1, first_pixel >> 24);
+                }
+                continue;
+            }
+
             var mr: f64 = 0;
             var mg: f64 = 0;
             var mb: f64 = 0;
@@ -179,8 +208,20 @@ pub fn encode(rgba: []const u8, dxt5: bool, width: usize, height: usize, out: []
                 if (dxt5) {
                     var index: u32 = 0;
                     const alpha: i32 = rgba[p + 3];
-                    for (1..8) |j| {
-                        if (@abs(alpha - alphas[j]) < @abs(alpha - alphas[index])) index = @intCast(j);
+                    // Endpoints are exact matches, with the high endpoint winning ties.
+                    if (alpha != alphas[0]) {
+                        if (alpha == alphas[1]) {
+                            index = 1;
+                        } else {
+                            var nearest = @abs(alpha - alphas[0]);
+                            for (1..8) |j| {
+                                const distance = @abs(alpha - alphas[j]);
+                                if (distance < nearest) {
+                                    nearest = distance;
+                                    index = @intCast(j);
+                                }
+                            }
+                        }
                     }
                     if (i < 8) {
                         low |= index << @as(u5, @intCast(i * 3));

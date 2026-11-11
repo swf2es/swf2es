@@ -91,6 +91,47 @@ test("flat colours, alpha ties and partial blocks choose the same indices", () =
   encoder.release();
 });
 
+test("every alpha endpoint pair preserves ties and nearby palette choices", () => {
+  const encoder = new DxtEncoder();
+  for (let low = 0; low < 256; low++) {
+    const height = (256 - low) * 4;
+    const pixels = new Uint8Array(4 * height * 4);
+    for (let high = low; high < 256; high++) {
+      const alphas = [high, low];
+      for (let i = 1; i < 8; i++) {
+        const at = Math.floor(((7 - i) * high + i * low) / 7);
+        alphas.push(Math.max(low, at - 1), Math.min(high, at + 1));
+      }
+
+      for (let i = 0; i < 16; i++) {
+        pixels.set([i * 17, high, low, alphas[i]], ((high - low) * 16 + i) * 4);
+      }
+    }
+
+    compare(encoder, pixels, true, 4, height, `alpha endpoints starting at ${low}`);
+  }
+
+  encoder.release();
+});
+
+test("a block with one changed channel still matches the reference", () => {
+  const encoder = new DxtEncoder();
+  for (let channel = 0; channel < 4; channel++) {
+    for (let changed = 0; changed < 16; changed++) {
+      const pixels = new Uint8Array(64);
+      for (let texel = 0; texel < 16; texel++) {
+        pixels.set([31, 96, 173, 201], texel * 4);
+      }
+      pixels[changed * 4 + channel] ^= 0x80;
+      for (const dxt5 of [false, true]) {
+        compare(encoder, pixels, dxt5, 4, 4, `channel ${channel}, texel ${changed}`);
+      }
+    }
+  }
+
+  encoder.release();
+});
+
 test("invalid sizes and short or excess input leave the native instance unmade", () => {
   const encoder = new DxtEncoder();
   for (const size of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 4097, 2 ** 32 + 1]) {
