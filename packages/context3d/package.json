@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/context3d",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Experimental Context3D resource contracts, AGAL translation and an optional WebGL2 backend",
   "keywords": [
     "flash",
