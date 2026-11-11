@@ -46,7 +46,7 @@ and the player's paths in this document are relative to it:
   gradients' ramps, and filters as records of their values.
 - `text/`: text fields' model and layout, static text, fonts and CSS.
 - `bitmap/`: the pixel store and its operations on the CPU, bitmap
-  filters, decoded images and PNG encoding.
+  filters, decoded images and PNG and JPEG encoding.
 - `media/`: sound: decoding and the host's device (`audio.ts`), MP3
   frames' headers (`mp3.ts`), what `Sound.extract` reads (`extract.ts`),
   and the sounds the player plays, the timeline's and scripts' channels

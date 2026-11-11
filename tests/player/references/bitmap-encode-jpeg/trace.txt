@@ -1,0 +1,45 @@
+default quality 80
+quality 0 ffd8 ffe0:16 ffdb:131 ffdb:131 ffc1:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 751 266bf79f end ffd9
+quality 1 ffd8 ffe0:16 ffdb:131 ffdb:131 ffc1:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 751 266bf79f end ffd9
+quality 10 ffd8 ffe0:16 ffdb:131 ffdb:131 ffc1:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 751 67f70951 end ffd9
+quality 19 ffd8 ffe0:16 ffdb:131 ffdb:131 ffc1:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 751 f86cd6f1 end ffd9
+quality 20 ffd8 ffe0:16 ffdb:131 ffdb:67 ffc1:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 687 5b88090a end ffd9
+quality 23 ffd8 ffe0:16 ffdb:131 ffdb:67 ffc1:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 687 d5c8040d end ffd9
+quality 24 ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 45250271 end ffd9
+quality 25 ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 74bbff83 end ffd9
+quality 50 ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 aff9db9a end ffd9
+quality 80 ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 2f21c623 end ffd9
+quality 90 ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 8685bee7 end ffd9
+quality 100 ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080040006003012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 f546b831 end ffd9
+tables ffdb00430006040506050406060506070706080a100a0a09090a140e0f0c1017141818171416161a1d251f1a1b231c1616202c20232627292a29191f2d302d283025282928ffdb0043010707070a080a130a0a13281a161a2828282828282828282828282828282828282828282828282828282828282828282828282828282828282828282828282828
+grey 629 d859c8bf 28a28a00ffd9
+white 631 7066ca6c faa68a28a00fffd9
+black 633 3cebbd3a ff003ffa28a2803fffd9
+red 635 c171bfdc fc5fa28a2bfca73fefe0ffd9
+green 635 c293bfab fac28a28aff95f3fe29cffd9
+blue 636 8302c05a fe39e8a28aff00bf83f95cffd9
+one pixel 633 eec2cc38 e428a28afa73e74fffd9
+seventeen by nine 637 3de0c690 ee28a28afc1cfdac28a28a00ffd9
+half alpha 634 ff7ec64d f9f28a28afcdcfd74fffd9
+no alpha 631 abacc33c fcaaa28a2803ffd9
+picture at 1 856 a32b19d5 
+picture at 10 1015 1fa88973 
+part ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(08000a001103012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 4139c59e end ffd9
+clipped ffd8 ffe0:16 ffdb:67 ffdb:67 ffc0:17(080004000f03012200021101031101) ffc4:31 ffc4:181 ffc4:31 ffc4:181 ffda:12 head 623 32e5c596 end ffd9
+new 633 633 bigEndian
+into true 635 635 6162ffd8ffe0 ffd9
+quality 101 [class RangeError] 2006
+quality 1000 [class RangeError] 2006
+quality -1 [class RangeError] 2006
+quality 101, null rect [class TypeError] 2007
+quality 101, empty rect [class ArgumentError] 2006
+null rect [class TypeError] 2007
+empty rect [class ArgumentError] 2006
+outside [class ArgumentError] 2006
+negative [class ArgumentError] 2006
+disposed [class ArgumentError] 2015
+disposed, quality 101 [class ArgumentError] 2015
+loaded image/jpeg 96 64 false 1
+loaded image/jpeg 96 64 false 2
+loaded image/jpeg 96 64 false 3
+loaded image/jpeg 96 64 false 4

@@ -7,7 +7,8 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
   tessellation (`Tessellator`), a shape layer's lines built in one call
   (`LineBuilder`), BitmapData's filters and pixel operations (`BitmapKernel`),
   and whole-level DXT1/DXT5 texture encoding (`DxtEncoder`).
-- `@swf2es/native/compress`: synchronous zlib and LZMA.
+- `@swf2es/native/compress`: synchronous zlib and LZMA, and the PNG and
+  JPEG encoders' passes over a bitmap.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 - `@swf2es/native/audio`: synchronous ADPCM and Nellymoser decoding, in
   Zig alone.
@@ -239,6 +240,13 @@ Upstream sources stay unchanged.
   alpha; with `filter`, given the filter of PNG's five whose output sums
   smallest, libpng's heuristic, sixteen bytes at a time (Wasm SIMD); and
   handed to the deflate.
+- `jpegEncode(pixels, width, height, quality)` makes a JPEG file of a
+  bitmap's ARGB pixels, alpha left out, as Flash's encoder does
+  (`jpeg.zig`, Zig alone): JFIF, 4:2:0, Annex K's quantization tables
+  scaled to the quality as the IJG scales them and its Huffman tables.
+  Colours are converted eight pixels at a time and the DCTs run eight and
+  sixteen columns at a time (Wasm SIMD); a chroma block is the low half
+  of its MCU's 16 by 16 DCT, as libjpeg scales since version 7.
 - `lzmaDecode(stream, size)` decodes an LZMA stream, its 5 property bytes
   first, to `size` bytes or to its end marker.
 - `lzmaEncode(data)` writes `ByteArray`'s LZMA: properties, an 8-byte
