@@ -160,6 +160,30 @@ test("a button pressed or let go while another is held, a move as pointer events
   unbind();
 });
 
+test("a middle press the SWF took keeps the browser's scroll from it, over the stage alone", () => {
+  const { canvas, fire } = page(100, 100);
+  let taken = false;
+  const player = {
+    pointer: {
+      captured: false,
+      post: () => {},
+      flush: () => {},
+      handle: () => {},
+      cursor: () => "default",
+      taken: (button: number) => button === 1 && taken,
+    },
+  } as unknown as Player;
+  const unbind = bindCanvasPointer(canvas, player, stage(0, 0, 100, 100));
+  assert.equal(fire("mousedown", 10, 10, { button: 1 }), false);
+  taken = true;
+  assert.equal(fire("mousedown", 10, 10, { button: 1 }), true);
+  assert.equal(fire("mousedown", 10, 10, { button: 0 }), false);
+  // Over an element on top of the canvas the press never reached the player: an earlier
+  // press's answer is not this one's.
+  assert.equal(fire("mousedown", 10, 10, { button: 1 }, {}), false);
+  unbind();
+});
+
 test("pointer moves are posted, flushed by a frame of their own where nothing else did", () => {
   const { canvas, frames, fire } = page(100, 100);
   const calls: string[] = [];

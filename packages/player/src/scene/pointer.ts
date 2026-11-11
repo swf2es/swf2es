@@ -247,8 +247,9 @@ export function bindCanvasPointer(
   };
 
   // A middle press the SWF hears is its own, not the browser's scroll, which a mousedown starts.
+  // Over the stage only: a press in a letterbox's bars never reached the player.
   const middle = (e: MouseEvent) => {
-    if (e.button === 1 && player.pointer?.taken(1)) {
+    if (e.button === 1 && place(e)[4] && player.pointer?.taken(1)) {
       e.preventDefault();
     }
   };
