@@ -63,6 +63,9 @@ for (const size of sizes) {
     "opaque-gradient",
     "opaque-noise",
     "mask-noise",
+    "tiles",
+    "mixed",
+    "flat-rgb",
   ]) {
     const rgba = new Uint8Array(size * size * 4);
     let seed = 71;
@@ -78,6 +81,20 @@ for (const size of sizes) {
             case "gradient":
             case "opaque-gradient":
               rgba[i + c] = Math.round(((x + y) * (c + 1) * 255) / (6 * size));
+              break;
+            case "tiles":
+              rgba[i + c] = [
+                Math.floor(x / 8) * 31,
+                Math.floor(y / 8) * 53,
+                (Math.floor(x / 8) ^ Math.floor(y / 8)) * 71,
+                255,
+              ][c];
+              break;
+            case "mixed":
+              rgba[i + c] = ((x >> 2) + (y >> 2)) & 1 ? seed >>> 24 : [33, 99, 173, 201][c];
+              break;
+            case "flat-rgb":
+              rgba[i + c] = c === 3 ? seed >>> 24 : [33, 99, 173][c];
               break;
             default:
               rgba[i + c] = seed >>> 24;

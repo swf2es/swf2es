@@ -114,6 +114,24 @@ test("every alpha endpoint pair preserves ties and nearby palette choices", () =
   encoder.release();
 });
 
+test("a block with one changed channel still matches the reference", () => {
+  const encoder = new DxtEncoder();
+  for (let channel = 0; channel < 4; channel++) {
+    for (let changed = 0; changed < 16; changed++) {
+      const pixels = new Uint8Array(64);
+      for (let texel = 0; texel < 16; texel++) {
+        pixels.set([31, 96, 173, 201], texel * 4);
+      }
+      pixels[changed * 4 + channel] ^= 0x80;
+      for (const dxt5 of [false, true]) {
+        compare(encoder, pixels, dxt5, 4, 4, `channel ${channel}, texel ${changed}`);
+      }
+    }
+  }
+
+  encoder.release();
+});
+
 test("invalid sizes and short or excess input leave the native instance unmade", () => {
   const encoder = new DxtEncoder();
   for (const size of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 4097, 2 ** 32 + 1]) {
