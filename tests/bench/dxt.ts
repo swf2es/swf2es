@@ -1,11 +1,16 @@
 // Whole-level DXT encoding, including copying input into wasm, against
 // the TypeScript reference. Run after pnpm build; --crossings counts actual
 // exports separately from timing, and --json emits one result per workload.
+// Two built checkout paths compare their native encoders, A/B then B/A.
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { encodeDxt } from "../../packages/context3d/dist/dxt.js";
 import { DxtEncoder } from "../../packages/native/dist/render/index.js";
 
 const args = process.argv.slice(2);
+const builds = args.filter((arg) => !arg.startsWith("--"));
+assert.ok(builds.length === 0 || builds.length === 2, "pass both checkout paths or neither");
 const json = args.includes("--json");
 const crossings = args.includes("--crossings");
 const sizes = args.includes("--large") ? [2048] : [4, 16, 64, 256, 1024, 2048];
@@ -39,9 +44,26 @@ if (crossings) {
 }
 
 const median = (values: number[]) => [...values].sort((a, b) => a - b)[values.length >> 1];
-const encoder = new DxtEncoder();
+const encoders: DxtEncoder[] = [];
+for (const dir of builds) {
+  const { DxtEncoder } = await import(
+    pathToFileURL(resolve(dir, "packages/native/dist/render/index.js")).href
+  );
+  encoders.push(new DxtEncoder());
+}
+if (!builds.length) {
+  encoders.push(new DxtEncoder(), new DxtEncoder());
+}
+const encoder = encoders[1];
 for (const size of sizes) {
-  for (const pattern of ["flat", "gradient", "noise"]) {
+  for (const pattern of [
+    "flat",
+    "gradient",
+    "noise",
+    "opaque-gradient",
+    "opaque-noise",
+    "mask-noise",
+  ]) {
     const rgba = new Uint8Array(size * size * 4);
     let seed = 71;
     for (let y = 0; y < size; y++) {
@@ -54,20 +76,33 @@ for (const size of sizes) {
               rgba[i + c] = [33, 99, 173, 201][c];
               break;
             case "gradient":
+            case "opaque-gradient":
               rgba[i + c] = Math.round(((x + y) * (c + 1) * 255) / (6 * size));
               break;
             default:
               rgba[i + c] = seed >>> 24;
           }
         }
+        if (pattern.startsWith("opaque-")) {
+          rgba[i + 3] = 255;
+        } else if (pattern === "mask-noise") {
+          rgba[i + 3] = rgba[i + 3] < 128 ? 0 : 255;
+        }
       }
     }
 
     for (const dxt5 of [false, true]) {
+      if (!dxt5 && (pattern.startsWith("opaque-") || pattern === "mask-noise")) {
+        continue;
+      }
+
       const expected = encodeDxt(rgba, dxt5, size, size);
       const native = encoder.encode(rgba, dxt5, size, size);
       assert.ok(native, "the benchmark must use the native encoder");
       assert.deepEqual(native, expected);
+      if (builds.length) {
+        assert.deepEqual(encoders[0].encode(rgba, dxt5, size, size), expected);
+      }
       if (crossings) {
         for (const key of Object.keys(calls)) {
           calls[key] = 0;
@@ -83,7 +118,9 @@ for (const size of sizes) {
       }
 
       const iterations = Math.min(2048, Math.max(1, Math.floor(1e6 / (size * size))));
-      const run = (native: boolean) => {
+      const run = (index: number) => {
+        const encoder = encoders[index];
+        const native = builds.length > 0 || index === 1;
         const before: number = encoder.encoded;
         const start = performance.now();
         for (let i = 0; i < iterations; i++) {
@@ -102,14 +139,14 @@ for (const size of sizes) {
         return elapsed;
       };
       for (let i = 0; i < 3; i++) {
-        run(false);
-        run(true);
+        run(0);
+        run(1);
       }
 
       const times: [number[], number[]] = [[], []];
       for (let round = 0; round < 7; round++) {
         for (const index of round % 2 ? [1, 0] : [0, 1]) {
-          times[index].push(run(index === 1));
+          times[index].push(run(index));
         }
       }
 
@@ -120,18 +157,21 @@ for (const size of sizes) {
         pattern,
         dxt5,
         iterations,
-        tsMs,
-        nativeMs,
+        ...(builds.length
+          ? { builds: builds.map((dir) => resolve(dir)), aMs: tsMs, bMs: nativeMs }
+          : { tsMs, nativeMs }),
         speedup: tsMs / nativeMs,
         times,
       };
       console.log(
         json
           ? JSON.stringify(result)
-          : `${size}² ${dxt5 ? "DXT5" : "DXT1"} ${pattern}: TS ${tsMs.toFixed(4)} ms, native ${nativeMs.toFixed(4)} ms (${result.speedup.toFixed(2)}×)`,
+          : `${size}² ${dxt5 ? "DXT5" : "DXT1"} ${pattern}: ${builds.length ? "A" : "TS"} ${tsMs.toFixed(4)} ms, ${builds.length ? "B" : "native"} ${nativeMs.toFixed(4)} ms (${result.speedup.toFixed(2)}×)`,
       );
     }
   }
 }
 
-encoder.release();
+for (const encoder of encoders) {
+  encoder.release();
+}

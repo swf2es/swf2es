@@ -179,8 +179,20 @@ pub fn encode(rgba: []const u8, dxt5: bool, width: usize, height: usize, out: []
                 if (dxt5) {
                     var index: u32 = 0;
                     const alpha: i32 = rgba[p + 3];
-                    for (1..8) |j| {
-                        if (@abs(alpha - alphas[j]) < @abs(alpha - alphas[index])) index = @intCast(j);
+                    // Endpoints are exact matches, with the high endpoint winning ties.
+                    if (alpha != alphas[0]) {
+                        if (alpha == alphas[1]) {
+                            index = 1;
+                        } else {
+                            var nearest = @abs(alpha - alphas[0]);
+                            for (1..8) |j| {
+                                const distance = @abs(alpha - alphas[j]);
+                                if (distance < nearest) {
+                                    nearest = distance;
+                                    index = @intCast(j);
+                                }
+                            }
+                        }
                     }
                     if (i < 8) {
                         low |= index << @as(u5, @intCast(i * 3));
