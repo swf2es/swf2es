@@ -5,6 +5,8 @@
 //   electron apps/desktop [--trace] [file.swf | http(s)://host/movie.swf]
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
+// --ignore-certificate-errors[=host,...] leaves HTTPS certificates unchecked.
+//
 // The second runs an AIR application by its descriptor, as adl does.
 import { statSync } from "node:fs";
 import { open as openFile, readFile, realpath } from "node:fs/promises";
@@ -46,7 +48,7 @@ import {
   writeOf,
 } from "./air.ts";
 import { bridgeFiles } from "./files.ts";
-import { type Movie, Network, Refused } from "./network.ts";
+import { type Movie, Network, Refused, unverifiedHosts } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { Sandbox } from "./sandbox.ts";
 import { SettingsFile } from "./settings.ts";
@@ -77,7 +79,25 @@ app.enableSandbox();
 const trace = process.argv.includes("--trace");
 const sandbox = new Sandbox();
 /** The SWF's http and https requests, judged as Flash's sandboxes had them. */
-const network = new Network();
+/**
+ * --ignore-certificate-errors[=host,...]: HTTPS servers whose certificates go
+ * unchecked, for one's own with a certificate it signed itself. For this
+ * run alone, never kept, and said aloud: anyone on the way to such a host
+ * can read and change what the SWF loads from it.
+ */
+const unverified = unverifiedHosts(process.argv.slice(1));
+if (unverified) {
+  process.stderr.write(
+    unverified.all
+      ? "swf2es: --ignore-certificate-errors: no HTTPS server's certificate is verified\n"
+      : `swf2es: --ignore-certificate-errors: certificates are not verified for ${unverified.hosts.join(", ") || "no host"}\n`,
+  );
+}
+
+const network = new Network({
+  unverified: (host) =>
+    !!unverified && (unverified.all || unverified.hosts.includes(host.toLowerCase())),
+});
 /** What the page's requests under way abort with, by the preload's number. */
 const requests = new Map<number, AbortController>();
 let settings: SettingsFile;
