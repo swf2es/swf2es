@@ -654,6 +654,9 @@ export function knownSharedByteArray(rt: Runtime, id: number): AsObject | undefi
   return sharedObjectsOf(rt).get(id)?.deref();
 }
 
+/** The longest string readUTFBytes reads a character at a time. */
+const SHORT_STRING = 24;
+
 /** The bytes up to the first NUL, as avmplus reads a C string. */
 function toNul(bytes: Uint8Array): Uint8Array {
   const nul = bytes.indexOf(0);
@@ -715,6 +718,29 @@ export function byteArrayNatives(rt: Runtime): Natives {
   const readUTFBytes = (rt: Runtime, b: Bytes, n: number) => {
     if (b.available < n) {
       throw rt.error("flash.errors::EOFError", 2030);
+    }
+
+    // A short ASCII string, as a C program's names are, a character at a time from the buffer
+    // itself: no views of it made, and a single character is one the engine already has. A NUL
+    // ends it; a byte past ASCII, a BOM's first among them, is read the long way.
+    if (n <= SHORT_STRING) {
+      const buffer = b.buffer;
+      const at = b.position;
+      let s = "";
+      let k = 0;
+      for (; k < n; k++) {
+        const c = buffer[at + k];
+        if (c === 0 || c >= 0x80) {
+          break;
+        }
+
+        s += String.fromCharCode(c);
+      }
+
+      if (k === n || buffer[at + k] === 0) {
+        b.position = (at + n) >>> 0;
+        return s;
+      }
     }
 
     let bytes = b.buffer.subarray(b.position, b.position + n);
