@@ -317,8 +317,8 @@ about 120) and 520 ms otherwise (Flash 2.7 s), at 1% more bytes than
 level 9. The rect is rounded and clipped as other methods' are, and an
 empty one is ArgumentError 2006; a null rect or compressor is TypeError
 2007, a compressor not an encoder's options ArgumentError 2004; the file
-goes into the ByteArray given, from its position, or a new one. JPEG and
-JPEG XR, which Flash also writes, are not supported yet. The
+goes into the ByteArray given, from its position, or a new one. JPEG XR,
+which Flash also writes, is not supported yet. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
 compression's file is Flash's byte for byte, as it is deflated
 by zlib itself. `getPixels` and
@@ -328,6 +328,47 @@ by zlib itself. `getPixels` and
 Reads use the ByteArray's DataView without allocating per pixel, keeping
 complete pixels and the read position when a later word fails with
 EOFError 2030 (`bitmap-pixel-endian`).
+
+## JPEG
+
+`encode` with `JPEGEncoderOptions` writes a JPEG as Flash does, which is
+as libjpeg does by default; every choice below was read from the files
+adl writes. SOI, a JFIF 1.01 APP0 (density 1:1, no unit), two DQT
+segments, the frame, four DHT segments, one interleaved scan, EOI: no
+restart intervals and nothing else. Three components at 4:2:0 whatever
+the quality. The quantization tables are Annex K's scaled as the IJG
+scales them, by 5000 / quality percent under 50 and 200 − 2 · quality
+from there, from 1 up and not held to a byte: the luma table under
+quality 24 and the chroma table under 20 are written in 16 bits, and the
+frame is then SOF1, extended sequential, not baseline's SOF0. Quality 0
+is quality 1; one past 100 is RangeError 2006, once the rect has passed,
+and the other refusals are PNG's. The Huffman tables are Annex K's,
+never made for the image. Alpha is left out: the premultiplied colours a
+transparent bitmap keeps are encoded as they are, so what is clear comes
+out black. Colours are JFIF's YCbCr in 16-bit fixed point. Chroma is not
+averaged down: a chroma block is the 8 by 8 lowest frequencies of the 16
+by 16 DCT of its MCU's full chroma, halved, as libjpeg has scaled since
+its version 7; averaging in fours instead puts coefficients tens of units
+from Flash's where chroma changes from pixel to pixel. The last column
+and row are repeated to fill an MCU, and a luma block wholly past them is
+the DC of the one before it and nothing else.
+
+The encoder is `jpeg.zig` in `@swf2es/native`, written for this and not
+libjpeg's code: the colours are converted eight pixels at a time, and the
+DCTs are in floats, eight or sixteen columns at a time, where libjpeg's
+are in integers. Both are within a fraction of a unit of the true
+transform, so a quantized coefficient differs from Flash's, by one, only
+where the true one lies next to a rounding boundary: a flat picture's
+file and a picture's at low quality are Flash's byte for byte; of a
+picture of gradients and edges, 1 coefficient in 1000 differs at quality
+80 and 4 in 100 at 100. A 4800 by 2475 picture encodes in about 80 ms at
+quality 80, a tenth of its PNG's time. The `bitmap-encode-jpeg` case
+traces each quality's segments and tables, the whole of the files that
+are Flash's, and each refusal under adl, and draws the files loaded
+back. There the browser's decoder comes between: Flash makes a block's
+chroma by a 16 by 16 inverse DCT, the browser by interpolating, which
+part by up to 56 on a hard edge between colours; decoded Flash's way in
+the unit tests, the files are within 10 of what Flash drew of its own.
 
 ## Pixel Bender
 
