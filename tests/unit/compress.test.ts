@@ -11,6 +11,7 @@ import {
   lzmaEncode,
   MEMORY_KEPT,
   memoryInUse,
+  pngEncode,
   TRUNCATED,
 } from "../../packages/native/dist/compress/index.js";
 
@@ -42,6 +43,121 @@ test("zlib and raw deflate round trip at every level", () => {
       assert.deepEqual(back.bytes, data);
     }
   }
+});
+
+/**
+ * PNG's rows filtered a byte at a time, as the encoder did it before the
+ * module: each row the filter of the five whose output, taken as signed,
+ * sums smallest, the first of equals, bottom up.
+ */
+function filteredRows(raw: Uint8Array, stride: number, bpp: number): Uint8Array {
+  const out = raw.slice();
+  const length = stride - 1;
+  const candidates = Array.from({ length: 5 }, () => new Uint8Array(length));
+  for (let y = raw.length / stride - 1; y >= 0; y--) {
+    const row = y * stride + 1;
+    const up = y > 0 ? row - stride : -1;
+    let best = 0;
+    let bestSum = Number.POSITIVE_INFINITY;
+    for (let f = 0; f < 5; f++) {
+      let sum = 0;
+      for (let i = 0; i < length; i++) {
+        const x = out[row + i];
+        const a = i >= bpp ? out[row + i - bpp] : 0;
+        const b = up >= 0 ? out[up + i] : 0;
+        const c = up >= 0 && i >= bpp ? out[up + i - bpp] : 0;
+        const p = a + b - c;
+        const pa = Math.abs(p - a);
+        const pb = Math.abs(p - b);
+        const pc = Math.abs(p - c);
+        const paeth = pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
+        candidates[f][i] = [x, x - a, x - b, x - ((a + b) >> 1), x - paeth][f];
+        const s = candidates[f][i];
+        sum += s < 128 ? s : 256 - s;
+      }
+
+      if (sum < bestSum) {
+        bestSum = sum;
+        best = f;
+      }
+    }
+
+    out[row - 1] = best;
+    out.set(candidates[best], row);
+  }
+
+  return out;
+}
+
+/** Pixels, premultiplied ARGB, as a PNG's unfiltered rows: Flash's division out of alpha. */
+function rawRows(pixels: Uint32Array, width: number, channels: number): Uint8Array {
+  const stride = 1 + width * channels;
+  const raw = new Uint8Array((pixels.length / width) * stride);
+  for (let i = 0; i < pixels.length; i++) {
+    const p = pixels[i];
+    const a = p >>> 24;
+    const at = Math.floor(i / width) * stride + 1 + (i % width) * channels;
+    for (let k = 0; k < 3; k++) {
+      const c = (p >>> (16 - 8 * k)) & 0xff;
+      raw[at + k] = a === 0 ? 0 : a === 255 ? c : Math.min(255, ((c << 8) / a) | 0);
+    }
+
+    if (channels === 4) {
+      raw[at + 3] = a;
+    }
+  }
+
+  return raw;
+}
+
+test("a PNG's rows are made, filtered and deflated as a byte at a time makes them", () => {
+  let seed = 7;
+  const random = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return (seed >>> 16) & 0xff;
+  };
+  for (const channels of [3, 4] as const) {
+    // Widths under, at and over the module's sixteen bytes at a time, and their tails.
+    for (const width of [1, 2, 5, 6, 16, 17, 33, 200]) {
+      const height = 9;
+      const pixels = new Uint32Array(width * height);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          // Noise, a flat row, a ramp and a row like the one above, so that every filter
+          // wins; alpha clear, opaque and between, its colours no more than it.
+          const a = [random(), 255, 0, 128][(x + y) % 4];
+          const c = [
+            random(),
+            200,
+            x * 3 + y * 5,
+            y ? (pixels[(y - 1) * width + x] & 0xff) + 1 : 9,
+          ];
+          const v = Math.floor(((c[y % 4] & 0xff) * a) / 255);
+          pixels[y * width + x] = ((a << 24) | (v << 16) | ((v >> 1) << 8) | (v >> 2)) >>> 0;
+        }
+      }
+
+      const raw = rawRows(pixels, width, channels);
+      const stride = 1 + width * channels;
+      const filtered = inflate(
+        pngEncode(pixels, width, height, channels, 6, true),
+        false,
+        raw.length,
+      );
+      assert.equal(filtered.status, DONE);
+      const expected = filteredRows(raw, stride, channels);
+      assert.deepEqual(filtered.bytes, expected, `${width} wide, ${channels} channels`);
+      const plain = inflate(
+        pngEncode(pixels, width, height, channels, 1, false),
+        false,
+        raw.length,
+      );
+      assert.deepEqual(plain.bytes, raw, `${width} wide, ${channels} channels, unfiltered`);
+    }
+  }
+
+  // Pixels that are not the size given are refused, not read past.
+  assert.throws(() => pngEncode(new Uint32Array(10), 4, 3, 4, 6, true), RangeError);
 });
 
 test("inflate stops at its limit, leaves room before its output and reports what it read", () => {

@@ -9,6 +9,7 @@
 const std = @import("std");
 // zlib.h, LzmaEnc.h and LzmaDec.h, as build.zig translates them.
 const c = @import("c");
+const png = @import("png.zig");
 
 pub const panic = std.debug.no_panic;
 
@@ -205,6 +206,73 @@ export fn inflateData(input: usize, length: usize, window_bits: c_int, limit: us
     }
 
     return finish(out, @intFromPtr(s.next_out) - out, @intFromPtr(s.next_in) - input, status);
+}
+
+/// A PNG's IDAT stream of the `width` by `height` pixels at `input`, premultiplied ARGB as a
+/// BitmapData keeps them, in one pass: each row made PNG's bytes (RGBA for 4 `channels`, RGB
+/// for 3), given its best filter where `filter` is not 0 (png.zig) and none otherwise, and
+/// handed to the deflate at `level`, which keeps what it needs of it.
+export fn pngEncode(input: usize, width: usize, height: usize, channels: usize, level: c_int, filter: i32) i32 {
+    if (width == 0 or height == 0 or (channels != 3 and channels != 4)) {
+        return CORRUPT;
+    }
+
+    const length = width * channels;
+    const stride = length + 1;
+    // The row and the one above it, unfiltered, and the five filtered lines.
+    const scratch = alloc(2 * length + 5 * stride);
+    if (scratch == 0) {
+        return NO_MEMORY;
+    }
+
+    var s = std.mem.zeroes(c.z_stream);
+    s.zalloc = zalloc;
+    s.zfree = zfree;
+    if (c.deflateInit2_(&s, level, c.Z_DEFLATED, 15, 8, c.Z_DEFAULT_STRATEGY, c.ZLIB_VERSION, @sizeOf(c.z_stream)) != c.Z_OK) {
+        return NO_MEMORY;
+    }
+
+    const bound: usize = c.deflateBound(&s, @intCast(stride * height));
+    const out = alloc(bound);
+    if (out == 0) {
+        return NO_MEMORY;
+    }
+
+    s.next_out = @ptrFromInt(out);
+    s.avail_out = @intCast(bound);
+    const bytes: [*]u8 = @ptrFromInt(scratch);
+    var row = bytes[0..length];
+    var up = bytes[length..][0..length];
+    const lines = bytes[2 * length ..][0 .. 5 * stride];
+    @memset(up, 0);
+    const pixels: [*]const u32 = @ptrFromInt(input);
+    for (0..height) |y| {
+        png.unpremultiply(pixels[y * width ..][0..width], row, channels);
+        var line: []const u8 = undefined;
+        if (filter != 0) {
+            line = png.filterBest(row, up, lines, channels);
+        } else {
+            lines[0] = 0;
+            @memcpy(lines[1..stride], row);
+            line = lines[0..stride];
+        }
+
+        s.next_in = @constCast(line.ptr);
+        s.avail_in = @intCast(stride);
+        if (c.deflate(&s, c.Z_NO_FLUSH) != c.Z_OK or s.avail_in != 0) {
+            return NO_MEMORY;
+        }
+
+        const above = up;
+        up = row;
+        row = above;
+    }
+
+    if (c.deflate(&s, c.Z_FINISH) != c.Z_STREAM_END) {
+        return NO_MEMORY;
+    }
+
+    return finish(out, @intFromPtr(s.next_out) - out, width * height * 4, DONE);
 }
 
 /// Deflate `length` bytes at `input` at `level`, as a zlib stream

@@ -233,6 +233,12 @@ Upstream sources stay unchanged.
 - `inflate(data, raw, limit)` inflates a zlib or raw deflate stream to at
   most `limit` bytes, stopping at the stream's end.
 - `deflate(data, level, raw)` deflates as zlib does at that level.
+- `pngEncode(pixels, width, height, channels, level, filter)` makes a PNG's
+  IDAT stream of a bitmap's premultiplied ARGB pixels in one pass
+  (`png.zig`): each row is made RGBA or RGB, its colours divided out of
+  alpha; with `filter`, given the filter of PNG's five whose output sums
+  smallest, libpng's heuristic, sixteen bytes at a time (Wasm SIMD); and
+  handed to the deflate.
 - `lzmaDecode(stream, size)` decodes an LZMA stream, its 5 property bytes
   first, to `size` bytes or to its end marker.
 - `lzmaEncode(data)` writes `ByteArray`'s LZMA: properties, an 8-byte
