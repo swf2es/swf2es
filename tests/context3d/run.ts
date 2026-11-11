@@ -242,6 +242,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(vertices.exception, null, JSON.stringify(vertices));
       assert.equal(vertices.value?.passed, true);
       console.log("context3d: vertex reuse preserves layouts, program switches and validation");
+      const indices = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.indexBindings())',
+      );
+      assert.equal(indices.exception, null, JSON.stringify(indices));
+      assert.equal(indices.value?.passed, true);
+      console.log("context3d: index reuse survives uploads, disposal and MSAA copies");
       const uniforms = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.uniformUploads())',
       );

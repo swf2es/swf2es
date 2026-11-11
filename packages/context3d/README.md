@@ -230,6 +230,11 @@ replacement invalidate that cache. Each program retains its target-orientation
 uniform and sampler-unit assignments until they change or it is replaced;
 texture and sampler validation still runs on every draw.
 
+The owned VAO retains its index-buffer binding across draws, presentation and
+internal copies. Index-buffer allocation, uploads and disposal invalidate that
+binding cache; vertex uploads leave it intact. Draw validation still runs before
+reusing a binding.
+
 Each texture unit retains its last texture/sampler pair across draws and
 presentations. Changing either uses the normal three binding calls. Uploads and
 internal copies invalidate unit zero; unbinding and disposal invalidate the
