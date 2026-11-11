@@ -279,6 +279,8 @@ export class Runtime {
   /** Empty the inline caches, so that they keep no traits or code of what is being let go of. */
   forgetCaches(): void {
     invalidate();
+    this.stringNames = new WeakMap();
+    this.stringNamesEpoch = epoch();
   }
 
   // Names.
@@ -359,6 +361,16 @@ export class Runtime {
 
   /** A multiname with its runtime namespace and name, from the stack. */
   runtimeName(mn: Multiname, ...parts: Value[]): Multiname {
+    if (
+      !mn.runtimeNs &&
+      mn.runtimeName &&
+      mn.cache !== NO_CACHE &&
+      typeof parts[0] === "string" &&
+      parts[0].length <= 128
+    ) {
+      return this.stringName(mn, parts[0]);
+    }
+
     let namespaces: readonly (Namespace | null)[] = mn.namespaces;
     let versions = mn.versions;
     let k = 0;
@@ -408,6 +420,49 @@ export class Runtime {
 
     const named = new Multiname(kind, namespaces, versions, name, mn.attribute);
     named.domain = mn.domain;
+    return named;
+  }
+
+  private stringNames = new WeakMap<Multiname, { names: Map<string, Multiname>; misses: number }>();
+  private stringNamesEpoch = -1;
+
+  /** Repeated string keys share lookup work, without retaining arbitrary keys or retired domains. */
+  private stringName(base: Multiname, name: string): Multiname {
+    const current = epoch();
+    if (this.stringNamesEpoch !== current) {
+      this.stringNames = new WeakMap();
+      this.stringNamesEpoch = current;
+    }
+
+    let cache = this.stringNames.get(base);
+    if (cache && cache.misses >= 0) {
+      const known = cache.names.get(name);
+      if (known) {
+        cache.misses = 0;
+        return known;
+      }
+    }
+
+    const named = new Multiname(base.kind, base.namespaces, base.versions, name, base.attribute);
+    named.domain = base.domain;
+    if (!cache) {
+      cache = { names: new Map(), misses: 0 };
+      this.stringNames.set(base, cache);
+    }
+
+    // Replacing filled inline caches would retain their heads until the next invalidation.
+    if (cache.misses < 0) {
+      return named;
+    }
+    if (cache.names.size < 64) {
+      named.cache = UNFILLED;
+      cache.names.set(name, named);
+    } else if (++cache.misses >= 64) {
+      // A stream of unrelated keys should stop paying for a map lookup on every access.
+      cache.names.clear();
+      cache.misses = -1;
+    }
+
     return named;
   }
 
