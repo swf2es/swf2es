@@ -26,7 +26,7 @@ frame so instrumentation does not affect timing. These are backend measurements,
 not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShader.
 `--draws`, `--frames` and `--samples` control the workload; `--only` selects a
 comma-separated subset of `static`, `transform`, `material`, `all-changing`,
-`programs`, `bindings`, `attributes`, `indices-changing`, `indices-uploading`,
+`programs`, `bindings`, `attributes`, `index-ranges`, `indices-changing`, `indices-uploading`,
 `indices-uploading-bytes`, `states`, `states-enabled`, `states-changing`,
 `targets`, `textures`, `textures-changing`,
 `textures-cube`, `textures-cube-changing`, `textures-uploading`,
@@ -35,7 +35,8 @@ registers changing, program/target switches and indirect vertex addressing. `bin
 `attributes` switches programs with different active vertex inputs. Every frame
 checks GL errors and context loss. Results are JSON on stdout; progress goes to stderr.
 
-The index controls alternate index buffers or upload each triangle's indices
+`index-ranges` alternates eight larger ranges within one unchanged index buffer.
+The other index controls alternate index buffers or upload each triangle's indices
 before drawing it, through numeric arrays or bytes. `checks/indices.ts` checks
 pixel output and index-bind counts across uploads, reentrant source getters,
 failed draws, disposal, program replacement, resize and MSAA seeding.

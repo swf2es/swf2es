@@ -43,6 +43,7 @@ const names = [
   "bindings",
   "attributes",
   "indices-changing",
+  "index-ranges",
   "indices-uploading",
   "indices-uploading-bytes",
   "states",

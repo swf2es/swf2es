@@ -213,7 +213,8 @@ across those layers is an experimental limitation. `Playback.destroy()` disposes
 the display-list scene before the renderer on ordinary loads as well as Stage3D
 loads; this intentional shared cleanup releases cached text-style listeners.
 
-Draw validation caches index-range summaries by upload version. Fully uploaded
+Draw validation caches index-range summaries by upload version, retaining at most
+16 ranges of 128 or more indices when a buffer is drawn in alternating parts. Fully uploaded
 vertex prefixes need no per-attribute index scan; sparse validation caches also
 include the vertex version. Uploads, changed ranges/bindings and disposal
 invalidate the relevant records. Warm draws add no validation arrays or GPU

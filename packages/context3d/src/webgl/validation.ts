@@ -1,6 +1,10 @@
 import { Context3DError } from "../errors.js";
 import type { BufferState, VertexBinding } from "./buffers.js";
 
+// Small ranges cost less to scan; changing ranges must not grow a buffer's cache without bound.
+const MIN_RANGE = 128;
+const RANGES = 16;
+
 export function validateIndices(index: BufferState, first: number, count: number): number {
   if (
     index.checkedVersion === index.version &&
@@ -13,6 +17,25 @@ export function validateIndices(index: BufferState, first: number, count: number
   const values = index.indices;
   if (!values) {
     throw new Context3DError("indexBuffer", "Context3D draw needs an index buffer");
+  }
+
+  let ranges = index.ranges;
+  // Both parts are at most the buffer's length (524287), so these keys are exact and distinct.
+  const key = count >= MIN_RANGE ? first * (values.length + 1) + count : -1;
+  if (key >= 0 && index.checkedVersion === index.version) {
+    if (!ranges && index.checkedCount >= MIN_RANGE) {
+      ranges = new Map();
+      ranges.set(index.checkedFirst * (values.length + 1) + index.checkedCount, index.maximum);
+      index.ranges = ranges;
+    }
+
+    const maximum = ranges?.get(key);
+    if (maximum !== undefined) {
+      index.checkedFirst = first;
+      index.checkedCount = count;
+      index.maximum = maximum;
+      return maximum;
+    }
   }
 
   const end = first + count;
@@ -29,6 +52,9 @@ export function validateIndices(index: BufferState, first: number, count: number
   index.checkedFirst = first;
   index.checkedCount = count;
   index.maximum = maximum;
+  if (key >= 0 && ranges && ranges.size < RANGES) {
+    ranges.set(key, maximum);
+  }
 
   return maximum;
 }
