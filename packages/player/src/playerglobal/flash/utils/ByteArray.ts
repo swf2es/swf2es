@@ -1,4 +1,4 @@
-// The player supplies charset decoding where avmshell has a stub.
+// The player supplies charset encoding and decoding where avmshell has stubs.
 // Instances of a subclass bound to DefineBinaryData start with shared data
 // at position 0, each seeing the others' writes until resized. Crossbridge
 // keeps a C program's initialized data so, one subclass per data section.
@@ -102,7 +102,116 @@ function shiftJisFallback(bytes: Uint8Array, decoder: TextDecoder): string {
   return parts.join("");
 }
 
+// What a code page writes for each character, from its decoder: every
+// single byte, then for a double-byte page every lead and trail byte pair,
+// the first sequence that decodes to a character kept for it. Made once
+// per page, when first written in.
+const encodings = new Map<string, Map<string, number>>();
+
+/** Lead bytes of the double-byte pages TextDecoder knows; their trails are any byte from 0x40. */
+const DOUBLE_BYTE = new Set(["shift_jis", "gbk", "gb18030", "big5", "euc-kr", "euc-jp"]);
+
+function encodingFor(decoder: TextDecoder): Map<string, number> {
+  let table = encodings.get(decoder.encoding);
+  if (table) {
+    return table;
+  }
+
+  table = new Map();
+  const one = new Uint8Array(1);
+  for (let byte = 0; byte < 0x100; byte++) {
+    one[0] = byte;
+    const text = decoder.decode(one);
+    if (text.length === 1 && text !== "\ufffd" && !table.has(text)) {
+      table.set(text, byte);
+    }
+  }
+
+  if (DOUBLE_BYTE.has(decoder.encoding)) {
+    const two = new Uint8Array(2);
+    for (let lead = 0x81; lead < 0xff; lead++) {
+      two[0] = lead;
+      for (let trail = 0x40; trail < 0xff; trail++) {
+        two[1] = trail;
+        const text = decoder.decode(two);
+        if (text.length === 1 && text !== "\ufffd" && !table.has(text)) {
+          table.set(text, 0x10000 | (lead << 8) | trail);
+        }
+      }
+    }
+  }
+
+  encodings.set(decoder.encoding, table);
+  return table;
+}
+
+function utf16Bytes(text: string, little: boolean): Uint8Array {
+  const bytes = new Uint8Array(text.length * 2);
+  const view = new DataView(bytes.buffer);
+  for (let i = 0; i < text.length; i++) {
+    view.setUint16(i * 2, text.charCodeAt(i), little);
+  }
+
+  return bytes;
+}
+
+/**
+ * `text` in charset `name`, as Windows Flash converts it: UTF-8 and UTF-16
+ * as they are, a code page's characters by its table, and a character it
+ * has not as "?", as WideCharToMultiByte writes one.
+ */
+function encode(text: string, name: string): Uint8Array {
+  switch (name) {
+    case "utf-8":
+      return new TextEncoder().encode(text);
+    case "utf-16":
+    case "utf-16le":
+    case "unicode":
+      return utf16Bytes(text, true);
+    case "utf-16be":
+    case "unicodefffe":
+      return utf16Bytes(text, false);
+  }
+
+  const latin = name === "iso-8859-1" || name === "iso_8859-1" || name === "latin1";
+  const ascii = name === "ascii" || name === "us-ascii";
+  const table = latin || ascii ? null : encodingFor(decoderFor(name));
+  const out: number[] = [];
+  for (const char of text) {
+    const code = char.charCodeAt(0);
+    let byte: number | undefined;
+    if (latin || ascii) {
+      byte = char.length === 1 && code < (ascii ? 0x80 : 0x100) ? code : undefined;
+    } else {
+      byte = (table as Map<string, number>).get(char);
+    }
+
+    if (byte === undefined) {
+      out.push(0x3f);
+    } else if (byte > 0xffff) {
+      out.push((byte >> 8) & 0xff, byte & 0xff);
+    } else {
+      out.push(byte);
+    }
+  }
+
+  return new Uint8Array(out);
+}
+
 export function byteArrayNatives(s: Scripting): avm2.Natives {
+  const write = (b: avm2.Bytes, value: Value, charset: Value): void => {
+    const rt = s.rt;
+    if (value === null || value === undefined) {
+      throw rt.error("TypeError", 2007, "value");
+    }
+
+    if (charset === null || charset === undefined) {
+      throw rt.error("TypeError", 2007, "charSet");
+    }
+
+    b.write(encode(rt.toString(value), rt.toString(charset).toLowerCase()));
+  };
+
   const read = (b: avm2.Bytes, length: Value, charset: Value): string => {
     const rt = s.rt;
     if (charset === null || charset === undefined) {
@@ -152,6 +261,20 @@ export function byteArrayNatives(s: Scripting): avm2.Natives {
       charset: Value,
     ) {
       return read(avm2.bytesOf(s.rt, this), length, charset);
+    }),
+    "flash.utils::ByteArray#writeMultiByte": avm2.plain(function (
+      this: avm2.AsObject,
+      value: Value,
+      charset: Value,
+    ) {
+      write(avm2.bytesOf(s.rt, this), value, charset);
+    }),
+    "flash.utils::ObjectOutput#writeMultiByte": avm2.plain(function (
+      this: avm2.AsObject,
+      value: Value,
+      charset: Value,
+    ) {
+      write(this.$amf.bytes, value, charset);
     }),
     "flash.utils::ObjectInput#readMultiByte": avm2.plain(function (
       this: avm2.AsObject,
