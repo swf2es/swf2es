@@ -379,10 +379,13 @@ read-only, as an installed application's is. What it writes elsewhere,
 in its storage directory (`app-storage:`) or the user's directories, is
 kept in the browser's IndexedDB by the application's id, and is there
 the next time the page plays it; `loadAir(app, { keepFiles: false })`
-keeps it in memory alone, for that play. `EncryptedLocalStore` keeps its
-items in IndexedDB too, by the application's id: a page has no keychain
-to encrypt them by, and the browser keeps them as it keeps the site's
-other data.
+keeps it in memory alone, for that play. `File.createTempFile()` and
+`File.createTempDirectory()` make theirs in its cache directory
+(`File.cacheDirectory`, `/cache`), kept the same way until it deletes
+them, as AIR leaves them for the application to delete.
+`EncryptedLocalStore` keeps its items in IndexedDB too, by the
+application's id: a page has no keychain to encrypt them by, and the
+browser keeps them as it keeps the site's other data.
 The element is its one window, at the descriptor's size, and
 `flash.display.Screen` has the one screen the page is on (`window.screen`);
 the play page opens `.air` and `.zip` files too.
