@@ -109,11 +109,7 @@ export function fillCache(
     mn.cache = head;
   }
 
-  const e = entryFor(head, traits);
-  if (e === null) {
-    return;
-  }
-
+  const e = entryFor(head, traits, mn);
   e.traits = traits;
   e.kind = kind;
   e.key = key;

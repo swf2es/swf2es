@@ -11,6 +11,11 @@
 // entry still looks for the property on the object, which may have lost it,
 // then on its prototypes, which may have gained or lost it, and leaves
 // what neither has to the full lookup.
+//
+// A name looked up on more traits than its cache keeps, as `x` is on every
+// class with an x, stops replacing entries; what it finds on traits it has
+// no entry for is kept on those traits instead, by name, so that the one
+// class it is mostly read on is not left to the full lookup.
 
 import type { Method, TypeRef } from "./descriptors.js";
 import type { Multiname } from "./names.js";
@@ -35,7 +40,7 @@ const ENTRIES = 8;
  * keeps would replace one on every miss, and still miss as often. It keeps
  * those it has until the epoch changes.
  */
-export const REPLACEMENTS = 16;
+const REPLACEMENTS = 16;
 
 /**
  * One traits' entry for a name. A name's first entry heads its list and
@@ -70,6 +75,8 @@ export function epoch(): number {
 
 /** The caches filled in this epoch, which invalidate empties so that they keep no traits or code. */
 const filled: PropertyCache[] = [];
+/** The traits given entries of their own in this epoch (Traits.manyTraitsEntries). */
+const filledTraits: Traits[] = [];
 
 /** Note that `head`'s cache is being filled in this epoch. */
 function filling(head: PropertyCache): void {
@@ -88,6 +95,11 @@ export function invalidate(): void {
   }
 
   filled.length = 0;
+  for (let i = 0; i < filledTraits.length; i++) {
+    filledTraits[i].manyTraitsEntries = null;
+  }
+
+  filledTraits.length = 0;
   current++;
 }
 
@@ -98,11 +110,12 @@ export const UNFILLED = new PropertyCache();
 
 /** The entry of `mn`'s cache for objects with traits `t`, or null. */
 export function cached(t: Traits | undefined, mn: Multiname): PropertyCache | null {
-  let e: PropertyCache | null = mn.cache;
-  if (t === undefined || e.epoch !== epoch()) {
+  const head = mn.cache;
+  if (t === undefined || head.epoch !== epoch()) {
     return null;
   }
 
+  let e: PropertyCache | null = head;
   do {
     if (e.traits === t) {
       return e;
@@ -111,16 +124,20 @@ export function cached(t: Traits | undefined, mn: Multiname): PropertyCache | nu
     e = e.next;
   } while (e !== null);
 
+  if (head.replaced === REPLACEMENTS && t.manyTraitsEntries !== null) {
+    return t.manyTraitsEntries.get(mn) ?? null;
+  }
+
   return null;
 }
 
 /**
- * The entry of a cache to fill for traits `t`: its own, a free one, a new
- * one while the list is shorter than ENTRIES, else the oldest, until it has
- * replaced REPLACEMENTS; then none. A cache of an earlier epoch is emptied
- * first.
+ * The entry of `mn`'s cache, `head`, to fill for traits `t`: its own, a
+ * free one, a new one while the list is shorter than ENTRIES, else the
+ * oldest, until it has replaced REPLACEMENTS; then one `t` keeps for `mn`.
+ * A cache of an earlier epoch is emptied first.
  */
-export function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
+export function entryFor(head: PropertyCache, t: Traits, mn: Multiname): PropertyCache {
   if (head.epoch !== epoch()) {
     for (let e: PropertyCache | null = head; e !== null; e = e.next) {
       e.traits = null;
@@ -150,7 +167,7 @@ export function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
   }
 
   if (head.replaced === REPLACEMENTS) {
-    return null;
+    return traitsEntry(t, mn);
   }
 
   head.replaced++;
@@ -158,3 +175,22 @@ export function entryFor(head: PropertyCache, t: Traits): PropertyCache | null {
   head.victim = victim.next ?? head;
   return victim;
 }
+
+/** The entry `t` keeps for `mn`, a name its cache has no room for. */
+function traitsEntry(t: Traits, mn: Multiname): PropertyCache {
+  let entries = t.manyTraitsEntries;
+  if (entries === null) {
+    entries = new Map();
+    t.manyTraitsEntries = entries;
+    filledTraits.push(t);
+  }
+
+  let e = entries.get(mn);
+  if (e === undefined) {
+    e = new PropertyCache();
+    entries.set(mn, e);
+  }
+
+  return e;
+}
+

@@ -113,7 +113,6 @@ import {
   IC_Slot,
   invalidate,
   NO_CACHE,
-  REPLACEMENTS,
   UNFILLED,
 } from "./property-cache.js";
 import {
@@ -1385,11 +1384,7 @@ export class Runtime {
   /** fillCache (cache-fill.ts), for a name that caches on traits a cache knows `o` by. */
   private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
     const head = mn.cache;
-    if (
-      head === NO_CACHE ||
-      (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
-      this.receiverTraits(o) !== traits
-    ) {
+    if (head === NO_CACHE || this.receiverTraits(o) !== traits) {
       return;
     }
 
