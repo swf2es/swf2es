@@ -30,7 +30,7 @@ export const IC_GetSet = 5;
 export const IC_Method = 6;
 /** A method a property hook resolves the name of for get and set, as XML's: callproperty only. */
 export const IC_Call = 7;
-/** No binding: a dynamic property, the object's own or else a prototype's, if either has it. */
+/** No binding: a dynamic property, the object's own (a dynamic object's) or else a prototype's, if either has it. */
 export const IC_Dynamic = 8;
 
 /** Entries a name keeps, for as many traits, before it replaces the oldest. */

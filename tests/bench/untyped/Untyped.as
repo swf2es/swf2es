@@ -252,6 +252,23 @@ function manyLoop(n:int):Number {
   return sum;
 }
 
+// Methods a script gives a class's prototype, called on its sealed objects
+// by name, as an obfuscator's code calls them.
+class Body {
+  public var m:Number = 2;
+}
+Body.prototype.mass = function():Number { return 3; };
+Body.prototype.kind = "body";
+
+function protoLoop(n:int):Number {
+  var sum:Number = 0;
+  var b:* = new Body();
+  for (var k:int = 0; k < n; k++) {
+    sum += b.mass() + b.kind.length + b.m;
+  }
+  return sum;
+}
+
 function runAll(rounds:int):void {
   var t:uint = getTimer();
   var r1:Number = displayLoop(rounds);
@@ -280,7 +297,10 @@ function runAll(rounds:int):void {
   t = getTimer();
   var r9:Number = manyLoop(rounds * 40);
   trace("time: many " + (getTimer() - t));
-  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9);
+  t = getTimer();
+  var r10:Number = protoLoop(rounds * 20);
+  trace("time: proto " + (getTimer() - t));
+  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9 + " " + r10);
 }
 
 runAll(20000);

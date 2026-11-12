@@ -67,3 +67,28 @@ test("a name looked up on more traits than its cache keeps finds each one's own"
   assert.equal(rt.getProperty(other.instance(), x), 4);
   assert.equal(rt.getProperty(o, x), 7);
 });
+
+test("a sealed object's name its prototype has is found until the prototype loses it", () => {
+  const rt = avm2.createRuntime();
+  const kind = name(rt, "kind");
+  const proto = rt.objectTraits.instance();
+  const sealed = slots(rt.objectTraits, ["m"], 1);
+  sealed.proto.$p = proto;
+  const o = sealed.instance();
+  rt.setProperty(proto, kind, "first");
+  for (let i = 0; i < 3; i++) {
+    assert.equal(rt.getProperty(o, kind), "first");
+  }
+
+  rt.setProperty(proto, kind, "second");
+  assert.equal(rt.getProperty(o, kind), "second");
+  assert.equal(
+    thrown(() => rt.setProperty(o, kind, "own")),
+    "ReferenceError: Error #1056",
+  );
+  rt.deleteProperty(proto, kind);
+  assert.equal(
+    thrown(() => rt.getProperty(o, kind)),
+    "ReferenceError: Error #1069",
+  );
+});
