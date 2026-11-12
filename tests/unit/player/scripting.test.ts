@@ -1724,3 +1724,38 @@ test("a symbol a script makes has its first frame placed before its constructor 
 
   assert.deepEqual(lines, ["before 1 null", "after 1 [object Shape]"]);
 });
+
+test("an event dispatched again whose clone is null is a TypeError #2007", { skip }, async () => {
+  // As Flash (Ruffle's event_clone_error_redispatch): a dispatched event goes out again as its clone.
+  const source = `package {
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    import flash.events.EventDispatcher;
+    public class Main extends MovieClip {
+      public function Main() {
+        const first:EventDispatcher = new EventDispatcher();
+        const second:EventDispatcher = new EventDispatcher();
+        first.addEventListener("custom", function (e:Event):void {
+          try {
+            second.dispatchEvent(e);
+          } catch (error:TypeError) {
+            trace(error.errorID);
+          }
+        });
+        first.dispatchEvent(new NullClone());
+      }
+    }
+  }
+  import flash.events.Event;
+  class NullClone extends Event {
+    public function NullClone() { super("custom"); }
+    override public function clone():Event { trace("cloned"); return null; }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("NullClone", source), 1), scripting);
+  await player.start();
+
+  assert.deepEqual(lines, ["cloned", "2007"]);
+});
