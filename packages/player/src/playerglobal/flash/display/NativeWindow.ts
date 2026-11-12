@@ -151,7 +151,9 @@ export function nativeWindowNatives(s: Scripting): avm2.Natives {
       return hostOf(this).displayState();
     }
 
+    // A stage in full screen leaves it first, with its FullScreenEvent, as in adl.
     minimize(): void {
+      s.fullScreen.set("normal");
       hostOf(this).minimize?.();
     }
 
@@ -160,6 +162,7 @@ export function nativeWindowNatives(s: Scripting): avm2.Natives {
     }
 
     restore(): void {
+      s.fullScreen.set("normal");
       hostOf(this).restore?.();
     }
 

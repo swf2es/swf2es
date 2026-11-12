@@ -29,10 +29,11 @@ import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
-import { display, withApp as runApp } from "./app.ts";
+import { type App, display, withApp as runApp } from "./app.ts";
 import { webSocketServer } from "./websocket-server.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+const desktopPackage = fileURLToPath(new URL("../../apps/desktop/package.json", import.meta.url));
 const out = `${here}out/`;
 
 const why = missing();
@@ -105,6 +106,7 @@ const airSource = `package {
   import flash.filesystem.File;
   import flash.filesystem.FileMode;
   import flash.filesystem.FileStream;
+  import flash.geom.Rectangle;
   import flash.net.*;
   import flash.system.Security;
   import flash.utils.ByteArray;
@@ -151,6 +153,15 @@ const airSource = `package {
         if (e.arguments.length > 4) {
           connectWebSocket("wss-address", "wss://127.0.0.1:" + e.arguments[4] + "/");
           connectWebSocket("wss-name", "wss://localhost:" + e.arguments[4] + "/");
+        }
+        // Full screen as an application asks for it: from no click or key, over a part of its stage.
+        if (e.arguments.length > 1) {
+          stage.addEventListener(FullScreenEvent.FULL_SCREEN, function (f:FullScreenEvent):void {
+            trace("air: fullScreen " + f.fullScreen + " " + f.interactive + " " + stage.displayState);
+          });
+          stage.fullScreenSourceRect = new Rectangle(0, 0, 50, 50);
+          stage.displayState = "fullScreenInteractive";
+          trace("air: displayState " + stage.displayState + " " + stage.stageWidth + "x" + stage.stageHeight);
         }
       });
     }
@@ -525,6 +536,57 @@ const withApp = (settings: object, args: string[], run: Parameters<typeof runApp
   runApp(screen.env, settings, args, run);
 
 /**
+ * The AIR application's full screen: the window's own, as the main
+ * process has it, and its source rect of 50 by 50 alone drawn, fitted and
+ * centred; then Esc, which leaves, as the stage hears. The headless
+ * window has no window manager to resize it, so its size stays.
+ */
+async function fullScreen({ until, evaluate, main, devtools, stdout }: App): Promise<void> {
+  let shown: { full: boolean; window: number[]; canvas: number[] } | null = null;
+  const look = async () => {
+    const full = await main<boolean>(`(() => {
+      const electron = process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron");
+      return electron.BrowserWindow.getAllWindows()[0].isFullScreen();
+    })()`);
+    const page = await evaluate<{ window: number[]; canvas: number[] }>(`(() => {
+      const r = document.getElementById("player").shadowRoot.querySelector("canvas").getBoundingClientRect();
+      return { window: [innerWidth, innerHeight], canvas: [r.x, r.y, r.width, r.height].map(Math.round) };
+    })()`);
+    shown = { full, ...page };
+  };
+  const sized = (full: boolean) => () => {
+    void look().catch(() => {});
+    if (!shown) {
+      return false;
+    }
+
+    // In full screen the source rect, a square; out of it the canvas is the window.
+    const [width, height] = shown.window;
+    const side = Math.min(width, height);
+    const canvas = full
+      ? [Math.round((width - side) / 2), Math.round((height - side) / 2), side, side]
+      : [0, 0, width, height];
+    return shown.full === full && shown.canvas.join() === canvas.join();
+  };
+  await until("the window in full screen, the source rect drawn", sized(true));
+
+  for (const type of ["keyDown", "keyUp"]) {
+    await devtools.send("Input.dispatchKeyEvent", {
+      type,
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
+  }
+
+  await until("Esc out of full screen", () =>
+    stdout.includes("air: fullScreen false false normal"),
+  );
+  shown = null;
+  await until("the window as it was", sized(false));
+}
+
+/**
  * An AIR application, its descriptor and content SWF in a directory of
  * their own, run adl's way with the socket server's port after "--": it
  * reads what Flash's local sandboxes refuse, and connects unasked, its
@@ -628,6 +690,8 @@ async function air(): Promise<void> {
     [
       "--log-sockets",
       "--ignore-certificate-errors=127.0.0.1",
+      // The inspector, for the window as the main process has it.
+      "--inspect=0",
       `${app}AirSmoke-app.xml`,
       "--",
       String(port),
@@ -636,7 +700,8 @@ async function air(): Promise<void> {
       String(webSockets.port),
       ...(secure ? [String(secure.port)] : []),
     ],
-    async ({ stdout, stderr, until }) => {
+    async (running) => {
+      const { stdout, stderr, until } = running;
       const settled = () =>
         [
           "app",
@@ -711,6 +776,9 @@ async function air(): Promise<void> {
         "air: http status 200 false data.txt text/plain",
         "air: http served",
         "air: socket pong",
+        // In full screen as its setter returns, the event before it, as in adl.
+        "air: fullScreen true false fullScreenInteractive",
+        "air: displayState fullScreenInteractive 100x50",
       ]) {
         assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
       }
@@ -724,6 +792,8 @@ async function air(): Promise<void> {
           stdout.indexOf("air: http served"),
         stdout.join("\n"),
       );
+
+      await fullScreen(running);
     },
   );
   served.server.close();

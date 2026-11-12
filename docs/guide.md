@@ -121,6 +121,20 @@ and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
 holds both): a page may size the element to the SWF's own size while it
 asks for `noScale`, as an embedding at that size shows it.
 
+A SWF goes full screen by setting `Stage.displayState`, as under Flash
+Player's plug-in: only with `allowfullscreen="true"` on the element
+(`allowfullscreeninteractive="true"` for `"fullScreenInteractive"`), and
+only from a mouse or key handler, as the browser's Fullscreen API asks
+too; otherwise the setter throws SecurityError #2152. The element then
+covers the screen, the stage placed by its scale mode, or its
+`fullScreenSourceRect` alone, fitted and centred. Esc leaves, and the SWF
+gets its `FullScreenEvent` either way. `replaceFlash` carries both
+parameters over. An AIR application needs neither attribute, but still
+the click. A page that makes the element full screen itself
+(`element.requestFullscreen()`) puts the stage in full screen too.
+`configure({ fullScreen })` takes a full screen of the embedder's own
+instead, as the desktop app's window, which needs no click.
+
 ## WebAssembly and CSP
 
 Fills, lines and BitmapData's filters and pixel operations are computed by
@@ -307,6 +321,10 @@ In a checkout of the repository the app runs from its sources:
 pnpm build
 pnpm --filter @swf2es/desktop start movie.swf
 ```
+
+A SWF or an AIR application that sets `Stage.displayState` takes the
+window full screen, with no click needed, as in AIR and Flash's projector;
+Esc or F11 leaves.
 
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.

@@ -254,6 +254,39 @@ prompt, as AIR's application sandbox has them (`network.ts`'s
 "application" movie). `tests/desktop/smoke.ts` runs one in headless
 Electron.
 
+## Full screen
+
+`Stage.displayState` asks the host's `FullScreenHost` (`hosts.ts`):
+`allowed` is the embedding's allowFullScreen and
+allowFullScreenInteractive, `request` goes full screen or refuses, and
+`exit` leaves; the host tells of what no script asked for, the user's Esc
+say, with `Scripting.fullScreen.hostChanged`. `scripting/full-screen.ts`
+keeps the state as adl (AIR 51.3) has it: the stage is in full screen, and
+its `FullScreenEvent.FULL_SCREEN` dispatched, before the setter returns,
+from a timer as from a click; nothing is dispatched for a state the stage
+is in, nor between `"fullScreen"` and `"fullScreenInteractive"`; another
+string throws ArgumentError #2008, null TypeError #2007. The event's
+`interactive` is false in adl even for the interactive state, and
+`allowsFullScreenInteractive` false though it works; outside AIR both
+follow the host. A host that refuses throws SecurityError #2152, Flash
+Player's without allowFullScreen or outside a click or key, which adl
+never throws and could not show. `mouseLock` may be set only in full
+screen (Error #3707, even for false) and its end clears it, and the
+window's `restore()` and `minimize()` leave it first.
+
+The stage keeps its size in full screen but in noScale, where it is the
+screen's, and Event.RESIZE follows as for any change of its box: before
+the FullScreenEvent where the host's box has changed by then, after it
+where it changes later, as a window's does. `fullScreenSourceRect` is
+kept in any state, read back as a copy, and in full screen that part of
+the stage alone is drawn, fitted to the screen and centred whatever the
+scale mode and alignment, the rest the stage's colour; in noScale the
+stage is the rect's size. A rect with no area is reported but draws as
+the one before it. adl dispatches two more RESIZEs that change no size as
+it leaves full screen in noScale; the player none. Without a host, as in
+node, the stage stays `"normal"` and nothing throws. AVM1's
+`Stage.displayState` is not there yet.
+
 ## Screen capabilities
 
 `flash.system.Capabilities` reads screen resolution, pixel aspect ratio and
