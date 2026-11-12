@@ -1767,9 +1767,7 @@ check(
         await new Promise((done) => setTimeout(done, 50));
       }
 
-      assert.fail(
-        `${what}: ${JSON.stringify(await call(evaluate, "fsLines"))} ${JSON.stringify(await call(evaluate, "window.__fsDebug"))}`,
-      );
+      assert.fail(`${what}: ${JSON.stringify(await call(evaluate, "fsLines"))}`);
     };
     const lines = () => call<string[]>(evaluate, "fsLines.splice(0)");
     try {
