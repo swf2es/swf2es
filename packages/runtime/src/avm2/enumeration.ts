@@ -36,6 +36,8 @@ interface SparseIndices {
   /** How many were given since they were taken, and whether they were taken again since this for-in met them. */
   sinceTaken: number;
   retaken: boolean;
+  /** Whether avmplus holds the Array's elements in its hashtable (see hashed). */
+  hashed: boolean;
 }
 
 /**
@@ -70,6 +72,7 @@ function dropSparse(enumerating: WeakMap<object, Enumeration>, o: AsObject): voi
   if (o === sparseOwner) {
     sparseOwner = null;
     ownerSparse = null;
+    lastStep.hashed = null;
   }
 }
 
@@ -201,12 +204,15 @@ const lastStep: {
   keys: DictionaryKeys | null;
   /** The slots of the names it went through, past any elements: the object's, as they never change. */
   walk: Walk | null;
+  /** The Array whose indices its last step went on by, where avmplus holds it in a hashtable. */
+  hashed: AsObject;
 } = {
   o: null,
   index: 0,
   none: false,
   keys: null,
   walk: null,
+  hashed: null,
 };
 
 /**
@@ -275,6 +281,15 @@ function nextElement(
     return from < length ? from : -1;
   }
 
+  // Where avmplus walks a hashtable, a hole filled during the walk is
+  // reached or not by where it hashes, which no order of indices follows:
+  // the step goes on by the indices without asking whether the hole at
+  // `from` was filled, a miss in the engine's dictionary and most of what
+  // such a step costs.
+  if (o === lastStep.hashed && (ownerSparse as SparseIndices).hashed) {
+    return nextSparse(o, a, ownerSparse as SparseIndices, from);
+  }
+
   if (enumerable(o, a, from)) {
     return from;
   }
@@ -289,6 +304,7 @@ function nextElement(
     if (e?.sparse !== undefined) {
       sparseOwner = o;
       ownerSparse = e.sparse;
+      lastStep.hashed = null;
       return nextSparse(o, a, e.sparse, from);
     }
   }
@@ -308,16 +324,19 @@ function nextElement(
   const keeper: Enumeration = e ?? enumerating.get(o) ?? {};
   enumerating.set(o, keeper);
   sparseKept++;
+  const indices = indicesOf(a, 0);
   keeper.sparse = {
-    indices: indicesOf(a, 0),
+    indices,
     length,
     at: -1,
     given: -1,
     sinceTaken: 0,
     retaken: false,
+    hashed: hashed(indices),
   };
   sparseOwner = o;
   ownerSparse = keeper.sparse;
+  lastStep.hashed = null;
   return nextSparse(o, a, keeper.sparse, scanned);
 }
 
@@ -356,6 +375,8 @@ function nextSparse(o: AsObject, a: Value[], sparse: SparseIndices, from: number
       sparse.at = j;
       sparse.given = i;
       sparse.sinceTaken++;
+      // These are the owner's, so that its next step goes on by them alone.
+      lastStep.hashed = sparse.hashed ? o : null;
       return i;
     }
 
@@ -378,6 +399,24 @@ function retake(a: Value[], sparse: SparseIndices): void {
   sparse.at = -1;
   sparse.given = -1;
   sparse.sinceTaken = 0;
+  sparse.hashed = hashed(sparse.indices);
+}
+
+/**
+ * Whether avmplus holds an Array with these elements in its hashtable, as
+ * it must when they span more than 32 slots and more than four times one
+ * more than their count: its dense part never holds so few over so many,
+ * and an Array once in the hashtable never leaves it. Else avmplus may hold
+ * them dense, walking them by index, as the for-in here does.
+ */
+function hashed(indices: number[]): boolean {
+  const n = indices.length;
+  if (n === 0) {
+    return false;
+  }
+
+  const span = indices[n - 1] - indices[0] + 1;
+  return span > 32 && span > (n + 1) * 4;
 }
 
 /** An Array's indices from `from` on, in order, as Object.keys gives them, appended to `indices`. */
