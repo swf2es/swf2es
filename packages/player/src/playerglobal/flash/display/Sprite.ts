@@ -11,6 +11,7 @@ import { dropTargetOf, hitAreaOf, setHitArea } from "../../../input/pointer.js";
 import type { SoundMix } from "../../../media/audio.js";
 import { mixOf, updateTimelineMixes } from "../../../media/sounds.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 import { channelMix, transformOf } from "../media/Sound.js";
 import { graphicsOf } from "./Graphics.js";
 
@@ -116,8 +117,8 @@ export function spriteNatives(s: Scripting): avm2.Natives {
       return null;
     }
 
-    const o = bounds as avm2.AsObject;
-    const get = (key: string) => s.rt.toNumber(s.rt.getProperty(o, avm2.qname(avm2.publicNs, key)));
+    const o = bounds as As3<"flash.geom::Rectangle">;
+    const get = (key: "x" | "y" | "width" | "height") => s.rt.toNumber(s.rt.prop(o, key));
     const x = get("x");
     const y = get("y");
     const right = x + get("width");

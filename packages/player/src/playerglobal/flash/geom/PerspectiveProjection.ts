@@ -7,6 +7,7 @@ import { avm2 } from "@swf2es/runtime";
 import { type DisplayObject, type Projection, TRANSFORM } from "../../../display/display.js";
 import { defaultProjection, focalLengthOver as focalLength } from "../../../display/perspective.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -108,9 +109,9 @@ export function perspectiveProjectionNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "projectionCenter");
       }
 
-      const point = v as AsObject;
-      const x = s.rt.toNumber(s.rt.getProperty(point, s.rt.publicName("x")));
-      const y = s.rt.toNumber(s.rt.getProperty(point, s.rt.publicName("y")));
+      const point = v as As3<"flash.geom::Point">;
+      const x = s.rt.toNumber(s.rt.prop(point, "x"));
+      const y = s.rt.toNumber(s.rt.prop(point, "y"));
       if (this.$display) {
         update(this.$display, { centerX: x, centerY: y });
       } else {

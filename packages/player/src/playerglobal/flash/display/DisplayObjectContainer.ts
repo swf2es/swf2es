@@ -4,6 +4,7 @@ import { avm2 } from "@swf2es/runtime";
 import { hitsOwnPoint } from "../../../display/bounds.js";
 import { Container, type DisplayObject, MovieClip, pickWork } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 
 type Value = avm2.Value;
 
@@ -155,8 +156,9 @@ export function containerNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "point");
       }
 
-      const x = s.rt.toNumber(s.rt.getProperty(point as avm2.AsObject, s.rt.publicName("x")));
-      const y = s.rt.toNumber(s.rt.getProperty(point as avm2.AsObject, s.rt.publicName("y")));
+      const p = point as As3<"flash.geom::Point">;
+      const x = s.rt.toNumber(s.rt.prop(p, "x"));
+      const y = s.rt.toNumber(s.rt.prop(p, "y"));
       const found: Value[] = [];
       const stage = s.stage;
       if (!stage) {

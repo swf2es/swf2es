@@ -4,6 +4,7 @@
 import { avm2 } from "@swf2es/runtime";
 import { encodePng } from "../../../bitmap/png.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 import { storeOf } from "../display/BitmapData.js";
 
 type Value = avm2.Value;
@@ -148,9 +149,9 @@ export function mouseNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "hotSpot");
       }
 
-      const p = value as AsObject;
-      this.$cursorHotX = s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName("x")));
-      this.$cursorHotY = s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName("y")));
+      const p = value as As3<"flash.geom::Point">;
+      this.$cursorHotX = s.rt.toNumber(s.rt.prop(p, "x"));
+      this.$cursorHotY = s.rt.toNumber(s.rt.prop(p, "y"));
     }
 
     get frameRate(): number {

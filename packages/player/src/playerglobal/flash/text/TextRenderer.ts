@@ -4,6 +4,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
 import { setCsmTable } from "../../../text/csm.js";
+import type { As3 } from "../../as3-types.js";
 
 type Value = avm2.Value;
 
@@ -85,8 +86,8 @@ export function textRendererNatives(s: Scripting): avm2.Natives {
         }
       }
 
-      const read = (entry: Value, k: string) =>
-        s.rt.toNumber(s.rt.getProperty(entry as avm2.AsObject, s.rt.publicName(k)));
+      const read = (entry: Value, k: "fontSize" | "insideCutoff" | "outsideCutoff") =>
+        s.rt.toNumber(s.rt.prop(entry as As3<"flash.text::CSMSettings">, k));
       setCsmTable(
         s.rt.toString(fontName),
         s.rt.toString(fontStyle),

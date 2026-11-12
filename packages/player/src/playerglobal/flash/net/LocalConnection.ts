@@ -4,6 +4,7 @@ import { avm2 } from "@swf2es/runtime";
 import { type LocalEndpoint, localDomain, localMethodAllowed } from "../../../localconnection.js";
 import { dispatchEvent, heard } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 import { readModernValues, writeModernValues } from "./local-modern.js";
 import { readLocalValues, writeLocalValues } from "./local-values.js";
 
@@ -101,7 +102,7 @@ export function localConnectionNatives(s: Scripting): avm2.Natives {
               "asyncError",
               false,
               false,
-              s.rt.getProperty(failure, s.rt.publicName("message")),
+              s.rt.prop(failure as As3<"Error">, "message"),
               s.rt.isInstance(error, s.rt.classNamed("Error"))
                 ? error
                 : s.rt.construct(s.rt.classNamed("Error"), s.rt.toString(error)),
