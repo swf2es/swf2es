@@ -70,6 +70,8 @@ import {
   CONSTANT_RTQnameA,
   CONSTANT_RTQnameL,
   CONSTANT_RTQnameLA,
+  MADE_Number,
+  MADE_Value,
   Multiname,
   Namespace,
   NS_Private,
@@ -441,6 +443,7 @@ export class Runtime {
         // Its string only once a lookup needs it: a Dictionary does not.
         const keyed = Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
         keyed.domain = mn.domain;
+        keyed.made = MADE_Value;
         return keyed;
       } else {
         name = typeof part === "string" ? part : this.toString(part);
@@ -449,6 +452,26 @@ export class Runtime {
 
     const named = new Multiname(kind, namespaces, versions, name, mn.attribute);
     named.domain = mn.domain;
+    // A number here is one no element access made: a Proxy tells it by its string.
+    if (mn.runtimeName && typeof last !== "number") {
+      named.made = MADE_Value;
+    }
+
+    return named;
+  }
+
+  /**
+   * The name number `i` makes of `mn` in an element's read or write, which
+   * avmplus' JIT hands an object as a number (getpropertylate_i and _d), a
+   * Proxy as its string: where the name has no public namespace, it is a
+   * name as any other.
+   */
+  private indexName(mn: Multiname, i: number): Multiname {
+    const named = this.runtimeName(mn, i);
+    if (mn.kind === CONSTANT_MultinameL && mn.elementName) {
+      named.made = MADE_Number;
+    }
+
     return named;
   }
 
@@ -474,6 +497,7 @@ export class Runtime {
 
     const named = new Multiname(base.kind, base.namespaces, base.versions, name, base.attribute);
     named.domain = base.domain;
+    named.made = MADE_Value;
     if (!cache) {
       cache = { names: new Map(), misses: 0 };
       this.stringNames.set(base, cache);
@@ -1196,7 +1220,7 @@ export class Runtime {
       }
     }
 
-    return this.getProperty(o, this.runtimeName(mn, i));
+    return this.getProperty(o, this.indexName(mn, i));
   }
 
   /** obj[i] = v for a number i, as avmplus' setUintProperty. */
@@ -1216,7 +1240,7 @@ export class Runtime {
       }
     }
 
-    this.setProperty(o, this.runtimeName(mn, i), v);
+    this.setProperty(o, this.indexName(mn, i), v);
   }
 
   /**

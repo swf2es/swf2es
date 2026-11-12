@@ -6,6 +6,8 @@ import {
   CONSTANT_MultinameL,
   CONSTANT_MultinameLA,
   CONSTANT_RTQnameL,
+  MADE_Unknown,
+  MADE_Value,
   Multiname,
 } from "../../../packages/runtime/dist/avm2/names.js";
 import { NO_CACHE } from "../../../packages/runtime/dist/avm2/property-cache.js";
@@ -90,6 +92,18 @@ test("indexed access respects namespaces and attributes, including resolved runt
     assert.throws(() => rt.setIndexed(o, name, 0, 99));
     assert.deepEqual(o.$a, [11]);
   }
+});
+
+test("a name made at run time records whether a number or another value made it", () => {
+  const rt = avm2.createRuntime();
+  const base = rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null);
+  assert.equal(base.made, MADE_Unknown);
+  assert.equal(rt.runtimeName(base, "0").made, MADE_Value);
+  assert.equal(rt.runtimeName(base, "x".repeat(129)).made, MADE_Value);
+  assert.equal(rt.runtimeName(base, {}).made, MADE_Value);
+  assert.equal(rt.runtimeName(base, true).made, MADE_Value);
+  // A number's own name is told by its string: only an element's read or write says it was one.
+  assert.equal(rt.runtimeName(base, 0).made, MADE_Unknown);
 });
 
 test("determining an indexed name leaves an object key's string conversion deferred", () => {
