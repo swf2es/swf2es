@@ -7,11 +7,13 @@ import type {
   NetworkResponse,
   OpenedMovie,
   SocketEvent,
+  WebSocketEvent,
 } from "../shared/api.js";
 
 const { contextBridge, ipcRenderer, webUtils } = require("electron") as typeof import("electron");
 
 let nextSocket = 1;
+let nextWebSocket = 1;
 let nextRequest = 1;
 /** The requests waiting for their response, by number. */
 const responses = new Map<number, (response: NetworkResponse) => void>();
@@ -49,6 +51,20 @@ const api: DesktopApi = {
     close: (id) => ipcRenderer.send("socket:close", id),
     onEvent: (listener) => {
       ipcRenderer.on("socket:event", (_event, id: number, event: SocketEvent) =>
+        listener(id, event),
+      );
+    },
+  },
+  webSockets: {
+    connect: (url, protocols) => {
+      const id = nextWebSocket++;
+      ipcRenderer.send("websocket:connect", id, String(url), Array.from(protocols, String));
+      return id;
+    },
+    send: (id, data) => ipcRenderer.send("websocket:send", id, data),
+    close: (id, code) => ipcRenderer.send("websocket:close", id, code),
+    onEvent: (listener) => {
+      ipcRenderer.on("websocket:event", (_event, id: number, event: WebSocketEvent) =>
         listener(id, event),
       );
     },
@@ -95,6 +111,7 @@ const api: DesktopApi = {
     remove: (path) => ipcRenderer.sendSync("air:remove", String(path)),
     move: (from, to) => ipcRenderer.sendSync("air:move", String(from), String(to)),
     window: () => ipcRenderer.sendSync("air:window"),
+    screens: () => ipcRenderer.sendSync("air:screens"),
     setBounds: (bounds) => ipcRenderer.send("air:set-bounds", bounds),
     setTitle: (title) => ipcRenderer.send("air:set-title", String(title)),
     minimize: () => ipcRenderer.send("air:window-do", "minimize"),

@@ -1,6 +1,7 @@
 package {
   import flash.data.EncryptedLocalStore;
   import flash.desktop.NativeApplication;
+  import flash.display.Screen;
   import flash.display.Sprite;
   import flash.events.Event;
   import flash.events.IOErrorEvent;
@@ -14,7 +15,7 @@ package {
   import flash.utils.ByteArray;
 
   // An AIR application a page plays from its package: its URL, sandbox,
-  // window and launch; what File finds in its directory and AIR's others;
+  // window, screen and launch; what File finds in its directory and AIR's others;
   // a file read by its app: URL, by its file: URL, and a missing one, and
   // by a FileStream at once and over frames; a file in its storage, which
   // counts its runs, written and loaded by its app-storage: URL; an
@@ -28,6 +29,8 @@ package {
       trace("air: sandbox " + Security.sandboxType);
       trace("air: id " + NativeApplication.nativeApplication.applicationID);
       trace("air: window " + stage.nativeWindow.title + " " + stage.nativeWindow.bounds.width + "x" + stage.nativeWindow.bounds.height);
+      var main:Screen = Screen.mainScreen;
+      trace("air: screen " + (main.bounds.width > 0 && main.bounds.containsRect(main.visibleBounds)) + " " + (main.colorDepth >= 8) + " " + Screen.screens.length + " " + Screen.getScreensForRectangle(stage.nativeWindow.bounds).length);
       NativeApplication.nativeApplication.addEventListener(InvokeEvent.INVOKE, invoked);
     }
 

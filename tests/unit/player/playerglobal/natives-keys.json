@@ -1609,12 +1609,19 @@
     "flash.net::LocalConnection#get:isPerUser",
     "flash.net::LocalConnection#send",
     "flash.net::LocalConnection#set:client",
-    "flash.net::LocalConnection#set:isPerUser"
+    "flash.net::LocalConnection#set:isPerUser",
+    "flash.display::Screen#get:bounds",
+    "flash.display::Screen#get:colorDepth",
+    "flash.display::Screen#get:visibleBounds",
+    "flash.display::Screen.get:mainScreen",
+    "flash.display::Screen.get:screens",
+    "flash.display::Screen.getScreensForRectangle"
   ],
   "hooks": [
     "flash.desktop::Clipboard",
     "flash.display::BitmapData",
     "flash.display::DisplayObject",
+    "flash.display::Screen",
     "flash.events::HTTPStatusEvent",
     "flash.filters::BitmapFilter",
     "flash.media::Sound",

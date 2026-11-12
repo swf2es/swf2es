@@ -497,7 +497,12 @@ export class Scripting {
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
-      { ...options, apiVersion: this.air ? AIR_API_VERSION : API_VERSION },
+      {
+        // What a SWF's catch swallowed is still said, as an uncaught one is.
+        onUnsupported: (message) => console.warn(`${message} (caught by the SWF)`),
+        ...options,
+        apiVersion: this.air ? AIR_API_VERSION : API_VERSION,
+      },
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);
     this.codegen.reset(this.rt.apiVersion);

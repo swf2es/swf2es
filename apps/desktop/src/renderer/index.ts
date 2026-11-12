@@ -7,6 +7,7 @@ import { airHosts, airPath } from "./air.js";
 import { shellFiles } from "./files.js";
 import { shellFetch } from "./network.js";
 import { shellSocketHost } from "./sockets.js";
+import { shellWebSocketHost } from "./websockets.js";
 
 declare global {
   interface Window {
@@ -22,6 +23,7 @@ configure({
   cache: true,
   fileHost: shellFiles(desktop.files),
   sockets: shellSocketHost(desktop.sockets),
+  webSockets: shellWebSocketHost(desktop.webSockets),
   fetch: shellFetch(desktop.network, () => {
     const launch = airLaunch;
     return launch

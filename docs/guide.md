@@ -283,11 +283,17 @@ the builtin.abc and playerglobal the player ships.
 | Option | What it does |
 | --- | --- |
 | `--trace` | Prints what the SWF traces to the terminal: `trace()` to stdout, warnings and errors to stderr. |
-| `--log-network` | Prints each request and socket of the SWF to stderr: method, URL, status, size and time. The window's DevTools show none of them, as the main process sends them. |
-| `--log-sockets` | `--log-network`, and what each socket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
-| `--ignore-certificate-errors` | Does not verify any HTTPS server's certificate, for this run. |
+| `--log-network` | Prints each request, socket and WebSocket of the SWF to stderr: method, URL, status, size and time. The window's DevTools show none of them, as the main process sends them. |
+| `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
+| `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
+
+npx reads the first `--` on its command line as the end of its own
+options, so an application's arguments need one before the package too:
+`npx -- @swf2es/desktop app.xml -- --server=local` (with `-y`, `npx -y --
+@swf2es/desktop …`). The installed command, `swf2es-desktop`, takes them as
+they are.
 
 `--ignore-certificate-errors` is for a server of your own whose certificate
 it signed itself. Whoever sits between you and such a host can then read and
@@ -335,8 +341,9 @@ keeps it in memory alone, for that play. `EncryptedLocalStore` keeps its
 items in IndexedDB too, by the application's id: a page has no keychain
 to encrypt them by, and the browser keeps them as it keeps the site's
 other data.
-The element is its one window, at the descriptor's size; the play page
-opens `.air` and `.zip` files too.
+The element is its one window, at the descriptor's size, and
+`flash.display.Screen` has the one screen the page is on (`window.screen`);
+the play page opens `.air` and `.zip` files too.
 
 A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
@@ -345,7 +352,7 @@ holds it alone, and its `app:` URLs load any other file from beside it on
 the server.
 
 The [desktop app](#play-a-swf-on-the-desktop) runs an AIR application from
-its descriptor on disk instead, with the real file system, sockets and the
+its descriptor on disk instead, with the real file system, sockets, WebSockets and the
 network, as adl runs one:
 
 ```sh
@@ -354,7 +361,7 @@ npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 
 The descriptor's first window's content SWF plays from `app:/`, at the
 descriptor's size and with its title; the arguments after `--` reach its
-InvokeEvent. File › Open, or a descriptor dropped on the window, runs the
+InvokeEvent, and `flash.display.Screen` has the system's displays. File › Open, or a descriptor dropped on the window, runs the
 application too, from its own directory; the app asks first, as an
 application reaches your files and the network unasked.
 
@@ -377,6 +384,13 @@ A player you set up yourself takes `socket:` from
 `nodeSocketHost()` (`@swf2es/player-hosts/node`) connects directly, and
 so does the desktop app, through its main process; an embedder with a
 transport of its own gives it as `configure({ sockets })`.
+
+An AIR application's `air.net.WebSocket` uses the page's own `WebSocket`.
+An embedder whose page may not connect, as the desktop app's, whose main
+process holds the connections, gives a `WebSocketHost` of its own as
+`configure({ webSockets })`: its `connect(url, protocols, events)` opens
+a connection, tells `events` its `open`, `message`, `close` and `error`,
+and returns its `send` and `close`.
 
 FileReference and FileReferenceList use the browser's file chooser. Saving
 uses the File System Access picker where available, or a Blob download;
