@@ -458,20 +458,17 @@ async function check(): Promise<void> {
               await value(`document.getElementById("url").focus({ preventScroll: true })`);
               assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
               await value(`document.getElementById("report").focus({ preventScroll: true })`);
-              // A frame painted after the focus moved, as a person's click or Tab paints one. Chrome
-              // scrolls by a key where its last frame had the focus: with the SWF paused, the player
-              // draws no frame, and a key sent at once can find the input field still focused there.
-              await value(`new Promise((done) => {
-                document.body.style.backgroundColor = "rgb(254, 254, 254)";
-                requestAnimationFrame(() => requestAnimationFrame(() => done(true)));
-              })`);
               assert.equal(await press("ArrowDown", "ArrowDown", 40), 0);
-              await until("scrollY > 300", 5000);
+              // Chrome scrolls at once, without its smooth scrolling (see withPage's args below).
+              const [, y] = await position();
+              assert.ok(
+                y > 300,
+                `ArrowDown on the report link scrolls the page, which stayed at ${y}`,
+              );
             } finally {
               await value(`(() => {
                 document.body.style.minHeight = "";
                 document.body.style.minWidth = "";
-                document.body.style.backgroundColor = "";
                 scrollTo({ left: 0, top: 0, behavior: "instant" });
                 return true;
               })()`);
@@ -939,8 +936,17 @@ async function check(): Promise<void> {
       return failed;
     },
     false,
-    // As GitHub Pages serves it: with no headers that isolate it.
-    { page: "swf2es/play/", mounts, isolated: false },
+    {
+      // As GitHub Pages serves it: with no headers that isolate it.
+      page: "swf2es/play/",
+      mounts,
+      isolated: false,
+      // A key's smooth scroll is an animation the compositor runs, and on a busy machine it can
+      // end having moved nothing: the page fires scrollend and stays where it was, which made
+      // the check that ArrowDown on a link scrolls the page fail now and then. Without it,
+      // the key scrolls the page before Chrome acknowledges it.
+      args: ["--disable-smooth-scrolling"],
+    },
   );
 
   if (failures > 0) {
