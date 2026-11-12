@@ -169,6 +169,21 @@ function hasWith(scopes: Value[], w: number): boolean {
 }
 
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
+/** Whether k is an int atom avmplus can take as a uint: an integer of 0 to 2^32-1, -0 not, as it is a double's. */
+function uintAtom(k: Value): k is number {
+  return typeof k === "number" && k >>> 0 === k && (k !== 0 || 1 / k > 0);
+}
+
+/** Whether v is an object's atom to avmplus: not null, nor a Namespace or float, whose atoms are their own. */
+function isScriptObject(v: Value): boolean {
+  return (
+    typeof v === "object" && v !== null && !(v instanceof Namespace) && !(v instanceof FloatValue)
+  );
+}
+
+/** The name avmplus' getUintProperty looks a number up by: public, at every version. */
+const ELEMENT_NAME = new Multiname(CONSTANT_MultinameL, [publicNs], [255], null, false);
+
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
   if (!d) {
@@ -1281,6 +1296,31 @@ export class Runtime {
     }
 
     this.setProperty(o, this.indexName(mn, i), v);
+  }
+
+  /**
+   * obj[k] by a runtime name with no public namespace, or an attribute's,
+   * in a script's or a class's initializer, which avmplus interprets: its
+   * getproperty reads an int key of at least 0 off an object by
+   * getUintProperty, whatever namespaces the name has, where its JIT asks
+   * for a public one (getIndexed). Any other key makes a name.
+   */
+  getInterpreted(o: Value, mn: Multiname, k: Value): Value {
+    if (uintAtom(k) && isScriptObject(o)) {
+      return this.getIndexed(o, ELEMENT_NAME, k);
+    }
+
+    return this.getProperty(o, this.runtimeName(mn, k));
+  }
+
+  /** obj[k] = v as getInterpreted reads it, as avmplus' interpreter's setproperty. */
+  setInterpreted(o: Value, mn: Multiname, k: Value, v: Value): void {
+    if (uintAtom(k) && isScriptObject(o)) {
+      this.setIndexed(o, ELEMENT_NAME, k, v);
+      return;
+    }
+
+    this.setProperty(o, this.runtimeName(mn, k), v);
   }
 
   /**
