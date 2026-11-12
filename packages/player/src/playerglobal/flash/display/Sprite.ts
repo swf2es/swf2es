@@ -1,7 +1,7 @@
 // flash.display.Sprite: its constructor's private native constructChildren
-// makes a symbol's first frame alive, placed before the constructor for a
-// timeline's child and here for a script's, so that the subclass's
-// constructor finds the children by name; a Sprite a script makes has none.
+// makes a symbol's first frame alive, placed before the constructor runs,
+// a timeline's child's or a script's, so that the subclass's constructor
+// finds the children by name; a Sprite a script makes has none.
 // Its soundTransform is kept, in whole percents as a channel's, and read
 // back as a copy; it mixes the timeline sounds of the sprite and all in it.
 import { avm2 } from "@swf2es/runtime";

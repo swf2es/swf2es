@@ -14,6 +14,7 @@ import type { Container, MovieClip } from "../../../packages/player/dist/display
 import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { square } from "../../player/cases/common.ts";
 import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
@@ -1673,4 +1674,53 @@ test("addFrameScript takes what is no function as null, clearing the frame's scr
 
   assert.deepEqual(lines, ["frame 1"]);
   assert.deepEqual(errors, []);
+});
+
+test("a symbol a script makes has its first frame placed before its constructor runs", {
+  skip,
+}, async () => {
+  // As Flash (Ruffle's displayobject_early_init): before super() the
+  // children are counted, not yet made; super() makes them.
+  const main = `package {
+    import flash.display.MovieClip;
+    import flash.utils.getDefinitionByName;
+    public class Main extends MovieClip {
+      public function Main() { new (getDefinitionByName("Child") as Class)(); }
+    }
+  }`;
+  const child = `package {
+    import flash.display.MovieClip;
+    public class Child extends MovieClip {
+      public function Child() {
+        trace("before", numChildren, getChildAt(0));
+        super();
+        trace("after", numChildren, getChildAt(0));
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const swf = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("EarlyChildren", main)),
+      w.doAbc(compiler(out)("Child", child)),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Child"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const player = new Player(swf, scripting);
+  await player.start();
+
+  assert.deepEqual(lines, ["before 1 null", "after 1 [object Shape]"]);
 });
