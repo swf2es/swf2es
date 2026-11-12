@@ -47,6 +47,21 @@ time passed and draws when `changes` moved or the element did. The keys
 go to the element, focusable and focused as it is pressed, as a plug-in
 had them only while focused.
 
+A SWF's `Stage.displayState` reaches the element as the player's
+`FullScreenHost` (see [Full screen](services.md#full-screen)): the
+Fullscreen API on the element, allowed by `allowfullscreen` and
+`allowfullscreeninteractive` as Flash's plug-in read them, an AIR
+application needing neither, and asked only while the browser counts a
+user's gesture (`navigator.userActivation`), since a request it would turn
+down must throw in the setter. `fullscreenchange` tells the player what it
+did not ask for, the user's Esc or the page's own `requestFullscreen()` on
+the element, and a request the browser rejects after all leaves the stage
+normal again. `configure`'s `fullScreen` replaces all of it with the
+embedder's window. In full screen with a `fullScreenSourceRect`, the
+canvas is that part of the stage alone, fitted to the box and centred
+(`sourceViewport`), the box's margins its background; in noScale the stage
+is then the rect's size, else the box's.
+
 It draws by the stage's quality (`Player.quality`): the element's
 `quality` attribute at the start and as the page changes it, then what a
 script sets, `Stage.quality` or AVM1's `_quality`, from the next frame.
@@ -234,7 +249,10 @@ denied, a SWF's callbacks named `destroy`, `getAttribute` and
 fetch and compile of codegen.wasm and one fetch of each library, the canvas's size as the element widens, and that destroy and
 removal let go: 20 elements made and destroyed leave no player and no
 codegen instance after a collection, no WebSocket or AudioContext
-open, and the heap within 256 KB of each.
+open, and the heap within 256 KB of each. Full screen: a click's
+handler refused without `allowfullscreen`, entering with it, the source
+rect's canvas on the screen, the stage told as the browser leaves, a
+request with no click refused, and the screen given back on destroy.
 
 An AS3 SWF's scripts see the element's `scale` and `salign` as Stage's
 scaleMode and align, and what they set there places the stage again; in

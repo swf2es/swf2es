@@ -15,6 +15,7 @@ export {
   configuration,
   configure,
   type SocketProxy,
+  type WindowFullScreen,
 } from "./config.js";
 export {
   defineElement,
