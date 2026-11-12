@@ -355,7 +355,7 @@ async function remote(): Promise<void> {
   const settings = { ...both, sockets: { [url]: endpoints, [again]: endpoints } };
 
   try {
-    const args = ["--log-network", url];
+    const args = ["--log-sockets", url];
     await withApp(settings, args, async ({ stdout, stderr, until, evaluate, page, userData }) => {
       const traced = (line: string) => stdout.filter((l) => l === line).length;
       const settled = (n: number) => () =>
@@ -393,6 +393,9 @@ async function remote(): Promise<void> {
         new RegExp(`swf2es: socket #\\d+ connecting to 127\\.0\\.0\\.1:${good.port}`),
       );
       assert.match(stderr(), /swf2es: socket #\d+ open/);
+      // --log-sockets: what the socket sent and what came back.
+      assert.match(stderr(), /swf2es: socket #\d+ > 4 B {2}ping/);
+      assert.match(stderr(), /swf2es: socket #\d+ < 4 B {2}pong/);
       // Nor may the page read the local SWF's files while a remote one plays.
       assert.equal(
         await evaluate<number>(`fetch("swf2es://file/${token}/data.txt").then((r) => r.status)`),

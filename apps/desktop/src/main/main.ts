@@ -79,7 +79,9 @@ app.enableSandbox();
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 const trace = process.argv.includes("--trace");
 // Each request and socket of the SWF's said on stderr: the page's DevTools show none of them.
-const logNetwork = process.argv.includes("--log-network");
+// --log-sockets says what each socket sends and receives as well, and so the rest too.
+const logSockets = process.argv.includes("--log-sockets");
+const logNetwork = logSockets || process.argv.includes("--log-network");
 const netLog = logNetwork ? (line: string) => process.stderr.write(`${line}\n`) : null;
 const sandbox = new Sandbox();
 /** The SWF's http and https requests, judged as Flash's sandboxes had them. */
@@ -873,7 +875,7 @@ function listen(): void {
       void chooseLibrary(name);
     }
   });
-  bridgeSockets(trusted, permitSocket, netLog);
+  bridgeSockets(trusted, permitSocket, netLog, logSockets);
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");
