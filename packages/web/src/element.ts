@@ -29,6 +29,7 @@ import { externalInterfaceHost, type PageBridge, type PageValue } from "./extern
 import { scaleMode } from "./layout.js";
 import { type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
+import { UncaughtReports } from "./uncaught.js";
 
 export const TAG = "swf2es-player";
 
@@ -72,6 +73,8 @@ interface Session {
   stage3D: Stage3DSession | null;
   /** The ExternalInterface callbacks the SWF put on the element. */
   callbacks: Set<string>;
+  /** The uncaught errors told so far, so that one thrown every frame is not told every frame. */
+  uncaught: UncaughtReports;
   /** Aborts the fetch of the SWF itself, as a destroy comes before it arrives. */
   abort: AbortController;
   /** The Web Workers its SWF starts, let go of with it. */
@@ -472,6 +475,7 @@ export class Swf2esPlayerElement extends ElementBase {
       playback: null,
       stage3D: null,
       callbacks: new Set(),
+      uncaught: new UncaughtReports(),
       workers: null,
       abort: new AbortController(),
       air: null,
@@ -842,7 +846,15 @@ export class Swf2esPlayerElement extends ElementBase {
       text = String(error);
     }
 
-    console.error(`swf2es: ${text}`);
+    const rt = session.scripting?.rt;
+    const line = session.uncaught.line(
+      text,
+      rt?.detailOf(error as never) ?? null,
+      rt?.stackOf(error as never) ?? null,
+    );
+    if (line !== null) {
+      console.error(line);
+    }
   }
 
   #look(): Look {
