@@ -61,6 +61,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
               false,
               false,
               s.loads.streamError(url, local),
+              2032,
             ) as AsObject,
           );
           return;
