@@ -795,3 +795,60 @@ test("a draw by rows puts what a draw a pixel at a time puts, into itself and at
     assert.deepEqual(drawn.pixels, expected.pixels, label);
   }
 });
+
+test("copyPixels without an alpha bitmap writes what it writes with one of alpha 255 everywhere", () => {
+  // The alpha bitmap takes the general per-pixel path in Flash's order; without one a copy
+  // that only moves pixels goes a row at a time, and a merge by a loop of its own.
+  let seed = 3;
+  const next = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed >>> 8;
+  };
+  const fill = (store: InstanceType<typeof BitmapStore>, holdsAlpha = false) => {
+    const pixels = store.pixels;
+    for (let i = 0; i < pixels.length; i++) {
+      // Clear, solid and between, about a third each.
+      const kind = next() % 3;
+      const a = kind === 0 ? 0 : kind === 1 ? 255 : 1 + (next() % 254);
+      const argb = ((a << 24) | (next() & 0xffffff)) >>> 0;
+      pixels[i] = store.transparent || holdsAlpha ? premultiply(argb) : argb | 0xff000000;
+    }
+
+    store.holdsAlpha = holdsAlpha;
+    store.changed();
+  };
+  const full = new BitmapStore(32, 32, true, 0xff000000);
+  const moves = [-3, 0, 2];
+  for (const into of ["transparent", "opaque", "holds alpha"]) {
+    for (const source of ["transparent", "opaque", "holds alpha", "self"]) {
+      for (const mergeAlpha of [false, true]) {
+        for (const dx of moves) {
+          for (const dy of moves) {
+            const make = () => {
+              seed = 11;
+              const dest = new BitmapStore(12, 9, into === "transparent", 0);
+              fill(dest, into === "holds alpha");
+              const from =
+                source === "self" ? dest : new BitmapStore(10, 7, source === "transparent", 0);
+              if (from !== dest) {
+                fill(from, source === "holds alpha");
+              }
+
+              return { dest, from };
+            };
+            const rect = { x: 1, y: 1, width: 8, height: 5 };
+            const fast = make();
+            fast.dest.copyPixels(fast.from, rect, 1 + dx, 2 + dy, mergeAlpha);
+            const general = make();
+            general.dest.copyPixels(general.from, rect, 1 + dx, 2 + dy, mergeAlpha, full, 0, 0);
+            assert.deepEqual(
+              Array.from(fast.dest.pixels),
+              Array.from(general.dest.pixels),
+              JSON.stringify({ into, source, mergeAlpha, dx, dy }),
+            );
+          }
+        }
+      }
+    }
+  }
+});

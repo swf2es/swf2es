@@ -485,6 +485,50 @@ export class BitmapStore {
     const maskWidth = alpha?.width ?? 0;
     const maskHeight = alpha?.height ?? 0;
 
+    if (replaces && !smears) {
+      // Each row moved whole: in place a memmove, which Flash's order is but for a smear.
+      for (let r = 0; r < d.height; r++) {
+        const row = up ? d.height - 1 - r : r;
+        const to = (d.y + row) * this.width + d.x;
+        const from = (sy + row) * source.width + sx;
+        if (into === pixels) {
+          into.copyWithin(to, from, from + d.width);
+        } else {
+          into.set(pixels.subarray(from, from + d.width), to);
+        }
+      }
+
+      this.fillGaps(gaps, source, gx, gy, mergeAlpha, alpha, gax, gay);
+      this.changed();
+      return;
+    }
+
+    if (!mask && source !== this && (mergeAlpha || !this.transparent)) {
+      // Source over destination, as composite does, written out: a blit of sprites, the
+      // commonest copy a game makes each frame, skips what is clear and takes what is solid.
+      const solid = this.transparent ? 0 : 0xff000000;
+      for (let r = 0; r < d.height; r++) {
+        const to = (d.y + r) * this.width + d.x;
+        const from = (sy + r) * source.width + sx;
+        for (let c = 0; c < d.width; c++) {
+          const p = pixels[from + c];
+          const sa = p >>> 24;
+          if (sa === 255) {
+            into[to + c] = p;
+          } else if (sa === 0) {
+            if (solid !== 0) {
+              into[to + c] = (into[to + c] | solid) >>> 0;
+            }
+          } else {
+            into[to + c] = (over(p, into[to + c]) | solid) >>> 0;
+          }
+        }
+      }
+
+      this.changed();
+      return;
+    }
+
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;
       const to = (d.y + row) * this.width + d.x;
