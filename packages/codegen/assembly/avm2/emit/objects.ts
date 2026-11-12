@@ -18,6 +18,7 @@ import {
   IR_GetGlobalScope,
   IR_Nip,
 } from "../ir/ir";
+import { Domain, NS_Public, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -228,6 +229,12 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
+      if (stringLength(em, src, ir.c[i])) {
+        receiver(em, src);
+        out.text(".length");
+        return true;
+      }
+
       virtual(em, a, src, 0, -1);
       return true;
     case IR_CallSetter:
@@ -269,7 +276,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       em.assign(i);
       em.reg(src + <i32>ir.srcCount[i] - 1);
       return true;
-    case ops.OP_getproperty:
+    case ops.OP_getproperty: {
       if (interpretedKey(em, a, src + 1)) {
         em.assign(i);
         out.text("rt.getInterpreted(");
@@ -325,6 +332,16 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
+      const guarded = maybeStringLength(em, a, src);
+      if (guarded) {
+        // Read twice, so from its register, not from a text held for it.
+        const copy = em.copyOf[src];
+        const read = copy === NONE ? src : copy;
+        if (read >= 0) {
+          em.release(read);
+        }
+      }
+
       em.assign(i);
       if (keyed(em, a, src + 1)) {
         out.text("rt.getKeyed(");
@@ -337,12 +354,21 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
+      if (guarded) {
+        out.text("typeof ");
+        em.read(src);
+        out.text(' === "string" ? ');
+        em.read(src);
+        out.text(".length : ");
+      }
+
       out.text("rt.getProperty(");
       em.reg(src);
       out.text(", ");
       name(em, a, src + 1);
       out.text(")");
       return true;
+    }
     case ops.OP_setproperty:
       if (interpretedKey(em, a, src + 1)) {
         out.text("rt.setInterpreted(");
@@ -931,6 +957,103 @@ function vectorLength(em: MethodEmitter, r: i32, getter: i32): bool {
   );
 }
 
+/** The namespace of the builtins' methods that a prototype's function cannot replace. */
+const AS3_URI = "http://adobe.com/AS3/2006/builtin";
+
+/** Whether the domain's string `id` is `text`, which is ASCII. */
+function stringIs(domain: Domain, id: u32, text: string): bool {
+  if (domain.stringLength[id] !== <u32>text.length) {
+    return false;
+  }
+
+  const at = domain.stringPtr[id];
+  for (let k = 0; k < text.length; k++) {
+    if (<i32>load<u8>(at + k) !== text.charCodeAt(k)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * The string's own method, `.charAt(` or `.charCodeAt(`, where the call
+ * by dispatch id `disp` on the String in register `src` is of AS3::charAt
+ * or AS3::charCodeAt with no argument, which is 0, or a number: what the
+ * runtime's natives call with it, and nothing but the string's
+ * characters; else "". Such a call is the inside of every loop over a
+ * string, and through the native it costs several times the method.
+ */
+function stringMethod(em: MethodEmitter, type: i32, disp: u32, src: i32, argc: u32): string {
+  const domain = em.domain;
+  if (type !== domain.stringType || argc > 1 || (argc === 1 && !isNumber(em, src + 1))) {
+    return "";
+  }
+
+  const m = aliasedMember(domain, <u32>type, disp);
+  if (m < 0) {
+    return "";
+  }
+
+  const traits = domain.traits;
+  const uri = domain.nsUri[traits.memberNs[m]];
+  if (uri === URI_None || !stringIs(domain, uri, AS3_URI)) {
+    return "";
+  }
+
+  const name = traits.memberName[m];
+  return stringIs(domain, name, "charAt")
+    ? ".charAt("
+    : stringIs(domain, name, "charCodeAt")
+      ? ".charCodeAt("
+      : "";
+}
+
+/**
+ * Whether `getter` on register r reads a String's length, which is its
+ * string's: String is final and has no other getter, and a call of the
+ * getter by its class's prototype, which the runtime looks up by name at
+ * each call, costs several times the read.
+ */
+function stringLength(em: MethodEmitter, r: i32, getter: i32): bool {
+  return (
+    getter >= 0 &&
+    em.builtinOf(r) === BUILTIN_String &&
+    em.domain.traits.returnType[getter] === em.domain.intType
+  );
+}
+
+/**
+ * Whether the get of multiname `a` on register r may read a string's
+ * length: a name `length` that is no attribute's, public or with a public
+ * namespace in its set, on a value typed * or Object. A string has that
+ * one property, a getter of its class, which nothing can replace or hide,
+ * and the string is told from any other value where it is read: through
+ * the runtime's lookup, the read costs several times the rest of a loop
+ * over an Array of strings.
+ */
+function maybeStringLength(em: MethodEmitter, a: u32, r: i32): bool {
+  const bt = em.builtinOf(r);
+  if (bt !== BUILTIN_Any && bt !== BUILTIN_Object) {
+    return false;
+  }
+
+  const domain = em.domain;
+  const pool = em.abc.pool;
+  const kind = pool.mnKind[a];
+  if (kind === C.CONSTANT_Qname) {
+    const ns = domain.abcNs[em.index][pool.mnA[a]];
+    const uri = domain.nsUri[ns];
+    if (domain.nsType[ns] !== NS_Public || (uri !== URI_None && domain.stringLength[uri] !== 0)) {
+      return false;
+    }
+  } else if (kind !== C.CONSTANT_Multiname || !domain.hasPublicNamespace(em.index, a)) {
+    return false;
+  }
+
+  return domain.abcString[em.index][pool.mnB[a]] === <u32>domain.findText("length");
+}
+
 /**
  * Whether the indexed access by multiname `a` on a Vector of `kind` reads
  * its elements, as the runtime's vectorGet and vectorSet do: a public
@@ -1239,11 +1362,30 @@ function virtual(em: MethodEmitter, disp: u32, src: i32, argc: u32, m: i32): voi
     bt === BUILTIN_String ||
     bt === BUILTIN_Namespace;
   if (primitive) {
-    out.text("rt.prototypeOf(");
+    const own = bt === BUILTIN_String ? stringMethod(em, type, disp, src, argc) : "";
+    if (own.length) {
+      receiver(em, src);
+      out.text(own);
+      if (argc) {
+        em.reg(src + 1);
+      } else {
+        out.text("0");
+      }
+
+      out.text(")");
+      return;
+    }
+
+    // The method is kept from the first call on: its class's prototype
+    // has it for good once the class is set up, and to read it there at
+    // every call costs as much as many a method does.
+    out.text("(T[");
+    out.uint(em.methodSlot(type, disp));
+    out.text("] ??= rt.prototypeOf(");
     typeRef(em, type);
     out.text(").$m");
     out.uint(disp);
-    out.text(".call(");
+    out.text(").call(");
     em.reg(src);
     args(em, src + 1, argc);
     out.text(")");

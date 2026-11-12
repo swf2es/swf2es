@@ -26,7 +26,8 @@
 //     ((...T) => (scope, sup) => function (...) {... T[0] ...})(cls(...))
 //
 // and so has one the names it makes of strings it holds, `obj["name"]`,
-// as rt.literalName(M[9], "name"); numbered as the method first refers
+// as rt.literalName(M[9], "name"), and the methods of primitives' classes
+// it calls, null until each is first called; numbered as the method first refers
 // to each, so that its code does not
 // depend on the module's other methods: compiled alone, as lazy JIT will
 // compile it, it comes out as it is in the module.
@@ -36,7 +37,7 @@ import { BodyDecoder, bodyDecoder, verifyMethods } from "../abc/code";
 import * as C from "../abc/constants";
 import { Domain, NS_Private } from "../link/domain";
 import { BKIND_Method, TRAITS_Class, TRAITS_Instance } from "../link/traits";
-import { MethodEmitter } from "./method";
+import { METHOD_SLOT, MethodEmitter } from "./method";
 import {
   className,
   constant,
@@ -372,6 +373,11 @@ export class ModuleEmitter {
       const t = types[k];
       if (t >= 0) {
         typeExpr(methods, t);
+        continue;
+      }
+
+      if (t === METHOD_SLOT) {
+        out.text("null");
         continue;
       }
 

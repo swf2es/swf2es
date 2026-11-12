@@ -326,6 +326,25 @@ writeFileSync(
   `${site}margins.swf`,
   bare(abcs.get("MarginsTest") as Uint8Array, 1, "MarginsTest", 100, 100),
 );
+// The same on a frame that starts at (30, 20), not (0, 0).
+writeFileSync(
+  `${site}origin.swf`,
+  w.swf({
+    x: 30,
+    y: 20,
+    width: 100,
+    height: 100,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abcs.get("MarginsTest") as Uint8Array, "MarginsTest"),
+      w.symbolClass([[0, "MarginsTest"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(
   `${site}activation.swf`,
   bare(abcs.get("ActivationTest") as Uint8Array, 1, "ActivationTest", 100, 100),
@@ -1093,6 +1112,52 @@ check(
     assert.deepEqual(only(image, [l + 210, t + 10, 80, 180]), [0x00ff00], "right margin");
     await press(250, 100);
     assert.deepEqual(await call<string[]>(evaluate, "marginsLog()"), ["green 125,50 125,50"]);
+    await call(evaluate, "marginsDestroy()");
+  },
+);
+
+check(
+  "a frame that starts off (0, 0) is placed by its corner, the stage's coordinates the SWF's",
+  async (evaluate, send) => {
+    const data = async () =>
+      (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+    const only = (image: Image, rect: number[]) => [...colours(image, rect, 2).keys()];
+
+    // The frame from (30, 20), twice its size and centred: its corner 200 CSS pixels in, as
+    // the projector and adl place it, so the stage's (0, 0) is 60 left of that and 40 above.
+    const [left, top, width, height] = await call<number[]>(
+      evaluate,
+      'marginsPlayer("", "/web-test/origin.swf")',
+    );
+    assert.deepEqual([width, height], [100, 100]);
+    const image = decodePng(new Uint8Array(Buffer.from(await data(), "base64")));
+    assert.deepEqual(only(image, [left + 50, top + 10, 80, 140]), [0xff0000], "red");
+    assert.deepEqual(only(image, [left + 150, top + 10, 180, 140]), [0xffff00], "yellow");
+    assert.deepEqual(only(image, [left + 350, top + 10, 80, 140]), [0x00ff00], "green");
+    assert.deepEqual(only(image, [left + 150, top + 170, 180, 20]), [0xffffff], "below the art");
+
+    for (const [x, y] of [
+      [300, 100],
+      [200, 0],
+      [100, 100],
+    ]) {
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount: 1,
+        });
+      }
+    }
+    // The pointer at the element's stage corner is at the frame's, (30, 20).
+    assert.deepEqual(await call<string[]>(evaluate, "marginsLog()"), [
+      "yellow 80,70 80,70",
+      "yellow 30,20 30,20",
+      "red -20,70 -20,70",
+    ]);
     await call(evaluate, "marginsDestroy()");
   },
 );

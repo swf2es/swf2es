@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/desktop",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "description": "swf2es's desktop app: local and remote SWFs, and AIR applications, in an Electron window",
   "keywords": [
     "swf",

@@ -1445,12 +1445,101 @@ function clipDepths(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A SWF whose frame starts at (100, 50), not (0, 0): Flash shows the frame's
+// rectangle, the stage's coordinates the SWF's all the same, so the square
+// at (100, 50) is in the corner, the one over it at (60, 30) is cut by the left and
+// top edges and the one at (270, 120) by the right and bottom ones. So do
+// the projector (32.0.0.465) and adl, each as the first SWF, AS3 and AVM1
+// alike, in every scale mode and alignment. Flash's harness loads its SWFs,
+// though, and a loaded SWF's frame moves nothing (frame-origin-loaded), so
+// the references are drawn from `shifted`: the same squares moved by the
+// origin in a frame that starts at (0, 0).
+function frameOrigin(as3: boolean, shifted: boolean): Uint8Array {
+  const [x, y] = shifted ? [0, 0] : [100, 50];
+  const at = (px: number, py: number) => ({ tx: (px - 100 + x) * 20, ty: (py - 50 + y) * 20 });
+  return w.swf({
+    version: as3 ? 10 : 8,
+    x,
+    y,
+    width: 200,
+    height: 100,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      square(2, 0x0000ff),
+      square(3, 0x00aa00),
+      w.place({ depth: 4, character: 1, matrix: at(60, 30) }),
+      w.place({ depth: 2, character: 2, matrix: at(100, 50) }),
+      w.place({ depth: 3, character: 3, matrix: at(270, 120) }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// The same frame on a SWF a Loader loads (scripts/FrameOrigin.as.template):
+// its content is not moved, and its LoaderInfo's width and height are the
+// frame's far corner, 140 by 70 for a frame of 100 by 50 from (40, 20).
+function frameOriginLoaded(compile: Compile): Uint8Array {
+  const inner = w.swf({
+    x: 40,
+    y: 20,
+    width: 100,
+    height: 50,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(1, 0x0000ff),
+      w.place({ depth: 1, character: 1, matrix: { tx: 800, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(
+    new URL("../scripts/FrameOrigin.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "FrameOrigin",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 3, "Main", 200, 100);
+}
+
 const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
 export const timelineCases: PlayerCase[] = [
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "frame-origin",
+    swf: frameOrigin(true, false),
+    flash: frameOrigin(true, true),
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "frame-origin-avm1",
+    swf: frameOrigin(false, false),
+    flash: frameOrigin(false, true),
+    frames: 1,
+    capture: [1],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "frame-origin-loaded",
+    build: frameOriginLoaded,
+    frames: 3,
+    capture: [3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   { name: "loops", swf: loops(true), ...looped },
   { name: "loops-avm1", swf: loops(false), ...looped },
   { name: "rewinds", swf: rewinds(true), ...rewound },

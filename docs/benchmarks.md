@@ -394,6 +394,23 @@ obfuscated physics game was busy in a run of its explosions in Chrome,
 and 0.95–1.0 s after, as it drew 2–3% more frames and a fifth fewer over
 25 ms.
 
+A string read through the lookup has one property, `length`, and that
+read cost several times the rest of a loop over an Array of strings
+(`a[i].length`, VectorAccess.as's array-string-read): the cache finds
+the getter, which is then called through the entry. Where the code reads
+a public `length` on a value typed `*` or Object, it now tells a string
+first and reads its length in place, `typeof x === "string" ? x.length :
+rt.getProperty(x ?? nn(x), M[k])`; anything else is looked up as before.
+`tests/bench/vector/run.ts`, medians of 9 interleaved pairs, in ms:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| array-string-read | 150 | 25 | −83.3% | 66 |
+| string-push-pop (`v.pop().length`) | 139 | 110 | −20.9% | 74 |
+
+The other sections, which read `length` on Arrays and Vectors through
+untyped references once a call, are unchanged.
+
 ### Typed construction and bound calls
 
 `tests/bench/typed/Typed.as` times what the compiler binds: `new` of
@@ -495,6 +512,80 @@ with the arguments coerced at the site, medians of 7 interleaved pairs:
 |---|---|---|---|---|
 | newArgs | 186 | 88 | −52.7% | 125 |
 | as3pb bytes / memory (11) | 110 / 104 | 109 / 104 | −0.9% / 0% | |
+
+### Vectors and Arrays by index
+
+`tests/bench/vector/VectorAccess.as` times indexed reads, writes, push
+and pop on Vectors of int, Number, String, Object and a class, growable
+and fixed, on Arrays of the same, and through an untyped reference
+(`tests/bench/players.ts vector` times it as a SWF in the players). Its
+other lines must match avmshell's:
+
+    node tests/bench/vector/run.ts [runs]
+    node tests/bench/vector/run.ts <dir A> <dir B> [runs]
+
+Reading a `Vector.<String>` was several times slower than in Flash, and
+not by the read: the loop sums `v[i].length`, and a String's `length` was
+a call of the getter through `rt.prototypeOf("String")`, which looked the
+class up by name at every call. Now a getter on a value typed String is
+the string's own `length`, and `prototypeOf` reads a String's, a Number's
+and a Boolean's prototype from their traits, which helps every method
+called on one. Medians of 7 interleaved pairs, in ms:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| string-read | 123 | 8 | −93.5% | 12 |
+| string-read-length | 124 | 14 | −88.7% | 18 |
+| string-push-pop | 139 | 140 | +0.7% | 74 |
+| object-read | 78 | 78 | 0% | 79 |
+| array-string-read | 151 | 151 | 0% | 69 |
+| int-read | 22 | 22 | 0% | 48 |
+| `charCodeAt` over a String of 10,000, 1000 times | 134 | 100 | −25% | 40 |
+| `charAt` over the same, compared with a letter | 140 | 102 | −27% | 20 |
+
+The other sections are unchanged within their noise. array-string-read
+is another path: an Array's element is untyped, so its `length` is the
+runtime's lookup (`rt.getProperty`), whose inline cache holds the name
+for the traits of every receiver the file reads `length` on (alone in a
+file, the section takes 117 ms), and whose getter is called through the
+cache's entry. object-read compares each element with a global by
+`rt.strictEquals`, at avmshell's speed.
+
+### Methods of primitives
+
+`tests/bench/primitives/Primitives.as` times the methods of String, int
+and Number the compiler binds on values typed as them, in the AS3
+namespace: a string of 10,000 walked by `charCodeAt` and by `charAt`,
+searched, cut by `substring`, `substr` and `slice`, and numbers made
+strings. Its other lines must match avmshell's:
+
+    node tests/bench/primitives/run.ts [runs]
+    node tests/bench/primitives/run.ts <dir A> <dir B> [runs]
+
+Such a call was `rt.prototypeOf("String").$m10.call(s, i)`, and reading
+the method from the prototype was most of it: a primitive's class's
+prototype is no object's prototype, so the engine keeps its methods, of
+which String has dozens, in a dictionary, and each read is a lookup
+there, of a function it then cannot take for a constant. Now a method
+keeps each such method it calls in an entry of its table from the first
+call on (`(T[0] ??= rt.prototypeOf("String").$m10).call(s, i)`), and
+`AS3::charAt` and `AS3::charCodeAt` by a number are the string's own
+(`s.charCodeAt(i)`), which is what the natives call. Medians of 7
+interleaved pairs, in ms:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| charCodeAt | 98 | 20 | −79.6% | 39 |
+| charAt | 103 | 30 | −70.9% | 21 |
+| indexOf | 78 | 61 | −21.8% | 47 |
+| substring | 73 | 56 | −23.3% | 132 |
+| substr-slice | 81 | 52 | −35.8% | 135 |
+| int-toString | 87 | 50 | −42.5% | 184 |
+| number-toString | 90 | 89 | −1.1% | 465 |
+| toFixed | 158 | 158 | 0% | 169 |
+
+The last two are the conversions' own time. VectorAccess.as, which
+calls no such method in a loop, is unchanged.
 
 ### The AssemblyScript runtime
 

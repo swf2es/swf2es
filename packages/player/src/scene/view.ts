@@ -41,7 +41,7 @@ import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
 import { cached, ShapeObject } from "../display/shapeobject.js";
 import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
-import { StaticTextObject, TextObject } from "../display/textobjects.js";
+import { StaticTextObject, settleFits, TextObject } from "../display/textobjects.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import type { Player } from "../player.js";
@@ -417,6 +417,8 @@ export class RenderView implements Drawer {
 
   /** Draw `root`'s display list. */
   render(root: DisplayObject): void {
+    // A field a script changed since the last frame ended, or before the first, is fitted before it is drawn.
+    settleFits();
     // Not drawn until it is all drawn: a render that throws leaves no frame to keep.
     this.drawnRoot = null;
     this.scene.reset();

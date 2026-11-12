@@ -60,6 +60,24 @@ class Shape extends ShapeObject {
 
 const depths = (clip: MovieClip) => clip.children.map((c) => c.depth);
 
+test("a frame that starts off (0, 0) gives the stage its size and the player its origin", () => {
+  const player = new Player(
+    w.swf({
+      x: 100,
+      y: -50,
+      width: 200,
+      height: 100,
+      frameCount: 1,
+      tags: [w.showFrame(), w.end()],
+    }),
+  );
+
+  assert.deepEqual(
+    [player.width, player.height, player.originX, player.originY],
+    [200, 100, 100, -50],
+  );
+});
+
 test("a named DefineEditText is placed as a TextField with its initial value", () => {
   const player = new Player(
     w.swf({

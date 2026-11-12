@@ -178,6 +178,12 @@ node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs]   # AVM1 names
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above
+node tests/bench/vector/run.ts [<dir A> <dir B>] [runs]   # indexed reads, writes, push and pop on
+                              # Vectors of int, Number, String, Object and a class, and on Arrays,
+                              # as the ones above
+node tests/bench/primitives/run.ts [<dir A> <dir B>] [runs]   # the methods of String, int and
+                              # Number on values typed as them (charCodeAt, charAt, indexOf,
+                              # substring, toString, toFixed), as the ones above
 node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash] [bench...]
                               # the enumeration and dictionary benchmarks as SWFs, timed in swf2es
                               # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug

@@ -76,10 +76,11 @@ export class TextObject extends DisplayObject {
   embedFonts = false;
   autoSize = "none";
   /**
-   * A script set the size or the autoSize of a field that fits itself: as
-   * in Flash, the fit waits for its size to be asked, its transform to
-   * change or the frame to be drawn, and a wordWrap set meanwhile wraps at
-   * the size the field has (adl).
+   * A script set the text, the size or the autoSize of a field that fits
+   * itself: as in Flash, the fit waits for its size to be asked, its
+   * transform to change or the frame to be drawn, and is by the autoSize it
+   * has by then; a wordWrap set meanwhile wraps at the size the field has
+   * (adl).
    */
   private fitPending = false;
   selectable = true;
@@ -225,7 +226,7 @@ export class TextObject extends DisplayObject {
     this.invalidate(CONTENT);
   }
 
-  /** A script set its size or its autoSize: under autoSize, the fit waits (fitPending). */
+  /** A script set its text, its size or its autoSize: under autoSize, the fit waits (fitPending). */
   deferFit(): void {
     if (this.autoSize !== "none" && !this.fitPending) {
       this.fitPending = true;
