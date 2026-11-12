@@ -6,6 +6,7 @@
 // (AIR 51.3), but for the system's sizes, a browser's window having no
 // least size of its own.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { WindowBounds } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
 
@@ -35,8 +36,6 @@ const MAX_SIDE = 107374182;
 
 export function nativeWindowNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
-  const prop = (o: Value, name: string) =>
-    Number(s.rt.getProperty(o as AsObject, avm2.qname(avm2.publicNs, name)));
   const point = (x: number, y: number) =>
     s.rt.construct(s.rt.classNamed("flash.geom::Point"), x, y);
   let closed = false;
@@ -107,11 +106,12 @@ export function nativeWindowNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "bounds");
       }
 
+      const r = v as As3<"flash.geom::Rectangle">;
       move(this, {
-        x: prop(v, "x"),
-        y: prop(v, "y"),
-        width: prop(v, "width"),
-        height: prop(v, "height"),
+        x: Number(s.rt.prop(r, "x")),
+        y: Number(s.rt.prop(r, "y")),
+        width: Number(s.rt.prop(r, "width")),
+        height: Number(s.rt.prop(r, "height")),
       });
     }
 
@@ -294,7 +294,11 @@ export function nativeWindowNatives(s: Scripting): avm2.Natives {
       const window = hostOf(this);
       const b = window.bounds();
       const offset = window.stageOffset();
-      return point(b.x + offset.x + prop(p, "x"), b.y + offset.y + prop(p, "y"));
+      const q = p as As3<"flash.geom::Point">;
+      return point(
+        b.x + offset.x + Number(s.rt.prop(q, "x")),
+        b.y + offset.y + Number(s.rt.prop(q, "y")),
+      );
     }
 
     get menu(): Value {

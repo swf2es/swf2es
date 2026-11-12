@@ -6,6 +6,7 @@
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
+// --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 //
 // The second runs an AIR application by its descriptor, as adl does.
 import { statSync } from "node:fs";
@@ -49,14 +50,23 @@ import {
   statOf,
   writeOf,
 } from "./air.ts";
+import { resolveCase } from "./case-paths.ts";
 import { bridgeFiles } from "./files.ts";
 import { failureLine, requestLine } from "./netlog.ts";
 import { type Movie, Network, Refused, unverifiedHosts } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
+import { describeProxy, proxyArgument, sameProxy } from "./proxy.ts";
 import { Sandbox } from "./sandbox.ts";
 import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
-import { hasWebSocket, unverifiedDispatcher, webSocketOpener } from "./websocket-connections.ts";
+import {
+  dispatchedOpener,
+  hasWebSocket,
+  type Opener,
+  proxiedDispatcher,
+  unverifiedDispatcher,
+  webSocketOpener,
+} from "./websocket-connections.ts";
 import { bridgeWebSockets } from "./websockets.ts";
 
 const preload = fileURLToPath(new URL("../preload/preload.cjs", import.meta.url));
@@ -106,14 +116,52 @@ if (unverified) {
 
 const unverifiedHost = (host: string) =>
   !!unverified && (unverified.all || unverified.hosts.includes(host.toLowerCase()));
-const network = new Network({ unverified: unverifiedHost });
+
+/**
+ * --proxy=<url>: what the SWF's requests, sockets and WebSockets go
+ * through. For this run alone, never kept, and said aloud, without its
+ * credentials. One that does not parse stops the app rather than letting
+ * it run without.
+ */
+const proxied = proxyArgument(process.argv.slice(1));
+if (proxied && "error" in proxied) {
+  process.stderr.write(`swf2es: ${proxied.error}\n`);
+  process.exit(2);
+}
+
+const proxy = proxied?.proxy ?? null;
+if (proxy) {
+  process.stderr.write(
+    `swf2es: --proxy: the SWF's requests, sockets and WebSockets go through ${describeProxy(proxy)}\n`,
+  );
+}
+
+/** What --log-network adds to a line of a connection that went through the proxy. */
+const via = proxy ? " via proxy" : "";
+const warn = (message: string) => process.stderr.write(`swf2es: ${message}\n`);
+const network = new Network({ unverified: unverifiedHost, proxy });
 // What opens an AIR application's WebSockets: the global's client, a wss: server's certificate
-// unchecked where the switch names its host.
-const insecureWebSockets = unverified ? unverifiedDispatcher() : null;
-if (unverified && !insecureWebSockets) {
+// unchecked where the switch names its host; or every one through the proxy.
+const insecureWebSockets = unverified && !proxy ? unverifiedDispatcher() : null;
+if (unverified && !proxy && !insecureWebSockets) {
   process.stderr.write(
     "swf2es: --ignore-certificate-errors: a WebSocket's certificate is verified all the same\n",
   );
+}
+
+const proxiedWebSockets = proxy ? proxiedDispatcher(proxy, unverifiedHost, warn) : null;
+// Never past the proxy: where none can be made, no WebSocket opens.
+const webSocketOpen: Opener | undefined = proxy
+  ? proxiedWebSockets
+    ? dispatchedOpener(proxiedWebSockets)
+    : () => {
+        throw new Error("no WebSocket through the proxy");
+      }
+  : insecureWebSockets
+    ? webSocketOpener(unverifiedHost, insecureWebSockets)
+    : undefined;
+if (proxy && !proxiedWebSockets) {
+  process.stderr.write("swf2es: --proxy: this Electron's WebSocket cannot go through a proxy\n");
 }
 
 /** What the page's requests under way abort with, by the preload's number. */
@@ -584,13 +632,15 @@ async function askForSocket(name: string, swf: string, endpoint: string): Promis
  * sockets do here. air.net.WebSocket is AIR's alone, so nothing else has one.
  */
 function permitWebSocket(url: string): boolean {
-  if (sandbox.application && hasWebSocket()) {
+  if (sandbox.application && hasWebSocket() && (!proxy || proxiedWebSockets)) {
     return true;
   }
 
-  const why = sandbox.application
-    ? "this Electron has no WebSocket client"
-    : "only an AIR application has one";
+  const why = !sandbox.application
+    ? "only an AIR application has one"
+    : !hasWebSocket()
+      ? "this Electron has no WebSocket client"
+      : "this Electron's WebSocket cannot go through the proxy";
   process.stderr.write(`swf2es: no WebSocket to ${url.slice(0, 2048)}: ${why}\n`);
   return false;
 }
@@ -643,8 +693,20 @@ async function chooseLibrary(name: LibraryName): Promise<void> {
     refuse("The settings could not be saved.", `swf2es uses ${path} until it quits.`);
   }
 
+  buildMenu();
+
   // The page fetched the libraries once; a fresh page fetches the new one.
   window.webContents.reload();
+}
+
+/** Play on the library the app ships again, in place of one the user chose. */
+function resetLibrary(name: LibraryName): void {
+  if (!settings.clearLibrary(name)) {
+    refuse("The settings could not be saved.", `swf2es uses its own ${name} until it quits.`);
+  }
+
+  buildMenu();
+  window?.webContents.reload();
 }
 
 function buildMenu(): void {
@@ -681,6 +743,11 @@ function buildMenu(): void {
         },
         { type: "separator" },
         { label: "Choose playerglobal.abc…", click: () => void chooseLibrary("playerglobal") },
+        {
+          label: "Use the App's playerglobal",
+          enabled: !!settings.settings.playerglobal,
+          click: () => resetLibrary("playerglobal"),
+        },
         { type: "separator" },
         { role: "quit" },
       ],
@@ -913,14 +980,8 @@ function listen(): void {
       void chooseLibrary(name);
     }
   });
-  bridgeSockets(trusted, permitSocket, netLog, logSockets);
-  bridgeWebSockets(
-    trusted,
-    permitWebSocket,
-    insecureWebSockets ? webSocketOpener(unverifiedHost, insecureWebSockets) : undefined,
-    netLog,
-    logSockets,
-  );
+  bridgeSockets(trusted, permitSocket, netLog, logSockets, { proxy, warn });
+  bridgeWebSockets(trusted, permitWebSocket, webSocketOpen, netLog, logSockets, via);
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");
@@ -1052,7 +1113,7 @@ function listenForAir(): void {
     }
 
     try {
-      const real = await realpath(path);
+      const real = await realpath(resolveCase(path));
       return sandbox.startApplication(real) ? new Uint8Array(await readFile(real)) : null;
     } catch {
       return null;
@@ -1155,7 +1216,7 @@ async function fetchForPage(
         response.status,
         response.bytes?.length ?? null,
         performance.now() - started,
-      ),
+      ) + via,
     );
     return response;
   } catch (error) {
@@ -1164,7 +1225,7 @@ async function fetchForPage(
       const why = error instanceof Refused ? error.message : `failed: ${error}`;
       process.stderr.write(`swf2es: not loading ${shown}: ${why}\n`);
     } else {
-      netLog?.(failureLine(method, url, "aborted", performance.now() - started));
+      netLog?.(failureLine(method, url, "aborted", performance.now() - started) + via);
     }
 
     throw error;
@@ -1178,10 +1239,25 @@ async function fetchForPage(
 // One app to a user data directory: a second start hands its SWF to the first and quits.
 const first = app.requestSingleInstanceLock();
 if (!first) {
+  if (proxied) {
+    process.stderr.write(
+      "swf2es: handed to the app already open, which opens it only if started with the same --proxy\n",
+    );
+  }
+
   app.quit();
 }
 
 app.on("second-instance", (_event, argv, workingDirectory) => {
+  // What it names would go through another proxy than this app's, or past it.
+  const asked = proxyArgument(argv.slice(1));
+  if (asked && !("proxy" in asked && sameProxy(asked.proxy, proxy))) {
+    process.stderr.write(
+      "swf2es: not opening what a second start named: its --proxy is not this app's\n",
+    );
+    return;
+  }
+
   if (window) {
     if (window.isMinimized()) {
       window.restore();
@@ -1231,6 +1307,15 @@ void app.whenReady().then(() => {
   }
 
   settings = new SettingsFile(app.getPath("userData"));
+  // A playerglobal chosen once is kept across versions of the app: said at each start, as a
+  // library older or newer than the app's own makes SWFs fail in ways nothing else explains.
+  const chosen = settings.libraries().playerglobal;
+  if (chosen) {
+    process.stderr.write(
+      `swf2es: playing on the playerglobal chosen in File, ${chosen}, not the app's own\n`,
+    );
+  }
+
   serve(session.defaultSession, sandbox, () => settings.libraries());
   // The page never goes to the network itself: a SWF's requests go through
   // the main process (network.ts), which sends them without this session.

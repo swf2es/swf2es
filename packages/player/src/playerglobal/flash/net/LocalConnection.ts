@@ -1,6 +1,7 @@
 // Both VMs use the player's LocalConnection registry. The AS3 class keeps
 // its public API in playerglobal; only transport and VM values live here.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { type LocalEndpoint, localDomain, localMethodAllowed } from "../../../localconnection.js";
 import { dispatchEvent, heard } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
@@ -101,7 +102,7 @@ export function localConnectionNatives(s: Scripting): avm2.Natives {
               "asyncError",
               false,
               false,
-              s.rt.getProperty(failure, s.rt.publicName("message")),
+              s.rt.prop(failure as As3<"Error">, "message"),
               s.rt.isInstance(error, s.rt.classNamed("Error"))
                 ? error
                 : s.rt.construct(s.rt.classNamed("Error"), s.rt.toString(error)),

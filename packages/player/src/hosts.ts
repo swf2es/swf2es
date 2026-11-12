@@ -85,7 +85,12 @@ export function browserNavigate(): Navigate | null {
 
 /**
  * Where the host keeps shared objects' bytes, by key: the browser's
- * localStorage by default, else memory.
+ * localStorage by default, else memory. Each is a .sol file as Flash writes
+ * it, under `host/path/name` (`#secure` after a secure one's); an AMF3 file,
+ * AS3's, under that key and AMF3_KEY. An AMF3 file under the key alone is
+ * one swf2es 0.1.16 or earlier wrote, each value with AMF3 tables of its
+ * own where Flash shares one writer's: it is read so, and moved on its next
+ * write.
  */
 export interface SharedObjectStorage {
   get(key: string): Uint8Array | null;
@@ -134,6 +139,9 @@ export function defaultStorage(): SharedObjectStorage {
     remove: (key) => storage().remove(key),
   };
 }
+
+/** What an AMF3 .sol file's key ends with (SharedObjectStorage). */
+export const AMF3_KEY = "#amf3";
 
 const PREFIX = "swf2es:so:";
 

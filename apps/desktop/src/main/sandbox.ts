@@ -15,6 +15,7 @@ import { realpathSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join, parse, relative, sep } from "node:path";
+import { resolveCase } from "./case-paths.ts";
 
 export const FILE_ORIGIN = "swf2es://file";
 
@@ -35,7 +36,7 @@ interface Grant {
  */
 async function real(path: string): Promise<string | null> {
   try {
-    return await realpath(path);
+    return await realpath(resolveCase(path));
   } catch {
     return null;
   }

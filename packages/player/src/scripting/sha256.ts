@@ -97,7 +97,8 @@ export function sha256Here(bytes: Uint8Array): Uint8Array {
   return out;
 }
 
-function hex(digest: Uint8Array): string {
+/** Bytes as lower-case hex digits, two each. */
+export function hex(digest: Uint8Array): string {
   let s = "";
   for (let i = 0; i < digest.length; i++) {
     s += digest[i].toString(16).padStart(2, "0");

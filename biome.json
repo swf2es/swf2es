@@ -10,6 +10,7 @@
       "**",
       "!pnpm-lock.yaml",
       "!**/dist",
+      "!**/*.generated.ts",
       "!oracle/avmplus",
       "!tests/tamarin/baseline.json",
       "!tests/tamarin/swf2es-baseline.json",

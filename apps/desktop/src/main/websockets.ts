@@ -16,7 +16,8 @@ import {
  * connection made only where `permit` allows its URL, with `open` if
  * given. `log`, where given, is told each connection asked for, opened,
  * refused, failed and closed (--log-network), and with `data` what each
- * sends and receives too (--log-sockets).
+ * sends and receives too (--log-sockets), the connections' lines ending
+ * in `via`.
  */
 export function bridgeWebSockets(
   trusted: (event: IpcMainEvent) => boolean,
@@ -24,6 +25,7 @@ export function bridgeWebSockets(
   open: Opener | undefined,
   log: ((line: string) => void) | null = null,
   data = false,
+  via = "",
 ): void {
   const pages = new Map<WebContents, WebSocketConnections>();
 
@@ -85,7 +87,7 @@ export function bridgeWebSockets(
     // As the client will read it: what is said of it has nothing a terminal would act on.
     const href = new URL(url).href;
     const allowed = permit(href);
-    log?.(webSocketLine(id, `${allowed ? "connecting to" : "refused"} ${href}`));
+    log?.(webSocketLine(id, `${allowed ? `connecting to ${href}${via}` : `refused ${href}`}`));
     if (allowed) {
       connections.connect(id, href, protocols);
     } else {

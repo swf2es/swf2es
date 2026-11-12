@@ -10,6 +10,7 @@
 // no listener prevents is the host's to report.
 
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../as3/types.js";
 import { rootOf } from "../display/display.js";
 import type { Library } from "../display/timeline.js";
 import type { Scripting } from "../scripting.js";
@@ -105,8 +106,9 @@ export class UncaughtErrors {
     if (this.tell(event, this.s.code.runningLibrary() ?? this.asked)) {
       // As Flash words it: "Error #2044: Unhandled ioError:. text=…".
       const rt = this.s.rt;
-      const text = rt.toString(rt.getProperty(event, rt.publicName("text")));
-      const type = rt.toString(rt.getProperty(event, rt.publicName("type")));
+      const errorEvent = event as As3<"flash.events::ErrorEvent">;
+      const text = rt.toString(rt.prop(errorEvent, "text"));
+      const type = rt.toString(rt.prop(errorEvent, "type"));
       const error = rt.construct(
         rt.classNamed("Error"),
         `Error #2044: Unhandled ${type}:. text=${text}`,

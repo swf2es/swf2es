@@ -148,6 +148,7 @@ export class Player {
     this.touch = pointer && scripting ? new TouchInput(this.stage, scripting, pointer) : null;
     if (scripting) {
       scripting.pointer = pointer;
+      scripting.touch = this.touch;
     }
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);
@@ -191,6 +192,7 @@ export class Player {
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
     const info = s.loads.loaderInfo(null);
     s.loads.describe(info, this.bytes, this.swf);
+    info.$typed = true;
     info.$loaded = this.bytes.length;
     info.$url = s.url;
     info.$params = s.loads.mainParameters();

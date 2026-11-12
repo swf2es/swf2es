@@ -2,6 +2,7 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import {
   bounds,
   boundsIn,
@@ -35,7 +36,6 @@ type Value = avm2.Value;
 
 const MATRIX_NAME = avm2.qname(avm2.publicNs, "matrix");
 const COLOR_NAME = avm2.qname(avm2.publicNs, "colorTransform");
-const name = (n: string) => avm2.qname(avm2.publicNs, n);
 
 /** The blend modes Flash accepts; another is ArgumentError #2008. */
 const BLEND_MODES = new Set([
@@ -68,8 +68,8 @@ function point(s: Scripting, x: number, y: number): Value {
 
 /** A point of the stage's in `d`'s plane: through a 3D object's in perspective, NaN where the matrices flatten it. */
 function stageToLocal(s: Scripting, d: DisplayObject, p: Value): [number, number] {
-  const x = Number(s.rt.getProperty(p as AsObject, name("x")));
-  const y = Number(s.rt.getProperty(p as AsObject, name("y")));
+  const x = Number(s.rt.prop(p as As3<"flash.geom::Point">, "x"));
+  const y = Number(s.rt.prop(p as As3<"flash.geom::Point">, "y"));
   const up = toStage(d, s.stage);
   const m = invert(up);
   if (m) {
@@ -170,6 +170,12 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
 
         if (made) {
           s.lifecycle.made(display);
+          // A symbol's first frame is placed before its constructor runs,
+          // as a timeline child's is: numChildren counts the children
+          // before super() makes them alive, getChildAt finding null.
+          if (display instanceof MovieClip) {
+            display.placeFirstFrame();
+          }
         }
 
         return o;
@@ -688,8 +694,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const [x, y, w, h] = ["x", "y", "width", "height"].map((k) =>
-        Number(s.rt.getProperty(v as AsObject, name(k))),
+      const [x, y, w, h] = (["x", "y", "width", "height"] as const).map((k) =>
+        Number(s.rt.prop(v as As3<"flash.geom::Rectangle">, k)),
       );
       const [cx, cy] = [Math.trunc(x), Math.trunc(y)];
       d.scale9Grid = { xMin: cx, yMin: cy, xMax: cx + Math.trunc(w), yMax: cy + Math.trunc(h) };
@@ -708,8 +714,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.touch();
       let r: Rect | null = null;
       if (v) {
-        const [x, y, w, h] = ["x", "y", "width", "height"].map((k) =>
-          Number(s.rt.getProperty(v as AsObject, name(k))),
+        const [x, y, w, h] = (["x", "y", "width", "height"] as const).map((k) =>
+          Number(s.rt.prop(v as As3<"flash.geom::Rectangle">, k)),
         );
         r = { xMin: halfEven(x), yMin: halfEven(y), xMax: halfEven(x + w), yMax: halfEven(y + h) };
       }
@@ -730,8 +736,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     /** Through a plane, to a whole pixel, as adl gives it (the `three-d-bounds` case). */
     localToGlobal(p: Value): Value {
       const m = toStage(this.$display, s.stage);
-      const x = Number(s.rt.getProperty(p as AsObject, name("x")));
-      const y = Number(s.rt.getProperty(p as AsObject, name("y")));
+      const x = Number(s.rt.prop(p as As3<"flash.geom::Point">, "x"));
+      const y = Number(s.rt.prop(p as As3<"flash.geom::Point">, "y"));
       const [gx, gy] = apply(m, x, y);
       return isProjective(m) ? point(s, Math.round(gx) + 0, Math.round(gy) + 0) : point(s, gx, gy);
     }
@@ -755,7 +761,8 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
      * drawn. Flash reports it to a quarter pixel.
      */
     local3DToGlobal(v: Value): Value {
-      const get = (key: string) => Number(s.rt.getProperty(v as AsObject, name(key)));
+      const get = (key: "x" | "y" | "z") =>
+        Number(s.rt.prop(v as As3<"flash.geom::Vector3D">, key));
       const [x, y] = stagePoint3D(this.$display, get("x"), get("y"), get("z"), s.stage);
       return point(s, Math.round(x * 4) / 4, Math.round(y * 4) / 4);
     }

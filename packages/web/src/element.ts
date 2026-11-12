@@ -793,14 +793,60 @@ export class Swf2esPlayerElement extends ElementBase {
       };
     }
 
-    const exit = () => {
-      if (document.fullscreenElement === this) {
-        document.exitFullscreen().catch(() => {});
+    // The browser enters and leaves asynchronously, and its word of a change can come after
+    // the SWF has changed its mind, or after a later request: what the element last asked
+    // for, `wanted`, holds while any request of its own is still under way, and the browser's
+    // changes meanwhile are the element's doing, not the user's, of which the stage, changed
+    // at once, is not told. Once none is under way, the page is brought to what was wanted.
+    let wanted: boolean | null = null;
+    let pending = 0;
+    let tries = 0;
+    const inside = () => document.fullscreenElement === this;
+    const settle = () => {
+      if (pending > 0 || wanted === null) {
+        return;
+      }
+
+      if (inside() === wanted) {
+        wanted = null;
+        tries = 0;
+      } else if (!wanted && tries < 60) {
+        // In after all, or the browser would not let go while it was still entering: out
+        // again, a frame later.
+        tries++;
+        requestAnimationFrame(() => {
+          if (pending === 0 && wanted === false && inside()) {
+            track(document.exitFullscreen());
+          }
+        });
       }
     };
-    document.addEventListener("fullscreenchange", () => told(document.fullscreenElement === this), {
-      signal,
-    });
+    const track = (step: Promise<void>, refused?: () => void) => {
+      pending++;
+      step
+        .catch(() => refused?.())
+        .finally(() => {
+          pending--;
+          settle();
+        });
+    };
+    const exit = () => {
+      wanted = false;
+      if (inside()) {
+        track(document.exitFullscreen());
+      }
+    };
+    document.addEventListener(
+      "fullscreenchange",
+      () => {
+        if (wanted === null && pending === 0) {
+          told(inside());
+        } else {
+          settle();
+        }
+      },
+      { signal },
+    );
     leave(exit);
     return {
       allowed: (interactive) =>
@@ -813,8 +859,20 @@ export class Swf2esPlayerElement extends ElementBase {
           return false;
         }
 
-        // What the browser turns down after all leaves the stage as it was.
-        dom?.requestFullscreen.call(this).catch(() => told(false));
+        // What the browser turns down after all leaves the stage as it was, unless it has
+        // left since.
+        wanted = true;
+        tries = 0;
+        const asked = dom?.requestFullscreen.call(this);
+        if (asked) {
+          track(asked, () => {
+            if (wanted === true) {
+              wanted = null;
+              told(false);
+            }
+          });
+        }
+
         return true;
       },
       exit,

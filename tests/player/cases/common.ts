@@ -36,6 +36,8 @@ export interface PlayerCase {
   flash?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
+  /** Played as AIR plays it, AIR's API defined (Scripting's `air`); Flash's harness is AIR's. */
+  air?: boolean;
   /** An AVM1 SWF whose trace must match Flash's. */
   traced?: boolean;
   /**

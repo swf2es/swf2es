@@ -23,7 +23,7 @@ export function coerceArgument(s: Scripting, v: Value, qualified: string): Value
     return v;
   }
 
-  throw s.rt.error("TypeError", 1034, s.rt.describe(v), cls.$it.name);
+  throw s.rt.error("TypeError", 1034, s.rt.describe(v), cls.$it.errorName);
 }
 
 export function interactiveObjectNatives(s: Scripting): avm2.Natives {

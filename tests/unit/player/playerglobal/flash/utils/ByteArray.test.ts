@@ -70,3 +70,30 @@ test("unknown charset churn and oversized labels cannot poison cached decoders",
   bytes.position = 0;
   assert.equal(read(1, "windows-1252"), "€");
 });
+
+test("writeMultiByte writes UTF-16, Latin-1, ASCII and code pages, '?' for what a page has not", () => {
+  const rt = { toString: String, error: (_: string, id: number) => new Error(`Error #${id}`) };
+  const natives = byteArrayNatives({ rt } as unknown as Scripting);
+  const owner: avm2.AsObject = {};
+  const written = (text: string, charset: string): number[] => {
+    const b = avm2.bytesOf(rt as unknown as avm2.Runtime, owner);
+    b.length = 0;
+    b.position = 0;
+    natives["flash.utils::ByteArray#writeMultiByte"](rt as unknown as avm2.Runtime).call(
+      owner,
+      text,
+      charset,
+    );
+    return [...b.buffer.subarray(0, b.length)];
+  };
+
+  assert.deepEqual(written("Aé", "unicode"), [0x41, 0, 0xe9, 0]);
+  assert.deepEqual(written("Aé", "UTF-16BE"), [0, 0x41, 0, 0xe9]);
+  assert.deepEqual(written("Aé€", "utf-8"), [0x41, 0xc3, 0xa9, 0xe2, 0x82, 0xac]);
+  assert.deepEqual(written("é€", "iso-8859-1"), [0xe9, 0x3f]);
+  assert.deepEqual(written("Aé", "us-ascii"), [0x41, 0x3f]);
+  assert.deepEqual(written("€", "windows-1252"), [0x80]);
+  assert.deepEqual(written("次 ｱ", "shift-jis"), [0x8e, 0x9f, 0x20, 0xb1]);
+  assert.deepEqual(written("€", "shift_jis"), [0x3f]);
+  assert.throws(() => written("A", null as unknown as string), /2007/);
+});

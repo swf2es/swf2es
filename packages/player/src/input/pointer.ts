@@ -486,6 +486,8 @@ export interface Drag {
   bounds: Rect | null;
   lastX: number;
   lastY: number;
+  /** The touch point that moves it, as Sprite.startTouchDrag's; the mouse where there is none. */
+  touchPointID?: number;
 }
 
 /**
@@ -632,20 +634,83 @@ export class PointerInput implements Pointer {
     this.updateDrag();
   }
 
+  /** Ends the mouse's drag; a touch point's stays, as only stopTouchDrag ends it. */
   stopDrag(): void {
+    if (this.drag?.touchPointID !== undefined) {
+      return;
+    }
+
     this.updateDrag();
     this.drag = null;
   }
 
-  private updateDrag(): void {
+  /**
+   * A drag that touch point `id` moves, from where it is (`at`, null while it
+   * is not down: the target stays until it moves). The one drag there is,
+   * the mouse's or another point's, gives way to it.
+   */
+  startTouchDrag(
+    target: DisplayObject,
+    id: number,
+    lockCenter: boolean,
+    bounds: Rect | null,
+    at: { x: number; y: number } | null,
+  ): void {
+    this.drag = {
+      target,
+      lockCenter,
+      bounds,
+      lastX: at?.x ?? Number.NaN,
+      lastY: at?.y ?? Number.NaN,
+      touchPointID: id,
+    };
+    if (at) {
+      this.updateDrag(id, at.x, at.y);
+    }
+  }
+
+  /** Ends touch point `id`'s drag, where it is (`at`), and no other. */
+  stopTouchDrag(id: number, at: { x: number; y: number } | null): void {
     const drag = this.drag;
-    if (!drag) {
+    if (drag?.touchPointID !== id) {
+      return;
+    }
+
+    if (at) {
+      this.dragTouch(id, at.x, at.y);
+    }
+
+    this.drag = null;
+  }
+
+  /** Touch point `id` at (x, y) on the stage: what it drags follows it (TouchInput). */
+  dragTouch(id: number, x: number, y: number): void {
+    const drag = this.drag;
+    if (drag?.touchPointID !== id) {
+      return;
+    }
+
+    // Begun while the point was up: it moves the target from where the point comes down.
+    if (Number.isNaN(drag.lastX)) {
+      drag.lastX = x;
+      drag.lastY = y;
+    }
+
+    this.updateDrag(id, x, y);
+  }
+
+  /** Moves the drag that `touchPointID` moves, or the mouse's, to (x, y). */
+  private updateDrag(
+    touchPointID?: number,
+    x = this.scripting.mouseStageX,
+    y = this.scripting.mouseStageY,
+  ): void {
+    const drag = this.drag;
+    if (!drag || drag.touchPointID !== touchPointID) {
       return;
     }
 
     const d = drag.target;
-    const x = this.scripting.mouseStageX;
-    const y = this.scripting.mouseStageY;
     if (dragTo(this.stage, drag, x, y)) {
       this.redraws++;
     }

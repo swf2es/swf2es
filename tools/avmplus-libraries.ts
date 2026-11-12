@@ -7,7 +7,8 @@
 //
 //   node tools/avmplus-libraries.ts [--update]
 //
-// fails if a module does not hold its file's bytes; --update writes them.
+// fails if a module does not hold its file's bytes; --update writes them,
+// and builtin's TypeScript declarations (tools/as3-types.ts) after them.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -118,5 +119,12 @@ if (import.meta.main) {
   if (stale > 0) {
     console.error("run node tools/avmplus-libraries.ts --update");
     process.exit(1);
+  }
+
+  // In a process of its own, which imports the library just written.
+  if (update) {
+    execFileSync(process.execPath, [join(root, "tools/as3-types.ts"), "--update"], {
+      stdio: "inherit",
+    });
   }
 }

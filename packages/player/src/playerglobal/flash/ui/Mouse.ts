@@ -2,6 +2,7 @@
 // which of Flash's own it forces, and bitmap cursors registered by name.
 // MouseCursorData holds a cursor's frames, hot spot and frame rate.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { encodePng } from "../../../bitmap/png.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "../display/BitmapData.js";
@@ -148,9 +149,9 @@ export function mouseNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "hotSpot");
       }
 
-      const p = value as AsObject;
-      this.$cursorHotX = s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName("x")));
-      this.$cursorHotY = s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName("y")));
+      const p = value as As3<"flash.geom::Point">;
+      this.$cursorHotX = s.rt.toNumber(s.rt.prop(p, "x"));
+      this.$cursorHotY = s.rt.toNumber(s.rt.prop(p, "y"));
     }
 
     get frameRate(): number {

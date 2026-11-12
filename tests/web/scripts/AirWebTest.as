@@ -19,8 +19,9 @@ package {
   // a file read by its app: URL, by its file: URL, and a missing one, and
   // by a FileStream at once and over frames; a file in its storage, which
   // counts its runs, written and loaded by its app-storage: URL; an
-  // EncryptedLocalStore item counting them too; and its exit, once the
-  // reads are done.
+  // EncryptedLocalStore item counting them too; a temporary file, written
+  // and read, and a temporary directory, in the cache directory; and its
+  // exit, once the reads are done.
   public class AirWebTest extends Sprite {
     private var _pending:int = 5;
 
@@ -67,6 +68,16 @@ package {
       stream.writeUTFBytes(String(runs + 1));
       stream.close();
       trace("air: saved " + runs);
+      var temp:File = File.createTempFile();
+      var empty:Boolean = temp.exists && temp.size == 0;
+      stream.open(temp, FileMode.WRITE);
+      stream.writeUTFBytes("temporary");
+      stream.close();
+      stream.open(temp, FileMode.READ);
+      var back:String = stream.readUTFBytes(stream.bytesAvailable);
+      stream.close();
+      var tempDirectory:File = File.createTempDirectory();
+      trace("air: temp " + back + " " + empty + " " + temp.parent.nativePath + " " + tempDirectory.isDirectory + " " + tempDirectory.getDirectoryListing().length + " " + (temp.nativePath != tempDirectory.nativePath) + " " + /^fla[0-9a-f]{1,4}\.tmp$/.test(temp.name));
       var async:FileStream = new FileStream();
       async.addEventListener(Event.COMPLETE, function (e:Event):void {
         trace("air: async stream " + async.readUTFBytes(async.bytesAvailable));

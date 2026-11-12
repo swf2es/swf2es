@@ -1,18 +1,22 @@
 // flash.net.URLStream: bytes fetched by the host, read through ByteArray's
 // DataInput implementation and delivered to scripts on a later frame.
 import { avm2 } from "@swf2es/runtime";
+import type { As3, As3Classes } from "../../../as3/types.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+type ByteArray = As3<"flash.utils::ByteArray">;
+type ByteArrayMethod = avm2.MethodName<As3Classes["flash.utils::ByteArray"]>;
 
 export function urlStreamNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   const bufferOf = (stream: AsObject): AsObject =>
     (stream.$buffer ??= s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject);
-  const read = (stream: AsObject, method: string, ...args: Value[]): Value =>
-    s.rt.callProperty(bufferOf(stream), s.rt.publicName(method), ...args);
+  // The arguments go to the buffer's method as the stream's were given, which it checks.
+  const read = (stream: AsObject, method: ByteArrayMethod, ...args: Value[]): Value =>
+    s.rt.callProp(bufferOf(stream) as ByteArray, method, ...(args as never));
   const stop = (stream: AsObject): void => {
     stream.$generation = (stream.$generation ?? 0) + 1;
     stream.$abort?.abort();
@@ -184,19 +188,19 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
     }
 
     get objectEncoding(): Value {
-      return s.rt.getProperty(bufferOf(this), s.rt.publicName("objectEncoding"));
+      return s.rt.prop(bufferOf(this) as ByteArray, "objectEncoding");
     }
 
     set objectEncoding(value: Value) {
-      s.rt.setProperty(bufferOf(this), s.rt.publicName("objectEncoding"), value);
+      s.rt.setProp(bufferOf(this) as ByteArray, "objectEncoding", value);
     }
 
     get endian(): Value {
-      return s.rt.getProperty(bufferOf(this), s.rt.publicName("endian"));
+      return s.rt.prop(bufferOf(this) as ByteArray, "endian");
     }
 
     set endian(value: Value) {
-      s.rt.setProperty(bufferOf(this), s.rt.publicName("endian"), value);
+      s.rt.setProp(bufferOf(this) as ByteArray, "endian", value);
     }
 
     get diskCacheEnabled(): boolean {

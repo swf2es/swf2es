@@ -42,3 +42,8 @@ test("Capabilities reads each player's captured screen values", async () => {
   assert.deepEqual(values(dpiOnly), [0, 0, 1, 96]);
   assert.deepEqual(values(first), [1536, 864, 1, 72]);
 });
+
+test("Capabilities._internal is 36, as Flash Player 32 and AIR 51.3 report it", async () => {
+  const s = new Scripting(await createCodegen(wasm));
+  assert.equal(playerNatives(s)["flash.system::Capabilities.get:_internal"](s.rt).call(null), 36);
+});

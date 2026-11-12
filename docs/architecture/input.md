@@ -405,6 +405,18 @@ touch event") and the W3C's, touch first; Ruffle dispatches no
 TouchEvent. Nor could the TouchEvents' own order: a move before its hover
 is the mouse's, measured, taken over.
 
+`Sprite.startTouchDrag(touchPointID, lockCenter, bounds)` is `startDrag`
+for one touch point: the sprite follows that point's begins and moves,
+before their events, as the mouse's drag follows the mouse, in any input
+mode. With the point down it starts where the point is, a locked centre
+jumping there; with it up nothing moves until it comes down, which is all
+adl and Flash Player 32 could show (the `system-small-natives` case): every
+id and bound taken without an error, and nothing moved. There is one drag,
+as the reference has it ("only one sprite is draggable at a time"): a touch
+drag takes it from the mouse or another point, and `startDrag` takes it
+back. `stopTouchDrag` ends it for its own point alone, and `stopDrag`
+leaves it.
+
 ## Keyboard and focus
 
 A host gives the player its keys (`bindKeyboard`, `input/keyboard.ts`): each

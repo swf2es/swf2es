@@ -21,6 +21,7 @@ import {
   VertexOffsetError,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../as3/types.js";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
@@ -561,11 +562,12 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       const rt = s.rt;
+      const r = rect as As3<"flash.geom::Rectangle">;
       backend.setScissor(
-        rt.toNumber(rt.getProperty(rect, rt.publicName("x"))),
-        rt.toNumber(rt.getProperty(rect, rt.publicName("y"))),
-        rt.toNumber(rt.getProperty(rect, rt.publicName("width"))),
-        rt.toNumber(rt.getProperty(rect, rt.publicName("height"))),
+        rt.toNumber(rt.prop(r, "x")),
+        rt.toNumber(rt.prop(r, "y")),
+        rt.toNumber(rt.prop(r, "width")),
+        rt.toNumber(rt.prop(r, "height")),
       );
     }
 

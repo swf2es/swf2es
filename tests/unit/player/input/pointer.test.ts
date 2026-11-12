@@ -187,6 +187,39 @@ test("sprite dragging follows the pointer in parent coordinates, clamps, and sto
   assert.deepEqual([second.matrix.tx, second.matrix.ty], [20, 25]);
 });
 
+test("a touch drag begun with its point up waits for it, and the mouse neither moves nor stops it", () => {
+  const stage = new Container();
+  const sprite = new Container();
+  sprite.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
+  stage.addChildAt(sprite, 0);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseStageX: 0,
+    mouseStageY: 0,
+    clipboard: new Clipboard(null),
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+
+  input.startTouchDrag(sprite, 7, false, null, null);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [5, 6]);
+  input.dragTouch(8, 50, 50);
+  input.dragTouch(7, 30, 30);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [5, 6]);
+  input.dragTouch(7, 40, 35);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [15, 11]);
+
+  input.handle("move", { x: 60, y: 60 });
+  input.stopDrag();
+  input.stopTouchDrag(8, null);
+  input.dragTouch(7, 41, 35);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [16, 11]);
+
+  input.stopTouchDrag(7, { x: 45, y: 35 });
+  input.dragTouch(7, 50, 50);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [20, 11]);
+});
+
 /** A white square of `size` at (x, y), which takes no pointer itself. */
 function square(x: number, y: number, size = 20): BitmapObject {
   const b = new BitmapObject(new BitmapStore(size, size, true, 0xffffffff));

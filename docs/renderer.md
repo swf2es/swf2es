@@ -45,7 +45,11 @@ of each kind of object is in modules of its own under
 - `paints.ts`: bitmap and gradient textures (`storeTexture`,
   `gradientTexture`);
 - `text.ts`, `text-items.ts`, `advanced.ts`: device text's textures,
-  and advanced text's glyph quads;
+  and advanced text's glyph quads. Device text is placed at the scale
+  it is shown, a texel a canvas pixel from a whole canvas pixel, below 1
+  too, and its glyphs rasterized at that size to half a pixel, so that a
+  window dragged or a tween finds most rasterized already; scaled after
+  rasterizing at a whole resolution, it blurred at 0.9 or 1.95;
 - `masks.ts`: masks and scroll rectangles;
 - `filters.ts`, `filter-layers.ts`: each filter's values, padding and
   insets, and kept outputs;

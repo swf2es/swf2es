@@ -20,6 +20,10 @@ package {
         say("click " + ask(stage.displayState == StageDisplayState.NORMAL ? "fullScreen" : "normal"));
       });
       ExternalInterface.addCallback("fsAsk", ask);
+      // In and out at once, before the browser has entered.
+      ExternalInterface.addCallback("fsBounce", function():String {
+        return ask("fullScreen") + " " + ask("normal");
+      });
       ExternalInterface.addCallback("fsState", function():String {
         return stage.displayState + " " + stage.allowsFullScreen + " " + stage.allowsFullScreenInteractive;
       });

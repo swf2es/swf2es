@@ -4,6 +4,7 @@
 // styles long and medium alike. The locale's patterns are read off Intl's
 // parts, and its names come from Intl; the pattern is interpreted here.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { Scripting } from "../../../scripting.js";
 import {
   availableLocales,
@@ -531,9 +532,7 @@ export function dateTimeFormatterNatives(s: Scripting): avm2.Natives {
       const time = (nonNull(s, date, "dateTime") as AsObject).$time as number;
       // Local time is the runtime's, as Date's own getters give it.
       const asked =
-        utc || Number.isNaN(time)
-          ? 0
-          : (s.rt.getProperty(date, s.rt.publicName("timezoneOffset")) as number);
+        utc || Number.isNaN(time) ? 0 : s.rt.prop(date as As3<"Date">, "timezoneOffset");
       const offset = Number.isNaN(asked) ? new Date(time).getTimezoneOffset() : asked;
       // A pattern with the date formats only Windows' dates; one of the time alone any. An
       // invalid date is, as adl has it, midnight of 1 January 1970 to a pattern without the

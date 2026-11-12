@@ -350,6 +350,11 @@ export class RenderView implements Drawer {
     return this.textItems.runCount;
   }
 
+  /** How many glyphs and runs of device text it has rasterized, which a page may check for churn. */
+  get textRasterized(): number {
+    return this.textItems.rasterized;
+  }
+
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
   resize(width: number, height: number, resolution = this.resolution): void {
     this.width = width;
@@ -854,7 +859,8 @@ export class RenderView implements Drawer {
       let glyph = 0;
       let normal = 0;
 
-      // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch.
+      // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch, its
+      // runs on whole canvas pixels.
       const resolution =
         o instanceof TextObject && !o.embedFonts
           ? deviceTextResolution([a, b, c, d], this.scale * this.resolution)
@@ -904,6 +910,7 @@ export class RenderView implements Drawer {
             ty,
             color,
             resolution,
+            this.target.scale,
           );
         } else if (!glyphsDrawn && advanced.handle) {
           glyphsDrawn = true;

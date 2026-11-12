@@ -1653,3 +1653,44 @@ test("failed image decoding delivers IOError 2124 and leaves the queue usable", 
 
   assert.equal(errors.length, 3);
 });
+
+test("a URL's bytes of no known type are told as any are, then #2124 with the URL, its bytes empty", {
+  skip,
+}, async (t) => {
+  const s = new Scripting(await createCodegen(wasm), {
+    print: () => {},
+    url: "https://example.test/main.swf",
+    fetch: async () => ({
+      bytes: new TextEncoder().encode("plain text"),
+      status: 200,
+      headers: [],
+    }),
+  });
+  t.after(() => s.destroy());
+  await s.loadLibraries(libraryAbcs());
+  const lengths: string[] = [];
+  let text = "";
+  const { loader, info, get, events } = loaderOf(s, (type, event) => {
+    lengths.push(`${type} ${get(get(info, "bytes"), "length")} ${get(info, "bytesLoaded")}`);
+    if (type === "ioError") {
+      text = get(event, "text");
+    }
+  });
+  // Flash's bytes are null before any load, an empty ByteArray from the load on.
+  assert.equal(get(info, "bytes"), null);
+  s.loads.requestLoadUrl(loader, "data.txt");
+  assert.equal(get(get(info, "bytes"), "length"), 0);
+  await deliver(s);
+  assert.deepEqual(events, ["open", "progress", "progress", "httpStatus", "ioError"]);
+  assert.deepEqual(lengths, [
+    "open 0 0",
+    "progress 0 0",
+    "progress 0 10",
+    "httpStatus 0 10",
+    "ioError 0 10",
+  ]);
+  assert.equal(
+    text,
+    "Error #2124: Loaded file is an unknown type. URL: https://example.test/data.txt",
+  );
+});

@@ -175,3 +175,22 @@ test("an enumerated own undefined masks the prototype, but a deleted value falls
   object.$d.delete("value");
   assert.equal(rt.nextValue(object, index), 42);
 });
+
+test("an error names an object by its class without the package", () => {
+  const rt = avm2.createRuntime();
+  assert.equal(rt.describe(new Traits("Object", null).instance()), "Object@0");
+  assert.equal(rt.describe(new Traits("flash.net::URLRequest", null).instance()), "URLRequest@0");
+  assert.equal(rt.describe("text"), "text");
+});
+
+test("an error names a class by its package and name joined by a dot, as Flash's debugger", () => {
+  const object = new Traits("Object", null);
+  assert.equal(new Traits("flash.text::TextField", object).errorName, "flash.text.TextField");
+  assert.equal(new Traits("Test.as$38::Second", object).errorName, "Test.as$38.Second");
+  assert.equal(object.errorName, "Object");
+  const classTraits = new Traits("Class", object);
+  assert.equal(
+    new Traits("flash.text::TextField$", classTraits).errorName,
+    "class flash.text.TextField",
+  );
+});

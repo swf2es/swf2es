@@ -701,7 +701,7 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
   }>(evaluate, "airRun(true)");
   assert.deepEqual(r.errors, []);
   // What it traces at once, in order; then what arrives on later frames, in any.
-  assert.deepEqual(r.traces.slice(0, 11), [
+  assert.deepEqual(r.traces.slice(0, 12), [
     "air: url app:/bin/AirWebTest.swf",
     "air: sandbox application",
     "air: id org.swf2es.web",
@@ -713,8 +713,10 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
     "air: stream hello from the package",
     "air: items 0",
     "air: saved 0",
+    // In the cache directory of its files in IndexedDB.
+    "air: temp temporary true /cache true 0 true true",
   ]);
-  assert.deepEqual(r.traces.slice(11, -1).sort(), [
+  assert.deepEqual(r.traces.slice(12, -1).sort(), [
     "air: app hello from the package",
     "air: async stream hello from the package",
     "air: file hello from the package",
@@ -1827,6 +1829,22 @@ check(
         "click fullScreen",
         "event false false normal",
       ]);
+
+      // In and straight out again within one gesture, before the browser has entered: the
+      // page leaves once it is in, and its late word of the entry puts the stage back in nothing.
+      const bounced = await send<{ result?: { value?: string } }>("Runtime.evaluate", {
+        expression: "fsPlayer.fsBounce()",
+        userGesture: true,
+        returnByValue: true,
+      });
+      assert.equal(bounced.result?.value, "fullScreen normal");
+      await call(
+        evaluate,
+        "new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => done(true), 500))))",
+      );
+      await until("the page out of full screen", "document.fullscreenElement === null");
+      assert.equal(await call(evaluate, "fsPlayer.fsState()"), "normal true true");
+      assert.deepEqual(await lines(), ["event true false fullScreen", "event false false normal"]);
 
       // A full screen the page asked for itself is the stage's too, and a destroy gives it back.
       const asked = await send<{ exceptionDetails?: object }>("Runtime.evaluate", {

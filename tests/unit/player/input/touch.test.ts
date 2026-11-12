@@ -213,3 +213,90 @@ test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first
     [],
   );
 });
+
+// Sprites a touch drags: "a" by the point that begins on it, "b" locked to
+// its point within a box; the stage traces where both are at each step.
+const DRAG_SOURCE = `package {
+  import flash.display.Sprite;
+  import flash.events.TouchEvent;
+  import flash.geom.Rectangle;
+  import flash.ui.Multitouch;
+
+  public class TouchDragMain extends Sprite {
+    private function box(x:Number):Sprite {
+      var s:Sprite = new Sprite();
+      s.graphics.beginFill(0xff0000);
+      s.graphics.drawRect(0, 0, 20, 20);
+      s.x = x;
+      addChild(s);
+      return s;
+    }
+
+    public function TouchDragMain() {
+      Multitouch.inputMode = "touchPoint";
+      var a:Sprite = box(0);
+      var b:Sprite = box(50);
+      a.addEventListener("touchBegin", function (e:TouchEvent):void {
+        a.startTouchDrag(e.touchPointID);
+      });
+      b.addEventListener("touchBegin", function (e:TouchEvent):void {
+        b.startTouchDrag(e.touchPointID, true, new Rectangle(40, 0, 20, 10));
+      });
+      b.addEventListener("touchEnd", function (e:TouchEvent):void {
+        b.stopTouchDrag(e.touchPointID);
+      });
+      for each (var type:String in ["touchBegin", "touchMove", "touchEnd"]) {
+        stage.addEventListener(type, function (e:TouchEvent):void {
+          trace(e.type, e.touchPointID, a.x + "," + a.y, b.x + "," + b.y, a.dropTarget == b);
+        });
+      }
+    }
+  }
+}`;
+
+test("startTouchDrag drags a sprite by its touch point, one drag at a time, until stopTouchDrag", {
+  skip,
+}, async () => {
+  const abc = compileScripts([{ name: "TouchDragMain", source: DRAG_SOURCE }], out).get(
+    "TouchDragMain",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    maxTouchPoints: 5,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "TouchDragMain"), scripting);
+  await player.start();
+  const touch = player.touch;
+  assert.ok(touch);
+  const at = (x: number, y: number, id: number): TouchState => ({ x, y, id, primary: false });
+
+  // Unlocked, "a" moves as far as its point does, and is dropped on "b"; locked,
+  // "b" puts its registration point under its point, kept within its box. The
+  // point that takes the drag leaves the first dragging nothing, and once it
+  // ends, nothing follows a point.
+  touch.handle("begin", at(5, 5, 1));
+  touch.handle("move", at(15, 8, 1));
+  touch.handle("move", at(55, 13, 1));
+  touch.handle("begin", at(65, 3, 2));
+  touch.handle("move", at(25, 8, 1));
+  touch.handle("move", at(70, 30, 2));
+  touch.handle("move", at(45, 2, 2));
+  touch.handle("end", at(45, 2, 2));
+  touch.handle("begin", at(30, 40, 3));
+  touch.handle("move", at(20, 45, 3));
+  assert.deepEqual(lines.splice(0), [
+    "touchBegin 1 0,0 50,0 false",
+    "touchMove 1 10,3 50,0 false",
+    "touchMove 1 50,8 50,0 true",
+    "touchBegin 2 50,8 60,3 true",
+    "touchMove 1 50,8 60,3 true",
+    "touchMove 2 50,8 60,10 true",
+    "touchMove 2 50,8 45,2 true",
+    "touchEnd 2 50,8 45,2 true",
+    "touchBegin 3 50,8 45,2 true",
+    "touchMove 3 50,8 45,2 true",
+  ]);
+  player.destroy();
+});

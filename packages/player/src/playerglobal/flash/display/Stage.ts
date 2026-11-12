@@ -3,6 +3,7 @@
 // to (input/keyboard.ts), and the two container methods Stage declares native
 // again, which do as a container's do.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { setFocus } from "../../../input/keyboard.js";
 import type { Scripting } from "../../../scripting.js";
 import { stageAlignment } from "../../../stage.js";
@@ -206,7 +207,8 @@ export function stageNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const read = (k: string) => s.rt.toNumber(s.rt.getProperty(v as never, s.rt.publicName(k)));
+      const r = v as As3<"flash.geom::Rectangle">;
+      const read = (k: "x" | "y" | "width" | "height") => s.rt.toNumber(s.rt.prop(r, k));
       s.fullScreen.setSourceRect({
         x: read("x"),
         y: read("y"),

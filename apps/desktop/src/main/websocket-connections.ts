@@ -2,7 +2,10 @@
 // of Electron's Node: what the WebSocket bridge (websockets.ts) holds for
 // each page, apart from Electron so that node runs it in the tests
 // (tests/desktop/websocket-connections.test.ts).
+import { isIP, type Socket } from "node:net";
+import * as tls from "node:tls";
 import type { WebSocketEvent } from "../shared/api.js";
+import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
 
 /** As many as a page may hold open at once; past it a connection is refused. */
 const MAX_OPEN = 64;
@@ -61,6 +64,23 @@ export function hasWebSocket(): boolean {
  * made from the class of the dispatcher undici keeps for everything else.
  */
 export function unverifiedDispatcher(): unknown {
+  const Agent = agentClass();
+  if (!Agent) {
+    return null;
+  }
+
+  try {
+    const agent = new Agent({
+      connect: { rejectUnauthorized: false },
+    });
+    return typeof agent.dispatch === "function" ? agent : null;
+  } catch {
+    return null;
+  }
+}
+
+/** undici's Agent, the class of the dispatcher it keeps for everything else; null where none. */
+function agentClass(): (new (options: object) => { dispatch?: unknown }) | null {
   // Naming the global loads undici, which then sets its dispatcher.
   if (!hasWebSocket()) {
     return null;
@@ -68,18 +88,78 @@ export function unverifiedDispatcher(): unknown {
 
   const shared = (globalThis as Record<symbol, unknown>)[Symbol.for("undici.globalDispatcher.1")];
   const Agent = (shared as { constructor?: unknown } | undefined)?.constructor;
-  if (typeof Agent !== "function" || Agent.name !== "Agent") {
+  return typeof Agent === "function" && Agent.name === "Agent"
+    ? (Agent as new (
+        options: object,
+      ) => { dispatch?: unknown })
+    : null;
+}
+
+/**
+ * What sends every client's requests through `proxy` (--proxy): a tunnel to
+ * the URL's host, by name for the proxy to resolve, and TLS over it for
+ * wss:, its certificate unverified where `unverified` says so of its host.
+ * `warn` is told why a proxy did not make one. Null where this Node gives
+ * no way to make one, as unverifiedDispatcher.
+ */
+export function proxiedDispatcher(
+  proxy: ProxyConfig,
+  unverified: (host: string) => boolean,
+  warn: (message: string) => void = () => {},
+): unknown {
+  const Agent = agentClass();
+  if (!Agent) {
     return null;
   }
 
+  // undici's connector: its options name the target, and its callback takes the socket made.
+  const connect = (
+    options: { hostname: string; protocol: string; port: string | number; servername?: string },
+    done: (error: Error | null, socket: Socket | null) => void,
+  ) => {
+    const host = options.hostname.replace(/^\[(.*)\]$/, "$1").toLowerCase();
+    const https = options.protocol === "https:";
+    const port = Number(options.port) || (https ? 443 : 80);
+    connectThrough(proxy, host, port).then(
+      (tunnel) => {
+        if (!https) {
+          done(null, tunnel);
+          return;
+        }
+
+        const secure = tls.connect({
+          socket: tunnel,
+          servername: isIP(host) ? undefined : (options.servername ?? host),
+          ALPNProtocols: ["http/1.1"],
+          ...(unverified(host) ? { rejectUnauthorized: false } : {}),
+        });
+        const failed = (error: Error) => done(error, null);
+        secure.once("error", failed);
+        secure.once("secureConnect", () => {
+          secure.removeListener("error", failed);
+          done(null, secure);
+        });
+      },
+      (error: ProxyError) => {
+        warn(`no WebSocket to ${host}:${port}: ${error.message}`);
+        done(error, null);
+      },
+    );
+  };
   try {
-    const agent = new (Agent as new (options: object) => { dispatch?: unknown })({
-      connect: { rejectUnauthorized: false },
-    });
+    const agent = new Agent({ connect });
     return typeof agent.dispatch === "function" ? agent : null;
   } catch {
     return null;
   }
+}
+
+/** An opener whose every connection is `dispatcher`'s: proxiedDispatcher's. */
+export function dispatchedOpener(dispatcher: unknown): Opener {
+  return (url, protocols) => {
+    const Client = globalClient() as ClientConstructor;
+    return new Client(url, { protocols, dispatcher });
+  };
 }
 
 /**

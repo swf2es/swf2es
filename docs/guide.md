@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.16"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.17"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.16`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.17`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -272,6 +272,30 @@ Without a renderer, nothing is drawn, and `BitmapData.draw` of a display
 object is not supported. The display list, scripts, timers, loads and
 sockets all run.
 
+## Declarations of a SWF's classes
+
+```sh
+swf2es types movie.swf -o movie-types.ts --name Movie
+```
+
+writes TypeScript declarations of the classes the SWF's ActionScript 3
+defines: for each, an interface of its instances' public members and one of
+its static ones, keyed by qualified name in `MovieClasses` and
+`MovieStatics`. A class extends the declarations of the one it extends in
+the player's libraries (`@swf2es/player/as3-types`), so a subclass of
+`flash.display.Sprite` has Sprite's members; a type that no library
+defines is `avm2.Value`. `--air` takes AIR's library in too. With them, a
+host's code reads a script's objects by name, checked as it compiles:
+
+```ts
+import type { avm2 } from "@swf2es/runtime";
+import type { MovieClasses } from "./movie-types.js";
+
+const hero = value as avm2.Ref<MovieClasses["game::Hero"]>;
+const hp = scripting.rt.prop(hero, "hp"); // a number; "hpp" would not compile
+scripting.rt.callProp(hero, "attack", null, 2);
+```
+
 ## Play a SWF on the desktop
 
 `@swf2es/desktop` is an Electron app that plays SWFs in a window, the
@@ -285,7 +309,8 @@ npx @swf2es/desktop app.xml                         # an AIR application, by its
 npx @swf2es/desktop                                 # the window: File › Open, or drop a SWF or a descriptor on it
 ```
 
-The first run downloads Electron's binary, about 100 MB, once. Installed
+The first run downloads Electron's binary, about 100 MB, once. npx may run a version it cached before
+rather than a newer one: `npx @swf2es/desktop@latest` takes the newest. Installed
 (`npm install -g @swf2es/desktop`), the command is `swf2es-desktop`.
 
 Each SWF plays in the sandbox Flash Player gave it. A local SWF goes by its
@@ -301,6 +326,8 @@ the builtin.abc and playerglobal the player ships.
 | `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
+| `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
+| `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
 
 npx reads the first `--` on its command line as the end of its own
@@ -315,6 +342,20 @@ change what the SWF loads from it, so name the hosts you mean, and leave the
 switch off otherwise. It is never remembered: the app says so on stderr each
 time it starts with it.
 
+`--proxy` is never remembered either, and the app says on stderr which
+proxy it uses (its credentials, which come from the command line alone,
+never). Every connection the main process makes for the SWF goes through
+it: http and https loads, policy files, sockets and an AIR application's
+WebSockets. TLS is the app's own, over the tunnel, so certificates are
+checked as without a proxy. The app still resolves a host itself, to tell
+whether it is on this machine or your network, which a SWF from the
+internet may not reach without a policy file there, and then asks the
+proxy for the address it judged; so a host this machine cannot resolve is
+not reached through the proxy either. A proxy that fails or refuses is a
+failed load or socket to the SWF, and a line on stderr saying why. An HTTP
+proxy that allows `CONNECT` only to port 443, as Squid does by default,
+refuses plain http and sockets on other ports.
+
 In a checkout of the repository the app runs from its sources:
 
 ```sh
@@ -325,6 +366,11 @@ pnpm --filter @swf2es/desktop start movie.swf
 A SWF or an AIR application that sets `Stage.displayState` takes the
 window full screen, with no click needed, as in AIR and Flash's projector;
 Esc or F11 leaves.
+
+On Linux, a local file a SWF or an AIR application names that is not there
+as named is found as Windows and macOS find it, ignoring case, so content
+made there finds its files whatever case it names them in. Where two names
+in a directory differ only in case, neither is taken.
 
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.
@@ -355,10 +401,13 @@ read-only, as an installed application's is. What it writes elsewhere,
 in its storage directory (`app-storage:`) or the user's directories, is
 kept in the browser's IndexedDB by the application's id, and is there
 the next time the page plays it; `loadAir(app, { keepFiles: false })`
-keeps it in memory alone, for that play. `EncryptedLocalStore` keeps its
-items in IndexedDB too, by the application's id: a page has no keychain
-to encrypt them by, and the browser keeps them as it keeps the site's
-other data.
+keeps it in memory alone, for that play. `File.createTempFile()` and
+`File.createTempDirectory()` make theirs in its cache directory
+(`File.cacheDirectory`, `/cache`), kept the same way until it deletes
+them, as AIR leaves them for the application to delete.
+`EncryptedLocalStore` keeps its items in IndexedDB too, by the
+application's id: a page has no keychain to encrypt them by, and the
+browser keeps them as it keeps the site's other data.
 The element is its one window, at the descriptor's size, and
 `flash.display.Screen` has the one screen the page is on (`window.screen`);
 the play page opens `.air` and `.zip` files too.
