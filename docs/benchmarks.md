@@ -394,6 +394,23 @@ obfuscated physics game was busy in a run of its explosions in Chrome,
 and 0.95–1.0 s after, as it drew 2–3% more frames and a fifth fewer over
 25 ms.
 
+A string read through the lookup has one property, `length`, and that
+read cost several times the rest of a loop over an Array of strings
+(`a[i].length`, VectorAccess.as's array-string-read): the cache finds
+the getter, which is then called through the entry. Where the code reads
+a public `length` on a value typed `*` or Object, it now tells a string
+first and reads its length in place, `typeof x === "string" ? x.length :
+rt.getProperty(x ?? nn(x), M[k])`; anything else is looked up as before.
+`tests/bench/vector/run.ts`, medians of 9 interleaved pairs, in ms:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| array-string-read | 150 | 25 | −83.3% | 66 |
+| string-push-pop (`v.pop().length`) | 139 | 110 | −20.9% | 74 |
+
+The other sections, which read `length` on Arrays and Vectors through
+untyped references once a call, are unchanged.
+
 ### Typed construction and bound calls
 
 `tests/bench/typed/Typed.as` times what the compiler binds: `new` of
