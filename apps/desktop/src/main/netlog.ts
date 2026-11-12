@@ -41,3 +41,68 @@ export function failureLine(method: string, url: string, why: string, ms: number
 export function socketLine(id: number, what: string): string {
   return `swf2es: socket #${id} ${shown(what)}`;
 }
+
+/** How much of a message --log-sockets shows. */
+const PREVIEW = 512;
+
+/** The start of `bytes`: as text where it is text, bytes that are no printable ASCII as dots, else in hex. */
+function preview(bytes: Uint8Array): string {
+  const shownBytes = bytes.subarray(0, PREVIEW);
+  let printable = 0;
+  for (let i = 0; i < shownBytes.length; i++) {
+    const b = shownBytes[i];
+    if ((b >= 32 && b < 127) || b === 9 || b === 10 || b === 13 || b === 0) {
+      printable++;
+    }
+  }
+
+  let text = "";
+  // Mostly text, as a line protocol's messages are, a NUL ending each: shown as text.
+  if (printable * 10 >= shownBytes.length * 9) {
+    for (let i = 0; i < shownBytes.length; i++) {
+      const b = shownBytes[i];
+      text += b >= 32 && b < 127 ? String.fromCharCode(b) : ".";
+    }
+  } else {
+    for (let i = 0; i < shownBytes.length; i++) {
+      text += (i > 0 ? " " : "") + shownBytes[i].toString(16).padStart(2, "0");
+    }
+  }
+
+  return text + (bytes.length > PREVIEW ? "…" : "");
+}
+
+/**
+ * What a socket sent (">") or received ("<"): its size and its start, as
+ * text where it is text, bytes that are no printable ASCII as dots, else
+ * in hex. A message past PREVIEW bytes ends in an ellipsis.
+ */
+export function socketDataLine(id: number, sent: boolean, bytes: Uint8Array): string {
+  return `swf2es: socket #${id} ${sent ? ">" : "<"} ${bytes.length} B  ${preview(bytes)}`;
+}
+
+/** A WebSocket's connection asked for, opened, refused, failed or closed. */
+export function webSocketLine(id: number, what: string): string {
+  return `swf2es: websocket #${id} ${shown(what)}`;
+}
+
+/**
+ * What a WebSocket sent (">") or received ("<"): a text message's size
+ * in UTF-8 and its first PREVIEW characters, control characters as dots;
+ * a binary one's as a socket's.
+ */
+export function webSocketDataLine(id: number, sent: boolean, data: string | Uint8Array): string {
+  const head = `swf2es: websocket #${id} ${sent ? ">" : "<"}`;
+  if (typeof data !== "string") {
+    return `${head} binary ${data.length} B  ${preview(data)}`;
+  }
+
+  // By code point, so that no pair is cut in two.
+  const characters = Array.from(data.slice(0, PREVIEW * 2)).slice(0, PREVIEW);
+  const text = characters
+    .join("")
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what is taken out
+    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ".");
+  const more = text.length < data.length ? "…" : "";
+  return `${head} text ${Buffer.byteLength(data)} B  ${text}${more}`;
+}

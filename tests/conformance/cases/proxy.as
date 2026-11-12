@@ -95,3 +95,35 @@ function forwarded():String {
   return f.deep + " " + f.hidden::deep;
 }
 trace("forwarded", forwarded());
+// The name proxy[key] hands the proxy, by what the key is, in a function,
+// which avmshell compiles: a number's, whatever the number, is its string;
+// a String's, "0" too, and an object's is a QName.
+import flash.utils.Proxy;
+import flash.utils.flash_proxy;
+
+class Kinds extends Proxy {
+  flash_proxy override function getProperty(name:*):* {
+    return (name is QName ? "QName" : typeof name) + " " + name;
+  }
+
+  flash_proxy override function setProperty(name:*, value:*):void {
+    trace("set", name is QName ? "QName" : typeof name, name);
+  }
+}
+
+function kinds():void {
+  const p:Kinds = new Kinds();
+  const i:int = 0, n:int = -1, u:uint = 4294967295, h:Number = 1.5, nan:Number = NaN;
+  const s:String = "0", t:String = "x";
+  const o:Object = {toString: function():String { return "1"; }};
+  trace("kinds", p[i], "|", p[n], "|", p[u], "|", p[h], "|", p[nan]);
+  trace("kinds", p[s], "|", p[t], "|", p[o], "|", p[true], "|", p[null]);
+  p[i] = 1;
+  p[n] = 1;
+  p[u] = 1;
+  p[h] = 1;
+  p[s] = 1;
+  p[o] = 1;
+}
+
+kinds();
