@@ -501,8 +501,13 @@ Generated methods follow one calling convention. A slot is the field `$n`,
 by its slot id from 0, and a method, getter or setter is `$mn` on the
 prototype, by its dispatch id (`$bn` too, for bound calls); dynamic properties are kept apart from
 both. A method of a primitive receiver is called through its class's
-prototype, `rt.prototypeOf(int).$mn.call(x, ...)`; a String's `length`,
-its only getter, is read from the string itself. A method's own scope
+prototype, `(T[k] ??= rt.prototypeOf(int).$mn).call(x, ...)`, which the
+calling method keeps in an entry of its table T from the first call on:
+the prototype has it for good once the class is set up, and is not
+there to read it from when the module loads. A String's `length`, its
+only getter, is read from the string itself, and its `AS3::charAt` and
+`AS3::charCodeAt` by a number, or by nothing, are the string's own
+methods, as the natives call them. A method's own scope
 registers and the chain it captured are passed to the runtime together
 when it looks a name up or creates a function or class, with a bit per
 scope for the with scopes.

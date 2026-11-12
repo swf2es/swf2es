@@ -18,6 +18,7 @@ import {
   IR_GetGlobalScope,
   IR_Nip,
 } from "../ir/ir";
+import { Domain, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -937,6 +938,58 @@ function vectorLength(em: MethodEmitter, r: i32, getter: i32): bool {
   );
 }
 
+/** The namespace of the builtins' methods that a prototype's function cannot replace. */
+const AS3_URI = "http://adobe.com/AS3/2006/builtin";
+
+/** Whether the domain's string `id` is `text`, which is ASCII. */
+function stringIs(domain: Domain, id: u32, text: string): bool {
+  if (domain.stringLength[id] !== <u32>text.length) {
+    return false;
+  }
+
+  const at = domain.stringPtr[id];
+  for (let k = 0; k < text.length; k++) {
+    if (<i32>load<u8>(at + k) !== text.charCodeAt(k)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * The string's own method, `.charAt(` or `.charCodeAt(`, where the call
+ * by dispatch id `disp` on the String in register `src` is of AS3::charAt
+ * or AS3::charCodeAt with no argument, which is 0, or a number: what the
+ * runtime's natives call with it, and nothing but the string's
+ * characters; else "". Such a call is the inside of every loop over a
+ * string, and through the native it costs several times the method.
+ */
+function stringMethod(em: MethodEmitter, type: i32, disp: u32, src: i32, argc: u32): string {
+  const domain = em.domain;
+  if (type !== domain.stringType || argc > 1 || (argc === 1 && !isNumber(em, src + 1))) {
+    return "";
+  }
+
+  const m = aliasedMember(domain, <u32>type, disp);
+  if (m < 0) {
+    return "";
+  }
+
+  const traits = domain.traits;
+  const uri = domain.nsUri[traits.memberNs[m]];
+  if (uri === URI_None || !stringIs(domain, uri, AS3_URI)) {
+    return "";
+  }
+
+  const name = traits.memberName[m];
+  return stringIs(domain, name, "charAt")
+    ? ".charAt("
+    : stringIs(domain, name, "charCodeAt")
+      ? ".charCodeAt("
+      : "";
+}
+
 /**
  * Whether `getter` on register r reads a String's length, which is its
  * string's: String is final and has no other getter, and a call of the
@@ -1259,11 +1312,30 @@ function virtual(em: MethodEmitter, disp: u32, src: i32, argc: u32, m: i32): voi
     bt === BUILTIN_String ||
     bt === BUILTIN_Namespace;
   if (primitive) {
-    out.text("rt.prototypeOf(");
+    const own = bt === BUILTIN_String ? stringMethod(em, type, disp, src, argc) : "";
+    if (own.length) {
+      receiver(em, src);
+      out.text(own);
+      if (argc) {
+        em.reg(src + 1);
+      } else {
+        out.text("0");
+      }
+
+      out.text(")");
+      return;
+    }
+
+    // The method is kept from the first call on: its class's prototype
+    // has it for good once the class is set up, and to read it there at
+    // every call costs as much as many a method does.
+    out.text("(T[");
+    out.uint(em.methodSlot(type, disp));
+    out.text("] ??= rt.prototypeOf(");
     typeRef(em, type);
     out.text(").$m");
     out.uint(disp);
-    out.text(".call(");
+    out.text(").call(");
     em.reg(src);
     args(em, src + 1, argc);
     out.text(")");

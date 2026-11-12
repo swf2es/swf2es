@@ -534,6 +534,42 @@ file, the section takes 117 ms), and whose getter is called through the
 cache's entry. object-read compares each element with a global by
 `rt.strictEquals`, at avmshell's speed.
 
+### Methods of primitives
+
+`tests/bench/primitives/Primitives.as` times the methods of String, int
+and Number the compiler binds on values typed as them, in the AS3
+namespace: a string of 10,000 walked by `charCodeAt` and by `charAt`,
+searched, cut by `substring`, `substr` and `slice`, and numbers made
+strings. Its other lines must match avmshell's:
+
+    node tests/bench/primitives/run.ts [runs]
+    node tests/bench/primitives/run.ts <dir A> <dir B> [runs]
+
+Such a call was `rt.prototypeOf("String").$m10.call(s, i)`, and reading
+the method from the prototype was most of it: a primitive's class's
+prototype is no object's prototype, so the engine keeps its methods, of
+which String has dozens, in a dictionary, and each read is a lookup
+there, of a function it then cannot take for a constant. Now a method
+keeps each such method it calls in an entry of its table from the first
+call on (`(T[0] ??= rt.prototypeOf("String").$m10).call(s, i)`), and
+`AS3::charAt` and `AS3::charCodeAt` by a number are the string's own
+(`s.charCodeAt(i)`), which is what the natives call. Medians of 7
+interleaved pairs, in ms:
+
+| Section | Before | After | Change | avmshell |
+|---|---|---|---|---|
+| charCodeAt | 98 | 20 | −79.6% | 39 |
+| charAt | 103 | 30 | −70.9% | 21 |
+| indexOf | 78 | 61 | −21.8% | 47 |
+| substring | 73 | 56 | −23.3% | 132 |
+| substr-slice | 81 | 52 | −35.8% | 135 |
+| int-toString | 87 | 50 | −42.5% | 184 |
+| number-toString | 90 | 89 | −1.1% | 465 |
+| toFixed | 158 | 158 | 0% | 169 |
+
+The last two are the conversions' own time. VectorAccess.as, which
+calls no such method in a loop, is unchanged.
+
 ### The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator
