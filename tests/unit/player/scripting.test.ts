@@ -1643,3 +1643,34 @@ for (const lazyCompilation of [false, true]) {
     assert.equal(lines.filter((line) => line.startsWith("E:")).length, 7);
   });
 }
+
+test("addFrameScript takes what is no function as null, clearing the frame's script", {
+  skip,
+}, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Main extends MovieClip {
+      public function Main() {
+        addFrameScript(0, frame1, 1, frame2, 2, frame3);
+        addFrameScript(1, "primitive", 2, null);
+      }
+      private function frame1():void { trace("frame 1"); }
+      private function frame2():void { trace("frame 2"); }
+      private function frame3():void { trace("frame 3"); }
+    }
+  }`;
+  const lines: string[] = [];
+  const errors: unknown[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    onUncaught: (error) => errors.push(error),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("FrameScriptValues", source), 3), scripting);
+  await player.start();
+  player.tick();
+  player.tick();
+
+  assert.deepEqual(lines, ["frame 1"]);
+  assert.deepEqual(errors, []);
+});
