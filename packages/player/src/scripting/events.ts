@@ -93,7 +93,7 @@ function invoke(
     try {
       s.rt.call(l.fn, null, event);
     } catch (error) {
-      s.reportUncaught(error);
+      s.reportUncaught(error, l.fn);
     }
 
     if (event[f.stopped] === 2) {
@@ -108,12 +108,12 @@ function invoke(
  * none could tell whether it was made: the player's own events, one for
  * each object put on the list or taken off, are made only where heard.
  */
-export function heard(target: AsObject, type: string): boolean {
+export function heard(target: AsObject, type: string, owner: AsObject = target): boolean {
   if ((target.$listeners?.get(type) as Listener[] | undefined)?.length) {
     return true;
   }
 
-  for (let d = displayOf(target)?.parent; d; d = d.parent) {
+  for (let d = displayOf(owner)?.parent; d; d = d.parent) {
     if ((d.object?.$listeners?.get(type) as Listener[] | undefined)?.length) {
       return true;
     }
@@ -146,8 +146,41 @@ export function dispatchToListener(
   try {
     s.rt.call(fn, null, event);
   } catch (error) {
-    s.reportUncaught(error);
+    s.reportUncaught(error, fn);
   }
+}
+
+/**
+ * Dispatch `event`, an UncaughtErrorEvent, along `path`: its target first,
+ * a LoaderInfo, then what is above it, nearest first, each with the
+ * dispatcher that keeps its listeners, its uncaughtErrorEvents, if it has
+ * made one. The event has the LoaderInfo for its target, and each
+ * LoaderInfo or Loader for its current target, as in Flash. Whether no
+ * listener prevented its default.
+ */
+export function dispatchUncaught(
+  s: Scripting,
+  event: AsObject,
+  path: readonly (readonly [current: AsObject, listeners: AsObject | undefined])[],
+): boolean {
+  const f = eventFields(s);
+  const phase = (i: number, phase: number) => {
+    const [current, listeners] = path[i];
+    if (listeners && event[f.stopped] === 0) {
+      invoke(s, f, listeners, event, phase, current);
+    }
+  };
+  event[f.target] = path[0][0];
+  for (let i = path.length - 1; i > 0; i--) {
+    phase(i, CAPTURING_PHASE);
+  }
+
+  phase(0, AT_TARGET);
+  for (let i = 1; i < path.length; i++) {
+    phase(i, BUBBLING_PHASE);
+  }
+
+  return !event[f.prevented];
 }
 
 /**
@@ -159,6 +192,13 @@ export function dispatchToListener(
 export function dispatchEvent(s: Scripting, target: AsObject, event: AsObject): boolean {
   const f = eventFields(s);
   const owner: AsObject = target.$target ?? target;
+  // An ErrorEvent no listener of its type hears is an error nothing caught,
+  // told before the event is anyone's: its target is still null, as in Flash.
+  if (!heard(target, event[f.type], owner) && s.uncaughtErrors.mustBeHeard(event)) {
+    s.uncaughtErrors.unheard(event);
+    return true;
+  }
+
   event[f.target] = owner;
   // The ancestors of a display object, nearest first.
   const ancestors: AsObject[] = [];

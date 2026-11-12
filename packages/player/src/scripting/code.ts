@@ -891,6 +891,46 @@ export class Code {
   }
 
   /**
+   * The SWF whose code is running, the innermost on the stack, as
+   * codeLibrary; null when only the player's is. More frames are asked of
+   * the engine than it keeps by default: the runtime's own, between a
+   * native and the method that called it, take most of those.
+   */
+  runningLibrary(): Library | null {
+    const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
+    const limit = engine.stackTraceLimit;
+    engine.stackTraceLimit = 48;
+    const stack = new Error().stack;
+    engine.stackTraceLimit = limit;
+
+    return this.codeOrigin(stack)?.library ?? null;
+  }
+
+  /**
+   * The SWF whose code the player called and whose error nothing caught,
+   * as Flash has it from the function it called, not from the one that
+   * threw: `by`'s, the function called (Runtime.moduleOf); else the
+   * outermost SWF's on the stack `error` was made with, an AS3 Error's.
+   * Null where neither tells.
+   */
+  calledLibrary(by: Value, error: Value): Library | null {
+    const abc = this.s.rt.moduleOf(by);
+    const origin = abc && this.origins.get(abc);
+    if (origin) {
+      return origin.library;
+    }
+
+    const made = (error as { $jsError?: Error } | null)?.$jsError;
+    let outermost: Library | null = null;
+    for (const at of made instanceof Error ? avm2.frameScripts(made.stack) : []) {
+      const abc = this.moduleAbcs.get(at)?.deref();
+      outermost = (abc && this.origins.get(abc)?.library) ?? outermost;
+    }
+
+    return outermost;
+  }
+
+  /**
    * Where the innermost SWF's code on `stack` came from, if any SWF's is.
    * The stack is the caller's: a frame more of the player's would push the
    * SWF's out of the engine's stackTraceLimit frames sooner.

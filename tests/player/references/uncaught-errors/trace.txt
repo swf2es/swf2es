@@ -1,0 +1,159 @@
+the same at each ask true
+a Loader's are its LoaderInfo's false
+-- an Error in an enterFrame listener
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, bubbles true, cancelable true, errorID 0, text "", prevented false, error RangeError RangeError "main's enterFrame" 77
+  main's, the listener after it: prevents the default
+the listener after it runs
+-- a String
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error string a string
+  main's, the listener after it: prevents the default
+-- a Number
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error number 42
+  main's, the listener after it: prevents the default
+-- null
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error object null
+  main's, the listener after it: prevents the default
+-- undefined
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error undefined undefined
+  main's, the listener after it: prevents the default
+-- an Object
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error object an object
+  main's, the listener after it: prevents the default
+-- an error of the player's
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error TypeError TypeError "Error #1009: Cannot access a property or method of a null object reference." 1009
+  main's, the listener after it: prevents the default
+-- an IOErrorEvent no listener hears
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="unheard" errorID=7] whose target is null
+  main's, the listener after it: prevents the default
+dispatchEvent returns true
+after the dispatch
+-- an ErrorEvent of a type of its own
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error [ErrorEvent type="other" bubbles=false cancelable=false eventPhase=2 text="other" errorID=8] whose target is null
+  main's, the listener after it: prevents the default
+dispatchEvent returns true
+-- an IOErrorEvent where another type is heard
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="half heard" errorID=7] whose target is null
+  main's, the listener after it: prevents the default
+dispatchEvent returns true
+-- an UncaughtErrorEvent no listener hears
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error [UncaughtErrorEvent type="uncaughtError" bubbles=true cancelable=true eventPhase=2] whose target is null
+  main's, the listener after it: prevents the default
+dispatchEvent returns true
+-- IOErrorEvents a parent listens for
+main hears it, phase 3
+dispatchEvent returns true
+dispatchEvent returns true
+main hears it, phase 1
+dispatchEvent returns true
+dispatchEvent returns true
+-- a listener of a script's dispatch throws
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error Error Error "in a script's dispatch" 0
+  main's, the listener after it: prevents the default
+the listener after it runs
+dispatchEvent returns true
+-- a listener of the uncaught error throws
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error Error Error "first" 0
+  it throws
+  main's, the listener after it: prevents the default
+-- a Timer
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error Error Error "main's timer" 0
+  main's, the listener after it: prevents the default
+-- setTimeout
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error Error Error "main's timeout" 0
+  main's, the listener after it: prevents the default
+-- a frame script
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error Error Error "main's frame script" 0
+  main's, the listener after it: prevents the default
+-- the child's enterFrame listener, its Loader on no display list
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's enterFrame" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "the child's enterFrame" 0
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error Error Error "the child's enterFrame" 0
+  the Loader's, the listener after it
+-- the child's Timer
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's timer" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "the child's timer" 0
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error Error Error "the child's timer" 0
+  the Loader's, the listener after it
+-- the child's listener calls a function of main's that throws
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "main's function, called by the child" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "main's function, called by the child" 0
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error Error Error "main's function, called by the child" 0
+  the Loader's, the listener after it
+-- main's listener calls a method of the child's that throws
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error Error Error "the child's method, called by main" 0
+  main's, the listener after it: prevents the default
+-- the child dispatches an IOErrorEvent no listener hears
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="the child's" errorID=9] whose target is null
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="the child's" errorID=9] whose target is null
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="the child's" errorID=9] whose target is null
+  the Loader's, the listener after it
+the child's dispatch returns true
+-- main dispatches one, called by the child's listener
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="main's, called by the child" errorID=7] whose target is null
+  main's, the listener after it: prevents the default
+dispatchEvent returns true
+-- stopPropagation at the child's
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's stopped" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "the child's stopped" 0
+  the child's, the listener after it
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+-- stopImmediatePropagation at the child's
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's stopped at once" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "the child's stopped at once" 0
+-- stopPropagation at the Loader's, capturing
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's stopped on the way down" 0
+-- a child whose constructor throws
+the bad child's constructor runs
+  the bad Loader's, capturing: target the bad child's LoaderInfo, current target the bad Loader, phase 1, prevented false, error Error Error "the bad child's constructor" 0
+  the bad child's: target the bad child's LoaderInfo, current target the bad child's LoaderInfo, phase 2, prevented false, error Error Error "the bad child's constructor" 0
+  the bad child's, the listener after it: prevents the default
+  the bad Loader's: target the bad child's LoaderInfo, current target the bad Loader, phase 3, prevented true, error Error Error "the bad child's constructor" 0
+  the bad Loader's, the listener after it
+-- the Loader on the display list
+  main's, capturing: target the child's LoaderInfo, current target main's LoaderInfo, phase 1, prevented false, error Error Error "the child's enterFrame" 0
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's enterFrame" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "the child's enterFrame" 0
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error Error Error "the child's enterFrame" 0
+  the Loader's, the listener after it
+  main's: target the child's LoaderInfo, current target main's LoaderInfo, phase 3, prevented true, error Error Error "the child's enterFrame" 0
+  main's, the listener after it
+-- stopPropagation at the Loader's
+  main's, capturing: target the child's LoaderInfo, current target main's LoaderInfo, phase 1, prevented false, error Error Error "the child's stopped at the Loader" 0
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error Error Error "the child's stopped at the Loader" 0
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error Error Error "the child's stopped at the Loader" 0
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error Error Error "the child's stopped at the Loader" 0
+  the Loader's, the listener after it
+-- a script dispatches one
+  main's: target main's uncaughtErrorEvents, current target main's uncaughtErrorEvents, phase 2, bubbles true, cancelable true, errorID 0, text "", prevented false, error string made by a script
+  main's, the listener after it: prevents the default
+returns false
+  the Loader's: target the Loader's uncaughtErrorEvents, current target the Loader's uncaughtErrorEvents, phase 2, bubbles false, cancelable false, errorID 0, text "", prevented false, error string made by a script
+  the Loader's, the listener after it: prevents the default
+returns true
+uncaughtError true true null 0 "" [UncaughtErrorEvent type="uncaughtError" bubbles=true cancelable=true eventPhase=2]
+-- a URLLoader's IOErrorEvent no listener hears
+  main's: target main's LoaderInfo, current target main's LoaderInfo, phase 2, prevented false, error flash.events::IOErrorEvent 2032
+  main's, the listener after it: prevents the default
+-- the child's URLLoader's
+  main's, capturing: target the child's LoaderInfo, current target main's LoaderInfo, phase 1, prevented false, error flash.events::IOErrorEvent 2032
+  the Loader's, capturing: target the child's LoaderInfo, current target the Loader, phase 1, prevented false, error flash.events::IOErrorEvent 2032
+  the child's: target the child's LoaderInfo, current target the child's LoaderInfo, phase 2, prevented false, error flash.events::IOErrorEvent 2032
+  the child's, the listener after it: prevents the default
+  the child hears its own: phase 2, its LoaderInfo the target true and the current target true
+  the Loader's: target the child's LoaderInfo, current target the Loader, phase 3, prevented true, error flash.events::IOErrorEvent 2032
+  the Loader's, the listener after it
+  main's: target the child's LoaderInfo, current target main's LoaderInfo, phase 3, prevented true, error flash.events::IOErrorEvent 2032
+  main's, the listener after it
+-- done

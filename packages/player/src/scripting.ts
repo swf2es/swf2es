@@ -75,6 +75,7 @@ import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
+import { UncaughtErrors } from "./scripting/uncaught.js";
 import { type ParentLink, Workers } from "./scripting/workers.js";
 import { type StageScaleMode, stageAlignment } from "./stage.js";
 
@@ -105,6 +106,7 @@ export class Scripting {
   readonly mainDomain: avm2.Domain;
   /** The SWFs' code, linked into their application domains, and whose code runs. */
   readonly code = new Code(this);
+  readonly uncaughtErrors = new UncaughtErrors(this);
   /** What SymbolClass bound, the fonts registered and the sounds' shared decodes. */
   readonly symbols = new Symbols(this);
   /** What happens to display objects as they come and go: their events, and the orphans. */
@@ -604,7 +606,7 @@ export class Scripting {
     this.symbols.bind(swf, library);
 
     library.construct = (display, character) => this.construct(display, character, library);
-    library.uncaught = this.reportUncaught;
+    library.uncaught = (error) => this.reportUncaught(error, library);
     library.constructLater = (display, character) => {
       // Its class is ready as the frame plays, its script run, as the frame's
       // tags have it in Flash; only the instance waits (`delayed_symbolclass`).
@@ -880,8 +882,18 @@ export class Scripting {
     }
   }
 
-  /** An error that no script caught: to the host's hook now, or kept for the frame's end. */
-  readonly reportUncaught = (error: unknown): void => {
+  /**
+   * An error that no script caught: an UncaughtErrorEvent for its SWF's
+   * listeners (scripting/uncaught.ts), then the host's unless one of them
+   * prevented that. `by` is the function the player called, or the SWF it
+   * is of, where that is known.
+   */
+  readonly reportUncaught = (error: unknown, by: Value | Library = null): void => {
+    this.uncaughtErrors.report(error, by);
+  };
+
+  /** An uncaught error for the host: to its hook now, or kept for the frame's end. */
+  readonly tellHost = (error: unknown): void => {
     if (!this.onUncaught) {
       this.uncaught.push(error);
       return;
@@ -999,7 +1011,7 @@ export class Scripting {
         try {
           this.rt.call(script, o.object);
         } catch (error) {
-          this.reportUncaught(error);
+          this.reportUncaught(error, script);
         } finally {
           this.inFrameScript = outer;
         }
@@ -1133,7 +1145,7 @@ export class Scripting {
         try {
           this.construct(next.display, next.character, next.library);
         } catch (error) {
-          this.reportUncaught(error);
+          this.reportUncaught(error, next.library);
         }
       }
     }
@@ -1154,7 +1166,7 @@ export class Scripting {
       try {
         this.construct(next.display, next.character, goto.library);
       } catch (error) {
-        this.reportUncaught(error);
+        this.reportUncaught(error, goto.library);
       }
     }
   }

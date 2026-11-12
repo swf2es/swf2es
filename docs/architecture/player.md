@@ -322,6 +322,38 @@ callback's own error goes back to the page that called it. A child its
 parent's first frame places is made in the parent's `super()`, and its
 error still reaches the parent's constructor.
 
+Before the host, the SWF hears of it: an `UncaughtErrorEvent`, as adl
+dispatches it (`scripting/uncaught.ts`, the player case
+`uncaught-errors`). Its target is the LoaderInfo of the SWF whose code
+the player called, the listener, frame script, timer closure or
+constructor, not of the SWF whose function threw, and the listeners of
+that LoaderInfo's `uncaughtErrorEvents` hear it at the target. A loaded
+SWF's goes on, capturing and bubbling, through its Loader's
+`uncaughtErrorEvents`, then those of the LoaderInfo of the SWF the Loader
+is on the display list of, and so on to the main SWF's; a Loader on no
+list ends the path, and no display object hears it. A LoaderInfo's
+`uncaughtErrorEvents` and its Loader's are two dispatchers, each the
+current target as its owner. `error` is the value thrown, of any type.
+An ErrorEvent dispatched where no listener of its type, in either phase,
+is on its target or above it is such an error too: told as the dispatch
+begins, the event for `error`, its target still null, to the SWF whose
+code dispatched it, the innermost on the stack. One the player
+dispatches between scripts is the SWF's that asked for what is being
+delivered, a URLLoader's, URLStream's or Sound's load, as adl tells a
+loaded SWF's URLLoader's failure to that SWF; any other, a Loader's or a
+socket's, is the main SWF's here. What a listener of the
+UncaughtErrorEvent throws is dropped. `preventDefault()` keeps the error
+from the host, which otherwise gets it as above, an unheard ErrorEvent
+as Flash words it ("Error #2044: Unhandled ioError:. text=…"). An error
+of the player's own, which no script could catch, is no event but the
+host's alone, as are AVM1's, which has no such event, and a background
+worker's once its own listeners let it pass. The SWF is told from the
+function the player called (`Runtime.moduleOf`): one a script made, by
+the global object its scope begins with, a bound method by its
+receiver's class. Where the player has no function to name, or it is a
+class's own method, an Error is the outermost SWF's on the stack it was
+made with, and any other value the main SWF's.
+
 An AS3 error keeps the JavaScript stack it was made on, out of AS3's
 sight (the release player's `getStackTrace` gives null), for a host to
 say where an error nothing caught came from: `Runtime.stackOf` gives its

@@ -614,6 +614,7 @@ export class Runtime {
       const traits = new Traits("global", this.objectTraits);
       traits.dynamic = true;
       traits.isGlobal = true;
+      traits.abc = script.abc;
       traits.describe(script.desc.traits);
       const g = traits.instance();
       // As the script's initializer, its methods run in an empty scope chain,
@@ -1604,6 +1605,8 @@ export class Runtime {
       f.$length = (method as CountedMethod).$length ?? method.length;
       f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
+      // Whose method it is, for moduleOf.
+      f.$of = traits;
       if (typeof o === "object") {
         byMethod.set(method, f);
       }
@@ -2419,6 +2422,21 @@ export class Runtime {
     f.$id = id;
     this.functionObjects.set(method, f);
     return f;
+  }
+
+  /**
+   * The module a function's code is from, as avmplus has a method's code
+   * context: a function's by the global object its scope begins with, a
+   * bound method's by its receiver's class; null for a native, a class's
+   * own method, or anything but a function.
+   */
+  moduleOf(f: Value): object | null {
+    const o = f as AsObject | null;
+    if (o?.$of) {
+      return (o.$of as Traits).abc;
+    }
+
+    return o?.$global ? this.traitsOf(o.$global).abc : null;
   }
 
   /** A Function object calling `f`, with `global` as its receiver when it has none. */

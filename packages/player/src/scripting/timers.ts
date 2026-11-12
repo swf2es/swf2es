@@ -207,7 +207,7 @@ export class Timers {
           this.s.rt.call(next.closure, next.object);
         } catch (error) {
           // Reported, and the timers after it and the frame still run.
-          this.s.reportUncaught(error);
+          this.s.reportUncaught(error, next.closure);
         } finally {
           // Pushed back whatever the call did, unless it stopped the timer or
           // started it anew: one whose closure throws still has its next time.
@@ -322,7 +322,7 @@ export class Timers {
         try {
           this.s.rt.call(record.closure, record.object);
         } catch (error) {
-          this.s.reportUncaught(error);
+          this.s.reportUncaught(error, record.closure);
         } finally {
           if (!record.stopped) {
             this.timers.push(record);
