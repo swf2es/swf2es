@@ -14,6 +14,7 @@
 import { API_VERSION, checkApiVersion } from "@swf2es/format";
 import { AmfClasses } from "./amf-classes.js";
 import { ArrayConversion } from "./array-conversion.js";
+import type { MethodName, PropertyName, Ref, WritableName } from "./as3-types.js";
 import { fillCache } from "./cache-fill.js";
 import { newClass, specializeVector, withId } from "./classes.js";
 import { classNamed, classNamedByCode, definingAbc, definitionNamed } from "./definitions.js";
@@ -1956,6 +1957,36 @@ export class Runtime {
    */
   publicName(name: Value): Multiname {
     return qname(publicNs, this.nameString(name));
+  }
+
+  // Natives' typed reach into AS3 objects (as3-types.ts): getProperty,
+  // setProperty and callProperty of the public name, the lookup natives
+  // made before, with the name checked against the class's declarations
+  // when compiled.
+
+  /** `o`'s public property `name`: a variable, constant or accessor its class declares. */
+  prop<T, K extends PropertyName<T>>(o: Ref<T>, name: K): T[K] {
+    // biome-ignore lint/style/useConst: a const is folded into a tail call (see getProperty)
+    let r: Value;
+    r = this.getProperty(o, this.publicName(name));
+    return r;
+  }
+
+  /** Sets `o`'s public property `name`, which its class declares writable. */
+  setProp<T, K extends WritableName<T>>(o: Ref<T>, name: K, v: T[K]): void {
+    this.setProperty(o, this.publicName(name), v);
+  }
+
+  /** Calls `o`'s public method `name` with `args`. */
+  callProp<T, K extends MethodName<T>>(
+    o: Ref<T>,
+    name: K,
+    ...args: T[K] extends (...a: infer A) => unknown ? A : never
+  ): T[K] extends (...a: never[]) => infer R ? R : never {
+    // biome-ignore lint/style/useConst: a const is folded into a tail call (see getProperty)
+    let r: Value;
+    r = this.callProperty(o, this.publicName(name), ...args);
+    return r;
   }
 
   /** A property name as a string, as ToString makes one. */

@@ -24,6 +24,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./as3-types": {
+      "types": "./dist/playerglobal/as3-types.d.ts",
+      "default": "./dist/playerglobal/as3-types.js"
+    },
     "./context3d": {
       "types": "./dist/playerglobal/context3d.d.ts",
       "default": "./dist/playerglobal/context3d.js"
@@ -44,7 +48,9 @@
   "files": [
     "dist",
     "!dist/**/.tsbuildinfo",
+    "!dist/**/*.generated.*.map",
     "src",
+    "!src/**/*.generated.ts",
     "LICENSE.third-party"
   ],
   "dependencies": {
