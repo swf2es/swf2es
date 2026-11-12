@@ -244,6 +244,32 @@ export interface ScreenCapabilities {
   screenDPI: number;
 }
 
+/**
+ * The host's full screen, which Stage.displayState asks for: a window that
+ * covers its screen, or a page's element under the Fullscreen API. A script
+ * that asks is answered at once, as Flash answers it: the stage is in full
+ * screen when its setter returns, or the setter throws. What happens
+ * without a script, the user's Esc or a request the system then turns
+ * down, the host tells the player (Scripting.fullScreen.hostChanged).
+ * Without a host, displayState stays "normal".
+ */
+export interface FullScreenHost {
+  /**
+   * Whether the embedding lets its SWFs go full screen, and with the keys
+   * (`interactive`): Flash Player's allowFullScreen and
+   * allowFullScreenInteractive, which Stage.allowsFullScreen and
+   * allowsFullScreenInteractive read.
+   */
+  allowed(interactive: boolean): boolean;
+  /**
+   * Goes full screen; false where it may not now, as Flash Player
+   * refuses outside a user's click or key (SecurityError #2152).
+   */
+  request(interactive: boolean): boolean;
+  /** Leaves full screen. */
+  exit(): void;
+}
+
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
 /** A renderer's part in BitmapData.draw of a display object. */
@@ -364,9 +390,22 @@ export interface AirWindow {
 }
 
 /**
+ * One of the host's screens, as flash.display.Screen reads it: its bounds
+ * on the desktop the windows' bounds are on, the part of it a window may
+ * fill (past a task bar, a menu bar or a dock), and its colours' bits.
+ */
+export interface AirScreen {
+  bounds: WindowBounds;
+  visibleBounds: WindowBounds;
+  colorDepth: number;
+  /** Whether it is Screen.mainScreen; the first one where none says so. */
+  main?: boolean;
+}
+
+/**
  * What an AIR application's host gives NativeApplication: the descriptor
  * it was launched from, the launch's arguments, which its InvokeEvent
- * carries, and its one window.
+ * carries, its one window, and the screens it may be on.
  */
 export interface AirApplication {
   /** The application descriptor's XML, as applicationDescriptor gives it, and its id. */
@@ -377,6 +416,8 @@ export interface AirApplication {
   /** The directory it was launched from, a native path: InvokeEvent's currentDirectory. */
   currentDirectory?: string | null;
   window?: AirWindow | null;
+  /** The screens as they are now; a host without them has one, of the screen capabilities' size. */
+  screens?(): readonly AirScreen[];
   /** NativeApplication.exit's code; a host without it stops nothing. */
   exit?(code: number): void;
 }

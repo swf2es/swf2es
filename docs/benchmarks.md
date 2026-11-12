@@ -340,8 +340,11 @@ has been asked to run. Medians in ms, interleaved, on an idle machine
 typed `*`, as a large Flash application does through untyped fields:
 display objects deep in a class hierarchy (getters, setters, slots and
 methods of sealed classes), data decoded from JSON (dynamic properties),
-an Object and an Array, eight classes sharing the same names, and a
-String's methods. None binds early, so each goes through the runtime's
+an Object and an Array, eight classes sharing the same names, a
+String's methods, a name read on 25 classes and then mostly on another
+(`many`), and functions and values a script gives a sealed class's
+prototype, got and called by name (`proto`). None binds early, so each
+goes through the runtime's
 `getProperty`, `setProperty` or `callProperty`. Its sections trace their
 times and the rest must match avmshell's output:
 
@@ -372,6 +375,24 @@ poly's 8 classes fit in eight entries. With 8 more classes in its array,
 16 per name, four entries took 327 → 310 ms and eight 345 → 265 against
 the build before; without the stop, four took 347 → 445, a miss on every
 lookup paying for its replacement.
+
+A name such as `x`, read on every display object and on a physics
+engine's vectors, outgrows its entries all the same, and was left to the
+full lookup on the class most of its reads are on; so was a function on
+a sealed class's prototype, which obfuscated code calls methods through.
+Each against the build before it, medians of 7 interleaved pairs, in ms:
+
+| Change | display | data | object | poly | string | many | proto |
+|---|---|---|---|---|---|---|---|
+| Entries kept on the traits past a name's own, and a sealed object's prototypes' names cached | 197 → 196 | 90 → 89 | 395 → 384 | 110 → 107 | 140 → 133 | 208 → 111 | 125 → 40 |
+| An object's own traits read before testing it as a float or a Namespace | 190 → 160 | 87 → 80 | 380 → 357 | 106 → 96 | 131 → 131 | 109 → 105 | 39 → 38 |
+
+avmshell takes 52, 32, 207, 103, 53, 70 and 23 ms. Together with keeping,
+on a captured scope chain the compiler could not type, the object each
+name was found on, the runtime's lookups took 2.2–2.3 s of the 17 s an
+obfuscated physics game was busy in a run of its explosions in Chrome,
+and 0.95–1.0 s after, as it drew 2–3% more frames and a fifth fewer over
+25 ms.
 
 ### Typed construction and bound calls
 

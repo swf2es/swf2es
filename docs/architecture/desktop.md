@@ -10,7 +10,7 @@ through `window.swf2esDesktop`, whose types are `src/shared/api.ts`:
 `start`, which hands the page the libraries' state and the SWF to play;
 `onOpen` and `onClose`; `openDialog`, `openUrlDialog`, `openDropped` and
 `chooseLibrary`, requests the main process answers with dialogs and
-`onOpen`; `sockets`; and `network`. The page (`src/renderer`, `static/`)
+`onOpen`; `sockets`; `webSockets`; and `network`. The page (`src/renderer`, `static/`)
 imports nothing of Electron's, so a Tauri shell can serve it as it is.
 
 ## Serving the page
@@ -93,8 +93,9 @@ reaches the network itself: a SWF's http and https loads go through the
 main process (below), and every http, https, ws and wss request the page
 makes is cancelled in the session's `webRequest`, with a word on stderr,
 whatever the policy would allow. So `air.net.WebSocket`, AIR's and not
-Flash Player's, has no server here. Nothing may frame the page, and it
-frames nothing.
+Flash Player's, never uses the page's WebSocket here: its connections
+are the main process's too ([WebSockets](#websockets)). Nothing may
+frame the page, and it frames nothing.
 
 ## The network
 
@@ -239,7 +240,13 @@ SWF has the network (local-with-networking or remote), and a click, key
 or tap in the window asked for it: one page a gesture, within five
 seconds of it and a second after the last, as a browser's popup blocker
 allows, so a SWF cannot launch the browser in a loop. `<webview>`s are
-refused, and the only permission granted is full screen.
+refused, and the only permission granted is full screen. A SWF's
+`Stage.displayState` does not go through that permission, which wants a
+gesture: the page asks the shell (`fullScreen.set`), which sets the
+window's own full screen while a SWF the user opened plays, and tells
+the page as the window enters or leaves it, by the menu's F11 too, so
+that the stage follows (`renderer/full-screen.ts`). Esc in the page
+leaves it, as in Flash.
 ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
 into the page would run beside the API.
 
@@ -299,6 +306,46 @@ stops reading cannot fill the main process's memory. A page's sockets
 close, silently, as it navigates or reloads, and with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
+## WebSockets
+
+`air.net.WebSocket` runs over a WebSocketHost
+([AIR's WebSocket](services.md#airs-websocket)), by default the page's
+own WebSocket, which here would be refused twice, by the page's policy
+and by the session's `webRequest`. Neither is loosened: the element
+takes the shell's host through `configure({ webSockets })`
+(`src/renderer/websockets.ts`), and each connection is an id the preload
+numbers, which the main process opens (`src/main/websockets.ts`,
+`websocket-connections.ts`) with the WHATWG `WebSocket` of Electron's
+Node, undici's, relaying its events over IPC: `open` with the
+subprotocol the server chose, `message` with a string for a text message
+and bytes for a binary one, `close` with its code and `error`. Only an
+AIR application has them (`sandbox.application`), to any `ws:` or `wss:`
+URL and unasked, as AIR's application sandbox connects and as its
+sockets do here; for anything else the connection is refused with a
+word on stderr, and a refusal is an error and then a close with 1006, as
+a server that took no connection. The client is a browser's: it sends
+the close codes 1000 and 3000 to 4999, any other closing with none,
+answers pings itself and sends no ping or pong of the application's, and
+fails a connection whose server chose none of the subprotocols offered.
+
+`--ignore-certificate-errors` holds for `wss:` as for https. The WHATWG
+WebSocket has no option for it, and Node exports none of undici's
+classes, so the connection to a host the switch names is given, in the
+options undici's constructor takes in the protocols' place, a dispatcher
+made from the class of the one undici keeps for everything else
+(`Symbol.for("undici.globalDispatcher.1")`), with `rejectUnauthorized`
+off; every other connection is the global's as it is. Where a Node gave
+no such dispatcher the app would say so at its start and verify every
+certificate; the unit test fails if node's does not.
+
+A page holds at most 64 at once, and one with more than 16 MB its peer
+has not read fails. A page's WebSockets close, silently, as it navigates
+or reloads, and with it: the client has no way to drop a connection, so
+each is sent a close frame, and is gone once its server answers.
+`--log-network` says each connection asked for, opened, refused, failed
+and closed, and `--log-sockets` each message, a text one as its text
+(`src/main/netlog.ts`).
+
 ## Running and testing
 
 `pnpm install` leaves Electron's binary undownloaded (pnpm's
@@ -322,9 +369,19 @@ dialog, which starts with the URL playing, plays in the remote sandbox:
 it reads its own origin and one whose crossdomain.xml grants it, not one
 without, no local file by swf2es:// or file://, connects the socket
 whose server answers with a socket policy and not the one without, and
-both URLs join the recent list. `connections.test.ts` and
+both URLs join the recent list; and that an AIR application's
+`air.net.WebSocket` exchanges a text and a binary message with a server
+of the test's own (`websocket-server.ts`: node has a client and no
+server), over TLS too to the host `--ignore-certificate-errors` names
+and not to another, while a SWF's page is refused one. The AIR
+application also goes full screen from its InvokeEvent, with no gesture:
+the window is in full screen as the main process has it, the source rect
+alone drawn, and Esc leaves, as the stage traces. Headless, no window
+manager resizes the window, so that it covers a screen is not checked.
+`connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and the sandbox's grants in
-node, `addresses.test.ts` where each address is, in every form an IPv4
+node, `websocket-connections.test.ts` the WebSockets' messages, close
+codes, refusals, limits and certificates, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and
 what policies grant, by the specification's examples, and
 `network.test.ts` the network against servers of its own, each on

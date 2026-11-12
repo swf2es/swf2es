@@ -13,6 +13,7 @@ import {
   generatedRect,
 } from "../../../bitmap/filters.js";
 import { encodeJpeg } from "../../../bitmap/jpeg.js";
+import { encodeJpegXr, JPEG_XR_COLOR_SPACES } from "../../../bitmap/jpegxr.js";
 import {
   alphaAt,
   colorBounds,
@@ -455,8 +456,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     /**
      * The rect as an image file, written into `byteArray` from its position
-     * or into a new one, which is returned: PNG or JPEG; JPEG XR, which
-     * Flash also writes, is not supported yet.
+     * or into a new one, which is returned: PNG, JPEG or JPEG XR.
      */
     encode(rect: Value, compressor: Value, byteArray: Value): Value {
       const store = storeOf(s, this);
@@ -470,12 +470,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
       const options = compressor as AsObject;
       const is = (name: string) => s.rt.isInstance(options, s.rt.classNamed(name));
+      const option = (name: string) => s.rt.getProperty(options, s.rt.publicName(name));
       const jpeg = is("flash.display::JPEGEncoderOptions");
-      if (!jpeg && !is("flash.display::PNGEncoderOptions")) {
-        if (is("flash.display::JPEGXREncoderOptions")) {
-          throw s.rt.unsupported("BitmapData#encode as JPEG XR");
-        }
-
+      const jpegXr = !jpeg && is("flash.display::JPEGXREncoderOptions");
+      if (!jpeg && !jpegXr && !is("flash.display::PNGEncoderOptions")) {
         throw s.rt.error("ArgumentError", 2004);
       }
 
@@ -484,22 +482,48 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2006);
       }
 
-      // A JPEG's quality is a uint, of which Flash takes 0 to 100, 0 as 1, and refuses the
-      // rest once the rect has passed.
-      const quality = jpeg ? Number(s.rt.getProperty(options, s.rt.publicName("quality"))) : 0;
+      // The options are checked once the rect has passed. A JPEG's quality and a JPEG XR's
+      // quantization are uints, of which Flash takes 0 to 100.
+      const quality = jpeg || jpegXr ? Number(option(jpeg ? "quality" : "quantization")) : 0;
       if (!(quality >= 0 && quality <= 100)) {
         throw s.rt.error("RangeError", 2006);
+      }
+
+      let file: Uint8Array;
+      if (jpegXr) {
+        // Then the colour space, then trimFlexBits, which Flash takes up to 255 and its
+        // encoder up to 15, but only for an opaque bitmap: a transparent one trims none.
+        const colorSpace = option("colorSpace") as string | null;
+        if (colorSpace === null || colorSpace === undefined) {
+          throw s.rt.error("TypeError", 2007, "colorspace");
+        }
+
+        if (!Object.hasOwn(JPEG_XR_COLOR_SPACES, colorSpace)) {
+          throw s.rt.error("ArgumentError", 2004);
+        }
+
+        const trim = Number(option("trimFlexBits"));
+        if (!(trim >= 0 && trim <= 255)) {
+          throw s.rt.error("RangeError", 2006);
+        }
+
+        if (trim > 15 && !store.transparent) {
+          throw s.rt.error("Error", 3699);
+        }
+
+        file = encodeJpegXr(store, area, quality, colorSpace, store.transparent ? 0 : trim);
+      } else if (jpeg) {
+        // Quality 0 is 1.
+        file = encodeJpeg(store, area, quality);
+      } else {
+        file = encodePng(store, area, !!option("fastCompression"));
       }
 
       const out =
         byteArray === null || byteArray === undefined
           ? (s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject)
           : (byteArray as AsObject);
-      out.$bytes.write(
-        jpeg
-          ? encodeJpeg(store, area, quality)
-          : encodePng(store, area, !!s.rt.getProperty(options, s.rt.publicName("fastCompression"))),
-      );
+      out.$bytes.write(file);
       return out;
     }
 

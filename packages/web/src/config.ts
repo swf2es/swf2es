@@ -14,6 +14,7 @@ import {
   type ModuleCache,
   playerglobalLibrary,
   type SocketHost,
+  type WebSocketHost,
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
@@ -25,6 +26,17 @@ export interface SocketProxy {
   host: string;
   port: number;
   proxyUrl: string;
+}
+
+/** An embedder's window that goes full screen: the element in it is to fill it. */
+export interface WindowFullScreen {
+  /** Enters or leaves full screen. */
+  set(fullScreen: boolean): void;
+  /**
+   * Tells `listener` each time the window has entered or left, the user's
+   * doing or a script's; what it gives stops telling.
+   */
+  onChange(listener: (fullScreen: boolean) => void): () => void;
 }
 
 export interface Configuration {
@@ -47,6 +59,11 @@ export interface Configuration {
    * socketProxy's relays: a desktop app's, which reaches TCP itself.
    */
   sockets?: SocketHost;
+  /**
+   * A host of the embedder's own for air.net.WebSocket, in place of the
+   * page's WebSocket: a desktop app's, whose page has no network.
+   */
+  webSockets?: WebSocketHost;
   fileHost?: FileHost | null;
   /**
    * A fetch of the embedder's own for what the SWFs load, the SWF the
@@ -87,6 +104,13 @@ export interface Configuration {
   workerUrl?: string | URL;
   /** The page's build, a short commit or a version, which the context menu's About item names. */
   build?: string;
+  /**
+   * A full screen of the embedder's own for Stage.displayState, in place
+   * of the Fullscreen API on the element: a desktop app's, whose window
+   * covers its screen, asked by any SWF and with no user's gesture, as
+   * AIR and Flash's projector allow.
+   */
+  fullScreen?: WindowFullScreen | null;
   /**
    * Play the SWFs the element plays next as an AIR application's, as a
    * desktop app runs one: AIR's library loaded after playerglobal, its API

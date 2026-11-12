@@ -713,7 +713,7 @@ export class BitmapKernel {
 
   /**
    * `region` of `into` (`intoWidth` wide) made by the copy `op` of `from`'s
-   * pixels from (sx, sy) on: copyChannel, merge, paletteMap or a colour
+   * pixels from (sx, sy) on: copyChannel, merge, copyPixels' blend, paletteMap or a colour
    * matrix filter (pixel-ops.ts), each pixel reading what the pixels before
    * it wrote where `from` is `into`. False where the module refused it,
    * which may leave the rows done before it done.

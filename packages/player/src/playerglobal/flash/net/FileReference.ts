@@ -31,15 +31,19 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
     error: (id: number): never => {
       throw s.rt.error("Error", id);
     },
+    responseStatus: s.air,
   };
   const state = (target: AsObject): FileReference => {
     let ref = states.get(target);
     if (!ref) {
-      ref = new FileReference(services, (type, loaded, total, text) => {
-        let event: AsObject;
+      ref = new FileReference(services, (type, loaded, total, text, response) => {
+        let event: AsObject | null;
         switch (type) {
           case "httpStatus":
             event = s.httpStatus(loaded ?? 0);
+            break;
+          case "httpResponseStatus":
+            event = response ? s.httpResponseStatus(response, text ?? "") : null;
             break;
           case "progress":
             event = s.rt.construct(
@@ -95,7 +99,9 @@ export function fileReferenceNatives(s: Scripting): avm2.Natives {
             event = s.event(type);
         }
 
-        dispatchEvent(s, target, event);
+        if (event) {
+          dispatchEvent(s, target, event);
+        }
       });
       states.set(target, ref);
     }

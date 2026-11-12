@@ -9,6 +9,7 @@ import {
   type FetchRequest,
   type FetchResult,
   type FileSystemHost,
+  type FullScreenHost,
   Player,
   Scripting,
   type WorkerHost,
@@ -29,6 +30,7 @@ import { externalInterfaceHost, type PageBridge, type PageValue } from "./extern
 import { scaleMode } from "./layout.js";
 import { type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
+import { UncaughtReports } from "./uncaught.js";
 
 export const TAG = "swf2es-player";
 
@@ -50,6 +52,7 @@ const dom = globalThis.HTMLElement
       setAttribute: Element.prototype.setAttribute,
       dispatchEvent: EventTarget.prototype.dispatchEvent,
       focus: HTMLElement.prototype.focus,
+      requestFullscreen: Element.prototype.requestFullscreen,
       isConnected: Object.getOwnPropertyDescriptor(Node.prototype, "isConnected")?.get,
       id: Object.getOwnPropertyDescriptor(Element.prototype, "id")?.get,
     }
@@ -72,6 +75,8 @@ interface Session {
   stage3D: Stage3DSession | null;
   /** The ExternalInterface callbacks the SWF put on the element. */
   callbacks: Set<string>;
+  /** The uncaught errors told so far, so that one thrown every frame is not told every frame. */
+  uncaught: UncaughtReports;
   /** Aborts the fetch of the SWF itself, as a destroy comes before it arrives. */
   abort: AbortController;
   /** The Web Workers its SWF starts, let go of with it. */
@@ -472,6 +477,7 @@ export class Swf2esPlayerElement extends ElementBase {
       playback: null,
       stage3D: null,
       callbacks: new Set(),
+      uncaught: new UncaughtReports(),
       workers: null,
       abort: new AbortController(),
       air: null,
@@ -726,7 +732,7 @@ export class Swf2esPlayerElement extends ElementBase {
       fileSystem: session.air?.fileSystem ?? configuration().air?.fileSystem,
       encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
-      webSocket: offline ? null : undefined,
+      webSocket: offline ? null : configuration().webSockets,
       navigate: internal ? null : undefined,
       fileHost: configuration().fileHost,
       sendToUrl: !internal,
@@ -737,11 +743,82 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       },
       onUncaught: (error) => this.#report(session, error),
+      fullScreen: this.#fullScreen(session),
       lazyCompilation: configuration().lazyCompilation,
       workerHost,
       ...moduleCacheOptions(),
     });
     return scripting;
+  }
+
+  /**
+   * Full screen for a load's Stage.displayState. The embedder's window
+   * where it gave one (`configure`'s fullScreen), which any SWF may ask
+   * for at any time. Else the Fullscreen API on the element, as Flash
+   * Player's plug-in had it: only with `allowfullscreen="true"`, and
+   * `allowfullscreeninteractive="true"` for the interactive kind, which an
+   * AIR application needs neither of; and only while the user's click or
+   * key is handled, which a browser asks too. Either way the player hears
+   * of what it did not ask for, as the user's Esc.
+   */
+  #fullScreen(session: Session): FullScreenHost {
+    const told = (fullScreen: boolean) => {
+      if (this.#session === session) {
+        session.scripting?.fullScreen.hostChanged(fullScreen);
+      }
+    };
+    const { signal } = session.abort;
+    // A load that goes while its SWF holds the screen gives it back.
+    const leave = (exit: () => void) =>
+      signal.addEventListener(
+        "abort",
+        () => {
+          if (session.scripting?.fullScreen.active) {
+            exit();
+          }
+        },
+        { once: true },
+      );
+    const own = configuration().fullScreen;
+    if (own) {
+      signal.addEventListener("abort", own.onChange(told), { once: true });
+      leave(() => own.set(false));
+      return {
+        allowed: () => true,
+        request: () => {
+          own.set(true);
+          return true;
+        },
+        exit: () => own.set(false),
+      };
+    }
+
+    const exit = () => {
+      if (document.fullscreenElement === this) {
+        document.exitFullscreen().catch(() => {});
+      }
+    };
+    document.addEventListener("fullscreenchange", () => told(document.fullscreenElement === this), {
+      signal,
+    });
+    leave(exit);
+    return {
+      allowed: (interactive) =>
+        session.air !== null ||
+        attribute(this, interactive ? "allowfullscreeninteractive" : "allowfullscreen")
+          ?.trim()
+          .toLowerCase() === "true",
+      request: () => {
+        if (!document.fullscreenEnabled || !navigator.userActivation?.isActive) {
+          return false;
+        }
+
+        // What the browser turns down after all leaves the stage as it was.
+        dom?.requestFullscreen.call(this).catch(() => told(false));
+        return true;
+      },
+      exit,
+    };
   }
 
   /** Whether the SWFs the element plays next have workers: its `workers` attribute, else the page's configuration. */
@@ -842,7 +919,15 @@ export class Swf2esPlayerElement extends ElementBase {
       text = String(error);
     }
 
-    console.error(`swf2es: ${text}`);
+    const rt = session.scripting?.rt;
+    const line = session.uncaught.line(
+      text,
+      rt?.detailOf(error as never) ?? null,
+      rt?.stackOf(error as never) ?? null,
+    );
+    if (line !== null) {
+      console.error(line);
+    }
   }
 
   #look(): Look {

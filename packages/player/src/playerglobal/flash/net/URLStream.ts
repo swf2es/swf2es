@@ -39,15 +39,26 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       const abort = new AbortController();
       this.$abort = abort;
       const source = request as AsObject;
-      s.loads.requestBytes(source, abort.signal, ({ bytes, status, local }, url) => {
+      s.loads.requestBytes(source, abort.signal, (result, url) => {
         if (this.$generation !== generation) {
           return;
         }
 
+        const { bytes, status, local } = result;
+        const redirected = result.url !== undefined;
+        // AIR's, as the response's headers come: before the bytes and Flash Player's status.
+        const response = s.httpResponseStatus(result, url);
         this.$abort = null;
         if (bytes === null) {
           this.$connected = false;
-          dispatchEvent(s, this, s.httpStatus(status));
+          if (response) {
+            dispatchEvent(s, this, response);
+            if (this.$generation !== generation) {
+              return;
+            }
+          }
+
+          dispatchEvent(s, this, s.httpStatus(status, redirected));
           if (this.$generation !== generation) {
             return;
           }
@@ -61,6 +72,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
               false,
               false,
               s.loads.streamError(url, local),
+              2032,
             ) as AsObject,
           );
           return;
@@ -70,6 +82,13 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
         dispatchEvent(s, this, s.event("open"));
         if (this.$generation !== generation) {
           return;
+        }
+
+        if (response) {
+          dispatchEvent(s, this, response);
+          if (this.$generation !== generation) {
+            return;
+          }
         }
 
         const buffer = avm2.bytesOf(s.rt, bufferOf(this));
@@ -91,7 +110,7 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
           return;
         }
 
-        dispatchEvent(s, this, s.httpStatus(status));
+        dispatchEvent(s, this, s.httpStatus(status, redirected));
         if (this.$generation !== generation) {
           return;
         }

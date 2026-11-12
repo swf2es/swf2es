@@ -11,7 +11,7 @@ package flash.events
 
 		private var _status:int;
 		private var _redirected:Boolean;
-		private var _responseHeaders:Array;
+		private var _responseHeaders:Array = [];
 		private var _responseURL:String;
 
 		public function HTTPStatusEvent(
@@ -29,13 +29,17 @@ package flash.events
 
 		override public function clone():Event
 		{
-			return new HTTPStatusEvent(
+			const event:HTTPStatusEvent = new HTTPStatusEvent(
 					this.type,
 					this.bubbles,
 					this.cancelable,
 					this.status,
 					this.redirected
 				);
+			// AIR's response, which a URLLoader's listeners get through this copy.
+			event.responseURL = this._responseURL;
+			event.responseHeaders = this._responseHeaders;
+			return event;
 		}
 
 		override public function toString():String

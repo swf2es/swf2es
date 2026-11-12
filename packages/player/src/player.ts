@@ -195,6 +195,7 @@ export class Player {
     info.$url = s.url;
     info.$params = s.loads.mainParameters();
     this.root.loaderInfo = info;
+    s.uncaughtErrors.owns(this.library, info);
     // The stage's too: what a script puts on the stage itself has the stage
     // for its root and this for its LoaderInfo, and takes hits, as in Flash.
     this.stage.loaderInfo = info;
@@ -214,7 +215,7 @@ export class Player {
       constructed = true;
       s.lifecycle.rootConstructed(this.root);
     } catch (error) {
-      s.reportUncaught(error);
+      s.reportUncaught(error, this.library);
     }
 
     info.$content = this.root.object ?? null;

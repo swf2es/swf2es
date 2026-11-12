@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.15"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.16"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.15`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.16`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -120,6 +120,20 @@ gives back its GL context, audio and sockets. It fires `load`, `error` and
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
 holds both): a page may size the element to the SWF's own size while it
 asks for `noScale`, as an embedding at that size shows it.
+
+A SWF goes full screen by setting `Stage.displayState`, as under Flash
+Player's plug-in: only with `allowfullscreen="true"` on the element
+(`allowfullscreeninteractive="true"` for `"fullScreenInteractive"`), and
+only from a mouse or key handler, as the browser's Fullscreen API asks
+too; otherwise the setter throws SecurityError #2152. The element then
+covers the screen, the stage placed by its scale mode, or its
+`fullScreenSourceRect` alone, fitted and centred. Esc leaves, and the SWF
+gets its `FullScreenEvent` either way. `replaceFlash` carries both
+parameters over. An AIR application needs neither attribute, but still
+the click. A page that makes the element full screen itself
+(`element.requestFullscreen()`) puts the stage in full screen too.
+`configure({ fullScreen })` takes a full screen of the embedder's own
+instead, as the desktop app's window, which needs no click.
 
 ## WebAssembly and CSP
 
@@ -283,9 +297,17 @@ the builtin.abc and playerglobal the player ships.
 | Option | What it does |
 | --- | --- |
 | `--trace` | Prints what the SWF traces to the terminal: `trace()` to stdout, warnings and errors to stderr. |
-| `--ignore-certificate-errors` | Does not verify any HTTPS server's certificate, for this run. |
+| `--log-network` | Prints each request, socket and WebSocket of the SWF to stderr: method, URL, status, size and time. The window's DevTools show none of them, as the main process sends them. |
+| `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
+| `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
+
+npx reads the first `--` on its command line as the end of its own
+options, so an application's arguments need one before the package too:
+`npx -- @swf2es/desktop app.xml -- --server=local` (with `-y`, `npx -y --
+@swf2es/desktop …`). The installed command, `swf2es-desktop`, takes them as
+they are.
 
 `--ignore-certificate-errors` is for a server of your own whose certificate
 it signed itself. Whoever sits between you and such a host can then read and
@@ -299,6 +321,10 @@ In a checkout of the repository the app runs from its sources:
 pnpm build
 pnpm --filter @swf2es/desktop start movie.swf
 ```
+
+A SWF or an AIR application that sets `Stage.displayState` takes the
+window full screen, with no click needed, as in AIR and Flash's projector;
+Esc or F11 leaves.
 
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.
@@ -333,8 +359,9 @@ keeps it in memory alone, for that play. `EncryptedLocalStore` keeps its
 items in IndexedDB too, by the application's id: a page has no keychain
 to encrypt them by, and the browser keeps them as it keeps the site's
 other data.
-The element is its one window, at the descriptor's size; the play page
-opens `.air` and `.zip` files too.
+The element is its one window, at the descriptor's size, and
+`flash.display.Screen` has the one screen the page is on (`window.screen`);
+the play page opens `.air` and `.zip` files too.
 
 A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
@@ -343,7 +370,7 @@ holds it alone, and its `app:` URLs load any other file from beside it on
 the server.
 
 The [desktop app](#play-a-swf-on-the-desktop) runs an AIR application from
-its descriptor on disk instead, with the real file system, sockets and the
+its descriptor on disk instead, with the real file system, sockets, WebSockets and the
 network, as adl runs one:
 
 ```sh
@@ -352,7 +379,7 @@ npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 
 The descriptor's first window's content SWF plays from `app:/`, at the
 descriptor's size and with its title; the arguments after `--` reach its
-InvokeEvent. File › Open, or a descriptor dropped on the window, runs the
+InvokeEvent, and `flash.display.Screen` has the system's displays. File › Open, or a descriptor dropped on the window, runs the
 application too, from its own directory; the app asks first, as an
 application reaches your files and the network unasked.
 
@@ -375,6 +402,13 @@ A player you set up yourself takes `socket:` from
 `nodeSocketHost()` (`@swf2es/player-hosts/node`) connects directly, and
 so does the desktop app, through its main process; an embedder with a
 transport of its own gives it as `configure({ sockets })`.
+
+An AIR application's `air.net.WebSocket` uses the page's own `WebSocket`.
+An embedder whose page may not connect, as the desktop app's, whose main
+process holds the connections, gives a `WebSocketHost` of its own as
+`configure({ webSockets })`: its `connect(url, protocols, events)` opens
+a connection, tells `events` its `open`, `message`, `close` and `error`,
+and returns its `send` and `close`.
 
 FileReference and FileReferenceList use the browser's file chooser. Saving
 uses the File System Access picker where available, or a Blob download;

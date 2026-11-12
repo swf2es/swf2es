@@ -27,6 +27,7 @@ export {
 } from "./files.js";
 export type {
   AirApplication,
+  AirScreen,
   AirWindow,
   CachedModule,
   ClipboardHost,
@@ -38,6 +39,7 @@ export type {
   FetchResult,
   FileStat,
   FileSystemHost,
+  FullScreenHost,
   ModuleCache,
   Navigate,
   PlatformCapabilities,

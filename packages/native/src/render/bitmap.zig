@@ -120,6 +120,15 @@ export fn channelPixels(address: usize) usize {
     return 1;
 }
 
+/// copyPixels' blend over the rows the Rows at `address` name: 1, or 0 where they are invalid.
+export fn overPixels(address: usize) usize {
+    if (!holds(address, @sizeOf(ops.Rows), @alignOf(ops.Rows))) return 0;
+    const p = @as(*const ops.Rows, @ptrFromInt(address)).*;
+    const rows = copyRows(p) orelse return 0;
+    ops.over(rows.dst, rows.src, p);
+    return 1;
+}
+
 /// merge over the rows the MergeParams at `address` name: 1, or 0 where they are invalid.
 export fn mergePixels(address: usize) usize {
     if (!holds(address, @sizeOf(ops.MergeParams), @alignOf(ops.MergeParams))) return 0;

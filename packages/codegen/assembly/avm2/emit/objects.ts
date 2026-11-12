@@ -29,7 +29,7 @@ import {
   BUILTIN_String,
   BUILTIN_Uint,
 } from "../link/traits";
-import { NONE } from "./copies";
+import { CONSTANT, NONE } from "./copies";
 import { isAddress, viewMethod } from "./memory";
 import { hasBoundEntry, MethodEmitter } from "./method";
 import { aliasedMember, interfaceAlias, isClassRef, poolString, slotMember, typeRef } from "./refs";
@@ -314,6 +314,17 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       }
 
       em.assign(i);
+      if (keyed(em, a, src + 1)) {
+        out.text("rt.getKeyed(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(")");
+        return true;
+      }
+
       out.text("rt.getProperty(");
       em.reg(src);
       out.text(", ");
@@ -382,6 +393,19 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
           em.reg(src + 2);
         }
 
+        out.text(")");
+        return true;
+      }
+
+      if (keyed(em, a, src + 1)) {
+        out.text("rt.setKeyed(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(", ");
+        em.reg(src + 2);
         out.text(")");
         return true;
       }
@@ -814,6 +838,20 @@ function name(em: MethodEmitter, a: u32, from: i32): void {
     return;
   }
 
+  // The name of a string the code holds is the same each time: made once, in T.
+  const copy = em.copyOf[from];
+  if (
+    (kind === C.CONSTANT_MultinameL || kind === C.CONSTANT_MultinameLA) &&
+    from !== em.pendingNull &&
+    copy <= CONSTANT &&
+    em.ir.op[CONSTANT - copy] === ops.OP_pushstring
+  ) {
+    out.text("T[");
+    out.uint(em.literalSlot(a, em.ir.a[CONSTANT - copy]));
+    out.text("]");
+    return;
+  }
+
   out.text("rt.runtimeName(M[");
   out.uint(a);
   out.text("]");
@@ -928,6 +966,26 @@ function storedType(em: MethodEmitter, kind: string, src: i32): i32 {
  */
 function indexed(em: MethodEmitter, a: u32, r: i32): bool {
   return em.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && isNumber(em, r);
+}
+
+/**
+ * Whether multiname `a` is a runtime name alone, not an attribute, whose
+ * name in register r is of a type that tells nothing of what it is at run
+ * time, a number or an object among them: as avmplus' JIT, which hands
+ * such a key to getprop_index and setprop_index, the runtime looks at the
+ * key before it makes a name of it. A String's is a name always, a number's
+ * an index (indexed). Not in a script's or a class's initializer, which
+ * avmplus interprets: there a Dictionary is asked for an object by any
+ * name, and a Proxy is handed a number that is no index as a QName, as the
+ * name made of the key has it.
+ */
+function keyed(em: MethodEmitter, a: u32, r: i32): bool {
+  return (
+    !em.staticInit &&
+    em.abc.pool.mnKind[a] === C.CONSTANT_MultinameL &&
+    !isNumber(em, r) &&
+    em.builtinOf(r) !== BUILTIN_String
+  );
 }
 
 /**

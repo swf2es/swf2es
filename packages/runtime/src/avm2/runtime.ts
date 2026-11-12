@@ -47,7 +47,7 @@ import {
   pairOf,
   walkless,
 } from "./enumeration.js";
-import { AsError, describe, errorMessage, stackOf } from "./errors.js";
+import { AsError, describe, detailOf, errorMessage, stackOf, UnsupportedError } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -70,6 +70,8 @@ import {
   CONSTANT_RTQnameA,
   CONSTANT_RTQnameL,
   CONSTANT_RTQnameLA,
+  MADE_Number,
+  MADE_Value,
   Multiname,
   Namespace,
   NS_Private,
@@ -113,7 +115,7 @@ import {
   IC_Slot,
   invalidate,
   NO_CACHE,
-  REPLACEMENTS,
+  ScopeFinds,
   UNFILLED,
 } from "./property-cache.js";
 import {
@@ -153,6 +155,18 @@ class ScopePack {
   ) {}
 }
 
+/** Whether a chain or a pack, `scopes` with bits `w`, has a with scope, in a pack in it too. */
+function hasWith(scopes: Value[], w: number): boolean {
+  for (let i = 0; i < scopes.length; i++) {
+    const o = scopes[i];
+    if (o instanceof ScopePack ? hasWith(o.scopes, o.w) : (w >> i) & 1) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
@@ -167,6 +181,7 @@ function dynamicValue(o: AsObject, name: string): Value {
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
+  private readonly onUnsupported: ((message: string) => void) | undefined;
   readonly compileAbc:
     | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
@@ -249,7 +264,7 @@ export class Runtime {
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
-  readonly empty: Scope = Object.assign([], { w: 0 });
+  readonly empty: Scope = Object.assign([], { w: 0, found: undefined });
 
   /**
    * `natives` are the natives by name, or a provider that makes them for
@@ -264,6 +279,7 @@ export class Runtime {
   ) {
     this.print = options.print ?? defaultPrint;
     this.debugger = options.debugger ?? false;
+    this.onUnsupported = options.onUnsupported;
     this.compileAbc = options.compileAbc ?? null;
     this.files = options.files ?? memoryFiles();
     this.workerHost = options.workers ?? null;
@@ -429,6 +445,7 @@ export class Runtime {
         // Its string only once a lookup needs it: a Dictionary does not.
         const keyed = Multiname.keyed(kind, namespaces, versions, part, mn.attribute, this.keyName);
         keyed.domain = mn.domain;
+        keyed.made = MADE_Value;
         return keyed;
       } else {
         name = typeof part === "string" ? part : this.toString(part);
@@ -437,6 +454,42 @@ export class Runtime {
 
     const named = new Multiname(kind, namespaces, versions, name, mn.attribute);
     named.domain = mn.domain;
+    // A number here is one no element access made: a Proxy tells it by its string.
+    if (mn.runtimeName && typeof last !== "number") {
+      named.made = MADE_Value;
+    }
+
+    return named;
+  }
+
+  /**
+   * The name runtimeName makes of `mn`, a MultinameL, and a string the
+   * code itself holds, `obj["name"]`: a module makes it once as it loads
+   * and keeps it as it keeps `mn`, so it has a cache as a module's own
+   * names have, however many such names the module has and however long
+   * the string is.
+   */
+  literalName(mn: Multiname, name: string): Multiname {
+    const named = new Multiname(mn.kind, mn.namespaces, mn.versions, name, mn.attribute);
+    named.domain = mn.domain;
+    named.made = MADE_Value;
+    named.cache = UNFILLED;
+
+    return named;
+  }
+
+  /**
+   * The name number `i` makes of `mn` in an element's read or write, which
+   * avmplus' JIT hands an object as a number (getpropertylate_i and _d), a
+   * Proxy as its string: where the name has no public namespace, it is a
+   * name as any other.
+   */
+  private indexName(mn: Multiname, i: number): Multiname {
+    const named = this.runtimeName(mn, i);
+    if (mn.kind === CONSTANT_MultinameL && mn.elementName) {
+      named.made = MADE_Number;
+    }
+
     return named;
   }
 
@@ -462,6 +515,7 @@ export class Runtime {
 
     const named = new Multiname(base.kind, base.namespaces, base.versions, name, base.attribute);
     named.domain = base.domain;
+    named.made = MADE_Value;
     if (!cache) {
       cache = { names: new Map(), misses: 0 };
       this.stringNames.set(base, cache);
@@ -578,6 +632,7 @@ export class Runtime {
       const traits = new Traits("global", this.objectTraits);
       traits.dynamic = true;
       traits.isGlobal = true;
+      traits.abc = script.abc;
       traits.describe(script.desc.traits);
       const g = traits.instance();
       // As the script's initializer, its methods run in an empty scope chain,
@@ -671,6 +726,7 @@ export class Runtime {
   scope(outer: Scope, locals: Value[], withs: number): Scope {
     const chain = outer.concat(locals) as Scope;
     chain.w = outer.w | (withs << outer.length);
+    chain.found = undefined;
     return chain;
   }
 
@@ -686,6 +742,7 @@ export class Runtime {
     const packed = chain.slice(0, at) as Scope;
     packed.push(new ScopePack(chain.slice(at), chain.w >>> at) as never);
     packed.w = (chain.w & ((1 << at) - 1)) | (1 << at);
+    packed.found = undefined;
     return packed;
   }
 
@@ -724,6 +781,47 @@ export class Runtime {
       }
     }
 
+    const found = this.outerScopeOf(outer, mn);
+    if (found !== null) {
+      return found;
+    }
+
+    return this.global(mn, outer.length ? outer[0] : locals[0], strict);
+  }
+
+  /**
+   * The innermost object of a captured chain that has `mn`, or null: kept
+   * on a chain without a with scope (ScopeFinds), as a function whose
+   * chain the compiler could not type, such as one made where chains of
+   * different lengths meet, looks its names up each time it runs.
+   */
+  private outerScopeOf(outer: Scope, mn: Multiname): AsObject | null {
+    let finds = outer.found;
+    if (finds === undefined) {
+      finds = hasWith(outer, outer.w) ? null : new ScopeFinds();
+      outer.found = finds;
+    }
+
+    // A name made at run time is a new one each time: keeping it would only grow the map.
+    if (finds === null || mn.cache === NO_CACHE) {
+      return this.searchOuter(outer, mn);
+    }
+
+    if (finds.epoch !== epoch()) {
+      finds.clear();
+      finds.epoch = epoch();
+    }
+
+    let o = finds.get(mn);
+    if (o === undefined) {
+      o = this.searchOuter(outer, mn);
+      finds.set(mn, o);
+    }
+
+    return o;
+  }
+
+  private searchOuter(outer: Scope, mn: Multiname): AsObject | null {
     for (let i = outer.length - 1; i >= 0; i--) {
       const o = outer[i];
       if (o instanceof ScopePack) {
@@ -736,7 +834,7 @@ export class Runtime {
       }
     }
 
-    return this.global(mn, outer.length ? outer[0] : locals[0], strict);
+    return null;
   }
 
   findPropertyStrict(mn: Multiname, outer: Scope, locals: Value[], withs: number): AsObject {
@@ -887,16 +985,24 @@ export class Runtime {
   traitsOf(v: Value): Traits {
     switch (typeof v) {
       case "object":
-      case "function":
+      case "function": {
         if (v === null) {
           throw this.error("TypeError", 1009);
+        }
+
+        // An object's own first: instanceof walks the whole prototype
+        // chain of an object, and a class's is as deep as its bases.
+        const traits = v.$traits;
+        if (traits !== undefined) {
+          return traits;
         }
 
         return v instanceof FloatValue
           ? this.builtinTraits("float")
           : v instanceof Namespace
             ? this.builtinTraits("Namespace")
-            : v.$traits;
+            : traits;
+      }
       // As avmplus' toVTable: every number is a Number at run time, int or
       // not; int's and uint's traits only bind early, from static types.
       case "number":
@@ -918,12 +1024,19 @@ export class Runtime {
   private receiverTraits(v: Value): Traits | undefined {
     switch (typeof v) {
       case "object":
-      case "function":
-        return v instanceof FloatValue
-          ? this.builtinTraits("float")
-          : v === null
-            ? undefined
-            : v.$traits;
+      case "function": {
+        if (v === null) {
+          return undefined;
+        }
+
+        // A float and a Namespace have none of their own (see traitsOf).
+        const traits: Traits | undefined = v.$traits;
+        if (traits !== undefined) {
+          return traits;
+        }
+
+        return v instanceof FloatValue ? this.builtinTraits("float") : undefined;
+      }
       case "string":
         return this.stringTraits;
       case "number":
@@ -1126,7 +1239,7 @@ export class Runtime {
       }
     }
 
-    return this.getProperty(o, this.runtimeName(mn, i));
+    return this.getProperty(o, this.indexName(mn, i));
   }
 
   /** obj[i] = v for a number i, as avmplus' setUintProperty. */
@@ -1140,13 +1253,103 @@ export class Runtime {
         return;
       }
 
-      if (o.$a !== undefined && o.$a !== SEALED_ELEMENTS && i !== 0xffffffff) {
-        o.$a[i] = v;
-        return;
+      const a: Value[] | undefined = o.$a;
+      if (a !== undefined) {
+        if (a !== SEALED_ELEMENTS && i !== 0xffffffff) {
+          a[i] = v;
+          return;
+        }
+      } else if (traits?.dynamic && traits.properties === null && !traits.refusesNames) {
+        // As ScriptObject::setUintProperty: an object with no elements of its own keeps the
+        // number among its dynamic properties, with no binding asked for.
+        const d: Map<string, Value> | null | undefined = o.$d;
+        if (d) {
+          d.set(`${i}`, v);
+          return;
+        }
       }
     }
 
-    this.setProperty(o, this.runtimeName(mn, i), v);
+    this.setProperty(o, this.indexName(mn, i), v);
+  }
+
+  /**
+   * obj[k] for a key whose type the compiler does not know, by a name with
+   * no namespace from the stack, as avmplus' getprop_index and
+   * getpropertyHelper: a number is an index (getIndexed), an object a
+   * Dictionary has as a key is read by itself, and anything else, a QName
+   * and a Dictionary's absent key among them, is looked up by the name it
+   * makes.
+   */
+  getKeyed(o: Value, mn: Multiname, k: Value): Value {
+    let r: Value;
+    if (typeof k === "number") {
+      r = this.getIndexed(o, mn, k);
+      return r;
+    }
+
+    if (typeof k === "object" && k !== null) {
+      const keys: DictionaryKeys | undefined = o?.$keys;
+      if (keys !== undefined) {
+        if (!mn.elementName) {
+          r = this.getProperty(o, this.runtimeName(mn, this.unkeyed(k)));
+          return r;
+        }
+
+        // What is there was put there by a name with the object as its key, which a QName's is not.
+        const v = keys.get(k);
+        if (v !== undefined) {
+          return v;
+        }
+      }
+    }
+
+    r = this.getProperty(o, this.runtimeName(mn, k));
+    return r;
+  }
+
+  /**
+   * An object given as the key of a Dictionary by a name with no public
+   * namespace, as the name is made of it: avmplus' JIT asks a Dictionary
+   * for an object only through getprop_index and setprop_index, which such
+   * a name does not reach, so the object is its string, as on any other
+   * receiver (initMultinameLate); a QName names what it names. Its
+   * interpreter asks the Dictionary by any name, as a name made without
+   * this does: the compiler leaves script and class initializers to that.
+   */
+  private unkeyed(k: AsObject): Value {
+    return k.$traits !== undefined && k.$local === undefined ? this.toString(k) : k;
+  }
+
+  /** obj[k] = v for a key whose type the compiler does not know, as avmplus' setprop_index and setpropertyHelper. */
+  setKeyed(o: Value, mn: Multiname, k: Value, v: Value): void {
+    if (typeof k === "number") {
+      this.setIndexed(o, mn, k, v);
+      return;
+    }
+
+    if (typeof k === "object" && k !== null) {
+      const keys: DictionaryKeys | undefined = o?.$keys;
+      if (keys !== undefined) {
+        if (!mn.elementName) {
+          this.setProperty(o, this.runtimeName(mn, this.unkeyed(k)), v);
+          return;
+        }
+
+        if (keys.replace(k, v)) {
+          return;
+        }
+
+        // A new key: an object of traits, which a float and a Namespace are not, and no QName,
+        // which names what it names. Those are added, or not, by the name they make.
+        if (k.$traits !== undefined && k.$local === undefined) {
+          keys.add(k, v);
+          return;
+        }
+      }
+    }
+
+    this.setProperty(o, this.runtimeName(mn, k), v);
   }
 
   /**
@@ -1385,11 +1588,7 @@ export class Runtime {
   /** fillCache (cache-fill.ts), for a name that caches on traits a cache knows `o` by. */
   private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
     const head = mn.cache;
-    if (
-      head === NO_CACHE ||
-      (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
-      this.receiverTraits(o) !== traits
-    ) {
+    if (head === NO_CACHE || this.receiverTraits(o) !== traits) {
       return;
     }
 
@@ -1424,6 +1623,8 @@ export class Runtime {
       f.$length = (method as CountedMethod).$length ?? method.length;
       f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
+      // Whose method it is, for moduleOf.
+      f.$of = traits;
       if (typeof o === "object") {
         byMethod.set(method, f);
       }
@@ -1740,8 +1941,7 @@ export class Runtime {
     if (
       typeof o === "object" &&
       o !== null &&
-      !(o instanceof Namespace) &&
-      !(o instanceof FloatValue)
+      (o.$traits !== undefined || !(o instanceof Namespace || o instanceof FloatValue))
     ) {
       return o.$p;
     }
@@ -2240,6 +2440,21 @@ export class Runtime {
     f.$id = id;
     this.functionObjects.set(method, f);
     return f;
+  }
+
+  /**
+   * The module a function's code is from, as avmplus has a method's code
+   * context: a function's by the global object its scope begins with, a
+   * bound method's by its receiver's class; null for a native, a class's
+   * own method, or anything but a function.
+   */
+  moduleOf(f: Value): object | null {
+    const o = f as AsObject | null;
+    if (o?.$of) {
+      return (o.$of as Traits).abc;
+    }
+
+    return o?.$global ? this.traitsOf(o.$global).abc : null;
   }
 
   /** A Function object calling `f`, with `global` as its receiver when it has none. */
@@ -3124,12 +3339,23 @@ export class Runtime {
       return new AsError(`${name}: ${message}`);
     }
 
-    return this.constructClass(cls, [message, id]);
+    const made = this.constructClass(cls, [message, id]);
+    // What the number stands for, kept beside the message for a host's report (detailOf).
+    if (!this.debugger) {
+      Object.defineProperty(made, "$detail", { value: errorMessage(true, id, args) });
+    }
+
+    return made;
   }
 
   /** See stackOf in errors.ts. */
   stackOf(error: Value): string | null {
     return stackOf(error);
+  }
+
+  /** See detailOf in errors.ts. */
+  detailOf(error: Value): string | null {
+    return detailOf(error);
   }
 
   /** See errorMessage in errors.ts. */
@@ -3162,11 +3388,39 @@ export class Runtime {
       return this.error("RangeError", 1506);
     }
 
+    if (e instanceof UnsupportedError) {
+      return this.unsupportedCaught(e);
+    }
+
     if (e instanceof Error && !(e instanceof AsError)) {
       throw e;
     }
 
     return e;
+  }
+
+  /** What a catch was told of already (unsupportedCaught). */
+  private readonly unsupportedTold = new Set<string>();
+
+  /**
+   * What is not supported as the AS3 error a catch gets: an
+   * IllegalOperationError with its message, or an Error where the player's
+   * classes are not loaded; said once to the host, as the code may say nothing.
+   */
+  private unsupportedCaught(e: UnsupportedError): Value {
+    if (!this.unsupportedTold.has(e.message)) {
+      this.unsupportedTold.add(e.message);
+      this.onUnsupported?.(e.message);
+    }
+
+    let cls: AsObject;
+    try {
+      cls = this.resolve(this.cls(namespace(NS_Public, "flash.errors"), "IllegalOperationError"));
+    } catch {
+      cls = this.builtinClass("Error");
+    }
+
+    return this.constructClass(cls, [e.message, 0]);
   }
 
   catches(e: Value, type: TypeRef): boolean {
@@ -3178,7 +3432,7 @@ export class Runtime {
   }
 
   unsupported(what: string): Error {
-    return new Error(`swf2es: ${what} is not supported yet`);
+    return new UnsupportedError(`swf2es: ${what} is not supported yet`);
   }
 
   // Class aliases and the classes AMF makes (amf-classes.ts).

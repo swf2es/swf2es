@@ -9,6 +9,11 @@ npx @swf2es/desktop [options] [file.swf | https://host/movie.swf]
 npx @swf2es/desktop [options] app.xml [root-dir] [-- arguments...]
 ```
 
+npx takes the first `--` on its command line as the end of its own
+options, so with arguments for the application write one before the
+package too: `npx -- @swf2es/desktop app.xml -- --server=local`. The
+installed command, `swf2es-desktop`, needs only the second.
+
 Node 22.18 or later runs it. The first run downloads Electron's binary
 (about 100 MB), once; installed, the command is `swf2es-desktop`. A
 relative path is taken from the directory the command was run in.
@@ -32,7 +37,11 @@ fetch-electron` does so ahead, for the tests.
   open; File › Open Recent lists the last ten, files and URLs. The
   window takes the SWF's name. View › Reload Movie (Ctrl+R) starts it
   again, View › Toggle Full Screen (F11) fills the screen, and File ›
-  Close Movie (Ctrl+W) stops it. Opening another SWF destroys the
+  Close Movie (Ctrl+W) stops it. A SWF's own full screen
+  (`Stage.displayState`) is the window's too: it needs no click, as in AIR
+  and Flash's projector, draws its `fullScreenSourceRect` alone where it
+  set one, and ends with Esc or F11, which the SWF hears of as a
+  `FullScreenEvent`. Opening another SWF destroys the
   player before the next starts.
 - **Stage3D.** View › Stage3D (Experimental) opts in to Context3D playback.
   It starts off, remembers the choice in `settings.json`, and restarts the
@@ -53,15 +62,29 @@ fetch-electron` does so ahead, for the tests.
   `settings.json` in Electron's user data directory.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
+- **Network log.** `--log-network` prints each of the SWF's requests to
+  stderr as it is answered (`swf2es: net GET https://… 200 12.3 kB 48 ms`),
+  an aborted one too, and each socket and each WebSocket of an AIR
+  application as it is asked for, opened, refused, failed and closed
+  (`swf2es: websocket #1 connecting to ws://…`, `open`, `close 1000`). A
+  refused request is said with or without it. The
+  window's DevTools show none of these in their Network tab: the page has
+  no network, and the main process sends them.
+  `--log-sockets` prints those lines and each message a socket or a
+  WebSocket sends (`>`) and receives (`<`): its size and its first 512
+  bytes, as text where it is text and in hex otherwise, a WebSocket's
+  text message as its text. That is whatever the SWF sends, a login
+  and its password among it: mind where the terminal's output goes.
 - **Certificates.** `--ignore-certificate-errors` leaves every HTTPS
-  server's certificate unverified for this run, and
+  server's certificate, and every `wss:` server's that an AIR
+  application's WebSocket connects to, unverified for this run, and
   `--ignore-certificate-errors=dev.test,localhost` those hosts' alone, on
   any port: for a server of your own whose certificate it signed itself.
   Whoever is between you and such a host can then read and change what the
-  SWF loads from it. It is never kept in the settings, and the app says on
+  SWF loads from it or says to it. It is never kept in the settings, and the app says on
   stderr, each time it starts with it, which hosts go unverified. The page
-  itself has no network (the main process makes a SWF's requests), so
-  nothing but those requests is affected.
+  itself has no network (the main process makes a SWF's requests and
+  connections), so nothing but those is affected.
 - **Sandbox.** A SWF plays in the sandbox Flash Player gave a local SWF,
   by its FileAttributes' UseNetwork bit. Without it,
   local-with-filesystem: it reads the files in its own directory and below
@@ -90,16 +113,25 @@ fetch-electron` does so ahead, for the tests.
 - **Sockets** (`flash.net.Socket`) connect over TCP through the main
   process. The first connection to each server asks: Allow Once, Always
   Allow for This SWF (remembered in `settings.json`) or Deny.
+- **WebSockets** (`air.net.WebSocket`, AIR's and not Flash Player's)
+  connect through the main process too, with the WebSocket client of
+  Electron's Node, for an AIR application alone: to any `ws:` or `wss:`
+  URL, unasked, text and binary messages, subprotocols and close codes.
+  As in a browser, it sends the close codes 1000 and 3000 to 4999 (any
+  other closes with none), answers a server's pings itself and sends
+  none of the application's own.
 - **AIR applications** run by their descriptor (`app.xml`), as adl runs
   them: its first window's content SWF, from the descriptor's directory
   or the root directory given after it, at the descriptor's size and with
   its title, the arguments after `--` handed to its InvokeEvent. It plays
-  with AIR's API (NativeApplication, the window, `flash.filesystem.File`)
+  with AIR's API (NativeApplication, the window, the system's displays as
+  `flash.display.Screen`, `flash.filesystem.File`)
   in AIR's application sandbox: it is played from `app:/`, reads any
   local file through File, FileStream and its `app:`, `app-storage:` and
   `file:` URLs, writes any file but through its `app:` URLs, as AIR does,
-  and reaches the network and sockets without Flash's policy files or a
-  prompt, as an installed application does. Its storage directory is
+  and reaches the network, sockets and WebSockets (`air.net.WebSocket`)
+  without Flash's policy files or a prompt, as an installed application
+  does. Its storage directory is
   under the app's user data, by its id, and its `EncryptedLocalStore`
   beside it, encrypted by the system's keychain (Electron's
   `safeStorage`) where there is one. Only the application playing has
@@ -118,11 +150,12 @@ fetch-electron` does so ahead, for the tests.
 ## Layout
 
 ```
-src/main/       the main process: window, menu, settings, swf2es://, sockets and the network
+src/main/       the main process: window, menu, settings, swf2es://, sockets, WebSockets
+                and the network
 src/preload/    window.swf2esDesktop, the page's only way to the main process, and the
                 URL dialog's window.swf2esPrompt
-src/renderer/   the page: the element, the welcome and library panels, the socket and
-                fetch hosts; and the URL dialog's page
+src/renderer/   the page: the element, the welcome and library panels, the socket,
+                WebSocket and fetch hosts; and the URL dialog's page
 src/shared/     api.ts, the types of window.swf2esDesktop
 static/         index.html (with the page's import map), open-url.html and style.css
 src/launch/     the swf2es-desktop command, and `start`: finds Electron, fetching its

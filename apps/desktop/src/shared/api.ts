@@ -50,6 +50,14 @@ export interface AirWindowState {
   visible: boolean;
 }
 
+/** One of the system's displays as flash.display.Screen reads it: all of it, and what a window may fill. */
+export interface AirScreenState {
+  bounds: { x: number; y: number; width: number; height: number };
+  visibleBounds: { x: number; y: number; width: number; height: number };
+  colorDepth: number;
+  main: boolean;
+}
+
 /**
  * An AIR application's own reach, only while one the user opened plays:
  * the file system, read and written synchronously as File does, and the
@@ -72,6 +80,8 @@ export interface DesktopAir {
   remove(path: string): boolean;
   move(from: string, to: string): boolean;
   window(): AirWindowState;
+  /** The displays as they are now; none where no application plays. */
+  screens(): AirScreenState[];
   setBounds(bounds: { x: number; y: number; width: number; height: number }): void;
   setTitle(title: string): void;
   minimize(): void;
@@ -134,6 +144,23 @@ export interface DesktopSockets {
   onEvent(listener: (id: number, event: SocketEvent) => void): void;
 }
 
+/** What befalls a WebSocket, as player's WebSocketEvents has it. */
+export type WebSocketEvent =
+  | { type: "open"; protocol: string }
+  | { type: "message"; data: string | Uint8Array }
+  | { type: "close"; code: number }
+  | { type: "error" };
+
+/** air.net.WebSocket's connections, opened by the shell, for an AIR application alone. */
+export interface DesktopWebSockets {
+  /** A connection's id; its events follow, an "error" then a "close" if the shell refuses it. */
+  connect(url: string, protocols: string[]): number;
+  /** A text message for a string, a binary one for bytes. */
+  send(id: number, data: string | Uint8Array): void;
+  close(id: number, code?: number): void;
+  onEvent(listener: (id: number, event: WebSocketEvent) => void): void;
+}
+
 /** A request of a SWF's, as player's FetchRequest has it. */
 export interface NetworkRequest {
   url: string;
@@ -182,8 +209,20 @@ export interface DesktopFiles {
   release(id: number): void;
 }
 
+/**
+ * The window's full screen, which a SWF's Stage.displayState asks for
+ * while one the user opened plays, with no gesture, as AIR's and the
+ * projector's did.
+ */
+export interface DesktopFullScreen {
+  set(fullScreen: boolean): void;
+  /** The window has entered or left full screen, a SWF's doing or the user's (F11). */
+  onChange(listener: (fullScreen: boolean) => void): void;
+}
+
 export interface DesktopApi {
   files: DesktopFiles;
+  fullScreen: DesktopFullScreen;
   /** The page has loaded and listens: what it is to show. */
   start(): Promise<StartState>;
   /** The shell opened a SWF: play it in place of what plays. */
@@ -199,6 +238,7 @@ export interface DesktopApi {
   /** Ask the user for a library; the page reloads once the shell has it. */
   chooseLibrary(name: LibraryName): void;
   sockets: DesktopSockets;
+  webSockets: DesktopWebSockets;
   network: DesktopNetwork;
   air: DesktopAir;
 }

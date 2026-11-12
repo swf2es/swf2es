@@ -71,6 +71,15 @@ interface Run {
   error: string | null;
 }
 
+/** Whether `error` is the player's report of an ErrorEvent no listener heard, Error #2044. */
+function unheardEvent(rt: Scripting["rt"], error: unknown): boolean {
+  try {
+    return rt.getProperty(error as never, rt.publicName("errorID")) === 2044;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The scripting for `bytes`, through the served codegen and libraries; null
  * for a SWF with no scripts. `url` is the SWF's, for what it loads. The
@@ -136,7 +145,13 @@ async function scriptingFor(
     url: url ? new URL(url, location.href).href : undefined,
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
-    onUncaught: (error) => uncaught.push(error),
+    // An ErrorEvent no listener heard (#2044) ends no run: Flash tells its debugger of it and
+    // plays on, tracing nothing, and a test without a socket or a Context3D has many.
+    onUncaught: (error) => {
+      if (!unheardEvent(scripting.rt, error)) {
+        uncaught.push(error);
+      }
+    },
     fetch: testFetch(url ? new URL(url, location.href).href : undefined, trace, logFetch, true),
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),

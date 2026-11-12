@@ -33,6 +33,8 @@ interface Load {
   url: string | null;
   bytes: Uint8Array;
   status: number;
+  /** Whether a redirect led to its response, which its status event tells. */
+  redirected: boolean;
   /** What the content's frame does: it returns what the frame's end does, INIT and COMPLETE. */
   ready: (() => () => void) | null;
   /** The IOErrorEvent text the load ended in, as Flash words one. */
@@ -483,8 +485,9 @@ export class Loads {
       (result) => result,
       () => ({ bytes: null, status: 0, headers: [] }),
     );
+    const asked = this.s.uncaughtErrors.asCaller(deliver);
     const completed = fetched.then((result) => {
-      this.readyBytes.push(() => deliver(result, outgoing.url));
+      this.readyBytes.push(() => asked(result, outgoing.url));
     });
     this.trackRequest(completed);
   }
@@ -643,6 +646,7 @@ export class Loads {
       parameters,
       bytes: new Uint8Array(0),
       status: 0,
+      redirected: false,
       ready: null,
       failed: null,
       swf,
@@ -663,11 +667,12 @@ export class Loads {
     // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
     const fetched = bytes.then(
       (result) => result,
-      () => ({ bytes: null, status: 0, headers: [] }),
+      (): FetchResult => ({ bytes: null, status: 0, headers: [] }),
     );
     this.preparing = this.preparing.then(async () => {
       const result = await fetched;
       load.status = result.status;
+      load.redirected = result.url !== undefined;
       if (!result.bytes) {
         load.failed = `${this.errorText(2035)} URL: ${url}`;
         return;
@@ -856,7 +861,7 @@ export class Loads {
 
     const info = this.loaderInfoOf(load.loader);
     if (load.url !== null) {
-      dispatchEvent(this.s, info, this.s.httpStatus(load.status));
+      dispatchEvent(this.s, info, this.s.httpStatus(load.status, load.redirected));
       if (load.generation !== load.loader.$generation) {
         return;
       }
@@ -908,6 +913,8 @@ export class Loads {
     let root: MovieClip;
     let avm1: Avm1 | null = null;
     if (run) {
+      // Known before its code runs: an error of its own is its LoaderInfo's to tell.
+      this.s.uncaughtErrors.owns(library, info);
       run();
       this.s.symbols.addFontLibrary(library);
       root = new MovieClip(library.root, library);
@@ -931,7 +938,8 @@ export class Loads {
       const s = this.s;
       const vm = new Avm1(s.codegen, {
         print: s.rt.print,
-        onUncaught: (error) => s.reportUncaught(error),
+        // AVM1 has no event for it: the host's alone.
+        onUncaught: (error) => s.tellHost(error),
         url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
         base: s.base ?? undefined,
         fetch: s.fetch ?? undefined,
@@ -1043,7 +1051,7 @@ export class Loads {
       }
 
       if (load.url !== null) {
-        dispatchEvent(this.s, info, this.s.httpStatus(load.status));
+        dispatchEvent(this.s, info, this.s.httpStatus(load.status, load.redirected));
       }
 
       // An INIT or status listener that unloads has no COMPLETE, as Flash.

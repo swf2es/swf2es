@@ -25,7 +25,9 @@
 //
 //     ((...T) => (scope, sup) => function (...) {... T[0] ...})(cls(...))
 //
-// numbered as the method first refers to each, so that its code does not
+// and so has one the names it makes of strings it holds, `obj["name"]`,
+// as rt.literalName(M[9], "name"); numbered as the method first refers
+// to each, so that its code does not
 // depend on the module's other methods: compiled alone, as lazy JIT will
 // compile it, it comes out as it is in the module.
 
@@ -328,8 +330,9 @@ export class ModuleEmitter {
 
   /**
    * Method m's entry in F, from its IR in `decoder`: `(scope, sup) =>
-   * function`, and if it refers to classes or Vectors, inside a function
-   * of its table of them. The same whether the module is being written or
+   * function`, and if it refers to classes, Vectors or names of its own
+   * strings, inside a function of its table of them. The same whether
+   * the module is being written or
    * the method compiled alone.
    */
   factory(m: u32, global: u32, decoder: BodyDecoder): void {
@@ -366,7 +369,17 @@ export class ModuleEmitter {
     out.text(")(");
     for (let k = 0; k < types.length; k++) {
       out.text(k ? ", " : "");
-      typeExpr(methods, types[k]);
+      const t = types[k];
+      if (t >= 0) {
+        typeExpr(methods, t);
+        continue;
+      }
+
+      out.text("rt.literalName(M[");
+      out.uint(methods.literalMultinames[-1 - t]);
+      out.text("], ");
+      poolString(methods, methods.literalStrings[-1 - t]);
+      out.text(")");
     }
 
     out.text(")");

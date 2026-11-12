@@ -19,6 +19,8 @@ const CARRIED = [
   "base",
   "allowscriptaccess",
   "allownetworking",
+  "allowfullscreen",
+  "allowfullscreeninteractive",
   "quality",
   "bgcolor",
   "menu",

@@ -4,6 +4,7 @@
 
 import type { Domain, Script } from "./domain.js";
 import type { Multiname, Namespace, TypeName } from "./names.js";
+import type { ScopeFinds } from "./property-cache.js";
 import type { ClassRef, VectorRef } from "./traits.js";
 
 // biome-ignore lint/suspicious/noExplicitAny: AS3 values are untyped
@@ -16,8 +17,11 @@ export type Method = Function;
 /** Not a property: distinct from undefined, which a property can hold. */
 export const NOT_FOUND = Symbol("not found");
 
-/** A scope chain: its objects, outermost first, and a bit per with scope in w. */
-export type Scope = Value[] & { w: number };
+/**
+ * A scope chain: its objects, outermost first, and a bit per with scope in
+ * w; what findProperty found on it, once asked (Runtime.outerScopeOf).
+ */
+export type Scope = Value[] & { w: number; found?: ScopeFinds | null };
 
 /** A method factory: the method's function, once its scope chain is known. */
 export type Factory = (scope: Scope, sup: AsObject | null) => Method;
