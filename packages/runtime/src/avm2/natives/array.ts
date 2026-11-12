@@ -28,7 +28,7 @@ function sealed(rt: Runtime, o: AsObject, adding: number): boolean {
   }
 
   if (adding > 0) {
-    throw rt.error("ReferenceError", 1056, "0", o.$traits.name);
+    throw rt.error("ReferenceError", 1056, "0", o.$traits.errorName);
   }
 
   return true;

@@ -420,12 +420,20 @@ export function soundNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.media:Sound::_load"(request: Value, _checkPolicyFile: Value, _bufferTime: Value): void {
+      const sound = stateOf(this as AsObject);
+      // A bound sound's data counts as loaded from its constructor's super()
+      // on, 0 before it, as Flash's (Ruffle's displayobject_early_init).
+      const data = sound.character?.definition;
+      if (data && sound.total === 0) {
+        sound.loaded = data.data.length;
+        sound.total = data.data.length;
+      }
+
       // Sound's AS3 constructor always calls load, with null when it was given no request.
       if (request === null || request === undefined) {
         return;
       }
 
-      const sound = stateOf(this as AsObject);
       if (sound.used) {
         throw s.rt.error("Error", 2037);
       }
@@ -697,8 +705,8 @@ export function soundHooks(s: Scripting): Record<string, avm2.ClassHook> {
           character,
           bytes: null,
           url: null,
-          loaded: data?.data.length ?? 0,
-          total: data?.data.length ?? 0,
+          loaded: 0,
+          total: 0,
           // In samples a millisecond, to adl's last bit.
           length: data ? data.sampleCount / (data.sampleRate / 1000) : 0,
           used: !!data,

@@ -191,9 +191,12 @@ function shortName(qualified: string): string {
 
 export function qualifiedClassName(rt: Runtime, v: Value): string {
   switch (typeof v) {
-    // As TypeDescriber::chooseTraits: an int is one that fits avmplus' 29-bit int atom.
+    // As TypeDescriber::chooseTraits: an int is one that fits avmplus' 29-bit
+    // int atom, which -0, always a double, never is.
     case "number":
-      return (v | 0) === v && v >= -(1 << 28) && v < 1 << 28 ? "int" : "Number";
+      return (v | 0) === v && v >= -(1 << 28) && v < 1 << 28 && !Object.is(v, -0)
+        ? "int"
+        : "Number";
     case "string":
       return "String";
     case "boolean":

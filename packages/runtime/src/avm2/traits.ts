@@ -188,6 +188,26 @@ export class Traits {
   }
 
   /**
+   * Its name as Flash's debugger player writes it in an error message
+   * (AvmCore::toErrorString): the package and the name joined by a dot,
+   * "flash.text.TextField"; a class object's as "class " and its class's.
+   */
+  get errorName(): string {
+    let name = this.name;
+    const statics = this.base?.name === "Class" && name.endsWith("$");
+    if (statics) {
+      name = name.slice(0, -1);
+    }
+
+    const colons = name.lastIndexOf("::");
+    if (colons >= 0) {
+      name = `${name.slice(0, colons)}.${name.slice(colons + 2)}`;
+    }
+
+    return statics ? `class ${name}` : name;
+  }
+
+  /**
    * The object a method and its entries, `count` properties, go into:
    * the prototype, till it holds HOME_PROPERTIES, then an object chained
    * below it, above the base's, and so on. V8 keeps an object of more

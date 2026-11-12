@@ -1,9 +1,11 @@
-// The player supplies charset encoding and decoding where avmshell has stubs.
+// The player supplies charset encoding and decoding where avmshell has stubs, and
+// AMF0 where avmshell refuses it (../net/amf0.ts).
 // Instances of a subclass bound to DefineBinaryData start with shared data
 // at position 0, each seeing the others' writes until resized. Crossbridge
 // keeps a C program's initialized data so, one subclass per data section.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import * as amf0 from "../net/amf0.js";
 
 type Value = avm2.Value;
 
@@ -275,6 +277,23 @@ export function byteArrayNatives(s: Scripting): avm2.Natives {
       charset: Value,
     ) {
       write(this.$amf.bytes, value, charset);
+    }),
+    // An encoding below 3 is AMF0, where avmshell refuses it (#1508), any
+    // other AMF3; ByteArray.defaultObjectEncoding may be any uint, which
+    // both read as a signed ObjectEncoding.
+    "flash.utils::ByteArray#writeObject": avm2.plain(function (this: avm2.AsObject, v: Value) {
+      const b = avm2.bytesOf(s.rt, this);
+      if ((b.objectEncoding | 0) < 3) {
+        new amf0.Writer(s.rt, b).value(v);
+      } else {
+        new avm2.Amf3Writer(s.rt, b).value(v);
+      }
+    }),
+    "flash.utils::ByteArray#readObject": avm2.plain(function (this: avm2.AsObject) {
+      const b = avm2.bytesOf(s.rt, this);
+      return (b.objectEncoding | 0) < 3
+        ? new amf0.Reader(s.rt, b).value()
+        : new avm2.Amf3Reader(s.rt, b).value();
     }),
     "flash.utils::ObjectInput#readMultiByte": avm2.plain(function (
       this: avm2.AsObject,

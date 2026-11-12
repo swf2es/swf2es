@@ -44,6 +44,11 @@ export class SettingsFile {
     return this.update({ [name]: path });
   }
 
+  /** Back to the library the app ships; whether that was saved. */
+  clearLibrary(name: LibraryName): boolean {
+    return this.update({ [name]: undefined });
+  }
+
   setStage3D(enabled: boolean): boolean {
     return this.update({ stage3D: enabled });
   }

@@ -895,9 +895,10 @@ export class Reader implements ExternalStream {
   }
 }
 
-/** As Toplevel::writeObject: AMF3 only, as avmshell has no AMF0. */
+/** As Toplevel::writeObject: AMF3 only, as avmshell has no AMF0 (a player gives its own natives for it). */
 export function writeObject(rt: Runtime, b: Bytes, v: Value): void {
-  if (b.objectEncoding < 3) {
+  // As an ObjectEncoding, a signed enum: 2^31 and above are below 3.
+  if ((b.objectEncoding | 0) < 3) {
     throw rt.error("ArgumentError", 1508, "objectEncoding");
   }
 
@@ -906,7 +907,7 @@ export function writeObject(rt: Runtime, b: Bytes, v: Value): void {
 
 /** As Toplevel::readObject. */
 export function readObject(rt: Runtime, b: Bytes): Value {
-  if (b.objectEncoding < 3) {
+  if ((b.objectEncoding | 0) < 3) {
     throw rt.error("ArgumentError", 1508, "objectEncoding");
   }
 

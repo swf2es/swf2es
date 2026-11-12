@@ -57,6 +57,8 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $content: AsObject | null;
     declare $bytes: Uint8Array | null;
     declare $swf: SwfFacts | null;
+    /** Whether its SWF is its content yet: Flash's contentType is null till then, through the last PROGRESS. */
+    declare $typed: boolean;
     declare $image: ImageFacts | null;
     declare $url: string | null;
     /** What `parameters` tells (Loads.loaderInfo): its LoaderContext's, its URL's query, or the main SWF's flashvars. */
@@ -128,7 +130,10 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     }
 
     get contentType(): Value {
-      return this.$image?.contentType ?? (this.$swf ? "application/x-shockwave-flash" : null);
+      return (
+        this.$image?.contentType ??
+        (this.$swf && this.$typed ? "application/x-shockwave-flash" : null)
+      );
     }
 
     get sharedEvents(): Value {
