@@ -90,7 +90,7 @@ export function declarations(): [string, string][] {
       }),
     ],
     [
-      "packages/player/src/playerglobal/playerglobal-types.generated.ts",
+      "packages/player/src/as3/playerglobal-types.generated.ts",
       as3Declarations({
         abcs: playerglobal,
         name: "Playerglobal",
@@ -107,7 +107,7 @@ export function declarations(): [string, string][] {
       }),
     ],
     [
-      "packages/player/src/playerglobal/air-types.generated.ts",
+      "packages/player/src/as3/air-types.generated.ts",
       as3Declarations({
         abcs: air,
         name: "Air",

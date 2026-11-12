@@ -4,10 +4,10 @@
 // their defaults when set to null. What is in a display object with one
 // is drawn through it (display/perspective.ts).
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { type DisplayObject, type Projection, TRANSFORM } from "../../../display/display.js";
 import { defaultProjection, focalLengthOver as focalLength } from "../../../display/perspective.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

@@ -5,8 +5,8 @@
 // The enhanced options are the exception: Flash keeps one set for every
 // Microphone once getEnhancedMicrophone has been called, whatever it returned.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 
 type Value = avm2.Value;
 /** The enhanced options Flash keeps. */

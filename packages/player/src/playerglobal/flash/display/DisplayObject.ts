@@ -2,6 +2,7 @@
 // other face, and its properties read and written through it.
 import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import {
   bounds,
   boundsIn,
@@ -25,7 +26,6 @@ import { apply, invert, isProjective, type Rect } from "../../../display/geometr
 import { stagePoint3D } from "../../../display/perspective.js";
 import { gridInside, sliceBounds } from "../../../display/scale9.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 import { filterClassName, filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { copyMap } from "../filters/DisplacementMapFilter.js";
 import { colorOf, matrixOf } from "../geom/Transform.js";

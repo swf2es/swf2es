@@ -3,10 +3,10 @@
 // to (input/keyboard.ts), and the two container methods Stage declares native
 // again, which do as a container's do.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { setFocus } from "../../../input/keyboard.js";
 import type { Scripting } from "../../../scripting.js";
 import { stageAlignment } from "../../../stage.js";
-import type { As3 } from "../../as3-types.js";
 import { displayOf } from "./DisplayObject.js";
 import { containerNatives } from "./DisplayObjectContainer.js";
 import { nativeWindowOf } from "./NativeWindow.js";

@@ -6,9 +6,9 @@
 // (AIR 51.3), but for the system's sizes, a browser's window having no
 // least size of its own.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { WindowBounds } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

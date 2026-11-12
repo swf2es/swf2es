@@ -8,9 +8,9 @@
 // rectangle, which crashes adl, is refused as a null parameter is elsewhere.
 // AIR 51's contentsScaleFactor, safeArea, mode and modes are not declared.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { AirScreen, WindowBounds } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;

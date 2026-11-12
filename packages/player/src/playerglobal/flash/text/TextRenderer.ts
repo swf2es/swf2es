@@ -2,9 +2,9 @@
 // SWF to read back, with the values adl takes and ignores, and the tables
 // of cutoffs a font's advanced text is drawn by (text/csm.ts).
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { Scripting } from "../../../scripting.js";
 import { setCsmTable } from "../../../text/csm.js";
-import type { As3 } from "../../as3-types.js";
 
 type Value = avm2.Value;
 

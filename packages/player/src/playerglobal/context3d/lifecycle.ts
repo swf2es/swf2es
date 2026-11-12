@@ -7,10 +7,10 @@ import {
   type Texture3D,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../as3/types.js";
 import { encodeDxt } from "../../bitmap/dxt.js";
 import { dispatchEvent } from "../../scripting/events.js";
 import type { Scripting } from "../../scripting.js";
-import type { As3 } from "../as3-types.js";
 
 export type AsObject = avm2.AsObject;
 export type ResourceValue = Buffer3D | Program3D | Texture3D;

@@ -12,6 +12,7 @@
 import { AIR_API_VERSION, API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
@@ -830,10 +831,11 @@ export class Scripting {
     const rt = this.rt;
     const event = this.statusEvent("httpResponseStatus", result.status, result.url !== undefined);
     const header = rt.classNamed("flash.net::URLRequestHeader");
-    rt.setProperty(event, rt.publicName("responseURL"), responseUrl);
-    rt.setProperty(
-      event,
-      rt.publicName("responseHeaders"),
+    const status = event as As3<"flash.events::HTTPStatusEvent">;
+    rt.setProp(status, "responseURL", responseUrl);
+    rt.setProp(
+      status,
+      "responseHeaders",
       rt.array(result.headers.map(([name, value]) => rt.construct(header, name, value))),
     );
 

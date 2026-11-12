@@ -18,9 +18,9 @@
 // stream has open to write (IOError 3013), which macOS' does not; nor
 // does this.
 import { avm2 } from "@swf2es/runtime";
+import type { As3, As3Classes } from "../../../as3/types.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3, As3Classes } from "../../as3-types.js";
 import { fileLocation } from "./File.js";
 import { ioErrorEvent, openRefusal, refuseApp, writeFile } from "./writes.js";
 

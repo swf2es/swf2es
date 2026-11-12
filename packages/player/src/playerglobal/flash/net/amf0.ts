@@ -32,7 +32,7 @@
 // are. A reference past the table is RangeError #2006, an end too soon
 // EOFError #2030.
 import { avm2 } from "@swf2es/runtime";
-import type { As3 } from "../../as3-types.js";
+import type { As3 } from "../../../as3/types.js";
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;

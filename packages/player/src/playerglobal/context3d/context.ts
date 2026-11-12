@@ -21,8 +21,8 @@ import {
   VertexOffsetError,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../as3/types.js";
 import type { Scripting } from "../../scripting.js";
-import type { As3 } from "../as3-types.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
 import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";

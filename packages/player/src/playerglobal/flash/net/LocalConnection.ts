@@ -1,10 +1,10 @@
 // Both VMs use the player's LocalConnection registry. The AS3 class keeps
 // its public API in playerglobal; only transport and VM values live here.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { type LocalEndpoint, localDomain, localMethodAllowed } from "../../../localconnection.js";
 import { dispatchEvent, heard } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 import { readModernValues, writeModernValues } from "./local-modern.js";
 import { readLocalValues, writeLocalValues } from "./local-values.js";
 

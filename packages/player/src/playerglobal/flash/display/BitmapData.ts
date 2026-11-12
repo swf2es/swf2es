@@ -2,6 +2,7 @@
 // object, as $store; the natives read and write it. Flash's limits and its
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
 import { drawDisplayObject } from "../../../bitmap/draw.js";
@@ -36,7 +37,6 @@ import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { colorOf } from "../geom/Transform.js";
 import { programOf } from "./ShaderData.js";

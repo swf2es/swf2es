@@ -15,7 +15,7 @@ import {
   type RuntimeOptions,
 } from "@swf2es/runtime/avm2";
 import { runShell } from "../../../packages/cli/dist/index.js";
-import type { As3 } from "../../../packages/player/dist/playerglobal/as3-types.js";
+import type { As3 } from "../../../packages/player/dist/as3/types.js";
 
 const generated = fileURLToPath(new URL("../../../oracle/avmplus/generated/", import.meta.url));
 const skip = !existsSync(`${generated}builtin.abc`) && "oracle/avmplus missing";
