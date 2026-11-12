@@ -148,6 +148,7 @@ export class Player {
     this.touch = pointer && scripting ? new TouchInput(this.stage, scripting, pointer) : null;
     if (scripting) {
       scripting.pointer = pointer;
+      scripting.touch = this.touch;
     }
     this.root = new MovieClip(this.library.root, this.library);
     this.stage.addChildAt(this.root, 0);

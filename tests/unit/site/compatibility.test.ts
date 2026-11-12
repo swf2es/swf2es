@@ -209,13 +209,13 @@ test("the API: each listed native is declared, and leaves its member missing", (
     score.packages.find((p) => p.name === pkg)?.rows.find((r) => r.name === name);
 
   assert.deepEqual(score.unmatched, []);
-  assert.deepEqual(row("flash.display", "Sprite")?.missing.sort(), [
-    "startTouchDrag",
-    "stopTouchDrag",
-  ]);
+  assert.deepEqual(row("flash.display", "DisplayObjectContainer")?.missing, ["textSnapshot"]);
   // A static getter and a property's two accessors are one member each.
-  const job = row("flash.printing", "PrintJob");
-  assert.ok(job?.missing.includes("static isSupported"));
+  assert.ok(row("flash.net.drm", "DRMManager")?.missing.includes("static isSupported"));
+  assert.deepEqual(
+    row("flash.ui", "GameInputDevice")?.missing.filter((m) => m === "enabled"),
+    ["enabled"],
+  );
 
   for (const p of score.packages) {
     for (const r of p.rows) {
