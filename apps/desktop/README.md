@@ -9,6 +9,11 @@ npx @swf2es/desktop [options] [file.swf | https://host/movie.swf]
 npx @swf2es/desktop [options] app.xml [root-dir] [-- arguments...]
 ```
 
+npx takes the first `--` on its command line as the end of its own
+options, so with arguments for the application write one before the
+package too: `npx -- @swf2es/desktop app.xml -- --server=local`. The
+installed command, `swf2es-desktop`, needs only the second.
+
 Node 22.18 or later runs it. The first run downloads Electron's binary
 (about 100 MB), once; installed, the command is `swf2es-desktop`. A
 relative path is taken from the directory the command was run in.
