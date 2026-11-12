@@ -385,7 +385,7 @@ export function netConnectionNatives(s: Scripting): avm2.Natives {
         try {
           s.rt.call(handler, null, value);
         } catch (error) {
-          s.reportUncaught(error);
+          s.reportUncaught(error, handler);
         }
       }
     }

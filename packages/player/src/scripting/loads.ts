@@ -485,8 +485,9 @@ export class Loads {
       (result) => result,
       () => ({ bytes: null, status: 0, headers: [] }),
     );
+    const asked = this.s.uncaughtErrors.asCaller(deliver);
     const completed = fetched.then((result) => {
-      this.readyBytes.push(() => deliver(result, outgoing.url));
+      this.readyBytes.push(() => asked(result, outgoing.url));
     });
     this.trackRequest(completed);
   }
@@ -912,6 +913,8 @@ export class Loads {
     let root: MovieClip;
     let avm1: Avm1 | null = null;
     if (run) {
+      // Known before its code runs: an error of its own is its LoaderInfo's to tell.
+      this.s.uncaughtErrors.owns(library, info);
       run();
       this.s.symbols.addFontLibrary(library);
       root = new MovieClip(library.root, library);
@@ -935,7 +938,8 @@ export class Loads {
       const s = this.s;
       const vm = new Avm1(s.codegen, {
         print: s.rt.print,
-        onUncaught: (error) => s.reportUncaught(error),
+        // AVM1 has no event for it: the host's alone.
+        onUncaught: (error) => s.tellHost(error),
         url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
         base: s.base ?? undefined,
         fetch: s.fetch ?? undefined,

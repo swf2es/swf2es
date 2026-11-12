@@ -28,13 +28,13 @@ package flash.events
 
 		override public function toString():String
 		{
+			// Flash's leaves the error out.
 			return this.formatToString(
 					"UncaughtErrorEvent",
 					"type",
 					"bubbles",
 					"cancelable",
-					"eventPhase",
-					"error"
+					"eventPhase"
 				);
 		}
 
