@@ -4,8 +4,8 @@
 // styles long and medium alike. The locale's patterns are read off Intl's
 // parts, and its names come from Intl; the pattern is interpreted here.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 import {
   availableLocales,
   ILLEGAL_ARGUMENT_ERROR,

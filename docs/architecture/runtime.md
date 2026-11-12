@@ -271,13 +271,13 @@ in one call more; generated code does not use them.
 
 The declarations are generated from the libraries' ABCs by
 `tools/as3-types.ts` into `avm2/builtin-types.generated.ts` here and
-`playerglobal/playerglobal-types.generated.ts` and `air-types.generated.ts`
+`as3/playerglobal-types.generated.ts` and `air-types.generated.ts`
 in the player: for each class an interface of its instances' public
 members, `As3_flash_geom_Rectangle`, extending its base class's (an
 interface its super-interfaces'), and one of its class object's,
 `As3_flash_geom_Rectangle$`, keyed by qualified name in
 `BuiltinClasses` and `BuiltinStatics`, `PlayerglobalClasses` and so on.
-The player's `playerglobal/as3-types.ts` joins them, as
+The player's `as3/types.ts` joins them, as
 `@swf2es/player/as3-types`: `v as As3<"flash.geom::Rectangle">` types a
 native's argument. int, uint and Number are `number`, Boolean is `boolean`,
 String is `string | null`, as AS3 lets a String be null; `*` and Object are

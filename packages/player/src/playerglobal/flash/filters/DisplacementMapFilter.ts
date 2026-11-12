@@ -1,9 +1,9 @@
 // flash.filters.DisplacementMapFilter: its map, a copy of a BitmapData, its
 // point, mode and scales.
 import type { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { BitmapStore } from "../../../bitmap/bitmap.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 import { filterNatives } from "./BitmapFilter.js";
 
 type AsObject = avm2.AsObject;

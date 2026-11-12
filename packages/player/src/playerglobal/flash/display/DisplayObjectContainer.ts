@@ -1,10 +1,10 @@
 // flash.display.DisplayObjectContainer: children by index, as AS3 sees
 // them, over the player's render-ordered list.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { hitsOwnPoint } from "../../../display/bounds.js";
 import { Container, type DisplayObject, MovieClip, pickWork } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
-import type { As3 } from "../../as3-types.js";
 
 type Value = avm2.Value;
 

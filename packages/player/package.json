@@ -25,8 +25,8 @@
       "default": "./dist/index.js"
     },
     "./as3-types": {
-      "types": "./dist/playerglobal/as3-types.d.ts",
-      "default": "./dist/playerglobal/as3-types.js"
+      "types": "./dist/as3/types.d.ts",
+      "default": "./dist/as3/types.js"
     },
     "./context3d": {
       "types": "./dist/playerglobal/context3d.d.ts",
