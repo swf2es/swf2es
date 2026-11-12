@@ -6,6 +6,8 @@ import {
   requestLine,
   socketDataLine,
   socketLine,
+  webSocketDataLine,
+  webSocketLine,
 } from "../../apps/desktop/src/main/netlog.ts";
 
 test("a request's line has its method, URL, status, size and time", () => {
@@ -54,4 +56,24 @@ test("a socket's message is shown as text where it is text, else in hex, and cut
       "\u001b",
     ),
   );
+});
+
+test("a WebSocket's lines name it, and a text message is shown as its text", () => {
+  assert.equal(
+    webSocketLine(1, "connecting to ws://127.0.0.1:6588/\u001b"),
+    "swf2es: websocket #1 connecting to ws://127.0.0.1:6588/?",
+  );
+  assert.equal(webSocketLine(1, "close 1000"), "swf2es: websocket #1 close 1000");
+  assert.equal(
+    webSocketDataLine(1, true, '{"cmd":"héllo"}\n\u001b[2J'),
+    'swf2es: websocket #1 > text 21 B  {"cmd":"héllo"}..[2J',
+  );
+  assert.equal(
+    webSocketDataLine(1, false, new Uint8Array([0, 255, 16, 128, 1])),
+    "swf2es: websocket #1 < binary 5 B  00 ff 10 80 01",
+  );
+  const long = webSocketDataLine(2, false, "😀".repeat(600));
+  assert.ok(long.startsWith("swf2es: websocket #2 < text 2400 B  😀"));
+  assert.ok(long.endsWith(`${"😀".repeat(512)}…`));
+  assert.ok(!webSocketDataLine(2, true, "a".repeat(512)).endsWith("…"));
 });

@@ -134,6 +134,23 @@ export interface DesktopSockets {
   onEvent(listener: (id: number, event: SocketEvent) => void): void;
 }
 
+/** What befalls a WebSocket, as player's WebSocketEvents has it. */
+export type WebSocketEvent =
+  | { type: "open"; protocol: string }
+  | { type: "message"; data: string | Uint8Array }
+  | { type: "close"; code: number }
+  | { type: "error" };
+
+/** air.net.WebSocket's connections, opened by the shell, for an AIR application alone. */
+export interface DesktopWebSockets {
+  /** A connection's id; its events follow, an "error" then a "close" if the shell refuses it. */
+  connect(url: string, protocols: string[]): number;
+  /** A text message for a string, a binary one for bytes. */
+  send(id: number, data: string | Uint8Array): void;
+  close(id: number, code?: number): void;
+  onEvent(listener: (id: number, event: WebSocketEvent) => void): void;
+}
+
 /** A request of a SWF's, as player's FetchRequest has it. */
 export interface NetworkRequest {
   url: string;
@@ -199,6 +216,7 @@ export interface DesktopApi {
   /** Ask the user for a library; the page reloads once the shell has it. */
   chooseLibrary(name: LibraryName): void;
   sockets: DesktopSockets;
+  webSockets: DesktopWebSockets;
   network: DesktopNetwork;
   air: DesktopAir;
 }
