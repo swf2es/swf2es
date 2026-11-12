@@ -20,11 +20,14 @@
 import { avm2 } from "@swf2es/runtime";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3, As3Classes } from "../../as3-types.js";
 import { fileLocation } from "./File.js";
 import { ioErrorEvent, openRefusal, refuseApp, writeFile } from "./writes.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+type ByteArray = As3<"flash.utils::ByteArray">;
+type ByteArrayMethod = avm2.MethodName<As3Classes["flash.utils::ByteArray"]>;
 
 /** How much of an asynchronously opened file a frame hands over, as adl's reads do. */
 const CHUNK = 40960;
@@ -53,13 +56,14 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
     const buffer = opened(stream);
     return stream.$mode === "read" ? notOpen() : buffer;
   };
-  const read = (stream: FileStreamNatives, method: string, ...args: Value[]): Value =>
-    s.rt.callProperty(reading(stream), s.rt.publicName(method), ...args);
-  const write = (stream: FileStreamNatives, method: string, ...args: Value[]): void => {
+  // The arguments go to the buffer's method as the stream's were given, which it checks.
+  const read = (stream: FileStreamNatives, method: ByteArrayMethod, ...args: Value[]): Value =>
+    s.rt.callProp(reading(stream) as ByteArray, method, ...(args as never));
+  const write = (stream: FileStreamNatives, method: ByteArrayMethod, ...args: Value[]): void => {
     const bytes = avm2.bytesOf(s.rt, writing(stream));
     // A write past the end leaves zeros before it, which the file, made as long, has too.
     const from = bytes.position;
-    s.rt.callProperty(stream.$buffer as AsObject, s.rt.publicName(method), ...args);
+    s.rt.callProp(stream.$buffer as ByteArray, method, ...(args as never));
     stream.$written = (stream.$written ?? 0) + (bytes.position - from);
     changed(stream, from, bytes.position);
   };
@@ -184,8 +188,8 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
     flush(stream);
     stream.$generation = (stream.$generation ?? 0) + 1;
     const buffer = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject;
-    s.rt.setProperty(buffer, s.rt.publicName("endian"), stream.$endian ?? "bigEndian");
-    s.rt.setProperty(buffer, s.rt.publicName("objectEncoding"), stream.$objectEncoding ?? 3);
+    s.rt.setProp(buffer as ByteArray, "endian", stream.$endian ?? "bigEndian");
+    s.rt.setProp(buffer as ByteArray, "objectEncoding", stream.$objectEncoding ?? 3);
     stream.$buffer = buffer;
     stream.$async = async;
     stream.$path = path;
@@ -404,7 +408,7 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
       const buffer = writing(this);
       const bytes = avm2.bytesOf(s.rt, buffer);
       const at = bytes.position;
-      s.rt.setProperty(buffer, s.rt.publicName("length"), at);
+      s.rt.setProp(buffer as ByteArray, "length", at);
       changed(this, at, at);
       // The file is cut at once, as adl's is, with what was written before.
       flush(this);
@@ -439,34 +443,32 @@ export function fileStreamNatives(s: Scripting): avm2.Natives {
 
     get endian(): Value {
       return this.$buffer
-        ? s.rt.getProperty(this.$buffer, s.rt.publicName("endian"))
+        ? s.rt.prop(this.$buffer as ByteArray, "endian")
         : (this.$endian ?? "bigEndian");
     }
 
     set endian(value: Value) {
       // The buffer's setter checks it; the stream keeps it for the files it opens next.
       if (this.$buffer) {
-        s.rt.setProperty(this.$buffer, s.rt.publicName("endian"), value);
+        s.rt.setProp(this.$buffer as ByteArray, "endian", value);
       }
 
-      this.$endian = this.$buffer
-        ? s.rt.getProperty(this.$buffer, s.rt.publicName("endian"))
-        : value;
+      this.$endian = this.$buffer ? s.rt.prop(this.$buffer as ByteArray, "endian") : value;
     }
 
     get objectEncoding(): Value {
       return this.$buffer
-        ? s.rt.getProperty(this.$buffer, s.rt.publicName("objectEncoding"))
+        ? s.rt.prop(this.$buffer as ByteArray, "objectEncoding")
         : (this.$objectEncoding ?? 3);
     }
 
     set objectEncoding(value: Value) {
       if (this.$buffer) {
-        s.rt.setProperty(this.$buffer, s.rt.publicName("objectEncoding"), value);
+        s.rt.setProp(this.$buffer as ByteArray, "objectEncoding", value);
       }
 
       this.$objectEncoding = this.$buffer
-        ? s.rt.getProperty(this.$buffer, s.rt.publicName("objectEncoding"))
+        ? s.rt.prop(this.$buffer as ByteArray, "objectEncoding")
         : value;
     }
 

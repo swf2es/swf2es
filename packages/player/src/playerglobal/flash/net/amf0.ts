@@ -32,6 +32,7 @@
 // are. A reference past the table is RangeError #2006, an end too soon
 // EOFError #2030.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../as3-types.js";
 
 type Value = avm2.Value;
 type AsObject = avm2.AsObject;
@@ -167,7 +168,7 @@ export class Writer {
     if (isA(traits, "Array")) {
       this.array(v);
     } else if (isA(traits, "Date")) {
-      const time: number = rt.getProperty(v, rt.publicName("time"));
+      const time: number = rt.prop(v as As3<"Date">, "time");
       const offset: number = rt.callProperty(v, rt.publicName("getTimezoneOffset"));
       this.u8(DATE);
       this.double(time);
@@ -204,7 +205,7 @@ export class Writer {
   private array(a: AsObject): void {
     const rt = this.rt;
     this.u8(ECMA_ARRAY);
-    this.u32(rt.getProperty(a, rt.publicName("length")) >>> 0);
+    this.u32(rt.prop(a as As3<"Array">, "length") >>> 0);
     for (const name of rt.enumerableNames(a)) {
       this.property(name, rt.getProperty(a, rt.publicName(name)));
     }
@@ -382,7 +383,7 @@ export class Reader {
       case ECMA_ARRAY: {
         const a = rt.newArray([]);
         this.references.push(a);
-        rt.setProperty(a, rt.publicName("length"), this.u32());
+        rt.setProp(a as As3<"Array">, "length", this.u32());
         this.properties(a);
         return a;
       }

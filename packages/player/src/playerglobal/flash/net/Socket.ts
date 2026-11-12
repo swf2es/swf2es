@@ -3,9 +3,12 @@ import { avm2 } from "@swf2es/runtime";
 import type { SocketEndpoints, SocketTransport } from "../../../hosts.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3, As3Classes } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
+type ByteArray = As3<"flash.utils::ByteArray">;
+type ByteArrayMethod = avm2.MethodName<As3Classes["flash.utils::ByteArray"]>;
 
 interface Connection {
   input: AsObject;
@@ -60,10 +63,11 @@ export function socketNatives(s: Scripting): avm2.Natives {
 
     return c;
   };
-  const input = (o: AsObject, method: string, ...args: Value[]): Value =>
-    s.rt.callProperty(active(o).input, s.rt.publicName(method), ...args);
-  const output = (o: AsObject, method: string, ...args: Value[]): Value =>
-    s.rt.callProperty(active(o).output, s.rt.publicName(method), ...args);
+  // The arguments go to the buffer's method as the socket's were given, which it checks.
+  const input = (o: AsObject, method: ByteArrayMethod, ...args: Value[]): Value =>
+    s.rt.callProp(active(o).input as ByteArray, method, ...(args as never));
+  const output = (o: AsObject, method: ByteArrayMethod, ...args: Value[]): Value =>
+    s.rt.callProp(active(o).output as ByteArray, method, ...(args as never));
   const event = (o: AsObject, type: string): void => {
     dispatchEvent(s, o, s.event(type));
   };
@@ -335,23 +339,23 @@ export function socketNatives(s: Scripting): avm2.Natives {
     }
 
     get objectEncoding(): Value {
-      return s.rt.getProperty(connection(this).input, s.rt.publicName("objectEncoding"));
+      return s.rt.prop(connection(this).input as ByteArray, "objectEncoding");
     }
 
     set objectEncoding(value: Value) {
       const c = connection(this);
-      s.rt.setProperty(c.input, s.rt.publicName("objectEncoding"), value);
-      s.rt.setProperty(c.output, s.rt.publicName("objectEncoding"), value);
+      s.rt.setProp(c.input as ByteArray, "objectEncoding", value);
+      s.rt.setProp(c.output as ByteArray, "objectEncoding", value);
     }
 
     get endian(): Value {
-      return s.rt.getProperty(connection(this).input, s.rt.publicName("endian"));
+      return s.rt.prop(connection(this).input as ByteArray, "endian");
     }
 
     set endian(value: Value) {
       const c = connection(this);
-      s.rt.setProperty(c.input, s.rt.publicName("endian"), value);
-      s.rt.setProperty(c.output, s.rt.publicName("endian"), value);
+      s.rt.setProp(c.input as ByteArray, "endian", value);
+      s.rt.setProp(c.output as ByteArray, "endian", value);
     }
   }
 
