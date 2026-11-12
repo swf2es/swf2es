@@ -294,7 +294,10 @@ the key's type, as avmplus' JIT chooses its helper by it. A number's is
 `rt.getIndexed` and `rt.setIndexed`, which read and write an element, or
 a dynamic object's property, by the number and make no name; a String's
 is the name it makes (`rt.runtimeName`), kept for the strings a site
-repeats. A key of any other type, `*` among them, is `rt.getKeyed` and
+repeats; a string the code itself holds, `obj["name"]`, makes the same
+name each time, so the method has it in its table T
+(`rt.literalName(M[k], "name")`), made once as the module loads, with a
+cache as the module's own names have. A key of any other type, `*` among them, is `rt.getKeyed` and
 `rt.setKeyed`, which look at the value: a number goes the number's way,
 an object that a Dictionary has as a key is read and replaced by itself,
 and anything else, a QName and a Dictionary's key not yet there among

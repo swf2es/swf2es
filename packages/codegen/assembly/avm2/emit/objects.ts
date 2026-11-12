@@ -29,7 +29,7 @@ import {
   BUILTIN_String,
   BUILTIN_Uint,
 } from "../link/traits";
-import { NONE } from "./copies";
+import { CONSTANT, NONE } from "./copies";
 import { isAddress, viewMethod } from "./memory";
 import { hasBoundEntry, MethodEmitter } from "./method";
 import { aliasedMember, interfaceAlias, isClassRef, poolString, slotMember, typeRef } from "./refs";
@@ -834,6 +834,20 @@ function name(em: MethodEmitter, a: u32, from: i32): void {
   if (parts === 0) {
     out.text("M[");
     out.uint(a);
+    out.text("]");
+    return;
+  }
+
+  // The name of a string the code holds is the same each time: made once, in T.
+  const copy = em.copyOf[from];
+  if (
+    (kind === C.CONSTANT_MultinameL || kind === C.CONSTANT_MultinameLA) &&
+    from !== em.pendingNull &&
+    copy <= CONSTANT &&
+    em.ir.op[CONSTANT - copy] === ops.OP_pushstring
+  ) {
+    out.text("T[");
+    out.uint(em.literalSlot(a, em.ir.a[CONSTANT - copy]));
     out.text("]");
     return;
   }
