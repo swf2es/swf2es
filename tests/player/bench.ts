@@ -169,10 +169,15 @@
 //     | --triangles N [--culled] | --redraw N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
+//     [--checkout DIR]
+//
+// --checkout DIR plays another built checkout's packages (its packages/*/dist)
+// with this harness and SWF, to compare two builds run in turn.
 //
 // --write-swf FILE writes the SWF the options make and stops, for another
 // browser or player to play.
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
 import { stemFont } from "./cases.ts";
@@ -1813,8 +1818,26 @@ if (args.includes("--write-swf")) {
   process.exit(0);
 }
 
+// --checkout DIR plays another built checkout's packages with this harness, for an A/B.
+const checkout = args.includes("--checkout") ? args[args.indexOf("--checkout") + 1] : undefined;
+const mounts: [string, string][] = [];
+if (checkout) {
+  for (const [prefix, pkg] of [
+    ["player", "player"],
+    ["native", "native"],
+    ["format", "format"],
+    ["render", "render"],
+    ["codegen", "codegen"],
+    ["context3d-backend", "context3d"],
+    ["runtime", "runtime"],
+  ]) {
+    mounts.push([`/${prefix}/`, `${resolve(checkout)}/packages/${pkg}/dist/`]);
+  }
+}
+
 const result = await benchPlayer(swf, frames, {
   gpu: args.includes("--gpu"),
+  mounts,
   idleRenders,
   toggle: toggleBranches > 0 ? 0 : toggle > 0 ? toggle : toggleStatic > 0 ? 0 : -1,
   antialias: args.includes("--antialias"),
