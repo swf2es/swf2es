@@ -886,16 +886,24 @@ export class Runtime {
   traitsOf(v: Value): Traits {
     switch (typeof v) {
       case "object":
-      case "function":
+      case "function": {
         if (v === null) {
           throw this.error("TypeError", 1009);
+        }
+
+        // An object's own first: instanceof walks the whole prototype
+        // chain of an object, and a class's is as deep as its bases.
+        const traits = v.$traits;
+        if (traits !== undefined) {
+          return traits;
         }
 
         return v instanceof FloatValue
           ? this.builtinTraits("float")
           : v instanceof Namespace
             ? this.builtinTraits("Namespace")
-            : v.$traits;
+            : traits;
+      }
       // As avmplus' toVTable: every number is a Number at run time, int or
       // not; int's and uint's traits only bind early, from static types.
       case "number":
@@ -917,12 +925,19 @@ export class Runtime {
   private receiverTraits(v: Value): Traits | undefined {
     switch (typeof v) {
       case "object":
-      case "function":
-        return v instanceof FloatValue
-          ? this.builtinTraits("float")
-          : v === null
-            ? undefined
-            : v.$traits;
+      case "function": {
+        if (v === null) {
+          return undefined;
+        }
+
+        // A float and a Namespace have none of their own (see traitsOf).
+        const traits: Traits | undefined = v.$traits;
+        if (traits !== undefined) {
+          return traits;
+        }
+
+        return v instanceof FloatValue ? this.builtinTraits("float") : undefined;
+      }
       case "string":
         return this.stringTraits;
       case "number":
@@ -1735,8 +1750,7 @@ export class Runtime {
     if (
       typeof o === "object" &&
       o !== null &&
-      !(o instanceof Namespace) &&
-      !(o instanceof FloatValue)
+      (o.$traits !== undefined || !(o instanceof Namespace || o instanceof FloatValue))
     ) {
       return o.$p;
     }
