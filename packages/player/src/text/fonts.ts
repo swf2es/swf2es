@@ -32,7 +32,52 @@ export class FontSet {
   }
 }
 
-/** A device font as the browser has it: `_sans`, `_serif` and `_typewriter` as its kinds, any other by name, then serif, as Flash's default is. */
+/**
+ * The system fonts SWFs name that are not serif ones, in lower case: a
+ * machine without one draws its text in a font of its kind, as a browser
+ * does for a page's, not in the serif one an unknown name gets.
+ */
+const SANS = new Set([
+  "arial",
+  "arial black",
+  "arial narrow",
+  "calibri",
+  "century gothic",
+  "comic sans ms",
+  "geneva",
+  "helvetica",
+  "helvetica neue",
+  "impact",
+  "lucida grande",
+  "lucida sans",
+  "lucida sans unicode",
+  "microsoft sans serif",
+  "ms sans serif",
+  "segoe ui",
+  "tahoma",
+  "trebuchet ms",
+  "verdana",
+]);
+const MONOSPACE = new Set([
+  "andale mono",
+  "consolas",
+  "courier",
+  "courier new",
+  "lucida console",
+  "monaco",
+]);
+
+/** The CSS kind a device font named `font` falls back to: serif, as Flash's default is, unless its name is a known font of another kind. */
+function fallback(font: string): string {
+  const name = font.toLowerCase();
+  if (SANS.has(name)) {
+    return "sans-serif";
+  }
+
+  return MONOSPACE.has(name) ? "monospace" : "serif";
+}
+
+/** A device font as the browser has it: `_sans`, `_serif` and `_typewriter` as its kinds, any other by name, then the kind its name is known for. */
 function fontFamily(font: string): string[] {
   switch (font) {
     case "_sans":
@@ -42,7 +87,7 @@ function fontFamily(font: string): string[] {
     case "_typewriter":
       return ["Courier New", "Courier", "monospace"];
     default:
-      return [font, "serif"];
+      return [font, fallback(font)];
   }
 }
 

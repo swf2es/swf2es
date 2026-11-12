@@ -61,7 +61,10 @@ pair's kerning (its boundaries stay); a run of a device font in one
 format as one item on the line's baseline (`scene/text.ts`), which a
 canvas rasterizes white and its row colours. A device font
 (`_sans`, `_serif`, `_typewriter`) is the browser's of that kind, any
-other by its name. Bullets, underlines, input and selection are still
+other by its name; where the machine has no such font, a serif one, as
+Flash's default is, unless the name is a well-known sans-serif or
+monospace system font (Tahoma, Verdana, Consolas), which gets one of its
+kind. Bullets, underlines, input and selection are still
 to come.
 
 A field whose `antiAliasType` is advanced has its embedded glyphs drawn
