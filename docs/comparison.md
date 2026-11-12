@@ -35,7 +35,7 @@ medians.
 - **Drawing:** vectors, bitmaps, filters, text, graphics redrawn every
   frame, a Pixel Bender fill computed anew each frame (`beginShaderFill`,
   at three sizes), each at three loads, at 60 frames a second; and
-  Stage3D in a SWF of its own (50 to 2,000 `drawTriangles` calls a frame,
+  Stage3D in a SWF of its own (50 to 20,000 `drawTriangles` calls a frame,
   of 100 triangles each), as a page that turns Stage3D on composites
   every scene of its SWF for it; each
   player says which Stage3D driver it got (`driverInfo`), as Flash under

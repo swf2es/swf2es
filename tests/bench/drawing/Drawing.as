@@ -58,7 +58,7 @@ public class Main extends Sprite {
     ["text", [50, 200, 800]],
     ["redraw", [50, 200, 800]],
     ["shader", [200, 400, 800]],
-    ["stage3d", [50, 500, 2000]],
+    ["stage3d", [50, 500, 2000, 8000, 20000]],
   ];
   // The scenes this SWF plays, by name, which players.ts gives: stage3d alone in a SWF of its own.
   private static const ONLY:String = "PLAYERS_ONLY";
