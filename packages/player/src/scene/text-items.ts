@@ -21,7 +21,7 @@ import { makeRoom, moveLast, same } from "../display/value-lists.js";
 import { cssFont } from "../text/fonts.js";
 import { DeviceGlyphs, GLYPH_MOST, PHASES, plainText } from "./device-glyphs.js";
 import type { Parts } from "./parts.js";
-import type { DeviceItem, TextItem } from "./text.js";
+import { type DeviceItem, deviceRasterScale, type TextItem } from "./text.js";
 
 /**
  * Device texts with runs kept, past which those let go of are looked for and
@@ -51,9 +51,10 @@ const WHITE = 0xffffffff;
 /**
  * A device text run drawn: its glyphs' quads in the atlas of its
  * generation, at their pens, or its texture rasterized, with its size and
- * left overhang in canvas pixels at `resolution`; and the style, metrics
- * and resolution it was asked for, which find it again among the runs of
- * its text.
+ * left overhang in texels; and the style, metrics and resolution it was
+ * asked for, which find it again among the runs of its text: its glyphs'
+ * by the resolution they are placed at, its texture's by the scale it was
+ * rasterized at (deviceRasterScale).
  */
 interface DeviceRun {
   glyphs: GeometryHandle | null;
@@ -63,6 +64,10 @@ interface DeviceRun {
   width: number;
   height: number;
   left: number;
+  /**
+   * Texels a text pixel it is drawn at; 0 for a texture drawn a texel a
+   * canvas pixel at any resolution its scale is asked for.
+   */
   resolution: number;
   family: string;
   size: number;
@@ -88,6 +93,7 @@ export class TextItems {
   private readonly glyphs: DeviceGlyphs;
   /** The frame the glyph atlas filled in, after which it is emptied; -1 while it has room. */
   private fullAt = -1;
+  private runsRasterized = 0;
 
   constructor(
     private readonly geometries: Geometries,
@@ -102,11 +108,19 @@ export class TextItems {
     return this.runs.size;
   }
 
+  /** How many glyphs and runs of device text it has rasterized. */
+  get rasterized(): number {
+    return this.glyphs.rasterized + this.runsRasterized;
+  }
+
   /**
    * A text's item under the object's transform (a b c d tx ty) and colour
    * transform: a glyph its fill, a rectangle the unit quad, each placed by
    * its row and coloured by its colour as a multiplier before the object's;
-   * a device run its rasterized texture, a texel a canvas pixel.
+   * a device run its rasterized texture, a texel a canvas pixel at
+   * `resolution` canvas pixels a pixel of the text, its corner on a canvas
+   * pixel, `unit` canvas pixels a stage pixel, where it is neither turned
+   * nor skewed.
    */
   drawTextItem(
     scene: SceneList,
@@ -120,6 +134,7 @@ export class TextItems {
     ty: number,
     color: ColorTransform | null,
     resolution: number,
+    unit: number,
   ): void {
     // Its colour as a multiplier, and that before the object's, in slots of its own: the row
     // made of them copies them.
@@ -136,18 +151,18 @@ export class TextItems {
         return;
       }
 
-      // A texel a canvas pixel, the run's origin `left` texels in, past its overhang.
-      const k = 1 / run.resolution;
+      // A texel a canvas pixel, the run's origin `left` texels in, past its overhang; on a whole
+      // canvas pixel, which its texels then each cover, not two halves of two.
+      const k = 1 / (run.resolution || resolution);
       const x = item.x - run.left * k;
-      const row = rows.add(
-        a * k,
-        b * k,
-        c * k,
-        d * k,
-        a * x + c * item.top + tx,
-        b * x + d * item.top + ty,
-        colored,
-      );
+      let x0 = a * x + c * item.top + tx;
+      let y0 = b * x + d * item.top + ty;
+      if (b === 0 && c === 0 && unit > 0) {
+        x0 = Math.round(x0 * unit) / unit;
+        y0 = Math.round(y0 * unit) / unit;
+      }
+
+      const row = rows.add(a * k, b * k, c * k, d * k, x0, y0, colored);
       // Its glyphs' quads on their atlas, or its texture's quad.
       const texture = run.glyphs ? this.glyphs.texture() : (run.handle as TextureHandle);
       const geometry = run.glyphs ?? this.parts.quad(run.width, run.height);
@@ -179,8 +194,9 @@ export class TextItems {
   }
 
   /**
-   * A run of device text rasterized white at `resolution` canvas pixels a
-   * stage pixel, or less where that would pass TEXT_MOST texels a side: its
+   * A run of device text placed at `resolution` canvas pixels a pixel of
+   * the text: its glyphs' quads, or rasterized white at its scale for that
+   * (deviceRasterScale), or less where that would pass TEXT_MOST texels a side: its
    * ink whole, the overhang left of its origin and past its advance too, its
    * top at the ascent above the baseline; premultiplied, and kept while
    * drawn, for every colour it is drawn in. Null for nothing to draw.
@@ -195,6 +211,7 @@ export class TextItems {
 
     // By its text, a string there is already; then its style compared as values, and the pens of
     // glyph quads, which a justified line spreads.
+    const raster = deviceRasterScale(item.size, resolution);
     const runs = this.runs.get(item.text);
     for (let i = runs ? runs.length - 1 : -1; i >= 0; i--) {
       const run = (runs as DeviceRun[])[i];
@@ -206,7 +223,7 @@ export class TextItems {
         same(run.letterSpacing, item.letterSpacing) &&
         same(run.ascent, item.ascent) &&
         same(run.descent, item.descent) &&
-        same(run.asked, resolution) &&
+        same(run.asked, run.glyphs ? resolution : raster) &&
         (run.pens === null || samePens(run.pens, item.pens)) &&
         this.runAlive(run)
       ) {
@@ -230,7 +247,7 @@ export class TextItems {
     }
 
     const { canvas, context } = this.textCanvas;
-    let scale = resolution;
+    let scale = raster;
     let size = { left: 0, width: 0, height: 0 };
     for (let tries = 0; tries < 2; tries++) {
       size = this.measureRun(context, item, scale);
@@ -249,6 +266,7 @@ export class TextItems {
 
     canvas.width = width;
     canvas.height = height;
+    this.runsRasterized++;
     this.fontAt(context, item, scale);
     context.fillStyle = "#ffffff";
     context.textBaseline = "alphabetic";
@@ -271,7 +289,7 @@ export class TextItems {
       width,
       height,
       left,
-      resolution: scale,
+      resolution: scale === raster ? 0 : scale,
       family: item.family,
       size: item.size,
       bold: item.bold,
@@ -279,13 +297,14 @@ export class TextItems {
       letterSpacing: item.letterSpacing,
       ascent: item.ascent,
       descent: item.descent,
-      asked: resolution,
+      asked: raster,
     });
   }
 
   /**
    * A run of plain characters as quads of their glyphs in the atlas, each
-   * pen where the layout put it, to a quarter texel: null for nothing to
+   * pen where the layout put it at `resolution`, to a quarter texel, its
+   * glyphs rasterized at their scale for it: null for nothing to
    * draw; undefined for a run drawn rasterized, of other characters, too
    * large, or past what the atlas holds this frame.
    */
@@ -300,7 +319,12 @@ export class TextItems {
       return undefined;
     }
 
-    const font = cssFont(item.family, item.size * resolution, item.bold, item.italic);
+    const font = cssFont(
+      item.family,
+      item.size * deviceRasterScale(item.size, resolution),
+      item.bold,
+      item.italic,
+    );
     // On the baseline as the rasterized run has it, a texel below its ascent.
     const baseline = Math.round(item.ascent * resolution) + 1;
     // A quad a character at most, those of no ink left out.

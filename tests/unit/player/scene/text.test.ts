@@ -1,19 +1,30 @@
 // How the renderer draws text: where a field clips what it lays out.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deviceTextResolution, overruns } from "../../../../packages/player/dist/scene/text.js";
+import {
+  deviceRasterScale,
+  deviceTextResolution,
+  overruns,
+} from "../../../../packages/player/dist/scene/text.js";
 
 test("device text resolves its largest stretch, including skew, reflection and screen pixels", () => {
   assert.equal(deviceTextResolution([1, 0, 0, 1], 1), 1);
   assert.equal(deviceTextResolution([3, 0, 0, 3], 1), 3);
   assert.equal(deviceTextResolution([1, 0, 0, -3], 2), 6);
-  assert.equal(deviceTextResolution([1, 0, 2, 1], 1), 3);
+  assert.equal(deviceTextResolution([1, 0, 2, 1], 1), Math.round((1 + Math.SQRT2) * 4096) / 4096);
   const angle = 0.2;
   assert.equal(
     deviceTextResolution([Math.cos(angle), Math.sin(angle), -Math.sin(angle), Math.cos(angle)], 1),
     1,
   );
-  assert.equal(deviceTextResolution([0.25, 0, 0, 0.25], 4), 4);
+  assert.equal(deviceTextResolution([0.25, 0, 0, 0.25], 4), 1);
+});
+
+test("device text is placed at the scale it is shown, below a canvas pixel too, to a 4096th", () => {
+  assert.equal(deviceTextResolution([1, 0, 0, 1], 0.9), 3686 / 4096);
+  assert.equal(deviceTextResolution([1, 0, 0, 1], 1.95), 7987 / 4096);
+  assert.equal(deviceTextResolution([0.5, 0, 0, 0.5], 1.5), 0.75);
+  assert.equal(deviceTextResolution([0, 0, 0, 0], 1), 1 / 64);
 });
 
 test("device text caps magnification and rejects non-finite stretch without requesting huge textures", () => {
@@ -21,6 +32,18 @@ test("device text caps magnification and rejects non-finite stretch without requ
   assert.equal(deviceTextResolution([1000, 0, 0, 1000], 2), 16);
   assert.equal(deviceTextResolution([Number.POSITIVE_INFINITY, 0, 0, 1], 2), 2);
   assert.equal(deviceTextResolution([1, 0, 0, 1], Number.NaN), 1);
+});
+
+test("a device font is rasterized at its shown size to half a canvas pixel", () => {
+  // 10 pixels shown at 0.9 are 9; at 0.92 and 0.88 still 9, as 9.2 and 8.8 round to it.
+  assert.equal(deviceRasterScale(10, 0.9), 0.9);
+  assert.equal(deviceRasterScale(10, 0.92), 0.9);
+  assert.equal(deviceRasterScale(10, 0.88), 0.9);
+  assert.equal(deviceRasterScale(10, 1.95), 1.95);
+  assert.equal(deviceRasterScale(12, 1.95), 23.5 / 12);
+  // A size of nothing, or a scale that rounds it to nothing, is rasterized as placed.
+  assert.equal(deviceRasterScale(0, 1.5), 1.5);
+  assert.equal(deviceRasterScale(10, 0.02), 0.02);
 });
 
 test("text a margin moves past its field's edge is clipped, though it is narrower than the field", () => {

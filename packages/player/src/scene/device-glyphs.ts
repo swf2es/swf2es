@@ -46,6 +46,8 @@ export class DeviceGlyphs {
   generation = 0;
   /** Whether a cell found no room, the page at its tallest: `clear` empties it. */
   full = false;
+  /** How many glyphs it has rasterized. */
+  rasterized = 0;
   private height = FIRST_HEIGHT;
   private page = new Uint8Array(WIDTH * FIRST_HEIGHT * 4);
   /** Each glyph's cell by its font, then phase and character; null for one with no ink. */
@@ -131,6 +133,7 @@ export class DeviceGlyphs {
       return undefined;
     }
 
+    this.rasterized++;
     context.clearRect(0, 0, width, height);
     context.fillText(char, left + shift, up);
     const pixels = context.getImageData(0, 0, width, height).data;
