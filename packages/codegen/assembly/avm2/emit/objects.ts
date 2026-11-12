@@ -18,7 +18,7 @@ import {
   IR_GetGlobalScope,
   IR_Nip,
 } from "../ir/ir";
-import { Domain, URI_None } from "../link/domain";
+import { Domain, NS_Public, URI_None } from "../link/domain";
 import {
   BUILTIN_Any,
   BUILTIN_Boolean,
@@ -276,7 +276,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       em.assign(i);
       em.reg(src + <i32>ir.srcCount[i] - 1);
       return true;
-    case ops.OP_getproperty:
+    case ops.OP_getproperty: {
       if (interpretedKey(em, a, src + 1)) {
         em.assign(i);
         out.text("rt.getInterpreted(");
@@ -332,6 +332,16 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
+      const guarded = maybeStringLength(em, a, src);
+      if (guarded) {
+        // Read twice, so from its register, not from a text held for it.
+        const copy = em.copyOf[src];
+        const read = copy === NONE ? src : copy;
+        if (read >= 0) {
+          em.release(read);
+        }
+      }
+
       em.assign(i);
       if (keyed(em, a, src + 1)) {
         out.text("rt.getKeyed(");
@@ -344,12 +354,21 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
+      if (guarded) {
+        out.text("typeof ");
+        em.read(src);
+        out.text(' === "string" ? ');
+        em.read(src);
+        out.text(".length : ");
+      }
+
       out.text("rt.getProperty(");
       em.reg(src);
       out.text(", ");
       name(em, a, src + 1);
       out.text(")");
       return true;
+    }
     case ops.OP_setproperty:
       if (interpretedKey(em, a, src + 1)) {
         out.text("rt.setInterpreted(");
@@ -1002,6 +1021,37 @@ function stringLength(em: MethodEmitter, r: i32, getter: i32): bool {
     em.builtinOf(r) === BUILTIN_String &&
     em.domain.traits.returnType[getter] === em.domain.intType
   );
+}
+
+/**
+ * Whether the get of multiname `a` on register r may read a string's
+ * length: a name `length` that is no attribute's, public or with a public
+ * namespace in its set, on a value typed * or Object. A string has that
+ * one property, a getter of its class, which nothing can replace or hide,
+ * and the string is told from any other value where it is read: through
+ * the runtime's lookup, the read costs several times the rest of a loop
+ * over an Array of strings.
+ */
+function maybeStringLength(em: MethodEmitter, a: u32, r: i32): bool {
+  const bt = em.builtinOf(r);
+  if (bt !== BUILTIN_Any && bt !== BUILTIN_Object) {
+    return false;
+  }
+
+  const domain = em.domain;
+  const pool = em.abc.pool;
+  const kind = pool.mnKind[a];
+  if (kind === C.CONSTANT_Qname) {
+    const ns = domain.abcNs[em.index][pool.mnA[a]];
+    const uri = domain.nsUri[ns];
+    if (domain.nsType[ns] !== NS_Public || (uri !== URI_None && domain.stringLength[uri] !== 0)) {
+      return false;
+    }
+  } else if (kind !== C.CONSTANT_Multiname || !domain.hasPublicNamespace(em.index, a)) {
+    return false;
+  }
+
+  return domain.abcString[em.index][pool.mnB[a]] === <u32>domain.findText("length");
 }
 
 /**
