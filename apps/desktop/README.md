@@ -120,7 +120,8 @@ fetch-electron` does so ahead, for the tests.
   them: its first window's content SWF, from the descriptor's directory
   or the root directory given after it, at the descriptor's size and with
   its title, the arguments after `--` handed to its InvokeEvent. It plays
-  with AIR's API (NativeApplication, the window, `flash.filesystem.File`)
+  with AIR's API (NativeApplication, the window, the system's displays as
+  `flash.display.Screen`, `flash.filesystem.File`)
   in AIR's application sandbox: it is played from `app:/`, reads any
   local file through File, FileStream and its `app:`, `app-storage:` and
   `file:` URLs, writes any file but through its `app:` URLs, as AIR does,

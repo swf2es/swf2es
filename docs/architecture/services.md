@@ -198,6 +198,21 @@ is not supported. Where the host does not say, the values are adl's
 or Electron's window has no menu, dock icon or tray of AIR's, so the
 `supports` flags are false.
 
+`flash.display.Screen` (`playerglobal/flash/display/Screen.ts`) has the
+screens the host's `AirApplication.screens` gives, each with its bounds on
+the desktop the window's bounds are on, the part of it the system's bars
+leave free, its colour depth and whether it is the main one: a page's one
+screen (`@swf2es/web`'s `pageScreens`, from `window.screen`), the system's
+displays in the desktop app, and without a host one screen of the screen
+capabilities' size. As adl has them, `screens`, `mainScreen` and
+`getScreensForRectangle` make new Screen objects at every call, each
+keeping its two Rectangles; `getScreensForRectangle` rounds the
+rectangle's x, y, width and height each to an integer, a half to the even
+one, and gives the screens it shares any area with, in `screens`' order,
+so one that only touches a screen's edge, or has no area, finds none;
+`new Screen()` throws ArgumentError 2012, and nothing is dispatched on a
+Screen (`Screen.test.ts`).
+
 ## AIR's file system
 
 In AIR, `flash.filesystem.File` reads the host's file system through a
@@ -229,7 +244,7 @@ descriptor read in `main/descriptor.ts`, the launch in `main/air.ts`).
 AIR's library loaded after playerglobal, `air: true`, the host's
 `AirApplication` and `FileSystemHost`, and Security.sandboxType
 "application". The renderer gives them over the shell
-(`renderer/air.ts`): the window's state, and `stat` and `list`, by
+(`renderer/air.ts`): the window's state, the displays, and `stat` and `list`, by
 synchronous messages, as File and NativeWindow read; its app:,
 app-storage: and file: URLs are read through the shell too. The main
 process answers them only while the application the user opened plays

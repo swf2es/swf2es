@@ -50,6 +50,14 @@ export interface AirWindowState {
   visible: boolean;
 }
 
+/** One of the system's displays as flash.display.Screen reads it: all of it, and what a window may fill. */
+export interface AirScreenState {
+  bounds: { x: number; y: number; width: number; height: number };
+  visibleBounds: { x: number; y: number; width: number; height: number };
+  colorDepth: number;
+  main: boolean;
+}
+
 /**
  * An AIR application's own reach, only while one the user opened plays:
  * the file system, read and written synchronously as File does, and the
@@ -72,6 +80,8 @@ export interface DesktopAir {
   remove(path: string): boolean;
   move(from: string, to: string): boolean;
   window(): AirWindowState;
+  /** The displays as they are now; none where no application plays. */
+  screens(): AirScreenState[];
   setBounds(bounds: { x: number; y: number; width: number; height: number }): void;
   setTitle(title: string): void;
   minimize(): void;

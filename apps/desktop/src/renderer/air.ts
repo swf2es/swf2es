@@ -37,6 +37,7 @@ export function airHosts(
         close: () => air.close(),
         stageOffset: () => air.window().contentOffset,
       },
+      screens: () => air.screens(),
       exit: (code) => air.exit(code),
     },
     fileSystem: {
