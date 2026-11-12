@@ -49,6 +49,7 @@ import {
   statOf,
   writeOf,
 } from "./air.ts";
+import { resolveCase } from "./case-paths.ts";
 import { bridgeFiles } from "./files.ts";
 import { failureLine, requestLine } from "./netlog.ts";
 import { type Movie, Network, Refused, unverifiedHosts } from "./network.ts";
@@ -1069,7 +1070,7 @@ function listenForAir(): void {
     }
 
     try {
-      const real = await realpath(path);
+      const real = await realpath(resolveCase(path));
       return sandbox.startApplication(real) ? new Uint8Array(await readFile(real)) : null;
     } catch {
       return null;
