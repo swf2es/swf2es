@@ -194,6 +194,81 @@ function handlesLoop(n:int):Number {
   return sum;
 }
 
+// A name read on more classes than its cache keeps, as a physics engine's
+// vectors' x and y are read where every display object's are, then mostly
+// on one class.
+class P0 {
+  public var px:Number = 1;
+  public var py:Number = 2;
+}
+class P1 extends P0 {}
+class P2 extends P0 {}
+class P3 extends P0 {}
+class P4 extends P0 {}
+class P5 extends P0 {}
+class P6 extends P0 {}
+class P7 extends P0 {}
+class P8 extends P0 {}
+class P9 extends P0 {}
+class P10 extends P0 {}
+class P11 extends P0 {}
+class P12 extends P0 {}
+class P13 extends P0 {}
+class P14 extends P0 {}
+class P15 extends P0 {}
+class P16 extends P0 {}
+class P17 extends P0 {}
+class P18 extends P0 {}
+class P19 extends P0 {}
+class P20 extends P0 {}
+class P21 extends P0 {}
+class P22 extends P0 {}
+class P23 extends P0 {}
+class P24 extends P0 {}
+class Vec2 {
+  public var px:Number = 0.5;
+  public var py:Number = 0.25;
+}
+var shapes:Array = [
+  new P0(), new P1(), new P2(), new P3(), new P4(),
+  new P5(), new P6(), new P7(), new P8(), new P9(),
+  new P10(), new P11(), new P12(), new P13(), new P14(),
+  new P15(), new P16(), new P17(), new P18(), new P19(),
+  new P20(), new P21(), new P22(), new P23(), new P24()
+];
+var vecs:Array = [new Vec2(), new Vec2(), new Vec2(), new Vec2()];
+
+function manyLoop(n:int):Number {
+  var sum:Number = 0;
+  for (var i:int = 0; i < shapes.length; i++) {
+    var s:* = shapes[i];
+    sum += s.px + s.py;
+  }
+  for (var k:int = 0; k < n; k++) {
+    var v:* = vecs[k & 3];
+    v.px = v.py * 0.5 + 0.125;
+    sum += v.px * v.py;
+  }
+  return sum;
+}
+
+// Methods a script gives a class's prototype, called on its sealed objects
+// by name, as an obfuscator's code calls them.
+class Body {
+  public var m:Number = 2;
+}
+Body.prototype.mass = function():Number { return 3; };
+Body.prototype.kind = "body";
+
+function protoLoop(n:int):Number {
+  var sum:Number = 0;
+  var b:* = new Body();
+  for (var k:int = 0; k < n; k++) {
+    sum += b.mass() + b.kind.length + b.m;
+  }
+  return sum;
+}
+
 function runAll(rounds:int):void {
   var t:uint = getTimer();
   var r1:Number = displayLoop(rounds);
@@ -219,7 +294,13 @@ function runAll(rounds:int):void {
   t = getTimer();
   var r8:Number = handlesLoop(rounds * 40);
   trace("time: handles " + (getTimer() - t));
-  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8);
+  t = getTimer();
+  var r9:Number = manyLoop(rounds * 40);
+  trace("time: many " + (getTimer() - t));
+  t = getTimer();
+  var r10:Number = protoLoop(rounds * 20);
+  trace("time: proto " + (getTimer() - t));
+  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9 + " " + r10);
 }
 
 runAll(20000);

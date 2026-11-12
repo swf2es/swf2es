@@ -113,7 +113,7 @@ import {
   IC_Slot,
   invalidate,
   NO_CACHE,
-  REPLACEMENTS,
+  ScopeFinds,
   UNFILLED,
 } from "./property-cache.js";
 import {
@@ -151,6 +151,18 @@ class ScopePack {
     readonly scopes: Value[],
     readonly w: number,
   ) {}
+}
+
+/** Whether a chain or a pack, `scopes` with bits `w`, has a with scope, in a pack in it too. */
+function hasWith(scopes: Value[], w: number): boolean {
+  for (let i = 0; i < scopes.length; i++) {
+    const o = scopes[i];
+    if (o instanceof ScopePack ? hasWith(o.scopes, o.w) : (w >> i) & 1) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
@@ -249,7 +261,7 @@ export class Runtime {
   /** Special traits: an activation's or a catch scope's, by descriptor. */
   private readonly scopeTraits = new WeakMap<object, Traits>();
   readonly specialized = new Map<AsObject, AsObject>();
-  readonly empty: Scope = Object.assign([], { w: 0 });
+  readonly empty: Scope = Object.assign([], { w: 0, found: undefined });
 
   /**
    * `natives` are the natives by name, or a provider that makes them for
@@ -671,6 +683,7 @@ export class Runtime {
   scope(outer: Scope, locals: Value[], withs: number): Scope {
     const chain = outer.concat(locals) as Scope;
     chain.w = outer.w | (withs << outer.length);
+    chain.found = undefined;
     return chain;
   }
 
@@ -686,6 +699,7 @@ export class Runtime {
     const packed = chain.slice(0, at) as Scope;
     packed.push(new ScopePack(chain.slice(at), chain.w >>> at) as never);
     packed.w = (chain.w & ((1 << at) - 1)) | (1 << at);
+    packed.found = undefined;
     return packed;
   }
 
@@ -724,6 +738,47 @@ export class Runtime {
       }
     }
 
+    const found = this.outerScopeOf(outer, mn);
+    if (found !== null) {
+      return found;
+    }
+
+    return this.global(mn, outer.length ? outer[0] : locals[0], strict);
+  }
+
+  /**
+   * The innermost object of a captured chain that has `mn`, or null: kept
+   * on a chain without a with scope (ScopeFinds), as a function whose
+   * chain the compiler could not type, such as one made where chains of
+   * different lengths meet, looks its names up each time it runs.
+   */
+  private outerScopeOf(outer: Scope, mn: Multiname): AsObject | null {
+    let finds = outer.found;
+    if (finds === undefined) {
+      finds = hasWith(outer, outer.w) ? null : new ScopeFinds();
+      outer.found = finds;
+    }
+
+    // A name made at run time is a new one each time: keeping it would only grow the map.
+    if (finds === null || mn.cache === NO_CACHE) {
+      return this.searchOuter(outer, mn);
+    }
+
+    if (finds.epoch !== epoch()) {
+      finds.clear();
+      finds.epoch = epoch();
+    }
+
+    let o = finds.get(mn);
+    if (o === undefined) {
+      o = this.searchOuter(outer, mn);
+      finds.set(mn, o);
+    }
+
+    return o;
+  }
+
+  private searchOuter(outer: Scope, mn: Multiname): AsObject | null {
     for (let i = outer.length - 1; i >= 0; i--) {
       const o = outer[i];
       if (o instanceof ScopePack) {
@@ -736,7 +791,7 @@ export class Runtime {
       }
     }
 
-    return this.global(mn, outer.length ? outer[0] : locals[0], strict);
+    return null;
   }
 
   findPropertyStrict(mn: Multiname, outer: Scope, locals: Value[], withs: number): AsObject {
@@ -887,16 +942,24 @@ export class Runtime {
   traitsOf(v: Value): Traits {
     switch (typeof v) {
       case "object":
-      case "function":
+      case "function": {
         if (v === null) {
           throw this.error("TypeError", 1009);
+        }
+
+        // An object's own first: instanceof walks the whole prototype
+        // chain of an object, and a class's is as deep as its bases.
+        const traits = v.$traits;
+        if (traits !== undefined) {
+          return traits;
         }
 
         return v instanceof FloatValue
           ? this.builtinTraits("float")
           : v instanceof Namespace
             ? this.builtinTraits("Namespace")
-            : v.$traits;
+            : traits;
+      }
       // As avmplus' toVTable: every number is a Number at run time, int or
       // not; int's and uint's traits only bind early, from static types.
       case "number":
@@ -918,12 +981,19 @@ export class Runtime {
   private receiverTraits(v: Value): Traits | undefined {
     switch (typeof v) {
       case "object":
-      case "function":
-        return v instanceof FloatValue
-          ? this.builtinTraits("float")
-          : v === null
-            ? undefined
-            : v.$traits;
+      case "function": {
+        if (v === null) {
+          return undefined;
+        }
+
+        // A float and a Namespace have none of their own (see traitsOf).
+        const traits: Traits | undefined = v.$traits;
+        if (traits !== undefined) {
+          return traits;
+        }
+
+        return v instanceof FloatValue ? this.builtinTraits("float") : undefined;
+      }
       case "string":
         return this.stringTraits;
       case "number":
@@ -1385,11 +1455,7 @@ export class Runtime {
   /** fillCache (cache-fill.ts), for a name that caches on traits a cache knows `o` by. */
   private fill(o: Value, traits: Traits, b: number, mn: Multiname): void {
     const head = mn.cache;
-    if (
-      head === NO_CACHE ||
-      (head.replaced === REPLACEMENTS && head.epoch === epoch()) ||
-      this.receiverTraits(o) !== traits
-    ) {
+    if (head === NO_CACHE || this.receiverTraits(o) !== traits) {
       return;
     }
 
@@ -1740,8 +1806,7 @@ export class Runtime {
     if (
       typeof o === "object" &&
       o !== null &&
-      !(o instanceof Namespace) &&
-      !(o instanceof FloatValue)
+      (o.$traits !== undefined || !(o instanceof Namespace || o instanceof FloatValue))
     ) {
       return o.$p;
     }
