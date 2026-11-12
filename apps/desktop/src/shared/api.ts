@@ -209,8 +209,20 @@ export interface DesktopFiles {
   release(id: number): void;
 }
 
+/**
+ * The window's full screen, which a SWF's Stage.displayState asks for
+ * while one the user opened plays, with no gesture, as AIR's and the
+ * projector's did.
+ */
+export interface DesktopFullScreen {
+  set(fullScreen: boolean): void;
+  /** The window has entered or left full screen, a SWF's doing or the user's (F11). */
+  onChange(listener: (fullScreen: boolean) => void): void;
+}
+
 export interface DesktopApi {
   files: DesktopFiles;
+  fullScreen: DesktopFullScreen;
   /** The page has loaded and listens: what it is to show. */
   start(): Promise<StartState>;
   /** The shell opened a SWF: play it in place of what plays. */

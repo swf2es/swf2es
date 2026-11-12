@@ -29,10 +29,11 @@ import { decodePng } from "../player/image.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
-import { display, withApp as runApp } from "./app.ts";
+import { type App, display, withApp as runApp } from "./app.ts";
 import { webSocketServer } from "./websocket-server.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+const desktopPackage = fileURLToPath(new URL("../../apps/desktop/package.json", import.meta.url));
 const out = `${here}out/`;
 
 const why = missing();
@@ -105,6 +106,7 @@ const airSource = `package {
   import flash.filesystem.File;
   import flash.filesystem.FileMode;
   import flash.filesystem.FileStream;
+  import flash.geom.Rectangle;
   import flash.net.*;
   import flash.system.Security;
   import flash.utils.ByteArray;
@@ -130,6 +132,9 @@ const airSource = `package {
         stream.close();
         load("app", "data.txt");
         load("file", outside.url);
+        if (e.arguments.length > 2) {
+          load("http", e.arguments[2]);
+        }
         socket = new Socket();
         socket.addEventListener(Event.CONNECT, function (e:Event):void {
           socket.writeUTFBytes("ping");
@@ -142,12 +147,21 @@ const airSource = `package {
           trace("air: socket refused");
         });
         socket.connect("127.0.0.1", int(e.arguments[0]));
-        if (e.arguments.length > 2) {
-          connectWebSocket("websocket", "ws://127.0.0.1:" + e.arguments[2] + "/smoke?q=1");
-        }
         if (e.arguments.length > 3) {
-          connectWebSocket("wss-address", "wss://127.0.0.1:" + e.arguments[3] + "/");
-          connectWebSocket("wss-name", "wss://localhost:" + e.arguments[3] + "/");
+          connectWebSocket("websocket", "ws://127.0.0.1:" + e.arguments[3] + "/smoke?q=1");
+        }
+        if (e.arguments.length > 4) {
+          connectWebSocket("wss-address", "wss://127.0.0.1:" + e.arguments[4] + "/");
+          connectWebSocket("wss-name", "wss://localhost:" + e.arguments[4] + "/");
+        }
+        // Full screen as an application asks for it: from no click or key, over a part of its stage.
+        if (e.arguments.length > 1) {
+          stage.addEventListener(FullScreenEvent.FULL_SCREEN, function (f:FullScreenEvent):void {
+            trace("air: fullScreen " + f.fullScreen + " " + f.interactive + " " + stage.displayState);
+          });
+          stage.fullScreenSourceRect = new Rectangle(0, 0, 50, 50);
+          stage.displayState = "fullScreenInteractive";
+          trace("air: displayState " + stage.displayState + " " + stage.stageWidth + "x" + stage.stageHeight);
         }
       });
     }
@@ -185,6 +199,16 @@ const airSource = `package {
       var loader:URLLoader = new URLLoader();
       loader.addEventListener(Event.COMPLETE, function (e:Event):void {
         trace("air: " + label + " " + loader.data);
+      });
+      // AIR's alone, as the response's headers come: a file has none.
+      loader.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, function (e:HTTPStatusEvent):void {
+        var type:String = "";
+        for each (var header:URLRequestHeader in e.responseHeaders) {
+          if (header.name.toLowerCase() == "content-type") {
+            type = header.value;
+          }
+        }
+        trace("air: " + label + " status " + e.status + " " + e.redirected + " " + e.responseURL.split("/").pop() + " " + type);
       });
       loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
         trace("air: " + label + " refused");
@@ -512,6 +536,57 @@ const withApp = (settings: object, args: string[], run: Parameters<typeof runApp
   runApp(screen.env, settings, args, run);
 
 /**
+ * The AIR application's full screen: the window's own, as the main
+ * process has it, and its source rect of 50 by 50 alone drawn, fitted and
+ * centred; then Esc, which leaves, as the stage hears. The headless
+ * window has no window manager to resize it, so its size stays.
+ */
+async function fullScreen({ until, evaluate, main, devtools, stdout }: App): Promise<void> {
+  let shown: { full: boolean; window: number[]; canvas: number[] } | null = null;
+  const look = async () => {
+    const full = await main<boolean>(`(() => {
+      const electron = process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron");
+      return electron.BrowserWindow.getAllWindows()[0].isFullScreen();
+    })()`);
+    const page = await evaluate<{ window: number[]; canvas: number[] }>(`(() => {
+      const r = document.getElementById("player").shadowRoot.querySelector("canvas").getBoundingClientRect();
+      return { window: [innerWidth, innerHeight], canvas: [r.x, r.y, r.width, r.height].map(Math.round) };
+    })()`);
+    shown = { full, ...page };
+  };
+  const sized = (full: boolean) => () => {
+    void look().catch(() => {});
+    if (!shown) {
+      return false;
+    }
+
+    // In full screen the source rect, a square; out of it the canvas is the window.
+    const [width, height] = shown.window;
+    const side = Math.min(width, height);
+    const canvas = full
+      ? [Math.round((width - side) / 2), Math.round((height - side) / 2), side, side]
+      : [0, 0, width, height];
+    return shown.full === full && shown.canvas.join() === canvas.join();
+  };
+  await until("the window in full screen, the source rect drawn", sized(true));
+
+  for (const type of ["keyDown", "keyUp"]) {
+    await devtools.send("Input.dispatchKeyEvent", {
+      type,
+      key: "Escape",
+      code: "Escape",
+      windowsVirtualKeyCode: 27,
+    });
+  }
+
+  await until("Esc out of full screen", () =>
+    stdout.includes("air: fullScreen false false normal"),
+  );
+  shown = null;
+  await until("the window as it was", sized(false));
+}
+
+/**
  * An AIR application, its descriptor and content SWF in a directory of
  * their own, run adl's way with the socket server's port after "--": it
  * reads what Flash's local sandboxes refuse, and connects unasked, its
@@ -607,28 +682,35 @@ async function air(): Promise<void> {
     console.warn("desktop smoke test: no openssl to make a certificate: wss: is not tested");
   }
 
-  // No socket allowed in the settings: an application asks no one.
+  // No socket allowed in the settings: an application asks no one. What it loads over HTTP
+  // tells its response as AIR does, which its files do not.
+  const served = await httpSite({ "/data.txt": ["text/plain", "served"] });
   await withApp(
     { ...both, sockets: {} },
     [
       "--log-sockets",
       "--ignore-certificate-errors=127.0.0.1",
+      // The inspector, for the window as the main process has it.
+      "--inspect=0",
       `${app}AirSmoke-app.xml`,
       "--",
       String(port),
       "two words",
+      `${served.origin}/data.txt`,
       String(webSockets.port),
       ...(secure ? [String(secure.port)] : []),
     ],
-    async ({ stdout, stderr, until }) => {
+    async (running) => {
+      const { stdout, stderr, until } = running;
       const settled = () =>
         [
           "app",
           "file",
           "socket",
+          "http served",
           "websocket close",
           ...(secure ? ["wss-address close", "wss-name"] : []),
-        ].every((what) => stdout.some((l) => l.startsWith(`air: ${what} `)));
+        ].every((what) => stdout.some((l) => l.startsWith(`air: ${what}`)));
       await until("the AIR application", settled);
       for (const line of [
         "air: websocket open smoke",
@@ -686,17 +768,35 @@ async function air(): Promise<void> {
         "air: sandbox application",
         "air: title Air Smoke",
         "air: screen true true true 1",
-        `air: invoke ${[port, "two words", webSockets.port, ...(secure ? [secure.port] : [])].join("|")} true`,
+        `air: invoke ${[port, "two words", `${served.origin}/data.txt`, webSockets.port, ...(secure ? [secure.port] : [])].join("|")} true`,
         "air: files true true 0",
         "air: stream beside",
         "air: app beside",
         "air: file outside",
+        "air: http status 200 false data.txt text/plain",
+        "air: http served",
         "air: socket pong",
+        // In full screen as its setter returns, the event before it, as in adl.
+        "air: fullScreen true false fullScreenInteractive",
+        "air: displayState fullScreenInteractive 100x50",
       ]) {
         assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
       }
+
+      assert.ok(
+        !stdout.some((l) => /^air: (app|file) status/.test(l)),
+        `a file's response status\n${stdout.join("\n")}`,
+      );
+      assert.ok(
+        stdout.indexOf("air: http status 200 false data.txt text/plain") <
+          stdout.indexOf("air: http served"),
+        stdout.join("\n"),
+      );
+
+      await fullScreen(running);
     },
   );
+  served.server.close();
   await webSockets.close();
   await secure?.close();
 

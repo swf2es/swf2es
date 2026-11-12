@@ -62,6 +62,7 @@ const abcs = compileScripts(
       name: "NativeBitmapTest",
       source: readFileSync(`${here}scripts/NativeBitmapTest.as`, "utf8"),
     },
+    { name: "FullScreenTest", source: readFileSync(`${here}scripts/FullScreenTest.as`, "utf8") },
     { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
     { name: "AirAloneTest", source: readFileSync(`${here}scripts/AirAloneTest.as`, "utf8") },
   ],
@@ -162,6 +163,10 @@ writeFileSync(`${site}data/hello.txt`, "hello from beside it");
 writeFileSync(
   `${site}context-menu.swf`,
   bare(abcs.get("ContextMenuTest") as Uint8Array, 1, "ContextMenuTest", 200, 120),
+);
+writeFileSync(
+  `${site}full-screen.swf`,
+  bare(abcs.get("FullScreenTest") as Uint8Array, 1, "FullScreenTest", 200, 120),
 );
 const fillHoles = cases.find((c) => c.name === "fill-holes")?.swf as Uint8Array;
 writeFileSync(`${site}shapes.swf`, fillHoles);
@@ -1722,6 +1727,122 @@ check(
       await call(
         evaluate,
         "(async () => { menuPlayer.destroy(); if (document.fullscreenElement) await document.exitFullscreen(); menuPlayer.remove(); delete window.menuTrace; return true; })()",
+      );
+    }
+  },
+);
+
+check(
+  "Stage.displayState takes the element full screen on a click, where allowfullscreen lets it, and back",
+  async (evaluate, send) => {
+    const at = await call<number[]>(
+      evaluate,
+      `(async () => {
+    window.fsLines = [];
+    window.fsTrace = line => fsLines.push(line);
+    window.fsPlayer = document.createElement("swf2es-player");
+    fsPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
+    document.body.append(fsPlayer);
+    await fsPlayer.load("/web-test/full-screen.swf");
+    window.fsCanvas = () => {
+      const r = fsPlayer.shadowRoot.querySelector("canvas").getBoundingClientRect();
+      return [r.x, r.y, r.width, r.height].map(Math.round);
+    };
+    const r = fsPlayer.getBoundingClientRect();
+    return [r.x, r.y];
+  })()`,
+    );
+    const click = async () => {
+      const point = { x: at[0] + 50, y: at[1] + 60, button: "left", clickCount: 1 };
+      await send("Input.dispatchMouseEvent", { type: "mouseMoved", ...point, button: "none" });
+      await send("Input.dispatchMouseEvent", { type: "mousePressed", ...point });
+      await send("Input.dispatchMouseEvent", { type: "mouseReleased", ...point });
+    };
+    const until = async (what: string, expression: string) => {
+      for (let i = 0; i < 100; i++) {
+        if (await call<boolean>(evaluate, expression)) {
+          return;
+        }
+
+        await new Promise((done) => setTimeout(done, 50));
+      }
+
+      assert.fail(`${what}: ${JSON.stringify(await call(evaluate, "fsLines"))}`);
+    };
+    const lines = () => call<string[]>(evaluate, "fsLines.splice(0)");
+    try {
+      // As Flash Player's plug-in without allowFullScreen: refused, click or no click.
+      assert.equal(await call(evaluate, "fsPlayer.fsState()"), "normal false false");
+      await click();
+      await until("the click's answer", "fsLines.length > 0");
+      assert.deepEqual(await lines(), ["click refused 2152"]);
+      assert.equal(await call(evaluate, "document.fullscreenElement === null"), true);
+
+      // With it, a click's handler enters: the state and its event before the setter returns.
+      await call(evaluate, 'fsPlayer.setAttribute("allowfullscreen", "true"); true');
+      assert.equal(await call(evaluate, "fsPlayer.fsState()"), "normal true false");
+      await click();
+      await until("full screen", "document.fullscreenElement === fsPlayer");
+      assert.deepEqual(await lines(), ["event true false fullScreen", "click fullScreen"]);
+      // Its source rect, the stage's left half of 100 by 120, fitted to the screen and centred.
+      const [width, height] = await call<number[]>(evaluate, "[innerWidth, innerHeight]");
+      const scale = Math.min(width / 100, height / 120);
+      await until(
+        "the source rect on the screen",
+        `JSON.stringify(fsCanvas()) === ${JSON.stringify(
+          JSON.stringify(
+            [(width - 100 * scale) / 2, (height - 120 * scale) / 2, 100 * scale, 120 * scale].map(
+              Math.round,
+            ),
+          ),
+        )}`,
+      );
+      // The interactive kind is not allowed: refused, and the stage stays as it is.
+      assert.equal(await call(evaluate, 'fsPlayer.fsAsk("fullScreenInteractive")'), "refused 2152");
+      assert.equal(await call(evaluate, "fsPlayer.fsState()"), "fullScreen true false");
+
+      // The browser leaves, as on the user's Esc: the stage hears of it.
+      await call(evaluate, "document.exitFullscreen().then(() => true)");
+      await until("the stage's event", "fsLines.length > 0");
+      assert.deepEqual(await lines(), ["event false false normal"]);
+      assert.equal(await call(evaluate, "fsPlayer.fsState()"), "normal true false");
+      await until("the whole stage again", "fsCanvas()[2] === 200 && fsCanvas()[3] === 120");
+
+      // With no click to answer, the request is refused, as Flash refused it: entering used the last one up.
+      assert.equal(await call(evaluate, 'fsPlayer.fsAsk("fullScreen")'), "refused 2152");
+      assert.deepEqual(await lines(), []);
+
+      // In by a click, with the keys too once allowed, and out by the script.
+      await call(evaluate, 'fsPlayer.setAttribute("allowfullscreeninteractive", "true"); true');
+      await click();
+      await until("full screen again", "document.fullscreenElement === fsPlayer");
+      assert.equal(
+        await call(evaluate, 'fsPlayer.fsAsk("fullScreenInteractive")'),
+        "fullScreenInteractive",
+      );
+      assert.equal(await call(evaluate, 'fsPlayer.fsAsk("normal")'), "normal");
+      await until("the page out of full screen", "document.fullscreenElement === null");
+      assert.deepEqual(await lines(), [
+        "event true false fullScreen",
+        "click fullScreen",
+        "event false false normal",
+      ]);
+
+      // A full screen the page asked for itself is the stage's too, and a destroy gives it back.
+      const asked = await send<{ exceptionDetails?: object }>("Runtime.evaluate", {
+        expression: "fsPlayer.requestFullscreen()",
+        userGesture: true,
+        awaitPromise: true,
+      });
+      assert.equal(asked.exceptionDetails, undefined);
+      await until("the stage's event", "fsLines.length > 0");
+      assert.deepEqual(await lines(), ["event true false fullScreen"]);
+      await call(evaluate, "fsPlayer.destroy(); true");
+      await until("the screen given back", "document.fullscreenElement === null");
+    } finally {
+      await call(
+        evaluate,
+        "(async () => { fsPlayer.destroy(); if (document.fullscreenElement) await document.exitFullscreen(); fsPlayer.remove(); delete window.fsTrace; return true; })()",
       );
     }
   },

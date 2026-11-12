@@ -29,6 +29,12 @@ const api: DesktopApi = {
     write: (id, bytes) => ipcRenderer.invoke("files:write", id, bytes),
     release: (id) => ipcRenderer.send("files:release", id),
   },
+  fullScreen: {
+    set: (fullScreen) => ipcRenderer.send("desktop:full-screen", fullScreen === true),
+    onChange: (listener) => {
+      ipcRenderer.on("desktop:full-screen", (_event, fullScreen: boolean) => listener(fullScreen));
+    },
+  },
   start: () => ipcRenderer.invoke("desktop:start"),
   onOpen: (listener) => {
     ipcRenderer.on("desktop:open", (_event, movie: OpenedMovie) => listener(movie));

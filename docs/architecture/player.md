@@ -32,6 +32,7 @@ and the player's paths in this document are relative to it:
   bound classes to, the fonts registered and the sounds' shared decodes,
   `timers.ts` keeps the clock and the timers that fire by it,
   `clipboard.ts` what the clipboard holds and when scripts may touch it,
+  `full-screen.ts` the stage's display state and its full screen source rect,
   `workers.ts` the workers as one VM sees them, `handover.ts` the
   modules the primordial hands them (see [Workers](services.md#workers)).
   `hosts.ts`

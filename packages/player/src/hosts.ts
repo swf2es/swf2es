@@ -244,6 +244,32 @@ export interface ScreenCapabilities {
   screenDPI: number;
 }
 
+/**
+ * The host's full screen, which Stage.displayState asks for: a window that
+ * covers its screen, or a page's element under the Fullscreen API. A script
+ * that asks is answered at once, as Flash answers it: the stage is in full
+ * screen when its setter returns, or the setter throws. What happens
+ * without a script, the user's Esc or a request the system then turns
+ * down, the host tells the player (Scripting.fullScreen.hostChanged).
+ * Without a host, displayState stays "normal".
+ */
+export interface FullScreenHost {
+  /**
+   * Whether the embedding lets its SWFs go full screen, and with the keys
+   * (`interactive`): Flash Player's allowFullScreen and
+   * allowFullScreenInteractive, which Stage.allowsFullScreen and
+   * allowsFullScreenInteractive read.
+   */
+  allowed(interactive: boolean): boolean;
+  /**
+   * Goes full screen; false where it may not now, as Flash Player
+   * refuses outside a user's click or key (SecurityError #2152).
+   */
+  request(interactive: boolean): boolean;
+  /** Leaves full screen. */
+  exit(): void;
+}
+
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
 
 /** A renderer's part in BitmapData.draw of a display object. */

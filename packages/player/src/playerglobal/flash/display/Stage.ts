@@ -108,11 +108,25 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
 
     get displayState(): string {
-      return "normal";
+      return s.fullScreen.state;
     }
 
-    set displayState(_v: Value) {
-      // No full screen.
+    /** As adl: full screen, and its FullScreenEvent dispatched, before it returns (scripting/full-screen.ts). */
+    set displayState(v: Value) {
+      if (v == null) {
+        throw s.rt.error("TypeError", 2007, "displayState");
+      }
+
+      const value = s.rt.toString(v);
+      switch (value) {
+        case "normal":
+        case "fullScreen":
+        case "fullScreenInteractive":
+          s.fullScreen.set(value);
+          break;
+        default:
+          throw s.rt.error("ArgumentError", 2008, "displayState");
+      }
     }
 
     get focus(): Value {
@@ -152,12 +166,14 @@ export function stageNatives(s: Scripting): avm2.Natives {
       s.updates++;
     }
 
+    /** The embedding's allowFullScreen; true where no host says, as before there was one. */
     get allowsFullScreen(): boolean {
-      return true;
+      return s.fullScreen.host?.allowed(false) ?? true;
     }
 
+    /** The embedding's allowFullScreenInteractive; false in adl, which goes interactive all the same. */
     get allowsFullScreenInteractive(): boolean {
-      return false;
+      return !s.air && (s.fullScreen.host?.allowed(true) ?? false);
     }
 
     get browserZoomFactor(): number {
@@ -176,12 +192,27 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return s.screenCapabilities.screenResolutionY;
     }
 
+    /** A Rectangle of its own each time, as adl gives: changing it changes nothing. */
     get fullScreenSourceRect(): Value {
-      return fullScreenSource;
+      const r = s.fullScreen.sourceRect;
+      return (
+        r && s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), r.x, r.y, r.width, r.height)
+      );
     }
 
     set fullScreenSourceRect(v: Value) {
-      fullScreenSource = v ?? null;
+      if (v == null) {
+        s.fullScreen.setSourceRect(null);
+        return;
+      }
+
+      const read = (k: string) => s.rt.toNumber(s.rt.getProperty(v as never, s.rt.publicName(k)));
+      s.fullScreen.setSourceRect({
+        x: read("x"),
+        y: read("y"),
+        width: read("width"),
+        height: read("height"),
+      });
     }
 
     get colorCorrection(): string {
@@ -200,13 +231,18 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return "unsupported";
     }
 
-    // Kept: the pointer is not locked, which only full screen allows.
+    // Kept while in full screen, which alone allows it and whose end clears it; the pointer is not locked.
     get mouseLock(): boolean {
-      return mouseLock;
+      return s.fullScreen.mouseLock;
     }
 
     set mouseLock(v: Value) {
-      mouseLock = !!v;
+      // Outside full screen even false throws, as in adl.
+      if (!s.fullScreen.active) {
+        throw s.rt.error("Error", 3707);
+      }
+
+      s.fullScreen.mouseLock = s.rt.toBoolean(v);
     }
 
     get wmodeGPU(): boolean {
@@ -260,9 +296,7 @@ export function stageNatives(s: Scripting): avm2.Natives {
   }
 
   let focusRect = true;
-  let fullScreenSource: Value = null;
   let colorCorrection = "default";
-  let mouseLock = false;
   let stage3Ds: Value[] | null = null;
 
   /** A Vector of the named class holding `values`. */

@@ -5,6 +5,7 @@ import { configure, type Swf2esPlayerElement } from "@swf2es/web";
 import type { AirLaunch, DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
 import { airHosts, airPath } from "./air.js";
 import { shellFiles } from "./files.js";
+import { windowFullScreen } from "./full-screen.js";
 import { shellFetch } from "./network.js";
 import { shellSocketHost } from "./sockets.js";
 import { shellWebSocketHost } from "./websockets.js";
@@ -34,6 +35,7 @@ configure({
       : null;
   }),
   loadPolicyFile: (url) => desktop.network.loadPolicyFile(url),
+  fullScreen: windowFullScreen(desktop.fullScreen),
 });
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;

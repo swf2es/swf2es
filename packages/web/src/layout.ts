@@ -125,3 +125,27 @@ export function viewport(
     css: { x: 0, y: 0, width: boxWidth, height: boxHeight },
   };
 }
+
+/**
+ * The viewport of a stage in full screen whose fullScreenSourceRect is
+ * `rect`, in a box of `boxWidth` by `boxHeight`, the screen: that part of
+ * the stage alone, scaled to fit the box whole and centred in it, whatever
+ * the stage's scale mode and alignment, as adl draws it; the box's margins
+ * are left to the stage's colour.
+ */
+export function sourceViewport(
+  rect: { x: number; y: number; width: number; height: number },
+  boxWidth: number,
+  boxHeight: number,
+  dpr: number,
+): Viewport {
+  const placed = place(rect.width, rect.height, boxWidth, boxHeight, "showAll", null, dpr);
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height,
+    resolution: placed.resolution,
+    css: { x: placed.x, y: placed.y, width: placed.width, height: placed.height },
+  };
+}

@@ -28,6 +28,17 @@ export interface SocketProxy {
   proxyUrl: string;
 }
 
+/** An embedder's window that goes full screen: the element in it is to fill it. */
+export interface WindowFullScreen {
+  /** Enters or leaves full screen. */
+  set(fullScreen: boolean): void;
+  /**
+   * Tells `listener` each time the window has entered or left, the user's
+   * doing or a script's; what it gives stops telling.
+   */
+  onChange(listener: (fullScreen: boolean) => void): () => void;
+}
+
 export interface Configuration {
   /**
    * The ABCs a SWF's ActionScript 3 links against, by URL, each in place
@@ -93,6 +104,13 @@ export interface Configuration {
   workerUrl?: string | URL;
   /** The page's build, a short commit or a version, which the context menu's About item names. */
   build?: string;
+  /**
+   * A full screen of the embedder's own for Stage.displayState, in place
+   * of the Fullscreen API on the element: a desktop app's, whose window
+   * covers its screen, asked by any SWF and with no user's gesture, as
+   * AIR and Flash's projector allow.
+   */
+  fullScreen?: WindowFullScreen | null;
   /**
    * Play the SWFs the element plays next as an AIR application's, as a
    * desktop app runs one: AIR's library loaded after playerglobal, its API
