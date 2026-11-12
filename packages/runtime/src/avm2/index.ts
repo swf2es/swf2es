@@ -71,6 +71,8 @@ export { invalidate as clearPropertyCaches } from "./property-cache.js";
 export { Runtime } from "./runtime.js";
 // methodKey: where a method sits on its traits, for a player that makes a closure of its own.
 export { instanceVarField, methodKey, setStaticVar } from "./traits.js";
+// avmplus' UTF-8, for a player's bytes that must read and write as ByteArray's do.
+export { fromUtf8, utf8 } from "./utf8.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
