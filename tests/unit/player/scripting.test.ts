@@ -306,6 +306,9 @@ test("an AS3 error tells a host the methods it was thrown in", { skip }, async (
   assert.match(stack.split("\n")[0], /reachNothing/);
   assert.match(stack, /frame1/);
   assert.equal(scripting.rt.stackOf("not an error"), null);
+  // What the number stands for, which the release player's message leaves out.
+  assert.match(scripting.rt.detailOf(errors[0] as avm2.Value) ?? "", /^Error #1009: Cannot access/);
+  assert.equal(scripting.rt.detailOf("not an error"), null);
 });
 
 test("frame scripts that send their clip to each other's frame end in a stack overflow, not the page's", {
