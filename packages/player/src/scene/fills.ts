@@ -21,11 +21,13 @@ export interface FillTessellator {
    * geometry, null for one it refused, or null for the whole layer. Its
    * output is drawn as it is, unchecked, as @swf2es/native's checks its
    * own: finite positions, and indices within the fill's vertices from its
-   * `indexOffset`.
+   * `indexOffset`. Where `borrowed`, the geometries need only last until
+   * the tessellator's next call, as @swf2es/native's then copies nothing.
    */
   layer(
     fills: readonly (readonly Path[])[],
     nonZero: readonly boolean[],
+    borrowed?: boolean,
   ): (FillGeometry | null)[] | null;
   /** A layer's lines built in one call, their outlines filled by this tessellator (strokes.ts). */
   lines: LineBuilder;
@@ -47,21 +49,25 @@ export interface LineBuilder {
  * Each fill of `layer` tessellated, in one call, or null where the
  * tessellator refused it. Resolved once at construction, so colour copies
  * do not tessellate again. A drawing used as a mask fills non-zero, even
- * where drawPath asked for even-odd.
+ * where drawPath asked for even-odd. Where `borrowed`, the geometries are
+ * read before the tessellator's next call (FillTessellator.layer).
  */
 export function resolveFills(
   layer: ShapeLayer,
   masking: boolean,
   tessellate: FillTessellator,
+  borrowed = false,
 ): (FillGeometry | null)[] {
-  const rules = layer.fills.map(({ winding }) => masking || winding === "nonZero");
+  const count = layer.fills.length;
+  const rules = new Array<boolean>(count);
   // The contours go as they are, their curves flattened in the call.
-  const contours = new Array<Path[]>(layer.fills.length);
-  for (let i = 0; i < layer.fills.length; i++) {
+  const contours = new Array<Path[]>(count);
+  for (let i = 0; i < count; i++) {
+    rules[i] = masking || layer.fills[i].winding === "nonZero";
     contours[i] = layer.fills[i].contours;
   }
 
-  return tessellate.layer(contours, rules) ?? layer.fills.map(() => null);
+  return tessellate.layer(contours, rules, borrowed) ?? layer.fills.map(() => null);
 }
 
 /** The bounds of a fill's contours, whole pixels out. */

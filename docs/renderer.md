@@ -74,6 +74,15 @@ single convex contour as a fan, without libtess2's sweep. Together they
 took that SWF's frame from 4.9 to about 2.5 ms (#658), and cutting the
 garbage its calls make to 1.8 ms (#659).
 
+What is left of such a frame is mostly buffers. A typed array of more
+than 64 bytes has its storage outside the JS heap, and making one costs
+about a microsecond, more than filling it does for a small shape: 800
+shapes of a fill and a line each, drawn anew, made 4,800 a frame, and the
+atlas two uploads a geometry beside. So a layer's fills are read from the
+native module's memory where they lie (`layer`'s `borrowed`), a part's
+arrays share one buffer, as a layer's lines do, and the atlas stages the
+geometries a frame adds and uploads them together.
+
 ### The scene list
 
 The scene list (`scene.ts`) is a structure of typed arrays in drawing
@@ -142,8 +151,10 @@ whose entries go once unused for their idle frames:
 
 - **Geometries** (`geometry.ts`): fills and lines as the native module
   writes them, copied once into the atlas's vertex and index buffers
-  (`webgl/atlas.ts`), a hole left where one goes and the atlas packed
-  again once the holes outweigh what is live. An atlas that outgrows its
+  (`webgl/atlas.ts`), those a frame adds staged and uploaded together, a
+  hole left where one goes and the atlas packed again once the holes
+  outweigh what is live; an atlas left empty is filled again from its
+  start, in the buffers it has. An atlas that outgrows its
   largest buffer starts again with only what is live, rather than
   failing.
 - **Textures** (`textures.ts`): bitmaps, device text, gradients, their

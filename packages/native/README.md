@@ -378,6 +378,10 @@ scratch, which then goes, and gathers every fill's positions into one buffer
 and its indices into another, counted from the layer's first vertex. The
 wrapper copies those two out once into JS-owned typed arrays and gives each
 fill views of its part, with `indexOffset`, its first vertex in the layer.
+With `layer(fills, nonZero, true)` it copies nothing: the views are of the
+module's memory, and the tessellator's next call overwrites them. The player
+asks so, as it copies each fill into its own geometry at once, and the two
+buffers cost a drawing made again every frame more than the fills did.
 Positions remain doubles; indices use 16 bits through 65,536 vertices in the
 layer and 32 bits above that. The module
 checks every input coordinate and every output position and index, so the

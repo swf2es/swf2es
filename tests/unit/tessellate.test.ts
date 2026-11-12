@@ -277,6 +277,26 @@ function ring(count: number, x = 0): number[] {
   return points;
 }
 
+test("a borrowed layer is the layer copied, until the next call; a copied one stays", () => {
+  const fills = tessellationFixtures.map((fixture) => fixture.contours).map(paths);
+  const rules = fills.map((_, i) => i % 2 === 1);
+  const tess = new Tessellator();
+  const copied = tess.tessellate.layer(fills, rules);
+  assert.ok(copied);
+  const kept = copied.map(plain);
+  const borrowed = tess.tessellate.layer(fills, rules, true);
+  assert.ok(borrowed);
+  assert.deepEqual(borrowed.map(plain), kept);
+  // The module's memory itself, read before another call writes it.
+  const lent = borrowed.find((geometry) => geometry !== null);
+  assert.ok(lent && lent.vertices.buffer.byteLength >= 65536);
+
+  // Another layer, and a fill alone, change no copy handed out before.
+  assert.ok(tess.tessellate.layer([[path([0, 0, 9, 0, 0, 9])]], [true], true));
+  assert.ok(tess.tessellate([square], false));
+  assert.deepEqual(copied.map(plain), kept);
+});
+
 test("a layer call tessellates each fill as a call of its own does, into one buffer each", () => {
   const fills = tessellationFixtures.flatMap((fixture) => [fixture.contours, fixture.contours]);
   const rules = fills.map((_, i) => i % 2 === 1);
@@ -500,6 +520,10 @@ test("a layer short of memory gives each fill what a layer of its own would", ()
       assert.deepEqual(plain(together[i]), own);
       assert.ok(own === null || JSON.stringify(own) === JSON.stringify(expected[i]));
     }
+
+    // Borrowed, the fills tried again alone overwrite nothing lent.
+    const lent = new Tessellator({ memoryLimit }).tessellate.layer(fills, rules, true);
+    assert.deepEqual(lent?.map(plain), together.map(plain));
   }
 });
 
