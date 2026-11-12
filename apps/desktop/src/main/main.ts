@@ -23,11 +23,13 @@ import {
   Menu,
   type MenuItemConstructorOptions,
   safeStorage,
+  screen,
   session,
   shell,
   type WebContents,
 } from "electron";
 import type {
+  AirScreenState,
   AirWindowState,
   LibraryName,
   NetworkResponse,
@@ -921,6 +923,17 @@ function windowState(w: BrowserWindow): AirWindowState {
   };
 }
 
+/** The displays as an AIR application's Screen reads them: the work area is past the system's bars. */
+function screenStates(): AirScreenState[] {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((display) => ({
+    bounds: display.bounds,
+    visibleBounds: display.workArea,
+    colorDepth: display.colorDepth,
+    main: display.id === primary,
+  }));
+}
+
 /**
  * An AIR application's reach, shared/api.ts DesktopAir: the file system
  * and the window, only while one the user opened plays and only for its
@@ -1002,6 +1015,9 @@ function listenForAir(): void {
   });
   ipcMain.on("air:window", (event) => {
     event.returnValue = playing(event) && window ? windowState(window) : null;
+  });
+  ipcMain.on("air:screens", (event) => {
+    event.returnValue = playing(event) ? screenStates() : [];
   });
   ipcMain.on("air:set-bounds", (event, bounds: unknown) => {
     const b = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;

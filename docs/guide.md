@@ -334,8 +334,9 @@ keeps it in memory alone, for that play. `EncryptedLocalStore` keeps its
 items in IndexedDB too, by the application's id: a page has no keychain
 to encrypt them by, and the browser keeps them as it keeps the site's
 other data.
-The element is its one window, at the descriptor's size; the play page
-opens `.air` and `.zip` files too.
+The element is its one window, at the descriptor's size, and
+`flash.display.Screen` has the one screen the page is on (`window.screen`);
+the play page opens `.air` and `.zip` files too.
 
 A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
@@ -353,7 +354,7 @@ npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 
 The descriptor's first window's content SWF plays from `app:/`, at the
 descriptor's size and with its title; the arguments after `--` reach its
-InvokeEvent. File › Open, or a descriptor dropped on the window, runs the
+InvokeEvent, and `flash.display.Screen` has the system's displays. File › Open, or a descriptor dropped on the window, runs the
 application too, from its own directory; the app asks first, as an
 application reaches your files and the network unasked.
 

@@ -94,6 +94,7 @@ const source = `package {
 // port its argument names, unasked, and names its window's title.
 const airSource = `package {
   import flash.desktop.NativeApplication;
+  import flash.display.Screen;
   import flash.display.Sprite;
   import flash.events.*;
   import flash.filesystem.File;
@@ -107,6 +108,9 @@ const airSource = `package {
       trace("air: url " + loaderInfo.url);
       trace("air: sandbox " + Security.sandboxType);
       trace("air: title " + stage.nativeWindow.title);
+      // The system's displays: the main one among them, and the one the window is on.
+      var main:Screen = Screen.mainScreen;
+      trace("air: screen " + (main.bounds.width > 0 && main.visibleBounds.height > 0) + " " + (main.colorDepth >= 8) + " " + (Screen.screens.length >= 1) + " " + Screen.getScreensForRectangle(stage.nativeWindow.bounds).length);
       NativeApplication.nativeApplication.addEventListener(InvokeEvent.INVOKE, function (e:InvokeEvent):void {
         trace("air: invoke " + e.arguments.join("|") + " " + e.currentDirectory.exists);
         // app:/ has no parent, as adl's: up from its native path, under file:.
@@ -501,6 +505,7 @@ async function air(): Promise<void> {
         "air: url app:/AirSmoke.swf",
         "air: sandbox application",
         "air: title Air Smoke",
+        "air: screen true true true 1",
         `air: invoke ${port}|two words true`,
         "air: files true true 0",
         "air: stream beside",
@@ -553,6 +558,7 @@ async function air(): Promise<void> {
         "air: url app:/AirSmoke.swf",
         "air: sandbox application",
         "air: title Air Smoke",
+        "air: screen true true true 1",
         "air: invoke  true",
         "air: stream beside",
         "air: app beside",

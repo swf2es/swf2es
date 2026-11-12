@@ -95,6 +95,7 @@ const api: DesktopApi = {
     remove: (path) => ipcRenderer.sendSync("air:remove", String(path)),
     move: (from, to) => ipcRenderer.sendSync("air:move", String(from), String(to)),
     window: () => ipcRenderer.sendSync("air:window"),
+    screens: () => ipcRenderer.sendSync("air:screens"),
     setBounds: (bounds) => ipcRenderer.send("air:set-bounds", bounds),
     setTitle: (title) => ipcRenderer.send("air:set-title", String(title)),
     minimize: () => ipcRenderer.send("air:window-do", "minimize"),

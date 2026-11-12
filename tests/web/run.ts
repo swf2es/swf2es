@@ -696,11 +696,12 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
   }>(evaluate, "airRun(true)");
   assert.deepEqual(r.errors, []);
   // What it traces at once, in order; then what arrives on later frames, in any.
-  assert.deepEqual(r.traces.slice(0, 10), [
+  assert.deepEqual(r.traces.slice(0, 11), [
     "air: url app:/bin/AirWebTest.swf",
     "air: sandbox application",
     "air: id org.swf2es.web",
     "air: window Air on the Web 240x160",
+    "air: screen true true 1 1",
     "air: invoke one|two words true",
     "air: files true 22 false true true",
     "air: listing META-INF,bin,data",
@@ -708,7 +709,7 @@ check("an AIR package plays as adl runs it, its files read from memory", async (
     "air: items 0",
     "air: saved 0",
   ]);
-  assert.deepEqual(r.traces.slice(10, -1).sort(), [
+  assert.deepEqual(r.traces.slice(11, -1).sort(), [
     "air: app hello from the package",
     "air: async stream hello from the package",
     "air: file hello from the package",
