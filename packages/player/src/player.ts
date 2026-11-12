@@ -191,6 +191,7 @@ export class Player {
     // The main SWF's LoaderInfo: on the root, which every display object under it reports.
     const info = s.loads.loaderInfo(null);
     s.loads.describe(info, this.bytes, this.swf);
+    info.$typed = true;
     info.$loaded = this.bytes.length;
     info.$url = s.url;
     info.$params = s.loads.mainParameters();
