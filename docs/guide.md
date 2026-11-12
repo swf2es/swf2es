@@ -326,6 +326,8 @@ the builtin.abc and playerglobal the player ships.
 | `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
+| `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
+| `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
 
 npx reads the first `--` on its command line as the end of its own
@@ -339,6 +341,20 @@ it signed itself. Whoever sits between you and such a host can then read and
 change what the SWF loads from it, so name the hosts you mean, and leave the
 switch off otherwise. It is never remembered: the app says so on stderr each
 time it starts with it.
+
+`--proxy` is never remembered either, and the app says on stderr which
+proxy it uses (its credentials, which come from the command line alone,
+never). Every connection the main process makes for the SWF goes through
+it: http and https loads, policy files, sockets and an AIR application's
+WebSockets. TLS is the app's own, over the tunnel, so certificates are
+checked as without a proxy. The app still resolves a host itself, to tell
+whether it is on this machine or your network, which a SWF from the
+internet may not reach without a policy file there, and then asks the
+proxy for the address it judged; so a host this machine cannot resolve is
+not reached through the proxy either. A proxy that fails or refuses is a
+failed load or socket to the SWF, and a line on stderr saying why. An HTTP
+proxy that allows `CONNECT` only to port 443, as Squid does by default,
+refuses plain http and sockets on other ports.
 
 In a checkout of the repository the app runs from its sources:
 

@@ -8,8 +8,11 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
 import {
+  dispatchedOpener,
   MAX_BUFFERED,
+  proxiedDispatcher,
   unverifiedDispatcher,
   validProtocols,
   validWebSocketUrl,
@@ -17,6 +20,7 @@ import {
   webSocketOpener,
 } from "../../apps/desktop/src/main/websocket-connections.ts";
 import type { WebSocketEvent } from "../../apps/desktop/src/shared/api.ts";
+import { testProxy } from "./proxy-server.ts";
 import { type Peer, webSocketServer } from "./websocket-server.ts";
 
 /** Connections whose events are kept, and a wait for the next of a type. */
@@ -293,4 +297,112 @@ test("a wss: server's certificate is verified, but for the hosts --ignore-certif
   unasked.connections.closeAll();
   await plain.close();
   await server.close();
+});
+
+test("through a proxy, by name, over TLS too, its certificate as the switch says", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "swf2es-wss-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const made = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=localhost",
+      "-addext",
+      "subjectAltName=DNS:localhost,IP:127.0.0.1",
+      "-keyout",
+      join(dir, "key.pem"),
+      "-out",
+      join(dir, "cert.pem"),
+    ],
+    { encoding: "utf8" },
+  );
+  const echo = {
+    protocol: (offered: string[]) => offered[0],
+    message: (peer: Peer, data: string | Uint8Array) => peer.send(data),
+  };
+  const plain = await webSocketServer(echo);
+  const secure =
+    made.status === 0
+      ? await webSocketServer(echo, {
+          key: readFileSync(join(dir, "key.pem")),
+          cert: readFileSync(join(dir, "cert.pem")),
+        })
+      : null;
+  for (const kind of ["socks5", "http"] as const) {
+    const proxy = await testProxy(kind, {
+      credentials: { username: "me", password: "pw" },
+      // Not port 1, which the WebSocket client refuses itself, as the Fetch standard does.
+      refuse: (_host, port) => (port === 4 ? (kind === "socks5" ? 5 : 403) : null),
+    });
+    const warned: string[] = [];
+    const dispatcher = proxiedDispatcher(
+      parseProxy(proxy.url("me:pw")),
+      (host) => host === "127.0.0.1",
+      (message) => warned.push(message),
+    );
+    assert.ok(dispatcher, "no dispatcher that goes through a proxy");
+    const through = recorded(dispatchedOpener(dispatcher));
+    through.connections.connect(1, `ws://localhost:${plain.port}/`, ["chat"]);
+    assert.equal((await through.next("open")).protocol, "chat");
+    through.connections.send(1, "hello");
+    assert.equal((await through.next("message")).data, "hello");
+    through.connections.close(1, 1000);
+    await through.next("close");
+    if (secure) {
+      // Named by --ignore-certificate-errors: unverified; another name, refused.
+      through.connections.connect(2, `wss://127.0.0.1:${secure.port}/`, ["chat"]);
+      assert.equal((await through.next("open")).protocol, "chat");
+      through.connections.send(2, "secret");
+      assert.equal((await through.next("message")).data, "secret");
+      through.connections.close(2, 1000);
+      await through.next("close");
+      through.connections.connect(3, `wss://localhost:${secure.port}/`, []);
+      await through.next("error");
+      await through.next("close");
+    }
+
+    // A name goes to the proxy as it is.
+    assert.equal(proxy.targets[0], `localhost:${plain.port}`);
+    if (secure) {
+      assert.ok(proxy.targets.includes(`127.0.0.1:${secure.port}`), proxy.targets.join());
+    }
+
+    // Refused by the proxy: an error and a close with no frame, and why on stderr.
+    through.connections.connect(4, "ws://127.0.0.1:4/", []);
+    await through.next("error");
+    assert.equal((await through.next("close")).code, 1006);
+    assert.ok(
+      warned.some((w) => /^no WebSocket to 127\.0\.0\.1:4: the proxy \S+ refused/.test(w)),
+      warned.join("\n"),
+    );
+    // The wrong password: the proxy's failure, its password unsaid.
+    const wrong = recorded(
+      dispatchedOpener(
+        proxiedDispatcher(
+          parseProxy(proxy.url("me:hunter2")),
+          () => false,
+          (m) => warned.push(m),
+        ),
+      ),
+    );
+    wrong.connections.connect(1, `ws://127.0.0.1:${plain.port}/`, []);
+    await wrong.next("error");
+    await wrong.next("close");
+    assert.ok(
+      warned.some((w) => /refused the username and password/.test(w)),
+      warned.join("\n"),
+    );
+    assert.ok(!warned.join("\n").includes("hunter2"));
+    await proxy.close();
+  }
+
+  await plain.close();
+  await secure?.close();
 });

@@ -11,6 +11,9 @@
 // whose server answers with a socket policy. The page's policy refuses
 // nothing it needs, the page is cross-origin isolated, and playing the SWF
 // again leaves one canvas. A SWF's workers share a Mutex and memory there.
+// The remote SWF and an AIR application play the same through a SOCKS5
+// and an HTTP proxy of the test's own (--proxy), which see every
+// connection, and a proxy that refuses stops the movie, saying why.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
@@ -39,6 +42,7 @@ import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
 import { type App, display, withApp as runApp } from "./app.ts";
+import { type TestProxy, testProxy } from "./proxy-server.ts";
 import { webSocketServer } from "./websocket-server.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -412,9 +416,10 @@ async function socketSite(policy: ((port: number) => string) | null) {
 
 /**
  * The remote sandbox: a SWF opened by its http URL, from the command line
- * and then from the URL dialog.
+ * and then from the URL dialog; or, `through` a proxy (with `credentials`
+ * where it asks for them), from the command line alone, the same.
  */
-async function remote(): Promise<void> {
+async function remote(through: TestProxy | null = null, credentials = ""): Promise<void> {
   const xml = (rules: string) => `<cross-domain-policy>${rules}</cross-domain-policy>`;
   const swfBytes = w.swf({
     width: 100,
@@ -462,7 +467,11 @@ async function remote(): Promise<void> {
   const settings = { ...both, sockets: { [url]: endpoints, [again]: endpoints } };
 
   try {
-    const args = ["--log-sockets", url];
+    const args = [
+      ...(through ? [`--proxy=${through.url(credentials)}`] : []),
+      "--log-sockets",
+      url,
+    ];
     await withApp(settings, args, async ({ stdout, stderr, until, evaluate, page, userData }) => {
       const traced = (line: string) => stdout.filter((l) => l === line).length;
       const settled = (n: number) => () =>
@@ -503,6 +512,37 @@ async function remote(): Promise<void> {
       // --log-sockets: what the socket sent and what came back.
       assert.match(stderr(), /swf2es: socket #\d+ > 4 B {2}ping/);
       assert.match(stderr(), /swf2es: socket #\d+ < 4 B {2}pong/);
+      if (through) {
+        // Every connection went through the proxy: the SWF, its loads, the policy files they
+        // needed, the socket policies and the sockets, each by the address it was judged by.
+        const port = (origin: string) => origin.slice(origin.lastIndexOf(":") + 1);
+        for (const target of [
+          port(home.origin),
+          port(allowed.origin),
+          port(denied.origin),
+          "843",
+          String(good.port),
+          String(bad.port),
+        ]) {
+          assert.ok(
+            through.targets.includes(`127.0.0.1:${target}`),
+            `${target} ${through.targets}`,
+          );
+        }
+
+        // Said at its start, without its credentials; --log-network says what went through it.
+        assert.match(
+          stderr(),
+          new RegExp(
+            `swf2es: --proxy: .* go through ${through.kind}://127\\.0\\.0\\.1:${through.port}\n`,
+          ),
+        );
+        assert.match(stderr(), new RegExp(`swf2es: net GET ${escaped} 200 .* ms via proxy`));
+        assert.match(stderr(), /swf2es: socket #\d+ connecting to \S+ via proxy/);
+        assert.ok(!credentials || !stderr().includes(credentials.split(":")[1]), stderr());
+        return;
+      }
+
       // air.net.WebSocket is an AIR application's: the shell opens none for a SWF, whatever
       // its page asks.
       await evaluate(
@@ -912,6 +952,133 @@ async function air(): Promise<void> {
   );
 }
 
+/**
+ * The AIR application `through` a proxy: its socket, its HTTP load and its
+ * WebSockets, ws: and wss:, the switch's host unverified and another name
+ * refused, as without one. Run after air(), whose directory it plays.
+ */
+async function airThroughProxy(through: TestProxy, credentials = ""): Promise<void> {
+  const echo: Parameters<typeof webSocketServer>[0] = {
+    protocol: () => "smoke",
+    message: (peer, data) => {
+      peer.send(
+        typeof data === "string"
+          ? data === "ping"
+            ? "pong"
+            : "?"
+          : Uint8Array.from(data).reverse(),
+      );
+      if (typeof data !== "string") {
+        peer.close(4001);
+      }
+    },
+  };
+  const webSockets = await webSocketServer(echo);
+  const secure = existsSync(`${out}air-cert.pem`)
+    ? await webSocketServer(echo, {
+        key: readFileSync(`${out}air-key.pem`),
+        cert: readFileSync(`${out}air-cert.pem`),
+      })
+    : null;
+  const served = await httpSite({ "/data.txt": ["text/plain", "served"] });
+  try {
+    await withApp(
+      { ...both, sockets: {} },
+      [
+        `--proxy=${through.url(credentials)}`,
+        "--log-network",
+        "--ignore-certificate-errors=127.0.0.1",
+        `${out}air-app/AirSmoke-app.xml`,
+        "--",
+        String(port),
+        "x",
+        `${served.origin}/data.txt`,
+        String(webSockets.port),
+        ...(secure ? [String(secure.port)] : []),
+      ],
+      async ({ stdout, stderr, until }) => {
+        const lines = [
+          "air: socket pong",
+          "air: http served",
+          "air: websocket text pong",
+          "air: websocket binary 3 255,2,1",
+          "air: websocket close 4001",
+          ...(secure ? ["air: wss-address binary 3 255,2,1", "air: wss-name refused"] : []),
+        ];
+        await until("the AIR application through the proxy", () =>
+          lines.every((line) => stdout.includes(line)),
+        );
+        // A WebSocket's host and the socket's go to the proxy by name where they were named so;
+        // no rule judged an address for them.
+        const servedPort = served.origin.slice(served.origin.lastIndexOf(":") + 1);
+        for (const target of [
+          `127.0.0.1:${port}`,
+          `127.0.0.1:${servedPort}`,
+          `127.0.0.1:${webSockets.port}`,
+          ...(secure ? [`127.0.0.1:${secure.port}`, `localhost:${secure.port}`] : []),
+        ]) {
+          assert.ok(through.targets.includes(target), `${target} ${through.targets}`);
+        }
+
+        assert.match(
+          stderr(),
+          new RegExp(
+            `swf2es: websocket #1 connecting to ws://127\\.0\\.0\\.1:${webSockets.port}/smoke\\?q=1 via proxy`,
+          ),
+        );
+      },
+    );
+  } finally {
+    served.server.close();
+    await webSockets.close();
+    await secure?.close();
+  }
+}
+
+/**
+ * A proxy that refuses: the wrong password, and a proxy that is not there.
+ * The SWF does not play, as from a server that is not there, and stderr
+ * says why, never the password.
+ */
+async function proxyRefused(through: TestProxy): Promise<void> {
+  const site = await httpSite({ "/movie.swf": ["application/x-shockwave-flash", "FWS"] });
+  const url = `${site.origin}/movie.swf`;
+  const closed = createServer();
+  await new Promise<void>((done) => closed.listen(0, "127.0.0.1", done));
+  const free = (closed.address() as { port: number }).port;
+  await new Promise((done) => closed.close(done));
+  try {
+    for (const [proxy, why] of [
+      [through.url("me:wrong-word"), /refused the username and password/],
+      [`socks5://me:wrong-word@127.0.0.1:${free}`, /is not reached/],
+    ] as const) {
+      await withApp(both, [`--proxy=${proxy}`, url], async ({ stderr, until, evaluate }) => {
+        const shown = new RegExp(
+          `swf2es: not loading ${url.replaceAll(".", "\\.")}: the proxy \\S+ `,
+        );
+        await until("the proxy's refusal", () => shown.test(stderr()));
+        assert.match(stderr(), why);
+        assert.ok(!stderr().includes("wrong-word"), stderr());
+        let failure = "";
+        for (let tries = 0; !failure.includes("did not play") && tries < 100; tries++) {
+          failure = await evaluate<string>(`document.getElementById("failure").textContent`);
+          await sleep(50);
+        }
+
+        assert.match(failure, /did not play/);
+      });
+    }
+  } finally {
+    site.server.close();
+  }
+
+  // A --proxy that does not parse stops the app, rather than playing without it.
+  await assert.rejects(
+    withApp(both, ["--proxy", "socks5://127.0.0.1:1", url], async () => {}),
+    /--proxy takes its URL after an equals sign/,
+  );
+}
+
 // The playerglobal the tests play on: the app's own, or
 // Flash Player's under SWF2ES_PLAYERGLOBAL=adobe.
 const both = {
@@ -1137,6 +1304,22 @@ try {
 
   await remote();
   await air();
+
+  // Through proxies of the test's own: a SOCKS5 one with a password, and an HTTP one.
+  const socks = await testProxy("socks5", {
+    credentials: { username: "me", password: "pass-word" },
+  });
+  const http = await testProxy("http");
+  try {
+    await remote(socks, "me:pass-word");
+    await remote(http);
+    await airThroughProxy(socks, "me:pass-word");
+    await airThroughProxy(http);
+    await proxyRefused(socks);
+  } finally {
+    await socks.close();
+    await http.close();
+  }
 
   console.log("desktop smoke test: ok");
 } finally {
