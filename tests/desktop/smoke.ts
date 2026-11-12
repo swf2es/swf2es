@@ -355,7 +355,8 @@ async function remote(): Promise<void> {
   const settings = { ...both, sockets: { [url]: endpoints, [again]: endpoints } };
 
   try {
-    await withApp(settings, [url], async ({ stdout, stderr, until, evaluate, page, userData }) => {
+    const args = ["--log-network", url];
+    await withApp(settings, args, async ({ stdout, stderr, until, evaluate, page, userData }) => {
       const traced = (line: string) => stdout.filter((l) => l === line).length;
       const settled = (n: number) => () =>
         ["same", "allowed", "denied", "file", "local", "socket-ok", "socket-no"].every(
@@ -382,6 +383,16 @@ async function remote(): Promise<void> {
         stderr(),
         new RegExp(`no socket to 127\\.0\\.0\\.1:${bad.port}: no socket policy`),
       );
+      // --log-network: the SWF's own load, a request it made, and its sockets, as the
+      // page's DevTools show none of them.
+      const escaped = url.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      assert.match(stderr(), new RegExp(`swf2es: net GET ${escaped} 200 [\\d.]+ k?B \\d+ ms`));
+      assert.match(stderr(), /swf2es: net GET \S+\/data\.txt 200 \d+ B \d+ ms/);
+      assert.match(
+        stderr(),
+        new RegExp(`swf2es: socket #\\d+ connecting to 127\\.0\\.0\\.1:${good.port}`),
+      );
+      assert.match(stderr(), /swf2es: socket #\d+ open/);
       // Nor may the page read the local SWF's files while a remote one plays.
       assert.equal(
         await evaluate<number>(`fetch("swf2es://file/${token}/data.txt").then((r) => r.status)`),

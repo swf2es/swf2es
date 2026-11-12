@@ -283,6 +283,7 @@ the builtin.abc and playerglobal the player ships.
 | Option | What it does |
 | --- | --- |
 | `--trace` | Prints what the SWF traces to the terminal: `trace()` to stdout, warnings and errors to stderr. |
+| `--log-network` | Prints each request and socket of the SWF to stderr: method, URL, status, size and time. The window's DevTools show none of them, as the main process sends them. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
