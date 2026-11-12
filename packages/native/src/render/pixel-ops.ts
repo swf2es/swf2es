@@ -14,6 +14,7 @@ export interface PixelExports {
   resetArena(bytes: number): number;
   channelPixels(params: number): number;
   mergePixels(params: number): number;
+  overPixels(params: number): number;
   palettePixels(params: number): number;
   matrixPixels(params: number): number;
   transformPixels(params: number): number;
@@ -46,6 +47,7 @@ export interface Progress {
 export type CopyOp =
   | { op: "channel"; from: number; to: number }
   | { op: "merge"; muls: readonly [number, number, number, number] }
+  | { op: "over" }
   | { op: "palette"; tables: readonly [Uint32Array, Uint32Array, Uint32Array, Uint32Array] }
   | {
       op: "matrix";
@@ -112,7 +114,7 @@ export function copyRows(
       src = base + rows * w;
       stride = w;
       // paletteMap's and a colour matrix's pixels are the source's alone: the destination's are not read.
-      const reads = op.op === "channel" || op.op === "merge";
+      const reads = op.op === "channel" || op.op === "merge" || op.op === "over";
       for (let row = 0; row < rows; row++) {
         if (reads) {
           const to = (dy0 + row) * intoWidth + dx;
@@ -143,6 +145,9 @@ export function copyRows(
         }
 
         ok = wasm.mergePixels(at);
+        break;
+      case "over":
+        ok = wasm.overPixels(at);
         break;
       case "palette": {
         params.setUint32(32, at + HEAD, true);

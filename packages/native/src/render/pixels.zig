@@ -183,6 +183,59 @@ pub fn merge(dst: [*]u32, src: [*]const u32, p: *const MergeParams) void {
     copied(dst, src, p.rows, Ctx.f, Ctx{ .muls = .{ p.muls[0], p.muls[1], p.muls[2], p.muls[3] } });
 }
 
+/// copyPixels' merge, a pixel premultiplied over another as Flash blends them: s + ((d * (256 -
+/// sa)) >> 8) a channel, at most 255, and d where s is clear.
+fn overOne(s: u32, d: u32) u32 {
+    const sa = s >> 24;
+    if (sa == 255) return s;
+    if (sa == 0) return d;
+    const k = 256 - sa;
+    var out: u32 = 0;
+    inline for (.{ 0, 8, 16, 24 }) |shift| {
+        const c: u32 = @min(255, ((s >> shift) & 0xff) + ((((d >> shift) & 0xff) * k) >> 8));
+        out |= c << shift;
+    }
+
+    return out;
+}
+
+/// `overOne` four pixels at a time, a byte of each channel widened to 16 bits: d * (256 - sa)
+/// is at most 65,280.
+fn overFour(s: @Vector(4, u32), d: @Vector(4, u32)) @Vector(4, u32) {
+    const sb: @Vector(16, u8) = @bitCast(s);
+    const db: @Vector(16, u8) = @bitCast(d);
+    // Each pixel's alpha, its fourth byte, in all four of its lanes.
+    const alpha = @shuffle(u8, sb, undefined, @Vector(16, i32){ 3, 3, 3, 3, 7, 7, 7, 7, 11, 11, 11, 11, 15, 15, 15, 15 });
+    const a16: @Vector(16, u16) = @intCast(alpha);
+    const k = @as(@Vector(16, u16), @splat(256)) - a16;
+    const s16: @Vector(16, u16) = @intCast(sb);
+    const d16: @Vector(16, u16) = @intCast(db);
+    const sum = @min(s16 + ((d16 * k) >> @splat(8)), @as(@Vector(16, u16), @splat(255)));
+    const blended: @Vector(16, u8) = @intCast(sum);
+    const clear = alpha == @as(@Vector(16, u8), @splat(0));
+    return @bitCast(@select(u8, clear, db, blended));
+}
+
+/// copyPixels with mergeAlpha, or into an opaque store: each source pixel over the
+/// destination's, both premultiplied, and opaque where the store is. The source is never
+/// the destination here: copyPixels blends in place by its own loop, in Flash's order.
+pub fn over(dst: [*]u32, src: [*]const u32, p: Rows) void {
+    const solid: u32 = if (p.transparent != 0) 0 else 0xff000000;
+    const solids: @Vector(4, u32) = @splat(solid);
+    for (0..p.h) |row| {
+        const d = dst + row * p.dst_stride;
+        const s = src + row * p.src_stride;
+        var i: usize = 0;
+        while (i + 4 <= p.w) : (i += 4) {
+            d[i..][0..4].* = overFour(s[i..][0..4].*, d[i..][0..4].*) | solids;
+        }
+
+        while (i < p.w) : (i += 1) {
+            d[i] = overOne(s[i], d[i]) | solid;
+        }
+    }
+}
+
 pub fn paletteMap(dst: [*]u32, src: [*]const u32, p: *const PaletteParams, tables: *const [1024]u32) void {
     const Ctx = struct {
         t: *const [1024]u32,
@@ -474,6 +527,41 @@ test "merge mixes each channel by its multiplier, unclamped and wrapped" {
     const p: MergeParams = .{ .rows = .{ .w = 1, .h = 1, .dst = 0, .dst_stride = 1, .src = 0, .src_stride = 1, .transparent = 1, .unused = 0 }, .muls = .{ 128, 0, 256, 256 } };
     merge(&dst, &src, &p);
     try std.testing.expectEqual(@as(u32, 0xff7f00ff), dst[0]);
+}
+
+test "over four pixels at a time is over one at a time, for every alpha and odd colours" {
+    var prng = std.Random.DefaultPrng.init(17);
+    const random = prng.random();
+    var src: [4 * 67]u32 = undefined;
+    var dst: [4 * 67]u32 = undefined;
+    var expected: [4 * 67]u32 = undefined;
+    for (0..2000) |round| {
+        for (&src, &dst) |*s, *d| {
+            // Every source alpha, its colour premultiplied or not, as a store may hold it.
+            const a: u32 = if (round % 3 == 0) random.uintAtMost(u32, 255) else switch (random.uintLessThan(u32, 3)) {
+                0 => 0,
+                1 => 255,
+                else => random.uintAtMost(u32, 255),
+            };
+            const rgb = random.int(u32) & 0xffffff;
+            s.* = if (round % 2 == 0) premultiply((a << 24) | rgb) else (a << 24) | rgb;
+            d.* = random.int(u32);
+        }
+
+        const transparent: u32 = @intCast(round % 2);
+        for (&expected, src, dst) |*e, s, d| {
+            e.* = overOne(s, d) | @as(u32, if (transparent != 0) 0 else 0xff000000);
+        }
+
+        // 67 pixels a row: sixteen of four and three left over.
+        over(&dst, &src, .{ .w = 67, .h = 4, .dst = 0, .dst_stride = 67, .src = 0, .src_stride = 67, .transparent = transparent, .unused = 0 });
+        try std.testing.expectEqualSlices(u32, &expected, &dst);
+    }
+
+    try std.testing.expectEqual(@as(u32, 0x80402010), overOne(0x00ffffff, 0x80402010));
+    try std.testing.expectEqual(@as(u32, 0xffffffff), overOne(0xffffffff, 0x80402010));
+    // Half a red over white: 128 + 255 * 128 / 256 = 255, and 0 + 127 for green and blue.
+    try std.testing.expectEqual(@as(u32, 0xffff7f7f), overOne(0x80800000, 0xffffffff));
 }
 
 test "a copy in place reads what the pixels before it wrote" {

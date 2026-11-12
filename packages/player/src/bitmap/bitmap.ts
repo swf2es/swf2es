@@ -5,6 +5,7 @@
 // c = min(255, (c' * floor(0xFF00 / a) + 127) >> 8), 0 for alpha 0. An
 // opaque bitmap keeps every alpha at 255.
 import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
+import { bitmapKernel } from "./kernel.js";
 
 export interface PixelRect {
   x: number;
@@ -82,6 +83,9 @@ export function spanRect(x: number, y: number, width: number, height: number): P
 
 /** No gaps, shared by every copy that leaves none. */
 const NO_GAPS: readonly PixelRect[] = [];
+/** The fewest pixels copyPixels blends in the native module rather than here. */
+const NATIVE_OVER = 2048;
+const OVER = { op: "over" } as const;
 
 /** The reciprocals Flash divides alpha out with, 8.8 fixed point. */
 const RECIPROCAL = new Uint32Array(256);
@@ -504,8 +508,17 @@ export class BitmapStore {
     }
 
     if (!mask && source !== this && (mergeAlpha || !this.transparent)) {
-      // Source over destination, as composite does, written out: a blit of sprites, the
-      // commonest copy a game makes each frame, skips what is clear and takes what is solid.
+      // Source over destination, as composite does: a blit of sprites, the commonest copy a
+      // game makes each frame. Four pixels at a time in the native module where there are
+      // enough to pay for copying them in and out; else written out here, which skips what
+      // is clear and takes what is solid.
+      const kernel = d.width * d.height >= NATIVE_OVER ? bitmapKernel() : null;
+      if (kernel) {
+        kernel.copy(into, this.width, pixels, source.width, d, sx, sy, this.transparent, OVER);
+        this.changed();
+        return;
+      }
+
       const solid = this.transparent ? 0 : 0xff000000;
       for (let r = 0; r < d.height; r++) {
         const to = (d.y + r) * this.width + d.x;
