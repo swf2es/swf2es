@@ -82,6 +82,8 @@ export function place(
  * coordinates; `css` is where the canvas goes in the box, in CSS pixels.
  * exactFit stretches the stage to the box, one axis more than the other,
  * which leaves no margin: the canvas is the stage, stretched by CSS.
+ * The stage's own corner is at (0, 0) but for a SWF whose frame starts
+ * elsewhere, whose viewport `viewport` moves by that origin.
  */
 export interface Viewport {
   x: number;
@@ -92,7 +94,11 @@ export interface Viewport {
   css: { x: number; y: number; width: number; height: number };
 }
 
-/** The viewport for `placed`, the stage of `stageWidth` by `stageHeight` placed in a box of `boxWidth` by `boxHeight`. */
+/**
+ * The viewport for `placed`, the stage of `stageWidth` by `stageHeight` placed in a box of
+ * `boxWidth` by `boxHeight`. The stage's shown corner is (`originX`, `originY`): where the
+ * SWF's frame starts, which Flash places as it would the corner of one that starts at (0, 0).
+ */
 export function viewport(
   stageWidth: number,
   stageHeight: number,
@@ -100,12 +106,14 @@ export function viewport(
   boxHeight: number,
   mode: ScaleMode,
   placed: Placement,
+  originX = 0,
+  originY = 0,
 ): Viewport {
   const scale = placed.width / stageWidth;
   if (mode === "exactFit" || !(scale > 0) || !(boxWidth > 0) || !(boxHeight > 0)) {
     return {
-      x: 0,
-      y: 0,
+      x: originX,
+      y: originY,
       width: stageWidth,
       height: stageHeight,
       resolution: placed.resolution,
@@ -116,8 +124,8 @@ export function viewport(
   const width = boxWidth / scale;
   const height = boxHeight / scale;
   return {
-    x: placed.x ? -placed.x / scale : 0,
-    y: placed.y ? -placed.y / scale : 0,
+    x: originX + (placed.x ? -placed.x / scale : 0),
+    y: originY + (placed.y ? -placed.y / scale : 0),
     width,
     height,
     // As fine as the stage, whose MAX_SIDE bounds it: the canvas then has at most the box's device pixels.

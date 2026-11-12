@@ -76,10 +76,16 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     o.$format = { ...values, tabStops: values.tabStops ? [...values.tabStops] : null };
     return o;
   };
-  /** The text or the field changed: drawn again, and fitted to its text under autoSize. */
+  /**
+   * The text or the field changed: drawn again, and under autoSize fitted to
+   * its text once its place is asked or the frame drawn, as after a set size.
+   * So a field given its text as it grows rightwards and then told to grow
+   * leftwards keeps the right edge it had with no text, as a label placed
+   * left of what it names does (adl).
+   */
   const changed = (o: { $display: TextObject }) => {
     o.$display.invalidate(CONTENT);
-    o.$display.fit();
+    o.$display.deferFit();
   };
   /** A line's index, or RangeError 2006 past the lines. */
   const lineAt = (field: TextObject, v: Value): number => {

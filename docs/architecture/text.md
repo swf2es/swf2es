@@ -61,7 +61,10 @@ pair's kerning (its boundaries stay); a run of a device font in one
 format as one item on the line's baseline (`scene/text.ts`), which a
 canvas rasterizes white and its row colours. A device font
 (`_sans`, `_serif`, `_typewriter`) is the browser's of that kind, any
-other by its name. Bullets, underlines, input and selection are still
+other by its name; where the machine has no such font, a serif one, as
+Flash's default is, unless the name is a well-known sans-serif or
+monospace system font (Tahoma, Verdana, Consolas), which gets one of its
+kind. Bullets, underlines, input and selection are still
 to come.
 
 A field whose `antiAliasType` is advanced has its embedded glyphs drawn
@@ -134,9 +137,14 @@ next one, which swf2es's does not; tab stops, the boundaries adl leaves out for 
 field's height, and those of a timeline's field, which adl gives 2
 pixels further right and down than its lines, are still to come.
 `autoSize` makes the field the text's size and 4 pixels, keeping its
-left, centre or right edge. A device font's metrics are the browser's
-font's, measured by the host, which Flash's own system fonts differ
-from.
+left, centre or right edge. The fit a script's change of the text, the
+size or `autoSize` asks for waits, as Flash's does, until the field's
+place, size or bounds are asked, it is drawn or hit, or the frame is
+drawn, and is by the `autoSize` of then: a label given its text and then
+`autoSize` right keeps the right edge it had before the text
+(`text-autosize-later`, `text-autosize-text-later`). A device font's
+metrics are the browser's font's, measured by the host, which Flash's
+own system fonts differ from.
 
 Static text (DefineText, DefineText2) is a `StaticText`: its records'
 glyphs where the authoring tool put them, each record keeping the font,

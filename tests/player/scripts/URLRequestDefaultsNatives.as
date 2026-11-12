@@ -19,7 +19,7 @@ package {
 
     // The agent is AIR's own on adl's Windows, the player's platform here.
     private static function agent(v:*):String {
-      return String(v).indexOf("AdobeAIR/51.3") > 0 ? "air" : JSON.stringify(v);
+      return String(v).indexOf("AdobeAIR/") > 0 ? "air" : JSON.stringify(v);
     }
 
     private function report(label:String, o:Object):void {

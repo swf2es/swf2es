@@ -608,6 +608,8 @@ async function surfaceFor(
     samples: antialias ? 4 : 1,
   });
   view.quality = player.quality;
+  // The SWF's frame, which starts where its header says.
+  view.setViewport(player.originX, player.originY, player.width, player.height);
   // Drawn n times finer to be averaged down: the screen is the output canvas.
   view.screenScale = shownAt;
   view.scale = shownAt / zoom;

@@ -78,6 +78,12 @@ const RESET_END: u32 = 11;
 const MAX_HELD: u32 = 1024;
 const MAX_HELD_TEXT: u32 = 1 << 20;
 
+/**
+ * In a method's types, the entry of a method of a primitive's class
+ * (methodSlot): below the names', which count down from -1.
+ */
+export const METHOD_SLOT: i32 = i32.MIN_VALUE;
+
 @final
 export class MethodEmitter {
   out: Output = new Output();
@@ -124,6 +130,14 @@ export class MethodEmitter {
    */
   literalMultinames: u32[] = [];
   literalStrings: u32[] = [];
+  /**
+   * The methods of primitives' classes the method calls, each kept in an
+   * entry of T from its first call on: the class and the dispatch id of
+   * each and its index in types, which holds METHOD_SLOT there.
+   */
+  heldTypes: i32[] = [];
+  heldMethods: u32[] = [];
+  heldSlots: u32[] = [];
   /**
    * By string: the index in types of the last such name of it, where its
    * stamp is typeGen. Two multinames with one string in a method, which is
@@ -803,6 +817,9 @@ export class MethodEmitter {
     this.types.length = 0;
     this.literalMultinames.length = 0;
     this.literalStrings.length = 0;
+    this.heldTypes.length = 0;
+    this.heldMethods.length = 0;
+    this.heldSlots.length = 0;
     if (++this.typeGen === 0) {
       // Every 2^32 methods, the stamps of the first generation would match again.
       const stamp = this.typeStamp;
@@ -878,6 +895,30 @@ export class MethodEmitter {
     this.literalStrings.push(string);
     this.literalStamp[string] = this.typeGen;
     this.literalIndex[string] = slot;
+
+    return slot;
+  }
+
+  /**
+   * The index in the method's T of the method by dispatch id `disp` of
+   * type t's prototype, given it the next if new: empty as the module
+   * loads, when the class may not be set up, and filled by the first call.
+   */
+  methodSlot(t: i32, disp: u32): u32 {
+    // A method calls few of them: a search costs less than tables by type.
+    const types = this.heldTypes;
+    const methods = this.heldMethods;
+    for (let k = 0; k < types.length; k++) {
+      if (types[k] === t && methods[k] === disp) {
+        return this.heldSlots[k];
+      }
+    }
+
+    const slot = <u32>this.types.length;
+    this.types.push(METHOD_SLOT);
+    types.push(t);
+    methods.push(disp);
+    this.heldSlots.push(slot);
 
     return slot;
   }

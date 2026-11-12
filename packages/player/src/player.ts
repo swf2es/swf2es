@@ -66,6 +66,15 @@ export class Player {
   readonly library: Library;
   readonly width: number;
   readonly height: number;
+  /**
+   * Where the SWF's frame starts, in pixels: (0, 0) as a rule, but Flash
+   * honours a header whose rectangle starts elsewhere. The stage's
+   * coordinates stay the SWF's, the root at (0, 0), and the player shows
+   * the frame's rectangle: a host draws the stage from this point (a view's
+   * setViewport) and takes the pointer by it.
+   */
+  readonly originX: number;
+  readonly originY: number;
   frameRate: number;
   private readonly swfBackground: number;
   /** The stage's colour, 0xRRGGBB: the SWF's SetBackgroundColor until a script sets Stage.color; a host that reads it each frame follows that. */
@@ -134,6 +143,8 @@ export class Player {
     warmAudioFor(scripting?.audio ?? avm1?.audio ?? null, this.library);
     this.width = Math.round((this.swf.frameSize.xMax - this.swf.frameSize.xMin) / 20);
     this.height = Math.round((this.swf.frameSize.yMax - this.swf.frameSize.yMin) / 20);
+    this.originX = this.swf.frameSize.xMin / 20;
+    this.originY = this.swf.frameSize.yMin / 20;
     setStageSize(this.stage, this.width, this.height);
     this.frameRate = this.swf.frameRate || 24;
     this.swfBackground = backgroundColor(this.swf);
@@ -147,6 +158,9 @@ export class Player {
     this.pointer = pointer ?? this.avm1Pointer;
     this.touch = pointer && scripting ? new TouchInput(this.stage, scripting, pointer) : null;
     if (scripting) {
+      // Until a host says what it shows, the frame's rectangle.
+      scripting.stageViewportX = this.originX;
+      scripting.stageViewportY = this.originY;
       scripting.pointer = pointer;
       scripting.touch = this.touch;
     }

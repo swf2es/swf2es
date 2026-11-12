@@ -179,11 +179,11 @@ export class Replay {
     }
   }
 
-  /** A recorded position, the window's, as the stage's. */
+  /** A recorded position, the window's, as the stage's: the window's corner shows the frame's. */
   private at(pos: unknown): void {
     const [x, y] = pos as [number, number];
-    this.x = (x - this.left) / this.scale;
-    this.y = (y - this.top) / this.scale;
+    this.x = (x - this.left) / this.scale + this.player.originX;
+    this.y = (y - this.top) / this.scale + this.player.originY;
   }
 
   /** A frame has run: the events up to the next Wait. */

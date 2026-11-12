@@ -208,6 +208,13 @@ nn(s1);`. A method's count of arguments is checked first, as avmplus'
 to three. Neither `nn`'s frame nor `ac`'s is named with a `$`, so the
 stack a host is shown starts at the method, as before.
 
+A public `length` read on a value typed `*` or Object tells a string
+first, whose length is read in place: `typeof s1 === "string" ?
+s1.length : rt.getProperty(s1 ?? nn(s1), M[3])`. A string has no other
+property, its class's getter cannot be replaced or hidden, and the
+lookup costs several times the read; the value is read from its
+register, so an expression is evaluated once.
+
 A call the verifier binds (`callmethod`, a bound setter) has coerced its
 arguments to the callee's parameter types and passes a count the callee
 takes, as avmplus' JIT coerces at the call site. So a method of some
@@ -501,7 +508,13 @@ Generated methods follow one calling convention. A slot is the field `$n`,
 by its slot id from 0, and a method, getter or setter is `$mn` on the
 prototype, by its dispatch id (`$bn` too, for bound calls); dynamic properties are kept apart from
 both. A method of a primitive receiver is called through its class's
-prototype, `rt.prototypeOf(int).$mn.call(x, ...)`. A method's own scope
+prototype, `(T[k] ??= rt.prototypeOf(int).$mn).call(x, ...)`, which the
+calling method keeps in an entry of its table T from the first call on:
+the prototype has it for good once the class is set up, and is not
+there to read it from when the module loads. A String's `length`, its
+only getter, is read from the string itself, and its `AS3::charAt` and
+`AS3::charCodeAt` by a number, or by nothing, are the string's own
+methods, as the natives call them. A method's own scope
 registers and the chain it captured are passed to the runtime together
 when it looks a name up or creates a function or class, with a bit per
 scope for the with scopes.

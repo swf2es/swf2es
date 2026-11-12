@@ -171,3 +171,22 @@ test("a full screen source rect alone is shown, fitted and centred whatever the 
   assert.deepEqual(tall.css, { x: 412, y: 0, width: 200, height: 768 });
   assert.equal(tall.resolution, 4);
 });
+
+test("a frame that starts at (100, 50) is placed as one from (0, 0), the viewport moved by it", () => {
+  // As adl places a 550 by 400 frame from (100, 50) in a window of 792 by 466.
+  const at = (mode: ScaleMode, salign: string | null) => {
+    const placed = place(550, 400, 792, 466, mode, salign, 1);
+    const view = viewport(550, 400, 792, 466, mode, placed, 100, 50);
+    return [view.x, view.y, view.width, view.height];
+  };
+
+  assert.deepEqual(at("noScale", "TL"), [100, 50, 792, 466]);
+  // Centred, the frame's corner 121 pixels in and 33 down.
+  assert.deepEqual(at("noScale", null), [-21, 17, 792, 466]);
+  assert.deepEqual(at("noScale", "BR"), [-142, -16, 792, 466]);
+  assert.deepEqual(at("exactFit", null), [100, 50, 550, 400]);
+  // showAll at 1.165: the frame's corner 75.625 window pixels in, and at the top.
+  const [x, y] = at("showAll", null);
+  assert.ok(Math.abs(x - (100 - 75.625 / 1.165)) < 1e-9);
+  assert.equal(y, 50);
+});

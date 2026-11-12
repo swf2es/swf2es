@@ -178,6 +178,12 @@ node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs]   # AVM1 names
 node tests/bench/typed/run.ts [<dir A> <dir B>] [runs]   # new of classes and calls the compiler
                               # binds (class-typed parameters given subclasses, interfaces, null),
                               # as the ones above
+node tests/bench/vector/run.ts [<dir A> <dir B>] [runs]   # indexed reads, writes, push and pop on
+                              # Vectors of int, Number, String, Object and a class, and on Arrays,
+                              # as the ones above
+node tests/bench/primitives/run.ts [<dir A> <dir B>] [runs]   # the methods of String, int and
+                              # Number on values typed as them (charCodeAt, charAt, indexOf,
+                              # substring, toString, toFixed), as the ones above
 node tests/bench/players.ts [--runs N] [--ruffle DIR] [--flash32 EXE] [--flash11 EXE] [--wine CMD]
     [--only swf2es,ruffle,adl,flash32,flash11] [--json FILE] [--write-swf DIR] [bench...]
                               # the enumeration, dictionary, vector, as3pb and lz4 benchmarks as SWFs, timed
