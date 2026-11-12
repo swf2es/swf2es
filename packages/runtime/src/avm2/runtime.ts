@@ -245,6 +245,13 @@ export class Runtime {
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
+  /**
+   * What the super operations of a script's methods and of a class's
+   * static ones look in, as avmplus' script traits extend Object and a
+   * class object's traits Class: their `super` is that class's instance.
+   */
+  readonly scriptSuper: AsObject;
+  readonly staticSuper: AsObject;
   readonly functionTraits: Traits;
   /**
    * Method closures, by receiver and method, so that o.f === o.f; by the
@@ -300,6 +307,8 @@ export class Runtime {
     this.objectTraits.dynamic = true;
     this.objectTraits.testsValues = true;
     this.classTraits = new Traits("Class", this.objectTraits);
+    this.scriptSuper = { $it: this.objectTraits };
+    this.staticSuper = { $it: this.classTraits };
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
     this.natives = typeof natives === "function" ? natives(this) : natives;
@@ -645,7 +654,7 @@ export class Runtime {
           this,
           traits.methodHome(3),
           d,
-          withId(factory(this.empty, null), id),
+          withId(factory(this.empty, this.scriptSuper), id),
           factory,
           params,
         );
@@ -678,7 +687,7 @@ export class Runtime {
     if (script.state === 0 || (retry && script.state === 3)) {
       script.state = 1;
       try {
-        script.desc.init(this.empty, null).call(g);
+        script.desc.init(this.empty, this.scriptSuper).call(g);
       } catch (e) {
         script.state = 3;
         throw e;

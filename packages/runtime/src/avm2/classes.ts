@@ -151,7 +151,14 @@ export function newClass(
 
   const iscope = rt.scope(scope, [cls], 0);
   for (const [d, factory, id, , params] of desc.static.methods) {
-    installMethod(rt, straits.methodHome(3), d, withId(factory(scope, base), id), factory, params);
+    installMethod(
+      rt,
+      straits.methodHome(3),
+      d,
+      withId(factory(scope, rt.staticSuper), id),
+      factory,
+      params,
+    );
   }
 
   for (const [d, factory, id, , params] of desc.instance.methods) {
@@ -198,7 +205,7 @@ export function newClass(
   // resolves from traits, before initproperty has stored it anywhere.
   rt.defining.set(qualified, cls);
   try {
-    desc.cinit(scope, base).call(cls);
+    desc.cinit(scope, rt.staticSuper).call(cls);
   } finally {
     rt.defining.delete(qualified);
   }
