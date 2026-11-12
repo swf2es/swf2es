@@ -712,7 +712,8 @@ async function playSwf2es(swf: Uint8Array, { kind, stage3D = false }: Bench): Pr
   }
 
   // A script runs in the first frame; LZ4's from the second, after Crossbridge's preloader.
-  const [result] = await runPlayer([{ swf, frames: 4, capture: [] }], {
+  // By the wall clock: a benchmark timed by getTimer, as Crossbridge's clock is, reads 0 by the frames.
+  const [result] = await runPlayer([{ swf, frames: 4, capture: [], realTime: true }], {
     timeout: SCRIPT_SECONDS * 1000,
   });
   if (result.error) {
