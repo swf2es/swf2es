@@ -501,7 +501,8 @@ Generated methods follow one calling convention. A slot is the field `$n`,
 by its slot id from 0, and a method, getter or setter is `$mn` on the
 prototype, by its dispatch id (`$bn` too, for bound calls); dynamic properties are kept apart from
 both. A method of a primitive receiver is called through its class's
-prototype, `rt.prototypeOf(int).$mn.call(x, ...)`. A method's own scope
+prototype, `rt.prototypeOf(int).$mn.call(x, ...)`; a String's `length`,
+its only getter, is read from the string itself. A method's own scope
 registers and the chain it captured are passed to the runtime together
 when it looks a name up or creates a function or class, with a bit per
 scope for the with scopes.
