@@ -64,7 +64,10 @@ if (!build || appRoot.includes(`${join("node_modules", "@swf2es")}`)) {
   build = JSON.parse(readFileSync(join(appRoot, "package.json"), "utf8")).version;
 }
 
-const env = { ...process.env, SWF2ES_DESKTOP_BUILD: build };
+const env: NodeJS.ProcessEnv = { ...process.env, SWF2ES_DESKTOP_BUILD: build };
+// Set by tools that are Electron apps themselves, an editor's terminals and tasks among them,
+// for the node they run: here it would make Electron run the app's main module as plain node.
+delete env.ELECTRON_RUN_AS_NODE;
 const child = spawn(electronBinary() as string, [appRoot, ...args], { stdio: "inherit", env });
 child.on("exit", (code, signal) => process.exit(signal ? 1 : (code ?? 0)));
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

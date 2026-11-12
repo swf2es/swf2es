@@ -12,6 +12,14 @@ import type { Runtime } from "./runtime.js";
 export class AsError extends Error {}
 
 /**
+ * Thrown where a SWF asks for something swf2es has not got (Runtime.unsupported).
+ * Uncaught, it stops the script as any error of the runtime's own does; an
+ * AS3 catch gets it as an AS3 error (Runtime.caught), since content written
+ * for several runtimes guards what one of them may lack with try and catch.
+ */
+export class UnsupportedError extends Error {}
+
+/**
  * Where an AS3 error was made, as JavaScript stack lines from the first
  * compiled method's (their names begin with `$`), the runtime's and the
  * player's frames before it left out, those between kept; every line if

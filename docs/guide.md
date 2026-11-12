@@ -289,6 +289,12 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
 
+npx reads the first `--` on its command line as the end of its own
+options, so an application's arguments need one before the package too:
+`npx -- @swf2es/desktop app.xml -- --server=local` (with `-y`, `npx -y --
+@swf2es/desktop …`). The installed command, `swf2es-desktop`, takes them as
+they are.
+
 `--ignore-certificate-errors` is for a server of your own whose certificate
 it signed itself. Whoever sits between you and such a host can then read and
 change what the SWF loads from it, so name the hosts you mean, and leave the
