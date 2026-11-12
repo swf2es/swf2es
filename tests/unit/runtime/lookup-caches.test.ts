@@ -92,3 +92,32 @@ test("a sealed object's name its prototype has is found until the prototype lose
     "ReferenceError: Error #1069",
   );
 });
+
+test("a captured chain's scope for a name follows its bindings, and a with scope's properties", () => {
+  const rt = avm2.createRuntime();
+  const a = name(rt, "a");
+  const outer = slots(rt.objectTraits, ["b"], 0).instance();
+  const binds = slots(rt.objectTraits, ["a"], 0).instance();
+  const innerTraits = slots(rt.objectTraits, ["c"], 0);
+  const inner = innerTraits.instance();
+  const chain = rt.scope(rt.empty, [outer, binds, inner], 0);
+  for (let i = 0; i < 3; i++) {
+    assert.equal(rt.findProperty(a, chain, [], 0), binds);
+  }
+
+  // The innermost scope's traits come to bind it too.
+  innerTraits.describe({
+    slots: 2,
+    defaults: [[1, 0, null]],
+    bindings: [[avm2.publicNs, 0, "a", (1 << 3) | BIND_Var]],
+    methods: [],
+  });
+  assert.equal(rt.findProperty(a, chain, [], 0), inner);
+
+  // A with scope has it once it has the property.
+  const withObject = rt.objectTraits.instance();
+  const withChain = rt.scope(rt.empty, [outer, binds, withObject], 0b100);
+  assert.equal(rt.findProperty(a, withChain, [], 0), binds);
+  rt.setProperty(withObject, a, 1);
+  assert.equal(rt.findProperty(a, withChain, [], 0), withObject);
+});

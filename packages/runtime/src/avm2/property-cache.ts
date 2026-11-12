@@ -17,7 +17,7 @@
 // no entry for is kept on those traits instead, by name, so that the one
 // class it is mostly read on is not left to the full lookup.
 
-import type { Method, TypeRef } from "./descriptors.js";
+import type { AsObject, Method, TypeRef } from "./descriptors.js";
 import type { Multiname } from "./names.js";
 import type { Traits } from "./traits.js";
 
@@ -194,3 +194,13 @@ function traitsEntry(t: Traits, mn: Multiname): PropertyCache {
   return e;
 }
 
+/**
+ * Which of a scope chain's objects binds each name findProperty looked up
+ * on it, the innermost that does, or null where none does, in the epoch it
+ * was found in: a chain's objects never change, nor do their traits'
+ * bindings within an epoch. Only for a chain without a with scope, which
+ * has a name by its dynamic properties too.
+ */
+export class ScopeFinds extends Map<Multiname, AsObject | null> {
+  epoch = current;
+}
