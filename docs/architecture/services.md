@@ -123,7 +123,10 @@ classes, so neither is the default.
 
 The natives (`playerglobal/air/net/WebSocket.ts`) run over a
 `WebSocketHost` (`hosts.ts`), by default the global WebSocket, a
-browser's or node's; `webSocket: null` has every connect fail. What they
+browser's or node's; `webSocket: null` has every connect fail, and the
+element takes an embedder's own as `configure({ webSockets })`, as the
+desktop app's, whose main process holds the connections
+([WebSockets](desktop.md#websockets)). What they
 throw and dispatch is what adl does: TypeError 2007 for a null URL, then
 IllegalOperationError 2082 for a second connect, a WebSocket connecting
 only once, then ArgumentError 2147 for a scheme other than `ws://` or

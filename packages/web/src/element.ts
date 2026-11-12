@@ -726,7 +726,7 @@ export class Swf2esPlayerElement extends ElementBase {
       fileSystem: session.air?.fileSystem ?? configuration().air?.fileSystem,
       encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
-      webSocket: offline ? null : undefined,
+      webSocket: offline ? null : configuration().webSockets,
       navigate: internal ? null : undefined,
       fileHost: configuration().fileHost,
       sendToUrl: !internal,
