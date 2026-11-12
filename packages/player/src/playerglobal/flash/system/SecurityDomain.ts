@@ -1,6 +1,7 @@
 // All content in this player shares one browser security sandbox. Flash's
 // SecurityDomain.currentDomain is the stable object for that sandbox.
 import { avm2 } from "@swf2es/runtime";
+import { hex, sha256Here } from "../../../scripting/sha256.js";
 import type { Scripting } from "../../../scripting.js";
 
 export function securityDomainNatives(s: Scripting): avm2.Natives {
@@ -15,6 +16,14 @@ export function securityDomainNatives(s: Scripting): avm2.Natives {
       }
 
       return current;
+    }
+
+    /**
+     * The main SWF's URL as SHA-256, in upper-case hex: adl gives that of its
+     * application's SWF, which the SWFs it loads share.
+     */
+    get domainID(): string {
+      return hex(sha256Here(new TextEncoder().encode(s.url))).toUpperCase();
     }
 
     "flash.system:SecurityDomain::ctor_impl"(): void {

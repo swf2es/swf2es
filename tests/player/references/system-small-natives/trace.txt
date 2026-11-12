@@ -1,0 +1,18 @@
+accelerometer false true
+interval 100 set
+interval 0 set
+interval -1 ArgumentError: Error #1508: The value specified for argument interval is invalid.
+interval NaN set
+interval -Infinity ArgumentError: Error #1508: The value specified for argument interval is invalid.
+interval 0.5 set
+_internal 36
+domainID 64 true true
+touch drag 30,40
+locked 30,40
+bounded 30,40
+negative id 30,40
+stop another 30,40
+stop 30,40
+drop target null
+frame 1 30,40
+frame 2 30,40
