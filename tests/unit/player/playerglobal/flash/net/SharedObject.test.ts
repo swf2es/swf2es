@@ -120,6 +120,98 @@ test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol 
   assert.ok(!stored.has("example.test/games/main.swf/kept"));
 });
 
+/** Bytes from hex, spaces ignored. */
+const fromHex = (hex: string) =>
+  Uint8Array.from(hex.replaceAll(" ", "").match(/../g) ?? [], (byte) => Number.parseInt(byte, 16));
+
+/** A .sol file's header for `name` and AMF `version`, its length that of what follows it in `body`. */
+function solHeader(name: string, version: number, body: number): string {
+  const nameHex = Buffer.from(name).toString("hex");
+  const length = 4 + 6 + 2 + name.length + 4 + body;
+  return `00bf ${length.toString(16).padStart(8, "0")} 5443534f 0004 00000000 ${name.length.toString(16).padStart(4, "0")} ${nameHex} 0000000${version}`;
+}
+
+test("a SharedObject of AMF0 is adl's .sol file, its properties sharing one table of references", {
+  skip,
+}, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedAmf0",
+        `var so:SharedObject = SharedObject.getLocal("amf0probe");
+      so.objectEncoding = 0;
+      var shared:Object = {k: 1};
+      so.data.n = 1.5; so.data.s = "str"; so.data.o = shared; so.data.p = shared;
+      so.data.a = [1, "x"]; so.data.u = undefined; so.data.nul = null;
+      trace(so.flush(), so.size);`,
+      ),
+      script(
+        "SharedAmf0Read",
+        `var so:SharedObject = SharedObject.getLocal("amf0probe");
+      var d:Object = so.data;
+      trace(d.n, d.s, d.o.k, d.o === d.p, d.a, d.a.length, d.u, d.nul, "u" in d);`,
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const url = "http://example.test/main.swf";
+
+  // adl's file for the same data, its properties in the order they were set.
+  const body = [
+    "0001 6e 00 3ff8000000000000 00",
+    "0001 73 02 0003 737472 00",
+    "0001 6f 03 0001 6b 00 3ff0000000000000 0000 09 00",
+    "0001 70 07 0000 00",
+    "0001 61 08 00000002 0001 30 00 3ff0000000000000 0001 31 02 0001 78 0000 09 00",
+    "0001 75 06 00",
+    "0003 6e756c 05 00",
+  ].join(" ");
+  const file = fromHex(`${solHeader("amf0probe", 0, fromHex(body).length)} ${body}`);
+  assert.deepEqual(await run(abcs.get("SharedAmf0") as Uint8Array, url, storage), [
+    `flushed ${file.length}`,
+  ]);
+  assert.deepEqual(stored.get("example.test/main.swf/amf0probe"), file);
+
+  assert.deepEqual(await run(abcs.get("SharedAmf0Read") as Uint8Array, url, storage), [
+    "1.5 str 1 true 1,x 2 undefined null true",
+  ]);
+});
+
+test("a SharedObject of AMF3 shares one writer's tables across its properties, names too, as adl", {
+  skip,
+}, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedAmf3",
+        `var so:SharedObject = SharedObject.getLocal("amf3probe");
+      var shared:Object = {k: 1};
+      so.data.o = shared; so.data.p = shared; so.data.s = "str"; so.data.t = "str";
+      trace(so.flush(), so.size);`,
+      ),
+      script(
+        "SharedAmf3Read",
+        `var d:Object = SharedObject.getLocal("amf3probe").data;
+      trace(d.o.k, d.o === d.p, d.s, d.t);`,
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const url = "http://example.test/main.swf";
+
+  // The names are strings of the table: "str" the second time is a reference to the fifth.
+  const body = "036f 0a0b01036b040101 00 0370 0a00 00 0373 0607737472 00 0374 0608 00";
+  const file = fromHex(`${solHeader("amf3probe", 3, fromHex(body).length)} ${body}`);
+  assert.deepEqual(await run(abcs.get("SharedAmf3") as Uint8Array, url, storage), ["flushed 60"]);
+  assert.deepEqual(stored.get("example.test/main.swf/amf3probe"), file);
+
+  assert.deepEqual(await run(abcs.get("SharedAmf3Read") as Uint8Array, url, storage), [
+    "1 true str str",
+  ]);
+});
+
 test("deleteAll and getDiskUsage reach no SWF's saves, its own or another site's, as Flash refuses them", {
   skip,
 }, async () => {

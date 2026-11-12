@@ -492,6 +492,22 @@ invisible container holds, as the pointer's pick does;
 `areInaccessibleObjectsUnderPoint` is false, there being no sandbox to
 hide them.
 
+AMF0, which avmshell refuses (#1508), is the player's own
+(`playerglobal/flash/net/amf0.ts`): ByteArray's `writeObject` and
+`readObject` of an objectEncoding below 3 (as a signed number:
+`defaultObjectEncoding` takes any uint) override the runtime's, and
+Socket, URLStream and FileStream reach them through their ByteArrays. It
+is what adl writes and reads (the `amf0` case): every number a double, an
+Array always an ECMA array, a Date with its zone, an XMLDocument as its
+text but E4X as an empty object, any other object its public variables and
+read-write accessors, [Transient] ones too, then what for-in finds; an
+IExternalizable writes no properties and reads as a plain typed object,
+and 0x11 reads as undefined, not as AMF3. An IExternalizable's
+ObjectOutput and ObjectInput are AMF3 whatever their objectEncoding, in
+avmshell and Flash alike. A SharedObject's .sol file is AMF0 or AMF3 by
+its objectEncoding, its properties sharing one writer's tables (in AMF3
+the names among the strings), as adl writes it.
+
 The legacy `flash.xml.XMLDocument` is playerglobal's own code over the
 runtime's XML tokenizer, avmplus' that E4X reads with too, exported for
 it: `XMLParser.getNext` fills an `XMLTag` with each tag, an element's

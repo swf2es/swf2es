@@ -5,11 +5,15 @@
 //
 // A .sol file: 0x00BF, the length of what follows, "TCSO", 00 04 00 00 00
 // 00, the name (u16 length, UTF-8), the AMF version as a u32 (0 or 3),
-// then each of the data's properties: its name (AMF3: a string's U29
-// header; AMF0: u16 length), its value as writeObject writes it, and a 0.
+// then each of the data's properties: its name (AMF3: a string; AMF0: u16
+// length and UTF-8), its value as writeObject writes it, and a 0. The
+// properties share one writer's tables, as adl writes them: a second
+// property of an object already written is a reference to it, and in AMF3
+// a string, the names' too, a reference to the first of it.
 // Flash's size is the file's, 0 for none, as the shared-objects case has it.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import * as amf0 from "./amf0.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -31,12 +35,10 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
   let preventBackup = false;
 
   const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const byteArray = (encoding: number): AsObject => {
-    const array = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject;
-    s.rt.setProperty(array, avm2.qname(avm2.publicNs, "objectEncoding"), encoding);
-    return array;
-  };
+  // A ByteArray's bytes, not bare ones: an IExternalizable's writeExternal
+  // and readExternal reach the ByteArray they are over.
+  const bytes = (): avm2.Bytes =>
+    avm2.bytesOf(s.rt, s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")));
 
   /** What `o` serializes to now, for destroy to tell a change by; null where it cannot. */
   const saved = (o: AsObject): Uint8Array | null => {
@@ -64,88 +66,64 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     return true;
   };
 
-  /**
-   * The .sol file of `o`'s data, in its encoding; none, empty, for no
-   * properties. AMF0 is the runtime's to write, which has none yet.
-   */
+  /** The .sol file of `o`'s data, in its encoding; none, empty, for no properties. */
   const serialize = (o: AsObject): Uint8Array => {
-    if (o.$encoding !== 3) {
-      throw s.rt.unsupported("an AMF0 SharedObject");
-    }
-
-    // Chunks joined once at the end: a value can be large enough that
-    // spreading its bytes into one call would overflow the stack.
-    const chunks: Uint8Array[] = [];
-    for (const [key, value] of o.$data.$d ?? new Map()) {
-      const name = encoder.encode(String(key));
-      chunks.push(u29((name.length << 1) | 1), name);
-      const array = byteArray(o.$encoding);
-      s.rt.callProperty(array, avm2.qname(avm2.publicNs, "writeObject"), value);
-      const b = avm2.bytesOf(s.rt, array);
-      chunks.push(b.buffer.subarray(0, b.length), END);
-    }
-
-    if (chunks.length === 0) {
+    const entries: Map<Value, Value> = o.$data.$d ?? new Map();
+    if (entries.size === 0) {
       return new Uint8Array(0);
     }
 
+    const amf3 = o.$encoding >= 3;
     const name = encoder.encode(o.$name);
     const header = new Uint8Array(6 + 10 + 2 + name.length + 4);
     header.set([0x00, 0xbf], 0);
     header.set([0x54, 0x43, 0x53, 0x4f, 0, 4, 0, 0, 0, 0], 6);
     header.set([name.length >> 8, name.length & 0xff], 16);
     header.set(name, 18);
-    header[header.length - 1] = 3;
-    let n = header.length;
-    for (const chunk of chunks) {
-      n += chunk.length;
+    header[header.length - 1] = amf3 ? 3 : 0;
+    const b = bytes();
+    b.write(header);
+    const w3 = amf3 ? new avm2.Amf3Writer(s.rt, b) : null;
+    const w0 = amf3 ? null : new amf0.Writer(s.rt, b);
+    for (const [key, value] of entries) {
+      if (w3) {
+        w3.string(String(key));
+        w3.value(value);
+      } else {
+        (w0 as amf0.Writer).name(String(key));
+        (w0 as amf0.Writer).value(value);
+      }
+
+      b.write(END);
     }
 
-    const file = new Uint8Array(n);
-    file.set(header);
-    new DataView(file.buffer).setUint32(2, n - 6);
-    let at = header.length;
-    for (const chunk of chunks) {
-      file.set(chunk, at);
-      at += chunk.length;
-    }
-
+    const file = b.buffer.slice(0, b.length);
+    new DataView(file.buffer).setUint32(2, file.length - 6);
     return file;
   };
 
   /** The data a .sol file holds, or null for one it cannot read. */
-  const deserialize = (bytes: Uint8Array): AsObject | null => {
-    if (bytes.length < 18 || bytes[0] !== 0x00 || bytes[1] !== 0xbf) {
+  const deserialize = (file: Uint8Array): AsObject | null => {
+    if (file.length < 18 || file[0] !== 0x00 || file[1] !== 0xbf) {
       return null;
     }
 
-    let at = 16;
-    const nameLength = (bytes[at] << 8) | bytes[at + 1];
-    at += 2 + nameLength;
-    const encoding = bytes[at + 3] === 3 ? 3 : 0;
-    at += 4;
-    const array = byteArray(encoding);
-    const b = avm2.bytesOf(s.rt, array);
-    b.write(bytes);
+    const nameLength = (file[16] << 8) | file[17];
+    const at = 18 + nameLength;
+    const b = bytes();
+    b.write(file);
+    b.position = at + 4;
+    const amf3 = file[at + 3] === 3;
+    const r3 = amf3 ? new avm2.Amf3Reader(s.rt, b) : null;
+    const r0 = amf3 ? null : new amf0.Reader(s.rt, b);
     const data = s.rt.newObject([]);
     try {
-      while (at < bytes.length) {
-        let length: number;
-        if (encoding === 3) {
-          const [n, next] = readU29(bytes, at);
-          length = n >> 1;
-          at = next;
-        } else {
-          length = (bytes[at] << 8) | bytes[at + 1];
-          at += 2;
-        }
-
-        const key = decoder.decode(bytes.subarray(at, at + length));
-        b.position = (at + length) >>> 0;
-        const value = s.rt.callProperty(array, avm2.qname(avm2.publicNs, "readObject"));
+      while (b.position < b.length) {
+        const key = r3 ? r3.string() : (r0 as amf0.Reader).name();
+        const value = r3 ? r3.value() : (r0 as amf0.Reader).value();
         s.rt.setProperty(data, avm2.qname(avm2.publicNs, key), value);
         // The 0 after each value.
-        at = b.position + 1;
+        b.position = (b.position + 1) >>> 0;
       }
     } catch {
       return null;
@@ -239,8 +217,9 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       return defaultEncoding;
     }
 
+    // Any uint, as adl keeps it; one below 3 writes AMF0.
     static set defaultObjectEncoding(v: Value) {
-      defaultEncoding = s.rt.toUint(v) === 0 ? 0 : 3;
+      defaultEncoding = s.rt.toUint(v);
     }
 
     static get "flash.net:SharedObject::preventBackupImpl"(): boolean {
@@ -306,7 +285,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
           o.$saved = file;
         }
       } catch {
-        // One that cannot be written, AMF0's or a full quota's, keeps the others from nothing.
+        // One that cannot be written, as one a full quota refuses, keeps the others from nothing.
       }
     }
   };
@@ -321,37 +300,3 @@ function sameBytes(a: Uint8Array, b: Uint8Array | null): boolean {
 
 /** The 0 after each value. */
 const END = new Uint8Array(1);
-
-/** An AMF3 U29: 1 to 4 bytes, 7 bits each but the fourth's 8. */
-function u29(n: number): Uint8Array {
-  if (n < 0x80) {
-    return Uint8Array.of(n);
-  }
-  if (n < 0x4000) {
-    return Uint8Array.of((n >> 7) | 0x80, n & 0x7f);
-  }
-  if (n < 0x200000) {
-    return Uint8Array.of((n >> 14) | 0x80, ((n >> 7) & 0x7f) | 0x80, n & 0x7f);
-  }
-
-  return Uint8Array.of(
-    (n >> 22) | 0x80,
-    ((n >> 15) & 0x7f) | 0x80,
-    ((n >> 8) & 0x7f) | 0x80,
-    n & 0xff,
-  );
-}
-
-/** The U29 at `at`, and where what follows it starts. */
-function readU29(bytes: Uint8Array, at: number): [number, number] {
-  let n = 0;
-  for (let i = 0; i < 3; i++) {
-    const b = bytes[at++];
-    n = (n << 7) | (b & 0x7f);
-    if (!(b & 0x80)) {
-      return [n, at];
-    }
-  }
-
-  return [(n << 8) | bytes[at], at + 1];
-}
