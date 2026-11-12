@@ -817,35 +817,43 @@ test("copyPixels without an alpha bitmap writes what it writes with one of alpha
     store.holdsAlpha = holdsAlpha;
     store.changed();
   };
-  const full = new BitmapStore(32, 32, true, 0xff000000);
+  const full = new BitmapStore(80, 80, true, 0xff000000);
   const moves = [-3, 0, 2];
-  for (const into of ["transparent", "opaque", "holds alpha"]) {
-    for (const source of ["transparent", "opaque", "holds alpha", "self"]) {
-      for (const mergeAlpha of [false, true]) {
-        for (const dx of moves) {
-          for (const dy of moves) {
-            const make = () => {
-              seed = 11;
-              const dest = new BitmapStore(12, 9, into === "transparent", 0);
-              fill(dest, into === "holds alpha");
-              const from =
-                source === "self" ? dest : new BitmapStore(10, 7, source === "transparent", 0);
-              if (from !== dest) {
-                fill(from, source === "holds alpha");
-              }
+  // Small copies stay in JS; large ones blend in the native module.
+  for (const [w, h] of [
+    [8, 5],
+    [64, 40],
+  ]) {
+    for (const into of ["transparent", "opaque", "holds alpha"]) {
+      for (const source of ["transparent", "opaque", "holds alpha", "self"]) {
+        for (const mergeAlpha of [false, true]) {
+          for (const dx of moves) {
+            for (const dy of moves) {
+              const make = () => {
+                seed = 11;
+                const dest = new BitmapStore(w + 4, h + 4, into === "transparent", 0);
+                fill(dest, into === "holds alpha");
+                const from =
+                  source === "self"
+                    ? dest
+                    : new BitmapStore(w + 2, h + 2, source === "transparent", 0);
+                if (from !== dest) {
+                  fill(from, source === "holds alpha");
+                }
 
-              return { dest, from };
-            };
-            const rect = { x: 1, y: 1, width: 8, height: 5 };
-            const fast = make();
-            fast.dest.copyPixels(fast.from, rect, 1 + dx, 2 + dy, mergeAlpha);
-            const general = make();
-            general.dest.copyPixels(general.from, rect, 1 + dx, 2 + dy, mergeAlpha, full, 0, 0);
-            assert.deepEqual(
-              Array.from(fast.dest.pixels),
-              Array.from(general.dest.pixels),
-              JSON.stringify({ into, source, mergeAlpha, dx, dy }),
-            );
+                return { dest, from };
+              };
+              const rect = { x: 1, y: 1, width: w, height: h };
+              const fast = make();
+              fast.dest.copyPixels(fast.from, rect, 1 + dx, 2 + dy, mergeAlpha);
+              const general = make();
+              general.dest.copyPixels(general.from, rect, 1 + dx, 2 + dy, mergeAlpha, full, 0, 0);
+              assert.deepEqual(
+                Array.from(fast.dest.pixels),
+                Array.from(general.dest.pixels),
+                JSON.stringify({ w, h, into, source, mergeAlpha, dx, dy }),
+              );
+            }
           }
         }
       }
