@@ -134,9 +134,14 @@ next one, which swf2es's does not; tab stops, the boundaries adl leaves out for 
 field's height, and those of a timeline's field, which adl gives 2
 pixels further right and down than its lines, are still to come.
 `autoSize` makes the field the text's size and 4 pixels, keeping its
-left, centre or right edge. A device font's metrics are the browser's
-font's, measured by the host, which Flash's own system fonts differ
-from.
+left, centre or right edge. The fit a script's change of the text, the
+size or `autoSize` asks for waits, as Flash's does, until the field's
+place, size or bounds are asked, it is drawn or hit, or the frame is
+drawn, and is by the `autoSize` of then: a label given its text and then
+`autoSize` right keeps the right edge it had before the text
+(`text-autosize-later`, `text-autosize-text-later`). A device font's
+metrics are the browser's font's, measured by the host, which Flash's
+own system fonts differ from.
 
 Static text (DefineText, DefineText2) is a `StaticText`: its records'
 glyphs where the authoring tool put them, each record keeping the font,
