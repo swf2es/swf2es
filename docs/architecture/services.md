@@ -506,7 +506,12 @@ and 0x11 reads as undefined, not as AMF3. An IExternalizable's
 ObjectOutput and ObjectInput are AMF3 whatever their objectEncoding, in
 avmshell and Flash alike. A SharedObject's .sol file is AMF0 or AMF3 by
 its objectEncoding, its properties sharing one writer's tables (in AMF3
-the names among the strings), as adl writes it.
+the names among the strings), as adl writes it. An AMF3 file is kept under
+its key with `#amf3` after it (`AMF3_KEY`), an AMF0 one, which AS2 reads
+too, under the key alone. An AMF3 file under the key alone can only be one
+swf2es 0.1.16 or earlier wrote, each value with tables of its own, and is
+read so; its next write moves it. The header cannot tell the two apart:
+the old writer's was Flash's, byte for byte.
 
 The legacy `flash.xml.XMLDocument` is playerglobal's own code over the
 runtime's XML tokenizer, avmplus' that E4X reads with too, exported for

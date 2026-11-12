@@ -103,11 +103,11 @@ test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol 
   const url = "http://example.test/games/main.swf";
 
   assert.deepEqual(await run(abcs.get("SharedWrite") as Uint8Array, url, storage), ["flushed"]);
-  // Keyed by host, the SWF's path, and the name; a .sol file, AMF3 by default.
-  const kept = stored.get("example.test/games/main.swf/kept") as Uint8Array;
+  // Keyed by host, the SWF's path, the name, and #amf3 for an AMF3 .sol file, the default.
+  const kept = stored.get("example.test/games/main.swf/kept#amf3") as Uint8Array;
   assert.deepEqual([...kept.subarray(0, 2)], [0x00, 0xbf]);
   assert.equal(new TextDecoder().decode(kept.subarray(6, 10)), "TCSO");
-  assert.ok(stored.has("example.test//rooted"));
+  assert.ok(stored.has("example.test//rooted#amf3"));
 
   // Read back by another player, as a later visit to the page would, its size the
   // file's: a 26-byte header for "kept", then 5, 9, 10 and 10 bytes of entries.
@@ -117,7 +117,7 @@ test("a SharedObject's data is kept in the host's storage, as Flash's AMF3 .sol 
     "1.5",
     "0",
   ]);
-  assert.ok(!stored.has("example.test/games/main.swf/kept"));
+  assert.deepEqual([...stored.keys()], ["example.test//rooted#amf3"]);
 });
 
 /** Bytes from hex, spaces ignored. */
@@ -205,11 +205,51 @@ test("a SharedObject of AMF3 shares one writer's tables across its properties, n
   const body = "036f 0a0b01036b040101 00 0370 0a00 00 0373 0607737472 00 0374 0608 00";
   const file = fromHex(`${solHeader("amf3probe", 3, fromHex(body).length)} ${body}`);
   assert.deepEqual(await run(abcs.get("SharedAmf3") as Uint8Array, url, storage), ["flushed 60"]);
-  assert.deepEqual(stored.get("example.test/main.swf/amf3probe"), file);
+  assert.deepEqual(stored.get("example.test/main.swf/amf3probe#amf3"), file);
 
   assert.deepEqual(await run(abcs.get("SharedAmf3Read") as Uint8Array, url, storage), [
     "1 true str str",
   ]);
+});
+
+test("an AMF3 save of swf2es 0.1.16, under the key alone with tables for each value, reads back as it was written", {
+  skip,
+}, async () => {
+  const abcs = compileScripts(
+    [
+      script(
+        "SharedLegacy",
+        `var so:SharedObject = SharedObject.getLocal("legacy");
+      var d:Object = so.data;
+      trace(d.list[0].a, d.list[1].a, d.more[1].a, d.same[0] === d.same[1], d.same[1].k);
+      trace(so.flush());`,
+      ),
+    ],
+    out,
+  );
+  const { stored, storage } = mapStorage();
+  const url = "http://example.test/main.swf";
+
+  // As 0.1.16 wrote list = [{a: "x"}, {a: "x"}], more = [{a: "y"}, {a: "y"}]
+  // and same = [o, o]: each name inline, each value by a writeObject of its
+  // own, so its second object's "a", "x" and traits, and o the second time,
+  // are references into its own tables. Read with one table for the file,
+  // "a" would be the name "list".
+  const body = [
+    "09 6c697374 09 05 01 0a 0b 01 03 61 06 03 78 01 0a 01 00 06 02 01 00",
+    "09 6d6f7265 09 05 01 0a 0b 01 03 61 06 03 79 01 0a 01 00 06 02 01 00",
+    "09 73616d65 09 05 01 0a 0b 01 03 6b 04 01 01 0a 02 00",
+  ].join(" ");
+  stored.set(
+    "example.test/main.swf/legacy",
+    fromHex(`${solHeader("legacy", 3, fromHex(body).length)} ${body}`),
+  );
+  const lines = ["x x y true 1", "flushed"];
+  assert.deepEqual(await run(abcs.get("SharedLegacy") as Uint8Array, url, storage), lines);
+
+  // Its flush wrote it in Flash's form under the AMF3 key, and took the old one away.
+  assert.deepEqual([...stored.keys()], ["example.test/main.swf/legacy#amf3"]);
+  assert.deepEqual(await run(abcs.get("SharedLegacy") as Uint8Array, url, storage), lines);
 });
 
 test("deleteAll and getDiskUsage reach no SWF's saves, its own or another site's, as Flash refuses them", {
@@ -315,7 +355,7 @@ test("a secure SharedObject is for a SWF that came over HTTPS, kept apart", { sk
   const abc = abcs.get("SharedSecure") as Uint8Array;
 
   assert.deepEqual(await run(abc, "https://example.test/main.swf", storage), ["flushed false"]);
-  assert.deepEqual([...stored.keys()], ["example.test/main.swf/guarded#secure"]);
+  assert.deepEqual([...stored.keys()], ["example.test/main.swf/guarded#secure#amf3"]);
   assert.deepEqual(await run(abc, "http://example.test/main.swf", storage), ["2134"]);
 });
 
@@ -428,8 +468,8 @@ test("a loaded SWF's SharedObject is its own, by its URL, not the main SWF's", {
   // The child's own path, under which "/child" is one of its directories.
   assert.deepEqual(lines, ["undefined true"]);
   assert.deepEqual([...stored.keys()].sort(), [
-    "example.test/child/inner.swf/prefs",
-    "example.test/outer.swf/prefs",
+    "example.test/child/inner.swf/prefs#amf3",
+    "example.test/outer.swf/prefs#amf3",
   ]);
 });
 
@@ -452,7 +492,7 @@ test("a destroyed player writes the SharedObjects its scripts left unflushed, as
   assert.equal(stored.size, 0);
 
   player.destroy();
-  assert.ok(stored.has("example.test/main.swf/later"));
+  assert.ok(stored.has("example.test/main.swf/later#amf3"));
 });
 
 test("a player writes the SharedObjects its scripts left unflushed as its page goes, and plays on", {
@@ -474,10 +514,10 @@ test("a player writes the SharedObjects its scripts left unflushed as its page g
   assert.equal(stored.size, 0);
 
   player.saveSharedObjects();
-  const written = stored.get("example.test/main.swf/later");
+  const written = stored.get("example.test/main.swf/later#amf3");
   assert.ok(written);
   player.saveSharedObjects();
-  assert.equal(stored.get("example.test/main.swf/later"), written);
+  assert.equal(stored.get("example.test/main.swf/later#amf3"), written);
   player.tick();
   player.destroy();
 });
@@ -502,7 +542,7 @@ test("destroy leaves a save it could not read, and one the SWF did not change, a
   const { stored, storage } = mapStorage();
   const url = "http://example.test/main.swf";
   await run(abc.get("SharedKeeps") as Uint8Array, url, storage);
-  const kept = stored.get("example.test/main.swf/kept");
+  const kept = stored.get("example.test/main.swf/kept#amf3");
   // Bytes no .sol reader takes: a save of a format the player cannot read.
   const broken = Uint8Array.of(1, 2, 3, 4);
   stored.set("example.test/main.swf/broken", broken);
@@ -536,5 +576,5 @@ test("destroy leaves a save it could not read, and one the SWF did not change, a
   assert.deepEqual(lines, ["0 5"]);
   assert.equal(writes, 0);
   assert.equal(stored.get("example.test/main.swf/broken"), broken);
-  assert.equal(stored.get("example.test/main.swf/kept"), kept);
+  assert.equal(stored.get("example.test/main.swf/kept#amf3"), kept);
 });

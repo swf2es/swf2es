@@ -10,7 +10,7 @@
 // 00, the name (u16 length, UTF-8), the AMF version as a u32 (0 here), then
 // each of the data's properties: its name (u16 length), its AMF0 value, a 0.
 import { avm1 } from "@swf2es/runtime";
-import type { SharedObjectStorage } from "../../hosts.js";
+import { AMF3_KEY, type SharedObjectStorage } from "../../hosts.js";
 import { put, Reader, Writer } from "../amf.js";
 
 const encoder = new TextEncoder();
@@ -218,6 +218,8 @@ export function sharedObjectClass(host: SharedObjectHost): {
         } catch {
           return false;
         }
+
+        dropAmf3(host.storage, key);
       }
     }
 
@@ -255,6 +257,8 @@ export function sharedObjectClass(host: SharedObjectHost): {
           // Storage the host refuses keeps nothing to remove.
         }
 
+        dropAmf3(host.storage, key);
+
         e.saved = new Uint8Array(0);
       }
     }
@@ -275,6 +279,7 @@ export function sharedObjectClass(host: SharedObjectHost): {
           const file = serialize(host, entry.name, avm1.get(entry.o, "data", version), version);
           if (file.length && !sameBytes(file, entry.saved)) {
             host.storage.set(key, file);
+            dropAmf3(host.storage, key);
             entry.saved = file;
           }
         } catch {
@@ -297,4 +302,13 @@ function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   }
 
   return true;
+}
+
+/** The AMF3 file AS3 may have kept for `key`, which the AMF0 one written there now replaces. */
+function dropAmf3(storage: SharedObjectStorage, key: string): void {
+  try {
+    storage.remove(key + AMF3_KEY);
+  } catch {
+    // Storage the host refuses keeps nothing to remove.
+  }
 }

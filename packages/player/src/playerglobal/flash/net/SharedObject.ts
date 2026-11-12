@@ -11,7 +11,18 @@
 // property of an object already written is a reference to it, and in AMF3
 // a string, the names' too, a reference to the first of it.
 // Flash's size is the file's, 0 for none, as the shared-objects case has it.
+//
+// An AMF3 file is kept under its key and AMF3_KEY, an AMF0 one under the
+// key alone, where AS2's SharedObject finds it. swf2es 0.1.16 and earlier
+// kept AMF3 files under the key alone, each value written with tables of
+// its own, which Flash's shared tables would misread with no error, and
+// which no header byte tells apart (theirs are Flash's). So an AMF3 file
+// under the key alone is read as those were written, and the next write
+// moves it; one under the new key, Flash's or this writer's, with shared
+// tables. What the player writes it never writes in the old form, so the
+// key cannot misfire.
 import { avm2 } from "@swf2es/runtime";
+import { AMF3_KEY } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
 import * as amf0 from "./amf0.js";
 
@@ -49,15 +60,37 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     }
   };
 
+  /** Remove what storage keeps under `key`, if it lets it. */
+  const remove = (key: string): void => {
+    try {
+      s.storage.remove(key);
+    } catch {
+      // Storage the host refuses keeps nothing to remove.
+    }
+  };
+
+  /**
+   * Keep `file` for `o` under the key its encoding has, and take away what
+   * the other key holds, an older file's; none for an empty one. Throws
+   * where storage refuses it.
+   */
+  const store = (o: AsObject, file: Uint8Array): void => {
+    if (file.length === 0) {
+      s.storage.remove(o.$key);
+      remove(o.$key + AMF3_KEY);
+      return;
+    }
+
+    const amf3 = isAmf3(file);
+    s.storage.set(amf3 ? o.$key + AMF3_KEY : o.$key, file);
+    remove(amf3 ? o.$key : o.$key + AMF3_KEY);
+  };
+
   /** Write `o`'s .sol file, or remove it for no data: false where storage refuses, as a full quota, which flush reports as #2130. */
   const write = (o: AsObject): boolean => {
     const file = serialize(o);
     try {
-      if (file.length) {
-        s.storage.set(o.$key, file);
-      } else {
-        s.storage.remove(o.$key);
-      }
+      store(o, file);
     } catch {
       return false;
     }
@@ -102,25 +135,35 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     return file;
   };
 
-  /** The data a .sol file holds, or null for one it cannot read. */
-  const deserialize = (file: Uint8Array): AsObject | null => {
+  /**
+   * The data a .sol file holds, or null for one it cannot read. An AMF3
+   * file `legacy`, kept under the key alone, is swf2es 0.1.16's: each name
+   * a string of no table, each value read with tables of its own.
+   */
+  const deserialize = (file: Uint8Array, legacy: boolean): AsObject | null => {
     if (file.length < 18 || file[0] !== 0x00 || file[1] !== 0xbf) {
       return null;
     }
 
-    const nameLength = (file[16] << 8) | file[17];
-    const at = 18 + nameLength;
     const b = bytes();
     b.write(file);
-    b.position = at + 4;
-    const amf3 = file[at + 3] === 3;
+    b.position = versionAt(file) + 1;
+    const amf3 = isAmf3(file);
     const r3 = amf3 ? new avm2.Amf3Reader(s.rt, b) : null;
     const r0 = amf3 ? null : new amf0.Reader(s.rt, b);
     const data = s.rt.newObject([]);
     try {
       while (b.position < b.length) {
-        const key = r3 ? r3.string() : (r0 as amf0.Reader).name();
-        const value = r3 ? r3.value() : (r0 as amf0.Reader).value();
+        let key: string;
+        let value: Value;
+        if (r3 && legacy) {
+          key = new avm2.Amf3Reader(s.rt, b).string();
+          value = new avm2.Amf3Reader(s.rt, b).value();
+        } else {
+          key = r3 ? r3.string() : (r0 as amf0.Reader).name();
+          value = r3 ? r3.value() : (r0 as amf0.Reader).value();
+        }
+
         s.rt.setProperty(data, avm2.qname(avm2.publicNs, key), value);
         // The 0 after each value.
         b.position = (b.position + 1) >>> 0;
@@ -193,8 +236,9 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       o.$name = text;
       o.$encoding = defaultEncoding;
       o.$client = o;
-      const stored = s.storage.get(key);
-      o.$data = (stored && deserialize(stored)) ?? s.rt.newObject([]);
+      const amf3 = s.storage.get(key + AMF3_KEY);
+      const stored = amf3 ?? s.storage.get(key);
+      o.$data = (stored && deserialize(stored, amf3 === null)) ?? s.rt.newObject([]);
       o.$saved = saved(o);
       open.set(key, o);
       return o;
@@ -262,7 +306,8 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
         case CLEAR:
           this.$data = s.rt.newObject([]);
           this.$saved = new Uint8Array(0);
-          s.storage.remove(this.$key);
+          remove(this.$key);
+          remove(this.$key + AMF3_KEY);
           return undefined;
         case CLOSE:
           return undefined;
@@ -281,7 +326,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       try {
         const file = serialize(o);
         if (file.length && !sameBytes(file, o.$saved)) {
-          s.storage.set(o.$key, file);
+          store(o, file);
           o.$saved = file;
         }
       } catch {
@@ -296,6 +341,16 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
 
 function sameBytes(a: Uint8Array, b: Uint8Array | null): boolean {
   return b !== null && a.length === b.length && a.every((byte, i) => byte === b[i]);
+}
+
+/** Where a .sol file's AMF version ends: the last byte of its u32, after the name. */
+function versionAt(file: Uint8Array): number {
+  return 18 + ((file[16] << 8) | file[17]) + 3;
+}
+
+/** Whether a .sol file is AMF3's. */
+function isAmf3(file: Uint8Array): boolean {
+  return file[versionAt(file)] === 3;
 }
 
 /** The 0 after each value. */
