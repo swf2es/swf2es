@@ -405,8 +405,18 @@ with no sweep: convex as every turn goes one way and its edges go back
 along each axis at most twice, which a contour winding round more than
 once, as a pentagram, does not pass. A single simple concave contour of
 at most 64 vertices uses ear clipping (`src/render/earclip.zig`), keeping
-the input points too. Crossings, touches, overlapping edges and repeated
-points, or an ear search that stalls, leave the fill to libtess2. Both
+the input points too. One that goes once along an axis and once back, as a
+crescent of two curves does, is first shown simple in a pass along that
+axis (`src/render/monotone.zig`): each point strictly on its own side of
+the other chain's edge beside it, so the chains meet only at their ends,
+where ear clipping looks at every pair of edges. A thin one, its chains on
+average no more than four of its points' steps apart, of at most 4,096
+points, is then cut in a second pass into a strip of triangles between
+the chains; a wide one goes to ear clipping, which skips its own check,
+as a strip's triangles all reach across the contour and their long sides
+cost a rasteriser more than ears' short ones.
+Crossings, touches, overlapping edges and repeated
+points, or an ear search that stalls, leave the fill to libtess2. The
 fast paths stay within libtess2's coordinate range.
 
 What libtess2 fails at, gives output

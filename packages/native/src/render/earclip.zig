@@ -26,7 +26,8 @@ fn turn(a: Point, b: Point, c: Point) ?f64 {
 
 /// Indices into the original points, or null to use the general filler.
 /// The caller releases allocations on failure, including a partial triangulation.
-pub fn fill(allocator: std.mem.Allocator, coords: []const f64) ?[]const i32 {
+/// A contour `simple` already, shown so another way (monotone.zig), has no pair of edges looked at.
+pub fn fill(allocator: std.mem.Allocator, coords: []const f64, simple: bool) ?[]const i32 {
     const n = coords.len / 2;
     if (coords.len % 2 != 0 or n < 3 or n > most_points) {
         return null;
@@ -49,11 +50,11 @@ pub fn fill(allocator: std.mem.Allocator, coords: []const f64) ?[]const i32 {
         }
     }
 
-    for (0..n) |i| {
+    for (0..if (simple) 0 else n) |i| {
         bounds[i] = Bounds.edge(points[i], points[links[i]]);
     }
 
-    for (0..n) |i| {
+    for (0..if (simple) 0 else n) |i| {
         const a = points[i];
         const b = points[links[i]];
         if (a.x == b.x and a.y == b.y) {
@@ -177,7 +178,9 @@ fn inside(coords: []const f64, p: Point) bool {
 fn check(coords: []const f64) !void {
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
-    const indices = fill(arena.allocator(), coords) orelse return error.NotTriangulated;
+    const indices = fill(arena.allocator(), coords, false) orelse return error.NotTriangulated;
+    // Known simple, the same triangles without the look at each pair of edges.
+    try std.testing.expectEqualSlices(i32, indices, fill(arena.allocator(), coords, true).?);
     try std.testing.expectEqual((coords.len / 2 - 2) * 3, indices.len);
     var polygon: f64 = 0;
     const n = coords.len / 2;
@@ -277,9 +280,9 @@ test "crossings, touches, repetitions, overlapping adjacent edges and invalid in
     var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
     defer arena.deinit();
     for (fixtures) |coords| {
-        try std.testing.expect(fill(arena.allocator(), coords) == null);
+        try std.testing.expect(fill(arena.allocator(), coords, false) == null);
     }
     const large: [(most_points + 1) * 2]f64 = @splat(0);
-    try std.testing.expect(fill(arena.allocator(), &large) == null);
-    try std.testing.expect(fill(std.testing.failing_allocator, &.{ 0, 0, 1, 0, 0, 1 }) == null);
+    try std.testing.expect(fill(arena.allocator(), &large, false) == null);
+    try std.testing.expect(fill(std.testing.failing_allocator, &.{ 0, 0, 1, 0, 0, 1 }, false) == null);
 }
