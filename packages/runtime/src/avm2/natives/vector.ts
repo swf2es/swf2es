@@ -330,7 +330,7 @@ for (const [kind, convert, fill, elementsOf, store] of VECTORS) {
 
       const source = args[0];
       if (!isObject(source)) {
-        throw rt.error("TypeError", 1034, rt.describe(source), cls.$it.name);
+        throw rt.error("TypeError", 1034, rt.describe(source), cls.$it.errorName);
       }
 
       if (source.$traits === cls.$it) {
