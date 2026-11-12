@@ -314,6 +314,29 @@ function objectKeysLoop(n:int):Number {
   return sum;
 }
 
+// Names the code writes as strings, as an obfuscator's does every member:
+// read, written and called on a sealed object, a dynamic one and a class.
+class Lit {
+  public static var count:Number = 0;
+  public static function twice(v:Number):Number { return v * 2; }
+  public var lx:Number = 1;
+  public var ly:Number = 2;
+  public function len():Number { return 3; }
+}
+var litDynamic:Object = {lx: 1, ly: 2, len: function():Number { return 3; }};
+
+function literalKeysLoop(n:int):Number {
+  var sum:Number = 0;
+  var s:* = new Lit(), d:* = litDynamic, c:* = Lit;
+  for (var k:int = 0; k < n; k++) {
+    s["lx"] = s["ly"] + (k & 3);
+    d["lx"] = d["ly"] + (k & 3);
+    c["count"] = c["twice"](k & 7);
+    sum += s["lx"] + s["len"]() + d["lx"] + d["len"]() + c["count"];
+  }
+  return sum;
+}
+
 function runAll(rounds:int):void {
   var t:uint = getTimer();
   var r1:Number = displayLoop(rounds);
@@ -351,7 +374,10 @@ function runAll(rounds:int):void {
   t = getTimer();
   var r12:Number = objectKeysLoop(rounds * 40);
   trace("time: objkeys " + (getTimer() - t));
-  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9 + " " + r10 + " " + r11 + " " + r12);
+  t = getTimer();
+  var r13:Number = literalKeysLoop(rounds * 20);
+  trace("time: litkeys " + (getTimer() - t));
+  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9 + " " + r10 + " " + r11 + " " + r12 + " " + r13);
 }
 
 runAll(20000);

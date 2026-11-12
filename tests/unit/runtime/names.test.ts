@@ -149,6 +149,55 @@ test("a name made at run time records whether a number or another value made it"
   assert.equal(rt.runtimeName(base, 0).made, MADE_Unknown);
 });
 
+test("the name of a string the code holds, made once, is the one made at each access", () => {
+  const rt = avm2.createRuntime();
+  const literals = ["0", "1.5", "", "value", "x".repeat(200), "ns::name"];
+  const bases = [
+    rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null),
+    rt.name([avm2.publicNs], [255], CONSTANT_MultinameLA, [0], null),
+    rt.name([rt.privateNs("hidden"), avm2.publicNs], [255, 255], CONSTANT_MultinameL, [0, 1], null),
+  ];
+  for (const base of bases) {
+    for (const literal of literals) {
+      const made = rt.runtimeName(base, literal);
+      const kept = rt.literalName(base, literal);
+      assert.deepEqual(
+        [kept.kind, kept.namespaces, kept.versions, kept.name, kept.attribute, kept.elementName],
+        [made.kind, made.namespaces, made.versions, made.name, made.attribute, made.elementName],
+      );
+      assert.equal(kept.domain, made.domain);
+      assert.equal(kept.made, made.made);
+      assert.equal(kept.key, made.key);
+      // However long the string, and however many such names its multiname has.
+      assert.notEqual(kept.cache, NO_CACHE);
+    }
+  }
+
+  // It reads and writes what the made one does, an element by "0", before and after the caches go.
+  const o = rt.objectTraits.instance();
+  o.$a = [7];
+  const kept = literals.map((literal) => rt.literalName(bases[0], literal));
+  for (let round = 0; round < 3; round++) {
+    for (let i = 0; i < literals.length; i++) {
+      rt.setProperty(o, kept[i], `${round}:${i}`);
+      assert.equal(rt.getProperty(o, rt.runtimeName(bases[0], literals[i])), `${round}:${i}`);
+      rt.setProperty(o, rt.runtimeName(bases[0], literals[i]), i);
+      assert.equal(rt.getProperty(o, kept[i]), i);
+    }
+
+    assert.deepEqual(o.$a, [0]);
+    rt.forgetCaches();
+  }
+
+  // A name of a child domain's module is looked up in that domain.
+  const child = rt.childDomain();
+  const inChild = rt.loadInto(child, () =>
+    rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null),
+  );
+  assert.equal(rt.literalName(inChild, "value").domain, child);
+  assert.equal(rt.runtimeName(inChild, "value").domain, child);
+});
+
 test("determining an indexed name leaves an object key's string conversion deferred", () => {
   let conversions = 0;
   const key = {};

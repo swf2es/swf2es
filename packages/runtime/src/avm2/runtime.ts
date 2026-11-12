@@ -463,6 +463,22 @@ export class Runtime {
   }
 
   /**
+   * The name runtimeName makes of `mn`, a MultinameL, and a string the
+   * code itself holds, `obj["name"]`: a module makes it once as it loads
+   * and keeps it as it keeps `mn`, so it has a cache as a module's own
+   * names have, however many such names the module has and however long
+   * the string is.
+   */
+  literalName(mn: Multiname, name: string): Multiname {
+    const named = new Multiname(mn.kind, mn.namespaces, mn.versions, name, mn.attribute);
+    named.domain = mn.domain;
+    named.made = MADE_Value;
+    named.cache = UNFILLED;
+
+    return named;
+  }
+
+  /**
    * The name number `i` makes of `mn` in an element's read or write, which
    * avmplus' JIT hands an object as a number (getpropertylate_i and _d), a
    * Proxy as its string: where the name has no public namespace, it is a
