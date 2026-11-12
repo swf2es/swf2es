@@ -105,7 +105,9 @@ constructor or `INIT` among them, ends there: an unload from `INIT` has
 no `COMPLETE`, as Flash has none. An `unload` asked for from `REMOVED`
 finds the content already let go of, and a load asked for there is the
 one that counts. What a `LoaderInfo` knows of its SWF's header
-(`swfVersion`, `frameRate`, `width`...) is refused
+(`swfVersion`, `frameRate`, `width`...; `width` and `height` are the
+frame's far corner, xMax by yMax, as Flash gives them for a frame that
+does not start at (0, 0), where the stage is xMax - xMin wide) is refused
 before the SWF is loaded, Error #2099, as Flash refuses it. `applicationDomain`
 is null before loading and after unloading; a byte load publishes its domain
 after the synchronous progress events, before its content is placed.

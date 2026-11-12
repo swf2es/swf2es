@@ -35,11 +35,16 @@ export function bindContextMenu(
     const keyboard = keyboardEvents.has(event);
     const [x, y] = keyboard
       ? [
-          player.scripting?.mouseStageX ?? player.width / 2,
-          player.scripting?.mouseStageY ?? player.height / 2,
+          player.scripting?.mouseStageX ?? player.originX + player.width / 2,
+          player.scripting?.mouseStageY ?? player.originY + player.height / 2,
         ]
       : point(event);
-    const area = shown() ?? { x: 0, y: 0, width: player.width, height: player.height };
+    const area = shown() ?? {
+      x: player.originX,
+      y: player.originY,
+      width: player.width,
+      height: player.height,
+    };
     if (x < area.x || y < area.y || x >= area.x + area.width || y >= area.y + area.height) {
       return;
     }

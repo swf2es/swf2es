@@ -307,6 +307,8 @@ export class Playback {
           this.box.clientHeight,
           mode,
           placed,
+          this.player.originX,
+          this.player.originY,
         );
     const canvas = this.view.canvas;
     canvas.style.left = `${view.css.x}px`;
