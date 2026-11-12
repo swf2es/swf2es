@@ -269,6 +269,51 @@ function protoLoop(n:int):Number {
   return sum;
 }
 
+// Keys held untyped, as an obfuscator's code holds every value: numbers
+// that index an Array, a Vector, a Dictionary and an Object, each read and
+// written, and objects that key a Dictionary.
+var keyNumbers:Array = [];
+var keyArray:Array = [];
+var keyVector:Vector.<Number> = new Vector.<Number>();
+var keyTable:Dictionary = new Dictionary();
+var keyObject:Object = {};
+var keyBodies:Array = [];
+var keyByBody:Dictionary = new Dictionary();
+for (var key:int = 0; key < 16; key++) {
+  keyNumbers.push(key);
+  keyArray.push(key);
+  keyVector.push(key);
+  keyTable[key] = key;
+  keyObject[key] = key;
+  keyBodies.push(new Body());
+  keyByBody[keyBodies[key]] = key;
+}
+
+function numberKeysLoop(n:int):Number {
+  var sum:Number = 0;
+  var a:* = keyArray, v:* = keyVector, d:* = keyTable, o:* = keyObject;
+  for (var k:int = 0; k < n; k++) {
+    var i:* = keyNumbers[k & 15];
+    a[i] = a[i] + 1;
+    v[i] = v[i] + 1;
+    d[i] = d[i] + 1;
+    o[i] = o[i] + 1;
+    sum += a[i] + v[i] + d[i] + o[i];
+  }
+  return sum;
+}
+
+function objectKeysLoop(n:int):Number {
+  var sum:Number = 0;
+  var d:* = keyByBody;
+  for (var k:int = 0; k < n; k++) {
+    var b:* = keyBodies[k & 15];
+    d[b] = d[b] + 1;
+    sum += d[b];
+  }
+  return sum;
+}
+
 function runAll(rounds:int):void {
   var t:uint = getTimer();
   var r1:Number = displayLoop(rounds);
@@ -300,7 +345,13 @@ function runAll(rounds:int):void {
   t = getTimer();
   var r10:Number = protoLoop(rounds * 20);
   trace("time: proto " + (getTimer() - t));
-  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9 + " " + r10);
+  t = getTimer();
+  var r11:Number = numberKeysLoop(rounds * 10);
+  trace("time: numkeys " + (getTimer() - t));
+  t = getTimer();
+  var r12:Number = objectKeysLoop(rounds * 40);
+  trace("time: objkeys " + (getTimer() - t));
+  trace(r1 + " " + r2 + " " + r3 + " " + r4 + " " + r5 + " " + r6 + " " + r7 + " " + r8 + " " + r9 + " " + r10 + " " + r11 + " " + r12);
 }
 
 runAll(20000);

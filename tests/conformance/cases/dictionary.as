@@ -107,3 +107,20 @@ probe("propertyIsEnumerable", function():* { return quiet.propertyIsEnumerable(l
 var plain:Object = {};
 probe("plain", function():* { plain[loud] = 9; return plain[loud] + " " + plain.loud + " " + (loud in plain); });
 probe("plain set", function():* { plain[angry] = 1; return "ok"; });
+// An object keys a Dictionary by a name with a public namespace alone, in
+// a function, which avmshell compiles: by any other, it is the name its
+// string is, which a Dictionary has not.
+namespace elsewhere = "urn:elsewhere";
+
+function qualified():void {
+  const d:Dictionary = new Dictionary();
+  const key:Object = {};
+  d[key] = "by key";
+  try { trace("qualified get", d.elsewhere::[key]); } catch (e:Error) { trace("qualified get", e.errorID); }
+  try { d.elsewhere::[key] = "no"; } catch (e:Error) { trace("qualified set", e.errorID); }
+  trace("qualified", d[key]);
+  use namespace elsewhere;
+  trace("qualified open", d[key]);
+}
+
+qualified();
