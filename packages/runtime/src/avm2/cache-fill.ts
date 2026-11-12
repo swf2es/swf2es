@@ -33,7 +33,10 @@ import {
 /**
  * Keep what `mn` found on `traits`, `o`'s, in `head`, its cache: a
  * binding, as getProperty, setProperty and callProperty use it, or a
- * dynamic property's name. Not where the name resolves otherwise: through
+ * dynamic property's name, on a sealed object too, whose prototypes have
+ * dynamic properties all the same (a script may give a class's prototype a
+ * function, and call it on the class's objects by name, as an obfuscator
+ * may have it do). Not where the name resolves otherwise: through
  * a property hook (a Proxy's, XML's), an index (a Vector's, an Array's
  * element), or a Dictionary's key; nor on a primitive's dynamic property,
  * which its prototypes have.
@@ -58,7 +61,6 @@ export function fillCache(
       name === null ||
       (typeof o !== "object" && typeof o !== "function") ||
       hook !== null ||
-      !traits.dynamic ||
       traits.refusesNames ||
       traits.getIndex !== undefined ||
       traits.index !== undefined ||
@@ -109,11 +111,7 @@ export function fillCache(
     mn.cache = head;
   }
 
-  const e = entryFor(head, traits);
-  if (e === null) {
-    return;
-  }
-
+  const e = entryFor(head, traits, mn);
   e.traits = traits;
   e.kind = kind;
   e.key = key;

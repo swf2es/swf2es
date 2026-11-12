@@ -147,7 +147,7 @@ function access(n: Name): string | null {
 }
 
 /** Parameter names from another source tree's declarations, by "Class.method" or "function". */
-function namesFrom(dir: string | null, pkg: string, local: string): Map<string, string[]> {
+export function namesFrom(dir: string | null, pkg: string, local: string): Map<string, string[]> {
   const out = new Map<string, string[]>();
   if (!dir) {
     return out;

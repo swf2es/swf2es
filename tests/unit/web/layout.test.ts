@@ -5,6 +5,7 @@ import {
   place,
   type ScaleMode,
   scaleMode,
+  sourceViewport,
   viewport,
 } from "../../../packages/web/dist/layout.js";
 
@@ -147,4 +148,26 @@ test("the margins are drawn at the stage's resolution: no finer, and no coarser 
   const big = shown(100, 100, 20_000, 1000, "showAll", null, 2);
   assert.ok(big.width * big.resolution <= 20_000 * 2 + 1e-6);
   assert.ok(100 * big.resolution <= MAX_SIDE);
+});
+
+test("a full screen source rect alone is shown, fitted and centred whatever the mode, as adl draws it", () => {
+  // adl on a 1024 by 768 screen: (0, 0, 400, 200) covers the width, from y 128 to 640.
+  assert.deepEqual(sourceViewport({ x: 0, y: 0, width: 400, height: 200 }, 1024, 768, 1), {
+    x: 0,
+    y: 0,
+    width: 400,
+    height: 200,
+    resolution: 2.56,
+    css: { x: 0, y: 128, width: 1024, height: 512 },
+  });
+  // One off the stage's corner shows from there, the same size on the screen.
+  const offset = sourceViewport({ x: 300, y: 100, width: 400, height: 200 }, 1024, 768, 1);
+  assert.deepEqual(
+    [offset.x, offset.y, offset.css],
+    [300, 100, { x: 0, y: 128, width: 1024, height: 512 }],
+  );
+  // A taller one is fitted by its height, centred across; the device's pixels make it finer.
+  const tall = sourceViewport({ x: 0, y: 0, width: 100, height: 384 }, 1024, 768, 2);
+  assert.deepEqual(tall.css, { x: 412, y: 0, width: 200, height: 768 });
+  assert.equal(tall.resolution, 4);
 });

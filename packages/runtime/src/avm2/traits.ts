@@ -16,7 +16,7 @@ import type { Domain } from "./domain.js";
 import { DynamicProperties } from "./dynamic-properties.js";
 import type { ClassHook, IndexHook, PropertyHook } from "./hooks.js";
 import type { Multiname, Namespace } from "./names.js";
-import { invalidate } from "./property-cache.js";
+import { invalidate, type PropertyCache } from "./property-cache.js";
 
 // Binding kinds, as the compiler encodes them: kind | id << 3.
 export const BIND_Method = 1;
@@ -160,6 +160,12 @@ export class Traits {
   interfaceKeys: Map<Traits, (string | undefined)[]> | null = null;
   lastInterface: Traits | null = null;
   lastInterfaceKeys: (string | undefined)[] = [];
+  /**
+   * The cache entries for these traits of names looked up on more traits
+   * than their own caches keep (property-cache.ts), by name; emptied with
+   * every cache.
+   */
+  manyTraitsEntries: Map<Multiname, PropertyCache> | null = null;
 
   constructor(
     readonly name: string,
@@ -179,6 +185,26 @@ export class Traits {
         this.interfaces.add(i);
       }
     }
+  }
+
+  /**
+   * Its name as Flash's debugger player writes it in an error message
+   * (AvmCore::toErrorString): the package and the name joined by a dot,
+   * "flash.text.TextField"; a class object's as "class " and its class's.
+   */
+  get errorName(): string {
+    let name = this.name;
+    const statics = this.base?.name === "Class" && name.endsWith("$");
+    if (statics) {
+      name = name.slice(0, -1);
+    }
+
+    const colons = name.lastIndexOf("::");
+    if (colons >= 0) {
+      name = `${name.slice(0, colons)}.${name.slice(colons + 2)}`;
+    }
+
+    return statics ? `class ${name}` : name;
   }
 
   /**

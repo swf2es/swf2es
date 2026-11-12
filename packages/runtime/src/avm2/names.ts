@@ -85,6 +85,11 @@ export const CONSTANT_MultinameA = 0x0e;
 export const CONSTANT_MultinameL = 0x1b;
 export const CONSTANT_MultinameLA = 0x1c;
 
+// What a name made at run time was made of (Multiname.made).
+export const MADE_Unknown = 0;
+export const MADE_Number = 1;
+export const MADE_Value = 2;
+
 /**
  * A name as a property lookup uses it: its namespaces, each with the API
  * version it sees bindings at, and its local name, null for any name.
@@ -105,7 +110,7 @@ export class Multiname {
    * module's, or the one of the name it was made from; null for the root.
    */
   domain: Domain | null = null;
-  /** What its lookups found, for a module's name (property-cache.ts); a name made at run time keeps none. */
+  /** What its lookups found (property-cache.ts); transient runtime names keep none. */
   cache: PropertyCache = NO_CACHE;
   /**
    * The script that defines it, once found: the first definition of a name
@@ -121,6 +126,14 @@ export class Multiname {
   cls: AsObject | null = null;
   /** Fixed at construction so indexed access needs no getter in its hot path. */
   readonly elementName: boolean;
+  /**
+   * What made it, where the code's own value did at run time: a number
+   * read or written as an element (MADE_Number), which avmplus hands a
+   * Proxy as its string, or a string or any other value (MADE_Value), which
+   * it hands it as a QName. MADE_Unknown for a name of the code's own and
+   * one the runtime made.
+   */
+  made = MADE_Unknown;
 
   constructor(
     readonly kind: number,

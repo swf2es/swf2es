@@ -206,6 +206,48 @@ test("HTTP upload failure reports its status and never completes", async () => {
   assert.deepEqual(h.events, ["open", "progress", "httpStatus", "ioError"]);
 });
 
+test("an AIR upload tells its response before it completes or fails, with the request's URL", async () => {
+  const h = harness();
+  const told: unknown[] = [];
+  h.services.responseStatus = true;
+  const reference = new FileReference(h.services, (type, loaded, _total, text, response) => {
+    told.push(type === "httpResponseStatus" ? [type, loaded, text, response?.headers] : type);
+  });
+  const request: FetchRequest = {
+    url: "https://example.test/upload",
+    method: "POST",
+    headers: [],
+    body: null,
+  };
+  reference.file = selected;
+  reference.upload(request, null);
+  await h.frame();
+  assert.deepEqual(told.splice(0), [
+    "open",
+    "progress",
+    ["httpResponseStatus", 200, "https://example.test/upload", []],
+    "complete",
+    "uploadCompleteData",
+  ]);
+
+  h.services.fetch = async () => ({ bytes: null, status: 403, headers: [["X-Why", "no"]] });
+  reference.upload(request, null);
+  await h.frame();
+  assert.deepEqual(told.splice(0), [
+    "open",
+    "progress",
+    ["httpResponseStatus", 403, "https://example.test/upload", [["X-Why", "no"]]],
+    "httpStatus",
+    "ioError",
+  ]);
+
+  // No response came: nothing to tell.
+  h.services.fetch = async () => ({ bytes: null, status: 0, headers: [] });
+  reference.upload(request, null);
+  await h.frame();
+  assert.deepEqual(told, ["open", "progress", "ioError"]);
+});
+
 test("testUpload probes with an empty body only for files over 10 KB", async () => {
   const h = harness();
   h.reference.file = { ...selected, size: 10241, read: async () => new Uint8Array(10241) };

@@ -1,6 +1,7 @@
 // flash.filters.DisplacementMapFilter: its map, a copy of a BitmapData, its
 // point, mode and scales.
 import type { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { BitmapStore } from "../../../bitmap/bitmap.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterNatives } from "./BitmapFilter.js";
@@ -41,12 +42,9 @@ export function displacementMapFilterNatives(s: Scripting): avm2.Natives {
     mapPoint: [
       (f) => s.rt.construct(s.rt.classNamed("flash.geom::Point"), f.mapPoint[0], f.mapPoint[1]),
       (f, v) => {
-        const p = v as AsObject | null;
+        const p = v as As3<"flash.geom::Point"> | null;
         f.mapPoint = p
-          ? [
-              Math.trunc(num(s.rt.getProperty(p, s.rt.publicName("x")))) || 0,
-              Math.trunc(num(s.rt.getProperty(p, s.rt.publicName("y")))) || 0,
-            ]
+          ? [Math.trunc(num(s.rt.prop(p, "x"))) || 0, Math.trunc(num(s.rt.prop(p, "y"))) || 0]
           : [0, 0];
       },
     ],

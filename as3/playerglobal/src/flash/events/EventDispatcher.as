@@ -26,8 +26,18 @@ package flash.events
 				Error.throwError(TypeError, 2007, "event");
 			}
 
-			// An event dispatched again goes out as a clone, as Flash's does.
-			return dispatchEventFunction(event.target != null ? event.clone() : event);
+			// An event dispatched again goes out as a clone, as Flash's does,
+			// which must be an event too.
+			if (event.target != null)
+			{
+				event = event.clone();
+				if (event == null)
+				{
+					Error.throwError(TypeError, 2007, "event");
+				}
+			}
+
+			return dispatchEventFunction(event);
 		}
 
 		public native function hasEventListener(type:String):Boolean;

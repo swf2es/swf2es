@@ -222,6 +222,46 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(reconfiguration.exception, null, JSON.stringify(reconfiguration));
       assert.equal(reconfiguration.value?.passed, true);
       console.log("context3d: unchanged back buffers reuse resources and preserve pixels");
+      const stateCache = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.drawState())',
+      );
+      assert.equal(stateCache.exception, null, JSON.stringify(stateCache));
+      assert.equal(stateCache.value?.passed, true);
+      console.log(
+        "context3d: draw state survives readback, presentation, targets and program replacement",
+      );
+      const textures = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.textureBindings())',
+      );
+      assert.equal(textures.exception, null, JSON.stringify(textures));
+      assert.equal(textures.value?.passed, true);
+      console.log("context3d: texture bindings survive uploads, cube switches and MSAA copies");
+      const vertices = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.vertexBindings())',
+      );
+      assert.equal(vertices.exception, null, JSON.stringify(vertices));
+      assert.equal(vertices.value?.passed, true);
+      console.log("context3d: vertex reuse preserves layouts, program switches and validation");
+      const indices = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.indexBindings())',
+      );
+      assert.equal(indices.exception, null, JSON.stringify(indices));
+      assert.equal(indices.value?.passed, true);
+      console.log("context3d: index reuse survives uploads, disposal and MSAA copies");
+      const pipeline = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.pipelineState())',
+      );
+      assert.equal(pipeline.exception, null, JSON.stringify(pipeline));
+      assert.equal(pipeline.value?.passed, true);
+      console.log("context3d: pipeline state survives clears, resize and MSAA copies");
+      const uniforms = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.uniformUploads())',
+      );
+      assert.equal(uniforms.exception, null, JSON.stringify(uniforms));
+      assert.equal(uniforms.value?.passed, true);
+      console.log(
+        "context3d: uniform reuse preserves values across updates and program replacement",
+      );
       const masks = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.colorMasks())',
       );

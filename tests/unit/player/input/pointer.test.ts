@@ -187,6 +187,39 @@ test("sprite dragging follows the pointer in parent coordinates, clamps, and sto
   assert.deepEqual([second.matrix.tx, second.matrix.ty], [20, 25]);
 });
 
+test("a touch drag begun with its point up waits for it, and the mouse neither moves nor stops it", () => {
+  const stage = new Container();
+  const sprite = new Container();
+  sprite.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 6 });
+  stage.addChildAt(sprite, 0);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseStageX: 0,
+    mouseStageY: 0,
+    clipboard: new Clipboard(null),
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+
+  input.startTouchDrag(sprite, 7, false, null, null);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [5, 6]);
+  input.dragTouch(8, 50, 50);
+  input.dragTouch(7, 30, 30);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [5, 6]);
+  input.dragTouch(7, 40, 35);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [15, 11]);
+
+  input.handle("move", { x: 60, y: 60 });
+  input.stopDrag();
+  input.stopTouchDrag(8, null);
+  input.dragTouch(7, 41, 35);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [16, 11]);
+
+  input.stopTouchDrag(7, { x: 45, y: 35 });
+  input.dragTouch(7, 50, 50);
+  assert.deepEqual([sprite.matrix.tx, sprite.matrix.ty], [20, 11]);
+});
+
 /** A white square of `size` at (x, y), which takes no pointer itself. */
 function square(x: number, y: number, size = 20): BitmapObject {
   const b = new BitmapObject(new BitmapStore(size, size, true, 0xffffffff));
@@ -939,8 +972,11 @@ const GAPS_SOURCE = `package {
     }
 
     public function cmd(op:String, name:String, key:String, value:*):void {
-      var o:Object = name == "root" ? this : named[name];
+      var o:Object = name == "root" ? this : name == "stage" ? stage : named[name];
       switch (op) {
+        case "listen":
+          o.addEventListener(key, heard);
+          break;
         case "set":
           o[key] = value;
           break;
@@ -1253,6 +1289,53 @@ test("a double click on an object whose doubleClickEnabled is true sends doubleC
   click(10, 10);
   cmd("set", "b", "x", 0);
   assert.deepEqual(click(10, 10).at(-1), "click b null false 10,10 @10,10");
+});
+
+test("the middle and right buttons send their own events, and a right press heard keeps the menu", {
+  skip,
+}, async () => {
+  const { input, cmd, pointer } = await gaps();
+  const lines: string[] = [];
+  // A press and its release where the pointer has moved to, which the stage hears.
+  const press = (button: number, x: number, y: number): string[] => {
+    input("move", x, y);
+    lines.length = 0;
+    for (const type of ["down", "up"] as const) {
+      pointer.handle(type, { x, y, button, buttons: type === "down" ? [1, 4, 2][button] : 0 });
+      lines.push(...cmd("set", "a", "name", "a"));
+    }
+
+    return lines.slice();
+  };
+  for (const type of ["rightMouseUp", "middleMouseUp"]) {
+    cmd("listen", "stage", type);
+  }
+
+  // Over the empty stage, which hears only the Ups: the menu is the browser's.
+  assert.deepEqual(press(2, 300, 250), ["rightMouseUp stage null false 300,250 @300,250"]);
+  assert.equal(pointer.taken(2), false);
+
+  // Over a, which hears a rightClick: the press is the SWF's, the Down with the button down.
+  // Each line names the event's target; the stage's Up is the one bubbled from a.
+  cmd("listen", "a", "rightClick");
+  cmd("listen", "a", "rightMouseDown");
+  assert.deepEqual(press(2, 10, 10), [
+    "rightMouseDown a null true 10,10 @10,10",
+    "rightMouseUp a null false 10,10 @10,10",
+    "rightClick a null false 10,10 @10,10",
+  ]);
+  assert.equal(pointer.taken(2), true);
+
+  // The middle button's are its own, and hearing them leaves the right's as they were.
+  cmd("listen", "b", "middleClick");
+  assert.deepEqual(press(1, 110, 10), [
+    "middleMouseUp b null false 10,10 @110,10",
+    "middleClick b null false 10,10 @110,10",
+  ]);
+  assert.equal(pointer.taken(1), true);
+  assert.equal(pointer.taken(2), true);
+  press(2, 110, 10);
+  assert.equal(pointer.taken(2), false);
 });
 
 test("a frame's end moves the hover under a mouse that stands still, and the cursor with it", {

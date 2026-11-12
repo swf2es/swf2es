@@ -1,4 +1,8 @@
-/** The ahead-of-time compiler and avmshell's way of running ABCs as a library, for a host that does without the command. */
+/**
+ * The ahead-of-time compiler, avmshell's way of running ABCs and the
+ * declarations of ABCs' classes as a library, for a host that does without
+ * the command.
+ */
 export {
   type AbcInput,
   type ActionsModule,
@@ -13,6 +17,7 @@ export {
   readInput,
   sha256,
 } from "./aot.js";
+export { as3Declarations, type DeclarationsOptions, type DeclaredLibrary } from "./as3-types.js";
 export {
   evaluateModule,
   runShell,

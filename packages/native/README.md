@@ -7,12 +7,14 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
   tessellation (`Tessellator`), a shape layer's lines built in one call
   (`LineBuilder`), BitmapData's filters and pixel operations (`BitmapKernel`),
   and whole-level DXT1/DXT5 texture encoding (`DxtEncoder`).
-- `@swf2es/native/compress`: synchronous zlib and LZMA.
+- `@swf2es/native/compress`: synchronous zlib and LZMA, and the PNG and
+  JPEG encoders' passes over a bitmap.
 - `@swf2es/native/mp3`: synchronous MP3 frame decoding with minimp3.
 - `@swf2es/native/audio`: synchronous ADPCM and Nellymoser decoding, in
   Zig alone.
 - `@swf2es/native/atf`: Stage3D's ATF textures, read and decoded to what a
-  desktop GPU takes, their JPEG XR images by jxrlib.
+  desktop GPU takes, their JPEG XR images by jxrlib; and JPEG XR files
+  written as Flash's `BitmapData.encode` writes them, by jxrlib's encoder.
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress`, `mp3`, `audio` and `atf` each compile their own module. What the renderer
@@ -160,7 +162,12 @@ level in one call, into DXT1 or DXT5 blocks identical to
 `@swf2es/context3d`'s TypeScript encoder. It takes tightly packed top-down
 RGBA, repeats edge pixels for partial 4×4 blocks, and keeps the reference's
 double arithmetic and tie breaking. Four colour distances are compared
-together with integer SIMD. It returns `null` for invalid dimensions or
+together with integer SIMD. DXT5 alpha endpoints choose their exact palette
+entry directly (entry zero wins equal-endpoint ties); other values retain the
+nearest distance while searching. Uniform 4×4 blocks emit equal colour endpoints
+and zero indices immediately: DXT1 ignores alpha for this check, while DXT5
+requires all four channels to match. The check stops at the first differing
+pixel; other blocks keep the general colour fit. It returns `null` for invalid dimensions or
 input sizes, failed allocation, a refused module or a trap, so the caller
 can use the TypeScript path.
 
@@ -174,8 +181,17 @@ DXT5 upload's workspace between calls. A trap also drops the instance.
 
 The host Zig tests cover flat blocks and edge repetition;
 `tests/unit/native-dxt.test.ts` compares blocks against the TypeScript
-reference on thousands of levels, checks that each was encoded in wasm,
-and exercises rejection, traps and release.
+reference on thousands of levels and all 32,896 alpha endpoint pairs, including
+nearby palette values. It checks that each was encoded in wasm and exercises
+rejection, traps and release.
+
+`node tests/bench/dxt.ts before-checkout after-checkout --json` compares two built
+native encoders, alternating A/B and B/A after warmup and checking their bytes
+against the TypeScript reference. It includes opaque and binary-alpha textures
+as well as flat, gradient and random RGBA, coloured tiles, mixed flat/noisy
+blocks and constant RGB with varying alpha; `--large` selects 2048-square levels.
+Without checkout paths it compares TypeScript with the current native encoder.
+`--crossings` checks one encoding export per warmed level separately from timing.
 
 ## compress
 
@@ -219,6 +235,19 @@ Upstream sources stay unchanged.
 - `inflate(data, raw, limit)` inflates a zlib or raw deflate stream to at
   most `limit` bytes, stopping at the stream's end.
 - `deflate(data, level, raw)` deflates as zlib does at that level.
+- `pngEncode(pixels, width, height, channels, level, filter)` makes a PNG's
+  IDAT stream of a bitmap's premultiplied ARGB pixels in one pass
+  (`png.zig`): each row is made RGBA or RGB, its colours divided out of
+  alpha; with `filter`, given the filter of PNG's five whose output sums
+  smallest, libpng's heuristic, sixteen bytes at a time (Wasm SIMD); and
+  handed to the deflate.
+- `jpegEncode(pixels, width, height, quality)` makes a JPEG file of a
+  bitmap's ARGB pixels, alpha left out, as Flash's encoder does
+  (`jpeg.zig`, Zig alone): JFIF, 4:2:0, Annex K's quantization tables
+  scaled to the quality as the IJG scales them and its Huffman tables.
+  Colours are converted eight pixels at a time and the DCTs run eight and
+  sixteen columns at a time (Wasm SIMD); a chroma block is the low half
+  of its MCU's 16 by 16 DCT, as libjpeg scales since version 7.
 - `lzmaDecode(stream, size)` decodes an LZMA stream, its 5 property bytes
   first, to `size` bytes or to its end marker.
 - `lzmaEncode(data)` writes `ByteArray`'s LZMA: properties, an 8-byte
@@ -370,7 +399,13 @@ running out of memory return `null`. A fill of one convex contour, a
 triangle above all, is a fan from its first point, its points as given,
 with no sweep: convex as every turn goes one way and its edges go back
 along each axis at most twice, which a contour winding round more than
-once, as a pentagram, does not pass. What libtess2 fails at, gives output
+once, as a pentagram, does not pass. A single simple concave contour of
+at most 64 vertices uses ear clipping (`src/render/earclip.zig`), keeping
+the input points too. Crossings, touches, overlapping edges and repeated
+points, or an ear search that stalls, leave the fill to libtess2. Both
+fast paths stay within libtess2's coordinate range.
+
+What libtess2 fails at, gives output
 unfit to draw for, or cannot take (coordinates outside ±2^23), the module
 fills by bands (`src/render/bands.zig`): the fill cut at every vertex's
 height and every height two edges cross at, each span the rule fills a
@@ -461,10 +496,11 @@ skips (PVRTC's, ETC's), leaves that level and those after it absent, as
 does a level whose blocks for the desktop are empty (png2atf's `-n`).
 Nothing of the reserved bytes is read.
 
-jxrlib's decoder and glue (`vendor/jxrlib`, https://github.com/swf2es/jxrlib,
+jxrlib's decoder, glue and encoder (`vendor/jxrlib`, https://github.com/swf2es/jxrlib,
 a fork of 4creators/jxrlib, Microsoft's release, at tag `v2019.10.9`) are
-compiled unchanged, without its encoder, at `-Os`: the module is about
-100 KB, against 150 KB at `-O2` for 3% less time. `src/atf/jxr.c` decodes
+compiled unchanged at `-Os` (the encoder without `strenc_x86.c`, SSE2's):
+the module is about 154 KB, 101 KB of it the decoder's (150 KB at `-O2`
+for 3% less decoding time), and 56 KB gzipped. `src/atf/jxr.c` decodes
 an image in the pixel format its block must have, setting jxrlib's output
 to the container's pixel format as jxrlib's own decoder does (the
 codestream may name another, which jxrlib would write by into a buffer
@@ -475,6 +511,18 @@ sized for this one), and taking 24-bit RGB as png2atf writes it, named
 its allocator over a bump arena that each call resets. The instance is
 kept between images as compress's is (`src/instance.ts`, the same
 `MEMORY_KEPT`).
+
+`jxrEncode(pixels, width, height, { alpha, quantization, subsampling,
+trimFlexBits })` writes the JPEG XR file Flash's `BitmapData.encode`
+writes for the same pixels, byte for byte (docs/architecture/bitmaps.md
+has what Flash chooses). jxrlib's encoder writes the codestream, its rows
+copied in 16 at a time; `jxr.c` then rewrites its headers as Flash's
+(one quantizer index for all channels, the size always in 16 bits), pads
+it as Flash does and wraps it in Flash's container of five tags. The
+output grows in place at the top of the arena, so a file costs its own
+size and the encoder's few rows of macroblocks. A 4800 by 2475 picture
+encodes in about 150 ms at Flash's default quantization, 20, and 235 ms
+lossless (`jpegEncode` takes 70 at quality 80); with alpha, 205 ms.
 
 jxrlib is not memory safe on corrupt input: AddressSanitizer finds it
 reading past its tables and writing through null pointers. In the module

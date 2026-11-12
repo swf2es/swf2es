@@ -5,11 +5,26 @@
 //
 // A .sol file: 0x00BF, the length of what follows, "TCSO", 00 04 00 00 00
 // 00, the name (u16 length, UTF-8), the AMF version as a u32 (0 or 3),
-// then each of the data's properties: its name (AMF3: a string's U29
-// header; AMF0: u16 length), its value as writeObject writes it, and a 0.
+// then each of the data's properties: its name (AMF3: a string; AMF0: u16
+// length and UTF-8), its value as writeObject writes it, and a 0. The
+// properties share one writer's tables, as adl writes them: a second
+// property of an object already written is a reference to it, and in AMF3
+// a string, the names' too, a reference to the first of it.
 // Flash's size is the file's, 0 for none, as the shared-objects case has it.
+//
+// An AMF3 file is kept under its key and AMF3_KEY, an AMF0 one under the
+// key alone, where AS2's SharedObject finds it. swf2es 0.1.16 and earlier
+// kept AMF3 files under the key alone, each value written with tables of
+// its own, which Flash's shared tables would misread with no error, and
+// which no header byte tells apart (theirs are Flash's). So an AMF3 file
+// under the key alone is read as those were written, and the next write
+// moves it; one under the new key, Flash's or this writer's, with shared
+// tables. What the player writes it never writes in the old form, so the
+// key cannot misfire.
 import { avm2 } from "@swf2es/runtime";
+import { AMF3_KEY } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
+import * as amf0 from "./amf0.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -31,12 +46,10 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
   let preventBackup = false;
 
   const encoder = new TextEncoder();
-  const decoder = new TextDecoder();
-  const byteArray = (encoding: number): AsObject => {
-    const array = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject;
-    s.rt.setProperty(array, avm2.qname(avm2.publicNs, "objectEncoding"), encoding);
-    return array;
-  };
+  // A ByteArray's bytes, not bare ones: an IExternalizable's writeExternal
+  // and readExternal reach the ByteArray they are over.
+  const bytes = (): avm2.Bytes =>
+    avm2.bytesOf(s.rt, s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")));
 
   /** What `o` serializes to now, for destroy to tell a change by; null where it cannot. */
   const saved = (o: AsObject): Uint8Array | null => {
@@ -47,15 +60,37 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     }
   };
 
+  /** Remove what storage keeps under `key`, if it lets it. */
+  const remove = (key: string): void => {
+    try {
+      s.storage.remove(key);
+    } catch {
+      // Storage the host refuses keeps nothing to remove.
+    }
+  };
+
+  /**
+   * Keep `file` for `o` under the key its encoding has, and take away what
+   * the other key holds, an older file's; none for an empty one. Throws
+   * where storage refuses it.
+   */
+  const store = (o: AsObject, file: Uint8Array): void => {
+    if (file.length === 0) {
+      s.storage.remove(o.$key);
+      remove(o.$key + AMF3_KEY);
+      return;
+    }
+
+    const amf3 = isAmf3(file);
+    s.storage.set(amf3 ? o.$key + AMF3_KEY : o.$key, file);
+    remove(amf3 ? o.$key : o.$key + AMF3_KEY);
+  };
+
   /** Write `o`'s .sol file, or remove it for no data: false where storage refuses, as a full quota, which flush reports as #2130. */
   const write = (o: AsObject): boolean => {
     const file = serialize(o);
     try {
-      if (file.length) {
-        s.storage.set(o.$key, file);
-      } else {
-        s.storage.remove(o.$key);
-      }
+      store(o, file);
     } catch {
       return false;
     }
@@ -64,88 +99,74 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
     return true;
   };
 
-  /**
-   * The .sol file of `o`'s data, in its encoding; none, empty, for no
-   * properties. AMF0 is the runtime's to write, which has none yet.
-   */
+  /** The .sol file of `o`'s data, in its encoding; none, empty, for no properties. */
   const serialize = (o: AsObject): Uint8Array => {
-    if (o.$encoding !== 3) {
-      throw s.rt.unsupported("an AMF0 SharedObject");
-    }
-
-    // Chunks joined once at the end: a value can be large enough that
-    // spreading its bytes into one call would overflow the stack.
-    const chunks: Uint8Array[] = [];
-    for (const [key, value] of o.$data.$d ?? new Map()) {
-      const name = encoder.encode(String(key));
-      chunks.push(u29((name.length << 1) | 1), name);
-      const array = byteArray(o.$encoding);
-      s.rt.callProperty(array, avm2.qname(avm2.publicNs, "writeObject"), value);
-      const b = avm2.bytesOf(s.rt, array);
-      chunks.push(b.buffer.subarray(0, b.length), END);
-    }
-
-    if (chunks.length === 0) {
+    const entries: Map<Value, Value> = o.$data.$d ?? new Map();
+    if (entries.size === 0) {
       return new Uint8Array(0);
     }
 
+    const amf3 = o.$encoding >= 3;
     const name = encoder.encode(o.$name);
     const header = new Uint8Array(6 + 10 + 2 + name.length + 4);
     header.set([0x00, 0xbf], 0);
     header.set([0x54, 0x43, 0x53, 0x4f, 0, 4, 0, 0, 0, 0], 6);
     header.set([name.length >> 8, name.length & 0xff], 16);
     header.set(name, 18);
-    header[header.length - 1] = 3;
-    let n = header.length;
-    for (const chunk of chunks) {
-      n += chunk.length;
+    header[header.length - 1] = amf3 ? 3 : 0;
+    const b = bytes();
+    b.write(header);
+    const w3 = amf3 ? new avm2.Amf3Writer(s.rt, b) : null;
+    const w0 = amf3 ? null : new amf0.Writer(s.rt, b);
+    for (const [key, value] of entries) {
+      if (w3) {
+        w3.string(String(key));
+        w3.value(value);
+      } else {
+        (w0 as amf0.Writer).name(String(key));
+        (w0 as amf0.Writer).value(value);
+      }
+
+      b.write(END);
     }
 
-    const file = new Uint8Array(n);
-    file.set(header);
-    new DataView(file.buffer).setUint32(2, n - 6);
-    let at = header.length;
-    for (const chunk of chunks) {
-      file.set(chunk, at);
-      at += chunk.length;
-    }
-
+    const file = b.buffer.slice(0, b.length);
+    new DataView(file.buffer).setUint32(2, file.length - 6);
     return file;
   };
 
-  /** The data a .sol file holds, or null for one it cannot read. */
-  const deserialize = (bytes: Uint8Array): AsObject | null => {
-    if (bytes.length < 18 || bytes[0] !== 0x00 || bytes[1] !== 0xbf) {
+  /**
+   * The data a .sol file holds, or null for one it cannot read. An AMF3
+   * file `legacy`, kept under the key alone, is swf2es 0.1.16's: each name
+   * a string of no table, each value read with tables of its own.
+   */
+  const deserialize = (file: Uint8Array, legacy: boolean): AsObject | null => {
+    if (file.length < 18 || file[0] !== 0x00 || file[1] !== 0xbf) {
       return null;
     }
 
-    let at = 16;
-    const nameLength = (bytes[at] << 8) | bytes[at + 1];
-    at += 2 + nameLength;
-    const encoding = bytes[at + 3] === 3 ? 3 : 0;
-    at += 4;
-    const array = byteArray(encoding);
-    const b = avm2.bytesOf(s.rt, array);
-    b.write(bytes);
+    const b = bytes();
+    b.write(file);
+    b.position = versionAt(file) + 1;
+    const amf3 = isAmf3(file);
+    const r3 = amf3 ? new avm2.Amf3Reader(s.rt, b) : null;
+    const r0 = amf3 ? null : new amf0.Reader(s.rt, b);
     const data = s.rt.newObject([]);
     try {
-      while (at < bytes.length) {
-        let length: number;
-        if (encoding === 3) {
-          const [n, next] = readU29(bytes, at);
-          length = n >> 1;
-          at = next;
+      while (b.position < b.length) {
+        let key: string;
+        let value: Value;
+        if (r3 && legacy) {
+          key = new avm2.Amf3Reader(s.rt, b).string();
+          value = new avm2.Amf3Reader(s.rt, b).value();
         } else {
-          length = (bytes[at] << 8) | bytes[at + 1];
-          at += 2;
+          key = r3 ? r3.string() : (r0 as amf0.Reader).name();
+          value = r3 ? r3.value() : (r0 as amf0.Reader).value();
         }
 
-        const key = decoder.decode(bytes.subarray(at, at + length));
-        b.position = (at + length) >>> 0;
-        const value = s.rt.callProperty(array, avm2.qname(avm2.publicNs, "readObject"));
         s.rt.setProperty(data, avm2.qname(avm2.publicNs, key), value);
         // The 0 after each value.
-        at = b.position + 1;
+        b.position = (b.position + 1) >>> 0;
       }
     } catch {
       return null;
@@ -215,8 +236,9 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       o.$name = text;
       o.$encoding = defaultEncoding;
       o.$client = o;
-      const stored = s.storage.get(key);
-      o.$data = (stored && deserialize(stored)) ?? s.rt.newObject([]);
+      const amf3 = s.storage.get(key + AMF3_KEY);
+      const stored = amf3 ?? s.storage.get(key);
+      o.$data = (stored && deserialize(stored, amf3 === null)) ?? s.rt.newObject([]);
       o.$saved = saved(o);
       open.set(key, o);
       return o;
@@ -239,8 +261,9 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       return defaultEncoding;
     }
 
+    // Any uint, as adl keeps it; one below 3 writes AMF0.
     static set defaultObjectEncoding(v: Value) {
-      defaultEncoding = s.rt.toUint(v) === 0 ? 0 : 3;
+      defaultEncoding = s.rt.toUint(v);
     }
 
     static get "flash.net:SharedObject::preventBackupImpl"(): boolean {
@@ -283,7 +306,8 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
         case CLEAR:
           this.$data = s.rt.newObject([]);
           this.$saved = new Uint8Array(0);
-          s.storage.remove(this.$key);
+          remove(this.$key);
+          remove(this.$key + AMF3_KEY);
           return undefined;
         case CLOSE:
           return undefined;
@@ -302,11 +326,11 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
       try {
         const file = serialize(o);
         if (file.length && !sameBytes(file, o.$saved)) {
-          s.storage.set(o.$key, file);
+          store(o, file);
           o.$saved = file;
         }
       } catch {
-        // One that cannot be written, AMF0's or a full quota's, keeps the others from nothing.
+        // One that cannot be written, as one a full quota refuses, keeps the others from nothing.
       }
     }
   };
@@ -319,39 +343,15 @@ function sameBytes(a: Uint8Array, b: Uint8Array | null): boolean {
   return b !== null && a.length === b.length && a.every((byte, i) => byte === b[i]);
 }
 
+/** Where a .sol file's AMF version ends: the last byte of its u32, after the name. */
+function versionAt(file: Uint8Array): number {
+  return 18 + ((file[16] << 8) | file[17]) + 3;
+}
+
+/** Whether a .sol file is AMF3's. */
+function isAmf3(file: Uint8Array): boolean {
+  return file[versionAt(file)] === 3;
+}
+
 /** The 0 after each value. */
 const END = new Uint8Array(1);
-
-/** An AMF3 U29: 1 to 4 bytes, 7 bits each but the fourth's 8. */
-function u29(n: number): Uint8Array {
-  if (n < 0x80) {
-    return Uint8Array.of(n);
-  }
-  if (n < 0x4000) {
-    return Uint8Array.of((n >> 7) | 0x80, n & 0x7f);
-  }
-  if (n < 0x200000) {
-    return Uint8Array.of((n >> 14) | 0x80, ((n >> 7) & 0x7f) | 0x80, n & 0x7f);
-  }
-
-  return Uint8Array.of(
-    (n >> 22) | 0x80,
-    ((n >> 15) & 0x7f) | 0x80,
-    ((n >> 8) & 0x7f) | 0x80,
-    n & 0xff,
-  );
-}
-
-/** The U29 at `at`, and where what follows it starts. */
-function readU29(bytes: Uint8Array, at: number): [number, number] {
-  let n = 0;
-  for (let i = 0; i < 3; i++) {
-    const b = bytes[at++];
-    n = (n << 7) | (b & 0x7f);
-    if (!(b & 0x80)) {
-      return [n, at];
-    }
-  }
-
-  return [(n << 8) | bytes[at], at + 1];
-}

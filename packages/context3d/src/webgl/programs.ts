@@ -5,12 +5,20 @@ import { Context3DError } from "../errors.js";
 export interface ProgramState {
   handle: WebGLProgram | null;
   targetY: WebGLUniformLocation | null;
+  targetYValue: number;
   attributes: number[];
+  attributeMask: number;
   vertex: (WebGLUniformLocation | null)[];
   vertexBank: WebGLUniformLocation | null;
   fragment: (WebGLUniformLocation | null)[];
   samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
   samplerMask: number;
+  samplersSet: boolean;
+  vertexVersions: Float64Array;
+  fragmentVersions: Float64Array;
+  vertexValues: Uint32Array;
+  fragmentValues: Uint32Array;
+  vertexVersion: number;
 }
 
 export interface CopyProgram {
@@ -53,12 +61,19 @@ export function uploadProgram(
   gl.deleteProgram(state.handle);
   state.handle = handle;
   state.targetY = gl.getUniformLocation(handle, "targetY");
+  state.targetYValue = Number.NaN;
   state.attributes = vs.attributes;
+  state.attributeMask = 0;
+  for (const slot of state.attributes) {
+    state.attributeMask |= 1 << slot;
+  }
+
   state.vertex = [];
   state.vertexBank = vs.indirect ? gl.getUniformLocation(handle, "vc[0]") : null;
   state.fragment = [];
   state.samplers = [];
   state.samplerMask = 0;
+  state.samplersSet = false;
   for (let i = 0; i < vs.constants.length; i++) {
     const index = vs.constants[i];
     state.vertex[index] = gl.getUniformLocation(handle, `vc${index}`);
@@ -77,6 +92,13 @@ export function uploadProgram(
       location: gl.getUniformLocation(handle, `fs${source.index}`),
     });
   }
+
+  // A fresh link has GL's defaults, even when the context's constants were never written.
+  state.vertexVersions = new Float64Array(state.vertex.length).fill(-1);
+  state.fragmentVersions = new Float64Array(state.fragment.length).fill(-1);
+  state.vertexValues = new Uint32Array(state.vertex.length * 4);
+  state.fragmentValues = new Uint32Array(state.fragment.length * 4);
+  state.vertexVersion = -1;
 }
 
 /** A program linked as the device links one, its failures Context3D's errors as before. */

@@ -34,6 +34,8 @@ export interface Place {
   glyphs: { mode: Float32Array; table: Float32Array } | null;
   /** Its geometry's flat (GeometryData.flat). */
   flat: boolean;
+  /** Small, unchanged geometries may be copied into a run's streaming buffer. */
+  batch: { data: GeometryData; frame: number } | null;
 }
 
 /**
@@ -44,6 +46,7 @@ export interface Place {
  * holes outweigh what is live.
  */
 export class GeometryAtlas {
+  frame = 0;
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
   vertexArray!: WebGLVertexArrayObject;
@@ -129,6 +132,7 @@ export class GeometryAtlas {
    * grown to twice what is live.
    */
   place(geometries: Geometries): void {
+    this.frame++;
     for (const id of geometries.removed) {
       const place = this.places[id];
       if (place?.glyphs) {
@@ -149,6 +153,7 @@ export class GeometryAtlas {
       const data = geometries.get(id);
       if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
         this.copyVertices(data, place.vertexStart);
+        place.batch = this.batch(data);
       } else if (place && data) {
         this.places[id] = null;
         if (place.glyphs) {
@@ -298,6 +303,7 @@ export class GeometryAtlas {
       indices: indices.length,
       glyphs: null,
       flat: data.flat === true,
+      batch: this.batch(data),
     };
     this.vertexTop += count;
     this.indexTop += indices.length;
@@ -329,6 +335,12 @@ export class GeometryAtlas {
     gl.bufferSubData(gl.ARRAY_BUFFER, base * VERTEX_BYTES, floats);
   }
 
+  private batch(data: GeometryData): Place["batch"] {
+    return data.positions.length <= 512 && data.indices.length <= 1024 && !data.depths
+      ? { data, frame: this.frame }
+      : null;
+  }
+
   /** Glyph quads copied in at the top of the glyph atlas, their indices made absolute in it. */
   private copyGlyphs(id: number, data: GeometryData): void {
     const gl = this.gl;
@@ -351,6 +363,7 @@ export class GeometryAtlas {
       indices: indices.length,
       glyphs: { mode: glyphs.mode, table: glyphs.table },
       flat: false,
+      batch: null,
     };
     g.top += count;
     g.indexTop += indices.length;

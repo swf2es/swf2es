@@ -190,6 +190,50 @@ function copy(
   return true;
 }
 
+/** How many names there are for createTemporary to try, as GetTempFileName's numbers, 1 to ffff. */
+const TEMPORARY_NAMES = 0xffff;
+
+/**
+ * File's createTempFile, and createTempDirectory where `directory`: an
+ * empty file or directory of a name not yet taken in the host's temporary
+ * directory, which is its cache directory, as adl's (the system's, both).
+ * It is named as adl names one, by Windows' GetTempFileName: "fla", a
+ * number in hexadecimal, ".tmp" ("fla281f.tmp"; lowercase under Wine, where
+ * it was measured). adl counts up from the clock; this from a number
+ * picked at random, passing by those taken. Its path, and whether it was
+ * made: a host that cannot make it, as a temporary directory adl may not
+ * write, leaves the name free. Null where the host has no temporary
+ * directory, or every name is taken.
+ */
+export function createTemporary(
+  s: Scripting,
+  directory: boolean,
+): { path: string; made: boolean } | null {
+  const host = s.fileSystem;
+  const base = host?.directories.cache;
+  if (!host || !base) {
+    return null;
+  }
+
+  const write = writer(s);
+  const paths = new NativePaths(host.separator);
+  const start = Math.floor(Math.random() * TEMPORARY_NAMES);
+  for (let i = 0; i < TEMPORARY_NAMES; i++) {
+    const unique = ((start + i) % TEMPORARY_NAMES) + 1;
+    const path = paths.resolve(base, `fla${unique.toString(16)}.tmp`, null);
+    if (host.stat(path)) {
+      continue;
+    }
+
+    const made = directory
+      ? !!write?.createDirectory(path)
+      : !!write?.write(path, new Uint8Array(0), 0, 0);
+    return { path, made };
+  }
+
+  return null;
+}
+
 /** An IOErrorEvent of `id`, its text adl's: "Error #id: message", and `suffix`. */
 export function ioErrorEvent(s: Scripting, id: number, suffix = ""): AsObject {
   return s.rt.construct(

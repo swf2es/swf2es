@@ -21,6 +21,7 @@ import {
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
+import { GlState } from "../device/state.js";
 import { blockBytes, type DxtEncoder } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 
@@ -67,9 +68,30 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
   compressedAlpha: 2,
 };
 
+interface Constants {
+  data: Float32Array;
+  bits: Uint32Array;
+  versions: Float64Array;
+  version: number;
+  writing: number;
+}
+
+function constants(registers: number): Constants {
+  const data = new Float32Array(registers * 4);
+
+  return {
+    data,
+    bits: new Uint32Array(data.buffer),
+    versions: new Float64Array(registers),
+    version: 0,
+    writing: 0,
+  };
+}
+
 /** An owned WebGL2 context, deliberately independent of the 2D renderer. */
 export class WebGLContext3D implements Context3D {
   readonly gl: WebGL2RenderingContext;
+  private readonly drawState: GlState;
   width = 0;
   height = 0;
   disposed = false;
@@ -101,6 +123,9 @@ export class WebGLContext3D implements Context3D {
   private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
   private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
+  private enabledAttributes = 0;
+  private indexBuffer: WebGLBuffer | null = null;
+  private readonly texturesApplied = new Uint8Array(8);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
@@ -110,8 +135,11 @@ export class WebGLContext3D implements Context3D {
   private depthBuffer: WebGLRenderbuffer | null = null;
   private antiAlias = 0;
   private depthWrite = true;
+  private depthCompare: CompareMode = "less";
   private blendEnabled = false;
-  private cullEnabled = false;
+  private blendSource: BlendFactor = "one";
+  private blendDestination: BlendFactor = "zero";
+  private cullFace: CullFace = "none";
   private colorWrite = 15;
   private readonly stencilFront = new StencilState();
   private readonly stencilBack = new StencilState();
@@ -125,8 +153,8 @@ export class WebGLContext3D implements Context3D {
   private scissorRight = 0;
   private scissorBottom = 0;
   private scissorOutside = false;
-  private readonly vertexConstants = new Float32Array(128 * 4);
-  private readonly fragmentConstants = new Float32Array(28 * 4);
+  private readonly vertexConstants = constants(128);
+  private readonly fragmentConstants = constants(28);
   private pixels = new Uint8Array(0);
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
@@ -148,6 +176,7 @@ export class WebGLContext3D implements Context3D {
       );
     }
 
+    this.drawState = new GlState(gl);
     const vao = gl.createVertexArray();
     if (!vao) {
       throw new Context3DError("operation", "Context3D experiment: cannot create vertex array");
@@ -195,11 +224,14 @@ export class WebGLContext3D implements Context3D {
         this.seedTarget(texture, state);
       }
     }
-    this.gl.bindFramebuffer(
-      this.gl.FRAMEBUFFER,
-      state ? targetFramebuffer(state) : this.framebuffer,
-    );
-    this.gl.viewport(0, 0, texture?.width ?? this.width, texture?.height ?? this.height);
+    this.drawState.bindFramebuffer(state ? targetFramebuffer(state) : this.framebuffer);
+    this.drawState.viewport(0, 0, texture?.width ?? this.width, texture?.height ?? this.height);
+  }
+
+  /** Temporary attachments and separate READ/DRAW bindings bypass the hot target cache. */
+  private bindFramebuffer(target: number, framebuffer: WebGLFramebuffer | null): void {
+    this.drawState.forget();
+    this.gl.bindFramebuffer(target, framebuffer);
   }
 
   configure(width: number, height: number, depth = false, antiAlias = 0): void {
@@ -242,18 +274,20 @@ export class WebGLContext3D implements Context3D {
         throw new Context3DError("operation", "Context3D experiment: cannot allocate back buffer");
       }
 
+      this.texturesApplied[0] = 0;
+      gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, resolveFramebuffer ?? framebuffer);
+      this.bindFramebuffer(gl.FRAMEBUFFER, resolveFramebuffer ?? framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
       if (resolveFramebuffer) {
         if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
           throw new Context3DError("operation", "Context3D experiment: incomplete resolve buffer");
         }
 
-        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        this.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
         gl.bindRenderbuffer(gl.RENDERBUFFER, colorBuffer);
         gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, width, height);
         gl.framebufferRenderbuffer(
@@ -294,7 +328,7 @@ export class WebGLContext3D implements Context3D {
       gl.deleteRenderbuffer(depthBuffer);
       gl.deleteRenderbuffer(colorBuffer);
       gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+      this.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
       throw error;
     }
 
@@ -485,9 +519,15 @@ export class WebGLContext3D implements Context3D {
 
   setDepth(write: boolean, compare: CompareMode): void {
     this.alive();
-    this.depthWrite = write;
-    this.gl.depthMask(write);
-    this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+    if (this.depthWrite !== write) {
+      this.depthWrite = write;
+      this.gl.depthMask(write);
+    }
+
+    if (this.depthCompare !== compare) {
+      this.depthCompare = compare;
+      this.gl.depthFunc(this.gl[DEPTH_FUNCTIONS[compare]]);
+    }
   }
 
   setScissor(x: number | null, y = 0, width = 0, height = 0): void {
@@ -541,26 +581,42 @@ export class WebGLContext3D implements Context3D {
 
   setBlend(source: BlendFactor, destination: BlendFactor): void {
     this.alive();
+    if (this.blendSource === source && this.blendDestination === destination) {
+      return;
+    }
+
     const gl = this.gl;
+    const enabled = this.blendEnabled;
+    this.blendSource = source;
+    this.blendDestination = destination;
     this.blendEnabled = source !== "one" || destination !== "zero";
-    if (source === "one" && destination === "zero") {
+    if (!this.blendEnabled) {
       gl.disable(gl.BLEND);
     } else {
       gl.blendFunc(gl[BLEND_FUNCTIONS[source]], gl[BLEND_FUNCTIONS[destination]]);
-      gl.enable(gl.BLEND);
+      if (!enabled) {
+        gl.enable(gl.BLEND);
+      }
     }
   }
 
   setCulling(face: CullFace): void {
     this.alive();
+    const previous = this.cullFace;
+    if (previous === face) {
+      return;
+    }
+
     const gl = this.gl;
-    this.cullEnabled = face !== "none";
+    this.cullFace = face;
     if (face === "none") {
       gl.disable(gl.CULL_FACE);
       return;
     }
 
-    gl.enable(gl.CULL_FACE);
+    if (previous === "none") {
+      gl.enable(gl.CULL_FACE);
+    }
     switch (face) {
       case "back":
         gl.cullFace(gl.BACK);
@@ -600,6 +656,9 @@ export class WebGLContext3D implements Context3D {
     }
 
     const target = stride === 0 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
+    if (stride === 0) {
+      this.indexBuffer = null;
+    }
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(target, handle);
     gl.bufferData(target, bytes, gl.STATIC_DRAW);
@@ -613,6 +672,7 @@ export class WebGLContext3D implements Context3D {
       checkedFirst: 0,
       checkedCount: 0,
       maximum: -1,
+      ranges: null,
     };
     const buffer: Buffer3D = {
       count,
@@ -620,18 +680,34 @@ export class WebGLContext3D implements Context3D {
       upload: (values, start, amount) => {
         this.alive();
         this.buffer(buffer);
-        uploadBuffer(gl, this.vao, buffer, state, values, start, amount);
+        try {
+          uploadBuffer(gl, this.vao, buffer, state, values, start, amount);
+        } finally {
+          // Source getters can draw before the upload replaces the VAO's index binding.
+          if (stride === 0) {
+            this.indexBuffer = null;
+          }
+        }
       },
       uploadBytes: (data, offset, start, amount) => {
         this.alive();
         this.buffer(buffer);
-        uploadBufferBytes(gl, this.vao, buffer, state, data, offset, start, amount);
+        try {
+          uploadBufferBytes(gl, this.vao, buffer, state, data, offset, start, amount);
+        } finally {
+          if (stride === 0) {
+            this.indexBuffer = null;
+          }
+        }
       },
       dispose: () => {
         if (!this.buffers.delete(buffer)) {
           return;
         }
 
+        if (this.indexBuffer === handle) {
+          this.indexBuffer = null;
+        }
         gl.deleteBuffer(handle);
         this.bufferBytes -= bytes;
         if (stride !== 0) {
@@ -639,6 +715,7 @@ export class WebGLContext3D implements Context3D {
           this.vertexBufferBytes -= bytes;
         }
         state.indices = null;
+        state.ranges = null;
         state.uploaded = new Uint8Array(0);
         for (let i = 0; i < this.vertices.length; i++) {
           const binding = this.vertices[i];
@@ -680,17 +757,26 @@ export class WebGLContext3D implements Context3D {
     const state: ProgramState = {
       handle: null,
       targetY: null,
+      targetYValue: Number.NaN,
       attributes: [],
+      attributeMask: 0,
       vertex: [],
       vertexBank: null,
       fragment: [],
       samplers: [],
       samplerMask: 0,
+      samplersSet: false,
+      vertexVersions: new Float64Array(0),
+      fragmentVersions: new Float64Array(0),
+      vertexValues: new Uint32Array(0),
+      fragmentValues: new Uint32Array(0),
+      vertexVersion: -1,
     };
     const program: Program3D = {
       upload: (vertex, fragment) => {
         this.alive();
         this.program(program);
+        this.drawState.forget();
         uploadProgram(this.gl, state, vertex, fragment);
 
         if (this.selected === program) {
@@ -703,6 +789,7 @@ export class WebGLContext3D implements Context3D {
         }
 
         // WebGL keeps a deleted program alive while it is still current.
+        this.drawState.forget();
         if (this.gl.getParameter(this.gl.CURRENT_PROGRAM) === state.handle) {
           this.gl.useProgram(null);
         }
@@ -711,11 +798,16 @@ export class WebGLContext3D implements Context3D {
         state.handle = null;
         state.targetY = null;
         state.attributes.length = 0;
+        state.attributeMask = 0;
         state.vertex.length = 0;
         state.vertexBank = null;
         state.fragment.length = 0;
         state.samplers.length = 0;
         state.samplerMask = 0;
+        state.vertexVersions = new Float64Array(0);
+        state.fragmentVersions = new Float64Array(0);
+        state.vertexValues = new Uint32Array(0);
+        state.fragmentValues = new Uint32Array(0);
         if (this.selected === program) {
           this.selected = null;
         }
@@ -852,6 +944,7 @@ export class WebGLContext3D implements Context3D {
       throw new Context3DError("textureAllocation", "Context3D experiment: cannot create texture");
     }
 
+    this.texturesApplied[0] = 0;
     gl.activeTexture(gl.TEXTURE0);
     const target = cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
     gl.bindTexture(target, handle);
@@ -881,22 +974,31 @@ export class WebGLContext3D implements Context3D {
       upload: (pixels, level = 0, face = 0, sourceWidth, sourceHeight) => {
         this.alive();
         this.textureState(texture);
-        uploadTexture(
-          gl,
-          texture,
-          state,
-          pixels,
-          level,
-          face,
-          sourceWidth,
-          sourceHeight,
-          this.dxtEncoder,
-        );
+        try {
+          uploadTexture(
+            gl,
+            texture,
+            state,
+            pixels,
+            level,
+            face,
+            sourceWidth,
+            sourceHeight,
+            this.dxtEncoder,
+          );
+        } finally {
+          // An encoder can draw before the upload replaces unit zero's binding.
+          this.texturesApplied[0] = 0;
+        }
       },
       uploadBytes: (data, offset, level = 0, face = 0) => {
         this.alive();
         this.textureState(texture);
-        uploadTextureBytes(gl, texture, state, data, offset, level, face, this.dxtEncoder);
+        try {
+          uploadTextureBytes(gl, texture, state, data, offset, level, face, this.dxtEncoder);
+        } finally {
+          this.texturesApplied[0] = 0;
+        }
       },
       uploadCompressed: (blocks, level = 0, face = 0) => {
         this.alive();
@@ -908,7 +1010,11 @@ export class WebGLContext3D implements Context3D {
           );
         }
 
-        uploadCompressedLevel(gl, texture, state, blocks, level, face);
+        try {
+          uploadCompressedLevel(gl, texture, state, blocks, level, face);
+        } finally {
+          this.texturesApplied[0] = 0;
+        }
       },
       dispose: () => {
         if (!this.textures.delete(texture)) {
@@ -916,12 +1022,13 @@ export class WebGLContext3D implements Context3D {
         }
 
         this.textureCounts[kind]--;
+        this.drawState.forget();
         this.textureQuotaBytes[kind] -= quotaBytes;
 
         if (this.renderTexture === texture) {
           this.renderTexture = null;
           this.renderDepth = false;
-          gl.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
+          this.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
           gl.frontFace(gl.CW);
           this.applyScissor();
         }
@@ -941,6 +1048,7 @@ export class WebGLContext3D implements Context3D {
 
         for (let i = 0; i < this.textureSlots.length; i++) {
           if (this.textureSlots[i] === texture) {
+            this.texturesApplied[i] = 0;
             this.textureSlots[i] = null;
             this.textureMask &= ~(1 << i);
             gl.activeTexture(gl.TEXTURE0 + i);
@@ -999,7 +1107,7 @@ export class WebGLContext3D implements Context3D {
 
     const gl = this.gl;
     const program = this.copyProgram(texture.cube);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
+    this.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
     gl.viewport(0, 0, texture.width, texture.height);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.STENCIL_TEST);
@@ -1007,6 +1115,7 @@ export class WebGLContext3D implements Context3D {
     gl.disable(gl.CULL_FACE);
     gl.disable(gl.SCISSOR_TEST);
     gl.colorMask(true, true, true, true);
+    this.texturesApplied[0] = 0;
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, state.handle);
     gl.bindSampler(0, this.sampler(0));
@@ -1025,7 +1134,7 @@ export class WebGLContext3D implements Context3D {
     if (this.blendEnabled) {
       gl.enable(gl.BLEND);
     }
-    if (this.cullEnabled) {
+    if (this.cullFace !== "none") {
       gl.enable(gl.CULL_FACE);
     }
     if (this.scissor) {
@@ -1049,6 +1158,7 @@ export class WebGLContext3D implements Context3D {
   }
 
   private deleteMultisample(texture: Texture3D, target: MultisampleTarget): void {
+    this.drawState.forget();
     deleteMultisample(this.gl, target);
 
     const bytes = texture.width * texture.height * 4 * target.samples;
@@ -1081,6 +1191,8 @@ export class WebGLContext3D implements Context3D {
 
     this.copyProgram(texture.cube);
     this.sampler(0);
+    this.drawState.forget();
+    this.texturesApplied[0] = 0;
     const target = allocateMultisample(
       this.gl,
       texture,
@@ -1157,7 +1269,7 @@ export class WebGLContext3D implements Context3D {
             );
           }
         }
-        gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+        this.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
         gl.framebufferTexture2D(
           gl.FRAMEBUFFER,
           gl.COLOR_ATTACHMENT0,
@@ -1209,7 +1321,7 @@ export class WebGLContext3D implements Context3D {
         if (framebuffer !== state.framebuffer) {
           gl.deleteFramebuffer(framebuffer);
         } else if (framebuffer) {
-          gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
+          this.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
           gl.framebufferTexture2D(
             gl.FRAMEBUFFER,
             gl.COLOR_ATTACHMENT0,
@@ -1232,7 +1344,7 @@ export class WebGLContext3D implements Context3D {
           gl.deleteRenderbuffer(depthBuffer);
         }
         gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-        gl.bindFramebuffer(
+        this.bindFramebuffer(
           gl.FRAMEBUFFER,
           this.renderTexture
             ? targetFramebuffer(this.textureState(this.renderTexture))
@@ -1298,6 +1410,8 @@ export class WebGLContext3D implements Context3D {
     const state = this.textureState(texture);
     if (state.dirty) {
       const gl = this.gl;
+      this.drawState.forget();
+      this.texturesApplied[0] = 0;
       resolveTarget(this.gl, texture, state, this.renderFace, this.scissor);
       gl.activeTexture(gl.TEXTURE0);
       if (texture.cube) {
@@ -1306,7 +1420,7 @@ export class WebGLContext3D implements Context3D {
         gl.disable(gl.SCISSOR_TEST);
         const face = gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.renderFace;
         // The base-size depth attachment cannot accompany smaller mip images.
-        gl.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
+        this.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
         if (state.depthAttached) {
           gl.framebufferRenderbuffer(
             gl.FRAMEBUFFER,
@@ -1316,7 +1430,7 @@ export class WebGLContext3D implements Context3D {
           );
         }
         for (let level = 1; level < texture.levels; level++) {
-          gl.bindFramebuffer(gl.READ_FRAMEBUFFER, state.framebuffer);
+          this.bindFramebuffer(gl.READ_FRAMEBUFFER, state.framebuffer);
           gl.framebufferTexture2D(
             gl.READ_FRAMEBUFFER,
             gl.COLOR_ATTACHMENT0,
@@ -1324,7 +1438,7 @@ export class WebGLContext3D implements Context3D {
             state.handle,
             level - 1,
           );
-          gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, state.mipFramebuffer);
+          this.bindFramebuffer(gl.DRAW_FRAMEBUFFER, state.mipFramebuffer);
           gl.framebufferTexture2D(
             gl.DRAW_FRAMEBUFFER,
             gl.COLOR_ATTACHMENT0,
@@ -1346,7 +1460,7 @@ export class WebGLContext3D implements Context3D {
             gl.LINEAR,
           );
         }
-        gl.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
+        this.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
         gl.framebufferTexture2D(
           gl.FRAMEBUFFER,
           gl.COLOR_ATTACHMENT0,
@@ -1379,9 +1493,13 @@ export class WebGLContext3D implements Context3D {
     }
 
     // AIR accepts a disposed texture binding and reports 3663 when drawing.
+    if (this.textureSlots[index] !== texture) {
+      this.texturesApplied[index] = 0;
+    }
     this.textureSlots[index] = texture;
     this.textureMask = (this.textureMask & ~(1 << index)) | (texture ? 1 << index : 0);
     if (!texture) {
+      this.texturesApplied[index] = 0;
       this.gl.activeTexture(this.gl.TEXTURE0 + index);
       this.gl.bindTexture(this.gl.TEXTURE_2D, null);
       this.gl.bindTexture(this.gl.TEXTURE_CUBE_MAP, null);
@@ -1399,7 +1517,14 @@ export class WebGLContext3D implements Context3D {
       throw new Context3DError("operation", "Context3D experiment: invalid sampler state");
     }
 
-    this.samplerStates[index] = w | (f << 2) | (m << 5);
+    this.setSamplerState(index, w | (f << 2) | (m << 5));
+  }
+
+  private setSamplerState(index: number, state: number): void {
+    if (this.samplerStates[index] !== state) {
+      this.samplerStates[index] = state;
+      this.texturesApplied[index] = 0;
+    }
   }
 
   private sampler(index: number): WebGLSampler {
@@ -1465,8 +1590,10 @@ export class WebGLContext3D implements Context3D {
     for (let i = 0; i < state.samplers.length; i++) {
       const source = state.samplers[i].source;
       if (!source.ignore) {
-        this.samplerStates[source.index] =
-          (source.repeat ? 3 : 0) | (source.filter << 2) | (source.mip << 5);
+        this.setSamplerState(
+          source.index,
+          (source.repeat ? 3 : 0) | (source.filter << 2) | (source.mip << 5),
+        );
       }
     }
   }
@@ -1494,6 +1621,15 @@ export class WebGLContext3D implements Context3D {
     const valid = offset >= 0 && offset <= buffer.stride - (packed ? 1 : size);
     const previous = this.vertices[index];
     if (previous) {
+      if (
+        previous.buffer !== buffer ||
+        previous.offset !== offset ||
+        previous.size !== size ||
+        previous.packed !== packed
+      ) {
+        previous.applied = false;
+      }
+
       if (previous.buffer !== buffer) {
         previous.checkedIndex = null;
       }
@@ -1509,6 +1645,7 @@ export class WebGLContext3D implements Context3D {
         size,
         packed,
         valid,
+        applied: false,
         checkedIndex: null,
         checkedIndexVersion: -1,
         checkedVertexVersion: -1,
@@ -1521,10 +1658,20 @@ export class WebGLContext3D implements Context3D {
   setConstants(stage: ProgramType, first: number, values: ArrayLike<number>, count: number): void {
     this.alive();
     const dest = stage === "vertex" ? this.vertexConstants : this.fragmentConstants;
-    range(first, count, dest.length / 4);
+    range(first, count, dest.data.length / 4);
     range(0, count * 4, values.length);
-    for (let i = 0; i < count * 4; i++) {
-      dest[first * 4 + i] = values[i];
+
+    dest.writing++;
+    try {
+      for (let i = 0; i < count * 4; i++) {
+        dest.data[first * 4 + i] = values[i];
+      }
+    } finally {
+      // Source getters can draw, nest setters or throw after partially writing the bank.
+      dest.writing--;
+      if (count) {
+        dest.versions.fill(++dest.version, first, first + count);
+      }
     }
   }
 
@@ -1575,9 +1722,13 @@ export class WebGLContext3D implements Context3D {
     const maximum = validateIndices(index, first, count);
 
     const gl = this.gl;
-    gl.bindVertexArray(this.vao);
+    this.drawState.bindVertexArray(this.vao);
     for (let i = 0; i < 8; i++) {
-      gl.disableVertexAttribArray(i);
+      const bit = 1 << i;
+      if (this.enabledAttributes & bit & ~state.attributeMask) {
+        gl.disableVertexAttribArray(i);
+        this.enabledAttributes &= ~bit;
+      }
     }
 
     for (let i = 0; i < state.attributes.length; i++) {
@@ -1594,20 +1745,32 @@ export class WebGLContext3D implements Context3D {
 
       validateVertices(buffer, index, binding, first, count, maximum);
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, buffer.handle);
-      gl.enableVertexAttribArray(slot);
-      gl.vertexAttribPointer(
-        slot,
-        binding.size,
-        binding.packed ? gl.UNSIGNED_BYTE : gl.FLOAT,
-        binding.packed,
-        binding.buffer.stride * 4,
-        binding.offset * 4,
-      );
+      if (!binding.applied) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer.handle);
+        gl.vertexAttribPointer(
+          slot,
+          binding.size,
+          binding.packed ? gl.UNSIGNED_BYTE : gl.FLOAT,
+          binding.packed,
+          binding.buffer.stride * 4,
+          binding.offset * 4,
+        );
+        binding.applied = true;
+      }
+
+      const bit = 1 << slot;
+      if (!(this.enabledAttributes & bit)) {
+        gl.enableVertexAttribArray(slot);
+        this.enabledAttributes |= bit;
+      }
     }
 
-    gl.useProgram(state.handle);
-    gl.uniform1f(state.targetY, this.renderTexture ? -1 : 1);
+    this.drawState.useProgram(state.handle);
+    const targetY = this.renderTexture ? -1 : 1;
+    if (state.targetYValue !== targetY) {
+      gl.uniform1f(state.targetY, targetY);
+      state.targetYValue = targetY;
+    }
     for (let i = 0; i < state.samplers.length; i++) {
       const binding = state.samplers[i];
       const slot = binding.source.index;
@@ -1654,27 +1817,69 @@ export class WebGLContext3D implements Context3D {
         throw new TextureBindingError("format", slot);
       }
 
-      gl.activeTexture(gl.TEXTURE0 + slot);
-      gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, resource.handle);
-      gl.bindSampler(slot, this.sampler(this.samplerStates[slot]));
-      gl.uniform1i(binding.location, slot);
+      if (!this.texturesApplied[slot]) {
+        gl.activeTexture(gl.TEXTURE0 + slot);
+        gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, resource.handle);
+        gl.bindSampler(slot, this.sampler(this.samplerStates[slot]));
+        this.texturesApplied[slot] = 1;
+      }
+      if (!state.samplersSet) {
+        gl.uniform1i(binding.location, slot);
+      }
     }
 
+    state.samplersSet = true;
+
     if (state.vertexBank) {
-      gl.uniform4fv(state.vertexBank, this.vertexConstants);
+      if (this.vertexConstants.writing || state.vertexVersion !== this.vertexConstants.version) {
+        gl.uniform4fv(state.vertexBank, this.vertexConstants.data);
+        state.vertexVersion = this.vertexConstants.version;
+      }
     } else {
-      this.uniforms(state.vertex, this.vertexConstants);
+      this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
     }
-    this.uniforms(state.fragment, this.fragmentConstants);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
+    this.uniforms(
+      state.fragment,
+      this.fragmentConstants,
+      state.fragmentVersions,
+      state.fragmentValues,
+    );
+    if (this.indexBuffer !== index.handle) {
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, index.handle);
+      this.indexBuffer = index.handle;
+    }
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);
     this.changedTarget();
   }
 
-  private uniforms(locations: (WebGLUniformLocation | null)[], data: Float32Array): void {
+  private uniforms(
+    locations: (WebGLUniformLocation | null)[],
+    bank: Constants,
+    previous: Float64Array,
+    values: Uint32Array,
+  ): void {
     for (let i = 0; i < locations.length; i++) {
-      if (locations[i]) {
-        this.gl.uniform4fv(locations[i], data, i * 4, 4);
+      if (locations[i] && (bank.writing || previous[i] !== bank.versions[i])) {
+        const offset = i * 4;
+        const a = bank.bits[offset];
+        const b = bank.bits[offset + 1];
+        const c = bank.bits[offset + 2];
+        const d = bank.bits[offset + 3];
+        // Compare float32 bits so signed zero and NaN payloads keep reaching GL unchanged.
+        if (
+          previous[i] < 0 ||
+          values[offset] !== a ||
+          values[offset + 1] !== b ||
+          values[offset + 2] !== c ||
+          values[offset + 3] !== d
+        ) {
+          this.gl.uniform4fv(locations[i], bank.data, offset, 4);
+          values[offset] = a;
+          values[offset + 1] = b;
+          values[offset + 2] = c;
+          values[offset + 3] = d;
+        }
+        previous[i] = bank.versions[i];
       }
     }
   }
@@ -1686,8 +1891,8 @@ export class WebGLContext3D implements Context3D {
 
     const gl = this.gl;
     if (this.resolveDirty) {
-      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
-      gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resolveFramebuffer);
+      this.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
+      this.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resolveFramebuffer);
       if (this.scissor) {
         gl.disable(gl.SCISSOR_TEST);
       }
@@ -1708,7 +1913,7 @@ export class WebGLContext3D implements Context3D {
       }
       this.resolveDirty = false;
     }
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, this.resolveFramebuffer);
+    this.bindFramebuffer(gl.READ_FRAMEBUFFER, this.resolveFramebuffer);
   }
 
   read(width = this.width, height = this.height): Uint8Array {
@@ -1733,7 +1938,7 @@ export class WebGLContext3D implements Context3D {
     this.target();
     this.resolve();
     const gl = this.gl;
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+    this.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
     if (this.scissor) {
       gl.disable(gl.SCISSOR_TEST);
     }
@@ -1780,7 +1985,7 @@ export class WebGLContext3D implements Context3D {
     this.gl.useProgram(null);
     this.gl.bindBuffer(this.gl.ARRAY_BUFFER, null);
     this.gl.bindBuffer(this.gl.ELEMENT_ARRAY_BUFFER, null);
-    this.gl.bindFramebuffer(this.gl.FRAMEBUFFER, null);
+    this.bindFramebuffer(this.gl.FRAMEBUFFER, null);
     this.gl.bindTexture(this.gl.TEXTURE_2D, null);
     this.gl.deleteVertexArray(this.vao);
     this.gl.deleteFramebuffer(this.framebuffer);
@@ -1799,5 +2004,8 @@ export class WebGLContext3D implements Context3D {
     this.depthBuffer = null;
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
+    this.texturesApplied.fill(0);
+    this.indexBuffer = null;
+    this.drawState.forget();
   }
 }

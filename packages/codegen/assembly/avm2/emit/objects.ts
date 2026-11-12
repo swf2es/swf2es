@@ -29,7 +29,7 @@ import {
   BUILTIN_String,
   BUILTIN_Uint,
 } from "../link/traits";
-import { NONE } from "./copies";
+import { CONSTANT, NONE } from "./copies";
 import { isAddress, viewMethod } from "./memory";
 import { hasBoundEntry, MethodEmitter } from "./method";
 import { aliasedMember, interfaceAlias, isClassRef, poolString, slotMember, typeRef } from "./refs";
@@ -159,6 +159,25 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
     case IR_FindPropGlobal:
     case IR_FindPropGlobalStrict:
       em.assign(i);
+      if (ir.c[i] > 0) {
+        // The local scopes from c - 1 first, by what each is at run time.
+        out.text(op === IR_FindPropGlobalStrict ? "rt.findLocalStrict(M[" : "rt.findLocal(M[");
+        out.uint(a);
+        out.text("], [");
+        for (let d = <u32>ir.c[i] - 1; d < em.scopeDepth; d++) {
+          if (d > <u32>ir.c[i] - 1) {
+            out.text(", ");
+          }
+
+          em.reg(<i32>(em.ir.localCount + d));
+        }
+
+        out.text("], ");
+        globalScope(em);
+        out.text(")");
+        return true;
+      }
+
       // Not found statically: a script's name, or else the global object's.
       out.text("M[");
       out.uint(a);
@@ -251,6 +270,18 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       em.reg(src + <i32>ir.srcCount[i] - 1);
       return true;
     case ops.OP_getproperty:
+      if (interpretedKey(em, a, src + 1)) {
+        em.assign(i);
+        out.text("rt.getInterpreted(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(")");
+        return true;
+      }
+
       if (indexed(em, a, src + 1)) {
         // As avmplus' getUintProperty: an element by its number, of a
         // Vector by the kind of its elements where the IR knows it.
@@ -295,6 +326,17 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       }
 
       em.assign(i);
+      if (keyed(em, a, src + 1)) {
+        out.text("rt.getKeyed(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(")");
+        return true;
+      }
+
       out.text("rt.getProperty(");
       em.reg(src);
       out.text(", ");
@@ -302,6 +344,19 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text(")");
       return true;
     case ops.OP_setproperty:
+      if (interpretedKey(em, a, src + 1)) {
+        out.text("rt.setInterpreted(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(", ");
+        em.reg(src + 2);
+        out.text(")");
+        return true;
+      }
+
       if (indexed(em, a, src + 1)) {
         const kind = vectorKind(em, em.regType[src]);
         // An Array's element below its length written in place, as
@@ -363,6 +418,19 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
           em.reg(src + 2);
         }
 
+        out.text(")");
+        return true;
+      }
+
+      if (keyed(em, a, src + 1)) {
+        out.text("rt.setKeyed(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(", ");
+        em.reg(src + 2);
         out.text(")");
         return true;
       }
@@ -498,9 +566,10 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         em.assign(i);
       }
 
-      out.text("rt.callStatic(A, ");
+      // By its factory, which the runtime keeps the first method it made of.
+      out.text("rt.callStatic(F[");
       out.uint(a);
-      out.text(", ");
+      out.text("], ");
       em.reg(src);
       args(em, src + 1, ir.b[i]);
       out.text(")");
@@ -510,7 +579,7 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text("rt.newFunction(F[");
       out.uint(a);
       out.text("], ");
-      scopeHere(em);
+      functionScope(em, a);
       // Its method's id, as avmplus writes a function as [object Function-id].
       out.text(", ");
       out.uint(a);
@@ -742,6 +811,28 @@ function localScopes(em: MethodEmitter): void {
   out.uint(withs);
 }
 
+/**
+ * The scope chain function `m` of the ABC, created here, runs in: for a
+ * contested function whose creators' chains differ in length, this one's
+ * past those they share packed into the one entry it was compiled with
+ * (Scope.merged).
+ */
+function functionScope(em: MethodEmitter, m: u32): void {
+  const traits = em.domain.traits;
+  const g = em.domain.methodStart[em.index] + m;
+  const merged = traits.functionContested[g] ? traits.functionMerged[g] : null;
+  if (merged === null || merged.pack < 0) {
+    scopeHere(em);
+    return;
+  }
+
+  em.out.text("rt.packScope(");
+  scopeHere(em);
+  em.out.text(", ");
+  em.out.uint(<u32>merged.pack);
+  em.out.text(")");
+}
+
 /** The scope chain a function or class created here runs in. */
 function scopeHere(em: MethodEmitter): void {
   em.out.text("rt.scope(scope, ");
@@ -769,6 +860,20 @@ function name(em: MethodEmitter, a: u32, from: i32): void {
   if (parts === 0) {
     out.text("M[");
     out.uint(a);
+    out.text("]");
+    return;
+  }
+
+  // The name of a string the code holds is the same each time: made once, in T.
+  const copy = em.copyOf[from];
+  if (
+    (kind === C.CONSTANT_MultinameL || kind === C.CONSTANT_MultinameLA) &&
+    from !== em.pendingNull &&
+    copy <= CONSTANT &&
+    em.ir.op[CONSTANT - copy] === ops.OP_pushstring
+  ) {
+    out.text("T[");
+    out.uint(em.literalSlot(a, em.ir.a[CONSTANT - copy]));
     out.text("]");
     return;
   }
@@ -881,12 +986,49 @@ function storedType(em: MethodEmitter, kind: string, src: i32): i32 {
 }
 
 /**
+ * Whether getproperty or setproperty by multiname `a`, a runtime name
+ * alone, takes the key in register r as avmplus' interpreter does in a
+ * script's or a class's initializer (rt.getInterpreted): an int key of an
+ * object is an element there whatever the name's namespaces, where the
+ * JIT needs a public one and no attribute. A String is never such a key.
+ */
+function interpretedKey(em: MethodEmitter, a: u32, r: i32): bool {
+  const kind = em.abc.pool.mnKind[a];
+  return (
+    em.staticInit &&
+    (kind === C.CONSTANT_MultinameLA ||
+      (kind === C.CONSTANT_MultinameL && !em.domain.hasPublicNamespace(em.index, a))) &&
+    em.builtinOf(r) !== BUILTIN_String
+  );
+}
+
+/**
  * Whether multiname `a` is a runtime name alone, not an attribute, whose
  * name in register r is a number: an element's index, which the runtime
  * reads and writes without making the name.
  */
 function indexed(em: MethodEmitter, a: u32, r: i32): bool {
   return em.abc.pool.mnKind[a] === C.CONSTANT_MultinameL && isNumber(em, r);
+}
+
+/**
+ * Whether multiname `a` is a runtime name alone, not an attribute, whose
+ * name in register r is of a type that tells nothing of what it is at run
+ * time, a number or an object among them: as avmplus' JIT, which hands
+ * such a key to getprop_index and setprop_index, the runtime looks at the
+ * key before it makes a name of it. A String's is a name always, a number's
+ * an index (indexed). Not in a script's or a class's initializer, which
+ * avmplus interprets: there a Dictionary is asked for an object by any
+ * name, and a Proxy is handed a number that is no index as a QName, as the
+ * name made of the key has it.
+ */
+function keyed(em: MethodEmitter, a: u32, r: i32): bool {
+  return (
+    !em.staticInit &&
+    em.abc.pool.mnKind[a] === C.CONSTANT_MultinameL &&
+    !isNumber(em, r) &&
+    em.builtinOf(r) !== BUILTIN_String
+  );
 }
 
 /**

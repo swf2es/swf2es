@@ -1,5 +1,169 @@
 import { check, color, create, rejects, shader } from "./context.ts";
 
+/** Uniform values survive program switches, but a newly linked program starts afresh. */
+export async function uniformUploads() {
+  const owned = create();
+  const { backend: c, gl, live } = owned;
+  const upload = gl.uniform4fv;
+  let calls = 0;
+  gl.uniform4fv = (...args) => {
+    calls++;
+    upload.apply(gl, args);
+  };
+  try {
+    c.configure(32, 32);
+    c.setDepth(false, "always");
+    const vertices = c.createBuffer(3, 4);
+    vertices.upload([-0.75, -0.75, 0.5, 1, 0.75, -0.75, 0.5, 1, 0, 0.75, 0.5, 1], 0, 3);
+    const indices = c.createBuffer(3, 0);
+    indices.upload([0, 1, 2], 0, 3);
+    c.setVertex(0, vertices, 0, "float4");
+    const vertex = shader(false);
+    const fragment = shader(true);
+    const sparse = fragment.slice();
+    new DataView(sparse.buffer).setUint32(15, 0xe4000005, true);
+    const first = c.createProgram();
+    const second = c.createProgram();
+    first.upload(vertex, fragment);
+    second.upload(vertex, fragment);
+    const red = [1, 0, 0, 1];
+    const green = [0, 1, 0, 1];
+    c.setConstants("fragment", 0, red, 1);
+    c.setConstants("fragment", 5, green, 1);
+    const draw = (uploads: number, expected?: string) => {
+      calls = 0;
+      c.clear(0, 0, 0, 1);
+      c.draw(indices, 0, 1);
+      check(calls === uploads, `expected ${uploads} uniform uploads, got ${calls}`);
+      if (expected) {
+        const actual = color(c.read(), c.width / 2, c.height / 2, c.width);
+        check(actual === expected, `program constants produced ${actual}, expected ${expected}`);
+      }
+    };
+    c.setProgram(first);
+    draw(1, "ffff0000");
+    draw(0, "ffff0000");
+    c.setProgram(second);
+    draw(1, "ffff0000");
+    c.setProgram(first);
+    draw(0, "ffff0000");
+    c.setProgram(second);
+    c.setConstants("fragment", 0, green, 1);
+    draw(1, "ff00ff00");
+    c.setProgram(first);
+    c.setConstants("fragment", 0, red, 1);
+    draw(0, "ffff0000");
+    second.upload(vertex, sparse);
+    c.setConstants("fragment", 0, red, 1);
+    draw(0, "ffff0000");
+    c.setConstants("fragment", 9, green, 1);
+    draw(0, "ffff0000");
+    c.setProgram(second);
+    draw(1, "ff00ff00");
+    c.setConstants("fragment", 0, green, 1);
+    draw(0, "ff00ff00");
+    c.setProgram(first);
+    draw(1, "ff00ff00");
+    c.setProgram(second);
+    draw(0, "ff00ff00");
+    c.setProgram(first);
+    draw(0, "ff00ff00");
+
+    first.upload(vertex, fragment);
+    draw(1, "ff00ff00");
+    const malformed = fragment.slice();
+    malformed[7] = 0xff;
+    rejects(() => first.upload(vertex, malformed));
+    draw(0, "ff00ff00");
+    c.configure(64, 64);
+    draw(0, "ff00ff00");
+
+    // Equal float32 bits need no upload; the sign of zero and NaN payloads still matter.
+    c.setConstants("fragment", 0, [-0, 1, 0, 1], 1);
+    draw(1, "ff00ff00");
+    c.setConstants("fragment", 0, [-0, 1, 0, 1], 1);
+    draw(0, "ff00ff00");
+    c.setConstants("fragment", 0, [0, 1, 0, 1], 1);
+    draw(1, "ff00ff00");
+    c.setConstants("fragment", 0, [Number.NaN, 1, 0, 1], 1);
+    draw(1);
+    draw(0);
+    c.setConstants("fragment", 0, [Number.NaN, 1, 0, 1], 1);
+    draw(0);
+    const payloads = new Uint32Array([0x7fc00001, 0x3f800000, 0, 0x3f800000]);
+    const nan = new Float32Array(payloads.buffer);
+    c.setConstants("fragment", 0, nan, 1);
+    draw(1);
+    c.setConstants("fragment", 0, nan, 1);
+    draw(0);
+    payloads[0] = 0x7fc00002;
+    c.setConstants("fragment", 0, nan, 1);
+    draw(1);
+    c.setConstants("fragment", 0, [1 + 2 ** -30, 0, 0, 1], 1);
+    draw(1, "ffff0000");
+    c.setConstants("fragment", 0, red, 1);
+    draw(0, "ffff0000");
+
+    // The public ArrayLike setter can fail after earlier components were already written.
+    rejects(() =>
+      c.setConstants(
+        "fragment",
+        0,
+        {
+          length: 4,
+          0: 0,
+          1: 1,
+          get 2(): number {
+            throw new Error("source failed");
+          },
+          3: 1,
+        },
+        1,
+      ),
+    );
+    draw(1, "ff00ff00");
+    draw(0, "ff00ff00");
+
+    // A source getter can consume the partial bank before the setter finishes.
+    c.setConstants(
+      "fragment",
+      0,
+      {
+        length: 4,
+        get 0() {
+          c.setConstants("fragment", 0, red, 1);
+          draw(1, "ffff0000");
+          return 0;
+        },
+        get 1() {
+          draw(1, "ff000000");
+          return 1;
+        },
+        2: 0,
+        3: 1,
+      },
+      1,
+    );
+    draw(1, "ff00ff00");
+    draw(0, "ff00ff00");
+    const unwritten = fragment.slice();
+    new DataView(unwritten.buffer).setUint32(15, 0xe400001b, true);
+    first.upload(vertex, unwritten);
+    draw(1);
+    draw(0);
+    check(gl.getError() === gl.NO_ERROR, "uniform reuse polluted GL state");
+
+    return { passed: true };
+  } finally {
+    gl.uniform4fv = upload;
+    c.dispose();
+    check(live.size === 0, "uniform reuse retained GPU resources");
+    if (!gl.isContextLost()) {
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
+    }
+  }
+}
+
 export async function indirectConstants() {
   const owned = create();
   const { backend: c, gl, live } = owned;
@@ -62,6 +226,8 @@ export async function indirectConstants() {
         "stale indexed constant",
       );
       check(calls === iteration + 1, "indexed draw made redundant uniform uploads");
+      c.draw(indices, 0, 1);
+      check(calls === iteration + 1, "unchanged indexed constants uploaded again");
       check(
         queries === 0 && owned.created === allocated,
         "indexed draw queried or allocated GPU state",

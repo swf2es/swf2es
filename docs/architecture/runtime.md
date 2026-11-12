@@ -27,6 +27,14 @@ numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
 
+Runtime string names with fixed namespaces reuse at most 64 resolved names per
+module template, each at most 128 UTF-16 code units. These names share the normal
+property binding caches; values and prototype properties are still read afresh.
+After 64 consecutive misses on a full cache, that template stops probing the map
+until the next cache invalidation. Templates are weakly held, and invalidation
+discards their resolved names so retired domains are not kept by this cache.
+Runtime namespaces, object keys and numeric keys retain their transient path.
+
 The builtins' natives are in `natives/`, a file per
 family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
@@ -245,6 +253,51 @@ committed file to its sources; `SWF2ES_PLAYERGLOBAL=adobe` runs the tests on
 Flash Player's own instead. No version mark goes past the reference's 41:
 a builtin's highest mark from 42 up is the VM's internal one
 (`API_FirstInternalMark`), which a higher mark would make public.
+
+## AS3 classes in TypeScript
+
+Natives and hosts see AS3 objects as untyped JS objects, whose members
+they look up by name. `Runtime.prop(o, name)`, `setProp(o, name, v)` and
+`callProp(o, name, ...args)` are those lookups, getProperty, setProperty
+and callProperty of `publicName(name)`, as natives made them before, with
+`o` typed as an `avm2.Ref<T>` (`avm2/as3-types.ts`): an object of the class
+whose public members `T` declares. A name the class does not declare, a
+value of the wrong type, a write to a constant or a read-only accessor, a
+read of a method or a call of a property, is then a compile error, not a
+lookup that finds nothing at run time. A Ref has no JS properties of its
+own: `r.x` would not be the object's x, so the members are reached through
+the runtime alone. The three methods make the lookups natives made before,
+in one call more; generated code does not use them.
+
+The declarations are generated from the libraries' ABCs by
+`tools/as3-types.ts` into `avm2/builtin-types.generated.ts` here and
+`as3/playerglobal-types.generated.ts` and `air-types.generated.ts`
+in the player: for each class an interface of its instances' public
+members, `As3_flash_geom_Rectangle`, extending its base class's (an
+interface its super-interfaces'), and one of its class object's,
+`As3_flash_geom_Rectangle$`, keyed by qualified name in
+`BuiltinClasses` and `BuiltinStatics`, `PlayerglobalClasses` and so on.
+The player's `as3/types.ts` joins them, as
+`@swf2es/player/as3-types`: `v as As3<"flash.geom::Rectangle">` types a
+native's argument. int, uint and Number are `number`, Boolean is `boolean`,
+String is `string | null`, as AS3 lets a String be null; `*` and Object are
+`Value`; another class, an interface, Array or Function is a nullable Ref
+to its declarations, and a Vector a Ref to its storage class's
+(`Vector$int`, `$uint`, `$double` or `$object`, without its element type);
+void is `void`. A getter without a setter, or a constant, is `readonly`;
+a parameter with a default is optional, and `...rest` is `Value[]`.
+Parameter names are the AS3 sources' (as3/playerglobal/src, as3/air/src),
+as the ABCs have none. Only public names are declared: members in the AS3,
+flash_proxy or a class's own namespaces, internal and protected ones, and
+a package's functions, variables and constants are not, yet.
+
+`pnpm as3:playerglobal`, `pnpm as3:air` and `tools/avmplus-libraries.ts
+--update` write the declarations again after their library, and
+`node tools/as3-types.ts` says which are stale; a unit test fails while
+any is. The generator itself is `@swf2es/cli`'s (`as3-types.ts`), over
+`@swf2es/format`'s reader of an ABC's declarations (`abc-surface.ts`), so
+that `swf2es types movie.swf` writes the same for a SWF's own classes,
+extending the libraries' declarations, a type none defines `Value`.
 
 ## Running ABCs as avmshell does
 

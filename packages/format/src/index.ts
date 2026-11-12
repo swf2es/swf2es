@@ -1,14 +1,26 @@
 /**
  * Parsers for the SWF container and its tags: shapes, fonts, text, bitmaps,
  * sounds, buttons and filters, a DoABC's bytes, which codegen parses, and
- * the AVM1 action blocks, which it compiles; and Pixel Bender's bytecode,
- * which a script hands flash.display.Shader. Also an AIR application's
- * descriptor, and the ZIP archives AIR packages are.
+ * the AVM1 action blocks, which it compiles; an ABC's declarations without
+ * its code; and Pixel Bender's bytecode, which a script hands
+ * flash.display.Shader. Also an AIR application's descriptor, and the ZIP
+ * archives AIR packages are.
  * The compiler and the player both use this package, so it must stay free of
  * DOM and node APIs.
  */
 
 export { abcReferences } from "./abc-names.js";
+export {
+  type Class as AbcClass,
+  type Meta as AbcMeta,
+  type Method as AbcMethod,
+  type Param as AbcParam,
+  readSurface as readAbcSurface,
+  type Script as AbcScript,
+  type Surface as AbcSurface,
+  type Trait as AbcTrait,
+  type Value as AbcValue,
+} from "./abc-surface.js";
 export {
   type ActionBlock,
   type ActionList,

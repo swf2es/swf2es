@@ -10,7 +10,7 @@ through `window.swf2esDesktop`, whose types are `src/shared/api.ts`:
 `start`, which hands the page the libraries' state and the SWF to play;
 `onOpen` and `onClose`; `openDialog`, `openUrlDialog`, `openDropped` and
 `chooseLibrary`, requests the main process answers with dialogs and
-`onOpen`; `sockets`; and `network`. The page (`src/renderer`, `static/`)
+`onOpen`; `sockets`; `webSockets`; and `network`. The page (`src/renderer`, `static/`)
 imports nothing of Electron's, so a Tauri shell can serve it as it is.
 
 ## Serving the page
@@ -65,6 +65,12 @@ in `C:\Users\Public` or a directory of `/tmp`, reads all that directory
 holds, which may be other programs' or users' files, so a SWF from
 elsewhere is best kept in a directory of its own.
 
+On Linux a path that is not there exactly is first found as Windows and
+macOS would find it, ignoring case (`src/main/case-paths.ts`), for the
+file host, an AIR application's File and its URLs alike; each grant is
+then judged on the real path found, so case reaches nothing a grant did
+not.
+
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.
@@ -93,8 +99,9 @@ reaches the network itself: a SWF's http and https loads go through the
 main process (below), and every http, https, ws and wss request the page
 makes is cancelled in the session's `webRequest`, with a word on stderr,
 whatever the policy would allow. So `air.net.WebSocket`, AIR's and not
-Flash Player's, has no server here. Nothing may frame the page, and it
-frames nothing.
+Flash Player's, never uses the page's WebSocket here: its connections
+are the main process's too ([WebSockets](#websockets)). Nothing may
+frame the page, and it frames nothing.
 
 ## The network
 
@@ -148,7 +155,8 @@ controls") and its Cross Domain Policy File Specification (2.0):
 What Flash never guarded, the machine's place on the network, is guarded
 here, since a request from the main process is one from this machine. No
 request carries the user's credentials: no cookies (a response's are
-dropped), no HTTP authentication, no client certificate, no proxy. The
+dropped), no HTTP authentication, no client certificate, no proxy but
+the one `--proxy` names ([Through a proxy](#through-a-proxy)). The
 Referer is what a browser's default policy,
 strict-origin-when-cross-origin, sends: the SWF's URL to its own origin,
 its origin alone to another, and none from an https SWF to what is not
@@ -221,6 +229,54 @@ than the SWF without that place's own policy. What a SWF reads from the
 internet that way is what its author's own server could fetch. The page
 also tells the player the sandbox, which `Security.sandboxType` reports.
 
+## Through a proxy
+
+`--proxy=<url>` (`src/main/proxy.ts`) puts a proxy under every
+connection the main process makes for a SWF: `socks5://` (RFC 1928, its
+alias `socks5h://`), with RFC 1929's username and password where the URL
+gives them, or `http://`, a `CONNECT` tunnel for each connection, plain
+http too, rather than absolute-URI requests, so that one path serves
+http, https, sockets and WebSockets alike, with `Proxy-Authorization:
+Basic` where the URL gives credentials. The URL is the command line's
+alone: never kept in the settings, never said (stderr names its kind,
+host and port as the app starts), and refused whole where it does not
+parse, `--proxy` with its URL apart included, the app exiting rather than
+running without it. A second start with another proxy is refused by the
+first, which would otherwise play what it names past the proxy it asked
+for.
+
+Each path keeps what it judged and only changes how it connects.
+`network.ts`'s requests and URL policy files give Node's request a
+`createConnection` that makes the tunnel and, for https, TLS over it with
+the same server name, authorities and `--ignore-certificate-errors`
+hosts; the socket policies (port 843, and the others) go through the same
+tunnel. The address rules above still resolve the host on this machine
+and place that address, and the proxy is then asked for that address,
+never the name: a proxy's DNS that answers otherwise, or rebinding
+between the two, reaches nothing the judgement did not, and the policy
+file that granted an address came through the same proxy from that very
+address. So DNS stays local wherever a rule judges; a name only the
+proxy resolves is not reached. Where no rule judges an address, a local
+SWF's sockets and an AIR application's sockets and WebSockets, the
+proxy is asked for the name, and resolves it itself. A socket
+(`connections.ts`) is opened once the tunnel is, its peer reported as
+the target; one closed before is closed. A WebSocket goes through an
+undici Agent, of the class the global dispatcher has, whose `connect`
+makes the tunnel and the TLS, passed as the dispatcher, as
+`--ignore-certificate-errors` passes its own; where none can be made, no
+WebSocket opens.
+
+The proxy's own address is not judged: it is the user's. Anything a SWF
+names is judged as before, the proxy's host and port as a target among
+them. A connection the proxy fails is a failure the SWF sees as a server
+that is not there, with a line on stderr saying why (the SOCKS reply, the
+HTTP status); a proxy that fails itself, unreached, refusing the
+credentials or making no sense, also fails a policy file it was to fetch,
+said as such rather than as a site without one, while a target the proxy
+did not reach has no policy, as a server that is not there. Credentials
+appear in no message. `--log-network` names the target, as before, and
+ends in `via proxy`.
+
 ## What the page may do
 
 The window's renderer is sandboxed (`app.enableSandbox()`), with context
@@ -239,7 +295,13 @@ SWF has the network (local-with-networking or remote), and a click, key
 or tap in the window asked for it: one page a gesture, within five
 seconds of it and a second after the last, as a browser's popup blocker
 allows, so a SWF cannot launch the browser in a loop. `<webview>`s are
-refused, and the only permission granted is full screen.
+refused, and the only permission granted is full screen. A SWF's
+`Stage.displayState` does not go through that permission, which wants a
+gesture: the page asks the shell (`fullScreen.set`), which sets the
+window's own full screen while a SWF the user opened plays, and tells
+the page as the window enters or leaves it, by the menu's F11 too, so
+that the stage follows (`renderer/full-screen.ts`). Esc in the page
+leaves it, as in Flash.
 ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
 into the page would run beside the API.
 
@@ -299,6 +361,46 @@ stops reading cannot fill the main process's memory. A page's sockets
 close, silently, as it navigates or reloads, and with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
+## WebSockets
+
+`air.net.WebSocket` runs over a WebSocketHost
+([AIR's WebSocket](services.md#airs-websocket)), by default the page's
+own WebSocket, which here would be refused twice, by the page's policy
+and by the session's `webRequest`. Neither is loosened: the element
+takes the shell's host through `configure({ webSockets })`
+(`src/renderer/websockets.ts`), and each connection is an id the preload
+numbers, which the main process opens (`src/main/websockets.ts`,
+`websocket-connections.ts`) with the WHATWG `WebSocket` of Electron's
+Node, undici's, relaying its events over IPC: `open` with the
+subprotocol the server chose, `message` with a string for a text message
+and bytes for a binary one, `close` with its code and `error`. Only an
+AIR application has them (`sandbox.application`), to any `ws:` or `wss:`
+URL and unasked, as AIR's application sandbox connects and as its
+sockets do here; for anything else the connection is refused with a
+word on stderr, and a refusal is an error and then a close with 1006, as
+a server that took no connection. The client is a browser's: it sends
+the close codes 1000 and 3000 to 4999, any other closing with none,
+answers pings itself and sends no ping or pong of the application's, and
+fails a connection whose server chose none of the subprotocols offered.
+
+`--ignore-certificate-errors` holds for `wss:` as for https. The WHATWG
+WebSocket has no option for it, and Node exports none of undici's
+classes, so the connection to a host the switch names is given, in the
+options undici's constructor takes in the protocols' place, a dispatcher
+made from the class of the one undici keeps for everything else
+(`Symbol.for("undici.globalDispatcher.1")`), with `rejectUnauthorized`
+off; every other connection is the global's as it is. Where a Node gave
+no such dispatcher the app would say so at its start and verify every
+certificate; the unit test fails if node's does not.
+
+A page holds at most 64 at once, and one with more than 16 MB its peer
+has not read fails. A page's WebSockets close, silently, as it navigates
+or reloads, and with it: the client has no way to drop a connection, so
+each is sent a close frame, and is gone once its server answers.
+`--log-network` says each connection asked for, opened, refused, failed
+and closed, and `--log-sockets` each message, a text one as its text
+(`src/main/netlog.ts`).
+
 ## Running and testing
 
 `pnpm install` leaves Electron's binary undownloaded (pnpm's
@@ -322,11 +424,32 @@ dialog, which starts with the URL playing, plays in the remote sandbox:
 it reads its own origin and one whose crossdomain.xml grants it, not one
 without, no local file by swf2es:// or file://, connects the socket
 whose server answers with a socket policy and not the one without, and
-both URLs join the recent list. `connections.test.ts` and
+both URLs join the recent list; and that an AIR application's
+`air.net.WebSocket` exchanges a text and a binary message with a server
+of the test's own (`websocket-server.ts`: node has a client and no
+server), over TLS too to the host `--ignore-certificate-errors` names
+and not to another, while a SWF's page is refused one. The remote SWF,
+and the AIR application's socket, HTTP load and WebSockets, run again
+through a SOCKS5 proxy with a password and an HTTP proxy of the test's
+own, which see every connection, by address or by name as above, with
+the same results; a wrong password and a proxy that is not there stop
+the movie with the reason on stderr and no password in it, and `--proxy`
+with its URL apart stops the app. The AIR
+application also goes full screen from its InvokeEvent, with no gesture:
+the window is in full screen as the main process has it, the source rect
+alone drawn, and Esc leaves, as the stage traces. Headless, no window
+manager resizes the window, so that it covers a screen is not checked.
+`connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and the sandbox's grants in
-node, `addresses.test.ts` where each address is, in every form an IPv4
+node, `websocket-connections.test.ts` the WebSockets' messages, close
+codes, refusals, limits and certificates, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and
 what policies grant, by the specification's examples, and
+`proxy.test.ts` `--proxy`'s URL and the tunnels through a SOCKS5 and an
+HTTP proxy of its own (`proxy-server.ts`): by address and by name, IPv6,
+credentials right and wrong, refusals, proxies absent, silent or speaking
+no proxy, and no credential in any message; `connections.test.ts` and
+`websocket-connections.test.ts` sockets and WebSockets through them, and
 `network.test.ts` the network against servers of its own, each on
 127.0.0.2, which it takes for the internet, and on 127.0.0.1 at the same
 port: same-origin and cross-origin loads with and without policies,
@@ -348,6 +471,8 @@ in a sandbox of its own rather than its loader's, a POST from
 navigateToURL (the system's browser gets its URL alone), reading
 playerglobal from a `.swc`, Flash's SecurityErrorEvent for a load a
 policy refused (the SWF sees an IOErrorEvent), cookies for a SWF's own
-origin, the system's proxy, and Flash's checks within the player:
+origin, the system's proxy settings (only `--proxy`), proxy authentication
+other than a username and password (NTLM, Kerberos, Digest), TLS to the
+proxy itself (`https://` proxies), and Flash's checks within the player:
 `checkPolicyFile`, pixels and bytes of another domain's content, and
 `Security.allowDomain`.

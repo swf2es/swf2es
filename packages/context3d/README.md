@@ -213,8 +213,47 @@ across those layers is an experimental limitation. `Playback.destroy()` disposes
 the display-list scene before the renderer on ordinary loads as well as Stage3D
 loads; this intentional shared cleanup releases cached text-style listeners.
 
-Draw validation caches index-range summaries by upload version. Fully uploaded
+Draw validation caches index-range summaries by upload version, retaining at most
+16 ranges of 128 or more indices when a buffer is drawn in alternating parts. Fully uploaded
 vertex prefixes need no per-attribute index scan; sparse validation caches also
 include the vertex version. Uploads, changed ranges/bindings and disposal
 invalidate the relevant records. Warm draws add no validation arrays or GPU
 handles.
+
+The owned VAO keeps each vertex layout until its buffer, offset or format changes.
+Program switches enable and disable only attributes whose use changes. Buffer
+uploads keep the layouts but still invalidate draw validation; every draw checks
+its current bindings and uploaded ranges. This adds no VAOs or GPU buffers.
+
+The backend also reuses program, VAO, framebuffer and viewport bindings between
+draws. Temporary framebuffer work, read/draw framebuffer splits and program
+replacement invalidate that cache. Each program retains its target-orientation
+uniform and sampler-unit assignments until they change or it is replaced;
+texture and sampler validation still runs on every draw.
+
+Depth-write/compare settings, blend factors and cull faces are retained between
+setters. Repeating a value makes no GL call; changing blend factors or cull faces
+while already enabled does not enable them again. Clears and internal MSAA copies
+restore their temporary state changes before returning.
+
+The owned VAO retains its index-buffer binding across draws, presentation and
+internal copies. Index-buffer allocation, uploads and disposal invalidate that
+binding cache; vertex uploads leave it intact. Draw validation still runs before
+reusing a binding.
+
+Each texture unit retains its last texture/sampler pair across draws and
+presentations. Changing either uses the normal three binding calls. Uploads and
+internal copies invalidate unit zero; unbinding and disposal invalidate the
+affected units. The cache uses eight bytes of flags, with no extra GPU resources.
+
+Each linked program remembers the write versions last uploaded for its constants.
+Draws upload only active registers written since that program's preceding draw;
+indirectly addressed vertex constants are uploaded as one bank after a write.
+Switching programs or targets preserves those versions, while successful program
+replacement resets them. Direct registers also retain their last uploaded float32
+bits, so rewriting equal values or restoring a program's material needs no upload.
+Signed zero and NaN payloads are compared exactly. Version and value
+arrays retain at most 3,744 bytes per program and are released on disposal;
+the context's two banks retain another 1,248 bytes of versions together.
+Shader translation and arithmetic are unchanged. See the
+[backend benchmark](../../tests/context3d/README.md) for upload counts and timings.

@@ -4,6 +4,7 @@ import { COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
 import { usageError } from "../output.js";
 import { compile } from "./compile.js";
 import { run } from "./run.js";
+import { types } from "./types.js";
 
 const help: Command = {
   name: "help",
@@ -41,7 +42,9 @@ ${COMMON_USAGE}`,
   },
 };
 
-export const commands = new Map<string, Command>([compile, run, help].map((c) => [c.name, c]));
+export const commands = new Map<string, Command>(
+  [compile, run, types, help].map((c) => [c.name, c]),
+);
 
 /** The command's own usage: its commands, and the bare form compile keeps. */
 export function usage(): string {

@@ -198,6 +198,17 @@ export class WebGLBackend {
   private setUp(): void {
     const gl = this.gl;
     this.state.forget();
+    // WebGL takes a flat varying from a triangle's last vertex, Metal from its first. Where
+    // they differ, Safari's ANGLE rewrites the indices of every indexed draw from a program
+    // with flat varyings, as all of these have, into buffers of its own: thousands a frame
+    // from one atlas, charged to the page's process, which iOS then kills. Every flat value
+    // here is the same at a triangle's three corners (a draw's row, a glyph's quad), so with
+    // the first vertex provoking nothing drawn changes, and nothing is rewritten.
+    const provoking = gl.getExtension("WEBGL_provoking_vertex") as {
+      provokingVertexWEBGL(mode: number): void;
+      readonly FIRST_VERTEX_CONVENTION_WEBGL: number;
+    } | null;
+    provoking?.provokingVertexWEBGL(provoking.FIRST_VERTEX_CONVENTION_WEBGL);
     // Kernels' programs made again as first used, the context's own gone with it.
     this.kernels.clear();
     const textureMost = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
@@ -263,7 +274,6 @@ export class WebGLBackend {
     state.scissor(null);
     state.colorMask(15);
     state.useProgram(this.draws.program);
-    state.bindVertexArray(this.atlas.vertexArray);
     state.bindTexture(0, this.gpu.rowsTexture);
     // As many samples as the GPU takes; a BitmapData's frame supersamples instead, as Flash's draw
     // does. Its layers take the stage's, so that their edges are the stage's.

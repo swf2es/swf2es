@@ -1,5 +1,6 @@
 // A menu is a snapshot made after menuSelect, not something polled by the renderer.
 import type { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../as3/types.js";
 import type { Container } from "../display/display.js";
 import { dispatchTo } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
@@ -23,7 +24,8 @@ export function customContextMenu(s: Scripting, stage: Container, p: PointerStat
   s.mouseStageX = p.x;
   s.mouseStageY = p.y;
   const rt = s.rt;
-  const get = (o: avm2.Value, name: string) => rt.getProperty(o, rt.publicName(name));
+  // An element of the custom items, by index, which no class declares.
+  const at = (o: avm2.Value, i: number) => rt.getProperty(o, rt.publicName(String(i)));
   const picked = pointerTarget(
     stage,
     p.x,
@@ -61,34 +63,40 @@ export function customContextMenu(s: Scripting, stage: Container, p: PointerStat
       contextOwner,
     );
   dispatchTo(s, menu, event("menuSelect"));
-  const builtIn = get(menu, "builtInItems");
-  result.quality &&= !!builtIn && rt.toBoolean(get(builtIn, "quality"));
-  const custom = get(menu, "customItems");
+  const contextMenu = menu as As3<"flash.ui::ContextMenu">;
+  const builtIn = rt.prop(contextMenu, "builtInItems");
+  result.quality &&= !!builtIn && rt.toBoolean(rt.prop(builtIn, "quality"));
+  const custom = rt.prop(contextMenu, "customItems");
   if (!custom) {
     return result;
   }
 
-  const length = rt.toUint(get(custom, "length"));
+  const length = rt.toUint(rt.prop(custom, "length"));
   const cls = rt.classNamed("flash.ui::ContextMenuItem");
   const captions = new Set<string>();
   let selected = false;
   for (let i = 0; i < length && result.items.length < 15; i++) {
-    const item = get(custom, String(i));
-    if (!rt.isInstance(item, cls) || !rt.toBoolean(get(item, "visible"))) {
+    const element = at(custom, i);
+    if (!rt.isInstance(element, cls)) {
       continue;
     }
 
-    const caption = rt.toString(get(item, "caption"));
+    const item = element as As3<"flash.ui::ContextMenuItem">;
+    if (!rt.toBoolean(rt.prop(item, "visible"))) {
+      continue;
+    }
+
+    const caption = rt.toString(rt.prop(item, "caption"));
     if (!caption || captions.has(caption)) {
       continue;
     }
 
     captions.add(caption);
-    const enabled = rt.toBoolean(get(item, "enabled"));
+    const enabled = rt.toBoolean(rt.prop(item, "enabled"));
     result.items.push({
       caption,
       enabled,
-      separatorBefore: rt.toBoolean(get(item, "separatorBefore")),
+      separatorBefore: rt.toBoolean(rt.prop(item, "separatorBefore")),
       select: () => {
         if (!enabled || selected || s.destroyed) {
           return;

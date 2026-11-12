@@ -20,7 +20,8 @@ pub fn build(b: *std.Build) void {
     tests(b);
     mp3(b, wasm(b, &.{.bulk_memory}), optimize, include);
     audio(b, wasm(b, &.{.bulk_memory}), optimize);
-    compress(b, wasm(b, &.{.bulk_memory}), optimize, include);
+    // Wasm SIMD here too, for the PNG encoder's row filters.
+    compress(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
     // Wasm SIMD, which every engine the player runs on has, for the bitmap kernels.
     render(b, wasm(b, &.{ .bulk_memory, .simd128 }), optimize, include);
     atf(b, wasm(b, &.{.bulk_memory}));
@@ -38,7 +39,7 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
 /// The kernels', the fill flattener's, the band filler's, the blurs' and the sound decoders' tests, on the host.
 fn tests(b: *std.Build) void {
     const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's, the band filler's, the blurs' and the sound decoders' tests on the host");
-    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" } }) |unit| {
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "earclip", "src/render/earclip.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" }, .{ "png", "src/compress/png.zig" }, .{ "jpeg", "src/compress/jpeg.zig" } }) |unit| {
         const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
     }
@@ -149,6 +150,7 @@ fn compress(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
     const exports = [_][]const u8{
         "reset",        "alloc",       "resultPointer", "resultSize", "inputUsed",
         "errorMessage", "inflateData", "deflateData",   "lzmaDecode", "lzmaEncode",
+        "pngEncode",    "jpegEncode",
     };
 
     const zlib = b.path(vendor ++ "zlib");
@@ -221,11 +223,11 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         "bucketalloc.c", "dict.c", "geom.c", "mesh.c", "priorityq.c", "sweep.c", "tess.c",
     };
     const exports = [_][]const u8{
-        "reset",           "alloc",         "run",          "vertices",        "indices",     "vertexCount",  "triangleCount",
-        "highWater",       "allocated",     "setLimit",     "layer",           "lineInput",   "lineHeader",   "lineBuild",
-        "resetArena",      "convolve",      "capacity",     "bandsOnly",       "blurFilter",  "layerFilter",  "channelPixels",
-        "mergePixels",     "palettePixels", "matrixPixels", "transformPixels", "noisePixels", "perlinPixels", "drawPixels",
-        "compositePixels", "encodeDxt",
+        "reset",       "alloc",           "run",           "vertices",     "indices",         "vertexCount", "triangleCount",
+        "highWater",   "allocated",       "setLimit",      "layer",        "lineInput",       "lineHeader",  "lineBuild",
+        "resetArena",  "convolve",        "capacity",      "bandsOnly",    "blurFilter",      "layerFilter", "channelPixels",
+        "mergePixels", "overPixels",      "palettePixels", "matrixPixels", "transformPixels", "noisePixels", "perlinPixels",
+        "drawPixels",  "compositePixels", "encodeDxt",
     };
 
     const library = b.path(vendor ++ "libtess2");
@@ -263,16 +265,19 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
     b.installArtifact(module);
 }
 
-/// ATF's JPEG XR images: src/atf/root.zig and jxr.c over jxrlib's decoder
-/// and its glue, unchanged; jxrlib's encoder is left out. Small rather than
-/// fast: an image decodes once, as its texture uploads.
+/// JPEG XR images, ATF's and BitmapData.encode's: src/atf/root.zig and
+/// jxr.c over jxrlib's decoder, its glue and its encoder, unchanged. Small
+/// rather than fast: an image decodes once, as its texture uploads.
 fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
     const optimize: std.builtin.Optimize = .ReleaseSmall;
     const sys = [_][]const u8{ "adapthuff.c", "image.c", "strcodec.c", "strPredQuant.c", "strTransform.c" };
     const decode = [_][]const u8{ "decode.c", "postprocess.c", "segdec.c", "strdec.c", "strInvTransform.c", "strPredQuantDec.c" };
+    // strenc_x86.c is SSE2's, which wasm has not.
+    const encode = [_][]const u8{ "encode.c", "segenc.c", "strenc.c", "strFwdTransform.c", "strPredQuantEnc.c" };
     const glue = [_][]const u8{ "JXRGlue.c", "JXRGlueJxr.c", "JXRMeta.c" };
     const exports = [_][]const u8{
-        "reset", "alloc", "decodeImage", "resultPointer", "resultWidth", "resultHeight",
+        "reset",      "alloc",       "decodeImage", "resultPointer", "resultWidth", "resultHeight",
+        "resultSize", "encodeBegin", "encodeRows",  "encodeEnd",
     };
 
     const jxrlib = b.path(vendor ++ "jxrlib");
@@ -312,6 +317,7 @@ fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
     };
     root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/sys"), .files = &sys, .flags = &flags });
     root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/decode"), .files = &decode, .flags = &flags });
+    root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/encode"), .files = &encode, .flags = &flags });
     root.addCSourceFiles(.{ .root = jxrlib.path(b, "jxrgluelib"), .files = &glue, .flags = &flags });
     root.addCSourceFiles(.{ .root = b.path("src/atf"), .files = &.{"jxr.c"}, .flags = &flags });
 

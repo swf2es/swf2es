@@ -9,6 +9,11 @@ export interface RuntimeOptions {
   /** Where trace and print write a line. */
   print?: (line: string) => void;
   /**
+   * Told what is not supported that the code asked for and caught, once
+   * for each: caught, it reaches no one else.
+   */
+  onUnsupported?: (message: string) => void;
+  /**
    * Behave as the debugger player: error messages carry avmplus' text
    * ("Error #1009: Cannot access ..."), and System.isDebugger is true. By
    * default they are the release player's and avmshell's, "Error #1009".

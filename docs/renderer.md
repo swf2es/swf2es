@@ -45,7 +45,11 @@ of each kind of object is in modules of its own under
 - `paints.ts`: bitmap and gradient textures (`storeTexture`,
   `gradientTexture`);
 - `text.ts`, `text-items.ts`, `advanced.ts`: device text's textures,
-  and advanced text's glyph quads;
+  and advanced text's glyph quads. Device text is placed at the scale
+  it is shown, a texel a canvas pixel from a whole canvas pixel, below 1
+  too, and its glyphs rasterized at that size to half a pixel, so that a
+  window dragged or a tween finds most rasterized already; scaled after
+  rasterizing at a whole resolution, it blurred at 0.9 or 1.95;
 - `masks.ts`: masks and scroll rectangles;
 - `filters.ts`, `filter-layers.ts`: each filter's values, padding and
   insets, and kept outputs;
@@ -192,6 +196,22 @@ with the context:
   run's texture bindings and sampling modes in reusable arrays; drawing uses
   those ranges directly, including when held layers reorder commands.
   Without the extension, a call a draw.
+- **Merged fills** (`batches.ts`): runs of at least 32 small geometries
+  unchanged since the previous frame use one indexed draw. Their vertices
+  carry the packed row as an integer attribute, so transforms, colour and
+  quarter-pixel snapping use the same shader math. The merged buffers are
+  reused while geometry, order and packed rows match; moving an object
+  only updates the row texture. A changed stream is staged on the CPU only
+  from its first draw that differs, and uploaded there before any draw:
+  the part before it stays on the GPU alone, kept by a copy there when a
+  buffer grows, so the CPU holds no copy of the stream between frames.
+  After 240 frames that used a quarter of the room or less, the GPU
+  buffers and the staging shrink to twice what they used. A geometry has
+  at most 256 vertices and 1,024 indices; the stream has room for at most
+  2,097,152 vertices and 6,291,456 indices (72 MiB). Fresh geometry,
+  masks, short or oversized runs, and frames whose run table does not fit
+  keep the atlas path.
+  Context restoration rebuilds the buffers and forgets the cached stream.
 - **Held layers** (`holds.ts`): each level's held layers drawn side by
   side on pages, then their filters' passes in waves, the k-th of every
   chain at once, each wave's targets on pages of their own (`filters.ts`
@@ -251,7 +271,9 @@ compose with the display list without copies.
   README](../packages/native/README.md)): one module, in Zig, which each
   user instantiates apart. Its `Tessellator` fills with libtess2 in
   double precision, a layer in one call, a single convex contour as a
-  fan, and whatever libtess2 refuses or fails at by bands (`bands.zig`):
+  fan, and a single simple concave contour of at most 64 vertices by ear
+  clipping after checking for crossings and touches (`earclip.zig`).
+  Whatever libtess2 refuses or fails at goes to bands (`bands.zig`):
   each horizontal band between vertices and crossings filled as disjoint
   trapezoids under its winding rule. Its `LineBuilder` builds a layer's
   lines in one call (`strokes.zig`): triangles along the path for a line
@@ -324,7 +346,9 @@ Ordinary textures may reuse at most twice the requested rounded area, avoiding
 oversized clears and MSAA allocations; a filter's, four times.
 
 For each pull request, `tests/player/bench.ts` builds a synthetic scene
-and times it; `--town N` draws N hairline-outlined characters and
+and times it. `--vectors N` builds N outlined rounded rectangles with a
+translucent circle once, then moves and turns them each frame: it measures
+draw submission without rebuilding geometry. `--town N` draws N hairline-outlined characters and
 scenery instead, some of them glowing, which is nearer a room's lines and
 filters but has none of its bitmap or gradient fills, blend layers or
 masks. A synthetic scene built to the replay's whole mix is still to

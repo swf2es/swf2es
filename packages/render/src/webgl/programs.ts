@@ -32,6 +32,8 @@ export const ORIGIN_AT = 4;
 export const GLYPH_AT = 5;
 export const RUN_AT = 6;
 export const TINT_AT = 7;
+/** A merged fill's packed row, in the streaming vertex buffer. */
+export const DRAW_AT = 8;
 
 /** The most cutoff table entries a text's draw takes, as the player's text/saffron.ts builds them. */
 export const TABLE_ENTRIES = 48;
@@ -76,7 +78,8 @@ export const RUN_UNIT = FILL_UNIT + FILL_TEXTURES;
  * space), and passes on its straight colour, the row's colour transform
  * and the texture it samples. uRow names the draw's row (FILL_SLOT); with
  * `multi` (WEBGL_multi_draw), uRunTable names each draw's of a multi-draw by
- * gl_DrawID, which is 0 in a draw of its own.
+ * gl_DrawID, which is 0 in a draw of its own. Merged fills supply the packed
+ * row as aDraw; the atlas leaves that attribute disabled and negative.
  */
 export const fillVertex = (multi: boolean) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
@@ -85,7 +88,7 @@ layout(location = ${POSITION_AT}) in vec2 aPosition;
 layout(location = ${TEXEL_AT}) in vec2 aTexel;
 layout(location = ${COLOR_AT}) in vec4 aColor;
 uniform highp sampler2D uRows;
-${multi ? "uniform highp isampler2D uRunTable;\nuniform int uRunBase;" : "uniform int uRow;"}
+${multi ? `layout(location = ${DRAW_AT}) in int aDraw;\nuniform highp isampler2D uRunTable;\nuniform int uRunBase;` : "uniform int uRow;"}
 uniform vec4 uView;
 uniform float uUnit;
 out vec4 vColor;
@@ -95,7 +98,7 @@ flat out vec4 vAdd;
 flat out int vSlot;
 
 void main(void) {
-  int draw = ${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
+  int draw = ${multi ? `aDraw >= 0 ? aDraw : texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
   int row = draw & ${(1 << FILL_SLOT) - 1};
   vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});

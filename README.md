@@ -60,7 +60,7 @@ that defines the element (CSP, isolation and self-hosting in
 [the guide](docs/guide.md#from-a-cdn)):
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.8"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.16"></script>
 ```
 
 Or turn an existing page's Flash tags into players:
@@ -109,7 +109,7 @@ packages/
   cli/           the swf2es command: ahead-of-time compiler, avmshell-style runner
 apps/
   site/          the demo site on GitHub Pages
-  desktop/       an Electron app that plays local SWFs
+  desktop/       an Electron app that plays local SWFs (npm's @swf2es/desktop)
 ```
 
 [docs/architecture.md](docs/architecture.md) explains how it works, and

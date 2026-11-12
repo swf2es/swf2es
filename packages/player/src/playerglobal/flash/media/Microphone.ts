@@ -5,14 +5,17 @@
 // The enhanced options are the exception: Flash keeps one set for every
 // Microphone once getEnhancedMicrophone has been called, whatever it returned.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
+/** The enhanced options Flash keeps. */
+type EnhancedName = "mode" | "echoPath" | "nonLinearProcessing";
 
 export function microphoneNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
 
-  let enhanced: Map<string, Value> | undefined;
+  let enhanced: Map<EnhancedName, Value> | undefined;
 
   function required(value: Value, name: string): void {
     if (value === null || value === undefined) {
@@ -35,7 +38,7 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
     }
 
     static getEnhancedMicrophone(_index: Value): Value {
-      enhanced ??= new Map<string, Value>([
+      enhanced ??= new Map<EnhancedName, Value>([
         ["mode", "fullDuplex"],
         ["echoPath", 128],
         ["nonLinearProcessing", true],
@@ -76,9 +79,9 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
 
       const o = s.rt.construct(
         s.rt.classNamed("flash.media::MicrophoneEnhancedOptions"),
-      ) as avm2.AsObject;
+      ) as As3<"flash.media::MicrophoneEnhancedOptions">;
       for (const [name, value] of enhanced) {
-        s.rt.setProperty(o, s.rt.publicName(name), value);
+        s.rt.setProp(o, name, value);
       }
 
       return o;
@@ -90,7 +93,10 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
       }
 
       for (const name of enhanced.keys()) {
-        enhanced.set(name, s.rt.getProperty(options as avm2.AsObject, s.rt.publicName(name)));
+        enhanced.set(
+          name,
+          s.rt.prop(options as As3<"flash.media::MicrophoneEnhancedOptions">, name),
+        );
       }
     }
 

@@ -1,10 +1,11 @@
 // flash.display.Sprite: its constructor's private native constructChildren
-// makes a symbol's first frame alive, placed before the constructor for a
-// timeline's child and here for a script's, so that the subclass's
-// constructor finds the children by name; a Sprite a script makes has none.
+// makes a symbol's first frame alive, placed before the constructor runs,
+// a timeline's child's or a script's, so that the subclass's constructor
+// finds the children by name; a Sprite a script makes has none.
 // Its soundTransform is kept, in whole percents as a channel's, and read
 // back as a copy; it mixes the timeline sounds of the sprite and all in it.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { type DisplayObject, MovieClip } from "../../../display/display.js";
 import type { Rect } from "../../../display/geometry.js";
 import { dropTargetOf, hitAreaOf, setHitArea } from "../../../input/pointer.js";
@@ -85,29 +86,49 @@ export function spriteNatives(s: Scripting): avm2.Natives {
     }
 
     startDrag(lockCenter: Value, bounds: Value): void {
-      let rect: Rect | null = null;
-      if (bounds !== null && bounds !== undefined) {
-        const o = bounds as avm2.AsObject;
-        const get = (key: string) =>
-          s.rt.toNumber(s.rt.getProperty(o, avm2.qname(avm2.publicNs, key)));
-        const x = get("x");
-        const y = get("y");
-        const right = x + get("width");
-        const bottom = y + get("height");
-        rect = {
-          xMin: Math.min(x, right),
-          yMin: Math.min(y, bottom),
-          xMax: Math.max(x, right),
-          yMax: Math.max(y, bottom),
-        };
-      }
-
-      s.pointer?.startDrag(this.$display, !!lockCenter, rect);
+      s.pointer?.startDrag(this.$display, !!lockCenter, dragBounds(bounds));
     }
 
     stopDrag(): void {
       s.pointer?.stopDrag();
     }
+
+    /** As startDrag, for the touch point: a point that is not down moves nothing until it is. */
+    startTouchDrag(touchPointID: Value, lockCenter: Value, bounds: Value): void {
+      const id = s.rt.toInt(touchPointID);
+      s.pointer?.startTouchDrag(
+        this.$display,
+        id,
+        !!lockCenter,
+        dragBounds(bounds),
+        s.touch?.at(id) ?? null,
+      );
+    }
+
+    stopTouchDrag(touchPointID: Value): void {
+      const id = s.rt.toInt(touchPointID);
+      s.pointer?.stopTouchDrag(id, s.touch?.at(id) ?? null);
+    }
+  }
+
+  /** A drag's Rectangle as the bounds it keeps the registration point in, its sides in either order. */
+  function dragBounds(bounds: Value): Rect | null {
+    if (bounds === null || bounds === undefined) {
+      return null;
+    }
+
+    const o = bounds as As3<"flash.geom::Rectangle">;
+    const get = (key: "x" | "y" | "width" | "height") => s.rt.toNumber(s.rt.prop(o, key));
+    const x = get("x");
+    const y = get("y");
+    const right = x + get("width");
+    const bottom = y + get("height");
+    return {
+      xMin: Math.min(x, right),
+      yMin: Math.min(y, bottom),
+      xMax: Math.max(x, right),
+      yMax: Math.max(y, bottom),
+    };
   }
 
   avm2.registerNativeClass(natives, "flash.display::Sprite", SpriteNatives);

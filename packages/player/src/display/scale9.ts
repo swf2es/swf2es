@@ -2,7 +2,8 @@
 // with a grid draws its shapes, its own and its Shape children's, with
 // each vertex moved region by region, so that the corners keep their size
 // in its parent's space, the edges stretch one way and the centre both.
-// Its sprites, texts and bitmaps scale as ever, as do its bounds.
+// A fill's gradient or bitmap goes with its fill. Its sprites, texts and
+// bitmaps scale as ever, as do its bounds.
 import type { Matrix } from "@swf2es/format";
 import { ownBounds } from "./bounds.js";
 import {
@@ -12,8 +13,8 @@ import {
   StaticTextObject,
   TextObject,
 } from "./display.js";
-import { apply, invert, type Rect, union } from "./geometry.js";
-import { MOVE, pointsOf, type ShapeLayer } from "./shapes.js";
+import { apply, concat, invert, type Rect, union } from "./geometry.js";
+import { MOVE, type Paint, pointsOf, type ShapeLayer } from "./shapes.js";
 import { makeRoom, moveLast, same } from "./value-lists.js";
 
 /**
@@ -214,9 +215,10 @@ export function withinMask(d: DisplayObject): boolean {
 
 /**
  * Layers with every point of their paths, fills' and lines' alike, moved
- * as the slice moves them. A fill's gradient or bitmap keeps its matrix,
- * stretched as ever, as Flash's does. `version` is a drawing's, whose
- * layers change in place.
+ * as the slice moves them. A fill's gradient, bitmap or shader goes with
+ * its fill: from the box around the fill's points to the box around them
+ * moved (slicedPaint). `version` is a drawing's, whose layers change in
+ * place.
  */
 export function sliceLayers(
   layers: ShapeLayer[],
@@ -308,7 +310,11 @@ function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): Shape
   // drawTriangles' textured triangles stay where they were drawn.
   return layers.map((layer) => ({
     ...layer,
-    fills: layer.fills.map((f) => ({ ...f, contours: f.contours.map(move) })),
+    fills: layer.fills.map((f) => ({
+      ...f,
+      fill: slicedPaint(f.fill, f.contours, slice, m, inverse),
+      contours: f.contours.map(move),
+    })),
     strokes: layer.strokes.map((s) => ({
       ...s,
       paths: s.paths.map(move),
@@ -318,4 +324,72 @@ function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): Shape
       }),
     })),
   }));
+}
+
+/**
+ * A fill's paint as its fill is sliced. adl maps a gradient or a bitmap by
+ * the fill it paints, all that one beginFill to its endFill draws: from
+ * the box around its points, in the owner's space, to the box around them
+ * moved. So a fill within one region goes as the region does, a corner's
+ * bitmap its own size and an edge's stretched one way, which is how a
+ * panel drawn as nine bitmap fills keeps its corners; a fill across them
+ * all is stretched whole, as the object would stretch it unsliced; and
+ * one across two regions is stretched over both alike. A colour, or a
+ * fill with no width or height, is as it was.
+ */
+function slicedPaint(
+  paint: Paint,
+  contours: number[][],
+  slice: Slice,
+  m: Matrix | null,
+  inverse: Matrix | null,
+): Paint {
+  if (typeof paint === "number" || !("matrix" in paint)) {
+    return paint;
+  }
+
+  let xMin = Number.POSITIVE_INFINITY;
+  let yMin = Number.POSITIVE_INFINITY;
+  let xMax = Number.NEGATIVE_INFINITY;
+  let yMax = Number.NEGATIVE_INFINITY;
+  for (const path of contours) {
+    // The pen's place as a fill begins is a path of its own, of one point, which draws nothing.
+    if (path.length <= 1 + 2 * pointsOf(path[0])) {
+      continue;
+    }
+
+    for (let i = 0; i < path.length; ) {
+      const points = pointsOf(path[i]);
+      for (let k = 0; k < points; k++) {
+        const at = i + 1 + 2 * k;
+        const [x, y] = m ? apply(m, path[at], path[at + 1]) : [path[at], path[at + 1]];
+        xMin = Math.min(xMin, x);
+        yMin = Math.min(yMin, y);
+        xMax = Math.max(xMax, x);
+        yMax = Math.max(yMax, y);
+      }
+
+      i += 1 + 2 * points;
+    }
+  }
+
+  if (!(xMax > xMin && yMax > yMin)) {
+    return paint;
+  }
+
+  const x0 = onAxis(slice.x, xMin);
+  const y0 = onAxis(slice.y, yMin);
+  const a = (onAxis(slice.x, xMax) - x0) / (xMax - xMin);
+  const d = (onAxis(slice.y, yMax) - y0) / (yMax - yMin);
+  if (a === 1 && d === 1 && x0 === xMin && y0 === yMin) {
+    return paint;
+  }
+
+  // In the owner's space, then back into the shape's own.
+  let box: Matrix = { a, b: 0, c: 0, d, tx: x0 - xMin * a, ty: y0 - yMin * d };
+  if (m && inverse) {
+    box = concat(concat(m, box), inverse);
+  }
+
+  return { ...paint, matrix: concat(paint.matrix, box) };
 }

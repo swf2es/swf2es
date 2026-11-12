@@ -43,6 +43,27 @@ test("native tessellation resolves intersections and global winding rules", () =
   assert.equal(area(tess.tessellate([[0, 0, 0, 0, 0, 0]], false)), 0);
 });
 
+test("small simple concave fills retain their input vertices in either winding and rule", () => {
+  const tess = new Tessellator();
+  for (const fixture of tessellationFixtures.slice(0, 3)) {
+    const points = fixture.contours[0];
+    const reversed = Array.from({ length: points.length / 2 }, (_, i) =>
+      points.slice(i * 2, i * 2 + 2),
+    )
+      .reverse()
+      .flat();
+    for (const contour of [points, reversed]) {
+      for (const nonZero of [false, true]) {
+        const result = tess.tessellate([contour], nonZero);
+        assert.ok(result);
+        assert.deepEqual(Array.from(result.vertices), contour);
+        assert.equal(result.indices.length, (contour.length / 2 - 2) * 3);
+        assert.equal(area(result), fixture.area[Number(nonZero)]);
+      }
+    }
+  }
+});
+
 test("the native module imports only its aborting allocation failure callback, and sine and cosine", async () => {
   const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
   assert.deepEqual(WebAssembly.Module.imports(module), [

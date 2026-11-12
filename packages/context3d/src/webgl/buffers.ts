@@ -11,6 +11,7 @@ export interface BufferState {
   checkedFirst: number;
   checkedCount: number;
   maximum: number;
+  ranges: Map<number, number> | null;
 }
 
 export interface VertexBinding {
@@ -19,6 +20,8 @@ export interface VertexBinding {
   size: number;
   packed: boolean;
   valid: boolean;
+  /** Layout stored in the owned VAO, independent of whether this attribute is enabled. */
+  applied: boolean;
   checkedIndex: BufferState | null;
   checkedIndexVersion: number;
   checkedVertexVersion: number;
@@ -33,6 +36,7 @@ function uploaded(state: BufferState, start: number, amount: number): void {
 
   state.uploaded.fill(1, start, start + amount);
   state.version++;
+  state.ranges?.clear();
   while (state.prefix < state.uploaded.length && state.uploaded[state.prefix]) {
     state.prefix++;
   }

@@ -36,7 +36,11 @@ function factsOf(
   return info.$swf;
 }
 
-/** The UncaughtErrorEvents of `owner`, a Loader or the main SWF's LoaderInfo, made when first asked for. */
+/**
+ * The UncaughtErrorEvents of `owner`, a Loader or a LoaderInfo, made when
+ * first asked for: each has its own, as in Flash, where a loaded SWF's
+ * error is told to its LoaderInfo's, then its Loader's (scripting/uncaught.ts).
+ */
 export function uncaughtErrorEvents(s: Scripting, owner: AsObject): AsObject {
   if (!owner.$uncaught) {
     owner.$uncaught = s.rt.construct(s.rt.classNamed("flash.events::UncaughtErrorEvents"));
@@ -53,6 +57,8 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     declare $content: AsObject | null;
     declare $bytes: Uint8Array | null;
     declare $swf: SwfFacts | null;
+    /** Whether its SWF is its content yet: Flash's contentType is null till then, through the last PROGRESS. */
+    declare $typed: boolean;
     declare $image: ImageFacts | null;
     declare $url: string | null;
     /** What `parameters` tells (Loads.loaderInfo): its LoaderContext's, its URL's query, or the main SWF's flashvars. */
@@ -124,7 +130,10 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
     }
 
     get contentType(): Value {
-      return this.$image?.contentType ?? (this.$swf ? "application/x-shockwave-flash" : null);
+      return (
+        this.$image?.contentType ??
+        (this.$swf && this.$typed ? "application/x-shockwave-flash" : null)
+      );
     }
 
     get sharedEvents(): Value {
@@ -186,13 +195,12 @@ export function loaderInfoNatives(s: Scripting): avm2.Natives {
       return args;
     }
 
-    /** The Loader's and its LoaderInfo's uncaughtErrorEvents are one dispatcher. */
     "flash.display:LoaderInfo::_getUncaughtErrorEvents"(): Value {
-      return uncaughtErrorEvents(s, this.$loader ?? this);
+      return uncaughtErrorEvents(s, this);
     }
 
     "flash.display:LoaderInfo::_setUncaughtErrorEvents"(v: Value): void {
-      (this.$loader ?? this).$uncaught = v;
+      this.$uncaught = v;
     }
 
     static getLoaderInfoByDefinition(_object: Value): Value {

@@ -4,10 +4,14 @@ import type { RuntimeOptions } from "./options.js";
 import { Runtime } from "./runtime.js";
 
 export { Reader as Amf3Reader, Writer as Amf3Writer } from "./amf.js";
+// The classes' declarations, for natives to reach AS3 objects by (Runtime.prop).
+export type { MethodName, PropertyName, Ref, WritableName } from "./as3-types.js";
 /** avmplus' builtin.abc (MPL-2.0), which every runtime loads first. */
 export { builtinLibrary } from "./builtin-library.js";
+export type { BuiltinClasses, BuiltinStatics } from "./builtin-types.generated.js";
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
+export { UnsupportedError } from "./errors.js";
 export { FloatValue, hasFloatLibrary } from "./float.js";
 export { floatLibrary } from "./float-library.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";
@@ -67,6 +71,8 @@ export { invalidate as clearPropertyCaches } from "./property-cache.js";
 export { Runtime } from "./runtime.js";
 // methodKey: where a method sits on its traits, for a player that makes a closure of its own.
 export { instanceVarField, methodKey, setStaticVar } from "./traits.js";
+// avmplus' UTF-8, for a player's bytes that must read and write as ByteArray's do.
+export { fromUtf8, utf8 } from "./utf8.js";
 
 /** A runtime with the builtins' natives, for modules compiled from builtin.abc and after. */
 export function createRuntime(options: RuntimeOptions = {}): Runtime {

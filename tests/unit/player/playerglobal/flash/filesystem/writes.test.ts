@@ -5,7 +5,14 @@
 // checks (~/.cache/swf2es/adl-filewrite's probes); the paths here are a
 // POSIX host's. Windows' AIR refuses to open a file another stream has
 // open to write (IOError 3013), which swf2es does not: the checks read a
-// file once its writer has closed.
+// file once its writer has closed. Then File.createTempFile and
+// createTempDirectory, over a host in memory that can be made to have
+// taken names, or to refuse: an empty file, or an empty directory, of a
+// name not yet taken in the host's temporary directory, its cache
+// directory, named as adl names one ("fla281f.tmp"), and, where none can
+// be made, as adl's with its temporary directory read-only (Wine): the
+// file's File with nothing there, and IllegalOperationError 2014 for the
+// directory.
 import assert from "node:assert/strict";
 import {
   closeSync,
@@ -117,14 +124,19 @@ const fileSystem: FileSystemHost = {
     }),
 };
 
-/** Play `source` as an AIR application for `frames` frames: what it traced. */
-async function play(name: string, source: string, frames: number): Promise<string[]> {
+/** Play `source` as an AIR application over `host` for `frames` frames: what it traced. */
+async function play(
+  name: string,
+  source: string,
+  frames: number,
+  host: FileSystemHost = fileSystem,
+): Promise<string[]> {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
     print: (line) => lines.push(line),
     realTime: null,
     air: true,
-    fileSystem,
+    fileSystem: host,
     application: { descriptor: "<application/>", id: "test", arguments: [], currentDirectory: app },
   });
   await scripting.loadLibraries([libraryAbcs(`${out}libraries/`)[0], playerglobalLibrary]);
@@ -508,4 +520,218 @@ test("File makes, deletes, copies and moves as adl's", { skip }, async () => {
     "async listing: 1 sub",
     "async move: complete false true",
   ]);
+});
+
+/** A file system in memory, "/"-separated: its files' bytes, and its directories. */
+class MemoryFiles {
+  readonly files = new Map<string, Uint8Array>();
+  readonly directories = new Set(["/", "/app", "/storage", "/user", "/temp"]);
+  /** Whether it refuses every write. */
+  refuses = false;
+
+  host(cache: string | undefined, writes = true): FileSystemHost {
+    const parentOf = (path: string) => path.slice(0, path.lastIndexOf("/")) || "/";
+    const host: FileSystemHost = {
+      separator: "/",
+      directories: {
+        application: "/app",
+        applicationStorage: "/storage",
+        user: "/user",
+        documents: "/user",
+        desktop: "/user",
+        cache,
+      },
+      stat: (path) => {
+        const file = this.files.get(path);
+        if (file) {
+          return { directory: false, size: file.length, modified: 0, created: 0 };
+        }
+
+        return this.directories.has(path)
+          ? { directory: true, size: 0, modified: 0, created: 0 }
+          : null;
+      },
+      list: (path) => {
+        if (!this.directories.has(path)) {
+          return null;
+        }
+
+        return [...this.files.keys(), ...this.directories]
+          .filter((p) => p !== "/" && parentOf(p) === path)
+          .map((p) => p.slice(p.lastIndexOf("/") + 1))
+          .sort();
+      },
+      read: (path) => this.files.get(path) ?? null,
+    };
+    if (!writes) {
+      return host;
+    }
+
+    return {
+      ...host,
+      write: (path, bytes, offset, length) => {
+        if (this.refuses || this.directories.has(path)) {
+          return false;
+        }
+
+        const old = this.files.get(path) ?? new Uint8Array(0);
+        const next = new Uint8Array(length);
+        next.set(old.subarray(0, Math.min(old.length, length)));
+        next.set(bytes.subarray(0, Math.max(0, Math.min(bytes.length, length - offset))), offset);
+        this.files.set(path, next);
+        this.directories.add(parentOf(path));
+        return true;
+      },
+      createDirectory: (path) => {
+        if (this.refuses || this.files.has(path)) {
+          return false;
+        }
+
+        this.directories.add(path);
+        return true;
+      },
+      remove: (path) => {
+        if (this.refuses) {
+          return false;
+        }
+
+        return this.files.delete(path) || this.directories.delete(path);
+      },
+    };
+  }
+}
+
+/** The script that traces each of `checks`, or what it throws: label, then value or THROWS class id. */
+function tempScript(name: string, checks: [string, string][]): string {
+  return `package {
+  import flash.display.Sprite;
+  import flash.filesystem.*;
+  import flash.utils.getQualifiedClassName;
+
+  public class ${name} extends Sprite {
+    private function t(label:String, f:Function):void {
+      try {
+        trace(label + ": " + f());
+      } catch (e:Error) {
+        trace(label + ": THROWS " + getQualifiedClassName(e).replace(/^.*::/, "") + " " + e.errorID);
+      }
+    }
+
+    private static function describe(f:File):String {
+      return [f.nativePath, f.url, f.name, f.extension, f.exists, f.isDirectory, f.isDirectory ? f.getDirectoryListing().length : f.size, f.parent.nativePath].join(" | ");
+    }
+
+    public function ${name}() {
+${checks.map(([label, body]) => `      t(${JSON.stringify(label)}, function():* { ${body} });`).join("\n")}
+    }
+  }
+}
+`;
+}
+
+/** adl's names: "fla", up to four hexadecimal digits, ".tmp". */
+const NAME = /^fla[0-9a-f]{1,4}\.tmp$/;
+
+test("createTempFile and createTempDirectory make each a new one in the temporary directory", {
+  skip,
+}, async () => {
+  const memory = new MemoryFiles();
+  const lines = await play(
+    "TempMade",
+    tempScript("TempMade", [
+      ["file", "return describe(File.createTempFile());"],
+      ["file", "return describe(File.createTempFile());"],
+      ["directory", "return describe(File.createTempDirectory());"],
+      ["directory", "return describe(File.createTempDirectory());"],
+      [
+        "written",
+        'var f:File = File.createTempFile(); var s:FileStream = new FileStream(); s.open(f, FileMode.WRITE); s.writeUTFBytes("hello"); s.close(); s.open(f, FileMode.READ); var text:String = s.readUTFBytes(s.bytesAvailable); s.close(); return text + " " + f.size;',
+      ],
+      [
+        "in a directory",
+        'var d:File = File.createTempDirectory(); var f:File = d.resolvePath("x.txt"); var s:FileStream = new FileStream(); s.open(f, FileMode.WRITE); s.writeUTFBytes("x"); s.close(); return d.getDirectoryListing().length + " " + f.exists;',
+      ],
+    ]),
+    0,
+    memory.host("/temp"),
+  );
+
+  assert.equal(lines.length, 6, lines.join("\n"));
+  const made = lines.slice(0, 4).map((line) => {
+    const [label, rest] = line.split(": ");
+    const [nativePath, url, name, extension, exists, directory, content, parent] =
+      rest.split(" | ");
+    assert.match(name, NAME, line);
+    assert.equal(nativePath, `/temp/${name}`, line);
+    assert.equal(url, `file:///temp/${name}`, line);
+    assert.equal(extension, "tmp", line);
+    assert.equal(exists, "true", line);
+    assert.equal(directory, String(label === "directory"), line);
+    // Empty: no bytes, or nothing in it.
+    assert.equal(content, "0", line);
+    assert.equal(parent, "/temp", line);
+    return nativePath;
+  });
+
+  assert.equal(new Set(made).size, 4, lines.join("\n"));
+  for (const path of made.slice(0, 2)) {
+    assert.deepEqual(memory.files.get(path), new Uint8Array(0));
+  }
+
+  for (const path of made.slice(2)) {
+    assert.ok(memory.directories.has(path), path);
+  }
+
+  assert.deepEqual(lines.slice(4), ["written: hello 5", "in a directory: 1 true"]);
+});
+
+const tempSource = (name: string) =>
+  tempScript(name, [
+    ["file", 'var f:File = File.createTempFile(); return f.nativePath + " " + f.exists;'],
+    ["directory", 'var f:File = File.createTempDirectory(); return f.nativePath + " " + f.exists;'],
+  ]);
+
+test("a name taken is passed by, and with none left nothing is made", { skip }, async () => {
+  // Every name but one taken, by files and directories alike.
+  const memory = new MemoryFiles();
+  for (let unique = 1; unique <= 0xffff; unique++) {
+    const path = `/temp/fla${unique.toString(16)}.tmp`;
+    if (unique === 0xbeef) {
+      continue;
+    }
+
+    if (unique % 2) {
+      memory.files.set(path, new Uint8Array([1]));
+    } else {
+      memory.directories.add(path);
+    }
+  }
+
+  assert.deepEqual(await play("TempTaken", tempSource("TempTaken"), 0, memory.host("/temp")), [
+    "file: /temp/flabeef.tmp true",
+    "directory: THROWS IllegalOperationError 2014",
+  ]);
+});
+
+test("where none can be made, the file's File is given with nothing there, as adl's", {
+  skip,
+}, async () => {
+  // adl with its temporary directory read-only: a name, not made, for the file; a refusal for
+  // the directory.
+  const refusing = new MemoryFiles();
+  refusing.refuses = true;
+  for (const [name, host] of [
+    ["TempRefused", refusing.host("/temp")],
+    ["TempReadOnly", new MemoryFiles().host("/temp", false)],
+  ] as const) {
+    const lines = await play(name, tempSource(name), 0, host);
+    assert.match(lines[0], /^file: \/temp\/fla[0-9a-f]{1,4}\.tmp false$/);
+    assert.deepEqual(lines.slice(1), ["directory: THROWS IllegalOperationError 2014"]);
+  }
+
+  // A host with no temporary directory has nowhere to name one.
+  assert.deepEqual(
+    await play("TempNoCache", tempSource("TempNoCache"), 0, new MemoryFiles().host(undefined)),
+    ["file: THROWS IllegalOperationError 2014", "directory: THROWS IllegalOperationError 2014"],
+  );
 });

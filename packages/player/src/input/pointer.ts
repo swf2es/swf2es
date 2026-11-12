@@ -68,6 +68,12 @@ export interface Pointer {
   handle(type: "move" | "down" | "up" | "leave", p: PointerState): void;
   /** The wheel turned by `delta` lines over `p`; whether the SWF takes it there. */
   wheel(p: PointerState, delta: number): boolean;
+  /**
+   * Whether the SWF heard the last press of `button`, 1 the middle or 2 the
+   * right: the host then keeps the browser's own from it, the context menu
+   * Flash and the browser would show for the right, a scroll for the middle.
+   */
+  taken(button: number): boolean;
 }
 
 /**
@@ -480,6 +486,8 @@ export interface Drag {
   bounds: Rect | null;
   lastX: number;
   lastY: number;
+  /** The touch point that moves it, as Sprite.startTouchDrag's; the mouse where there is none. */
+  touchPointID?: number;
 }
 
 /**
@@ -575,6 +583,10 @@ export class PointerInput implements Pointer {
   /** Whether the pointer has left the player, and not come back to it since. */
   private gone = false;
   private pressed: DisplayObject | null = null;
+  /** What the middle and the right button were last pressed on, by button, until let go. */
+  private pressedOther: (DisplayObject | null)[] = [null, null, null];
+  /** Whether the middle and the right button's last press were heard, by button (see taken). */
+  private heardOther = [false, false, false];
   /** The last press, which the next continues as a double or triple click if on its target, near it in place and time. */
   private lastPress: {
     x: number;
@@ -622,20 +634,83 @@ export class PointerInput implements Pointer {
     this.updateDrag();
   }
 
+  /** Ends the mouse's drag; a touch point's stays, as only stopTouchDrag ends it. */
   stopDrag(): void {
+    if (this.drag?.touchPointID !== undefined) {
+      return;
+    }
+
     this.updateDrag();
     this.drag = null;
   }
 
-  private updateDrag(): void {
+  /**
+   * A drag that touch point `id` moves, from where it is (`at`, null while it
+   * is not down: the target stays until it moves). The one drag there is,
+   * the mouse's or another point's, gives way to it.
+   */
+  startTouchDrag(
+    target: DisplayObject,
+    id: number,
+    lockCenter: boolean,
+    bounds: Rect | null,
+    at: { x: number; y: number } | null,
+  ): void {
+    this.drag = {
+      target,
+      lockCenter,
+      bounds,
+      lastX: at?.x ?? Number.NaN,
+      lastY: at?.y ?? Number.NaN,
+      touchPointID: id,
+    };
+    if (at) {
+      this.updateDrag(id, at.x, at.y);
+    }
+  }
+
+  /** Ends touch point `id`'s drag, where it is (`at`), and no other. */
+  stopTouchDrag(id: number, at: { x: number; y: number } | null): void {
     const drag = this.drag;
-    if (!drag) {
+    if (drag?.touchPointID !== id) {
+      return;
+    }
+
+    if (at) {
+      this.dragTouch(id, at.x, at.y);
+    }
+
+    this.drag = null;
+  }
+
+  /** Touch point `id` at (x, y) on the stage: what it drags follows it (TouchInput). */
+  dragTouch(id: number, x: number, y: number): void {
+    const drag = this.drag;
+    if (drag?.touchPointID !== id) {
+      return;
+    }
+
+    // Begun while the point was up: it moves the target from where the point comes down.
+    if (Number.isNaN(drag.lastX)) {
+      drag.lastX = x;
+      drag.lastY = y;
+    }
+
+    this.updateDrag(id, x, y);
+  }
+
+  /** Moves the drag that `touchPointID` moves, or the mouse's, to (x, y). */
+  private updateDrag(
+    touchPointID?: number,
+    x = this.scripting.mouseStageX,
+    y = this.scripting.mouseStageY,
+  ): void {
+    const drag = this.drag;
+    if (!drag || drag.touchPointID !== touchPointID) {
       return;
     }
 
     const d = drag.target;
-    const x = this.scripting.mouseStageX;
-    const y = this.scripting.mouseStageY;
     if (dragTo(this.stage, drag, x, y)) {
       this.redraws++;
     }
@@ -799,6 +874,11 @@ export class PointerInput implements Pointer {
       // A press or a release is a user's gesture, in whose handlers alone a
       // script may write to the clipboard: not the hover's events around it.
       this.scripting.clipboard.gesture(() => this.button(type, target, p));
+    }
+
+    if (type !== "move" && (p.button === 1 || p.button === 2)) {
+      // Over nothing, the stage, as Ruffle sends them.
+      this.otherButton(type, p.button, found?.avm1Root ? null : (target ?? this.stage), p);
     }
 
     if (type !== "move") {
@@ -1036,6 +1116,46 @@ export class PointerInput implements Pointer {
       this.pressed = null;
       this.held = false;
     }
+  }
+
+  /**
+   * The middle (1) or right (2) button pressed or let go over `target`, as
+   * Flash Player 11.2 added them: middleMouseDown or rightMouseDown, then
+   * the Up, and the Click where it was pressed, as Ruffle's corpus has
+   * Flash send them. A right press a rightMouseDown or rightClick listener
+   * hears is the SWF's, and shows no context menu, as Ruffle takes it.
+   */
+  private otherButton(
+    type: "down" | "up",
+    button: 1 | 2,
+    target: DisplayObject | null,
+    p: PointerState,
+  ): void {
+    const name = button === 2 ? "right" : "middle";
+    if (type === "down") {
+      this.pressedOther[button] = target;
+      const object = target?.object;
+      this.heardOther[button] =
+        !!object && (heard(object, `${name}MouseDown`) || heard(object, `${name}Click`));
+      if (target) {
+        this.send(`${name}MouseDown`, target, p, true);
+      }
+
+      return;
+    }
+
+    if (target) {
+      this.send(`${name}MouseUp`, target, p, false);
+      if (target === this.pressedOther[button]) {
+        this.send(`${name}Click`, target, p, false);
+      }
+    }
+
+    this.pressedOther[button] = null;
+  }
+
+  taken(button: number): boolean {
+    return this.heardOther[button] ?? false;
   }
 
   /** Show a changed cursor immediately, including when a script hides or shows it. */

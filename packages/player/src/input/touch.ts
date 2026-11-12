@@ -30,6 +30,9 @@ interface Point {
   over: DisplayObject | null;
   /** What it began on, which a tap must end on. */
   began: DisplayObject | null;
+  /** Where it is on the stage, which a drag it is given starts from. */
+  x: number;
+  y: number;
 }
 
 export class TouchInput {
@@ -46,6 +49,12 @@ export class TouchInput {
     private readonly scripting: Scripting,
     private readonly pointer: PointerInput,
   ) {}
+
+  /** Where touch point `id` is on the stage, or null while it is not down. */
+  at(id: number): { x: number; y: number } | null {
+    const point = this.points.get(id);
+    return point ? { x: point.x, y: point.y } : null;
+  }
 
   /** A move to handle at the next flush, as PointerInput.post. */
   post(t: TouchState): void {
@@ -79,7 +88,7 @@ export class TouchInput {
         this.drop(t.id, point, t);
       }
 
-      point = { over: null, began: null };
+      point = { over: null, began: null, x: t.x, y: t.y };
       this.points.set(t.id, point);
       // The browser's primary, as Flash's: the first finger down while none was.
       if (t.primary) {
@@ -92,6 +101,10 @@ export class TouchInput {
       return;
     }
 
+    point.x = t.x;
+    point.y = t.y;
+    // What the point drags follows it first, as the mouse's drag does, whatever the input mode.
+    this.pointer.dragTouch(t.id, t.x, t.y);
     const primary = this.primary === t.id;
     const s = this.scripting;
     if (s.inputMode === "touchPoint") {

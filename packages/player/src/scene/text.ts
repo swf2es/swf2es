@@ -9,7 +9,22 @@ import type { shapeLayers } from "../display/shapes.js";
 import { deviceMetrics } from "../text/fonts.js";
 import { GUTTER, type LaidChar, shownLines } from "../text/layout.js";
 
-/** Device text rasterized at its largest stretch, with bounded extra texture resolution. */
+/**
+ * Steps of a canvas pixel a text pixel that device text is placed at: a
+ * run 4096 texels wide then lands within a pixel of where it should end,
+ * and rounding error, as a turn's, does not move it to another.
+ */
+const RESOLUTION_STEPS = 4096;
+
+/** The least resolution device text is placed at, for a text scaled to nothing. */
+const LEAST_RESOLUTION = 1 / 64;
+
+/**
+ * Canvas pixels a pixel of device text is shown at, `pixels` a stage pixel
+ * at the text's largest stretch: below 1 too, where the stage is shown
+ * smaller, as Flash rasterizes a device font at the size it is shown;
+ * 8 times the screen's at most.
+ */
 export function deviceTextResolution(
   world: readonly [number, number, number, number],
   pixels: number,
@@ -24,8 +39,24 @@ export function deviceTextResolution(
     return base;
   }
 
-  // A turn alone must not cross a resolution boundary through rounding error.
-  return Math.max(base, Math.min(8 * base, Math.ceil(stretch * base - 1e-6)));
+  const shown = Math.min(8 * base, stretch * base);
+  return Math.max(LEAST_RESOLUTION, Math.round(shown * RESOLUTION_STEPS) / RESOLUTION_STEPS);
+}
+
+/** Steps of a canvas pixel a device font's size is rasterized at. */
+const FONT_STEPS = 2;
+
+/**
+ * Texels a text pixel a device font of `size` pixels is rasterized at, for
+ * `resolution`: its size in canvas pixels to a half, so that a text
+ * whose scale changes a little, as a window is dragged or a tween runs,
+ * finds its glyphs rasterized already. Drawn at `resolution`, a texel a
+ * canvas pixel, its glyphs are then at most a quarter of a pixel larger
+ * or smaller, each where the layout put it. Flash steps by whole pixels.
+ */
+export function deviceRasterScale(size: number, resolution: number): number {
+  const steps = Math.round(size * resolution * FONT_STEPS);
+  return size > 0 && steps > 0 ? steps / FONT_STEPS / size : resolution;
 }
 
 /**
@@ -89,6 +120,8 @@ export interface DeviceItem {
   descent: number;
   x: number;
   top: number;
+  /** Where the layout put each character's pen, in pixels from x. */
+  pens: number[];
 }
 
 export type TextItem = GlyphItem | RectItem | DeviceItem;
@@ -356,5 +389,6 @@ function deviceRun(o: TextObject, run: LaidChar[], dx: number, baseline: number)
     descent: metrics.descent,
     x: (dx + run[0].x) / 20,
     top: baseline - metrics.ascent,
+    pens: run.map((c) => (c.x - run[0].x) / 20),
   };
 }

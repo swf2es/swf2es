@@ -12,6 +12,7 @@
 import { AIR_API_VERSION, API_VERSION, type Codegen } from "@swf2es/codegen";
 import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
 import {
   BitmapObject,
@@ -42,6 +43,7 @@ import {
   type FetchRequest,
   type FetchResult,
   type FileSystemHost,
+  type FullScreenHost,
   globalWebSocketHost,
   hostTouchPoints,
   type ModuleCache,
@@ -57,6 +59,7 @@ import {
 } from "./hosts.js";
 import type { LoadedAvm1Input } from "./input/avm1.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
+import type { TouchInput } from "./input/touch.js";
 import { LocalConnections } from "./localconnection.js";
 import { type AudioHost, browserAudioHost } from "./media/audio.js";
 import { finishSounds, soundHostOf, stopAllSounds, timelineSoundsOf } from "./media/sounds.js";
@@ -70,11 +73,13 @@ import {
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo, type EventFields, heard, WeakTargets } from "./scripting/events.js";
+import { FullScreen } from "./scripting/full-screen.js";
 import { type HandedModules, ModuleHandover, ModuleRecorder } from "./scripting/handover.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
 import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
+import { UncaughtErrors } from "./scripting/uncaught.js";
 import { type ParentLink, Workers } from "./scripting/workers.js";
 import { type StageScaleMode, stageAlignment } from "./stage.js";
 
@@ -105,6 +110,7 @@ export class Scripting {
   readonly mainDomain: avm2.Domain;
   /** The SWFs' code, linked into their application domains, and whose code runs. */
   readonly code = new Code(this);
+  readonly uncaughtErrors = new UncaughtErrors(this);
   /** What SymbolClass bound, the fonts registered and the sounds' shared decodes. */
   readonly symbols = new Symbols(this);
   /** What happens to display objects as they come and go: their events, and the orphans. */
@@ -278,6 +284,8 @@ export class Scripting {
   stageAlignSet = false;
   /** A host updates placement synchronously before the setter returns. */
   onStageLayout: (() => void) | null = null;
+  /** Stage.displayState and fullScreenSourceRect, and the host's full screen behind them. */
+  readonly fullScreen: FullScreen;
   /** Stage.color's 0xRRGGBB, the SWF's background until a script sets it; null before the stage is made. */
   stageColor: number | null = null;
   /**
@@ -307,6 +315,8 @@ export class Scripting {
   /** The cursors Mouse.registerCursor registered, by name, as CSS cursor values. */
   readonly cursors = new Map<string, Cursor>();
   pointer: PointerInput | null = null;
+  /** The touch points, where the host has a pointer: where each is, for Sprite.startTouchDrag. */
+  touch: TouchInput | null = null;
   /** Created only when a Loader holds AVM1 content. */
   avm1Input: LoadedAvm1Input | null = null;
   /** Whether an HTML assignment drops its final line break, as some players do. */
@@ -391,6 +401,11 @@ export class Scripting {
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /**
+       * The host's full screen, which Stage.displayState asks for; none by
+       * default, which leaves the stage in its "normal" state.
+       */
+      fullScreen?: FullScreenHost | null;
+      /**
        * Starts the threads background Workers run on (docs/workers.md);
        * none by default, which leaves Worker.isSupported false.
        */
@@ -437,6 +452,7 @@ export class Scripting {
       pixelAspectRatio: options.screenCapabilities?.pixelAspectRatio ?? 1,
       screenDPI: options.screenCapabilities?.screenDPI ?? 72,
     };
+    this.fullScreen = new FullScreen(this, options.fullScreen ?? null);
     this.trimTrailingHtmlBreak = options.trimTrailingHtmlBreak ?? false;
     this.timers = new Timers(this, options);
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
@@ -495,7 +511,12 @@ export class Scripting {
     this.rt = new avm2.Runtime(
       (rt) => ({ ...avm2.builtinNatives(rt), ...playerNatives(this) }),
       { ...avm2.builtinHooks(), ...playerHooks(this) },
-      { ...options, apiVersion: this.air ? AIR_API_VERSION : API_VERSION },
+      {
+        // What a SWF's catch swallowed is still said, as an uncaught one is.
+        onUnsupported: (message) => console.warn(`${message} (caught by the SWF)`),
+        ...options,
+        apiVersion: this.air ? AIR_API_VERSION : API_VERSION,
+      },
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);
     this.codegen.reset(this.rt.apiVersion);
@@ -604,7 +625,7 @@ export class Scripting {
     this.symbols.bind(swf, library);
 
     library.construct = (display, character) => this.construct(display, character, library);
-    library.uncaught = this.reportUncaught;
+    library.uncaught = (error) => this.reportUncaught(error, library);
     library.constructLater = (display, character) => {
       // Its class is ready as the frame plays, its script run, as the frame's
       // tags have it in Flash; only the instance waits (`delayed_symbolclass`).
@@ -789,15 +810,46 @@ export class Scripting {
     return this.rt.construct(this.rt.classNamed("flash.events::Event"), type, bubbles, false);
   }
 
-  /** Flash Player's status event; AIR-only response properties stay at their defaults. */
-  httpStatus(status: number): AsObject {
+  /**
+   * Flash Player's status event, after the bytes. In AIR too its response URL and headers stay
+   * at their defaults; `redirected` alone tells of the response.
+   */
+  httpStatus(status: number, redirected = false): AsObject {
+    return this.statusEvent("httpStatus", status, redirected);
+  }
+
+  /**
+   * AIR's status event for `result`, the response to a request for `url`, or null where AIR
+   * dispatches none: outside AIR, for a file, and where no response came.
+   */
+  httpResponseStatus(result: FetchResult, url: string): AsObject | null {
+    const responseUrl = result.url ?? url;
+    if (!this.air || result.local || result.status === 0 || !/^https?:/i.test(responseUrl)) {
+      return null;
+    }
+
+    const rt = this.rt;
+    const event = this.statusEvent("httpResponseStatus", result.status, result.url !== undefined);
+    const header = rt.classNamed("flash.net::URLRequestHeader");
+    const status = event as As3<"flash.events::HTTPStatusEvent">;
+    rt.setProp(status, "responseURL", responseUrl);
+    rt.setProp(
+      status,
+      "responseHeaders",
+      rt.array(result.headers.map(([name, value]) => rt.construct(header, name, value))),
+    );
+
+    return event;
+  }
+
+  private statusEvent(type: string, status: number, redirected: boolean): AsObject {
     let cls = this.statusClass;
     if (!cls) {
       cls = this.rt.classNamed("flash.events::HTTPStatusEvent");
       this.statusClass = cls;
     }
 
-    return this.rt.construct(cls, "httpStatus", false, false, status);
+    return this.rt.construct(cls, type, false, false, status, redirected);
   }
 
   /** The display objects a broadcast of `type` reaches, for EventDispatcher to keep. */
@@ -880,8 +932,18 @@ export class Scripting {
     }
   }
 
-  /** An error that no script caught: to the host's hook now, or kept for the frame's end. */
-  readonly reportUncaught = (error: unknown): void => {
+  /**
+   * An error that no script caught: an UncaughtErrorEvent for its SWF's
+   * listeners (scripting/uncaught.ts), then the host's unless one of them
+   * prevented that. `by` is the function the player called, or the SWF it
+   * is of, where that is known.
+   */
+  readonly reportUncaught = (error: unknown, by: Value | Library = null): void => {
+    this.uncaughtErrors.report(error, by);
+  };
+
+  /** An uncaught error for the host: to its hook now, or kept for the frame's end. */
+  readonly tellHost = (error: unknown): void => {
     if (!this.onUncaught) {
       this.uncaught.push(error);
       return;
@@ -999,7 +1061,7 @@ export class Scripting {
         try {
           this.rt.call(script, o.object);
         } catch (error) {
-          this.reportUncaught(error);
+          this.reportUncaught(error, script);
         } finally {
           this.inFrameScript = outer;
         }
@@ -1133,7 +1195,7 @@ export class Scripting {
         try {
           this.construct(next.display, next.character, next.library);
         } catch (error) {
-          this.reportUncaught(error);
+          this.reportUncaught(error, next.library);
         }
       }
     }
@@ -1154,7 +1216,7 @@ export class Scripting {
       try {
         this.construct(next.display, next.character, goto.library);
       } catch (error) {
-        this.reportUncaught(error);
+        this.reportUncaught(error, goto.library);
       }
     }
   }

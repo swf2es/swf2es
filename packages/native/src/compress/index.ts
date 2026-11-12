@@ -17,6 +17,15 @@ interface Exports {
   errorMessage(): number;
   inflateData(input: number, length: number, windowBits: number, limit: number): number;
   deflateData(input: number, length: number, level: number, windowBits: number): number;
+  pngEncode(
+    input: number,
+    width: number,
+    height: number,
+    channels: number,
+    level: number,
+    filter: number,
+  ): number;
+  jpegEncode(input: number, width: number, height: number, quality: number): number;
   lzmaDecode(properties: number, input: number, length: number, size: number): number;
   lzmaEncode(input: number, length: number): number;
 }
@@ -158,6 +167,78 @@ export function deflate(data: Uint8Array, level: number, raw: boolean): Uint8Arr
         : output(x, 0);
     if (bytes === null) {
       throw new RangeError(`no memory to deflate ${data.length} bytes`);
+    }
+
+    return bytes;
+  });
+}
+
+/**
+ * A PNG's IDAT stream, a zlib stream at `level`, of `width` by `height`
+ * pixels, premultiplied ARGB as a BitmapData keeps them, as RGBA (4
+ * `channels`) or RGB (3). One pass in the module (png.zig): each row is
+ * made PNG's bytes, its colours divided out of alpha as Flash's encoder
+ * does; with `filter`, given the filter of PNG's five whose output sums
+ * smallest, sixteen bytes at a time, and otherwise none; and deflated.
+ */
+export function pngEncode(
+  pixels: Uint32Array,
+  width: number,
+  height: number,
+  channels: 3 | 4,
+  level: number,
+  filter: boolean,
+): Uint8Array {
+  if (pixels.length !== width * height) {
+    throw new RangeError(`${pixels.length} pixels are no ${width} by ${height}`);
+  }
+
+  return call((x) => {
+    const at = input(x, new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength));
+    const bytes =
+      at === 0 || x.pngEncode(at, width, height, channels, level, filter ? 1 : 0) !== DONE
+        ? null
+        : output(x, 0);
+    if (bytes === null) {
+      throw new RangeError(`no memory to encode ${width} by ${height} pixels as a PNG`);
+    }
+
+    return bytes;
+  });
+}
+
+/**
+ * A JPEG file of `width` by `height` pixels, ARGB, at `quality`, 0 to 100,
+ * as Flash's BitmapData.encode writes one (jpeg.zig): JFIF, 4:2:0, Annex
+ * K's quantization tables scaled as the IJG scales them (in 16 bits, under
+ * an extended sequential frame, where a value passes 255: under quality
+ * 24) and its Huffman tables. Alpha is left out: premultiplied pixels
+ * encode as they are, faded to black. Throws a RangeError for a quality
+ * past 100 or a side that is 0 or past 65535.
+ */
+export function jpegEncode(
+  pixels: Uint32Array,
+  width: number,
+  height: number,
+  quality: number,
+): Uint8Array {
+  if (pixels.length !== width * height) {
+    throw new RangeError(`${pixels.length} pixels are no ${width} by ${height}`);
+  }
+
+  if (
+    !(width >= 1 && width <= 65535 && height >= 1 && height <= 65535) ||
+    !(quality >= 0 && quality <= 100)
+  ) {
+    throw new RangeError(`no JPEG of ${width} by ${height} pixels at quality ${quality}`);
+  }
+
+  return call((x) => {
+    const at = input(x, new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.byteLength));
+    const bytes =
+      at === 0 || x.jpegEncode(at, width, height, quality) !== DONE ? null : output(x, 0);
+    if (bytes === null) {
+      throw new RangeError(`no memory to encode ${width} by ${height} pixels as a JPEG`);
     }
 
     return bytes;

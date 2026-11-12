@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { PUBLIC_PACKAGES } from "./notices.ts";
+import { PUBLISHED } from "./notices.ts";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const { values } = parseArgs({
@@ -36,9 +36,9 @@ interface Manifest {
 }
 
 const manifests = new Map<string, Manifest>(
-  PUBLIC_PACKAGES.map((dir) => [
+  PUBLISHED.map((dir) => [
     dir,
-    JSON.parse(readFileSync(join(root, `packages/${dir}/package.json`), "utf8")) as Manifest,
+    JSON.parse(readFileSync(join(root, `${dir}/package.json`), "utf8")) as Manifest,
   ]),
 );
 
@@ -82,7 +82,7 @@ function ordered(): string[] {
     visiting.delete(dir);
     done.push(dir);
   };
-  for (const dir of PUBLIC_PACKAGES) {
+  for (const dir of PUBLISHED) {
     visit(dir);
   }
 
@@ -102,8 +102,8 @@ try {
   );
   for (const dir of ordered()) {
     const { name } = manifests.get(dir) as Manifest;
-    if (!existsSync(join(root, `packages/${dir}/dist`))) {
-      throw new Error(`packages/${dir} is not built: run pnpm build first`);
+    if (!existsSync(join(root, `${dir}/dist`))) {
+      throw new Error(`${dir} is not built: run pnpm build first`);
     }
 
     if (published(name, version)) {
@@ -111,9 +111,9 @@ try {
       continue;
     }
 
-    const out = join(work, dir);
+    const out = join(work, dir.replace("/", "-"));
     execFileSync("pnpm", ["pack", "--pack-destination", out], {
-      cwd: join(root, `packages/${dir}`),
+      cwd: join(root, dir),
       stdio: "ignore",
     });
     const [tarball] = readdirSync(out).filter((f) => f.endsWith(".tgz"));

@@ -14,7 +14,55 @@ node tests/context3d/host.ts
 node tests/desktop/stage3d.ts    # normal Electron View-menu opt-in (needs its binary)
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
+# Backend timings, completed draws and GL call counts:
+node tests/context3d/bench.ts --gpu
+node tests/context3d/bench.ts /path/to/before /path/to/after --gpu --runs 3
 ```
+
+`bench.ts` alternates two built checkouts and checks their first/last frame hashes.
+It reports raw CPU submission and completed-frame times separately; a synchronous
+one-pixel readback waits for completion. Call counts come from a separate warmed
+frame so instrumentation does not affect timing. These are backend measurements,
+not an ActionScript workload or a game's frame rate. Omit `--gpu` for SwiftShader.
+`--draws`, `--frames` and `--samples` control the workload; `--only` selects a
+comma-separated subset of `static`, `transform`, `material`, `all-changing`,
+`uniforms-repeated`, `program-materials`, `programs`, `bindings`, `attributes`,
+`index-ranges`, `indices-changing`, `indices-uploading`,
+`indices-uploading-bytes`, `states`, `states-enabled`, `states-changing`,
+`targets`, `textures`, `textures-changing`,
+`textures-cube`, `textures-cube-changing`, `textures-uploading`,
+`textures-uploading-zero`, `indirect` and `indirect-changing`. The controls include unchanged constants, all
+registers changing, program/target switches and indirect vertex addressing. `bindings` switches buffers, strides and offsets every draw;
+`attributes` switches programs with different active vertex inputs. Every frame
+checks GL errors and context loss. Results are JSON on stdout; progress goes to stderr.
+
+`uniforms-repeated` rewrites the same matrix and material before each draw.
+`program-materials` alternates eight programs, rewriting each program's own material
+on every switch. These exercise value reuse across writes; `all-changing` changes
+every active register, while `static` checks the existing version fast path.
+
+`index-ranges` alternates eight larger ranges within one unchanged index buffer.
+The other index controls alternate index buffers or upload each triangle's indices
+before drawing it, through numeric arrays or bytes. `checks/indices.ts` checks
+pixel output and index-bind counts across uploads, reentrant source getters,
+failed draws, disposal, program replacement, resize and MSAA seeding.
+
+The state controls call depth, blend and culling setters before every draw:
+repeated defaults, repeated enabled blending/culling, or alternating settings.
+`checks/pipeline-state.ts` checks their pixels and calls through depth rejection,
+blend/cull changes, clears, failed resize, presentation and MSAA seeding.
+
+The texture controls use sampler unit 3, retaining or alternating its texture on
+each draw. The cube variants exercise the same two patterns. The upload controls
+replace the sampled image on every draw, using unit 3 or unit 0 respectively.
+`checks/texture-bindings.ts` checks pixels and binding counts across uploads,
+encoder callbacks, 2D/cube and sampler changes, missing mips, disposal, resize and
+MSAA seeding.
+
+`checks/draw-state.ts` checks retained GL bindings and per-program
+orientation/sampler uniforms through successful and failed shader replacement,
+program/target switches, readback, presentation, resize and MSAA seeding/resolves.
+It checks pixels as well as call counts and releases every tracked GPU handle.
 
 `page.ts` retains the browser runners' exports and routes them to `checks/`.
 Those modules group playback, composition, resource limits/lifetime, targets,

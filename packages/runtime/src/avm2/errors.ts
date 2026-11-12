@@ -12,6 +12,14 @@ import type { Runtime } from "./runtime.js";
 export class AsError extends Error {}
 
 /**
+ * Thrown where a SWF asks for something swf2es has not got (Runtime.unsupported).
+ * Uncaught, it stops the script as any error of the runtime's own does; an
+ * AS3 catch gets it as an AS3 error (Runtime.caught), since content written
+ * for several runtimes guards what one of them may lack with try and catch.
+ */
+export class UnsupportedError extends Error {}
+
+/**
  * Where an AS3 error was made, as JavaScript stack lines from the first
  * compiled method's (their names begin with `$`), the runtime's and the
  * player's frames before it left out, those between kept; every line if
@@ -27,6 +35,16 @@ export function stackOf(error: Value): string | null {
   const frames = made.stack.split("\n").filter((line) => !/^Error\b/.test(line));
   const first = frames.findIndex((line) => /^(?:\s*at (?:[\w$]+\.)?)?\$[\w$]/.test(line));
   return frames.slice(Math.max(0, first)).join("\n");
+}
+
+/**
+ * What an error the runtime made says in full, its text and arguments as
+ * debugger mode words them, for a host to show: the release player's
+ * message, which the SWF sees, is the number alone. Null for any other value.
+ */
+export function detailOf(error: Value): string | null {
+  const detail = (error as { $detail?: unknown } | null)?.$detail;
+  return typeof detail === "string" ? detail : null;
 }
 
 /**
@@ -49,6 +67,8 @@ export function describe(rt: Runtime, v: Value): string {
     return rt.toString(v);
   }
 
+  // Its class's name without the package, as "Object@0", the address left out.
   const name: string = v.$traits.name;
-  return `${name.slice(name.lastIndexOf("::") + (name.includes("::") ? 2 : 0))}@0`;
+  const colons = name.lastIndexOf("::");
+  return `${colons < 0 ? name : name.slice(colons + 2)}@0`;
 }

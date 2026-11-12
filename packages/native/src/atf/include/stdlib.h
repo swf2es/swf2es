@@ -9,5 +9,8 @@ void *calloc(size_t count, size_t n);
 
 #define abs(x) __builtin_abs(x)
 #define exit(status) __builtin_trap()
+// The encoder's random quantizers a macroblock, which it draws only from
+// several a frame; the module sets one.
+#define rand() 0
 
 #endif

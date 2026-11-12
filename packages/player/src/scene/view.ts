@@ -95,6 +95,9 @@ export interface RenderViewOptions {
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
 
+/** The numbers a render draws from besides its root and quality (RenderView.inputsInto). */
+const INPUTS = 13;
+
 /** What a pass of its own swaps out of the walk (RenderView.passState). */
 interface PassState {
   scene: SceneList;
@@ -215,6 +218,15 @@ export class RenderView implements Drawer {
   private inAlphaMask = false;
   /** An object's transform's linear part, made its stretch in place (stretchOf). */
   private readonly stretchScratch: Linear = [0, 0, 0, 0];
+  /**
+   * What the last render drew from, which `unchanged` compares: its root,
+   * null before one and once the context came back; its quality; and its
+   * other inputs, with room to read them again.
+   */
+  private drawnRoot: DisplayObject | null = null;
+  private drawnQuality = "";
+  private readonly drawnInputs = new Float64Array(INPUTS);
+  private readonly nowInputs = new Float64Array(INPUTS);
 
   constructor(options: RenderViewOptions) {
     // First, so that a page that cannot run the render module throws before a context is made.
@@ -265,6 +277,7 @@ export class RenderView implements Drawer {
 
   /** The context came back: the backend made again, and every texture added again as it is drawn. */
   private readonly restored = () => {
+    this.drawnRoot = null;
     this.backend.restore(this.geometries);
     this.textures.lost();
     this.keeps.lost();
@@ -337,6 +350,11 @@ export class RenderView implements Drawer {
     return this.textItems.runCount;
   }
 
+  /** How many glyphs and runs of device text it has rasterized, which a page may check for churn. */
+  get textRasterized(): number {
+    return this.textItems.rasterized;
+  }
+
   /** The canvas made `width` by `height` stage pixels at `resolution` canvas pixels each. */
   resize(width: number, height: number, resolution = this.resolution): void {
     this.width = width;
@@ -346,8 +364,61 @@ export class RenderView implements Drawer {
     this.canvas.height = Math.max(1, Math.round(height * resolution));
   }
 
+  /**
+   * Whether rendering `root` now would draw what the canvas shows: the root
+   * the last render drew, nothing in it invalidated since (its flags, which
+   * every change a render syncs sets up to the root, a BitmapData's pixels
+   * shown by a Bitmap or a fill too, and which the render cleared), nothing
+   * waiting to upload, and the view's size, scale, quality, samples,
+   * background and viewport as they were. A host may then leave the canvas
+   * be, which gives the browser no frame to composite, as Flash repaints no
+   * region of a stage where nothing changed.
+   */
+  unchanged(root: DisplayObject): boolean {
+    if (
+      root !== this.drawnRoot ||
+      root.dirty !== CLEAN ||
+      (root instanceof Container && root.descendantsDirty) ||
+      this.stageQuality !== this.drawnQuality
+    ) {
+      return false;
+    }
+
+    const now = this.inputsInto(this.nowInputs);
+    const drawn = this.drawnInputs;
+    for (let i = 0; i < INPUTS; i++) {
+      if (now[i] !== drawn[i]) {
+        return false;
+      }
+    }
+
+    return !this.gl.isContextLost();
+  }
+
+  /** The numbers a render draws from, besides its root and its quality, in `to`. */
+  private inputsInto(to: Float64Array): Float64Array {
+    const gl = this.gl;
+    to[0] = this.scale;
+    to[1] = this.screenScale ?? -1;
+    to[2] = this.background;
+    to[3] = this.transparent ? 1 : 0;
+    to[4] = this.resolution;
+    to[5] = this.canvas.width;
+    to[6] = this.canvas.height;
+    to[7] = gl.drawingBufferWidth;
+    to[8] = gl.drawingBufferHeight;
+    to[9] = this.backend.samples;
+    to[10] = this.viewX;
+    to[11] = this.viewY;
+    to[12] =
+      this.textures.pending.length + this.geometries.added.length + this.geometries.updated.length;
+    return to;
+  }
+
   /** Draw `root`'s display list. */
   render(root: DisplayObject): void {
+    // Not drawn until it is all drawn: a render that throws leaves no frame to keep.
+    this.drawnRoot = null;
     this.scene.reset();
     this.rows.reset();
     this.filters.reset();
@@ -403,6 +474,9 @@ export class RenderView implements Drawer {
     this.geometries.endFrame();
     this.textures.endFrame();
     this.keeps.endFrame();
+    this.drawnRoot = root;
+    this.drawnQuality = this.stageQuality;
+    this.inputsInto(this.drawnInputs);
   }
 
   /**
@@ -785,7 +859,8 @@ export class RenderView implements Drawer {
       let glyph = 0;
       let normal = 0;
 
-      // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch.
+      // Device text as sharp as the text is shown: canvas pixels a stage pixel, at its stretch, its
+      // runs on whole canvas pixels.
       const resolution =
         o instanceof TextObject && !o.embedFonts
           ? deviceTextResolution([a, b, c, d], this.scale * this.resolution)
@@ -835,6 +910,7 @@ export class RenderView implements Drawer {
             ty,
             color,
             resolution,
+            this.target.scale,
           );
         } else if (!glyphsDrawn && advanced.handle) {
           glyphsDrawn = true;

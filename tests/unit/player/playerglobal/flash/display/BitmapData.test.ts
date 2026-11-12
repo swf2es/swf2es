@@ -303,14 +303,26 @@ const ops: Op[] = [
   ["setVector", () => call(bd(), "setVector", rect(), vector())],
   [
     "encode",
-    () =>
-      call(
-        bd(),
-        "encode",
-        rect(),
-        make("flash.display::PNGEncoderOptions", rand() < 0.5),
-        rand() < 0.5 ? null : bytes(),
-      ),
+    () => {
+      // A PNG, fast or not, a JPEG at a quality that Flash takes or refuses, or a JPEG XR
+      // with a quantization, colour space and trim that it takes or refuses.
+      const kind = rand();
+      let options: unknown;
+      if (kind < 0.35) {
+        options = make("flash.display::PNGEncoderOptions", kind < 0.17);
+      } else if (kind < 0.7) {
+        options = make("flash.display::JPEGEncoderOptions", Math.floor(kind * 300) - 140);
+      } else {
+        options = make(
+          "flash.display::JPEGXREncoderOptions",
+          Math.floor(rand() * 130) - 10,
+          pick(["auto", "4:4:4", "4:2:2", "4:2:0", "4:4:0", null]),
+          pick([0, 1, 15, 16, 255, 256, num()]),
+        );
+      }
+
+      return call(bd(), "encode", rect(), options, rand() < 0.5 ? null : bytes());
+    },
   ],
   ["noise", () => call(bd(), "noise", num(), num(), num(), num(), rand() < 0.5)],
   [

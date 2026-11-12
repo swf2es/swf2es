@@ -4,9 +4,10 @@
 
 #include_next <string.h>
 
-// Only the glue's file names and XMP metadata use these, which the module
-// never reads.
+// Only the glue's file names and XMP metadata, and the encoder's temporary
+// files, use these, which the module never reads nor writes.
 #define strchr(s, c) ((char *)0)
+#define strcpy(d, s) (d)
 #define strrchr(s, c) ((char *)0)
 #define strncpy(d, s, n) ((char *)0)
 #define wcslen(s) ((size_t)0)

@@ -123,7 +123,10 @@ classes, so neither is the default.
 
 The natives (`playerglobal/air/net/WebSocket.ts`) run over a
 `WebSocketHost` (`hosts.ts`), by default the global WebSocket, a
-browser's or node's; `webSocket: null` has every connect fail. What they
+browser's or node's; `webSocket: null` has every connect fail, and the
+element takes an embedder's own as `configure({ webSockets })`, as the
+desktop app's, whose main process holds the connections
+([WebSockets](desktop.md#websockets)). What they
 throw and dispatch is what adl does: TypeError 2007 for a null URL, then
 IllegalOperationError 2082 for a second connect, a WebSocket connecting
 only once, then ArgumentError 2147 for a scheme other than `ws://` or
@@ -195,6 +198,21 @@ is not supported. Where the host does not say, the values are adl's
 or Electron's window has no menu, dock icon or tray of AIR's, so the
 `supports` flags are false.
 
+`flash.display.Screen` (`playerglobal/flash/display/Screen.ts`) has the
+screens the host's `AirApplication.screens` gives, each with its bounds on
+the desktop the window's bounds are on, the part of it the system's bars
+leave free, its colour depth and whether it is the main one: a page's one
+screen (`@swf2es/web`'s `pageScreens`, from `window.screen`), the system's
+displays in the desktop app, and without a host one screen of the screen
+capabilities' size. As adl has them, `screens`, `mainScreen` and
+`getScreensForRectangle` make new Screen objects at every call, each
+keeping its two Rectangles; `getScreensForRectangle` rounds the
+rectangle's x, y, width and height each to an integer, a half to the even
+one, and gives the screens it shares any area with, in `screens`' order,
+so one that only touches a screen's edge, or has no area, finds none;
+`new Screen()` throws ArgumentError 2012, and nothing is dispatched on a
+Screen (`Screen.test.ts`).
+
 ## AIR's file system
 
 In AIR, `flash.filesystem.File` reads the host's file system through a
@@ -226,7 +244,7 @@ descriptor read in `main/descriptor.ts`, the launch in `main/air.ts`).
 AIR's library loaded after playerglobal, `air: true`, the host's
 `AirApplication` and `FileSystemHost`, and Security.sandboxType
 "application". The renderer gives them over the shell
-(`renderer/air.ts`): the window's state, and `stat` and `list`, by
+(`renderer/air.ts`): the window's state, the displays, and `stat` and `list`, by
 synchronous messages, as File and NativeWindow read; its app:,
 app-storage: and file: URLs are read through the shell too. The main
 process answers them only while the application the user opened plays
@@ -235,6 +253,39 @@ and its requests and sockets go unjudged, without policy files or a
 prompt, as AIR's application sandbox has them (`network.ts`'s
 "application" movie). `tests/desktop/smoke.ts` runs one in headless
 Electron.
+
+## Full screen
+
+`Stage.displayState` asks the host's `FullScreenHost` (`hosts.ts`):
+`allowed` is the embedding's allowFullScreen and
+allowFullScreenInteractive, `request` goes full screen or refuses, and
+`exit` leaves; the host tells of what no script asked for, the user's Esc
+say, with `Scripting.fullScreen.hostChanged`. `scripting/full-screen.ts`
+keeps the state as adl (AIR 51.3) has it: the stage is in full screen, and
+its `FullScreenEvent.FULL_SCREEN` dispatched, before the setter returns,
+from a timer as from a click; nothing is dispatched for a state the stage
+is in, nor between `"fullScreen"` and `"fullScreenInteractive"`; another
+string throws ArgumentError #2008, null TypeError #2007. The event's
+`interactive` is false in adl even for the interactive state, and
+`allowsFullScreenInteractive` false though it works; outside AIR both
+follow the host. A host that refuses throws SecurityError #2152, Flash
+Player's without allowFullScreen or outside a click or key, which adl
+never throws and could not show. `mouseLock` may be set only in full
+screen (Error #3707, even for false) and its end clears it, and the
+window's `restore()` and `minimize()` leave it first.
+
+The stage keeps its size in full screen but in noScale, where it is the
+screen's, and Event.RESIZE follows as for any change of its box: before
+the FullScreenEvent where the host's box has changed by then, after it
+where it changes later, as a window's does. `fullScreenSourceRect` is
+kept in any state, read back as a copy, and in full screen that part of
+the stage alone is drawn, fitted to the screen and centred whatever the
+scale mode and alignment, the rest the stage's colour; in noScale the
+stage is the rect's size. A rect with no area is reported but draws as
+the one before it. adl dispatches two more RESIZEs that change no size as
+it leaves full screen in noScale; the player none. Without a host, as in
+node, the stage stays `"normal"` and nothing throws. AVM1's
+`Stage.displayState` is not there yet.
 
 ## Screen capabilities
 
@@ -440,6 +491,27 @@ Flash does, leaving out masks, a timeline's or a script's, and all an
 invisible container holds, as the pointer's pick does;
 `areInaccessibleObjectsUnderPoint` is false, there being no sandbox to
 hide them.
+
+AMF0, which avmshell refuses (#1508), is the player's own
+(`playerglobal/flash/net/amf0.ts`): ByteArray's `writeObject` and
+`readObject` of an objectEncoding below 3 (as a signed number:
+`defaultObjectEncoding` takes any uint) override the runtime's, and
+Socket, URLStream and FileStream reach them through their ByteArrays. It
+is what adl writes and reads (the `amf0` case): every number a double, an
+Array always an ECMA array, a Date with its zone, an XMLDocument as its
+text but E4X as an empty object, any other object its public variables and
+read-write accessors, [Transient] ones too, then what for-in finds; an
+IExternalizable writes no properties and reads as a plain typed object,
+and 0x11 reads as undefined, not as AMF3. An IExternalizable's
+ObjectOutput and ObjectInput are AMF3 whatever their objectEncoding, in
+avmshell and Flash alike. A SharedObject's .sol file is AMF0 or AMF3 by
+its objectEncoding, its properties sharing one writer's tables (in AMF3
+the names among the strings), as adl writes it. An AMF3 file is kept under
+its key with `#amf3` after it (`AMF3_KEY`), an AMF0 one, which AS2 reads
+too, under the key alone. An AMF3 file under the key alone can only be one
+swf2es 0.1.16 or earlier wrote, each value with tables of its own, and is
+read so; its next write moves it. The header cannot tell the two apart:
+the old writer's was Flash's, byte for byte.
 
 The legacy `flash.xml.XMLDocument` is playerglobal's own code over the
 runtime's XML tokenizer, avmplus' that E4X reads with too, exported for

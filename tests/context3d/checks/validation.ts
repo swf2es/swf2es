@@ -63,11 +63,29 @@ export function drawValidation() {
     }
     check(reads === 0 && owned.created === handles, "warm validation scanned or allocated handles");
     check(color(c.read(), 16, 16, 32) === "ffff0000", "cached draw changed pixels");
+    c.draw(indices, 3000, 1000);
+    c.draw(indices, 0, 1000);
+    reads = 0;
+    for (let i = 0; i < 4; i++) {
+      c.draw(indices, i % 2 ? 0 : 3000, 1000);
+    }
+    check(reads === 0, "alternating ranges scanned unchanged indices");
     indices.upload([4], 0, 1);
+    rejects(() => c.draw(indices, 0, 1000));
+    c.draw(indices, 3000, 1000);
     rejects(() => c.draw(indices, 0, -1));
     indices.upload([0], 0, 1);
     c.draw(indices, 0, -1);
+    indices.uploadBytes(new Uint8Array([4, 0]), 0, 3000, 1);
+    rejects(() => c.draw(indices, 3000, 1000));
+    indices.uploadBytes(new Uint8Array([0, 0]), 0, 3000, 1);
+    c.draw(indices, 3000, 1000);
     c.draw(indices, 3, 1);
+
+    for (let i = 0; i < 24; i++) {
+      c.draw(indices, i * 3, 50);
+    }
+    check((state.buffers.get(indices)?.ranges?.size ?? 0) <= 16, "range cache grew unbounded");
 
     const sparse = c.createBuffer(4, 4);
     sparse.upload([-1, -1, 0, 1], 0, 1);

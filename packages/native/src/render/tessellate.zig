@@ -10,6 +10,7 @@ const c = @import("c");
 const flatten = @import("flatten.zig");
 const arena = @import("arena.zig");
 const bands = @import("bands.zig");
+const earclip = @import("earclip.zig");
 
 extern "env" fn failure(code: c_int) noreturn;
 
@@ -104,6 +105,12 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     if (libtess and ends.len == 1 and inRange(coords)) {
         if (fan(coords)) |result| {
             out = result;
+            return 0;
+        }
+
+        arena.top = mark;
+        if (earclip.fill(arena.allocator, coords)) |triangles| {
+            out = .{ .positions = coords, .indices = triangles };
             return 0;
         }
 

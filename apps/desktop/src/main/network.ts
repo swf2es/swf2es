@@ -21,12 +21,17 @@
 //   that changes its answer (rebinding) changes nothing.
 // - Requests are bounded: methods, headers, sizes, redirects, time, and
 //   how many run at once; and each movie's are aborted as the next opens.
+// - Through a proxy (--proxy, proxy.ts), each connection is a tunnel to
+//   the address its host was pinned to, judged as without one: the proxy
+//   is asked for that address, not the name, so a proxy's DNS that answers
+//   otherwise than this machine's reaches nothing the judgement did not.
 //
 // Without Electron, so that node tests it (tests/desktop/network.test.ts).
 import { lookup } from "node:dns/promises";
 import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { connect, isIP, isIPv4 } from "node:net";
+import { connect, isIP, isIPv4, type Socket } from "node:net";
+import type { Duplex } from "node:stream";
 import * as tls from "node:tls";
 import { type AddressClass, addressClass, badPort, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
@@ -44,6 +49,7 @@ import {
   urlMetaPolicy,
   usablePolicies,
 } from "./policy.ts";
+import { connectThrough, type ProxyConfig, ProxyError } from "./proxy.ts";
 
 export type Purpose = "movie" | "content" | "data" | "send";
 
@@ -136,9 +142,17 @@ export interface NetworkOptions {
   classify?: (address: string) => AddressClass | null;
   /** The certificate authorities HTTPS trusts, in place of Node's and the system's. */
   ca?: string | string[];
+  /**
+   * Hosts whose HTTPS certificate is not verified: a server with one it
+   * signed itself, as a developer's own has (--ignore-certificate-errors).
+   * None by default.
+   */
+  unverified?: (host: string) => boolean;
   limits?: Partial<Limits>;
   /** Where a socket server keeps its master policy: 843. */
   socketPolicyPort?: number;
+  /** What every connection goes through (--proxy); none by default. */
+  proxy?: ProxyConfig | null;
 }
 
 /** What Flash Player 32 reported, sent as it sent it. */
@@ -196,12 +210,44 @@ function defaultCa(): string[] | undefined {
   }
 }
 
+/**
+ * The hosts --ignore-certificate-errors names, of the app's arguments up to
+ * an AIR application's own after "--": null without the switch; with it
+ * alone, every host; with `=a.test,b.test`, those, whatever their case.
+ * A host is a name or an address, with no port: every port of it.
+ */
+export function unverifiedHosts(argv: string[]): { all: boolean; hosts: string[] } | null {
+  const end = argv.indexOf("--");
+  const own = end < 0 ? argv : argv.slice(0, end);
+  let named = false;
+  let all = false;
+  const hosts: string[] = [];
+  for (const arg of own) {
+    if (arg === "--ignore-certificate-errors") {
+      named = true;
+      all = true;
+    } else if (arg.startsWith("--ignore-certificate-errors=")) {
+      // The switch with nothing named ignores nothing, rather than everything by a slip.
+      named = true;
+      for (const host of arg.slice(arg.indexOf("=") + 1).split(",")) {
+        if (host.trim() !== "") {
+          hosts.push(host.trim().toLowerCase());
+        }
+      }
+    }
+  }
+
+  return named ? { all, hosts } : null;
+}
+
 export class Network {
   private readonly limits: Limits;
   private readonly resolveHost: (host: string) => Promise<string[]>;
   private readonly classify: (address: string) => AddressClass | null;
   private readonly ca: string | string[] | undefined;
+  private readonly unverified: (host: string) => boolean;
   private readonly socketPolicyPort: number;
+  private readonly proxy: ProxyConfig | null;
   private session: Session | null = null;
   private running = 0;
   private readonly waiting: (() => void)[] = [];
@@ -214,7 +260,9 @@ export class Network {
         (await lookup(host, { all: true, verbatim: true })).map(({ address }) => address));
     this.classify = options.classify ?? addressClass;
     this.ca = options.ca ?? defaultCa();
+    this.unverified = options.unverified ?? (() => false);
     this.socketPolicyPort = options.socketPolicyPort ?? 843;
+    this.proxy = options.proxy ?? null;
   }
 
   /**
@@ -715,7 +763,13 @@ export class Network {
         timeout: this.limits.policyTimeout,
         deadline: this.limits.policyTimeout,
       });
-    } catch {
+    } catch (error) {
+      // A proxy that failed is said, as the request that needed the policy fails;
+      // a server the proxy did not reach has no policy, as one that is not there.
+      if (proxyFault(error)) {
+        throw error;
+      }
+
       return null;
     }
 
@@ -752,15 +806,27 @@ export class Network {
     timeout: number,
     signal: AbortSignal,
   ): Promise<SocketPolicy | null> {
-    return new Promise((answer) => {
+    return new Promise((answer, fail) => {
       const chunks: Buffer[] = [];
       let length = 0;
-      const socket = connect({ host: address, port });
-      const finish = (policy: SocketPolicy | null) => {
+      let socket: Socket | null = null;
+      let finished = false;
+      const opening = new AbortController();
+      const finish = (policy: SocketPolicy | null, error?: Error) => {
+        if (finished) {
+          return;
+        }
+
+        finished = true;
         clearTimeout(timer);
         signal.removeEventListener("abort", abort);
-        socket.destroy();
-        answer(policy);
+        opening.abort();
+        socket?.destroy();
+        if (error) {
+          fail(error);
+        } else {
+          answer(policy);
+        }
       };
       const read = () => {
         const text = Buffer.concat(chunks).toString("utf8");
@@ -770,22 +836,68 @@ export class Network {
       const abort = () => finish(null);
       const timer = setTimeout(abort, timeout);
       signal.addEventListener("abort", abort, { once: true });
-      socket.on("connect", () => socket.write("<policy-file-request/>\0"));
-      socket.on("data", (chunk: Buffer) => {
-        length += chunk.length;
-        if (length > this.limits.policy) {
-          finish(null);
-          return;
-        }
+      const talk = (connected: Socket) => {
+        socket = connected;
+        connected.on("data", (chunk: Buffer) => {
+          length += chunk.length;
+          if (length > this.limits.policy) {
+            finish(null);
+            return;
+          }
 
-        chunks.push(chunk);
-        if (chunk.includes(0)) {
-          read();
-        }
-      });
-      socket.on("end", read);
-      socket.on("error", () => finish(null));
+          chunks.push(chunk);
+          if (chunk.includes(0)) {
+            read();
+          }
+        });
+        connected.on("end", read);
+        connected.on("error", () => finish(null));
+      };
+
+      if (!this.proxy) {
+        const direct = connect({ host: address, port });
+        talk(direct);
+        direct.on("connect", () => direct.write("<policy-file-request/>\0"));
+        return;
+      }
+
+      connectThrough(this.proxy, address, port, { signal: opening.signal }).then(
+        (tunnel) => {
+          if (finished) {
+            tunnel.destroy();
+            return;
+          }
+
+          talk(tunnel);
+          tunnel.write("<policy-file-request/>\0");
+        },
+        (error: ProxyError) =>
+          // A server the proxy did not reach has no policy; a proxy that failed is said.
+          finish(null, error.fault ? new Refused(error.message, { cause: error }) : undefined),
+      );
     });
+  }
+
+  /**
+   * A request's createConnection: a tunnel through `proxy` to `address`,
+   * with TLS over it where `secure` says how, as Node's callback form takes
+   * it. A proxy's failure is a refusal saying why, the ProxyError its cause.
+   */
+  private tunnel(
+    proxy: ProxyConfig,
+    address: string,
+    port: number,
+    secure: tls.ConnectionOptions | false,
+    signal: AbortSignal,
+  ) {
+    return (_options: unknown, done: (error: Error | null, socket: Duplex) => void) => {
+      connectThrough(proxy, address, port, { signal }).then(
+        (tunnel) => done(null, secure ? tls.connect({ ...secure, socket: tunnel }) : tunnel),
+        (error: ProxyError) =>
+          done(new Refused(error.message, { cause: error }), undefined as unknown as Duplex),
+      );
+      return undefined;
+    };
   }
 
   /**
@@ -839,26 +951,41 @@ export class Network {
 
       const https = url.protocol === "https:";
       const family = isIP(address);
+      const port = Number(url.port || (https ? 443 : 80));
+      const secure: tls.ConnectionOptions = {
+        servername: isIP(host) ? undefined : host,
+        ca: this.ca,
+        // Only where the user asked for this host: its certificate goes unchecked.
+        ...(this.unverified(host) ? { rejectUnauthorized: false } : {}),
+      };
       let request: ClientRequest;
       try {
         request = (https ? httpsRequest : httpRequest)({
           host,
-          port: url.port || (https ? 443 : 80),
+          port,
           path: `${url.pathname}${url.search}`,
           method,
           headers: outgoing,
-          agent: false,
-          // The address pinned for this request, whatever the resolver would say now.
-          lookup: (_name, opts, callback) => {
-            if ((opts as { all?: boolean }).all) {
-              (callback as (e: null, a: { address: string; family: number }[]) => void)(null, [
-                { address, family },
-              ]);
-            } else {
-              (callback as (e: null, a: string, f: number) => void)(null, address, family);
-            }
-          },
-          ...(https ? { servername: isIP(host) ? undefined : host, ca: this.ca } : {}),
+          ...(this.proxy
+            ? // Through the proxy to the pinned address, TLS over the tunnel for https; the
+              // request's own timers and signal bound the proxy's part too. No agent: the
+              // connection is this one's.
+              { createConnection: this.tunnel(this.proxy, address, port, https && secure, signal) }
+            : {
+                agent: false,
+                // The address pinned for this request, whatever the resolver would say now.
+                lookup: (_name, opts, callback) => {
+                  if ((opts as { all?: boolean }).all) {
+                    (callback as (e: null, a: { address: string; family: number }[]) => void)(
+                      null,
+                      [{ address, family }],
+                    );
+                  } else {
+                    (callback as (e: null, a: string, f: number) => void)(null, address, family);
+                  }
+                },
+                ...(https ? secure : {}),
+              }),
         });
       } catch (error) {
         // What check() let through and Node still refuses: a refusal like any other.
@@ -891,7 +1018,10 @@ export class Network {
       const abort = () => stop(new Refused("aborted"));
       signal.addEventListener("abort", abort, { once: true });
       arm();
-      request.on("error", (error) => stop(new Refused(error.message)));
+      // A proxy's refusal comes as it was made, with its cause.
+      request.on("error", (error) =>
+        stop(error instanceof Refused ? error : new Refused(error.message)),
+      );
       request.on("response", (response: IncomingMessage) => {
         const status = response.statusCode ?? 0;
         const received: [string, string][] = [];
@@ -1155,9 +1285,22 @@ function cached<T>(
 
     value = make();
     cache.set(key, value);
+    // A failure, a proxy's, is not kept: the next request asks again.
+    const made = value;
+    made.catch(() => {
+      if (cache.get(key) === made) {
+        cache.delete(key);
+      }
+    });
   }
 
   return value;
+}
+
+/** Whether `error` is a refusal for a proxy that failed, not a server it did not reach. */
+function proxyFault(error: unknown): boolean {
+  const cause = (error as Error | null)?.cause;
+  return cause instanceof ProxyError && cause.fault;
 }
 
 function describe(requester: Requester): string {

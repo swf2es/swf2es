@@ -85,7 +85,12 @@ export function browserNavigate(): Navigate | null {
 
 /**
  * Where the host keeps shared objects' bytes, by key: the browser's
- * localStorage by default, else memory.
+ * localStorage by default, else memory. Each is a .sol file as Flash writes
+ * it, under `host/path/name` (`#secure` after a secure one's); an AMF3 file,
+ * AS3's, under that key and AMF3_KEY. An AMF3 file under the key alone is
+ * one swf2es 0.1.16 or earlier wrote, each value with AMF3 tables of its
+ * own where Flash shares one writer's: it is read so, and moved on its next
+ * write.
  */
 export interface SharedObjectStorage {
   get(key: string): Uint8Array | null;
@@ -134,6 +139,9 @@ export function defaultStorage(): SharedObjectStorage {
     remove: (key) => storage().remove(key),
   };
 }
+
+/** What an AMF3 .sol file's key ends with (SharedObjectStorage). */
+export const AMF3_KEY = "#amf3";
 
 const PREFIX = "swf2es:so:";
 
@@ -242,6 +250,32 @@ export interface ScreenCapabilities {
   screenResolutionY: number;
   pixelAspectRatio: number;
   screenDPI: number;
+}
+
+/**
+ * The host's full screen, which Stage.displayState asks for: a window that
+ * covers its screen, or a page's element under the Fullscreen API. A script
+ * that asks is answered at once, as Flash answers it: the stage is in full
+ * screen when its setter returns, or the setter throws. What happens
+ * without a script, the user's Esc or a request the system then turns
+ * down, the host tells the player (Scripting.fullScreen.hostChanged).
+ * Without a host, displayState stays "normal".
+ */
+export interface FullScreenHost {
+  /**
+   * Whether the embedding lets its SWFs go full screen, and with the keys
+   * (`interactive`): Flash Player's allowFullScreen and
+   * allowFullScreenInteractive, which Stage.allowsFullScreen and
+   * allowsFullScreenInteractive read.
+   */
+  allowed(interactive: boolean): boolean;
+  /**
+   * Goes full screen; false where it may not now, as Flash Player
+   * refuses outside a user's click or key (SecurityError #2152).
+   */
+  request(interactive: boolean): boolean;
+  /** Leaves full screen. */
+  exit(): void;
 }
 
 type Affine = { a: number; b: number; c: number; d: number; tx: number; ty: number };
@@ -364,9 +398,22 @@ export interface AirWindow {
 }
 
 /**
+ * One of the host's screens, as flash.display.Screen reads it: its bounds
+ * on the desktop the windows' bounds are on, the part of it a window may
+ * fill (past a task bar, a menu bar or a dock), and its colours' bits.
+ */
+export interface AirScreen {
+  bounds: WindowBounds;
+  visibleBounds: WindowBounds;
+  colorDepth: number;
+  /** Whether it is Screen.mainScreen; the first one where none says so. */
+  main?: boolean;
+}
+
+/**
  * What an AIR application's host gives NativeApplication: the descriptor
  * it was launched from, the launch's arguments, which its InvokeEvent
- * carries, and its one window.
+ * carries, its one window, and the screens it may be on.
  */
 export interface AirApplication {
   /** The application descriptor's XML, as applicationDescriptor gives it, and its id. */
@@ -377,6 +424,8 @@ export interface AirApplication {
   /** The directory it was launched from, a native path: InvokeEvent's currentDirectory. */
   currentDirectory?: string | null;
   window?: AirWindow | null;
+  /** The screens as they are now; a host without them has one, of the screen capabilities' size. */
+  screens?(): readonly AirScreen[];
   /** NativeApplication.exit's code; a host without it stops nothing. */
   exit?(code: number): void;
 }

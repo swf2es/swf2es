@@ -5,6 +5,7 @@
 // c = min(255, (c' * floor(0xFF00 / a) + 127) >> 8), 0 for alpha 0. An
 // opaque bitmap keeps every alpha at 255.
 import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
+import { bitmapKernel } from "./kernel.js";
 
 export interface PixelRect {
   x: number;
@@ -82,6 +83,9 @@ export function spanRect(x: number, y: number, width: number, height: number): P
 
 /** No gaps, shared by every copy that leaves none. */
 const NO_GAPS: readonly PixelRect[] = [];
+/** The fewest pixels copyPixels blends in the native module rather than here. */
+const NATIVE_OVER = 2048;
+const OVER = { op: "over" } as const;
 
 /** The reciprocals Flash divides alpha out with, 8.8 fixed point. */
 const RECIPROCAL = new Uint32Array(256);
@@ -484,6 +488,59 @@ export class BitmapStore {
     const mask = alpha?.readable ?? null;
     const maskWidth = alpha?.width ?? 0;
     const maskHeight = alpha?.height ?? 0;
+
+    if (replaces && !smears) {
+      // Each row moved whole: in place a memmove, which Flash's order is but for a smear.
+      for (let r = 0; r < d.height; r++) {
+        const row = up ? d.height - 1 - r : r;
+        const to = (d.y + row) * this.width + d.x;
+        const from = (sy + row) * source.width + sx;
+        if (into === pixels) {
+          into.copyWithin(to, from, from + d.width);
+        } else {
+          into.set(pixels.subarray(from, from + d.width), to);
+        }
+      }
+
+      this.fillGaps(gaps, source, gx, gy, mergeAlpha, alpha, gax, gay);
+      this.changed();
+      return;
+    }
+
+    if (!mask && source !== this && (mergeAlpha || !this.transparent)) {
+      // Source over destination, as composite does: a blit of sprites, the commonest copy a
+      // game makes each frame. Four pixels at a time in the native module where there are
+      // enough to pay for copying them in and out; else written out here, which skips what
+      // is clear and takes what is solid.
+      const kernel = d.width * d.height >= NATIVE_OVER ? bitmapKernel() : null;
+      if (kernel) {
+        kernel.copy(into, this.width, pixels, source.width, d, sx, sy, this.transparent, OVER);
+        this.changed();
+        return;
+      }
+
+      const solid = this.transparent ? 0 : 0xff000000;
+      for (let r = 0; r < d.height; r++) {
+        const to = (d.y + r) * this.width + d.x;
+        const from = (sy + r) * source.width + sx;
+        for (let c = 0; c < d.width; c++) {
+          const p = pixels[from + c];
+          const sa = p >>> 24;
+          if (sa === 255) {
+            into[to + c] = p;
+          } else if (sa === 0) {
+            if (solid !== 0) {
+              into[to + c] = (into[to + c] | solid) >>> 0;
+            }
+          } else {
+            into[to + c] = (over(p, into[to + c]) | solid) >>> 0;
+          }
+        }
+      }
+
+      this.changed();
+      return;
+    }
 
     for (let r = 0; r < d.height; r++) {
       const row = up ? d.height - 1 - r : r;

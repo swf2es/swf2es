@@ -1,5 +1,6 @@
 // Independent ray crossings check both fill rules, including self-intersecting contours and
-// convex ones, some far larger, which the module fills by a fan within libtess2's range, and
+// convex ones, some far larger, which the module fills by a fan within libtess2's range, small
+// concave stars, crescents and combs, and contours that almost cross or touch themselves; and
 // every eight fills tessellated as a layer must give each what it gave alone: by libtess2, and
 // by the bands the module fills by where libtess2 fails (bands.zig). Then curved fills:
 // the layer call's flattening must match a JS one, as the player's was, the same points where
@@ -109,6 +110,63 @@ function checkLayer(by: Tessellator): void {
   pending.length = 0;
 }
 
+/** Small concave contours and near misses for the native ear clipper. */
+function concave(kind: number): number[] {
+  const points: number[] = [];
+  switch (kind) {
+    case 0: {
+      const n = 8 + 2 * Math.floor(random() * 28);
+      for (let i = 0; i < n; i++) {
+        const angle = ((i + random() * 0.2) * 2 * Math.PI) / n;
+        const radius = i % 2 ? 10 + random() * 10 : 35 + random() * 10;
+        points.push(50 + radius * Math.cos(angle), 50 + radius * Math.sin(angle));
+      }
+      break;
+    }
+    case 1: {
+      const steps = 4 + Math.floor(random() * 29);
+      const outer = 80 + random() * 80;
+      const inner = outer * (0.1 + random() * 0.8);
+      for (let i = 0; i <= steps; i++) {
+        const t = i / steps;
+        points.push(10 + 80 * t, 20 + outer * t * (1 - t));
+      }
+      for (let i = steps - 1; i > 0; i--) {
+        const t = i / steps;
+        points.push(10 + 80 * t, 20 + inner * t * (1 - t));
+      }
+      break;
+    }
+    case 2: {
+      const teeth = 2 + Math.floor(random() * 13);
+      const width = 80 / (2 * teeth - 1);
+      points.push(10, 10, 90, 10, 90, 90);
+      for (let i = 2 * teeth - 2; i > 0; i -= 2) {
+        const y = 20 + random() * 50;
+        points.push(10 + i * width, 90, 10 + i * width, y);
+        points.push(10 + (i - 1) * width, y, 10 + (i - 1) * width, 90);
+      }
+      points.push(10, 90);
+      break;
+    }
+    default: {
+      // The notch touches or crosses the bottom edge, or stops just short of it.
+      const tip = [0, -1e-7, 1e-7][Math.floor(random() * 3)];
+      points.push(10, 20, 90, 20, 90, 90, 50 + random() * 20, 20 + tip, 10, 90);
+      break;
+    }
+  }
+
+  if (random() < 0.5) {
+    const pairs = Array.from({ length: points.length / 2 }, (_, i) =>
+      points.slice(i * 2, i * 2 + 2),
+    );
+    return pairs.reverse().flat();
+  }
+
+  return points;
+}
+
 for (const by of [tessellator, banded]) {
   state = seed;
   for (let i = 0; i < cases; i++) {
@@ -122,7 +180,15 @@ for (const by of [tessellator, banded]) {
       contours.push(angles.flatMap((a) => [50 + r * Math.cos(a), 50 + r * Math.sin(a)]));
     }
 
-    for (let j = 0; !convex && j < 1 + Math.floor(random() * 3); j++) {
+    if (!convex && i % 32 < 16) {
+      contours.push(concave(Math.floor(i / 4) % 4));
+    }
+
+    for (
+      let j = 0, count = contours.length === 0 ? 1 + Math.floor(random() * 3) : 0;
+      j < count;
+      j++
+    ) {
       const points: number[] = [];
       for (let k = 0; k < 3 + Math.floor(random() * 20); k++) {
         const x = Math.floor(random() * 100);
@@ -211,7 +277,7 @@ for (const by of [tessellator, banded]) {
 }
 
 console.log(
-  `fuzz tessellate: ${cases} fills by libtess2 and as many by the bands, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
+  `fuzz tessellate: ${cases} native fills and as many by the bands, ${checked} winding samples, ${layered} in layers from seed ${seed}, all well`,
 );
 
 /** A contour flattened as the player's JS did, with its length function. */

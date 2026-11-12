@@ -2,6 +2,7 @@
 // object, as $store; the natives read and write it. Flash's limits and its
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
+import type { As3 } from "../../../as3/types.js";
 import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
 import { drawDisplayObject } from "../../../bitmap/draw.js";
@@ -12,6 +13,8 @@ import {
   GLOWS,
   generatedRect,
 } from "../../../bitmap/filters.js";
+import { encodeJpeg } from "../../../bitmap/jpeg.js";
+import { encodeJpegXr, JPEG_XR_COLOR_SPACES } from "../../../bitmap/jpegxr.js";
 import {
   alphaAt,
   colorBounds,
@@ -80,8 +83,8 @@ function rectOf(s: Scripting, v: Value, span = false): PixelRect {
     throw s.rt.error("TypeError", 2007, "rect");
   }
 
-  const r = v as AsObject;
-  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k)));
+  const r = v as As3<"flash.geom::Rectangle">;
+  const read = (k: "x" | "y" | "width" | "height") => s.rt.toNumber(s.rt.prop(r, k));
   return (span ? spanRect : pixelRect)(read("x"), read("y"), read("width"), read("height"));
 }
 
@@ -96,9 +99,9 @@ function pointOf(s: Scripting, v: Value, name: string): [number, number] {
     throw s.rt.error("TypeError", 2007, name);
   }
 
-  const p = v as AsObject;
-  const read = (k: string) => {
-    const t = Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))));
+  const p = v as As3<"flash.geom::Point">;
+  const read = (k: "x" | "y") => {
+    const t = Math.trunc(s.rt.toNumber(s.rt.prop(p, k)));
     return t >= -0x80000000 && t <= 0x7fffffff ? t + 0 : -0x80000000;
   };
   return [read("x"), read("y")];
@@ -187,7 +190,8 @@ function drawInto(
  * the range's ends wraps round to near 0, 107374180 drawing at -2.4.
  */
 function matrixOf(s: Scripting, o: AsObject): Affine {
-  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
+  const matrix = o as As3<"flash.geom::Matrix">;
+  const read = (k: "a" | "b" | "c" | "d" | "tx" | "ty") => s.rt.toNumber(s.rt.prop(matrix, k));
   const m = {
     a: read("a"),
     b: read("b"),
@@ -454,8 +458,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
     /**
      * The rect as an image file, written into `byteArray` from its position
-     * or into a new one, which is returned: PNG; JPEG and JPEG XR, which
-     * Flash also writes, are not supported yet.
+     * or into a new one, which is returned: PNG, JPEG or JPEG XR.
      */
     encode(rect: Value, compressor: Value, byteArray: Value): Value {
       const store = storeOf(s, this);
@@ -469,11 +472,10 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
       const options = compressor as AsObject;
       const is = (name: string) => s.rt.isInstance(options, s.rt.classNamed(name));
-      if (!is("flash.display::PNGEncoderOptions")) {
-        if (is("flash.display::JPEGEncoderOptions") || is("flash.display::JPEGXREncoderOptions")) {
-          throw s.rt.unsupported("BitmapData#encode as JPEG");
-        }
-
+      const xr = options as As3<"flash.display::JPEGXREncoderOptions">;
+      const jpeg = is("flash.display::JPEGEncoderOptions");
+      const jpegXr = !jpeg && is("flash.display::JPEGXREncoderOptions");
+      if (!jpeg && !jpegXr && !is("flash.display::PNGEncoderOptions")) {
         throw s.rt.error("ArgumentError", 2004);
       }
 
@@ -482,12 +484,53 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("ArgumentError", 2006);
       }
 
-      const fast = !!s.rt.getProperty(options, s.rt.publicName("fastCompression"));
+      // The options are checked once the rect has passed. A JPEG's quality and a JPEG XR's
+      // quantization are uints, of which Flash takes 0 to 100.
+      const quality = jpeg
+        ? Number(s.rt.prop(options as As3<"flash.display::JPEGEncoderOptions">, "quality"))
+        : jpegXr
+          ? Number(s.rt.prop(xr, "quantization"))
+          : 0;
+      if (!(quality >= 0 && quality <= 100)) {
+        throw s.rt.error("RangeError", 2006);
+      }
+
+      let file: Uint8Array;
+      if (jpegXr) {
+        // Then the colour space, then trimFlexBits, which Flash takes up to 255 and its
+        // encoder up to 15, but only for an opaque bitmap: a transparent one trims none.
+        const colorSpace = s.rt.prop(xr, "colorSpace");
+        if (colorSpace === null || colorSpace === undefined) {
+          throw s.rt.error("TypeError", 2007, "colorspace");
+        }
+
+        if (!Object.hasOwn(JPEG_XR_COLOR_SPACES, colorSpace)) {
+          throw s.rt.error("ArgumentError", 2004);
+        }
+
+        const trim = Number(s.rt.prop(xr, "trimFlexBits"));
+        if (!(trim >= 0 && trim <= 255)) {
+          throw s.rt.error("RangeError", 2006);
+        }
+
+        if (trim > 15 && !store.transparent) {
+          throw s.rt.error("Error", 3699);
+        }
+
+        file = encodeJpegXr(store, area, quality, colorSpace, store.transparent ? 0 : trim);
+      } else if (jpeg) {
+        // Quality 0 is 1.
+        file = encodeJpeg(store, area, quality);
+      } else {
+        const png = options as As3<"flash.display::PNGEncoderOptions">;
+        file = encodePng(store, area, !!s.rt.prop(png, "fastCompression"));
+      }
+
       const out =
         byteArray === null || byteArray === undefined
           ? (s.rt.construct(s.rt.classNamed("flash.utils::ByteArray")) as AsObject)
           : (byteArray as AsObject);
-      out.$bytes.write(encodePng(store, area, fast));
+      out.$bytes.write(file);
       return out;
     }
 
@@ -580,15 +623,14 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const store = storeOf(s, this);
       const given = (offsets as AsObject | null)?.$a as Value[] | undefined;
       const point = s.rt.classNamed("flash.geom::Point");
-      const read = (p: AsObject, k: string) =>
-        s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k)));
+      const read = (p: As3<"flash.geom::Point">, k: "x" | "y") => s.rt.toNumber(s.rt.prop(p, k));
       // Past 1024 octaves the doubles' ratio would be infinite, where Flash's sum stays as it was from
       // some 40 on, for any count up to 2^32 - 1, a negative one too (the `perlin-noise` case).
       const count = Math.min(s.rt.toUint(octaves), 1024);
       const shifts = Array.from({ length: count }, (_, i): [number, number] => {
         const p = given?.[i];
         return p && s.rt.isInstanceOf(p, point.$it)
-          ? [read(p as AsObject, "x"), read(p as AsObject, "y")]
+          ? [read(p as As3<"flash.geom::Point">, "x"), read(p as As3<"flash.geom::Point">, "y")]
           : [0, 0];
       });
       perlinNoise(

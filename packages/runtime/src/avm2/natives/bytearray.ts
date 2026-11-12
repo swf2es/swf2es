@@ -654,6 +654,9 @@ export function knownSharedByteArray(rt: Runtime, id: number): AsObject | undefi
   return sharedObjectsOf(rt).get(id)?.deref();
 }
 
+/** The longest string readUTFBytes reads a character at a time. */
+const SHORT_STRING = 24;
+
 /** The bytes up to the first NUL, as avmplus reads a C string. */
 function toNul(bytes: Uint8Array): Uint8Array {
   const nul = bytes.indexOf(0);
@@ -717,6 +720,29 @@ export function byteArrayNatives(rt: Runtime): Natives {
       throw rt.error("flash.errors::EOFError", 2030);
     }
 
+    // A short ASCII string, as a C program's names are, a character at a time from the buffer
+    // itself: no views of it made, and a single character is one the engine already has. A NUL
+    // ends it; a byte past ASCII, a BOM's first among them, is read the long way.
+    if (n <= SHORT_STRING) {
+      const buffer = b.buffer;
+      const at = b.position;
+      let s = "";
+      let k = 0;
+      for (; k < n; k++) {
+        const c = buffer[at + k];
+        if (c === 0 || c >= 0x80) {
+          break;
+        }
+
+        s += String.fromCharCode(c);
+      }
+
+      if (k === n || buffer[at + k] === 0) {
+        b.position = (at + n) >>> 0;
+        return s;
+      }
+    }
+
     let bytes = b.buffer.subarray(b.position, b.position + n);
     if (BOM(bytes)) {
       bytes = bytes.subarray(3);
@@ -734,13 +760,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
       return rt.defaultObjectEncoding;
     }
 
+    // Unchecked, unlike an instance's: avmshell and Flash take any uint, a
+    // new ByteArray starts with it, and writeObject reads an encoding below
+    // 3 as AMF0 (#1508 in avmshell), any other as AMF3.
     static set defaultObjectEncoding(v: Value) {
-      const e = rt.toUint(v);
-      if (e !== kAMF0 && e !== kAMF3) {
-        throw rt.error("ArgumentError", 2008, "objectEncoding");
-      }
-
-      rt.defaultObjectEncoding = e;
+      rt.defaultObjectEncoding = rt.toUint(v);
     }
 
     get length() {
@@ -1189,13 +1213,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
     },
   };
 
+  // AMF3 whatever their objectEncoding, as ObjectOutputObject::writeObject
+  // and ObjectInputObject::readObject: avmshell and Flash alike.
   class ObjectOutputNatives {
     writeObject(this: AsObject, v: Value): void {
       const stream: Writer = this.$amf;
-      if (stream.objectEncoding !== 3) {
-        throw rt.unsupported("AMF0");
-      }
-
       stream.value(v);
     }
   }
@@ -1203,10 +1225,6 @@ export function byteArrayNatives(rt: Runtime): Natives {
   class ObjectInputNatives {
     readObject(this: AsObject): Value {
       const stream: Reader = this.$amf;
-      if (stream.objectEncoding !== 3) {
-        throw rt.unsupported("AMF0");
-      }
-
       return stream.value();
     }
 

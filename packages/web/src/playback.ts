@@ -11,7 +11,14 @@ import {
   type TextInput,
 } from "@swf2es/player";
 import type { RenderView } from "@swf2es/player/scene";
-import { place, type ScaleMode, viewport } from "./layout.js";
+import {
+  type Placement,
+  place,
+  type ScaleMode,
+  sourceViewport,
+  type Viewport,
+  viewport,
+} from "./layout.js";
 import type { Stage3DSession } from "./stage3d.js";
 
 /** How the element shows its player, read again as the page changes them. */
@@ -79,6 +86,9 @@ export class Playback {
     this.unbind.push(() => this.textInput.destroy());
     // Its keys' releases are lost when the window or the element loses focus: the player lets them go.
     this.unbind.push(bindActivation(player, window, host as HTMLElement));
+    // Shown again, the stage is drawn anew rather than trusted to the canvas a hidden page kept.
+    document.addEventListener("visibilitychange", this.shown);
+    this.unbind.push(() => document.removeEventListener("visibilitychange", this.shown));
     this.resize = new ResizeObserver(() => this.layout());
     this.resize.observe(box);
     this.layout();
@@ -138,6 +148,12 @@ export class Playback {
   invalidate(): void {
     this.dirty = true;
   }
+
+  private readonly shown = () => {
+    if (document.visibilityState === "visible") {
+      this.dirty = true;
+    }
+  };
 
   private readonly tick = (now: number) => {
     this.frame = requestAnimationFrame(this.tick);
@@ -217,11 +233,16 @@ export class Playback {
     const clear = transparent || overlay;
     // What showAll leaves around the stage is the stage's colour, as in Flash.
     this.box.style.background = transparent ? "" : `#${color.toString(16).padStart(6, "0")}`;
+    const forced = this.dirty;
     this.drawn = this.player.changes;
     this.dirty = false;
     this.view.background = background;
     this.view.transparent = clear;
-    this.view.render(this.player.stage);
+    // A frame played that changed nothing drawn is left as it shows: no frame for the browser to
+    // composite, as Flash repaints nothing of a still stage. What the host changed draws anew.
+    if (forced || !this.view.unchanged(this.player.stage)) {
+      this.view.render(this.player.stage);
+    }
   }
 
   /**
@@ -259,10 +280,12 @@ export class Playback {
     scripting?.setStageDefaults(look.scale, look.salign ?? "");
     const mode = scripting?.stageScaleMode ?? look.scale;
     const align = scripting?.stageAlign ?? look.salign;
-    // Live noScale makes the stage the box's size; every other mode keeps the SWF's.
+    // In full screen with a fullScreenSourceRect, that part of the stage alone is shown.
+    const rect = scripting?.fullScreen.rect ?? null;
+    // Live noScale makes the stage the box's size, or the source rect's; every other mode keeps the SWF's.
     const noScale = !!scripting && mode === "noScale";
-    const stageWidth = noScale ? this.box.clientWidth : this.player.width;
-    const stageHeight = noScale ? this.box.clientHeight : this.player.height;
+    const stageWidth = noScale ? (rect?.width ?? this.box.clientWidth) : this.player.width;
+    const stageHeight = noScale ? (rect?.height ?? this.box.clientHeight) : this.player.height;
     this.dpr = devicePixelRatio || 1;
     const placed = place(
       this.player.width || 1,
@@ -275,14 +298,16 @@ export class Playback {
       // AIR's top and left edges win where both are named; checked with Stage3D only.
       !!this.stage3D,
     );
-    const view = viewport(
-      this.player.width || 1,
-      this.player.height || 1,
-      this.box.clientWidth,
-      this.box.clientHeight,
-      mode,
-      placed,
-    );
+    const view = rect
+      ? sourceViewport(rect, this.box.clientWidth, this.box.clientHeight, this.dpr)
+      : viewport(
+          this.player.width || 1,
+          this.player.height || 1,
+          this.box.clientWidth,
+          this.box.clientHeight,
+          mode,
+          placed,
+        );
     const canvas = this.view.canvas;
     canvas.style.left = `${view.css.x}px`;
     canvas.style.top = `${view.css.y}px`;
@@ -315,7 +340,11 @@ export class Playback {
     }
 
     this.view.setViewport(view.x, view.y, screenWidth, screenHeight);
-    this.stage3D?.layout(placed, this.player.width, this.player.height);
+    this.stage3D?.layout(
+      rect ? stageAround(rect, view, this.player.width, this.player.height) : placed,
+      this.player.width,
+      this.player.height,
+    );
     this.dirty = true;
     // Dispatch only after placement is current: a resize listener may set
     // another layout or reconfigure its Stage3D back buffer synchronously.
@@ -349,6 +378,23 @@ export class Playback {
     this.view.destroy();
     this.view.canvas.remove();
   }
+}
+
+/** Where the whole stage lies in the box when `view` shows `rect` of it: Stage3D's layers are placed by the stage. */
+function stageAround(
+  rect: { x: number; y: number; width: number },
+  view: Viewport,
+  stageWidth: number,
+  stageHeight: number,
+): Placement {
+  const scale = view.css.width / rect.width;
+  return {
+    x: view.css.x - rect.x * scale,
+    y: view.css.y - rect.y * scale,
+    width: stageWidth * scale,
+    height: stageHeight * scale,
+    resolution: view.resolution,
+  };
 }
 
 /** The most a canvas's multisampled buffers may take, colour and depth-stencil together. */

@@ -586,6 +586,34 @@ export const bitmapCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // BitmapData.encode as JPEG (scripts/BitmapEncodeJpeg.as): the files' segments and
+    // tables, and the files loaded back and shown. The traces are exact. The frame is not:
+    // Flash's decoder makes a block's chroma by a 16 by 16 inverse DCT and the browser's by
+    // interpolating between samples, which part by up to 56 on a hard edge between colours
+    // and by nothing where the colours change slowly. Decoded Flash's way, the files are
+    // within 10 of this frame (tests/unit/player/bitmap/jpeg.test.ts).
+    name: "bitmap-encode-jpeg",
+    swf: (abc) => bare(abc, 1, "BitmapEncodeJpeg", 400, 68),
+    script: "BitmapEncodeJpeg",
+    frames: 6,
+    capture: [6],
+    tolerance: 32,
+    maxOutliers: 150,
+  },
+  {
+    // BitmapData.encode as JPEG XR (scripts/BitmapEncodeJpegXr.as): the files, which are
+    // Flash's byte for byte, and the refusals. 64-bit adl crashes encoding a transparent
+    // bitmap as JPEG XR, at least under Wine: draw the reference with the 32-bit adl.exe
+    // (ADL names it).
+    name: "bitmap-encode-jpegxr",
+    swf: (abc) => bare(abc, 1, "BitmapEncodeJpegXr"),
+    script: "BitmapEncodeJpegXr",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "bitmap-fills",
     swf: bitmapFills,
     script: "BitmapFills",

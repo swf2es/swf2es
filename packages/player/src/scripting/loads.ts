@@ -33,10 +33,14 @@ interface Load {
   url: string | null;
   bytes: Uint8Array;
   status: number;
+  /** Whether a redirect led to its response, which its status event tells. */
+  redirected: boolean;
   /** What the content's frame does: it returns what the frame's end does, INIT and COMPLETE. */
   ready: (() => () => void) | null;
   /** The IOErrorEvent text the load ended in, as Flash words one. */
   failed: string | null;
+  /** Whether it failed after its bytes came, as content of no type Flash knows. */
+  arrived: boolean;
   /** The application domain its code loads into, as the Loader's context chose it when asked. */
   domain: avm2.Domain;
   /** The LoaderContext's parameters, which take the place of the URL's query; null when it set none. */
@@ -158,6 +162,7 @@ export class Loads {
     info.$content = null;
     info.$bytes = null;
     info.$swf = null;
+    info.$typed = false;
     info.$image = null;
     info.$url = null;
     info.$params = NO_PARAMETERS;
@@ -178,9 +183,13 @@ export class Loads {
     return parameters;
   }
 
-  /** What a LoaderInfo knows once its SWF is: the bytes, the header's version, frame rate and size. */
+  /**
+   * What a LoaderInfo knows once its SWF is: the bytes, the header's
+   * version, frame rate and size. Its bytes are the SWF decompressed, as
+   * Flash's, their total what came.
+   */
   describe(info: AsObject, bytes: Uint8Array, swf: Swf): void {
-    info.$bytes = bytes;
+    info.$bytes = swf.bytes;
     info.$total = bytes.length;
     info.$swf = {
       version: swf.header.version,
@@ -410,6 +419,8 @@ export class Loads {
     const info = this.loaderInfoOf(loader);
     info.$loaderURL = this.ownerUrl(loader);
     info.$params = parameters ?? NO_PARAMETERS;
+    // Its bytes are an empty ByteArray from the load on, null only before any, as Flash's.
+    info.$bytes = NO_BYTES;
     return { info, generation };
   }
 
@@ -483,8 +494,9 @@ export class Loads {
       (result) => result,
       () => ({ bytes: null, status: 0, headers: [] }),
     );
+    const asked = this.s.uncaughtErrors.asCaller(deliver);
     const completed = fetched.then((result) => {
-      this.readyBytes.push(() => deliver(result, outgoing.url));
+      this.readyBytes.push(() => asked(result, outgoing.url));
     });
     this.trackRequest(completed);
   }
@@ -643,8 +655,10 @@ export class Loads {
       parameters,
       bytes: new Uint8Array(0),
       status: 0,
+      redirected: false,
       ready: null,
       failed: null,
+      arrived: false,
       swf,
     };
   }
@@ -663,11 +677,12 @@ export class Loads {
     // Settled at once, not when its turn in the chain comes: a rejection must find its handler.
     const fetched = bytes.then(
       (result) => result,
-      () => ({ bytes: null, status: 0, headers: [] }),
+      (): FetchResult => ({ bytes: null, status: 0, headers: [] }),
     );
     this.preparing = this.preparing.then(async () => {
       const result = await fetched;
       load.status = result.status;
+      load.redirected = result.url !== undefined;
       if (!result.bytes) {
         load.failed = `${this.errorText(2035)} URL: ${url}`;
         return;
@@ -682,8 +697,11 @@ export class Loads {
       try {
         load.ready = await this.prepare(load);
       } catch {
-        // Unknown or undecodable content, or code that does not link.
-        load.failed = this.errorText(2124);
+        // Unknown or undecodable content, or code that does not link: its
+        // bytes came, as its progress tells first (completeLoad).
+        const text = this.errorText(2124);
+        load.failed = load.url === null ? text : `${text} URL: ${load.url}`;
+        load.arrived = true;
       }
     });
   }
@@ -763,6 +781,7 @@ export class Loads {
       info.$content = null;
       info.$bytes = null;
       info.$swf = null;
+      info.$typed = false;
       info.$image = null;
       info.$domain = undefined;
       info.$url = null;
@@ -855,8 +874,26 @@ export class Loads {
     }
 
     const info = this.loaderInfoOf(load.loader);
+    // Bytes that came and are no content are told as any are, OPEN and
+    // PROGRESS, though its bytes stay empty, before the error.
+    if (load.arrived && load.url !== null) {
+      dispatchEvent(this.s, info, this.s.event("open"));
+      info.$total = load.bytes.length;
+      for (const loaded of [0, load.bytes.length]) {
+        if (load.generation !== load.loader.$generation) {
+          return;
+        }
+
+        this.progress(info, loaded);
+      }
+
+      if (load.generation !== load.loader.$generation) {
+        return;
+      }
+    }
+
     if (load.url !== null) {
-      dispatchEvent(this.s, info, this.s.httpStatus(load.status));
+      dispatchEvent(this.s, info, this.s.httpStatus(load.status, load.redirected));
       if (load.generation !== load.loader.$generation) {
         return;
       }
@@ -908,6 +945,8 @@ export class Loads {
     let root: MovieClip;
     let avm1: Avm1 | null = null;
     if (run) {
+      // Known before its code runs: an error of its own is its LoaderInfo's to tell.
+      this.s.uncaughtErrors.owns(library, info);
       run();
       this.s.symbols.addFontLibrary(library);
       root = new MovieClip(library.root, library);
@@ -931,7 +970,8 @@ export class Loads {
       const s = this.s;
       const vm = new Avm1(s.codegen, {
         print: s.rt.print,
-        onUncaught: (error) => s.reportUncaught(error),
+        // AVM1 has no event for it: the host's alone.
+        onUncaught: (error) => s.tellHost(error),
         url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
         base: s.base ?? undefined,
         fetch: s.fetch ?? undefined,
@@ -1026,6 +1066,7 @@ export class Loads {
     const root = object.$display;
     const live = () => load.generation === load.loader.$generation;
     info.$url = load.url ?? info.$dynamic ?? info.$loaderURL;
+    info.$typed = true;
     info.$content = object;
     load.loader.$content = object;
     const display: Container = load.loader.$display;
@@ -1043,7 +1084,7 @@ export class Loads {
       }
 
       if (load.url !== null) {
-        dispatchEvent(this.s, info, this.s.httpStatus(load.status));
+        dispatchEvent(this.s, info, this.s.httpStatus(load.status, load.redirected));
       }
 
       // An INIT or status listener that unloads has no COMPLETE, as Flash.
@@ -1055,6 +1096,7 @@ export class Loads {
 }
 
 const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
+const NO_BYTES = new Uint8Array(0);
 
 /**
  * The names and values of a URL's query, as Flash reads them into

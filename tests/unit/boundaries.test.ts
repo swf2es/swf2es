@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { PUBLIC_APPS } from "../../tools/notices.ts";
 
 // Package boundaries (docs/architecture/overview.md). pnpm only links the packages a
 // package.json lists, so the build already rejects imports that are not
@@ -82,7 +83,8 @@ test("every package is in the table", () => {
 for (const app of apps) {
   test(`app ${app} depends only on packages`, () => {
     const pkg = readJson(`${app}/package.json`, appsRoot);
-    assert.ok(pkg.private, "an app is not published");
+    // But the ones a release publishes for npx to run (tools/notices.ts).
+    assert.equal(!pkg.private, PUBLIC_APPS.includes(app), "an app is not published");
     for (const dep of internalDependencies(pkg)) {
       assert.ok(
         Object.hasOwn(allowed, dep),

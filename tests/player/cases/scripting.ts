@@ -199,6 +199,28 @@ function loaderParameters(compile: Compile): Uint8Array {
   return bare(abc, 3);
 }
 
+// Errors nothing catches, told to uncaughtErrorEvents (scripts/UncaughtErrors.as.template):
+// the main SWF's, a loaded SWF's (scripts/UncaughtErrorsChild.as) and one whose
+// document class's constructor throws (scripts/UncaughtErrorsBad.as).
+function uncaughtErrors(compile: Compile): Uint8Array {
+  const inner = bare(compile("UncaughtErrorsChild"), 2, "UncaughtErrorsChild");
+  const bad = bare(compile("UncaughtErrorsBad"), 1, "UncaughtErrorsBad");
+  const template = readFileSync(
+    new URL("../scripts/UncaughtErrors.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "UncaughtErrors",
+    template
+      .replaceAll("@@INNER@@", Buffer.from(inner).toString("base64"))
+      .replaceAll("@@BAD@@", Buffer.from(bad).toString("base64")),
+  );
+  return bare(abc, UNCAUGHT_FRAMES);
+}
+
+/** A step every third frame, 32 of them, after the load. */
+const UNCAUGHT_FRAMES = 110;
+
 function loadsInit(compile: Compile): Uint8Array {
   return loading(compile, "LoadsInit", 1);
 }
@@ -513,6 +535,26 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Played as AIR, as adl plays it: Flash Player 32 has no URLRequestDefaults.
+    name: "url-request-defaults-natives",
+    swf: (abc) => bare(abc, 1, "URLRequestDefaultsNatives"),
+    script: "URLRequestDefaultsNatives",
+    air: true,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "system-small-natives",
+    swf: (abc) => bare(abc, 1, "SystemSmallNatives"),
+    script: "SystemSmallNatives",
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "currency-parse-result-natives",
     swf: (abc) => bare(abc, 1, "CurrencyParseResultNatives"),
     script: "CurrencyParseResultNatives",
@@ -638,6 +680,15 @@ export const scriptingCases: PlayerCase[] = [
     name: "crypto-random",
     swf: (abc) => bare(abc, 1, "CryptoRandom"),
     script: "CryptoRandom",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "amf0",
+    swf: (abc) => bare(abc, 1, "Amf0"),
+    script: "Amf0",
     frames: 1,
     capture: [],
     tolerance: 0,
@@ -782,6 +833,14 @@ export const scriptingCases: PlayerCase[] = [
   // Last: the content it unloads plays on in Flash until collected, and its
   // traces would reach the case recorded after it.
   { name: "loads", build: loads, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "uncaught-errors",
+    build: uncaughtErrors,
+    frames: UNCAUGHT_FRAMES,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "current-domain",
     build: currentDomain,

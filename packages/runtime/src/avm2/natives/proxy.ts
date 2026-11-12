@@ -7,7 +7,16 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { ClassHook, PropertyHook } from "../hooks.js";
-import { type Multiname, NS_Public, namespace, publicNs, publicQname, qname } from "../names.js";
+import {
+  MADE_Number,
+  MADE_Unknown,
+  type Multiname,
+  NS_Public,
+  namespace,
+  publicNs,
+  publicQname,
+  qname,
+} from "../names.js";
 import type { Runtime } from "../runtime.js";
 import type { Natives } from "./define.js";
 
@@ -15,8 +24,11 @@ const FLASH_PROXY = namespace(NS_Public, "http://www.adobe.com/2006/actionscript
 
 /**
  * The name a flash_proxy method gets for `mn`: a QName that was the name
- * stays one, an index comes as its string, as avmplus' getUintProperty
- * interns it, and any other name as a QName in its namespace.
+ * stays one; a number read or written as an element comes as its string,
+ * as avmplus' getUintProperty and getpropertylate_d intern it, whatever
+ * the number; a string or another value of the code's comes as a QName,
+ * "0" too, as does any other name, in its namespace. A name whose maker
+ * is not known is told by its string: an index's is the string.
  */
 function nameFor(rt: Runtime, mn: Multiname): Value {
   if (mn.key !== undefined && (mn.key as AsObject)?.$local !== undefined) {
@@ -24,7 +36,11 @@ function nameFor(rt: Runtime, mn: Multiname): Value {
   }
 
   const name = mn.name;
-  if (name !== null && !mn.attribute && isIndex(name)) {
+  if (
+    name !== null &&
+    !mn.attribute &&
+    (mn.made === MADE_Number || (mn.made === MADE_Unknown && isIndex(name)))
+  ) {
     return name;
   }
 

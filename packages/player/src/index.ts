@@ -27,6 +27,7 @@ export {
 } from "./files.js";
 export type {
   AirApplication,
+  AirScreen,
   AirWindow,
   CachedModule,
   ClipboardHost,
@@ -38,6 +39,7 @@ export type {
   FetchResult,
   FileStat,
   FileSystemHost,
+  FullScreenHost,
   ModuleCache,
   Navigate,
   PlatformCapabilities,
@@ -54,7 +56,7 @@ export type {
   WorkerHost,
   WorkerThread,
 } from "./hosts.js";
-export { browserClipboard, globalWebSocketHost } from "./hosts.js";
+export { AMF3_KEY, browserClipboard, globalWebSocketHost } from "./hosts.js";
 export { bindActivation } from "./input/activation.js";
 export type { MenuItem } from "./input/context-menu.js";
 export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js";

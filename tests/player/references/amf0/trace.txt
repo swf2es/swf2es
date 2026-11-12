@@ -1,0 +1,128 @@
+int 004008000000000000
+  back int 3 true
+negative 00c014000000000000
+  back int -5 true
+uint 0041edcd6500000000
+  back Number 4000000000 true
+negative zero 008000000000000000
+  back Number 0 true
+half 003fe0000000000000
+  back Number 0.5 true
+infinity 00fff0000000000000
+  back Number -Infinity true
+true 0101
+  back Boolean true true
+false 0100
+  back Boolean false true
+null 05
+  back null true
+undefined 06
+  back undefined true
+string 02000368c3a9
+  back String hé true
+empty string 020000
+  back String  true
+long string 70005 0c000111706161
+long key 70008 03117061616161
+object 03000161003ff0000000000000000009
+  back Object {a=1} true
+self 0300026d65070000000009
+  back Object {me=self} true
+twice 080000000200013003000161003ff0000000000000000009000131070001000009
+  back Array length 2 {0=Object 1=Object} true
+nested 0300017803000179080000000200013003000161003ff00000000000000000090001310300017a070003000009000009000009000009
+  back Object {x=Object} true
+function 06
+  back undefined true
+function property 03000167004000000000000000000009
+  back Object {g=2} true
+number key 030001310200036f6e65000009
+  back Object {1=one} true
+two writes 03000161003ff000000000000000000903000161003ff0000000000000000009
+dense 0800000002000130003ff0000000000000000131004000000000000000000009
+  back Array length 2 {0=1 1=2} true
+sparse 080000000300013202000178000009
+  back Array length 3 {2=x} true
+functions 0800000003000130003ff0000000000000000132004008000000000000000009
+  back Array length 3 {0=1 2=3} true
+undefined elements 08000000020001300600013105000009
+  back Array length 2 {0=undefined 1=null} true
+empty array 0800000000000009
+  back Array length 0 {} true
+named 08000000010001300200016d0006637573746f6d02000163000009
+  back Array length 1 {0=m custom=c} true
+longer 0800011170000130003ff0000000000000000009
+  back Array length 70000 {0=1} true
+date 0b427856aa0c800000 true
+summer true
+invalid date 11 0b true 0
+date twice 08000000020001300b427856aa0c800000 000131070001000009
+xml document 0f000000123c6120623d2263223e3c64202f3e3c2f613e
+  back flash.xml::XMLDocument <a b="c"><d /></a> true
+xml document twice 08000000020001300f000000123c6120623d2263223e3c64202f3e3c2f613e000131070001000009
+  back Array length 2 {0=flash.xml::XMLDocument 1=flash.xml::XMLDocument} true
+xml 03000009
+  back Object {} true
+xml twice 080000000200013003000009000131070001000009
+  back Array length 2 {0=Object 1=Object} true
+xml list 03000009
+  back Object {} true
+typed 10000a616d66302e5479706564000178004008000000000000000364796e02000164000009
+  back FilePrivateNS:Amf0::Typed x 3 {dyn=d} true
+transient 0300027472004022000000000000000009
+  back Object {tr=9} true
+accessors 10000e616d66302e4163636573736f72730003616363004018000000000000000009
+  back FilePrivateNS:Amf0::Accessors {} true
+sealed 03000179003ff8000000000000000009
+  back Object {y=1.5} true
+externalizable 100008616d66302e457874000009
+  back FilePrivateNS:Amf0::Ext v 11 {} true
+class 0300027376003ff0000000000000000009
+  back Object {sv=1} true
+dictionary 0300016b003ff0000000000000000009
+  back Object {k=1} true
+dictionary keys 49 Object {1=one [object Object]=2 true=t} true
+bytearray 98 Object {endian=bigEndian length=1 objectEncoding=3 position=1 shareable=false} true
+vector 37 Object {0=a fixed=true length=1} true
+vector of int 54 Object {0=1 1=2 fixed=false length=2} true
+many 709848 3635353430070002000009
+many back 65541 false true
+boolean 2 Boolean true 2
+amf3 marker undefined 1
+amf3 in array Array length 2 {0=undefined 1=undefined} 7
+movieclip undefined 1
+unsupported undefined 1
+recordset undefined 1
+object end undefined 1
+marker 0x12 undefined 1
+marker 0xff undefined 1
+end in number flash.errors::EOFError 2030 1
+nothing flash.errors::EOFError 2030 0
+end in string flash.errors::EOFError 2030 3
+end in object flash.errors::EOFError 2030 13
+reference past RangeError 2006 3
+self reference Object {me=self} 11
+strict array Array length 3 {0=1 1=undefined 2=a} 19
+strict array reference Array length 2 {0=Object 1=Object} 12
+date reference Array length 2 {0=Date 1=Date} 19
+long string String ab 7
+xml flash.xml::XMLDocument <a /> 9
+xml reference Array length 2 {0=flash.xml::XMLDocument 1=flash.xml::XMLDocument} 17
+date zone Date 1672531200000 11
+ecma length Array length 5 {0=true} 13
+empty name Object {=true a=false} 13
+unknown alias Object {a=true} 14
+typed FilePrivateNS:Amf0::Typed x 5 {qq=true} 34
+externalizable FilePrivateNS:Amf0::Ext v 5 {} 26
+default 1 1 1
+encoding 1 03000161003ff0000000000000000009
+encoding 7 0a0b010361040101
+encoding 2 2008
+writeExternal 0a0711616d66302e4578740000000b0a0b0103710905010401040201
+  readExternal 1,2
+readExternal 11
+so encoding 0
+so size 138
+so flush flushed 138
+so3 size 59
+so default 7

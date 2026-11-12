@@ -827,3 +827,46 @@ for (const channel of [false, true]) {
     assert.deepEqual(lines, ["taken true", "written after it was taken false"]);
   });
 }
+
+test("what is not supported is an error a SWF's catch gets, told to the host once", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const told: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    onUnsupported: (message) => told.push(message),
+    realTime: null,
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const abc = compiler(out)(
+    "Main",
+    `package {
+  import flash.display.Sprite;
+  import flash.errors.IllegalOperationError;
+  import flash.system.WorkerDomain;
+
+  public class Main extends Sprite {
+    public function Main() {
+      for (var i:int = 0; i < 2; i++) {
+        try {
+          WorkerDomain.current.createWorker(loaderInfo.bytes);
+          trace("made");
+        } catch (e:Error) {
+          trace((e is IllegalOperationError) + " " + e.message);
+        }
+      }
+
+      trace("went on");
+    }
+  }
+}`,
+  );
+  const player = new Player(bare(abc, 1), scripting);
+  await player.start();
+
+  const message = "swf2es: creating a Worker without a worker host is not supported yet";
+  assert.deepEqual(lines, [`true ${message}`, `true ${message}`, "went on"]);
+  assert.deepEqual(told, [message]);
+  scripting.destroy();
+});

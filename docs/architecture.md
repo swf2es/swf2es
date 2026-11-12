@@ -30,7 +30,8 @@ topic each:
   and hit tests, scale and rotation, 3D display objects, nine-slice
   scaling.
 - [Bitmaps](architecture/bitmaps.md): BitmapData, drawing into a bitmap,
-  bitmaps on the GPU, a SWF's bitmaps, bitmap and gradient fills, PNG.
+  bitmaps on the GPU, a SWF's bitmaps, bitmap and gradient fills, PNG
+  and JPEG encoding.
 - [Text](architecture/text.md).
 - [Colour, blends, filters and masks](architecture/compositing.md):
   colour transforms, blend modes, filters and the native CPU filters,

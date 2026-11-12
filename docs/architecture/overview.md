@@ -89,8 +89,9 @@ over the builtins, then each conformance case (also compiled with asc's
   new emitter each, and in the reverse order with one emitter for all.
   Everything a method's code refers to is indexed by its ABC (multinames,
   namespaces, functions, descriptors), but for the classes and Vectors it
-  refers to, which it has in a table of its own, numbered as it first
-  refers to each (`((...T) => (scope, sup) => function ...)(cls(...))`).
+  refers to and the names it makes of strings it holds, which it has in a
+  table of its own, numbered as it first refers to each
+  (`((...T) => (scope, sup) => function ...)(cls(...))`).
 
 ## Packages
 
@@ -277,8 +278,10 @@ ActionScript 3 SWF's never run.
 Apps, in `apps/`, are what people run rather than import: `desktop`, the
 Electron app (see [The desktop app](desktop.md#the-desktop-app)), `site`, the demo
 site on GitHub Pages (see [The demo site](site.md#the-demo-site)), and later a
-browser extension. An app may use any package, and no package may use an app; an
-app is private, never published. The boundaries test checks both.
+browser extension. An app may use any package, and no package may use an app. An
+app is private, never published, but for the desktop app, which npm has as
+`@swf2es/desktop` so that `npx` runs it (`PUBLIC_APPS` in `tools/notices.ts`):
+it is run, not imported, there as here. The boundaries test checks all three.
 
 Third-party C swf2es forks lives in `vendor/`, a git submodule each, kept
 apart from `packages/` because it is neither swf2es's code nor under its

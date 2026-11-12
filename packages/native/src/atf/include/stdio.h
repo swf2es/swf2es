@@ -1,6 +1,7 @@
 // What jxrlib needs beyond include/stdio.h, for wasm32-freestanding: the
-// module decodes from memory alone, so its file streams and diagnostics
-// are inert.
+// module decodes and encodes in memory alone, so its file streams,
+// diagnostics and the encoder's temporary files (frequency order's, which
+// it never writes) are inert.
 #ifndef SWF2ES_ATF_STDIO_H
 #define SWF2ES_ATF_STDIO_H
 
@@ -13,6 +14,7 @@ typedef struct swf2es_file FILE;
 #define SEEK_CUR 1
 #define SEEK_END 2
 #define EOF (-1)
+#define FILENAME_MAX 260
 
 #define stdout ((FILE *)0)
 #define stderr ((FILE *)0)
@@ -27,5 +29,7 @@ typedef struct swf2es_file FILE;
 #define fseek(f, offset, whence) (-1)
 #define ftell(f) (-1L)
 #define feof(f) 1
+#define tmpnam(name) ((char *)0)
+#define remove(name) (-1)
 
 #endif

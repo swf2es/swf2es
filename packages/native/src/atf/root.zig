@@ -1,5 +1,6 @@
-//! JPEG XR decoding for ATF textures: jxrlib's decoder and its glue,
-//! compiled unchanged beside jxr.c, behind the few calls index.ts makes.
+//! JPEG XR for ATF textures and BitmapData.encode: jxrlib's decoder, its
+//! glue and its encoder, compiled unchanged beside jxr.c, behind the few
+//! calls index.ts and jxr.ts make.
 //! Each call works in a bump arena that the host resets first; jxrlib's
 //! malloc, calloc and realloc take from it, and its free returns nothing,
 //! since the arena goes as a whole at the next reset.
@@ -18,8 +19,12 @@ var top: usize = 0;
 var result: usize = 0;
 var result_width: u32 = 0;
 var result_height: u32 = 0;
+var result_size: usize = 0;
 
 extern fn swf2es_jxr_decode(data: [*]const u8, size: usize, format: c_int, limit: c_uint, out: *[*]u8, width: *c_uint, height: *c_uint) c_int;
+extern fn swf2es_jxr_encode_begin(width: c_uint, height: c_uint, alpha: c_int, quantization: c_uint, subsampling: c_int, trim: c_uint) c_int;
+extern fn swf2es_jxr_encode_rows(pixels: [*]const u8, lines: c_uint) c_int;
+extern fn swf2es_jxr_encode_end(out: *[*]u8, size: *usize) c_int;
 
 /// Memory up to `end`, grown if need be.
 fn reserve(end: u64) bool {
@@ -46,6 +51,7 @@ export fn reset() void {
     result = 0;
     result_width = 0;
     result_height = 0;
+    result_size = 0;
 }
 
 /// `n` bytes, 16-aligned, growing memory as needed; 0 when it cannot.
@@ -84,6 +90,18 @@ export fn calloc(count: usize, n: usize) ?*anyopaque {
 }
 
 export fn realloc(old: ?*anyopaque, n: usize) ?*anyopaque {
+    // The block last allocated grows where it is: the encoder's output,
+    // which would otherwise leave a copy behind at each doubling.
+    if (old) |o| {
+        const at = @intFromPtr(o);
+        const size = @as(*usize, @ptrFromInt(at - header)).*;
+        if (at + size == top and reserve(@as(u64, at) + n)) {
+            top = at + n;
+            @as(*usize, @ptrFromInt(at - header)).* = n;
+            return o;
+        }
+    }
+
     const p = malloc(n) orelse return null;
     if (old) |o| {
         const size = @as(*usize, @ptrFromInt(@intFromPtr(o) - header)).*;
@@ -107,6 +125,10 @@ export fn resultHeight() u32 {
     return result_height;
 }
 
+export fn resultSize() usize {
+    return result_size;
+}
+
 /// Decode the JPEG XR file of `length` bytes at `input`, which must be of
 /// `format` (jxr.c's) and at most `limit` pixels a side: its pixels at
 /// resultPointer(), top-down rows with no padding.
@@ -122,5 +144,31 @@ export fn decodeImage(input: usize, length: usize, format: c_int, limit: c_uint)
     result = @intFromPtr(out);
     result_width = width;
     result_height = height;
+    return DONE;
+}
+
+/// Begin encoding a `width` by `height` image, with alpha or without, at
+/// Flash's `quantization`, chroma `subsampling` (jxr.c's) and `trim`
+/// flexbits; its rows follow through encodeRows, then encodeEnd.
+export fn encodeBegin(width: c_uint, height: c_uint, alpha: c_int, quantization: c_uint, subsampling: c_int, trim: c_uint) i32 {
+    return swf2es_jxr_encode_begin(width, height, alpha, quantization, subsampling, trim);
+}
+
+/// The next `lines` rows at `input`, 16 but at the bottom, unpadded BGRA.
+export fn encodeRows(input: usize, lines: c_uint) i32 {
+    return swf2es_jxr_encode_rows(@ptrFromInt(input), lines);
+}
+
+/// The file, at resultPointer(), resultSize() bytes.
+export fn encodeEnd() i32 {
+    var out: [*]u8 = undefined;
+    var size: usize = 0;
+    const status = swf2es_jxr_encode_end(&out, &size);
+    if (status != DONE) {
+        return status;
+    }
+
+    result = @intFromPtr(out);
+    result_size = size;
     return DONE;
 }
