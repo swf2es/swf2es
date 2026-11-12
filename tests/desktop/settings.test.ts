@@ -34,3 +34,22 @@ test("Stage3D choices survive other settings updates and reopening the settings 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("a chosen playerglobal is kept until the app's own is chosen again", () => {
+  const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
+  try {
+    const library = join(directory, "playerglobal.abc");
+    writeFileSync(library, new Uint8Array([16, 0, 46, 0]));
+    const settings = new SettingsFile(directory);
+    assert.equal(settings.setLibrary("playerglobal", library), true);
+    assert.equal(new SettingsFile(directory).libraries().playerglobal, library);
+
+    assert.equal(settings.clearLibrary("playerglobal"), true);
+    assert.equal(settings.libraries().playerglobal, null);
+    const saved = JSON.parse(readFileSync(join(directory, "settings.json"), "utf8"));
+    assert.equal("playerglobal" in saved, false);
+    assert.equal(new SettingsFile(directory).libraries().playerglobal, null);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
