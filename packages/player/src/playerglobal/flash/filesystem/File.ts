@@ -8,8 +8,9 @@
 // synchronous, as File's properties are; FileStream reads a file's bytes
 // (FileStream.ts). It makes and deletes directories and deletes, copies
 // and moves files and directories (writes.ts), at once or on the next
-// frame with an event, as the asynchronous methods do; dialogs are not
-// supported yet. Without a host, nothing is there.
+// frame with an event, as the asynchronous methods do, and makes temporary
+// ones in the host's cache directory; dialogs are not supported yet.
+// Without a host, nothing is there.
 import { avm2 } from "@swf2es/runtime";
 import type { FileStat } from "../../../hosts.js";
 import { dispatchEvent } from "../../../scripting/events.js";
@@ -18,6 +19,7 @@ import { NativePaths, type Root } from "./paths.js";
 import {
   copyOrMove,
   createDirectory,
+  createTemporary,
   deleteDirectory,
   deleteFile,
   ioErrorEvent,
@@ -154,6 +156,20 @@ export function fileNatives(s: Scripting): avm2.Natives {
     });
   };
 
+  /**
+   * A new temporary file, or directory where `directory`, as a File. Where
+   * none can be made, adl gives the file's File all the same, with nothing
+   * there, and refuses the directory with IllegalOperationError 2014.
+   */
+  const temporary = (directory: boolean): Value => {
+    const temp = createTemporary(s, directory);
+    if (!temp || (directory && !temp.made)) {
+      throw s.rt.error("flash.errors::IllegalOperationError", 2014);
+    }
+
+    return make({ root: "file", path: temp.path });
+  };
+
   /** What is at `at`; Error 3003 where nothing is. */
   const there = (at: FileLocation): FileStat => {
     const stat = host?.stat(at.path);
@@ -218,11 +234,11 @@ export function fileNatives(s: Scripting): avm2.Natives {
     }
 
     static createTempFile(): Value {
-      throw s.rt.unsupported("File.createTempFile");
+      return temporary(false);
     }
 
     static createTempDirectory(): Value {
-      throw s.rt.unsupported("File.createTempDirectory");
+      return temporary(true);
     }
 
     "flash.filesystem:File::_init"(given: Value): void {

@@ -24,12 +24,13 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer, type Server } from "node:net";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { missing } from "../../apps/desktop/src/launch/electron.ts";
 import { cases } from "../player/cases.ts";
@@ -138,6 +139,21 @@ const airSource = `package {
         stream.open(File.applicationDirectory.resolvePath("data.txt"), FileMode.READ);
         trace("air: stream " + stream.readUTFBytes(stream.bytesAvailable));
         stream.close();
+        // A temporary file and directory, on disk in the system's temporary directory: the
+        // launch with arguments alone makes them, which the test removes.
+        if (e.arguments.length > 0) {
+          var temp:File = File.createTempFile();
+          var empty:Boolean = temp.exists && temp.size == 0;
+          stream.open(temp, FileMode.WRITE);
+          stream.writeUTFBytes("temporary");
+          stream.close();
+          stream.open(temp, FileMode.READ);
+          var back:String = stream.readUTFBytes(stream.bytesAvailable);
+          stream.close();
+          var tempDirectory:File = File.createTempDirectory();
+          trace("air: temp " + back + " " + empty + " " + tempDirectory.isDirectory + " " + tempDirectory.getDirectoryListing().length + " " + (temp.parent.nativePath == File.cacheDirectory.nativePath) + " " + (temp.nativePath != tempDirectory.nativePath));
+          trace("air: temp paths " + temp.nativePath + "|" + tempDirectory.nativePath);
+        }
         load("app", "data.txt");
         load("file", outside.url);
         // Named in another case than on the disk, as an application made on Windows names files.
@@ -793,6 +809,7 @@ async function air(): Promise<void> {
         `air: invoke ${[port, "two words", `${served.origin}/data.txt`, webSockets.port, ...(secure ? [secure.port] : [])].join("|")} true`,
         "air: files true true 0",
         "air: stream beside",
+        "air: temp temporary true true 0 true true",
         "air: app beside",
         "air: file outside",
         "air: cased true level",
@@ -811,6 +828,21 @@ async function air(): Promise<void> {
       // Written into the directory there in another case, under the name it gave.
       assert.equal(readFileSync(`${app}maps/meadow/Saved.txt`, "utf8"), "saved");
       assert.ok(!existsSync(`${app}MAPS`));
+
+      // The temporary file and directory are on disk, side by side, the file with what it wrote.
+      const temps = stdout.find((l) => l.startsWith("air: temp paths "));
+      assert.ok(temps, stdout.join("\n"));
+      const [tempFile, tempDirectory] = temps.slice("air: temp paths ".length).split("|");
+      try {
+        assert.equal(readFileSync(tempFile, "utf8"), "temporary");
+        assert.ok(statSync(tempDirectory).isDirectory(), tempDirectory);
+        assert.equal(dirname(tempFile), dirname(tempDirectory));
+        assert.match(basename(tempFile), /^fla[0-9a-f]{1,4}\.tmp$/);
+      } finally {
+        rmSync(tempFile, { force: true });
+        rmSync(tempDirectory, { recursive: true, force: true });
+      }
+
       assert.ok(
         !stdout.some((l) => /^air: (app|file) status/.test(l)),
         `a file's response status\n${stdout.join("\n")}`,

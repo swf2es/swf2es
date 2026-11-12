@@ -131,6 +131,9 @@ fetch-electron` does so ahead, for the tests.
   in AIR's application sandbox: it is played from `app:/`, reads any
   local file through File, FileStream and its `app:`, `app-storage:` and
   `file:` URLs, writes any file but through its `app:` URLs, as AIR does,
+  makes temporary files and directories (`File.createTempFile()`,
+  `createTempDirectory()`) in the system's temporary directory, its
+  `File.cacheDirectory`, which it leaves for the application to delete,
   and reaches the network, sockets and WebSockets (`air.net.WebSocket`)
   without Flash's policy files or a prompt, as an installed application
   does. Its storage directory is
