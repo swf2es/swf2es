@@ -50,6 +50,8 @@ export interface RunOptions {
   page?: string;
   /** Whether the page is cross-origin isolated, as it is by default (serve.ts). */
   isolated?: boolean;
+  /** More switches for Chrome. */
+  args?: string[];
 }
 
 const QUALITIES = ["low", "medium", "high", "best"];
@@ -149,7 +151,7 @@ export async function withPage<T>(
   gpu = false,
   options: RunOptions = {},
 ): Promise<T> {
-  const { timeout, mounts, csp, page = "", isolated = true } = options;
+  const { timeout, mounts, csp, page = "", isolated = true, args = [] } = options;
   const { server, url } = await serve(mounts, csp, isolated);
   const profile = mkdtempSync(join(tmpdir(), "swf2es-chrome-"));
   let chrome: ChildProcess | null = null;
@@ -169,6 +171,7 @@ export async function withPage<T>(
           ? (process.env.SWF2ES_GPU_FLAGS ?? "--ignore-gpu-blocklist --use-angle=vulkan").split(" ")
           : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]),
         "--no-first-run",
+        ...args,
         "about:blank",
       ],
       // The user's locale, flash.globalization's default, as the Flash oracle's: Chrome on
