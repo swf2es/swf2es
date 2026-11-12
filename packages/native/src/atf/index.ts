@@ -2,7 +2,8 @@
 // level decoded into what a desktop GPU takes, as Flash Player picks it on
 // the desktop: RGB888 and RGBA8888's JPEG XR images as BGRA, and the block
 // compressed formats as S3TC, DXT1 or DXT5, rebuilt from their LZMA'd
-// indices and JPEG XR endpoint images, or copied where they are raw.
+// indices and JPEG XR endpoint images, or copied where they are raw. The
+// same module writes JPEG XR files too, for BitmapData.encode (jxr.ts).
 import { DONE, lzmaDecode } from "../compress/index.js";
 import { decodeJxr, JXR_BGR, JXR_BGRA, JXR_GRAY, JXR_RGB565, type JxrImage } from "./jxr.js";
 import {
@@ -19,7 +20,15 @@ import {
   readAtfBlocks,
 } from "./parse.js";
 
-export { jxrMemoryInUse, jxrTraps } from "./jxr.js";
+export {
+  JXR_420,
+  JXR_422,
+  JXR_444,
+  type JxrEncodeOptions,
+  jxrEncode,
+  jxrMemoryInUse,
+  jxrTraps,
+} from "./jxr.js";
 export * from "./parse.js";
 
 /** What a level decodes to: BGRA pixels, or S3TC blocks. */

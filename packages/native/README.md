@@ -13,7 +13,8 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 - `@swf2es/native/audio`: synchronous ADPCM and Nellymoser decoding, in
   Zig alone.
 - `@swf2es/native/atf`: Stage3D's ATF textures, read and decoded to what a
-  desktop GPU takes, their JPEG XR images by jxrlib.
+  desktop GPU takes, their JPEG XR images by jxrlib; and JPEG XR files
+  written as Flash's `BitmapData.encode` writes them, by jxrlib's encoder.
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress`, `mp3`, `audio` and `atf` each compile their own module. What the renderer
@@ -495,10 +496,11 @@ skips (PVRTC's, ETC's), leaves that level and those after it absent, as
 does a level whose blocks for the desktop are empty (png2atf's `-n`).
 Nothing of the reserved bytes is read.
 
-jxrlib's decoder and glue (`vendor/jxrlib`, https://github.com/swf2es/jxrlib,
+jxrlib's decoder, glue and encoder (`vendor/jxrlib`, https://github.com/swf2es/jxrlib,
 a fork of 4creators/jxrlib, Microsoft's release, at tag `v2019.10.9`) are
-compiled unchanged, without its encoder, at `-Os`: the module is about
-100 KB, against 150 KB at `-O2` for 3% less time. `src/atf/jxr.c` decodes
+compiled unchanged at `-Os` (the encoder without `strenc_x86.c`, SSE2's):
+the module is about 154 KB, 101 KB of it the decoder's (150 KB at `-O2`
+for 3% less decoding time), and 56 KB gzipped. `src/atf/jxr.c` decodes
 an image in the pixel format its block must have, setting jxrlib's output
 to the container's pixel format as jxrlib's own decoder does (the
 codestream may name another, which jxrlib would write by into a buffer
@@ -509,6 +511,18 @@ sized for this one), and taking 24-bit RGB as png2atf writes it, named
 its allocator over a bump arena that each call resets. The instance is
 kept between images as compress's is (`src/instance.ts`, the same
 `MEMORY_KEPT`).
+
+`jxrEncode(pixels, width, height, { alpha, quantization, subsampling,
+trimFlexBits })` writes the JPEG XR file Flash's `BitmapData.encode`
+writes for the same pixels, byte for byte (docs/architecture/bitmaps.md
+has what Flash chooses). jxrlib's encoder writes the codestream, its rows
+copied in 16 at a time; `jxr.c` then rewrites its headers as Flash's
+(one quantizer index for all channels, the size always in 16 bits), pads
+it as Flash does and wraps it in Flash's container of five tags. The
+output grows in place at the top of the arena, so a file costs its own
+size and the encoder's few rows of macroblocks. A 4800 by 2475 picture
+encodes in about 150 ms at Flash's default quantization, 20, and 235 ms
+lossless (`jpegEncode` takes 70 at quality 80); with alpha, 205 ms.
 
 jxrlib is not memory safe on corrupt input: AddressSanitizer finds it
 reading past its tables and writing through null pointers. In the module

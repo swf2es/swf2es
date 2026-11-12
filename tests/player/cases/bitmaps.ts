@@ -601,6 +601,19 @@ export const bitmapCases: PlayerCase[] = [
     maxOutliers: 150,
   },
   {
+    // BitmapData.encode as JPEG XR (scripts/BitmapEncodeJpegXr.as): the files, which are
+    // Flash's byte for byte, and the refusals. 64-bit adl crashes encoding a transparent
+    // bitmap as JPEG XR, at least under Wine: draw the reference with the 32-bit adl.exe
+    // (ADL names it).
+    name: "bitmap-encode-jpegxr",
+    swf: (abc) => bare(abc, 1, "BitmapEncodeJpegXr"),
+    script: "BitmapEncodeJpegXr",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "bitmap-fills",
     swf: bitmapFills,
     script: "BitmapFills",

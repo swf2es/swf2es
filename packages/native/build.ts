@@ -88,6 +88,7 @@ const BINARIES: Binary[] = [
       ...files(join(vendor, "jxrlib/common/include"), /\.h$/),
       ...files(join(vendor, "jxrlib/image/sys"), /\.[ch]$/),
       ...files(join(vendor, "jxrlib/image/decode"), /\.[ch]$/),
+      ...files(join(vendor, "jxrlib/image/encode"), /\.[ch]$/),
       ...files(join(vendor, "jxrlib/jxrgluelib"), /\.[ch]$/),
       join(vendor, "jxrlib/LICENSE"),
     ],

@@ -8,6 +8,9 @@ import {
   atfEncoding,
   atfKind,
   decodeAtf,
+  JXR_420,
+  JXR_444,
+  jxrEncode,
   jxrTraps,
   readAtfBlocks,
   readAtfHeader,
@@ -338,4 +341,49 @@ test("AIR reads the blocks as far as the data goes, the length aside", () => {
   // Cut within one it reads: corrupt, nothing kept.
   assert.equal(refusal(withLength(atf, one + 10).subarray(0, one + 10)), "decode");
   assert.equal(refusal(withLength(atf, 30).subarray(0, 30)), "decode");
+});
+
+test("the module encodes JPEG XR between decodes, and refuses what Flash would not ask", () => {
+  const pixels = new Uint32Array(37 * 21);
+  for (let i = 0; i < pixels.length; i++) {
+    pixels[i] = (0xff000000 | (i * 2654435761)) >>> 0;
+  }
+
+  const options = { alpha: false, quantization: 0, subsampling: JXR_444, trimFlexBits: 0 };
+  const file = jxrEncode(pixels, 37, 21, options);
+  // Flash's container: II, 0xBC01, the IFD at 8 of five tags, the codestream at 90.
+  assert.equal(Buffer.from(file.subarray(0, 10)).toString("hex"), "4949bc01080000000500");
+  assert.equal(new DataView(file.buffer).getUint32(10 + 12 * 4 + 8, true), file.length - 91);
+  assert.equal(Buffer.from(file.subarray(90, 98)).toString(), "WMPHOTO\0");
+
+  // A decode after it, and an encode after that, as though nothing came between.
+  assert.equal(decode(fixture("rgb")).length > 0, true);
+  assert.deepEqual(jxrEncode(pixels, 37, 21, options), file);
+
+  // A picture past what the instance keeps, whose output grows several times.
+  const big = new Uint32Array(1200 * 900);
+  for (let i = 0; i < big.length; i++) {
+    big[i] = (0xff000000 | (i * 2654435761)) >>> 0;
+  }
+
+  assert.ok(jxrEncode(big, 1200, 900, options).length > 1200 * 900 * 3);
+
+  for (const [width, height, change] of [
+    [37, 21, { quantization: 101 }],
+    [37, 21, { quantization: -1 }],
+    [37, 21, { quantization: 1.5 }],
+    [37, 21, { trimFlexBits: 16 }],
+    [37, 21, { subsampling: 0 }],
+    [38, 21, {}],
+  ] as const) {
+    assert.throws(
+      () => jxrEncode(pixels, width, height, { ...options, ...change }),
+      RangeError,
+      JSON.stringify(change),
+    );
+  }
+
+  assert.throws(() => jxrEncode(new Uint32Array(0), 0, 0, options), RangeError);
+  assert.equal(jxrEncode(pixels, 37, 21, { ...options, subsampling: JXR_420 }).length > 0, true);
+  assert.equal(jxrTraps(), 0);
 });
