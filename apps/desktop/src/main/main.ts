@@ -48,6 +48,7 @@ import {
   writeOf,
 } from "./air.ts";
 import { bridgeFiles } from "./files.ts";
+import { failureLine, requestLine } from "./netlog.ts";
 import { type Movie, Network, Refused, unverifiedHosts } from "./network.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { Sandbox } from "./sandbox.ts";
@@ -77,6 +78,9 @@ app.enableSandbox();
 
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 const trace = process.argv.includes("--trace");
+// Each request and socket of the SWF's said on stderr: the page's DevTools show none of them.
+const logNetwork = process.argv.includes("--log-network");
+const netLog = logNetwork ? (line: string) => process.stderr.write(`${line}\n`) : null;
 const sandbox = new Sandbox();
 /** The SWF's http and https requests, judged as Flash's sandboxes had them. */
 /**
@@ -869,7 +873,7 @@ function listen(): void {
       void chooseLibrary(name);
     }
   });
-  bridgeSockets(trusted, permitSocket);
+  bridgeSockets(trusted, permitSocket, netLog);
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");
@@ -1068,7 +1072,7 @@ async function fetchForPage(
   request: unknown,
   deliver: (response: NetworkResponse) => void,
 ): Promise<NetworkResponse> {
-  const asked = request as { url?: unknown; purpose?: unknown } | null;
+  const asked = request as { url?: unknown; purpose?: unknown; method?: unknown } | null;
   const url = typeof asked?.url === "string" ? asked.url : "";
   const shown = url.slice(0, 2048);
   const movie = asked?.purpose === "movie" && sandbox.startRemote(url);
@@ -1079,13 +1083,27 @@ async function fetchForPage(
 
   const controller = new AbortController();
   requests.set(id, controller);
+  const started = performance.now();
+  const method = typeof asked?.method === "string" ? asked.method.slice(0, 16) : "GET";
   try {
-    return await network.fetch(request, controller.signal, deliver);
+    const response = await network.fetch(request, controller.signal, deliver);
+    netLog?.(
+      requestLine(
+        method,
+        url,
+        response.status,
+        response.bytes?.length ?? null,
+        performance.now() - started,
+      ),
+    );
+    return response;
   } catch (error) {
     // A refusal says why; anything else, which should not happen, is said too.
     if (!controller.signal.aborted) {
       const why = error instanceof Refused ? error.message : `failed: ${error}`;
       process.stderr.write(`swf2es: not loading ${shown}: ${why}\n`);
+    } else {
+      netLog?.(failureLine(method, url, "aborted", performance.now() - started));
     }
 
     throw error;

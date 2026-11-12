@@ -53,6 +53,12 @@ fetch-electron` does so ahead, for the tests.
   `settings.json` in Electron's user data directory.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
+- **Network log.** `--log-network` prints each of the SWF's requests to
+  stderr as it is answered (`swf2es: net GET https://… 200 12.3 kB 48 ms`),
+  an aborted one too, and each socket as it is asked for, opened, refused,
+  failed and closed. A refused request is said with or without it. The
+  window's DevTools show none of these in their Network tab: the page has
+  no network, and the main process sends them.
 - **Certificates.** `--ignore-certificate-errors` leaves every HTTPS
   server's certificate unverified for this run, and
   `--ignore-certificate-errors=dev.test,localhost` those hosts' alone, on

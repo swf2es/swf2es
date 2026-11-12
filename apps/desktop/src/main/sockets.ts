@@ -3,15 +3,18 @@
 // connections (connections.ts) close as it navigates, reloads or goes.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import { Connections, validEndpoint } from "./connections.ts";
+import { socketLine } from "./netlog.ts";
 
 /**
  * Carry socket messages from pages that `trusted` accepts, each connection
  * made only as `permit` allows it, to the address it gives where it gives
- * one; null refuses it.
+ * one; null refuses it. `log`, where given, is told each connection asked
+ * for, opened, refused, failed and closed (--log-network).
  */
 export function bridgeSockets(
   trusted: (event: IpcMainEvent) => boolean,
   permit: (host: string, port: number) => Promise<{ address?: string } | null>,
+  log: ((line: string) => void) | null = null,
 ): void {
   const pages = new Map<WebContents, Connections>();
 
@@ -22,6 +25,10 @@ export function bridgeSockets(
     }
 
     const connections = new Connections((id, event) => {
+      if (log && event.type !== "data") {
+        log(socketLine(id, event.type === "error" ? `error: ${event.message}` : event.type));
+      }
+
       if (!contents.isDestroyed()) {
         contents.send("socket:event", id, event);
       }
@@ -59,6 +66,7 @@ export function bridgeSockets(
           return;
         }
 
+        log?.(socketLine(id, `${allowed ? "connecting to" : "refused"} ${host}:${port}`));
         if (allowed) {
           connections.connect(id, host, port, allowed.address);
         } else {

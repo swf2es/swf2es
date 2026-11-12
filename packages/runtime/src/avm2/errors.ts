@@ -30,6 +30,16 @@ export function stackOf(error: Value): string | null {
 }
 
 /**
+ * What an error the runtime made says in full, its text and arguments as
+ * debugger mode words them, for a host to show: the release player's
+ * message, which the SWF sees, is the number alone. Null for any other value.
+ */
+export function detailOf(error: Value): string | null {
+  const detail = (error as { $detail?: unknown } | null)?.$detail;
+  return typeof detail === "string" ? detail : null;
+}
+
+/**
  * Error `id`'s message as AS3 sees it: its number, as the release player
  * and avmshell give it, or with its text and arguments in debugger mode.
  */
