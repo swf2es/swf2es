@@ -4,8 +4,14 @@
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
 import { test } from "node:test";
-import { Connections, MAX_BUFFERED } from "../../apps/desktop/src/main/connections.ts";
+import {
+  type ConnectionOptions,
+  Connections,
+  MAX_BUFFERED,
+} from "../../apps/desktop/src/main/connections.ts";
+import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
 import type { SocketEvent } from "../../apps/desktop/src/shared/api.ts";
+import { testProxy } from "./proxy-server.ts";
 
 async function listen(onConnection: (socket: Socket) => void): Promise<[Server, number]> {
   const server = createServer(onConnection);
@@ -14,7 +20,7 @@ async function listen(onConnection: (socket: Socket) => void): Promise<[Server, 
 }
 
 /** Connections whose events are kept, and a wait for one of a type. */
-function recorded() {
+function recorded(options?: ConnectionOptions) {
   const events: SocketEvent[] = [];
   const waiting: [string, () => void][] = [];
   const connections = new Connections((_id, event) => {
@@ -26,7 +32,7 @@ function recorded() {
         waiting.push([type, done]);
       }
     }
-  });
+  }, options);
   const next = (type: SocketEvent["type"]) =>
     events.some((e) => e.type === type)
       ? Promise.resolve()
@@ -95,5 +101,72 @@ test("connects to the address its policy came from, not where the name resolves 
   const opened = events.find((e) => e.type === "open");
   assert.equal(opened?.type === "open" && opened.remoteAddress, "127.0.0.1");
   await next("close");
+  server.close();
+});
+
+test("through a proxy: by the pinned address or by name, refused as one no server took", async () => {
+  const [server, port] = await listen((socket) => {
+    socket.write("hello");
+    socket.on("data", (bytes) => socket.write(bytes.toString() === "ping" ? "pong" : "?"));
+  });
+  for (const kind of ["socks5", "http"] as const) {
+    const code = kind === "socks5" ? 1 : 403;
+    const proxy = await testProxy(kind, { refuse: (_host, at) => (at === 1 ? code : null) });
+    const warned: string[] = [];
+    const { connections, events, next } = recorded({
+      proxy: parseProxy(proxy.url()),
+      warn: (message) => warned.push(message),
+    });
+    connections.connect(1, "no-such-host.invalid", port, "127.0.0.1");
+    await next("open");
+    // Its peer is the target, not the proxy.
+    const opened = events.find((e) => e.type === "open");
+    assert.equal(
+      opened?.type === "open" && `${opened.remoteAddress}:${opened.remotePort}`,
+      `127.0.0.1:${port}`,
+    );
+    await next("data");
+    connections.send(1, new TextEncoder().encode("ping"));
+    while (
+      !events.some((e) => e.type === "data" && new TextDecoder().decode(e.bytes).includes("pong"))
+    ) {
+      await new Promise((done) => setTimeout(done, 10));
+    }
+
+    connections.close(1);
+    await next("close");
+
+    // By name, where nothing pinned an address: the proxy resolves it.
+    const named = recorded({ proxy: parseProxy(proxy.url()) });
+    named.connections.connect(2, "localhost", port);
+    await named.next("open");
+    named.connections.closeAll();
+    assert.deepEqual(proxy.targets, [`127.0.0.1:${port}`, `localhost:${port}`]);
+
+    // Refused by the proxy: an error, then a close, and why on stderr.
+    const refused = recorded({ proxy: parseProxy(proxy.url()), warn: (m) => warned.push(m) });
+    refused.connections.connect(3, "127.0.0.1", 1);
+    await refused.next("close");
+    assert.deepEqual(
+      refused.events.map((e) => e.type),
+      ["error", "close"],
+    );
+    assert.match(warned.join("\n"), /^no socket to 127\.0\.0\.1:1: the proxy \S+ refused: /);
+
+    // Closed before the proxy has made it: closed, and nothing opens after.
+    const early = recorded({ proxy: parseProxy(proxy.url()) });
+    early.connections.connect(4, "127.0.0.1", port);
+    assert.equal(early.connections.size, 1);
+    early.connections.close(4);
+    await early.next("close");
+    await new Promise((done) => setTimeout(done, 100));
+    assert.deepEqual(
+      early.events.map((e) => e.type),
+      ["close"],
+    );
+    assert.equal(early.connections.size, 0);
+    await proxy.close();
+  }
+
   server.close();
 });

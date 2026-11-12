@@ -37,6 +37,8 @@ import {
   refererFor,
   unverifiedHosts,
 } from "../../apps/desktop/src/main/network.ts";
+import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
+import { testProxy } from "./proxy-server.ts";
 
 const PUBLIC = "127.0.0.2";
 const LOOPBACK = "127.0.0.1";
@@ -890,6 +892,27 @@ test("HTTPS: verified, and its policies' secure flag kept", async (t) => {
     unverified: (host: string) => host === "other.test",
   });
   assert.match(await outcome(ask(net, `${secure}/image.png`, "content")), /refused: .*certificate/);
+
+  // Through a proxy, TLS over its tunnel, by the name: verified as without one.
+  const tunnel = await testProxy("http");
+  const proxy = parseProxy(tunnel.url());
+  try {
+    net = await playing(`${swf()}/movie.swf`, { proxy });
+    assert.match(
+      await outcome(ask(net, `${secure}/image.png`, "content")),
+      /refused: .*certificate/,
+    );
+    net = await playing(`${swf()}/movie.swf`, { proxy, ca: cert.toString() });
+    assert.equal(await outcome(ask(net, `${secure}/data.txt`)), "secure/data.txt");
+    net = await playing(`${swf()}/movie.swf`, {
+      proxy,
+      unverified: (host: string) => host === "secure.test",
+    });
+    assert.equal(await outcome(ask(net, `${secure}/image.png`, "content")), "secure/image.png");
+    assert.ok(tunnel.targets.includes(`${PUBLIC}:${securePort}`), tunnel.targets.join());
+  } finally {
+    await tunnel.close();
+  }
 });
 
 test("--ignore-certificate-errors names every host, or those it lists, up to an application's own arguments", () => {
@@ -1096,4 +1119,85 @@ test("a gzip header is read the same whole or a byte at a time, in time linear i
   const [atEnds, atTouched] = bytesTouched(() => headerEnds(at));
   assert.deepEqual(atEnds, [GZIP_HEADER_MAX, GZIP_HEADER_MAX]);
   assert.ok(atTouched < 8 * at.length, `${atTouched} bytes touched`);
+});
+
+test("through a proxy, each request and socket policy goes to the address judged", async () => {
+  const masterPolicy = await socketServer(() =>
+    xml('<allow-access-from domain="swf.test" to-ports="*"/>'),
+  );
+  for (const kind of ["socks5", "http"] as const) {
+    policies.clear();
+    policies.set("other/crossdomain.xml", xml('<allow-access-from domain="swf.test"/>'));
+    let blocked = 0;
+    const proxy = await testProxy(kind, {
+      credentials: { username: "me", password: "pw" },
+      // The proxy of a network that keeps a site from it, once `blocked` names its port.
+      refuse: (_host, port) => (port === blocked ? (kind === "socks5" ? 2 : 403) : null),
+    });
+    const options = { proxy: parseProxy(proxy.url("me:pw")), socketPolicyPort: masterPolicy };
+    try {
+      const net = await playing(`${swf()}/movie.swf`, options);
+      assert.equal(await outcome(ask(net, `${swf()}/data.txt`)), "swf/data.txt");
+      assert.equal(await outcome(ask(net, `${other()}/data.txt`)), "other/data.txt");
+      // Not by name: the proxy is asked for the address this machine's DNS gave, which
+      // the request was judged by, its policy file fetched from the same.
+      assert.deepEqual(
+        [...new Set(proxy.targets)].sort(),
+        [`${PUBLIC}:${otherPort}`, `${PUBLIC}:${swfPort}`].sort(),
+      );
+      assert.equal(await net.socketAddress("swf.test", swfPort), PUBLIC);
+      assert.ok(proxy.targets.includes(`${PUBLIC}:${masterPolicy}`), kind);
+
+      // A target the proxy refuses is a refusal saying so, as one no server took.
+      blocked = otherPort;
+      assert.match(
+        await outcome(ask(net, `${other()}/image.png`, "content")),
+        kind === "socks5"
+          ? /^refused: the proxy socks5:\/\/127\.0\.0\.1:\d+ refused: not allowed by its rules/
+          : /^refused: the proxy http:\/\/127\.0\.0\.1:\d+ refused: HTTP 403/,
+      );
+
+      // The rules hold as without one: another origin's data needs its policy, and this
+      // machine, more private, its own, whatever the proxy would reach.
+      blocked = 0;
+      policies.clear();
+      const fresh = await playing(`${swf()}/movie.swf`, options);
+      assert.match(await outcome(ask(fresh, `${other()}/data.txt`)), /refused: no policy file/);
+      rebinds = 0;
+      const rebound = await playing(`http://rebind.test:${swfPort}/movie.swf`, options);
+      assert.match(
+        await outcome(ask(rebound, `http://rebind.test:${swfPort}/data.txt`)),
+        /refused: rebind\.test:\d+ is at 127\.0\.0\.1, more private than the SWF/,
+      );
+
+      // The wrong password: the proxy's failure, said, its password not.
+      const wrong = network({ proxy: parseProxy(proxy.url("me:secret-word")) });
+      wrong.play({ kind: "remote", url: `${swf()}/movie.swf` });
+      const refused = await outcome(ask(wrong, `${swf()}/movie.swf`, "movie"));
+      assert.match(refused, /^refused: the proxy \S+ refused the username and password/);
+      assert.ok(!refused.includes("secret-word"), refused);
+    } finally {
+      await proxy.close();
+    }
+  }
+
+  // A policy the proxy failed to fetch is the proxy's failure, not a site without a policy.
+  policies.clear();
+  const picky = await testProxy("http", {
+    refuse: (_h, port) => (port === otherPort ? 407 : null),
+  });
+  try {
+    const net = await playing(`${swf()}/movie.swf`, { proxy: parseProxy(picky.url()) });
+    assert.match(
+      await outcome(ask(net, `${other()}/data.txt`)),
+      /^refused: the proxy \S+ asks for a username and password \(HTTP 407\)/,
+    );
+    // Content needs no policy: the same failure, from the request itself.
+    assert.match(
+      await outcome(ask(net, `${other()}/image.png`, "content")),
+      /asks for a username and password/,
+    );
+  } finally {
+    await picky.close();
+  }
 });

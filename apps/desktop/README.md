@@ -87,6 +87,31 @@ fetch-electron` does so ahead, for the tests.
   stderr, each time it starts with it, which hosts go unverified. The page
   itself has no network (the main process makes a SWF's requests and
   connections), so nothing but those is affected.
+- **Proxy.** `--proxy=socks5://host:1080` sends everything the SWF does
+  on the network through a SOCKS5 proxy (RFC 1928; `socks5h://` is the
+  same), and `--proxy=http://host:3128` through an HTTP proxy, by a
+  `CONNECT` tunnel for each connection, plain http too: its http and https
+  requests, the policy files they need, its sockets with their socket
+  policies, and an AIR application's WebSockets. A username and password
+  go in the URL (`socks5://user:pass@host:1080`, %-escaped where they need
+  it): RFC 1929's for SOCKS5, `Proxy-Authorization: Basic` for HTTP. They
+  come from the command line alone, and are never kept nor said: the app
+  says on stderr, as it starts, which proxy it uses, by its host and port.
+  TLS is the app's own, over the tunnel, so certificates are verified, or
+  not for the hosts `--ignore-certificate-errors` names, as without a
+  proxy. Whether a host is on this machine or the local network (below)
+  is still judged by this machine's DNS, and the proxy is then asked for
+  the address judged, not the name, so it reaches nothing the judgement
+  did not; a socket or WebSocket nothing judged (a local SWF's, an AIR
+  application's) goes by its name, for the proxy to resolve. A proxy that
+  is not there, refuses the credentials or refuses a connection is, to
+  the SWF, a server that is not there (IOErrorEvent, a socket's #2031), and
+  a line on stderr says why: `swf2es: not loading http://…: the proxy
+  socks5://127.0.0.1:1080 refused: connection refused (SOCKS reply 5)`.
+  `--log-network`'s lines name the target, and end in `via proxy`. A
+  second start of the app with another `--proxy` opens nothing in the
+  first. An HTTP proxy that allows `CONNECT` only to port 443, as Squid
+  does by default, refuses plain http and sockets on other ports.
 - **Sandbox.** A SWF plays in the sandbox Flash Player gave a local SWF,
   by its FileAttributes' UseNetwork bit. Without it,
   local-with-filesystem: it reads the files in its own directory and below
