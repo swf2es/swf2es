@@ -1115,7 +1115,21 @@ export class Runtime {
     this.arrayConversion.noteArrayClass(cls);
   }
 
+  /**
+   * A class's prototype, whose methods compiled code calls on a primitive:
+   * at every such call, so a String's, a Number's and a Boolean's are read
+   * from their traits, kept once known, without the lookup by name.
+   */
   prototypeOf(ref: TypeRef): AsObject {
+    switch (ref) {
+      case "String":
+        return (this.stringTraits ?? this.builtinTraits("String")).proto;
+      case "Number":
+        return (this.numberTraits ?? this.builtinTraits("Number")).proto;
+      case "Boolean":
+        return (this.booleanTraits ?? this.builtinTraits("Boolean")).proto;
+    }
+
     return this.classOf(ref).$it.proto;
   }
 

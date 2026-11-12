@@ -228,6 +228,12 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         return true;
       }
 
+      if (stringLength(em, src, ir.c[i])) {
+        receiver(em, src);
+        out.text(".length");
+        return true;
+      }
+
       virtual(em, a, src, 0, -1);
       return true;
     case IR_CallSetter:
@@ -928,6 +934,20 @@ function vectorLength(em: MethodEmitter, r: i32, getter: i32): bool {
     getter >= 0 &&
     vectorKind(em, em.regType[r]).length > 0 &&
     em.domain.traits.returnType[getter] === em.domain.uintType
+  );
+}
+
+/**
+ * Whether `getter` on register r reads a String's length, which is its
+ * string's: String is final and has no other getter, and a call of the
+ * getter by its class's prototype, which the runtime looks up by name at
+ * each call, costs several times the read.
+ */
+function stringLength(em: MethodEmitter, r: i32, getter: i32): bool {
+  return (
+    getter >= 0 &&
+    em.builtinOf(r) === BUILTIN_String &&
+    em.domain.traits.returnType[getter] === em.domain.intType
   );
 }
 
