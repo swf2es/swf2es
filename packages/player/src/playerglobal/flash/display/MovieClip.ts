@@ -110,7 +110,10 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
     addFrameScript(...args: Value[]): void {
       const clip = this.$display;
       for (let i = 0; i + 1 < args.length; i += 2) {
-        clip.setFrameScript(s.rt.toInt(args[i]) + 1, args[i + 1]);
+        // What is no function, as a string, clears the frame's script, as null does in Flash.
+        const script = args[i + 1];
+        const callable = s.rt.isInstanceOf(script, s.rt.functionTraits);
+        clip.setFrameScript(s.rt.toInt(args[i]) + 1, callable ? script : null);
       }
     }
 

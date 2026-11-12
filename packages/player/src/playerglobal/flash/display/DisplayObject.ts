@@ -170,6 +170,12 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
 
         if (made) {
           s.lifecycle.made(display);
+          // A symbol's first frame is placed before its constructor runs,
+          // as a timeline child's is: numChildren counts the children
+          // before super() makes them alive, getChildAt finding null.
+          if (display instanceof MovieClip) {
+            display.placeFirstFrame();
+          }
         }
 
         return o;
