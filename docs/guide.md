@@ -309,7 +309,8 @@ npx @swf2es/desktop app.xml                         # an AIR application, by its
 npx @swf2es/desktop                                 # the window: File › Open, or drop a SWF or a descriptor on it
 ```
 
-The first run downloads Electron's binary, about 100 MB, once. Installed
+The first run downloads Electron's binary, about 100 MB, once. npx may run a version it cached before
+rather than a newer one: `npx @swf2es/desktop@latest` takes the newest. Installed
 (`npm install -g @swf2es/desktop`), the command is `swf2es-desktop`.
 
 Each SWF plays in the sandbox Flash Player gave it. A local SWF goes by its

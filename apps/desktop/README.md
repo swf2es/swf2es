@@ -59,7 +59,9 @@ fetch-electron` does so ahead, for the tests.
   MPL-2.0) and playerglobal that ship with the player, with nothing to set
   up. File › Choose playerglobal.abc… plays on another playerglobal, such
   as Flash Player's, in place of the app's own; the app keeps its path in
-  `settings.json` in Electron's user data directory.
+  `settings.json` in Electron's user data directory, across updates of the
+  app, and says so on stderr at each start. File › Use the App's
+  playerglobal goes back to the app's own.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
 - **Network log.** `--log-network` prints each of the SWF's requests to
