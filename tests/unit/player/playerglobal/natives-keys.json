@@ -1353,6 +1353,8 @@
     "flash.ui::MouseCursorData#set:frameRate",
     "flash.ui::MouseCursorData#set:hotSpot",
     "flash.utils::ByteArray#readMultiByte",
+    "flash.utils::ByteArray#readObject",
+    "flash.utils::ByteArray#writeObject",
     "flash.utils::ObjectInput#readMultiByte",
     "flash.utils::Timer#flash.utils:Timer::_start",
     "flash.utils::Timer#flash.utils:Timer::_timerDispatch",

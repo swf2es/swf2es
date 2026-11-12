@@ -666,6 +666,15 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "amf0",
+    swf: (abc) => bare(abc, 1, "Amf0"),
+    script: "Amf0",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "bytearray-multibyte",
     swf: (abc) => bare(abc, 1, "ByteArrayMultibyte"),
     script: "ByteArrayMultibyte",
