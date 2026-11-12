@@ -41,3 +41,38 @@ export function failureLine(method: string, url: string, why: string, ms: number
 export function socketLine(id: number, what: string): string {
   return `swf2es: socket #${id} ${shown(what)}`;
 }
+
+/** How much of a message --log-sockets shows. */
+const PREVIEW = 512;
+
+/**
+ * What a socket sent (">") or received ("<"): its size and its start, as
+ * text where it is text, bytes that are no printable ASCII as dots, else
+ * in hex. A message past PREVIEW bytes ends in an ellipsis.
+ */
+export function socketDataLine(id: number, sent: boolean, bytes: Uint8Array): string {
+  const shownBytes = bytes.subarray(0, PREVIEW);
+  let printable = 0;
+  for (let i = 0; i < shownBytes.length; i++) {
+    const b = shownBytes[i];
+    if ((b >= 32 && b < 127) || b === 9 || b === 10 || b === 13 || b === 0) {
+      printable++;
+    }
+  }
+
+  let preview = "";
+  // Mostly text, as a line protocol's messages are, a NUL ending each: shown as text.
+  if (printable * 10 >= shownBytes.length * 9) {
+    for (let i = 0; i < shownBytes.length; i++) {
+      const b = shownBytes[i];
+      preview += b >= 32 && b < 127 ? String.fromCharCode(b) : ".";
+    }
+  } else {
+    for (let i = 0; i < shownBytes.length; i++) {
+      preview += (i > 0 ? " " : "") + shownBytes[i].toString(16).padStart(2, "0");
+    }
+  }
+
+  const more = bytes.length > PREVIEW ? "…" : "";
+  return `swf2es: socket #${id} ${sent ? ">" : "<"} ${bytes.length} B  ${preview}${more}`;
+}

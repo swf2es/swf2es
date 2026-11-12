@@ -59,6 +59,10 @@ fetch-electron` does so ahead, for the tests.
   failed and closed. A refused request is said with or without it. The
   window's DevTools show none of these in their Network tab: the page has
   no network, and the main process sends them.
+  `--log-sockets` prints those lines and each message a socket sends (`>`)
+  and receives (`<`): its size and its first 512 bytes, as text where it
+  is text and in hex otherwise. That is whatever the SWF sends, a login
+  and its password among it: mind where the terminal's output goes.
 - **Certificates.** `--ignore-certificate-errors` leaves every HTTPS
   server's certificate unverified for this run, and
   `--ignore-certificate-errors=dev.test,localhost` those hosts' alone, on
