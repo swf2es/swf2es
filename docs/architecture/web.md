@@ -36,7 +36,13 @@ the stage's size stretched by CSS. `layout.ts` places it as Flash's plug-in did:
 showAll fits the stage whole, noBorder fills the element and crops,
 exactFit stretches it, noScale leaves it its size, and `salign`'s T, B,
 L and R hold the edges they name, the stage centred along an axis that
-names neither. A stretched stage is drawn as fine as its finer axis
+names neither. A SWF whose header's frame does not start at (0, 0) is
+placed by its frame all the same, as the projector and adl place it in
+every mode and alignment: the stage's size is the frame's, its coordinates
+stay the SWF's, the root at (0, 0), and the viewport is moved by the
+frame's corner (`Player.originX`, `originY`), so the corner shows where a
+stage's (0, 0) would and the pointer there is at the corner's coordinates.
+A SWF a `Loader` loads is not moved by its frame. A stretched stage is drawn as fine as its finer axis
 needs; no side passes 4096 device pixels. A ResizeObserver places it
 again as the element changes, and each animation frame checks
 `devicePixelRatio`, which a move to another display or a zoom changes.

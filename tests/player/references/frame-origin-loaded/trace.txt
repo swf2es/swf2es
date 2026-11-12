@@ -1,0 +1,4 @@
+inner size 140 70
+inner at 0 0
+inner bounds (x=40, y=20, w=50, h=50) 50 50
+outer 200 100 (x=0, y=0)

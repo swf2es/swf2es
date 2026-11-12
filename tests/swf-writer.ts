@@ -1152,17 +1152,25 @@ export function font3(spec: FontSpec): Uint8Array {
   return tag(75, w.done(), true);
 }
 
-/** A whole uncompressed SWF: the header, the frame size and rate, then the tags. */
+/**
+ * A whole uncompressed SWF: the header, the frame size and rate, then the
+ * tags. The frame's rectangle starts at (`x`, `y`), in pixels, where a
+ * SWF's starts at (0, 0) as a rule.
+ */
 export function swf(options: {
   version?: number;
   width: number;
   height: number;
+  x?: number;
+  y?: number;
   frameRate?: number;
   frameCount: number;
   tags: Uint8Array[];
 }): Uint8Array {
   const head = new BitWriter();
-  rect(head, 0, options.width * 20, 0, options.height * 20);
+  const left = (options.x ?? 0) * 20;
+  const top = (options.y ?? 0) * 20;
+  rect(head, left, left + options.width * 20, top, top + options.height * 20);
   head.u16(Math.round((options.frameRate ?? 24) * 256)).u16(options.frameCount);
   const body = concat([head.done(), ...options.tags]);
   const out = new Uint8Array(8 + body.length);

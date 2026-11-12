@@ -186,7 +186,9 @@ export class Loads {
   /**
    * What a LoaderInfo knows once its SWF is: the bytes, the header's
    * version, frame rate and size. Its bytes are the SWF decompressed, as
-   * Flash's, their total what came.
+   * Flash's, their total what came. The size is the frame's far corner, as
+   * Flash has it for a frame that does not start at (0, 0): xMax by yMax,
+   * not the stage's xMax - xMin by yMax - yMin.
    */
   describe(info: AsObject, bytes: Uint8Array, swf: Swf): void {
     info.$bytes = swf.bytes;
@@ -194,8 +196,8 @@ export class Loads {
     info.$swf = {
       version: swf.header.version,
       frameRate: swf.frameRate,
-      width: Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
-      height: Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
+      width: Math.round(swf.frameSize.xMax / 20),
+      height: Math.round(swf.frameSize.yMax / 20),
       as3: isAs3(swf),
     };
   }

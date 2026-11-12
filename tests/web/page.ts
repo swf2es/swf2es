@@ -778,11 +778,11 @@ async function touchLog() {
  * A player of the margins SWF in a box three times as wide as its stage
  * and twice its size, by `salign`; where the box is, and the stage's size.
  */
-async function marginsPlayer(salign: string) {
+async function marginsPlayer(salign: string, src = "/web-test/margins.swf") {
   document.getElementById("margins")?.remove();
   const p = document.createElement("swf2es-player") as Player;
   p.id = "margins";
-  p.setAttribute("src", "/web-test/margins.swf");
+  p.setAttribute("src", src);
   p.setAttribute("allowscriptaccess", "always");
   p.setAttribute("width", "600");
   p.setAttribute("height", "200");
