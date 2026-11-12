@@ -47,7 +47,7 @@ import {
   pairOf,
   walkless,
 } from "./enumeration.js";
-import { AsError, describe, errorMessage, stackOf } from "./errors.js";
+import { AsError, describe, detailOf, errorMessage, stackOf } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -1234,13 +1234,103 @@ export class Runtime {
         return;
       }
 
-      if (o.$a !== undefined && o.$a !== SEALED_ELEMENTS && i !== 0xffffffff) {
-        o.$a[i] = v;
-        return;
+      const a: Value[] | undefined = o.$a;
+      if (a !== undefined) {
+        if (a !== SEALED_ELEMENTS && i !== 0xffffffff) {
+          a[i] = v;
+          return;
+        }
+      } else if (traits?.dynamic && traits.properties === null && !traits.refusesNames) {
+        // As ScriptObject::setUintProperty: an object with no elements of its own keeps the
+        // number among its dynamic properties, with no binding asked for.
+        const d: Map<string, Value> | null | undefined = o.$d;
+        if (d) {
+          d.set(`${i}`, v);
+          return;
+        }
       }
     }
 
     this.setProperty(o, this.indexName(mn, i), v);
+  }
+
+  /**
+   * obj[k] for a key whose type the compiler does not know, by a name with
+   * no namespace from the stack, as avmplus' getprop_index and
+   * getpropertyHelper: a number is an index (getIndexed), an object a
+   * Dictionary has as a key is read by itself, and anything else, a QName
+   * and a Dictionary's absent key among them, is looked up by the name it
+   * makes.
+   */
+  getKeyed(o: Value, mn: Multiname, k: Value): Value {
+    let r: Value;
+    if (typeof k === "number") {
+      r = this.getIndexed(o, mn, k);
+      return r;
+    }
+
+    if (typeof k === "object" && k !== null) {
+      const keys: DictionaryKeys | undefined = o?.$keys;
+      if (keys !== undefined) {
+        if (!mn.elementName) {
+          r = this.getProperty(o, this.runtimeName(mn, this.unkeyed(k)));
+          return r;
+        }
+
+        // What is there was put there by a name with the object as its key, which a QName's is not.
+        const v = keys.get(k);
+        if (v !== undefined) {
+          return v;
+        }
+      }
+    }
+
+    r = this.getProperty(o, this.runtimeName(mn, k));
+    return r;
+  }
+
+  /**
+   * An object given as the key of a Dictionary by a name with no public
+   * namespace, as the name is made of it: avmplus' JIT asks a Dictionary
+   * for an object only through getprop_index and setprop_index, which such
+   * a name does not reach, so the object is its string, as on any other
+   * receiver (initMultinameLate); a QName names what it names. Its
+   * interpreter asks the Dictionary by any name, as a name made without
+   * this does: the compiler leaves script and class initializers to that.
+   */
+  private unkeyed(k: AsObject): Value {
+    return k.$traits !== undefined && k.$local === undefined ? this.toString(k) : k;
+  }
+
+  /** obj[k] = v for a key whose type the compiler does not know, as avmplus' setprop_index and setpropertyHelper. */
+  setKeyed(o: Value, mn: Multiname, k: Value, v: Value): void {
+    if (typeof k === "number") {
+      this.setIndexed(o, mn, k, v);
+      return;
+    }
+
+    if (typeof k === "object" && k !== null) {
+      const keys: DictionaryKeys | undefined = o?.$keys;
+      if (keys !== undefined) {
+        if (!mn.elementName) {
+          this.setProperty(o, this.runtimeName(mn, this.unkeyed(k)), v);
+          return;
+        }
+
+        if (keys.replace(k, v)) {
+          return;
+        }
+
+        // A new key: an object of traits, which a float and a Namespace are not, and no QName,
+        // which names what it names. Those are added, or not, by the name they make.
+        if (k.$traits !== undefined && k.$local === undefined) {
+          keys.add(k, v);
+          return;
+        }
+      }
+    }
+
+    this.setProperty(o, this.runtimeName(mn, k), v);
   }
 
   /**
@@ -3213,12 +3303,23 @@ export class Runtime {
       return new AsError(`${name}: ${message}`);
     }
 
-    return this.constructClass(cls, [message, id]);
+    const made = this.constructClass(cls, [message, id]);
+    // What the number stands for, kept beside the message for a host's report (detailOf).
+    if (!this.debugger) {
+      Object.defineProperty(made, "$detail", { value: errorMessage(true, id, args) });
+    }
+
+    return made;
   }
 
   /** See stackOf in errors.ts. */
   stackOf(error: Value): string | null {
     return stackOf(error);
+  }
+
+  /** See detailOf in errors.ts. */
+  detailOf(error: Value): string | null {
+    return detailOf(error);
   }
 
   /** See errorMessage in errors.ts. */

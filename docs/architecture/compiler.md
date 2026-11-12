@@ -289,6 +289,23 @@ function too long for V8 to optimize (60 KB of bytecode). Other
 addresses go through the runtime (`rt.li32` and the like). Anything typed
 `*` goes through the runtime, which does what avmplus does at run time.
 
+`obj[k]`, a name whose only part from the stack is the key, is emitted by
+the key's type, as avmplus' JIT chooses its helper by it. A number's is
+`rt.getIndexed` and `rt.setIndexed`, which read and write an element, or
+a dynamic object's property, by the number and make no name; a String's
+is the name it makes (`rt.runtimeName`), kept for the strings a site
+repeats. A key of any other type, `*` among them, is `rt.getKeyed` and
+`rt.setKeyed`, which look at the value: a number goes the number's way,
+an object that a Dictionary has as a key is read and replaced by itself,
+and anything else, a QName and a Dictionary's key not yet there among
+them, makes the name. A name without a public namespace is a name
+whatever the key, so `d.ns::[object]` is no Dictionary key there. A
+script's and a class's initializer, which avmplus interprets, keep the
+name made of the key, by which a Dictionary is asked for an object under
+any name, as avmplus' interpreter asks it. A name made
+at run time records what made it (`Multiname.made`), for a Proxy, which
+avmplus hands a number as its string and anything else as a QName.
+
 Two ints or uints multiplied and the product made an int or uint by the
 next instruction, in the same block, are `Math.imul`: avmplus' JIT
 multiplies them as ints (`CodegenLIR::coerceNumberToInt`), which wraps,

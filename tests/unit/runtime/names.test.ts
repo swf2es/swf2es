@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AIR_API_VERSION, API_VERSION } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
+import { DictionaryKeys } from "../../../packages/runtime/dist/avm2/dictionary-keys.js";
 import {
   CONSTANT_MultinameL,
   CONSTANT_MultinameLA,
@@ -92,6 +93,48 @@ test("indexed access respects namespaces and attributes, including resolved runt
     assert.throws(() => rt.setIndexed(o, name, 0, 99));
     assert.deepEqual(o.$a, [11]);
   }
+});
+
+test("a key of unknown type is an index, a Dictionary's key or a name by what it is", () => {
+  const rt = avm2.createRuntime();
+  const base = rt.name([avm2.publicNs], [255], CONSTANT_MultinameL, [0], null);
+  const array = rt.objectTraits.instance();
+  array.$a = [7, 8];
+  assert.equal(rt.getKeyed(array, base, 1), 8);
+  assert.equal(rt.getKeyed(array, base, "1"), 8);
+  rt.setKeyed(array, base, 3, 9);
+  assert.equal(array.$a.length, 4);
+  assert.equal(array.$a[3], 9);
+  assert.equal(2 in array.$a, false);
+  rt.setKeyed(array, base, 1.5, "half");
+  assert.equal(array.$d.get("1.5"), "half");
+  assert.equal(rt.getKeyed(array, base, 1.5), "half");
+
+  // A number on an object with no elements is its dynamic property, by the number's string.
+  const plain = rt.objectTraits.instance();
+  rt.setKeyed(plain, base, 4278392, "handle");
+  assert.equal(plain.$d.get("4278392"), "handle");
+  assert.equal(rt.getKeyed(plain, base, 4278392), "handle");
+  assert.equal(rt.getKeyed(plain, base, "4278392"), "handle");
+  assert.equal(rt.getKeyed(plain, base, 5), undefined);
+
+  // An object keys a Dictionary by itself: another object is another key.
+  const dictionary = rt.objectTraits.instance();
+  dictionary.$keys = new DictionaryKeys(false);
+  const key = rt.objectTraits.instance();
+  const twin = rt.objectTraits.instance();
+  rt.setKeyed(dictionary, base, key, "first");
+  assert.equal(dictionary.$keys.get(key), "first");
+  assert.equal(dictionary.$d.size, 0);
+  rt.setKeyed(dictionary, base, key, "second");
+  assert.equal(rt.getKeyed(dictionary, base, key), "second");
+  assert.equal(rt.getKeyed(dictionary, base, twin), undefined);
+  assert.equal(dictionary.$keys.size, 1);
+
+  // A name with no public namespace is no index.
+  const hidden = new Multiname(CONSTANT_MultinameL, [rt.privateNs("hidden")], [255], null, false);
+  assert.throws(() => rt.getKeyed(array, hidden, 1));
+  assert.equal(dictionary.$keys.get(key), "second");
 });
 
 test("a name made at run time records whether a number or another value made it", () => {
