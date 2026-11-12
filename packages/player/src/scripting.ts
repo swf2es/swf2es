@@ -42,6 +42,7 @@ import {
   type FetchRequest,
   type FetchResult,
   type FileSystemHost,
+  type FullScreenHost,
   globalWebSocketHost,
   hostTouchPoints,
   type ModuleCache,
@@ -70,6 +71,7 @@ import {
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
 import { dispatchTo, type EventFields, heard, WeakTargets } from "./scripting/events.js";
+import { FullScreen } from "./scripting/full-screen.js";
 import { type HandedModules, ModuleHandover, ModuleRecorder } from "./scripting/handover.js";
 import { Lifecycle } from "./scripting/lifecycle.js";
 import { Loads } from "./scripting/loads.js";
@@ -278,6 +280,8 @@ export class Scripting {
   stageAlignSet = false;
   /** A host updates placement synchronously before the setter returns. */
   onStageLayout: (() => void) | null = null;
+  /** Stage.displayState and fullScreenSourceRect, and the host's full screen behind them. */
+  readonly fullScreen: FullScreen;
   /** Stage.color's 0xRRGGBB, the SWF's background until a script sets it; null before the stage is made. */
   stageColor: number | null = null;
   /**
@@ -391,6 +395,11 @@ export class Scripting {
       decodeImage?: ImageDecode | null;
       screenCapabilities?: Partial<ScreenCapabilities>;
       /**
+       * The host's full screen, which Stage.displayState asks for; none by
+       * default, which leaves the stage in its "normal" state.
+       */
+      fullScreen?: FullScreenHost | null;
+      /**
        * Starts the threads background Workers run on (docs/workers.md);
        * none by default, which leaves Worker.isSupported false.
        */
@@ -437,6 +446,7 @@ export class Scripting {
       pixelAspectRatio: options.screenCapabilities?.pixelAspectRatio ?? 1,
       screenDPI: options.screenCapabilities?.screenDPI ?? 72,
     };
+    this.fullScreen = new FullScreen(this, options.fullScreen ?? null);
     this.trimTrailingHtmlBreak = options.trimTrailingHtmlBreak ?? false;
     this.timers = new Timers(this, options);
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;

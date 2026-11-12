@@ -39,6 +39,7 @@ export type {
   FetchResult,
   FileStat,
   FileSystemHost,
+  FullScreenHost,
   ModuleCache,
   Navigate,
   PlatformCapabilities,

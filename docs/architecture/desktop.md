@@ -240,7 +240,13 @@ SWF has the network (local-with-networking or remote), and a click, key
 or tap in the window asked for it: one page a gesture, within five
 seconds of it and a second after the last, as a browser's popup blocker
 allows, so a SWF cannot launch the browser in a loop. `<webview>`s are
-refused, and the only permission granted is full screen.
+refused, and the only permission granted is full screen. A SWF's
+`Stage.displayState` does not go through that permission, which wants a
+gesture: the page asks the shell (`fullScreen.set`), which sets the
+window's own full screen while a SWF the user opened plays, and tells
+the page as the window enters or leaves it, by the menu's F11 too, so
+that the stage follows (`renderer/full-screen.ts`). Esc in the page
+leaves it, as in Flash.
 ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
 into the page would run beside the API.
 
@@ -367,7 +373,12 @@ both URLs join the recent list; and that an AIR application's
 `air.net.WebSocket` exchanges a text and a binary message with a server
 of the test's own (`websocket-server.ts`: node has a client and no
 server), over TLS too to the host `--ignore-certificate-errors` names
-and not to another, while a SWF's page is refused one. `connections.test.ts` and
+and not to another, while a SWF's page is refused one. The AIR
+application also goes full screen from its InvokeEvent, with no gesture:
+the window is in full screen as the main process has it, the source rect
+alone drawn, and Esc leaves, as the stage traces. Headless, no window
+manager resizes the window, so that it covers a screen is not checked.
+`connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and the sandbox's grants in
 node, `websocket-connections.test.ts` the WebSockets' messages, close
 codes, refusals, limits and certificates, `addresses.test.ts` where each address is, in every form an IPv4
