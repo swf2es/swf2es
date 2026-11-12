@@ -193,8 +193,21 @@ A successful stream reports `OPEN`, `PROGRESS`, `HTTP_STATUS`, `COMPLETE`;
 a failed one reports `HTTP_STATUS` before `IO_ERROR`. A URL load through
 `Loader` reports status on its `LoaderInfo` between `INIT` and `COMPLETE`,
 or before `IO_ERROR` on failure. A local file reports status 0 and no
-response headers. The host's response URL and headers are not surfaced by
-the Flash Player path; AIR-only `HTTP_RESPONSE_STATUS` is not sent.
+response headers. `HTTP_STATUS` tells of the response its status and
+whether a redirect led to it (`redirected`), never its URL or headers,
+in AIR either. An AIR application (`air`) gets those from
+`HTTP_RESPONSE_STATUS`, which a `URLStream`, the `URLLoader` over it and
+an upload dispatch as adl does: for an http or https response alone, as
+its headers come, after `OPEN` and before `PROGRESS` (an upload's after
+its `PROGRESS`), with the status, `redirected`, `responseURL`, where
+redirects took it, and `responseHeaders`, the host's headers as
+`URLRequestHeader`s in the host's order and case. adl has the server's
+own: a browser's fetch gives the names in lower case, sorted and merged,
+and no `Set-Cookie`; the desktop app's are as sent, without the cookies.
+A `Loader`'s `LoaderInfo`, a file and a failed connection have no
+`HTTP_RESPONSE_STATUS`, and Flash Player content never. In AIR a response
+of an error status goes on to `COMPLETE` with its body; here, where the
+hosts give a failure no body, to `IO_ERROR` as in Flash Player.
 Stream fetches are independent of Loader's ordered preparation, so a
 stalled stream cannot hold up a later Loader; `settled()` waits for both
 when a host explicitly asks it to. A new load or `close` aborts the old

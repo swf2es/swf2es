@@ -34,6 +34,8 @@ test("URLStream delivers fetched bytes on a frame and discards a closed request"
     rt,
     event: (type: string) => ({ $type: type, $stopped: 0 }),
     httpStatus: (status: number) => ({ $type: "httpStatus", $status: status, $stopped: 0 }),
+    // Flash Player content: AIR's response status is HTTPStatusEvent.test.ts's.
+    httpResponseStatus: () => null,
     loads: {
       requestBytes: (
         request: { url: string },

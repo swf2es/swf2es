@@ -132,6 +132,9 @@ const airSource = `package {
         stream.close();
         load("app", "data.txt");
         load("file", outside.url);
+        if (e.arguments.length > 2) {
+          load("http", e.arguments[2]);
+        }
         socket = new Socket();
         socket.addEventListener(Event.CONNECT, function (e:Event):void {
           socket.writeUTFBytes("ping");
@@ -144,12 +147,12 @@ const airSource = `package {
           trace("air: socket refused");
         });
         socket.connect("127.0.0.1", int(e.arguments[0]));
-        if (e.arguments.length > 2) {
-          connectWebSocket("websocket", "ws://127.0.0.1:" + e.arguments[2] + "/smoke?q=1");
-        }
         if (e.arguments.length > 3) {
-          connectWebSocket("wss-address", "wss://127.0.0.1:" + e.arguments[3] + "/");
-          connectWebSocket("wss-name", "wss://localhost:" + e.arguments[3] + "/");
+          connectWebSocket("websocket", "ws://127.0.0.1:" + e.arguments[3] + "/smoke?q=1");
+        }
+        if (e.arguments.length > 4) {
+          connectWebSocket("wss-address", "wss://127.0.0.1:" + e.arguments[4] + "/");
+          connectWebSocket("wss-name", "wss://localhost:" + e.arguments[4] + "/");
         }
         // Full screen as an application asks for it: from no click or key, over a part of its stage.
         if (e.arguments.length > 1) {
@@ -196,6 +199,16 @@ const airSource = `package {
       var loader:URLLoader = new URLLoader();
       loader.addEventListener(Event.COMPLETE, function (e:Event):void {
         trace("air: " + label + " " + loader.data);
+      });
+      // AIR's alone, as the response's headers come: a file has none.
+      loader.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, function (e:HTTPStatusEvent):void {
+        var type:String = "";
+        for each (var header:URLRequestHeader in e.responseHeaders) {
+          if (header.name.toLowerCase() == "content-type") {
+            type = header.value;
+          }
+        }
+        trace("air: " + label + " status " + e.status + " " + e.redirected + " " + e.responseURL.split("/").pop() + " " + type);
       });
       loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
         trace("air: " + label + " refused");
@@ -669,7 +682,9 @@ async function air(): Promise<void> {
     console.warn("desktop smoke test: no openssl to make a certificate: wss: is not tested");
   }
 
-  // No socket allowed in the settings: an application asks no one.
+  // No socket allowed in the settings: an application asks no one. What it loads over HTTP
+  // tells its response as AIR does, which its files do not.
+  const served = await httpSite({ "/data.txt": ["text/plain", "served"] });
   await withApp(
     { ...both, sockets: {} },
     [
@@ -681,6 +696,7 @@ async function air(): Promise<void> {
       "--",
       String(port),
       "two words",
+      `${served.origin}/data.txt`,
       String(webSockets.port),
       ...(secure ? [String(secure.port)] : []),
     ],
@@ -691,9 +707,10 @@ async function air(): Promise<void> {
           "app",
           "file",
           "socket",
+          "http served",
           "websocket close",
           ...(secure ? ["wss-address close", "wss-name"] : []),
-        ].every((what) => stdout.some((l) => l.startsWith(`air: ${what} `)));
+        ].every((what) => stdout.some((l) => l.startsWith(`air: ${what}`)));
       await until("the AIR application", settled);
       for (const line of [
         "air: websocket open smoke",
@@ -751,11 +768,13 @@ async function air(): Promise<void> {
         "air: sandbox application",
         "air: title Air Smoke",
         "air: screen true true true 1",
-        `air: invoke ${[port, "two words", webSockets.port, ...(secure ? [secure.port] : [])].join("|")} true`,
+        `air: invoke ${[port, "two words", `${served.origin}/data.txt`, webSockets.port, ...(secure ? [secure.port] : [])].join("|")} true`,
         "air: files true true 0",
         "air: stream beside",
         "air: app beside",
         "air: file outside",
+        "air: http status 200 false data.txt text/plain",
+        "air: http served",
         "air: socket pong",
         // In full screen as its setter returns, the event before it, as in adl.
         "air: fullScreen true false fullScreenInteractive",
@@ -764,9 +783,20 @@ async function air(): Promise<void> {
         assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
       }
 
+      assert.ok(
+        !stdout.some((l) => /^air: (app|file) status/.test(l)),
+        `a file's response status\n${stdout.join("\n")}`,
+      );
+      assert.ok(
+        stdout.indexOf("air: http status 200 false data.txt text/plain") <
+          stdout.indexOf("air: http served"),
+        stdout.join("\n"),
+      );
+
       await fullScreen(running);
     },
   );
+  served.server.close();
   await webSockets.close();
   await secure?.close();
 
