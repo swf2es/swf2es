@@ -21,6 +21,7 @@ import { loaderNatives } from "./flash/display/Loader.js";
 import { loaderInfoNatives } from "./flash/display/LoaderInfo.js";
 import { movieClipNatives } from "./flash/display/MovieClip.js";
 import { nativeWindowNatives } from "./flash/display/NativeWindow.js";
+import { screenHooks, screenNatives } from "./flash/display/Screen.js";
 import { shaderNatives } from "./flash/display/Shader.js";
 import { shaderDataNatives } from "./flash/display/ShaderData.js";
 import { shaderInputNatives } from "./flash/display/ShaderInput.js";
@@ -123,6 +124,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...fileStreamNatives(s),
     ...encryptedLocalStoreNatives(s),
     ...nativeWindowNatives(s),
+    ...screenNatives(s),
     ...eventNatives(s),
     ...keyboardEventNatives(s),
     ...timerEventNatives(s),
@@ -225,6 +227,7 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...byteArrayHooks(s),
     ...httpStatusHooks,
     ...bitmapFilterHooks,
+    ...screenHooks,
     ...workerHooks(s),
     ...clipboardHooks(),
     ...soundHooks(s),
