@@ -305,7 +305,9 @@ them, makes the name. A name without a public namespace is a name
 whatever the key, so `d.ns::[object]` is no Dictionary key there. A
 script's and a class's initializer, which avmplus interprets, keep the
 name made of the key, by which a Dictionary is asked for an object under
-any name, as avmplus' interpreter asks it. A name made
+any name, as avmplus' interpreter asks it; and an int key of an object
+is an element there by a name without a public namespace too
+(`rt.getInterpreted` and `rt.setInterpreted`), where the JIT throws. A name made
 at run time records what made it (`Multiname.made`), for a Proxy, which
 avmplus hands a number as its string and anything else as a QName.
 

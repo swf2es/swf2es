@@ -19,6 +19,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   realpathSync,
@@ -155,6 +156,16 @@ const airSource = `package {
         }
         load("app", "data.txt");
         load("file", outside.url);
+        // Named in another case than on the disk, as an application made on Windows names files.
+        var cased:File = File.applicationDirectory.resolvePath("Maps/Meadow/Level.TXT");
+        stream.open(cased, FileMode.READ);
+        trace("air: cased " + cased.exists + " " + stream.readUTFBytes(stream.bytesAvailable));
+        stream.close();
+        stream.open(new File(File.applicationDirectory.nativePath).resolvePath("MAPS/meadow/Saved.txt"), FileMode.WRITE);
+        stream.writeUTFBytes("saved");
+        stream.close();
+        load("cased-app", "Maps/Meadow/Level.TXT");
+        load("cased-file", new File(File.applicationDirectory.nativePath).resolvePath("maps/MEADOW/level.txt").url);
         if (e.arguments.length > 2) {
           load("http", e.arguments[2]);
         }
@@ -621,6 +632,8 @@ async function air(): Promise<void> {
   rmSync(app, { recursive: true, force: true });
   mkdirSync(app, { recursive: true });
   writeFileSync(`${app}data.txt`, "beside");
+  mkdirSync(`${app}maps/meadow`, { recursive: true });
+  writeFileSync(`${app}maps/meadow/level.txt`, "level");
   writeFileSync(`${out}air-outside.txt`, "outside");
   writeFileSync(
     `${app}AirSmoke-app.xml`,
@@ -729,6 +742,8 @@ async function air(): Promise<void> {
         [
           "app",
           "file",
+          "cased-app",
+          "cased-file",
           "socket",
           "http served",
           "websocket close",
@@ -797,6 +812,9 @@ async function air(): Promise<void> {
         "air: temp temporary true true 0 true true",
         "air: app beside",
         "air: file outside",
+        "air: cased true level",
+        "air: cased-app level",
+        "air: cased-file level",
         "air: http status 200 false data.txt text/plain",
         "air: http served",
         "air: socket pong",
@@ -806,6 +824,10 @@ async function air(): Promise<void> {
       ]) {
         assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
       }
+
+      // Written into the directory there in another case, under the name it gave.
+      assert.equal(readFileSync(`${app}maps/meadow/Saved.txt`, "utf8"), "saved");
+      assert.ok(!existsSync(`${app}MAPS`));
 
       // The temporary file and directory are on disk, side by side, the file with what it wrote.
       const temps = stdout.find((l) => l.startsWith("air: temp paths "));
@@ -1009,6 +1031,17 @@ try {
     const outside = new URL("../../smoke.ts", url).href;
     assert.equal(
       await evaluate<number>(`fetch(${JSON.stringify(outside)}).then((r) => r.status)`),
+      404,
+    );
+    // A name in another case finds the file, as on Windows and macOS; above, it still does not.
+    const cased = new URL("DATA.txt", url).href;
+    assert.equal(
+      await evaluate<string>(`fetch(${JSON.stringify(cased)}).then((r) => r.text())`),
+      "beside",
+    );
+    const casedOutside = new URL("..%2FSECRET.TXT", url).href;
+    assert.equal(
+      await evaluate<number>(`fetch(${JSON.stringify(casedOutside)}).then((r) => r.status)`),
       404,
     );
 

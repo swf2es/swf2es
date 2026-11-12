@@ -14,6 +14,7 @@ import type { Container, MovieClip } from "../../../packages/player/dist/display
 import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { square } from "../../player/cases/common.ts";
 import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
@@ -1643,3 +1644,118 @@ for (const lazyCompilation of [false, true]) {
     assert.equal(lines.filter((line) => line.startsWith("E:")).length, 7);
   });
 }
+
+test("addFrameScript takes what is no function as null, clearing the frame's script", {
+  skip,
+}, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Main extends MovieClip {
+      public function Main() {
+        addFrameScript(0, frame1, 1, frame2, 2, frame3);
+        addFrameScript(1, "primitive", 2, null);
+      }
+      private function frame1():void { trace("frame 1"); }
+      private function frame2():void { trace("frame 2"); }
+      private function frame3():void { trace("frame 3"); }
+    }
+  }`;
+  const lines: string[] = [];
+  const errors: unknown[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    onUncaught: (error) => errors.push(error),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("FrameScriptValues", source), 3), scripting);
+  await player.start();
+  player.tick();
+  player.tick();
+
+  assert.deepEqual(lines, ["frame 1"]);
+  assert.deepEqual(errors, []);
+});
+
+test("a symbol a script makes has its first frame placed before its constructor runs", {
+  skip,
+}, async () => {
+  // As Flash (Ruffle's displayobject_early_init): before super() the
+  // children are counted, not yet made; super() makes them.
+  const main = `package {
+    import flash.display.MovieClip;
+    import flash.utils.getDefinitionByName;
+    public class Main extends MovieClip {
+      public function Main() { new (getDefinitionByName("Child") as Class)(); }
+    }
+  }`;
+  const child = `package {
+    import flash.display.MovieClip;
+    public class Child extends MovieClip {
+      public function Child() {
+        trace("before", numChildren, getChildAt(0));
+        super();
+        trace("after", numChildren, getChildAt(0));
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const swf = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("EarlyChildren", main)),
+      w.doAbc(compiler(out)("Child", child)),
+      w.symbolClass([
+        [0, "Main"],
+        [2, "Child"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const player = new Player(swf, scripting);
+  await player.start();
+
+  assert.deepEqual(lines, ["before 1 null", "after 1 [object Shape]"]);
+});
+
+test("an event dispatched again whose clone is null is a TypeError #2007", { skip }, async () => {
+  // As Flash (Ruffle's event_clone_error_redispatch): a dispatched event goes out again as its clone.
+  const source = `package {
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    import flash.events.EventDispatcher;
+    public class Main extends MovieClip {
+      public function Main() {
+        const first:EventDispatcher = new EventDispatcher();
+        const second:EventDispatcher = new EventDispatcher();
+        first.addEventListener("custom", function (e:Event):void {
+          try {
+            second.dispatchEvent(e);
+          } catch (error:TypeError) {
+            trace(error.errorID);
+          }
+        });
+        first.dispatchEvent(new NullClone());
+      }
+    }
+  }
+  import flash.events.Event;
+  class NullClone extends Event {
+    public function NullClone() { super("custom"); }
+    override public function clone():Event { trace("cloned"); return null; }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("NullClone", source), 1), scripting);
+  await player.start();
+
+  assert.deepEqual(lines, ["cloned", "2007"]);
+});

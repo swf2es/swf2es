@@ -309,7 +309,8 @@ npx @swf2es/desktop app.xml                         # an AIR application, by its
 npx @swf2es/desktop                                 # the window: File › Open, or drop a SWF or a descriptor on it
 ```
 
-The first run downloads Electron's binary, about 100 MB, once. Installed
+The first run downloads Electron's binary, about 100 MB, once. npx may run a version it cached before
+rather than a newer one: `npx @swf2es/desktop@latest` takes the newest. Installed
 (`npm install -g @swf2es/desktop`), the command is `swf2es-desktop`.
 
 Each SWF plays in the sandbox Flash Player gave it. A local SWF goes by its
@@ -349,6 +350,11 @@ pnpm --filter @swf2es/desktop start movie.swf
 A SWF or an AIR application that sets `Stage.displayState` takes the
 window full screen, with no click needed, as in AIR and Flash's projector;
 Esc or F11 leaves.
+
+On Linux, a local file a SWF or an AIR application names that is not there
+as named is found as Windows and macOS find it, ignoring case, so content
+made there finds its files whatever case it names them in. Where two names
+in a directory differ only in case, neither is taken.
 
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.

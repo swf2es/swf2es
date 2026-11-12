@@ -151,11 +151,15 @@ export function newClass(
 
   const iscope = rt.scope(scope, [cls], 0);
   for (const [d, factory, id, , params] of desc.static.methods) {
-    installMethod(rt, straits.methodHome(3), d, withId(factory(scope, base), id), factory, params);
+    const method = withId(factory(scope, rt.staticSuper), id);
+    rt.keepStatic(factory, method);
+    installMethod(rt, straits.methodHome(3), d, method, factory, params);
   }
 
   for (const [d, factory, id, , params] of desc.instance.methods) {
-    installMethod(rt, itraits.methodHome(3), d, withId(factory(iscope, base), id), factory, params);
+    const method = withId(factory(iscope, base), id);
+    rt.keepStatic(factory, method);
+    installMethod(rt, itraits.methodHome(3), d, method, factory, params);
   }
 
   // Playerglobal can declare an accessor whose setter has no ABC body.
@@ -187,6 +191,7 @@ export function newClass(
   // Caches keep the methods and what the hooks decide.
   invalidate();
   const init = desc.init(iscope, base);
+  rt.keepStatic(desc.init, init);
   itraits.proto.$init = init;
   // Its entry for `new` and `super()` of the class where the compiler
   // coerced the arguments, as for bound calls (installMethod).
@@ -198,7 +203,9 @@ export function newClass(
   // resolves from traits, before initproperty has stored it anywhere.
   rt.defining.set(qualified, cls);
   try {
-    desc.cinit(scope, base).call(cls);
+    const cinit = desc.cinit(scope, rt.staticSuper);
+    rt.keepStatic(desc.cinit, cinit);
+    cinit.call(cls);
   } finally {
     rt.defining.delete(qualified);
   }

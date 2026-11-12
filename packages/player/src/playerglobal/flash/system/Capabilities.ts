@@ -75,8 +75,9 @@ export function capabilitiesNatives(s: Scripting): avm2.Natives {
       return serverString(s);
     }
 
-    static get "flash.system:Capabilities::_internal"(): number {
-      return 0;
+    // Flash Player 32 and AIR 51 both.
+    static get _internal(): number {
+      return 36;
     }
 
     static hasMultiChannelAudio(_type: avm2.Value): boolean {

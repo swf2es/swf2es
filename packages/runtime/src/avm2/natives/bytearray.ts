@@ -760,13 +760,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
       return rt.defaultObjectEncoding;
     }
 
+    // Unchecked, unlike an instance's: avmshell and Flash take any uint, a
+    // new ByteArray starts with it, and writeObject reads an encoding below
+    // 3 as AMF0 (#1508 in avmshell), any other as AMF3.
     static set defaultObjectEncoding(v: Value) {
-      const e = rt.toUint(v);
-      if (e !== kAMF0 && e !== kAMF3) {
-        throw rt.error("ArgumentError", 2008, "objectEncoding");
-      }
-
-      rt.defaultObjectEncoding = e;
+      rt.defaultObjectEncoding = rt.toUint(v);
     }
 
     get length() {
@@ -1215,13 +1213,11 @@ export function byteArrayNatives(rt: Runtime): Natives {
     },
   };
 
+  // AMF3 whatever their objectEncoding, as ObjectOutputObject::writeObject
+  // and ObjectInputObject::readObject: avmshell and Flash alike.
   class ObjectOutputNatives {
     writeObject(this: AsObject, v: Value): void {
       const stream: Writer = this.$amf;
-      if (stream.objectEncoding !== 3) {
-        throw rt.unsupported("AMF0");
-      }
-
       stream.value(v);
     }
   }
@@ -1229,10 +1225,6 @@ export function byteArrayNatives(rt: Runtime): Natives {
   class ObjectInputNatives {
     readObject(this: AsObject): Value {
       const stream: Reader = this.$amf;
-      if (stream.objectEncoding !== 3) {
-        throw rt.unsupported("AMF0");
-      }
-
       return stream.value();
     }
 

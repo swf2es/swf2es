@@ -169,6 +169,21 @@ function hasWith(scopes: Value[], w: number): boolean {
 }
 
 /** The value of `o`'s dynamic property `name`, or NOT_FOUND. */
+/** Whether k is an int atom avmplus can take as a uint: an integer of 0 to 2^32-1, -0 not, as it is a double's. */
+function uintAtom(k: Value): k is number {
+  return typeof k === "number" && k >>> 0 === k && (k !== 0 || 1 / k > 0);
+}
+
+/** Whether v is an object's atom to avmplus: not null, nor a Namespace or float, whose atoms are their own. */
+function isScriptObject(v: Value): boolean {
+  return (
+    typeof v === "object" && v !== null && !(v instanceof Namespace) && !(v instanceof FloatValue)
+  );
+}
+
+/** The name avmplus' getUintProperty looks a number up by: public, at every version. */
+const ELEMENT_NAME = new Multiname(CONSTANT_MultinameL, [publicNs], [255], null, false);
+
 function dynamicValue(o: AsObject, name: string): Value {
   const d: Map<string, Value> | null | undefined = o.$d;
   if (!d) {
@@ -245,6 +260,13 @@ export class Runtime {
   /** The builtin classes' traits, made before their classes so the bootstrap can refer to them. */
   readonly objectTraits: Traits;
   readonly classTraits: Traits;
+  /**
+   * What the super operations of a script's methods and of a class's
+   * static ones look in, as avmplus' script traits extend Object and a
+   * class object's traits Class: their `super` is that class's instance.
+   */
+  readonly scriptSuper: AsObject;
+  readonly staticSuper: AsObject;
   readonly functionTraits: Traits;
   /**
    * Method closures, by receiver and method, so that o.f === o.f; by the
@@ -300,6 +322,8 @@ export class Runtime {
     this.objectTraits.dynamic = true;
     this.objectTraits.testsValues = true;
     this.classTraits = new Traits("Class", this.objectTraits);
+    this.scriptSuper = { $it: this.objectTraits };
+    this.staticSuper = { $it: this.classTraits };
     this.functionTraits = new Traits("Function", this.objectTraits);
     this.functionTraits.dynamic = true;
     this.natives = typeof natives === "function" ? natives(this) : natives;
@@ -641,14 +665,9 @@ export class Runtime {
       // indexes the scopes their closures capture: the global object is
       // only what they push.
       for (const [d, factory, id, , params] of script.desc.traits.methods) {
-        installMethod(
-          this,
-          traits.methodHome(3),
-          d,
-          withId(factory(this.empty, null), id),
-          factory,
-          params,
-        );
+        const method = withId(factory(this.empty, this.scriptSuper), id);
+        this.keepStatic(factory, method);
+        installMethod(this, traits.methodHome(3), d, method, factory, params);
       }
 
       // Caches keep the methods.
@@ -678,7 +697,7 @@ export class Runtime {
     if (script.state === 0 || (retry && script.state === 3)) {
       script.state = 1;
       try {
-        script.desc.init(this.empty, null).call(g);
+        script.desc.init(this.empty, this.scriptSuper).call(g);
       } catch (e) {
         script.state = 3;
         throw e;
@@ -1198,7 +1217,7 @@ export class Runtime {
       "ReferenceError",
       name === null && nsset ? 1081 : 1069,
       mn.name ?? "*",
-      traits.name,
+      traits.errorName,
     );
   }
 
@@ -1272,6 +1291,31 @@ export class Runtime {
     }
 
     this.setProperty(o, this.indexName(mn, i), v);
+  }
+
+  /**
+   * obj[k] by a runtime name with no public namespace, or an attribute's,
+   * in a script's or a class's initializer, which avmplus interprets: its
+   * getproperty reads an int key of at least 0 off an object by
+   * getUintProperty, whatever namespaces the name has, where its JIT asks
+   * for a public one (getIndexed). Any other key makes a name.
+   */
+  getInterpreted(o: Value, mn: Multiname, k: Value): Value {
+    if (uintAtom(k) && isScriptObject(o)) {
+      return this.getIndexed(o, ELEMENT_NAME, k);
+    }
+
+    return this.getProperty(o, this.runtimeName(mn, k));
+  }
+
+  /** obj[k] = v as getInterpreted reads it, as avmplus' interpreter's setproperty. */
+  setInterpreted(o: Value, mn: Multiname, k: Value, v: Value): void {
+    if (uintAtom(k) && isScriptObject(o)) {
+      this.setIndexed(o, ELEMENT_NAME, k, v);
+      return;
+    }
+
+    this.setProperty(o, this.runtimeName(mn, k), v);
   }
 
   /**
@@ -1579,10 +1623,10 @@ export class Runtime {
           return o[slot];
         }
 
-        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.errorName);
       }
       default:
-        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.errorName);
     }
   }
 
@@ -1684,7 +1728,7 @@ export class Runtime {
       switch (b & 7) {
         case BIND_Const:
           if (!init) {
-            throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
+            throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.errorName);
           }
           o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
@@ -1696,9 +1740,9 @@ export class Runtime {
           (traits.proto[untypedSetKey(id + 1)] ?? traits.proto[methodKey(id + 1)]).call(o, v);
           return;
         case BIND_Method:
-          throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
+          throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.errorName);
         default:
-          throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
+          throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.errorName);
       }
     }
 
@@ -1723,7 +1767,7 @@ export class Runtime {
       }
     }
 
-    throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.name);
+    throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.errorName);
   }
 
   initProperty(o: Value, mn: Multiname, v: Value): void {
@@ -1742,7 +1786,7 @@ export class Runtime {
 
     // A primitive's property cannot be deleted, as MethodEnv's delproperty has it.
     if (typeof o !== "object" || o instanceof Namespace) {
-      throw this.error("ReferenceError", 1120, mn.name ?? "*", this.traitsOf(o).name);
+      throw this.error("ReferenceError", 1120, mn.name ?? "*", this.traitsOf(o).errorName);
     }
 
     // E4X 11.3.1: delete x[list] is a TypeError, as in delete x.a.(b == 1).
@@ -2239,8 +2283,33 @@ export class Runtime {
     return key;
   }
 
-  callStatic(_abc: Abc, m: number, ..._args: Value[]): Value {
-    throw this.unsupported(`callstatic ${m}`);
+  /**
+   * The first method each factory made for a class's or a script's
+   * traits, as avmplus' AbcEnv keeps the first MethodEnv of each method
+   * a vtable makes (VTable::makeMethodEnv): what callstatic calls.
+   */
+  private readonly staticMethods = new WeakMap<Factory, Method>();
+
+  /** Keep `method`, made by `factory`, for callstatic, unless it made one before. */
+  keepStatic(factory: Factory, method: Method): void {
+    if (!this.staticMethods.has(factory)) {
+      this.staticMethods.set(factory, method);
+    }
+  }
+
+  /**
+   * callstatic: method `factory` made, called on `o` with its arguments,
+   * which the compiler coerced. avmplus verifies a method when it first
+   * runs and refuses one that calls a method no vtable has made yet
+   * (1107); that is found here only once the call is reached.
+   */
+  callStatic(factory: Factory, o: Value, ...args: Value[]): Value {
+    const method = this.staticMethods.get(factory);
+    if (method === undefined) {
+      throw this.error("VerifyError", 1107);
+    }
+
+    return method.apply(o, args);
   }
 
   // The super operations, as MethodEnv's: by the base class's traits
@@ -2256,7 +2325,7 @@ export class Runtime {
     }
 
     if (b === 0) {
-      throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.name);
+      throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.errorName);
     }
 
     r = this.callValue(this.getBound(o, traits, b, mn), o, args, mn);
@@ -2267,7 +2336,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if (b === 0) {
-      throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
+      throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.errorName);
     }
 
     return this.getBound(o, traits, b, mn);
@@ -2286,11 +2355,11 @@ export class Runtime {
         o[slotKey(id)] = this.coerce(v, traits.slotType(id));
         return;
       case BIND_Method:
-        throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.errorName);
       case 0:
-        throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.errorName);
       default:
-        throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.errorName);
     }
   }
 
@@ -2765,7 +2834,7 @@ export class Runtime {
           return v;
         }
 
-        throw this.error("TypeError", 1034, this.describe(v), traits.name);
+        throw this.error("TypeError", 1034, this.describe(v), traits.errorName);
       }
     }
   }
@@ -2790,7 +2859,7 @@ export class Runtime {
       return v;
     }
 
-    throw this.error("TypeError", 1034, this.describe(v), traits.name);
+    throw this.error("TypeError", 1034, this.describe(v), traits.errorName);
   }
 
   coerceString(v: Value): string | null {
@@ -3031,7 +3100,7 @@ export class Runtime {
       }
     }
 
-    throw this.error("TypeError", 1050, o.$traits.name);
+    throw this.error("TypeError", 1050, o.$traits.errorName);
   }
 
   add(a: Value, b: Value): Value {

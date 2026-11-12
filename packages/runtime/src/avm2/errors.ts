@@ -67,6 +67,8 @@ export function describe(rt: Runtime, v: Value): string {
     return rt.toString(v);
   }
 
+  // Its class's name without the package, as "Object@0", the address left out.
   const name: string = v.$traits.name;
-  return `${name.slice(name.lastIndexOf("::") + (name.includes("::") ? 2 : 0))}@0`;
+  const colons = name.lastIndexOf("::");
+  return `${colons < 0 ? name : name.slice(colons + 2)}@0`;
 }

@@ -121,7 +121,14 @@ function chooseTraits(rt: Runtime, v: Value): Traits | string {
     return "null";
   }
 
-  if (typeof v === "number" && (v | 0) === v && v >= -(1 << 28) && v < 1 << 28) {
+  // An int atom: -0 is a double.
+  if (
+    typeof v === "number" &&
+    (v | 0) === v &&
+    v >= -(1 << 28) &&
+    v < 1 << 28 &&
+    !Object.is(v, -0)
+  ) {
     return rt.traitsOfType("int");
   }
 

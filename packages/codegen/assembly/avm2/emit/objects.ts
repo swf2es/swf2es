@@ -270,6 +270,18 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       em.reg(src + <i32>ir.srcCount[i] - 1);
       return true;
     case ops.OP_getproperty:
+      if (interpretedKey(em, a, src + 1)) {
+        em.assign(i);
+        out.text("rt.getInterpreted(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(")");
+        return true;
+      }
+
       if (indexed(em, a, src + 1)) {
         // As avmplus' getUintProperty: an element by its number, of a
         // Vector by the kind of its elements where the IR knows it.
@@ -332,6 +344,19 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
       out.text(")");
       return true;
     case ops.OP_setproperty:
+      if (interpretedKey(em, a, src + 1)) {
+        out.text("rt.setInterpreted(");
+        em.reg(src);
+        out.text(", M[");
+        out.uint(a);
+        out.text("], ");
+        em.reg(src + 1);
+        out.text(", ");
+        em.reg(src + 2);
+        out.text(")");
+        return true;
+      }
+
       if (indexed(em, a, src + 1)) {
         const kind = vectorKind(em, em.regType[src]);
         // An Array's element below its length written in place, as
@@ -541,9 +566,10 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         em.assign(i);
       }
 
-      out.text("rt.callStatic(A, ");
+      // By its factory, which the runtime keeps the first method it made of.
+      out.text("rt.callStatic(F[");
       out.uint(a);
-      out.text(", ");
+      out.text("], ");
       em.reg(src);
       args(em, src + 1, ir.b[i]);
       out.text(")");
@@ -957,6 +983,23 @@ function storedType(em: MethodEmitter, kind: string, src: i32): i32 {
       // A class's instances: an instance check, which throws as the helper would.
       return isClassRef(em, type) ? type : CONVERTS;
   }
+}
+
+/**
+ * Whether getproperty or setproperty by multiname `a`, a runtime name
+ * alone, takes the key in register r as avmplus' interpreter does in a
+ * script's or a class's initializer (rt.getInterpreted): an int key of an
+ * object is an element there whatever the name's namespaces, where the
+ * JIT needs a public one and no attribute. A String is never such a key.
+ */
+function interpretedKey(em: MethodEmitter, a: u32, r: i32): bool {
+  const kind = em.abc.pool.mnKind[a];
+  return (
+    em.staticInit &&
+    (kind === C.CONSTANT_MultinameLA ||
+      (kind === C.CONSTANT_MultinameL && !em.domain.hasPublicNamespace(em.index, a))) &&
+    em.builtinOf(r) !== BUILTIN_String
+  );
 }
 
 /**
