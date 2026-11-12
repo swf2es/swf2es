@@ -18,6 +18,7 @@ import {
   translation3D,
 } from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -65,7 +66,7 @@ const CHANGES = [
 export function matrix3DNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   let numberVector: AsObject | null = null;
-  const axes = ["x", "y", "z", "w"];
+  const axes = ["x", "y", "z", "w"] as const;
 
   const checkedAxis = (value: Value, axis: Value): number => {
     if (value === null || value === undefined) {
@@ -99,7 +100,7 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
     s.rt.construct(s.rt.classNamed("flash.geom::Vector3D"), x, y, z, w) as AsObject;
 
   const read3D = (v: AsObject): number[] =>
-    axes.map((axis) => s.rt.toNumber(s.rt.getProperty(v, s.rt.publicName(axis))));
+    axes.map((axis) => s.rt.toNumber(s.rt.prop(v as As3<"flash.geom::Vector3D">, axis)));
 
   const xyz = (v: AsObject): [number, number, number] => {
     const [x, y, z] = read3D(v);
@@ -235,7 +236,7 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const n = checkedAxis(dest, row);
       const m = data(this);
       for (let i = 0; i < 4; i++) {
-        s.rt.setProperty(dest as AsObject, s.rt.publicName(axes[i]), m[n + i * 4]);
+        s.rt.setProp(dest as As3<"flash.geom::Vector3D">, axes[i], m[n + i * 4]);
       }
     }
 
@@ -243,7 +244,7 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const n = checkedAxis(dest, column);
       const m = data(this);
       for (let i = 0; i < 4; i++) {
-        s.rt.setProperty(dest as AsObject, s.rt.publicName(axes[i]), m[n * 4 + i]);
+        s.rt.setProp(dest as As3<"flash.geom::Vector3D">, axes[i], m[n * 4 + i]);
       }
     }
 
@@ -251,9 +252,7 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const n = checkedAxis(source, row);
       const m = data(this);
       for (let i = 0; i < 4; i++) {
-        m[n + i * 4] = s.rt.toNumber(
-          s.rt.getProperty(source as AsObject, s.rt.publicName(axes[i])),
-        );
+        m[n + i * 4] = s.rt.toNumber(s.rt.prop(source as As3<"flash.geom::Vector3D">, axes[i]));
       }
     }
 
@@ -261,9 +260,7 @@ export function matrix3DNatives(s: Scripting): avm2.Natives {
       const n = checkedAxis(source, column);
       const m = data(this);
       for (let i = 0; i < 4; i++) {
-        m[n * 4 + i] = s.rt.toNumber(
-          s.rt.getProperty(source as AsObject, s.rt.publicName(axes[i])),
-        );
+        m[n * 4 + i] = s.rt.toNumber(s.rt.prop(source as As3<"flash.geom::Vector3D">, axes[i]));
       }
     }
 

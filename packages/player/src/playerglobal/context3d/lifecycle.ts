@@ -10,6 +10,7 @@ import { avm2 } from "@swf2es/runtime";
 import { encodeDxt } from "../../bitmap/dxt.js";
 import { dispatchEvent } from "../../scripting/events.js";
 import type { Scripting } from "../../scripting.js";
+import type { As3 } from "../as3-types.js";
 
 export type AsObject = avm2.AsObject;
 export type ResourceValue = Buffer3D | Program3D | Texture3D;
@@ -146,7 +147,8 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   const indexOf = (slot: AsObject): number => {
     let index = indices.get(slot);
     if (index === undefined) {
-      const vector = s.rt.getProperty(s.stage?.object, s.rt.publicName("stage3Ds")) as AsObject;
+      const stage = s.stage?.object as As3<"flash.display::Stage">;
+      const vector = s.rt.prop(stage, "stage3Ds") as AsObject;
       index = (vector.$a as AsObject[]).indexOf(slot);
       if (index < 0) {
         unsupported("a Stage3D that the stage does not list");

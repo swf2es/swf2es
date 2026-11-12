@@ -3,6 +3,7 @@
 import { avm2 } from "@swf2es/runtime";
 import { interpolate3D, pointAt3D, transform3D, translation3D } from "../../../display/matrix3d.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -20,8 +21,8 @@ export function utils3DNatives(s: Scripting): avm2.Natives {
     return v as AsObject;
   };
 
-  const component = (v: AsObject, name: string): number =>
-    s.rt.toNumber(s.rt.getProperty(v, s.rt.publicName(name)));
+  const component = (v: AsObject, name: "x" | "y" | "z"): number =>
+    s.rt.toNumber(s.rt.prop(v as As3<"flash.geom::Vector3D">, name));
 
   /** A vector grown with zeros to `n`, as Flash grows it; a fixed one too short is RangeError 1126. */
   const grow = (v: AsObject, n: number): void => {
@@ -38,7 +39,8 @@ export function utils3DNatives(s: Scripting): avm2.Natives {
     }
   };
 
-  const xyz = (v: AsObject): number[] => ["x", "y", "z"].map((name) => component(v, name));
+  const xyz = (v: AsObject): number[] =>
+    (["x", "y", "z"] as const).map((name) => component(v, name));
 
   class Utils3DNatives {
     /**

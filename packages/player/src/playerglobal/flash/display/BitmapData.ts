@@ -190,7 +190,8 @@ function drawInto(
  * the range's ends wraps round to near 0, 107374180 drawing at -2.4.
  */
 function matrixOf(s: Scripting, o: AsObject): Affine {
-  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(o, s.rt.publicName(k)));
+  const matrix = o as As3<"flash.geom::Matrix">;
+  const read = (k: "a" | "b" | "c" | "d" | "tx" | "ty") => s.rt.toNumber(s.rt.prop(matrix, k));
   const m = {
     a: read("a"),
     b: read("b"),
@@ -622,15 +623,14 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const store = storeOf(s, this);
       const given = (offsets as AsObject | null)?.$a as Value[] | undefined;
       const point = s.rt.classNamed("flash.geom::Point");
-      const read = (p: AsObject, k: string) =>
-        s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k)));
+      const read = (p: As3<"flash.geom::Point">, k: "x" | "y") => s.rt.toNumber(s.rt.prop(p, k));
       // Past 1024 octaves the doubles' ratio would be infinite, where Flash's sum stays as it was from
       // some 40 on, for any count up to 2^32 - 1, a negative one too (the `perlin-noise` case).
       const count = Math.min(s.rt.toUint(octaves), 1024);
       const shifts = Array.from({ length: count }, (_, i): [number, number] => {
         const p = given?.[i];
         return p && s.rt.isInstanceOf(p, point.$it)
-          ? [read(p as AsObject, "x"), read(p as AsObject, "y")]
+          ? [read(p as As3<"flash.geom::Point">, "x"), read(p as As3<"flash.geom::Point">, "y")]
           : [0, 0];
       });
       perlinNoise(
