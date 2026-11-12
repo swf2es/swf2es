@@ -351,7 +351,8 @@ function verifySpecial(bd: BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32): bo
 /**
  * Whether method `m` of bd ABC may be called statically: without types
  * any may, as the structural checks cannot tell; with them, as avmplus'
- * AbcEnv, one bound to a traits by a method, getter or setter.
+ * AbcEnv, one bound to a traits by a method, getter or setter, or a
+ * class's or its instances' initializer.
  */
 function callable(bd: BodyDecoder, m: u32): bool {
   const domain = bd.domain;
@@ -359,7 +360,7 @@ function callable(bd: BodyDecoder, m: u32): bool {
     return true;
   }
 
-  return domain.isVirtual(domain.methodStart[bd.index] + m);
+  return domain.staticallyCallable(domain.methodStart[bd.index] + m);
 }
 
 /** Values a multiname takes from the stack: a runtime namespace, a runtime name, or both. */

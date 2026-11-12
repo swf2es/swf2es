@@ -665,14 +665,9 @@ export class Runtime {
       // indexes the scopes their closures capture: the global object is
       // only what they push.
       for (const [d, factory, id, , params] of script.desc.traits.methods) {
-        installMethod(
-          this,
-          traits.methodHome(3),
-          d,
-          withId(factory(this.empty, this.scriptSuper), id),
-          factory,
-          params,
-        );
+        const method = withId(factory(this.empty, this.scriptSuper), id);
+        this.keepStatic(factory, method);
+        installMethod(this, traits.methodHome(3), d, method, factory, params);
       }
 
       // Caches keep the methods.
@@ -2288,8 +2283,33 @@ export class Runtime {
     return key;
   }
 
-  callStatic(_abc: Abc, m: number, ..._args: Value[]): Value {
-    throw this.unsupported(`callstatic ${m}`);
+  /**
+   * The first method each factory made for a class's or a script's
+   * traits, as avmplus' AbcEnv keeps the first MethodEnv of each method
+   * a vtable makes (VTable::makeMethodEnv): what callstatic calls.
+   */
+  private readonly staticMethods = new WeakMap<Factory, Method>();
+
+  /** Keep `method`, made by `factory`, for callstatic, unless it made one before. */
+  keepStatic(factory: Factory, method: Method): void {
+    if (!this.staticMethods.has(factory)) {
+      this.staticMethods.set(factory, method);
+    }
+  }
+
+  /**
+   * callstatic: method `factory` made, called on `o` with its arguments,
+   * which the compiler coerced. avmplus verifies a method when it first
+   * runs and refuses one that calls a method no vtable has made yet
+   * (1107); that is found here only once the call is reached.
+   */
+  callStatic(factory: Factory, o: Value, ...args: Value[]): Value {
+    const method = this.staticMethods.get(factory);
+    if (method === undefined) {
+      throw this.error("VerifyError", 1107);
+    }
+
+    return method.apply(o, args);
   }
 
   // The super operations, as MethodEnv's: by the base class's traits

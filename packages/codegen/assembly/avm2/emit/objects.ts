@@ -566,9 +566,10 @@ export function object(em: MethodEmitter, i: u32, op: u16): bool {
         em.assign(i);
       }
 
-      out.text("rt.callStatic(A, ");
+      // By its factory, which the runtime keeps the first method it made of.
+      out.text("rt.callStatic(F[");
       out.uint(a);
-      out.text(", ");
+      out.text("], ");
       em.reg(src);
       args(em, src + 1, ir.b[i]);
       out.text(")");

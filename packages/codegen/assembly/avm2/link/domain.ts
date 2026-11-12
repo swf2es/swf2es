@@ -57,6 +57,7 @@ import {
   TRAITS_Catch,
   TRAITS_Class,
   TRAITS_Instance,
+  TRAITS_Script,
   TraitsTable,
   TYPE_Any,
 } from "./traits";
@@ -521,6 +522,22 @@ export class Domain {
   /** Whether method m is a method, getter or setter of some traits, which callstatic may call. */
   isVirtual(m: u32): bool {
     return this.traits.methodVirtual[m] !== 0;
+  }
+
+  /**
+   * Whether callstatic may call method m, as avmplus' AbcEnv keeps an
+   * environment for it once its traits have a vtable (VTable::makeMethodEnv):
+   * a method, getter or setter of some traits, or the initializer of a
+   * class or of its instances. A script's has none outside AOT.
+   */
+  staticallyCallable(m: u32): bool {
+    const traits = this.traits;
+    if (traits.methodVirtual[m] !== 0) {
+      return true;
+    }
+
+    const t = traits.methodTraits[m];
+    return t >= 0 && traits.init[t] === <i32>m && traits.kind[t] !== TRAITS_Script;
   }
 
   /**
