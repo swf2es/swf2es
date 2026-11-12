@@ -1,6 +1,8 @@
-// flash.net.URLRequest: a URL and how to ask for it, kept as fields.
+// flash.net.URLRequest: a URL and how to ask for it, kept as fields, AIR's
+// starting as URLRequestDefaults are when it is made.
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../../scripting.js";
+import { defaultUserAgent, idleTimeout, requestDefaults } from "./URLRequestDefaults.js";
 
 type Value = avm2.Value;
 
@@ -86,8 +88,9 @@ export function urlRequestNatives(s: Scripting): avm2.Natives {
       this.$followRedirects = !!v;
     }
 
+    // Null is AIR's own agent, not the defaults'; "" stays.
     get userAgent(): Value {
-      return this.$userAgent ?? null;
+      return this.$userAgent ?? defaultUserAgent(s);
     }
 
     set userAgent(v: Value) {
@@ -119,7 +122,7 @@ export function urlRequestNatives(s: Scripting): avm2.Natives {
     }
 
     "flash.net:URLRequest::_SetIdleTimeout"(v: Value): void {
-      this.$idleTimeout = Number(v);
+      this.$idleTimeout = idleTimeout(s, v);
     }
 
     get idleTimeout(): number {
@@ -137,4 +140,23 @@ export function urlRequestNatives(s: Scripting): avm2.Natives {
 
   avm2.registerNativeClass(natives, "flash.net::URLRequest", URLRequestNatives);
   return natives;
+}
+
+export function urlRequestHooks(s: Scripting): Record<string, avm2.ClassHook> {
+  return {
+    "flash.net::URLRequest": {
+      create: (traits) => {
+        const o = Object.create(traits.proto);
+        const d = requestDefaults(s);
+        o.$followRedirects = d.followRedirects;
+        o.$manageCookies = d.manageCookies;
+        o.$authenticate = d.authenticate;
+        o.$useCache = d.useCache;
+        o.$cacheResponse = d.cacheResponse;
+        o.$idleTimeout = d.idleTimeout;
+        o.$userAgent = d.userAgent;
+        return o;
+      },
+    },
+  };
 }

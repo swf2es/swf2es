@@ -80,7 +80,8 @@ import { netConnectionNatives } from "./flash/net/NetConnection.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
-import { urlRequestNatives } from "./flash/net/URLRequest.js";
+import { urlRequestHooks, urlRequestNatives } from "./flash/net/URLRequest.js";
+import { urlRequestDefaultsNatives } from "./flash/net/URLRequestDefaults.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { xmlSocketNatives } from "./flash/net/XMLSocket.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
@@ -155,6 +156,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...numberFormatterNatives(s),
     ...stringToolsNatives(s),
     ...urlRequestNatives(s),
+    ...urlRequestDefaultsNatives(s),
     ...urlStreamNatives(s),
     ...navigateNatives(s),
     ...applicationDomainNatives(s),
@@ -232,5 +234,6 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...clipboardHooks(),
     ...soundHooks(s),
     ...fontHooks(s),
+    ...urlRequestHooks(s),
   };
 }

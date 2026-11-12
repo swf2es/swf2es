@@ -18,7 +18,7 @@ type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
 /** NativeApplication.runtimeVersion, and its patch level: the AIR these natives follow. */
-const AIR_RUNTIME_VERSION = "51.3.1.2";
+export const AIR_RUNTIME_VERSION = "51.3.1.2";
 const AIR_PATCH_LEVEL = 2;
 
 const INVOKE = "invoke";

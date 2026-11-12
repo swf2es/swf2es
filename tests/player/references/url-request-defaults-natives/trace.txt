@@ -1,0 +1,51 @@
+default authenticate true
+default cacheResponse true
+default followRedirects true
+default idleTimeout 0
+default manageCookies true
+default useCache true
+default userAgent air
+before authenticate true
+before cacheResponse true
+before followRedirects true
+before idleTimeout 0
+before manageCookies true
+before useCache true
+before userAgent air
+set booleans done
+idleTimeout 2.5 2.5
+idleTimeout -1 RangeError: Error #2006: The supplied index is out of bounds.
+idleTimeout NaN NaN
+idleTimeout 3 3
+userAgent x "x"
+defaults set authenticate false
+defaults set cacheResponse false
+defaults set followRedirects false
+defaults set idleTimeout 3
+defaults set manageCookies false
+defaults set useCache false
+defaults set userAgent "x"
+after authenticate false
+after cacheResponse false
+after followRedirects false
+after idleTimeout 3
+after manageCookies false
+after useCache false
+after userAgent "x"
+before still authenticate true
+before still cacheResponse true
+before still followRedirects true
+before still idleTimeout 0
+before still manageCookies true
+before still useCache true
+before still userAgent air
+userAgent 5 "5"
+userAgent null air
+request of null air
+userAgent empty air
+request of empty ""
+request set null air
+request idleTimeout -1 RangeError: Error #2006: The supplied index is out of bounds.
+login undefined
+login nulls undefined
+new [object URLRequestDefaults]
