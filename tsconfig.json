@@ -29,6 +29,8 @@
   ],
   "exclude": [
     "tests/programs/as3pb",
+    // What tests write, such as swf2es types' declarations, which import packages tests/ need not.
+    "tests/*/out",
     "tests/player/page.ts",
     "tests/player/render-bench/page.ts",
     "tests/web/page.ts",

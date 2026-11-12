@@ -85,6 +85,8 @@ node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--em
 node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
                               # ABCs after builtin and shell_toplevel (the command's own by default),
                               # their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js types file.swf [-o file.ts] [--air] [--name prefix]   # TypeScript
+                              # declarations of a SWF's or an ABC's classes over the player's libraries'
 node packages/cli/dist/main.js help [command]   # the commands, or one's options
 node tests/packages/run.ts    # the packages as npm gets them: packed by pnpm, their tarballs' licences,
                               # notices, READMEs and files checked, installed offline into an empty

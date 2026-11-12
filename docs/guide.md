@@ -272,6 +272,30 @@ Without a renderer, nothing is drawn, and `BitmapData.draw` of a display
 object is not supported. The display list, scripts, timers, loads and
 sockets all run.
 
+## Declarations of a SWF's classes
+
+```sh
+swf2es types movie.swf -o movie-types.ts --name Movie
+```
+
+writes TypeScript declarations of the classes the SWF's ActionScript 3
+defines: for each, an interface of its instances' public members and one of
+its static ones, keyed by qualified name in `MovieClasses` and
+`MovieStatics`. A class extends the declarations of the one it extends in
+the player's libraries (`@swf2es/player/as3-types`), so a subclass of
+`flash.display.Sprite` has Sprite's members; a type that no library
+defines is `avm2.Value`. `--air` takes AIR's library in too. With them, a
+host's code reads a script's objects by name, checked as it compiles:
+
+```ts
+import type { avm2 } from "@swf2es/runtime";
+import type { MovieClasses } from "./movie-types.js";
+
+const hero = value as avm2.Ref<MovieClasses["game::Hero"]>;
+const hp = scripting.rt.prop(hero, "hp"); // a number; "hpp" would not compile
+scripting.rt.callProp(hero, "attack", null, 2);
+```
+
 ## Play a SWF on the desktop
 
 `@swf2es/desktop` is an Electron app that plays SWFs in a window, the
