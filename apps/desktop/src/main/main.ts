@@ -835,6 +835,9 @@ function createWindow(): void {
   window.on("closed", () => {
     window = null;
   });
+  // The page hears of full screen however it came, a SWF's Stage.displayState or the menu's F11.
+  window.on("enter-full-screen", () => window?.webContents.send("desktop:full-screen", true));
+  window.on("leave-full-screen", () => window?.webContents.send("desktop:full-screen", false));
   guard(window.webContents);
   void window.loadURL(`${APP_ORIGIN}/`);
 }
@@ -865,6 +868,12 @@ function listen(): void {
       movie: current?.movie ?? null,
       build,
     };
+  });
+  // Stage.displayState of a SWF the user opened: the window's full screen, asked with no gesture.
+  ipcMain.on("desktop:full-screen", (event, fullScreen: unknown) => {
+    if (trusted(event) && current && window) {
+      window.setFullScreen(fullScreen === true);
+    }
   });
   ipcMain.on("desktop:open-dialog", (event) => {
     if (trusted(event)) {
