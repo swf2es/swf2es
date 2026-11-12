@@ -118,6 +118,9 @@ const airSource = `package {
         stream.close();
         load("app", "data.txt");
         load("file", outside.url);
+        if (e.arguments.length > 2) {
+          load("http", e.arguments[2]);
+        }
         socket = new Socket();
         socket.addEventListener(Event.CONNECT, function (e:Event):void {
           socket.writeUTFBytes("ping");
@@ -136,6 +139,16 @@ const airSource = `package {
       var loader:URLLoader = new URLLoader();
       loader.addEventListener(Event.COMPLETE, function (e:Event):void {
         trace("air: " + label + " " + loader.data);
+      });
+      // AIR's alone, as the response's headers come: a file has none.
+      loader.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, function (e:HTTPStatusEvent):void {
+        var type:String = "";
+        for each (var header:URLRequestHeader in e.responseHeaders) {
+          if (header.name.toLowerCase() == "content-type") {
+            type = header.value;
+          }
+        }
+        trace("air: " + label + " status " + e.status + " " + e.redirected + " " + e.responseURL.split("/").pop() + " " + type);
       });
       loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
         trace("air: " + label + " refused");
@@ -490,31 +503,49 @@ async function air(): Promise<void> {
     }),
   );
 
-  // No socket allowed in the settings: an application asks no one.
-  await withApp(
-    { ...both, sockets: {} },
-    [`${app}AirSmoke-app.xml`, "--", String(port), "two words"],
-    async ({ stdout, until }) => {
-      const settled = () =>
-        ["app", "file", "socket"].every((what) =>
-          stdout.some((l) => l.startsWith(`air: ${what} `)),
+  // No socket allowed in the settings: an application asks no one. What it loads over HTTP
+  // tells its response as AIR does, which its files do not.
+  const served = await httpSite({ "/data.txt": ["text/plain", "served"] });
+  try {
+    await withApp(
+      { ...both, sockets: {} },
+      [`${app}AirSmoke-app.xml`, "--", String(port), "two words", `${served.origin}/data.txt`],
+      async ({ stdout, until }) => {
+        const settled = () =>
+          ["app", "file", "socket", "http served"].every((what) =>
+            stdout.some((l) => l.startsWith(`air: ${what}`)),
+          );
+        await until("the AIR application", settled);
+        for (const line of [
+          "air: url app:/AirSmoke.swf",
+          "air: sandbox application",
+          "air: title Air Smoke",
+          `air: invoke ${port}|two words|${served.origin}/data.txt true`,
+          "air: files true true 0",
+          "air: stream beside",
+          "air: app beside",
+          "air: file outside",
+          "air: http status 200 false data.txt text/plain",
+          "air: http served",
+          "air: socket pong",
+        ]) {
+          assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
+        }
+
+        assert.ok(
+          !stdout.some((l) => /^air: (app|file) status/.test(l)),
+          `a file's response status\n${stdout.join("\n")}`,
         );
-      await until("the AIR application", settled);
-      for (const line of [
-        "air: url app:/AirSmoke.swf",
-        "air: sandbox application",
-        "air: title Air Smoke",
-        `air: invoke ${port}|two words true`,
-        "air: files true true 0",
-        "air: stream beside",
-        "air: app beside",
-        "air: file outside",
-        "air: socket pong",
-      ]) {
-        assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
-      }
-    },
-  );
+        assert.ok(
+          stdout.indexOf("air: http status 200 false data.txt text/plain") <
+            stdout.indexOf("air: http served"),
+          stdout.join("\n"),
+        );
+      },
+    );
+  } finally {
+    served.server.close();
+  }
 
   // Its descriptor dropped on the window runs it too, with no arguments, from its own
   // directory. One that has run before, as the recent list has it, is not asked about again:

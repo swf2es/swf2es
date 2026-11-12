@@ -210,11 +210,20 @@ export interface FileServices {
   track(task: Promise<void>): void;
   fetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult>;
   error(id: number): never;
+  /** Whether a transfer's response is told as it comes, as AIR's httpResponseStatus. */
+  responseStatus?: boolean;
 }
 
 type Operation = { generation: number; signal: AbortSignal; abort(): void };
 
-export type FileEvent = (type: string, loaded?: number, total?: number, text?: string) => void;
+/** An "httpResponseStatus" has its request's URL as `text`, and the `response`. */
+export type FileEvent = (
+  type: string,
+  loaded?: number,
+  total?: number,
+  text?: string,
+  response?: FetchResult,
+) => void;
 
 /** One reference's operation, with stale host callbacks suppressed after cancel or destruction. */
 export class FileReference {
@@ -249,12 +258,19 @@ export class FileReference {
     return operation;
   }
 
-  private emit(operation: Operation, type: string, loaded = 0, total = 0, text = ""): boolean {
+  private emit(
+    operation: Operation,
+    type: string,
+    loaded = 0,
+    total = 0,
+    text = "",
+    response?: FetchResult,
+  ): boolean {
     if (operation.signal.aborted || operation.generation !== this.generation) {
       return false;
     }
 
-    this.event(type, loaded, total, text);
+    this.event(type, loaded, total, text, response);
     return !operation.signal.aborted && operation.generation === this.generation;
   }
 
@@ -413,6 +429,14 @@ export class FileReference {
     this.services.defer(() => this.emit(operation, "open"));
     this.after(operation, transfer(), ({ result, size }) => {
       if (!this.emit(operation, "progress", size, size)) {
+        return;
+      }
+
+      if (
+        this.services.responseStatus &&
+        result.status &&
+        !this.emit(operation, "httpResponseStatus", result.status, 0, request.url, result)
+      ) {
         return;
       }
 

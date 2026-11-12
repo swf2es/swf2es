@@ -789,15 +789,45 @@ export class Scripting {
     return this.rt.construct(this.rt.classNamed("flash.events::Event"), type, bubbles, false);
   }
 
-  /** Flash Player's status event; AIR-only response properties stay at their defaults. */
-  httpStatus(status: number): AsObject {
+  /**
+   * Flash Player's status event, after the bytes. In AIR too its response URL and headers stay
+   * at their defaults; `redirected` alone tells of the response.
+   */
+  httpStatus(status: number, redirected = false): AsObject {
+    return this.statusEvent("httpStatus", status, redirected);
+  }
+
+  /**
+   * AIR's status event for `result`, the response to a request for `url`, or null where AIR
+   * dispatches none: outside AIR, for a file, and where no response came.
+   */
+  httpResponseStatus(result: FetchResult, url: string): AsObject | null {
+    const responseUrl = result.url ?? url;
+    if (!this.air || result.local || result.status === 0 || !/^https?:/i.test(responseUrl)) {
+      return null;
+    }
+
+    const rt = this.rt;
+    const event = this.statusEvent("httpResponseStatus", result.status, result.url !== undefined);
+    const header = rt.classNamed("flash.net::URLRequestHeader");
+    rt.setProperty(event, rt.publicName("responseURL"), responseUrl);
+    rt.setProperty(
+      event,
+      rt.publicName("responseHeaders"),
+      rt.array(result.headers.map(([name, value]) => rt.construct(header, name, value))),
+    );
+
+    return event;
+  }
+
+  private statusEvent(type: string, status: number, redirected: boolean): AsObject {
     let cls = this.statusClass;
     if (!cls) {
       cls = this.rt.classNamed("flash.events::HTTPStatusEvent");
       this.statusClass = cls;
     }
 
-    return this.rt.construct(cls, "httpStatus", false, false, status);
+    return this.rt.construct(cls, type, false, false, status, redirected);
   }
 
   /** The display objects a broadcast of `type` reaches, for EventDispatcher to keep. */
