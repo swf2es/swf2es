@@ -1767,7 +1767,9 @@ check(
         await new Promise((done) => setTimeout(done, 50));
       }
 
-      assert.fail(`${what}: ${JSON.stringify(await call(evaluate, "fsLines"))}`);
+      assert.fail(
+        `${what}: ${JSON.stringify(await call(evaluate, "fsLines"))} ${JSON.stringify(await call(evaluate, "window.__fsDebug"))}`,
+      );
     };
     const lines = () => call<string[]>(evaluate, "fsLines.splice(0)");
     try {
@@ -1827,6 +1829,22 @@ check(
         "click fullScreen",
         "event false false normal",
       ]);
+
+      // In and straight out again within one gesture, before the browser has entered: the
+      // page leaves once it is in, and its late word of the entry puts the stage back in nothing.
+      const bounced = await send<{ result?: { value?: string } }>("Runtime.evaluate", {
+        expression: "fsPlayer.fsBounce()",
+        userGesture: true,
+        returnByValue: true,
+      });
+      assert.equal(bounced.result?.value, "fullScreen normal");
+      await call(
+        evaluate,
+        "new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(() => done(true), 500))))",
+      );
+      await until("the page out of full screen", "document.fullscreenElement === null");
+      assert.equal(await call(evaluate, "fsPlayer.fsState()"), "normal true true");
+      assert.deepEqual(await lines(), ["event true false fullScreen", "event false false normal"]);
 
       // A full screen the page asked for itself is the stage's too, and a destroy gives it back.
       const asked = await send<{ exceptionDetails?: object }>("Runtime.evaluate", {
