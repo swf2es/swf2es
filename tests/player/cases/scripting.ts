@@ -546,6 +546,15 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "system-small-natives",
+    swf: (abc) => bare(abc, 1, "SystemSmallNatives"),
+    script: "SystemSmallNatives",
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "currency-parse-result-natives",
     swf: (abc) => bare(abc, 1, "CurrencyParseResultNatives"),
     script: "CurrencyParseResultNatives",

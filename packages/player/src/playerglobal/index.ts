@@ -78,12 +78,14 @@ import { fileReferenceNatives } from "./flash/net/FileReference.js";
 import { localConnectionNatives } from "./flash/net/LocalConnection.js";
 import { netConnectionNatives } from "./flash/net/NetConnection.js";
 import { navigateNatives } from "./flash/net/navigateToURL.js";
+import { secureSocketNatives } from "./flash/net/SecureSocket.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
 import { urlRequestHooks, urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlRequestDefaultsNatives } from "./flash/net/URLRequestDefaults.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { xmlSocketNatives } from "./flash/net/XMLSocket.js";
+import { printJobNatives } from "./flash/printing/PrintJob.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
 import { accelerometerNatives } from "./flash/sensors/Accelerometer.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
@@ -169,6 +171,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
     ...socketNatives(s),
+    ...secureSocketNatives(),
     ...xmlSocketNatives(s),
     ...localConnectionNatives(s),
     ...webSocketNatives(s),
@@ -218,7 +221,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...keyboardNatives(),
     ...gameInputNatives(s),
     ...contextMenuNatives(s),
-    ...accelerometerNatives(),
+    ...accelerometerNatives(s),
+    ...printJobNatives(),
   };
 }
 
