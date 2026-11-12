@@ -85,6 +85,8 @@ node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--em
 node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
                               # ABCs after builtin and shell_toplevel (the command's own by default),
                               # their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js types file.swf [-o file.ts] [--air] [--name prefix]   # TypeScript
+                              # declarations of a SWF's or an ABC's classes over the player's libraries'
 node packages/cli/dist/main.js help [command]   # the commands, or one's options
 node tests/packages/run.ts    # the packages as npm gets them: packed by pnpm, their tarballs' licences,
                               # notices, READMEs and files checked, installed offline into an empty
@@ -94,6 +96,9 @@ node tools/notices.ts [--update]   # each package's LICENSE, LICENSE.third-party
                               # a unit test holds to what its files' headers say came from elsewhere
 node tools/avmplus-libraries.ts [--update]   # avmplus' builtin.abc and shell_toplevel.abc embedded
                               # in @swf2es/runtime and @swf2es/cli, from the submodule (after a bump)
+node tools/as3-types.ts [--update]   # the TypeScript declarations of builtin's, playerglobal's and
+                              # AIR's classes, for natives' Runtime.prop (docs/architecture/runtime.md);
+                              # pnpm as3:playerglobal, as3:air and avmplus-libraries --update run it
 node tools/version.ts <version>   # every published package at that version (docs/releasing.md)
 node tools/publish.ts [--dry-run] # pack and publish the packages to npm in dependency order, passing
                               # by versions npm has; release.yml runs it on a tag v<version> on main

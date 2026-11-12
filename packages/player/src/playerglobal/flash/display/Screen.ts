@@ -10,6 +10,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { AirScreen, WindowBounds } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -72,8 +73,8 @@ function overlaps(rect: WindowBounds, bounds: WindowBounds): boolean {
 export function screenNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   const states = new WeakMap<object, ScreenState>();
-  const prop = (o: Value, name: string) =>
-    Number(s.rt.getProperty(o as AsObject, avm2.qname(avm2.publicNs, name)));
+  const prop = (o: As3<"flash.geom::Rectangle">, name: "x" | "y" | "width" | "height") =>
+    Number(s.rt.prop(o, name));
   const rectangle = (b: WindowBounds) =>
     s.rt.construct(s.rt.classNamed("flash.geom::Rectangle"), b.x, b.y, b.width, b.height);
 
