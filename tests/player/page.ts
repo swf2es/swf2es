@@ -1190,6 +1190,89 @@ async function resizeSwf(
 }
 
 /**
+ * A SWF with no scripts drawn as a host fitting it to a window draws it, a
+ * frame at each resolution, canvas pixels a stage pixel: each frame's
+ * pixels, where `capture` asks for them, and the device text's glyphs and
+ * runs rasterized by the end of it.
+ */
+async function deviceTextSwf(
+  base64: string,
+  resolutions: number[],
+  capture: boolean,
+): Promise<{ width: number; height: number; pixels: string | null; rasterized: number }[]> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const player = new Player(bytes, null);
+  const view = new RenderView({
+    width: player.width,
+    height: player.height,
+    resolution: 1,
+    background: player.background,
+    preserveDrawingBuffer: true,
+    fillTessellator: await fillTessellator(),
+    samples: 4,
+  });
+  view.quality = player.quality;
+  const frames = [];
+  try {
+    await player.start();
+
+    for (const resolution of resolutions) {
+      view.resize(player.width, player.height, resolution);
+      player.tick();
+      view.render(player.stage);
+      let pixels: string | null = null;
+      if (capture) {
+        const data = pixelsOf(view.gl);
+        let text = "";
+        for (let i = 0; i < data.length; i += 0x8000) {
+          text += String.fromCharCode(...data.subarray(i, i + 0x8000));
+        }
+
+        pixels = btoa(text);
+      }
+
+      frames.push({
+        width: view.gl.drawingBufferWidth,
+        height: view.gl.drawingBufferHeight,
+        pixels,
+        rasterized: view.textRasterized,
+      });
+    }
+
+    return frames;
+  } finally {
+    view.destroy();
+  }
+}
+
+/** `text` drawn black on white by the page's own canvas in the CSS `font`, its baseline at `baseline`: its RGBA, top row first. */
+function canvasText(
+  text: string,
+  font: string,
+  width: number,
+  height: number,
+  x: number,
+  baseline: number,
+): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d") as CanvasRenderingContext2D;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, width, height);
+  context.fillStyle = "#000000";
+  context.font = font;
+  context.fillText(text, x, baseline);
+  const data = context.getImageData(0, 0, width, height).data;
+  let out = "";
+  for (let i = 0; i < data.length; i += 0x8000) {
+    out += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  }
+
+  return btoa(out);
+}
+
+/**
  * What is wrong with the context's provoking vertex, or null: where the
  * browser has WEBGL_provoking_vertex it must be the first, which keeps
  * Safari's Metal from rewriting every draw's indices (webgl/backend.ts).
@@ -1693,6 +1776,8 @@ const page = globalThis as unknown as {
   traceSwf: typeof traceSwf;
   resizeSwf: typeof resizeSwf;
   redrawSwf: typeof redrawSwf;
+  deviceTextSwf: typeof deviceTextSwf;
+  canvasText: typeof canvasText;
   contextLossSwf: typeof contextLossSwf;
   contextLossPlanSwf: typeof contextLossPlanSwf;
 };
@@ -1706,5 +1791,7 @@ page.closeSwf = closeSwf;
 page.traceSwf = traceSwf;
 page.resizeSwf = resizeSwf;
 page.redrawSwf = redrawSwf;
+page.deviceTextSwf = deviceTextSwf;
+page.canvasText = canvasText;
 page.contextLossSwf = contextLossSwf;
 page.contextLossPlanSwf = contextLossPlanSwf;
