@@ -1217,7 +1217,7 @@ export class Runtime {
       "ReferenceError",
       name === null && nsset ? 1081 : 1069,
       mn.name ?? "*",
-      traits.name,
+      traits.errorName,
     );
   }
 
@@ -1623,10 +1623,10 @@ export class Runtime {
           return o[slot];
         }
 
-        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.errorName);
       }
       default:
-        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1077, mn.name ?? "*", traits.errorName);
     }
   }
 
@@ -1728,7 +1728,7 @@ export class Runtime {
       switch (b & 7) {
         case BIND_Const:
           if (!init) {
-            throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
+            throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.errorName);
           }
           o[slotKey(id)] = this.coerce(v, traits.slotType(id));
           return;
@@ -1740,9 +1740,9 @@ export class Runtime {
           (traits.proto[untypedSetKey(id + 1)] ?? traits.proto[methodKey(id + 1)]).call(o, v);
           return;
         case BIND_Method:
-          throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
+          throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.errorName);
         default:
-          throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
+          throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.errorName);
       }
     }
 
@@ -1767,7 +1767,7 @@ export class Runtime {
       }
     }
 
-    throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.name);
+    throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.errorName);
   }
 
   initProperty(o: Value, mn: Multiname, v: Value): void {
@@ -1786,7 +1786,7 @@ export class Runtime {
 
     // A primitive's property cannot be deleted, as MethodEnv's delproperty has it.
     if (typeof o !== "object" || o instanceof Namespace) {
-      throw this.error("ReferenceError", 1120, mn.name ?? "*", this.traitsOf(o).name);
+      throw this.error("ReferenceError", 1120, mn.name ?? "*", this.traitsOf(o).errorName);
     }
 
     // E4X 11.3.1: delete x[list] is a TypeError, as in delete x.a.(b == 1).
@@ -2325,7 +2325,7 @@ export class Runtime {
     }
 
     if (b === 0) {
-      throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.name);
+      throw this.error("ReferenceError", 1070, mn.name ?? "*", traits.errorName);
     }
 
     r = this.callValue(this.getBound(o, traits, b, mn), o, args, mn);
@@ -2336,7 +2336,7 @@ export class Runtime {
     const traits: Traits = sup.$it;
     const b = traits.find(mn);
     if (b === 0) {
-      throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.name);
+      throw this.error("ReferenceError", 1069, mn.name ?? "*", traits.errorName);
     }
 
     return this.getBound(o, traits, b, mn);
@@ -2355,11 +2355,11 @@ export class Runtime {
         o[slotKey(id)] = this.coerce(v, traits.slotType(id));
         return;
       case BIND_Method:
-        throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1037, mn.name ?? "*", traits.errorName);
       case 0:
-        throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1056, mn.name ?? "*", traits.errorName);
       default:
-        throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.name);
+        throw this.error("ReferenceError", 1074, mn.name ?? "*", traits.errorName);
     }
   }
 
@@ -2834,7 +2834,7 @@ export class Runtime {
           return v;
         }
 
-        throw this.error("TypeError", 1034, this.describe(v), traits.name);
+        throw this.error("TypeError", 1034, this.describe(v), traits.errorName);
       }
     }
   }
@@ -2859,7 +2859,7 @@ export class Runtime {
       return v;
     }
 
-    throw this.error("TypeError", 1034, this.describe(v), traits.name);
+    throw this.error("TypeError", 1034, this.describe(v), traits.errorName);
   }
 
   coerceString(v: Value): string | null {
@@ -3100,7 +3100,7 @@ export class Runtime {
       }
     }
 
-    throw this.error("TypeError", 1050, o.$traits.name);
+    throw this.error("TypeError", 1050, o.$traits.errorName);
   }
 
   add(a: Value, b: Value): Value {
