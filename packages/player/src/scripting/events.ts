@@ -194,7 +194,8 @@ export function dispatchEvent(s: Scripting, target: AsObject, event: AsObject): 
   const owner: AsObject = target.$target ?? target;
   // An ErrorEvent no listener of its type hears is an error nothing caught,
   // told before the event is anyone's: its target is still null, as in Flash.
-  if (!heard(target, event[f.type], owner) && s.uncaughtErrors.mustBeHeard(event)) {
+  // (A unit test's stand-in for a Scripting has no uncaughtErrors.)
+  if (!heard(target, event[f.type], owner) && s.uncaughtErrors?.mustBeHeard(event)) {
     s.uncaughtErrors.unheard(event);
     return true;
   }

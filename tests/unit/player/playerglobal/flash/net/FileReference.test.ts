@@ -164,7 +164,7 @@ test("a load completion listener can start a second load into a fresh ByteArray"
 for (const ending of ["cancel", "ioError"] as const) {
   test(`an upload cannot populate the ByteArray of a reload ended by ${ending}`, async () => {
     let reads = 0;
-    const { player, rt, get, call, frame } = await setup({
+    const { player, rt, file, get, call, frame } = await setup({
       fetch: async () => ({ bytes: new Uint8Array(), status: 200, headers: [] }),
       fileHost: {
         browse: async () => [
@@ -184,6 +184,10 @@ for (const ending of ["cancel", "ioError"] as const) {
         save: async () => null,
       },
     });
+    // Heard: an IOErrorEvent no listener hears is an error nothing caught.
+    file.$listeners = new Map([
+      ["ioError", [{ fn: { $f: () => {} }, capture: false, priority: 0 }]],
+    ]);
     try {
       call("browse");
       await frame();
