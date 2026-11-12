@@ -3,7 +3,7 @@
 // swf2es-desktop command of the package npm installs, and a checkout's
 // `start`.
 //
-//   npx @swf2es/desktop [--trace] [file.swf | https://host/movie.swf]
+//   npx @swf2es/desktop [--trace] [--log-network] [file.swf | https://host/movie.swf]
 //   npx @swf2es/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //   pnpm --filter @swf2es/desktop start ...        the same, in a checkout
 //
