@@ -36,6 +36,7 @@ import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
 import type { Scripting } from "../../../scripting.js";
+import type { As3 } from "../../as3-types.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { colorOf } from "../geom/Transform.js";
 import { programOf } from "./ShaderData.js";
@@ -82,8 +83,8 @@ function rectOf(s: Scripting, v: Value, span = false): PixelRect {
     throw s.rt.error("TypeError", 2007, "rect");
   }
 
-  const r = v as AsObject;
-  const read = (k: string) => s.rt.toNumber(s.rt.getProperty(r, s.rt.publicName(k)));
+  const r = v as As3<"flash.geom::Rectangle">;
+  const read = (k: "x" | "y" | "width" | "height") => s.rt.toNumber(s.rt.prop(r, k));
   return (span ? spanRect : pixelRect)(read("x"), read("y"), read("width"), read("height"));
 }
 
@@ -98,9 +99,9 @@ function pointOf(s: Scripting, v: Value, name: string): [number, number] {
     throw s.rt.error("TypeError", 2007, name);
   }
 
-  const p = v as AsObject;
-  const read = (k: string) => {
-    const t = Math.trunc(s.rt.toNumber(s.rt.getProperty(p, s.rt.publicName(k))));
+  const p = v as As3<"flash.geom::Point">;
+  const read = (k: "x" | "y") => {
+    const t = Math.trunc(s.rt.toNumber(s.rt.prop(p, k)));
     return t >= -0x80000000 && t <= 0x7fffffff ? t + 0 : -0x80000000;
   };
   return [read("x"), read("y")];
@@ -470,7 +471,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
       const options = compressor as AsObject;
       const is = (name: string) => s.rt.isInstance(options, s.rt.classNamed(name));
-      const option = (name: string) => s.rt.getProperty(options, s.rt.publicName(name));
+      const xr = options as As3<"flash.display::JPEGXREncoderOptions">;
       const jpeg = is("flash.display::JPEGEncoderOptions");
       const jpegXr = !jpeg && is("flash.display::JPEGXREncoderOptions");
       if (!jpeg && !jpegXr && !is("flash.display::PNGEncoderOptions")) {
@@ -484,7 +485,11 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
 
       // The options are checked once the rect has passed. A JPEG's quality and a JPEG XR's
       // quantization are uints, of which Flash takes 0 to 100.
-      const quality = jpeg || jpegXr ? Number(option(jpeg ? "quality" : "quantization")) : 0;
+      const quality = jpeg
+        ? Number(s.rt.prop(options as As3<"flash.display::JPEGEncoderOptions">, "quality"))
+        : jpegXr
+          ? Number(s.rt.prop(xr, "quantization"))
+          : 0;
       if (!(quality >= 0 && quality <= 100)) {
         throw s.rt.error("RangeError", 2006);
       }
@@ -493,7 +498,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       if (jpegXr) {
         // Then the colour space, then trimFlexBits, which Flash takes up to 255 and its
         // encoder up to 15, but only for an opaque bitmap: a transparent one trims none.
-        const colorSpace = option("colorSpace") as string | null;
+        const colorSpace = s.rt.prop(xr, "colorSpace");
         if (colorSpace === null || colorSpace === undefined) {
           throw s.rt.error("TypeError", 2007, "colorspace");
         }
@@ -502,7 +507,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
           throw s.rt.error("ArgumentError", 2004);
         }
 
-        const trim = Number(option("trimFlexBits"));
+        const trim = Number(s.rt.prop(xr, "trimFlexBits"));
         if (!(trim >= 0 && trim <= 255)) {
           throw s.rt.error("RangeError", 2006);
         }
@@ -516,7 +521,8 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         // Quality 0 is 1.
         file = encodeJpeg(store, area, quality);
       } else {
-        file = encodePng(store, area, !!option("fastCompression"));
+        const png = options as As3<"flash.display::PNGEncoderOptions">;
+        file = encodePng(store, area, !!s.rt.prop(png, "fastCompression"));
       }
 
       const out =
