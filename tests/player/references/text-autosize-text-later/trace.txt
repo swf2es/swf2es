@@ -1,0 +1,34 @@
+text, right: right
+text, center: centre
+text: left
+text, width read, right: left
+text, x read, right: left
+text, x set, right: left
+text, hitTestPoint, right: left
+text, drawn into a bitmap: fitted
+text, drawn into a bitmap, right: left
+text, parent drawn into a bitmap, right: left
+text, text metrics read, right: right
+text, characters and lines asked, right: right
+text, scale, pointer and matrix read, right: right
+text, removed, added and scrolled, right: right
+text, left again, right: right
+htmlText, right: right
+appendText, right: right
+replaceText, right: right
+an input field's text, right: right
+fitted, setTextFormat, right: right
+fitted, defaultTextFormat, text, right: right
+fitted, replaceSelectedText, right: right
+fitted, multiline, longer text, right: right
+fitted, border, right: where it was
+right, text, left: left
+center, text, left: left
+text, none: not fitted
+text, none, right: right
+text, width, right: the set width's right kept
+lines, maxScrollV 11, bottomScrollV 1
+text, wordWrap: not fitted
+text, width read, wordWrap: fitted
+a label: right
+text, a frame drawn, right: left
