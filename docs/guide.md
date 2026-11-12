@@ -350,6 +350,11 @@ A SWF or an AIR application that sets `Stage.displayState` takes the
 window full screen, with no click needed, as in AIR and Flash's projector;
 Esc or F11 leaves.
 
+On Linux, a local file a SWF or an AIR application names that is not there
+as named is found as Windows and macOS find it, ignoring case, so content
+made there finds its files whatever case it names them in. Where two names
+in a directory differ only in case, neither is taken.
+
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.
 

@@ -22,6 +22,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { readAirDescriptor } from "@swf2es/format";
 import type { AirFileStat, AirLaunch } from "../shared/api.js";
+import { resolveCase } from "./case-paths.ts";
 
 /** What the command line asks adl's way: the descriptor, the application's directory, the arguments. */
 export interface AirCommand {
@@ -78,7 +79,7 @@ export function airLaunch(
   );
   mkdirSync(applicationStorage, { recursive: true });
   return {
-    content: resolve(application, ...descriptor.content.split("/")),
+    content: resolveCase(resolve(application, ...descriptor.content.split("/"))),
     relative: descriptor.content,
     launch: {
       descriptor: xml,
@@ -95,7 +96,8 @@ export function airLaunch(
 }
 
 /** What is at `path`, as File reads it; null where nothing is. */
-export function statOf(path: string): AirFileStat | null {
+export function statOf(asked: string): AirFileStat | null {
+  const path = resolveCase(asked);
   try {
     const s = statSync(path);
     const link = lstatSync(path).isSymbolicLink();
@@ -116,7 +118,7 @@ export function statOf(path: string): AirFileStat | null {
 /** The names in the directory at `path`; null where it is none. */
 export function listOf(path: string): string[] | null {
   try {
-    return readdirSync(path);
+    return readdirSync(resolveCase(path));
   } catch {
     return null;
   }
@@ -125,7 +127,7 @@ export function listOf(path: string): string[] | null {
 /** The bytes of the file at `path`, as FileStream's open reads them at once; null where none can be read. */
 export function readOf(path: string): Uint8Array | null {
   try {
-    return new Uint8Array(readFileSync(path));
+    return new Uint8Array(readFileSync(resolveCase(path)));
   } catch {
     return null;
   }
@@ -222,7 +224,8 @@ export class EncryptedItems {
  * `length` long, made with its directories where it is not: FileStream's
  * writes. False where it cannot be written.
  */
-export function writeOf(path: string, bytes: Uint8Array, offset: number, length: number): boolean {
+export function writeOf(asked: string, bytes: Uint8Array, offset: number, length: number): boolean {
+  const path = resolveCase(asked);
   return attempt(() => {
     mkdirSync(dirname(path), { recursive: true });
     // "a+" would only append; "r+" needs the file there, which "a" makes without emptying it.
@@ -239,16 +242,23 @@ export function writeOf(path: string, bytes: Uint8Array, offset: number, length:
 
 /** Makes the directory at `path` and those it is in; false where it cannot. */
 export function createDirectoryOf(path: string): boolean {
-  return attempt(() => mkdirSync(path, { recursive: true }));
+  return attempt(() => mkdirSync(resolveCase(path), { recursive: true }));
 }
 
 /** Removes the file or directory at `path`, with all in it; false where it cannot. */
 export function removeOf(path: string): boolean {
-  return attempt(() => rmSync(path, { recursive: true }));
+  return attempt(() => rmSync(resolveCase(path), { recursive: true }));
 }
 
 /** Moves what is at `from` to `to`, its directories made; false where it cannot. */
-export function moveOf(from: string, to: string): boolean {
+export function moveOf(askedFrom: string, askedTo: string): boolean {
+  const from = resolveCase(askedFrom);
+  let to = resolveCase(askedTo);
+  // A rename of its case alone, which Windows makes: the name as given, in its directory as found.
+  if (to === from) {
+    to = join(resolveCase(dirname(askedTo)), basename(askedTo));
+  }
+
   return attempt(() => {
     mkdirSync(dirname(to), { recursive: true });
     try {

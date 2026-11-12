@@ -65,6 +65,12 @@ in `C:\Users\Public` or a directory of `/tmp`, reads all that directory
 holds, which may be other programs' or users' files, so a SWF from
 elsewhere is best kept in a directory of its own.
 
+On Linux a path that is not there exactly is first found as Windows and
+macOS would find it, ignoring case (`src/main/case-paths.ts`), for the
+file host, an AIR application's File and its URLs alike; each grant is
+then judged on the real path found, so case reaches nothing a grant did
+not.
+
 The main process chooses the sandbox from the SWF's first 64 KB, with
 `fileAttributes` (`format`), which decompresses only as far as the first
 tag: a SWF's header may name a length of 4 GB, which it never trusts.

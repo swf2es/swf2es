@@ -140,6 +140,16 @@ fetch-electron` does so ahead, for the tests.
   opened with the app runs the application too, from its own directory
   with no arguments; the app asks first, once, until the descriptor
   leaves the recent list.
+- **Case in names.** Windows and macOS find a file whatever case its name
+  is given in, so content made there names files as it likes. On Linux, a
+  path a SWF or an AIR application names that is not there exactly is
+  found the same way: each missing name is the one in its directory equal
+  to it ignoring case (both as NFC, lowercased, which is close to how NTFS
+  and APFS fold case). `Maps/Town.swf` reads `maps/town.swf`; a file
+  written into `Saves/` goes into `saves/` where that is there, under the
+  name it was given. Where a directory holds two names that differ only in
+  case, neither is taken, and stderr says so once. A sandbox reaches no
+  more than before: what it lets a SWF read is judged on the file found.
 - **File dialogs** requested by AS2 or AS3 FileReference use native open
   and save dialogs after a click or key. Uploads and downloads use the
   same network permissions as other data requests.
