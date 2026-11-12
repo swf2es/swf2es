@@ -47,7 +47,7 @@ import {
   pairOf,
   walkless,
 } from "./enumeration.js";
-import { AsError, describe, errorMessage, stackOf } from "./errors.js";
+import { AsError, describe, detailOf, errorMessage, stackOf } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -3124,12 +3124,23 @@ export class Runtime {
       return new AsError(`${name}: ${message}`);
     }
 
-    return this.constructClass(cls, [message, id]);
+    const made = this.constructClass(cls, [message, id]);
+    // What the number stands for, kept beside the message for a host's report (detailOf).
+    if (!this.debugger) {
+      Object.defineProperty(made, "$detail", { value: errorMessage(true, id, args) });
+    }
+
+    return made;
   }
 
   /** See stackOf in errors.ts. */
   stackOf(error: Value): string | null {
     return stackOf(error);
+  }
+
+  /** See detailOf in errors.ts. */
+  detailOf(error: Value): string | null {
+    return detailOf(error);
   }
 
   /** See errorMessage in errors.ts. */
