@@ -265,16 +265,19 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
     b.installArtifact(module);
 }
 
-/// ATF's JPEG XR images: src/atf/root.zig and jxr.c over jxrlib's decoder
-/// and its glue, unchanged; jxrlib's encoder is left out. Small rather than
-/// fast: an image decodes once, as its texture uploads.
+/// JPEG XR images, ATF's and BitmapData.encode's: src/atf/root.zig and
+/// jxr.c over jxrlib's decoder, its glue and its encoder, unchanged. Small
+/// rather than fast: an image decodes once, as its texture uploads.
 fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
     const optimize: std.builtin.Optimize = .ReleaseSmall;
     const sys = [_][]const u8{ "adapthuff.c", "image.c", "strcodec.c", "strPredQuant.c", "strTransform.c" };
     const decode = [_][]const u8{ "decode.c", "postprocess.c", "segdec.c", "strdec.c", "strInvTransform.c", "strPredQuantDec.c" };
+    // strenc_x86.c is SSE2's, which wasm has not.
+    const encode = [_][]const u8{ "encode.c", "segenc.c", "strenc.c", "strFwdTransform.c", "strPredQuantEnc.c" };
     const glue = [_][]const u8{ "JXRGlue.c", "JXRGlueJxr.c", "JXRMeta.c" };
     const exports = [_][]const u8{
-        "reset", "alloc", "decodeImage", "resultPointer", "resultWidth", "resultHeight",
+        "reset",      "alloc",       "decodeImage", "resultPointer", "resultWidth", "resultHeight",
+        "resultSize", "encodeBegin", "encodeRows",  "encodeEnd",
     };
 
     const jxrlib = b.path(vendor ++ "jxrlib");
@@ -314,6 +317,7 @@ fn atf(b: *std.Build, target: std.Build.ResolvedTarget) void {
     };
     root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/sys"), .files = &sys, .flags = &flags });
     root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/decode"), .files = &decode, .flags = &flags });
+    root.addCSourceFiles(.{ .root = jxrlib.path(b, "image/encode"), .files = &encode, .flags = &flags });
     root.addCSourceFiles(.{ .root = jxrlib.path(b, "jxrgluelib"), .files = &glue, .flags = &flags });
     root.addCSourceFiles(.{ .root = b.path("src/atf"), .files = &.{"jxr.c"}, .flags = &flags });
 

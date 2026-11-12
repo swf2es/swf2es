@@ -317,8 +317,7 @@ about 120) and 520 ms otherwise (Flash 2.7 s), at 1% more bytes than
 level 9. The rect is rounded and clipped as other methods' are, and an
 empty one is ArgumentError 2006; a null rect or compressor is TypeError
 2007, a compressor not an encoder's options ArgumentError 2004; the file
-goes into the ByteArray given, from its position, or a new one. JPEG XR,
-which Flash also writes, is not supported yet. The
+goes into the ByteArray given, from its position, or a new one. The
 `bitmap-encode` case traces the file and each refusal under adl; fast
 compression's file is Flash's byte for byte, as it is deflated
 by zlib itself. `getPixels` and
@@ -369,6 +368,44 @@ back. There the browser's decoder comes between: Flash makes a block's
 chroma by a 16 by 16 inverse DCT, the browser by interpolating, which
 part by up to 56 on a hard edge between colours; decoded Flash's way in
 the unit tests, the files are within 10 of what Flash drew of its own.
+
+## JPEG XR
+
+`encode` with `JPEGXREncoderOptions` writes the file Flash writes, byte
+for byte; every choice below was read from the files adl writes. The
+codestream is jxrlib's encoder's (`jxr.c` in `@swf2es/native`), set as
+Flash sets it: spatial order, one tile, hard tile boundaries, no overlap
+filter, every band present, and one quantizer for every band and
+channel. An opaque bitmap is 24bppBGR; a transparent one 32bppPBGRA, the
+premultiplied colours the store keeps, with alpha interleaved as a plane
+of its own in the one codestream. `colorSpace` "auto" is 4:4:4 at every
+quantization; "4:2:2" and "4:2:0" subsample chroma as jxrlib does. The
+quantization maps to the quantizer index as 2 · q up to 15, q + 18 from
+16 to 48 and q + 20 from 49, so 0 is lossless. `trimFlexBits` trims an
+opaque bitmap's flexbits, and a transparent one's never: Flash leaves
+them whole whatever is asked.
+
+What Flash writes beside jxrlib's codestream is written after it: the
+headers' quantizers are one index for all channels (jxrlib writes three
+alike), or, lossless, one for luma and one for chroma, both 0; the size is
+always 16 bits a side, where jxrlib writes 32 past 255 macroblocks; the
+codestream is padded to an even length and the file has one byte past it;
+and the container is Flash's own, five tags (the pixel format, width,
+height, the codestream's offset and length) and the GUID, no resolution
+or metadata. Flash Player loads no JPEG XR, so nothing is drawn. A 4800 by 2475
+picture encodes in about 150 ms at the default quantization, twice
+JPEG's time, and 235 ms lossless.
+
+The refusals come in Flash's order: a null rect TypeError 2007, an empty
+one ArgumentError 2006; then a quantization past 100 RangeError 2006; a
+null `colorSpace` TypeError 2007 ("colorspace"), one not of the four
+ArgumentError 2004; a `trimFlexBits` past 255 RangeError 2006; and an
+opaque bitmap's past 15 Error 3699 with the ByteArray untouched, as
+Flash's encoder fails there. 64-bit adl crashes encoding a transparent
+bitmap, at least under Wine; the 32-bit adl.exe does not. The
+`bitmap-encode-jpegxr` case traces the files and the refusals under adl,
+and `tests/unit/player/bitmap/jpegxr.test.ts` holds the files to Flash's
+and decodes them through jxrlib's decoder.
 
 ## Pixel Bender
 

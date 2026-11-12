@@ -11,19 +11,25 @@ import type { BitmapStore, PixelRect } from "./bitmap.js";
 
 /** `rect` of the store, clipped to it and not empty, as a JPEG file at `quality`, 0 to 100. */
 export function encodeJpeg(store: BitmapStore, rect: PixelRect, quality: number): Uint8Array {
+  return jpegEncode(areaPixels(store, rect), rect.width, rect.height, quality);
+}
+
+/**
+ * The pixels of `rect`, clipped to the store, as the native encoders read
+ * them: the store's own rows where the area is as wide as it, else gathered.
+ */
+export function areaPixels(store: BitmapStore, rect: PixelRect): Uint32Array {
   const { x: x0, y: y0, width, height } = rect;
   const pixels = store.drawable;
-  // The rows the module reads: the store's own where the area is as wide as it, else gathered.
-  let rows: Uint32Array;
   if (x0 === 0 && width === store.width) {
-    rows = pixels.subarray(y0 * width, (y0 + height) * width);
-  } else {
-    rows = new Uint32Array(width * height);
-    for (let y = 0; y < height; y++) {
-      const from = (y0 + y) * store.width + x0;
-      rows.set(pixels.subarray(from, from + width), y * width);
-    }
+    return pixels.subarray(y0 * width, (y0 + height) * width);
   }
 
-  return jpegEncode(rows, width, height, quality);
+  const rows = new Uint32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const from = (y0 + y) * store.width + x0;
+    rows.set(pixels.subarray(from, from + width), y * width);
+  }
+
+  return rows;
 }
