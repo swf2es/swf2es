@@ -101,7 +101,11 @@ export class MethodEmitter {
   /** Which local scope registers hold with scopes, and how many are pushed. */
   scopeWith: StaticArray<u8> = new StaticArray<u8>(0);
   scopeDepth: u32 = 0;
-  /** The classes and Vectors the method being written refers to, in the order its T holds them. */
+  /**
+   * The classes and Vectors the method being written refers to, in the
+   * order its T holds them, and below zero the names among them
+   * (literalMultinames).
+   */
   types: i32[] = [];
   /**
    * By type: its index in types, where its stamp is typeGen, the method's.
@@ -113,6 +117,20 @@ export class MethodEmitter {
   typeStamp: StaticArray<u32> = new StaticArray<u32>(0);
   // From 1, as a fresh stamp is 0: an emitter that never called newTypes has seen no type.
   typeGen: u32 = 1;
+  /**
+   * The names the method makes of a MultinameL and a string its code holds,
+   * `obj["name"]`: the multiname and the string of each. Such a name is an
+   * entry of T as a type is, where types holds -1 - its index here.
+   */
+  literalMultinames: u32[] = [];
+  literalStrings: u32[] = [];
+  /**
+   * By string: the index in types of the last such name of it, where its
+   * stamp is typeGen. Two multinames with one string in a method, which is
+   * rare, take turns.
+   */
+  literalIndex: StaticArray<u32> = new StaticArray<u32>(0);
+  literalStamp: StaticArray<u32> = new StaticArray<u32>(0);
   /** The name the method being written is given, a JavaScript identifier; "" for none. */
   functionName: string = "";
   /**
@@ -783,11 +801,18 @@ export class MethodEmitter {
   /** A new method's types: none yet. */
   newTypes(): void {
     this.types.length = 0;
+    this.literalMultinames.length = 0;
+    this.literalStrings.length = 0;
     if (++this.typeGen === 0) {
       // Every 2^32 methods, the stamps of the first generation would match again.
       const stamp = this.typeStamp;
       for (let k = 0; k < stamp.length; k++) {
         stamp[k] = 0;
+      }
+
+      const literals = this.literalStamp;
+      for (let k = 0; k < literals.length; k++) {
+        literals[k] = 0;
       }
 
       this.typeGen = 1;
@@ -824,6 +849,37 @@ export class MethodEmitter {
     }
 
     return this.typeIndex[t];
+  }
+
+  /**
+   * The index in the method's T of the name multiname `mn` makes of the
+   * pool's string `string`, given it the next if new: made once as the
+   * module loads, not at every read of `obj["name"]`.
+   */
+  literalSlot(mn: u32, string: u32): u32 {
+    // string is one a pushstring the verifier passed names. The tables
+    // grow only at a method's first such name: an ABC's methods share a pool.
+    const count = this.abc.pool.stringCount;
+    if (<u32>this.literalStamp.length < count) {
+      this.literalIndex = new StaticArray<u32>(count);
+      this.literalStamp = new StaticArray<u32>(count);
+    }
+
+    if (this.literalStamp[string] === this.typeGen) {
+      const slot = this.literalIndex[string];
+      if (this.literalMultinames[-1 - this.types[slot]] === mn) {
+        return slot;
+      }
+    }
+
+    const slot = <u32>this.types.length;
+    this.types.push(-1 - this.literalMultinames.length);
+    this.literalMultinames.push(mn);
+    this.literalStrings.push(string);
+    this.literalStamp[string] = this.typeGen;
+    this.literalIndex[string] = slot;
+
+    return slot;
   }
 
   /** A space, but at the start of a line, as after a block written in place. */

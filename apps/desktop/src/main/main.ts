@@ -5,7 +5,7 @@
 //   electron apps/desktop [--trace] [file.swf | http(s)://host/movie.swf]
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
-// --ignore-certificate-errors[=host,...] leaves HTTPS certificates unchecked.
+// --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 //
 // The second runs an AIR application by its descriptor, as adl does.
 import { statSync } from "node:fs";
@@ -23,11 +23,13 @@ import {
   Menu,
   type MenuItemConstructorOptions,
   safeStorage,
+  screen,
   session,
   shell,
   type WebContents,
 } from "electron";
 import type {
+  AirScreenState,
   AirWindowState,
   LibraryName,
   NetworkResponse,
@@ -54,6 +56,8 @@ import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { Sandbox } from "./sandbox.ts";
 import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
+import { hasWebSocket, unverifiedDispatcher, webSocketOpener } from "./websocket-connections.ts";
+import { bridgeWebSockets } from "./websockets.ts";
 
 const preload = fileURLToPath(new URL("../preload/preload.cjs", import.meta.url));
 const promptPreload = fileURLToPath(new URL("../preload/prompt.cjs", import.meta.url));
@@ -95,15 +99,23 @@ const unverified = unverifiedHosts(process.argv.slice(1));
 if (unverified) {
   process.stderr.write(
     unverified.all
-      ? "swf2es: --ignore-certificate-errors: no HTTPS server's certificate is verified\n"
+      ? "swf2es: --ignore-certificate-errors: no HTTPS or WSS server's certificate is verified\n"
       : `swf2es: --ignore-certificate-errors: certificates are not verified for ${unverified.hosts.join(", ") || "no host"}\n`,
   );
 }
 
-const network = new Network({
-  unverified: (host) =>
-    !!unverified && (unverified.all || unverified.hosts.includes(host.toLowerCase())),
-});
+const unverifiedHost = (host: string) =>
+  !!unverified && (unverified.all || unverified.hosts.includes(host.toLowerCase()));
+const network = new Network({ unverified: unverifiedHost });
+// What opens an AIR application's WebSockets: the global's client, a wss: server's certificate
+// unchecked where the switch names its host.
+const insecureWebSockets = unverified ? unverifiedDispatcher() : null;
+if (unverified && !insecureWebSockets) {
+  process.stderr.write(
+    "swf2es: --ignore-certificate-errors: a WebSocket's certificate is verified all the same\n",
+  );
+}
+
 /** What the page's requests under way abort with, by the preload's number. */
 const requests = new Map<number, AbortController>();
 let settings: SettingsFile;
@@ -566,6 +578,23 @@ async function askForSocket(name: string, swf: string, endpoint: string): Promis
   }
 }
 
+/**
+ * Whether what plays may open a WebSocket to `url`: an AIR application,
+ * unasked and anywhere, as AIR's application sandbox connects and as its
+ * sockets do here. air.net.WebSocket is AIR's alone, so nothing else has one.
+ */
+function permitWebSocket(url: string): boolean {
+  if (sandbox.application && hasWebSocket()) {
+    return true;
+  }
+
+  const why = sandbox.application
+    ? "this Electron has no WebSocket client"
+    : "only an AIR application has one";
+  process.stderr.write(`swf2es: no WebSocket to ${url.slice(0, 2048)}: ${why}\n`);
+  return false;
+}
+
 async function showOpenDialog(): Promise<void> {
   if (!window) {
     return;
@@ -876,6 +905,13 @@ function listen(): void {
     }
   });
   bridgeSockets(trusted, permitSocket, netLog, logSockets);
+  bridgeWebSockets(
+    trusted,
+    permitWebSocket,
+    insecureWebSockets ? webSocketOpener(unverifiedHost, insecureWebSockets) : undefined,
+    netLog,
+    logSockets,
+  );
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");
@@ -921,6 +957,17 @@ function windowState(w: BrowserWindow): AirWindowState {
     active: w.isFocused(),
     visible: w.isVisible(),
   };
+}
+
+/** The displays as an AIR application's Screen reads them: the work area is past the system's bars. */
+function screenStates(): AirScreenState[] {
+  const primary = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((display) => ({
+    bounds: display.bounds,
+    visibleBounds: display.workArea,
+    colorDepth: display.colorDepth,
+    main: display.id === primary,
+  }));
 }
 
 /**
@@ -1004,6 +1051,9 @@ function listenForAir(): void {
   });
   ipcMain.on("air:window", (event) => {
     event.returnValue = playing(event) && window ? windowState(window) : null;
+  });
+  ipcMain.on("air:screens", (event) => {
+    event.returnValue = playing(event) ? screenStates() : [];
   });
   ipcMain.on("air:set-bounds", (event, bounds: unknown) => {
     const b = bounds as { x?: unknown; y?: unknown; width?: unknown; height?: unknown } | null;

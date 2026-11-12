@@ -91,7 +91,10 @@ default what the import map gives `@swf2es/codegen/codegen.wasm`;
 `socketProxy`, a function from a socket's host and port to a WebSocket
 relay's URL or a list of them as Ruffle's, a socket without one refused
 with #2031; `sockets`, a SocketHost of the embedder's own that takes the
-relays' place, as the desktop app's, which reaches TCP itself; `fetch`,
+relays' place, as the desktop app's, which reaches TCP itself;
+`webSockets`, a WebSocketHost of the embedder's own for
+`air.net.WebSocket` in place of the page's WebSocket, as the desktop
+app's, whose page has no network; `fetch`,
 an embedder's fetch in place of the browser's for what the SWFs load and
 for the SWF the element plays (purpose `movie`), with `loadPolicyFile`
 and `sandboxType` for the player, as the desktop app judges requests by

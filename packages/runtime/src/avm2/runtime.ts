@@ -47,7 +47,7 @@ import {
   pairOf,
   walkless,
 } from "./enumeration.js";
-import { AsError, describe, detailOf, errorMessage, stackOf } from "./errors.js";
+import { AsError, describe, detailOf, errorMessage, stackOf, UnsupportedError } from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -181,6 +181,7 @@ function dynamicValue(o: AsObject, name: string): Value {
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
+  private readonly onUnsupported: ((message: string) => void) | undefined;
   readonly compileAbc:
     | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
@@ -278,6 +279,7 @@ export class Runtime {
   ) {
     this.print = options.print ?? defaultPrint;
     this.debugger = options.debugger ?? false;
+    this.onUnsupported = options.onUnsupported;
     this.compileAbc = options.compileAbc ?? null;
     this.files = options.files ?? memoryFiles();
     this.workerHost = options.workers ?? null;
@@ -456,6 +458,22 @@ export class Runtime {
     if (mn.runtimeName && typeof last !== "number") {
       named.made = MADE_Value;
     }
+
+    return named;
+  }
+
+  /**
+   * The name runtimeName makes of `mn`, a MultinameL, and a string the
+   * code itself holds, `obj["name"]`: a module makes it once as it loads
+   * and keeps it as it keeps `mn`, so it has a cache as a module's own
+   * names have, however many such names the module has and however long
+   * the string is.
+   */
+  literalName(mn: Multiname, name: string): Multiname {
+    const named = new Multiname(mn.kind, mn.namespaces, mn.versions, name, mn.attribute);
+    named.domain = mn.domain;
+    named.made = MADE_Value;
+    named.cache = UNFILLED;
 
     return named;
   }
@@ -3352,11 +3370,39 @@ export class Runtime {
       return this.error("RangeError", 1506);
     }
 
+    if (e instanceof UnsupportedError) {
+      return this.unsupportedCaught(e);
+    }
+
     if (e instanceof Error && !(e instanceof AsError)) {
       throw e;
     }
 
     return e;
+  }
+
+  /** What a catch was told of already (unsupportedCaught). */
+  private readonly unsupportedTold = new Set<string>();
+
+  /**
+   * What is not supported as the AS3 error a catch gets: an
+   * IllegalOperationError with its message, or an Error where the player's
+   * classes are not loaded; said once to the host, as the code may say nothing.
+   */
+  private unsupportedCaught(e: UnsupportedError): Value {
+    if (!this.unsupportedTold.has(e.message)) {
+      this.unsupportedTold.add(e.message);
+      this.onUnsupported?.(e.message);
+    }
+
+    let cls: AsObject;
+    try {
+      cls = this.resolve(this.cls(namespace(NS_Public, "flash.errors"), "IllegalOperationError"));
+    } catch {
+      cls = this.builtinClass("Error");
+    }
+
+    return this.constructClass(cls, [e.message, 0]);
   }
 
   catches(e: Value, type: TypeRef): boolean {
@@ -3368,7 +3414,7 @@ export class Runtime {
   }
 
   unsupported(what: string): Error {
-    return new Error(`swf2es: ${what} is not supported yet`);
+    return new UnsupportedError(`swf2es: ${what} is not supported yet`);
   }
 
   // Class aliases and the classes AMF makes (amf-classes.ts).

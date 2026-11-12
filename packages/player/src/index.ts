@@ -27,6 +27,7 @@ export {
 } from "./files.js";
 export type {
   AirApplication,
+  AirScreen,
   AirWindow,
   CachedModule,
   ClipboardHost,

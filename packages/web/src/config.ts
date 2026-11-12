@@ -14,6 +14,7 @@ import {
   type ModuleCache,
   playerglobalLibrary,
   type SocketHost,
+  type WebSocketHost,
 } from "@swf2es/player";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
@@ -47,6 +48,11 @@ export interface Configuration {
    * socketProxy's relays: a desktop app's, which reaches TCP itself.
    */
   sockets?: SocketHost;
+  /**
+   * A host of the embedder's own for air.net.WebSocket, in place of the
+   * page's WebSocket: a desktop app's, whose page has no network.
+   */
+  webSockets?: WebSocketHost;
   fileHost?: FileHost | null;
   /**
    * A fetch of the embedder's own for what the SWFs load, the SWF the

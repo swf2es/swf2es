@@ -16,6 +16,7 @@
 //
 //   node tests/desktop/smoke.ts
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -29,6 +30,7 @@ import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
 import { display, withApp as runApp } from "./app.ts";
+import { webSocketServer } from "./websocket-server.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -91,9 +93,13 @@ const source = `package {
 // URL and sandbox, its launch's arguments and directory, what File finds
 // in its directory and outside it, reads a file by an app: URL, by a
 // FileStream, and one outside by its file: URL, connects a socket to the
-// port its argument names, unasked, and names its window's title.
+// port its argument names, unasked, names its window's title, and, given
+// a third argument, opens an air.net.WebSocket to that port: a text
+// message and a binary one each way, until the server closes it; and,
+// given a fourth, two more to that port over TLS, by address and by name.
 const airSource = `package {
   import flash.desktop.NativeApplication;
+  import flash.display.Screen;
   import flash.display.Sprite;
   import flash.events.*;
   import flash.filesystem.File;
@@ -101,12 +107,18 @@ const airSource = `package {
   import flash.filesystem.FileStream;
   import flash.net.*;
   import flash.system.Security;
+  import flash.utils.ByteArray;
+  import flash.utils.getDefinitionByName;
   public class AirSmoke extends Sprite {
     private var socket:Socket;
+    private var webSockets:Array = [];
     public function AirSmoke() {
       trace("air: url " + loaderInfo.url);
       trace("air: sandbox " + Security.sandboxType);
       trace("air: title " + stage.nativeWindow.title);
+      // The system's displays: the main one among them, and the one the window is on.
+      var main:Screen = Screen.mainScreen;
+      trace("air: screen " + (main.bounds.width > 0 && main.visibleBounds.height > 0) + " " + (main.colorDepth >= 8) + " " + (Screen.screens.length >= 1) + " " + Screen.getScreensForRectangle(stage.nativeWindow.bounds).length);
       NativeApplication.nativeApplication.addEventListener(InvokeEvent.INVOKE, function (e:InvokeEvent):void {
         trace("air: invoke " + e.arguments.join("|") + " " + e.currentDirectory.exists);
         // app:/ has no parent, as adl's: up from its native path, under file:.
@@ -133,7 +145,44 @@ const airSource = `package {
           trace("air: socket refused");
         });
         socket.connect("127.0.0.1", int(e.arguments[0]));
+        if (e.arguments.length > 3) {
+          connectWebSocket("websocket", "ws://127.0.0.1:" + e.arguments[3] + "/smoke?q=1");
+        }
+        if (e.arguments.length > 4) {
+          connectWebSocket("wss-address", "wss://127.0.0.1:" + e.arguments[4] + "/");
+          connectWebSocket("wss-name", "wss://localhost:" + e.arguments[4] + "/");
+        }
       });
+    }
+    private function connectWebSocket(label:String, url:String):void {
+      // By name, and its event untyped: the playerglobal ASC compiles against has no AIR 51.
+      var WebSocket:Class = getDefinitionByName("air.net.WebSocket") as Class;
+      var webSocket:Object = new WebSocket();
+      webSockets.push(webSocket);
+      webSocket.addEventListener(Event.CONNECT, function (e:Event):void {
+        trace("air: " + label + " open " + webSocket.protocol);
+        webSocket.sendMessage(WebSocket.fmtTEXT, "ping");
+      });
+      webSocket.addEventListener("websocketData", function (event:Event):void {
+        var e:Object = event;
+        if (e.format == WebSocket.fmtTEXT) {
+          trace("air: " + label + " text " + e.stringData);
+          var bytes:ByteArray = new ByteArray();
+          bytes.writeByte(1);
+          bytes.writeByte(2);
+          bytes.writeByte(255);
+          webSocket.sendMessage(WebSocket.fmtBINARY, bytes);
+        } else {
+          trace("air: " + label + " binary " + e.data.length + " " + e.data[0] + "," + e.data[1] + "," + e.data[2]);
+        }
+      });
+      webSocket.addEventListener(Event.CLOSE, function (e:Event):void {
+        trace("air: " + label + " close " + webSocket.closeReason);
+      });
+      webSocket.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
+        trace("air: " + label + " refused");
+      });
+      webSocket.connect(url, new <String>["other", "smoke"]);
     }
     private function load(label:String, url:String):void {
       var loader:URLLoader = new URLLoader();
@@ -409,6 +458,16 @@ async function remote(): Promise<void> {
       // --log-sockets: what the socket sent and what came back.
       assert.match(stderr(), /swf2es: socket #\d+ > 4 B {2}ping/);
       assert.match(stderr(), /swf2es: socket #\d+ < 4 B {2}pong/);
+      // air.net.WebSocket is an AIR application's: the shell opens none for a SWF, whatever
+      // its page asks.
+      await evaluate(
+        `(window.swf2esDesktop.webSockets.connect("ws://127.0.0.1:${good.port}/", []), 0)`,
+      );
+      await until("the WebSocket refused", () =>
+        stderr().includes(
+          `swf2es: no WebSocket to ws://127.0.0.1:${good.port}/: only an AIR application has one`,
+        ),
+      );
       // Nor may the page read the local SWF's files while a remote one plays.
       assert.equal(
         await evaluate<number>(`fetch("swf2es://file/${token}/data.txt").then((r) => r.status)`),
@@ -468,7 +527,9 @@ const withApp = (settings: object, args: string[], run: Parameters<typeof runApp
 /**
  * An AIR application, its descriptor and content SWF in a directory of
  * their own, run adl's way with the socket server's port after "--": it
- * reads what Flash's local sandboxes refuse, and connects unasked.
+ * reads what Flash's local sandboxes refuse, and connects unasked, its
+ * socket and its WebSocket, which the main process opens for the page,
+ * whose own would be refused by its policy.
  */
 async function air(): Promise<void> {
   const app = `${out}air-app/`;
@@ -503,49 +564,171 @@ async function air(): Promise<void> {
     }),
   );
 
+  // A WebSocket server that answers "ping" with "pong", and a binary message
+  // with its bytes turned around, and then closes with a code of its own.
+  const heard: string[] = [];
+  const handlers: Parameters<typeof webSocketServer>[0] = {
+    protocol: (offered) => {
+      heard.push(`offered ${offered.join(",")}`);
+      return "smoke";
+    },
+    open: (peer) => heard.push(`path ${peer.request.url}`),
+    message: (peer, data) => {
+      if (typeof data === "string") {
+        heard.push(`text ${data}`);
+        peer.send(data === "ping" ? "pong" : "?");
+      } else {
+        heard.push(`binary ${[...data].join(",")}`);
+        peer.send(Uint8Array.from(data).reverse());
+        peer.close(4001);
+      }
+    },
+    close: (_peer, code) => heard.push(`close ${code}`),
+  };
+  const webSockets = await webSocketServer(handlers);
+  // The same over TLS, with a certificate it signed itself, where openssl makes one:
+  // --ignore-certificate-errors names its address, and not its name.
+  const made = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=localhost",
+      "-addext",
+      "subjectAltName=DNS:localhost,IP:127.0.0.1",
+      "-keyout",
+      `${out}air-key.pem`,
+      "-out",
+      `${out}air-cert.pem`,
+    ],
+    { encoding: "utf8" },
+  );
+  const secure =
+    made.status === 0
+      ? await webSocketServer(
+          { ...handlers, protocol: () => "smoke", open: undefined, close: undefined },
+          { key: readFileSync(`${out}air-key.pem`), cert: readFileSync(`${out}air-cert.pem`) },
+        )
+      : null;
+  if (!secure) {
+    console.warn("desktop smoke test: no openssl to make a certificate: wss: is not tested");
+  }
+
   // No socket allowed in the settings: an application asks no one. What it loads over HTTP
   // tells its response as AIR does, which its files do not.
   const served = await httpSite({ "/data.txt": ["text/plain", "served"] });
-  try {
-    await withApp(
-      { ...both, sockets: {} },
-      [`${app}AirSmoke-app.xml`, "--", String(port), "two words", `${served.origin}/data.txt`],
-      async ({ stdout, until }) => {
-        const settled = () =>
-          ["app", "file", "socket", "http served"].every((what) =>
-            stdout.some((l) => l.startsWith(`air: ${what}`)),
-          );
-        await until("the AIR application", settled);
+  await withApp(
+    { ...both, sockets: {} },
+    [
+      "--log-sockets",
+      "--ignore-certificate-errors=127.0.0.1",
+      `${app}AirSmoke-app.xml`,
+      "--",
+      String(port),
+      "two words",
+      `${served.origin}/data.txt`,
+      String(webSockets.port),
+      ...(secure ? [String(secure.port)] : []),
+    ],
+    async ({ stdout, stderr, until }) => {
+      const settled = () =>
+        [
+          "app",
+          "file",
+          "socket",
+          "http served",
+          "websocket close",
+          ...(secure ? ["wss-address close", "wss-name"] : []),
+        ].every((what) => stdout.some((l) => l.startsWith(`air: ${what}`)));
+      await until("the AIR application", settled);
+      for (const line of [
+        "air: websocket open smoke",
+        "air: websocket text pong",
+        "air: websocket binary 3 255,2,1",
+        "air: websocket close 4001",
+      ]) {
+        assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
+      }
+
+      assert.ok(!stdout.includes("air: websocket refused"), stdout.join("\n"));
+      assert.deepEqual(
+        heard.filter((line) => !line.startsWith("text") && !line.startsWith("binary")),
+        ["offered other,smoke", "path /smoke?q=1", "close 4001"],
+      );
+      assert.equal(heard.filter((line) => line === "text ping").length, secure ? 2 : 1);
+      assert.equal(heard.filter((line) => line === "binary 1,2,255").length, secure ? 2 : 1);
+      // Over TLS: the address the switch names goes unverified, the name it does not is refused.
+      if (secure) {
         for (const line of [
-          "air: url app:/AirSmoke.swf",
-          "air: sandbox application",
-          "air: title Air Smoke",
-          `air: invoke ${port}|two words|${served.origin}/data.txt true`,
-          "air: files true true 0",
-          "air: stream beside",
-          "air: app beside",
-          "air: file outside",
-          "air: http status 200 false data.txt text/plain",
-          "air: http served",
-          "air: socket pong",
+          "air: wss-address open smoke",
+          "air: wss-address text pong",
+          "air: wss-address binary 3 255,2,1",
+          "air: wss-address close 4001",
+          "air: wss-name refused",
         ]) {
           assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
         }
 
-        assert.ok(
-          !stdout.some((l) => /^air: (app|file) status/.test(l)),
-          `a file's response status\n${stdout.join("\n")}`,
-        );
-        assert.ok(
-          stdout.indexOf("air: http status 200 false data.txt text/plain") <
-            stdout.indexOf("air: http served"),
-          stdout.join("\n"),
-        );
-      },
-    );
-  } finally {
-    served.server.close();
-  }
+        assert.ok(!stdout.some((l) => l.startsWith("air: wss-name open")), stdout.join("\n"));
+      }
+
+      // --log-network: the connection, as a socket's; --log-sockets: its messages, a text
+      // one as its text.
+      const logged = stderr();
+      assert.ok(
+        logged.includes(
+          `swf2es: websocket #1 connecting to ws://127.0.0.1:${webSockets.port}/smoke?q=1`,
+        ),
+        logged,
+      );
+      for (const line of [
+        "swf2es: websocket #1 open smoke",
+        "swf2es: websocket #1 > text 4 B  ping",
+        "swf2es: websocket #1 < text 4 B  pong",
+        "swf2es: websocket #1 > binary 3 B  01 02 ff",
+        "swf2es: websocket #1 < binary 3 B  ff 02 01",
+        "swf2es: websocket #1 close 4001",
+      ]) {
+        assert.ok(logged.includes(line), `${line}\n${logged}`);
+      }
+
+      for (const line of [
+        "air: url app:/AirSmoke.swf",
+        "air: sandbox application",
+        "air: title Air Smoke",
+        "air: screen true true true 1",
+        `air: invoke ${[port, "two words", `${served.origin}/data.txt`, webSockets.port, ...(secure ? [secure.port] : [])].join("|")} true`,
+        "air: files true true 0",
+        "air: stream beside",
+        "air: app beside",
+        "air: file outside",
+        "air: http status 200 false data.txt text/plain",
+        "air: http served",
+        "air: socket pong",
+      ]) {
+        assert.ok(stdout.includes(line), `${line}\n${stdout.join("\n")}`);
+      }
+
+      assert.ok(
+        !stdout.some((l) => /^air: (app|file) status/.test(l)),
+        `a file's response status\n${stdout.join("\n")}`,
+      );
+      assert.ok(
+        stdout.indexOf("air: http status 200 false data.txt text/plain") <
+          stdout.indexOf("air: http served"),
+        stdout.join("\n"),
+      );
+    },
+  );
+  served.server.close();
+  await webSockets.close();
+  await secure?.close();
 
   // Its descriptor dropped on the window runs it too, with no arguments, from its own
   // directory. One that has run before, as the recent list has it, is not asked about again:
@@ -587,6 +770,7 @@ async function air(): Promise<void> {
         "air: url app:/AirSmoke.swf",
         "air: sandbox application",
         "air: title Air Smoke",
+        "air: screen true true true 1",
         "air: invoke  true",
         "air: stream beside",
         "air: app beside",

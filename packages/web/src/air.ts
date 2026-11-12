@@ -19,6 +19,7 @@ import {
 import {
   AIR_DEFINITIONS,
   type AirApplication,
+  type AirScreen,
   type AirWindow,
   type FetchRequest,
   type FetchResult,
@@ -182,7 +183,8 @@ export class AirApp {
 
   /**
    * NativeApplication's view: the descriptor, `args` as the launch's
-   * arguments, and `window`, the element playing it. Its exit is `exit`.
+   * arguments, `window`, the element playing it, and the page's screen.
+   * Its exit is `exit`.
    */
   application(
     window: AirWindow,
@@ -195,6 +197,7 @@ export class AirApp {
       arguments: args,
       currentDirectory: DIRECTORIES.application,
       window,
+      screens: pageScreens,
       exit,
     };
   }
@@ -494,4 +497,34 @@ export function elementWindow(element: HTMLElement, title: string | null): AirWi
     visible: () => true,
     stageOffset: () => ({ x: 0, y: 0 }),
   };
+}
+
+/**
+ * The screen the page is on, the one a page knows of, as Screen reads it:
+ * at the corner of its own desktop, as the element's window is placed in
+ * the page, and what the system's bars leave of it. A page is told the
+ * free part's place among all the screens and not its own screen's, so
+ * its corner is held to the room the bars take.
+ */
+export function pageScreens(): AirScreen[] {
+  const { width, height, availWidth, availHeight, colorDepth } = screen;
+  // availLeft and availTop are not in every browser, nor in the standard.
+  const { availLeft = 0, availTop = 0 } = screen as Screen & {
+    availLeft?: number;
+    availTop?: number;
+  };
+  const within = (at: number, room: number) => Math.min(Math.max(at, 0), Math.max(room, 0));
+  return [
+    {
+      bounds: { x: 0, y: 0, width, height },
+      visibleBounds: {
+        x: within(availLeft, width - availWidth),
+        y: within(availTop, height - availHeight),
+        width: availWidth,
+        height: availHeight,
+      },
+      colorDepth,
+      main: true,
+    },
+  ];
 }
