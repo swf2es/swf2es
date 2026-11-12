@@ -9,7 +9,7 @@
 // as the SWF's whose code dispatched it, with the event for `error`. What
 // no listener prevents is the host's to report.
 
-import type { avm2 } from "@swf2es/runtime";
+import { avm2 } from "@swf2es/runtime";
 import { rootOf } from "../display/display.js";
 import type { Library } from "../display/timeline.js";
 import type { Scripting } from "../scripting.js";
@@ -39,9 +39,16 @@ export class UncaughtErrors {
   /**
    * Tell of `error`, which code the player called threw: `by` the function
    * called, or the SWF it is of, if known. One of the player's own, which
-   * no script could catch either, is no event's: the host's alone.
+   * no script could catch either, is no event's: the host's alone. So is
+   * what is not supported, which only a catch of the script's own makes
+   * an AS3 error: a listener that prevents every error must not hide it.
    */
   report(error: unknown, by: Value | Library = null): void {
+    if (error instanceof avm2.UnsupportedError) {
+      this.s.tellHost(error);
+      return;
+    }
+
     let value: Value;
     try {
       value = this.s.rt.caught(error);

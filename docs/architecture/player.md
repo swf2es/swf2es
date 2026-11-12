@@ -346,7 +346,9 @@ UncaughtErrorEvent throws is dropped. `preventDefault()` keeps the error
 from the host, which otherwise gets it as above, an unheard ErrorEvent
 as Flash words it ("Error #2044: Unhandled ioError:. text=…"). An error
 of the player's own, which no script could catch, is no event but the
-host's alone, as are AVM1's, which has no such event, and a background
+host's alone; so is what is not supported yet, which a script's own
+catch gets as an AS3 error but a listener that prevents every error
+must not hide; so are AVM1's, which has no such event, and a background
 worker's once its own listeners let it pass. The SWF is told from the
 function the player called (`Runtime.moduleOf`): one a script made, by
 the global object its scope begins with, a bound method by its

@@ -173,9 +173,12 @@ test("an error of the player's own is the host's alone", { skip }, async () => {
   );
   const own = new Error("swf2es: not a SWF's error");
   scripting.reportUncaught(own);
+  // What is not supported, too, though a script's own catch would get it.
+  const unsupported = scripting.rt.unsupported("a thing");
+  scripting.reportUncaught(unsupported);
 
   assert.deepEqual(lines, []);
-  assert.deepEqual(raw, [own]);
+  assert.deepEqual(raw, [own, unsupported]);
 });
 
 test("what a listener of the event throws is dropped, and the error is still told once", {
