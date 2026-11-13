@@ -24,6 +24,48 @@ const GLYPHS_LEAST = 1024;
 const LEAST = 1 << 16;
 /** Holes past which, and past the live vertices, the atlas is packed again. */
 const SLACK = 1 << 16;
+/**
+ * The vertices, and the indices, staged before an upload: geometries placed
+ * one after another go to the GPU in one call for each buffer, not two a
+ * geometry, which shapes drawn anew each frame paid for some thousand times
+ * a frame. A geometry larger than the staging is uploaded from its own copy.
+ */
+const STAGED_VERTICES = 1 << 14;
+const STAGED_INDICES = 1 << 16;
+
+/**
+ * `data`'s `count` vertices interleaved into `floats` from float `at`, `words` the same bytes:
+ * a position, a texel or zeros, then the colour's bytes or a mesh's depth.
+ */
+function interleave(
+  data: GeometryData,
+  count: number,
+  floats: Float32Array,
+  words: Uint32Array,
+  at: number,
+): void {
+  const positions = data.positions;
+  const texels = data.texels;
+  const depths = data.depths;
+  const colors = data.colors;
+  for (let i = 0; i < count; i++, at += 5) {
+    floats[at] = positions[i * 2];
+    floats[at + 1] = positions[i * 2 + 1];
+    if (texels) {
+      floats[at + 2] = texels[i * 2];
+      floats[at + 3] = texels[i * 2 + 1];
+    } else {
+      floats[at + 2] = 0;
+      floats[at + 3] = 0;
+    }
+
+    if (depths) {
+      floats[at + 4] = depths[i];
+    } else {
+      words[at + 4] = colors[i];
+    }
+  }
+}
 
 /** Where a geometry lies in the atlas, or the glyph atlas with its text's mode and table. */
 export interface Place {
@@ -58,6 +100,15 @@ export class GeometryAtlas {
   private indexTop = 0;
   private live = 0;
   private holes = 0;
+  /** Vertices staged for the atlas from vertex `stagedVertexAt`, as floats and as words. */
+  private readonly stagedFloats = new Float32Array(STAGED_VERTICES * (VERTEX_BYTES / 4));
+  private readonly stagedWords = new Uint32Array(this.stagedFloats.buffer);
+  private stagedVertexAt = 0;
+  private stagedVertices = 0;
+  /** Indices staged for the atlas from index `stagedIndexAt`. */
+  private readonly stagedIndices = new Uint32Array(STAGED_INDICES);
+  private stagedIndexAt = 0;
+  private stagedIndexCount = 0;
   places: (Place | null)[] = [];
   glyphArray!: WebGLVertexArrayObject;
   private glyphBuffer!: WebGLBuffer;
@@ -123,6 +174,8 @@ export class GeometryAtlas {
     });
     this.vertexCapacity = 0;
     this.indexCapacity = 0;
+    this.stagedVertices = 0;
+    this.stagedIndexCount = 0;
     this.places = [];
   }
 
@@ -147,6 +200,13 @@ export class GeometryAtlas {
     }
 
     geometries.removed.length = 0;
+    // Nothing left in it: filled again from its start, in the buffers it has.
+    if (this.live === 0) {
+      this.vertexTop = 0;
+      this.indexTop = 0;
+      this.holes = 0;
+    }
+
     // Changed in place: copied again where they lie, else as added.
     for (const id of geometries.updated) {
       const place = this.places[id];
@@ -211,6 +271,7 @@ export class GeometryAtlas {
     }
 
     geometries.added.length = 0;
+    this.flush();
   }
 
   /** Every live shape's geometry copied into new buffers, with room for twice what is live. */
@@ -233,6 +294,9 @@ export class GeometryAtlas {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, this.vertexCapacity * VERTEX_BYTES, gl.STATIC_DRAW);
     gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.indexCapacity * 4, gl.STATIC_DRAW);
+    // What was staged for the buffers replaced is copied again below.
+    this.stagedVertices = 0;
+    this.stagedIndexCount = 0;
     this.vertexTop = 0;
     this.indexTop = 0;
     this.live = 0;
@@ -243,6 +307,8 @@ export class GeometryAtlas {
         this.copyIn(id, data);
       }
     }
+
+    this.flush();
   }
 
   /** Every live text's quads copied into new glyph buffers: none till a text needs them. */
@@ -285,54 +351,110 @@ export class GeometryAtlas {
       return;
     }
 
-    const gl = this.gl;
     const count = data.positions.length / 2;
     const base = this.vertexTop;
     this.copyVertices(data, base);
-    const indices = new Uint32Array(data.indices.length);
-    for (let i = 0; i < indices.length; i++) {
-      indices[i] = data.indices[i] + base;
+    const source = data.indices;
+    const length = source.length;
+    if (length > STAGED_INDICES) {
+      const indices = new Uint32Array(length);
+      for (let i = 0; i < length; i++) {
+        indices[i] = source[i] + base;
+      }
+
+      this.flushIndices();
+      this.state.bindVertexArray(this.vertexArray);
+      this.gl.bufferSubData(this.gl.ELEMENT_ARRAY_BUFFER, this.indexTop * 4, indices);
+    } else {
+      if (
+        this.stagedIndexCount + length > STAGED_INDICES ||
+        this.stagedIndexAt + this.stagedIndexCount !== this.indexTop
+      ) {
+        this.flushIndices();
+        this.stagedIndexAt = this.indexTop;
+      }
+
+      const staged = this.stagedIndices;
+      const at = this.stagedIndexCount;
+      for (let i = 0; i < length; i++) {
+        staged[at + i] = source[i] + base;
+      }
+
+      this.stagedIndexCount = at + length;
     }
 
-    this.state.bindVertexArray(this.vertexArray);
-    gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, this.indexTop * 4, indices);
     this.places[id] = {
       vertexStart: base,
       vertices: count,
       indexStart: this.indexTop,
-      indices: indices.length,
+      indices: length,
       glyphs: null,
       flat: data.flat === true,
       batch: this.batch(data),
     };
     this.vertexTop += count;
-    this.indexTop += indices.length;
+    this.indexTop += length;
     this.live += count;
   }
 
-  /** `data`'s vertices interleaved into the atlas from vertex `base`. */
+  /** `data`'s vertices interleaved for the atlas from vertex `base`: staged, or uploaded if too many. */
   private copyVertices(data: GeometryData, base: number): void {
-    const gl = this.gl;
     const count = data.positions.length / 2;
-    const bytes = new ArrayBuffer(count * VERTEX_BYTES);
-    const floats = new Float32Array(bytes);
-    const words = new Uint32Array(bytes);
-    const texels = data.texels;
-    const depths = data.depths;
-    for (let i = 0; i < count; i++) {
-      floats[i * 5] = data.positions[i * 2];
-      floats[i * 5 + 1] = data.positions[i * 2 + 1];
-      floats[i * 5 + 2] = texels ? texels[i * 2] : 0;
-      floats[i * 5 + 3] = texels ? texels[i * 2 + 1] : 0;
-      if (depths) {
-        floats[i * 5 + 4] = depths[i];
-      } else {
-        words[i * 5 + 4] = data.colors[i];
-      }
+    if (count > STAGED_VERTICES) {
+      const floats = new Float32Array(count * (VERTEX_BYTES / 4));
+      interleave(data, count, floats, new Uint32Array(floats.buffer), 0);
+      this.flushVertices();
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+      this.gl.bufferSubData(this.gl.ARRAY_BUFFER, base * VERTEX_BYTES, floats);
+      return;
     }
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferSubData(gl.ARRAY_BUFFER, base * VERTEX_BYTES, floats);
+    if (
+      this.stagedVertices + count > STAGED_VERTICES ||
+      this.stagedVertexAt + this.stagedVertices !== base
+    ) {
+      this.flushVertices();
+      this.stagedVertexAt = base;
+    }
+
+    interleave(data, count, this.stagedFloats, this.stagedWords, this.stagedVertices * 5);
+    this.stagedVertices += count;
+  }
+
+  /** What is staged, uploaded: before anything draws from the atlas. */
+  private flush(): void {
+    this.flushVertices();
+    this.flushIndices();
+  }
+
+  private flushVertices(): void {
+    if (this.stagedVertices > 0) {
+      const gl = this.gl;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.bufferSubData(
+        gl.ARRAY_BUFFER,
+        this.stagedVertexAt * VERTEX_BYTES,
+        this.stagedFloats,
+        0,
+        this.stagedVertices * 5,
+      );
+      this.stagedVertices = 0;
+    }
+  }
+
+  private flushIndices(): void {
+    if (this.stagedIndexCount > 0) {
+      const gl = this.gl;
+      this.state.bindVertexArray(this.vertexArray);
+      gl.bufferSubData(
+        gl.ELEMENT_ARRAY_BUFFER,
+        this.stagedIndexAt * 4,
+        this.stagedIndices,
+        0,
+        this.stagedIndexCount,
+      );
+      this.stagedIndexCount = 0;
+    }
   }
 
   private batch(data: GeometryData): Place["batch"] {

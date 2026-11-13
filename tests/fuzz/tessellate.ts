@@ -110,7 +110,7 @@ function checkLayer(by: Tessellator): void {
   pending.length = 0;
 }
 
-/** Small concave contours and near misses for the native ear clipper. */
+/** Small concave contours and near misses for the native module's monotone cut and ear clipper. */
 function concave(kind: number): number[] {
   const points: number[] = [];
   switch (kind) {
@@ -149,6 +149,36 @@ function concave(kind: number): number[] {
       points.push(10, 90);
       break;
     }
+    case 3: {
+      // Two saws from one end to the other, which go along an axis once and back, as the native
+      // module cuts in a pass: clear of each other, or one tooth on, just past or just short of
+      // the other side, a straight edge; or both saws, clear or crossing.
+      const teeth = 2 + Math.floor(random() * 40);
+      const straight = random() < 0.5;
+      const gap = straight ? 4 : [4, 4, 0, -6][Math.floor(random() * 4)];
+      const tip = [undefined, 0, 1e-7, -1e-7][Math.floor(random() * 4)];
+      const at = 1 + Math.floor(random() * (teeth - 1));
+      points.push(10, 50);
+      for (let i = 1; i < teeth; i++) {
+        const x = 10 + (80 * (i + random() * 0.8 - 0.4)) / teeth;
+        points.push(
+          x,
+          straight && i === at && tip !== undefined ? 50 + tip : 50 - gap - random() * 30,
+        );
+      }
+
+      points.push(90, 50);
+      for (let i = teeth - 1; i > 0 && !straight; i--) {
+        points.push(10 + (80 * (i + random() * 0.8 - 0.4)) / teeth, 50 + gap + random() * 30);
+      }
+
+      if (random() < 0.5) {
+        for (let i = 0; i < points.length; i += 2) {
+          [points[i], points[i + 1]] = [points[i + 1], points[i]];
+        }
+      }
+      break;
+    }
     default: {
       // The notch touches or crosses the bottom edge, or stops just short of it.
       const tip = [0, -1e-7, 1e-7][Math.floor(random() * 3)];
@@ -181,7 +211,7 @@ for (const by of [tessellator, banded]) {
     }
 
     if (!convex && i % 32 < 16) {
-      contours.push(concave(Math.floor(i / 4) % 4));
+      contours.push(concave(Math.floor(i / 4) % 5));
     }
 
     for (
