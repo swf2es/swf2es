@@ -8,6 +8,19 @@ import type { DxtEncoder } from "./dxt.js";
  */
 export const MOST_BACK_BUFFER = 16384;
 
+/**
+ * A length in stage pixels at `scale` of the screen's to them, as AIR draws a back buffer
+ * configured for best resolution and its scissor rectangle: rounded half to even, as the
+ * FPU rounds by default (AIR 51 on Windows at 144 DPI: 33 to 50, 47 to 70).
+ */
+export function screenPixels(length: number, scale: number): number {
+  const exact = length * scale;
+  const floor = Math.floor(exact);
+  const rest = exact - floor;
+
+  return rest > 0.5 || (rest === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;
+}
+
 export const COMPARE_MODES = [
   "always",
   "never",
@@ -163,8 +176,18 @@ export interface Context3D {
   samplerFormats: boolean;
   /** Optional acceleration for pixels uploaded to compressed textures. */
   setDxtEncoder?(encoder: DxtEncoder): void;
-  /** Width and height from 32 to MOST_BACK_BUFFER. */
-  configure(width: number, height: number, depth?: boolean, antiAlias?: number): void;
+  /**
+   * Width and height from 32 to MOST_BACK_BUFFER, in the back buffer's pixels. `scale` is
+   * those to a CSS pixel where it shows, and to a scissor rectangle's unit: a back buffer
+   * configured for best resolution has the stage's contentsScaleFactor, any other 1.
+   */
+  configure(
+    width: number,
+    height: number,
+    depth?: boolean,
+    antiAlias?: number,
+    scale?: number,
+  ): void;
   /** No back buffer, width and height 0, as a size configureBackBuffer refuses leaves AIR's. */
   unconfigure(): void;
   clear(

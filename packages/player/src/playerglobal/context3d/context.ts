@@ -3,6 +3,7 @@ import {
   type BlendFactor,
   COMPARE_MODES,
   type CompareMode,
+  Context3DError,
   CULL_FACES,
   type CullFace,
   MOST_BACK_BUFFER,
@@ -15,6 +16,7 @@ import {
   ScissorBoundsError,
   STENCIL_ACTIONS,
   type StencilAction,
+  screenPixels,
   TextureBindingError,
   type TextureFormat,
   VERTEX_FORMATS,
@@ -37,7 +39,8 @@ const SIZE_ERRORS_FROM = 30;
 
 /**
  * A maxBackBufferWidth or maxBackBufferHeight set: AIR takes it between the back buffer's
- * size (at least 32) and the GPU's limit.
+ * size (at least 32), in stage pixels even where it is drawn at the screen's, and the GPU's
+ * limit.
  */
 function most(value: number, size: number, limit: number): number {
   return Math.min(limit, Math.max(32, size, value | 0));
@@ -71,6 +74,28 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     dispose,
   } = bindings;
   const matrixConstants = new Float32Array(16);
+  // Drawn at the screen's pixels as they change, between frames: cleared again before drawing.
+  bindings.followScale((entry) => {
+    const scale = s.contentsScaleFactor;
+    const width = screenPixels(entry.width, scale);
+    const height = screenPixels(entry.height, scale);
+    if (width < 32 || height < 32 || width > entry.maxWidth || height > entry.maxHeight) {
+      return;
+    }
+
+    try {
+      entry.backend.configure(width, height, entry.depth, entry.aa, scale);
+    } catch (error) {
+      // What the GPU cannot give at the new size, it keeps at the old.
+      if (!(error instanceof Context3DError)) {
+        throw error;
+      }
+
+      return;
+    }
+
+    entry.cleared = 0;
+  });
 
   class ContextNatives {
     get driverInfo(): string {
@@ -109,7 +134,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     set maxBackBufferWidth(value: number) {
       const entry = contexts.get(this as unknown as AsObject);
       if (entry) {
-        entry.maxWidth = most(value, entry.backend.width, MOST_BACK_BUFFER);
+        entry.maxWidth = most(value, entry.width, MOST_BACK_BUFFER);
       } else {
         this.$maxWidth = most(value, 0, DISPOSED_MOST);
       }
@@ -124,7 +149,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     set maxBackBufferHeight(value: number) {
       const entry = contexts.get(this as unknown as AsObject);
       if (entry) {
-        entry.maxHeight = most(value, entry.backend.height, MOST_BACK_BUFFER);
+        entry.maxHeight = most(value, entry.height, MOST_BACK_BUFFER);
       } else {
         this.$maxHeight = most(value, 0, DISPOSED_MOST);
       }
@@ -136,17 +161,27 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       aa: number,
       depth = true,
       best = false,
-      zoom = false,
+      _zoom = false,
     ): void {
       const entry = state(this as unknown as AsObject);
       const backend = entry.backend;
+      // With best resolution AIR draws at the screen's pixels, and holds those to 32 and to
+      // maxBackBufferWidth and maxBackBufferHeight: 16 by 16 is 32 by 32 at a scale of 2.
+      // The browser's zoom is in contentsScaleFactor already, so the zoom flag adds nothing,
+      // as it adds nothing in AIR, whose browserZoomFactor is 1.
+      const scale = best ? s.contentsScaleFactor : 1;
+      const drawnWidth = screenPixels(width, scale);
+      const drawnHeight = screenPixels(height, scale);
       // AIR's limits are the GPU's, 16384 on a desktop one in every profile (Flash Player 32
       // and AIR 51 alike); a GPU that allows less draws the back buffer smaller and stretches
       // it (WebGLContext3D), where AIR would refuse.
-      const wide = !(width >= 32 && width <= entry.maxWidth);
-      if (wide || !(height >= 32 && height <= entry.maxHeight)) {
+      const wide = !(drawnWidth >= 32 && drawnWidth <= entry.maxWidth);
+      if (wide || !(drawnHeight >= 32 && drawnHeight <= entry.maxHeight)) {
         // The back buffer it had is gone: clear refuses until another configure.
         backend.unconfigure();
+        entry.width = 0;
+        entry.height = 0;
+        entry.best = false;
         if (s.rt.swfVersion < SIZE_ERRORS_FROM) {
           throw s.rt.error("Error", 3669);
         }
@@ -156,24 +191,21 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
           : s.rt.error("Error", 3781, 32, entry.maxHeight);
       }
 
-      if (best || zoom) {
-        unsupported(
-          "configureBackBuffer's wantsBestResolution or wantsBestResolutionOnBrowserZoom",
-        );
-      }
-
       const changed =
-        width !== backend.width ||
-        height !== backend.height ||
+        drawnWidth !== backend.width ||
+        drawnHeight !== backend.height ||
         depth !== entry.depth ||
         aa !== entry.aa;
-      backend.configure(width, height, depth, aa);
+      backend.configure(drawnWidth, drawnHeight, depth, aa, scale);
       if (changed) {
         entry.cleared = 0;
       }
 
       entry.depth = depth;
       entry.aa = aa;
+      entry.width = width;
+      entry.height = height;
+      entry.best = best;
     }
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {

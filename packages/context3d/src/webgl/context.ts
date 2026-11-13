@@ -14,6 +14,7 @@ import {
   type SamplerMip,
   type SamplerWrap,
   ScissorBoundsError,
+  screenPixels,
   type StencilAction,
   type Texture3D,
   TextureBindingError,
@@ -142,6 +143,8 @@ export class WebGLContext3D implements Context3D {
   private resolveDirty = false;
   private depthBuffer: WebGLRenderbuffer | null = null;
   private antiAlias = 0;
+  /** The back buffer's pixels to a CSS pixel and to a scissor rectangle's unit. */
+  private scale = 1;
   private depthWrite = true;
   private depthCompare: CompareMode = "less";
   private blendEnabled = false;
@@ -247,7 +250,7 @@ export class WebGLContext3D implements Context3D {
     this.gl.bindFramebuffer(target, framebuffer);
   }
 
-  configure(width: number, height: number, depth = false, antiAlias = 0): void {
+  configure(width: number, height: number, depth = false, antiAlias = 0, scale = 1): void {
     this.alive();
     range(32, width - 32, MOST_BACK_BUFFER);
     range(32, height - 32, MOST_BACK_BUFFER);
@@ -267,6 +270,12 @@ export class WebGLContext3D implements Context3D {
       depth === (this.depthBuffer !== null) &&
       antiAlias === this.antiAlias
     ) {
+      if (scale !== this.scale) {
+        this.scale = scale;
+        this.showAt();
+        this.applyScissor();
+      }
+
       return;
     }
 
@@ -379,19 +388,30 @@ export class WebGLContext3D implements Context3D {
     this.height = height;
     this.drawnWidth = drawnWidth;
     this.drawnHeight = drawnHeight;
+    this.scale = scale;
     gl.canvas.width = drawnWidth;
     gl.canvas.height = drawnHeight;
-    // Shown at the size asked for, in CSS pixels, as an unstyled canvas of that size would be.
-    const style = (gl.canvas as Partial<HTMLCanvasElement>).style;
-    if (style) {
-      style.width = drawnWidth === width ? "" : `${width}px`;
-      style.height = drawnHeight === height ? "" : `${height}px`;
-    }
+    this.showAt();
     // Readback's storage waits for a read: a back buffer as large as a 4K screen is 33 MB each.
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
     this.applyScissor();
     this.clear(0, 0, 0, 1);
+  }
+
+  /**
+   * Shown at the size asked for, in CSS pixels, as an unstyled canvas of that size would be,
+   * divided by its scale: a best-resolution back buffer shows its pixels at the screen's.
+   */
+  private showAt(): void {
+    const style = (this.gl.canvas as Partial<HTMLCanvasElement>).style;
+    if (!style) {
+      return;
+    }
+
+    const plain = this.scale === 1;
+    style.width = plain && this.drawnWidth === this.width ? "" : `${this.width / this.scale}px`;
+    style.height = plain && this.drawnHeight === this.height ? "" : `${this.height / this.scale}px`;
   }
 
   /** The largest back buffer storage the GPU gives: a texture, a renderbuffer and a viewport. */
@@ -432,6 +452,7 @@ export class WebGLContext3D implements Context3D {
     this.depthBuffer = null;
     this.resolveDirty = false;
     this.antiAlias = 0;
+    this.scale = 1;
     this.width = 0;
     this.height = 0;
     this.drawnWidth = 0;
@@ -656,7 +677,16 @@ export class WebGLContext3D implements Context3D {
     let top = Math.max(0, Math.min(height, this.scissorTop));
     let right = Math.max(0, Math.min(width, this.scissorRight));
     let bottom = Math.max(0, Math.min(height, this.scissorBottom));
+    // AIR tells a rectangle outside from its own unit, then scales it to a back buffer
+    // configured for best resolution, whose pixels are the screen's.
     this.scissorOutside = right <= left || bottom <= top;
+    if (!this.renderTexture && this.scale !== 1) {
+      const scale = this.scale;
+      left = Math.max(0, Math.min(width, screenPixels(this.scissorLeft, scale)));
+      top = Math.max(0, Math.min(height, screenPixels(this.scissorTop, scale)));
+      right = Math.max(0, Math.min(width, screenPixels(this.scissorRight, scale)));
+      bottom = Math.max(0, Math.min(height, screenPixels(this.scissorBottom, scale)));
+    }
     let drawnHeight = height;
     if (!this.renderTexture && (this.drawnWidth !== width || this.drawnHeight !== height)) {
       // The back buffer's storage is smaller than its size: the rectangle shrinks with it.
