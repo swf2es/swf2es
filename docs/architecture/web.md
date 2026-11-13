@@ -49,7 +49,30 @@ again as the element changes, and each animation frame checks
 `wmode="transparent"` draws no background, so the page shows through;
 otherwise the stage's colour, `bgcolor`'s if given, fills the element
 around the stage too. Each animation frame advances the player by the
-time passed and draws when `changes` moved or the element did. The keys
+time passed and draws when `changes` moved or the element did, and then
+only if the view finds something changed (`RenderView.unchanged`). A stage
+nothing has been drawn on for 150 ms is still, and ticks by a timer at the
+display's interval instead, the shortest between its last animation
+frames: Chrome makes a frame of the page ready for every animation frame
+asked of it, drawn to or not, which cost a still stage more than its ticks
+did (about 3.7% of a core for the frames against 0.7% for the timer, of
+the 6.5% a still 60 fps SWF took on an Intel laptop). The player is
+advanced the same, by the time passed, so frames, timers and sound keep
+their pace; the tick that finds something to draw draws it at once, which
+the browser shows at its next frame, and the ticks go back to animation
+frames, where a run of drawings shows in step with the display. A SWF
+slower than the display draws in one tick of several and stays on them.
+So does one with a Stage3D context, which presents on canvases of its own.
+A hidden page has no animation frames, and the player stops with them as
+before: a timer's tick on a hidden page asks for an animation frame and
+waits. Where frames stop on a page that is not hidden, as out of sight in
+a frame of another origin, the animation frame a still stage asks for
+once a second does not come, and it waits likewise. Timers that come late
+by half an interval four times in a row are too coarse to tick by, which
+would have the player run frames in batches, and are given up for
+animation frames. `tests/web/still.ts` holds a still stage to no drawing
+and an animation frame a second, its frames to their pace, and a change
+to being drawn in its tick. The keys
 go to the element, focusable and focused as it is pressed, as a plug-in
 had them only while focused.
 
