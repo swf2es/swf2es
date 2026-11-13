@@ -5,6 +5,7 @@ import {
   type CompareMode,
   type Context3D,
   type CullFace,
+  compressedFormat,
   FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
   MOST_CUBE,
@@ -20,6 +21,7 @@ import {
   type SamplerWrap,
   ScissorBoundsError,
   type StencilAction,
+  TEXEL_BYTES,
   type Texture3D,
   TextureBindingError,
   type TextureFormat,
@@ -62,6 +64,7 @@ import {
   targetFramebuffer,
 } from "./targets.js";
 import {
+  storageFormat,
   type TextureState,
   uploadCompressedLevel,
   uploadTexture,
@@ -74,7 +77,15 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
   bgra: 0,
   compressed: 1,
   compressedAlpha: 2,
+  bgrPacked565: 0,
+  bgraPacked4444: 0,
+  rgbaHalfFloat: 0,
 };
+
+/** A value within 0 to 1, NaN kept. */
+function unit(value: number): number {
+  return value > 1 ? 1 : value < 0 ? 0 : value;
+}
 
 /** AGAL's wraps (clamp, repeat, clamp_u_repeat_v, repeat_u_clamp_v) as SAMPLER_WRAPS indices. */
 const WRAPS = [0, 3, 2, 1];
@@ -133,6 +144,7 @@ export class WebGLContext3D implements Context3D {
   private renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
+  private floatTargets: boolean | undefined;
   private readonly textureSlots: (Texture3D | null)[] = new Array(SAMPLER_SLOTS).fill(null);
   private textureMask = 0;
   private readonly samplers: (WebGLSampler | null)[] = new Array(96).fill(null);
@@ -464,7 +476,8 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     let bits = 0;
     if (mask & 1) {
-      gl.clearColor(red, green, blue, alpha);
+      // Direct3D's clear colour has 8 bits a channel: a float target is cleared within 0 to 1.
+      gl.clearColor(unit(red), unit(green), unit(blue), unit(alpha));
       bits |= gl.COLOR_BUFFER_BIT;
       this.changedTarget();
     }
@@ -951,8 +964,8 @@ export class WebGLContext3D implements Context3D {
     return this.allocateTexture(width, height, cube, false, format);
   }
 
-  createRectangleTexture(width: number, height: number): Texture3D {
-    return this.allocateTexture(width, height, false, true, "bgra");
+  createRectangleTexture(width: number, height: number, format: TextureFormat = "bgra"): Texture3D {
+    return this.allocateTexture(width, height, false, true, format);
   }
 
   /** GL's internal format for a compressed texture's S3TC, or 0 where the context takes none. */
@@ -960,7 +973,7 @@ export class WebGLContext3D implements Context3D {
     if (this.s3tc === undefined) {
       this.s3tc = this.gl.getExtension("WEBGL_compressed_texture_s3tc");
     }
-    if (!this.s3tc || format === "bgra") {
+    if (!this.s3tc || !compressedFormat(format)) {
       return 0;
     }
 
@@ -986,7 +999,9 @@ export class WebGLContext3D implements Context3D {
     for (let level = 0; level < levels; level++) {
       const w = Math.max(1, width >> level);
       const h = Math.max(1, height >> level);
-      size += format === "bgra" ? w * h * 4 : blockBytes(w, h, format === "compressedAlpha");
+      size += compressedFormat(format)
+        ? blockBytes(w, h, format === "compressedAlpha")
+        : w * h * (TEXEL_BYTES[format] ?? 4);
     }
 
     return size * faces;
@@ -1019,15 +1034,15 @@ export class WebGLContext3D implements Context3D {
         "Context3D texture size must be a power of two",
       );
     }
-    if (format !== "bgra" && rectangle) {
+    if (compressedFormat(format) && rectangle) {
       throw new Context3DError("unsupported", "Context3D rectangle textures are not compressed");
     }
-    if (format !== "bgra" && (width < 4 || height < 4)) {
+    if (compressedFormat(format) && (width < 4 || height < 4)) {
       throw new Context3DError("compressedSize", "Context3D compressed textures are at least 4x4");
     }
 
     const gl = this.gl;
-    const storage = this.s3tcFormat(format) || gl.RGBA8;
+    const storage = this.s3tcFormat(format) || storageFormat(gl, format);
     const size = this.chainBytes(width, height, levels, faces, format);
     const kind = cube ? 2 : rectangle ? 1 : 0;
     const countLimit = cube
@@ -1043,7 +1058,8 @@ export class WebGLContext3D implements Context3D {
     // AIR reserves half the base size for mips, independently of the exact
     // chain storage, and charges DXT1 an eighth of BGRA and DXT5 a quarter.
     const quotaBytes =
-      (width * height * faces * (rectangle ? 4 : 6)) /
+      (width * height * faces * (rectangle ? 4 : 6) * (TEXEL_BYTES[format] ?? 4)) /
+      4 /
       (format === "compressed" ? 8 : format === "compressedAlpha" ? 4 : 1);
     if (
       this.textures.size >= this.limits.maxTextures ||
@@ -1118,10 +1134,10 @@ export class WebGLContext3D implements Context3D {
       uploadCompressed: (blocks, level = 0, face = 0) => {
         this.alive();
         this.textureState(texture);
-        if (format === "bgra") {
+        if (!compressedFormat(format)) {
           throw new Context3DError(
             "textureUpload",
-            "Context3D experiment: BGRA texture given blocks",
+            "Context3D experiment: uncompressed texture given blocks",
           );
         }
 
@@ -1316,6 +1332,7 @@ export class WebGLContext3D implements Context3D {
       depth,
       this.depthWrite,
       this.stencilWrite,
+      state.storage,
     );
     if (same) {
       if (newDepth) {
@@ -1351,12 +1368,13 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     if (texture) {
       this.textureState(texture);
-      if (texture.format !== "bgra") {
+      if (compressedFormat(texture.format)) {
         throw new Context3DError(
           "operation",
           "Context3D experiment: compressed textures are no render targets",
         );
       }
+      this.renderFormat(texture.format);
     }
     const samples = texture ? this.multisamples(antiAlias, depth) : 0;
     this.finishTarget();
@@ -1597,6 +1615,18 @@ export class WebGLContext3D implements Context3D {
       }
       state.uploaded[this.renderFace] = (1 << texture.levels) - 1;
       state.dirty = false;
+    }
+  }
+
+  /** Half floats are drawn into where the GPU's WebGL renders float colour, as every desktop one does. */
+  private renderFormat(format: TextureFormat): void {
+    if (format !== "rgbaHalfFloat") {
+      return;
+    }
+
+    this.floatTargets ??= this.gl.getExtension("EXT_color_buffer_float") !== null;
+    if (!this.floatTargets) {
+      throw new Context3DError("unsupported", "Context3D: this GPU draws into no half floats");
     }
   }
 

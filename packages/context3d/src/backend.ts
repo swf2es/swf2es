@@ -60,9 +60,32 @@ export type SamplerFilter = (typeof SAMPLER_FILTERS)[number];
 export const SAMPLER_MIPS = ["mipnone", "mipnearest", "miplinear"] as const;
 export type SamplerMip = (typeof SAMPLER_MIPS)[number];
 
-/** The texture formats a backend stores: BGRA, and S3TC's DXT1 and DXT5 as Flash calls them. */
-export const TEXTURE_FORMATS = ["bgra", "compressed", "compressedAlpha"] as const;
+/**
+ * The texture formats a backend stores: BGRA, S3TC's DXT1 and DXT5 as Flash calls them,
+ * 16-bit 5:6:5 colour and 4:4:4:4 colour with alpha, and RGBA in half floats.
+ */
+export const TEXTURE_FORMATS = [
+  "bgra",
+  "compressed",
+  "compressedAlpha",
+  "bgrPacked565",
+  "bgraPacked4444",
+  "rgbaHalfFloat",
+] as const;
 export type TextureFormat = (typeof TEXTURE_FORMATS)[number];
+
+/** Bytes a texel of each uncompressed format takes, as its byte uploads give it. */
+export const TEXEL_BYTES: Partial<Record<TextureFormat, number>> = {
+  bgra: 4,
+  bgrPacked565: 2,
+  bgraPacked4444: 2,
+  rgbaHalfFloat: 8,
+};
+
+/** Whether a format holds S3TC blocks, which no draw renders into. */
+export function compressedFormat(format: TextureFormat): boolean {
+  return format === "compressed" || format === "compressedAlpha";
+}
 
 /** Stage3D's profiles, from what the least GPU does to the most. */
 export const PROFILES = [
@@ -268,7 +291,7 @@ export interface Context3D {
   createBuffer(count: number, stride: number): Buffer3D;
   createProgram(): Program3D;
   createTexture(width: number, height: number, cube?: boolean, format?: TextureFormat): Texture3D;
-  createRectangleTexture(width: number, height: number): Texture3D;
+  createRectangleTexture(width: number, height: number, format?: TextureFormat): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(
     texture: Texture3D | null,

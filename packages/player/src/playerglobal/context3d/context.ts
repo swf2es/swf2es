@@ -5,6 +5,7 @@ import {
   type CompareMode,
   CULL_FACES,
   type CullFace,
+  compressedFormat,
   FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
   MOST_CUBE,
@@ -19,6 +20,7 @@ import {
   ScissorBoundsError,
   STENCIL_ACTIONS,
   type StencilAction,
+  TEXTURE_FORMATS,
   TextureBindingError,
   type TextureFormat,
   VERTEX_CONSTANTS,
@@ -32,7 +34,7 @@ import type { As3 } from "../../as3/types.js";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
-import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
+import { type AsObject, type Bindings, type ContextState, unsupported } from "./lifecycle.js";
 import { writeReadback } from "./readback.js";
 
 /** maxBackBufferWidth and maxBackBufferHeight of a disposed context, as AIR reads them. */
@@ -47,15 +49,6 @@ const SIZE_ERRORS_FROM = 30;
  */
 function most(value: number, size: number, limit: number): number {
   return Math.min(limit, Math.max(32, size, value | 0));
-}
-
-/** The backend's format for a texture's; the packed and half-float ones are not yet. */
-function textureFormat(format: string): TextureFormat {
-  if (format !== "bgra" && format !== "compressed" && format !== "compressedAlpha") {
-    unsupported(`the texture format "${format}"`);
-  }
-
-  return format;
 }
 
 export function registerContext(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
@@ -77,6 +70,21 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     dispose,
   } = bindings;
   const matrixConstants = new Float32Array(16);
+
+  /** A texture's format: one Flash names (#2008), and in rgbaHalfFloat's case one its profile has (#3759). */
+  const textureFormat = (entry: ContextState, format: string | null): TextureFormat => {
+    if (format === null) {
+      throw s.rt.error("TypeError", 2007, "format");
+    }
+    if (!TEXTURE_FORMATS.includes(format as TextureFormat)) {
+      throw s.rt.error("ArgumentError", 2008, "format");
+    }
+    if (format === "rgbaHalfFloat" && !profileLimits(entry.profile).halfFloat) {
+      throw s.rt.error("ArgumentError", 3759);
+    }
+
+    return format as TextureFormat;
+  };
 
   class ContextNatives {
     get driverInfo(): string {
@@ -279,7 +287,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     ): AsObject {
       const entry = state(this as unknown as AsObject);
       const backend = entry.backend;
-      const compressed = textureFormat(format);
+      const compressed = textureFormat(entry, format);
       const most = profileLimits(entry.profile).textureSize;
       if (width > most || height > most) {
         throw s.rt.error("ArgumentError", 3683, most);
@@ -319,35 +327,19 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (!most) {
         throw s.rt.error("Error", 3782);
       }
-      if (format === null) {
-        throw s.rt.error("TypeError", 2007, "format");
-      }
-      switch (format) {
-        case "bgra":
-        case "bgraPacked4444":
-        case "bgrPacked565":
-        case "compressed":
-        case "compressedAlpha":
-        case "rgbaHalfFloat":
-          break;
-        default:
-          throw s.rt.error("ArgumentError", 2008, "format");
-      }
+      const kind = textureFormat(entry, format);
       if (width <= 0 || height <= 0) {
         throw s.rt.error("ArgumentError", 3681);
       }
       if (width > most || height > most) {
         throw s.rt.error("ArgumentError", 3766, most);
       }
-      if (format === "compressed" || format === "compressedAlpha") {
+      if (compressedFormat(kind)) {
         throw s.rt.error("ArgumentError", 3762);
-      }
-      if (format !== "bgra") {
-        unsupported(`the rectangle texture format "${format}"`);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createRectangleTexture(width, height),
+        backend.createRectangleTexture(width, height, kind),
       );
       const object = construct("RectangleTexture", value, "flash.display3D.textures");
       textures.set(
@@ -367,7 +359,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
       const entry = state(this as unknown as AsObject);
       const backend = entry.backend;
-      const compressed = textureFormat(format);
+      const compressed = textureFormat(entry, format);
       if (size > MOST_CUBE) {
         throw s.rt.error("ArgumentError", 3705);
       }
@@ -467,7 +459,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         value = null;
       }
       // AIR takes a compressed texture as the target, and refuses to clear or draw into it.
-      entry.compressedTarget = value !== null && value.format !== "bgra";
+      entry.compressedTarget = value !== null && compressedFormat(value.format);
       if (entry.compressedTarget) {
         value = null;
       }
