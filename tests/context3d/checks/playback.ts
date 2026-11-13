@@ -208,7 +208,8 @@ export async function shaderFixture(
     | "CubeTextures"
     | "RenderTargets"
     | "Readback"
-    | "BestResolution",
+    | "BestResolution"
+    | "ContextArguments",
   /** Whether the context offers S3TC; without it, compressed textures decode on the CPU. */
   s3tc = true,
 ) {

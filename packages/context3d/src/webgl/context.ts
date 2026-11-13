@@ -14,8 +14,8 @@ import {
   type SamplerMip,
   type SamplerWrap,
   ScissorBoundsError,
-  screenPixels,
   type StencilAction,
+  screenPixels,
   type Texture3D,
   TextureBindingError,
   type TextureFormat,
@@ -759,7 +759,7 @@ export class WebGLContext3D implements Context3D {
     }
   }
 
-  createBuffer(count: number, stride: number): Buffer3D {
+  createBuffer(count: number, stride: number, dynamic = false): Buffer3D {
     this.alive();
     range(1, count - 1, stride === 0 ? 524287 : 65535);
     range(0, stride, 64);
@@ -790,7 +790,7 @@ export class WebGLContext3D implements Context3D {
     }
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(target, handle);
-    gl.bufferData(target, bytes, gl.STATIC_DRAW);
+    gl.bufferData(target, bytes, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
     const state: BufferState = {
       handle,
       indices: stride === 0 ? new Uint16Array(count) : null,
@@ -963,8 +963,9 @@ export class WebGLContext3D implements Context3D {
     height: number,
     cube = false,
     format: TextureFormat = "bgra",
+    streaming = 0,
   ): Texture3D {
-    return this.allocateTexture(width, height, cube, false, format);
+    return this.allocateTexture(width, height, cube, false, format, streaming);
   }
 
   createRectangleTexture(width: number, height: number): Texture3D {
@@ -1014,6 +1015,7 @@ export class WebGLContext3D implements Context3D {
     cube: boolean,
     rectangle: boolean,
     format: TextureFormat,
+    streaming = 0,
   ): Texture3D {
     this.alive();
     range(1, width - 1, 2048);
@@ -1027,6 +1029,7 @@ export class WebGLContext3D implements Context3D {
 
     const faces = cube ? 6 : 1;
     const levels = rectangle ? 1 : 1 + Math.floor(Math.log2(Math.max(width, height)));
+    range(streaming, 1, levels);
     if (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) {
       throw new Context3DError(
         "texturePowerOfTwo",
@@ -1092,6 +1095,7 @@ export class WebGLContext3D implements Context3D {
       multisample: null,
       samples: 0,
       antiAlias: 0,
+      base: 0,
     };
     const texture: Texture3D = {
       width,
@@ -1100,6 +1104,7 @@ export class WebGLContext3D implements Context3D {
       cube,
       rectangle,
       format,
+      streaming,
       upload: (pixels, level = 0, face = 0, sourceWidth, sourceHeight) => {
         this.alive();
         this.textureState(texture);
@@ -1929,7 +1934,10 @@ export class WebGLContext3D implements Context3D {
           throw new TextureBindingError("unuploaded");
         }
       }
-      for (let face = 0; face < resource.uploaded.length; face++) {
+      const base = texture.streaming
+        ? this.streamingBase(texture, resource, this.samplerStates[slot] >>> 5 !== 0)
+        : 0;
+      for (let face = 0; !texture.streaming && face < resource.uploaded.length; face++) {
         if (!texture.cube && !(resource.uploaded[face] & 1)) {
           throw new TextureBindingError("unuploaded");
         }
@@ -1951,6 +1959,13 @@ export class WebGLContext3D implements Context3D {
         gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, resource.handle);
         gl.bindSampler(slot, this.sampler(this.samplerStates[slot]));
         this.texturesApplied[slot] = 1;
+      }
+      if (resource.base !== base) {
+        const target = texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
+        gl.activeTexture(gl.TEXTURE0 + slot);
+        gl.bindTexture(target, resource.handle);
+        gl.texParameteri(target, gl.TEXTURE_BASE_LEVEL, base);
+        resource.base = base;
       }
       if (!state.samplersSet) {
         gl.uniform1i(binding.location, slot);
@@ -1979,6 +1994,50 @@ export class WebGLContext3D implements Context3D {
     }
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);
     this.changedTarget();
+  }
+
+  /**
+   * The level a streaming texture is drawn from, as AIR 51 draws one: with mip filtering, the
+   * finest whose levels down to the smallest are uploaded on every face, which must reach its
+   * streaming level (#3700 before); without, its level 0 alone (#3713), as a texture that
+   * does not stream.
+   */
+  private streamingBase(texture: Texture3D, resource: TextureState, mip: boolean): number {
+    const faces = resource.uploaded.length;
+    let uploaded = 0;
+    for (let face = 0; face < faces; face++) {
+      uploaded |= resource.uploaded[face];
+    }
+    if (!uploaded) {
+      throw new TextureBindingError("unuploaded");
+    }
+    if (!mip) {
+      for (let face = 0; face < faces; face++) {
+        if (!(resource.uploaded[face] & 1)) {
+          throw new TextureBindingError("streaming");
+        }
+      }
+
+      return 0;
+    }
+
+    let base = texture.levels;
+    while (base > 0) {
+      let whole = true;
+      for (let face = 0; face < faces; face++) {
+        whole &&= (resource.uploaded[face] & (1 << (base - 1))) !== 0;
+      }
+      if (!whole) {
+        break;
+      }
+
+      base--;
+    }
+    if (base > texture.streaming) {
+      throw new TextureBindingError("mipmaps");
+    }
+
+    return base;
   }
 
   private uniforms(

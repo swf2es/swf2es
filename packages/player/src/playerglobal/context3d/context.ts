@@ -7,6 +7,7 @@ import {
   CULL_FACES,
   type CullFace,
   MOST_BACK_BUFFER,
+  type ProgramType,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
   SAMPLER_WRAPS,
@@ -28,7 +29,7 @@ import type { As3 } from "../../as3/types.js";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
-import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
+import { type AsObject, type Bindings, type ContextState, unsupported } from "./lifecycle.js";
 import { writeReadback } from "./readback.js";
 
 /** maxBackBufferWidth and maxBackBufferHeight of a disposed context, as AIR reads them. */
@@ -55,7 +56,58 @@ function textureFormat(format: string): TextureFormat {
   return format;
 }
 
+/** The constant registers a program of `stage` has in the context's profile. */
+function registers(entry: ContextState, stage: ProgramType): number {
+  const standard = entry.profile.startsWith("standard");
+  return stage === "vertex" ? (standard ? 250 : 128) : standard ? 64 : 28;
+}
+
+/**
+ * How many of `count` registers from `first` there are: AIR takes more than there are,
+ * and writes those that fit.
+ */
+function within(entry: ContextState, stage: ProgramType, first: number, count: number): number {
+  return first >= 0 && count > 0
+    ? Math.max(0, Math.min(count, registers(entry, stage) - first))
+    : count;
+}
+
 export function registerContext(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
+  /** Whether a buffer's usage is dynamicDraw: only it and staticDraw are, by their case. */
+  const dynamicUsage = (usage: string | null): boolean => {
+    switch (usage) {
+      case "staticDraw":
+        return false;
+      case "dynamicDraw":
+        return true;
+      case null:
+        throw s.rt.error("TypeError", 2007, "bufferUsage");
+      default:
+        throw s.rt.error("ArgumentError", 2008, "bufferUsage");
+    }
+  };
+  /** AIR 51 refuses a negative streamingLevels (#2004) and one past the smallest level (#3711). */
+  const streamingLevels = (levels: number, side: number): void => {
+    if (levels < 0) {
+      throw s.rt.error("Error", 2004);
+    }
+    // A side that is no power of two, which the backend refuses, has no levels to compare.
+    if (side > 0 && levels > Math.floor(Math.log2(side))) {
+      throw s.rt.error("ArgumentError", 3711);
+    }
+  };
+  /** A program type, which AIR names programType when it refuses one. */
+  const programType = (type: string | null): ProgramType => {
+    switch (type) {
+      case "vertex":
+      case "fragment":
+        return type;
+      case null:
+        throw s.rt.error("TypeError", 2007, "programType");
+      default:
+        throw s.rt.error("ArgumentError", 2008, "programType");
+    }
+  };
   const {
     contexts,
     buffers,
@@ -224,11 +276,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         return;
       }
 
-      if (mask !== 0xffffffff && mask > 7) {
-        unsupported(`clear's mask ${mask}`);
-      }
-
-      backend.clear(r, g, b, a, depth, mask, stencil);
+      // AIR reads the mask's three low bits alone: 8 clears nothing, 15 clears all.
+      backend.clear(r, g, b, a, depth, mask & 7, stencil);
       // Only successful AS3 clears count, not the backend's allocation-time clear.
       if (entry.target) {
         entry.target.initialized = true;
@@ -237,13 +286,25 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
     }
 
-    createVertexBuffer(count: number, stride: number, usage = "staticDraw"): AsObject {
-      if (usage !== "staticDraw" || stride === 0) {
-        unsupported(`a vertex buffer of usage "${usage}" or 32-bit values per vertex ${stride}`);
+    createVertexBuffer(
+      count: number,
+      stride: number,
+      usage: string | null = "staticDraw",
+    ): AsObject {
+      const dynamic = dynamicUsage(usage);
+      // As AIR 51 refuses them: a negative count of values, none, and more than 64.
+      if (stride < 0) {
+        throw s.rt.error("Error", 2004);
+      }
+      if (stride === 0) {
+        throw s.rt.error("ArgumentError", 3671);
+      }
+      if (stride > 64) {
+        throw s.rt.error("ArgumentError", 3670);
       }
 
       const owner = this as unknown as AsObject;
-      const resource = allocate(owner, () => context(owner).createBuffer(count, stride));
+      const resource = allocate(owner, () => context(owner).createBuffer(count, stride, dynamic));
       const object = construct("VertexBuffer3D", resource);
       buffers.set(
         object,
@@ -258,13 +319,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       return object;
     }
 
-    createIndexBuffer(count: number, usage = "staticDraw"): AsObject {
-      if (usage !== "staticDraw") {
-        unsupported(`an index buffer of usage "${usage}"`);
-      }
-
+    createIndexBuffer(count: number, usage: string | null = "staticDraw"): AsObject {
+      const dynamic = dynamicUsage(usage);
       const owner = this as unknown as AsObject;
-      const resource = allocate(owner, () => context(owner).createBuffer(count, 0));
+      const resource = allocate(owner, () => context(owner).createBuffer(count, 0, dynamic));
       const object = construct("IndexBuffer3D", resource);
       buffers.set(
         object,
@@ -305,12 +363,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     ): AsObject {
       const backend = context(this as unknown as AsObject);
       const compressed = textureFormat(format);
-      if (levels !== 0) {
-        unsupported(`createTexture's streamingLevels ${levels}`);
-      }
-
+      streamingLevels(levels, Math.max(width, height));
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createTexture(width, height, false, compressed),
+        backend.createTexture(width, height, false, compressed, levels),
       );
       const object = construct("Texture", value, "flash.display3D.textures");
       textures.set(
@@ -382,12 +437,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
       const backend = context(this as unknown as AsObject);
       const compressed = textureFormat(format);
-      if (levels !== 0) {
-        unsupported(`createCubeTexture's streamingLevels ${levels}`);
-      }
-
+      streamingLevels(levels, size);
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createTexture(size, size, true, compressed),
+        backend.createTexture(size, size, true, compressed, levels),
       );
       const object = construct("CubeTexture", value, "flash.display3D.textures");
       textures.set(
@@ -518,11 +570,12 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
-      if (index >= 8) {
-        unsupported(`vertex buffer index ${index}`);
+      if (index >= 16) {
+        throw s.rt.error("RangeError", 2006);
       }
 
-      if (!backend) {
+      // AIR takes indices up to 15, which no AGAL 1 program reads: nothing to bind.
+      if (!backend || index >= 8) {
         return;
       }
 
@@ -530,18 +583,54 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       owner.vertices[index] = live ? object : null;
     }
 
-    setProgramConstantsFromVector(type: string, first: number, values: AsObject, count = -1): void {
-      if (type !== "vertex" && type !== "fragment") {
-        unsupported(`program constants of type "${type}"`);
+    setProgramConstantsFromVector(
+      type: string | null,
+      first: number,
+      values: AsObject,
+      count = -1,
+    ): void {
+      const stage = programType(type);
+      const data: number[] = values.$a;
+      const entry = state(this as unknown as AsObject);
+      const asked = count === -1 ? Math.floor(data.length / 4) : count;
+      const registers = within(entry, stage, first, asked);
+      if (registers !== 0 || asked === 0) {
+        entry.backend.setConstants(stage, first, data, registers);
+      }
+    }
+
+    /** Little-endian floats whatever the ByteArray's endian, its position left as it is. */
+    setProgramConstantsFromByteArray(
+      type: string | null,
+      first: number,
+      count: number,
+      data: AsObject | null,
+      offset: number,
+    ): void {
+      const stage = programType(type);
+      if (!data) {
+        throw s.rt.error("TypeError", 2007, "data");
+      }
+      if (first < 0) {
+        throw s.rt.error("RangeError", 2006);
       }
 
-      const data: number[] = values.$a;
-      context(this as unknown as AsObject).setConstants(
-        type,
-        first,
-        data,
-        count === -1 ? Math.floor(data.length / 4) : count,
-      );
+      const bytes = bindings.bytes(data);
+      if (count < 0 || offset + count * 16 > bytes.length) {
+        throw s.rt.error("RangeError", 3669);
+      }
+
+      const entry = state(this as unknown as AsObject);
+      const registers = within(entry, stage, first, count);
+      const values = new Float32Array(registers * 4);
+      const view = new DataView(bytes.buffer, bytes.byteOffset + offset, registers * 16);
+      for (let i = 0; i < values.length; i++) {
+        values[i] = view.getFloat32(i * 4, true);
+      }
+
+      if (registers !== 0 || count === 0) {
+        entry.backend.setConstants(stage, first, values, registers);
+      }
     }
 
     setProgramConstantsFromMatrix(
@@ -697,6 +786,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
               throw s.rt.error("Error", 3605);
             case "mipmaps":
               throw s.rt.error("Error", 3700);
+            case "streaming":
+              throw s.rt.error("Error", 3713);
             case "rectangleMip":
               throw s.rt.error("Error", 3755);
             case "wrap":
@@ -756,8 +847,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         return;
       }
 
-      if (this.$checking) {
-        requireClear(entry);
+      // AIR 51 asks only for the colour cleared: a clear of mask 1 lets present through
+      // where it still refuses to draw without the depth and stencil cleared.
+      if (this.$checking && !(entry.cleared & 1)) {
+        throw s.rt.error("Error", 3692);
       }
 
       entry.backend.present();

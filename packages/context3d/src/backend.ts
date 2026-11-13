@@ -97,7 +97,8 @@ export class TextureBindingError extends Error {
     | "wrap"
     | "rectangleMip"
     | "feedback"
-    | "format";
+    | "format"
+    | "streaming";
 
   /** The sampler it names, where it names one. */
   readonly sampler: number;
@@ -130,6 +131,11 @@ export interface Texture3D {
   readonly levels: number;
   readonly cube: boolean;
   readonly rectangle: boolean;
+  /**
+   * createTexture's streamingLevels: the levels from it to the smallest are enough to draw it
+   * with mip filtering, from the finest of them uploaded, as AIR draws a texture still loading.
+   */
+  readonly streaming: number;
   /** What samplers must read it as; a compressed texture also takes pixels, as AIR's do. */
   readonly format: TextureFormat;
   /** Top-down premultiplied ARGB pixels, copied before returning.
@@ -213,9 +219,17 @@ export interface Context3D {
   setColorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void;
   /** Null disables clipping; coordinates are in top-down target pixels. */
   setScissor(x: number | null, y?: number, width?: number, height?: number): void;
-  createBuffer(count: number, stride: number): Buffer3D;
+  /** `stride` 32-bit values a vertex, or 0 for 16-bit indices; `dynamic` for data uploaded often. */
+  createBuffer(count: number, stride: number, dynamic?: boolean): Buffer3D;
   createProgram(): Program3D;
-  createTexture(width: number, height: number, cube?: boolean, format?: TextureFormat): Texture3D;
+  /** `streaming` from 0 to the texture's levels less one. */
+  createTexture(
+    width: number,
+    height: number,
+    cube?: boolean,
+    format?: TextureFormat,
+    streaming?: number,
+  ): Texture3D;
   createRectangleTexture(width: number, height: number): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(

@@ -111,6 +111,7 @@ node tests/context3d/oracle.ts --backbuffer
 node tests/context3d/oracle.ts --backbufferlegacy    # compiled as SWF 15
 node tests/context3d/oracle.ts --framevalidation
 node tests/context3d/oracle.ts --framevalidationflat
+node tests/context3d/oracle.ts --contextarguments
 # With Wine at 192 DPI (below):
 node tests/context3d/oracle.ts --bestresolution
 # Requires a reference driver that implements pixel-shader predication:

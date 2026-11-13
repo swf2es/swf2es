@@ -20,6 +20,7 @@ const fixture =
     "BackBuffer",
     "BackBufferLegacy",
     "BestResolution",
+    "ContextArguments",
     "Comparisons",
     "RenderTargets",
     "CubeTargets",
@@ -108,7 +109,7 @@ writeFileSync(
       fixture === "BestResolution"
         ? "<requestedDisplayResolution>high</requestedDisplayResolution>"
         : ""
-    }<depthAndStencil>${fixture === "Stencil" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation" || fixture.startsWith("BackBuffer")}</depthAndStencil>
+    }<depthAndStencil>${fixture === "Stencil" || fixture === "ContextArguments" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation" || fixture.startsWith("BackBuffer")}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>

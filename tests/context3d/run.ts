@@ -62,6 +62,7 @@ const scripts = compileScripts(
     "IndirectConstants",
     "Readback",
     "BestResolution",
+    "ContextArguments",
   ].map((name) => ({
     name,
     source: fixtureSource(name),
@@ -116,6 +117,7 @@ for (const name of [
   "IndirectConstants",
   "Readback",
   "BestResolution",
+  "ContextArguments",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -128,7 +130,8 @@ for (const name of [
     name === "Lifecycle" ||
     name === "BackBuffer" ||
     name === "BackBufferConstrained" ||
-    name === "BestResolution"
+    name === "BestResolution" ||
+    name === "ContextArguments"
       ? 51
       : name === "AtfLegacy"
         ? 13
@@ -424,6 +427,7 @@ if (!process.argv.includes("--build-only")) {
         "IndirectConstants",
         "Readback",
         "BestResolution",
+        "ContextArguments",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,

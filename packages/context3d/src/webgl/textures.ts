@@ -20,6 +20,8 @@ export interface TextureState {
   multisample: MultisampleTarget | null;
   samples: number;
   antiAlias: number;
+  /** TEXTURE_BASE_LEVEL: a streaming texture's finest level whole to the smallest. */
+  base: number;
 }
 
 /** The staging array, made base-sized at its first use: a texture given only blocks on S3TC has none. */
