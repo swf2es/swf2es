@@ -135,6 +135,17 @@ the click. A page that makes the element full screen itself
 `configure({ fullScreen })` takes a full screen of the embedder's own
 instead, as the desktop app's window, which needs no click.
 
+With Stage3D on, a back buffer may be from 32 to 16384 pixels a side in
+every profile, as Flash Player 32 and AIR 51 take one on a desktop GPU,
+so a SWF that sizes its back buffer to its stage plays on a 2K or 4K
+screen. `maxBackBufferWidth` and `maxBackBufferHeight` read 16384
+whatever the GPU. Where the GPU allows less, the back buffer is drawn at
+the largest size it allows and stretched to the size asked for; AIR
+would read the GPU's own limit there and refuse larger sizes. In the
+`baselineConstrained` profile AIR draws no back buffer larger than the
+stage (Error #3710, or #3723 for SWFs before version 30); swf2es draws
+it.
+
 ## WebAssembly and CSP
 
 Fills, lines and BitmapData's filters and pixel operations are computed by

@@ -11,6 +11,7 @@ export {
   type Context3DLifecycle,
   CULL_FACES,
   type CullFace,
+  MOST_BACK_BUFFER,
   type Program3D,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,

@@ -1,6 +1,13 @@
 import type { ProgramType } from "./agal.js";
 import type { DxtEncoder } from "./dxt.js";
 
+/**
+ * The widest and tallest back buffer configure() takes: Flash Player 32's and AIR 51's
+ * maxBackBufferWidth and maxBackBufferHeight on a desktop GPU, in every profile. A GPU that
+ * allows less still takes it, and draws it smaller (WebGLContext3D).
+ */
+export const MOST_BACK_BUFFER = 16384;
+
 export const COMPARE_MODES = [
   "always",
   "never",
@@ -156,7 +163,10 @@ export interface Context3D {
   samplerFormats: boolean;
   /** Optional acceleration for pixels uploaded to compressed textures. */
   setDxtEncoder?(encoder: DxtEncoder): void;
+  /** Width and height from 32 to MOST_BACK_BUFFER. */
   configure(width: number, height: number, depth?: boolean, antiAlias?: number): void;
+  /** No back buffer, width and height 0, as a size configureBackBuffer refuses leaves AIR's. */
+  unconfigure(): void;
   clear(
     red: number,
     green: number,

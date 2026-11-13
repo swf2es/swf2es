@@ -5,6 +5,7 @@ import {
   type CompareMode,
   type Context3D,
   type CullFace,
+  MOST_BACK_BUFFER,
   type Program3D,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
@@ -94,6 +95,13 @@ export class WebGLContext3D implements Context3D {
   private readonly drawState: GlState;
   width = 0;
   height = 0;
+  /**
+   * The back buffer's storage: its size, or less where the GPU allows less. The SWF still
+   * sees the size it asked for, drawn at this one and stretched to it when presented.
+   */
+  private drawnWidth = 0;
+  private drawnHeight = 0;
+  private gpuMost: Int32Array | null = null;
   disposed = false;
   samplerFormats = true;
   private readonly buffers = new Map<Buffer3D, BufferState>();
@@ -225,7 +233,12 @@ export class WebGLContext3D implements Context3D {
       }
     }
     this.drawState.bindFramebuffer(state ? targetFramebuffer(state) : this.framebuffer);
-    this.drawState.viewport(0, 0, texture?.width ?? this.width, texture?.height ?? this.height);
+    this.drawState.viewport(
+      0,
+      0,
+      texture?.width ?? this.drawnWidth,
+      texture?.height ?? this.drawnHeight,
+    );
   }
 
   /** Temporary attachments and separate READ/DRAW bindings bypass the hot target cache. */
@@ -236,8 +249,8 @@ export class WebGLContext3D implements Context3D {
 
   configure(width: number, height: number, depth = false, antiAlias = 0): void {
     this.alive();
-    range(32, width - 32, 2048);
-    range(32, height - 32, 2048);
+    range(32, width - 32, MOST_BACK_BUFFER);
+    range(32, height - 32, MOST_BACK_BUFFER);
     if (this.renderTexture) {
       throw new Context3DError(
         "operation",
@@ -259,6 +272,9 @@ export class WebGLContext3D implements Context3D {
 
     const samples = selectSamples(this.gl, antiAlias, depth);
     const gl = this.gl;
+    const most = this.storageLimit();
+    const drawnWidth = Math.min(width, most[0]);
+    const drawnHeight = Math.min(height, most[1]);
     const texture = gl.createTexture();
     const framebuffer = gl.createFramebuffer();
     const depthBuffer = depth ? gl.createRenderbuffer() : null;
@@ -279,7 +295,17 @@ export class WebGLContext3D implements Context3D {
       gl.bindTexture(gl.TEXTURE_2D, texture);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        drawnWidth,
+        drawnHeight,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
       this.bindFramebuffer(gl.FRAMEBUFFER, resolveFramebuffer ?? framebuffer);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
       if (resolveFramebuffer) {
@@ -289,7 +315,13 @@ export class WebGLContext3D implements Context3D {
 
         this.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
         gl.bindRenderbuffer(gl.RENDERBUFFER, colorBuffer);
-        gl.renderbufferStorageMultisample(gl.RENDERBUFFER, samples, gl.RGBA8, width, height);
+        gl.renderbufferStorageMultisample(
+          gl.RENDERBUFFER,
+          samples,
+          gl.RGBA8,
+          drawnWidth,
+          drawnHeight,
+        );
         gl.framebufferRenderbuffer(
           gl.FRAMEBUFFER,
           gl.COLOR_ATTACHMENT0,
@@ -304,11 +336,11 @@ export class WebGLContext3D implements Context3D {
             gl.RENDERBUFFER,
             samples,
             gl.DEPTH24_STENCIL8,
-            width,
-            height,
+            drawnWidth,
+            drawnHeight,
           );
         } else {
-          gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, width, height);
+          gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, drawnWidth, drawnHeight);
         }
         gl.framebufferRenderbuffer(
           gl.FRAMEBUFFER,
@@ -345,12 +377,67 @@ export class WebGLContext3D implements Context3D {
     this.antiAlias = antiAlias;
     this.width = width;
     this.height = height;
-    gl.canvas.width = width;
-    gl.canvas.height = height;
-    this.pixels = new Uint8Array(width * height * 4);
-    this.topDown = new Uint8Array(this.pixels.length);
+    this.drawnWidth = drawnWidth;
+    this.drawnHeight = drawnHeight;
+    gl.canvas.width = drawnWidth;
+    gl.canvas.height = drawnHeight;
+    // Shown at the size asked for, in CSS pixels, as an unstyled canvas of that size would be.
+    const style = (gl.canvas as Partial<HTMLCanvasElement>).style;
+    if (style) {
+      style.width = drawnWidth === width ? "" : `${width}px`;
+      style.height = drawnHeight === height ? "" : `${height}px`;
+    }
+    // Readback's storage waits for a read: a back buffer as large as a 4K screen is 33 MB each.
+    this.pixels = new Uint8Array(0);
+    this.topDown = new Uint8Array(0);
     this.applyScissor();
     this.clear(0, 0, 0, 1);
+  }
+
+  /** The largest back buffer storage the GPU gives: a texture, a renderbuffer and a viewport. */
+  private storageLimit(): Int32Array {
+    if (!this.gpuMost) {
+      const gl = this.gl;
+      const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
+      const side = Math.min(
+        gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
+        gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
+      );
+      this.gpuMost = Int32Array.of(Math.min(side, viewport[0]), Math.min(side, viewport[1]));
+    }
+
+    return this.gpuMost;
+  }
+
+  unconfigure(): void {
+    this.alive();
+    if (this.renderTexture) {
+      throw new Context3DError(
+        "operation",
+        "Context3D experiment: resize while rendering to texture",
+      );
+    }
+
+    const gl = this.gl;
+    gl.deleteTexture(this.texture);
+    gl.deleteFramebuffer(this.framebuffer);
+    gl.deleteFramebuffer(this.resolveFramebuffer);
+    gl.deleteRenderbuffer(this.depthBuffer);
+    gl.deleteRenderbuffer(this.colorBuffer);
+    this.drawState.forget();
+    this.texture = null;
+    this.framebuffer = null;
+    this.resolveFramebuffer = null;
+    this.colorBuffer = null;
+    this.depthBuffer = null;
+    this.resolveDirty = false;
+    this.antiAlias = 0;
+    this.width = 0;
+    this.height = 0;
+    this.drawnWidth = 0;
+    this.drawnHeight = 0;
+    this.pixels = new Uint8Array(0);
+    this.topDown = new Uint8Array(0);
   }
 
   clear(
@@ -565,15 +652,27 @@ export class WebGLContext3D implements Context3D {
 
     const width = this.renderTexture?.width ?? this.width;
     const height = this.renderTexture?.height ?? this.height;
-    const left = Math.max(0, Math.min(width, this.scissorLeft));
-    const top = Math.max(0, Math.min(height, this.scissorTop));
-    const right = Math.max(0, Math.min(width, this.scissorRight));
-    const bottom = Math.max(0, Math.min(height, this.scissorBottom));
+    let left = Math.max(0, Math.min(width, this.scissorLeft));
+    let top = Math.max(0, Math.min(height, this.scissorTop));
+    let right = Math.max(0, Math.min(width, this.scissorRight));
+    let bottom = Math.max(0, Math.min(height, this.scissorBottom));
     this.scissorOutside = right <= left || bottom <= top;
+    let drawnHeight = height;
+    if (!this.renderTexture && (this.drawnWidth !== width || this.drawnHeight !== height)) {
+      // The back buffer's storage is smaller than its size: the rectangle shrinks with it.
+      const x = this.drawnWidth / width;
+      const y = this.drawnHeight / height;
+      left = Math.round(left * x);
+      right = Math.round(right * x);
+      top = Math.round(top * y);
+      bottom = Math.round(bottom * y);
+      drawnHeight = this.drawnHeight;
+    }
+
     gl.enable(gl.SCISSOR_TEST);
     gl.scissor(
       left,
-      this.renderTexture ? top : height - bottom,
+      this.renderTexture ? top : drawnHeight - bottom,
       Math.max(0, right - left),
       Math.max(0, bottom - top),
     );
@@ -1899,12 +1998,12 @@ export class WebGLContext3D implements Context3D {
       gl.blitFramebuffer(
         0,
         0,
-        this.width,
-        this.height,
+        this.drawnWidth,
+        this.drawnHeight,
         0,
         0,
-        this.width,
-        this.height,
+        this.drawnWidth,
+        this.drawnHeight,
         gl.COLOR_BUFFER_BIT,
         gl.NEAREST,
       );
@@ -1922,12 +2021,46 @@ export class WebGLContext3D implements Context3D {
     this.target(true);
     this.resolve();
     const gl = this.gl;
+    const scaleX = this.drawnWidth / this.width;
+    const scaleY = this.drawnHeight / this.height;
+    const drawnWidth = Math.min(this.drawnWidth, Math.ceil(width * scaleX));
+    const drawnHeight = Math.min(this.drawnHeight, Math.ceil(height * scaleY));
+    if (this.pixels.length < drawnWidth * drawnHeight * 4) {
+      this.pixels = new Uint8Array(drawnWidth * drawnHeight * 4);
+    }
+    if (this.topDown.length < width * height * 4) {
+      this.topDown = new Uint8Array(width * height * 4);
+    }
+
     // GL's rows run bottom-up, so the top-left region starts height rows below the top.
-    gl.readPixels(0, this.height - height, width, height, gl.RGBA, gl.UNSIGNED_BYTE, this.pixels);
+    gl.readPixels(
+      0,
+      this.drawnHeight - drawnHeight,
+      drawnWidth,
+      drawnHeight,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      this.pixels,
+    );
     const row = width * 4;
+    if (drawnWidth === width && drawnHeight === height) {
+      for (let y = 0; y < height; y++) {
+        const from = (height - y - 1) * row;
+        this.topDown.set(this.pixels.subarray(from, from + row), y * row);
+      }
+
+      return this.topDown;
+    }
+
+    // Storage smaller than the back buffer: each pixel is the stored one it falls on.
+    const source = new Uint32Array(this.pixels.buffer, 0, drawnWidth * drawnHeight);
+    const target = new Uint32Array(this.topDown.buffer, 0, width * height);
     for (let y = 0; y < height; y++) {
-      const from = (height - y - 1) * row;
-      this.topDown.set(this.pixels.subarray(from, from + row), y * row);
+      const from =
+        (drawnHeight - 1 - Math.min(drawnHeight - 1, Math.floor(y * scaleY))) * drawnWidth;
+      for (let x = 0; x < width; x++) {
+        target[y * width + x] = source[from + Math.min(drawnWidth - 1, Math.floor(x * scaleX))];
+      }
     }
 
     return this.topDown;
@@ -1942,15 +2075,16 @@ export class WebGLContext3D implements Context3D {
     if (this.scissor) {
       gl.disable(gl.SCISSOR_TEST);
     }
+    // To the drawing buffer the browser gave, which it may have made smaller than the canvas.
     gl.blitFramebuffer(
       0,
       0,
-      this.width,
-      this.height,
+      this.drawnWidth,
+      this.drawnHeight,
       0,
       0,
-      this.width,
-      this.height,
+      gl.drawingBufferWidth,
+      gl.drawingBufferHeight,
       gl.COLOR_BUFFER_BIT,
       gl.NEAREST,
     );
