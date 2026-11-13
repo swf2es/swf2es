@@ -1,8 +1,12 @@
 import type { GlState } from "@swf2es/context3d/device";
 import type { Place } from "./atlas.js";
-import { COLOR_AT, DRAW_AT, POSITION_AT, TEXEL_AT } from "./programs.js";
+import { COLOR_AT, DRAW_AT, MERGED_LINE, MERGED_UNIT, POSITION_AT, TEXEL_AT } from "./programs.js";
 
-/** Atlas attributes followed by the packed row: transforms and snapping stay in the shader. */
+/**
+ * Atlas attributes followed by where the draw's packed row is in the rows'
+ * texture: transforms and snapping stay in the shader, and a row that
+ * changes changes no vertex.
+ */
 const WORDS = 6;
 /** Bound the extra CPU and GPU storage, falling back to the atlas after it fills. */
 const VERTICES_MOST = 2 << 20;
@@ -13,12 +17,30 @@ const INDICES_LEAST = 3 << 14;
 /** Frames over which the most used is watched; room four times that is let go of after them. */
 const SHRINK_FRAMES = 240;
 
+type Batch = NonNullable<Place["batch"]>;
+
+/** A run's geometries copied in a row into the stream, where every run of the same geometries finds them. */
+interface Segment {
+  batches: Batch[];
+  vertexStart: number;
+  vertices: number;
+  indexStart: number;
+  indices: number;
+  /** Where its draws' rows are in the rows' texture, one after another. */
+  slot: number;
+  /** The last frame a run used it (FillBatches.frame). */
+  frame: number;
+}
+
 /**
- * Small stable geometries merged in painter's order; unchanged streams reuse
- * their GPU buffers. Only what changed since the last frame, from the first
- * draw that differs to the stream's end, is staged on the CPU and uploaded
- * where it lies: the stream before it stays on the GPU alone, and a buffer
- * grown keeps it by a copy there.
+ * Small geometries merged run by run in painter's order, each run's copy a
+ * segment of one stream that any later run of the same geometries draws
+ * again, wherever it comes in the frame: its rows are in a texture of its
+ * own, written each frame, not in its vertices. Only the segments a frame adds are staged on the
+ * CPU, after the stream's top, and uploaded there at once; what is below
+ * stays on the GPU alone, and a buffer grown keeps it by a copy there.
+ * Segments no run used in a frame are let go of, and their room once the
+ * stream is twice what the last frame used, the stream then made anew.
  */
 export class FillBatches {
   vertexArray!: WebGLVertexArrayObject;
@@ -32,14 +54,36 @@ export class FillBatches {
   private indexCapacity = 0;
   private vertexTop = 0;
   indexTop = 0;
-  /** Where this frame's staging starts in the stream: the first draw that differs from the last frame's. */
+  /** Where this frame's staging starts in the stream: its top as the frame began. */
   private fromVertex = 0;
   private fromIndex = 0;
-  private readonly previous: NonNullable<Place["batch"]>[] = [];
-  private readonly previousRows: number[] = [];
-  private cursor = 0;
-  /** Stays dirty if preparation aborts before upload, as an overflowing run table can do. */
-  private changed = false;
+  /**
+   * The segments' rows, slot by slot (Segment.slot), as their texture holds
+   * them, the slots taken, and the range of them this frame changed.
+   */
+  rowsTexture: WebGLTexture | null = null;
+  private rows = new Int32Array(0);
+  private rowsLines = 0;
+  private slotTop = 0;
+  private slotsMost = 0;
+  private changedFrom = 0;
+  private changedTo = 0;
+  /** The segments by their first geometry. */
+  private readonly segments = new Map<Batch, Segment[]>();
+  private frame = 0;
+  /** What the frame's runs used of the stream, each segment once. */
+  private liveVertices = 0;
+  private liveIndices = 0;
+  /**
+   * The keys of the runs this frame and the last asked for (add's
+   * `settled`), so that a run is copied only once it is drawn again.
+   */
+  private seen = new Set<number>();
+  private seenBefore = new Set<number>();
+  /** A frame prepared but not uploaded, as an overflowing run table leaves one: its staging lost. */
+  private pending = false;
+  /** Whether a run found no room this frame, so that the next makes the stream anew. */
+  private full = false;
   /** The frames of the current watch, and the most of the stream and of the staging they used. */
   private frames = 0;
   private mostVertices = 0;
@@ -52,8 +96,13 @@ export class FillBatches {
     private readonly state: GlState,
   ) {}
 
-  setUp(): void {
+  /** The buffers and the rows' texture made, `textureMost` lines at most, as the context comes. */
+  setUp(textureMost: number): void {
     const gl = this.gl;
+    this.rowsTexture = null;
+    this.rowsLines = 0;
+    this.rows = new Int32Array(0);
+    this.slotsMost = MERGED_LINE * textureMost;
     this.vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
     this.vertexBuffer = gl.createBuffer() as WebGLBuffer;
     this.indexBuffer = gl.createBuffer() as WebGLBuffer;
@@ -72,69 +121,142 @@ export class FillBatches {
     gl.vertexAttribI4i(DRAW_AT, -1, 0, 0, 0);
     this.vertexCapacity = 0;
     this.indexCapacity = 0;
-    this.previous.length = 0;
-    this.previousRows.length = 0;
-    this.changed = false;
-    this.reset();
+    this.clear();
   }
 
-  reset(): void {
+  /** No segment kept: the stream made anew from its start. */
+  private clear(): void {
+    this.segments.clear();
     this.vertexTop = 0;
     this.indexTop = 0;
-    this.cursor = 0;
-    // A preparation that aborted left the whole stream to stage again.
-    this.fromVertex = 0;
-    this.fromIndex = 0;
+    this.slotTop = 0;
+    this.pending = false;
+    this.full = false;
   }
 
-  /** Append the whole run, or leave it to multi-draw if copying would cost too much. */
-  add(places: Place[], rows: Int32Array, count: number, frame: number): void {
-    if (count < 32) {
-      return;
+  /** A frame's preparation begun: staging from the stream's top, or from its start once it is mostly dead. */
+  reset(): void {
+    if (this.pending) {
+      // Rows written and not uploaded: the texture made again, so that the CPU's copy is its own.
+      this.rowsLines = 0;
     }
 
-    let vertices = this.vertexTop;
-    let indices = this.indexTop;
+    if (
+      this.pending ||
+      // Room let go of where a run found none, unless the last frame used all of the stream.
+      (this.full && (this.vertexTop > this.liveVertices || this.indexTop > this.liveIndices)) ||
+      (this.vertexTop > VERTICES_LEAST && this.vertexTop > this.liveVertices * 2) ||
+      (this.indexTop > INDICES_LEAST && this.indexTop > this.liveIndices * 2)
+    ) {
+      this.clear();
+    }
+
+    this.full = false;
+    const seen = this.seenBefore;
+    this.seenBefore = this.seen;
+    this.seen = seen;
+    seen.clear();
+    this.frame++;
+    this.fromVertex = this.vertexTop;
+    this.fromIndex = this.indexTop;
+    this.liveVertices = 0;
+    this.liveIndices = 0;
+    this.changedFrom = this.slotTop;
+    this.changedTo = 0;
+    this.pending = true;
+  }
+
+  /**
+   * The segment that draws the run, of at least `least` draws: one kept, or
+   * one staged now; null leaves it to the atlas, where copying would cost
+   * too much: a run short or of geometry added this `frame` is cheaper
+   * drawn from it, and with `settled` a run not drawn the frame before
+   * too, as a run that changes from frame to frame, as an animation's do,
+   * would be copied again each frame. Its vertices carry each draw's slot
+   * in the rows' texture, where `rows` are written.
+   */
+  add(
+    places: Place[],
+    rows: Int32Array,
+    count: number,
+    frame: number,
+    least: number,
+    settled: boolean,
+  ): { indexStart: number; indices: number } | null {
+    if (count < least) {
+      return null;
+    }
+
+    let vertices = 0;
+    let indices = 0;
+    // The run's geometries by where they lie in the atlas, which no two live geometries share.
+    let key = count;
     for (let i = 0; i < count; i++) {
       const place = places[i];
       if (!place.batch || place.batch.frame === frame) {
-        return;
+        return null;
       }
 
       vertices += place.vertices;
       indices += place.indices;
+      key = Math.imul(key ^ place.indexStart, 0x9e3779b1) ^ place.indices;
     }
 
-    if (vertices > VERTICES_MOST || indices > INDICES_MOST) {
-      return;
+    const first = places[0].batch as Batch;
+    let list = this.segments.get(first);
+    if (list) {
+      for (const segment of list) {
+        // A copy a run drew this frame already serves another only with the same rows.
+        if (
+          segment.batches.length === count &&
+          this.holds(segment, places) &&
+          (segment.frame !== this.frame || this.rowsAre(segment.slot, rows, count))
+        ) {
+          this.use(segment);
+          this.writeRows(segment.slot, rows, count);
+          return segment;
+        }
+      }
     }
 
+    // A key alike by chance merges a run a frame early, which costs a copy and draws the same.
+    this.seen.add(key);
+    if (settled && !this.seenBefore.has(key)) {
+      return null;
+    }
+
+    if (
+      this.vertexTop + vertices > VERTICES_MOST ||
+      this.indexTop + indices > INDICES_MOST ||
+      this.slotTop + count > this.slotsMost
+    ) {
+      this.full = true;
+      return null;
+    }
+
+    const segment: Segment = {
+      batches: new Array<Batch>(count),
+      vertexStart: this.vertexTop,
+      vertices,
+      indexStart: this.indexTop,
+      indices,
+      slot: this.slotTop,
+      frame: -1,
+    };
+    this.slotTop += count;
+    this.stageRoom(
+      this.vertexTop + vertices - this.fromVertex,
+      this.indexTop + indices - this.fromIndex,
+    );
+    const floats = this.floats;
+    const words = this.words;
+    const staged = this.indices;
     for (let i = 0; i < count; i++) {
       const place = places[i];
-      const batch = place.batch as NonNullable<Place["batch"]>;
-      // An unchanged prefix has the same offsets. After a mismatch, stage the rest in order.
-      if (
-        !this.changed &&
-        (this.previous[this.cursor] !== batch || this.previousRows[this.cursor] !== rows[i])
-      ) {
-        this.changed = true;
-        this.fromVertex = this.vertexTop;
-        this.fromIndex = this.indexTop;
-      }
-
-      this.previous[this.cursor] = batch;
-      this.previousRows[this.cursor++] = rows[i];
-      if (!this.changed) {
-        this.vertexTop += place.vertices;
-        this.indexTop += place.indices;
-        continue;
-      }
-
-      this.stageRoom(vertices - this.fromVertex, indices - this.fromIndex);
+      const batch = place.batch as Batch;
+      segment.batches[i] = batch;
       const data = batch.data;
       const base = this.vertexTop;
-      const floats = this.floats;
-      const words = this.words;
       for (let j = 0; j < place.vertices; j++) {
         const at = (base - this.fromVertex + j) * WORDS;
         floats[at] = data.positions[j * 2];
@@ -142,10 +264,9 @@ export class FillBatches {
         floats[at + 2] = data.texels ? data.texels[j * 2] : 0;
         floats[at + 3] = data.texels ? data.texels[j * 2 + 1] : 0;
         words[at + 4] = data.colors[j];
-        words[at + 5] = rows[i];
+        words[at + 5] = segment.slot + i;
       }
 
-      const staged = this.indices;
       let at = this.indexTop - this.fromIndex;
       for (let j = 0; j < place.indices; j++) {
         staged[at++] = base + data.indices[j];
@@ -154,22 +275,146 @@ export class FillBatches {
       this.vertexTop += place.vertices;
       this.indexTop += place.indices;
     }
+
+    if (!list) {
+      list = [];
+      this.segments.set(first, list);
+    }
+
+    list.push(segment);
+    this.use(segment);
+    this.writeRows(segment.slot, rows, count);
+    return segment;
+  }
+
+  /** Whether the `count` rows from `slot` are `rows`. */
+  private rowsAre(slot: number, rows: Int32Array, count: number): boolean {
+    for (let i = 0; i < count; i++) {
+      if (this.rows[slot + i] !== rows[i]) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /** `rows` written from `slot` on, what changes counted for the upload. */
+  private writeRows(slot: number, rows: Int32Array, count: number): void {
+    if (slot + count > this.rows.length) {
+      const lines = Math.ceil(Math.max(slot + count, this.rows.length * 2) / MERGED_LINE);
+      const grown = new Int32Array(lines * MERGED_LINE);
+      grown.set(this.rows);
+      this.rows = grown;
+    }
+
+    const held = this.rows;
+    for (let i = 0; i < count; i++) {
+      if (held[slot + i] !== rows[i]) {
+        held[slot + i] = rows[i];
+        this.changedFrom = Math.min(this.changedFrom, slot + i);
+        this.changedTo = Math.max(this.changedTo, slot + i + 1);
+      }
+    }
+  }
+
+  /** The rows' texture made tall enough for the slots taken, and the lines this frame changed uploaded. */
+  private uploadRows(): void {
+    const gl = this.gl;
+    const lines = Math.ceil(this.slotTop / MERGED_LINE);
+    if (lines > this.rowsLines) {
+      if (this.rowsTexture) {
+        this.state.dropTexture(this.rowsTexture);
+        gl.deleteTexture(this.rowsTexture);
+      }
+
+      // A new texture holds zeros: the rows taken uploaded again, the CPU's past them zeros too.
+      this.rows.fill(0, this.slotTop);
+      this.rowsLines = Math.min(this.slotsMost / MERGED_LINE, Math.max(lines, this.rowsLines * 2));
+      this.rowsTexture = gl.createTexture();
+      this.state.bindTexture(MERGED_UNIT, this.rowsTexture);
+      this.state.activeTexture(MERGED_UNIT);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32I, MERGED_LINE, this.rowsLines);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this.changedFrom = 0;
+      this.changedTo = this.slotTop;
+    }
+
+    if (this.changedTo <= this.changedFrom) {
+      return;
+    }
+
+    const from = Math.floor(this.changedFrom / MERGED_LINE);
+    const to = Math.ceil(this.changedTo / MERGED_LINE);
+    this.state.bindTexture(MERGED_UNIT, this.rowsTexture);
+    this.state.activeTexture(MERGED_UNIT);
+    gl.texSubImage2D(
+      gl.TEXTURE_2D,
+      0,
+      0,
+      from,
+      MERGED_LINE,
+      to - from,
+      gl.RED_INTEGER,
+      gl.INT,
+      this.rows,
+      from * MERGED_LINE,
+    );
+  }
+
+  /** Whether `segment` is of the geometries of `places`, in their order. */
+  private holds(segment: Segment, places: Place[]): boolean {
+    const batches = segment.batches;
+    for (let i = 0; i < batches.length; i++) {
+      if (batches[i] !== places[i].batch) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /** `segment` used this frame, counted once among what the frame used. */
+  private use(segment: Segment): void {
+    if (segment.frame !== this.frame) {
+      segment.frame = this.frame;
+      this.liveVertices += segment.vertices;
+      this.liveIndices += segment.indices;
+    }
   }
 
   /**
-   * The staged part of the stream uploaded where it lies, the buffers grown
-   * to fit it first, keeping what is before it; and, once a watch of
-   * SHRINK_FRAMES has used a quarter of the room or less, the buffers and
-   * the staging made smaller.
+   * The staged segments uploaded where they lie, the buffers grown to fit
+   * them first, keeping what is below; the segments no run used let go of;
+   * and, once a watch of SHRINK_FRAMES has used a quarter of the room or
+   * less, the buffers and the staging made smaller.
    */
   upload(): void {
-    this.previous.length = this.cursor;
-    this.previousRows.length = this.cursor;
-    const staging = this.changed && this.indexTop > 0;
+    const staging = this.vertexTop > this.fromVertex;
     if (staging) {
       this.uploadStaged();
     }
 
+    if (this.slotTop > 0) {
+      this.uploadRows();
+    }
+
+    for (const [first, list] of this.segments) {
+      let kept = 0;
+      for (const segment of list) {
+        if (segment.frame === this.frame) {
+          list[kept++] = segment;
+        }
+      }
+
+      if (kept === 0) {
+        this.segments.delete(first);
+      } else {
+        list.length = kept;
+      }
+    }
+
+    this.pending = false;
     this.watch(staging);
   }
 
@@ -215,10 +460,15 @@ export class FillBatches {
       0,
       this.indexTop - this.fromIndex,
     );
-    this.changed = false;
   }
 
   destroy(): void {
+    if (this.rowsTexture) {
+      this.state.dropTexture(this.rowsTexture);
+      this.gl.deleteTexture(this.rowsTexture);
+      this.rowsTexture = null;
+    }
+
     this.gl.deleteVertexArray(this.vertexArray);
     this.gl.deleteBuffer(this.vertexBuffer);
     this.gl.deleteBuffer(this.indexBuffer);
@@ -266,10 +516,8 @@ export class FillBatches {
     }
 
     const gl = this.gl;
-    // With nothing uploaded for a change, as for a stream of no draws, nothing on the GPU is kept.
-    const kept = !this.changed;
-    const keepVertices = kept ? this.vertexTop : 0;
-    const keepIndices = kept ? this.indexTop : 0;
+    const keepVertices = this.vertexTop;
+    const keepIndices = this.indexTop;
     const vertices = Math.max(VERTICES_LEAST, this.mostVertices * 2);
     if (this.mostVertices * 4 <= this.vertexCapacity && vertices < this.vertexCapacity) {
       this.state.bindVertexArray(this.vertexArray);

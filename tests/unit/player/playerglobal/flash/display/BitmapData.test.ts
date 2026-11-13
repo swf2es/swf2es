@@ -118,6 +118,10 @@ const newBitmap = () => {
 for (let i = 0; i < 6; i++) {
   bitmaps.push(make("flash.display::BitmapData", 8 + i * 3, 5 + i * 2, i % 2 === 0, 0xff336699));
 }
+// Two whose pixels are a run long enough for the native module to set and read (bitmap.ts).
+bitmaps.push(make("flash.display::BitmapData", 64, 40, true, 0x80336699));
+bitmaps.push(make("flash.display::BitmapData", 64, 40, false, 0xff336699));
+const KEPT = bitmaps.length;
 const bd = () => pick(bitmaps);
 
 const arr = (n: number, f: () => unknown) => {
@@ -252,10 +256,16 @@ const filter = () => {
 
 const bytes = () => {
   const b = make("flash.utils::ByteArray");
-  const n = Math.floor(rand() * 400);
+  // Now and then enough for every pixel of the largest bitmap, in either byte order.
+  const n = Math.floor(rand() * (rand() < 0.1 ? 12000 : 400));
   for (let i = 0; i < n; i++) {
     call(b, "writeByte", Math.floor(rand() * 256));
   }
+
+  if (rand() < 0.3) {
+    set(b, "endian", "littleEndian");
+  }
+
   // A ByteArray's own position as far as 1e9 grows it as far in adl too.
   if (rand() < 0.5) {
     set(b, "position", Math.floor(rand() * (n + 20)));
@@ -265,7 +275,7 @@ const bytes = () => {
 
 const vector = () => {
   const v = make(rt.resolve(rt.vector("uint")));
-  const n = Math.floor(rand() * 600);
+  const n = Math.floor(rand() * (rand() < 0.1 ? 3000 : 600));
   for (let i = 0; i < n; i++) {
     call(v, "push", Math.floor(rand() * 2 ** 32));
   }
@@ -498,7 +508,7 @@ test("no BitmapData native or filter throws a JS error or makes a buffer the inp
     }
 
     if (bitmaps.length > 40) {
-      bitmaps.splice(6, bitmaps.length - 20);
+      bitmaps.splice(KEPT, bitmaps.length - 20);
     }
   }
 
@@ -536,4 +546,238 @@ test("pixelDissolve's answers past the states, at count 0 and for a rect a pixel
     [1, 0, 2, 100],
   );
   assert.deepEqual([answer(3, 3, 100, 1), answer(2, 1, -2, 3), answer(2, 2, 0, 0)], [0, -2, 3]);
+});
+
+/** The store's pixels of a BitmapData, premultiplied as it keeps them. */
+const pixelsOf = (b: unknown) => (b as { $store: { pixels: Uint32Array } }).$store.pixels;
+
+/** The id of the AS3 error `f` throws, or 0. */
+const errorOf = (f: () => unknown): number => {
+  try {
+    f();
+  } catch (e) {
+    return Number(get(e, "errorID"));
+  }
+
+  return 0;
+};
+
+/** Values of every alpha, clear and solid ones among them, from a seed of their own. */
+const values = (n: number, from: number): number[] => {
+  let x = from >>> 0;
+  const out: number[] = [];
+  for (let i = 0; i < n; i++) {
+    x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
+    const alpha = x % 5 === 0 ? 0 : x % 5 === 1 ? 255 : x >>> 24;
+    out.push(((alpha << 24) | (Math.imul(x, 2654435761) & 0xffffff)) >>> 0);
+  }
+
+  return out;
+};
+
+/** A ByteArray of `junk` bytes, then `words` in the byte order given, some of the last left out; positioned past the junk. */
+const wordBytes = (words: number[], little: boolean, junk: number, cut = 0) => {
+  const b = make("flash.utils::ByteArray");
+  set(b, "endian", little ? "littleEndian" : "bigEndian");
+  for (let i = 0; i < junk; i++) {
+    call(b, "writeByte", 0xa5);
+  }
+
+  for (const w of words) {
+    call(b, "writeUnsignedInt", w);
+  }
+
+  set(b, "length", junk + words.length * 4 - cut);
+  set(b, "position", junk);
+  return b;
+};
+
+// Bitmaps whose rows, or all of whose pixels, are runs long enough for the native module
+// (1024 pixels) and too short for it, of odd widths; rects whole, within and overhanging.
+const SHAPES: [number, number, [number, number, number, number][]][] = [
+  [
+    70,
+    40,
+    [
+      [0, 0, 70, 40],
+      [3, 2, 61, 33],
+      [-5, 20, 90, 40],
+    ],
+  ],
+  [
+    7,
+    5,
+    [
+      [0, 0, 7, 5],
+      [2, 1, 3, 3],
+    ],
+  ],
+  [
+    1100,
+    3,
+    [
+      [0, 0, 1100, 3],
+      [37, 1, 1041, 2],
+      [1, 0, 1027, 3],
+    ],
+  ],
+];
+
+test("setPixels and setVector set what setPixel32 does a pixel at a time, whatever the run, byte order and position", () => {
+  let seed = 1;
+  for (const [w, h, rects] of SHAPES) {
+    for (const transparent of [true, false]) {
+      for (const [rx, ry, rw, rh] of rects) {
+        const x0 = Math.max(0, rx);
+        const y0 = Math.max(0, ry);
+        const cw = Math.min(w, rx + rw) - x0;
+        const ch = Math.min(h, ry + rh) - y0;
+        const words = values(cw * ch, seed++);
+        const r = make("flash.geom::Rectangle", rx, ry, rw, rh);
+        const expected = make("flash.display::BitmapData", w, h, transparent, 0x80402010);
+        for (let i = 0; i < words.length; i++) {
+          call(expected, "setPixel32", x0 + (i % cw), y0 + Math.floor(i / cw), words[i]);
+        }
+
+        for (const little of [false, true]) {
+          for (const junk of [0, 1, 3, 4]) {
+            const label = `${w}x${h} ${transparent} ${rx},${ry} ${little} +${junk}`;
+            const b = make("flash.display::BitmapData", w, h, transparent, 0x80402010);
+            const input = wordBytes(words, little, junk);
+            call(b, "setPixels", r, input);
+            assert.deepEqual(pixelsOf(b), pixelsOf(expected), label);
+            assert.equal(get(input, "position"), junk + words.length * 4, label);
+          }
+        }
+
+        const v = make(rt.resolve(rt.vector("uint")));
+        (v as { $a: number[] }).$a.push(...words, 0x12345678);
+        const b = make("flash.display::BitmapData", w, h, transparent, 0x80402010);
+        call(b, "setVector", r, v);
+        assert.deepEqual(pixelsOf(b), pixelsOf(expected), `${w}x${h} setVector`);
+
+        // A Vector a value short sets nothing.
+        (v as { $a: number[] }).$a.length = words.length - 1;
+        const untouched = make("flash.display::BitmapData", w, h, transparent, 0x80402010);
+        const before = pixelsOf(untouched).slice();
+        assert.equal(
+          errorOf(() => call(untouched, "setVector", r, v)),
+          2006,
+        );
+        assert.deepEqual(pixelsOf(untouched), before);
+      }
+    }
+  }
+});
+
+test("setPixels of bytes that run out sets the pixels they hold, moves past those alone, then throws EOFError", () => {
+  let seed = 100;
+  for (const [w, h, rects] of SHAPES) {
+    for (const transparent of [true, false]) {
+      for (const [rx, ry, rw, rh] of rects) {
+        const x0 = Math.max(0, rx);
+        const y0 = Math.max(0, ry);
+        const cw = Math.min(w, rx + rw) - x0;
+        const ch = Math.min(h, ry + rh) - y0;
+        const all = values(cw * ch, seed++);
+        const r = make("flash.geom::Rectangle", rx, ry, rw, rh);
+        // Ending within a row, at a row's end and at once; a whole pixel short, and bytes of one over.
+        for (const [held, cut] of [
+          [all.length - Math.floor(cw / 2) - 1, 0],
+          [all.length - cw, 3],
+          [all.length, 1],
+          [1, 2],
+          [0, 0],
+        ]) {
+          const label = `${w}x${h} ${transparent} ${rx},${ry} ${held} -${cut}`;
+          const words = all.slice(0, held);
+          const set32 = cut === 0 ? held : held - 1;
+          const expected = make("flash.display::BitmapData", w, h, transparent, 0x80402010);
+          for (let i = 0; i < set32; i++) {
+            call(expected, "setPixel32", x0 + (i % cw), y0 + Math.floor(i / cw), words[i]);
+          }
+
+          for (const [little, junk] of [
+            [false, 0],
+            [true, 0],
+            [false, 3],
+            [true, 2],
+          ] as const) {
+            const b = make("flash.display::BitmapData", w, h, transparent, 0x80402010);
+            const input = wordBytes(words, little, junk, cut);
+            assert.equal(
+              errorOf(() => call(b, "setPixels", r, input)),
+              2030,
+              label,
+            );
+            assert.deepEqual(pixelsOf(b), pixelsOf(expected), label);
+            assert.equal(get(input, "position"), junk + set32 * 4, label);
+          }
+        }
+      }
+    }
+  }
+});
+
+test("getPixels, copyPixelsToByteArray and getVector read what getPixel32 does a pixel at a time, whatever the run, byte order and position", () => {
+  let seed = 200;
+  for (const [w, h, rects] of SHAPES) {
+    for (const transparent of [true, false]) {
+      // What a store may hold: values premultiplied, and pixels no value premultiplies to.
+      const b = make("flash.display::BitmapData", w, h, transparent, 0);
+      const held = values(w * h, seed++);
+      for (let i = 0; i < held.length; i++) {
+        call(b, "setPixel32", i % w, Math.floor(i / w), held[i]);
+      }
+
+      if (transparent) {
+        pixelsOf(b).set(values(w, seed++), w);
+      }
+
+      for (const [rx, ry, rw, rh] of rects) {
+        const x0 = Math.max(0, rx);
+        const y0 = Math.max(0, ry);
+        const cw = Math.min(w, rx + rw) - x0;
+        const ch = Math.min(h, ry + rh) - y0;
+        const expected: number[] = [];
+        for (let i = 0; i < cw * ch; i++) {
+          expected.push(call(b, "getPixel32", x0 + (i % cw), y0 + Math.floor(i / cw)) as number);
+        }
+
+        const label = `${w}x${h} ${transparent} ${rx},${ry}`;
+        const r = make("flash.geom::Rectangle", rx, ry, rw, rh);
+        const words = (bytes: unknown, at: number) => {
+          set(bytes, "position", at);
+          return expected.map(() => call(bytes, "readUnsignedInt"));
+        };
+
+        const got = call(b, "getPixels", r);
+        assert.equal(get(got, "length"), expected.length * 4, label);
+        assert.equal(get(got, "position"), expected.length * 4, label);
+        assert.deepEqual(words(got, 0), expected, label);
+
+        for (const little of [false, true]) {
+          for (const junk of [0, 1, 2, 4]) {
+            const target = wordBytes([], little, junk);
+            // Past what it holds: written over, and the rest kept.
+            call(target, "writeUnsignedInt", 0xdeadbeef);
+            set(target, "position", junk);
+            call(b, "copyPixelsToByteArray", r, target);
+            assert.equal(get(target, "position"), junk + expected.length * 4, `${label} +${junk}`);
+            assert.equal(get(target, "length"), junk + expected.length * 4, `${label} +${junk}`);
+            assert.deepEqual(words(target, junk), expected, `${label} ${little} +${junk}`);
+            if (junk > 0) {
+              assert.equal(
+                (target as { $bytes: { buffer: Uint8Array } }).$bytes.buffer[junk - 1],
+                0xa5,
+              );
+            }
+          }
+        }
+
+        const v = call(b, "getVector", r) as { $a: number[] };
+        assert.deepEqual(v.$a, expected, label);
+      }
+    }
+  }
 });

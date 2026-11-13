@@ -6,10 +6,15 @@ import {
   Context3DError,
   CULL_FACES,
   type CullFace,
+  compressedFormat,
+  FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
+  MOST_CUBE,
   type ProgramType,
+  profileLimits,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
+  SAMPLER_SLOTS,
   SAMPLER_WRAPS,
   type SamplerFilter,
   type SamplerMip,
@@ -18,9 +23,12 @@ import {
   STENCIL_ACTIONS,
   type StencilAction,
   screenPixels,
+  TEXTURE_FORMATS,
   TextureBindingError,
   type TextureFormat,
+  VERTEX_CONSTANTS,
   VERTEX_FORMATS,
+  VERTEX_SLOTS,
   type VertexFormat,
   VertexOffsetError,
 } from "@swf2es/context3d";
@@ -29,7 +37,7 @@ import type { As3 } from "../../as3/types.js";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
-import { type AsObject, type Bindings, type ContextState, unsupported } from "./lifecycle.js";
+import type { AsObject, Bindings, ContextState } from "./lifecycle.js";
 import { writeReadback } from "./readback.js";
 
 /** maxBackBufferWidth and maxBackBufferHeight of a disposed context, as AIR reads them. */
@@ -45,31 +53,6 @@ const SIZE_ERRORS_FROM = 30;
  */
 function most(value: number, size: number, limit: number): number {
   return Math.min(limit, Math.max(32, size, value | 0));
-}
-
-/** The backend's format for a texture's; the packed and half-float ones are not yet. */
-function textureFormat(format: string): TextureFormat {
-  if (format !== "bgra" && format !== "compressed" && format !== "compressedAlpha") {
-    unsupported(`the texture format "${format}"`);
-  }
-
-  return format;
-}
-
-/** The constant registers a program of `stage` has in the context's profile. */
-function registers(entry: ContextState, stage: ProgramType): number {
-  const standard = entry.profile.startsWith("standard");
-  return stage === "vertex" ? (standard ? 250 : 128) : standard ? 64 : 28;
-}
-
-/**
- * How many of `count` registers from `first` there are: AIR takes more than there are,
- * and writes those that fit.
- */
-function within(entry: ContextState, stage: ProgramType, first: number, count: number): number {
-  return first >= 0 && count > 0
-    ? Math.max(0, Math.min(count, registers(entry, stage) - first))
-    : count;
 }
 
 export function registerContext(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
@@ -95,6 +78,21 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     if (side > 0 && levels > Math.floor(Math.log2(side))) {
       throw s.rt.error("ArgumentError", 3711);
     }
+  };
+  /**
+   * The constant registers a setter writes: `count` from `first`. Every profile takes 250
+   * vertex and 200 fragment registers, whatever its AGAL reads, and refuses a run that starts
+   * or ends past them (#2006), a matrix's four too (Profiles.as).
+   */
+  const within = (stage: ProgramType, first: number, count: number): number => {
+    if (
+      first < 0 ||
+      first + Math.max(count, 0) > (stage === "vertex" ? VERTEX_CONSTANTS : FRAGMENT_CONSTANTS)
+    ) {
+      throw s.rt.error("RangeError", 2006);
+    }
+
+    return count;
   };
   /** A program type, which AIR names programType when it refuses one. */
   const programType = (type: string | null): ProgramType => {
@@ -148,6 +146,63 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     entry.cleared = 0;
   });
+
+  /** The back buffer alone again: what setRenderToBackBuffer and present leave. */
+  const resetOutputs = (entry: ContextState): void => {
+    for (let i = 0; i < entry.outputs.length; i++) {
+      if (entry.outputs[i]) {
+        entry.backend.setColorOutput(i + 1, null);
+        entry.outputs[i] = null;
+      }
+    }
+  };
+
+  /**
+   * How many colour outputs a clear or draw writes, checked as AIR checks them: the others
+   * only beside a texture target (#3728), each of its size, format, depth and antialiasing
+   * (#3729).
+   */
+  const colorOutputs = (entry: ContextState): number => {
+    let count = 1;
+    for (let i = 0; i < entry.outputs.length; i++) {
+      const output = entry.outputs[i];
+      if (!output) {
+        continue;
+      }
+
+      const target = entry.target?.value;
+      if (!target) {
+        throw s.rt.error("Error", 3728);
+      }
+      if (
+        output.value.width !== target.width ||
+        output.value.height !== target.height ||
+        output.value.format !== target.format ||
+        output.depth !== entry.targetDepth ||
+        output.antiAlias !== entry.targetAntiAlias
+      ) {
+        throw s.rt.error("Error", 3729);
+      }
+      count = i + 2;
+    }
+
+    return count;
+  };
+
+  /** A texture's format: one Flash names (#2008), and in rgbaHalfFloat's case one its profile has (#3759). */
+  const textureFormat = (entry: ContextState, format: string | null): TextureFormat => {
+    if (format === null) {
+      throw s.rt.error("TypeError", 2007, "format");
+    }
+    if (!TEXTURE_FORMATS.includes(format as TextureFormat)) {
+      throw s.rt.error("ArgumentError", 2008, "format");
+    }
+    if (format === "rgbaHalfFloat" && !profileLimits(entry.profile).halfFloat) {
+      throw s.rt.error("ArgumentError", 3759);
+    }
+
+    return format as TextureFormat;
+  };
 
   class ContextNatives {
     get driverInfo(): string {
@@ -276,11 +331,19 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         return;
       }
 
+      colorOutputs(entry);
       // AIR reads the mask's three low bits alone: 8 clears nothing, 15 clears all.
       backend.clear(r, g, b, a, depth, mask & 7, stencil);
       // Only successful AS3 clears count, not the backend's allocation-time clear.
       if (entry.target) {
         entry.target.initialized = true;
+        for (let i = 0; i < entry.outputs.length; i++) {
+          const output = entry.outputs[i];
+          const resource = output && textures.get(output.object);
+          if (resource) {
+            resource.initialized = true;
+          }
+        }
       } else {
         entry.cleared |= mask & (entry.depth ? 7 : 1);
       }
@@ -361,8 +424,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       _target: boolean,
       levels = 0,
     ): AsObject {
-      const backend = context(this as unknown as AsObject);
-      const compressed = textureFormat(format);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      const compressed = textureFormat(entry, format);
+      const most = profileLimits(entry.profile).textureSize;
+      if (width > most || height > most) {
+        throw s.rt.error("ArgumentError", 3683, most);
+      }
       streamingLevels(levels, Math.max(width, height));
       const value = allocate(this as unknown as AsObject, () =>
         backend.createTexture(width, height, false, compressed, levels),
@@ -388,36 +456,26 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       format: string | null,
       _target: boolean,
     ): AsObject {
-      const backend = context(this as unknown as AsObject);
-      if (format === null) {
-        throw s.rt.error("TypeError", 2007, "format");
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      // baselineConstrained has none.
+      const most = profileLimits(entry.profile).rectangleSize;
+      if (!most) {
+        throw s.rt.error("Error", 3782);
       }
-      switch (format) {
-        case "bgra":
-        case "bgraPacked4444":
-        case "bgrPacked565":
-        case "compressed":
-        case "compressedAlpha":
-        case "rgbaHalfFloat":
-          break;
-        default:
-          throw s.rt.error("ArgumentError", 2008, "format");
-      }
+      const kind = textureFormat(entry, format);
       if (width <= 0 || height <= 0) {
         throw s.rt.error("ArgumentError", 3681);
       }
-      if (width > 2048 || height > 2048) {
-        throw s.rt.error("ArgumentError", 3766);
+      if (width > most || height > most) {
+        throw s.rt.error("ArgumentError", 3766, most);
       }
-      if (format === "compressed" || format === "compressedAlpha") {
+      if (compressedFormat(kind)) {
         throw s.rt.error("ArgumentError", 3762);
-      }
-      if (format !== "bgra") {
-        unsupported(`the rectangle texture format "${format}"`);
       }
 
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createRectangleTexture(width, height),
+        backend.createRectangleTexture(width, height, kind),
       );
       const object = construct("RectangleTexture", value, "flash.display3D.textures");
       textures.set(
@@ -435,8 +493,12 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     }
 
     createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
-      const backend = context(this as unknown as AsObject);
-      const compressed = textureFormat(format);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      const compressed = textureFormat(entry, format);
+      if (size > MOST_CUBE) {
+        throw s.rt.error("ArgumentError", 3705);
+      }
       streamingLevels(levels, size);
       const value = allocate(this as unknown as AsObject, () =>
         backend.createTexture(size, size, true, compressed, levels),
@@ -492,6 +554,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     setTextureAt(index: number, object: AsObject | null): void {
       const entry = state(this as unknown as AsObject);
+      if (index < 0 || index >= SAMPLER_SLOTS) {
+        throw s.rt.error("RangeError", 2006);
+      }
       if (object && !textures.has(object)) {
         // An AS3-created TextureBase has no native resource and leaves this slot intact.
         const previous = entry.textures[index];
@@ -510,11 +575,14 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       surface = 0,
       output = 0,
     ): void {
-      if (output !== 0) {
-        unsupported(`setRenderToTexture's colorOutputIndex ${output}`);
+      if (output < 0 || output > 3) {
+        throw s.rt.error("ArgumentError", 3770);
       }
 
       const entry = state(this as unknown as AsObject);
+      if (output > 0 && profileLimits(entry.profile).colorOutputs === 1) {
+        throw s.rt.error("ArgumentError", 3779);
+      }
       if (object && !textures.has(object)) {
         throw s.rt.error("ArgumentError", 0);
       }
@@ -526,8 +594,15 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (object && textures.get(object)?.disposed) {
         value = null;
       }
+      if (output > 0) {
+        entry.backend.setColorOutput(output, value, surface);
+        entry.outputs[output - 1] =
+          value && object ? { object, value, depth, antiAlias: aa } : null;
+        return;
+      }
+
       // AIR takes a compressed texture as the target, and refuses to clear or draw into it.
-      entry.compressedTarget = value !== null && value.format !== "bgra";
+      entry.compressedTarget = value !== null && compressedFormat(value.format);
       if (entry.compressedTarget) {
         value = null;
       }
@@ -535,6 +610,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       entry.backend.setRenderTarget(value, depth, surface, aa);
       entry.target = value && object ? (textures.get(object) ?? null) : null;
       entry.targetObject = value ? object : null;
+      entry.targetDepth = depth;
+      entry.targetAntiAlias = aa;
     }
 
     setRenderToBackBuffer(): void {
@@ -543,6 +620,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       entry.backend.setRenderTarget(null);
       entry.target = null;
       entry.targetObject = null;
+      resetOutputs(entry);
     }
 
     setProgram(object: AsObject): void {
@@ -570,12 +648,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
-      if (index >= 16) {
+      if (index >= VERTEX_SLOTS) {
         throw s.rt.error("RangeError", 2006);
       }
 
-      // AIR takes indices up to 15, which no AGAL 1 program reads: nothing to bind.
-      if (!backend || index >= 8) {
+      if (!backend) {
         return;
       }
 
@@ -593,10 +670,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       const data: number[] = values.$a;
       const entry = state(this as unknown as AsObject);
       const asked = count === -1 ? Math.floor(data.length / 4) : count;
-      const registers = within(entry, stage, first, asked);
-      if (registers !== 0 || asked === 0) {
-        entry.backend.setConstants(stage, first, data, registers);
-      }
+      entry.backend.setConstants(stage, first, data, within(stage, first, asked));
     }
 
     /** Little-endian floats whatever the ByteArray's endian, its position left as it is. */
@@ -621,16 +695,14 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       const entry = state(this as unknown as AsObject);
-      const registers = within(entry, stage, first, count);
+      const registers = within(stage, first, count);
       const values = new Float32Array(registers * 4);
       const view = new DataView(bytes.buffer, bytes.byteOffset + offset, registers * 16);
       for (let i = 0; i < values.length; i++) {
         values[i] = view.getFloat32(i * 4, true);
       }
 
-      if (registers !== 0 || count === 0) {
-        entry.backend.setConstants(stage, first, values, registers);
-      }
+      entry.backend.setConstants(stage, first, values, registers);
     }
 
     setProgramConstantsFromMatrix(
@@ -650,12 +722,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
+      const registers = within(type as ProgramType, first, 4);
       const values: Float32Array = matrix.$matrix3D;
       for (let i = 0; i < 16; i++) {
         matrixConstants[i] = values[transpose ? (i % 4) * 4 + Math.floor(i / 4) : i];
       }
 
-      backend.setConstants(type, first, matrixConstants, 4);
+      backend.setConstants(type, first, matrixConstants, registers);
     }
 
     setCulling(face: string): void {
@@ -762,8 +835,21 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         if (entry.compressedTarget) {
           throw s.rt.error("Error", 3746);
         }
+        const drawn = entry.program && programs.get(entry.program);
         if (this.$checking) {
           requireClear(entry);
+          // Every stream bound is one the program reads.
+          const read = drawn && !drawn.disposed ? drawn.value.attributes : -1;
+          for (let i = 0; i < entry.vertices.length; i++) {
+            if (entry.vertices[i] && !(read & (1 << i))) {
+              throw s.rt.error("Error", 3607, i);
+            }
+          }
+        }
+        // Every colour output bound, and no more, is one the program writes.
+        const outputs = colorOutputs(entry);
+        if (drawn && !drawn.disposed && drawn.value.outputs !== outputs) {
+          throw s.rt.error("Error", 3774);
         }
 
         entry.backend.draw(buffer(object), first, count);
@@ -830,6 +916,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     present(): void {
       const entry = state(this as unknown as AsObject);
       entry.compressedTarget = false;
+      resetOutputs(entry);
       // AIR returns to the back buffer even when the following validation fails.
       if (entry.target) {
         entry.backend.setRenderTarget(null);

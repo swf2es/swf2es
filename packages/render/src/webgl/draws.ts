@@ -30,6 +30,7 @@ import {
   fillVertex,
   glyphsFragment,
   glyphsVertex,
+  MERGED_UNIT,
   meshFragment,
   meshVertex,
   OUTLINE_UNIT,
@@ -56,6 +57,15 @@ interface MultiDraw {
 /** Last entry, table start, draws, units, batch start/count, then each unit's texture and sampling. */
 const RUN_STRIDE = 6 + FILL_TEXTURES * 2;
 
+/**
+ * The fewest fills a run copies into the merged stream (FillBatches): with
+ * WEBGL_multi_draw, whose one call already draws a run, enough for the GPU's
+ * sub-draws to cost more than the copy; without it, two, each fill
+ * otherwise a call of its own.
+ */
+const MERGED_LEAST_MULTI = 32;
+const MERGED_LEAST = 2;
+
 /** The most masks the stencil's eight bits count. */
 const STENCIL_MOST = 255;
 
@@ -72,9 +82,10 @@ export interface Masks {
 /**
  * The draws of a scene list's entries into the target bound: fills in runs,
  * one multi-draw of the atlas's index ranges a run where WEBGL_multi_draw
- * is, meshes and advanced text's glyphs each by a program of its own, and
- * the masks' coverage into the stencil; and the view of the target drawn
- * into, which each program is told.
+ * is, else one draw of the run copied into the merged stream where its
+ * geometries are small; meshes and advanced text's glyphs each by a program
+ * of its own, and the masks' coverage into the stencil; and the view of the
+ * target drawn into, which each program is told.
  */
 export class Draws {
   private readonly gl: WebGL2RenderingContext;
@@ -103,9 +114,16 @@ export class Draws {
   private blendBackLocation: WebGLUniformLocation | null = null;
   /** WEBGL_multi_draw, which draws a run of fills alike a call (drawEntries), where there is. */
   private multi: MultiDraw | null = null;
+  /**
+   * Whether, without WEBGL_multi_draw, runs are merged; false draws a call a
+   * fill, as a reference the merged draws are tested against (multi-draw.ts).
+   */
+  merging = true;
   /** Avoid the dynamically indexed uniform table used in the Intel GPU hang reproducer. */
   private runTable: WebGLTexture | null = null;
   private runBaseLocation: WebGLUniformLocation | null = null;
+  /** The table start the fill program was told last (uRunBase), -1 for none. */
+  private runBase = -1;
   private runTableHeight = 0;
   private runTableMost = 0;
   private tableRows = new Int32Array(RUN_MOST);
@@ -198,15 +216,15 @@ export class Draws {
     const gl = this.gl;
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
     try {
-      this.program = linkProgram(gl, fillVertex(this.multi !== null), fillFragment);
+      this.program = linkProgram(gl, fillVertex(this.multi !== null, true), fillFragment);
     } catch (e) {
       if (!this.multi) {
         throw e;
       }
 
-      // An extension offered whose shader directive the compiler refuses: a call a draw.
+      // An extension offered whose shader directive the compiler refuses: runs merged alone.
       this.multi = null;
-      this.program = linkProgram(gl, fillVertex(false), fillFragment);
+      this.program = linkProgram(gl, fillVertex(false, true), fillFragment);
     }
 
     this.unitIds.fill(-1);
@@ -223,8 +241,10 @@ export class Draws {
     this.runTableMost = textureMost;
     this.prepared = false;
     this.runBaseLocation = gl.getUniformLocation(this.program, "uRunBase");
+    this.runBase = -1;
+    this.batches.setUp(textureMost);
+    gl.uniform1i(gl.getUniformLocation(this.program, "uMergedRows"), MERGED_UNIT);
     if (this.multi) {
-      this.batches.setUp();
       this.sizeRunTable(1);
       gl.uniform1i(gl.getUniformLocation(this.program, "uRunTable"), RUN_UNIT);
     }
@@ -268,13 +288,21 @@ export class Draws {
     this.lastRow = -1;
   }
 
-  /** Upload before any draws, so that updating a run cannot stall earlier draws reading it. */
+  /**
+   * Upload before any draws, so that updating a run cannot stall earlier
+   * draws reading it: the run table, with WEBGL_multi_draw, and the merged
+   * stream and its rows.
+   */
   prepare(commands: Commands, scene: SceneList): void {
     this.prepared = false;
-    if (!this.multi) {
-      return;
-    }
-
+    const multi = this.multi !== null;
+    // Without a multi-draw, rows are told by uniform or merged; the table is not read.
+    const tableMost = multi ? RUN_MOST * this.runTableMost : Number.POSITIVE_INFINITY;
+    const least = multi
+      ? MERGED_LEAST_MULTI
+      : this.merging
+        ? MERGED_LEAST
+        : Number.POSITIVE_INFINITY;
     this.batches.reset();
     if (commands.length > this.commandStarts.length) {
       this.commandStarts = new Uint32Array(commands.ops.length / 4);
@@ -309,16 +337,13 @@ export class Draws {
 
         i = this.gatherRun(scene, i, end, stencil);
         const needed = count + this.runCount;
-        if (needed > RUN_MOST * this.runTableMost) {
+        if (needed > tableMost) {
           // An unusually large frame still draws by updating the first row a run at a time.
           return;
         }
 
         if (needed > this.tableRows.length) {
-          const size = Math.min(
-            RUN_MOST * this.runTableMost,
-            Math.max(needed, this.tableRows.length * 2),
-          );
+          const size = Math.min(tableMost, Math.max(needed, this.tableRows.length * 2));
           const rows = new Int32Array(size);
           rows.set(this.tableRows);
           this.tableRows = rows;
@@ -340,13 +365,21 @@ export class Draws {
         this.runs[run + 1] = count;
         this.runs[run + 2] = this.runCount;
         this.runs[run + 3] = this.runUnits;
-        const batchStart = this.batches.indexTop;
-        if (!stencil) {
-          this.batches.add(this.runPlaces, this.runRows, this.runCount, this.atlas.frame);
-        }
+        // A mask's fills merged too where each would be a call.
+        const segment =
+          !stencil || !multi
+            ? this.batches.add(
+                this.runPlaces,
+                this.runRows,
+                this.runCount,
+                this.atlas.frame,
+                least,
+                !multi,
+              )
+            : null;
 
-        this.runs[run + 4] = batchStart;
-        this.runs[run + 5] = this.batches.indexTop - batchStart;
+        this.runs[run + 4] = segment ? segment.indexStart : 0;
+        this.runs[run + 5] = segment ? segment.indices : 0;
         for (let j = 0; j < FILL_TEXTURES; j++) {
           if (this.runUnits & (1 << j)) {
             this.runs[run + 6 + j * 2] = this.unitIds[j];
@@ -364,7 +397,7 @@ export class Draws {
     }
 
     const height = Math.ceil(count / RUN_MOST);
-    if (height > 0) {
+    if (multi && height > 0) {
       this.sizeRunTable(height);
       const gl = this.gl;
       this.state.bindTexture(RUN_UNIT, this.runTable);
@@ -641,20 +674,27 @@ export class Draws {
 
       if (batchCount > 0) {
         state.bindVertexArray(this.batches.vertexArray);
-        state.bindTexture(RUN_UNIT, this.runTable);
-        state.bindSampler(RUN_UNIT, null);
+        state.bindTexture(MERGED_UNIT, this.batches.rowsTexture);
+        state.bindSampler(MERGED_UNIT, null);
         gl.drawElements(gl.TRIANGLES, batchCount, gl.UNSIGNED_INT, batchStart * 4);
         continue;
       }
 
       state.bindVertexArray(this.atlas.vertexArray);
       if (!this.multi) {
-        if (this.runRows[0] !== this.lastRow) {
-          this.lastRow = this.runRows[0];
-          gl.uniform1i(this.rowLocation, this.lastRow);
+        // A run not merged: a call a fill, its row told as it changes.
+        const rows = this.prepared ? this.tableRows : this.runRows;
+        const counts = this.prepared ? this.tableCounts : this.runCounts;
+        const offsets = this.prepared ? this.tableOffsets : this.runOffsets;
+        for (let k = base; k < base + draws; k++) {
+          if (rows[k] !== this.lastRow) {
+            this.lastRow = rows[k];
+            gl.uniform1i(this.rowLocation, this.lastRow);
+          }
+
+          gl.drawElements(gl.TRIANGLES, counts[k], gl.UNSIGNED_INT, offsets[k]);
         }
 
-        gl.drawElements(gl.TRIANGLES, this.runCounts[0], gl.UNSIGNED_INT, this.runOffsets[0]);
         continue;
       }
 
@@ -665,7 +705,7 @@ export class Draws {
         gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, draws, 1, gl.RED_INTEGER, gl.INT, this.runRows);
       }
 
-      gl.uniform1i(this.runBaseLocation, base);
+      this.tellRunBase(base);
       this.multi.multiDrawElementsWEBGL(
         gl.TRIANGLES,
         this.prepared ? this.tableCounts : this.runCounts,
@@ -682,17 +722,34 @@ export class Draws {
     }
   }
 
+  /** The fill program told where its run starts in the run table, if it was told another. */
+  private tellRunBase(base: number): void {
+    if (base !== this.runBase) {
+      this.runBase = base;
+      this.gl.uniform1i(this.runBaseLocation, base);
+    }
+  }
+
   /**
    * The fills from entry `i` on that one call draws, as many as fit its
-   * textures (FILL_TEXTURES, each with its sampling) and, without
-   * WEBGL_multi_draw, one: their runCounts, runOffsets and runRows (FILL_SLOT),
-   * and the units their textures take in runUnits. The last entry gathered,
-   * past those whose texture is gone, which draw nothing.
+   * textures (FILL_TEXTURES, each with its sampling), RUN_MOST at most:
+   * their runCounts, runOffsets and runRows (FILL_SLOT), and the units their
+   * textures take in runUnits. Without WEBGL_multi_draw, a run is of
+   * geometries too large to merge (Place.batch), of geometries added this
+   * frame, or of stable ones alone, so that a stable run's merged copy is
+   * drawn again while a part of it changes from frame to frame; and without
+   * merging each fill is a run. The last entry gathered, past those whose
+   * texture is gone, which draw nothing.
    */
   private gatherRun(scene: SceneList, i: number, end: number, stencil: boolean): number {
     const places = this.atlas.places;
     const textures = this.gpu.textures;
-    const most = this.multi ? RUN_MOST : 1;
+    const single = !this.multi;
+    const most = this.multi || this.merging ? RUN_MOST : 1;
+    const frame = this.atlas.frame;
+    // Without a multi-draw, what the run is of: geometries too large to merge, geometries added
+    // this frame, or stable ones, whose merged copy later frames draw again.
+    let kind = -1;
     let draws = 0;
     let last = i;
     this.runUnits = 0;
@@ -709,6 +766,15 @@ export class Draws {
 
       if (place.glyphs || (!stencil && scene.sampler[j] & (MESH | PLANE | SHADED))) {
         break;
+      }
+
+      if (single) {
+        const of = !place.batch ? 0 : place.batch.frame === frame ? 1 : 2;
+        if (draws === 0) {
+          kind = of;
+        } else if (of !== kind) {
+          break;
+        }
       }
 
       const id = stencil ? -1 : scene.texture[j];
@@ -916,9 +982,7 @@ export class Draws {
 
   /** The programs and draw table made on the context, deleted. */
   destroy(): void {
-    if (this.multi) {
-      this.batches.destroy();
-    }
+    this.batches.destroy();
 
     if (this.runTable) {
       this.state.dropTexture(this.runTable);

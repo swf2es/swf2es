@@ -1,6 +1,6 @@
 // Experimental opt-in bindings. Install before loading playerglobal and close
 // the host before destroying Scripting; default playback keeps ErrorEvent #3702.
-import type { Stage3DHost } from "@swf2es/context3d";
+import { PROFILES, type Profile, type Stage3DHost } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
 import { registerContext } from "./context3d/context.js";
@@ -13,23 +13,16 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
   const natives: avm2.Natives = {};
   const bindings = createBindings(s, host);
   const { slots, place, request, unavailable } = bindings;
-  // The profiles the backend serves, best first: baselineConstrained asks for less of it than
-  // baseline does, and is Starling 1.x's default.
-  const served = ["baseline", "baselineConstrained"];
-  const profileName = (value: string | null): string => {
-    switch (value) {
-      case null:
-        return "baseline";
-      case "baseline":
-      case "baselineConstrained":
-      case "baselineExtended":
-      case "standardConstrained":
-      case "standard":
-      case "standardExtended":
-        return value;
-      default:
-        throw s.rt.error("ArgumentError", 2008, "profile");
+  /** A profile's name as AS3 gives it; null is baseline. */
+  const profileName = (value: string | null): Profile => {
+    if (value === null) {
+      return "baseline";
     }
+    if (!PROFILES.includes(value as Profile)) {
+      throw s.rt.error("ArgumentError", 2008, "profile");
+    }
+
+    return value as Profile;
   };
 
   class StageNatives {
@@ -50,7 +43,7 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       if (bindings.closed) {
         throw s.rt.error("Error", 3694);
       }
-      if (mode !== "auto" || !served.includes(selected)) {
+      if (mode !== "auto") {
         unavailable(slot);
         return;
       }
@@ -67,20 +60,21 @@ export function installContext3D(s: Scripting, host: Stage3DHost): () => void {
       if (!values.length) {
         throw s.rt.error("ArgumentError", 2008, "profiles");
       }
-      const asked = new Set<string>();
+      const asked = new Set<Profile>();
       for (let i = 0; i < values.length; i++) {
         asked.add(profileName(values[i]));
       }
       if (bindings.closed) {
         throw s.rt.error("Error", 3694);
       }
-      // The best of them the backend serves, as Flash takes the best its device has.
-      const best = served.find((p) => asked.has(p));
-      if (best) {
-        request(this as unknown as AsObject, best);
-      } else {
-        unavailable(this as unknown as AsObject);
+      // The best of them, as Flash takes the best its device has.
+      let best: Profile = "baselineConstrained";
+      for (const profile of asked) {
+        if (PROFILES.indexOf(profile) > PROFILES.indexOf(best)) {
+          best = profile;
+        }
       }
+      request(this as unknown as AsObject, best);
     }
   }
 

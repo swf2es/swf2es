@@ -14,7 +14,10 @@
 // replaces, removes and adds shapes and morphs every frame; and counters, fields of
 // the device font whose text changes every frame, their glyphs drawn from one atlas. Software GL
 // and a GPU must count the same. Buffers made anew and copied on the GPU,
-// as a growing geometry atlas makes them, are printed too.
+// as a growing geometry atlas makes them, are printed too. Each case is
+// counted twice: with WEBGL_multi_draw, and with it hidden (its name then
+// followed by NO_MULTI_DRAW), as the renderer draws in a browser without it,
+// as Firefox is.
 //
 //   node tests/player/draw-counts.ts [--update] [--gpu] [--runs N] [case...]
 //
@@ -46,6 +49,9 @@ const KEYS = ["calls", "subDraws", "useProgram", "bindVertexArray", "bindFramebu
 const BUFFERS = ["bufferData", "bufferDataBytes", "copyBufferSubData", "copyBufferSubDataBytes"];
 
 type Counts = Record<string, number>;
+
+/** What follows a case's name for its counts without WEBGL_multi_draw. */
+const NO_MULTI_DRAW = " without multi-draw";
 
 /** An ellipse of 8 curves about (cx, cy), radii rx and ry, in twips. */
 function ellipse(cx: number, cy: number, rx: number, ry: number): w.PathCommand[] {
@@ -464,6 +470,7 @@ function cases(): Map<string, Uint8Array> {
 async function play(
   swf: Uint8Array,
   gpu: boolean,
+  multiDraw: boolean,
 ): Promise<{
   counts: Counts;
   warmUp: number;
@@ -471,7 +478,7 @@ async function play(
 }> {
   // On the page's frame clock.
   const frames = 1 + WARM_UP_MOST + COUNTED;
-  const result = await benchPlayer(swf, frames, { gpu, clock: true, metered: true });
+  const result = await benchPlayer(swf, frames, { gpu, clock: true, metered: true, multiDraw });
   if (result.error) {
     throw new Error(result.error);
   }
@@ -533,14 +540,18 @@ const baseline = (
 const failures: string[] = [];
 const lower: string[] = [];
 const measured: Record<string, Counts> = { ...baseline };
-for (const [name, swf] of cases()) {
-  if (wanted.length > 0 && !wanted.includes(name)) {
+const plays = [...cases()].flatMap(([name, swf]) => [
+  { name, swf, multiDraw: true },
+  { name: `${name}${NO_MULTI_DRAW}`, swf, multiDraw: false },
+]);
+for (const { name, swf, multiDraw } of plays) {
+  if (wanted.length > 0 && !wanted.includes(name.replace(NO_MULTI_DRAW, ""))) {
     continue;
   }
 
   let first: Counts | null = null;
   for (let run = 0; run < runs; run++) {
-    const { counts, warmUp, renderer } = await play(swf, gpu);
+    const { counts, warmUp, renderer } = await play(swf, gpu, multiDraw);
     const shown = KEYS.map((k) => `${k} ${counts[k]}`).join(", ");
     const buffers = `bufferData ${counts.bufferData} (${Math.round(counts.bufferDataBytes / 1024)} KB), copyBufferSubData ${counts.copyBufferSubData} (${Math.round(counts.copyBufferSubDataBytes / 1024)} KB)`;
     console.log(

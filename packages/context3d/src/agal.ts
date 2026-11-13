@@ -1,6 +1,7 @@
-// Deliberately small AGAL v1 slice for the opt-in Context3D probe.
+// AGAL 1, 2 and 3 to GLSL ES 3.00, with AIR's validation.
 // Format: https://github.com/adobe/glsl2agal/blob/master/agalassembler/agal.h
-import { SamplerBiasError } from "./backend.js";
+// Each version's registers and rules are as AIR 51 enforces them (tests/context3d/AGALProfiles.as).
+import { type Profile, profileLimits, SamplerBiasError } from "./backend.js";
 import { Context3DError } from "./errors.js";
 
 export type ProgramType = "vertex" | "fragment";
@@ -10,7 +11,8 @@ export interface SamplerSource {
   /** What the sampler reads: 0 RGBA, 1 DXT1 ("compressed"), 2 DXT5 ("compressedAlpha"). */
   format: number;
   filter: number;
-  repeat: boolean;
+  /** AGAL's wrap: 0 clamp, 1 repeat, 2 clamp_u_repeat_v, 3 repeat_u_clamp_v. */
+  wrap: number;
   mip: number;
   cube: boolean;
   ignore: boolean;
@@ -25,27 +27,107 @@ export interface ShaderSource {
   constants: number[];
   indirect: boolean;
   samplers: SamplerSource[];
+  /** Colour outputs a fragment program writes, oc0 up: 1 to 4. */
+  outputs: number;
+}
+
+/** The registers each AGAL version has, and how long its programs may be. */
+interface Registers {
+  attributes: number;
+  vertexConstants: number;
+  fragmentConstants: number;
+  temporaries: number;
+  varyings: number;
+  samplers: number;
+  outputs: number;
+  depth: boolean;
+  tokens: number;
+}
+
+function registers(version: number, profile: Profile): Registers {
+  if (version === 1) {
+    return {
+      attributes: 8,
+      vertexConstants: 128,
+      fragmentConstants: 28,
+      temporaries: profile === "baselineConstrained" ? 7 : 8,
+      varyings: 8,
+      samplers: 8,
+      outputs: 1,
+      depth: false,
+      tokens: 200,
+    };
+  }
+
+  const constrained = profile === "standardConstrained";
+  return {
+    attributes: version === 2 ? 8 : 16,
+    vertexConstants: 250,
+    fragmentConstants: version === 2 ? 64 : 200,
+    temporaries: 26,
+    varyings: constrained ? 8 : 10,
+    samplers: constrained ? 8 : 16,
+    outputs: constrained ? 1 : 4,
+    depth: !constrained,
+    tokens: version === 2 ? 1024 : 2048,
+  };
 }
 
 const SUPPORTED = new Set([
   0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
-  0x15, 0x16, 0x17, 0x18, 0x19, 0x27, 0x28, 0x29, 0x2a, 0x2c,
+  0x15, 0x16, 0x17, 0x18, 0x19, 0x27, 0x28, 0x29, 0x2a, 0x2c, 0x2d,
 ]);
-const UNARY = new Set([0, 5, 8, 9, 0x0a, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x14, 0x15, 0x16, 0x27]);
+/** ddx, ddy and the conditionals: ife, ine, ifg, ifl, els and eif. */
+const VERSION2 = new Set([0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21]);
+const UNARY = new Set([
+  0, 5, 8, 9, 0x0a, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x14, 0x15, 0x16, 0x1a, 0x1b, 0x27,
+]);
+const COMPARISONS = ["==", "!=", ">", "<"];
+/**
+ * The vertex constants an indirect read reaches: AIR's reach the first 128 in AGAL 2 and 3
+ * too, and read 0 past them; the rest only direct reads reach.
+ */
+export const INDIRECT_BANK = 128;
+/** The instructions a baselineConstrained fragment program may have. */
+const CONSTRAINED_FRAGMENT = 96;
+/** The deepest AIR nests conditionals. */
+const NESTING = 4;
 
-export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
+/** A conditional being translated: its predicate, and what was written before and in it. */
+interface Block {
+  predicate: string;
+  condition: string;
+  parent: string;
+  otherwise: boolean;
+  instructions: number;
+  temporaries: Uint8Array;
+  varyings: Uint8Array;
+}
+
+export function translate(
+  bytes: Uint8Array,
+  stage: ProgramType,
+  profile: Profile = "baseline",
+): ShaderSource {
   const data = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes.length < 31 || (bytes.length - 7) % 24 !== 0) {
     throw new Context3DError("agalLength", "Invalid AGAL program length");
   }
-  if ((bytes.length - 7) / 24 > 200) {
+
+  // AIR takes version 0 as 1.
+  const version = data.getUint32(1, true) || 1;
+  const limits = registers(Math.min(version, 3), profile);
+  if ((bytes.length - 7) / 24 > limits.tokens) {
     throw new Context3DError("agalTokens", "Too many AGAL instructions");
   }
   if (bytes[0] !== 0xa0) {
     throw new Context3DError("agalMagic", "Invalid AGAL magic byte");
   }
-  if (data.getUint32(1, true) !== 1) {
-    throw new Context3DError("agalVersion", "Context3D experiment requires an AGAL v1 program");
+  if (version > profileLimits(profile).agal) {
+    throw new Context3DError(
+      "agalProfileVersion",
+      `AGAL version ${version} is not valid in the ${profile} profile`,
+    );
   }
   if (bytes[5] !== 0xa1) {
     throw new Context3DError("agalStageMarker", "Invalid AGAL stage marker");
@@ -73,6 +155,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     }
   }
 
+  const bank = INDIRECT_BANK;
   const names = new Map<string, string>();
   const attributes = new Set<number>();
   const constants = new Set<number>();
@@ -80,8 +163,11 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
   const lines: string[] = [];
   const components = "xyzw";
   let output = 0;
-  const temporaries = new Uint8Array(8);
-  const varyings = new Uint8Array(8);
+  let outputs = 0;
+  let temporaries: Uint8Array = new Uint8Array(limits.temporaries);
+  let varyings: Uint8Array = new Uint8Array(limits.varyings);
+  const blocks: Block[] = [];
+  let hoisted = 0;
   const readTemporary = (index: number, mask: number): void => {
     if (!temporaries[index]) {
       throw new Context3DError("agalTemporaryRead", "AGAL temporary read before writing");
@@ -93,12 +179,20 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       );
     }
   };
+  const outputInBlock = (): void => {
+    if (blocks.length) {
+      throw new Context3DError(
+        "agalConditionOutput",
+        "AGAL outputs cannot be written in conditionals",
+      );
+    }
+  };
   const register = (type: number, index: number, write: boolean): string => {
     let name: string;
     let declaration: string;
     switch (type) {
       case 0:
-        if (write || stage !== "vertex" || index >= 8) {
+        if (write || stage !== "vertex" || index >= limits.attributes) {
           const reason = write
             ? "agalAttributeWrite"
             : stage !== "vertex"
@@ -111,15 +205,18 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         attributes.add(index);
         break;
       case 1:
-        if (write || index >= (stage === "vertex" ? 128 : 28)) {
+        if (
+          write ||
+          index >= (stage === "vertex" ? limits.vertexConstants : limits.fragmentConstants)
+        ) {
           throw new Context3DError(
             write ? "agalConstantWrite" : "agalConstantIndex",
             "Invalid AGAL constant",
           );
         }
 
-        if (indirect && stage === "vertex") {
-          names.set("vc", "uniform vec4 vc[128];");
+        if (indirect && stage === "vertex" && index < bank) {
+          names.set("vc", `uniform vec4 vc[${bank}];`);
           return `vc[${index}]`;
         }
 
@@ -128,29 +225,66 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         constants.add(index);
         break;
       case 2:
-        if (index >= 8) {
+        if (index >= limits.temporaries) {
           throw new Context3DError("agalTemporaryIndex", "Invalid AGAL temporary");
         }
         name = `t${index}`;
         declaration = `vec4 ${name};`;
         break;
       case 3:
-        if (!write || index !== 0) {
+        if (!write || index >= (stage === "vertex" ? 1 : limits.outputs)) {
           throw new Context3DError(
             write ? "agalOutputIndex" : "agalOutputRead",
             "Invalid AGAL output",
           );
         }
-        return "result";
+        outputInBlock();
+        if (index === 0) {
+          return "result";
+        }
+
+        name = `result${index}`;
+        declaration = `vec4 ${name} = vec4(0.0);`;
+        break;
       case 4:
-        if (index >= 8 || write !== (stage === "vertex")) {
+        if (index >= limits.varyings || write !== (stage === "vertex")) {
           throw new Context3DError(
-            index >= 8 ? "agalVaryingIndex" : write ? "agalVaryingWrite" : "agalVaryingRead",
+            index >= limits.varyings
+              ? "agalVaryingIndex"
+              : write
+                ? "agalVaryingWrite"
+                : "agalVaryingRead",
             "Invalid AGAL varying",
           );
         }
         name = `v${index}`;
         declaration = `${stage === "vertex" ? "out" : "in"} vec4 ${name};`;
+        break;
+      case 6:
+        if (stage === "vertex") {
+          throw new Context3DError("agalDepthStage", "AGAL depth output in a vertex program");
+        }
+        if (!write) {
+          throw new Context3DError("agalRegister", "Unsupported AGAL register");
+        }
+        if (!limits.depth || index !== 0) {
+          throw new Context3DError("agalDepthIndex", "Invalid AGAL depth output");
+        }
+        outputInBlock();
+        name = "depth";
+        declaration = "vec4 depth = vec4(0.0);";
+        break;
+      case 7:
+        if (stage !== "vertex") {
+          throw new Context3DError("agalInstanceStage", "AGAL instance id in a fragment program");
+        }
+        if (write || index !== 0) {
+          throw new Context3DError("agalRegister", "Unsupported AGAL register");
+        }
+        // AIR reads the instance id from vertex stream 15, which a draw must bind (#3611).
+        name = "va15";
+        declaration = "layout(location = 15) in vec4 va15;";
+        attributes.add(15);
         break;
       default:
         throw new Context3DError("agalRegister", "Unsupported AGAL register");
@@ -173,8 +307,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         high >>> 24 !== 128 ||
         (high & 255) !== 1 ||
         type > 2 ||
-        component > 3 ||
-        add >= 128
+        component > 3
       ) {
         throw new Context3DError("agalIndirect", "Unsupported AGAL indirect constant");
       }
@@ -183,7 +316,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       if (type === 2) {
         readTemporary(low & 65535, 1 << component);
       }
-      names.set("vc", "uniform vec4 vc[128];");
+      names.set("vc", `uniform vec4 vc[${bank}];`);
       name = `readConstant(${index}.${components[component]}, ${add + row}.0)`;
     } else {
       if (high >>> 8 || ((low >>> 16) & 255) !== 0) {
@@ -214,24 +347,119 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     return `${name}.${lanes}`;
   };
 
+  const scalar = (offset: number): boolean => {
+    const swizzle = data.getUint32(offset, true) >>> 24;
+    return swizzle === (swizzle & 3) * 0x55;
+  };
+
   for (let offset = 7; offset < bytes.length; offset += 24) {
     const opcode = data.getUint32(offset, true);
+    if (opcode > 0x2e) {
+      throw new Context3DError("agalOpcodeRange", "AGAL opcode out of range");
+    }
+    // tld, a vertex texture read AIR names but does not do: its sampler is refused first.
+    if (opcode === 0x2e && stage === "vertex") {
+      throw new Context3DError("agalSamplerStage", "AGAL sampler in a vertex program");
+    }
     // Unsupported instructions may have no destination or a sampler operand;
     // do not misreport those layouts as malformed arithmetic registers.
-    if (!SUPPORTED.has(opcode)) {
+    if (!SUPPORTED.has(opcode) && !VERSION2.has(opcode)) {
       throw new Context3DError("agalOpcode", "Unsupported AGAL opcode");
+    }
+    if ((opcode === 0x1a || opcode === 0x1b) && stage !== "fragment") {
+      throw new Context3DError("agalFragmentOnly", "AGAL opcode only in fragment programs");
+    }
+    if (VERSION2.has(opcode) && version < 2) {
+      throw new Context3DError("agalOpcodeVersion", "AGAL opcode needs version 2");
     }
 
     const dest = data.getUint32(offset + 4, true);
+    const block = blocks[blocks.length - 1];
+    if (opcode === 0x20 || opcode === 0x21) {
+      if (!block) {
+        throw new Context3DError(
+          opcode === 0x20 ? "agalElse" : "agalEndIf",
+          "AGAL else or eif without if",
+        );
+      }
+      if (opcode === 0x20 && block.otherwise) {
+        throw new Context3DError("agalElse", "AGAL else chain broken");
+      }
+      if (!block.instructions) {
+        throw new Context3DError("agalEmptyBranch", "Empty AGAL conditional branch");
+      }
+
+      if (opcode === 0x20) {
+        // The else branch starts from what was written before the if.
+        block.otherwise = true;
+        temporaries = block.temporaries.slice();
+        varyings = block.varyings.slice();
+        block.instructions = 0;
+        block.predicate = `p${offset}`;
+        lines.push(`bool ${block.predicate} = ${block.parent}!${block.condition};`);
+        continue;
+      }
+
+      // After the eif AIR counts what the else branch wrote, or, with none, what was written
+      // before the if: an if branch's writes alone are not.
+      if (!block.otherwise) {
+        temporaries = block.temporaries;
+        varyings = block.varyings;
+      }
+      blocks.pop();
+      continue;
+    }
+
+    if (opcode >= 0x1c && opcode <= 0x1f) {
+      if (dest !== 0) {
+        throw new Context3DError("agalConditionDestination", "AGAL conditional with a destination");
+      }
+      if (!scalar(offset + 8) || !scalar(offset + 16)) {
+        throw new Context3DError("agalScalar", "AGAL conditional operands must be scalar");
+      }
+      if (blocks.length === NESTING) {
+        throw new Context3DError("agalNesting", "AGAL conditionals nested too deep");
+      }
+
+      const a = source(offset + 8);
+      const b = source(offset + 16);
+      if (block) {
+        block.instructions++;
+      }
+      // Both branches run for every pixel and only their writes are predicated, as
+      // Direct3D's predication runs them: derivatives stay defined.
+      const parent = block ? `${block.predicate} && ` : "";
+      const condition = `c${offset}`;
+      const name = `p${offset}`;
+      lines.push(`bool ${condition} = ${a}.x ${COMPARISONS[opcode - 0x1c]} ${b}.x;`);
+      lines.push(`bool ${name} = ${parent}${condition};`);
+      blocks.push({
+        predicate: name,
+        condition,
+        parent,
+        otherwise: false,
+        instructions: 0,
+        temporaries: temporaries.slice(),
+        varyings: varyings.slice(),
+      });
+      continue;
+    }
+
     const unary = UNARY.has(opcode);
     if (unary && (data.getUint32(offset + 16, true) || data.getUint32(offset + 20, true))) {
       throw new Context3DError("agalUnusedSource", "Nonempty unused AGAL source");
+    }
+    if (block) {
+      block.instructions++;
     }
 
     if (opcode === 0x27) {
       const operand = data.getUint32(offset + 8, true);
       const type = data.getUint32(offset + 12, true);
       const swizzle = operand >>> 24;
+      if (type === 1 && stage === "fragment" && dest === 0) {
+        throw new Context3DError("agalConstants", "AGAL operands are both constants");
+      }
       if (
         stage !== "fragment" ||
         dest !== 0 ||
@@ -241,7 +469,8 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         throw new Context3DError("agalDiscard", "Invalid AGAL discard");
       }
 
-      lines.push(`if (${source(offset + 8)}.x < 0.0) { discard; }`);
+      const p = block ? `${block.predicate} && ` : "";
+      lines.push(`if (${p}${source(offset + 8)}.x < 0.0) { discard; }`);
       continue;
     }
 
@@ -253,8 +482,34 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
     const targetType = dest >>> 24;
     const targetIndex = dest & 65535;
     const target = register(targetType, targetIndex, true);
-    if (stage === "fragment" && targetType === 3 && mask !== 15) {
-      throw new Context3DError("agalColorMask", "AGAL color output must write all components");
+    if (stage === "fragment" && targetType === 3) {
+      if (mask !== 15) {
+        throw new Context3DError("agalColorMask", "AGAL color output must write all components");
+      }
+      if (outputs & (1 << targetIndex)) {
+        throw new Context3DError("agalOutputTwice", "AGAL color output written twice");
+      }
+    }
+    if (targetType === 6 && mask !== 1) {
+      throw new Context3DError("agalDepthMask", "AGAL depth output must write only x");
+    }
+    if (opcode === 0x28 && block && data.getUint32(offset + 12, true) !== 4) {
+      throw new Context3DError(
+        "agalConditionTexture",
+        "AGAL texture reads in conditionals take only varyings",
+      );
+    }
+    if ((opcode === 0x1a || opcode === 0x1b) && block) {
+      throw new Context3DError("agalConditionDerivative", "AGAL ddx and ddy in a conditional");
+    }
+    // Two constants make a value AIR wants precomputed; a lone one in kil, ddx and ddy too.
+    if (
+      opcode !== 0 &&
+      opcode !== 0x28 &&
+      (data.getUint32(offset + 12, true) & 255) === 1 &&
+      (unary ? opcode === 0x1a || opcode === 0x1b : (data.getUint32(offset + 20, true) & 255) === 1)
+    ) {
+      throw new Context3DError("agalConstants", "AGAL operands are both constants");
     }
     const a = source(offset + 8);
     const b = unary || opcode === 0x28 ? "" : source(offset + 16);
@@ -374,29 +629,48 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
         expression = `vec${rows}(${dots.join(", ")})`;
         break;
       }
+      case 0x1a:
+        expression = `dFdx(${a})`;
+        break;
+      case 0x1b:
+        // AIR's y grows down its target; GL's up the back buffer, and down a texture, which
+        // targetY flips.
+        names.set("targetY", "uniform float targetY;");
+        expression = `(-targetY * dFdy(${a}))`;
+        break;
       case 0x28: {
         const low = data.getUint32(offset + 16, true);
         const high = data.getUint32(offset + 20, true);
         const index = low & 65535;
         const bias = data.getInt8(offset + 18) / 8;
         const format = (high >>> 8) & 15;
+        const dimension = (high >>> 12) & 15;
+        const special = (high >>> 16) & 15;
+        const wrap = (high >>> 20) & 15;
         const mip = (high >>> 24) & 15;
         const filter = high >>> 28;
-        if (
-          stage !== "fragment" ||
-          index >= 8 ||
-          low >>> 24 !== 0 ||
-          (high & ~0x73141f00) !== 5 ||
-          format > 2 ||
-          filter > 5 ||
-          mip > 2
-        ) {
+        if (stage !== "fragment" || low >>> 24 !== 0 || (high & 255) !== 5) {
           throw new Context3DError("agalSampler", "Unsupported AGAL sampler encoding");
         }
+        if (index >= limits.samplers) {
+          throw new Context3DError("agalSamplerIndex", "AGAL sampler index out of bounds");
+        }
+        if (dimension > 1) {
+          throw new Context3DError("agalSamplerDimension", "Unknown AGAL sampler dimension");
+        }
+        // Of the special flags only ignoresampler: AIR refuses centroid and single.
+        if (special & ~4 || wrap > 3) {
+          throw new Context3DError("agalSampler", "Unsupported AGAL sampler encoding");
+        }
+        if (mip > 2) {
+          throw new Context3DError("agalSamplerMip", "Unknown AGAL sampler mipmap mode");
+        }
+        if (filter > 5) {
+          throw new Context3DError("agalSamplerFilter", "Unknown AGAL sampler filter");
+        }
 
-        const cube = (high & 0x1000) !== 0;
-        const repeat = (high & 0x00100000) !== 0;
-        const ignore = (high & 0x00040000) !== 0;
+        const cube = dimension === 1;
+        const ignore = (special & 4) !== 0;
         const previous = samplers.get(index);
         if (previous && previous.bias !== bias) {
           throw new SamplerBiasError("Conflicting AGAL sampler biases");
@@ -406,7 +680,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
           previous &&
           (previous.format !== format ||
             previous.filter !== filter ||
-            previous.repeat !== repeat ||
+            previous.wrap !== wrap ||
             previous.mip !== mip ||
             previous.cube !== cube ||
             previous.ignore !== ignore)
@@ -414,7 +688,7 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
           throw new Context3DError("agalSampler", "Conflicting AGAL sampler states");
         }
 
-        samplers.set(index, { index, format, filter, repeat, mip, cube, ignore, bias });
+        samplers.set(index, { index, format, filter, wrap, mip, cube, ignore, bias });
         names.set(`fs${index}`, `uniform ${cube ? "samplerCube" : "sampler2D"} fs${index};`);
         // Bias stays in the shader even when ignoresampler preserves runtime state.
         expression = `texture(fs${index}, ${a}.${cube ? "xyz" : "xy"}${bias === 0 ? "" : `, ${bias.toFixed(3)}`})`;
@@ -429,6 +703,9 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       case 0x2c:
         expression = `vec4(equal(${a}, ${b}))`;
         break;
+      case 0x2d:
+        expression = `vec4(notEqual(${a}, ${b}))`;
+        break;
       default:
         throw new Context3DError("agalOpcode", "Unsupported AGAL opcode");
     }
@@ -442,13 +719,28 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
 
     // One vector assignment evaluates every source before changing any lane,
     // including overlapping temporary registers in matrix operations.
-    lines.push(`${target}.${lanes} = ${expression}.${lanes};`);
+    if (!block) {
+      lines.push(`${target}.${lanes} = ${expression}.${lanes};`);
+    } else if (opcode === 0x28) {
+      // A texture read's derivatives are taken outside the branch, where every pixel of a
+      // quad computes them.
+      const value = `h${hoisted++}`;
+      lines.push(`vec4 ${value} = ${expression};`);
+      lines.push(`if (${block.predicate}) { ${target}.${lanes} = ${value}.${lanes}; }`);
+    } else {
+      lines.push(`if (${block.predicate}) { ${target}.${lanes} = ${expression}.${lanes}; }`);
+    }
     switch (targetType) {
       case 2:
         temporaries[targetIndex] |= mask;
         break;
       case 3:
-        output |= mask;
+        if (stage === "fragment") {
+          outputs |= 1 << targetIndex;
+        }
+        if (targetIndex === 0) {
+          output |= mask;
+        }
         break;
       case 4:
         varyings[targetIndex] |= mask;
@@ -462,26 +754,57 @@ export function translate(bytes: Uint8Array, stage: ProgramType): ShaderSource {
       "AGAL program does not write its complete output",
     );
   }
+  if (outputs & (outputs + 1)) {
+    throw new Context3DError("agalOutputSlots", "AGAL color outputs are not consecutive");
+  }
+  // ps_2_0's 64 arithmetic and 32 texture instructions, which AIR counts once the program
+  // is valid; an instruction here is taken as one there.
+  if (
+    profile === "baselineConstrained" &&
+    stage === "fragment" &&
+    (bytes.length - 7) / 24 > CONSTRAINED_FRAGMENT
+  ) {
+    throw new Context3DError("agalNativeLength", "Too many instructions for the native shader");
+  }
 
-  const declarations = [...names.values()].join("\n");
-  const finish =
-    stage === "vertex"
-      ? "gl_Position = vec4(result.x, result.y * targetY, result.z * 2.0 - result.w, result.w);"
-      : "color = result;";
+  const count = stage === "fragment" ? 32 - Math.clz32(outputs) : 1;
+  let results: string;
+  let finish: string;
+  if (stage === "vertex") {
+    results = "uniform float targetY;";
+    finish =
+      "gl_Position = vec4(result.x, result.y * targetY, result.z * 2.0 - result.w, result.w);";
+  } else if (count === 1) {
+    results = "out vec4 color;";
+    finish = "color = result;";
+  } else {
+    const outs: string[] = [];
+    const sets: string[] = [];
+    for (let i = 0; i < count; i++) {
+      outs.push(`layout(location = ${i}) out vec4 color${i || ""};`);
+      sets.push(`color${i || ""} = result${i || ""};`);
+    }
+    results = outs.join("\n");
+    finish = sets.join("\n  ");
+  }
+  if (names.has("depth")) {
+    finish += "\n  gl_FragDepth = depth.x;";
+  }
+
   return {
     source: `#version 300 es
 precision highp float;
-${declarations}
+${[...names.values()].join("\n")}
 ${
   indirect
     ? `vec4 readConstant(float address, float offset) {
   float index = roundEven(address) + offset;
-  if (!(index >= 0.0 && index < 128.0)) { return vec4(0.0); }
+  if (!(index >= 0.0 && index < ${bank}.0)) { return vec4(0.0); }
   return vc[int(index)];
 }`
     : ""
 }
-${stage === "fragment" ? "out vec4 color;" : "uniform float targetY;"}
+${results}
 void main() {
   vec4 result = vec4(0.0);
   ${lines.join("\n  ")}
@@ -492,5 +815,6 @@ void main() {
     constants: [...constants],
     indirect,
     samplers: [...samplers.values()],
+    outputs: count,
   };
 }

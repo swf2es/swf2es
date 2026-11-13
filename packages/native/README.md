@@ -98,6 +98,14 @@ reads what the pixels before it wrote, as in Flash. A band that traps is
 made again in a new instance, the bands before it not twice; where it
 fails again, the call returns false with the bands before it written.
 
+`words()` makes a run of 32-bit words a bitmap's pixels or their values,
+four at a time, for setPixels, getPixels, copyPixelsToByteArray and
+getVector: alpha 255 for an opaque bitmap, premultiplied or divided back
+for a transparent one, the bytes reversed where the values are big-endian.
+It takes bytes, at any offset, and returns how many it made, from the
+first: fewer than all where the module refused the rest, which the caller
+makes itself.
+
 `blur()` takes the rect to blur, `layer()` the rect to place a layer on
 and the offsets it reads the source's alpha from (one, or a bevel's two, on
 and back); the wrapper copies in the blocks of the source each reads, 0

@@ -1,4 +1,4 @@
-// The normal Electron player, using its View menu and persisted Stage3D choice.
+// The normal Electron player: Stage3D on by default, and turned off and on by its View menu.
 import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -29,11 +29,39 @@ const scripts = compileScripts(
       name: "StageWorker",
       source: readFileSync(new URL("../context3d/StageWorker.as", import.meta.url), "utf8"),
     },
+    {
+      name: "Plain",
+      source: `package {
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Plain extends Sprite {
+    public var ready:Boolean = false;
+    private var _frames:int = 0;
+
+    public function Plain() {
+      graphics.beginFill(0x3060c0);
+      graphics.drawRect(10, 10, 40, 30);
+      graphics.endFill();
+      addEventListener(Event.ENTER_FRAME, frame);
+    }
+
+    private function frame(event:Event):void {
+      _frames++;
+      ready = _frames >= 10;
+    }
+  }
+}
+`,
+    },
   ],
   out,
 );
 const movie = `${out}layout.swf`;
 writeFileSync(movie, bare(scripts.get("StageLayout") as Uint8Array, 1, "StageLayout", 120, 100));
+// An AS3 SWF that never asks for a Context3D.
+const plain = `${out}plain.swf`;
+writeFileSync(plain, bare(scripts.get("Plain") as Uint8Array, 1, "Plain", 120, 100));
 const replacement = `${out}replacement.swf`;
 copyFileSync(movie, replacement);
 const workerMovie = `${out}worker.swf`;
@@ -89,6 +117,17 @@ const ready = `(() => {
   return !!p.scripting.rt.getProperty(p.root.object, p.scripting.rt.publicName("ready"));
 })()`;
 
+/** Whether the movie playing is the SWF named `name`. */
+const playing = (name: string) => `(() => {
+  const p = ${player}?.player, rt = p?.scripting?.rt;
+  if (!rt || !p.root?.object) {
+    return false;
+  }
+
+  const info = rt.getProperty(p.root.object, rt.publicName("loaderInfo"));
+  return rt.getProperty(info, rt.publicName("url")).endsWith(${JSON.stringify(`/${name}`)});
+})()`;
+
 async function layout(app: App, mode: string, align: string): Promise<string> {
   return app.evaluate<string>(`(() => {
     const p = ${player}.player, rt = p.scripting.rt, object = p.root.object;
@@ -122,18 +161,60 @@ async function pixels(app: App): Promise<void> {
 
 const screen = await display();
 try {
-  await withApp(screen.env, {}, [movie, "--inspect=0"], async (app) => {
+  // On by default: a fresh profile, and one where the opt-in this replaced saved its `false` with
+  // every other setting, play Stage3D with nothing chosen.
+  for (const settings of [{}, { stage3D: false, recent: [], sockets: {} }]) {
+    await withApp(screen.env, settings, [movie], async (app) => {
+      await app.devtools.send("Emulation.setDeviceMetricsOverride", {
+        width: 200,
+        height: 160,
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
+      await waitFor(app, `${ready} && ${canvases}.length === 3`);
+      assert.match(await layout(app, "noScale", "TL"), /^noScale\|TL\|200\|160\|/);
+      await pixels(app);
+      assert.equal(
+        app.stdout.some((line) => line.startsWith("stagelayout error")),
+        false,
+        app.stdout.join("\n"),
+      );
+      assert.equal(
+        "stage3DChoice" in JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")),
+        false,
+      );
+    });
+  }
+
+  // The backend loads at a SWF's first requestContext3D: never for one that does not ask.
+  await withApp(screen.env, {}, [], async (app) => {
+    const loads: string[] = [];
+    app.devtools.listeners.set("Network.requestWillBeSent", (params) => {
+      const url = (params.request as { url: string }).url;
+      if (url.includes("/modules/context3d/webgl/")) {
+        loads.push(url);
+      }
+    });
+    await app.devtools.send("Network.enable");
+    assert.equal(await app.again([plain]), 0);
+    await waitFor(app, `${playing("plain.swf")} && ${ready}`);
+    await frame(app);
+    assert.deepEqual(loads, []);
+    assert.equal(await app.evaluate(`${canvases}.length`), 1);
+
+    assert.equal(await app.again([movie]), 0);
+    await waitFor(app, `${playing("layout.swf")} && ${ready} && ${canvases}.length === 3`);
+    assert.notDeepEqual(loads, []);
+    await app.devtools.send("Network.disable");
+    app.devtools.listeners.delete("Network.requestWillBeSent");
+  });
+
+  await withApp(screen.env, { stage3DChoice: false }, [movie, "--inspect=0"], async (app) => {
     await app.until(
-      "the disabled Stage3D fallback",
+      "the fallback of Stage3D turned off",
       () => app.stdout.filter((s) => s.startsWith("stagelayout error 3702")).length === 2,
     );
     assert.equal(await app.evaluate(`${canvases}.length`), 1);
-    assert.equal(
-      await app.evaluate(
-        `performance.getEntriesByType("resource").some(e => e.name.includes("/context3d/webgl/"))`,
-      ),
-      false,
-    );
 
     await app.devtools.send("Emulation.setDeviceMetricsOverride", {
       width: 200,
@@ -143,12 +224,16 @@ try {
     });
     let paused = "";
     let sessionPaused = "";
+    // The session's module is held the first time it loads alone: a reload takes it from the cache.
+    let holdSession = true;
     app.devtools.listeners.set("Fetch.requestPaused", (params) => {
       const request = params.request as { url: string };
-      if (request.url.endsWith("/modules/web/stage3d.js")) {
+      if (!request.url.endsWith("/modules/web/stage3d.js")) {
+        paused = String(params.requestId);
+      } else if (holdSession) {
         sessionPaused = String(params.requestId);
       } else {
-        paused = String(params.requestId);
+        void app.devtools.send("Fetch.continueRequest", { requestId: params.requestId });
       }
     });
     await app.devtools.send("Fetch.enable", {
@@ -157,23 +242,11 @@ try {
         { urlPattern: "*/modules/web/stage3d.js" },
       ],
     });
+    // The session's module first, then the backend, at the SWF's first request; a movie closed
+    // while the module loads reports no failure.
     await menu(app, "stage3d", true);
-    await app.until("the delayed optional backend", () => paused !== "");
-    await app.devtools.send("Fetch.failRequest", { requestId: paused, errorReason: "Failed" });
-    await app.until(
-      "the fallback after the backend import fails",
-      () => app.stdout.filter((s) => s.startsWith("stagelayout error 3702")).length === 4,
-    );
-    assert.equal(await app.evaluate(`${player}.hidden`), false);
-    assert.equal(await app.evaluate(`${canvases}.length`), 1);
-    assert.equal(await app.evaluate('document.getElementById("failure").hidden'), true);
-    assert.equal(JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3D, true);
-    paused = "";
-    await app.devtools.send("Page.reload", { ignoreCache: true });
-    await app.until("the backend import retry on page reload", () => paused !== "");
-    assert.equal(await app.again([replacement]), 0);
-    await app.devtools.send("Fetch.continueRequest", { requestId: paused });
-    await app.until("the delayed Stage3D session", () => sessionPaused !== "");
+    await app.until("the Stage3D session's module", () => sessionPaused !== "");
+    holdSession = false;
     await menu(app, "close-movie");
     await waitFor(app, `${player}.hidden && ${player}.player === null`);
     await frame(app);
@@ -182,22 +255,40 @@ try {
       true,
       "closing a pending movie reported a failure",
     );
-    assert.equal(await app.again([replacement]), 0);
+    assert.equal(await app.again([movie]), 0);
     await app.devtools.send("Fetch.continueRequest", { requestId: sessionPaused });
+    await app.until("the backend, at the first requestContext3D", () => paused !== "");
+    await app.devtools.send("Fetch.failRequest", { requestId: paused, errorReason: "Failed" });
+    await app.until(
+      "the fallback after the backend import fails",
+      () => app.stdout.filter((s) => s.startsWith("stagelayout error 3702")).length === 4,
+    );
+    assert.equal(await app.evaluate(`${player}.hidden`), false, "a cancelled load hid the movie");
+    assert.equal(await app.evaluate(`${canvases}.length`), 1);
+    assert.equal(await app.evaluate('document.getElementById("failure").hidden'), true);
+    assert.equal(
+      JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3DChoice,
+      true,
+    );
+
+    // The backend is tried again on a page reload, and a movie replaced while it loads gets its
+    // contexts from that load.
+    paused = "";
+    await app.devtools.send("Page.reload", { ignoreCache: true });
+    await app.until("the backend import retry on page reload", () => paused !== "");
+    assert.equal(await app.again([replacement]), 0);
+    await waitFor(app, `${playing("replacement.swf")} && ${canvases}.length === 1`);
+    await app.devtools.send("Fetch.continueRequest", { requestId: paused });
     await app.devtools.send("Fetch.disable");
     app.devtools.listeners.delete("Fetch.requestPaused");
     await waitFor(app, ready);
     assert.equal(await app.evaluate(`${player}.hidden`), false, "a cancelled load hid the movie");
     assert.equal(await app.evaluate('document.getElementById("failure").hidden'), true);
+    assert.equal(await app.evaluate(playing("replacement.swf")), true);
     assert.equal(
-      await app.evaluate(`(() => {
-      const p = ${player}.player, rt = p.scripting.rt;
-      const info = rt.getProperty(p.root.object, rt.publicName("loaderInfo"));
-      return rt.getProperty(info, rt.publicName("url")).endsWith("/replacement.swf");
-    })()`),
+      JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3DChoice,
       true,
     );
-    assert.equal(JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3D, true);
     assert.equal(await app.evaluate(`${canvases}.length`), 3);
     assert.match(await layout(app, "noScale", "TL"), /^noScale\|TL\|200\|160\|/);
     await pixels(app);
@@ -305,7 +396,10 @@ try {
       app,
       `performance.timeOrigin !== ${previousPage} && document.getElementById("welcome")?.hidden === false && document.readyState === "complete"`,
     );
-    assert.equal(JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3D, false);
+    assert.equal(
+      JSON.parse(readFileSync(`${app.userData}/settings.json`, "utf8")).stage3DChoice,
+      false,
+    );
     await app.again([movie]);
     await app.until(
       "the fallback after disabling Stage3D",

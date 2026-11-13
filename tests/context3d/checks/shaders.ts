@@ -203,11 +203,12 @@ export async function indirectConstants() {
     gl.uniform4fv = (location, data, offset, length) => {
       calls++;
       check(data instanceof Float32Array, "constant upload is not typed storage");
-      check(data.length === 512, "constant upload allocated a temporary slice");
+      // The context's 250 registers, of which an indirect program's bank is the first 128.
+      check(data.length === 1000, "constant upload allocated a temporary slice");
       check(!bank || data === bank, "draw replaced constant storage");
       bank = data;
       if (bankMode) {
-        check(offset === undefined && length === undefined, "indexed draw did not upload one bank");
+        check(offset === 0 && length === 512, "indexed draw did not upload one bank");
       } else {
         check(offset === 20 && length === 4, "direct-only draw stopped uploading sparse constants");
       }

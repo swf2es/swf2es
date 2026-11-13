@@ -70,6 +70,10 @@ export const OUTLINE_UNIT = 7;
 export const FILL_UNIT = 8;
 /** The multi-draw row table's unit, past the fill textures. */
 export const RUN_UNIT = FILL_UNIT + FILL_TEXTURES;
+/** The merged fills' rows' unit (FillBatches), past the run table. */
+export const MERGED_UNIT = RUN_UNIT + 1;
+/** The merged fills' rows a line of their integer texture: a power of two, as for RUN_MOST. */
+export const MERGED_LINE = 1024;
 
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
@@ -78,17 +82,21 @@ export const RUN_UNIT = FILL_UNIT + FILL_TEXTURES;
  * space), and passes on its straight colour, the row's colour transform
  * and the texture it samples. uRow names the draw's row (FILL_SLOT); with
  * `multi` (WEBGL_multi_draw), uRunTable names each draw's of a multi-draw by
- * gl_DrawID, which is 0 in a draw of its own. Merged fills supply the packed
- * row as aDraw; the atlas leaves that attribute disabled and negative.
+ * gl_DrawID, which is 0 in a draw of its own. With `merged`, as with
+ * `multi`, a merged fill's vertices carry as aDraw where its packed row is
+ * in uMergedRows, which the stream keeps for its copy, so that the row
+ * changes from frame to frame where the vertices need not; the atlas leaves
+ * that attribute disabled and negative.
  */
-export const fillVertex = (multi: boolean) => `#version 300 es
+export const fillVertex = (multi: boolean, merged = multi) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
 precision highp float;
 layout(location = ${POSITION_AT}) in vec2 aPosition;
 layout(location = ${TEXEL_AT}) in vec2 aTexel;
 layout(location = ${COLOR_AT}) in vec4 aColor;
 uniform highp sampler2D uRows;
-${multi ? `layout(location = ${DRAW_AT}) in int aDraw;\nuniform highp isampler2D uRunTable;\nuniform int uRunBase;` : "uniform int uRow;"}
+${merged ? `layout(location = ${DRAW_AT}) in int aDraw;\nuniform highp isampler2D uMergedRows;` : ""}
+${multi ? "uniform highp isampler2D uRunTable;\nuniform int uRunBase;" : "uniform int uRow;"}
 uniform vec4 uView;
 uniform float uUnit;
 out vec4 vColor;
@@ -98,7 +106,7 @@ flat out vec4 vAdd;
 flat out int vSlot;
 
 void main(void) {
-  int draw = ${multi ? `aDraw >= 0 ? aDraw : texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
+  int draw = ${merged ? `aDraw >= 0 ? texelFetch(uMergedRows, ivec2(aDraw & ${MERGED_LINE - 1}, aDraw >> ${Math.log2(MERGED_LINE)}), 0).r : ` : ""}${multi ? `texelFetch(uRunTable, ivec2((uRunBase + gl_DrawID) & ${RUN_MOST - 1}, (uRunBase + gl_DrawID) >> ${Math.log2(RUN_MOST)}), 0).r` : "uRow"};
   int row = draw & ${(1 << FILL_SLOT) - 1};
   vSlot = (draw >> ${FILL_SLOT}) & 15;
   ivec2 at = ivec2((row & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, row >> ${Math.log2(ROWS_A_LINE)});

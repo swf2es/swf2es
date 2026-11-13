@@ -479,6 +479,11 @@ export interface BenchOptions {
   morphMetrics?: boolean;
   /** Alternate built modules for comparisons while keeping the same harness. */
   mounts?: [string, string][];
+  /**
+   * False hides WEBGL_multi_draw from the page, so that the renderer draws
+   * as it does where there is none, as in Firefox.
+   */
+  multiDraw?: boolean;
 }
 
 /** A node of a sampled heap profile: what was allocated under a call, and the calls under it. */
@@ -539,10 +544,20 @@ export function benchPlayer(
     metered = false,
     morphMetrics = false,
     mounts,
+    multiDraw = true,
   } = options;
   return withPage(
     "benchSwf",
     async (evaluate, send, _fresh, listen) => {
+      if (!multiDraw) {
+        await evaluate(`{
+          const getExtension = WebGL2RenderingContext.prototype.getExtension;
+          WebGL2RenderingContext.prototype.getExtension = function (name) {
+            return name === "WEBGL_multi_draw" ? null : getExtension.call(this, name);
+          };
+        }`);
+      }
+
       if (morphMetrics && metered) {
         await evaluate(`globalThis.benchNativeCalls = { layer: 0, lineBuild: 0 };
           WebAssembly.Instance = new Proxy(WebAssembly.Instance, {
