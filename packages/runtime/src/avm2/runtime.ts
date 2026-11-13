@@ -2532,7 +2532,7 @@ export class Runtime {
   }
 
   array(values: Value[]): AsObject {
-    const o = this.builtinTraits("Array").instance();
+    const o = (this.arrayTraits ?? this.builtinTraits("Array")).instance();
     o.$a = values;
     return o;
   }
