@@ -2,7 +2,8 @@
 // Ruffle's web build, each in headless Chrome, and Flash, AIR's adl without
 // the debugger. The benchmarks are those that time themselves for
 // avmshell (enumeration/Enumeration.as, dictionary/DictionaryAccess.as),
-// and vector/VectorAccess.as, indexed access to Vectors and Arrays,
+// vector/VectorAccess.as, indexed access to Vectors and Arrays, and
+// pixels/BitmapPixels.as, a bitmap's pixels set and read whole, each
 // compiled against playerglobal into a SWF whose document class is empty:
 // their script runs as it is loaded, its sections tracing their times
 // ("time: dense1k-in 120") by the Date, which each player keeps the same
@@ -32,6 +33,7 @@ const BENCHES: Record<string, string> = {
   enumeration: "enumeration/Enumeration.as",
   dictionary: "dictionary/DictionaryAccess.as",
   vector: "vector/VectorAccess.as",
+  pixels: "pixels/BitmapPixels.as",
 };
 const PLAYERS = ["swf2es", "ruffle", "flash"] as const;
 type PlayerName = (typeof PLAYERS)[number];
