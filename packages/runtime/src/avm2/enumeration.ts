@@ -9,6 +9,7 @@ import { DictionaryKeys } from "./dictionary-keys.js";
 import { type DynamicProperties, GONE, type Walk } from "./dynamic-properties.js";
 import { Namespace } from "./names.js";
 import { FloatVector } from "./natives/float-vector.js";
+import type { Traits } from "./traits.js";
 
 /**
  * What for-ins over one object keep apart from its names: elements are
@@ -172,10 +173,29 @@ export function nextIndex(
   o: AsObject,
   index: number,
 ): number {
-  // An object without elements never gains them: past its first step, no need to look again.
+  // What the last step read of the object stands: past its first step, no need to look again.
   const known = o === lastStep.o && index === lastStep.index;
-  const a: Value[] | FloatVector | undefined = known && lastStep.none ? undefined : o.$a;
-  if (!known) {
+  stepKnown = known;
+  let a: Value[] | FloatVector | undefined;
+  if (known) {
+    a = lastStep.elements;
+
+    // The element right after the last, there and not hidden: nearly every
+    // step. Not over an Array walked by its sparse indices, where the one
+    // after is a hole nearly every time.
+    if (
+      a !== undefined &&
+      lastStep.hidden === undefined &&
+      index < a.length &&
+      o !== sparseOwner &&
+      index in a
+    ) {
+      lastStep.index = index + 1;
+      return index + 1;
+    }
+  } else {
+    a = o.$a;
+    lastStep.elements = a;
     lastStep.walk = null;
     if (a !== undefined) {
       // Not the keys of a Dictionary whose for-in was left off.
@@ -188,13 +208,14 @@ export function nextIndex(
       ? nextOfNames(o, index, known)
       : nextOfElements(enumerating, o, a, index, known);
   if (next === 0) {
-    lastStep.o = null;
-    lastStep.keys = null;
-    lastStep.walk = null;
+    letGo();
   } else {
     lastStep.o = o;
     lastStep.index = next;
-    lastStep.none = a === undefined;
+    if (!known) {
+      lastStep.hidden = o.$dontEnum;
+      lastStep.traits = o.$traits;
+    }
   }
 
   return next;
@@ -225,26 +246,71 @@ export function dictionaryAt(o: AsObject, index: number): DictionaryKeys | null 
 }
 
 /**
- * The step a for-in last took: the object, the index it gave, whether the
- * object has no elements and its keys if a Dictionary, so that the next
- * step and the nextName and nextValue right after it need not look for
- * them again, which misses, at a cost, on the many objects that have
- * neither, and never gain any. Let go when a for-in ends.
+ * The step a for-in last took: the object, the index it gave, and what the
+ * step read of the object: its elements, its hidden names, its traits and
+ * its keys if a Dictionary, so that the next step and the nextName and
+ * nextValue right after it need not read them again. The steps of every
+ * for-in go through this one code, over objects of every class, where the
+ * engine finds each of those by a lookup, several to a step: more than the
+ * step itself costs. Let go when a for-in ends.
+ *
+ * What it keeps must stand for as long as the object is the same: one
+ * without elements never gains them, and its traits and whether it is a
+ * Dictionary are for good; whoever gives an object other elements, or its
+ * first hidden name, says so (forgetStep).
  */
 const lastStep: {
   o: AsObject;
   index: number;
-  none: boolean;
+  /** Its elements, undefined for an object without any. */
+  elements: Value[] | FloatVector | undefined;
+  /** Its names hidden from for-ins, undefined while it has had none. */
+  hidden: Set<string> | undefined;
+  traits: Traits | undefined;
   keys: DictionaryKeys | null;
   /** The slots of the names it went through, past any elements: the object's, as they never change. */
   walk: Walk | null;
 } = {
   o: null,
   index: 0,
-  none: false,
+  elements: undefined,
+  hidden: undefined,
+  traits: undefined,
   keys: null,
   walk: null,
 };
+
+/**
+ * Whether the step nextIndex is taking goes on from the last, so that the
+ * last one's hidden names are its object's: else they are read from the
+ * object, by a step that comes to ask, which one over an object with
+ * nothing to go through never does.
+ */
+let stepKnown = false;
+
+function hiddenOf(o: AsObject): Set<string> | undefined {
+  return stepKnown ? lastStep.hidden : o.$dontEnum;
+}
+
+/**
+ * `o` has other elements than it had (its storage, not what is in it), or
+ * its first hidden name: a for-in's next step over it reads them again.
+ */
+export function forgetStep(o: AsObject): void {
+  if (o === lastStep.o) {
+    letGo();
+  }
+}
+
+/** The for-in is over: nothing of its object is kept, which would hold its class and all that hangs on it. */
+function letGo(): void {
+  lastStep.o = null;
+  lastStep.elements = undefined;
+  lastStep.hidden = undefined;
+  lastStep.traits = undefined;
+  lastStep.keys = null;
+  lastStep.walk = null;
+}
 
 /**
  * Whether a for-in's step over `o` at `index` goes on from the last one
@@ -254,13 +320,14 @@ export function continues(o: Value, index: number): boolean {
   return o === lastStep.o && index === lastStep.index;
 }
 
-/** The length of the elements of `o` at a for-in's index: where those end and its other names start. */
-export function elementsAt(o: AsObject, index: number): number {
-  if (o === lastStep.o && index === lastStep.index && lastStep.none) {
-    return 0;
-  }
+/** The elements of `o` at a for-in's index, whose length is where those end and its other names start. */
+export function elementsAt(o: AsObject, index: number): Value[] | FloatVector | undefined {
+  return o === lastStep.o && index === lastStep.index ? lastStep.elements : o?.$a;
+}
 
-  return o?.$a?.length ?? 0;
+/** The traits of `o` at a for-in's index. */
+export function traitsAt(o: AsObject, index: number): Traits | undefined {
+  return o === lastStep.o && index === lastStep.index ? lastStep.traits : o?.$traits;
 }
 
 /** As nextIndex, over an object with elements. */
@@ -549,8 +616,10 @@ function firstAtOrAfter(indices: number[], from: number): number {
   return low;
 }
 
+/** Whether element `i` of `o`, the object nextIndex steps over, is there and not hidden. */
 function enumerable(o: AsObject, a: Value[], i: number): boolean {
-  return i in a && !o.$dontEnum?.has(String(i));
+  const hidden = hiddenOf(o);
+  return i in a && (hidden === undefined || !hidden.has(String(i)));
 }
 
 /**
@@ -578,8 +647,9 @@ function nextNameIndex(o: AsObject, index: number, starting: boolean, known: boo
   // A name deleted since the for-in started is passed over.
   const slots = walk.slots;
   const live = walk.live;
+  const hidden = hiddenOf(o);
   for (let i = index; i < slots.length; i++) {
-    if (live[i] !== GONE && !o.$dontEnum?.has(slots[i] as string)) {
+    if (live[i] !== GONE && (hidden === undefined || !hidden.has(slots[i] as string))) {
       return i + 1;
     }
   }

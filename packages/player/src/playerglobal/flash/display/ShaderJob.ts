@@ -56,7 +56,7 @@ export function shaderJobNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("RangeError", 1126);
       }
 
-      target.$a = Array.from(out);
+      s.rt.setElements(target, Array.from(out));
       return;
     }
 

@@ -76,7 +76,7 @@ for (const [kind, , , elementsOf, store] of VECTORS) {
         a.length = length;
       } else if (length === 0) {
         // A new array: V8 empties one by a call into its runtime.
-        this.$a = elementsOf(0);
+        rt.setElements(this, elementsOf(0));
       } else if (length < a.length) {
         a.length = length;
       } else if (length > a.length) {

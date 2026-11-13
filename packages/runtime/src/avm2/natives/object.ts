@@ -2,6 +2,7 @@
 // calling or constructing Object, Namespace, QName or Function does.
 
 import type { AsObject, Value } from "../descriptors.js";
+import { forgetStep } from "../enumeration.js";
 import type { ClassHook } from "../hooks.js";
 import { formatClassName, Namespace, prefixOf, publicQname } from "../names.js";
 import { NOT_FOUND, type Runtime } from "../runtime.js";
@@ -51,7 +52,11 @@ export const objectNatives: Natives = {
         o.$d.allHidden = false;
       }
     } else {
-      o.$dontEnum ??= new Set();
+      if (o.$dontEnum === undefined) {
+        o.$dontEnum = new Set();
+        forgetStep(o);
+      }
+
       o.$dontEnum.add(name);
     }
   },
