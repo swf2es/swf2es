@@ -5,9 +5,16 @@
 // bitmaps large enough to be done in several bands; transparent and opaque.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BitmapKernel } from "@swf2es/native/render";
-import { BitmapStore } from "../../packages/player/dist/bitmap/bitmap.js";
+import {
+  BitmapKernel,
+  WORDS_PLAIN,
+  WORDS_PREMULTIPLY,
+  WORDS_SOLID,
+  WORDS_UNMULTIPLY,
+} from "@swf2es/native/render";
+import { BitmapStore, premultiply, unmultiply } from "../../packages/player/dist/bitmap/bitmap.js";
 import { applyFilter } from "../../packages/player/dist/bitmap/filters.js";
+import { bitmapKernel } from "../../packages/player/dist/bitmap/kernel.js";
 import {
   colorTransform,
   copyChannel,
@@ -287,5 +294,169 @@ test("a band that traps is made again in a new instance, the bands before it not
     assert.equal(instances, 2);
   } finally {
     wasm.Instance = Instance;
+  }
+});
+
+/** `w` with its bytes in the other order. */
+const reversed = (w: number) => new DataView(new Uint32Array([w]).buffer).getUint32(0, false);
+
+test("words are made pixels and values four at a time as one at a time, in either byte order, across bands", () => {
+  const r = random(41);
+  const kernel = new BitmapKernel();
+  // Under a band, a band and three words over, and counts that leave one, two and three after the fours.
+  for (const count of [1, 2, 3, 5, 67, 1 << 18, (1 << 18) + 3, 600001]) {
+    const from = new Uint32Array(count);
+    for (let i = 0; i < count; i++) {
+      const x = Math.floor(r() * 2 ** 32);
+      from[i] = i % 7 === 0 ? x | 0xff000000 : i % 7 === 1 ? x & 0xffffff : x;
+    }
+
+    for (const swap of [false, true]) {
+      const value = (w: number) => (swap ? reversed(w) : w);
+      const kinds: [number, (w: number) => number][] = [
+        [WORDS_SOLID, (w) => (value(w) | 0xff000000) >>> 0],
+        [WORDS_PREMULTIPLY, (w) => premultiply(value(w))],
+        [WORDS_UNMULTIPLY, (w) => value(unmultiply(w))],
+        [WORDS_PLAIN, (w) => value(w)],
+      ];
+      for (const [kind, one] of kinds) {
+        const into = new Uint32Array(count);
+        const done = kernel.words(
+          new Uint8Array(into.buffer),
+          new Uint8Array(from.buffer),
+          kind,
+          swap,
+        );
+        assert.equal(done, count * 4);
+        assert.deepEqual(into, from.map(one), `${count} words, kind ${kind}, swap ${swap}`);
+      }
+    }
+  }
+
+  // In place, and from bytes that begin at no multiple of four.
+  const bytes = new Uint8Array(4 * 300 + 3);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = Math.floor(r() * 256);
+  }
+
+  const odd = bytes.subarray(3);
+  const expected = new Uint32Array(odd.slice().buffer).map((w) => premultiply(reversed(w)));
+  assert.equal(kernel.words(odd, odd, WORDS_PREMULTIPLY, true), 1200);
+  assert.deepEqual(new Uint32Array(odd.slice().buffer), expected);
+
+  // Bytes that are no whole words, or of another length than their place, are refused.
+  assert.equal(kernel.words(new Uint8Array(6), new Uint8Array(6), WORDS_SOLID, false), 0);
+  assert.equal(kernel.words(new Uint8Array(8), new Uint8Array(4), WORDS_SOLID, false), 0);
+  kernel.dispose();
+});
+
+test("words the module refuses or traps on are made by the store's own loops, from where it stopped", () => {
+  const wasm = globalThis.WebAssembly as unknown as {
+    Instance: new (module: WebAssembly.Module, imports?: object) => WebAssembly.Instance;
+    RuntimeError: new (message: string) => Error;
+  };
+  const Instance = wasm.Instance;
+  let calls = 0;
+  let fail: (call: number) => "reject" | "trap" | null = () => null;
+  wasm.Instance = new Proxy(Instance, {
+    construct(target, args) {
+      const instance = Reflect.construct(target, args) as WebAssembly.Instance;
+      return {
+        exports: {
+          ...instance.exports,
+          wordsPixels: (params: number) => {
+            switch (fail(++calls)) {
+              case "trap":
+                throw new wasm.RuntimeError("test trap");
+              case "reject":
+                return 0;
+              default:
+                return (instance.exports.wordsPixels as (params: number) => number)(params);
+            }
+          },
+        },
+      };
+    },
+  });
+  try {
+    const r = random(57);
+    // 1200 by 500 are three bands whole, and 41 of its rows of 1100 as many runs for the module.
+    const w = 1200;
+    const h = 500;
+    const rects = [
+      { x: 0, y: 0, width: w, height: h },
+      { x: 11, y: 200, width: 1100, height: 41 },
+    ];
+    const fails: [string, (call: number) => "reject" | "trap" | null][] = [
+      ["none", () => null],
+      ["the second band on", (call) => (call >= 2 ? "reject" : null)],
+      ["every band", () => "reject"],
+      ["the second band once", (call) => (call === 2 ? "trap" : null)],
+      ["the second band on, by a trap", (call) => (call >= 2 ? "trap" : null)],
+      ["every third", (call) => (call % 3 === 0 ? "reject" : null)],
+    ];
+    for (const [name, failing] of fails) {
+      for (const transparent of [true, false]) {
+        for (const rect of rects) {
+          for (const little of [true, false]) {
+            const label = `${name}, ${transparent}, ${rect.width} wide, ${little}`;
+            const count = rect.width * rect.height;
+            const view = new DataView(new ArrayBuffer(count * 4 + 4));
+            const expected = store(r, w, h, transparent);
+            const set = new BitmapStore(w, h, transparent, 0);
+            set.pixels.set(expected.pixels);
+            const values: number[] = [];
+            for (let i = 0; i < count; i++) {
+              const v = Math.floor(r() * 2 ** 32);
+              values.push(v);
+              view.setUint32(i * 4, v, little);
+              expected.setPixel32(
+                rect.x + (i % rect.width),
+                rect.y + Math.floor(i / rect.width),
+                v,
+              );
+            }
+
+            // An instance of its own for each, made under the proxy.
+            bitmapKernel()?.dispose();
+            calls = 0;
+            fail = failing;
+            // Two pixels short: the last row's run ends within it.
+            set.setWords(rect, new Uint8Array(view.buffer), 0, count - 2, little);
+            const last = { x: rect.x + rect.width - 2, y: rect.y + rect.height - 1 };
+            for (let i = 0; i < 2; i++) {
+              set.setPixel32(last.x + i, last.y, values[count - 2 + i]);
+            }
+
+            assert.deepEqual(set.pixels, expected.pixels, `setWords: ${label}`);
+            assert.ok(calls > 0, label);
+
+            bitmapKernel()?.dispose();
+            calls = 0;
+            const read = Array.from({ length: count }, (_, i) =>
+              expected.getPixel32(rect.x + (i % rect.width), rect.y + Math.floor(i / rect.width)),
+            );
+            const out = new Uint8Array(count * 4 + 5);
+            expected.getWords(rect, out, 5, little);
+            const got = new DataView(out.buffer, 5);
+            assert.deepEqual(
+              read.map((_, i) => got.getUint32(i * 4, little)),
+              read,
+              `getWords: ${label}`,
+            );
+            // An opaque store's pixels in the module's order are copied here.
+            assert.equal(calls > 0, transparent || !little, label);
+
+            bitmapKernel()?.dispose();
+            calls = 0;
+            assert.deepEqual(expected.getVector(rect), read, `getVector: ${label}`);
+            assert.equal(calls > 0, transparent, label);
+          }
+        }
+      }
+    }
+  } finally {
+    wasm.Instance = Instance;
+    bitmapKernel()?.dispose();
   }
 });

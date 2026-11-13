@@ -66,7 +66,17 @@ the render module (`packages/native/src/render/pixels.zig`), a band of rows
 at a time, which keeps their arithmetic. They write into the store in
 place; a band that traps is made again in a new instance, and where that
 fails too the bands before it stay written and the rest are left as they
-were. `noise` and
+were. A bitmap's pixels set and read whole (`setPixels`, `setVector`,
+`getPixels`, `copyPixelsToByteArray`, `getVector`) go as runs, a rect as
+wide as the store one run and a narrower one a run a row: straight between
+the ByteArray's buffer and the store, with no array of values between. A
+run of 1,024 pixels or more is made in the module four pixels at a time
+(pixels.zig's `words`: alpha 255 for an opaque store, premultiplied or
+divided back for a transparent one, bytes reversed for a big-endian
+ByteArray); a shorter one, what the module refuses, and a Vector's
+numbers being set, which cost as much to take as to premultiply, by loops
+in `bitmap.ts`, one for each kind with nothing to decide inside. `getVector`
+makes its array of packed doubles at its length at once. `noise` and
 `pixelDissolve`, whose pseudo-random sequences are Flash's own and fitted
 to the values Ruffle's corpus recorded of it; `copyChannel`,
 `colorTransform`, `merge`, `scroll`; `threshold`, `hitTest`,
