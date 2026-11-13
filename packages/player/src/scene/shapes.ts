@@ -144,12 +144,7 @@ class Gathered {
     this.region = region;
   }
 
-  /** The index the next vertex takes in the part. */
-  get next(): number {
-    return this.vertices;
-  }
-
-  /** Room for `vertices` more vertices and `corners` more indices, which vertex and triangle take. */
+  /** Room for `vertices` more vertices and `corners` more indices, which add takes. */
   reserve(vertices: number, corners: number): void {
     const n = this.vertices + vertices;
     scratchPositions = roomy(scratchPositions, n * 2, this.vertices * 2);
@@ -158,43 +153,96 @@ class Gathered {
     scratchIndices = roomy(scratchIndices, this.corners + corners, this.corners);
   }
 
-  /** A vertex at (x, y) of `color`, sampling at texel (u, v), in room reserve made. */
-  vertex(x: number, y: number, color: number, u: number, v: number): void {
-    const n = this.vertices;
-    scratchPositions[n * 2] = x;
-    scratchPositions[n * 2 + 1] = y;
-    scratchColors[n] = color;
-    scratchTexels[n * 2] = u;
-    scratchTexels[n * 2 + 1] = v;
-    this.vertices = n + 1;
-  }
+  /**
+   * A fill's triangles in the part open, in room reserve made: its
+   * `vertices` in `color`, sampling where `how` puts them, and its
+   * `indices`, which count from `offset`. The loops are over the arrays
+   * themselves: a call a vertex and a triangle showed in a drawing made
+   * again on every frame.
+   */
+  add(
+    vertices: Float32Array | Float64Array,
+    indices: Uint16Array | Uint32Array,
+    offset: number,
+    color: number,
+    how: Sampling | null,
+  ): void {
+    const first = this.vertices;
+    const count = vertices.length >> 1;
+    const positions = scratchPositions;
+    const colors = scratchColors;
+    for (let k = 0; k < count; k++) {
+      positions[(first + k) * 2] = vertices[k * 2];
+      positions[(first + k) * 2 + 1] = vertices[k * 2 + 1];
+      colors[first + k] = color;
+    }
 
-  /** A fill begun in the part open: its vertices and triangles follow. */
-  fill(): void {
+    // A part of solid fills has no texels, and reads none.
+    if (how) {
+      const texels = scratchTexels;
+      for (let k = 0; k < count; k++) {
+        how.at(vertices[k * 2], vertices[k * 2 + 1]);
+        texels[(first + k) * 2] = how.u;
+        texels[(first + k) * 2 + 1] = how.v;
+      }
+    }
+
+    const corners = this.corners;
+    const length = indices.length;
+    const out = scratchIndices;
+    const base = first - offset;
+    for (let k = 0; k < length; k++) {
+      out[corners + k] = indices[k] + base;
+    }
+
+    this.vertices = first + count;
+    this.corners = corners + length;
     this.fills++;
-  }
-
-  /** A triangle of the part's vertices `a`, `b` and `c`, in room reserve made. */
-  triangle(a: number, b: number, c: number): void {
-    const n = this.corners;
-    scratchIndices[n] = a;
-    scratchIndices[n + 1] = b;
-    scratchIndices[n + 2] = c;
-    this.corners = n + 3;
   }
 
   close(): void {
     const n = this.vertices;
+    const corners = this.corners;
     const shader = this.paint?.type === "shader";
-    if (this.corners > 0) {
+    if (corners > 0) {
+      // One buffer for the part's arrays, as each array's own costs more than filling it.
+      const colored = shader ? 0 : n;
+      const sampled = this.paint ? n * 2 : 0;
+      const deep = shader ? n : 0;
+      const buffer = new ArrayBuffer((n * 2 + colored + sampled + deep + corners) * 4);
+      const positions = new Float32Array(buffer, 0, n * 2);
+      positions.set(scratchPositions.subarray(0, n * 2));
+      let at = n * 8;
+      let colors = NO_COLORS;
+      // A shader fill's vertices carry a depth where others carry their colour (MESH's).
+      if (!shader) {
+        colors = new Uint32Array(buffer, at, n);
+        colors.set(scratchColors.subarray(0, n));
+        at += n * 4;
+      }
+
+      let texels: Float32Array | undefined;
+      if (this.paint) {
+        texels = new Float32Array(buffer, at, n * 2);
+        texels.set(scratchTexels.subarray(0, n * 2));
+        at += n * 8;
+      }
+
+      let depths: Float32Array | undefined;
+      if (shader) {
+        depths = new Float32Array(buffer, at, n).fill(1);
+        at += n * 4;
+      }
+
+      const indices = new Uint32Array(buffer, at, corners);
+      indices.set(scratchIndices.subarray(0, corners));
       this.parts.push({
         geometry: {
-          positions: scratchPositions.slice(0, n * 2),
-          // A shader fill's vertices carry a depth where others carry their colour (MESH's).
-          colors: shader ? NO_COLORS : scratchColors.slice(0, n),
-          texels: this.paint ? scratchTexels.slice(0, n * 2) : undefined,
-          depths: shader ? new Float32Array(n).fill(1) : undefined,
-          indices: scratchIndices.slice(0, this.corners),
+          positions,
+          colors,
+          texels,
+          depths,
+          indices,
           // One fill's triangles cover each point of it once; fills of a drawing may overlap.
           flat: this.fills === 1,
         },
@@ -326,7 +374,8 @@ function meshPart(mesh: TriangleMesh): Part | null {
 /** `layer`'s fills as geometries in order. */
 function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boolean): Part[] {
   // A drawing used as a mask fills non-zero, whatever its winding (fills.ts, resolveFills).
-  const geometries = resolveFills(layer, masking, tessellator);
+  // Read below before the tessellator is called again, so borrowed from it.
+  const geometries = resolveFills(layer, masking, tessellator, true);
   const out = new Gathered();
   for (let i = 0; i < layer.fills.length; i++) {
     const { fill, contours } = layer.fills[i];
@@ -349,22 +398,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     if (geometry && geometry.vertices.length > 0) {
       const { vertices, indices, indexOffset = 0 } = geometry;
       out.reserve(vertices.length / 2, indices.length);
-      out.fill();
-      const first = out.next;
-      for (let k = 0; k < vertices.length; k += 2) {
-        const x = vertices[k];
-        const y = vertices[k + 1];
-        how?.at(x, y);
-        out.vertex(x, y, color, how ? how.u : 0, how ? how.v : 0);
-      }
-
-      for (let k = 0; k < indices.length; k += 3) {
-        out.triangle(
-          first + indices[k] - indexOffset,
-          first + indices[k + 1] - indexOffset,
-          first + indices[k + 2] - indexOffset,
-        );
-      }
+      out.add(vertices, indices, indexOffset, color, how);
     }
   }
 

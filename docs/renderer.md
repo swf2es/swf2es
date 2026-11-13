@@ -74,6 +74,17 @@ single convex contour as a fan, without libtess2's sweep. Together they
 took that SWF's frame from 4.9 to about 2.5 ms (#658), and cutting the
 garbage its calls make to 1.8 ms (#659).
 
+What is left of such a frame is mostly buffers. A typed array of more
+than 64 bytes has its storage outside the JS heap, and making one costs
+about a microsecond, more than filling it does for a small shape: 800
+shapes of a fill and a line each, drawn anew, made 4,800 a frame, and the
+atlas two uploads a geometry beside. So a layer's fills are read from the
+native module's memory where they lie (`layer`'s `borrowed`), a part's
+arrays share one buffer, as a layer's lines do, and the atlas stages the
+geometries a frame adds and uploads them together. Half of those fills
+are crescents, which the native module cuts into a strip in two passes
+along an axis rather than by ear clipping (`monotone.zig`).
+
 ### The scene list
 
 The scene list (`scene.ts`) is a structure of typed arrays in drawing
@@ -142,8 +153,10 @@ whose entries go once unused for their idle frames:
 
 - **Geometries** (`geometry.ts`): fills and lines as the native module
   writes them, copied once into the atlas's vertex and index buffers
-  (`webgl/atlas.ts`), a hole left where one goes and the atlas packed
-  again once the holes outweigh what is live. An atlas that outgrows its
+  (`webgl/atlas.ts`), those a frame adds staged and uploaded together, a
+  hole left where one goes and the atlas packed again once the holes
+  outweigh what is live; an atlas left empty is filled again from its
+  start, in the buffers it has. An atlas that outgrows its
   largest buffer starts again with only what is live, rather than
   failing.
 - **Textures** (`textures.ts`): bitmaps, device text, gradients, their
@@ -271,8 +284,10 @@ compose with the display list without copies.
   README](../packages/native/README.md)): one module, in Zig, which each
   user instantiates apart. Its `Tessellator` fills with libtess2 in
   double precision, a layer in one call, a single convex contour as a
-  fan, and a single simple concave contour of at most 64 vertices by ear
-  clipping after checking for crossings and touches (`earclip.zig`).
+  fan, a thin one that goes once along an axis and back as a strip
+  (`monotone.zig`), and any other simple concave contour of at most 64
+  vertices by ear clipping after checking for crossings and touches
+  (`earclip.zig`).
   Whatever libtess2 refuses or fails at goes to bands (`bands.zig`):
   each horizontal band between vertices and crossings filled as disjoint
   trapezoids under its winding rule. Its `LineBuilder` builds a layer's
@@ -351,8 +366,11 @@ translucent circle once, then moves and turns them each frame: it measures
 draw submission without rebuilding geometry. `--town N` draws N hairline-outlined characters and
 scenery instead, some of them glowing, which is nearer a room's lines and
 filters but has none of its bitmap or gradient fills, blend layers or
-masks. A synthetic scene built to the replay's whole mix is still to
-come. `--gpu` draws on the GPU rather than software GL. A change is measured
+masks. `--redraw N` has a script clear and draw N shapes again each
+frame, a fill of two curves under a line: what tessellating, stroking and
+uploading shapes anew costs. `--checkout DIR` plays another built
+checkout's packages on the same scene, for runs of two builds in turn. A
+synthetic scene built to the replay's whole mix is still to come. `--gpu` draws on the GPU rather than software GL. A change is measured
 on a GPU and on SwiftShader, which CI draws with and a player without a
 usable GPU falls back to. `tests/player/draw-counts.ts` keeps GL calls,
 sub-draws, binds and uniform calls a frame from creeping up unnoticed

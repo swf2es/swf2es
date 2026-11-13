@@ -48,8 +48,15 @@ to libtess2. A single concave contour of at most 64 vertices can instead
 use ear clipping (`native/src/render/earclip.zig`), after checking every
 non-adjacent edge pair for crossings and touches. It keeps the input
 vertices and allocates only triangle indices. Repeated points, overlaps,
-non-finite cross products or a stalled ear search leave it to libtess2;
-both fast paths stay within libtess2's coordinate range.
+non-finite cross products or a stalled ear search leave it to libtess2.
+A contour that goes once along an axis and once back, a crescent or a
+leaf of two curves, needs no such check: a pass along the axis shows its
+two chains to meet only at their ends (`native/src/render/monotone.zig`).
+A thin one is then cut into a strip of triangles between the chains in
+another pass; a wide one is ear clipped without the check, since a
+strip's long triangles would cost the rasteriser more each frame than
+the cut saved once. The fast paths stay within libtess2's coordinate
+range.
 
 Lines (`scene/strokes.ts`) are stroked in the stage's axes, because
 Flash strokes a transformed line with one width all along, not the local

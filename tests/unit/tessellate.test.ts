@@ -64,6 +64,46 @@ test("small simple concave fills retain their input vertices in either winding a
   }
 });
 
+test("a thin contour once along an axis and back keeps its input vertices, past ear clipping's size", () => {
+  const tess = new Tessellator();
+  // A saw of 150 teeth a pixel high over a shallower one, 600 points: along x and, turned, along y.
+  const saw: number[] = [];
+  for (let i = 0; i <= 300; i++) {
+    saw.push(i, i % 2 ? 31 : 30);
+  }
+
+  for (let i = 299; i > 0; i--) {
+    saw.push(i, i % 2 ? 28 : 28.5);
+  }
+
+  let twice = 0;
+  for (let i = 0; i < saw.length; i += 2) {
+    const j = (i + 2) % saw.length;
+    twice += saw[i] * saw[j + 1] - saw[j] * saw[i + 1];
+  }
+
+  for (const contour of [saw, saw.map((_, i) => saw[i ^ 1])]) {
+    for (const nonZero of [false, true]) {
+      const result = tess.tessellate([contour], nonZero);
+      assert.ok(result);
+      assert.deepEqual(Array.from(result.vertices), contour);
+      assert.equal(result.indices.length, (contour.length / 2 - 2) * 3);
+      assert.ok(Math.abs(area(result) - Math.abs(twice) / 2) < 1e-9);
+    }
+  }
+
+  // Its chains touching, it is libtess2's, which gives the vertices in its own order; so is a wide one.
+  const touching = saw.slice();
+  touching[302 * 2 + 1] = 30;
+  assert.deepEqual(touching.slice(302 * 2, 302 * 2 + 2), touching.slice(298 * 2, 298 * 2 + 2));
+  const wide = saw.map((value, i) => (i % 2 ? value * 40 : value));
+  for (const contour of [touching, wide]) {
+    const result = tess.tessellate([contour], false);
+    assert.ok(result);
+    assert.notDeepEqual(Array.from(result.vertices), contour);
+  }
+});
+
 test("the native module imports only its aborting allocation failure callback, and sine and cosine", async () => {
   const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
   assert.deepEqual(WebAssembly.Module.imports(module), [
@@ -276,6 +316,26 @@ function ring(count: number, x = 0): number[] {
 
   return points;
 }
+
+test("a borrowed layer is the layer copied, until the next call; a copied one stays", () => {
+  const fills = tessellationFixtures.map((fixture) => fixture.contours).map(paths);
+  const rules = fills.map((_, i) => i % 2 === 1);
+  const tess = new Tessellator();
+  const copied = tess.tessellate.layer(fills, rules);
+  assert.ok(copied);
+  const kept = copied.map(plain);
+  const borrowed = tess.tessellate.layer(fills, rules, true);
+  assert.ok(borrowed);
+  assert.deepEqual(borrowed.map(plain), kept);
+  // The module's memory itself, read before another call writes it.
+  const lent = borrowed.find((geometry) => geometry !== null);
+  assert.ok(lent && lent.vertices.buffer.byteLength >= 65536);
+
+  // Another layer, and a fill alone, change no copy handed out before.
+  assert.ok(tess.tessellate.layer([[path([0, 0, 9, 0, 0, 9])]], [true], true));
+  assert.ok(tess.tessellate([square], false));
+  assert.deepEqual(copied.map(plain), kept);
+});
 
 test("a layer call tessellates each fill as a call of its own does, into one buffer each", () => {
   const fills = tessellationFixtures.flatMap((fixture) => [fixture.contours, fixture.contours]);
@@ -500,6 +560,10 @@ test("a layer short of memory gives each fill what a layer of its own would", ()
       assert.deepEqual(plain(together[i]), own);
       assert.ok(own === null || JSON.stringify(own) === JSON.stringify(expected[i]));
     }
+
+    // Borrowed, the fills tried again alone overwrite nothing lent.
+    const lent = new Tessellator({ memoryLimit }).tessellate.layer(fills, rules, true);
+    assert.deepEqual(lent?.map(plain), together.map(plain));
   }
 });
 
