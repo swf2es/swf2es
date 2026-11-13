@@ -10,7 +10,7 @@ filters are computed in WebAssembly: Zig, with libtess2 for the fills.
 **Try it** at https://swf2es.github.io/swf2es/play/: open or drop a SWF (it
 is read in your browser, never uploaded), or play a demo. The site has the
 [guide](https://swf2es.github.io/swf2es/docs/) too. For Stage3D SWFs,
-select **Stage3D (experimental)** in the player controls.
+select **Stage3D** in the player controls.
 
 **Status:**
 - **ActionScript 3** runs as avmshell runs it: 97.9% of Tamarin's
@@ -20,7 +20,8 @@ select **Stage3D (experimental)** in the player controls.
   text, bitmaps, filters, blend modes, sound, input, loading, sockets,
   workers, ExternalInterface and Pixel Bender (`ShaderJob`, shader
   filters, blends and fills), each checked against Flash under AIR's
-  `adl`. Stage3D is experimental: on in the desktop app, an opt-in on a page.
+  `adl`. Stage3D covers every profile and AGAL 1 to 3: on in the desktop
+  app, an opt-in on a page.
 - **Not yet:** video, printing, and Pixel Bender's shader lines.
   Compatibility is incomplete.
 

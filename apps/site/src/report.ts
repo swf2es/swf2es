@@ -77,7 +77,7 @@ function body(facts: ReportFacts, errors: string[]): string {
     `- Browser: ${facts.userAgent}`,
     `- Renderer: ${facts.renderer}`,
     `- Quality: ${facts.quality}, scale: ${facts.scale}`,
-    `- Stage3D: ${facts.stage3D ? "enabled (experimental)" : "disabled"}`,
+    `- Stage3D: ${facts.stage3D ? "enabled" : "disabled"}`,
   );
   if (errors.length > 0) {
     // A fence longer than any run of backticks in them, which would end a shorter one.

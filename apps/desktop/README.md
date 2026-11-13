@@ -44,7 +44,7 @@ fetch-electron` does so ahead, for the tests.
   `FullScreenEvent`. Opening another SWF destroys the
   player before the next starts.
 - **Stage3D.** SWFs get a Context3D, as in Flash and AIR on a desktop. View ›
-  Stage3D (Experimental) turns it off, after which a SWF's `requestContext3D`
+  Stage3D turns it off, after which a SWF's `requestContext3D`
   gets Error #3702 "Context3D not available", and on again; the app remembers
   that choice in `settings.json` (`stage3DChoice`) and restarts the current
   movie when it changes. Until it is changed there it is on, also for a
