@@ -12,6 +12,18 @@ is read in your browser, never uploaded), or play a demo. The site has the
 [guide](https://swf2es.github.io/swf2es/docs/) too. For Stage3D SWFs,
 select **Stage3D** in the player controls.
 
+**On your desktop**, the app plays a local SWF or one by its URL, and AIR
+applications from their descriptor, with Stage3D on:
+
+```sh
+npx @swf2es/desktop movie.swf
+npx @swf2es/desktop app.xml
+```
+
+It needs Node 22.18 or later; the first run downloads Electron, about
+100 MB. Open, drop or reopen recent SWFs from its window; its
+[README](apps/desktop/README.md) has the rest.
+
 **Status:**
 - **ActionScript 3** runs as avmshell runs it: 97.9% of Tamarin's
   acceptance tests match it ([coverage](docs/coverage.md)).
