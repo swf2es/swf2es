@@ -85,7 +85,7 @@ export interface Configuration {
   /** Experimental AVM2 compilation on first method-factory use; off by default. */
   lazyCompilation?: boolean;
   /**
-   * Experimental Stage3D surface factory, or a loader of one, called at a SWF's first
+   * Stage3D's surface factory, or a loader of one, called at a SWF's first
    * requestContext3D so that a SWF that never asks loads no backend; absent/null keeps
    * ErrorEvent #3702, as does a loader that fails.
    */

@@ -1,4 +1,4 @@
-// Experimental opt-in bindings. Install before loading playerglobal and close
+// Stage3D's bindings, which a host opts in to. Install before loading playerglobal and close
 // the host before destroying Scripting; default playback keeps ErrorEvent #3702.
 import { PROFILES, type Profile, type Stage3DHost } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";

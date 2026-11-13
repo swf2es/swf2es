@@ -47,7 +47,7 @@ whatever version the range names by then.
 lies beside it and loads as a page needs it: `codegen.wasm`, the
 compiler, the renderer's chunk and the Flash Workers' host, a small one,
 with the first player; `worker.js` only for a SWF that uses workers;
-Stage3D's chunk only on a page that configures it (experimental).
+Stage3D's chunk only on a page that configures it.
 
 ## Content-Security-Policy
 

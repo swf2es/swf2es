@@ -101,7 +101,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
-| `context3d` | experimental renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
+| `context3d` | Stage3D's renderer contracts, AGAL translation and optional WebGL2 backend; the WebGL 2 device layer it shares with `render` | — |
 | `render`  | the renderer ([renderer.md](../renderer.md)): scene list, planner and WebGL 2 backend | context3d |
 | `player`  | display list, timeline, playerglobal, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, player (its libraries alone, `@swf2es/player/libraries`), runtime |
@@ -190,7 +190,7 @@ The caller supplies the clipped stage container and puts the display-list canvas
 above Stage3D slots 0..3. A lost surface stays attached until restoration or
 teardown; removing it detaches its listeners. `tests/context3d` exercises these
 package entries against AIR references and repeated-load resource checks.
-`@swf2es/web` accepts an experimental `configure({ stage3D: surfaceFactory })`
+`@swf2es/web` accepts `configure({ stage3D: surfaceFactory })`
 for subsequent loads. It lazily installs the optional bindings before libraries,
 owns each load's layers and closes them before destroying Scripting. Its display
 canvas supports transparency from creation and clears to transparent black while
@@ -215,7 +215,7 @@ failed load gives that SWF's requests #3702. The web session's own module is
 imported alongside codegen and the libraries. The desktop's surface factory inherits the backend's
 independent per-type resource counts and AIR-backed buffer/texture byte limits.
 Composition, AS3 Stage layout, loss/recovery and teardown use the web host.
-The demo site also offers Stage3D as an unchecked experimental option. It loads
+The demo site also offers Stage3D as an option, unchecked by default. It loads
 the backend only when selected and uses the same resource limits as the desktop,
 Flash Player's own: lower budgets refused scenes that play in Flash, with Error
 #3691 on every frame. Changing the option restarts the current SWF; closing

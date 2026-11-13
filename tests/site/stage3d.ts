@@ -130,7 +130,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
             return link.href;
           })()`),
         );
-        assert.match(report.searchParams.get("body") ?? "", /Stage3D: enabled \(experimental\)/);
+        assert.match(report.searchParams.get("body") ?? "", /Stage3D: enabled\b/);
         await clear();
         await click("reload");
         await ready();

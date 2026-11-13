@@ -405,7 +405,7 @@ application that acts on F11 itself, setting `Stage.displayState` in its
 `keyDown` listener, has the key to itself, and one press toggles once.
 
 A SWF gets a Context3D, as in Flash Player and AIR on a desktop: Stage3D
-content plays with nothing to set up. View › Stage3D (Experimental) turns
+content plays with nothing to set up. View › Stage3D turns
 it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
 not available", and on again; the app remembers the choice and restarts
 the movie playing.
