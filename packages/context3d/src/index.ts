@@ -24,6 +24,7 @@ export {
   STENCIL_ACTIONS,
   type Stage3DHost,
   type StencilAction,
+  screenPixels,
   TEXTURE_FORMATS,
   type Texture3D,
   TextureBindingError,

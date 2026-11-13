@@ -19,6 +19,8 @@ const fixture =
     "Reconfigure",
     "BackBuffer",
     "BackBufferLegacy",
+    "BestResolution",
+    "ContextArguments",
     "Comparisons",
     "RenderTargets",
     "CubeTargets",
@@ -102,7 +104,12 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Stencil" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation" || fixture.startsWith("BackBuffer")}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode>${
+      // AIR on Windows draws at the screen's pixels with it: run under Wine at 192 DPI (README).
+      fixture === "BestResolution"
+        ? "<requestedDisplayResolution>high</requestedDisplayResolution>"
+        : ""
+    }<depthAndStencil>${fixture === "Stencil" || fixture === "ContextArguments" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation" || fixture.startsWith("BackBuffer")}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>

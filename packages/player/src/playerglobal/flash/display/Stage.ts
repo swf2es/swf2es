@@ -181,8 +181,9 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return 1;
     }
 
+    /** The host's: the screen's pixels to a stage pixel, 2 on most high-density screens. */
     get contentsScaleFactor(): number {
-      return 1;
+      return s.contentsScaleFactor;
     }
 
     get fullScreenWidth(): number {
