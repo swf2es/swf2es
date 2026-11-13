@@ -39,7 +39,7 @@ const { value, exception } = await withPage(
       largest = Math.max(largest, args[6]);
       return draw.apply(this, args);
     };
-    let uploads = 0, bufferUploads = 0;
+    let uploads = 0, rowUploads = 0, bufferUploads = 0;
     const bufferUpload = multi.gl.bufferSubData;
     multi.gl.bufferSubData = function (...args) {
       bufferUploads++;
@@ -64,8 +64,13 @@ const { value, exception } = await withPage(
     };
     const upload = multi.gl.texSubImage2D;
     multi.gl.texSubImage2D = function (...args) {
+      // The merged fills' rows are uploaded 1024 texels a line; the run table, 256 at most.
       if (args[6] === this.RED_INTEGER) {
-        uploads++;
+        if (args[4] === 1024) {
+          rowUploads++;
+        } else {
+          uploads++;
+        }
       }
       return upload.apply(this, args);
     };
@@ -121,6 +126,7 @@ const { value, exception } = await withPage(
           }
           const expected = capture(single, root);
           uploads = 0;
+          rowUploads = 0;
           bufferUploads = 0;
           const actual = capture(multi, root);
           withoutMultiCalls = 0;
@@ -142,7 +148,7 @@ const { value, exception } = await withPage(
           if (frame === 2 && count >= 32 && multi.backend.draws.batches.indexTop === 0) {
             throw new Error("Stable small geometries were not merged");
           }
-          if (frame === 3 && bufferUploads !== 0) {
+          if (frame === 3 && (bufferUploads !== 0 || rowUploads !== 0)) {
             throw new Error("Moving unchanged geometry uploaded the batch again");
           }
           if (!expected.some((value, i) => i % 4 !== 3 && value !== 0)) {

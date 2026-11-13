@@ -172,8 +172,8 @@ export class FillBatches {
    * too much: a run short or of geometry added this `frame` is cheaper
    * drawn from it, and with `settled` a run not drawn the frame before
    * too, as a run that changes from frame to frame, as an animation's do,
-   * would be copied again each frame. Its vertices carry each draw's place
-   * in the run, which the run table's rows follow.
+   * would be copied again each frame. Its vertices carry each draw's slot
+   * in the rows' texture, where `rows` are written.
    */
   add(
     places: Place[],
