@@ -8,10 +8,11 @@ BitmapData, presents, and disposes its resources.
 pnpm build
 node --test tests/context3d/agal.test.ts
 node tests/context3d/run.ts
+VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json node tests/context3d/run.ts --gpu
 node tests/context3d/stress.ts
 node tests/context3d/reclamation.ts
 node tests/context3d/host.ts
-node tests/desktop/stage3d.ts    # normal Electron View-menu opt-in (needs its binary)
+node tests/desktop/stage3d.ts    # Electron: on by default, the View menu turns it off (needs its binary)
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
 # Backend timings, completed draws and GL call counts:
@@ -107,11 +108,31 @@ node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
 node tests/context3d/oracle.ts --cubetargets
 node tests/context3d/oracle.ts --reconfigure
+node tests/context3d/oracle.ts --backbuffer
+node tests/context3d/oracle.ts --backbufferlegacy    # compiled as SWF 15
 node tests/context3d/oracle.ts --framevalidation
 node tests/context3d/oracle.ts --framevalidationflat
+node tests/context3d/oracle.ts --contextarguments
+# With Wine at 192 DPI (below):
+node tests/context3d/oracle.ts --bestresolution
+node tests/context3d/oracle.ts --profiles
+node tests/context3d/oracle.ts --agalprofiles
+node tests/context3d/oracle.ts --agalstandard
+node tests/context3d/oracle.ts --textureformats
+node tests/context3d/oracle.ts --multipletargets
 # Requires a reference driver that implements pixel-shader predication:
 node tests/context3d/oracle.ts --comparisons
 ```
+
+`BestResolution.as` needs AIR on a screen of twice the density: its
+descriptor asks for `requestedDisplayResolution` high, which AIR 51 on
+Windows honours, and Wine reports 192 DPI with
+`wine reg add 'HKLM\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts' /v LogPixels /t REG_DWORD /d 192 /f`
+in its prefix (96 afterwards). Its reference starts `bestresolution scale 2`;
+`run.ts` plays it with `contentsScaleFactor` 2. `host.ts` checks the same
+in Chrome at a device scale factor of 2 (`Sharpness.as`): the back buffer
+is allocated at the screen's pixels and shown at its CSS size, a
+checkerboard of its own pixels survives, and at 1 nothing changes.
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
 from `oracle/flash.ts`: that harness uses CPU display-list capture, which
@@ -276,9 +297,8 @@ streams, float defaults, format changes, offset/stride bounds, null buffers,
 invalid formats and disposed resources/contexts. With a live context and buffer,
 null/invalid formats fail first (2007/2008); negative slots fail with 2006 even
 after disposal. Null/disposed buffers ignore the format. Offset/stride errors
-are deferred until a draw consumes the attribute (3610). This experiment still
-limits bindings to the eight attributes accessible to its AGAL v1 shaders;
-AIR accepted bindings at slot 8 in a separate probe.
+are deferred until a draw consumes the attribute (3610). Every profile takes
+streams 0 to 15, as AIR does, though only AGAL 3 reads past 7 (`Profiles.as`).
 
 The backend uses normalized `UNSIGNED_BYTE` vertex attributes; it does not
 expand packed vertices or generate conversion shaders. Binding records are
@@ -893,15 +913,14 @@ node tests/context3d/stage-layout-oracle.ts [--update]
 
 This is **off by default in the player, website and desktop app**.
 The test imports `@swf2es/player/context3d`, installs natives before loading
-playerglobal and explicitly tears down its host. Only the AGAL v1 instructions listed above plus `mov`,
+playerglobal and explicitly tears down its host. AGAL 1 to 3 in every profile,
 float and packed-byte vertex attributes, vector/matrix uploads, depth/stencil testing, culling, blending,
-color rendering and back buffers with optional multisampling are exercised, with sizes limited to
-32×32 through 2048×2048.
-Unsupported operations throw experimental errors, not a claim of
+every texture format, up to four colour outputs and back buffers with optional multisampling
+are exercised. Unsupported operations throw experimental errors (#3708), not a claim of
 Flash-compatible validation.
 
-Next gates are the unresolved shader cases above and broader texture
-formats, alongside broader Flash error semantics and numeric coverage.
+Next gates are the unresolved shader cases above, instanced drawing, and broader
+Flash error semantics and numeric coverage.
 The separate WebGL contexts and canvas
 layers isolate this probe; production integration still needs its own
 presentation and resource-sharing design. These sample checks do not claim
@@ -1071,3 +1090,41 @@ passes an independent repeat, the exact-size guards fail it, and the shared
 crop/pad path matches it. Backend checks reuse one staging array across faces and
 mips, preserve source stride/premultiplied channels, clear only the active prefix,
 allocate no warm GPU handles and reject malformed dimensions/face/mip inputs.
+
+`Profiles.as` asks for each profile in turn, and for some through
+`requestContext3DMatchingProfiles`, which takes the best asked for; for each it
+traces the largest textures, rectangle and cube textures it creates (#3683,
+#3766, #3705, and #3782 for a rectangle in `baselineConstrained`), the formats
+(#3759 for `rgbaHalfFloat` below `standardConstrained`), the sampler, stream and
+constant slots the setters take (#2006 past them, the same in every profile, a
+run or a matrix that ends past them too) and the colour outputs (#3770 past 3,
+#3779 below `standard`). In `baseline` it also draws with a stream its program
+does not read (#3607, with error checking on), and last clears a baseline back
+buffer to colours between bytes: AIR truncates them (0.5 clears to 127, 0.1 to
+25), as swf2es now does on every target.
+`AGALProfiles.as` uploads some 1,200 programs, versions 0 to 4 in each profile:
+every register file's bounds, the depth output, `iid`, each opcode AGAL 2 adds
+and each conditional rule, the sampler flags, program lengths, two constants
+and indirect reads. Set `SWF2ES_ORACLE_VERBOSE=1` to have these fixtures trace
+AIR's messages too, into the oracle's `trace.log`.
+
+`run.ts --gpu` plays them on the machine's GPU (Vulkan ANGLE; `VK_DRIVER_FILES`
+picks the driver). On an Intel Iris Xe (Mesa) every fixture matches AIR's
+references; on an NVIDIA RTX 4060 every new fixture runs and checks, and the
+only differences, there as in dev's own Arithmetic, Texturing, ShaderMath and
+others, are channels a shader writes at exactly half way between bytes, which
+NVIDIA rounds down (0.5 to 127) where SwiftShader and AIR round up.
+
+`AGALStandard.as` draws them in `standardExtended`: each comparison at equal,
+lower and higher operands and at -0, branches over a varying, nested, with
+`kil` and `tex` inside, partial writes in both branches, `ddx` and `ddy` into
+the back buffer and a texture, `od` in front of and behind a second draw and
+clamped, the last register of each file, stream 15 against `iid`, indirect reads
+past 128, which read 0 in AGAL 1 and 2 alike, and AGAL's own wraps. AIR's
+fragment comparisons are not compared (`Comparisons.as` says why), so `sne`'s
+are not either: AIR takes it in AGAL 1 already. `TextureFormats.as` uploads
+bitmaps and bytes to the packed and half-float formats, 2D, rectangle and cube,
+reads them back through a sampler, clears and draws into them, and checks
+their sampler formats; `MultipleTargets.as` draws into up to four textures at
+once and checks which bindings one output leaves the others, and AIR's #3728,
+#3729 and #3774. The browser plays all five as SWF 51.

@@ -94,6 +94,30 @@ pub const NoiseParams = extern struct {
     transparent: u32,
 };
 
+/// What `words` makes of each word.
+pub const WordKind = enum(u32) {
+    /// An unmultiplied value into an opaque store: alpha 255, which premultiplies to itself.
+    solid,
+    /// An unmultiplied value into a transparent store.
+    premultiply,
+    /// A transparent store's pixel as its value.
+    unmultiply,
+    /// An opaque store's pixel as its value, which it is.
+    plain,
+};
+
+/// setPixels', setVector's, getPixels' and getVector's words, `count` at
+/// `words`, each made in place the store's pixel of a value or the value
+/// of a pixel (`kind`, a WordKind). `swap` where the values' bytes lie in
+/// the other order than the store's words, as a big-endian ByteArray's
+/// do: reversed before a value is taken, and after one is made.
+pub const WordsParams = extern struct {
+    count: u32,
+    words: u32,
+    kind: u32,
+    swap: u32,
+};
+
 const B_SIZE = 0x100;
 const PERLIN_N: f64 = 0x1000;
 pub const LATTICE = B_SIZE + B_SIZE + 2;
@@ -233,6 +257,80 @@ pub fn over(dst: [*]u32, src: [*]const u32, p: Rows) void {
         while (i < p.w) : (i += 1) {
             d[i] = overOne(s[i], d[i]) | solid;
         }
+    }
+}
+
+/// `premultiply` four pixels at a time: a channel times alpha over 255, to the nearest, is
+/// (t + (t >> 8)) >> 8 of t = c * a + 128, with no division; red and blue at once in the two
+/// halves of a word, each product at most 65,153.
+fn premultiplyFour(v: @Vector(4, u32)) @Vector(4, u32) {
+    const V = @Vector(4, u32);
+    const halves: V = @splat(0x00ff00ff);
+    const a = v >> @splat(24);
+    const rb = (v & halves) * a + @as(V, @splat(0x00800080));
+    const g = ((v >> @splat(8)) & @as(V, @splat(0xff))) * a + @as(V, @splat(0x80));
+    return (v & @as(V, @splat(0xff000000))) |
+        (((rb + ((rb >> @splat(8)) & halves)) >> @splat(8)) & halves) |
+        ((g + (g >> @splat(8))) & @as(V, @splat(0xff00)));
+}
+
+/// `unmultiply` four pixels at a time: each one's reciprocal looked up, then its channels
+/// multiplied by it together.
+fn unmultiplyFour(v: @Vector(4, u32)) @Vector(4, u32) {
+    // Solid pixels, as most of an image's are, are their values.
+    if (@reduce(.And, v >= @as(@Vector(4, u32), @splat(0xff000000)))) return v;
+    const a: [4]u32 = v >> @splat(24);
+    const k = @Vector(4, u32){ color.reciprocal[a[0]], color.reciprocal[a[1]], color.reciprocal[a[2]], color.reciprocal[a[3]] };
+    var out = v & @as(@Vector(4, u32), @splat(0xff000000));
+    inline for (.{ 0, 8, 16 }) |shift| {
+        const c = (v >> @splat(shift)) & @as(@Vector(4, u32), @splat(0xff));
+        const channel: @Vector(4, u32) = @min((c * k + @as(@Vector(4, u32), @splat(127))) >> @splat(8), @as(@Vector(4, u32), @splat(255)));
+        out |= channel << @splat(shift);
+    }
+
+    return out;
+}
+
+/// What `words` makes of one word.
+fn wordOne(w: u32, comptime kind: WordKind, comptime swap: bool) u32 {
+    const value = if (swap and kind != .unmultiply and kind != .plain) @byteSwap(w) else w;
+    const made = switch (kind) {
+        .solid => value | 0xff000000,
+        .premultiply => premultiply(value),
+        .unmultiply => unmultiply(value),
+        .plain => value,
+    };
+    return if (swap and (kind == .unmultiply or kind == .plain)) @byteSwap(made) else made;
+}
+
+/// `wordOne` of four words.
+fn wordFour(v: @Vector(4, u32), comptime kind: WordKind, comptime swap: bool) @Vector(4, u32) {
+    const value = if (swap and kind != .unmultiply and kind != .plain) @byteSwap(v) else v;
+    const made = switch (kind) {
+        .solid => value | @as(@Vector(4, u32), @splat(0xff000000)),
+        .premultiply => premultiplyFour(value),
+        .unmultiply => unmultiplyFour(value),
+        .plain => value,
+    };
+    return if (swap and (kind == .unmultiply or kind == .plain)) @byteSwap(made) else made;
+}
+
+/// One kind's loop, with nothing to decide inside it.
+fn wordsOf(px: []u32, comptime kind: WordKind, comptime swap: bool) void {
+    var i: usize = 0;
+    while (i + 4 <= px.len) : (i += 4) {
+        px[i..][0..4].* = wordFour(px[i..][0..4].*, kind, swap);
+    }
+
+    while (i < px.len) : (i += 1) {
+        px[i] = wordOne(px[i], kind, swap);
+    }
+}
+
+/// A bitmap's pixels set from values or read as them, whole runs at once: see WordsParams.
+pub fn words(px: []u32, kind: WordKind, swap: bool) void {
+    switch (kind) {
+        inline else => |k| if (swap) wordsOf(px, k, true) else wordsOf(px, k, false),
     }
 }
 
@@ -562,6 +660,57 @@ test "over four pixels at a time is over one at a time, for every alpha and odd 
     try std.testing.expectEqual(@as(u32, 0xffffffff), overOne(0xffffffff, 0x80402010));
     // Half a red over white: 128 + 255 * 128 / 256 = 255, and 0 + 127 for green and blue.
     try std.testing.expectEqual(@as(u32, 0xffff7f7f), overOne(0x80800000, 0xffffffff));
+}
+
+test "premultiplying without a division rounds as the division does, for every alpha and channel" {
+    for (0..256) |a| {
+        for (0..256) |c| {
+            const argb: u32 = @intCast((a << 24) | (c << 16) | ((255 - c) << 8) | (c ^ 0x5a));
+            const four = premultiplyFour(@splat(argb));
+            try std.testing.expectEqual(premultiply(argb), four[0]);
+            try std.testing.expectEqual(premultiply(argb), four[3]);
+            // Whatever a store holds, premultiplied or not.
+            const back = unmultiplyFour(@splat(argb));
+            try std.testing.expectEqual(unmultiply(argb), back[0]);
+            try std.testing.expectEqual(unmultiply(argb), back[2]);
+        }
+    }
+}
+
+test "words four at a time are words one at a time, of every kind and in either byte order" {
+    var prng = std.Random.DefaultPrng.init(23);
+    const random = prng.random();
+    // 67 words: sixteen of four and three left over.
+    var px: [67]u32 = undefined;
+    var expected: [67]u32 = undefined;
+    for (0..400) |round| {
+        for (&px) |*p| {
+            p.* = switch (random.uintLessThan(u32, 4)) {
+                0 => random.int(u32) & 0xffffff,
+                1 => random.int(u32) | 0xff000000,
+                else => random.int(u32),
+            };
+        }
+
+        const swap = round % 2 == 0;
+        const kind: WordKind = @fromBackingInt(@intCast((round / 2) % 4));
+        for (&expected, px) |*e, p| {
+            const value = if (swap) @byteSwap(p) else p;
+            e.* = switch (kind) {
+                .solid => value | 0xff000000,
+                .premultiply => premultiply(value),
+                .unmultiply => if (swap) @byteSwap(unmultiply(p)) else unmultiply(p),
+                .plain => value,
+            };
+        }
+
+        words(&px, kind, swap);
+        try std.testing.expectEqualSlices(u32, &expected, &px);
+    }
+
+    var value = [_]u32{0x4020ff80};
+    words(&value, .premultiply, true);
+    try std.testing.expectEqual(premultiply(0x80ff2040), value[0]);
 }
 
 test "a copy in place reads what the pixels before it wrote" {

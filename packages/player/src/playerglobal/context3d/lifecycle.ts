@@ -2,9 +2,13 @@ import {
   type Buffer3D,
   type Context3D,
   Context3DError,
+  MOST_BACK_BUFFER,
+  type Profile,
   type Program3D,
+  SAMPLER_SLOTS,
   type Stage3DHost,
   type Texture3D,
+  VERTEX_SLOTS,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../as3/types.js";
@@ -26,16 +30,38 @@ export interface TextureResource extends Resource<Texture3D> {
   initialized: boolean;
 }
 
+export interface ColorOutput {
+  object: AsObject;
+  value: Texture3D;
+  depth: boolean;
+  antiAlias: number;
+}
+
 export interface ContextState {
   backend: Context3D;
   slot: AsObject;
   /** The profile it was made for, as Context3D.profile reads it. */
-  profile: string;
+  profile: Profile;
   cleared: number;
   depth: boolean;
   aa: number;
+  /**
+   * The last configureBackBuffer's size, in stage pixels, and whether it asked for best
+   * resolution: such a back buffer has the screen's pixels, and follows a change of them.
+   */
+  width: number;
+  height: number;
+  best: boolean;
+  /** maxBackBufferWidth and maxBackBufferHeight, which a SWF may lower. */
+  maxWidth: number;
+  maxHeight: number;
   target: TextureResource | null;
   targetObject: AsObject | null;
+  /** The target's depth and antialiasing, which every other colour output must share. */
+  targetDepth: boolean;
+  targetAntiAlias: number;
+  /** Colour outputs 1 to 3, drawn into with the target. */
+  outputs: (ColorOutput | null)[];
   /** A compressed texture is the target: AIR takes it, and refuses to clear or draw (#3746). */
   compressedTarget: boolean;
   program: AsObject | null;
@@ -53,7 +79,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
   // The profile each slot last asked for, which a context restored after a loss keeps.
-  const profiles = new WeakMap<AsObject, string>();
+  const profiles = new WeakMap<AsObject, Profile>();
   const generations = new WeakMap<AsObject, object>();
   const lost = new Map<AsObject, object>();
   const contexts = new Map<AsObject, ContextState>();
@@ -114,6 +140,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     entry.program = null;
     entry.target = null;
     entry.targetObject = null;
+    entry.outputs.fill(null);
     entry.backend.dispose();
   };
   const disposeResource = (object: AsObject, entry: Resource<ResourceValue> | undefined): void => {
@@ -127,7 +154,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       return;
     }
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < owner.vertices.length; i++) {
       if (owner.vertices[i] === object) {
         owner.vertices[i] = null;
       }
@@ -141,6 +168,11 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     if (owner.targetObject === object) {
       owner.target = null;
       owner.targetObject = null;
+    }
+    for (let i = 0; i < owner.outputs.length; i++) {
+      if (owner.outputs[i]?.object === object) {
+        owner.outputs[i] = null;
+      }
     }
   };
 
@@ -275,14 +307,14 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       }
     });
   };
-  const request = (slot: AsObject, profile = profiles.get(slot) ?? "baseline"): void => {
+  const request = (slot: AsObject, profile: Profile = profiles.get(slot) ?? "baseline"): void => {
     if (pending.has(slot) || lost.has(slot)) {
       return;
     }
 
     profiles.set(slot, profile);
     pending.add(slot);
-    deferEvent(() => {
+    const deliver = () => {
       pending.delete(slot);
       if (closed || s.destroyed || lost.has(slot)) {
         return;
@@ -339,6 +371,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       }
       // Older content reads a compressed texture with any sampler, as AIR lets it.
       backend.samplerFormats = s.rt.swfVersion >= 17;
+      backend.profile = profiles.get(slot) ?? "baseline";
       backend.setDxtEncoder?.(encodeDxt);
       let object: AsObject;
       try {
@@ -357,18 +390,49 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         cleared: 0,
         depth: false,
         aa: 0,
+        width: 0,
+        height: 0,
+        best: false,
+        maxWidth: MOST_BACK_BUFFER,
+        maxHeight: MOST_BACK_BUFFER,
         target: null,
         targetObject: null,
+        targetDepth: false,
+        targetAntiAlias: 0,
+        outputs: [null, null, null],
         compressedTarget: false,
         program: null,
-        vertices: new Array(8).fill(null),
-        textures: new Array(8).fill(null),
+        vertices: new Array(VERTEX_SLOTS).fill(null),
+        textures: new Array(SAMPLER_SLOTS).fill(null),
         resources: new Set(),
       });
       slots.set(slot, object);
       place(slot);
       created(slot);
-    });
+    };
+    // A backend the host loads now is there before the context is made: Flash's context3DCreate
+    // comes after the request anyway.
+    const loading = host.ready?.();
+    if (!loading) {
+      deferEvent(deliver);
+      return;
+    }
+
+    loading.then(
+      () => {
+        if (closed || s.destroyed) {
+          pending.delete(slot);
+        } else {
+          deferEvent(deliver);
+        }
+      },
+      () => {
+        pending.delete(slot);
+        if (!closed && !s.destroyed) {
+          unavailable(slot);
+        }
+      },
+    );
   };
 
   const dispose = (object: AsObject): AsObject | null => {
@@ -385,8 +449,30 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     return entry.slot;
   };
 
+  // A back buffer configured for best resolution follows the screen's pixels as they change,
+  // as Flash's followed the browser's zoom; one being drawn to a texture keeps its size.
+  let rescale: ((entry: ContextState) => void) | null = null;
+  const rescaled = (): void => {
+    for (const entry of contexts.values()) {
+      if (
+        rescale &&
+        entry.best &&
+        entry.backend.width &&
+        !entry.backend.disposed &&
+        !entry.target
+      ) {
+        rescale(entry);
+      }
+    }
+  };
+  s.contentsScaleListeners.add(rescaled);
+  const followScale = (listener: (entry: ContextState) => void): void => {
+    rescale = listener;
+  };
+
   const close = () => {
     closed = true;
+    s.contentsScaleListeners.delete(rescaled);
     for (const object of contexts.keys()) {
       dispose(object);
     }
@@ -420,6 +506,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     request,
     unavailable,
     dispose,
+    followScale,
     close,
     get closed() {
       return closed;

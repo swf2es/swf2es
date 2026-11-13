@@ -5,31 +5,46 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { SettingsFile } from "../../apps/desktop/src/main/settings.ts";
 
-test("Stage3D requires an explicit saved boolean opt-in", () => {
+test("Stage3D is on unless the View menu turned it off", () => {
   const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
   try {
-    assert.equal(new SettingsFile(directory).settings.stage3D, false);
-    for (const value of [undefined, null, "true", 1, false, true]) {
+    assert.equal(new SettingsFile(directory).stage3D, true);
+    // The opt-in's own key saved its `false` with every other change: it says nothing either way.
+    for (const value of [undefined, null, "false", 0, false, true]) {
       writeFileSync(join(directory, "settings.json"), JSON.stringify({ stage3D: value }));
-      assert.equal(new SettingsFile(directory).settings.stage3D, value === true);
+      assert.equal(new SettingsFile(directory).stage3D, true, `stage3D: ${value}`);
+      writeFileSync(join(directory, "settings.json"), JSON.stringify({ stage3DChoice: value }));
+      assert.equal(new SettingsFile(directory).stage3D, value !== false, `stage3DChoice: ${value}`);
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
 });
 
-test("Stage3D choices survive other settings updates and reopening the settings file", () => {
+test("Stage3D's choice is saved only when made, and survives other settings updates", () => {
   const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
   try {
+    writeFileSync(join(directory, "settings.json"), JSON.stringify({ stage3D: false }));
     const settings = new SettingsFile(directory);
-    assert.equal(settings.setStage3D(true), true);
     settings.opened("example.swf");
-    assert.equal(new SettingsFile(directory).settings.stage3D, true);
+    let saved = JSON.parse(readFileSync(join(directory, "settings.json"), "utf8"));
+    assert.equal("stage3DChoice" in saved, false);
+    assert.equal("stage3D" in saved, false);
+    assert.equal(new SettingsFile(directory).stage3D, true);
+
     assert.equal(settings.setStage3D(false), true);
-    const saved = JSON.parse(readFileSync(join(directory, "settings.json"), "utf8"));
-    assert.equal(saved.stage3D, false);
-    assert.deepEqual(saved.recent, ["example.swf"]);
-    assert.equal(new SettingsFile(directory).settings.stage3D, false);
+    settings.opened("other.swf");
+    saved = JSON.parse(readFileSync(join(directory, "settings.json"), "utf8"));
+    assert.equal(saved.stage3DChoice, false);
+    assert.deepEqual(saved.recent, ["other.swf", "example.swf"]);
+    assert.equal(new SettingsFile(directory).stage3D, false);
+
+    assert.equal(settings.setStage3D(true), true);
+    assert.equal(new SettingsFile(directory).stage3D, true);
+    assert.equal(
+      JSON.parse(readFileSync(join(directory, "settings.json"), "utf8")).stage3DChoice,
+      true,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

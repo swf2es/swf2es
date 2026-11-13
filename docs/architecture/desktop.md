@@ -476,11 +476,12 @@ address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
 limits. `tests/desktop/stage3d.ts` drives the native View menu through the main
-process's test-only inspector: disabled fallback without fetching the backend,
-remembered opt-in, two composed slots, live layout/DPR changes, browser context
+process's test-only inspector: Stage3D on for a fresh profile and for the
+opt-in's old settings, a stored off's fallback without fetching the backend,
+the choice remembered, two composed slots, live layout/DPR changes, browser context
 loss/restoration, repeated movie reloads and close. It shares the isolated
 display and process harness in `tests/desktop/app.ts` with the ordinary smoke
-test. `settings.test.ts` covers explicit opt-in and persistence. CI's `desktop`
+test. `settings.test.ts` covers the default, the stored choice and its persistence. CI's `desktop`
 workflow fetches Electron and runs them.
 
 Not done yet: packaging and installers, `SecureSocket`, Flash's Settings

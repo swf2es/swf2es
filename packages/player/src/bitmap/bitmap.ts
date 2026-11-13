@@ -4,6 +4,12 @@
 // alpha and value): premultiplied c' = (c * a + 127) / 255, and back
 // c = min(255, (c' * floor(0xFF00 / a) + 127) >> 8), 0 for alpha 0. An
 // opaque bitmap keeps every alpha at 255.
+import {
+  WORDS_PLAIN,
+  WORDS_PREMULTIPLY,
+  WORDS_SOLID,
+  WORDS_UNMULTIPLY,
+} from "@swf2es/native/render";
 import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
 import { bitmapKernel } from "./kernel.js";
 
@@ -93,39 +99,225 @@ for (let a = 1; a < 256; a++) {
   RECIPROCAL[a] = Math.floor(0xff00 / a);
 }
 
-/** `argb` with its colour channels premultiplied by its alpha. */
+/**
+ * `argb` with its colour channels premultiplied by its alpha: each the
+ * nearest whole number to c * a / 255, which (t + (t >> 8)) >> 8 of
+ * t = c * a + 128 is with no division, red and blue at once in the two
+ * halves of a word. No test but the solid pixel's, which most are: a run
+ * of every alpha takes the one way through.
+ */
 export function premultiply(argb: number): number {
   const a = argb >>> 24;
   if (a === 255) {
     return argb >>> 0;
   }
 
-  if (a === 0) {
-    return 0;
-  }
-
-  const r = ((((argb >>> 16) & 0xff) * a + 127) / 255) | 0;
-  const g = ((((argb >>> 8) & 0xff) * a + 127) / 255) | 0;
-  const b = (((argb & 0xff) * a + 127) / 255) | 0;
-  return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
+  const rb = (Math.imul(argb & 0xff00ff, a) + 0x800080) | 0;
+  const g = ((argb >>> 8) & 0xff) * a + 0x80;
+  return (
+    ((a << 24) |
+      (((rb + ((rb >>> 8) & 0xff00ff)) >>> 8) & 0xff00ff) |
+      ((g + (g >>> 8)) & 0xff00)) >>>
+    0
+  );
 }
 
-/** A premultiplied pixel with its alpha divided back out. */
+/** A premultiplied pixel with its alpha divided back out; a clear one's reciprocal is 0, and so is it. */
 export function unmultiply(pixel: number): number {
   const a = pixel >>> 24;
   if (a === 255) {
     return pixel >>> 0;
   }
 
-  if (a === 0) {
-    return 0;
+  const k = RECIPROCAL[a];
+  const r = Math.min(255, (((pixel >>> 16) & 0xff) * k + 127) >> 8);
+  const g = Math.min(255, (((pixel >>> 8) & 0xff) * k + 127) >> 8);
+  const b = Math.min(255, ((pixel & 0xff) * k + 127) >> 8);
+  return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
+}
+
+/**
+ * Whether a typed array's words are little-endian here: a store's pixels
+ * are ARGB words in the host's order, so a ByteArray's bytes in the same
+ * order are its words as they are, and in the other each reversed.
+ */
+const HOST_LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+
+/** `w` with its four bytes in the other order. */
+function reversed(w: number): number {
+  return (w << 24) | ((w & 0xff00) << 8) | ((w >>> 8) & 0xff00) | (w >>> 24);
+}
+
+// A run of pixels set from or read into words, each kind by a loop of its
+// own with nothing to decide inside: the byte order, whether the store is
+// opaque and what holds the words are settled once a call, not once a
+// pixel, and each loop sees one kind of array.
+
+/** `n` of `pixels` from `to` set from unmultiplied ARGB `words` from `from`, reversed first where `swap`. */
+function setRun(
+  pixels: Uint32Array,
+  to: number,
+  words: Uint32Array,
+  from: number,
+  n: number,
+  swap: boolean,
+  transparent: boolean,
+): void {
+  if (!transparent) {
+    // Alpha 255 premultiplies to itself.
+    if (swap) {
+      for (let i = 0; i < n; i++) {
+        pixels[to + i] = reversed(words[from + i]) | 0xff000000;
+      }
+    } else {
+      for (let i = 0; i < n; i++) {
+        pixels[to + i] = words[from + i] | 0xff000000;
+      }
+    }
+  } else if (swap) {
+    for (let i = 0; i < n; i++) {
+      pixels[to + i] = premultiply(reversed(words[from + i]));
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      pixels[to + i] = premultiply(words[from + i]);
+    }
+  }
+}
+
+/** `setRun` from a Vector's elements, an array of numbers. */
+function setRunOf(
+  pixels: Uint32Array,
+  to: number,
+  values: ArrayLike<number>,
+  from: number,
+  n: number,
+  transparent: boolean,
+): void {
+  if (transparent) {
+    for (let i = 0; i < n; i++) {
+      pixels[to + i] = premultiply(values[from + i] | 0);
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      pixels[to + i] = values[from + i] | 0xff000000;
+    }
+  }
+}
+
+/** `n` of `words` from `from` into `values` from `to`, as they are. */
+function valuesOf(values: number[], to: number, words: Uint32Array, from: number, n: number): void {
+  for (let i = 0; i < n; i++) {
+    values[to + i] = words[from + i];
+  }
+}
+
+/**
+ * The fewest pixels of a run that the native module makes rather than the
+ * loops here: four at a time there, but copied in and out.
+ */
+const NATIVE_WORDS = 1024;
+
+/**
+ * A Vector's elements on their way from the native module, which writes
+ * no array of numbers: so many at a time, as words that stay in the
+ * processor's cache between the two.
+ */
+const SCRATCH = new Uint32Array(1 << 14);
+
+/** The bytes of `n` of `words` from `at`. */
+function bytesOf(words: Uint32Array, at: number, n: number): Uint8Array {
+  return new Uint8Array(words.buffer, words.byteOffset + at * 4, n * 4);
+}
+
+/**
+ * The native module for runs of `run` pixels, or null: where they are too
+ * few, where the realm refused it, and where the host's words are not in
+ * its order, little-endian, in which it reads the store's.
+ */
+function wordsKernel(run: number) {
+  return run >= NATIVE_WORDS && HOST_LITTLE ? bitmapKernel() : null;
+}
+
+/** `n` of `pixels` from `from` read into `words` from `to` as their values, reversed where `swap`. */
+function getRun(
+  words: Uint32Array,
+  to: number,
+  pixels: Uint32Array,
+  from: number,
+  n: number,
+  swap: boolean,
+  transparent: boolean,
+): void {
+  if (!transparent) {
+    // An opaque store's pixels are their values.
+    if (swap) {
+      for (let i = 0; i < n; i++) {
+        words[to + i] = reversed(pixels[from + i]);
+      }
+    } else {
+      words.set(pixels.subarray(from, from + n), to);
+    }
+  } else if (swap) {
+    for (let i = 0; i < n; i++) {
+      words[to + i] = reversed(unmultiply(pixels[from + i]));
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      words[to + i] = unmultiply(pixels[from + i]);
+    }
+  }
+}
+
+/** `getRun` into a Vector's elements, an array of numbers. */
+function getRunOf(
+  values: number[],
+  to: number,
+  pixels: Uint32Array,
+  from: number,
+  n: number,
+  transparent: boolean,
+): void {
+  if (transparent) {
+    for (let i = 0; i < n; i++) {
+      values[to + i] = unmultiply(pixels[from + i]);
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      values[to + i] = pixels[from + i];
+    }
+  }
+}
+
+/** As many zeros as `packedDoubles` copies at once. */
+const ZEROS_LENGTH = 1 << 15;
+const ZEROS: number[] = [0.5];
+ZEROS.pop();
+while (ZEROS.length < ZEROS_LENGTH) {
+  ZEROS.push(0);
+}
+
+/**
+ * An array of `length` zeros as a Vector.<uint> keeps its elements, packed
+ * doubles (vector-elements.ts), made at once: pushed one by one it grows
+ * over and over, each time copied, which cost more than reading a bitmap's
+ * pixels into it; `new Array(length)` is made at once but has holes, and
+ * a site that stores into one such array takes every Vector's elements
+ * for holey from then on. A slice or a concat of packed doubles is packed
+ * doubles, allocated once at its length.
+ */
+function packedDoubles(length: number): number[] {
+  if (length <= ZEROS_LENGTH) {
+    return ZEROS.slice(0, length);
   }
 
-  const k = RECIPROCAL[a];
-  const r = Math.min(255, ((((pixel >>> 16) & 0xff) * k + 127) >> 8) >>> 0);
-  const g = Math.min(255, ((((pixel >>> 8) & 0xff) * k + 127) >> 8) >>> 0);
-  const b = Math.min(255, (((pixel & 0xff) * k + 127) >> 8) >>> 0);
-  return ((a << 24) | (r << 16) | (g << 8) | b) >>> 0;
+  const parts: number[][] = [];
+  for (let left = length - ZEROS_LENGTH; left >= ZEROS_LENGTH; left -= ZEROS_LENGTH) {
+    parts.push(ZEROS);
+  }
+
+  parts.push(ZEROS.slice(0, length % ZEROS_LENGTH));
+  return ZEROS.concat(...parts);
 }
 
 /**
@@ -645,42 +837,76 @@ export class BitmapStore {
     return mergeAlpha ? over(p, d) : p;
   }
 
-  /** The rect's pixels, unmultiplied ARGB, row by row; the rect clipped to the store. */
+  /**
+   * The rect's pixels, unmultiplied ARGB, row by row, as a Vector.<uint>'s
+   * elements; the rect clipped to the store.
+   */
   getVector(r: PixelRect): number[] {
     const c = this.clip(r);
-    const out: number[] = [];
     if (!c) {
-      return out;
+      return packedDoubles(0);
     }
 
-    for (let y = c.y; y < c.y + c.height; y++) {
-      for (let x = c.x; x < c.x + c.width; x++) {
-        out.push(this.unmultiplied(this.readable[y * this.width + x]));
+    const pixels = this.readable;
+    const count = c.width * c.height;
+    const out = packedDoubles(count);
+    // Rows as wide as the store follow one another in it: one run.
+    const run = c.width === this.width ? count : c.width;
+    // Only a transparent store's pixels are worked on: divided in the module, then taken as numbers.
+    const kernel = this.transparent ? wordsKernel(run) : null;
+    for (let k = 0, row = c.y * this.width + c.x; k < count; k += run, row += this.width) {
+      let done = 0;
+      while (kernel && done < run) {
+        const n = Math.min(SCRATCH.length, run - done);
+        const from = bytesOf(pixels, row + done, n);
+        const made = kernel.words(bytesOf(SCRATCH, 0, n), from, WORDS_UNMULTIPLY, false) >> 2;
+        valuesOf(out, k + done, SCRATCH, 0, made);
+        done += made;
+        if (made < n) {
+          break;
+        }
       }
+
+      getRunOf(out, k + done, pixels, row + done, run - done, this.transparent);
     }
 
     return out;
   }
 
-  /** Unmultiplied ARGB words in the destination's byte order, row by row; the rect clipped to the store. */
-  argbBytes(rect: PixelRect, littleEndian = false): Uint8Array {
-    const c = this.clip(rect);
-    if (!c) {
-      return new Uint8Array(0);
-    }
-
+  /**
+   * The rect's pixels, within the store, as unmultiplied ARGB words in the
+   * byte order given, row by row, into `bytes` from `at`, which has room
+   * for them: getPixels' and copyPixelsToByteArray's write of a ByteArray.
+   */
+  getWords(r: PixelRect, bytes: Uint8Array, at: number, littleEndian: boolean): void {
     const pixels = this.readable;
-    const out = new Uint8Array(c.width * c.height * 4);
-    const view = new DataView(out.buffer);
-    let j = 0;
-    for (let y = c.y; y < c.y + c.height; y++) {
-      for (let i = y * this.width + c.x, end = i + c.width; i < end; i++, j += 4) {
-        const p = this.unmultiplied(pixels[i]);
-        view.setUint32(j, p, littleEndian);
+    const count = r.width * r.height;
+    const run = r.width === this.width ? count : r.width;
+    // An opaque store's pixels in the host's order are copied as they are, which the module would not hasten.
+    const kernel = this.transparent || !littleEndian ? wordsKernel(run) : null;
+    const kind = this.transparent ? WORDS_UNMULTIPLY : WORDS_PLAIN;
+    // What is left to the loops here writes words, which a typed array holds at a multiple of four alone.
+    const aligned = ((bytes.byteOffset + at) & 3) === 0;
+    const swap = littleEndian !== HOST_LITTLE;
+    for (let k = 0, row = r.y * this.width + r.x; k < count; k += run, row += this.width) {
+      const to = at + k * 4;
+      const into = bytes.subarray(to, to + run * 4);
+      const done = kernel
+        ? kernel.words(into, bytesOf(pixels, row, run), kind, !littleEndian) >> 2
+        : 0;
+      if (done === run) {
+        continue;
+      }
+
+      const left = run - done;
+      const words = aligned
+        ? new Uint32Array(bytes.buffer, bytes.byteOffset + to + done * 4, left)
+        : new Uint32Array(left);
+      getRun(words, 0, pixels, row + done, left, swap, this.transparent);
+      if (!aligned) {
+        into.set(bytesOf(words, 0, left), done * 4);
       }
     }
-
-    return out;
   }
 
   /** The rect's pixels set from `values`, unmultiplied ARGB, row by row, as far as they go; how many it took. */
@@ -691,15 +917,71 @@ export class BitmapStore {
     }
 
     // As many as there are values, row by row; the rest stay.
-    let k = 0;
-    for (let y = c.y; y < c.y + c.height && k < values.length; y++) {
-      for (let x = c.x; x < c.x + c.width && k < values.length; x++) {
-        this.pixels[y * this.width + x] = this.premultiplied(values[k++] >>> 0);
-      }
+    const pixels = this.pixels;
+    const count = Math.min(values.length, c.width * c.height);
+    const run = c.width === this.width ? count : c.width;
+    // Here alone: taking an array's numbers as words costs what premultiplying them does, and
+    // the native module would then save little.
+    for (let k = 0, row = c.y * this.width + c.x; k < count; k += run, row += this.width) {
+      setRunOf(pixels, row, values, k, Math.min(run, count - k), this.transparent);
     }
 
     this.changed();
-    return k;
+    return count;
+  }
+
+  /**
+   * The rect's first `count` pixels, row by row, set from unmultiplied ARGB
+   * words in `bytes` from `at`, in the byte order given: setPixels' read of
+   * a ByteArray, with no array of the values between.
+   */
+  setWords(
+    r: PixelRect,
+    bytes: Uint8Array,
+    at: number,
+    count: number,
+    littleEndian: boolean,
+  ): void {
+    const c = this.clip(r);
+    if (!c || count === 0) {
+      return;
+    }
+
+    const pixels = this.pixels;
+    const run = c.width === this.width ? count : c.width;
+    const kernel = wordsKernel(run);
+    const kind = this.transparent ? WORDS_PREMULTIPLY : WORDS_SOLID;
+    const swap = littleEndian !== HOST_LITTLE;
+    // What is left to the loops here reads words, which a typed array holds at a multiple
+    // of four alone: from elsewhere the bytes are copied to one first.
+    let words: Uint32Array | null = null;
+    for (let k = 0, row = c.y * this.width + c.x; k < count; k += run, row += this.width) {
+      const n = Math.min(run, count - k);
+      const from = at + k * 4;
+      const done = kernel
+        ? kernel.words(
+            bytesOf(pixels, row, n),
+            bytes.subarray(from, from + n * 4),
+            kind,
+            !littleEndian,
+          ) >> 2
+        : 0;
+      if (done === n) {
+        continue;
+      }
+
+      if (!words) {
+        const offset = bytes.byteOffset + at;
+        words =
+          (offset & 3) === 0
+            ? new Uint32Array(bytes.buffer, offset, count)
+            : new Uint32Array(bytes.slice(at, at + count * 4).buffer);
+      }
+
+      setRun(pixels, row + done, words, k + done, n - done, swap, this.transparent);
+    }
+
+    this.changed();
   }
 
   clone(): BitmapStore {

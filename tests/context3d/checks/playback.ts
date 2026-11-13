@@ -190,6 +190,9 @@ export async function shaderFixture(
     | "FrameValidation"
     | "FrameValidationFlat"
     | "Reconfigure"
+    | "BackBuffer"
+    | "BackBufferLegacy"
+    | "BackBufferConstrained"
     | "Scissor"
     | "Mipmaps"
     | "BitmapUploads"
@@ -204,7 +207,14 @@ export async function shaderFixture(
     | "CubeBitmapUploads"
     | "CubeTextures"
     | "RenderTargets"
-    | "Readback",
+    | "Readback"
+    | "BestResolution"
+    | "ContextArguments"
+    | "Profiles"
+    | "AGALProfiles"
+    | "AGALStandard"
+    | "TextureFormats"
+    | "MultipleTargets",
   /** Whether the context offers S3TC; without it, compressed textures decode on the CPU. */
   s3tc = true,
 ) {
@@ -213,6 +223,10 @@ export async function shaderFixture(
   );
   const trace: string[] = [];
   const scripting = new Scripting(codegen, { print: (line) => trace.push(line), audio: null });
+  // As AIR's reference ran, on a screen of 192 DPI.
+  if (fixture === "BestResolution") {
+    scripting.setContentsScaleFactor(2);
+  }
   const owned: ReturnType<typeof create>[] = [];
   let targetSamples = 0;
   let nativeDxtLevels = 0;
@@ -267,15 +281,21 @@ export async function shaderFixture(
       scripting,
     );
     await player.start();
-    for (let i = 0; i < 3; i++) {
+    // A fixture that goes through the profiles makes a context a frame.
+    const complete = `${fixture.toLowerCase()} complete`;
+    for (let i = 0; i < 3 || (i < 40 && trace.at(-1) !== complete); i++) {
       await scripting.settled();
       player.tick();
     }
-    check(
-      trace.at(-1) === `${fixture.toLowerCase()} complete`,
-      `incomplete shader trace: ${trace}`,
-    );
-    const expectedContexts = fixture === "ContextRequests" ? 3 : 1;
+    check(trace.at(-1) === complete, `incomplete shader trace: ${trace}`);
+    const expectedContexts =
+      fixture === "ContextRequests"
+        ? 3
+        : fixture === "Profiles"
+          ? 11
+          : fixture === "AGALProfiles"
+            ? 6
+            : 1;
     check(owned.length === expectedContexts, "unexpected shader context count");
     for (let i = 0; i < owned.length; i++) {
       check(owned[i].gl.getError() === owned[i].gl.NO_ERROR, "GL error after shader fixture");

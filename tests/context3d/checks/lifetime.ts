@@ -44,8 +44,9 @@ export async function lifetime() {
     rejects(() => second.backend.setVertex(0, vertices, 0, "float4"));
     rejects(() => c.draw(vertices, 0, 1));
     rejects(() => indices.upload([0], 3, 1));
-    rejects(() => c.setVertex(8, vertices, 0, "float4"));
-    rejects(() => c.setConstants("fragment", 28, [1, 0, 0, 1], 1));
+    // Every profile has 16 streams and 200 fragment constants.
+    rejects(() => c.setVertex(16, vertices, 0, "float4"));
+    rejects(() => c.setConstants("fragment", 200, [1, 0, 0, 1], 1));
     const handles = first.live.size;
     // Valid stages with incompatible varyings fail linking after GPU allocation.
     const varying = shader(true);
@@ -109,7 +110,7 @@ export async function lifetime() {
     rejects(() => c.createTexture(4096, 2));
     const texture = c.createTexture(2, 2);
     rejects(() => second.backend.setTexture(0, texture));
-    rejects(() => c.setTexture(8, texture));
+    rejects(() => c.setTexture(16, texture));
     const textured = shader(true);
     const textureCode = new DataView(textured.buffer);
     textureCode.setUint32(7, 0x28, true);

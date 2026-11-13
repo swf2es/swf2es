@@ -10,6 +10,11 @@ const fixture =
   [
     "ContextRequests",
     "ContextStartup",
+    "Profiles",
+    "AGALProfiles",
+    "AGALStandard",
+    "TextureFormats",
+    "MultipleTargets",
     "AGALValidation",
     "ByteBudgets",
     "ResourceObjects",
@@ -17,6 +22,10 @@ const fixture =
     "FrameValidation",
     "FrameValidationFlat",
     "Reconfigure",
+    "BackBuffer",
+    "BackBufferLegacy",
+    "BestResolution",
+    "ContextArguments",
     "Comparisons",
     "RenderTargets",
     "CubeTargets",
@@ -55,7 +64,13 @@ const triangle = fixture === "Triangle";
 const prefix = fixture === "Lifecycle" ? "life" : fixture.toLowerCase();
 const out = `${here}out/oracle-${fixture}/`;
 mkdirSync(out, { recursive: true });
-writeFileSync(`${out}${fixture}.as`, fixtureSource(fixture));
+// SWF2ES_ORACLE_VERBOSE=1 has fixtures that know it trace AIR's messages too, into trace.log.
+writeFileSync(
+  `${out}${fixture}.as`,
+  process.env.SWF2ES_ORACLE_VERBOSE === "1"
+    ? fixtureSource(fixture).replace("VERBOSE:Boolean = false", "VERBOSE:Boolean = true")
+    : fixtureSource(fixture),
+);
 writeFileSync(
   `${out}Reference.as`,
   `package {
@@ -73,7 +88,16 @@ writeFileSync(
           trace("reference-error", error);
           NativeApplication.nativeApplication.exit(1);
         }
-      }, 2000);
+      }, ${
+        // A context each profile, made a frame or more apart under Wine.
+        fixture === "Profiles" || fixture === "AGALProfiles"
+          ? 90000
+          : fixture.startsWith("BackBuffer")
+            ? 20000
+            : ["AGALStandard", "TextureFormats", "MultipleTargets"].includes(fixture)
+              ? 6000
+              : 2000
+      });
     }
   }
 }`,
@@ -85,6 +109,8 @@ const compiled = spawnSync(
     "-omit-trace-statements=false",
     // AtfLegacy is old content, which AIR serves as Flash Player 11.0 did.
     ...(fixture === "AtfLegacy" ? ["-swf-version=13"] : []),
+    // The user's content of Flash Player 11.2, whose size errors are #3669.
+    ...(fixture === "BackBufferLegacy" ? ["-swf-version=15"] : []),
     `-source-path=${out},${here}`,
     "-output",
     `${out}Reference.swf`,
@@ -98,7 +124,12 @@ writeFileSync(
   `<application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>swf2es.context3d.reference</id><versionNumber>1.0.0</versionNumber><filename>Reference</filename>
   <initialWindow><content>Reference.swf</content><visible>true</visible>
-    <width>96</width><height>96</height><renderMode>direct</renderMode><depthAndStencil>${fixture === "Stencil" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation"}</depthAndStencil>
+    <width>96</width><height>96</height><renderMode>direct</renderMode>${
+      // AIR on Windows draws at the screen's pixels with it: run under Wine at 192 DPI (README).
+      fixture === "BestResolution"
+        ? "<requestedDisplayResolution>high</requestedDisplayResolution>"
+        : ""
+    }<depthAndStencil>${fixture === "Stencil" || fixture === "ContextArguments" || fixture === "AGALStandard" || fixture === "MultipleTargets" || fixture === "ColorMask" || fixture === "Depth" || fixture === "Multisampling" || fixture === "TargetMultisampling" || fixture === "RenderTargets" || fixture === "CubeTargets" || fixture === "Reconfigure" || fixture === "FrameValidation" || fixture.startsWith("BackBuffer")}</depthAndStencil>
   </initialWindow>
   <supportedProfiles>extendedDesktop</supportedProfiles>
   <diagnostics><traceToConsole>true</traceToConsole></diagnostics>
@@ -107,7 +138,11 @@ writeFileSync(
 const run = spawnSync(process.env.ADL ?? "adl", ["app.xml", "."], {
   cwd: out,
   encoding: "utf8",
-  timeout: 30_000,
+  // AIR draws large back buffers on the CPU under Wine, slowly.
+  timeout:
+    fixture.startsWith("BackBuffer") || fixture === "Profiles" || fixture === "AGALProfiles"
+      ? 150_000
+      : 30_000,
 });
 writeFileSync(`${out}trace.log`, run.stdout + run.stderr);
 assert.equal(run.status, 0, run.stdout + run.stderr);

@@ -159,8 +159,8 @@ but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
 
-`@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL v1
-translation. Its core is built without DOM or node types; the separate
+`@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL 1 to 3
+translation, for every Stage3D profile. Its core is built without DOM or node types; the separate
 `@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
 Neither entry depends on player AS objects. The two TypeScript projects
 keep browser types out of the core while the normal package build checks both.
@@ -202,10 +202,17 @@ silently reconfigure AS buffers. An optional surface `destroy` hook releases the
 browser context after resources and listeners are gone, also on attachment failure.
 Web teardown disposes the display-list scene before the renderer so cached font
 measurements cannot retain the scene through text style listeners.
-Default playback still reports unavailable Context3D. The desktop View menu
-offers an experimental opt-in, saved as a strict boolean in settings.json.
-Changing it reloads the page and current movie; startup lazily imports the
-backend only when enabled. The desktop's surface factory inherits the backend's
+A page that configures no factory still reports unavailable Context3D. The
+desktop configures one by default; its View menu turns Stage3D off and on,
+saved as `stage3DChoice` in settings.json only once chosen (the opt-in's old
+`stage3D` key was saved with every setting, so its `false` is ignored).
+Changing it reloads the page and current movie. The desktop configures a
+loader, `{ load }`, rather than a factory: the session asks for it through the
+host's optional `ready()`, which the player awaits before creating a context
+(Flash delivers `context3DCreate` later anyway), so the backend is imported at
+a SWF's first `requestContext3D` and never for a SWF that does not ask. A
+failed load gives that SWF's requests #3702. The web session's own module is
+imported alongside codegen and the libraries. The desktop's surface factory inherits the backend's
 independent per-type resource counts and AIR-backed buffer/texture byte limits.
 Composition, AS3 Stage layout, loss/recovery and teardown use the web host.
 The demo site also offers Stage3D as an unchecked experimental option. It loads
@@ -218,7 +225,7 @@ Its fullscreen button fits the composed Stage3D player to the screen with a
 CSS transform, preserving the SWF viewport and back-buffer sizes. The 2D overlay
 and input use the same presentation scale. Leaving fullscreen restores responsive
 layout; ordinary playback retains its existing fullscreen resizing.
-Best-resolution buffers and default enablement remain separate work.
+Best-resolution buffers remain separate work.
 
 An AS3 SWF's Stage scale and alignment settings are live: the web host shares
 them with player natives through Scripting's synchronous `onStageLayout`

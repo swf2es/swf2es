@@ -1,4 +1,10 @@
-import { blockBytes, Context3DError, SamplerBiasError, type Texture3D } from "@swf2es/context3d";
+import {
+  blockBytes,
+  Context3DError,
+  SamplerBiasError,
+  TEXEL_BYTES,
+  type Texture3D,
+} from "@swf2es/context3d";
 import {
   AtfError,
   type AtfHeader,
@@ -145,7 +151,11 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
     }
 
     const storage = avm2.bytesOf(s.rt, data);
-    const length = Math.max(1, value.width >> level) * Math.max(1, value.height >> level) * 4;
+    // Each format's texels: BGRA's four bytes, the packed ones' two, half floats' eight.
+    const length =
+      Math.max(1, value.width >> level) *
+      Math.max(1, value.height >> level) *
+      (TEXEL_BYTES[value.format] ?? 4);
     if (offset > storage.length - length) {
       throw s.rt.error("RangeError", 3669);
     }

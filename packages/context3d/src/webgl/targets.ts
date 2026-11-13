@@ -107,6 +107,8 @@ export function allocateMultisample(
   depth: boolean,
   depthWrite: boolean,
   stencilWrite: number,
+  /** The texture's internal format, which its samples resolve into. */
+  storage: number = gl.RGBA8,
 ): MultisampleTarget {
   const same = old?.samples === samples;
   const newDepth = depth && (!same || !old.depth);
@@ -125,7 +127,7 @@ export function allocateMultisample(
     if (texture.cube && !same) {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, resolved);
-      gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, texture.width, texture.height);
+      gl.texStorage2D(gl.TEXTURE_2D, 1, storage, texture.width, texture.height);
       gl.bindFramebuffer(gl.FRAMEBUFFER, resolve);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, resolved, 0);
       if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
@@ -148,7 +150,7 @@ export function allocateMultisample(
       gl.renderbufferStorageMultisample(
         gl.RENDERBUFFER,
         samples,
-        gl.RGBA8,
+        storage,
         texture.width,
         texture.height,
       );

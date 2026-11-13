@@ -1,7 +1,7 @@
 # Experimental Context3D backend
 
-`@swf2es/context3d` provides resource/lifecycle contracts and AGAL v1 to GLSL
-translation. Its core has no dependencies or browser types. The optional
+`@swf2es/context3d` provides resource/lifecycle contracts and AGAL 1, 2 and 3 to
+GLSL ES 3.00 translation, for every Stage3D profile. Its core has no dependencies or browser types. The optional
 `@swf2es/context3d/webgl` entry exports `WebGLContext3D`, which owns the supplied
 WebGL2 context exclusively. It does not share GL state or resources with the
 display list's renderer.
@@ -81,13 +81,101 @@ through is made at its first pixel upload or CPU decoding, so compressed
 textures uploaded as blocks on S3TC have none. Samplers must
 read a texture as what it is, AGAL's format DXT1 or DXT5 for a compressed one
 (#3763), where `samplerFormats` is set, as the player sets it for content from
-SWF 17 on. `rgbaHalfFloat` and the packed formats remain unsupported and return
-Error #3708 before backend allocation.
+SWF 17 on, or RGBA for the packed and half-float formats.
+
+`bgrPacked565` and `bgraPacked4444` are stored at 8 bits a channel (RGB8 and
+RGBA8), as AIR draws into them: an upload keeps each channel's high bits and
+widens them back as Direct3D reads them (`0x12` becomes `0x10` in 5:6:5), from a
+BitmapData's premultiplied pixels or from little-endian words (5:6:5 red high,
+4:4:4:4 alpha, red, green, blue from the high nibble), two bytes a texel. 5:6:5
+reads alpha 1. `rgbaHalfFloat` is RGBA16F, eight bytes a texel in R, G, B, A
+order; a bitmap goes up as its bytes over 255. Drawing into one keeps values past
+1, and needs `EXT_color_buffer_float`, which every desktop WebGL 2 has. A clear's
+colour is cut to 8 bits a channel on every target, as AIR clears through
+Direct3D's 8-bit colour, by truncation: 0.5 clears to 127, and a half-float
+target within 0 to 1.
+
+## Profiles
+
+`Context3D.profile` sets what a context's programs, textures and targets may be
+(`profileLimits`), as AIR 51.3 grants them under Wine, where it serves every
+profile on Direct3D 9Ex (`tests/context3d`'s `Profiles.as`, `AGALProfiles.as`,
+`AGALStandard.as`, `TextureFormats.as` and `MultipleTargets.as` hold the
+references). Every profile has 16
+sampler and vertex-stream slots, 250 vertex and 200 fragment constants for the
+setters, cube faces up to 1024 and back buffers up to 16384. A constant setter
+whose registers start or end past 250 or 200 is #2006 in every profile, a
+matrix's four too; one within them writes them all, though an AGAL 1 program
+reads only the first 128 and 28, and AGAL 2 the first 250 and 64:
+
+| Profile | AGAL | Texture | RectangleTexture | rgbaHalfFloat | Colour outputs |
+| --- | --- | --- | --- | --- | --- |
+| `baselineConstrained` | 1 | 2048 | none (#3782) | no (#3759) | 1 |
+| `baseline` | 1 | 2048 | 2048 | no | 1 |
+| `baselineExtended` | 1 | 4096 | 4096 | no | 1 |
+| `standardConstrained` | 1, 2 | 4096 | 4096 | yes | 1 |
+| `standard` | 1, 2 | 4096 | 4096 | yes | 4 |
+| `standardExtended` | 1, 2, 3 | 4096 | 4096 | yes | 4 |
+
+What each AGAL version's programs may use (version 0 is 1; a version past the
+profile's is #3725):
+
+| | AGAL 1 | AGAL 2 | AGAL 3 |
+| --- | --- | --- | --- |
+| Tokens a program | 200 | 1024 | 2048 |
+| `va` | 8 | 8 | 16 |
+| `vc` / `fc` | 128 / 28 | 250 / 64 | 250 / 200 |
+| `vt`, `ft` | 8 (7 in `baselineConstrained`) | 26 | 26 |
+| `v` | 8 | 10 (8 in `standardConstrained`) | 10 |
+| `fs` | 8 | 16 (8 in `standardConstrained`) | 16 |
+| `oc` | 1 | 4 (1 in `standardConstrained`) | 4 |
+| `od` | — | `od.x` (none in `standardConstrained`) | `od.x` |
+
+AGAL 2 adds `ddx` and `ddy` (fragment programs, not in conditionals; `ddy` grows
+down the target, as AIR's), and the conditionals `ife`, `ine`, `ifg` and `ifl`
+(scalar operands, compared as `==`, `!=`, `>` and `<`), `els` and `eif`, at most
+four deep. Both branches run for every pixel and only their writes are
+predicated, as Direct3D's predication runs them, so derivatives stay defined:
+nothing branches in GLSL. AIR's rules hold: no output written in a conditional
+(#3751), no empty branch (#3748), a texture read in one takes a varying alone
+(#3741), and after `eif` a temporary counts as written where the `els` branch
+wrote it, or, with no `els`, where it was before the `if`. `od` writes the
+depth, clamped by the depth buffer. AIR's indirect reads reach the first 128
+vertex constants in every version and read 0 past them, so a program's bank
+stays `vc[128]`, indexed as AGAL 1's is; constants past it are uniforms of their
+own. Fragment programs have no indirect reads (#3639). AIR reads `iid` from
+vertex stream 15. In every version `sne` compares, two constant operands are
+refused (#3625, as are `kil`, `ddx` and `ddy` of a constant), each colour output
+is written once (#3744) from `oc0` up without gaps (#3775), and samplers take
+the four wraps and any format, which a draw then checks.
+
+Colour outputs 1 to 3 (`setColorOutput`) draw beside the target: the player
+binds them for `setRenderToTexture`'s `colorOutputIndex`, refuses them beside the
+back buffer (#3728) or unlike the target in size, format, depth or antialiasing
+(#3729), and a draw whose program writes another number of outputs (#3774).
+`setRenderToBackBuffer` and `present` unbind them. The backend attaches them to
+the target's framebuffer only while they are bound, so a target drawn alone
+pays nothing.
+
+Left out, and why:
+
+- `drawTrianglesInstanced` and `createVertexBufferForInstances`, which AIR has
+  and Flash Player 32's playerglobal does not; `iid` reads stream 15 meanwhile.
+- Colour outputs on an antialiased target (#3708): AIR takes them.
+- The same texture bound to two outputs, which AIR draws into with the later one.
+- `baselineConstrained` fragment programs are held to 96 instructions (#3715),
+  ps_2_0's 64 arithmetic and 32 texture ones, counted as AGAL's: AIR counts
+  Direct3D's, of which a matrix, `nrm` or a comparison takes several.
+- A RectangleTexture as large as the back buffer where that is larger than the
+  profile's size, which AIR's message names but no test has checked.
+- Conditionals in vertex programs: AIR's validation takes them, then under Wine
+  its Direct3D 9 compile fails (#3613), so no reference shows what they draw;
+  swf2es runs them as it runs a fragment program's.
 
 Core failures carry typed reasons. The Flash adapter maps them to catchable AS3
 errors, including resource limits (#3691), disposed objects (#3694), draw bounds
-and AGAL validation/linkage. Known unavailable modes or profiles report an
-asynchronous ErrorEvent #3702 so content can retry baseline. Concurrent requests
+and AGAL validation/linkage. Every profile is served; the software render mode
+reports an asynchronous ErrorEvent #3702 so content can retry. Concurrent requests
 coalesce; requesting again after creation retires the preceding context and
 creates a new one. Broader unchecked-error precedence remains experimental.
 The constructor rejects antialiased host contexts before allocating GPU handles:
@@ -131,8 +219,9 @@ must dispose them or the context.
 
 The current API and validation are experimental. Supported operations, AIR
 references, unsupported formats/profiles and lifecycle stress tests are tracked
-in [tests/context3d](../../tests/context3d/README.md). Stage3D playback remains off
-by default. A web host can explicitly opt in before loading its first player:
+in [tests/context3d](../../tests/context3d/README.md). Stage3D playback is off by
+default in the web element, and on in the desktop app, whose View menu turns it
+off. A web host can explicitly opt in before loading its first player:
 
 ```ts
 import { configure } from "@swf2es/web";
@@ -163,7 +252,10 @@ configure({
 });
 ```
 
-Each requested slot needs a fresh surface. `configure({ stage3D: null })` disables
+Each requested slot needs a fresh surface. In place of the factory, `stage3D` takes
+a loader, `{ load: () => import("./my-stage3d.js").then((m) => m.create) }`, which
+the element calls at a SWF's first `requestContext3D`: a SWF that never asks loads
+no backend, and one whose load fails gets #3702. `configure({ stage3D: null })` disables
 the experiment for subsequent loads. The web element owns native installation,
 composition, cancellation, restoration and teardown for each load. GPU backend
 selection stays with the host; the default web entry does not eagerly import

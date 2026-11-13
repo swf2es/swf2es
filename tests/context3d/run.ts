@@ -43,6 +43,9 @@ const scripts = compileScripts(
     "FrameValidation",
     "FrameValidationFlat",
     "Reconfigure",
+    "BackBuffer",
+    "BackBufferLegacy",
+    "BackBufferConstrained",
     "Scissor",
     "Mipmaps",
     "BitmapUploads",
@@ -58,6 +61,13 @@ const scripts = compileScripts(
     "TemporaryMatrices",
     "IndirectConstants",
     "Readback",
+    "BestResolution",
+    "ContextArguments",
+    "Profiles",
+    "AGALProfiles",
+    "AGALStandard",
+    "TextureFormats",
+    "MultipleTargets",
   ].map((name) => ({
     name,
     source: fixtureSource(name),
@@ -93,6 +103,9 @@ for (const name of [
   "FrameValidation",
   "FrameValidationFlat",
   "Reconfigure",
+  "BackBuffer",
+  "BackBufferLegacy",
+  "BackBufferConstrained",
   "Scissor",
   "Mipmaps",
   "BitmapUploads",
@@ -108,13 +121,38 @@ for (const name of [
   "TemporaryMatrices",
   "IndirectConstants",
   "Readback",
+  "BestResolution",
+  "ContextArguments",
+  "Profiles",
+  "AGALProfiles",
+  "AGALStandard",
+  "TextureFormats",
+  "MultipleTargets",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
   const size = name === "Triangle" ? 64 : 96;
   const swf = bare(abc, 1, name, size, size);
-  // AIR's ATF and sampler rules follow the SWF's version: AIR built these as 51 and 13.
-  swf[3] = name === "AtfTextures" ? 51 : name === "AtfLegacy" ? 13 : swf[3];
+  // AIR's ATF, sampler and back buffer size rules follow the SWF's version: AIR built these
+  // as 51, 13 and 15.
+  swf[3] =
+    name === "AtfTextures" ||
+    name === "Lifecycle" ||
+    name === "Profiles" ||
+    name === "AGALProfiles" ||
+    name === "AGALStandard" ||
+    name === "TextureFormats" ||
+    name === "MultipleTargets" ||
+    name === "BackBuffer" ||
+    name === "BackBufferConstrained" ||
+    name === "BestResolution" ||
+    name === "ContextArguments"
+      ? 51
+      : name === "AtfLegacy"
+        ? 13
+        : name === "BackBufferLegacy"
+          ? 15
+          : swf[3];
   writeFileSync(`${out}${name}.swf`, swf);
 }
 if (!process.argv.includes("--build-only")) {
@@ -222,6 +260,12 @@ if (!process.argv.includes("--build-only")) {
       assert.equal(reconfiguration.exception, null, JSON.stringify(reconfiguration));
       assert.equal(reconfiguration.value?.passed, true);
       console.log("context3d: unchanged back buffers reuse resources and preserve pixels");
+      const backBuffer = await evaluate<{ passed: boolean }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.backBufferLimit())',
+      );
+      assert.equal(backBuffer.exception, null, JSON.stringify(backBuffer));
+      assert.equal(backBuffer.value?.passed, true);
+      console.log("context3d: a back buffer past the GPU's limit is drawn smaller and stretched");
       const stateCache = await evaluate<{ passed: boolean }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.drawState())',
       );
@@ -380,6 +424,8 @@ if (!process.argv.includes("--build-only")) {
         "FrameValidation",
         "FrameValidationFlat",
         "Reconfigure",
+        "BackBuffer",
+        "BackBufferLegacy",
         "Scissor",
         "Mipmaps",
         "BitmapUploads",
@@ -395,6 +441,13 @@ if (!process.argv.includes("--build-only")) {
         "TemporaryMatrices",
         "IndirectConstants",
         "Readback",
+        "BestResolution",
+        "ContextArguments",
+        "Profiles",
+        "AGALProfiles",
+        "AGALStandard",
+        "TextureFormats",
+        "MultipleTargets",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,
@@ -406,6 +459,22 @@ if (!process.argv.includes("--build-only")) {
         );
         console.log(`context3d: ${fixture} matches AIR`);
       }
+      // Not AIR's: it draws no back buffer larger than the stage in baselineConstrained.
+      const constrained = await evaluate<{ trace: string[] }>(
+        'import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture("BackBufferConstrained"))',
+      );
+      assert.equal(constrained.exception, null, JSON.stringify(constrained));
+      const screens = (constrained.value?.trace ?? []).filter((line) => / aa\d /.test(line));
+      assert.deepEqual(
+        screens,
+        ["2560x1440 aa0", "3840x2160 aa0", "2560x1440 aa4", "3840x2160 aa2", "64x64 aa0"].map(
+          (frame) => {
+            const size = frame.split(" ")[0];
+            return `backbufferconstrained baselineConstrained ${frame} ff3366ff ${size} most 16384x16384`;
+          },
+        ),
+      );
+      console.log("context3d: baselineConstrained takes back buffers larger than the stage");
       const decoded = await evaluate<{ trace: string[] }>(
         'import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture("AtfTextures", false))',
       );
@@ -467,7 +536,9 @@ if (!process.argv.includes("--build-only")) {
         assert.equal(closed.exception, null, JSON.stringify(closed));
       }
     },
-    false,
+    // --gpu: the machine's GPU, as SWF2ES_GPU_FLAGS and VK_DRIVER_FILES choose it, for new
+    // shaders' first run on each driver; the references are SwiftShader's.
+    process.argv.includes("--gpu"),
     {
       mounts: [
         ["/repo/", root],

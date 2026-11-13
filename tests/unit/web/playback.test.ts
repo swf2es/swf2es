@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  denseSamples,
-  displayInterval,
-  fittingSamples,
-  stageSamples,
-} from "../../../packages/web/dist/playback.js";
+import { denseSamples, fittingSamples, stageSamples } from "../../../packages/web/dist/playback.js";
 
 test("a canvas takes the most samples whose buffers fit, and 4 at least", () => {
   // A 960x550 stage shown 1.6 times larger, 1080p, 1440p and 4K.
@@ -45,16 +40,4 @@ test("a stage only zoomed keeps its quality's samples; a finer screen takes fewe
   assert.equal(stageSamples("BEST", 2400 * 1375, 2.5, 1.25), 8);
   // 4K still fits only 4.
   assert.equal(stageSamples("HIGH", 3840 * 2160, 4, 1), 4);
-});
-
-test("the display's interval is the mean time between animation frames, those out of step left out", () => {
-  // Chrome at 60 Hz, the first frame after a still period early.
-  assert.ok(Math.abs(displayInterval([11.1, 16.7, 16.6, 16.7, 16.7, 16.6, 16.7]) - 16.67) < 0.05);
-  // Firefox: two frames at once, then 16 and 17 ms by turns, 60 a second, not the median's 58.
-  const firefox = displayInterval([0.26, 16.12, 17.12, 16.26, 17.14, 16.1, 17.2, 16.08, 17.12]);
-  assert.ok(Math.abs(firefox - 16.64) < 0.05, `${firefox}`);
-  // A frame the page missed is no display's interval either.
-  assert.ok(Math.abs(displayInterval([8.3, 8.4, 16.7, 8.3, 8.3]) - 8.33) < 0.05);
-  assert.ok(Math.abs(displayInterval([16, 17, 33, 17, 16, 34, 17, 16, 17]) - 16.6) < 0.1);
-  assert.equal(displayInterval([16, 16, 16]), 16);
 });

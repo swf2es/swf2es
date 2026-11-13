@@ -312,6 +312,24 @@ export async function recover(): Promise<void> {
   );
 }
 
+/** Calls a public method of the root. */
+export function rootCall(name: string): unknown {
+  const { scripting, object } = root();
+  return scripting.rt.callValue(
+    scripting.rt.getProperty(object, scripting.rt.publicName(name)),
+    object,
+    [],
+    null,
+  );
+}
+
+/** The live Stage3D canvas's CSS width and height, as set on it. */
+export function surfaceStyle(): string {
+  const surface = surfaces.find((s) => !s.destroyed);
+  check(surface, "no live Stage3D surface");
+  return `${surface.owned.canvas.style.width},${surface.owned.canvas.style.height}`;
+}
+
 export function status() {
   return {
     ready: element?.player ? ready() : false,

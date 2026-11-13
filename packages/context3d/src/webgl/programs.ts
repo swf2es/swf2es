@@ -1,4 +1,5 @@
 import { type SamplerSource, translate } from "../agal.js";
+import type { Profile } from "../backend.js";
 import { linkProgram as link, ShaderError } from "../device/programs.js";
 import { Context3DError } from "../errors.js";
 
@@ -10,6 +11,8 @@ export interface ProgramState {
   attributeMask: number;
   vertex: (WebGLUniformLocation | null)[];
   vertexBank: WebGLUniformLocation | null;
+  /** The colour outputs its fragment program writes. */
+  outputs: number;
   fragment: (WebGLUniformLocation | null)[];
   samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
   samplerMask: number;
@@ -32,19 +35,20 @@ export function uploadProgram(
   state: ProgramState,
   vertex: Uint8Array,
   fragment: Uint8Array,
+  profile: Profile,
 ): void {
   // Translate both before allocating anything on the GPU.
-  const vs = translate(vertex, "vertex");
-  const fs = translate(fragment, "fragment");
-  for (let i = 0; i < 8; i++) {
-    if (fs.varyings[i] & ~vs.varyings[i]) {
+  const vs = translate(vertex, "vertex", profile);
+  const fs = translate(fragment, "fragment", profile);
+  for (let i = 0; i < fs.varyings.length; i++) {
+    if (fs.varyings[i] & ~(vs.varyings[i] ?? 0)) {
       throw new Context3DError(
         "agalVaryingMissing",
         "Fragment program reads an unwritten varying component",
       );
     }
   }
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < vs.varyings.length; i++) {
     if (vs.varyings[i] && vs.varyings[i] !== 15) {
       throw new Context3DError(
         "agalVaryingPartial",
@@ -70,6 +74,7 @@ export function uploadProgram(
 
   state.vertex = [];
   state.vertexBank = vs.indirect ? gl.getUniformLocation(handle, "vc[0]") : null;
+  state.outputs = fs.outputs;
   state.fragment = [];
   state.samplers = [];
   state.samplerMask = 0;
