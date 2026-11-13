@@ -51,12 +51,18 @@ otherwise the stage's colour, `bgcolor`'s if given, fills the element
 around the stage too. Each animation frame advances the player by the
 time passed and draws when `changes` moved or the element did, and then
 only if the view finds something changed (`RenderView.unchanged`). A stage
-nothing has been drawn on for 150 ms is still, and ticks by a timer at the
-display's interval instead, the shortest between its last animation
-frames: Chrome makes a frame of the page ready for every animation frame
+nothing has been drawn on for 150 ms is still, and ticks by a timer
+instead: Chrome makes a frame of the page ready for every animation frame
 asked of it, drawn to or not, which cost a still stage more than its ticks
 did (about 3.7% of a core for the frames against 0.7% for the timer, of
-the 6.5% a still 60 fps SWF took on an Intel laptop). The player is
+the 6.5% a still 60 fps SWF took on an Intel laptop). The timer's
+interval is a little under the display's (0.97 of it), which is the mean
+time between the last animation frames, those within a quarter of their
+median: the first after a still period come out of step, two at once in
+Firefox and one early in Chrome, and one the page was too busy for
+leaves a time twice as long. A tick slower than the display would lose a 60 fps SWF frames,
+which play one a tick; one a little faster finds none due now and then.
+The player is
 advanced the same, by the time passed, so frames, timers and sound keep
 their pace; the tick that finds something to draw draws it at once, which
 the browser shows at its next frame, and the ticks go back to animation

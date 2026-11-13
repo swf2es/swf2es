@@ -39,6 +39,15 @@ export interface Look {
 const STILL_MS = 150;
 /** A display's interval, in ms, until the animation frames have shown this one's. */
 const DISPLAY_INTERVAL = 1000 / 60;
+/** The times between animation frames kept for the display's interval, and the fewest it is told by. */
+const GAPS = 9;
+const MIN_GAPS = 3;
+/**
+ * The part of the display's interval a still stage's timer ticks at. A player ticked slower
+ * than the display plays fewer frames than a 60 fps SWF has, one a tick and those lost dropped;
+ * ticked a little faster it finds no frame due in a tick now and then, which costs nothing.
+ */
+const EARLY = 0.97;
 /** How often, in ms, a still stage asks for an animation frame, to learn whether the page's still come. */
 const PROBE_MS = 1000;
 /** The timer ticks in a row, each late by half an interval or more, after which the timers are too coarse to tick by. */
@@ -55,9 +64,11 @@ export class Playback {
   private drewAt = 0;
   /** Whether the last tick was an animation frame's. */
   private framed = false;
-  /** The display's interval: the shortest between the animation frames of the last run of them. */
-  private interval = DISPLAY_INTERVAL;
-  private shortest = Infinity;
+  /** The timer's interval: a little under the display's, by the last run of animation frames. */
+  private interval = DISPLAY_INTERVAL * EARLY;
+  /** The times between that run's animation frames, the last GAPS of them, a ring. */
+  private readonly gaps: number[] = [];
+  private nextGap = 0;
   /** The animation frame a still stage asked for, 0 when it came, and when it asked. */
   private probe = 0;
   private probedAt = 0;
@@ -189,7 +200,8 @@ export class Playback {
   private readonly animate = (now: number) => {
     this.frame = 0;
     if (this.framed && this.last !== null && now > this.last) {
-      this.shortest = Math.min(this.shortest, now - this.last);
+      this.gaps[this.nextGap] = now - this.last;
+      this.nextGap = (this.nextGap + 1) % GAPS;
     }
 
     this.framed = true;
@@ -258,7 +270,8 @@ export class Playback {
       document.visibilityState !== "visible"
     ) {
       if (!this.framed) {
-        this.shortest = Infinity;
+        this.gaps.length = 0;
+        this.nextGap = 0;
       }
 
       this.wait();
@@ -267,8 +280,8 @@ export class Playback {
 
     if (this.framed) {
       // 240 Hz at most, and no slower than a tenth of a second.
-      if (this.shortest !== Infinity) {
-        this.interval = Math.min(100, Math.max(1000 / 240, this.shortest));
+      if (this.gaps.length >= MIN_GAPS) {
+        this.interval = Math.min(100, Math.max(1000 / 240, displayInterval(this.gaps) * EARLY));
       }
 
       this.due = now;
@@ -549,6 +562,29 @@ function stageAround(
     height: stageHeight * scale,
     resolution: view.resolution,
   };
+}
+
+/**
+ * The display's interval by the times between a run of animation frames: the mean of those
+ * within a quarter of their median. Not the shortest: the first frames after a still period
+ * come out of step, two at once in Firefox and one early in Chrome, and a timer at the time
+ * between those ticked several times a display frame. Not the median: Firefox's frames come
+ * 16 and 17 ms apart by turns, 60 a second. Nor the mean of all: a frame the page was too
+ * busy for leaves a time twice as long.
+ */
+export function displayInterval(gaps: readonly number[]): number {
+  const sorted = gaps.slice().sort((a, b) => a - b);
+  const median = sorted[(sorted.length - 1) >> 1];
+  let sum = 0;
+  let count = 0;
+  for (let i = 0; i < gaps.length; i++) {
+    if (gaps[i] >= median * 0.75 && gaps[i] <= median * 1.25) {
+      sum += gaps[i];
+      count++;
+    }
+  }
+
+  return sum / count;
 }
 
 /** The most a canvas's multisampled buffers may take, colour and depth-stencil together. */
