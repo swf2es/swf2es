@@ -652,8 +652,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
-      // AIR takes indices up to 15, which no AGAL 1 program reads: nothing to bind.
-      if (!backend || index >= 8) {
+      if (!backend) {
         return;
       }
 
