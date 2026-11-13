@@ -135,6 +135,9 @@ await withPage(
       end.frames - begin.frames <= 4,
       `${end.frames - begin.frames} animation frames asked in two still seconds`,
     );
+    // Its ticks came by the timer at the display's interval, 60 a second here.
+    const ticks = end.timers - begin.timers;
+    assert.ok(ticks >= 110 && ticks <= 130, `${ticks} timers set in two still seconds`);
     // Its 120 frames took their two seconds, none run right after another, none skipped: a
     // few of either are a busy machine's.
     const elapsed = end.at - begin.at;
@@ -154,6 +157,11 @@ await withPage(
       done.frames - again.frames <= 3,
       `${done.frames - again.frames} animation frames asked in a second still again`,
     );
+
+    // At the display's interval again, not at the time between the first animation frames
+    // after the still, which come out of step.
+    const after = done.timers - again.timers;
+    assert.ok(after >= 50 && after <= 70, `${after} timers set in a second still again`);
 
     // A page that is hidden has no animation frames, and the player waits for them: here
     // the page only says so, and they come, each one's tick asking for the next.
