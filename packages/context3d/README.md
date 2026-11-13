@@ -90,9 +90,10 @@ BitmapData's premultiplied pixels or from little-endian words (5:6:5 red high,
 4:4:4:4 alpha, red, green, blue from the high nibble), two bytes a texel. 5:6:5
 reads alpha 1. `rgbaHalfFloat` is RGBA16F, eight bytes a texel in R, G, B, A
 order; a bitmap goes up as its bytes over 255. Drawing into one keeps values past
-1, and needs `EXT_color_buffer_float`, which every desktop WebGL 2 has. A clear
-writes each channel within 0 to 1, as Direct3D's 8-bit clear colour does, a
-half-float target too.
+1, and needs `EXT_color_buffer_float`, which every desktop WebGL 2 has. A clear's
+colour is cut to 8 bits a channel on every target, as AIR clears through
+Direct3D's 8-bit colour, by truncation: 0.5 clears to 127, and a half-float
+target within 0 to 1.
 
 ## Profiles
 

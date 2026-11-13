@@ -82,9 +82,16 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
   rgbaHalfFloat: 0,
 };
 
-/** A value within 0 to 1, NaN kept. */
-function unit(value: number): number {
-  return value > 1 ? 1 : value < 0 ? 0 : value;
+/**
+ * A clear colour's channel as Direct3D's 8-bit clear colour holds it, which AIR fills by
+ * truncation (0.5 clears to 127): within 0 to 1 and cut to its byte, NaN kept.
+ */
+function clearChannel(value: number): number {
+  if (!(value > 0)) {
+    return value < 0 ? 0 : value;
+  }
+
+  return value >= 1 ? 1 : Math.floor(value * 255 + 1e-3) / 255;
 }
 
 /** AGAL's wraps (clamp, repeat, clamp_u_repeat_v, repeat_u_clamp_v) as SAMPLER_WRAPS indices. */
@@ -483,8 +490,13 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     let bits = 0;
     if (mask & 1) {
-      // Direct3D's clear colour has 8 bits a channel: a float target is cleared within 0 to 1.
-      gl.clearColor(unit(red), unit(green), unit(blue), unit(alpha));
+      // A float target too: AIR clears through Direct3D's 8-bit colour.
+      gl.clearColor(
+        clearChannel(red),
+        clearChannel(green),
+        clearChannel(blue),
+        clearChannel(alpha),
+      );
       bits |= gl.COLOR_BUFFER_BIT;
       this.changedTarget();
     }
