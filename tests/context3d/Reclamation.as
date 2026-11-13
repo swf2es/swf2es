@@ -101,7 +101,8 @@ package {
 
     public function invalidBinding(kind:int):void {
       switch (kind) {
-        case 0: context.setVertexBufferAt(8, context.createVertexBuffer(3, 4)); break;
+        // AIR takes indices up to 15 (ContextArguments.as).
+        case 0: context.setVertexBufferAt(16, context.createVertexBuffer(3, 4)); break;
         case 1: context.setTextureAt(8, context.createTexture(8, 8, "bgra", false)); break;
         case 2: context.setProgram(context.createProgram()); break;
         // A face a 2D texture does not have.

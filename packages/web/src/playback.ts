@@ -342,6 +342,9 @@ export class Playback {
     }
 
     this.view.setViewport(view.x, view.y, screenWidth, screenHeight);
+    // The browser's zoom is in the ratio too, which Flash kept apart as browserZoomFactor: a
+    // back buffer configured for best resolution follows both.
+    scripting?.setContentsScaleFactor(this.dpr);
     this.stage3D?.layout(
       rect ? stageAround(rect, view, this.player.width, this.player.height) : placed,
       this.player.width,

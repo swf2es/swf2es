@@ -14,12 +14,17 @@ const out = `${here}out/`;
 mkdirSync(out, { recursive: true });
 libraryAbcs();
 const scripts = compileScripts(
-  ["Composition", "StageLayout", "StageWorker", "ProfileFallback", "StageWorkerLive"].map(
-    (name) => ({
-      name,
-      source: fixtureSource(name),
-    }),
-  ),
+  [
+    "Composition",
+    "StageLayout",
+    "StageWorker",
+    "ProfileFallback",
+    "StageWorkerLive",
+    "Sharpness",
+  ].map((name) => ({
+    name,
+    source: fixtureSource(name),
+  })),
   out,
 );
 for (const name of [
@@ -28,6 +33,7 @@ for (const name of [
   "StageWorker",
   "ProfileFallback",
   "StageWorkerLive",
+  "Sharpness",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -305,6 +311,70 @@ await withPage(
       assert.equal(await call("scriptState"), "noScale|TL|192|144|192,144,false,false,2,true;");
       assert.equal((await call<Status>("status")).overlayWidth, 192);
       await capture("stage-layout-display-only", 192, 144, [[124, 104]], ["00ffffff"]);
+    } finally {
+      await call("close");
+    }
+    await collect();
+    // A back buffer configured for best resolution has the screen's pixels: a checkerboard of
+    // its own pixels survives at a device pixel ratio of 2, and at 1 nothing changes.
+    const board = async (name: string, ratio: number, sharp: boolean): Promise<void> => {
+      const result = await send<{ data: string }>("Page.captureScreenshot", {
+        format: "png",
+        clip: { x: 0, y: 0, width: 64, height: 64, scale: 1 },
+      });
+      const png = Buffer.from(result.data, "base64");
+      writeFileSync(`${out}host-${name}.png`, png);
+      const image = decodePng(png);
+      assert.equal(image.width, 64 * ratio, name);
+      let wrong = 0;
+      for (let y = 2; y < image.height - 2; y++) {
+        for (let x = 2; x < image.width - 2; x++) {
+          const at = (y * image.width + x) * 4;
+          const white = image.data[at] > 128 && image.data[at + 1] > 128;
+          if (white !== ((x + y) % 2 === 0)) {
+            wrong++;
+          }
+        }
+      }
+      // Without best resolution, the back buffer has half the screen's pixels: no checkerboard.
+      assert.equal(wrong === 0, sharp, `${name}: ${wrong} screen pixels off the checkerboard`);
+    };
+    await call("open", true, true, "Sharpness");
+    try {
+      const surface = async (): Promise<Surface> => {
+        const active = (await call<Status>("status")).surfaces.filter((s) => !s.destroyed);
+        assert.equal(active.length, 1);
+        return active[0];
+      };
+      assert.equal(await call("rootProperty", "sizes"), "1,64,64");
+      assert.deepEqual(
+        [(await surface()).width, (await surface()).height, await call("surfaceStyle")],
+        [64, 64, ","],
+      );
+      await board("best-1", 1, true);
+      await send("Emulation.setDeviceMetricsOverride", {
+        width: 400,
+        height: 400,
+        deviceScaleFactor: 2,
+        mobile: false,
+      });
+      await call("idle");
+      await call("idle");
+      assert.equal(await call("rootProperty", "sizes"), "2,128,128");
+      assert.deepEqual(
+        [(await surface()).width, (await surface()).height, await call("surfaceStyle")],
+        [128, 128, "64px,64px"],
+      );
+      await board("best-2", 2, true);
+      await call("rootCall", "plain");
+      await call("idle");
+      assert.equal(await call("rootProperty", "sizes"), "2,64,64");
+      assert.equal((await surface()).width, 64);
+      await board("plain-2", 2, false);
+      await send("Emulation.clearDeviceMetricsOverride");
+      await call("idle");
+      assert.equal(await call("rootProperty", "sizes"), "1,64,64");
+      assert.deepEqual((await call<Status>("status")).errors, []);
     } finally {
       await call("close");
     }
