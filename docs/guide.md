@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.18"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.19"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.18`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.19`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -145,6 +145,22 @@ would read the GPU's own limit there and refuse larger sizes. In the
 `baselineConstrained` profile AIR draws no back buffer larger than the
 stage (Error #3710, or #3723 for SWFs before version 30); swf2es draws
 it.
+
+A back buffer configured with `wantsBestResolution` is drawn at the
+screen's pixels: its size times `Stage.contentsScaleFactor`, which is the
+page's `devicePixelRatio` (1 for an AIR application whose descriptor does
+not ask for `<requestedDisplayResolution>high</requestedDisplayResolution>`,
+as in AIR). `backBufferWidth`, `backBufferHeight` and `drawToBitmapData`
+then count those pixels, the scissor rectangle stays in stage pixels, and
+the canvas keeps its size on the page. The ratio holds the browser's zoom
+too, which Flash kept apart as `browserZoomFactor` (1 here), so
+`wantsBestResolutionOnBrowserZoom` adds nothing; a best-resolution back
+buffer follows the ratio as the page is zoomed or moved to another screen,
+and must be cleared again. It costs the ratio squared in memory: a
+1920 by 1080 back buffer at a ratio of 2 is 3840 by 2160, 33 MB for each
+of its colour, depth and stencil, and the canvas's two buffers, about
+130 MB, and 265 MB more in multisampled buffers at 4x antialiasing; one of
+3840 by 2160 at a ratio of 2 is four times all that.
 
 Every Stage3D profile is served, from `baselineConstrained` to
 `standardExtended`, `requestContext3DMatchingProfiles` taking the best
@@ -387,6 +403,12 @@ window full screen, with no click needed, as in AIR and Flash's projector;
 Esc or F11 leaves. F11 is the View menu's key for it; a SWF or an
 application that acts on F11 itself, setting `Stage.displayState` in its
 `keyDown` listener, has the key to itself, and one press toggles once.
+
+A SWF gets a Context3D, as in Flash Player and AIR on a desktop: Stage3D
+content plays with nothing to set up. View › Stage3D (Experimental) turns
+it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
+not available", and on again; the app remembers the choice and restarts
+the movie playing.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content

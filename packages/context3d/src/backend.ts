@@ -8,6 +8,19 @@ import type { DxtEncoder } from "./dxt.js";
  */
 export const MOST_BACK_BUFFER = 16384;
 
+/**
+ * A length in stage pixels at `scale` of the screen's to them, as AIR draws a back buffer
+ * configured for best resolution and its scissor rectangle: rounded half to even, as the
+ * FPU rounds by default (AIR 51 on Windows at 144 DPI: 33 to 50, 47 to 70).
+ */
+export function screenPixels(length: number, scale: number): number {
+  const exact = length * scale;
+  const floor = Math.floor(exact);
+  const rest = exact - floor;
+
+  return rest > 0.5 || (rest === 0.5 && floor % 2 !== 0) ? floor + 1 : floor;
+}
+
 export const COMPARE_MODES = [
   "always",
   "never",
@@ -178,7 +191,8 @@ export class TextureBindingError extends Error {
     | "wrap"
     | "rectangleMip"
     | "feedback"
-    | "format";
+    | "format"
+    | "streaming";
 
   /** The sampler it names, where it names one. */
   readonly sampler: number;
@@ -215,6 +229,11 @@ export interface Texture3D {
   readonly levels: number;
   readonly cube: boolean;
   readonly rectangle: boolean;
+  /**
+   * createTexture's streamingLevels: the levels from it to the smallest are enough to draw it
+   * with mip filtering, from the finest of them uploaded, as AIR draws a texture still loading.
+   */
+  readonly streaming: number;
   /** What samplers must read it as; a compressed texture also takes pixels, as AIR's do. */
   readonly format: TextureFormat;
   /** Top-down premultiplied ARGB pixels, copied before returning.
@@ -245,6 +264,11 @@ export interface Context3DLifecycle {
 /** Loss callbacks are asynchronous. Keep the lost surface until remove(), including
  * its restoration listener; remove() must detach both listeners before releasing it. */
 export interface Stage3DHost {
+  /**
+   * What a request waits for before create(): a host that loads its backend at the first
+   * request gives the load, null once loaded. A rejection makes the context unavailable (#3702).
+   */
+  ready?(): Promise<unknown> | null;
   create(slot: number, lifecycle: Context3DLifecycle): Context3D;
   place(slot: number, x: number, y: number, visible: boolean): void;
   remove(slot: number): void;
@@ -263,8 +287,18 @@ export interface Context3D {
   profile: Profile;
   /** Optional acceleration for pixels uploaded to compressed textures. */
   setDxtEncoder?(encoder: DxtEncoder): void;
-  /** Width and height from 32 to MOST_BACK_BUFFER. */
-  configure(width: number, height: number, depth?: boolean, antiAlias?: number): void;
+  /**
+   * Width and height from 32 to MOST_BACK_BUFFER, in the back buffer's pixels. `scale` is
+   * those to a CSS pixel where it shows, and to a scissor rectangle's unit: a back buffer
+   * configured for best resolution has the stage's contentsScaleFactor, any other 1.
+   */
+  configure(
+    width: number,
+    height: number,
+    depth?: boolean,
+    antiAlias?: number,
+    scale?: number,
+  ): void;
   /** No back buffer, width and height 0, as a size configureBackBuffer refuses leaves AIR's. */
   unconfigure(): void;
   clear(
@@ -290,9 +324,17 @@ export interface Context3D {
   setColorMask(red: boolean, green: boolean, blue: boolean, alpha: boolean): void;
   /** Null disables clipping; coordinates are in top-down target pixels. */
   setScissor(x: number | null, y?: number, width?: number, height?: number): void;
-  createBuffer(count: number, stride: number): Buffer3D;
+  /** `stride` 32-bit values a vertex, or 0 for 16-bit indices; `dynamic` for data uploaded often. */
+  createBuffer(count: number, stride: number, dynamic?: boolean): Buffer3D;
   createProgram(): Program3D;
-  createTexture(width: number, height: number, cube?: boolean, format?: TextureFormat): Texture3D;
+  /** `streaming` from 0 to the texture's levels less one. */
+  createTexture(
+    width: number,
+    height: number,
+    cube?: boolean,
+    format?: TextureFormat,
+    streaming?: number,
+  ): Texture3D;
   createRectangleTexture(width: number, height: number, format?: TextureFormat): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(

@@ -208,6 +208,8 @@ export async function shaderFixture(
     | "CubeTextures"
     | "RenderTargets"
     | "Readback"
+    | "BestResolution"
+    | "ContextArguments"
     | "Profiles"
     | "AGALProfiles"
     | "AGALStandard"
@@ -221,6 +223,10 @@ export async function shaderFixture(
   );
   const trace: string[] = [];
   const scripting = new Scripting(codegen, { print: (line) => trace.push(line), audio: null });
+  // As AIR's reference ran, on a screen of 192 DPI.
+  if (fixture === "BestResolution") {
+    scripting.setContentsScaleFactor(2);
+  }
   const owned: ReturnType<typeof create>[] = [];
   let targetSamples = 0;
   let nativeDxtLevels = 0;

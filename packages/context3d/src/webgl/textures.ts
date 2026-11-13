@@ -22,6 +22,8 @@ export interface TextureState {
   antiAlias: number;
   /** The extra colour outputs its framebuffer has attached, a bit each from output 1. */
   outputs: number;
+  /** TEXTURE_BASE_LEVEL: a streaming texture's finest level whole to the smallest. */
+  base: number;
 }
 
 /**

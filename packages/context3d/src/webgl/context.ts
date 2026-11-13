@@ -21,6 +21,7 @@ import {
   type SamplerWrap,
   ScissorBoundsError,
   type StencilAction,
+  screenPixels,
   TEXEL_BYTES,
   type Texture3D,
   TextureBindingError,
@@ -176,6 +177,8 @@ export class WebGLContext3D implements Context3D {
   private resolveDirty = false;
   private depthBuffer: WebGLRenderbuffer | null = null;
   private antiAlias = 0;
+  /** The back buffer's pixels to a CSS pixel and to a scissor rectangle's unit. */
+  private scale = 1;
   private depthWrite = true;
   private depthCompare: CompareMode = "less";
   private blendEnabled = false;
@@ -284,7 +287,7 @@ export class WebGLContext3D implements Context3D {
     this.gl.bindFramebuffer(target, framebuffer);
   }
 
-  configure(width: number, height: number, depth = false, antiAlias = 0): void {
+  configure(width: number, height: number, depth = false, antiAlias = 0, scale = 1): void {
     this.alive();
     range(32, width - 32, MOST_BACK_BUFFER);
     range(32, height - 32, MOST_BACK_BUFFER);
@@ -304,6 +307,12 @@ export class WebGLContext3D implements Context3D {
       depth === (this.depthBuffer !== null) &&
       antiAlias === this.antiAlias
     ) {
+      if (scale !== this.scale) {
+        this.scale = scale;
+        this.showAt();
+        this.applyScissor();
+      }
+
       return;
     }
 
@@ -416,19 +425,30 @@ export class WebGLContext3D implements Context3D {
     this.height = height;
     this.drawnWidth = drawnWidth;
     this.drawnHeight = drawnHeight;
+    this.scale = scale;
     gl.canvas.width = drawnWidth;
     gl.canvas.height = drawnHeight;
-    // Shown at the size asked for, in CSS pixels, as an unstyled canvas of that size would be.
-    const style = (gl.canvas as Partial<HTMLCanvasElement>).style;
-    if (style) {
-      style.width = drawnWidth === width ? "" : `${width}px`;
-      style.height = drawnHeight === height ? "" : `${height}px`;
-    }
+    this.showAt();
     // Readback's storage waits for a read: a back buffer as large as a 4K screen is 33 MB each.
     this.pixels = new Uint8Array(0);
     this.topDown = new Uint8Array(0);
     this.applyScissor();
     this.clear(0, 0, 0, 1);
+  }
+
+  /**
+   * Shown at the size asked for, in CSS pixels, as an unstyled canvas of that size would be,
+   * divided by its scale: a best-resolution back buffer shows its pixels at the screen's.
+   */
+  private showAt(): void {
+    const style = (this.gl.canvas as Partial<HTMLCanvasElement>).style;
+    if (!style) {
+      return;
+    }
+
+    const plain = this.scale === 1;
+    style.width = plain && this.drawnWidth === this.width ? "" : `${this.width / this.scale}px`;
+    style.height = plain && this.drawnHeight === this.height ? "" : `${this.height / this.scale}px`;
   }
 
   /** The largest back buffer storage the GPU gives: a texture, a renderbuffer and a viewport. */
@@ -469,6 +489,7 @@ export class WebGLContext3D implements Context3D {
     this.depthBuffer = null;
     this.resolveDirty = false;
     this.antiAlias = 0;
+    this.scale = 1;
     this.width = 0;
     this.height = 0;
     this.drawnWidth = 0;
@@ -699,7 +720,16 @@ export class WebGLContext3D implements Context3D {
     let top = Math.max(0, Math.min(height, this.scissorTop));
     let right = Math.max(0, Math.min(width, this.scissorRight));
     let bottom = Math.max(0, Math.min(height, this.scissorBottom));
+    // AIR tells a rectangle outside from its own unit, then scales it to a back buffer
+    // configured for best resolution, whose pixels are the screen's.
     this.scissorOutside = right <= left || bottom <= top;
+    if (!this.renderTexture && this.scale !== 1) {
+      const scale = this.scale;
+      left = Math.max(0, Math.min(width, screenPixels(this.scissorLeft, scale)));
+      top = Math.max(0, Math.min(height, screenPixels(this.scissorTop, scale)));
+      right = Math.max(0, Math.min(width, screenPixels(this.scissorRight, scale)));
+      bottom = Math.max(0, Math.min(height, screenPixels(this.scissorBottom, scale)));
+    }
     let drawnHeight = height;
     if (!this.renderTexture && (this.drawnWidth !== width || this.drawnHeight !== height)) {
       // The back buffer's storage is smaller than its size: the rectangle shrinks with it.
@@ -772,7 +802,7 @@ export class WebGLContext3D implements Context3D {
     }
   }
 
-  createBuffer(count: number, stride: number): Buffer3D {
+  createBuffer(count: number, stride: number, dynamic = false): Buffer3D {
     this.alive();
     range(1, count - 1, stride === 0 ? 524287 : 65535);
     range(0, stride, 64);
@@ -803,7 +833,7 @@ export class WebGLContext3D implements Context3D {
     }
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(target, handle);
-    gl.bufferData(target, bytes, gl.STATIC_DRAW);
+    gl.bufferData(target, bytes, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
     const state: BufferState = {
       handle,
       indices: stride === 0 ? new Uint16Array(count) : null,
@@ -983,8 +1013,9 @@ export class WebGLContext3D implements Context3D {
     height: number,
     cube = false,
     format: TextureFormat = "bgra",
+    streaming = 0,
   ): Texture3D {
-    return this.allocateTexture(width, height, cube, false, format);
+    return this.allocateTexture(width, height, cube, false, format, streaming);
   }
 
   createRectangleTexture(width: number, height: number, format: TextureFormat = "bgra"): Texture3D {
@@ -1036,6 +1067,7 @@ export class WebGLContext3D implements Context3D {
     cube: boolean,
     rectangle: boolean,
     format: TextureFormat,
+    streaming = 0,
   ): Texture3D {
     this.alive();
     const limits = profileLimits(this.profile);
@@ -1051,6 +1083,7 @@ export class WebGLContext3D implements Context3D {
 
     const faces = cube ? 6 : 1;
     const levels = rectangle ? 1 : 1 + Math.floor(Math.log2(Math.max(width, height)));
+    range(streaming, 1, levels);
     if (!rectangle && ((width & (width - 1)) !== 0 || (height & (height - 1)) !== 0)) {
       throw new Context3DError(
         "texturePowerOfTwo",
@@ -1118,6 +1151,7 @@ export class WebGLContext3D implements Context3D {
       samples: 0,
       antiAlias: 0,
       outputs: 0,
+      base: 0,
     };
     const texture: Texture3D = {
       width,
@@ -1126,6 +1160,7 @@ export class WebGLContext3D implements Context3D {
       cube,
       rectangle,
       format,
+      streaming,
       upload: (pixels, level = 0, face = 0, sourceWidth, sourceHeight) => {
         this.alive();
         this.textureState(texture);
@@ -2071,7 +2106,10 @@ export class WebGLContext3D implements Context3D {
           throw new TextureBindingError("unuploaded");
         }
       }
-      for (let face = 0; face < resource.uploaded.length; face++) {
+      const base = texture.streaming
+        ? this.streamingBase(texture, resource, this.samplerStates[slot] >>> 5 !== 0)
+        : 0;
+      for (let face = 0; !texture.streaming && face < resource.uploaded.length; face++) {
         if (!texture.cube && !(resource.uploaded[face] & 1)) {
           throw new TextureBindingError("unuploaded");
         }
@@ -2093,6 +2131,13 @@ export class WebGLContext3D implements Context3D {
         gl.bindTexture(texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D, resource.handle);
         gl.bindSampler(slot, this.sampler(this.samplerStates[slot]));
         this.texturesApplied[slot] = 1;
+      }
+      if (resource.base !== base) {
+        const target = texture.cube ? gl.TEXTURE_CUBE_MAP : gl.TEXTURE_2D;
+        gl.activeTexture(gl.TEXTURE0 + slot);
+        gl.bindTexture(target, resource.handle);
+        gl.texParameteri(target, gl.TEXTURE_BASE_LEVEL, base);
+        resource.base = base;
       }
       if (!state.samplersSet) {
         gl.uniform1i(binding.location, slot);
@@ -2121,6 +2166,50 @@ export class WebGLContext3D implements Context3D {
     }
     gl.drawElements(gl.TRIANGLES, count, gl.UNSIGNED_SHORT, first * 2);
     this.changedTarget();
+  }
+
+  /**
+   * The level a streaming texture is drawn from, as AIR 51 draws one: with mip filtering, the
+   * finest whose levels down to the smallest are uploaded on every face, which must reach its
+   * streaming level (#3700 before); without, its level 0 alone (#3713), as a texture that
+   * does not stream.
+   */
+  private streamingBase(texture: Texture3D, resource: TextureState, mip: boolean): number {
+    const faces = resource.uploaded.length;
+    let uploaded = 0;
+    for (let face = 0; face < faces; face++) {
+      uploaded |= resource.uploaded[face];
+    }
+    if (!uploaded) {
+      throw new TextureBindingError("unuploaded");
+    }
+    if (!mip) {
+      for (let face = 0; face < faces; face++) {
+        if (!(resource.uploaded[face] & 1)) {
+          throw new TextureBindingError("streaming");
+        }
+      }
+
+      return 0;
+    }
+
+    let base = texture.levels;
+    while (base > 0) {
+      let whole = true;
+      for (let face = 0; face < faces; face++) {
+        whole &&= (resource.uploaded[face] & (1 << (base - 1))) !== 0;
+      }
+      if (!whole) {
+        break;
+      }
+
+      base--;
+    }
+    if (base > texture.streaming) {
+      throw new TextureBindingError("mipmaps");
+    }
+
+    return base;
   }
 
   private uniforms(

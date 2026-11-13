@@ -3,12 +3,14 @@ import {
   type BlendFactor,
   COMPARE_MODES,
   type CompareMode,
+  Context3DError,
   CULL_FACES,
   type CullFace,
   compressedFormat,
   FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
   MOST_CUBE,
+  type ProgramType,
   profileLimits,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
@@ -20,6 +22,7 @@ import {
   ScissorBoundsError,
   STENCIL_ACTIONS,
   type StencilAction,
+  screenPixels,
   TEXTURE_FORMATS,
   TextureBindingError,
   type TextureFormat,
@@ -34,7 +37,7 @@ import type { As3 } from "../../as3/types.js";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
-import { type AsObject, type Bindings, type ContextState, unsupported } from "./lifecycle.js";
+import type { AsObject, Bindings, ContextState } from "./lifecycle.js";
 import { writeReadback } from "./readback.js";
 
 /** maxBackBufferWidth and maxBackBufferHeight of a disposed context, as AIR reads them. */
@@ -45,13 +48,62 @@ const SIZE_ERRORS_FROM = 30;
 
 /**
  * A maxBackBufferWidth or maxBackBufferHeight set: AIR takes it between the back buffer's
- * size (at least 32) and the GPU's limit.
+ * size (at least 32), in stage pixels even where it is drawn at the screen's, and the GPU's
+ * limit.
  */
 function most(value: number, size: number, limit: number): number {
   return Math.min(limit, Math.max(32, size, value | 0));
 }
 
 export function registerContext(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
+  /** Whether a buffer's usage is dynamicDraw: only it and staticDraw are, by their case. */
+  const dynamicUsage = (usage: string | null): boolean => {
+    switch (usage) {
+      case "staticDraw":
+        return false;
+      case "dynamicDraw":
+        return true;
+      case null:
+        throw s.rt.error("TypeError", 2007, "bufferUsage");
+      default:
+        throw s.rt.error("ArgumentError", 2008, "bufferUsage");
+    }
+  };
+  /** AIR 51 refuses a negative streamingLevels (#2004) and one past the smallest level (#3711). */
+  const streamingLevels = (levels: number, side: number): void => {
+    if (levels < 0) {
+      throw s.rt.error("Error", 2004);
+    }
+    // A side that is no power of two, which the backend refuses, has no levels to compare.
+    if (side > 0 && levels > Math.floor(Math.log2(side))) {
+      throw s.rt.error("ArgumentError", 3711);
+    }
+  };
+  /**
+   * How many of `count` constant registers from `first` a setter writes. Every profile takes
+   * 250 vertex and 200 fragment registers, whatever its AGAL reads (Profiles.as): a first one
+   * past them is #2006, and a run past their end writes those that fit (ContextArguments.as).
+   */
+  const within = (stage: ProgramType, first: number, count: number): number => {
+    const registers = stage === "vertex" ? VERTEX_CONSTANTS : FRAGMENT_CONSTANTS;
+    if (first >= registers) {
+      throw s.rt.error("RangeError", 2006);
+    }
+
+    return first >= 0 && count > 0 ? Math.min(count, registers - first) : count;
+  };
+  /** A program type, which AIR names programType when it refuses one. */
+  const programType = (type: string | null): ProgramType => {
+    switch (type) {
+      case "vertex":
+      case "fragment":
+        return type;
+      case null:
+        throw s.rt.error("TypeError", 2007, "programType");
+      default:
+        throw s.rt.error("ArgumentError", 2008, "programType");
+    }
+  };
   const {
     contexts,
     buffers,
@@ -70,6 +122,28 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     dispose,
   } = bindings;
   const matrixConstants = new Float32Array(16);
+  // Drawn at the screen's pixels as they change, between frames: cleared again before drawing.
+  bindings.followScale((entry) => {
+    const scale = s.contentsScaleFactor;
+    const width = screenPixels(entry.width, scale);
+    const height = screenPixels(entry.height, scale);
+    if (width < 32 || height < 32 || width > entry.maxWidth || height > entry.maxHeight) {
+      return;
+    }
+
+    try {
+      entry.backend.configure(width, height, entry.depth, entry.aa, scale);
+    } catch (error) {
+      // What the GPU cannot give at the new size, it keeps at the old.
+      if (!(error instanceof Context3DError)) {
+        throw error;
+      }
+
+      return;
+    }
+
+    entry.cleared = 0;
+  });
 
   /** The back buffer alone again: what setRenderToBackBuffer and present leave. */
   const resetOutputs = (entry: ContextState): void => {
@@ -165,7 +239,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     set maxBackBufferWidth(value: number) {
       const entry = contexts.get(this as unknown as AsObject);
       if (entry) {
-        entry.maxWidth = most(value, entry.backend.width, MOST_BACK_BUFFER);
+        entry.maxWidth = most(value, entry.width, MOST_BACK_BUFFER);
       } else {
         this.$maxWidth = most(value, 0, DISPOSED_MOST);
       }
@@ -180,7 +254,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     set maxBackBufferHeight(value: number) {
       const entry = contexts.get(this as unknown as AsObject);
       if (entry) {
-        entry.maxHeight = most(value, entry.backend.height, MOST_BACK_BUFFER);
+        entry.maxHeight = most(value, entry.height, MOST_BACK_BUFFER);
       } else {
         this.$maxHeight = most(value, 0, DISPOSED_MOST);
       }
@@ -192,17 +266,27 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       aa: number,
       depth = true,
       best = false,
-      zoom = false,
+      _zoom = false,
     ): void {
       const entry = state(this as unknown as AsObject);
       const backend = entry.backend;
+      // With best resolution AIR draws at the screen's pixels, and holds those to 32 and to
+      // maxBackBufferWidth and maxBackBufferHeight: 16 by 16 is 32 by 32 at a scale of 2.
+      // The browser's zoom is in contentsScaleFactor already, so the zoom flag adds nothing,
+      // as it adds nothing in AIR, whose browserZoomFactor is 1.
+      const scale = best ? s.contentsScaleFactor : 1;
+      const drawnWidth = screenPixels(width, scale);
+      const drawnHeight = screenPixels(height, scale);
       // AIR's limits are the GPU's, 16384 on a desktop one in every profile (Flash Player 32
       // and AIR 51 alike); a GPU that allows less draws the back buffer smaller and stretches
       // it (WebGLContext3D), where AIR would refuse.
-      const wide = !(width >= 32 && width <= entry.maxWidth);
-      if (wide || !(height >= 32 && height <= entry.maxHeight)) {
+      const wide = !(drawnWidth >= 32 && drawnWidth <= entry.maxWidth);
+      if (wide || !(drawnHeight >= 32 && drawnHeight <= entry.maxHeight)) {
         // The back buffer it had is gone: clear refuses until another configure.
         backend.unconfigure();
+        entry.width = 0;
+        entry.height = 0;
+        entry.best = false;
         if (s.rt.swfVersion < SIZE_ERRORS_FROM) {
           throw s.rt.error("Error", 3669);
         }
@@ -212,24 +296,21 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
           : s.rt.error("Error", 3781, 32, entry.maxHeight);
       }
 
-      if (best || zoom) {
-        unsupported(
-          "configureBackBuffer's wantsBestResolution or wantsBestResolutionOnBrowserZoom",
-        );
-      }
-
       const changed =
-        width !== backend.width ||
-        height !== backend.height ||
+        drawnWidth !== backend.width ||
+        drawnHeight !== backend.height ||
         depth !== entry.depth ||
         aa !== entry.aa;
-      backend.configure(width, height, depth, aa);
+      backend.configure(drawnWidth, drawnHeight, depth, aa, scale);
       if (changed) {
         entry.cleared = 0;
       }
 
       entry.depth = depth;
       entry.aa = aa;
+      entry.width = width;
+      entry.height = height;
+      entry.best = best;
     }
 
     clear(r = 0, g = 0, b = 0, a = 1, depth = 1, stencil = 0, mask = 0xffffffff): void {
@@ -248,12 +329,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         return;
       }
 
-      if (mask !== 0xffffffff && mask > 7) {
-        unsupported(`clear's mask ${mask}`);
-      }
       colorOutputs(entry);
-
-      backend.clear(r, g, b, a, depth, mask, stencil);
+      // AIR reads the mask's three low bits alone: 8 clears nothing, 15 clears all.
+      backend.clear(r, g, b, a, depth, mask & 7, stencil);
       // Only successful AS3 clears count, not the backend's allocation-time clear.
       if (entry.target) {
         entry.target.initialized = true;
@@ -269,13 +347,25 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
     }
 
-    createVertexBuffer(count: number, stride: number, usage = "staticDraw"): AsObject {
-      if (usage !== "staticDraw" || stride === 0) {
-        unsupported(`a vertex buffer of usage "${usage}" or 32-bit values per vertex ${stride}`);
+    createVertexBuffer(
+      count: number,
+      stride: number,
+      usage: string | null = "staticDraw",
+    ): AsObject {
+      const dynamic = dynamicUsage(usage);
+      // As AIR 51 refuses them: a negative count of values, none, and more than 64.
+      if (stride < 0) {
+        throw s.rt.error("Error", 2004);
+      }
+      if (stride === 0) {
+        throw s.rt.error("ArgumentError", 3671);
+      }
+      if (stride > 64) {
+        throw s.rt.error("ArgumentError", 3670);
       }
 
       const owner = this as unknown as AsObject;
-      const resource = allocate(owner, () => context(owner).createBuffer(count, stride));
+      const resource = allocate(owner, () => context(owner).createBuffer(count, stride, dynamic));
       const object = construct("VertexBuffer3D", resource);
       buffers.set(
         object,
@@ -290,13 +380,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       return object;
     }
 
-    createIndexBuffer(count: number, usage = "staticDraw"): AsObject {
-      if (usage !== "staticDraw") {
-        unsupported(`an index buffer of usage "${usage}"`);
-      }
-
+    createIndexBuffer(count: number, usage: string | null = "staticDraw"): AsObject {
+      const dynamic = dynamicUsage(usage);
       const owner = this as unknown as AsObject;
-      const resource = allocate(owner, () => context(owner).createBuffer(count, 0));
+      const resource = allocate(owner, () => context(owner).createBuffer(count, 0, dynamic));
       const object = construct("IndexBuffer3D", resource);
       buffers.set(
         object,
@@ -342,12 +429,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (width > most || height > most) {
         throw s.rt.error("ArgumentError", 3683, most);
       }
-      if (levels !== 0) {
-        unsupported(`createTexture's streamingLevels ${levels}`);
-      }
-
+      streamingLevels(levels, Math.max(width, height));
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createTexture(width, height, false, compressed),
+        backend.createTexture(width, height, false, compressed, levels),
       );
       const object = construct("Texture", value, "flash.display3D.textures");
       textures.set(
@@ -413,12 +497,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (size > MOST_CUBE) {
         throw s.rt.error("ArgumentError", 3705);
       }
-      if (levels !== 0) {
-        unsupported(`createCubeTexture's streamingLevels ${levels}`);
-      }
-
+      streamingLevels(levels, size);
       const value = allocate(this as unknown as AsObject, () =>
-        backend.createTexture(size, size, true, compressed),
+        backend.createTexture(size, size, true, compressed, levels),
       );
       const object = construct("CubeTexture", value, "flash.display3D.textures");
       textures.set(
@@ -569,7 +650,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
-      if (!backend) {
+      // AIR takes indices up to 15, which no AGAL 1 program reads: nothing to bind.
+      if (!backend || index >= 8) {
         return;
       }
 
@@ -577,23 +659,54 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       owner.vertices[index] = live ? object : null;
     }
 
-    setProgramConstantsFromVector(type: string, first: number, values: AsObject, count = -1): void {
-      if (type !== "vertex" && type !== "fragment") {
-        unsupported(`program constants of type "${type}"`);
-      }
-
-      const backend = context(this as unknown as AsObject);
+    setProgramConstantsFromVector(
+      type: string | null,
+      first: number,
+      values: AsObject,
+      count = -1,
+    ): void {
+      const stage = programType(type);
       const data: number[] = values.$a;
-      const registers = count === -1 ? Math.floor(data.length / 4) : count;
-      // Every profile has 250 vertex and 200 fragment constants, whatever its AGAL reads.
-      if (
-        first < 0 ||
-        first + registers > (type === "vertex" ? VERTEX_CONSTANTS : FRAGMENT_CONSTANTS)
-      ) {
+      const entry = state(this as unknown as AsObject);
+      const asked = count === -1 ? Math.floor(data.length / 4) : count;
+      const registers = within(stage, first, asked);
+      if (registers !== 0 || asked === 0) {
+        entry.backend.setConstants(stage, first, data, registers);
+      }
+    }
+
+    /** Little-endian floats whatever the ByteArray's endian, its position left as it is. */
+    setProgramConstantsFromByteArray(
+      type: string | null,
+      first: number,
+      count: number,
+      data: AsObject | null,
+      offset: number,
+    ): void {
+      const stage = programType(type);
+      if (!data) {
+        throw s.rt.error("TypeError", 2007, "data");
+      }
+      if (first < 0) {
         throw s.rt.error("RangeError", 2006);
       }
 
-      backend.setConstants(type, first, data, registers);
+      const bytes = bindings.bytes(data);
+      if (count < 0 || offset + count * 16 > bytes.length) {
+        throw s.rt.error("RangeError", 3669);
+      }
+
+      const entry = state(this as unknown as AsObject);
+      const registers = within(stage, first, count);
+      const values = new Float32Array(registers * 4);
+      const view = new DataView(bytes.buffer, bytes.byteOffset + offset, registers * 16);
+      for (let i = 0; i < values.length; i++) {
+        values[i] = view.getFloat32(i * 4, true);
+      }
+
+      if (registers !== 0 || count === 0) {
+        entry.backend.setConstants(stage, first, values, registers);
+      }
     }
 
     setProgramConstantsFromMatrix(
@@ -613,12 +726,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
+      const registers = within(type as ProgramType, first, 4);
       const values: Float32Array = matrix.$matrix3D;
       for (let i = 0; i < 16; i++) {
         matrixConstants[i] = values[transpose ? (i % 4) * 4 + Math.floor(i / 4) : i];
       }
 
-      backend.setConstants(type, first, matrixConstants, 4);
+      backend.setConstants(type, first, matrixConstants, registers);
     }
 
     setCulling(face: string): void {
@@ -762,6 +876,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
               throw s.rt.error("Error", 3605);
             case "mipmaps":
               throw s.rt.error("Error", 3700);
+            case "streaming":
+              throw s.rt.error("Error", 3713);
             case "rectangleMip":
               throw s.rt.error("Error", 3755);
             case "wrap":
@@ -822,8 +938,10 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         return;
       }
 
-      if (this.$checking) {
-        requireClear(entry);
+      // AIR 51 asks only for the colour cleared: a clear of mask 1 lets present through
+      // where it still refuses to draw without the depth and stencil cleared.
+      if (this.$checking && !(entry.cleared & 1)) {
+        throw s.rt.error("Error", 3692);
       }
 
       entry.backend.present();

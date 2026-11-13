@@ -12,7 +12,7 @@ VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json node tests/context
 node tests/context3d/stress.ts
 node tests/context3d/reclamation.ts
 node tests/context3d/host.ts
-node tests/desktop/stage3d.ts    # normal Electron View-menu opt-in (needs its binary)
+node tests/desktop/stage3d.ts    # Electron: on by default, the View menu turns it off (needs its binary)
 # Longer local resource/memory soak:
 node tests/context3d/stress.ts --loads 200
 # Backend timings, completed draws and GL call counts:
@@ -112,6 +112,9 @@ node tests/context3d/oracle.ts --backbuffer
 node tests/context3d/oracle.ts --backbufferlegacy    # compiled as SWF 15
 node tests/context3d/oracle.ts --framevalidation
 node tests/context3d/oracle.ts --framevalidationflat
+node tests/context3d/oracle.ts --contextarguments
+# With Wine at 192 DPI (below):
+node tests/context3d/oracle.ts --bestresolution
 node tests/context3d/oracle.ts --profiles
 node tests/context3d/oracle.ts --agalprofiles
 node tests/context3d/oracle.ts --agalstandard
@@ -120,6 +123,16 @@ node tests/context3d/oracle.ts --multipletargets
 # Requires a reference driver that implements pixel-shader predication:
 node tests/context3d/oracle.ts --comparisons
 ```
+
+`BestResolution.as` needs AIR on a screen of twice the density: its
+descriptor asks for `requestedDisplayResolution` high, which AIR 51 on
+Windows honours, and Wine reports 192 DPI with
+`wine reg add 'HKLM\System\CurrentControlSet\Hardware Profiles\Current\Software\Fonts' /v LogPixels /t REG_DWORD /d 192 /f`
+in its prefix (96 afterwards). Its reference starts `bestresolution scale 2`;
+`run.ts` plays it with `contentsScaleFactor` 2. `host.ts` checks the same
+in Chrome at a device scale factor of 2 (`Sharpness.as`): the back buffer
+is allocated at the screen's pixels and shown at its CSS size, a
+checkerboard of its own pixels survives, and at 1 nothing changes.
 
 `AMXMLC` and `ADL` select the SDK commands. The reference runner is separate
 from `oracle/flash.ts`: that harness uses CPU display-list capture, which

@@ -1,12 +1,18 @@
 // What the app remembers between runs, in settings.json under its user
-// data: a playerglobal.abc the user chose, and the SWFs opened last.
+// data: a playerglobal.abc the user chose, the SWFs opened last, and
+// Stage3D turned off or on from the View menu.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LibraryName, LibraryState } from "../shared/api.js";
 
 export interface Settings {
-  stage3D: boolean;
+  /**
+   * Stage3D as the View menu last set it; absent until it does, which is on. Not `stage3D`, the
+   * key of the opt-in this replaced: every write saved that one, its `false` along with any other
+   * change, so a stored `false` there does not tell a user's choice from the old default.
+   */
+  stage3DChoice?: boolean;
   playerglobal?: string;
   /** Most recent first. */
   recent: string[];
@@ -49,8 +55,13 @@ export class SettingsFile {
     return this.update({ [name]: undefined });
   }
 
+  /** Whether SWFs get a Context3D: on unless the user turned it off. */
+  get stage3D(): boolean {
+    return this.current.stage3DChoice ?? true;
+  }
+
   setStage3D(enabled: boolean): boolean {
-    return this.update({ stage3D: enabled });
+    return this.update({ stage3DChoice: enabled });
   }
 
   /** `path` opened: first in the recent list. */
@@ -84,7 +95,7 @@ export class SettingsFile {
       const read = JSON.parse(readFileSync(this.path, "utf8"));
       const text = (value: unknown) => (typeof value === "string" ? value : undefined);
       return {
-        stage3D: read.stage3D === true,
+        stage3DChoice: typeof read.stage3DChoice === "boolean" ? read.stage3DChoice : undefined,
         playerglobal: text(read.playerglobal),
         recent: strings(read.recent),
         sockets: Object.fromEntries(
@@ -95,7 +106,7 @@ export class SettingsFile {
       };
     } catch {
       // None yet, or unreadable: start again rather than refuse to start.
-      return { stage3D: false, recent: [], sockets: {} };
+      return { recent: [], sockets: {} };
     }
   }
 

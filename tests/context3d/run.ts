@@ -61,6 +61,8 @@ const scripts = compileScripts(
     "TemporaryMatrices",
     "IndirectConstants",
     "Readback",
+    "BestResolution",
+    "ContextArguments",
     "Profiles",
     "AGALProfiles",
     "AGALStandard",
@@ -119,6 +121,8 @@ for (const name of [
   "TemporaryMatrices",
   "IndirectConstants",
   "Readback",
+  "BestResolution",
+  "ContextArguments",
   "Profiles",
   "AGALProfiles",
   "AGALStandard",
@@ -140,7 +144,9 @@ for (const name of [
     name === "TextureFormats" ||
     name === "MultipleTargets" ||
     name === "BackBuffer" ||
-    name === "BackBufferConstrained"
+    name === "BackBufferConstrained" ||
+    name === "BestResolution" ||
+    name === "ContextArguments"
       ? 51
       : name === "AtfLegacy"
         ? 13
@@ -435,6 +441,8 @@ if (!process.argv.includes("--build-only")) {
         "TemporaryMatrices",
         "IndirectConstants",
         "Readback",
+        "BestResolution",
+        "ContextArguments",
         "Profiles",
         "AGALProfiles",
         "AGALStandard",

@@ -6,6 +6,11 @@ import type { Placement } from "./layout.js";
 /** A fresh, exclusively owned surface for each context requested by a player. */
 export type Stage3DSurfaceFactory = (slot: number) => Stage3DSurface;
 
+/** A factory loaded when a SWF first requests a context, as a GPU backend imported then. */
+export interface Stage3DSurfaceLoader {
+  load(): Promise<Stage3DSurfaceFactory>;
+}
+
 /** One load's Stage3D layers, below its transparent display-list canvas. */
 export class Stage3DSession {
   private readonly layer = document.createElement("div");
@@ -23,13 +28,16 @@ export class Stage3DSession {
   constructor(
     box: HTMLElement,
     scripting: Scripting,
-    create: Stage3DSurfaceFactory,
+    source: Stage3DSurfaceFactory | Stage3DSurfaceLoader,
     changed: () => void,
   ) {
     this.box = box;
     this.isolation = box.style.isolation;
     this.layer.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:0";
-    const host = stage3DCanvasHost(this.layer, create);
+    let create = typeof source === "function" ? source : null;
+    // Asked once for this SWF: a failed load leaves its contexts unavailable.
+    let loading: Promise<unknown> | null = null;
+    const host = stage3DCanvasHost(this.layer, (slot) => (create as Stage3DSurfaceFactory)(slot));
     this.host = host;
 
     try {
@@ -37,6 +45,16 @@ export class Stage3DSession {
       // Keep canvases from different overlapping players in separate stacks.
       box.style.isolation = "isolate";
       this.close = installContext3D(scripting, {
+        ready: () => {
+          if (typeof source === "function" || create) {
+            return null;
+          }
+
+          loading ??= source.load().then((loaded) => {
+            create = loaded;
+          });
+          return loading;
+        },
         create: (slot, lifecycle) => {
           const context = host.create(slot, lifecycle);
           this.slots.set(slot, { x: 0, y: 0, visible: true });

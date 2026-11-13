@@ -45,6 +45,13 @@ export interface ContextState {
   cleared: number;
   depth: boolean;
   aa: number;
+  /**
+   * The last configureBackBuffer's size, in stage pixels, and whether it asked for best
+   * resolution: such a back buffer has the screen's pixels, and follows a change of them.
+   */
+  width: number;
+  height: number;
+  best: boolean;
   /** maxBackBufferWidth and maxBackBufferHeight, which a SWF may lower. */
   maxWidth: number;
   maxHeight: number;
@@ -307,7 +314,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
 
     profiles.set(slot, profile);
     pending.add(slot);
-    deferEvent(() => {
+    const deliver = () => {
       pending.delete(slot);
       if (closed || s.destroyed || lost.has(slot)) {
         return;
@@ -383,6 +390,9 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         cleared: 0,
         depth: false,
         aa: 0,
+        width: 0,
+        height: 0,
+        best: false,
         maxWidth: MOST_BACK_BUFFER,
         maxHeight: MOST_BACK_BUFFER,
         target: null,
@@ -399,7 +409,30 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       slots.set(slot, object);
       place(slot);
       created(slot);
-    });
+    };
+    // A backend the host loads now is there before the context is made: Flash's context3DCreate
+    // comes after the request anyway.
+    const loading = host.ready?.();
+    if (!loading) {
+      deferEvent(deliver);
+      return;
+    }
+
+    loading.then(
+      () => {
+        if (closed || s.destroyed) {
+          pending.delete(slot);
+        } else {
+          deferEvent(deliver);
+        }
+      },
+      () => {
+        pending.delete(slot);
+        if (!closed && !s.destroyed) {
+          unavailable(slot);
+        }
+      },
+    );
   };
 
   const dispose = (object: AsObject): AsObject | null => {
@@ -416,8 +449,30 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     return entry.slot;
   };
 
+  // A back buffer configured for best resolution follows the screen's pixels as they change,
+  // as Flash's followed the browser's zoom; one being drawn to a texture keeps its size.
+  let rescale: ((entry: ContextState) => void) | null = null;
+  const rescaled = (): void => {
+    for (const entry of contexts.values()) {
+      if (
+        rescale &&
+        entry.best &&
+        entry.backend.width &&
+        !entry.backend.disposed &&
+        !entry.target
+      ) {
+        rescale(entry);
+      }
+    }
+  };
+  s.contentsScaleListeners.add(rescaled);
+  const followScale = (listener: (entry: ContextState) => void): void => {
+    rescale = listener;
+  };
+
   const close = () => {
     closed = true;
+    s.contentsScaleListeners.delete(rescaled);
     for (const object of contexts.keys()) {
       dispose(object);
     }
@@ -451,6 +506,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     request,
     unavailable,
     dispose,
+    followScale,
     close,
     get closed() {
       return closed;
