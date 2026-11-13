@@ -41,11 +41,13 @@ import {
   type Enumeration,
   elementsAt,
   enumerated,
+  forgetStep,
   INT_ATOM_LIMIT,
   nextIndex,
   ownNames,
   pairIndex,
   pairOf,
+  traitsAt,
   walkless,
 } from "./enumeration.js";
 import { AsError, describe, detailOf, errorMessage, stackOf, UnsupportedError } from "./errors.js";
@@ -2520,6 +2522,15 @@ export class Runtime {
   }
 
   /** An Array holding `values`. */
+  /**
+   * Give `o`, which has elements, the storage `elements` in place of its
+   * own, so that a for-in under way over it goes on over them.
+   */
+  setElements(o: AsObject, elements: Value[]): void {
+    o.$a = elements;
+    forgetStep(o);
+  }
+
   array(values: Value[]): AsObject {
     const o = this.builtinTraits("Array").instance();
     o.$a = values;
@@ -3349,7 +3360,7 @@ export class Runtime {
     }
 
     // As avmplus' ArrayObject and TypedVectorObject: the elements, then the other names.
-    const length = elementsAt(o, index);
+    const length = elementsAt(o, index)?.length ?? 0;
     if (index > 0 && index <= length) {
       const element = index - 1;
       return element < INT_ATOM_LIMIT ? element : String(element);
@@ -3366,7 +3377,7 @@ export class Runtime {
   }
 
   nextValue(o: Value, index: number): Value {
-    const traits: Traits | undefined = o?.$traits;
+    const traits: Traits | undefined = traitsAt(o, index);
     if (!continues(o, index)) {
       const properties = traits?.properties;
       if (properties) {
@@ -3386,7 +3397,8 @@ export class Runtime {
       }
     }
 
-    const length = elementsAt(o, index);
+    const a = elementsAt(o, index);
+    const length = a?.length ?? 0;
     if (index > 0 && index <= length) {
       const element = index - 1;
       if (traits?.getIndex) {
@@ -3395,8 +3407,8 @@ export class Runtime {
 
       if (traits === this.arrayTraits) {
         // A hole reads undefined too: only then is `in` asked.
-        const value = o.$a[element];
-        if (value !== undefined || element in o.$a) {
+        const value = (a as Value[])[element];
+        if (value !== undefined || element in (a as Value[])) {
           return value;
         }
       }
