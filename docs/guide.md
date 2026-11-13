@@ -365,7 +365,9 @@ pnpm --filter @swf2es/desktop start movie.swf
 
 A SWF or an AIR application that sets `Stage.displayState` takes the
 window full screen, with no click needed, as in AIR and Flash's projector;
-Esc or F11 leaves.
+Esc or F11 leaves. F11 is the View menu's key for it; a SWF or an
+application that acts on F11 itself, setting `Stage.displayState` in its
+`keyDown` listener, has the key to itself, and one press toggles once.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content

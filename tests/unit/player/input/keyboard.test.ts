@@ -52,6 +52,8 @@ function setUp(...names: string[]) {
   const scripting = {
     focus: null,
     clipboard,
+    // No script here changes Stage.displayState.
+    fullScreen: { asked: 0 },
     rt: {
       classNamed: (name: string) => ({ name }),
       construct: (

@@ -29,6 +29,12 @@ export class FullScreen {
   private drawn: SourceRect | null = null;
   /** Stage.mouseLock, which only full screen holds. */
   mouseLock = false;
+  /**
+   * How many times a script has taken the stage into or out of full
+   * screen: a key in whose events it did is the SWF's own key for it,
+   * which a host keeps from its own (see KeyboardInput.handle).
+   */
+  asked = 0;
 
   constructor(
     private readonly s: Scripting,
@@ -61,6 +67,7 @@ export class FullScreen {
     }
 
     if (state === "normal") {
+      this.asked++;
       host.exit();
       this.change(state);
       return;
@@ -81,6 +88,7 @@ export class FullScreen {
       throw this.s.rt.error("SecurityError", 2152);
     }
 
+    this.asked++;
     this.change(state);
   }
 

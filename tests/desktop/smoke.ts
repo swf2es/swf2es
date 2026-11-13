@@ -199,6 +199,12 @@ const airSource = `package {
           stage.addEventListener(FullScreenEvent.FULL_SCREEN, function (f:FullScreenEvent):void {
             trace("air: fullScreen " + f.fullScreen + " " + f.interactive + " " + stage.displayState);
           });
+          // F11 is the application's own to act on, as AIR leaves it: adl has no key for full screen.
+          stage.addEventListener(KeyboardEvent.KEY_DOWN, function (k:KeyboardEvent):void {
+            if (k.keyCode == 122) {
+              stage.displayState = stage.displayState == "normal" ? "fullScreenInteractive" : "normal";
+            }
+          });
           stage.fullScreenSourceRect = new Rectangle(0, 0, 50, 50);
           stage.displayState = "fullScreenInteractive";
           trace("air: displayState " + stage.displayState + " " + stage.stageWidth + "x" + stage.stageHeight);
@@ -614,19 +620,45 @@ const screen = await display();
 const withApp = (settings: object, args: string[], run: Parameters<typeof runApp>[3]) =>
   runApp(screen.env, settings, args, run);
 
+/** Whether the app's window is in full screen, as the main process has it (--inspect=0). */
+const windowFull = (main: App["main"]) =>
+  main<boolean>(`(() => {
+    const electron = process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron");
+    return electron.BrowserWindow.getAllWindows()[0].isFullScreen();
+  })()`);
+
+/**
+ * F11 pressed and let go in the page, as the system sends a key: a raw
+ * key down, which the View menu's accelerator takes where the page leaves
+ * it, as it does not the key down DevTools sends for typing.
+ */
+async function pressF11(devtools: App["devtools"]): Promise<void> {
+  for (const type of ["rawKeyDown", "keyUp"]) {
+    await devtools.send("Input.dispatchKeyEvent", {
+      type,
+      key: "F11",
+      code: "F11",
+      windowsVirtualKeyCode: 122,
+      nativeVirtualKeyCode: 122,
+    });
+  }
+}
+
+/** How long a second toggle would have had to show: the menu's comes with the key, in the same turn. */
+const SETTLE_MS = 750;
+
 /**
  * The AIR application's full screen: the window's own, as the main
  * process has it, and its source rect of 50 by 50 alone drawn, fitted and
  * centred; then Esc, which leaves, as the stage hears. The headless
- * window has no window manager to resize it, so its size stays.
+ * window has no window manager to resize it, so its size stays. Then F11,
+ * which the application acts on itself: one press enters and a second
+ * leaves, the View menu's F11 taking neither.
  */
 async function fullScreen({ until, evaluate, main, devtools, stdout }: App): Promise<void> {
   let shown: { full: boolean; window: number[]; canvas: number[] } | null = null;
   const look = async () => {
-    const full = await main<boolean>(`(() => {
-      const electron = process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron");
-      return electron.BrowserWindow.getAllWindows()[0].isFullScreen();
-    })()`);
+    const full = await windowFull(main);
     const page = await evaluate<{ window: number[]; canvas: number[] }>(`(() => {
       const r = document.getElementById("player").shadowRoot.querySelector("canvas").getBoundingClientRect();
       return { window: [innerWidth, innerHeight], canvas: [r.x, r.y, r.width, r.height].map(Math.round) };
@@ -663,6 +695,28 @@ async function fullScreen({ until, evaluate, main, devtools, stdout }: App): Pro
   );
   shown = null;
   await until("the window as it was", sized(false));
+
+  const events = () => stdout.filter((l) => l.startsWith("air: fullScreen "));
+  const before = events().length;
+  await pressF11(devtools);
+  await until("the application's F11 into full screen", () => events().length > before);
+  shown = null;
+  await until("the window in full screen by the application's key", sized(true));
+  await sleep(SETTLE_MS);
+  // Once: the menu's F11 did not take the window out again.
+  assert.deepEqual(events().slice(before), ["air: fullScreen true false fullScreenInteractive"]);
+  assert.equal(await windowFull(main), true);
+
+  await pressF11(devtools);
+  await until("the application's F11 out of full screen", () => events().length > before + 1);
+  shown = null;
+  await until("the window as it was, by the application's key", sized(false));
+  await sleep(SETTLE_MS);
+  assert.deepEqual(events().slice(before), [
+    "air: fullScreen true false fullScreenInteractive",
+    "air: fullScreen false false normal",
+  ]);
+  assert.equal(await windowFull(main), false);
 }
 
 /**
@@ -1295,11 +1349,30 @@ try {
 
   // With no library chosen, the builtin.abc and playerglobal swf2es ships
   // play an ActionScript 3 SWF.
-  await withApp({ recent: [] }, [local], async ({ stdout, until }) => {
-    await until("the local SWF on the app's own libraries", () =>
-      stdout.includes("smoke: started"),
-    );
-  });
+  await withApp(
+    { recent: [] },
+    ["--inspect=0", local],
+    async ({ stdout, until, main, devtools }) => {
+      await until("the local SWF on the app's own libraries", () =>
+        stdout.includes("smoke: started"),
+      );
+
+      // F11 is the View menu's for a SWF that does nothing with it: in, then out.
+      for (const full of [true, false]) {
+        let now = !full;
+        await pressF11(devtools);
+        await until(`the menu's F11 ${full ? "into" : "out of"} full screen`, () => {
+          void windowFull(main).then((is) => {
+            now = is;
+          });
+
+          return now === full;
+        });
+        await sleep(SETTLE_MS);
+        assert.equal(await windowFull(main), full);
+      }
+    },
+  );
 
   // A SWF's workers run on Web Workers whose script the app's protocol serves, sharing a Mutex
   // and memory on its isolated page.
