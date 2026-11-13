@@ -13,6 +13,10 @@ export {
   type LayerFilter,
   type PerlinSetup,
   type PixelRegion,
+  WORDS_PLAIN,
+  WORDS_PREMULTIPLY,
+  WORDS_SOLID,
+  WORDS_UNMULTIPLY,
 } from "./bitmap-kernel.js";
 export {
   DRAW_OPAQUE,

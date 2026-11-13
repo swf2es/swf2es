@@ -62,6 +62,20 @@ export function storeOf(s: Scripting, o: AsObject): BitmapStore {
   return store;
 }
 
+/**
+ * The rect of `store`, clipped to it, written into `bytes` at its position
+ * in its byte order, as unmultiplied ARGB words: straight into its buffer,
+ * with no array of them between.
+ */
+function writeWords(store: BitmapStore, rect: PixelRect, bytes: avm2.Bytes): void {
+  const c = store.clip(rect);
+  // No pixels are still a write, of nothing.
+  const at = bytes.claim(c ? c.width * c.height * 4 : 0);
+  if (c) {
+    store.getWords(c, bytes.buffer, at, bytes.littleEndian);
+  }
+}
+
 /** The store for reading its size: one Flash could not read has it, a disposed one not. */
 function sizeOf(s: Scripting, o: AsObject): BitmapStore {
   const store: BitmapStore | null | undefined = o.$store;
@@ -442,7 +456,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
     getPixels(rect: Value): Value {
       const store = storeOf(s, this);
       const o = s.rt.construct(s.rt.classNamed("flash.utils::ByteArray"));
-      o.$bytes.write(store.argbBytes(rectOf(s, rect)));
+      writeWords(store, rectOf(s, rect), o.$bytes);
       return o;
     }
 
@@ -452,8 +466,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "data");
       }
 
-      const bytes = (target as AsObject).$bytes;
-      bytes.write(store.argbBytes(rectOf(s, rect), bytes.littleEndian));
+      writeWords(store, rectOf(s, rect), (target as AsObject).$bytes);
     }
 
     /**
@@ -551,7 +564,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       const bytes = (input as AsObject).$bytes;
       const wanted = c.width * c.height;
       const count = Math.min(wanted, Math.floor(bytes.available / 4));
-      store.setWords(c, bytes.view, bytes.position, count, bytes.littleEndian);
+      store.setWords(c, bytes.buffer, bytes.position, count, bytes.littleEndian);
       bytes.position = (bytes.position + count * 4) >>> 0;
       if (count < wanted) {
         bytes.checkEOF(4);
