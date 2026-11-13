@@ -225,8 +225,15 @@ export class KeyboardInput implements Keyboard {
    */
   handle(type: "down" | "up", k: KeyState, edits = true): boolean {
     this.handled++;
+    const fullScreen = this.scripting.fullScreen;
+    const asked = fullScreen.asked;
     // A key is a user's gesture, in whose handlers a script may write to the clipboard.
-    return this.scripting.clipboard.gesture(() => this.key(type, k, edits));
+    const used = this.scripting.clipboard.gesture(() => this.key(type, k, edits));
+
+    // A key whose listeners took the stage into or out of full screen is the SWF's key for
+    // it, as F11 is an AIR application's: the host's own for the same key, a menu's F11,
+    // would undo it at once.
+    return used || fullScreen.asked !== asked;
   }
 
   /**

@@ -365,7 +365,9 @@ pnpm --filter @swf2es/desktop start movie.swf
 
 A SWF or an AIR application that sets `Stage.displayState` takes the
 window full screen, with no click needed, as in AIR and Flash's projector;
-Esc or F11 leaves.
+Esc or F11 leaves. F11 is the View menu's key for it; a SWF or an
+application that acts on F11 itself, setting `Stage.displayState` in its
+`keyDown` listener, has the key to itself, and one press toggles once.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content
@@ -412,6 +414,13 @@ The element is its one window, at the descriptor's size, and
 `flash.display.Screen` has the one screen the page is on (`window.screen`);
 the play page opens `.air` and `.zip` files too.
 
+A `URLLoader` or `URLStream` whose response tells an HTTP error (404, 500)
+gets the response's body in an AIR application, here and in the desktop
+app, as in AIR: with a listener for `httpResponseStatus` added before
+`load`, the load completes, the body its `data`; without one it ends in
+`ioError`, the body in `data` all the same. A SWF that is no AIR
+application gets `ioError` and no data, as in Flash Player.
+
 A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
 browser's Flash Player would refuse it (VerifyError #1014). Its directory
@@ -428,7 +437,9 @@ npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 
 The descriptor's first window's content SWF plays from `app:/`, at the
 descriptor's size and with its title; the arguments after `--` reach its
-InvokeEvent, and `flash.display.Screen` has the system's displays. File › Open, or a descriptor dropped on the window, runs the
+InvokeEvent, and `flash.display.Screen` has the system's displays, their
+`colorDepth` counted as AIR counts it (32 for true colour, where the
+system says 24). File › Open, or a descriptor dropped on the window, runs the
 application too, from its own directory; the app asks first, as an
 application reaches your files and the network unasked.
 

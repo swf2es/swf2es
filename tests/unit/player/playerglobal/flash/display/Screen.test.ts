@@ -232,8 +232,9 @@ test("getScreensForRectangle finds the screens a rectangle is on, in the host's 
   );
 
   assert.deepEqual(lines, [
-    "screens 2 (x=-1280, y=0, w=1280, h=1024) (x=-1280, y=0, w=1280, h=1024) 24",
-    "second (x=0, y=0, w=1920, h=1080) (x=0, y=30, w=1920, h=1010) 30",
+    // A browser's and Electron's 24 bits of true colour, and their 30 of deep colour, are AIR's 32.
+    "screens 2 (x=-1280, y=0, w=1280, h=1024) (x=-1280, y=0, w=1280, h=1024) 32",
+    "second (x=0, y=0, w=1920, h=1080) (x=0, y=30, w=1920, h=1010) 32",
     "main (x=0, y=0, w=1920, h=1080) (x=0, y=30, w=1920, h=1010)",
     "on one [left] [main] [main]",
     "on both [left,main] [left,main]",
@@ -268,4 +269,29 @@ test("a host that names no screens has one, of the screen capabilities' size", {
   assert.deepEqual(await play("Default", DEFAULT, 1, application(null)), expected);
   assert.deepEqual(await play("Default", DEFAULT, 1, null), expected);
   assert.deepEqual(await play("Default", DEFAULT, 1, application([])), expected);
+});
+
+test("colorDepth counts a pixel's bits as AIR does: 32 for true colour, fewer as they are", {
+  skip,
+}, async () => {
+  const bounds = { x: 0, y: 0, width: 1280, height: 720 };
+  const depth = async (colorDepth: number) =>
+    (
+      await play(
+        "Default",
+        DEFAULT,
+        1,
+        application([{ bounds, visibleBounds: bounds, colorDepth }]),
+      )
+    )[0]
+      .split(" ")
+      .pop();
+
+  // adl (AIR 51.3) on a desktop of true colour says 32, where Electron's display says 24.
+  assert.equal(await depth(24), "32");
+  assert.equal(await depth(32), "32");
+  assert.equal(await depth(30), "32");
+  assert.equal(await depth(16), "16");
+  assert.equal(await depth(8), "8");
+  assert.equal(await depth(48), "48");
 });

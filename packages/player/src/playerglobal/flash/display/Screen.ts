@@ -17,6 +17,19 @@ type Value = avm2.Value;
 
 /** adl's on a desktop of true colour, for a host that names no screens. */
 const COLOR_DEPTH = 32;
+
+/**
+ * Screen.colorDepth for a host's count of a screen's colour bits. AIR
+ * counts the bits a pixel is kept in: 32 on a desktop of true colour (adl,
+ * AIR 51.3), where a browser and Electron count the 24 of its red, green
+ * and blue. A deep-colour screen, 30 to them, keeps its pixels in 32 bits
+ * too. A screen of fewer colours, 16 bits or 8, is the same count to
+ * both; so is one past 32.
+ */
+export function airColorDepth(bits: number): number {
+  const depth = bits | 0;
+  return depth >= 24 && depth < 32 ? 32 : depth;
+}
 /** A screen's size where the host knows none, as a player outside a browser. */
 const DEFAULT_WIDTH = 1920;
 const DEFAULT_HEIGHT = 1080;
@@ -145,7 +158,7 @@ export function screenNatives(s: Scripting): avm2.Natives {
     }
 
     get colorDepth(): number {
-      return stateOf(this).screen.colorDepth | 0;
+      return airColorDepth(stateOf(this).screen.colorDepth);
     }
   }
 

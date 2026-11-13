@@ -277,7 +277,12 @@ function ask(
   net: Network,
   url: string,
   purpose: Purpose = "data",
-  more: { method?: string; headers?: [string, string][]; body?: Uint8Array | null } = {},
+  more: {
+    method?: string;
+    headers?: [string, string][];
+    body?: Uint8Array | null;
+    errorBody?: boolean;
+  } = {},
   signal = never,
 ) {
   return net.fetch(
@@ -287,6 +292,7 @@ function ask(
       headers: more.headers ?? [],
       body: more.body ?? null,
       purpose,
+      ...(more.errorBody ? { errorBody: true } : {}),
     },
     signal,
   );
@@ -343,6 +349,45 @@ test("a remote SWF loads itself, then reads its own origin", async () => {
     { ...(await ask(net, `${swf()}/missing`)), headers: [] },
     { bytes: null, status: 404, headers: [] },
   );
+});
+
+test("an error response's body is read for an AIR application that asks, and for no SWF", async () => {
+  const gone = { bytes: null, status: 404, headers: [] };
+  const application = network();
+  application.play({ kind: "application" });
+  // As its URLLoader asks, which completes with it in AIR.
+  const answered = await ask(application, `${swf()}/missing`, "data", { errorBody: true });
+  assert.deepEqual([text(answered.bytes), answered.status], ["gone", 404]);
+  const posted = await ask(application, `${swf()}/missing`, "data", {
+    method: "POST",
+    body: new TextEncoder().encode("a=1"),
+    errorBody: true,
+  });
+  assert.deepEqual([text(posted.bytes), posted.status], ["gone", 404]);
+  // Unasked, as its Loader and its Sound, which fail in AIR too.
+  assert.deepEqual(
+    { ...(await ask(application, `${swf()}/missing`, "content")), headers: [] },
+    gone,
+  );
+
+  // Flash Player's sandboxes fail such a load whatever the page asks.
+  const remote = await playing();
+  assert.deepEqual(
+    { ...(await ask(remote, `${swf()}/missing`, "data", { errorBody: true })), headers: [] },
+    gone,
+  );
+  const local = network();
+  local.play({ kind: "local" });
+  policies.set("swf/crossdomain.xml", xml('<allow-access-from domain="*"/>'));
+  try {
+    assert.equal(await outcome(ask(local, `${swf()}/data.txt`)), "swf/data.txt");
+    assert.deepEqual(
+      { ...(await ask(local, `${swf()}/missing`, "data", { errorBody: true })), headers: [] },
+      gone,
+    );
+  } finally {
+    policies.delete("swf/crossdomain.xml");
+  }
 });
 
 test("another origin's data as its policy grants; content and sends need none", async () => {

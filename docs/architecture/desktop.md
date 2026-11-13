@@ -301,7 +301,21 @@ gesture: the page asks the shell (`fullScreen.set`), which sets the
 window's own full screen while a SWF the user opened plays, and tells
 the page as the window enters or leaves it, by the menu's F11 too, so
 that the stage follows (`renderer/full-screen.ts`). Esc in the page
-leaves it, as in Flash.
+leaves it, as in Flash. F11 is View › Toggle Full Screen's accelerator,
+and may be the SWF's own key as well: AIR leaves it to the application
+(adl has no key for full screen), and one that sets `displayState` in
+its `keyDown` listener would enter by its own doing and leave at once by
+the menu's. So a key in whose events a script took the stage into or out
+of full screen counts as used by the SWF (`KeyboardInput.handle`,
+`FullScreen.asked`), and `bindKeyboard` cancels the page's `keydown` for
+it, as for any key the SWF used. Electron runs a menu's accelerator only
+for a key the page left alone: Chromium sends the key to the renderer
+first and hands back what it did not cancel
+(`WebContents::HandleKeyboardEvent`), where Electron looks the
+accelerator up, in the window's accelerator table on Linux and Windows
+and in the main menu's key equivalents on macOS. A SWF that does nothing
+with F11 leaves it to the menu. One that acts on the key's `keyUp`
+instead is not covered: the menu has taken the key by then.
 ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
 into the page would run beside the API.
 
@@ -439,6 +453,10 @@ application also goes full screen from its InvokeEvent, with no gesture:
 the window is in full screen as the main process has it, the source rect
 alone drawn, and Esc leaves, as the stage traces. Headless, no window
 manager resizes the window, so that it covers a screen is not checked.
+It acts on F11 itself too: one press enters and stays, a second leaves,
+where the SWF with no such listener enters and leaves by the menu's F11.
+A URL answered 404 completes for the application, with the response's
+body, and fails for the remote SWF.
 `connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and the sandbox's grants in
 node, `websocket-connections.test.ts` the WebSockets' messages, close
