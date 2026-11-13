@@ -204,7 +204,14 @@ the desktop the window's bounds are on, the part of it the system's bars
 leave free, its colour depth and whether it is the main one: a page's one
 screen (`@swf2es/web`'s `pageScreens`, from `window.screen`), the system's
 displays in the desktop app, and without a host one screen of the screen
-capabilities' size. As adl has them, `screens`, `mainScreen` and
+capabilities' size. `colorDepth` counts the bits a pixel is kept in, as
+AIR does: adl says 32 on a desktop of true colour, where a browser's
+`screen.colorDepth` and Electron's display say 24, the bits of its red,
+green and blue, so a host's 24 reads as 32 (`airColorDepth`). A host's 30,
+a deep-colour screen's, reads as 32 too, its pixels being kept in 32 bits
+(a choice: AIR documents the property only as the screen's bits, and none
+was at hand to measure); 16 and 8, and anything past 32, read as the host
+counts them. As adl has them, `screens`, `mainScreen` and
 `getScreensForRectangle` make new Screen objects at every call, each
 keeping its two Rectangles; `getScreensForRectangle` rounds the
 rectangle's x, y, width and height each to an integer, a half to the even

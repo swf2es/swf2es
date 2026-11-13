@@ -547,17 +547,14 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      // A pixel at a time, as Flash reads them: those read before the end are set, then EOFError 2030.
+      // As Flash reads them, a pixel at a time: those read before the end are set, then EOFError 2030.
       const bytes = (input as AsObject).$bytes;
-      const values: number[] = [];
-      try {
-        for (let i = 0; i < c.width * c.height; i++) {
-          bytes.checkEOF(4);
-          values.push(bytes.view.getUint32(bytes.position, bytes.littleEndian));
-          bytes.position = (bytes.position + 4) >>> 0;
-        }
-      } finally {
-        store.setVector(c, values);
+      const wanted = c.width * c.height;
+      const count = Math.min(wanted, Math.floor(bytes.available / 4));
+      store.setWords(c, bytes.view, bytes.position, count, bytes.littleEndian);
+      bytes.position = (bytes.position + count * 4) >>> 0;
+      if (count < wanted) {
+        bytes.checkEOF(4);
       }
     }
 

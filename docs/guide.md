@@ -135,6 +135,33 @@ the click. A page that makes the element full screen itself
 `configure({ fullScreen })` takes a full screen of the embedder's own
 instead, as the desktop app's window, which needs no click.
 
+With Stage3D on, a back buffer may be from 32 to 16384 pixels a side in
+every profile, as Flash Player 32 and AIR 51 take one on a desktop GPU,
+so a SWF that sizes its back buffer to its stage plays on a 2K or 4K
+screen. `maxBackBufferWidth` and `maxBackBufferHeight` read 16384
+whatever the GPU. Where the GPU allows less, the back buffer is drawn at
+the largest size it allows and stretched to the size asked for; AIR
+would read the GPU's own limit there and refuse larger sizes. In the
+`baselineConstrained` profile AIR draws no back buffer larger than the
+stage (Error #3710, or #3723 for SWFs before version 30); swf2es draws
+it.
+
+A back buffer configured with `wantsBestResolution` is drawn at the
+screen's pixels: its size times `Stage.contentsScaleFactor`, which is the
+page's `devicePixelRatio` (1 for an AIR application whose descriptor does
+not ask for `<requestedDisplayResolution>high</requestedDisplayResolution>`,
+as in AIR). `backBufferWidth`, `backBufferHeight` and `drawToBitmapData`
+then count those pixels, the scissor rectangle stays in stage pixels, and
+the canvas keeps its size on the page. The ratio holds the browser's zoom
+too, which Flash kept apart as `browserZoomFactor` (1 here), so
+`wantsBestResolutionOnBrowserZoom` adds nothing; a best-resolution back
+buffer follows the ratio as the page is zoomed or moved to another screen,
+and must be cleared again. It costs the ratio squared in memory: a
+1920 by 1080 back buffer at a ratio of 2 is 3840 by 2160, 33 MB for each
+of its colour, depth and stencil, and the canvas's two buffers, about
+130 MB, and 265 MB more in multisampled buffers at 4x antialiasing; one of
+3840 by 2160 at a ratio of 2 is four times all that.
+
 ## WebAssembly and CSP
 
 Fills, lines and BitmapData's filters and pixel operations are computed by
@@ -365,7 +392,9 @@ pnpm --filter @swf2es/desktop start movie.swf
 
 A SWF or an AIR application that sets `Stage.displayState` takes the
 window full screen, with no click needed, as in AIR and Flash's projector;
-Esc or F11 leaves.
+Esc or F11 leaves. F11 is the View menu's key for it; a SWF or an
+application that acts on F11 itself, setting `Stage.displayState` in its
+`keyDown` listener, has the key to itself, and one press toggles once.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content
@@ -412,6 +441,13 @@ The element is its one window, at the descriptor's size, and
 `flash.display.Screen` has the one screen the page is on (`window.screen`);
 the play page opens `.air` and `.zip` files too.
 
+A `URLLoader` or `URLStream` whose response tells an HTTP error (404, 500)
+gets the response's body in an AIR application, here and in the desktop
+app, as in AIR: with a listener for `httpResponseStatus` added before
+`load`, the load completes, the body its `data`; without one it ends in
+`ioError`, the body in `data` all the same. A SWF that is no AIR
+application gets `ioError` and no data, as in Flash Player.
+
 A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
 browser's Flash Player would refuse it (VerifyError #1014). Its directory
@@ -428,7 +464,9 @@ npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 
 The descriptor's first window's content SWF plays from `app:/`, at the
 descriptor's size and with its title; the arguments after `--` reach its
-InvokeEvent, and `flash.display.Screen` has the system's displays. File › Open, or a descriptor dropped on the window, runs the
+InvokeEvent, and `flash.display.Screen` has the system's displays, their
+`colorDepth` counted as AIR counts it (32 for true colour, where the
+system says 24). File › Open, or a descriptor dropped on the window, runs the
 application too, from its own directory; the app asks first, as an
 application reaches your files and the network unasked.
 

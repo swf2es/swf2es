@@ -3,7 +3,8 @@
 // debugger; and Flash Player's Windows projectors, such as 32 and 11.5,
 // under Wine. The benchmarks are those that time themselves for avmshell
 // (enumeration/Enumeration.as, dictionary/DictionaryAccess.as),
-// vector/VectorAccess.as, indexed access to Vectors and Arrays, and as3pb's
+// vector/VectorAccess.as, indexed access to Vectors and Arrays,
+// pixels/BitmapPixels.as, a bitmap's pixels set and read whole, and as3pb's
 // (tests/programs/as3pb), protobuf, AMF3 and JSON encoding, each compiled
 // against playerglobal into a SWF whose document class is empty: their
 // script runs as it is loaded, its sections tracing their times
@@ -613,6 +614,7 @@ const BENCHES: Record<string, Bench> = {
   enumeration: script("enumeration/Enumeration.as"),
   dictionary: script("dictionary/DictionaryAccess.as"),
   vector: script("vector/VectorAccess.as"),
+  pixels: script("pixels/BitmapPixels.as"),
   as3pb,
   lz4,
   drawing: drawing("PlayersDrawing", ["vectors", "bitmaps", "filters", "text", "redraw", "shader"]),

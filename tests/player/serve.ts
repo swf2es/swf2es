@@ -194,8 +194,9 @@ export async function serve(
       }
     }
 
-    response.writeHead(404);
-    response.end();
+    // With a body, as servers' errors have, which an AIR application's URLLoader reads.
+    response.writeHead(404, { "content-type": "text/plain" });
+    response.end("not found");
   });
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const port = (server.address() as { port: number }).port;

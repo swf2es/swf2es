@@ -1,5 +1,6 @@
 // Stable entry for the browser runners and external diagnostics.
 
+export { backBufferLimit } from "./checks/back-buffer.ts";
 export { bitmapUploads } from "./checks/bitmap-uploads.ts";
 export { bufferBytes, vertexFormats } from "./checks/buffers.ts";
 export { byteBudgets } from "./checks/byte-budgets.ts";

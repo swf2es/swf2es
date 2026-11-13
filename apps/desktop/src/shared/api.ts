@@ -169,6 +169,8 @@ export interface NetworkRequest {
   body: Uint8Array | null;
   /** "movie" for the SWF the page plays, else what the SWF loads it for. */
   purpose: "movie" | "content" | "data" | "send";
+  /** Whether an error response's body is wanted too, as an AIR application's URLLoader reads it. */
+  errorBody?: boolean;
 }
 
 /** Its response, as player's FetchResult has it: no bytes for a failure. */

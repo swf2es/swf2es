@@ -207,9 +207,29 @@ redirects took it, and `responseHeaders`, the host's headers as
 own: a browser's fetch gives the names in lower case, sorted and merged,
 and no `Set-Cookie`; the desktop app's are as sent, without the cookies.
 A `Loader`'s `LoaderInfo`, a file and a failed connection have no
-`HTTP_RESPONSE_STATUS`, and Flash Player content never. In AIR a response
-of an error status goes on to `COMPLETE` with its body; here, where the
-hosts give a failure no body, to `IO_ERROR` as in Flash Player.
+`HTTP_RESPONSE_STATUS`, and Flash Player content never.
+
+A response whose status tells an HTTP error (400 or more) fails in Flash
+Player: `HTTP_STATUS`, then `IO_ERROR` #2032, and no data. An AIR
+application gets its body all the same, as adl (AIR 51.3) does for 400,
+403, 404, 500 and 503, by GET and POST: `OPEN`, `HTTP_RESPONSE_STATUS`,
+`PROGRESS` (none for an empty body, of any status) and `HTTP_STATUS` as
+for any response, the bytes in the stream, which stays connected, and in
+the loader's `data`. It then goes on to `COMPLETE` if the stream had a
+listener for `HTTP_RESPONSE_STATUS` when `load` was called, as an
+application that reads the status itself has, and to `IO_ERROR` #2032
+otherwise, the body still there to read. A `URLLoader` listens to its
+stream for it from the first time a listener for it is added to the
+loader, and from then on, so one added and removed again still counts,
+and one added after `load` hears the response and changes nothing. So an
+application's `URLStream` asks its host for an error's body
+(`FetchRequest.errorBody`): the browser's fetch and the desktop app's
+network read it then, the desktop app for an application alone, and give
+no bytes for an error otherwise, as an embedder's fetch that does not
+know of it does. A `Loader` and a `Sound` fail on such a response in AIR
+too (#2036 and #2032 in adl; a `Loader`'s is #2035 here, Flash Player's),
+and do not ask; nor does an application's `app:` file a page loads from
+beside it on its server, where an error means there is no such file.
 Stream fetches are independent of Loader's ordered preparation, so a
 stalled stream cannot hold up a later Loader; `settled()` waits for both
 when a host explicitly asks it to. A new load or `close` aborts the old

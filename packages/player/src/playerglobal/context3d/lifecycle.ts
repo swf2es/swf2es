@@ -2,6 +2,7 @@ import {
   type Buffer3D,
   type Context3D,
   Context3DError,
+  MOST_BACK_BUFFER,
   type Program3D,
   type Stage3DHost,
   type Texture3D,
@@ -34,6 +35,16 @@ export interface ContextState {
   cleared: number;
   depth: boolean;
   aa: number;
+  /**
+   * The last configureBackBuffer's size, in stage pixels, and whether it asked for best
+   * resolution: such a back buffer has the screen's pixels, and follows a change of them.
+   */
+  width: number;
+  height: number;
+  best: boolean;
+  /** maxBackBufferWidth and maxBackBufferHeight, which a SWF may lower. */
+  maxWidth: number;
+  maxHeight: number;
   target: TextureResource | null;
   targetObject: AsObject | null;
   /** A compressed texture is the target: AIR takes it, and refuses to clear or draw (#3746). */
@@ -357,6 +368,11 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         cleared: 0,
         depth: false,
         aa: 0,
+        width: 0,
+        height: 0,
+        best: false,
+        maxWidth: MOST_BACK_BUFFER,
+        maxHeight: MOST_BACK_BUFFER,
         target: null,
         targetObject: null,
         compressedTarget: false,
@@ -385,8 +401,30 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     return entry.slot;
   };
 
+  // A back buffer configured for best resolution follows the screen's pixels as they change,
+  // as Flash's followed the browser's zoom; one being drawn to a texture keeps its size.
+  let rescale: ((entry: ContextState) => void) | null = null;
+  const rescaled = (): void => {
+    for (const entry of contexts.values()) {
+      if (
+        rescale &&
+        entry.best &&
+        entry.backend.width &&
+        !entry.backend.disposed &&
+        !entry.target
+      ) {
+        rescale(entry);
+      }
+    }
+  };
+  s.contentsScaleListeners.add(rescaled);
+  const followScale = (listener: (entry: ContextState) => void): void => {
+    rescale = listener;
+  };
+
   const close = () => {
     closed = true;
+    s.contentsScaleListeners.delete(rescaled);
     for (const object of contexts.keys()) {
       dispose(object);
     }
@@ -420,6 +458,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     request,
     unavailable,
     dispose,
+    followScale,
     close,
     get closed() {
       return closed;

@@ -9,6 +9,7 @@ import { DictionaryKeys } from "./dictionary-keys.js";
 import { type DynamicProperties, GONE, type Walk } from "./dynamic-properties.js";
 import { Namespace } from "./names.js";
 import { FloatVector } from "./natives/float-vector.js";
+import type { Traits } from "./traits.js";
 
 /**
  * What for-ins over one object keep apart from its names: elements are
@@ -36,6 +37,8 @@ interface SparseIndices {
   /** How many were given since they were taken, and whether they were taken again since this for-in met them. */
   sinceTaken: number;
   retaken: boolean;
+  /** Whether avmplus holds the Array's elements in its hashtable (see hashed). */
+  hashed: boolean;
 }
 
 /**
@@ -109,14 +112,49 @@ export function ownNames(o: AsObject): EnumeratedName[] {
  * The name of `o`, not a Dictionary, at a for-in's index among the names
  * past its elements, the index less their length.
  */
-export function enumerated(o: AsObject, at: number, index: number): string {
+export function enumerated(o: AsObject, at: number, index: number): string | number {
   // The slots the step itself went through, without looking them up again.
   const walk =
     o === lastStep.o && index === lastStep.index && lastStep.walk !== null
       ? lastStep.walk
       : walkOf(o);
-  return walk?.slots[at - 1] ?? "";
+  return walk?.slots[at - 1] ?? unslotted(index);
 }
+
+/**
+ * The name at a for-in's index that no slot holds: an element's, where the
+ * index is negative, one a step by a sparse Array's indices gave (see
+ * stepBy), found here so that the names of every other step are looked up
+ * as before; else none.
+ */
+function unslotted(index: number): string | number {
+  if (index >= 0) {
+    return "";
+  }
+
+  const element = -index - 1;
+  return element < INT_ATOM_LIMIT ? element : String(element);
+}
+
+/**
+ * The value of the element a step by a sparse Array's indices gave at
+ * for-in index `index`, negative, if `o` reads its elements as an Array
+ * does (`plain`) and it is still there; else `missing`.
+ */
+export function sparseElement(o: AsObject, index: number, plain: boolean, missing: Value): Value {
+  const element = -index - 1;
+  if (plain) {
+    const value = o.$a[element];
+    if (value !== undefined || element in o.$a) {
+      return value;
+    }
+  }
+
+  return missing;
+}
+
+/** The name of the element at a for-in's index, as a property's. */
+export const elementName = (index: number) => String(index < 0 ? -index - 1 : index - 1);
 
 function walkOf(o: AsObject): Walk | null {
   const d: DynamicProperties | null | undefined = o.$d;
@@ -135,10 +173,29 @@ export function nextIndex(
   o: AsObject,
   index: number,
 ): number {
-  // An object without elements never gains them: past its first step, no need to look again.
+  // What the last step read of the object stands: past its first step, no need to look again.
   const known = o === lastStep.o && index === lastStep.index;
-  const a: Value[] | FloatVector | undefined = known && lastStep.none ? undefined : o.$a;
-  if (!known) {
+  stepKnown = known;
+  let a: Value[] | FloatVector | undefined;
+  if (known) {
+    a = lastStep.elements;
+
+    // The element right after the last, there and not hidden: nearly every
+    // step. Not over an Array walked by its sparse indices, where the one
+    // after is a hole nearly every time.
+    if (
+      a !== undefined &&
+      lastStep.hidden === undefined &&
+      index < a.length &&
+      o !== sparseOwner &&
+      index in a
+    ) {
+      lastStep.index = index + 1;
+      return index + 1;
+    }
+  } else {
+    a = o.$a;
+    lastStep.elements = a;
     lastStep.walk = null;
     if (a !== undefined) {
       // Not the keys of a Dictionary whose for-in was left off.
@@ -151,13 +208,14 @@ export function nextIndex(
       ? nextOfNames(o, index, known)
       : nextOfElements(enumerating, o, a, index, known);
   if (next === 0) {
-    lastStep.o = null;
-    lastStep.keys = null;
-    lastStep.walk = null;
+    letGo();
   } else {
     lastStep.o = o;
     lastStep.index = next;
-    lastStep.none = a === undefined;
+    if (!known) {
+      lastStep.hidden = o.$dontEnum;
+      lastStep.traits = o.$traits;
+    }
   }
 
   return next;
@@ -188,26 +246,71 @@ export function dictionaryAt(o: AsObject, index: number): DictionaryKeys | null 
 }
 
 /**
- * The step a for-in last took: the object, the index it gave, whether the
- * object has no elements and its keys if a Dictionary, so that the next
- * step and the nextName and nextValue right after it need not look for
- * them again, which misses, at a cost, on the many objects that have
- * neither, and never gain any. Let go when a for-in ends.
+ * The step a for-in last took: the object, the index it gave, and what the
+ * step read of the object: its elements, its hidden names, its traits and
+ * its keys if a Dictionary, so that the next step and the nextName and
+ * nextValue right after it need not read them again. The steps of every
+ * for-in go through this one code, over objects of every class, where the
+ * engine finds each of those by a lookup, several to a step: more than the
+ * step itself costs. Let go when a for-in ends.
+ *
+ * What it keeps must stand for as long as the object is the same: one
+ * without elements never gains them, and its traits and whether it is a
+ * Dictionary are for good; whoever gives an object other elements, or its
+ * first hidden name, says so (forgetStep).
  */
 const lastStep: {
   o: AsObject;
   index: number;
-  none: boolean;
+  /** Its elements, undefined for an object without any. */
+  elements: Value[] | FloatVector | undefined;
+  /** Its names hidden from for-ins, undefined while it has had none. */
+  hidden: Set<string> | undefined;
+  traits: Traits | undefined;
   keys: DictionaryKeys | null;
   /** The slots of the names it went through, past any elements: the object's, as they never change. */
   walk: Walk | null;
 } = {
   o: null,
   index: 0,
-  none: false,
+  elements: undefined,
+  hidden: undefined,
+  traits: undefined,
   keys: null,
   walk: null,
 };
+
+/**
+ * Whether the step nextIndex is taking goes on from the last, so that the
+ * last one's hidden names are its object's: else they are read from the
+ * object, by a step that comes to ask, which one over an object with
+ * nothing to go through never does.
+ */
+let stepKnown = false;
+
+function hiddenOf(o: AsObject): Set<string> | undefined {
+  return stepKnown ? lastStep.hidden : o.$dontEnum;
+}
+
+/**
+ * `o` has other elements than it had (its storage, not what is in it), or
+ * its first hidden name: a for-in's next step over it reads them again.
+ */
+export function forgetStep(o: AsObject): void {
+  if (o === lastStep.o) {
+    letGo();
+  }
+}
+
+/** The for-in is over: nothing of its object is kept, which would hold its class and all that hangs on it. */
+function letGo(): void {
+  lastStep.o = null;
+  lastStep.elements = undefined;
+  lastStep.hidden = undefined;
+  lastStep.traits = undefined;
+  lastStep.keys = null;
+  lastStep.walk = null;
+}
 
 /**
  * Whether a for-in's step over `o` at `index` goes on from the last one
@@ -217,13 +320,14 @@ export function continues(o: Value, index: number): boolean {
   return o === lastStep.o && index === lastStep.index;
 }
 
-/** The length of the elements of `o` at a for-in's index: where those end and its other names start. */
-export function elementsAt(o: AsObject, index: number): number {
-  if (o === lastStep.o && index === lastStep.index && lastStep.none) {
-    return 0;
-  }
+/** The elements of `o` at a for-in's index, whose length is where those end and its other names start. */
+export function elementsAt(o: AsObject, index: number): Value[] | FloatVector | undefined {
+  return o === lastStep.o && index === lastStep.index ? lastStep.elements : o?.$a;
+}
 
-  return o?.$a?.length ?? 0;
+/** The traits of `o` at a for-in's index. */
+export function traitsAt(o: AsObject, index: number): Traits | undefined {
+  return o === lastStep.o && index === lastStep.index ? lastStep.traits : o?.$traits;
 }
 
 /** As nextIndex, over an object with elements. */
@@ -234,20 +338,24 @@ function nextOfElements(
   index: number,
   known: boolean,
 ): number {
-  if (index === 0) {
-    dropSparse(enumerating, o);
-    walkOf(o)?.freeDeleted();
+  // The start of a for-in, or a step from a negative index: both off the
+  // path of a step over elements, which this one comparison is all of.
+  if (index <= 0) {
+    const next = startOrGoOn(enumerating, o, a, index, known);
+    if (index < 0) {
+      return next;
+    }
   }
 
   const length = a.length;
   if (index < length) {
-    const i = nextElement(enumerating, o, a, index);
-    if (i >= 0) {
-      return i + 1;
+    const next = nextElement(enumerating, o, a, index);
+    if (next !== 0) {
+      return next;
     }
   }
 
-  const at = Math.max(index - length, 0);
+  const at = index > length ? index - length : 0;
 
   // An Array that has never had other names needs no list of them.
   const next = at === 0 && !o.$d?.size ? 0 : nextNameIndex(o, at, false, known);
@@ -263,7 +371,11 @@ function nextOfElements(
 /** After this many holes in a row, the next element is found by an Array's indices, so that a sparse one stays cheap. */
 const HOLE_SCAN_LIMIT = 16;
 
-/** The first element of `o` at or after `from`, or -1. */
+/**
+ * The index a for-in goes on from once it is given the first element of `o`
+ * at or after `from`, or 0 without one: one more than the element's, or
+ * that negated (see stepBy).
+ */
 function nextElement(
   enumerating: WeakMap<object, Enumeration>,
   o: AsObject,
@@ -272,24 +384,24 @@ function nextElement(
 ): number {
   const length = a.length;
   if (a instanceof FloatVector) {
-    return from < length ? from : -1;
+    return from < length ? from + 1 : 0;
   }
 
   if (enumerable(o, a, from)) {
-    return from;
+    return from + 1;
   }
 
   let e: Enumeration | undefined;
   if (sparseKept !== 0) {
     if (o === sparseOwner) {
-      return nextSparse(o, a, ownerSparse as SparseIndices, from);
+      return stepBy(o, a, ownerSparse as SparseIndices, from);
     }
 
     e = enumerating.get(o);
     if (e?.sparse !== undefined) {
       sparseOwner = o;
       ownerSparse = e.sparse;
-      return nextSparse(o, a, e.sparse, from);
+      return stepBy(o, a, e.sparse, from);
     }
   }
 
@@ -297,28 +409,104 @@ function nextElement(
   const scanned = Math.min(length, from + HOLE_SCAN_LIMIT);
   for (let i = from + 1; i < scanned; i++) {
     if (enumerable(o, a, i)) {
-      return i;
+      return i + 1;
     }
   }
 
   if (scanned === length) {
-    return -1;
+    return 0;
   }
 
+  return stepBy(o, a, takeSparse(enumerating, o, a, e), scanned);
+}
+
+/** Take the indices of sparse Array `o` for the for-in over it, which `e` keeps things for, if any. */
+function takeSparse(
+  enumerating: WeakMap<object, Enumeration>,
+  o: AsObject,
+  a: Value[],
+  e: Enumeration | undefined,
+): SparseIndices {
   const keeper: Enumeration = e ?? enumerating.get(o) ?? {};
   enumerating.set(o, keeper);
   sparseKept++;
-  keeper.sparse = {
-    indices: indicesOf(a, 0),
-    length,
+  const indices = indicesOf(a, 0);
+  const sparse: SparseIndices = {
+    indices,
+    length: a.length,
     at: -1,
     given: -1,
     sinceTaken: 0,
     retaken: false,
+    hashed: hashed(indices),
   };
+  keeper.sparse = sparse;
   sparseOwner = o;
-  ownerSparse = keeper.sparse;
-  return nextSparse(o, a, keeper.sparse, scanned);
+  ownerSparse = sparse;
+  return sparse;
+}
+
+/**
+ * The index a for-in goes on from after the first element of `o` at or
+ * after `from` by its sparse indices, or 0. Where avmplus walks the Array
+ * by index, that is one more than the element's, and the next step first
+ * asks whether the hole right after it was filled, as avmplus reaches one
+ * filled during the walk. Where avmplus walks its hashtable, such an
+ * element is reached or not by where it hashes, which no order of indices
+ * follows, and asking is a miss in the engine's dictionary-mode elements,
+ * a third of what a step cost: the index given is negative, the element's
+ * plus one negated, so that the next step comes straight back to the
+ * indices (startOrGoOn), told apart by the comparison with 0 every step
+ * makes already.
+ */
+function stepBy(o: AsObject, a: Value[], sparse: SparseIndices, from: number): number {
+  const i = nextSparse(o, a, sparse, from);
+  if (i < 0) {
+    return 0;
+  }
+
+  return sparse.hashed ? -(i + 1) : i + 1;
+}
+
+/**
+ * What nextOfElements does first at a for-in's start, index 0: the indices
+ * and the deleted names' slots a for-in left off kept are let go. From a
+ * negative index, one stepBy gave, the whole step, by the indices alone,
+ * then the Array's other names.
+ */
+function startOrGoOn(
+  enumerating: WeakMap<object, Enumeration>,
+  o: AsObject,
+  a: Value[] | FloatVector,
+  index: number,
+  known: boolean,
+): number {
+  if (index === 0) {
+    dropSparse(enumerating, o);
+    walkOf(o)?.freeDeleted();
+    return 0;
+  }
+
+  const from = -index;
+  let next = 0;
+  if (from < a.length) {
+    if (o === sparseOwner) {
+      next = stepBy(o, a as Value[], ownerSparse as SparseIndices, from);
+    } else {
+      const sparse = sparseKept !== 0 ? enumerating.get(o)?.sparse : undefined;
+      if (sparse !== undefined) {
+        sparseOwner = o;
+        ownerSparse = sparse;
+        next = stepBy(o, a as Value[], sparse, from);
+      } else {
+        // Dropped when another for-in over the Array started: taken again from here.
+        next = nextElement(enumerating, o, a, from);
+      }
+    }
+  }
+
+  // Past the last element, as a step from the Array's length.
+  return next !== 0 ? next : nextOfElements(enumerating, o, a, a.length, known);
 }
 
 /**
@@ -378,12 +566,32 @@ function retake(a: Value[], sparse: SparseIndices): void {
   sparse.at = -1;
   sparse.given = -1;
   sparse.sinceTaken = 0;
+  // An Array in avmplus' hashtable never leaves it.
+  sparse.hashed ||= hashed(sparse.indices);
+}
+
+/**
+ * Whether avmplus holds an Array with these elements in its hashtable, as
+ * it must when they span more than 32 slots and more than four times one
+ * more than their count (ArrayObject's shouldBeSparse): its dense part
+ * never holds so few over so many. Else avmplus may hold them dense,
+ * walking them by index, as the for-in here does.
+ */
+function hashed(indices: number[]): boolean {
+  const n = indices.length;
+  if (n === 0) {
+    return false;
+  }
+
+  const span = indices[n - 1] - indices[0] + 1;
+  return span > 32 && span > (n + 1) * 4;
 }
 
 /** An Array's indices from `from` on, in order, as Object.keys gives them, appended to `indices`. */
 function indicesOf(a: Value[], from: number, indices: number[] = []): number[] {
-  for (const k of Object.keys(a)) {
-    const i = Number(k);
+  const keys = Object.keys(a);
+  for (let k = 0; k < keys.length; k++) {
+    const i = Number(keys[k]);
     if (i >= from) {
       indices.push(i);
     }
@@ -408,8 +616,10 @@ function firstAtOrAfter(indices: number[], from: number): number {
   return low;
 }
 
+/** Whether element `i` of `o`, the object nextIndex steps over, is there and not hidden. */
 function enumerable(o: AsObject, a: Value[], i: number): boolean {
-  return i in a && !o.$dontEnum?.has(String(i));
+  const hidden = hiddenOf(o);
+  return i in a && (hidden === undefined || !hidden.has(String(i)));
 }
 
 /**
@@ -437,8 +647,9 @@ function nextNameIndex(o: AsObject, index: number, starting: boolean, known: boo
   // A name deleted since the for-in started is passed over.
   const slots = walk.slots;
   const live = walk.live;
+  const hidden = hiddenOf(o);
   for (let i = index; i < slots.length; i++) {
-    if (live[i] !== GONE && !o.$dontEnum?.has(slots[i] as string)) {
+    if (live[i] !== GONE && (hidden === undefined || !hidden.has(slots[i] as string))) {
       return i + 1;
     }
   }

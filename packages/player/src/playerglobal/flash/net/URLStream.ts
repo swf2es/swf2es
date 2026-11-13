@@ -1,8 +1,19 @@
 // flash.net.URLStream: bytes fetched by the host, read through ByteArray's
 // DataInput implementation and delivered to scripts on a later frame.
+//
+// A response that tells an HTTP error fails in Flash Player: httpStatus,
+// ioError #2032, and no data. An AIR application gets its body all the
+// same (adl, AIR 51.3: 400, 403, 404, 500 and 503, GET and POST, with a
+// body, chunked or not, and without): open, progress and httpStatus as for
+// any response, the bytes there to read, the stream connected; and then
+// `complete` where the stream had a listener for httpResponseStatus as
+// `load` was called, as an application that reads the status itself has,
+// else ioError #2032, its bytes still there. A listener added after `load`
+// hears the response and changes nothing. So an application's request asks
+// the host for such a body (FetchRequest.errorBody).
 import { avm2 } from "@swf2es/runtime";
 import type { As3, As3Classes } from "../../../as3/types.js";
-import { dispatchEvent } from "../../../scripting/events.js";
+import { dispatchEvent, heard } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -43,12 +54,17 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       const abort = new AbortController();
       this.$abort = abort;
       const source = request as AsObject;
+      // AIR's: whether an HTTP error will complete, decided as the load is asked for.
+      const errorsComplete = s.air && heard(this, "httpResponseStatus");
       s.loads.requestBytes(source, abort.signal, (result, url) => {
         if (this.$generation !== generation) {
           return;
         }
 
-        const { bytes, status, local } = result;
+        const { status, local } = result;
+        const error = status >= 400;
+        // Flash Player reads no error's body, whatever a host gives.
+        const bytes = error && !s.air ? null : result.bytes;
         const redirected = result.url !== undefined;
         // AIR's, as the response's headers come: before the bytes and Flash Player's status.
         const response = s.httpResponseStatus(result, url);
@@ -98,20 +114,23 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
         const buffer = avm2.bytesOf(s.rt, bufferOf(this));
         buffer.write(bytes);
         buffer.position = 0;
-        dispatchEvent(
-          s,
-          this,
-          s.rt.construct(
-            s.rt.classNamed("flash.events::ProgressEvent"),
-            "progress",
-            false,
-            false,
-            bytes.length,
-            bytes.length,
-          ) as AsObject,
-        );
-        if (this.$generation !== generation) {
-          return;
+        // An AIR application hears of no progress where no bytes came (adl, AIR 51.3).
+        if (bytes.length > 0 || !s.air) {
+          dispatchEvent(
+            s,
+            this,
+            s.rt.construct(
+              s.rt.classNamed("flash.events::ProgressEvent"),
+              "progress",
+              false,
+              false,
+              bytes.length,
+              bytes.length,
+            ) as AsObject,
+          );
+          if (this.$generation !== generation) {
+            return;
+          }
         }
 
         dispatchEvent(s, this, s.httpStatus(status, redirected));
@@ -119,7 +138,20 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
           return;
         }
 
-        dispatchEvent(s, this, s.event("complete"));
+        dispatchEvent(
+          s,
+          this,
+          error && !errorsComplete
+            ? (s.rt.construct(
+                s.rt.classNamed("flash.events::IOErrorEvent"),
+                "ioError",
+                false,
+                false,
+                s.loads.streamError(url, local),
+                2032,
+              ) as AsObject)
+            : s.event("complete"),
+        );
       });
     }
 

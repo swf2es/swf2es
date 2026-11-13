@@ -758,6 +758,15 @@ check("an AIR application finds what it wrote and kept when it plays again", asy
   assert.ok(r.traces.includes("air: items 1"), r.traces.join("\n"));
   assert.ok(r.traces.includes("air: saved 1"), r.traces.join("\n"));
   assert.ok(r.traces.includes("air: storage 2"), r.traces.join("\n"));
+  // With the network this time: the server's 404 and its body, as AIR gives an application an
+  // error's response, a load that completes where it listens for the response and fails without.
+  for (const line of [
+    "air: gone status 404",
+    "air: gone not found",
+    "air: gone unheard refused not found",
+  ]) {
+    assert.ok(r.traces.includes(line), `${line}\n${r.traces.join("\n")}`);
+  }
   assert.equal(r.exit, 3);
 });
 
@@ -774,6 +783,8 @@ check("a SWF that names AIR's classes plays alone as an AIR application", async 
     "alone: title air-alone",
     "alone: listing air-alone.swf",
     "alone: beside hello from beside it",
+    // The server's 404 for a file of its own is no file, not that error's body.
+    "alone: no file refused ",
   ]);
   assert.equal(r.exit, 5);
 });

@@ -49,6 +49,7 @@ export function shellFetch(
         headers: request.headers.map(([name, value]) => [name, value]),
         body: request.body,
         purpose: request.purpose ?? "data",
+        ...(request.errorBody ? { errorBody: true } : {}),
       },
       (abort) => signal.addEventListener("abort", abort, { once: true }),
     );

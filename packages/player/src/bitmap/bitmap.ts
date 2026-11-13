@@ -653,9 +653,10 @@ export class BitmapStore {
       return out;
     }
 
+    const pixels = this.readable;
     for (let y = c.y; y < c.y + c.height; y++) {
-      for (let x = c.x; x < c.x + c.width; x++) {
-        out.push(this.unmultiplied(this.readable[y * this.width + x]));
+      for (let i = y * this.width + c.x, end = i + c.width; i < end; i++) {
+        out.push(this.unmultiplied(pixels[i]));
       }
     }
 
@@ -691,15 +692,43 @@ export class BitmapStore {
     }
 
     // As many as there are values, row by row; the rest stay.
+    const pixels = this.pixels;
+    const count = Math.min(values.length, c.width * c.height);
+    const opaque = this.transparent ? 0 : 0xff000000;
     let k = 0;
-    for (let y = c.y; y < c.y + c.height && k < values.length; y++) {
-      for (let x = c.x; x < c.x + c.width && k < values.length; x++) {
-        this.pixels[y * this.width + x] = this.premultiplied(values[k++] >>> 0);
+    for (let row = c.y * this.width + c.x; k < count; row += this.width) {
+      const end = Math.min(c.width, count - k);
+      for (let x = 0; x < end; x++) {
+        pixels[row + x] = premultiply((values[k++] | opaque) >>> 0);
       }
     }
 
     this.changed();
     return k;
+  }
+
+  /**
+   * The rect's first `count` pixels, row by row, set from unmultiplied ARGB
+   * words in `view` from `at`, in the byte order given: setPixels' read of
+   * a ByteArray, with no array of the values between.
+   */
+  setWords(r: PixelRect, view: DataView, at: number, count: number, littleEndian: boolean): void {
+    const c = this.clip(r);
+    if (!c) {
+      return;
+    }
+
+    const pixels = this.pixels;
+    const opaque = this.transparent ? 0 : 0xff000000;
+    let k = 0;
+    for (let row = c.y * this.width + c.x; k < count; row += this.width) {
+      const end = Math.min(c.width, count - k);
+      for (let x = 0; x < end; x++, k++, at += 4) {
+        pixels[row + x] = premultiply((view.getUint32(at, littleEndian) | opaque) >>> 0);
+      }
+    }
+
+    this.changed();
   }
 
   clone(): BitmapStore {

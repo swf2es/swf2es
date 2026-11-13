@@ -59,6 +59,12 @@ export interface NetRequest {
   headers: [string, string][];
   body: Uint8Array | null;
   purpose: Purpose;
+  /**
+   * Whether the body of a response whose status is 400 or more is read
+   * too, which an AIR application's URLLoader and URLStream complete
+   * with; only an application is given it.
+   */
+  errorBody?: boolean;
 }
 
 export interface NetResponse {
@@ -513,7 +519,15 @@ export class Network {
       throw new Refused("its headers are too long");
     }
 
-    return { url: target.href, target, method, headers, body, purpose };
+    return {
+      url: target.href,
+      target,
+      method,
+      headers,
+      body,
+      purpose,
+      ...(r.errorBody === true ? { errorBody: true } : {}),
+    };
   }
 
   /** Wait for a turn among the requests under way: at most `concurrent` at once. */
@@ -692,6 +706,8 @@ export class Network {
       const response = await this.send(url, target.address, method, headers, body, signal, {
         // sendToURL's answer is no one's to read.
         read: request.purpose !== "send",
+        // In AIR's application sandbox alone: Flash Player's fail such a load, with no data.
+        errorBody: application && request.errorBody === true,
         max: this.limits.response,
         budget,
         referer: refererFor(session.origin?.url ?? null, url),
@@ -903,7 +919,8 @@ export class Network {
   /**
    * One HTTP exchange with `address`, the URL's host pinned to it: its
    * status and headers, and its body if `read` and the status is a
-   * success, up to `max` bytes. No cookies, no credentials, no
+   * success, or an error whose body was asked for (`errorBody`), up to
+   * `max` bytes. No cookies, no credentials, no
    * compression asked for, no connection kept.
    */
   private send(
@@ -915,6 +932,8 @@ export class Network {
     signal: AbortSignal,
     options: {
       read: boolean;
+      /** Whether a response whose status is 400 or more is read too. */
+      errorBody?: boolean;
       max: number;
       referer: string | null;
       timeout?: number;
@@ -1033,7 +1052,7 @@ export class Network {
           }
         }
 
-        const ok = status >= 200 && status < 300;
+        const wanted = (status >= 200 && status < 300) || (!!options.errorBody && status >= 400);
         const end = (bytes: Uint8Array | null) => {
           if (!finished) {
             finished = true;
@@ -1044,7 +1063,7 @@ export class Network {
             answer({ bytes, status, headers: received });
           }
         };
-        if (!ok || !options.read) {
+        if (!wanted || !options.read) {
           end(null);
           return;
         }

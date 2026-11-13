@@ -282,9 +282,12 @@ function fetchFor(
       return fetchOf(request, signal);
     }
 
-    // A file the application does not hold, from the directory it came from.
+    // A file the application does not hold, from the directory it came from: one the server
+    // has none of is a file that is not there, not its error's body.
     const remote = local.bytes ? null : app.remote(request.url);
-    return remote ? fetchOf({ ...request, url: remote }, signal) : Promise.resolve(local);
+    return remote
+      ? fetchOf({ ...request, url: remote, errorBody: false }, signal)
+      : Promise.resolve(local);
   };
 }
 
@@ -301,8 +304,10 @@ async function browserFetch(request: FetchRequest, signal: AbortSignal): Promise
     headers.push([name, value]);
   });
 
+  // An error's body only where it is asked for, as an AIR application's URLLoader reads it.
+  const read = response.ok || (!!request.errorBody && response.status >= 400);
   return {
-    bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
+    bytes: read ? new Uint8Array(await response.arrayBuffer()) : null,
     status: response.status,
     headers,
     // Where a redirect took it: the SWF is judged and named by that.
