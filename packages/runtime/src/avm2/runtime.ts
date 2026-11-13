@@ -2521,7 +2521,6 @@ export class Runtime {
     return this.array(values);
   }
 
-  /** An Array holding `values`. */
   /**
    * Give `o`, which has elements, the storage `elements` in place of its
    * own, so that a for-in under way over it goes on over them.
@@ -2531,6 +2530,7 @@ export class Runtime {
     forgetStep(o);
   }
 
+  /** An Array holding `values`. */
   array(values: Value[]): AsObject {
     const o = (this.arrayTraits ?? this.builtinTraits("Array")).instance();
     o.$a = values;
