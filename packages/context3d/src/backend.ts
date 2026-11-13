@@ -64,6 +64,77 @@ export type SamplerMip = (typeof SAMPLER_MIPS)[number];
 export const TEXTURE_FORMATS = ["bgra", "compressed", "compressedAlpha"] as const;
 export type TextureFormat = (typeof TEXTURE_FORMATS)[number];
 
+/** Stage3D's profiles, from what the least GPU does to the most. */
+export const PROFILES = [
+  "baselineConstrained",
+  "baseline",
+  "baselineExtended",
+  "standardConstrained",
+  "standard",
+  "standardExtended",
+] as const;
+export type Profile = (typeof PROFILES)[number];
+
+/** What a profile allows, as AIR 51 grants it on a desktop GPU (docs/architecture/rendering.md). */
+export interface ProfileLimits {
+  /** The newest AGAL version its programs may be. */
+  readonly agal: number;
+  /** The widest and tallest Texture. */
+  readonly textureSize: number;
+  /** The widest and tallest RectangleTexture, 0 where the profile has none. */
+  readonly rectangleSize: number;
+  /** Whether it creates rgbaHalfFloat textures. */
+  readonly halfFloat: boolean;
+  /** How many textures a draw renders into at once. */
+  readonly colorOutputs: number;
+}
+
+const LIMITS: Record<Profile, ProfileLimits> = {
+  baselineConstrained: {
+    agal: 1,
+    textureSize: 2048,
+    rectangleSize: 0,
+    halfFloat: false,
+    colorOutputs: 1,
+  },
+  baseline: { agal: 1, textureSize: 2048, rectangleSize: 2048, halfFloat: false, colorOutputs: 1 },
+  baselineExtended: {
+    agal: 1,
+    textureSize: 4096,
+    rectangleSize: 4096,
+    halfFloat: false,
+    colorOutputs: 1,
+  },
+  standardConstrained: {
+    agal: 2,
+    textureSize: 4096,
+    rectangleSize: 4096,
+    halfFloat: true,
+    colorOutputs: 1,
+  },
+  standard: { agal: 2, textureSize: 4096, rectangleSize: 4096, halfFloat: true, colorOutputs: 4 },
+  standardExtended: {
+    agal: 3,
+    textureSize: 4096,
+    rectangleSize: 4096,
+    halfFloat: true,
+    colorOutputs: 4,
+  },
+};
+
+export function profileLimits(profile: Profile): ProfileLimits {
+  return LIMITS[profile];
+}
+
+/** Cube faces are at most this wide in every profile. */
+export const MOST_CUBE = 1024;
+
+/** Sampler, vertex attribute and constant registers a context holds in every profile. */
+export const SAMPLER_SLOTS = 16;
+export const VERTEX_SLOTS = 16;
+export const VERTEX_CONSTANTS = 250;
+export const FRAGMENT_CONSTANTS = 200;
+
 export const VERTEX_FORMATS = ["float1", "float2", "float3", "float4", "bytes4"] as const;
 export type VertexFormat = (typeof VERTEX_FORMATS)[number];
 
@@ -107,6 +178,8 @@ export interface Buffer3D {
 }
 
 export interface Program3D {
+  /** The vertex attributes it reads, a bit each; 0 before an upload. */
+  readonly attributes: number;
   upload(vertex: Uint8Array, fragment: Uint8Array): void;
   dispose(): void;
 }
@@ -161,6 +234,8 @@ export interface Context3D {
    * format (TextureBindingError "format"): AIR checks from SWF 17 on.
    */
   samplerFormats: boolean;
+  /** The profile it was made for: what its programs, textures and targets may be. */
+  profile: Profile;
   /** Optional acceleration for pixels uploaded to compressed textures. */
   setDxtEncoder?(encoder: DxtEncoder): void;
   /** Width and height from 32 to MOST_BACK_BUFFER. */

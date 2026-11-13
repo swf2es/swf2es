@@ -3,9 +3,12 @@ import {
   type Context3D,
   Context3DError,
   MOST_BACK_BUFFER,
+  type Profile,
   type Program3D,
+  SAMPLER_SLOTS,
   type Stage3DHost,
   type Texture3D,
+  VERTEX_SLOTS,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../as3/types.js";
@@ -31,7 +34,7 @@ export interface ContextState {
   backend: Context3D;
   slot: AsObject;
   /** The profile it was made for, as Context3D.profile reads it. */
-  profile: string;
+  profile: Profile;
   cleared: number;
   depth: boolean;
   aa: number;
@@ -57,7 +60,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
   const slots = new WeakMap<AsObject, AsObject>();
   const pending = new WeakSet<AsObject>();
   // The profile each slot last asked for, which a context restored after a loss keeps.
-  const profiles = new WeakMap<AsObject, string>();
+  const profiles = new WeakMap<AsObject, Profile>();
   const generations = new WeakMap<AsObject, object>();
   const lost = new Map<AsObject, object>();
   const contexts = new Map<AsObject, ContextState>();
@@ -131,7 +134,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       return;
     }
 
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < owner.vertices.length; i++) {
       if (owner.vertices[i] === object) {
         owner.vertices[i] = null;
       }
@@ -279,7 +282,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       }
     });
   };
-  const request = (slot: AsObject, profile = profiles.get(slot) ?? "baseline"): void => {
+  const request = (slot: AsObject, profile: Profile = profiles.get(slot) ?? "baseline"): void => {
     if (pending.has(slot) || lost.has(slot)) {
       return;
     }
@@ -343,6 +346,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       }
       // Older content reads a compressed texture with any sampler, as AIR lets it.
       backend.samplerFormats = s.rt.swfVersion >= 17;
+      backend.profile = profiles.get(slot) ?? "baseline";
       backend.setDxtEncoder?.(encodeDxt);
       let object: AsObject;
       try {
@@ -367,8 +371,8 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         targetObject: null,
         compressedTarget: false,
         program: null,
-        vertices: new Array(8).fill(null),
-        textures: new Array(8).fill(null),
+        vertices: new Array(VERTEX_SLOTS).fill(null),
+        textures: new Array(SAMPLER_SLOTS).fill(null),
         resources: new Set(),
       });
       slots.set(slot, object);

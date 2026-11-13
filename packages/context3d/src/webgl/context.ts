@@ -5,10 +5,15 @@ import {
   type CompareMode,
   type Context3D,
   type CullFace,
+  FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
+  MOST_CUBE,
+  type Profile,
   type Program3D,
+  profileLimits,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
+  SAMPLER_SLOTS,
   SAMPLER_WRAPS,
   type SamplerFilter,
   type SamplerMip,
@@ -18,7 +23,9 @@ import {
   type Texture3D,
   TextureBindingError,
   type TextureFormat,
+  VERTEX_CONSTANTS,
   VERTEX_FORMATS,
+  VERTEX_SLOTS,
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
@@ -104,6 +111,7 @@ export class WebGLContext3D implements Context3D {
   private gpuMost: Int32Array | null = null;
   disposed = false;
   samplerFormats = true;
+  profile: Profile = "baseline";
   private readonly buffers = new Map<Buffer3D, BufferState>();
   private vertexBuffers = 0;
   private bufferBytes = 0;
@@ -122,7 +130,7 @@ export class WebGLContext3D implements Context3D {
   private renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
-  private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
+  private readonly textureSlots: (Texture3D | null)[] = new Array(SAMPLER_SLOTS).fill(null);
   private textureMask = 0;
   private readonly samplers: (WebGLSampler | null)[] = new Array(96).fill(null);
   // Two wrap bits, three filter bits and two mip bits fit each slot in one byte.
@@ -130,10 +138,10 @@ export class WebGLContext3D implements Context3D {
   private anisotropy: EXT_texture_filter_anisotropic | null | undefined;
   private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
-  private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
+  private readonly vertices: (VertexBinding | null)[] = new Array(VERTEX_SLOTS).fill(null);
   private enabledAttributes = 0;
   private indexBuffer: WebGLBuffer | null = null;
-  private readonly texturesApplied = new Uint8Array(8);
+  private readonly texturesApplied = new Uint8Array(SAMPLER_SLOTS);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
@@ -161,8 +169,8 @@ export class WebGLContext3D implements Context3D {
   private scissorRight = 0;
   private scissorBottom = 0;
   private scissorOutside = false;
-  private readonly vertexConstants = constants(128);
-  private readonly fragmentConstants = constants(28);
+  private readonly vertexConstants = constants(VERTEX_CONSTANTS);
+  private readonly fragmentConstants = constants(FRAGMENT_CONSTANTS);
   private pixels = new Uint8Array(0);
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
@@ -872,6 +880,9 @@ export class WebGLContext3D implements Context3D {
       vertexVersion: -1,
     };
     const program: Program3D = {
+      get attributes() {
+        return state.attributeMask;
+      },
       upload: (vertex, fragment) => {
         this.alive();
         this.program(program);
@@ -986,12 +997,14 @@ export class WebGLContext3D implements Context3D {
     format: TextureFormat,
   ): Texture3D {
     this.alive();
-    range(1, width - 1, 2048);
-    range(1, height - 1, 2048);
+    const limits = profileLimits(this.profile);
+    const most = rectangle ? limits.rectangleSize : limits.textureSize;
+    range(1, width - 1, most);
+    range(1, height - 1, most);
     if (cube && width !== height) {
       throw new Context3DError("textureShape", "Context3D cube faces must be square");
     }
-    if (cube && width > 1024) {
+    if (cube && width > MOST_CUBE) {
       throw new Context3DError("textureSize", "Context3D cube faces must be at most 1024");
     }
 
@@ -1586,7 +1599,7 @@ export class WebGLContext3D implements Context3D {
 
   setTexture(index: number, texture: Texture3D | null): void {
     this.alive();
-    range(index, 1, 8);
+    range(index, 1, SAMPLER_SLOTS);
     if (texture && !this.textureOwners.has(texture)) {
       throw new Context3DError("disposed", "Context3D experiment: texture from another context");
     }
@@ -1699,7 +1712,7 @@ export class WebGLContext3D implements Context3D {
 
   setVertex(index: number, buffer: Buffer3D | null, offset: number, format: VertexFormat): void {
     this.alive();
-    range(index, 1, 8);
+    range(index, 1, VERTEX_SLOTS);
     if (buffer === null) {
       this.vertices[index] = null;
       return;
@@ -1822,7 +1835,7 @@ export class WebGLContext3D implements Context3D {
 
     const gl = this.gl;
     this.drawState.bindVertexArray(this.vao);
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < VERTEX_SLOTS; i++) {
       const bit = 1 << i;
       if (this.enabledAttributes & bit & ~state.attributeMask) {
         gl.disableVertexAttribArray(i);
@@ -1931,7 +1944,8 @@ export class WebGLContext3D implements Context3D {
 
     if (state.vertexBank) {
       if (this.vertexConstants.writing || state.vertexVersion !== this.vertexConstants.version) {
-        gl.uniform4fv(state.vertexBank, this.vertexConstants.data);
+        // AGAL 1's bank: the first 128 of the context's constants.
+        gl.uniform4fv(state.vertexBank, this.vertexConstants.data, 0, 128 * 4);
         state.vertexVersion = this.vertexConstants.version;
       }
     } else {

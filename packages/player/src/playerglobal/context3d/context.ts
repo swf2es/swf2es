@@ -5,9 +5,13 @@ import {
   type CompareMode,
   CULL_FACES,
   type CullFace,
+  FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
+  MOST_CUBE,
+  profileLimits,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
+  SAMPLER_SLOTS,
   SAMPLER_WRAPS,
   type SamplerFilter,
   type SamplerMip,
@@ -17,7 +21,9 @@ import {
   type StencilAction,
   TextureBindingError,
   type TextureFormat,
+  VERTEX_CONSTANTS,
   VERTEX_FORMATS,
+  VERTEX_SLOTS,
   type VertexFormat,
   VertexOffsetError,
 } from "@swf2es/context3d";
@@ -271,8 +277,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       _target: boolean,
       levels = 0,
     ): AsObject {
-      const backend = context(this as unknown as AsObject);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
       const compressed = textureFormat(format);
+      const most = profileLimits(entry.profile).textureSize;
+      if (width > most || height > most) {
+        throw s.rt.error("ArgumentError", 3683, most);
+      }
       if (levels !== 0) {
         unsupported(`createTexture's streamingLevels ${levels}`);
       }
@@ -301,7 +312,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       format: string | null,
       _target: boolean,
     ): AsObject {
-      const backend = context(this as unknown as AsObject);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      // baselineConstrained has none.
+      const most = profileLimits(entry.profile).rectangleSize;
+      if (!most) {
+        throw s.rt.error("Error", 3782);
+      }
       if (format === null) {
         throw s.rt.error("TypeError", 2007, "format");
       }
@@ -319,8 +336,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (width <= 0 || height <= 0) {
         throw s.rt.error("ArgumentError", 3681);
       }
-      if (width > 2048 || height > 2048) {
-        throw s.rt.error("ArgumentError", 3766);
+      if (width > most || height > most) {
+        throw s.rt.error("ArgumentError", 3766, most);
       }
       if (format === "compressed" || format === "compressedAlpha") {
         throw s.rt.error("ArgumentError", 3762);
@@ -348,8 +365,12 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     }
 
     createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
-      const backend = context(this as unknown as AsObject);
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
       const compressed = textureFormat(format);
+      if (size > MOST_CUBE) {
+        throw s.rt.error("ArgumentError", 3705);
+      }
       if (levels !== 0) {
         unsupported(`createCubeTexture's streamingLevels ${levels}`);
       }
@@ -408,6 +429,9 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
     setTextureAt(index: number, object: AsObject | null): void {
       const entry = state(this as unknown as AsObject);
+      if (index < 0 || index >= SAMPLER_SLOTS) {
+        throw s.rt.error("RangeError", 2006);
+      }
       if (object && !textures.has(object)) {
         // An AS3-created TextureBase has no native resource and leaves this slot intact.
         const previous = entry.textures[index];
@@ -486,8 +510,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         throw s.rt.error("RangeError", 2006);
       }
 
-      if (index >= 8) {
-        unsupported(`vertex buffer index ${index}`);
+      if (index >= VERTEX_SLOTS) {
+        throw s.rt.error("RangeError", 2006);
       }
 
       if (!backend) {
@@ -503,13 +527,18 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         unsupported(`program constants of type "${type}"`);
       }
 
+      const backend = context(this as unknown as AsObject);
       const data: number[] = values.$a;
-      context(this as unknown as AsObject).setConstants(
-        type,
-        first,
-        data,
-        count === -1 ? Math.floor(data.length / 4) : count,
-      );
+      const registers = count === -1 ? Math.floor(data.length / 4) : count;
+      // Every profile has 250 vertex and 200 fragment constants, whatever its AGAL reads.
+      if (
+        first < 0 ||
+        first + registers > (type === "vertex" ? VERTEX_CONSTANTS : FRAGMENT_CONSTANTS)
+      ) {
+        throw s.rt.error("RangeError", 2006);
+      }
+
+      backend.setConstants(type, first, data, registers);
     }
 
     setProgramConstantsFromMatrix(
@@ -641,8 +670,16 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         if (entry.compressedTarget) {
           throw s.rt.error("Error", 3746);
         }
+        const drawn = entry.program && programs.get(entry.program);
         if (this.$checking) {
           requireClear(entry);
+          // Every stream bound is one the program reads.
+          const read = drawn && !drawn.disposed ? drawn.value.attributes : -1;
+          for (let i = 0; i < entry.vertices.length; i++) {
+            if (entry.vertices[i] && !(read & (1 << i))) {
+              throw s.rt.error("Error", 3607, i);
+            }
+          }
         }
 
         entry.backend.draw(buffer(object), first, count);
