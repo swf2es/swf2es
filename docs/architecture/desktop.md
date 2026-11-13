@@ -439,6 +439,8 @@ application also goes full screen from its InvokeEvent, with no gesture:
 the window is in full screen as the main process has it, the source rect
 alone drawn, and Esc leaves, as the stage traces. Headless, no window
 manager resizes the window, so that it covers a screen is not checked.
+A URL answered 404 completes for the application, with the response's
+body, and fails for the remote SWF.
 `connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and the sandbox's grants in
 node, `websocket-connections.test.ts` the WebSockets' messages, close

@@ -22,6 +22,8 @@ package flash.net
 		private var _stream:URLStream;
 		// From load until its stream completes or fails: its bytes may not have come yet.
 		private var _loading:Boolean;
+		// Whether the stream's httpResponseStatus is listened for, to dispatch it again.
+		private var _responseStatus:Boolean;
 
 		public function URLLoader(request:URLRequest = null)
 		{
@@ -29,7 +31,6 @@ package flash.net
 			_stream.addEventListener(Event.OPEN, forward);
 			_stream.addEventListener(ProgressEvent.PROGRESS, progress);
 			_stream.addEventListener(HTTPStatusEvent.HTTP_STATUS, forward);
-			_stream.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, forward);
 			_stream.addEventListener(IOErrorEvent.IO_ERROR, failed);
 			_stream.addEventListener(SecurityErrorEvent.SECURITY_ERROR, forward);
 			_stream.addEventListener(Event.COMPLETE, complete);
@@ -42,6 +43,14 @@ package flash.net
 		override public function addEventListener(type:String, listener:Function, useCapture:Boolean = false, priority:int = 0, useWeakReference:Boolean = false):void
 		{
 			super.addEventListener(type, listener, useCapture, priority, useWeakReference);
+			// The stream is listened to for it only once the loader is, and from then on, as in
+			// AIR: a load whose stream has the listener completes on an HTTP error, where another
+			// fails (URLStream.ts), and a listener removed again leaves the stream's.
+			if (type == HTTPStatusEvent.HTTP_RESPONSE_STATUS && !_responseStatus)
+			{
+				_responseStatus = true;
+				_stream.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, forward);
+			}
 		}
 
 		public function load(request:URLRequest):void
@@ -80,7 +89,8 @@ package flash.net
 			dispatchEvent(event);
 		}
 
-		// A failed load's data is what it delivered, nothing, as Flash's reads after one.
+		// A failed load's data is what it delivered: nothing, as Flash's reads after one; the
+		// body of a response that told an HTTP error in an AIR application.
 		private function failed(event:IOErrorEvent):void
 		{
 			_loading = false;

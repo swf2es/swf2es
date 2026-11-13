@@ -306,7 +306,11 @@ export interface Drawer {
   ): boolean;
 }
 
-/** A host request's bytes and transport result; a local file reports status 0. */
+/**
+ * A host request's bytes and transport result; a local file reports status
+ * 0. No bytes is a failed load: nothing answered, or its status told an
+ * error and the request did not ask for such a response's body (`errorBody`).
+ */
 export interface FetchResult {
   bytes: Uint8Array | null;
   status: number;
@@ -335,6 +339,14 @@ export interface FetchRequest {
   body: Uint8Array | null;
   /** What it is for, for a host that judges requests as Flash did; a browser's fetch ignores it. */
   purpose?: FetchPurpose;
+  /**
+   * Whether the body of a response that tells an HTTP error (a status of
+   * 400 or more) is wanted, as the result's bytes: an AIR application's
+   * URLLoader and URLStream read it and complete, where Flash Player's
+   * fail. Without it, and from a host that does not know it, such a
+   * response has no bytes.
+   */
+  errorBody?: boolean;
 }
 
 /** A TCP connection supplied by the embedding host. */

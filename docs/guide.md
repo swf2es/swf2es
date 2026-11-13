@@ -412,6 +412,13 @@ The element is its one window, at the descriptor's size, and
 `flash.display.Screen` has the one screen the page is on (`window.screen`);
 the play page opens `.air` and `.zip` files too.
 
+A `URLLoader` or `URLStream` whose response tells an HTTP error (404, 500)
+gets the response's body in an AIR application, here and in the desktop
+app, as in AIR: with a listener for `httpResponseStatus` added before
+`load`, the load completes, the body its `data`; without one it ends in
+`ioError`, the body in `data` all the same. A SWF that is no AIR
+application gets `ioError` and no data, as in Flash Player.
+
 A SWF played on its own that names a class only AIR has, such as
 `NativeApplication` or `File`, plays as an AIR application too: the
 browser's Flash Player would refuse it (VerifyError #1014). Its directory

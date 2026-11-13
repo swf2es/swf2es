@@ -4,7 +4,11 @@
 // and an upload, with the URL redirects led to and the headers as
 // URLRequestHeaders; httpStatus after the bytes, with `redirected` alone;
 // neither a file, a failed connection nor a Loader has the former, and
-// Flash Player none at all.
+// Flash Player none at all. A response that tells an HTTP error has its
+// body there, the loader's data and the stream's bytes, an empty one with
+// no progress, and completes where httpResponseStatus was listened for as
+// the load was asked for, else fails with the body still there; in Flash
+// Player it fails, ioError and no data.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
@@ -60,6 +64,14 @@ ${
         ["loader 200", function():void { urlLoader("http://example.test/ok"); }],
         ["loader redirect", function():void { urlLoader("http://example.test/redirect"); }],
         ["loader 404", function():void { urlLoader("http://example.test/missing"); }],
+        ["loader 404 post", function():void { urlLoader("http://example.test/missing", "POST"); }],
+        ["loader 404 binary", function():void { urlLoader("http://example.test/missing", "GET", "binary"); }],
+        ["loader 500 empty", function():void { urlLoader("http://example.test/broken"); }],
+        ["stream 404", function():void { urlStream("http://example.test/missing"); }],
+        ["loader 404 unheard", function():void { urlLoader("http://example.test/missing", "GET", "text", "never"); }],
+        ["loader 404 heard late", function():void { urlLoader("http://example.test/missing", "GET", "text", "after"); }],
+        ["loader 404 heard once", function():void { urlLoader("http://example.test/missing", "GET", "text", "removed"); }],
+        ["stream 404 unheard", function():void { urlStream("http://example.test/missing", false); }],
         ["loader dead", function():void { urlLoader("http://example.test/dead"); }],
         ["loader file", function():void { urlLoader("app:/data.txt"); }],
         ["stream redirect", function():void { urlStream("http://example.test/redirect"); }],
@@ -101,10 +113,12 @@ ${
       trace("  " + line);
     }
 
-    private function listen(d:IEventDispatcher, ends:Array = null):void {
+    private function listen(d:IEventDispatcher, ends:Array = null, response:Boolean = true):void {
       keep.push(d);
       for each (var type:String in ["open", "progress", "httpStatus", "httpResponseStatus", "complete", "ioError", "init", "uploadCompleteData", "select"]) {
-        d.addEventListener(type, show);
+        if (response || type != "httpResponseStatus") {
+          d.addEventListener(type, show);
+        }
       }
 
       // Each step's last event; a higher priority would run before it is shown.
@@ -113,16 +127,40 @@ ${
       }
     }
 
-    private function urlLoader(url:String):void {
+    // heard: when httpResponseStatus is listened for: "before" the load, "after" it, "never",
+    // or "removed", before it and no longer.
+    private function urlLoader(url:String, method:String = "GET", format:String = "text", heard:String = "before"):void {
       var loader:URLLoader = new URLLoader();
-      listen(loader);
-      loader.addEventListener("httpResponseStatus", function(e:Event):void { trace("  target " + (e.target == loader)); });
-      loader.load(new URLRequest(url));
+      loader.dataFormat = format;
+      listen(loader, null, heard == "before");
+      var target:Function = function(e:Event):void { trace("  target " + (e.target == loader)); };
+      if (heard == "before" || heard == "removed") {
+        loader.addEventListener("httpResponseStatus", target);
+      }
+
+      if (heard == "removed") {
+        loader.removeEventListener("httpResponseStatus", target);
+      }
+      loader.addEventListener("progress", function(e:ProgressEvent):void { trace("  loaded " + e.bytesLoaded + " " + e.bytesTotal); });
+      loader.addEventListener("complete", function(e:Event):void { trace("  data [" + loader.data + "] " + loader.bytesLoaded); });
+      loader.addEventListener("ioError", function(e:Event):void { trace("  failed [" + loader.data + "] " + loader.bytesLoaded); });
+      var request:URLRequest = new URLRequest(url);
+      request.method = method;
+      if (method == "POST") {
+        request.data = "a=1";
+      }
+
+      loader.load(request);
+      if (heard == "after") {
+        loader.addEventListener("httpResponseStatus", target);
+      }
     }
 
-    private function urlStream(url:String):void {
+    private function urlStream(url:String, response:Boolean = true):void {
       var stream:URLStream = new URLStream();
-      listen(stream);
+      listen(stream, null, response);
+      stream.addEventListener("complete", function(e:Event):void { trace("  bytes [" + stream.readUTFBytes(stream.bytesAvailable) + "]"); });
+      stream.addEventListener("ioError", function(e:Event):void { trace("  failed [" + stream.readUTFBytes(stream.bytesAvailable) + "] " + stream.connected); });
       stream.load(new URLRequest(url));
     }
 
@@ -142,7 +180,11 @@ const headers: [string, string][] = [
   ["X-Dup", "2"],
 ];
 
+/** What the host was asked for, and whether an error's body with it. */
+const asked: string[] = [];
+
 async function play(air: boolean): Promise<string[]> {
+  asked.length = 0;
   const compile = compiler(out);
   const child = innerSwf(
     compile(
@@ -164,7 +206,10 @@ async function play(air: boolean): Promise<string[]> {
       ],
       save: async () => null,
     },
-    fetch: async ({ url }: FetchRequest): Promise<FetchResult> => {
+    fetch: async ({ url, method, purpose, errorBody }: FetchRequest): Promise<FetchResult> => {
+      asked.push(
+        `${method} ${url.replace("http://example.test", "")} ${purpose} ${errorBody ?? false}`,
+      );
       switch (url) {
         case "http://example.test/ok":
           return { bytes: text("hello"), status: 200, headers };
@@ -173,7 +218,14 @@ async function play(air: boolean): Promise<string[]> {
         case "http://example.test/redirectswf":
           return { bytes: child, status: 200, headers, url: "http://example.test/swf" };
         case "http://example.test/missing":
-          return { bytes: null, status: 404, headers: [["X-Why", "gone"]] };
+          // As the hosts do: an error's body only where it was asked for.
+          return {
+            bytes: errorBody ? text("not found body") : null,
+            status: 404,
+            headers: [["X-Why", "gone"]],
+          };
+        case "http://example.test/broken":
+          return { bytes: errorBody ? new Uint8Array(0) : null, status: 500, headers: [] };
         case "app:/data.txt":
           // As the hosts answer for an application's own file.
           return { bytes: text("beside"), status: 200, headers: [] };
@@ -217,30 +269,90 @@ test("an AIR application gets httpResponseStatus before the bytes, as adl", { sk
     "== loader 200",
     response(200, false, "http://example.test/ok"),
     "  target true",
+    "  loaded 5 5",
     status(200),
     "  complete",
+    "  data [hello] 5",
     "== loader redirect",
     response(200, true, "http://example.test/ok"),
     "  target true",
+    "  loaded 5 5",
     status(200, true),
     "  complete",
-    // AIR goes on to complete with the response's body; the hosts give a failure's none.
+    "  data [hello] 5",
+    // An error completes for a loader that listened for the response before its load, its
+    // body the data: adl's order, for 400, 403, 404, 500 and 503.
     "== loader 404",
     response(404, false, "http://example.test/missing", "X-Why: gone"),
     "  target true",
+    "  loaded 14 14",
+    status(404),
+    "  complete",
+    "  data [not found body] 14",
+    "== loader 404 post",
+    response(404, false, "http://example.test/missing", "X-Why: gone"),
+    "  target true",
+    "  loaded 14 14",
+    status(404),
+    "  complete",
+    "  data [not found body] 14",
+    "== loader 404 binary",
+    response(404, false, "http://example.test/missing", "X-Why: gone"),
+    "  target true",
+    "  loaded 14 14",
+    status(404),
+    "  complete",
+    "  data [not found body] 14",
+    // No body, no progress.
+    "== loader 500 empty",
+    response(500, false, "http://example.test/broken", ""),
+    "  target true",
+    status(500),
+    "  complete",
+    "  data [] 0",
+    "== stream 404",
+    response(404, false, "http://example.test/missing", "X-Why: gone"),
+    status(404),
+    "  complete",
+    "  bytes [not found body]",
+    // With no such listener as the load is asked for it fails, the body there all the same.
+    "== loader 404 unheard",
+    "  loaded 14 14",
     status(404),
     "  ioError",
+    "  failed [not found body] 14",
+    // One added after hears the response, and the load fails as without it.
+    "== loader 404 heard late",
+    "  target true",
+    "  loaded 14 14",
+    status(404),
+    "  ioError",
+    "  failed [not found body] 14",
+    // One added and removed again hears nothing, and the load completes.
+    "== loader 404 heard once",
+    "  loaded 14 14",
+    status(404),
+    "  complete",
+    "  data [not found body] 14",
+    "== stream 404 unheard",
+    status(404),
+    "  ioError",
+    "  failed [not found body] true",
     "== loader dead",
     status(0),
     "  ioError",
+    "  failed [] 0",
     "== loader file",
     // The hosts' status for a file they read; adl's is 0.
+    "  loaded 6 6",
     status(200),
     "  complete",
+    "  data [beside] 6",
     "== stream redirect",
     response(200, true, "http://example.test/ok"),
     status(200, true),
     "  complete",
+    "  bytes [hello]",
     "== Loader redirect",
     status(200, true),
     "  complete",
@@ -255,6 +367,14 @@ test("an AIR application gets httpResponseStatus before the bytes, as adl", { sk
     "  ioError",
     "== done",
   ]);
+  // Its URLLoaders and URLStreams ask for an error's body; its Loader, which fails in AIR too, not.
+  assert.deepEqual(asked.slice(0, 3), [
+    "GET /ok data true",
+    "GET /redirect data true",
+    "GET /missing data true",
+  ]);
+  assert.ok(asked.includes("POST /missing data true"), asked.join("\n"));
+  assert.ok(asked.includes("GET /redirectswf content false"), asked.join("\n"));
 });
 
 test("Flash Player content gets httpStatus alone", { skip }, async () => {
@@ -265,10 +385,47 @@ test("Flash Player content gets httpStatus alone", { skip }, async () => {
     false,
     lines.join("\n"),
   );
-  assert.deepEqual(lines.slice(0, 4), [
+  assert.deepEqual(lines.slice(0, 6), [
     "== loader 200",
+    "  loaded 5 5",
     "  httpStatus 200",
     "  complete",
+    "  data [hello] 5",
     "== loader redirect",
   ]);
+  // An error fails, with no data, and no host is asked for its body.
+  const from = (step: string) => lines.slice(lines.indexOf(step), lines.indexOf(step) + 4);
+  assert.deepEqual(from("== loader 404"), [
+    "== loader 404",
+    "  httpStatus 404",
+    "  ioError",
+    "  failed [] 0",
+  ]);
+  assert.deepEqual(from("== loader 500 empty"), [
+    "== loader 500 empty",
+    "  httpStatus 500",
+    "  ioError",
+    "  failed [] 0",
+  ]);
+  assert.deepEqual(from("== loader 404 heard once"), [
+    "== loader 404 heard once",
+    "  httpStatus 404",
+    "  ioError",
+    "  failed [] 0",
+  ]);
+  assert.deepEqual(from("== stream 404 unheard"), [
+    "== stream 404 unheard",
+    "  httpStatus 404",
+    "  ioError",
+    "  failed [] false",
+  ]);
+  assert.deepEqual(from("== stream 404").slice(0, 3), [
+    "== stream 404",
+    "  httpStatus 404",
+    "  ioError",
+  ]);
+  assert.ok(
+    asked.every((line) => line.endsWith(" false")),
+    asked.join("\n"),
+  );
 });

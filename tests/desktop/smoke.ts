@@ -172,6 +172,8 @@ const airSource = `package {
         load("cased-file", new File(File.applicationDirectory.nativePath).resolvePath("maps/MEADOW/level.txt").url);
         if (e.arguments.length > 2) {
           load("http", e.arguments[2]);
+          // A response that tells an error completes in AIR, its body the data.
+          load("gone", e.arguments[2] + ".gone");
         }
         socket = new Socket();
         socket.addEventListener(Event.CONNECT, function (e:Event):void {
@@ -271,6 +273,8 @@ const remoteSource = `package {
       trace("remote: url " + loaderInfo.url);
       trace("remote: sandbox " + Security.sandboxType);
       load("same", "data.txt");
+      // A response that tells an error fails in Flash Player, its body unread.
+      load("gone", "gone.txt");
       load("allowed", p.allowed);
       load("denied", p.denied);
       load("file", p.file);
@@ -382,7 +386,7 @@ async function httpSite(files: Record<string, [type: string, body: string | Uint
     if (file) {
       response.writeHead(200, { "content-type": file[0] }).end(file[1]);
     } else {
-      response.writeHead(404).end();
+      response.writeHead(404, { "content-type": "text/plain" }).end("no such file");
     }
   });
   await new Promise<void>((done) => http.listen(0, "127.0.0.1", done));
@@ -475,13 +479,14 @@ async function remote(through: TestProxy | null = null, credentials = ""): Promi
     await withApp(settings, args, async ({ stdout, stderr, until, evaluate, page, userData }) => {
       const traced = (line: string) => stdout.filter((l) => l === line).length;
       const settled = (n: number) => () =>
-        ["same", "allowed", "denied", "file", "local", "socket-ok", "socket-no"].every(
+        ["same", "gone", "allowed", "denied", "file", "local", "socket-ok", "socket-no"].every(
           (what) => stdout.filter((l) => l.startsWith(`remote: ${what} `)).length >= n,
         );
       await until("the remote SWF", settled(1));
       assert.equal(traced(`remote: url ${url}`), 1);
       assert.equal(traced("remote: sandbox remote"), 1);
       assert.equal(traced("remote: same same"), 1);
+      assert.equal(traced("remote: gone refused"), 1);
       assert.equal(traced("remote: allowed allowed"), 1);
       assert.equal(traced("remote: denied refused"), 1);
       assert.equal(traced("remote: file refused"), 1);
@@ -786,6 +791,7 @@ async function air(): Promise<void> {
           "cased-file",
           "socket",
           "http served",
+          "gone ",
           "websocket close",
           ...(secure ? ["wss-address close", "wss-name"] : []),
         ].every((what) => stdout.some((l) => l.startsWith(`air: ${what}`)));
@@ -857,6 +863,9 @@ async function air(): Promise<void> {
         "air: cased-file level",
         "air: http status 200 false data.txt text/plain",
         "air: http served",
+        // Not "refused": an error's response completes for an application, as in adl.
+        "air: gone status 404 false data.txt.gone text/plain",
+        "air: gone no such file",
         "air: socket pong",
         // In full screen as its setter returns, the event before it, as in adl.
         "air: fullScreen true false fullScreenInteractive",
@@ -1000,6 +1009,7 @@ async function airThroughProxy(through: TestProxy, credentials = ""): Promise<vo
         const lines = [
           "air: socket pong",
           "air: http served",
+          "air: gone no such file",
           "air: websocket text pong",
           "air: websocket binary 3 255,2,1",
           "air: websocket close 4001",
@@ -1026,6 +1036,8 @@ async function airThroughProxy(through: TestProxy, credentials = ""): Promise<vo
             `swf2es: websocket #1 connecting to ws://127\\.0\\.0\\.1:${webSockets.port}/smoke\\?q=1 via proxy`,
           ),
         );
+        // --log-network: an error's body was read for the application, and its size is said.
+        assert.match(stderr(), /swf2es: net GET \S+\/data\.txt\.gone 404 12 B \d+ ms/);
       },
     );
   } finally {
