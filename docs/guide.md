@@ -380,6 +380,12 @@ Esc or F11 leaves. F11 is the View menu's key for it; a SWF or an
 application that acts on F11 itself, setting `Stage.displayState` in its
 `keyDown` listener, has the key to itself, and one press toggles once.
 
+A SWF gets a Context3D, as in Flash Player and AIR on a desktop: Stage3D
+content plays with nothing to set up. View › Stage3D (Experimental) turns
+it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
+not available", and on again; the app remembers the choice and restarts
+the movie playing.
+
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content
 made there finds its files whatever case it names them in. Where two names

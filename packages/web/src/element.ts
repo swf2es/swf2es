@@ -582,9 +582,11 @@ export class Swf2esPlayerElement extends ElementBase {
         (definesInput(swf) ||
           swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2));
       if (scripted) {
-        const [codegen, abcs] = await Promise.all([
+        const stage3D = configuration().stage3D;
+        const [codegen, abcs, stage3DModule] = await Promise.all([
           codegenForPlayer(),
           playerLibraries(session.air !== null || !!configuration().air),
+          stage3D ? import("./stage3d.js") : null,
         ]);
         if (!current()) {
           return;
@@ -598,15 +600,12 @@ export class Swf2esPlayerElement extends ElementBase {
 
         session.workers = host;
         session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
-        const stage3D = configuration().stage3D;
-        if (stage3D) {
-          const { Stage3DSession } = await import("./stage3d.js");
-          if (!current()) {
-            return;
-          }
-
-          session.stage3D = new Stage3DSession(this.#box, session.scripting, stage3D, () =>
-            session.playback?.invalidate(),
+        if (stage3D && stage3DModule) {
+          session.stage3D = new stage3DModule.Stage3DSession(
+            this.#box,
+            session.scripting,
+            stage3D,
+            () => session.playback?.invalidate(),
           );
         }
         await session.scripting.loadLibraries(abcs);
