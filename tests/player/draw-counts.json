@@ -54,5 +54,61 @@
     "bindVertexArray": 0,
     "bindFramebuffer": 0,
     "uniforms": 2
+  },
+  "crowd without multi-draw": {
+    "calls": 576,
+    "subDraws": 576,
+    "useProgram": 0,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 0,
+    "uniforms": 578
+  },
+  "bounce without multi-draw": {
+    "calls": 49.8,
+    "subDraws": 49.8,
+    "useProgram": 23.1,
+    "bindVertexArray": 10.9,
+    "bindFramebuffer": 23.67,
+    "uniforms": 201.87
+  },
+  "mixed-crowd without multi-draw": {
+    "calls": 108,
+    "subDraws": 108,
+    "useProgram": 0,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 0,
+    "uniforms": 110
+  },
+  "blend-mask without multi-draw": {
+    "calls": 34,
+    "subDraws": 34,
+    "useProgram": 14,
+    "bindVertexArray": 4,
+    "bindFramebuffer": 18,
+    "uniforms": 166
+  },
+  "blend-bitmaps without multi-draw": {
+    "calls": 24,
+    "subDraws": 24,
+    "useProgram": 2,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 45,
+    "uniforms": 146
+  },
+  "swap without multi-draw": {
+    "calls": 50.57,
+    "subDraws": 50.57,
+    "useProgram": 0,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 0,
+    "uniforms": 52.57
+  },
+  "counters without multi-draw": {
+    "calls": 40,
+    "subDraws": 40,
+    "useProgram": 0,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 0,
+    "uniforms": 42
   }
 }
