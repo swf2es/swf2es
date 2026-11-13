@@ -202,8 +202,14 @@ function uploadLevel(
     return;
   }
 
-  convertStaged(texture.format, state.bytes, w * h, raw);
-  const [layout, type, pixels] = stagedPixels(gl, texture.format, state.bytes, w * h);
+  // BGRA's staging is RGBA bytes already: no conversion and no views.
+  const bgra = texture.format === "bgra";
+  if (!bgra) {
+    convertStaged(texture.format, state.bytes, w * h, raw);
+  }
+  const [layout, type, pixels] = bgra
+    ? [gl.RGBA, gl.UNSIGNED_BYTE, state.bytes]
+    : stagedPixels(gl, texture.format, state.bytes, w * h);
   // 5:6:5's rows of three bytes need not be 4-byte aligned.
   if (texture.format === "bgrPacked565") {
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);

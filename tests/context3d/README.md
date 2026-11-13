@@ -1108,6 +1108,13 @@ and each conditional rule, the sampler flags, program lengths, two constants
 and indirect reads. Set `SWF2ES_ORACLE_VERBOSE=1` to have these fixtures trace
 AIR's messages too, into the oracle's `trace.log`.
 
+`run.ts --gpu` plays them on the machine's GPU (Vulkan ANGLE; `VK_DRIVER_FILES`
+picks the driver). On an Intel Iris Xe (Mesa) every fixture matches AIR's
+references; on an NVIDIA RTX 4060 every new fixture runs and checks, and the
+only differences, there as in dev's own Arithmetic, Texturing, ShaderMath and
+others, are channels a shader writes at exactly half way between bytes, which
+NVIDIA rounds down (0.5 to 127) where SwiftShader and AIR round up.
+
 `AGALStandard.as` draws them in `standardExtended`: each comparison at equal,
 lower and higher operands and at -0, branches over a varying, nested, with
 `kil` and `tex` inside, partial writes in both branches, `ddx` and `ddy` into

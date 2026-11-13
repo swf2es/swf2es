@@ -156,6 +156,8 @@ export class WebGLContext3D implements Context3D {
   private readonly outputs: (Texture3D | null)[] = [null, null, null];
   private readonly outputFaces = new Uint8Array(3);
   private outputsChanged = false;
+  /** Whether any of outputs is bound, so that a draw alone into its target looks at none. */
+  private outputsBound = false;
   private floatTargets: boolean | undefined;
   private readonly textureSlots: (Texture3D | null)[] = new Array(SAMPLER_SLOTS).fill(null);
   private textureMask = 0;
@@ -1240,6 +1242,7 @@ export class WebGLContext3D implements Context3D {
           if (this.outputs[i] === texture) {
             this.outputs[i] = null;
             this.outputsChanged = true;
+            this.outputsBound = this.outputMask() !== 0;
           }
         }
         for (let i = 0; i < this.textureSlots.length; i++) {
@@ -1585,7 +1588,7 @@ export class WebGLContext3D implements Context3D {
   }
 
   private changedTarget(): void {
-    for (let i = 0; i < this.outputs.length; i++) {
+    for (let i = 0; this.outputsBound && i < this.outputs.length; i++) {
       const output = this.outputs[i];
       if (output) {
         this.textureState(output).dirty = true;
@@ -1738,6 +1741,7 @@ export class WebGLContext3D implements Context3D {
     this.outputs[index - 1] = texture;
     this.outputFaces[index - 1] = texture ? face : 0;
     this.outputsChanged = true;
+    this.outputsBound = this.outputMask() !== 0;
   }
 
   /**
@@ -2023,13 +2027,14 @@ export class WebGLContext3D implements Context3D {
 
     const gl = this.gl;
     this.drawState.bindVertexArray(this.vao);
-    for (let i = 0; i < VERTEX_SLOTS; i++) {
-      const bit = 1 << i;
-      if (this.enabledAttributes & bit & ~state.attributeMask) {
-        gl.disableVertexAttribArray(i);
-        this.enabledAttributes &= ~bit;
-      }
+    // The streams enabled that the program does not read, highest first.
+    let stale = this.enabledAttributes & ~state.attributeMask;
+    while (stale) {
+      const i = 31 - Math.clz32(stale);
+      gl.disableVertexAttribArray(i);
+      stale &= ~(1 << i);
     }
+    this.enabledAttributes &= state.attributeMask;
 
     for (let i = 0; i < state.attributes.length; i++) {
       const slot = state.attributes[i];
@@ -2078,9 +2083,10 @@ export class WebGLContext3D implements Context3D {
       if (
         texture &&
         (texture === this.renderTexture ||
-          texture === this.outputs[0] ||
-          texture === this.outputs[1] ||
-          texture === this.outputs[2])
+          (this.outputsBound &&
+            (texture === this.outputs[0] ||
+              texture === this.outputs[1] ||
+              texture === this.outputs[2])))
       ) {
         throw new TextureBindingError("feedback");
       }
@@ -2153,7 +2159,9 @@ export class WebGLContext3D implements Context3D {
       }
     }
     // An indirect program's own uniforms are only the registers past its bank.
-    this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
+    if (state.vertex.length) {
+      this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
+    }
     this.uniforms(
       state.fragment,
       this.fragmentConstants,
