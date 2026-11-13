@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Context3DError, type ProgramType, SamplerBiasError, translate } from "@swf2es/context3d";
+import {
+  Context3DError,
+  type Profile,
+  type ProgramType,
+  SamplerBiasError,
+  translate,
+} from "@swf2es/context3d";
 
 function mov(fragment = false): Uint8Array {
   const bytes = new Uint8Array(31);
@@ -73,7 +79,6 @@ test("indirect sources reject unverified stages, offsets, register types and res
   translate(valid, "vertex");
   for (const [offset, value] of [
     [15, 8],
-    [17, 128],
     [19, 0],
     [19, 2],
     [20, 3],
@@ -191,10 +196,12 @@ function computation(bytes: Uint8Array, stage: ProgramType): Uint8Array {
   return initialized(program, stage);
 }
 
+/** `opcode` of va0 (v0 in a fragment program, which AIR refuses two constants) and vc/fc `first`. */
 function binary(opcode: number, first: number, fragment = false): Uint8Array {
   const bytes = mov(fragment);
   const view = new DataView(bytes.buffer);
   view.setUint32(7, opcode, true);
+  view.setUint32(19, fragment ? 4 : 0, true);
   view.setUint32(23, 0xe4000000 | first, true);
   view.setUint32(27, 1, true);
   return bytes;
@@ -225,7 +232,7 @@ test("pow raises the base's magnitude, as Direct3D's pow does", () => {
     bytes[13] = 7;
     const { source } = translate(computation(bytes, stage), stage);
     // GLSL's pow leaves a negative base undefined, and a GPU gives NaN.
-    assert.match(source, /= pow\(abs\((va|fc)0\.xyzw\), [vf]c27\.xyzw\)/);
+    assert.match(source, /= pow\(abs\((va|v)0\.xyzw\), [vf]c27\.xyzw\)/);
   }
 });
 
@@ -325,7 +332,7 @@ test("unsupported instruction layouts are not reported as malformed arithmetic",
   const view = new DataView(bytes.buffer);
   view.setUint32(7, 0xffff, true); // Unknown instructions may have no destination
   view.setUint32(11, 0, true);
-  assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL opcode/);
+  assert.throws(() => translate(bytes, "fragment"), /AGAL opcode/);
 });
 
 test("2D texture samplers preserve filtering/wrapping and reject unsupported encodings", () => {
@@ -334,30 +341,35 @@ test("2D texture samplers preserve filtering/wrapping and reject unsupported enc
   view.setUint32(7, 0x28, true);
   view.setUint32(23, 7, true);
   for (let filter = 0; filter < 6; filter++) {
-    for (const repeat of [false, true]) {
+    for (let wrap = 0; wrap < 4; wrap++) {
       for (let mip = 0; mip < 3; mip++) {
-        view.setUint32(27, 5 | (filter << 28) | (Number(repeat) << 20) | (mip << 24), true);
+        view.setUint32(27, 5 | (filter << 28) | (wrap << 20) | (mip << 24), true);
         const result = translate(bytes, "fragment");
         assert.deepEqual(result.samplers, [
-          { index: 7, format: 0, filter, repeat, mip, cube: false, ignore: false, bias: 0 },
+          { index: 7, format: 0, filter, wrap, mip, cube: false, ignore: false, bias: 0 },
         ]);
         assert.match(result.source, /uniform sampler2D fs7/);
         assert.match(result.source, /texture\(fs7, fc0\.xyzw\.xy\)/);
       }
     }
   }
-  for (const flags of [6, 0x305, 0xf05, 0x2005, 0x10005, 0x200005, 0x3000005, 0x4000005]) {
+  // Formats past DXT5 (video's, and others AIR takes) only fail where a texture is drawn.
+  for (const flags of [0x305, 0xf05]) {
     view.setUint32(27, flags, true);
-    assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
+    translate(bytes, "fragment");
+  }
+  for (const flags of [6, 0x2005, 0x10005, 0x20005, 0x80005, 0x400005, 0x3000005, 0x4000005]) {
+    view.setUint32(27, flags, true);
+    assert.throws(() => translate(bytes, "fragment"), /AGAL sampler/);
   }
   for (let filter = 6; filter < 16; filter++) {
     view.setUint32(27, 5 | (filter << 28), true);
-    assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
+    assert.throws(() => translate(bytes, "fragment"), /AGAL sampler filter/);
   }
   view.setUint32(27, 5, true);
   for (const index of [8, 0x1000000, 0xff000007]) {
     view.setUint32(23, index, true);
-    assert.throws(() => translate(bytes, "fragment"), /Unsupported AGAL sampler/);
+    assert.throws(() => translate(bytes, "fragment"), /AGAL sampler/);
   }
   view.setUint32(23, 0, true);
   bytes[6] = 0;
@@ -366,6 +378,7 @@ test("2D texture samplers preserve filtering/wrapping and reject unsupported enc
   const doubled = new Uint8Array(55);
   doubled.set(bytes);
   doubled.set(bytes.subarray(7), 31);
+  doubled[14] = 2;
   new DataView(doubled.buffer).setUint32(51, 0x10000005, true);
   assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
   new DataView(doubled.buffer).setUint32(51, 0x01000005, true);
@@ -436,7 +449,7 @@ test("discard validates its destination, stage, source and unused operand", () =
 });
 
 test("comparisons support both stages and validate the constant bank", () => {
-  for (const opcode of [0x29, 0x2a, 0x2c]) {
+  for (const opcode of [0x29, 0x2a, 0x2c, 0x2d]) {
     const bytes = binary(opcode, 127);
     const vertex = translate(bytes, "vertex");
     assert.deepEqual(vertex.constants, [127]);
@@ -448,9 +461,9 @@ test("comparisons support both stages and validate the constant bank", () => {
     assert.throws(() => translate(bytes, "vertex"), /constant/);
     const fragment = binary(opcode, 27, true);
     const result = translate(fragment, "fragment");
-    assert.deepEqual(result.constants, [0, 27]);
+    assert.deepEqual(result.constants, [27]);
     if (opcode === 0x2c) {
-      assert.match(result.source, /vec4\(equal\(fc0\.xyzw, fc27\.xyzw\)\)/);
+      assert.match(result.source, /vec4\(equal\(v0\.xyzw, fc27\.xyzw\)\)/);
     }
 
     fragment[23] = 28;
@@ -496,6 +509,7 @@ test("samplers read RGBA, DXT1 or DXT5, and a slot reads one", () => {
   view.setUint32(27, 0x105, true);
   doubled.set(bytes);
   doubled.set(bytes.subarray(7), 31);
+  doubled[14] = 2;
   new DataView(doubled.buffer).setUint32(51, 0x205, true);
   assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
 });
@@ -508,7 +522,7 @@ test("cube samplers use three coordinates and cannot share a slot with 2D sample
     view.setUint32(27, 0x10001005 | (mip << 24), true);
     const result = translate(bytes, "fragment");
     assert.deepEqual(result.samplers, [
-      { index: 0, format: 0, cube: true, filter: 1, repeat: false, mip, ignore: false, bias: 0 },
+      { index: 0, format: 0, cube: true, filter: 1, wrap: 0, mip, ignore: false, bias: 0 },
     ]);
     assert.match(result.source, /uniform samplerCube fs0/);
     assert.match(result.source, /texture\(fs0, fc0\.xyzw\.xyz\)/);
@@ -516,6 +530,7 @@ test("cube samplers use three coordinates and cannot share a slot with 2D sample
   const doubled = new Uint8Array(55);
   doubled.set(bytes);
   doubled.set(bytes.subarray(7), 31);
+  doubled[14] = 2;
   new DataView(doubled.buffer).setUint32(51, 0x12000005, true);
   assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
 });
@@ -528,12 +543,14 @@ test("ignoresampler preserves dimensionality and cannot silently conflict within
     view.setUint32(27, 0x12140005 | (cube ? 0x1000 : 0), true);
     const translated = translate(bytes, "fragment");
     assert.deepEqual(translated.samplers, [
-      { index: 0, format: 0, cube, filter: 1, repeat: true, mip: 2, ignore: true, bias: 0 },
+      { index: 0, format: 0, cube, filter: 1, wrap: 1, mip: 2, ignore: true, bias: 0 },
     ]);
     assert.match(translated.source, cube ? /samplerCube fs0/ : /sampler2D fs0/);
     const doubled = new Uint8Array(55);
     doubled.set(bytes);
     doubled.set(bytes.subarray(7), 31);
+    doubled[14] = 2;
+    doubled[14] = 2;
     translate(doubled, "fragment");
     doubled[53] ^= 4;
     assert.throws(() => translate(doubled, "fragment"), /Conflicting AGAL sampler/);
@@ -558,7 +575,7 @@ test("sampler bias is signed eighths, independent of sampler flags and register 
           index: 7,
           format: 0,
           filter: 0,
-          repeat: false,
+          wrap: 0,
           mip: 2,
           cube,
           ignore: true,
@@ -572,6 +589,8 @@ test("sampler bias is signed eighths, independent of sampler flags and register 
     const doubled = new Uint8Array(55);
     doubled.set(bytes);
     doubled.set(bytes.subarray(7), 31);
+    doubled[14] = 2;
+    doubled[14] = 2;
     assert.equal(translate(doubled, "fragment").samplers.length, 1);
     doubled[49] = 128;
     assert.throws(() => translate(doubled, "fragment"), SamplerBiasError);
@@ -604,4 +623,92 @@ test("AIR rejects unwritten temporary lanes and incomplete outputs during upload
     () => translate(color, "fragment"),
     (error) => error instanceof Context3DError && error.reason === "agalColorMask",
   );
+});
+
+/** A program of `version` for `stage`: its rows of six words each. */
+function program(version: number, fragment: boolean, rows: number[][]): Uint8Array {
+  const bytes = new Uint8Array(7 + rows.length * 24);
+  const view = new DataView(bytes.buffer);
+  bytes[0] = 0xa0;
+  view.setUint32(1, version, true);
+  bytes[5] = 0xa1;
+  bytes[6] = fragment ? 1 : 0;
+  for (let i = 0; i < rows.length; i++) {
+    for (let j = 0; j < 6; j++) {
+      view.setUint32(7 + i * 24 + j * 4, rows[i][j], true);
+    }
+  }
+
+  return bytes;
+}
+
+test("each profile takes the AGAL versions AIR gives it, version 0 as 1", () => {
+  const output = [[0, 0x030f0000, 0xe4000000, 1, 0, 0]];
+  const allowed = {
+    baselineConstrained: 1,
+    baseline: 1,
+    baselineExtended: 1,
+    standardConstrained: 2,
+    standard: 2,
+    standardExtended: 3,
+  } as const;
+  for (const [profile, newest] of Object.entries(allowed)) {
+    for (let version = 0; version <= 4; version++) {
+      const run = () => translate(program(version, true, output), "fragment", profile as Profile);
+      if (version <= newest) {
+        run();
+      } else {
+        assert.throws(run, (e) => e instanceof Context3DError && e.reason === "agalProfileVersion");
+      }
+    }
+  }
+});
+
+test("conditionals predicate writes, and texture reads in them happen for every pixel", () => {
+  const rows = [
+    [0, 0x020f0000, 0xe4000000, 1, 0, 0], // mov ft0, fc0
+    [0x1e, 0, 0x00000000, 4, 0x55000000, 1], // ifg v0.x, fc0.y
+    [0x28, 0x020f0000, 0xe4000000, 4, 0, 5], // tex ft0, v0, fs0
+    [0x20, 0, 0, 0, 0, 0], // els
+    [0x27, 0, 0xff000000, 2, 0, 0], // kil ft0.w
+    [0x21, 0, 0, 0, 0, 0], // eif
+    [0, 0x030f0000, 0xe4000000, 2, 0, 0],
+  ];
+  const { source } = translate(program(2, true, rows), "fragment", "standard");
+  assert.match(source, /bool c\d+ = v0\.xxxx\.x > fc0\.yyyy\.x;/);
+  assert.match(
+    source,
+    /vec4 h0 = texture\(fs0, v0\.xyzw\.xy\);\n {2}if \(p\d+\) \{ t0\.xyzw = h0\.xyzw; \}/,
+  );
+  assert.match(source, /bool p\d+ = !c\d+;/);
+  assert.match(source, /if \(p\d+ && t0\.wwww\.x < 0\.0\) \{ discard; \}/);
+  // A temporary only the if branch writes is not written after the eif.
+  const inside = [
+    [0x1c, 0, 0x00000000, 1, 0x55000000, 1],
+    [0, 0x020f0000, 0xe4000000, 1, 0, 0],
+    [0x21, 0, 0, 0, 0, 0],
+    [0, 0x030f0000, 0xe4000000, 2, 0, 0],
+  ];
+  assert.throws(
+    () => translate(program(2, true, inside), "fragment", "standard"),
+    (e) => e instanceof Context3DError && e.reason === "agalTemporaryRead",
+  );
+});
+
+test("derivatives, depth and colour outputs of AGAL 2", () => {
+  const rows = [
+    [0x1a, 0x020f0000, 0xe4000000, 4, 0, 0], // ddx ft0, v0
+    [0x1b, 0x020f0001, 0xe4000000, 4, 0, 0], // ddy ft1, v0
+    [0, 0x030f0000, 0xe4000000, 2, 0, 0], // mov oc0, ft0
+    [0, 0x030f0001, 0xe4000001, 2, 0, 0], // mov oc1, ft1
+    [0, 0x06010000, 0x00000000, 4, 0, 0], // mov od.x, v0.x
+  ];
+  const result = translate(program(2, true, rows), "fragment", "standard");
+  assert.equal(result.outputs, 2);
+  assert.match(result.source, /dFdx\(v0\.xyzw\)/);
+  assert.match(result.source, /\(-targetY \* dFdy\(v0\.xyzw\)\)/);
+  assert.match(result.source, /layout\(location = 1\) out vec4 color1;/);
+  assert.match(result.source, /gl_FragDepth = depth\.x;/);
+  // standardConstrained has one colour output and no depth.
+  assert.throws(() => translate(program(2, true, rows), "fragment", "standardConstrained"));
 });

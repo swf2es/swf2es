@@ -1,4 +1,4 @@
-/** Experimental renderer contracts and AGAL v1 translation, without browser dependencies. */
+/** Stage3D's renderer contracts and AGAL translation, without browser dependencies. */
 
 export { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.js";
 export {

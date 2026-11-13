@@ -1,4 +1,4 @@
-import type { ProgramType } from "../agal.js";
+import { INDIRECT_BANK, type ProgramType } from "../agal.js";
 import {
   type BlendFactor,
   type Buffer3D,
@@ -75,6 +75,9 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
   compressed: 1,
   compressedAlpha: 2,
 };
+
+/** AGAL's wraps (clamp, repeat, clamp_u_repeat_v, repeat_u_clamp_v) as SAMPLER_WRAPS indices. */
+const WRAPS = [0, 3, 2, 1];
 
 interface Constants {
   data: Float32Array;
@@ -887,7 +890,7 @@ export class WebGLContext3D implements Context3D {
         this.alive();
         this.program(program);
         this.drawState.forget();
-        uploadProgram(this.gl, state, vertex, fragment);
+        uploadProgram(this.gl, state, vertex, fragment, this.profile);
 
         if (this.selected === program) {
           this.setProgram(program);
@@ -1704,7 +1707,7 @@ export class WebGLContext3D implements Context3D {
       if (!source.ignore) {
         this.setSamplerState(
           source.index,
-          (source.repeat ? 3 : 0) | (source.filter << 2) | (source.mip << 5),
+          WRAPS[source.wrap] | (source.filter << 2) | (source.mip << 5),
         );
       }
     }
@@ -1944,13 +1947,12 @@ export class WebGLContext3D implements Context3D {
 
     if (state.vertexBank) {
       if (this.vertexConstants.writing || state.vertexVersion !== this.vertexConstants.version) {
-        // AGAL 1's bank: the first 128 of the context's constants.
-        gl.uniform4fv(state.vertexBank, this.vertexConstants.data, 0, 128 * 4);
+        gl.uniform4fv(state.vertexBank, this.vertexConstants.data, 0, INDIRECT_BANK * 4);
         state.vertexVersion = this.vertexConstants.version;
       }
-    } else {
-      this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
     }
+    // An indirect program's own uniforms are only the registers past its bank.
+    this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
     this.uniforms(
       state.fragment,
       this.fragmentConstants,
