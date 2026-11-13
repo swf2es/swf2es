@@ -1096,10 +1096,12 @@ allocate no warm GPU handles and reject malformed dimensions/face/mip inputs.
 traces the largest textures, rectangle and cube textures it creates (#3683,
 #3766, #3705, and #3782 for a rectangle in `baselineConstrained`), the formats
 (#3759 for `rgbaHalfFloat` below `standardConstrained`), the sampler, stream and
-constant slots the setters take (#2006 past them, the same in every profile)
-and the colour outputs (#3770 past 3, #3779 below `standard`). In `baseline` it
-also draws with a stream its program does not read (#3607, with error checking
-on: AIR under Wine stopped answering at that draw in `baselineExtended`).
+constant slots the setters take (#2006 past them, the same in every profile, a
+run or a matrix that ends past them too) and the colour outputs (#3770 past 3,
+#3779 below `standard`). In `baseline` it also draws with a stream its program
+does not read (#3607, with error checking on), and last clears a baseline back
+buffer to colours between bytes: AIR truncates them (0.5 clears to 127, 0.1 to
+25), as swf2es now does on every target.
 `AGALProfiles.as` uploads some 1,200 programs, versions 0 to 4 in each profile:
 every register file's bounds, the depth output, `iid`, each opcode AGAL 2 adds
 and each conditional rule, the sampler flags, program lengths, two constants

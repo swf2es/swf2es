@@ -103,7 +103,10 @@ profile on Direct3D 9Ex (`tests/context3d`'s `Profiles.as`, `AGALProfiles.as`,
 `AGALStandard.as`, `TextureFormats.as` and `MultipleTargets.as` hold the
 references). Every profile has 16
 sampler and vertex-stream slots, 250 vertex and 200 fragment constants for the
-setters, cube faces up to 1024 and back buffers up to 16384:
+setters, cube faces up to 1024 and back buffers up to 16384. A constant setter
+whose registers start or end past 250 or 200 is #2006 in every profile, a
+matrix's four too; one within them writes them all, though an AGAL 1 program
+reads only the first 128 and 28, and AGAL 2 the first 250 and 64:
 
 | Profile | AGAL | Texture | RectangleTexture | rgbaHalfFloat | Colour outputs |
 | --- | --- | --- | --- | --- | --- |

@@ -292,7 +292,7 @@ export async function shaderFixture(
       fixture === "ContextRequests"
         ? 3
         : fixture === "Profiles"
-          ? 10
+          ? 11
           : fixture === "AGALProfiles"
             ? 6
             : 1;

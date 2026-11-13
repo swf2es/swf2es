@@ -4,6 +4,8 @@ package {
   import flash.display3D.Context3D;
   import flash.events.ErrorEvent;
   import flash.events.Event;
+  import flash.display.BitmapData;
+  import flash.geom.Matrix3D;
   import flash.utils.ByteArray;
 
   // What each profile grants: its name, its largest textures, the formats it creates,
@@ -34,8 +36,7 @@ package {
       } else if (index < profiles.length + matching.length) {
         asked = matching[index - profiles.length];
       } else {
-        complete = true;
-        trace("profiles complete");
+        clears(slot);
         return;
       }
 
@@ -68,6 +69,27 @@ package {
       } else {
         slot.requestContext3D("auto", asked[0]);
       }
+    }
+
+    // What a clear's colour keeps of channels between bytes, in baseline, last: AIR under Wine
+    // stopped answering a request after a context that read its back buffer.
+    private function clears(slot:Stage3D):void {
+      var created:Function = function(event:Event):void {
+        slot.removeEventListener(Event.CONTEXT3D_CREATE, created);
+        c = slot.context3D;
+        c.configureBackBuffer(32, 32, 0, false);
+        var read:BitmapData = new BitmapData(32, 32, true, 0);
+        for each (var value:Array in [[0.5, 0.3, 0.9], [0.25, 0.75, 0.1], [0.999, 0.002, 0.6]]) {
+          c.clear(value[0], value[1], value[2], 1);
+          c.drawToBitmapData(read);
+          trace("profiles clear", value.join(","), read.getPixel32(4, 4).toString(16));
+        }
+        complete = true;
+        trace("profiles complete");
+        c.dispose(false);
+      };
+      slot.addEventListener(Event.CONTEXT3D_CREATE, created);
+      slot.requestContext3D("auto", "baseline");
     }
 
     private function test(name:String, f:Function):void {
@@ -131,6 +153,14 @@ package {
       for each (i in [27, 28, 63, 64, 199, 200]) {
         test("fragment-constant-" + i, function():void { c.setProgramConstantsFromVector("fragment", i, one, 1); });
       }
+      // Runs past the end, and a matrix's four registers.
+      var two:Vector.<Number> = Vector.<Number>([1, 2, 3, 4, 5, 6, 7, 8]);
+      test("vertex-constant-span-249", function():void { c.setProgramConstantsFromVector("vertex", 249, two, 2); });
+      test("fragment-constant-span-199", function():void { c.setProgramConstantsFromVector("fragment", 199, two, 2); });
+      test("vertex-constant-negative", function():void { c.setProgramConstantsFromVector("vertex", -1, one, 1); });
+      test("vertex-matrix-248", function():void { c.setProgramConstantsFromMatrix("vertex", 248, new Matrix3D()); });
+      test("vertex-matrix-250", function():void { c.setProgramConstantsFromMatrix("vertex", 250, new Matrix3D()); });
+      test("fragment-matrix-198", function():void { c.setProgramConstantsFromMatrix("fragment", 198, new Matrix3D()); });
 
       for each (i in [0, 1, 3, 4, -1]) {
         test("color-output-" + i, function():void {

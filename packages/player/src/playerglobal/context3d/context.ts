@@ -80,17 +80,19 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     }
   };
   /**
-   * How many of `count` constant registers from `first` a setter writes. Every profile takes
-   * 250 vertex and 200 fragment registers, whatever its AGAL reads (Profiles.as): a first one
-   * past them is #2006, and a run past their end writes those that fit (ContextArguments.as).
+   * The constant registers a setter writes: `count` from `first`. Every profile takes 250
+   * vertex and 200 fragment registers, whatever its AGAL reads, and refuses a run that starts
+   * or ends past them (#2006), a matrix's four too (Profiles.as).
    */
   const within = (stage: ProgramType, first: number, count: number): number => {
-    const registers = stage === "vertex" ? VERTEX_CONSTANTS : FRAGMENT_CONSTANTS;
-    if (first >= registers) {
+    if (
+      first < 0 ||
+      first + Math.max(count, 0) > (stage === "vertex" ? VERTEX_CONSTANTS : FRAGMENT_CONSTANTS)
+    ) {
       throw s.rt.error("RangeError", 2006);
     }
 
-    return first >= 0 && count > 0 ? Math.min(count, registers - first) : count;
+    return count;
   };
   /** A program type, which AIR names programType when it refuses one. */
   const programType = (type: string | null): ProgramType => {
@@ -669,10 +671,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       const data: number[] = values.$a;
       const entry = state(this as unknown as AsObject);
       const asked = count === -1 ? Math.floor(data.length / 4) : count;
-      const registers = within(stage, first, asked);
-      if (registers !== 0 || asked === 0) {
-        entry.backend.setConstants(stage, first, data, registers);
-      }
+      entry.backend.setConstants(stage, first, data, within(stage, first, asked));
     }
 
     /** Little-endian floats whatever the ByteArray's endian, its position left as it is. */
@@ -704,9 +703,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         values[i] = view.getFloat32(i * 4, true);
       }
 
-      if (registers !== 0 || count === 0) {
-        entry.backend.setConstants(stage, first, values, registers);
-      }
+      entry.backend.setConstants(stage, first, values, registers);
     }
 
     setProgramConstantsFromMatrix(

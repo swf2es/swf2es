@@ -88,7 +88,16 @@ writeFileSync(
           trace("reference-error", error);
           NativeApplication.nativeApplication.exit(1);
         }
-      }, ${fixture.startsWith("BackBuffer") || fixture === "Profiles" || fixture === "AGALProfiles" ? 40000 : ["AGALStandard", "TextureFormats", "MultipleTargets"].includes(fixture) ? 6000 : 2000});
+      }, ${
+        // A context each profile, made a frame or more apart under Wine.
+        fixture === "Profiles" || fixture === "AGALProfiles"
+          ? 90000
+          : fixture.startsWith("BackBuffer")
+            ? 20000
+            : ["AGALStandard", "TextureFormats", "MultipleTargets"].includes(fixture)
+              ? 6000
+              : 2000
+      });
     }
   }
 }`,
@@ -130,7 +139,10 @@ const run = spawnSync(process.env.ADL ?? "adl", ["app.xml", "."], {
   cwd: out,
   encoding: "utf8",
   // AIR draws large back buffers on the CPU under Wine, slowly.
-  timeout: fixture.startsWith("BackBuffer") ? 120_000 : 60_000,
+  timeout:
+    fixture.startsWith("BackBuffer") || fixture === "Profiles" || fixture === "AGALProfiles"
+      ? 150_000
+      : 30_000,
 });
 writeFileSync(`${out}trace.log`, run.stdout + run.stderr);
 assert.equal(run.status, 0, run.stdout + run.stderr);
