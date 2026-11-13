@@ -35,6 +35,24 @@ until the next cache invalidation. Templates are weakly held, and invalidation
 discards their resolved names so retired domains are not kept by this cache.
 Runtime namespaces, object keys and numeric keys retain their transient path.
 
+Every for-in steps through the same few functions (`hasNextIn`,
+`nextName`, `nextValue`, `enumeration.ts`), over objects of every class,
+so what a step reads of its object (its elements, its hidden names, its
+traits, its keys if a Dictionary) the engine finds by a lookup each time,
+which together cost more than the step. A step therefore leaves what it
+read in one record (`lastStep`), and the step after it, and the name and
+value between, take it from there when they go on from the same object
+and index; the element after the last of a dense Array or Vector is then a
+bounds test and an `in`. The record is one: a for-in inside another takes
+it, and the outer one reads its object again at its next step, once a
+turn, which measured no slower than a second record kept for it. What
+the record says must hold for as long as its object is the same one: whoever gives an object other element storage does so
+through `rt.setElements`, and the first name hidden on one
+(`setPropertyIsEnumerable`) lets the record go (`forgetStep`). The
+elements' own contents and length are read at every step, as avmplus
+reads them: those pushed during a for-in are reached, and a length set to
+0 ends it.
+
 The builtins' natives are in `natives/`, a file per
 family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
