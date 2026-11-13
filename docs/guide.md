@@ -428,7 +428,9 @@ npx @swf2es/desktop app.xml [root-dir] [-- arguments...]
 
 The descriptor's first window's content SWF plays from `app:/`, at the
 descriptor's size and with its title; the arguments after `--` reach its
-InvokeEvent, and `flash.display.Screen` has the system's displays. File › Open, or a descriptor dropped on the window, runs the
+InvokeEvent, and `flash.display.Screen` has the system's displays, their
+`colorDepth` counted as AIR counts it (32 for true colour, where the
+system says 24). File › Open, or a descriptor dropped on the window, runs the
 application too, from its own directory; the app asks first, as an
 application reaches your files and the network unasked.
 

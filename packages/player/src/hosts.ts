@@ -400,7 +400,9 @@ export interface AirWindow {
 /**
  * One of the host's screens, as flash.display.Screen reads it: its bounds
  * on the desktop the windows' bounds are on, the part of it a window may
- * fill (past a task bar, a menu bar or a dock), and its colours' bits.
+ * fill (past a task bar, a menu bar or a dock), and its colours' bits as
+ * the host counts them: a browser's 24 for true colour is AIR's 32, which
+ * Screen.colorDepth gives for it.
  */
 export interface AirScreen {
   bounds: WindowBounds;
