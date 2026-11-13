@@ -1,4 +1,4 @@
-/** Experimental renderer contracts and AGAL v1 translation, without browser dependencies. */
+/** Stage3D's renderer contracts and AGAL translation, without browser dependencies. */
 
 export { type ProgramType, type SamplerSource, type ShaderSource, translate } from "./agal.js";
 export {
@@ -11,10 +11,18 @@ export {
   type Context3DLifecycle,
   CULL_FACES,
   type CullFace,
+  compressedFormat,
+  FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
+  MOST_CUBE,
+  PROFILES,
+  type Profile,
+  type ProfileLimits,
   type Program3D,
+  profileLimits,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
+  SAMPLER_SLOTS,
   SAMPLER_WRAPS,
   SamplerBiasError,
   type SamplerFilter,
@@ -25,11 +33,14 @@ export {
   type Stage3DHost,
   type StencilAction,
   screenPixels,
+  TEXEL_BYTES,
   TEXTURE_FORMATS,
   type Texture3D,
   TextureBindingError,
   type TextureFormat,
+  VERTEX_CONSTANTS,
   VERTEX_FORMATS,
+  VERTEX_SLOTS,
   type VertexFormat,
   VertexOffsetError,
 } from "./backend.js";

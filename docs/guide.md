@@ -162,6 +162,14 @@ of its colour, depth and stencil, and the canvas's two buffers, about
 130 MB, and 265 MB more in multisampled buffers at 4x antialiasing; one of
 3840 by 2160 at a ratio of 2 is four times all that.
 
+Every Stage3D profile is served, from `baselineConstrained` to
+`standardExtended`, `requestContext3DMatchingProfiles` taking the best
+asked for, as Flash does on a desktop GPU. The standard profiles run AGAL 2
+and 3 programs (conditionals, derivatives, depth output and their larger
+register files), half-float textures and up to four colour outputs at once;
+the packed 16-bit formats work in every profile. Instanced drawing, which
+only AIR has, is not there yet.
+
 ## WebAssembly and CSP
 
 Fills, lines and BitmapData's filters and pixel operations are computed by

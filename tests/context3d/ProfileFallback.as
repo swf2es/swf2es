@@ -20,7 +20,8 @@ package {
         slot.context3D.present();
         ready = true;
       });
-      slot.requestContext3D("auto", "standard");
+      // Every profile is served now; software rendering is not.
+      slot.requestContext3D("software", "standard");
       returned = true;
     }
   }

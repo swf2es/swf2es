@@ -63,6 +63,11 @@ const scripts = compileScripts(
     "Readback",
     "BestResolution",
     "ContextArguments",
+    "Profiles",
+    "AGALProfiles",
+    "AGALStandard",
+    "TextureFormats",
+    "MultipleTargets",
   ].map((name) => ({
     name,
     source: fixtureSource(name),
@@ -118,6 +123,11 @@ for (const name of [
   "Readback",
   "BestResolution",
   "ContextArguments",
+  "Profiles",
+  "AGALProfiles",
+  "AGALStandard",
+  "TextureFormats",
+  "MultipleTargets",
 ]) {
   const abc = scripts.get(name);
   assert.ok(abc);
@@ -128,6 +138,11 @@ for (const name of [
   swf[3] =
     name === "AtfTextures" ||
     name === "Lifecycle" ||
+    name === "Profiles" ||
+    name === "AGALProfiles" ||
+    name === "AGALStandard" ||
+    name === "TextureFormats" ||
+    name === "MultipleTargets" ||
     name === "BackBuffer" ||
     name === "BackBufferConstrained" ||
     name === "BestResolution" ||
@@ -428,6 +443,11 @@ if (!process.argv.includes("--build-only")) {
         "Readback",
         "BestResolution",
         "ContextArguments",
+        "Profiles",
+        "AGALProfiles",
+        "AGALStandard",
+        "TextureFormats",
+        "MultipleTargets",
       ]) {
         const result = await evaluate<{ trace: string[] }>(
           `import("/repo/tests/context3d/page.ts").then(m => m.shaderFixture(${JSON.stringify(fixture)}))`,
@@ -516,7 +536,9 @@ if (!process.argv.includes("--build-only")) {
         assert.equal(closed.exception, null, JSON.stringify(closed));
       }
     },
-    false,
+    // --gpu: the machine's GPU, as SWF2ES_GPU_FLAGS and VK_DRIVER_FILES choose it, for new
+    // shaders' first run on each driver; the references are SwiftShader's.
+    process.argv.includes("--gpu"),
     {
       mounts: [
         ["/repo/", root],
