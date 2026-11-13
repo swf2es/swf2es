@@ -17,7 +17,12 @@ a stack is in; `definitions.ts`, definitions by qualified name, as a host
 and `ApplicationDomain.getDefinition` look them up; `method-factories.ts`,
 the natives and the methods with no generated body as a module binds them;
 `classes.ts`, OP_newclass, which makes a class from its descriptor, and the
-Vector.<T> classes; `enumeration.ts`, the names a for-in goes through;
+Vector.<T> classes; `enumeration.ts`, the names a for-in goes through
+(an Array's elements by index, or, once a walk meets a gap too long to
+step through, by the Array's indices, taken anew at each walk as nothing
+tells of an element written since; where avmplus holds such an Array in
+its hashtable the steps go by the indices alone, their for-in index
+negative to tell them apart);
 `property-cache.ts`, the inline caches, and `cache-fill.ts`, what a full
 lookup leaves in one; `array-conversion.ts`, Number(array) while Array's
 conversion is the builtins'; `errors.ts`, error messages and the stack a

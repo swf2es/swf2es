@@ -39,6 +39,7 @@ import {
   continues,
   dictionaryAt,
   type Enumeration,
+  elementName,
   elementsAt,
   enumerated,
   INT_ATOM_LIMIT,
@@ -46,6 +47,7 @@ import {
   ownNames,
   pairIndex,
   pairOf,
+  sparseElement,
   walkless,
 } from "./enumeration.js";
 import { AsError, describe, detailOf, errorMessage, stackOf, UnsupportedError } from "./errors.js";
@@ -3410,12 +3412,22 @@ export class Runtime {
     }
 
     // Else a Dictionary's slot holds a dynamic property's name.
-    const name =
-      keys !== null
-        ? (keys.nameAt(index - length) as string)
-        : index <= length
-          ? String(index - 1)
-          : enumerated(o, index - length, index);
+    let name: string;
+    if (keys !== null) {
+      name = keys.nameAt(index - length) as string;
+    } else if (index <= length) {
+      // A step by a sparse Array's indices reads its element here, off the path of every other.
+      if (index < 0) {
+        const value = sparseElement(o, index, traits === this.arrayTraits, NOT_FOUND);
+        if (value !== NOT_FOUND) {
+          return value;
+        }
+      }
+
+      name = elementName(index);
+    } else {
+      name = enumerated(o, index - length, index) as string;
+    }
 
     // A dynamic property's value, as avmplus' nextValue reads its slot's:
     // no binding has its name, which setting it would have gone to.
