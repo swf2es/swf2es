@@ -11,6 +11,8 @@ export interface ProgramState {
   attributeMask: number;
   vertex: (WebGLUniformLocation | null)[];
   vertexBank: WebGLUniformLocation | null;
+  /** The colour outputs its fragment program writes. */
+  outputs: number;
   fragment: (WebGLUniformLocation | null)[];
   samplers: { source: SamplerSource; location: WebGLUniformLocation | null }[];
   samplerMask: number;
@@ -72,6 +74,7 @@ export function uploadProgram(
 
   state.vertex = [];
   state.vertexBank = vs.indirect ? gl.getUniformLocation(handle, "vc[0]") : null;
+  state.outputs = fs.outputs;
   state.fragment = [];
   state.samplers = [];
   state.samplerMask = 0;

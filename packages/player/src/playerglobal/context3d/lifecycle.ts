@@ -30,6 +30,13 @@ export interface TextureResource extends Resource<Texture3D> {
   initialized: boolean;
 }
 
+export interface ColorOutput {
+  object: AsObject;
+  value: Texture3D;
+  depth: boolean;
+  antiAlias: number;
+}
+
 export interface ContextState {
   backend: Context3D;
   slot: AsObject;
@@ -43,6 +50,11 @@ export interface ContextState {
   maxHeight: number;
   target: TextureResource | null;
   targetObject: AsObject | null;
+  /** The target's depth and antialiasing, which every other colour output must share. */
+  targetDepth: boolean;
+  targetAntiAlias: number;
+  /** Colour outputs 1 to 3, drawn into with the target. */
+  outputs: (ColorOutput | null)[];
   /** A compressed texture is the target: AIR takes it, and refuses to clear or draw (#3746). */
   compressedTarget: boolean;
   program: AsObject | null;
@@ -121,6 +133,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     entry.program = null;
     entry.target = null;
     entry.targetObject = null;
+    entry.outputs.fill(null);
     entry.backend.dispose();
   };
   const disposeResource = (object: AsObject, entry: Resource<ResourceValue> | undefined): void => {
@@ -148,6 +161,11 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
     if (owner.targetObject === object) {
       owner.target = null;
       owner.targetObject = null;
+    }
+    for (let i = 0; i < owner.outputs.length; i++) {
+      if (owner.outputs[i]?.object === object) {
+        owner.outputs[i] = null;
+      }
     }
   };
 
@@ -369,6 +387,9 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         maxHeight: MOST_BACK_BUFFER,
         target: null,
         targetObject: null,
+        targetDepth: false,
+        targetAntiAlias: 0,
+        outputs: [null, null, null],
         compressedTarget: false,
         program: null,
         vertices: new Array(VERTEX_SLOTS).fill(null),

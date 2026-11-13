@@ -20,6 +20,8 @@ export interface TextureState {
   multisample: MultisampleTarget | null;
   samples: number;
   antiAlias: number;
+  /** The extra colour outputs its framebuffer has attached, a bit each from output 1. */
+  outputs: number;
 }
 
 /**

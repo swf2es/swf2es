@@ -71,6 +71,48 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
   } = bindings;
   const matrixConstants = new Float32Array(16);
 
+  /** The back buffer alone again: what setRenderToBackBuffer and present leave. */
+  const resetOutputs = (entry: ContextState): void => {
+    for (let i = 0; i < entry.outputs.length; i++) {
+      if (entry.outputs[i]) {
+        entry.backend.setColorOutput(i + 1, null);
+        entry.outputs[i] = null;
+      }
+    }
+  };
+
+  /**
+   * How many colour outputs a clear or draw writes, checked as AIR checks them: the others
+   * only beside a texture target (#3728), each of its size, format, depth and antialiasing
+   * (#3729).
+   */
+  const colorOutputs = (entry: ContextState): number => {
+    let count = 1;
+    for (let i = 0; i < entry.outputs.length; i++) {
+      const output = entry.outputs[i];
+      if (!output) {
+        continue;
+      }
+
+      const target = entry.target?.value;
+      if (!target) {
+        throw s.rt.error("Error", 3728);
+      }
+      if (
+        output.value.width !== target.width ||
+        output.value.height !== target.height ||
+        output.value.format !== target.format ||
+        output.depth !== entry.targetDepth ||
+        output.antiAlias !== entry.targetAntiAlias
+      ) {
+        throw s.rt.error("Error", 3729);
+      }
+      count = i + 2;
+    }
+
+    return count;
+  };
+
   /** A texture's format: one Flash names (#2008), and in rgbaHalfFloat's case one its profile has (#3759). */
   const textureFormat = (entry: ContextState, format: string | null): TextureFormat => {
     if (format === null) {
@@ -209,11 +251,19 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (mask !== 0xffffffff && mask > 7) {
         unsupported(`clear's mask ${mask}`);
       }
+      colorOutputs(entry);
 
       backend.clear(r, g, b, a, depth, mask, stencil);
       // Only successful AS3 clears count, not the backend's allocation-time clear.
       if (entry.target) {
         entry.target.initialized = true;
+        for (let i = 0; i < entry.outputs.length; i++) {
+          const output = entry.outputs[i];
+          const resource = output && textures.get(output.object);
+          if (resource) {
+            resource.initialized = true;
+          }
+        }
       } else {
         entry.cleared |= mask & (entry.depth ? 7 : 1);
       }
@@ -442,11 +492,14 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       surface = 0,
       output = 0,
     ): void {
-      if (output !== 0) {
-        unsupported(`setRenderToTexture's colorOutputIndex ${output}`);
+      if (output < 0 || output > 3) {
+        throw s.rt.error("ArgumentError", 3770);
       }
 
       const entry = state(this as unknown as AsObject);
+      if (output > 0 && profileLimits(entry.profile).colorOutputs === 1) {
+        throw s.rt.error("ArgumentError", 3779);
+      }
       if (object && !textures.has(object)) {
         throw s.rt.error("ArgumentError", 0);
       }
@@ -458,6 +511,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       if (object && textures.get(object)?.disposed) {
         value = null;
       }
+      if (output > 0) {
+        entry.backend.setColorOutput(output, value, surface);
+        entry.outputs[output - 1] =
+          value && object ? { object, value, depth, antiAlias: aa } : null;
+        return;
+      }
+
       // AIR takes a compressed texture as the target, and refuses to clear or draw into it.
       entry.compressedTarget = value !== null && compressedFormat(value.format);
       if (entry.compressedTarget) {
@@ -467,6 +527,8 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       entry.backend.setRenderTarget(value, depth, surface, aa);
       entry.target = value && object ? (textures.get(object) ?? null) : null;
       entry.targetObject = value ? object : null;
+      entry.targetDepth = depth;
+      entry.targetAntiAlias = aa;
     }
 
     setRenderToBackBuffer(): void {
@@ -475,6 +537,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       entry.backend.setRenderTarget(null);
       entry.target = null;
       entry.targetObject = null;
+      resetOutputs(entry);
     }
 
     setProgram(object: AsObject): void {
@@ -673,6 +736,11 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
             }
           }
         }
+        // Every colour output bound, and no more, is one the program writes.
+        const outputs = colorOutputs(entry);
+        if (drawn && !drawn.disposed && drawn.value.outputs !== outputs) {
+          throw s.rt.error("Error", 3774);
+        }
 
         entry.backend.draw(buffer(object), first, count);
       } catch (error) {
@@ -736,6 +804,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     present(): void {
       const entry = state(this as unknown as AsObject);
       entry.compressedTarget = false;
+      resetOutputs(entry);
       // AIR returns to the back buffer even when the following validation fails.
       if (entry.target) {
         entry.backend.setRenderTarget(null);

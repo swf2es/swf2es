@@ -144,6 +144,10 @@ export class WebGLContext3D implements Context3D {
   private renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
+  /** Colour outputs 1 to 3, drawn into with renderTexture, and their cube faces. */
+  private readonly outputs: (Texture3D | null)[] = [null, null, null];
+  private readonly outputFaces = new Uint8Array(3);
+  private outputsChanged = false;
   private floatTargets: boolean | undefined;
   private readonly textureSlots: (Texture3D | null)[] = new Array(SAMPLER_SLOTS).fill(null);
   private textureMask = 0;
@@ -256,6 +260,9 @@ export class WebGLContext3D implements Context3D {
       }
     }
     this.drawState.bindFramebuffer(state ? targetFramebuffer(state) : this.framebuffer);
+    if (this.outputsChanged || state?.outputs) {
+      this.attachOutputs(state);
+    }
     this.drawState.viewport(
       0,
       0,
@@ -885,6 +892,7 @@ export class WebGLContext3D implements Context3D {
       attributeMask: 0,
       vertex: [],
       vertexBank: null,
+      outputs: 1,
       fragment: [],
       samplers: [],
       samplerMask: 0,
@@ -896,6 +904,9 @@ export class WebGLContext3D implements Context3D {
       vertexVersion: -1,
     };
     const program: Program3D = {
+      get outputs() {
+        return state.outputs;
+      },
       get attributes() {
         return state.attributeMask;
       },
@@ -1094,6 +1105,7 @@ export class WebGLContext3D implements Context3D {
       multisample: null,
       samples: 0,
       antiAlias: 0,
+      outputs: 0,
     };
     const texture: Texture3D = {
       width,
@@ -1177,6 +1189,12 @@ export class WebGLContext3D implements Context3D {
         state.mipFramebuffer = null;
         state.depthBuffer = null;
 
+        for (let i = 0; i < this.outputs.length; i++) {
+          if (this.outputs[i] === texture) {
+            this.outputs[i] = null;
+            this.outputsChanged = true;
+          }
+        }
         for (let i = 0; i < this.textureSlots.length; i++) {
           if (this.textureSlots[i] === texture) {
             this.texturesApplied[i] = 0;
@@ -1520,6 +1538,12 @@ export class WebGLContext3D implements Context3D {
   }
 
   private changedTarget(): void {
+    for (let i = 0; i < this.outputs.length; i++) {
+      const output = this.outputs[i];
+      if (output) {
+        this.textureState(output).dirty = true;
+      }
+    }
     if (this.renderTexture) {
       const state = this.textureState(this.renderTexture);
       state.dirty = true;
@@ -1536,22 +1560,34 @@ export class WebGLContext3D implements Context3D {
   }
 
   private finishTarget(): void {
-    if (!this.renderTexture) {
-      return;
+    if (this.renderTexture) {
+      this.finishTexture(this.renderTexture, this.renderFace);
     }
-    const texture = this.renderTexture;
+    for (let i = 0; i < this.outputs.length; i++) {
+      const output = this.outputs[i];
+      if (output) {
+        this.finishTexture(output, this.outputFaces[i]);
+      }
+    }
+  }
+
+  /** A texture drawn into made whole again: resolved, and its mips regenerated. */
+  private finishTexture(texture: Texture3D, renderFace: number): void {
     const state = this.textureState(texture);
     if (state.dirty) {
       const gl = this.gl;
       this.drawState.forget();
       this.texturesApplied[0] = 0;
-      resolveTarget(this.gl, texture, state, this.renderFace, this.scissor);
+      resolveTarget(this.gl, texture, state, renderFace, this.scissor);
       gl.activeTexture(gl.TEXTURE0);
       if (texture.cube) {
+        // An extra colour output may never have been a target of its own.
+        state.framebuffer ??= gl.createFramebuffer();
+        state.mipFramebuffer ??= gl.createFramebuffer();
         // generateMipmap(CUBE_MAP) would overwrite manually uploaded mips on
         // untouched faces. AIR regenerates only the face just rendered.
         gl.disable(gl.SCISSOR_TEST);
-        const face = gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.renderFace;
+        const face = gl.TEXTURE_CUBE_MAP_POSITIVE_X + renderFace;
         // The base-size depth attachment cannot accompany smaller mip images.
         this.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
         if (state.depthAttached) {
@@ -1613,7 +1649,7 @@ export class WebGLContext3D implements Context3D {
         gl.bindTexture(gl.TEXTURE_2D, state.handle);
         gl.generateMipmap(gl.TEXTURE_2D);
       }
-      state.uploaded[this.renderFace] = (1 << texture.levels) - 1;
+      state.uploaded[renderFace] = (1 << texture.levels) - 1;
       state.dirty = false;
     }
   }
@@ -1628,6 +1664,78 @@ export class WebGLContext3D implements Context3D {
     if (!this.floatTargets) {
       throw new Context3DError("unsupported", "Context3D: this GPU draws into no half floats");
     }
+  }
+
+  setColorOutput(index: number, texture: Texture3D | null, face = 0): void {
+    this.alive();
+    range(index - 1, 1, this.outputs.length);
+    if (texture) {
+      this.textureState(texture);
+      range(face, 1, texture.cube ? 6 : 1);
+      if (compressedFormat(texture.format)) {
+        throw new Context3DError(
+          "operation",
+          "Context3D experiment: compressed textures are no render targets",
+        );
+      }
+      this.renderFormat(texture.format);
+    }
+    if (this.outputs[index - 1] === texture && this.outputFaces[index - 1] === face) {
+      return;
+    }
+
+    const previous = this.outputs[index - 1];
+    if (previous) {
+      this.finishTexture(previous, this.outputFaces[index - 1]);
+    }
+    this.outputs[index - 1] = texture;
+    this.outputFaces[index - 1] = texture ? face : 0;
+    this.outputsChanged = true;
+  }
+
+  /**
+   * The current target's framebuffer with the extra colour outputs attached, or without
+   * them: its draws write every output bound, and a program's unwritten ones are refused
+   * before they draw.
+   */
+  private attachOutputs(state: TextureState | null): void {
+    const want = state ? this.outputMask() : 0;
+    if (!state || (!this.outputsChanged && state.outputs === want)) {
+      return;
+    }
+    if (want && state.samples) {
+      throw new Context3DError("unsupported", "Context3D: antialiased colour outputs");
+    }
+
+    const gl = this.gl;
+    const buffers: number[] = [gl.COLOR_ATTACHMENT0];
+    for (let i = 0; i < this.outputs.length; i++) {
+      const output = this.outputs[i];
+      const handle = output ? this.textureState(output).handle : null;
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT1 + i,
+        output?.cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.outputFaces[i] : gl.TEXTURE_2D,
+        handle,
+        0,
+      );
+      buffers.push(output ? gl.COLOR_ATTACHMENT1 + i : gl.NONE);
+    }
+    gl.drawBuffers(buffers);
+    state.outputs = want;
+    this.outputsChanged = false;
+  }
+
+  /** The extra colour outputs bound, a bit each from output 1. */
+  private outputMask(): number {
+    let mask = 0;
+    for (let i = 0; i < this.outputs.length; i++) {
+      if (this.outputs[i]) {
+        mask |= 1 << i;
+      }
+    }
+
+    return mask;
   }
 
   setTexture(index: number, texture: Texture3D | null): void {
@@ -1920,7 +2028,13 @@ export class WebGLContext3D implements Context3D {
       const binding = state.samplers[i];
       const slot = binding.source.index;
       const texture = this.textureSlots[slot];
-      if (texture && texture === this.renderTexture) {
+      if (
+        texture &&
+        (texture === this.renderTexture ||
+          texture === this.outputs[0] ||
+          texture === this.outputs[1] ||
+          texture === this.outputs[2])
+      ) {
         throw new TextureBindingError("feedback");
       }
       const resource = texture && this.textures.get(texture);

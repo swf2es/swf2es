@@ -201,6 +201,8 @@ export interface Buffer3D {
 }
 
 export interface Program3D {
+  /** The colour outputs its fragment program writes, 1 to 4; 1 before an upload. */
+  readonly outputs: number;
   /** The vertex attributes it reads, a bit each; 0 before an upload. */
   readonly attributes: number;
   upload(vertex: Uint8Array, fragment: Uint8Array): void;
@@ -299,6 +301,11 @@ export interface Context3D {
     face?: number,
     antiAlias?: number,
   ): void;
+  /**
+   * Colour output `index`, 1 to 3, draws into `texture` (`face` of a cube) beside
+   * setRenderTarget's; null stops it. The texture's size and format are the target's.
+   */
+  setColorOutput(index: number, texture: Texture3D | null, face?: number): void;
   setSampler(index: number, wrap: SamplerWrap, filter: SamplerFilter, mip: SamplerMip): void;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;
