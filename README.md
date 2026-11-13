@@ -17,6 +17,7 @@ applications from their descriptor, with Stage3D on:
 
 ```sh
 npx @swf2es/desktop movie.swf
+npx @swf2es/desktop https://example.com/movie.swf
 npx @swf2es/desktop app.xml
 ```
 
