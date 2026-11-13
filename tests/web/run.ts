@@ -1229,9 +1229,10 @@ check("a SWF with no code has buttons the pointer reaches", async (evaluate, sen
     image = await shot();
     assert.deepEqual(only(image, up), [0xff0000], `${vm}: up while still`);
 
-    // On the hit test: over, drawn there, and the up state gone.
+    // On the hit test: over, drawn there, and the up state gone, in the animation frame after
+    // the move: on a still stage too, which ticks by a timer until the move.
     await move(left + 70, top + 30);
-    await call(evaluate, "frames(2).then(() => true)");
+    await call(evaluate, "frames(1).then(() => true)");
     assert.ok((await clears()) > 0, `${vm}: the over state not drawn`);
     image = await shot();
     assert.deepEqual(only(image, up), [0xffffff], `${vm}: up on the hit test`);

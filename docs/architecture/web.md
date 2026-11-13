@@ -51,8 +51,8 @@ otherwise the stage's colour, `bgcolor`'s if given, fills the element
 around the stage too. Each animation frame advances the player by the
 time passed and draws when `changes` moved or the element did, and then
 only if the view finds something changed (`RenderView.unchanged`). A stage
-nothing has been drawn on for 150 ms is still, and ticks by a timer
-instead: Chrome makes a frame of the page ready for every animation frame
+nothing has been drawn on for 150 ms, and whose element has had no input
+for as long, is still, and ticks by a timer instead: Chrome makes a frame of the page ready for every animation frame
 asked of it, drawn to or not, which cost a still stage more than its ticks
 did (about 3.7% of a core for the frames against 0.7% for the timer, of
 the 6.5% a still 60 fps SWF took on an Intel laptop). The timer's
@@ -60,25 +60,36 @@ interval is a little under the display's (0.97 of it), which is the mean
 time between the last animation frames, those within a quarter of their
 median: the first after a still period come out of step, two at once in
 Firefox and one early in Chrome, and one the page was too busy for
-leaves a time twice as long. A tick slower than the display would lose a 60 fps SWF frames,
-which play one a tick; one a little faster finds none due now and then.
-The player is
-advanced the same, by the time passed, so frames, timers and sound keep
+leaves a time twice as long. A tick slower than the display would lose a
+60 fps SWF frames, which play one a tick; one a little faster finds none
+due now and then. The player is advanced the same, by the time passed, so frames, timers and sound keep
 their pace; the tick that finds something to draw draws it at once, which
 the browser shows at its next frame, and the ticks go back to animation
-frames, where a run of drawings shows in step with the display. A SWF
+frames, where a run of drawings shows in step with the display. Input on
+the element (the pointer's events, the wheel and the keys) brings the
+ticks back to animation frames from the next, so that what it changes, a
+button's over state or a caret, is drawn in the animation frame after it:
+made in a timer's tick, a hover drawing waited for that tick and then for
+the frame after, a frame late, and under load later. A SWF
 slower than the display draws in one tick of several and stays on them.
 So does one with a Stage3D context, which presents on canvases of its own.
 A hidden page has no animation frames, and the player stops with them as
 before: a timer's tick on a hidden page asks for an animation frame and
 waits. Where frames stop on a page that is not hidden, as out of sight in
 a frame of another origin, the animation frame a still stage asks for
-once a second does not come, and it waits likewise. Timers that come late
-by half an interval four times in a row are too coarse to tick by, which
-would have the player run frames in batches, and are given up for
-animation frames. `tests/web/still.ts` holds a still stage to no drawing
+once a second does not come, and it waits likewise. Timers too coarse to
+keep the display's interval would have the player run frames in batches;
+where the lower median of the last nine ticks' lateness is half an
+interval, the measure by which the player itself would batch frames (its
+typical interval is the lower median of its last nine calls), a still
+stage keeps to animation frames for 5 s and tries timers again, twice as
+long each time they fail in a row, up to 80 s. A thread busy now and
+then, as on a loaded machine, makes some ticks late, not most, and does
+not give the timers up: four late ticks in a row did, for good, and a
+loaded CI runner's still stage asked 11 animation frames in two seconds. `tests/web/still.ts` holds a still stage to no drawing
 and an animation frame a second, its frames to their pace, and a change
-to being drawn in its tick. The keys
+to being drawn in its tick; the times the page's thread was kept from its
+timers, as on a loaded machine, it measures and allows for. The keys
 go to the element, focusable and focused as it is pressed, as a plug-in
 had them only while focused.
 

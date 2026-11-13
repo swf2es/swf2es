@@ -2,9 +2,10 @@
 // nothing has been drawn for a moment the player ticks by a timer, asking
 // the page for no animation frames but one now and then and making no GL
 // call, its frames as far apart as before; a change is drawn in the tick
-// that made it, and shows; and a page that says it is hidden gets its
-// ticks by animation frames again, which a hidden page has none of. Run
-// after `pnpm build`, which builds the bundle.
+// that made it, and shows; four ticks late in a row, as a busy thread makes
+// them, do not give the timers up, and most of nine do, for 5 s; and a page
+// that says it is hidden gets its ticks by animation frames again, which a
+// hidden page has none of. Run after `pnpm build`, which builds the bundle.
 //
 //   node tests/web/still.ts
 import assert from "node:assert/strict";
@@ -32,14 +33,17 @@ mkdirSync(site, { recursive: true });
 writeFileSync(`${site}still.swf`, bare(abc, 1, "StillTest", 200, 100));
 // What the page asks of the browser, counted from before the bundle loads:
 // animation frames, short timers and the GL calls that draw or clear, and
-// their counts as each line is traced.
+// their counts as each line is traced. And the times the page's thread was
+// kept from its timers, as on a loaded machine, which the SWF's frames and the
+// timers' count are allowed for: the timers that came half a display frame
+// late or more (stalls), and the display frames they came late by (lost).
 writeFileSync(
   `${site}index.html`,
   `<!doctype html>
 <html>
 <head><meta charset="utf-8">
 <script>
-  window.counts = { frames: 0, timers: 0, draws: 0 };
+  window.counts = { frames: 0, timers: 0, draws: 0, stalls: 0, lost: 0 };
   window.marks = [];
   const frame = window.requestAnimationFrame.bind(window);
   window.requestAnimationFrame = (callback) => {
@@ -47,11 +51,29 @@ writeFileSync(
     return frame(callback);
   };
   const timer = window.setTimeout.bind(window);
+  const kept = { ticks: 0, ms: 0 };
+  window.busy = (ticks, ms) => Object.assign(kept, { ticks, ms });
   window.setTimeout = (callback, ms, ...rest) => {
-    if (ms < 50) {
-      counts.timers++;
+    if (!(ms < 50)) {
+      return timer(callback, ms, ...rest);
     }
-    return timer(callback, ms, ...rest);
+
+    counts.timers++;
+    const due = performance.now() + ms;
+    return timer((...args) => {
+      // A thread kept busy, as a loaded machine keeps it: the tick made that late.
+      if (kept.ticks > 0) {
+        kept.ticks--;
+        const until = performance.now() + kept.ms;
+        while (performance.now() < until) {}
+      }
+      const late = performance.now() - due;
+      if (late >= 8) {
+        counts.stalls++;
+        counts.lost += Math.floor(late / 16);
+      }
+      callback(...args);
+    }, ms, ...rest);
   };
   for (const name of ["clear", "drawArrays", "drawElements", "drawArraysInstanced", "drawElementsInstanced", "blitFramebuffer"]) {
     const call = WebGL2RenderingContext.prototype[name];
@@ -84,6 +106,8 @@ interface Counts {
   frames: number;
   timers: number;
   draws: number;
+  stalls: number;
+  lost: number;
 }
 interface Mark extends Counts {
   line: string;
@@ -135,15 +159,28 @@ await withPage(
       end.frames - begin.frames <= 4,
       `${end.frames - begin.frames} animation frames asked in two still seconds`,
     );
-    // Its ticks came by the timer at the display's interval, 60 a second here.
+    // Its ticks came by the timer at the display's interval, 60 a second here, but for those
+    // a stall took.
+    const stalls = end.stalls - begin.stalls;
+    const lost = end.lost - begin.lost;
     const ticks = end.timers - begin.timers;
-    assert.ok(ticks >= 110 && ticks <= 130, `${ticks} timers set in two still seconds`);
+    assert.ok(
+      ticks >= 110 - lost && ticks <= 130,
+      `${ticks} timers set in two still seconds, ${lost} display frames lost to stalls`,
+    );
     // Its 120 frames took their two seconds, none run right after another, none skipped: a
-    // few of either are a busy machine's.
+    // few of either are a busy machine's, and each stall makes one of each, a frame late and
+    // the next on its time.
     const elapsed = end.at - begin.at;
-    assert.ok(elapsed > 1950 && elapsed < 2300, `120 frames took ${elapsed} ms`);
+    assert.ok(
+      elapsed > 1950 && elapsed < 2300 + 17 * lost,
+      `120 frames took ${elapsed} ms, ${lost} display frames lost to stalls`,
+    );
     const [early, late] = end.line.split(" ").slice(2).map(Number);
-    assert.ok(early <= 3 && late <= 3, `${early} frames came early, ${late} late`);
+    assert.ok(
+      early <= 3 + stalls && late <= 3 + stalls,
+      `${early} frames came early, ${late} late, in ${stalls} stalls`,
+    );
 
     // The box moved in the frame that ended the still: drawn before the next frame played.
     const moved = await mark("moved");
@@ -161,7 +198,43 @@ await withPage(
     // At the display's interval again, not at the time between the first animation frames
     // after the still, which come out of step.
     const after = done.timers - again.timers;
-    assert.ok(after >= 50 && after <= 70, `${after} timers set in a second still again`);
+    const lostAfter = done.lost - again.lost;
+    assert.ok(
+      after >= 50 - lostAfter && after <= 70,
+      `${after} timers set in a second still again, ${lostAfter} display frames lost to stalls`,
+    );
+
+    // A thread busy for four ticks in a row, each late by more than half a frame, is no
+    // reason to give the timers up, as it was: most ticks come on time.
+    await value("busy(4, 12)");
+    await sleep(500);
+    const busied = await counts();
+    await sleep(1000);
+    const calm = await counts();
+    assert.ok(
+      calm.frames - busied.frames <= 2,
+      `${calm.frames - busied.frames} animation frames asked in the second after four late ticks`,
+    );
+
+    // Most of nine ticks late is timers too coarse to keep the display's interval, by which the
+    // player would run frames in batches: animation frames for a while, then timers again.
+    await value("busy(9, 12)");
+    await sleep(500);
+    const coarse = await counts();
+    await sleep(1000);
+    const framed = await counts();
+    assert.ok(
+      framed.frames - coarse.frames >= 30,
+      `${framed.frames - coarse.frames} animation frames asked in a second after nine late ticks`,
+    );
+    await sleep(5000);
+    const retried = await counts();
+    await sleep(1000);
+    const timed = await counts();
+    assert.ok(
+      timed.frames - retried.frames <= 2,
+      `${timed.frames - retried.frames} animation frames asked in a second, 5 s after the timers were late`,
+    );
 
     // A page that is hidden has no animation frames, and the player waits for them: here
     // the page only says so, and they come, each one's tick asking for the next.

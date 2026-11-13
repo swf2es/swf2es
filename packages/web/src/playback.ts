@@ -32,9 +32,9 @@ export interface Look {
 }
 
 /**
- * The ms after its last draw from which a stage counts as still. A SWF slower than the display
- * draws in one tick of several, 12 frames a second in one of five at 60 Hz, and is not still
- * between them.
+ * The ms after its last draw, or the last input on the element, from which a stage counts as
+ * still. A SWF slower than the display draws in one tick of several, 12 frames a second in one
+ * of five at 60 Hz, and is not still between them.
  */
 const STILL_MS = 150;
 /** A display's interval, in ms, until the animation frames have shown this one's. */
@@ -50,8 +50,25 @@ const MIN_GAPS = 3;
 const EARLY = 0.97;
 /** How often, in ms, a still stage asks for an animation frame, to learn whether the page's still come. */
 const PROBE_MS = 1000;
-/** The timer ticks in a row, each late by half an interval or more, after which the timers are too coarse to tick by. */
-const LATE_TICKS = 4;
+/**
+ * The timer ticks whose lateness tells whether timers keep the display's interval: the last
+ * LATENESSES, as the player's typical interval is the lower median of its last nine calls.
+ */
+const LATENESSES = 9;
+/** The ms a still stage keeps to animation frames after its timers came too late, at first and at most. */
+const RETRY_MS = 5000;
+const MAX_RETRY_MS = 80_000;
+/** The element's events after which what they change is drawn in the next animation frame. */
+const INPUT_EVENTS = [
+  "pointerdown",
+  "pointermove",
+  "pointerup",
+  "pointerout",
+  "pointercancel",
+  "wheel",
+  "keydown",
+  "keyup",
+];
 
 export class Playback {
   /** The animation frame asked for the next tick, 0 when none is. */
@@ -60,8 +77,8 @@ export class Playback {
   private timer = 0;
   /** When that timer's tick is due, by the page's clock. */
   private due = 0;
-  /** When it last drew, by the ticks' clock. */
-  private drewAt = 0;
+  /** When it last drew, or the element last had input, by the page's clock. */
+  private activeAt = 0;
   /** Whether the last tick was an animation frame's. */
   private framed = false;
   /** The timer's interval: a little under the display's, by the last run of animation frames. */
@@ -72,8 +89,12 @@ export class Playback {
   /** The animation frame a still stage asked for, 0 when it came, and when it asked. */
   private probe = 0;
   private probedAt = 0;
-  /** The timer ticks in a row that came late; Infinity once the timers are given up. */
-  private late = 0;
+  /** How late the last timer ticks came, in ms, a ring. */
+  private readonly lateness: number[] = [];
+  private nextLateness = 0;
+  /** Until when a still stage keeps to animation frames, its timers having come too late, and for how long next time. */
+  private framesUntil = 0;
+  private retry = RETRY_MS;
   private last: number | null = null;
   /**
    * The ms the last call to advance took, by which the player tells frames
@@ -127,6 +148,16 @@ export class Playback {
     this.unbind.push(() => this.textInput.destroy());
     // Its keys' releases are lost when the window or the element loses focus: the player lets them go.
     this.unbind.push(bindActivation(player, window, host as HTMLElement));
+    // Input changes what shows, and its drawing is not to wait for a timer: a hover is drawn
+    // in the next animation frame, as any change was before a still stage ticked by timers.
+    for (const type of INPUT_EVENTS) {
+      host.addEventListener(type, this.input, { capture: true, passive: true });
+    }
+    this.unbind.push(() => {
+      for (const type of INPUT_EVENTS) {
+        host.removeEventListener(type, this.input, { capture: true });
+      }
+    });
     // Shown again, the stage is drawn anew rather than trusted to the canvas a hidden page kept.
     document.addEventListener("visibilitychange", this.shown);
     this.unbind.push(() => document.removeEventListener("visibilitychange", this.shown));
@@ -196,6 +227,16 @@ export class Playback {
     }
   };
 
+  /** Input on the element: ticks by animation frames from the next. */
+  private readonly input = () => {
+    this.activeAt = performance.now();
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = 0;
+      this.wait();
+    }
+  };
+
   /** A tick in an animation frame, where what it draws shows in step with the display. */
   private readonly animate = (now: number) => {
     this.frame = 0;
@@ -207,7 +248,7 @@ export class Playback {
     this.framed = true;
     // A stage drawn on lately has its next tick in the next animation frame whatever this one
     // does: asked for first, as a loop of animation frames asks.
-    if (now - this.drewAt < STILL_MS) {
+    if (now - this.activeAt < STILL_MS) {
       this.frame = requestAnimationFrame(this.animate);
     }
 
@@ -225,16 +266,38 @@ export class Playback {
       return;
     }
 
-    // Timers too coarse to keep the display's interval would have the player run its frames
-    // in batches.
-    this.late = now - this.due >= this.interval / 2 ? this.late + 1 : 0;
-    if (this.late >= LATE_TICKS) {
-      this.late = Infinity;
-    }
-
+    this.late(now - this.due, now);
     this.framed = false;
     this.tick(now);
   };
+
+  /**
+   * A timer's tick came `ms` late. Timers too coarse to keep the display's
+   * interval would have the player run its frames in batches: where the
+   * lower median of the last ticks' lateness is half an interval, as the
+   * player's typical interval is the lower median of its last calls, a still
+   * stage keeps to animation frames for a while, and tries the timers again
+   * after it, twice as long each time they fail in a row. A thread busy now and then
+   * makes some ticks late, not most of them, and batches no frame.
+   */
+  private late(ms: number, now: number): void {
+    const lateness = this.lateness;
+    lateness[this.nextLateness] = ms;
+    this.nextLateness = (this.nextLateness + 1) % LATENESSES;
+    if (lateness.length < LATENESSES) {
+      return;
+    }
+
+    if (!tooLate(lateness, this.interval)) {
+      this.retry = RETRY_MS;
+      return;
+    }
+
+    this.framesUntil = now + this.retry;
+    this.retry = Math.min(MAX_RETRY_MS, this.retry * 2);
+    lateness.length = 0;
+    this.nextLateness = 0;
+  }
 
   private readonly probed = () => {
     this.probe = 0;
@@ -264,8 +327,8 @@ export class Playback {
     }
 
     if (
-      now - this.drewAt < STILL_MS ||
-      this.late === Infinity ||
+      now - this.activeAt < STILL_MS ||
+      now < this.framesUntil ||
       this.stage3D?.active ||
       document.visibilityState !== "visible"
     ) {
@@ -286,7 +349,8 @@ export class Playback {
 
       this.due = now;
       this.probedAt = now;
-      this.late = 0;
+      this.lateness.length = 0;
+      this.nextLateness = 0;
     } else if (now - this.probedAt >= PROBE_MS) {
       if (this.probe) {
         this.wait();
@@ -313,7 +377,7 @@ export class Playback {
     try {
       this.play(dt);
       if ((this.player.changes !== this.drawn || this.dirty) && this.draw()) {
-        this.drewAt = now;
+        this.activeAt = Math.max(this.activeAt, now);
       }
     } finally {
       this.schedule(now);
@@ -562,6 +626,17 @@ function stageAround(
     height: stageHeight * scale,
     resolution: view.resolution,
   };
+}
+
+/**
+ * Whether timer ticks that came `lateness` ms late are too late to tick a
+ * still stage by, at `interval`: the lower median of their lateness half an
+ * interval or more, where the player, whose typical interval is the lower
+ * median of its last calls, would run two frames a call.
+ */
+export function tooLate(lateness: readonly number[], interval: number): boolean {
+  const sorted = lateness.slice().sort((a, b) => a - b);
+  return sorted[(sorted.length - 1) >> 1] >= interval / 2;
 }
 
 /**

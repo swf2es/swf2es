@@ -5,6 +5,7 @@ import {
   displayInterval,
   fittingSamples,
   stageSamples,
+  tooLate,
 } from "../../../packages/web/dist/playback.js";
 
 test("a canvas takes the most samples whose buffers fit, and 4 at least", () => {
@@ -57,4 +58,13 @@ test("the display's interval is the mean time between animation frames, those ou
   assert.ok(Math.abs(displayInterval([8.3, 8.4, 16.7, 8.3, 8.3]) - 8.33) < 0.05);
   assert.ok(Math.abs(displayInterval([16, 17, 33, 17, 16, 34, 17, 16, 17]) - 16.6) < 0.1);
   assert.equal(displayInterval([16, 16, 16]), 16);
+});
+
+test("timers are too late to tick a still stage by only where most of their ticks are", () => {
+  const interval = 16.2;
+  // A busy thread: four ticks in a row late, the rest on time, as a loaded machine has them.
+  assert.equal(tooLate([0, 0, 9, 12, 30, 9, 0, 1, 0], interval), false);
+  // Coarse timers, most ticks half an interval late or more: the player would batch its frames.
+  assert.equal(tooLate([9, 12, 0, 8.5, 10, 0, 9, 1, 11], interval), true);
+  assert.equal(tooLate([16, 17, 16, 17, 16, 17, 16, 17, 16], interval), true);
 });
