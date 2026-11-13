@@ -61,15 +61,15 @@ function registers(version: number, profile: Profile): Registers {
 
   const constrained = profile === "standardConstrained";
   return {
-    attributes: 8,
+    attributes: version === 2 ? 8 : 16,
     vertexConstants: 250,
-    fragmentConstants: 64,
+    fragmentConstants: version === 2 ? 64 : 200,
     temporaries: 26,
     varyings: constrained ? 8 : 10,
     samplers: constrained ? 8 : 16,
     outputs: constrained ? 1 : 4,
     depth: !constrained,
-    tokens: 1024,
+    tokens: version === 2 ? 1024 : 2048,
   };
 }
 
@@ -273,6 +273,18 @@ export function translate(
         outputInBlock();
         name = "depth";
         declaration = "vec4 depth = vec4(0.0);";
+        break;
+      case 7:
+        if (stage !== "vertex") {
+          throw new Context3DError("agalInstanceStage", "AGAL instance id in a fragment program");
+        }
+        if (write || index !== 0) {
+          throw new Context3DError("agalRegister", "Unsupported AGAL register");
+        }
+        // AIR reads the instance id from vertex stream 15, which a draw must bind (#3611).
+        name = "va15";
+        declaration = "layout(location = 15) in vec4 va15;";
+        attributes.add(15);
         break;
       default:
         throw new Context3DError("agalRegister", "Unsupported AGAL register");
