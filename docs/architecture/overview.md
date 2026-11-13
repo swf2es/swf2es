@@ -159,8 +159,8 @@ but never imports its implementation. pnpm only links the packages each
 `package.json` lists, so the build rejects undeclared imports, and
 `tests/unit/boundaries.test.ts` checks the declarations and the tsconfigs.
 
-`@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL v1
-translation. Its core is built without DOM or node types; the separate
+`@swf2es/context3d` exposes renderer-neutral resource contracts and AGAL 1 to 3
+translation, for every Stage3D profile. Its core is built without DOM or node types; the separate
 `@swf2es/context3d/webgl` entry owns a WebGL2 context and its GPU resources.
 Neither entry depends on player AS objects. The two TypeScript projects
 keep browser types out of the core while the normal package build checks both.

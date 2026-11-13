@@ -146,6 +146,14 @@ would read the GPU's own limit there and refuse larger sizes. In the
 stage (Error #3710, or #3723 for SWFs before version 30); swf2es draws
 it.
 
+Every Stage3D profile is served, from `baselineConstrained` to
+`standardExtended`, `requestContext3DMatchingProfiles` taking the best
+asked for, as Flash does on a desktop GPU. The standard profiles run AGAL 2
+and 3 programs (conditionals, derivatives, depth output and their larger
+register files), half-float textures and up to four colour outputs at once;
+the packed 16-bit formats work in every profile. Instanced drawing, which
+only AIR has, is not there yet.
+
 ## WebAssembly and CSP
 
 Fills, lines and BitmapData's filters and pixel operations are computed by
