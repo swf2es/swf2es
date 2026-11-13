@@ -122,3 +122,149 @@ test("a Dictionary filled and drained over and over keeps only as many slots as 
     assert.equal((keys as unknown as { slots: unknown[] }).slots.length, 100);
   }
 });
+
+/** The names and values a for-in over `dictionary` goes through. */
+function walk(rt: avm2.Runtime, dictionary: avm2.AsObject): [unknown, unknown][] {
+  const met: [unknown, unknown][] = [];
+  for (let i = rt.hasNext(dictionary, 0); i; i = rt.hasNext(dictionary, i)) {
+    met.push([rt.nextName(dictionary, i), rt.nextValue(dictionary, i)]);
+  }
+
+  return met;
+}
+
+test("a weak Dictionary's walks read each key's WeakRef once a job, and keep no key past it", async () => {
+  const rt = avm2.createRuntime();
+  const keys = new DictionaryKeys(true);
+  const dictionary = { $keys: keys } as unknown as avm2.AsObject;
+  const kept = Array.from({ length: 50 }, (_, i) => ({ kept: i }));
+  const gone: WeakRef<object>[] = [];
+  (() => {
+    for (let i = 0; i < 50; i++) {
+      const key = { gone: i };
+      gone.push(new WeakRef(key));
+      keys.set(key, -1 - i);
+      keys.set(kept[i], i);
+    }
+  })();
+
+  // Counted on the prototype: the slots' WeakRefs are the only ones read here.
+  const deref = WeakRef.prototype.deref;
+  let reads = 0;
+  WeakRef.prototype.deref = function (this: WeakRef<object>) {
+    reads++;
+    return deref.call(this);
+  };
+
+  // In a function, so that the names it met are held by nothing after it.
+  const walks = () => {
+    const first = walk(rt, dictionary);
+    const settled = reads;
+    assert.equal(first.length, 100);
+
+    // The step's name and value, and the walks after it in the job, read none again.
+    reads = 0;
+    assert.deepEqual(walk(rt, dictionary), first);
+    assert.equal(rt.nextValue(dictionary, rt.hasNext(dictionary, 0)), -1);
+    assert.equal(reads, 0);
+    assert.ok(settled <= 200, `${settled} reads to give 100 keys their slots and walk them`);
+
+    // A walk left off part-way, as one that breaks.
+    rt.hasNext(dictionary, rt.hasNext(dictionary, 0));
+  };
+
+  try {
+    walks();
+  } finally {
+    WeakRef.prototype.deref = deref;
+  }
+
+  await collect();
+  assert.equal((keys as unknown as { opened: unknown }).opened, null);
+  assert.equal(
+    gone.filter((ref) => ref.deref() !== undefined).length,
+    0,
+    "keys walked in a job that is over are collected",
+  );
+  assert.deepEqual(
+    walk(rt, dictionary),
+    kept.map((key, i) => [key, i]),
+  );
+
+  // Their slots are free for keys added then, which the walk in that job goes through.
+  const later = Array.from({ length: 60 }, (_, i) => ({ later: i }));
+  for (let i = 0; i < later.length; i++) {
+    keys.set(later[i], `later ${i}`);
+  }
+
+  const names = walk(rt, dictionary).map(([name]) => name);
+  assert.equal(names.length, 110);
+  assert.deepEqual(new Set(names), new Set([...kept, ...later]));
+  assert.equal((keys as unknown as { slots: unknown[] }).slots.length, 110);
+});
+
+test("a weak Dictionary's walks go as a strong one's through sets, deletes and nested walks", async () => {
+  const rt = avm2.createRuntime();
+  // Deterministic: a failure names the step it came to.
+  let seed = 1;
+  const random = (n: number) => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return (seed >>> 8) % n;
+  };
+
+  const held = Array.from({ length: 40 }, (_, i) => ({ i }));
+  const dictionaries = [false, true].map(
+    (weak) => ({ $keys: new DictionaryKeys(weak) }) as unknown as avm2.AsObject,
+  );
+
+  /** A walk, with now and then a change or a walk inside between its steps. */
+  const steps = (dictionary: avm2.AsObject, log: unknown[], depth: number): void => {
+    for (let i = rt.hasNext(dictionary, 0); i; i = rt.hasNext(dictionary, i)) {
+      log.push(rt.nextName(dictionary, i));
+      switch (random(7)) {
+        case 0:
+          dictionary.$keys.delete(held[random(held.length)]);
+          break;
+        case 1:
+          dictionary.$keys.set(held[random(held.length)], random(1000));
+          break;
+        case 2:
+          if (depth < 2) {
+            steps(dictionary, log, depth + 1);
+          }
+
+          break;
+        case 3:
+          dictionary.$keys.delete(rt.nextName(dictionary, i) as object);
+          break;
+        default:
+          break;
+      }
+
+      // After a change, as a deleted key's name and value read back.
+      log.push(rt.nextName(dictionary, i), rt.nextValue(dictionary, i));
+    }
+  };
+
+  for (let round = 0; round < 60; round++) {
+    const from = seed;
+    const logs = dictionaries.map((dictionary) => {
+      seed = from;
+      const log: unknown[] = [];
+      for (let n = random(30); n > 0; n--) {
+        dictionary.$keys.set(held[random(held.length)], random(1000));
+      }
+
+      steps(dictionary, log, 0);
+      log.push([...dictionary.$keys]);
+      return log;
+    });
+
+    assert.deepEqual(logs[1], logs[0], `round ${round}, seed ${from}`);
+
+    // Some rounds in one job, some in a job of their own.
+    if (round % 3 === 0) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+  }
+});
