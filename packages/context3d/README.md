@@ -131,8 +131,9 @@ must dispose them or the context.
 
 The current API and validation are experimental. Supported operations, AIR
 references, unsupported formats/profiles and lifecycle stress tests are tracked
-in [tests/context3d](../../tests/context3d/README.md). Stage3D playback remains off
-by default. A web host can explicitly opt in before loading its first player:
+in [tests/context3d](../../tests/context3d/README.md). Stage3D playback is off by
+default in the web element, and on in the desktop app, whose View menu turns it
+off. A web host can explicitly opt in before loading its first player:
 
 ```ts
 import { configure } from "@swf2es/web";
@@ -163,7 +164,10 @@ configure({
 });
 ```
 
-Each requested slot needs a fresh surface. `configure({ stage3D: null })` disables
+Each requested slot needs a fresh surface. In place of the factory, `stage3D` takes
+a loader, `{ load: () => import("./my-stage3d.js").then((m) => m.create) }`, which
+the element calls at a SWF's first `requestContext3D`: a SWF that never asks loads
+no backend, and one whose load fails gets #3702. `configure({ stage3D: null })` disables
 the experiment for subsequent loads. The web element owns native installation,
 composition, cancellation, restoration and teardown for each load. GPU backend
 selection stays with the host; the default web entry does not eagerly import

@@ -20,7 +20,7 @@ select **Stage3D (experimental)** in the player controls.
   text, bitmaps, filters, blend modes, sound, input, loading, sockets,
   workers, ExternalInterface and Pixel Bender (`ShaderJob`, shader
   filters, blends and fills), each checked against Flash under AIR's
-  `adl`. Stage3D is an experimental opt-in.
+  `adl`. Stage3D is experimental: on in the desktop app, an opt-in on a page.
 - **Not yet:** video, printing, and Pixel Bender's shader lines.
   Compatibility is incomplete.
 

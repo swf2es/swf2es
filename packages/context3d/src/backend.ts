@@ -166,6 +166,11 @@ export interface Context3DLifecycle {
 /** Loss callbacks are asynchronous. Keep the lost surface until remove(), including
  * its restoration listener; remove() must detach both listeners before releasing it. */
 export interface Stage3DHost {
+  /**
+   * What a request waits for before create(): a host that loads its backend at the first
+   * request gives the load, null once loaded. A rejection makes the context unavailable (#3702).
+   */
+  ready?(): Promise<unknown> | null;
   create(slot: number, lifecycle: Context3DLifecycle): Context3D;
   place(slot: number, x: number, y: number, visible: boolean): void;
   remove(slot: number): void;

@@ -293,7 +293,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
 
     profiles.set(slot, profile);
     pending.add(slot);
-    deferEvent(() => {
+    const deliver = () => {
       pending.delete(slot);
       if (closed || s.destroyed || lost.has(slot)) {
         return;
@@ -384,7 +384,30 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
       slots.set(slot, object);
       place(slot);
       created(slot);
-    });
+    };
+    // A backend the host loads now is there before the context is made: Flash's context3DCreate
+    // comes after the request anyway.
+    const loading = host.ready?.();
+    if (!loading) {
+      deferEvent(deliver);
+      return;
+    }
+
+    loading.then(
+      () => {
+        if (closed || s.destroyed) {
+          pending.delete(slot);
+        } else {
+          deferEvent(deliver);
+        }
+      },
+      () => {
+        pending.delete(slot);
+        if (!closed && !s.destroyed) {
+          unavailable(slot);
+        }
+      },
+    );
   };
 
   const dispose = (object: AsObject): AsObject | null => {
