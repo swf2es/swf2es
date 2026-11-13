@@ -5,6 +5,7 @@ import {
   type CompareMode,
   CULL_FACES,
   type CullFace,
+  MOST_BACK_BUFFER,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
   SAMPLER_WRAPS,
@@ -27,6 +28,20 @@ import { storeOf } from "../flash/display/BitmapData.js";
 
 import { type AsObject, type Bindings, unsupported } from "./lifecycle.js";
 import { writeReadback } from "./readback.js";
+
+/** maxBackBufferWidth and maxBackBufferHeight of a disposed context, as AIR reads them. */
+const DISPOSED_MOST = 2048;
+
+/** The SWF version from which a refused size is #3780 or #3781, not #3669. */
+const SIZE_ERRORS_FROM = 30;
+
+/**
+ * A maxBackBufferWidth or maxBackBufferHeight set: AIR takes it between the back buffer's
+ * size (at least 32) and the GPU's limit.
+ */
+function most(value: number, size: number, limit: number): number {
+  return Math.min(limit, Math.max(32, size, value | 0));
+}
 
 /** The backend's format for a texture's; the packed and half-float ones are not yet. */
 function textureFormat(format: string): TextureFormat {
@@ -84,6 +99,37 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       return contexts.get(this as unknown as AsObject)?.backend.height ?? 0;
     }
 
+    declare $maxWidth: number | undefined;
+    declare $maxHeight: number | undefined;
+
+    get maxBackBufferWidth(): number {
+      return contexts.get(this as unknown as AsObject)?.maxWidth ?? this.$maxWidth ?? DISPOSED_MOST;
+    }
+
+    set maxBackBufferWidth(value: number) {
+      const entry = contexts.get(this as unknown as AsObject);
+      if (entry) {
+        entry.maxWidth = most(value, entry.backend.width, MOST_BACK_BUFFER);
+      } else {
+        this.$maxWidth = most(value, 0, DISPOSED_MOST);
+      }
+    }
+
+    get maxBackBufferHeight(): number {
+      return (
+        contexts.get(this as unknown as AsObject)?.maxHeight ?? this.$maxHeight ?? DISPOSED_MOST
+      );
+    }
+
+    set maxBackBufferHeight(value: number) {
+      const entry = contexts.get(this as unknown as AsObject);
+      if (entry) {
+        entry.maxHeight = most(value, entry.backend.height, MOST_BACK_BUFFER);
+      } else {
+        this.$maxHeight = most(value, 0, DISPOSED_MOST);
+      }
+    }
+
     configureBackBuffer(
       width: number,
       height: number,
@@ -94,11 +140,20 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
     ): void {
       const entry = state(this as unknown as AsObject);
       const backend = entry.backend;
-      if (width < 32) {
-        throw s.rt.error("Error", 3780, 32, 2048);
-      }
-      if (height < 32) {
-        throw s.rt.error("Error", 3781, 32, 2048);
+      // AIR's limits are the GPU's, 16384 on a desktop one in every profile (Flash Player 32
+      // and AIR 51 alike); a GPU that allows less draws the back buffer smaller and stretches
+      // it (WebGLContext3D), where AIR would refuse.
+      const wide = !(width >= 32 && width <= entry.maxWidth);
+      if (wide || !(height >= 32 && height <= entry.maxHeight)) {
+        // The back buffer it had is gone: clear refuses until another configure.
+        backend.unconfigure();
+        if (s.rt.swfVersion < SIZE_ERRORS_FROM) {
+          throw s.rt.error("Error", 3669);
+        }
+
+        throw wide
+          ? s.rt.error("Error", 3780, 32, entry.maxWidth)
+          : s.rt.error("Error", 3781, 32, entry.maxHeight);
       }
 
       if (best || zoom) {
@@ -128,8 +183,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       }
 
       const backend = entry.backend;
+      // Without error checking, as after a size refused, AIR clears nothing and says nothing.
       if (backend.width === 0) {
-        throw s.rt.error("Error", 3698);
+        if (this.$checking) {
+          throw s.rt.error("Error", 3698);
+        }
+
+        return;
       }
 
       if (mask !== 0xffffffff && mask > 7) {
@@ -652,6 +712,16 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
         entry.backend.setRenderTarget(null);
         entry.target = null;
         entry.targetObject = null;
+      }
+
+      // No back buffer: AIR still asks for the clear, then shows nothing and says nothing of it.
+      if (!entry.backend.width) {
+        const required = entry.depth ? 7 : 1;
+        if (this.$checking && (entry.cleared & required) !== required) {
+          throw s.rt.error("Error", 3692);
+        }
+
+        return;
       }
 
       if (this.$checking) {

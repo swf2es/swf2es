@@ -107,6 +107,8 @@ node tests/context3d/oracle.ts --cubetextures
 node tests/context3d/oracle.ts --rendertargets
 node tests/context3d/oracle.ts --cubetargets
 node tests/context3d/oracle.ts --reconfigure
+node tests/context3d/oracle.ts --backbuffer
+node tests/context3d/oracle.ts --backbufferlegacy    # compiled as SWF 15
 node tests/context3d/oracle.ts --framevalidation
 node tests/context3d/oracle.ts --framevalidationflat
 # Requires a reference driver that implements pixel-shader predication:
