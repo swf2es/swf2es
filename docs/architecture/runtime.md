@@ -41,10 +41,14 @@ family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `natives/index.ts`, with what makes some builtin classes differ from others:
 Arrays' and Vectors' element storage, and what calling or constructing
 `int`, `String`, `Object`, `Array` or a Vector does. A Dictionary keyed
-weakly (`new Dictionary(true)`, `weak-keys.ts`) keeps no key alive, as
+weakly (`new Dictionary(true)`, `dictionary-keys.ts`) keeps no key alive, as
 Flash's does not: its values in a `WeakMap`, its keys' order as `WeakRef`s,
 and a for-in's names of its keys held weakly too, so that a for-in left off
-keeps none. Kept strongly, an application's registry of display objects in
+keeps none. Reading a `WeakRef` is what a walk over one costs beyond a strong
+one's, so the entries a walk reads stay beside their slots until the job
+ends, a microtask then letting them go: the engine itself keeps what a
+`WeakRef` gave for that long, so no key lives longer for it, and a step's
+name and value, and the walks after it in that job, read none again. Kept strongly, an application's registry of display objects in
 one held every room's clips, which played on as orphans. avmshell's own classes,
 which a player has not, are in `natives/shell.ts`. playerglobal is the
 player's (`packages/player/src/playerglobal/flash/display/...`, a path per

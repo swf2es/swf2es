@@ -5,7 +5,10 @@
 // Dictionary(true)) keep no key alive, as Flash's do not: their entries are
 // held strongly only by a WeakMap keyed by the key, and their slots hold
 // them weakly, so neither a for-in left off nor a value that refers to its
-// key keeps the key.
+// key keeps the key. Reading a slot's WeakRef is the cost of a weak walk,
+// so the entries one reads are kept beside the slots until the job ends,
+// which is as long as the engine itself keeps what a WeakRef gave: a step's
+// name and value, and the walks after it in that job, read none again.
 
 import type { AsObject, Value } from "./descriptors.js";
 
@@ -36,6 +39,24 @@ class WeakEntry extends Entry {
 }
 
 type Held = Entry | WeakRef<Entry>;
+
+/**
+ * The weak Dictionaries whose slots' entries are kept open in this job, and
+ * whether their closing at its end is asked for. deref() makes the engine
+ * keep its target until the job ends, so an entry kept that long keeps no
+ * key the walk that read it did not; kept longer, it would.
+ */
+const openedInJob: DictionaryKeys[] = [];
+let closing = false;
+
+function closeOpened(): void {
+  for (let i = 0; i < openedInJob.length; i++) {
+    openedInJob[i].close();
+  }
+
+  openedInJob.length = 0;
+  closing = false;
+}
 
 /**
  * As avmplus' hashtable, a name keeps its slot while it is there, so that a
@@ -71,6 +92,12 @@ export class DictionaryKeys {
   private readonly spare: Entry[] = [];
   /** The slot of each dynamic property's name. */
   private named: Map<string, number> | null = null;
+  /**
+   * A weak Dictionary's entries that this job's for-ins have read from
+   * their slots, each at its slot's index, null where none was; null
+   * outside a job that walks it.
+   */
+  private opened: (Entry | null)[] | null = null;
 
   constructor(weak: boolean) {
     this.weak = weak;
@@ -171,6 +198,10 @@ export class DictionaryKeys {
       this.start(o);
     }
 
+    if (this.weak) {
+      return this.nextWeak(o, index);
+    }
+
     const slots = this.slots;
     for (let i = index; i < slots.length; i++) {
       const held = slots[i];
@@ -198,6 +229,64 @@ export class DictionaryKeys {
     return 0;
   }
 
+  /** As next, for weak keys: each slot's WeakRef is read once a job, then its entry kept. */
+  private nextWeak(o: AsObject, index: number): number {
+    const slots = this.slots;
+    const opened = this.opened ?? this.keepOpened();
+    for (let i = index; i < slots.length; i++) {
+      let entry = opened[i];
+      if (entry === null) {
+        const held = slots[i];
+        if (held === null) {
+          continue;
+        }
+
+        if (typeof held === "string") {
+          if (o.$d?.has(held) && !o.$dontEnum?.has(held)) {
+            return i + 1;
+          }
+
+          continue;
+        }
+
+        const read = (held as WeakRef<Entry>).deref();
+        if (read === undefined) {
+          slots[i] = null;
+          this.collected.push(i);
+          continue;
+        }
+
+        entry = read;
+        opened[i] = read;
+      }
+
+      if (entry.value !== GONE) {
+        return i + 1;
+      }
+    }
+
+    return 0;
+  }
+
+  /** Starts keeping the entries read from the slots, until the job ends. */
+  private keepOpened(): (Entry | null)[] {
+    const opened: (Entry | null)[] = new Array(this.slots.length).fill(null);
+    this.opened = opened;
+    openedInJob.push(this);
+    if (!closing) {
+      closing = true;
+      // A microtask runs before the job ends, when the engine lets go of what deref() gave.
+      void Promise.resolve().then(closeOpened);
+    }
+
+    return opened;
+  }
+
+  /** Lets go of the entries kept: the job that read them is over. */
+  close(): void {
+    this.opened = null;
+  }
+
   /** The name at a for-in's index: a key, a dynamic property's name, or "" once a key is gone. */
   nameAt(index: number): object | string {
     const held = this.slots[index - 1];
@@ -205,7 +294,7 @@ export class DictionaryKeys {
       return "";
     }
 
-    return typeof held === "string" ? held : (this.open(held)?.key ?? "");
+    return typeof held === "string" ? held : (this.at(held, index - 1)?.key ?? "");
   }
 
   /** The value at a for-in's index: a key's, undefined once it is gone, or NAMED. */
@@ -219,8 +308,17 @@ export class DictionaryKeys {
       return NAMED;
     }
 
-    const value = this.open(held)?.value;
+    const value = this.at(held, index - 1)?.value;
     return value === GONE ? undefined : value;
+  }
+
+  /** The entry slot `i` holds: a weak one as this job's for-in read it, if it did. */
+  private at(held: Held, i: number): Entry | undefined {
+    if (!this.weak) {
+      return held as Entry;
+    }
+
+    return this.opened?.[i] ?? (held as WeakRef<Entry>).deref();
   }
 
   /** The entry a slot or `added` holds, or undefined once its key is collected. */
@@ -249,8 +347,11 @@ export class DictionaryKeys {
     }
   }
 
-  /** Those of `added` still there; the others are let go, their keys with them. */
-  private settle(added: Held[]): Held[] {
+  /**
+   * Those of `added` still there; the others are let go, their keys with
+   * them. Their entries go into `entries`, for a caller to read none twice.
+   */
+  private settle(added: Held[], entries?: Entry[]): Held[] {
     let kept = 0;
     for (let i = 0; i < added.length; i++) {
       const held = added[i];
@@ -261,6 +362,7 @@ export class DictionaryKeys {
 
       if (entry.value !== GONE) {
         added[kept++] = held;
+        entries?.push(entry);
       } else {
         this.map.delete(entry.key as object);
         entry.key = null;
@@ -286,10 +388,16 @@ export class DictionaryKeys {
     }
 
     const slots = this.slots;
+    // In step with the slots: an entry freed is no longer its slot's, one given a slot is.
+    const opened = this.opened;
     const free: number[] = [];
     for (let i = 0; i < deleted.length; i++) {
       const entry = deleted[i];
       slots[entry.slot] = null;
+      if (opened !== null) {
+        opened[entry.slot] = null;
+      }
+
       free.push(entry.slot);
       entry.slot = -1;
       this.spare.push(entry);
@@ -322,15 +430,24 @@ export class DictionaryKeys {
           const i = next < free.length ? free[next++] : slots.length;
           slots[i] = name;
           this.named.set(name, i);
+          if (opened !== null) {
+            opened[i] = null;
+          }
         }
       }
     }
 
-    const added = this.settle(this.added);
+    const entries: Entry[] = [];
+    const added = this.settle(this.added, entries);
     for (let n = 0; n < added.length; n++) {
       const i = next < free.length ? free[next++] : slots.length;
+      const entry = entries[n];
       slots[i] = added[n];
-      (this.open(added[n]) as Entry).slot = i;
+      entry.slot = i;
+      if (opened !== null) {
+        // settle read it, so the engine keeps it for this job already.
+        opened[i] = entry;
+      }
     }
 
     // Kept for as many keys as were added since the last start, as the next
