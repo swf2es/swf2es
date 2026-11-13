@@ -4,6 +4,7 @@ package {
   import flash.display.Screen;
   import flash.display.Sprite;
   import flash.events.Event;
+  import flash.events.HTTPStatusEvent;
   import flash.events.IOErrorEvent;
   import flash.events.InvokeEvent;
   import flash.filesystem.File;
@@ -20,8 +21,10 @@ package {
   // by a FileStream at once and over frames; a file in its storage, which
   // counts its runs, written and loaded by its app-storage: URL; an
   // EncryptedLocalStore item counting them too; a temporary file, written
-  // and read, and a temporary directory, in the cache directory; and its
-  // exit, once the reads are done.
+  // and read, and a temporary directory, in the cache directory; given the
+  // page's site, a URL its server answers 404, whose body AIR gives it, a load that
+  // completes where httpResponseStatus is listened for and fails without;
+  // and its exit, once the reads are done.
   public class AirWebTest extends Sprite {
     private var _pending:int = 5;
 
@@ -36,7 +39,8 @@ package {
     }
 
     private function invoked(e:InvokeEvent):void {
-      trace("air: invoke " + e.arguments.join("|") + " " + e.currentDirectory.exists);
+      // A third argument is the page's site, whose port is any.
+      trace("air: invoke " + e.arguments.slice(0, 2).join("|") + " " + e.currentDirectory.exists);
       var data:File = File.applicationDirectory.resolvePath("data/hello.txt");
       trace("air: files " + data.exists + " " + data.size + " " + File.applicationDirectory.resolvePath("missing.txt").exists + " " + File.applicationStorageDirectory.exists + " " + File.documentsDirectory.isDirectory);
       var names:Array = [];
@@ -89,16 +93,27 @@ package {
       load("file", new File(data.nativePath).url);
       load("missing", "app:/missing.txt");
       load("storage", saved.url);
+      if (e.arguments.length > 2) {
+        _pending += 2;
+        load("gone", e.arguments[2] + "/web-test/gone.txt", true);
+        load("gone unheard", e.arguments[2] + "/web-test/gone.txt");
+      }
     }
 
-    private function load(label:String, url:String):void {
+    private function load(label:String, url:String, status:Boolean = false):void {
       var loader:URLLoader = new URLLoader();
+      if (status) {
+        loader.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, function (e:HTTPStatusEvent):void {
+          trace("air: " + label + " status " + e.status);
+        });
+      }
+
       loader.addEventListener(Event.COMPLETE, function (e:Event):void {
         trace("air: " + label + " " + loader.data);
         done();
       });
       loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
-        trace("air: " + label + " refused");
+        trace("air: " + label + " refused" + (loader.data ? " " + loader.data : ""));
         done();
       });
       loader.load(new URLRequest(url));

@@ -237,7 +237,13 @@ export const arrayNatives: Natives = {
   "Array#set:length": (rt) =>
     function (this: AsObject, n: Value) {
       if (!sealed(rt, this, 0)) {
-        this.$a.length = rt.toUint(n);
+        // Array.prototype.push sets the length its elements already gave it, at
+        // every call: the engine's setter is a call into its runtime even then.
+        const a: Value[] = this.$a;
+        const length = rt.toUint(n);
+        if (length !== a.length) {
+          a.length = length;
+        }
       }
     },
   [`Array#${AS3}::push`]: (rt) =>

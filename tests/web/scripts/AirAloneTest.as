@@ -2,6 +2,7 @@ package {
   import flash.desktop.NativeApplication;
   import flash.display.Sprite;
   import flash.events.Event;
+  import flash.events.HTTPStatusEvent;
   import flash.events.IOErrorEvent;
   import flash.events.InvokeEvent;
   import flash.filesystem.File;
@@ -11,7 +12,9 @@ package {
 
   // A SWF that names AIR's classes, played alone by its URL: as an AIR
   // application whose directory holds it alone, its other files loaded
-  // from beside it on the server, and its exit once that is done.
+  // from beside it on the server, and its exit once that is done. A file
+  // the server has none of beside it is a file that is not there, though
+  // the server's 404 has a body and the load listens for its response.
   public class AirAloneTest extends Sprite {
     public function AirAloneTest() {
       trace("alone: url " + loaderInfo.url);
@@ -29,16 +32,30 @@ package {
       }
 
       trace("alone: listing " + names.join(","));
+      load("beside", "data/hello.txt", false, function ():void {
+        load("no file", "data/gone.txt", true, function ():void {
+          NativeApplication.nativeApplication.exit(5);
+        });
+      });
+    }
+
+    private function load(label:String, url:String, status:Boolean, then:Function):void {
       var loader:URLLoader = new URLLoader();
       loader.addEventListener(Event.COMPLETE, function (e:Event):void {
-        trace("alone: beside " + loader.data);
-        NativeApplication.nativeApplication.exit(5);
+        trace("alone: " + label + " " + loader.data);
+        then();
       });
       loader.addEventListener(IOErrorEvent.IO_ERROR, function (e:IOErrorEvent):void {
-        trace("alone: beside refused");
-        NativeApplication.nativeApplication.exit(5);
+        trace("alone: " + label + " refused " + loader.data);
+        then();
       });
-      loader.load(new URLRequest("data/hello.txt"));
+      if (status) {
+        loader.addEventListener(HTTPStatusEvent.HTTP_RESPONSE_STATUS, function (e:HTTPStatusEvent):void {
+          trace("alone: " + label + " status " + e.status);
+        });
+      }
+
+      loader.load(new URLRequest(url));
     }
   }
 }

@@ -489,7 +489,12 @@ export class Loads {
     deliver: (result: FetchResult, url: string) => void,
     purpose: FetchPurpose = "data",
   ): void {
-    const outgoing = { ...this.fetchRequest(request, this.s.url), purpose };
+    const outgoing: FetchRequest = {
+      ...this.fetchRequest(request, this.s.url),
+      purpose,
+      // An AIR application's URLLoader and URLStream complete with an error response's body.
+      ...(this.s.air && purpose === "data" ? { errorBody: true } : {}),
+    };
     const fetch = this.s.fetch;
     // Attach both handlers at once; an early rejection must not be unhandled.
     const fetched = (fetch ? fetch(outgoing, signal) : Promise.reject()).then(

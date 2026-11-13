@@ -306,7 +306,11 @@ export interface Drawer {
   ): boolean;
 }
 
-/** A host request's bytes and transport result; a local file reports status 0. */
+/**
+ * A host request's bytes and transport result; a local file reports status
+ * 0. No bytes is a failed load: nothing answered, or its status told an
+ * error and the request did not ask for such a response's body (`errorBody`).
+ */
 export interface FetchResult {
   bytes: Uint8Array | null;
   status: number;
@@ -335,6 +339,14 @@ export interface FetchRequest {
   body: Uint8Array | null;
   /** What it is for, for a host that judges requests as Flash did; a browser's fetch ignores it. */
   purpose?: FetchPurpose;
+  /**
+   * Whether the body of a response that tells an HTTP error (a status of
+   * 400 or more) is wanted, as the result's bytes: an AIR application's
+   * URLLoader and URLStream read it and complete, where Flash Player's
+   * fail. Without it, and from a host that does not know it, such a
+   * response has no bytes.
+   */
+  errorBody?: boolean;
 }
 
 /** A TCP connection supplied by the embedding host. */
@@ -400,7 +412,9 @@ export interface AirWindow {
 /**
  * One of the host's screens, as flash.display.Screen reads it: its bounds
  * on the desktop the windows' bounds are on, the part of it a window may
- * fill (past a task bar, a menu bar or a dock), and its colours' bits.
+ * fill (past a task bar, a menu bar or a dock), and its colours' bits as
+ * the host counts them: a browser's 24 for true colour is AIR's 32, which
+ * Screen.colorDepth gives for it.
  */
 export interface AirScreen {
   bounds: WindowBounds;

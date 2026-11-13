@@ -17,7 +17,12 @@ a stack is in; `definitions.ts`, definitions by qualified name, as a host
 and `ApplicationDomain.getDefinition` look them up; `method-factories.ts`,
 the natives and the methods with no generated body as a module binds them;
 `classes.ts`, OP_newclass, which makes a class from its descriptor, and the
-Vector.<T> classes; `enumeration.ts`, the names a for-in goes through;
+Vector.<T> classes; `enumeration.ts`, the names a for-in goes through
+(an Array's elements by index, or, once a walk meets a gap too long to
+step through, by the Array's indices, taken anew at each walk as nothing
+tells of an element written since; where avmplus holds such an Array in
+its hashtable the steps go by the indices alone, their for-in index
+negative to tell them apart);
 `property-cache.ts`, the inline caches, and `cache-fill.ts`, what a full
 lookup leaves in one; `array-conversion.ts`, Number(array) while Array's
 conversion is the builtins'; `errors.ts`, error messages and the stack a
@@ -35,16 +40,38 @@ until the next cache invalidation. Templates are weakly held, and invalidation
 discards their resolved names so retired domains are not kept by this cache.
 Runtime namespaces, object keys and numeric keys retain their transient path.
 
+Every for-in steps through the same few functions (`hasNextIn`,
+`nextName`, `nextValue`, `enumeration.ts`), over objects of every class,
+so what a step reads of its object (its elements, its hidden names, its
+traits, its keys if a Dictionary) the engine finds by a lookup each time,
+which together cost more than the step. A step therefore leaves what it
+read in one record (`lastStep`), and the step after it, and the name and
+value between, take it from there when they go on from the same object
+and index; the element after the last of a dense Array or Vector is then a
+bounds test and an `in`. The record is one: a for-in inside another takes
+it, and the outer one reads its object again at its next step, once a
+turn, which measured no slower than a second record kept for it. What
+the record says must hold for as long as its object is the same one: whoever gives an object other element storage does so
+through `rt.setElements`, and the first name hidden on one
+(`setPropertyIsEnumerable`) lets the record go (`forgetStep`). The
+elements' own contents and length are read at every step, as avmplus
+reads them: those pushed during a for-in are reached, and a length set to
+0 ends it.
+
 The builtins' natives are in `natives/`, a file per
 family of classes (`object`, `array`, `string`, `regexp`, `number`,
 `vector`, `bytearray`, `date`, `json`, `dictionary`...), registered in
 `natives/index.ts`, with what makes some builtin classes differ from others:
 Arrays' and Vectors' element storage, and what calling or constructing
 `int`, `String`, `Object`, `Array` or a Vector does. A Dictionary keyed
-weakly (`new Dictionary(true)`, `weak-keys.ts`) keeps no key alive, as
+weakly (`new Dictionary(true)`, `dictionary-keys.ts`) keeps no key alive, as
 Flash's does not: its values in a `WeakMap`, its keys' order as `WeakRef`s,
 and a for-in's names of its keys held weakly too, so that a for-in left off
-keeps none. Kept strongly, an application's registry of display objects in
+keeps none. Reading a `WeakRef` is what a walk over one costs beyond a strong
+one's, so the entries a walk reads stay beside their slots until the job
+ends, a microtask then letting them go: the engine itself keeps what a
+`WeakRef` gave for that long, so no key lives longer for it, and a step's
+name and value, and the walks after it in that job, read none again. Kept strongly, an application's registry of display objects in
 one held every room's clips, which played on as orphans. avmshell's own classes,
 which a player has not, are in `natives/shell.ts`. playerglobal is the
 player's (`packages/player/src/playerglobal/flash/display/...`, a path per

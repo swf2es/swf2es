@@ -11,6 +11,7 @@ const flatten = @import("flatten.zig");
 const arena = @import("arena.zig");
 const bands = @import("bands.zig");
 const earclip = @import("earclip.zig");
+const monotone = @import("monotone.zig");
 
 extern "env" fn failure(code: c_int) noreturn;
 
@@ -108,8 +109,17 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
             return 0;
         }
 
+        // One that goes once along an axis and back, a crescent of two curves, is known simple in a
+        // pass: a thin one is cut in another, and ear clipping looks at no pair of a wide one's edges.
         arena.top = mark;
-        if (earclip.fill(arena.allocator, coords)) |triangles| {
+        const found = monotone.fill(arena.allocator, coords);
+        if (found == .triangles) {
+            out = .{ .positions = coords, .indices = found.triangles };
+            return 0;
+        }
+
+        arena.top = mark;
+        if (earclip.fill(arena.allocator, coords, found == .simple)) |triangles| {
             out = .{ .positions = coords, .indices = triangles };
             return 0;
         }

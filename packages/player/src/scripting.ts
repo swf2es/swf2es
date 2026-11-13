@@ -297,6 +297,14 @@ export class Scripting {
   stageViewportY = 0;
   stageViewportWidth = 0;
   stageViewportHeight = 0;
+  /**
+   * Stage.contentsScaleFactor: the screen's pixels to a stage pixel, which a
+   * Stage3D back buffer configured for best resolution is drawn at. A host
+   * sets it (setContentsScaleFactor); 1 by default.
+   */
+  contentsScaleFactor = 1;
+  /** Told once contentsScaleFactor changes, as Stage3D's back buffers follow it. */
+  readonly contentsScaleListeners = new Set<() => void>();
   /** The latest pointer position in stage coordinates. */
   mouseStageX = 0;
   mouseStageY = 0;
@@ -555,6 +563,7 @@ export class Scripting {
    */
   destroy(): void {
     this.onStageLayout = null;
+    this.contentsScaleListeners.clear();
     this.fileLifetime.abort();
     if (this.destroyed) {
       return;
@@ -872,6 +881,33 @@ export class Scripting {
     if (!this.stageAlignSet) {
       this.stageAlign = stageAlignment(align);
     }
+  }
+
+  /** The screen's pixels to a stage pixel, as the host shows the stage now; 1 for one not finite and above 0. */
+  setContentsScaleFactor(value: number): void {
+    // An AIR application draws at the screen's pixels only where its descriptor asks for
+    // them, as AIR 51 does on Windows; otherwise the system stretches it, and it reads 1.
+    const scale = Number.isFinite(value) && value > 0 && this.screenResolution() ? value : 1;
+    if (scale === this.contentsScaleFactor) {
+      return;
+    }
+
+    this.contentsScaleFactor = scale;
+    for (const listener of this.contentsScaleListeners) {
+      listener();
+    }
+  }
+
+  /** Whether the SWFs may draw at the screen's pixels: an AIR application's initial window asks. */
+  private screenResolution(): boolean {
+    if (!this.air) {
+      return true;
+    }
+
+    const initial = /<initialWindow>([\s\S]*?)<\/initialWindow>/.exec(
+      this.application?.descriptor ?? "",
+    );
+    return /<requestedDisplayResolution>\s*high\s*</.test(initial?.[1] ?? "");
   }
 
   /** The host's visible size in noScale, the authored size in other modes. */

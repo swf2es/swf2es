@@ -1,7 +1,10 @@
 import { LineBuilder } from "./lines.js";
 import { renderInstance, renderModule } from "./module.js";
 
-/** Buffers are owned by the caller; subsequent calls and disposal cannot change them. */
+/**
+ * Buffers are owned by the caller; subsequent calls and disposal cannot change them, but for a
+ * layer asked for `borrowed` (FillTessellate.layer).
+ */
 export interface FillGeometry {
   vertices: Float64Array;
   indices: Uint16Array | Uint32Array;
@@ -21,10 +24,17 @@ export interface FillTessellate {
    * flattens itself: each fill's geometry, or null for one it refused, all
    * fills' positions and indices in one buffer each. Its output needs no checking: the module has checked
    * every coordinate finite and every index in range.
+   *
+   * Where `borrowed`, the geometries may be views of the module's memory,
+   * which the tessellator's next call of any kind overwrites: for a caller
+   * that reads them at once, as the player does for a drawing made again
+   * every frame, which the two buffers a layer otherwise takes cost more
+   * than the copy does.
    */
   layer(
     fills: readonly (readonly (readonly number[])[])[],
     nonZero: readonly boolean[],
+    borrowed?: boolean,
   ): (FillGeometry | null)[] | null;
   /** A layer's lines in one call, their outlines filled by the same libtess2 (LineBuilder). */
   lines: LineBuilder;
@@ -94,6 +104,17 @@ const RANGE = 5;
  */
 export class Tessellator {
   private instance: NativeExports | null = null;
+  /**
+   * The instance's whole memory as each kind a layer reads and writes, made again once growth
+   * detaches them (their length 0) or the instance is another: a view made for each array of each
+   * call cost a drawing made again every frame as much as the copies.
+   */
+  private f64 = new Float64Array(0);
+  private i32 = new Int32Array(0);
+  private u32 = new Uint32Array(0);
+  private u16 = new Uint16Array(0);
+  private u8 = new Uint8Array(0);
+  private viewed: NativeExports | null = null;
   private readonly limit: number;
   private readonly keep: number;
   private readonly bands: boolean;
@@ -132,7 +153,7 @@ export class Tessellator {
   }
 
   dispose(): void {
-    this.instance = null;
+    this.release();
     this.lines.dispose();
   }
 
@@ -148,17 +169,41 @@ export class Tessellator {
     return x;
   }
 
+  /** `x`'s memory viewed as it is now (f64 and the rest). */
+  private view(x: NativeExports): void {
+    if (this.viewed !== x || this.u8.length === 0) {
+      const buffer = x.memory.buffer;
+      this.f64 = new Float64Array(buffer, 0, buffer.byteLength >> 3);
+      this.i32 = new Int32Array(buffer);
+      this.u32 = new Uint32Array(buffer);
+      this.u16 = new Uint16Array(buffer);
+      this.u8 = new Uint8Array(buffer);
+      this.viewed = x;
+    }
+  }
+
   /** A call that threw: a trapped instance is never used again. */
   private failed(): void {
     // In particular, longjmp unwinds through a throwing import: never resume that C instance. The
     // line builder's instance is its own.
+    this.release();
+  }
+
+  /** The instance let go of, and the views that would keep its memory. */
+  private release(): void {
     this.instance = null;
+    this.viewed = null;
+    this.f64 = new Float64Array(0);
+    this.i32 = new Int32Array(0);
+    this.u32 = new Uint32Array(0);
+    this.u16 = new Uint16Array(0);
+    this.u8 = new Uint8Array(0);
   }
 
   /** An instance grown past what is kept, let go. */
   private trim(): void {
     if ((this.instance?.memory.buffer.byteLength ?? 0) > this.keep) {
-      this.instance = null;
+      this.release();
     }
   }
 
@@ -236,30 +281,27 @@ export class Tessellator {
   private readonly layer = (
     fills: readonly (readonly (readonly number[])[])[],
     nonZero: readonly boolean[],
-  ): (FillGeometry | null)[] | null => this.layerBy(fills, nonZero, this.bands);
+    borrowed = false,
+  ): (FillGeometry | null)[] | null => this.layerBy(fills, nonZero, this.bands, borrowed);
 
   /** The layer, by the bands alone where `bands`; again so in a new instance where libtess2 trapped. */
   private layerBy(
     fills: readonly (readonly (readonly number[])[])[],
     nonZero: readonly boolean[],
     bands: boolean,
+    borrowed = false,
   ): (FillGeometry | null)[] | null {
     let length = 0;
     let contours = 0;
-    const rules = new Uint8Array(fills.length);
     for (let i = 0; i < fills.length; i++) {
       const fill = fills[i];
-      if (fill.length > MOST_CONTOURS) {
-        rules[i] = REJECTED;
-        continue;
-      }
+      if (fill.length <= MOST_CONTOURS) {
+        for (let j = 0; j < fill.length; j++) {
+          length += fill[j].length;
+        }
 
-      for (let j = 0; j < fill.length; j++) {
-        length += fill[j].length;
+        contours += fill.length;
       }
-
-      rules[i] = Number(nonZero[i]);
-      contours += fill.length;
     }
 
     let ranges: Int32Array;
@@ -277,23 +319,28 @@ export class Tessellator {
       const fillsAt = endsAt + contours * 4;
       const rulesAt = fillsAt + fills.length * 4;
 
-      const commands = new Float64Array(x.memory.buffer, commandAt, length);
-      const ends = new Uint32Array(x.memory.buffer, endsAt, contours);
-      const lasts = new Uint32Array(x.memory.buffer, fillsAt, fills.length);
-      new Uint8Array(x.memory.buffer, rulesAt, fills.length).set(rules);
+      this.view(x);
+      const commands = this.f64;
+      const ends = this.u32;
+      const rules = this.u8;
+      const command = commandAt >> 3;
       let at = 0;
       let contour = 0;
       for (let i = 0; i < fills.length; i++) {
-        if (rules[i] !== REJECTED) {
-          const fill = fills[i];
+        const fill = fills[i];
+        if (fill.length <= MOST_CONTOURS) {
           for (let j = 0; j < fill.length; j++) {
-            commands.set(fill[j], at);
+            commands.set(fill[j], command + at);
             at += fill[j].length;
-            ends[contour++] = at;
+            ends[(endsAt >> 2) + contour++] = at;
           }
+
+          rules[rulesAt + i] = Number(nonZero[i]);
+        } else {
+          rules[rulesAt + i] = REJECTED;
         }
 
-        lasts[i] = contour;
+        ends[(fillsAt >> 2) + i] = contour;
       }
 
       const head = x.layer(commandAt, length, endsAt, contours, fillsAt, rulesAt, fills.length);
@@ -305,13 +352,31 @@ export class Tessellator {
       }
 
       // The one copy out, its ranges read before a retry resets the arena.
-      const buffer = x.memory.buffer;
-      ranges = new Int32Array(buffer, head, LAYER + fills.length * RANGE).slice();
-      vertices = new Float64Array(buffer, ranges[0], ranges[2] * 2).slice();
-      indices =
-        ranges[4] === 2
-          ? new Uint16Array(buffer, ranges[1], ranges[3]).slice()
-          : new Uint32Array(buffer, ranges[1], ranges[3]).slice();
+      this.view(x);
+      const count = LAYER + fills.length * RANGE;
+      ranges = this.i32.subarray(head >> 2, (head >> 2) + count);
+      // A fill that ran out is tried alone, which resets the arena under what is borrowed.
+      let lent = borrowed;
+      for (let i = 0; lent && i < fills.length; i++) {
+        lent = ranges[LAYER + i * RANGE] !== -1;
+      }
+
+      const vertexAt = ranges[0] >> 3;
+      const indexAt = ranges[1];
+      if (lent) {
+        vertices = this.f64.subarray(vertexAt, vertexAt + ranges[2] * 2);
+        indices =
+          ranges[4] === 2
+            ? this.u16.subarray(indexAt >> 1, (indexAt >> 1) + ranges[3])
+            : this.u32.subarray(indexAt >> 2, (indexAt >> 2) + ranges[3]);
+      } else {
+        ranges = ranges.slice();
+        vertices = this.f64.slice(vertexAt, vertexAt + ranges[2] * 2);
+        indices =
+          ranges[4] === 2
+            ? this.u16.slice(indexAt >> 1, (indexAt >> 1) + ranges[3])
+            : this.u32.slice(indexAt >> 2, (indexAt >> 2) + ranges[3]);
+      }
     } catch {
       this.failed();
       if (bands) {
@@ -321,7 +386,7 @@ export class Tessellator {
       // libtess2 trapped: each fill in a fresh instance, and one that traps alone again by the
       // bands, which never trap.
       return fills.length === 1
-        ? this.layerBy(fills, nonZero, true)
+        ? this.layerBy(fills, nonZero, true, borrowed)
         : fills.map((fill, i) => this.alone(fill, nonZero[i], false));
     } finally {
       this.trim();

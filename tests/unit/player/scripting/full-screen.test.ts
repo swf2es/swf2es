@@ -63,7 +63,7 @@ async function play(
   frames: number,
   host: ReturnType<typeof fakeHost> | null,
   air: boolean,
-  between?: (frame: number, scripting: Scripting, lines: string[]) => void,
+  between?: (frame: number, scripting: Scripting, lines: string[], player: Player) => void,
 ): Promise<string[]> {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
@@ -102,7 +102,7 @@ async function play(
   try {
     await player.start();
     for (let i = 1; i <= frames; i++) {
-      between?.(i, scripting, lines);
+      between?.(i, scripting, lines, player);
       player.tick();
     }
   } finally {
@@ -457,4 +457,106 @@ test("without a host the stage stays normal", {
     "frame 2 normal",
     "frame 3 normal",
   ]);
+});
+
+const KEYS = `package {
+  import flash.display.Sprite;
+  import flash.events.FullScreenEvent;
+  import flash.events.KeyboardEvent;
+
+  public class FullScreenKeys extends Sprite {
+    public function FullScreenKeys() {
+      stage.addEventListener(FullScreenEvent.FULL_SCREEN, function(e:FullScreenEvent):void {
+        trace("event", e.fullScreen);
+      });
+      // F11 on its way down, F10 on its way up, and F9 where it is refused.
+      stage.addEventListener(KeyboardEvent.KEY_DOWN, function(e:KeyboardEvent):void {
+        if (e.keyCode == 122) {
+          stage.displayState = stage.displayState == "normal" ? "fullScreenInteractive" : "normal";
+        } else if (e.keyCode == 120) {
+          try {
+            stage.displayState = "fullScreen";
+          } catch (error:SecurityError) {
+            trace("refused", error.errorID);
+          }
+        } else if (e.keyCode == 119) {
+          // To the state it is in, and to the other kind of full screen: nothing the host does.
+          stage.displayState = stage.displayState == "normal" ? "normal" : "fullScreen";
+        }
+      });
+      stage.addEventListener(KeyboardEvent.KEY_UP, function(e:KeyboardEvent):void {
+        if (e.keyCode == 121) {
+          stage.displayState = stage.displayState == "normal" ? "fullScreen" : "normal";
+        }
+      });
+    }
+  }
+}
+`;
+
+test("a key whose listeners change displayState is the SWF's, which a host keeps from its own", {
+  skip,
+}, async () => {
+  for (const air of [true, false]) {
+    const host = fakeHost();
+    const used: string[] = [];
+    const lines = await play("FullScreenKeys", KEYS, 8, host, air, (frame, _s, _lines, player) => {
+      const key = (type: "down" | "up", keyCode: number) =>
+        used.push(`${type} ${keyCode} ${player.keyboard?.handle(type, { keyCode, charCode: 0 })}`);
+      switch (frame) {
+        case 2:
+          // In by the SWF's F11: the host's key for the same, a menu's, must not take it out again.
+          key("down", 122);
+          key("up", 122);
+          break;
+        case 3:
+          // Within full screen, to the state it is in and from one kind to the other: the host's still.
+          key("down", 119);
+          break;
+        case 4:
+          key("down", 122);
+          break;
+        case 5:
+          // A key the SWF does nothing with is the host's.
+          key("down", 123);
+          key("down", 119);
+          break;
+        case 6:
+          // A change on the key's way up is the SWF's too, though a host's key has acted by then.
+          key("down", 121);
+          key("up", 121);
+          break;
+        case 7:
+          // A request the host refuses changes nothing.
+          key("down", 121);
+          key("up", 121);
+          host.state.grant = false;
+          key("down", 120);
+          break;
+        default:
+      }
+    });
+
+    assert.deepEqual(used, [
+      "down 122 true",
+      "up 122 false",
+      "down 119 false",
+      "down 122 true",
+      "down 123 false",
+      "down 119 false",
+      "down 121 false",
+      "up 121 true",
+      "down 121 false",
+      "up 121 true",
+      "down 120 false",
+    ]);
+    assert.deepEqual(lines, [
+      "event true",
+      "event false",
+      "event true",
+      "event false",
+      "refused 2152",
+    ]);
+    assert.deepEqual(host.state.asked, ["interactive", "exit", "request", "exit", "request"]);
+  }
 });
