@@ -121,6 +121,9 @@ node tests/player/pixel-bender.ts [--gpu]   # Pixel Bender kernels as GLSL in Ch
                               # interpreter on random images (part of pnpm test)
 node tests/web/run.ts               # @swf2es/web's element, replaceFlash and ExternalInterface in
                               # Chrome (part of pnpm test)
+node tests/web/still.ts             # a still stage in the browser build's element in Chrome: no
+                              # drawing and an animation frame a second, its frames at their
+                              # pace, a change drawn in its tick (part of pnpm test)
 node packages/swf2es/build.ts       # the browser build, swf2es: @swf2es/web bundled by Rspack into
                               # packages/swf2es/dist/ for a CDN (the last step of pnpm build)
 node tests/web/cdn.ts               # that folder served as a CDN serves it, from another origin, and
