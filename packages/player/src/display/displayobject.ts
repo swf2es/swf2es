@@ -156,6 +156,16 @@ export function serials(): number {
 }
 
 /**
+ * Whether `d`'s pick bounds were marked stale since pick `picks` and are
+ * stale still: all above it, and the buttons it or one above it is the hit
+ * test state of, were marked then too (DisplayObject.pickChanged). One a
+ * pick worked out again since its mark, as a field's fit settled within
+ * that pick marks it, has to be marked again.
+ */
+const markedSince = (d: DisplayObject, picks: number): boolean =>
+  d.pickStale && d.pickChangedAt === picks;
+
+/**
  * A change in the hit test state `d` changes where its buttons are hit:
  * each not marked since pick `picks` is. Those let go of are dropped, into
  * a new list, as a button's mark may come back here.
@@ -167,7 +177,7 @@ function hitTestChanged(d: DisplayObject, picks: number): void {
     const button = buttons[i].deref();
     if (button === undefined) {
       gone = true;
-    } else if (button.pickChangedAt !== picks) {
+    } else if (!markedSince(button, picks)) {
       button.pickChanged(true);
     }
   }
@@ -520,8 +530,8 @@ export class DisplayObject {
   /**
    * Mark the pick bounds above it stale, and its own unless `own` is false
    * (input/hit-test.ts), and those of the buttons it or one above it is the
-   * hit test state of, and above them: one marked since the last pick has
-   * had all that marked already.
+   * hit test state of, and above them: one marked since the last pick, and
+   * stale still, has had all that marked already (markedSince).
    */
   pickChanged(own: boolean): void {
     const picks = pickWork.picks;
@@ -534,7 +544,7 @@ export class DisplayObject {
       hitTestChanged(this, picks);
     }
 
-    for (let p = this.parent; p && p.pickChangedAt !== picks; p = p.parent) {
+    for (let p = this.parent; p && !markedSince(p, picks); p = p.parent) {
       p.pickStale = true;
       p.pickChangedAt = picks;
       if (p.hitTestOf !== null) {

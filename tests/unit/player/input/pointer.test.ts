@@ -1627,6 +1627,46 @@ test("a still pointer's pick over a list of buttons sees each change under it, h
   }
 });
 
+test("a change after a pick whose bounds settled a field's fit is seen above the field", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const panel = new Container();
+  panel.object = { $display: panel } as never;
+  panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+  stage.addChildAt(panel, 0);
+  // A hidden field, which no pick goes into, whose fit waits.
+  const field = new TextObject(null);
+  field.object = { $display: field } as never;
+  field.autoSize = "left";
+  field.visible = false;
+  panel.addChildAt(field, 1);
+
+  const checks = pickChecks.on;
+  pickChecks.on = true;
+  try {
+    for (let i = 0; i < 4; i++) {
+      equal(pointerTarget(stage, 10, 10, 400, 400), panel);
+    }
+
+    field.model.setText("a");
+    field.deferFit();
+    field.invalidate(CONTENT);
+    // The third pick works the panel's bounds out, which settles the fit
+    // and so marks them stale while that pick makes them.
+    for (let i = 0; i < 3; i++) {
+      equal(pointerTarget(stage, 10, 10, 400, 400), panel);
+    }
+
+    field.visible = true;
+    field.invalidate(TRANSFORM);
+    field.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 200, ty: 200 });
+    equal(pointerTarget(stage, 205, 205, 400, 400), field);
+  } finally {
+    pickChecks.on = checks;
+  }
+});
+
 test("a pick sees a morph's new blend once drawn, though picks came between its ratio and its draw", () => {
   // A square of 20 pixels growing to 120.
   const square = (size: number): w.PathCommand[] => [
