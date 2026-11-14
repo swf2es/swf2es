@@ -136,3 +136,66 @@ test("a layer the line builder unwound on is asked for once more, and again on a
   assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
   assert.equal(builder.asked, 4);
 });
+
+test("a painted layer's lines come in pieces in order: runs of a colour together, each painted line alone and textured where it lies in the shape", () => {
+  const geometries = new Geometries();
+  const lines = new LineCache(geometries, tessellate);
+  const drawing = new Drawing();
+  const line = {
+    width: 40,
+    color: 0xff000000,
+    startCap: 1,
+    endCap: 1,
+    join: 1,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  // A bitmap mapped by the identity: a vertex samples its own place in the shape.
+  const bitmap = {
+    type: "image" as const,
+    image: null as never,
+    matrix: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    repeat: true,
+    smooth: false,
+  };
+  drawing.lineStyle(line);
+  drawing.moveTo(0, 0);
+  drawing.lineTo(50, 0);
+  drawing.lineStyle({ ...line, color: 0xff00ff00 });
+  drawing.lineTo(50, 50);
+  drawing.lineStyle(line);
+  drawing.lineBitmap(bitmap);
+  drawing.lineTo(0, 50);
+  drawing.lineStyle(line);
+  drawing.lineTo(0, 0);
+  const layer = drawing.layers[0];
+  assert.equal(lines.of(layer, 0).painted, true);
+
+  // Turned a quarter and scaled twice: the texels are the shape's points all the same.
+  const pieces = lines.pieces(layer, 0, 0, 2, -2, 0, 1, null, true);
+  assert.ok(pieces);
+  assert.deepEqual(
+    pieces.map((p) => p.part.paint?.type ?? null),
+    [null, "image", null],
+  );
+  const { positions, texels } = pieces[1].part.geometry;
+  assert.ok(texels);
+  for (let k = 0; k < positions.length; k += 2) {
+    // (x, y) went to (-2 y, 2 x).
+    assert.ok(Math.abs(texels[k] - positions[k + 1] / 2) < 1e-4);
+    assert.ok(Math.abs(texels[k + 1] + positions[k] / 2) < 1e-4);
+    assert.ok(texels[k + 1] >= 49 && texels[k + 1] <= 51);
+  }
+
+  // Found again, and stroked anew once a piece is let go of.
+  assert.equal(lines.pieces(layer, 0, 0, 2, -2, 0, 1, null, true), pieces);
+  geometries.remove(pieces[2].handle.id);
+  const again = lines.pieces(layer, 0, 0, 2, -2, 0, 1, null, true);
+  assert.notEqual(again, pieces);
+  assert.equal(geometries.alive(pieces[0].handle), false);
+  assert.ok(again?.every((p) => geometries.alive(p.handle)));
+});

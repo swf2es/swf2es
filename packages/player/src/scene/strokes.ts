@@ -5,7 +5,8 @@
 // non-zero, so that where it overlaps itself it is drawn once. A line drawn
 // at whole alpha, where an overlap shows nothing, is triangles along its
 // path instead, with no tessellator. Here the layer is packed as
-// strokes.zig reads it.
+// strokes.zig reads it. A line filled with a paint is built white, to be
+// textured (scene/shapes.ts, strokePart).
 import type { Line } from "@swf2es/format";
 import type { GeometryData } from "@swf2es/render";
 import { LINE, type ShapeLayer } from "../display/shapes.js";
@@ -22,6 +23,8 @@ import { vertexColor } from "./shapes.js";
  * curves, show a tenth.
  */
 const STROKE_FLATNESS = 0.1;
+
+const WHITE = 0xffffffff;
 
 /**
  * A line's width on the stage through the linear transform (a b c d): its
@@ -53,12 +56,13 @@ const OVERLAPS = 1;
 const TOGETHER = 2;
 
 /**
- * `layer`'s lines through the linear transform (a b c d), at least `least`
- * wide, as wide as `by` makes them (a 9-slice's line space) or null, built
- * by `builder`; those of whole alpha as triangles that may overlap where
- * `opaque`. Null for none, or where the builder refused them (a position
- * not a number, or past its memory); undefined where it had no instance, or
- * unwound again, which a later frame may try again.
+ * `layer`'s lines, those from `from` to before `to`, through the linear
+ * transform (a b c d), at least `least` wide, as wide as `by` makes them (a
+ * 9-slice's line space) or null, built by `builder`; those of whole alpha as
+ * triangles that may overlap where `opaque`. Null for none, or where the
+ * builder refused them (a position not a number, or past its memory);
+ * undefined where it had no instance, or unwound again, which a later
+ * frame may try again.
  */
 export function layerStrokes(
   layer: ShapeLayer,
@@ -70,16 +74,18 @@ export function layerStrokes(
   builder: LineBuilder,
   by: readonly number[] | null = null,
   opaque = false,
+  from = 0,
+  to = layer.strokes.length,
 ): GeometryData | null | undefined {
   // Seen through a transform that collapses the plane, lines cover nothing.
   if (a * d - b * c === 0) {
     return null;
   }
 
-  const built = build(layer, a, b, c, d, least, builder, by, opaque);
+  const built = build(layer, a, b, c, d, least, builder, by, opaque, from, to);
   // Once more where libtess2 trapped: the builder's next instance fills the outlines by the bands.
   return built === undefined && builder.unwound
-    ? build(layer, a, b, c, d, least, builder, by, opaque)
+    ? build(layer, a, b, c, d, least, builder, by, opaque, from, to)
     : built;
 }
 
@@ -97,9 +103,13 @@ function build(
   builder: LineBuilder,
   by: readonly number[] | null,
   opaque: boolean,
+  from: number,
+  to: number,
 ): GeometryData | null | undefined {
+  const strokes = layer.strokes;
   let size = 6;
-  for (const { paths } of layer.strokes) {
+  for (let i = from; i < to; i++) {
+    const paths = strokes[i].paths;
     size += 7;
     for (const path of paths) {
       size += 5 + path.length;
@@ -117,9 +127,10 @@ function build(
   input[3] = d;
   // `least` is a pixel of the screen, in the stage's pixels the lines are drawn in.
   input[4] = (by ? STROKE_FLATNESS / 2 : STROKE_FLATNESS) * least;
-  input[5] = layer.strokes.length;
+  input[5] = to - from;
   let at = 6;
-  for (const { line, paths, closes, triangles } of layer.strokes) {
+  for (let s = from; s < to; s++) {
+    const { line, paths, closes, triangles, paint } = strokes[s];
     input[at] = by
       ? strokeWidth(line, by[0], by[1], by[2], by[3], least) / 2
       : strokeWidth(line, a, b, c, d, least) / 2;
@@ -127,9 +138,11 @@ function build(
     input[at + 1] = line.startCap <= 2 ? line.startCap : 0;
     input[at + 2] = line.join <= 2 ? line.join : 0;
     input[at + 3] = Math.max(1, line.miterLimit);
-    input[at + 4] = vertexColor(line.color);
+    // A painted line white, for its paint to texture, and drawn once where it overlaps, as its
+    // paint may be translucent.
+    input[at + 4] = paint ? WHITE : vertexColor(line.color);
     input[at + 5] =
-      (opaque && line.color >>> 24 === 255 ? OVERLAPS : 0) | (triangles ? TOGETHER : 0);
+      (opaque && !paint && line.color >>> 24 === 255 ? OVERLAPS : 0) | (triangles ? TOGETHER : 0);
     input[at + 6] = paths.length;
     at += 7;
     // Each path as strokePaths gives it.

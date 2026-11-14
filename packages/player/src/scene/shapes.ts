@@ -10,6 +10,7 @@ import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
 import type {
   GradientFill,
   ImageFill,
+  LinePaint,
   Path,
   ShaderPaint,
   ShapeLayer,
@@ -276,10 +277,16 @@ class Sampling {
   private rows = 0;
 
   set(paint: ImageFill | GradientFill | ShaderPaint, contours: readonly Path[]): this {
+    const radial = paint.type === "gradient" && paint.radial;
+    return this.setIn(paint, radial ? regionOf(contours as Path[]) : null);
+  }
+
+  /** As set, a radial gradient's texture over `region`, which is null for any other paint. */
+  setIn(paint: ImageFill | GradientFill | ShaderPaint, region: Area | null): this {
     this.m = invert(paint.matrix) as Matrix;
     // A shader's coordinates are its matrix's inverse of the shape's, as a bitmap's texels are.
     this.kind = paint.type !== "gradient" ? "image" : paint.radial ? "radial" : "linear";
-    this.region = this.kind === "radial" ? regionOf(contours as Path[]) : null;
+    this.region = region;
     this.columns = this.region ? radialTexels(this.region.width) : 0;
     this.rows = this.region ? radialTexels(this.region.height) : 0;
     return this;
@@ -406,6 +413,79 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
   shrinkScratch();
 
   return out.parts;
+}
+
+/**
+ * A painted line's outline as the line builder made it (strokes.ts),
+ * through the linear transform (a b c d), white: a part sampling `paint`
+ * where each vertex lies in the shape's space, as a fill's do, so that the
+ * paint is mapped as Flash maps a line's. Null where the paint's matrix
+ * collapses the plane, which covers nothing.
+ */
+export function strokePart(
+  data: GeometryData,
+  a: number,
+  b: number,
+  c: number,
+  d: number,
+  paint: LinePaint,
+): Part | null {
+  const m = paint.matrix;
+  if (m.a * m.d - m.b * m.c === 0) {
+    return null;
+  }
+
+  // Back into the shape's space, which the builder left by (a b c d), never collapsed there.
+  const det = a * d - b * c;
+  const ia = d / det;
+  const ib = -b / det;
+  const ic = -c / det;
+  const id = a / det;
+  const positions = data.positions;
+  const count = positions.length >> 1;
+  const points = new Float64Array(count * 2);
+  let x0 = Number.POSITIVE_INFINITY;
+  let y0 = Number.POSITIVE_INFINITY;
+  let x1 = Number.NEGATIVE_INFINITY;
+  let y1 = Number.NEGATIVE_INFINITY;
+  for (let k = 0; k < count; k++) {
+    const px = positions[k * 2];
+    const py = positions[k * 2 + 1];
+    const x = ia * px + ic * py;
+    const y = ib * px + id * py;
+    points[k * 2] = x;
+    points[k * 2 + 1] = y;
+    x0 = Math.min(x0, x);
+    y0 = Math.min(y0, y);
+    x1 = Math.max(x1, x);
+    y1 = Math.max(y1, y);
+  }
+
+  // A radial gradient's texture over the outline's bounds, whole pixels out, as regionOf a fill's.
+  let region: Area | null = null;
+  if (paint.type === "gradient" && paint.radial) {
+    const x = Math.floor(x0);
+    const y = Math.floor(y0);
+    region =
+      x1 >= x0 && y1 >= y0
+        ? { x, y, width: Math.max(1, Math.ceil(x1) - x), height: Math.max(1, Math.ceil(y1) - y) }
+        : { x: 0, y: 0, width: 1, height: 1 };
+  }
+
+  const how = sampling.setIn(paint, region);
+  const texels = new Float32Array(count * 2);
+  for (let k = 0; k < count; k++) {
+    how.at(points[k * 2], points[k * 2 + 1]);
+    texels[k * 2] = how.u;
+    texels[k * 2 + 1] = how.v;
+  }
+
+  return {
+    geometry: { positions, colors: data.colors, texels, indices: data.indices },
+    paint,
+    region,
+    mesh: null,
+  };
 }
 
 /** A bitmap's quad, `width` by `height` pixels, its texels its pixels. */

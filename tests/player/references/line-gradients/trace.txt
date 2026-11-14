@@ -1,0 +1,9 @@
+conic ArgumentError 2008
+linear TypeError 2007
+radial ok
+true conic  TypeError 2007
+false conic  TypeError 2007
+false conic 0 ArgumentError 2008
+false linear  TypeError 2007
+false linear 0,0 ok
+bounds (x=-5, y=-5, w=110, h=10)
