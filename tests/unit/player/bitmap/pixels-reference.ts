@@ -1,11 +1,8 @@
 // The pixel operations the player computed in JS before the render module's
 // (pixels.zig) took them over, kept as the kernels' reference: what adl
 // computes, quirks and all, which native-pixels.test.ts holds them to.
-import {
-  type BitmapStore,
-  type PixelRect,
-  unmultiply,
-} from "../../../../packages/player/dist/bitmap/bitmap.js";
+import { type BitmapStore, unmultiply } from "../../../../packages/player/dist/bitmap/bitmap.js";
+import type { PixelRect } from "../../../../packages/player/dist/bitmap/pixel-rect.js";
 
 const M = 2147483647;
 

@@ -4,7 +4,7 @@
 // what the other did, and a swap that did not happen is not reported.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { Bytes } from "../../../packages/runtime/dist/avm2/natives/bytearray.js";
+import { Bytes } from "../../../packages/runtime/dist/avm2/natives/bytes.js";
 import type { Runtime } from "../../../packages/runtime/dist/avm2/runtime.js";
 
 const rt = {

@@ -370,9 +370,10 @@ without cookies, the gentler choice for a page that plays Flash content
 `navigateToURL` to `_blank` and ExternalInterface pages may rely on. Where swf2es's own pages get
 them is below.
 
-A shareable ByteArray (`natives/bytearray.ts`) keeps memory of its own
-until it first crosses to another worker: its bytes then move, once, to
-a growable `SharedArrayBuffer` (`new SharedArrayBuffer(capacity, {
+A shareable ByteArray (`Bytes` in `natives/bytes.ts`, the sharing in
+`natives/shared-bytes.ts`) keeps memory of its own until it first
+crosses to another worker: its bytes then move, once, to a growable
+`SharedArrayBuffer` (`new SharedArrayBuffer(capacity, {
 maxByteLength })`, up to the 2 GB a ByteArray holds, or as much as the
 host reserves), and its length to a word of a second, small one
 (`SharedBytesMemory`, with an id). Every worker's ByteArray for it uses

@@ -2,9 +2,10 @@
 // (convolve.zig) became its only one, kept as the kernel's reference: what
 // adl computes, quirks and all, which native-bitmap.test.ts holds the
 // kernel to, bit for bit.
-import type { BitmapStore, PixelRect } from "../../../../packages/player/dist/bitmap/bitmap.js";
+import type { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { unmultiply } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { integerKernel } from "../../../../packages/player/dist/bitmap/filters.js";
+import type { PixelRect } from "../../../../packages/player/dist/bitmap/pixel-rect.js";
 import type { Filter } from "../../../../packages/player/dist/display/filters.js";
 
 /**

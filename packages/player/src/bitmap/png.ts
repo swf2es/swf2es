@@ -9,7 +9,8 @@
 // 9: a 1080p frame takes a quarter of the time for 1% more bytes. The
 // rows are made, filtered and deflated by @swf2es/native, in one pass.
 import { pngEncode } from "@swf2es/native/compress";
-import type { BitmapStore, PixelRect } from "./bitmap.js";
+import type { BitmapStore } from "./bitmap.js";
+import type { PixelRect } from "./pixel-rect.js";
 
 const CRC = new Uint32Array(256);
 for (let n = 0; n < 256; n++) {

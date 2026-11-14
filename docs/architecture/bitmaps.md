@@ -60,11 +60,12 @@ counts in a version the node compares.
 
 The pixel operations that read and write the store alone are in
 `bitmap/ops.ts`, beside the store and its premultiplied arithmetic in
-`bitmap/bitmap.ts`; the loops of `noise`, `perlinNoise`, `copyChannel`,
-`colorTransform`, `merge`, `paletteMap` and a colour matrix filter run in
-the render module (`packages/native/src/render/pixels.zig`), a band of rows
-at a time, which keeps their arithmetic. They write into the store in
-place; a band that traps is made again in a new instance, and where that
+`bitmap/bitmap.ts` and the pixels a rect covers in `bitmap/pixel-rect.ts`;
+the loops of `noise`, `perlinNoise`, `copyChannel`, `colorTransform`,
+`merge`, `paletteMap` and a colour matrix filter run in the render module
+(`packages/native/src/render/pixels.zig`), a band of rows at a time,
+which keeps their arithmetic. They write into the store in place; a band
+that traps is made again in a new instance, and where that
 fails too the bands before it stay written and the rest are left as they
 were. A bitmap's pixels set and read whole (`setPixels`, `setVector`,
 `getPixels`, `copyPixelsToByteArray`, `getVector`) go as runs, a rect as

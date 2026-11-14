@@ -1,7 +1,7 @@
 // Class aliases, and AMF through ByteArray's readObject and writeObject.
 import { readObject, writeObject } from "../amf.js";
 import type { AsObject, Value } from "../descriptors.js";
-import { bytesOf } from "./bytearray.js";
+import { bytesOf } from "./bytes.js";
 import type { Natives } from "./define.js";
 
 export const aliasesNatives: Natives = {

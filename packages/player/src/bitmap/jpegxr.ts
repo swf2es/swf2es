@@ -7,8 +7,9 @@
 // and its flexbits never trimmed, as Flash's. "auto" is 4:4:4. The bytes
 // are Flash's.
 import { JXR_420, JXR_422, JXR_444, jxrEncode } from "@swf2es/native/atf";
-import type { BitmapStore, PixelRect } from "./bitmap.js";
+import type { BitmapStore } from "./bitmap.js";
 import { areaPixels } from "./jpeg.js";
+import type { PixelRect } from "./pixel-rect.js";
 
 /** JPEGXREncoderOptions' colorSpace as the encoder's subsampling; undefined for none of them. */
 export const JPEG_XR_COLOR_SPACES: Readonly<Record<string, number>> = {

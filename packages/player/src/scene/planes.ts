@@ -12,7 +12,7 @@ import {
   Rows,
   SceneList,
 } from "@swf2es/render";
-import type { PixelRect } from "../bitmap/bitmap.js";
+import type { PixelRect } from "../bitmap/pixel-rect.js";
 import { IDENTITY_COLOR } from "../display/color.js";
 import { Container } from "../display/container.js";
 import { type DisplayObject, TRANSFORM } from "../display/displayobject.js";

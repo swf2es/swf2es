@@ -20,7 +20,8 @@ import {
   type PbjSample,
   type PbjSelect,
 } from "@swf2es/format";
-import { type BitmapStore, nearest, type PixelRect } from "./bitmap.js";
+import type { BitmapStore } from "./bitmap.js";
+import { nearest, type PixelRect } from "./pixel-rect.js";
 
 /** An image a kernel samples: a BitmapData's premultiplied ARGB, or floats, `channels` a pixel. */
 export interface ShaderImage {

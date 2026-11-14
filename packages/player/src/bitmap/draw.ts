@@ -7,8 +7,9 @@ import { type DisplayObject, pickWork } from "../display/display.js";
 import { transformRect } from "../display/geometry.js";
 import { drawnAsStage } from "../display/perspective.js";
 import type { Drawer } from "../hosts.js";
-import { BitmapStore, type PixelRect } from "./bitmap.js";
+import { BitmapStore } from "./bitmap.js";
 import { type Affine, type ColorTransformValues, drawBitmap } from "./composite.js";
+import type { PixelRect } from "./pixel-rect.js";
 
 /** `d` drawn into `store` through `m`, as drawInto draws a display object. */
 function drawObject(

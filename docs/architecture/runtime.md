@@ -87,9 +87,10 @@ number alone.
 Where avmplus' behaviour is its own algorithm rather than a language rule,
 the runtime translates it, so that its output is avmplus' byte for byte:
 number formatting (`numbers.ts`), Array's sort (`natives/sort.ts`),
-ByteArray with its capacity (`natives/bytearray.ts`), UTF-8 (`utf8.ts`), AMF3
-(`amf.ts`), JSON (`natives/json.ts`), Date's formats (`natives/date.ts`),
-XML (`natives/xml/`: `chars.ts` and `parser.ts` tokenize text, `node.ts`
+ByteArray with its capacity (`natives/bytes.ts`; its natives in
+`natives/bytearray.ts`), UTF-8 (`utf8.ts`), AMF3 (`amf.ts`), JSON
+(`natives/json.ts`), Date's formats (`natives/date.ts`), XML
+(`natives/xml/`: `chars.ts` and `parser.ts` tokenize text, `node.ts`
 is the tree, `build.ts` makes trees from text and values, `values.ts` the
 XML and XMLList objects, `names.ts` their names, Namespaces and QNames,
 `access.ts` E4X's internal methods, `strings.ts` toString and toXMLString,

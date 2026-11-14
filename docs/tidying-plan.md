@@ -232,7 +232,7 @@ Each pull request of the pass ticks its row here.
 | 2 | ~~Documentation brought up to date (section 4)~~ done: #965, #966 | small | none |
 | 3 | ~~`apps/desktop`: `main.ts`, `network.ts`~~ done: #970 (also `switches.ts`; `air-bridge.ts` for `air.ts`, which exists) | medium | low; desktop tests |
 | 4 | ~~`packages/web/src/element.ts`; `input/pointer.ts`~~ done: #971 (also `workers.ts`) | medium | low |
-| 5 | `bitmap.ts`; `natives/bytearray.ts` | medium | low to medium; bitmap benches |
+| 5 | ~~`bitmap.ts`; `natives/bytearray.ts`~~ done: #972 (`bitmap.ts`: rect rounding alone, to `pixel-rect.ts`; the runs and arithmetic stay, slower apart) | medium | low to medium; bitmap benches |
 | 6 | `context3d`: `webgl/context.ts`, then the player's `context.ts` | medium | low; AIR references |
 | 7 | `runtime.ts` steps 1 to 3, a pull request each | large | medium; benchmarks each |
 | 8 | `enumeration.ts` | small | medium; measure inlining |

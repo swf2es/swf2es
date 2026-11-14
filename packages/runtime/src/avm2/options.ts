@@ -1,7 +1,7 @@
 // What a host gives a runtime when it makes one, and what it does without.
 
 import type { Abc, CompileUnit } from "./descriptors.js";
-import type { SharedBytesMemory } from "./natives/bytearray.js";
+import type { SharedBytesMemory } from "./natives/shared-bytes.js";
 import type { SyncInit, SyncMemory } from "./natives/sync.js";
 import type { Runtime } from "./runtime.js";
 
