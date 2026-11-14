@@ -294,13 +294,30 @@ export interface ShaderPaint {
  */
 export type Paint = Fill | ImageFill | GradientFill | ShaderPaint;
 
+/**
+ * What fills a line in place of its colour: lineGradientStyle's or
+ * lineBitmapStyle's, or a DefineShape4 line's fill, mapped in the shape's
+ * space as a fill's paint is.
+ */
+export type LinePaint = GradientFill | ImageFill;
+
+/**
+ * A line and the paths it strokes. `triangles` marks drawTriangles'
+ * outlines: each path closed, joined at its start, and all read back as
+ * one path, as Flash keeps them. A `paint` fills the line's outline, its
+ * colour then unused.
+ */
+export interface Stroke {
+  line: Line;
+  paths: Path[];
+  closes?: Close[];
+  triangles?: boolean;
+  paint?: LinePaint;
+}
+
 export interface ShapeLayer {
   fills: { fill: Paint; contours: Path[]; winding: Winding }[];
-  /**
-   * `triangles` marks drawTriangles' outlines: each path closed, joined at
-   * its start, and all read back as one path, as Flash keeps them.
-   */
-  strokes: { line: Line; paths: Path[]; closes?: Close[]; triangles?: boolean }[];
+  strokes: Stroke[];
   /** drawTriangles' triangles textured through u, v and t, drawn after the fills, under the lines. */
   meshes?: TriangleMesh[];
   /**
@@ -532,8 +549,14 @@ export function shapeLayers(
       smooth: fill.smooth,
     };
   };
+  // A line's fill painted as a fill is; a solid one, or a bitmap the SWF lacks, is the line's colour.
+  const linePaint = (line: Line): LinePaint | undefined => {
+    const p = line.fill ? paint(line.fill) : null;
+    return p?.type === "gradient" || p?.type === "image" ? p : undefined;
+  };
   let fills = shape.fills.map(paint);
   let lines = shape.lines;
+  let linePaints = lines.map(linePaint);
   let fillEdges: Edge[][] = fills.map(() => []);
   let strokes: Path[][] = lines.map(() => []);
   let fill0 = 0;
@@ -556,7 +579,10 @@ export function shapeLayers(
 
     for (const [i, l] of lines.entries()) {
       if (strokes[i].length) {
-        layer.strokes.push({ line: l, paths: strokes[i] });
+        const p = linePaints[i];
+        layer.strokes.push(
+          p ? { line: l, paths: strokes[i], paint: p } : { line: l, paths: strokes[i] },
+        );
       }
     }
 
@@ -601,6 +627,7 @@ export function shapeLayers(
         flush();
         fills = r.styles.fills.map(paint);
         lines = r.styles.lines;
+        linePaints = lines.map(linePaint);
         fillEdges = fills.map(() => []);
         strokes = lines.map(() => []);
         fill0 = 0;

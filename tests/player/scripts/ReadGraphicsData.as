@@ -136,6 +136,25 @@ package
 					g.beginBitmapFill(bitmap);
 					g.drawRect(10, 0, 8, 6);
 				});
+			probe("gradient line", function(g:Graphics):void
+				{
+					var m:Matrix = new Matrix();
+					m.createGradientBox(40, 20, Math.PI / 2, 5, 0);
+					g.lineStyle(10, 0x00ff00, 0.5);
+					g.lineGradientStyle(GradientType.LINEAR, [0xff0000, 0x0000ff], [0.25, 1], [0, 255], m,
+							"repeat", "linearRGB");
+					g.moveTo(0, 0);
+					g.lineTo(40, 0);
+					g.lineGradientStyle(GradientType.RADIAL, [0xff0000, 0x0000ff], [1, 1], [0, 255]);
+					g.lineTo(40, 20);
+				});
+			probe("bitmap line", function(g:Graphics):void
+				{
+					g.lineStyle(10, 0x00ff00);
+					g.lineBitmapStyle(bitmap, new Matrix(2, 0, 0, 2, 5, 5), false, true);
+					g.moveTo(0, 0);
+					g.lineTo(40, 0);
+				});
 			probe("cleared", function(g:Graphics):void
 				{
 					g.beginFill(0xff0000);
@@ -343,6 +362,22 @@ package
 			var drawn:Shape = new Shape();
 			drawn.graphics.drawGraphicsData(parent.graphics.readGraphicsData());
 			dump("round trip", drawn.graphics.readGraphicsData());
+			var lined:Shape = new Shape();
+			var lm:Matrix = new Matrix();
+			lm.createGradientBox(40, 20, 0, 0, 0);
+			lined.graphics.lineStyle(3, 0x00ff00);
+			lined.graphics.lineGradientStyle(GradientType.LINEAR, [0xff0000, 0x0000ff], [1, 1], [0, 255], lm);
+			lined.graphics.lineTo(30, 0);
+			var stroked:Vector.<IGraphicsData> = new Vector.<IGraphicsData>();
+			stroked.push(new GraphicsStroke(3, false, "normal", "round", "round", 3,
+					new GraphicsGradientFill(GradientType.LINEAR, [0xff0000, 0x0000ff], [1, 0.5], [0, 255], lm)));
+			stroked.push(new GraphicsPath(Vector.<int>([1, 2]), Vector.<Number>([0, 0, 30, 0])));
+			var redrawn:Shape = new Shape();
+			redrawn.graphics.drawGraphicsData(stroked);
+			dump("gradient stroke drawn", redrawn.graphics.readGraphicsData());
+			var again:Shape = new Shape();
+			again.graphics.drawGraphicsData(lined.graphics.readGraphicsData());
+			dump("gradient line round trip", again.graphics.readGraphicsData());
 			var v:Vector.<IGraphicsData> = parent.graphics.readGraphicsData();
 			trace("same objects", v[0] == parent.graphics.readGraphicsData()[0]);
 			var filled:Shape = new Shape();

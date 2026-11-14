@@ -728,7 +728,7 @@ export function graphicsData(
       for (const [i, path] of stroke.paths.entries()) {
         writeStroke(w, strokeSegments(path, stroke.closes ?? [], i, m), stroke.line);
         if (!stroke.triangles || i === stroke.paths.length - 1) {
-          writeLine(out, w, stroke.line);
+          writeLine(out, w, stroke.paint ? datumOf(stroke.paint, m, defaults) : null, stroke.line);
           w = new Writer();
         }
       }
@@ -736,9 +736,10 @@ export function graphicsData(
   }
 }
 
-function writeLine(out: GraphicsDatum[], w: Writer, line: Line): void {
+/** A line's outline, filled with its paint's datum, or with its colour where `paint` is null. */
+function writeLine(out: GraphicsDatum[], w: Writer, paint: GraphicsDatum | null, line: Line): void {
   if (w.commands.length) {
-    out.push({ type: "solid", ...storedColor(line.color) });
+    out.push(paint ?? { type: "solid", ...storedColor(line.color) });
     out.push({ type: "path", winding: "nonZero", commands: w.commands, data: w.data });
     out.push({ type: "end" });
   }

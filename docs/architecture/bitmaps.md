@@ -284,8 +284,10 @@ through the inverse of its matrix (`scene/shapes.ts`), each draw saying
 whether it repeats or clamps and whether it is smoothed, so one texture
 serves every fill of a store. Without scripts, a SWF's
 images are decoded at `start` too, for its bitmap fills. A bitmap line
-(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) still draws its first
-colour.
+(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) is filled with its bitmap
+as a fill is (`line-bitmaps`, `line-fills`); `lineBitmapStyle` fills the
+open line only while it has drawn nothing, as adl does, and takes a
+disposed BitmapData without an error.
 
 Gradient fills, a shape's linear, radial and focal ones and
 `beginGradientFill`'s, are drawn from Flash's own ramp, which adl gives
@@ -312,7 +314,11 @@ null alphas as opaque and null ratios as even, floor(255 · k / (n − 1));
 arrays of different lengths or a ratio outside 0 to 255 draw nothing,
 and stops past 16 are left out. The stage's supersampling softens a hard jump
 inside a fill, such as a repeating gradient's seam, which Flash leaves
-hard. Gradient lines still draw their first colour.
+hard. A gradient line (`lineGradientStyle`, a LINESTYLE2 gradient) is
+filled with its gradient as a fill is, its own colour and alpha unused
+(`line-gradients`, `line-fills`); `lineGradientStyle` strokes on from
+the pen as a new line style does, checks null colours before the type,
+and leaves the line as it was for arrays that would draw nothing.
 
 ## PNG
 

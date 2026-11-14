@@ -72,6 +72,17 @@
   GraphicsBitmapFill 4x3 (a=0.999755859375, b=0, c=0, d=0.999755859375, tx=0, ty=0) true false
   GraphicsPath evenOdd [1,2,2,2,2] [10,0,18,0,18,6,10,6,10,0] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
   GraphicsEndFill
+== gradient line 6 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsGradientFill linear [1073676288,4278190335] [0.24705882352941178,1] [0,255] (a=1.494930123649855e-18, b=0.01220703125, c=-0.0244140625, d=7.474650618249275e-19, tx=25, ty=10) repeat linearRGB 0
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [40,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,40,5,42.05,5,43.5,3.5,45,2.05,45,0,45,-2.05,43.5,-3.55,42.05,-5,40,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+  GraphicsGradientFill radial [4294901760,4278190335] [1,1] [0,255] (a=0.1220703125, b=0, c=0, d=0.1220703125, tx=0, ty=0) pad rgb 0
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [45,20,45,0,45,-2.05,43.5,-3.55,42.05,-5,40,-5,37.95,-5,36.45,-3.55,35,-2.05,35,0,35,20,35,22.05,36.45,23.5,37.95,25,40,25,42.05,25,43.5,23.5,45,22.05,45,20] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== bitmap line 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsBitmapFill 4x3 (a=1.99951171875, b=0, c=0, d=1.99951171875, tx=5, ty=5) true false
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [40,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,2.05,-3.55,3.5,-2.05,5,0,5,40,5,42.05,5,43.5,3.5,45,2.05,45,0,45,-2.05,43.5,-3.55,42.05,-5,40,-5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
 == cleared 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
   GraphicsSolidFill 0 1
   GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [34,37,4,-3,2.75,-4.65,0.7,-4.95,-1.35,-5.25,-3,-4,-4.65,-2.75,-4.95,-0.7,-5.25,1.35,-4,3,26,43,27.25,44.65,29.3,44.95,31.35,45.25,33,44,34.65,42.75,34.95,40.7,35.25,38.65,34,37] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
@@ -233,6 +244,14 @@ widths vertical 0.04:0.05/0 0.5:0.05/0 0.75:0.5/-0.5 1.25:0.5/-0.5 1.5:1/-1 2.5:
   GraphicsEndFill
   GraphicsSolidFill 333333 1
   GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [5,7,5,0,5,-2.05,3.5,-3.55,2.05,-5,0,-5,-2.05,-5,-3.55,-3.55,-5,-2.05,-5,0,-5,7,-5,9.05,-3.55,10.5,-2.05,12,0,12,2.05,12,3.5,10.5,5,9.05,5,7] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== gradient stroke drawn 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsGradientFill linear [4294901760,2130706687] [1,0.4980392156862745] [0,255] (a=0.0244140625, b=0, c=0, d=0.01220703125, tx=20, ty=10) pad rgb 0
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [30,-1.5,0,-1.5,-0.6,-1.5,-1.05,-1.05,-1.5,-0.6,-1.5,0,-1.5,0.6,-1.05,1.05,-0.6,1.5,0,1.5,30,1.5,30.6,1.5,31.05,1.05,31.5,0.6,31.5,0,31.5,-0.6,31.05,-1.05,30.6,-1.5,30,-1.5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
+  GraphicsEndFill
+== gradient line round trip 3 __AS3__.vec::Vector.<flash.display::IGraphicsData>
+  GraphicsGradientFill linear [4294901760,4278190335] [1,1] [0,255] (a=0.0244140625, b=0, c=0, d=0.01220703125, tx=20, ty=10) pad rgb 0
+  GraphicsPath nonZero [1,2,3,3,3,3,2,3,3,3,3] [30,-1.5,0,-1.5,-0.6,-1.5,-1.05,-1.05,-1.5,-0.6,-1.5,0,-1.5,0.6,-1.05,1.05,-0.6,1.5,0,1.5,30,1.5,30.6,1.5,31.05,1.05,31.5,0.6,31.5,0,31.5,-0.6,31.05,-1.05,30.6,-1.5,30,-1.5] __AS3__.vec::Vector.<int> __AS3__.vec::Vector.<Number>
   GraphicsEndFill
 same objects false
 bitmap is same false

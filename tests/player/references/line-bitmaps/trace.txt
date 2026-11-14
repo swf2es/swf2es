@@ -1,0 +1,4 @@
+true null TypeError 2007
+false null TypeError 2007
+false [object BitmapData] ok
+disposed ok

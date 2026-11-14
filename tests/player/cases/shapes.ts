@@ -260,6 +260,140 @@ function gradients(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Lines filled as DefineShape4 and DefineMorphShape2 fill them: a frame of
+// a linear gradient with alpha stops, as drawn, scaled and turned; a ring
+// of a radial gradient; a gradient hairline; a frame of a 4 by 4 bitmap,
+// repeated and clipped; and a morph whose line's gradient turns and
+// changes its colours, at three ratios.
+function lineFills(): Uint8Array {
+  const pixels: number[] = [];
+  for (let y = 0; y < 4; y++) {
+    for (let x = 0; x < 4; x++) {
+      const argb = (x + y) % 2 ? 0xff2040e0 : x < 2 ? 0xffe02020 : 0xfff0c000;
+      pixels.push(argb >>> 24, (argb >> 16) & 0xff, (argb >> 8) & 0xff, argb & 0xff);
+    }
+  }
+
+  const bitmap = w.tag(
+    36,
+    Uint8Array.from([9, 0, 5, 4, 0, 4, 0, ...zlibCompress(Uint8Array.from(pixels))]),
+    true,
+  );
+  // A frame 60 by 40 pixels, 1200 by 800 twips, over a grey fill, its line filled with `fill`.
+  const frame = (id: number, width: number, fill: w.BitmapFill | w.GradientFillSpec) =>
+    w.shape({
+      id,
+      version: 4,
+      bounds: [-200, 1400, -200, 1000],
+      fills: [0xffd0d0d0],
+      lines: [{ width, color: 0xff00ff00, fill }],
+      paths: [{ fill1: 1, line: 1, commands: rectPath(0, 0, 60, 40) }],
+    });
+  const across = {
+    type: 0x10,
+    // The square across the frame's width.
+    matrix: { a: 1200 / 32768, d: 1200 / 32768, tx: 600, ty: 400 },
+    stops: [
+      [0, 0x40ff0000],
+      [255, 0xff0000ff],
+    ],
+  } satisfies w.GradientFillSpec;
+  const ring = w.shape({
+    id: 4,
+    version: 4,
+    bounds: [-200, 1400, -200, 1400],
+    fills: [],
+    lines: [
+      {
+        width: 240,
+        color: 0xff00ff00,
+        fill: {
+          type: 0x12,
+          matrix: { a: 1400 / 32768, d: 1400 / 32768, tx: 600, ty: 600 },
+          spread: 1,
+          stops: [
+            [0, 0xffffff00],
+            [128, 0xffff00ff],
+            [255, 0xff00ffff],
+          ],
+        },
+      },
+    ],
+    paths: [
+      {
+        fill1: 0,
+        line: 1,
+        commands: [
+          { move: [600, 0] },
+          { curve: [1200, 0, 1200, 600] },
+          { curve: [1200, 1200, 600, 1200] },
+          { curve: [0, 1200, 0, 600] },
+          { curve: [0, 0, 600, 0] },
+        ],
+      },
+    ],
+  });
+  const morph = w.morphShape({
+    id: 7,
+    version: 2,
+    startBounds: [-200, 1400, -200, 1000],
+    endBounds: [-200, 1400, -200, 1000],
+    fills: [],
+    lines: [
+      {
+        startWidth: 120,
+        endWidth: 240,
+        startColor: 0xff00ff00,
+        endColor: 0xff00ff00,
+        fill: {
+          type: 0x10,
+          startMatrix: { a: 1200 / 32768, d: 1200 / 32768, tx: 600, ty: 400 },
+          endMatrix: { a: 0, b: 800 / 32768, c: -800 / 32768, d: 0, tx: 600, ty: 400 },
+          stops: [
+            [0, 0xffff0000, 0, 0xff00a000],
+            [255, 0xff0000ff, 255, 0x40ffff00],
+          ],
+        },
+      },
+    ],
+    start: [{ line: 1, commands: rectPath(0, 0, 60, 40) }],
+    end: [rectPath(0, 0, 60, 40)],
+  });
+  return w.swf({
+    width: 340,
+    height: 230,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      bitmap,
+      frame(1, 160, across),
+      // A hairline of the same gradient.
+      frame(2, 0, across),
+      frame(3, 240, { bitmap: 9, type: 0x42, matrix: { a: 60, d: 60, tx: -60, ty: -60 } }),
+      ring,
+      frame(5, 240, { bitmap: 9, type: 0x43, matrix: { a: 100, d: 100, tx: 200, ty: 100 } }),
+      morph,
+      w.place({ depth: 1, character: 1, matrix: { tx: 300, ty: 300 } }),
+      w.place({
+        depth: 2,
+        character: 1,
+        matrix: { a: 1.3, b: 0.75, c: -0.75, d: 1.3, tx: 2600, ty: 200 },
+      }),
+      w.place({ depth: 3, character: 2, matrix: { a: 1.5, d: 1.5, tx: 4410, ty: 310 } }),
+      w.place({ depth: 4, character: 3, matrix: { tx: 300, ty: 1900 } }),
+      w.place({ depth: 5, character: 4, matrix: { tx: 2000, ty: 1700 } }),
+      w.place({ depth: 6, character: 5, matrix: { tx: 3700, ty: 1900 } }),
+      w.place({ depth: 7, character: 7, ratio: 0, matrix: { tx: 300, ty: 3400 } }),
+      w.place({ depth: 8, character: 7, ratio: 32768, matrix: { tx: 2200, ty: 3400 } }),
+      w.place({ depth: 9, character: 7, ratio: 65535, matrix: { tx: 4100, ty: 3400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 /**
  * A floor of boards, as Flash Pro exports one: a rectangle's outline with
  * the fill on its inside, and the seams between the boards, lines with the
@@ -1461,6 +1595,39 @@ export const shapeCases: PlayerCase[] = [
     // channels in all, where a gradient drawn wrong is thousands.
     tolerance: 8,
     maxOutliers: 300,
+  },
+  {
+    name: "line-fills",
+    swf: lineFills(),
+    frames: 1,
+    capture: [1],
+    // The lines' edges anti-alias within a pixel of Flash's, as for `shared-lines`, and the turned
+    // frame's corners most: some 280 channels, where lines drawn in one colour are 31,000.
+    tolerance: 32,
+    maxOutliers: 400,
+  },
+  {
+    name: "line-bitmaps",
+    swf: (abc) => bare(abc, 1, "LineBitmaps", 420, 200),
+    script: "LineBitmaps",
+    frames: 1,
+    capture: [1],
+    // The bitmaps are Flash's texel for texel; the lines' edges and ends anti-alias apart, some
+    // 490 channels, where lines drawn in one colour are 26,000.
+    tolerance: 32,
+    maxOutliers: 650,
+  },
+  {
+    name: "line-gradients",
+    swf: (abc) => bare(abc, 1, "LineGradients", 380, 280),
+    script: "LineGradients",
+    frames: 1,
+    capture: [1],
+    // The lines' edges anti-alias apart, and the ring's focal gradient differs about its focus
+    // as a fill's does (`gradients`): some 1,050 channels, where lines drawn in one colour are
+    // 21,000.
+    tolerance: 32,
+    maxOutliers: 1300,
   },
   {
     name: "hidden-render-groups",

@@ -14,7 +14,7 @@ import {
   TextObject,
 } from "./display.js";
 import { apply, concat, invert, type Rect, union } from "./geometry.js";
-import { MOVE, type Paint, pointsOf, type ShapeLayer } from "./shapes.js";
+import { type LinePaint, MOVE, type Paint, pointsOf, type ShapeLayer } from "./shapes.js";
 import { makeRoom, moveLast, same } from "./value-lists.js";
 
 /**
@@ -317,6 +317,8 @@ function moveLayers(layers: ShapeLayer[], slice: Slice, m: Matrix | null): Shape
     })),
     strokes: layer.strokes.map((s) => ({
       ...s,
+      // A line's paint goes as a fill's does, by the box around its paths.
+      paint: s.paint && (slicedPaint(s.paint, s.paths, slice, m, inverse) as LinePaint),
       paths: s.paths.map(move),
       closes: s.closes?.map((c) => {
         const [, x, y] = move([MOVE, c.x, c.y]);
