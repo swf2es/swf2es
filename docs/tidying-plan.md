@@ -234,7 +234,7 @@ Each pull request of the pass ticks its row here.
 | 4 | ~~`packages/web/src/element.ts`; `input/pointer.ts`~~ done: #971 (also `workers.ts`) | medium | low |
 | 5 | ~~`bitmap.ts`; `natives/bytearray.ts`~~ done: #972 (`bitmap.ts`: rect rounding alone, to `pixel-rect.ts`; the runs and arithmetic stay, slower apart) | medium | low to medium; bitmap benches |
 | 6 | ~~`context3d`: `webgl/context.ts`, then the player's `context.ts`~~ done: #973 (texture and program creation stay in the class; all six create natives to `resources.ts`) | medium | low; AIR references |
-| 7 | `runtime.ts` steps 1 to 3, a pull request each | large | medium; benchmarks each |
+| 7 | `runtime.ts` steps 1 to 3, a pull request each; ~~step 1~~ done: #974 (`caught` to `errors.ts`, E4X's opcode helpers to `runtime-xml.ts`; `error` stays, slower moved; aliases were delegates to `amf-classes.ts` already; domain memory stays, per access for shared memory) | large | medium; benchmarks each |
 | 8 | `enumeration.ts` | small | medium; measure inlining |
 | 9 | ActionScript out of TypeScript tests (section 2) | medium | low |
 | 10 | `asformat` (section 3), and this file removed | very large, mechanical | low once the ABCs compare |

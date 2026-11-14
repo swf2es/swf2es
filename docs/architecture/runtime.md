@@ -5,7 +5,10 @@ lookup, coercions and exceptions (`packages/runtime/src/avm2`); it grows as
 far as each step needs. The engine is at the top. `runtime.ts` is the
 `Runtime` class, whose methods are what compiled code calls as `rt`:
 property access, calls and construction, coercions, for-in, exceptions and
-domain memory, with the inline caches' hookup. Around it, each a model of
+domain memory, with the inline caches' hookup. Compiled code reaches those
+members by name, so they all stay on the class, but some are a line that
+calls a function of another file, which takes the runtime and holds the
+body (`errors.ts` and `runtime-xml.ts` below). Around it, each a model of
 its own or a stage the hot paths do not run through: `descriptors.ts`, the
 values and descriptors a compiled module is built against; `options.ts`,
 what a host gives a runtime; `hooks.ts`, what a builtin or a player's class
@@ -25,9 +28,13 @@ its hashtable the steps go by the indices alone, their for-in index
 negative to tell them apart);
 `property-cache.ts`, the inline caches, and `cache-fill.ts`, what a full
 lookup leaves in one; `array-conversion.ts`, Number(array) while Array's
-conversion is the builtins'; `errors.ts`, error messages and the stack a
-host shows for an AS3 error; `amf-classes.ts`, class aliases and the
-classes AMF makes; `names.ts`, namespaces and multinames; `number-strings.ts`,
+conversion is the builtins'; `errors.ts`, error messages, what an AS3
+catch gets of an exception (`Runtime.caught`), and the stack a host shows
+for an AS3 error; `runtime-xml.ts`, what E4X's opcodes ask of the runtime
+(getdescendants, dxns, checkfilter and esc_xelem), XML answering through
+its property hook; `amf-classes.ts`, class aliases and the classes AMF
+makes, which `Runtime`'s alias members call; `names.ts`, namespaces and
+multinames; `number-strings.ts`,
 numbers to and from strings as ToNumber and ToString convert them; `numbers.ts`,
 `messages.ts`, and `amf.ts`, which ByteArray and later the player's
 networking use.
