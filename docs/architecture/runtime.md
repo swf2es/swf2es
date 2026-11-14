@@ -25,7 +25,11 @@ Vector.<T> classes; `enumeration.ts`, the names a for-in goes through
 step through, by the Array's indices, taken anew at each walk as nothing
 tells of an element written since; where avmplus holds such an Array in
 its hashtable the steps go by the indices alone, their for-in index
-negative to tell them apart);
+negative to tell them apart); `sparse-indices.ts`, those indices: their
+list, taken again, and searched (what takes, drops and steps by them
+stays in `enumeration.ts`, beside the step that calls it: called from
+another module, they made the step's functions larger, as the engine
+counts them for inlining, and holey walks 4–7% slower);
 `property-cache.ts`, the inline caches, and `cache-fill.ts`, what a full
 lookup leaves in one; `array-conversion.ts`, Number(array) while Array's
 conversion is the builtins'; `errors.ts`, error messages, what an AS3
