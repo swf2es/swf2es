@@ -1434,6 +1434,34 @@ test("a still mouse over a list that stood still sees what comes, goes, scrolls,
   ]);
   idle();
 
+  // What takes the hit changes too with no change drawn.
+  cmd("set", "list", "mouseChildren", false);
+  assert.deepEqual(frame(), [
+    "mouseOut r10 list false 5,5 @305,125",
+    "rollOut r10 list false 5,5 @305,125",
+    "mouseOver list r10 false 5,125 @305,125",
+  ]);
+  idle();
+  cmd("set", "list", "hitArea", player.root.children.find((child) => child.name === "m")?.object);
+  assert.deepEqual(frame(), [
+    "mouseOut list null false 5,125 @305,125",
+    "rollOut root null false 305,125 @305,125",
+  ]);
+  idle();
+  cmd("set", "list", "hitArea", null);
+  assert.deepEqual(frame(), [
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver list null false 5,125 @305,125",
+  ]);
+  idle();
+  cmd("set", "list", "mouseChildren", true);
+  assert.deepEqual(frame(), [
+    "mouseOut list r10 false 5,125 @305,125",
+    "rollOver r10 list false 5,5 @305,125",
+    "mouseOver r10 list false 5,5 @305,125",
+  ]);
+  idle();
+
   cmd("field", "f");
   assert.deepEqual(input("move", 60, 210), [
     "mouseMove stage null false 60,210 @60,210",
@@ -1580,8 +1608,8 @@ test("a still pointer's pick over a list of buttons sees each change under it, h
     at(square, 0, 0, 3);
     equal(pick(150, 70), stage);
     equal(pick(250, 70), buttons[2]);
-    buttons[3].hitTestState = sprite(-90, 0);
-    equal(pick(20, 100), buttons[3]);
+    buttons[3].hitTestState = sprite(200, 0);
+    equal(pick(310, 100), buttons[3]);
     // One on the list elsewhere, hit in the button's space wherever its
     // parent is; then moved, and a square put in it.
     const holder = sprite(300, 0);
@@ -1609,6 +1637,13 @@ test("a still pointer's pick over a list of buttons sees each change under it, h
     rows[9].invalidate(TRANSFORM);
     equal(pick(110, 280), stage);
     equal(pick(10, 280), rows[9]);
+    // Its bounds worked out again while scrolled, then the scroll taken off.
+    at(buttons[9], 100, 0);
+    equal(pick(110, 280), stage);
+    rows[9].scrollRect = null;
+    rows[9].scroll = null;
+    rows[9].invalidate(TRANSFORM);
+    equal(pick(110, 280), buttons[9]);
     // One state shared by two buttons moves both; let go of by one, only the other.
     const shared = sprite(0, 0);
     buttons[12].hitTestState = shared;
@@ -1628,42 +1663,54 @@ test("a still pointer's pick over a list of buttons sees each change under it, h
 });
 
 test("a change after a pick whose bounds settled a field's fit is seen above the field", () => {
-  const stage = new Container();
-  stage.object = { $display: stage } as never;
-  stage.loaderInfo = {} as never;
-  const panel = new Container();
-  panel.object = { $display: panel } as never;
-  panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
-  stage.addChildAt(panel, 0);
-  // A hidden field, which no pick goes into, whose fit waits.
-  const field = new TextObject(null);
-  field.object = { $display: field } as never;
-  field.autoSize = "left";
-  field.visible = false;
-  panel.addChildAt(field, 1);
-
-  const checks = pickChecks.on;
-  pickChecks.on = true;
-  try {
-    for (let i = 0; i < 4; i++) {
-      equal(pointerTarget(stage, 10, 10, 400, 400), panel);
+  // The field in a panel, then in a button's hit test state, in no container.
+  for (const inButton of [false, true]) {
+    const stage = new Container();
+    stage.object = { $display: stage } as never;
+    stage.loaderInfo = {} as never;
+    const panel = new Container();
+    panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    const button = new ButtonObject();
+    button.object = { $display: button } as never;
+    if (inButton) {
+      button.hitTestState = panel;
+      stage.addChildAt(button, 0);
+    } else {
+      panel.object = { $display: panel } as never;
+      stage.addChildAt(panel, 0);
     }
 
-    field.model.setText("a");
-    field.deferFit();
-    field.invalidate(CONTENT);
-    // The third pick works the panel's bounds out, which settles the fit
-    // and so marks them stale while that pick makes them.
-    for (let i = 0; i < 3; i++) {
-      equal(pointerTarget(stage, 10, 10, 400, 400), panel);
-    }
+    // A hidden field, which no pick goes into, whose fit waits.
+    const field = new TextObject(null);
+    field.object = { $display: field } as never;
+    field.autoSize = "left";
+    field.visible = false;
+    panel.addChildAt(field, 1);
+    const hit = inButton ? button : panel;
 
-    field.visible = true;
-    field.invalidate(TRANSFORM);
-    field.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 200, ty: 200 });
-    equal(pointerTarget(stage, 205, 205, 400, 400), field);
-  } finally {
-    pickChecks.on = checks;
+    const checks = pickChecks.on;
+    pickChecks.on = true;
+    try {
+      for (let i = 0; i < 4; i++) {
+        equal(pointerTarget(stage, 10, 10, 400, 400), hit);
+      }
+
+      field.model.setText("a");
+      field.deferFit();
+      field.invalidate(CONTENT);
+      // The third pick works the bounds out, which settles the fit and so
+      // marks them stale while that pick makes them.
+      for (let i = 0; i < 3; i++) {
+        equal(pointerTarget(stage, 10, 10, 400, 400), hit);
+      }
+
+      field.visible = true;
+      field.invalidate(TRANSFORM);
+      field.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 200, ty: 200 });
+      equal(pointerTarget(stage, 205, 205, 400, 400), inButton ? button : field);
+    } finally {
+      pickChecks.on = checks;
+    }
   }
 });
 
@@ -1788,13 +1835,14 @@ test("a sprite's hitArea elsewhere on the list is picked for it however long bot
 
   equal(pick(160, 160), owner);
   equal(pick(10, 10), stage);
-  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 20 });
-  equal(pick(110, 30), owner);
+  // Beyond all the owner's bounds took in before.
+  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 180 });
+  equal(pick(110, 190), owner);
   // The owner moving moves where its area is, from the owner's side, not at all.
   owner.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 50, ty: 0 });
-  equal(pick(110, 30), owner);
+  equal(pick(110, 190), owner);
   setHitArea(owner, null);
-  equal(pick(110, 30), stage);
+  equal(pick(110, 190), stage);
 });
 
 // A card turned 60 degrees about y, nearer on its right, over a sprite as
