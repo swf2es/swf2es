@@ -102,16 +102,12 @@ export class ButtonObject extends Container {
     // Where it is hit changes with its state, and what is under it, which marks it so (hitTestOf).
     const old = this.hitTest;
     if (old !== null && old !== d && old.hitTestOf !== null) {
-      const others = old.hitTestOf.filter((b) => {
-        const button = b.deref();
-        return button !== undefined && button !== this;
-      });
+      const others = old.hitTestOf.filter((b) => b !== this);
       old.hitTestOf = others.length > 0 ? others : null;
     }
 
     if (d !== null && d !== old) {
-      const self = new WeakRef(this);
-      d.hitTestOf = d.hitTestOf === null ? [self] : [...d.hitTestOf, self];
+      d.hitTestOf = d.hitTestOf === null ? [this] : [...d.hitTestOf, this];
     }
 
     this.hitTest = d;

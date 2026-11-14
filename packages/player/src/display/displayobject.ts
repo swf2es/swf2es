@@ -167,24 +167,14 @@ const markedSince = (d: DisplayObject, picks: number): boolean =>
 
 /**
  * A change in the hit test state `d` changes where its buttons are hit:
- * each not marked since pick `picks` is. Those let go of are dropped, into
- * a new list, as a button's mark may come back here.
+ * each not marked since pick `picks` is.
  */
 function hitTestChanged(d: DisplayObject, picks: number): void {
-  const buttons = d.hitTestOf as WeakRef<ButtonObject>[];
-  let gone = false;
+  const buttons = d.hitTestOf as ButtonObject[];
   for (let i = 0; i < buttons.length; i++) {
-    const button = buttons[i].deref();
-    if (button === undefined) {
-      gone = true;
-    } else if (!markedSince(button, picks)) {
-      button.pickChanged(true);
+    if (!markedSince(buttons[i], picks)) {
+      buttons[i].pickChanged(true);
     }
-  }
-
-  if (gone) {
-    const kept = buttons.filter((b) => b.deref() !== undefined);
-    d.hitTestOf = kept.length > 0 ? kept : null;
   }
 }
 
@@ -441,10 +431,10 @@ export class DisplayObject {
   /**
    * The buttons whose hit test state it is, AS3's or AVM1's, whose pick
    * bounds take it in from no container: a change in it or under it marks
-   * theirs stale too (pickChanged); null for none. Weak, as a state shared
-   * by many buttons, or on the list, may outlive them.
+   * theirs stale too (pickChanged); null for none. Held as stateOf holds
+   * them, which keeps a button alive as long as its state already.
    */
-  hitTestOf: WeakRef<ButtonObject>[] | null = null;
+  hitTestOf: ButtonObject[] | null = null;
   /**
    * Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue
    * and `advances` its advanceDue, as an orphan; null for none.
