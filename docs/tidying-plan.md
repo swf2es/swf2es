@@ -6,7 +6,7 @@ tests, the tests' ActionScript formatted, and the documentation brought up
 to date. Nothing here changes behaviour. This file is removed by the last
 pull request of the pass.
 
-Made on dev at 9cac3702 from each file's outline (its top-level
+Made on dev at 9cac3702 (0.1.20 is f65ba694) from each file's outline (its top-level
 declarations and, for `runtime.ts`, its methods), not from a full reading:
 line numbers are where things start, and each split is to be confirmed by
 reading the file when its turn comes.
@@ -209,7 +209,9 @@ default style, as `pnpm as3:format` already applies to `as3/`, over
 
 ## 4. Documentation
 
-- Stage3D is described as an opt-in experiment in places where it no
+- Done in #965: Stage3D no longer called experimental; #966: the README tells of
+  the desktop app. Left from this section: the file names after each split.
+- (Was:) Stage3D is described as an opt-in experiment in places where it no
   longer is: `packages/context3d/README.md` (its title, and lines about
   the desktop keeping it off by default and the checkbox opting in),
   `docs/roadmap.md` ("Stage3D as an experimental option"). The desktop has
@@ -221,10 +223,13 @@ default style, as `pnpm as3:format` already applies to `as3/`, over
 
 ## Order
 
+Each pull request of the pass ticks its row here.
+
+
 | # | Pull request | Size | Risk |
 |---|---|---|---|
 | 1 | This plan | 1 file | none |
-| 2 | Documentation brought up to date (section 4) | small | none |
+| 2 | ~~Documentation brought up to date (section 4)~~ done: #965, #966 | small | none |
 | 3 | `apps/desktop`: `main.ts`, `network.ts` | medium | low; desktop tests |
 | 4 | `packages/web/src/element.ts`; `input/pointer.ts` | medium | low |
 | 5 | `bitmap.ts`; `natives/bytearray.ts` | medium | low to medium; bitmap benches |
