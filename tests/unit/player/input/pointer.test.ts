@@ -293,6 +293,40 @@ test("a sprite with a hitArea is hit where the area draws, visible or not, and o
   equal(pointerTarget(stage, 75, 90, 100, 100), stage);
 });
 
+test("a stage resized from under a still pointer is picked again at the frame's end", () => {
+  const { stage, root, sprite } = stageWithSprite();
+  const area = new Container();
+  area.object = { $display: area, $mouseEnabled: false } as never;
+  area.addChildAt(square(50, 50), 0);
+  root.addChildAt(area, 1);
+  assert.ok(sprite.object);
+  sprite.object.$buttonMode = true;
+  setHitArea(sprite, area);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseCursor: "auto",
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+  // The checked build's full pick beside each one left out, which must agree.
+  const checks = pickChecks.on;
+  pickChecks.on = true;
+  try {
+    input.handle("move", { x: 60, y: 60 });
+    equal(input.cursor(), "pointer");
+    input.frameEnded();
+    equal(input.cursor(), "pointer");
+    // Nothing on the list changed, but the pointer is off the stage now.
+    (scripting as unknown as { stageWidth: number }).stageWidth = 40;
+    input.frameEnded();
+    equal(input.cursor(), "default");
+  } finally {
+    pickChecks.on = checks;
+  }
+});
+
 test("a sprite in buttonMode with a hitArea shows its hand over the area", () => {
   const { stage, root, sprite } = stageWithSprite();
   const area = new Container();

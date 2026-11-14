@@ -76,6 +76,14 @@ export class PointerInput implements Pointer {
   /** pickWork's count when the hover was last picked, and what that pick found. */
   private picked = -1;
   private found: DisplayObject | null = null;
+  /**
+   * The stage's viewport the last pick saw, which pickWork does not count:
+   * a stage resized or moved under a still pointer picks again.
+   */
+  private viewWidth = Number.NaN;
+  private viewHeight = Number.NaN;
+  private viewX = Number.NaN;
+  private viewY = Number.NaN;
   /** Whether the left button is down after a press here. */
   private held = false;
   /** Whether the pointer has left the player, and not come back to it since. */
@@ -108,15 +116,31 @@ export class PointerInput implements Pointer {
 
   private pick(p: PointerState): DisplayObject | null {
     const s = this.scripting;
+    this.viewWidth = s.stageViewportWidth || s.stageWidth;
+    this.viewHeight = s.stageViewportHeight || s.stageHeight;
+    this.viewX = s.stageViewportX;
+    this.viewY = s.stageViewportY;
     return pointerTarget(
       this.stage,
       p.x,
       p.y,
-      s.stageViewportWidth || s.stageWidth,
-      s.stageViewportHeight || s.stageHeight,
+      this.viewWidth,
+      this.viewHeight,
       s.avm1Input?.hit,
-      s.stageViewportX,
-      s.stageViewportY,
+      this.viewX,
+      this.viewY,
+    );
+  }
+
+  /** Whether nothing a pick reads changed since the last: pickWork's count and the stage's viewport. */
+  private pickedNow(): boolean {
+    const s = this.scripting;
+    return (
+      this.picked === pickWork.changes &&
+      this.viewWidth === (s.stageViewportWidth || s.stageWidth) &&
+      this.viewHeight === (s.stageViewportHeight || s.stageHeight) &&
+      this.viewX === s.stageViewportX &&
+      this.viewY === s.stageViewportY
     );
   }
 
@@ -455,11 +479,12 @@ export class PointerInput implements Pointer {
    */
   frameEnded(): void {
     const p = this.last;
-    if (p && !this.gone && this.picked === pickWork.changes && pickChecks.on) {
+    const unchanged = this.pickedNow();
+    if (p && !this.gone && unchanged && pickChecks.on) {
       this.checkUnchanged(p);
     }
 
-    if (p && !this.gone && this.picked !== pickWork.changes) {
+    if (p && !this.gone && !unchanged) {
       const s = this.scripting;
       this.picked = pickWork.changes;
       const found = this.pick(p);
