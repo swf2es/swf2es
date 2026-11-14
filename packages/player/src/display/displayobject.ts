@@ -155,6 +155,29 @@ export function serials(): number {
   return made;
 }
 
+/**
+ * Whether `d`'s pick bounds were marked stale since pick `picks` and are
+ * stale still: all above it, and the buttons it or one above it is the hit
+ * test state of, were marked then too (DisplayObject.pickChanged). One a
+ * pick worked out again since its mark, as a field's fit settled within
+ * that pick marks it, has to be marked again.
+ */
+const markedSince = (d: DisplayObject, picks: number): boolean =>
+  d.pickStale && d.pickChangedAt === picks;
+
+/**
+ * A change in the hit test state `d` changes where its buttons are hit:
+ * each not marked since pick `picks` is.
+ */
+function hitTestChanged(d: DisplayObject, picks: number): void {
+  const buttons = d.hitTestOf as ButtonObject[];
+  for (let i = 0; i < buttons.length; i++) {
+    if (!markedSince(buttons[i], picks)) {
+      buttons[i].pickChanged(true);
+    }
+  }
+}
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
 
 /** What a leaf has to walk: one for all, as the frame's walks visit every object once or more a frame. */
@@ -406,6 +429,13 @@ export class DisplayObject {
   /** The buttons whose state it is, which the rounds walk it from too, its parent or not; null for none. */
   stateOf: ButtonObject[] | null = null;
   /**
+   * The buttons whose hit test state it is, AS3's or AVM1's, whose pick
+   * bounds take it in from no container: a change in it or under it marks
+   * theirs stale too (pickChanged); null for none. Held as stateOf holds
+   * them, which keeps a button alive as long as its state already.
+   */
+  hitTestOf: ButtonObject[] | null = null;
+  /**
    * Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue
    * and `advances` its advanceDue, as an orphan; null for none.
    */
@@ -489,8 +519,9 @@ export class DisplayObject {
 
   /**
    * Mark the pick bounds above it stale, and its own unless `own` is false
-   * (input/hit-test.ts): an ancestor of one changed since the last pick is
-   * marked already.
+   * (input/hit-test.ts), and those of the buttons it or one above it is the
+   * hit test state of, and above them: one marked since the last pick, and
+   * stale still, has had all that marked already (markedSince).
    */
   pickChanged(own: boolean): void {
     const picks = pickWork.picks;
@@ -499,9 +530,16 @@ export class DisplayObject {
       this.pickChangedAt = picks;
     }
 
-    for (let p = this.parent; p && p.pickChangedAt !== picks; p = p.parent) {
+    if (this.hitTestOf !== null) {
+      hitTestChanged(this, picks);
+    }
+
+    for (let p = this.parent; p && !markedSince(p, picks); p = p.parent) {
       p.pickStale = true;
       p.pickChangedAt = picks;
+      if (p.hitTestOf !== null) {
+        hitTestChanged(p, picks);
+      }
     }
   }
 

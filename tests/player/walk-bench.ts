@@ -32,8 +32,16 @@
 // avatars do: scripts that run among the frame's advances. It prints how
 // many ticks had the advances find their clips again (display/advance.ts).
 //
+// --list N has a script open a panel listing N rows, each three text
+// fields, two SimpleButtons and a sprite in buttonMode, in a scrollRect,
+// with a shape turning beside it each frame, and puts the pointer still
+// over a button in it: an idle UI list, whose every frame's end asks what
+// is under the pointer (PointerInput.frameEnded). --moving K slides K of
+// the rows each frame, --scroll scrolls the list a pixel a frame.
+//
 //   node --expose-gc tests/player/walk-bench.ts [--rigs N] [--frames N] [--reps N]
 //     [--orphans N] [--menu K] [--old N] [--playing N] [--churn N]
+//     [--list N [--moving K] [--scroll]]
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -58,6 +66,9 @@ const menu = option("menu", 0);
 const old = option("old", 0);
 const playing = option("playing", 0);
 const churn = option("churn", 0);
+const list = option("list", 0);
+const moving = option("moving", 0);
+const scroll = args.includes("--scroll");
 
 const SOURCE = readFileSync(new URL("./scripts/WalkBench.as", import.meta.url), "utf8");
 
@@ -224,6 +235,14 @@ if (old > 0) {
   }
 }
 
+if (list > 0) {
+  call("list", list, moving, scroll);
+  player.tick();
+  // Still over the first button of the list's twelfth row.
+  player.pointer?.handle("move", { x: 310, y: 20 + 11 * 24 + 10 });
+  player.tick();
+}
+
 if (orphans > 0) {
   call("keep", orphans);
   // Orphans once the frame that made them ends.
@@ -287,6 +306,14 @@ if (churn > 0) {
 if (advance?.walkChecks) {
   console.log(`  found again in ${refoundIn} of ${frames * reps} ticks`);
 }
+
+if (list > 0) {
+  const overs = scripting.rt.getProperty(main, avm2.qname(avm2.publicNs, "overs"));
+  console.log(
+    `  list of ${list} rows, ${moving} moving${scroll ? ", scrolled" : ""}: ${overs} overs`,
+  );
+}
+
 console.log(`  walk  ${show(walks)}`);
 
 if (menu > 0) {

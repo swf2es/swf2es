@@ -17,7 +17,11 @@ import {
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
 import { dropTargetOf } from "../../../../packages/player/dist/input/drag.js";
-import { pointerTarget, setHitArea } from "../../../../packages/player/dist/input/hit-test.js";
+import {
+  pickChecks,
+  pointerTarget,
+  setHitArea,
+} from "../../../../packages/player/dist/input/hit-test.js";
 import { PointerInput } from "../../../../packages/player/dist/input/pointer.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Clipboard } from "../../../../packages/player/dist/scripting/clipboard.js";
@@ -287,6 +291,40 @@ test("a sprite with a hitArea is hit where the area draws, visible or not, and o
   setHitArea(sprite, null);
   equal(pointerTarget(stage, 15, 10, 100, 100), sprite);
   equal(pointerTarget(stage, 75, 90, 100, 100), stage);
+});
+
+test("a stage resized from under a still pointer is picked again at the frame's end", () => {
+  const { stage, root, sprite } = stageWithSprite();
+  const area = new Container();
+  area.object = { $display: area, $mouseEnabled: false } as never;
+  area.addChildAt(square(50, 50), 0);
+  root.addChildAt(area, 1);
+  assert.ok(sprite.object);
+  sprite.object.$buttonMode = true;
+  setHitArea(sprite, area);
+  const scripting = {
+    stageWidth: 100,
+    stageHeight: 100,
+    mouseCursor: "auto",
+    rt: { classNamed: () => ({}), construct: () => ({ $stopped: 0 }), call: () => {} },
+    clipboard: new Clipboard(null),
+  } as unknown as Scripting;
+  const input = new PointerInput(stage, scripting);
+  // The checked build's full pick beside each one left out, which must agree.
+  const checks = pickChecks.on;
+  pickChecks.on = true;
+  try {
+    input.handle("move", { x: 60, y: 60 });
+    equal(input.cursor(), "pointer");
+    input.frameEnded();
+    equal(input.cursor(), "pointer");
+    // Nothing on the list changed, but the pointer is off the stage now.
+    (scripting as unknown as { stageWidth: number }).stageWidth = 40;
+    input.frameEnded();
+    equal(input.cursor(), "default");
+  } finally {
+    pickChecks.on = checks;
+  }
 });
 
 test("a sprite in buttonMode with a hitArea shows its hand over the area", () => {
@@ -1337,6 +1375,161 @@ test("a button's new hit test state under a still mouse is picked at the frame's
   ]);
 });
 
+test("a still mouse over a list that stood still sees what comes, goes, scrolls, is masked, grows or is scaled under it", {
+  skip,
+}, async () => {
+  const { input, cmd, frame, player } = await gaps();
+  const c = player.root.children.find((child) => child.name === "c")?.object;
+  // Twenty rows of a list 12 pixels apart, beside the button, each hearing its roll events.
+  cmd("box", "list", null, "300,0,1");
+  for (let i = 0; i < 20; i++) {
+    cmd("box", `r${i}`, "list", `0,${i * 12},10`);
+    cmd("listen", `r${i}`, "rollOver");
+    cmd("listen", `r${i}`, "rollOut");
+  }
+
+  // Frames enough that the picks keep the list's bounds, which a change must reach.
+  const idle = () => {
+    for (let i = 0; i < 3; i++) {
+      assert.deepEqual(frame(), []);
+    }
+  };
+  assert.deepEqual(input("move", 305, 125), [
+    "mouseMove r10 null false 5,5 @305,125",
+    "rollOver r10 null false 5,5 @305,125",
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver r10 null false 5,5 @305,125",
+  ]);
+  idle();
+
+  cmd("set", "r10", "x", 50);
+  assert.deepEqual(frame(), [
+    "mouseOut r10 null false -45,5 @305,125",
+    "rollOut r10 null false -45,5 @305,125",
+    "rollOut root null false 305,125 @305,125",
+  ]);
+  idle();
+  cmd("box", "n", "list", "0,118,12");
+  assert.deepEqual(frame(), [
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver n null false 5,7 @305,125",
+  ]);
+  idle();
+  cmd("remove", "n");
+  assert.deepEqual(frame(), ["rollOut root null false 305,125 @305,125"]);
+  cmd("set", "r10", "x", 0);
+  assert.deepEqual(frame(), [
+    "rollOver r10 null false 5,5 @305,125",
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver r10 null false 5,5 @305,125",
+  ]);
+  idle();
+
+  // A scroll is applied as the frame is drawn, after its end's pick: the next frame's sees it.
+  cmd("scroll", "list", null, "0,0,20,100");
+  assert.deepEqual(frame(), []);
+  assert.deepEqual(frame(), [
+    "mouseOut r10 null false 5,5 @305,125",
+    "rollOut r10 null false 5,5 @305,125",
+    "rollOut root null false 305,125 @305,125",
+  ]);
+  idle();
+  cmd("scroll", "list", null, "0,12,20,200");
+  assert.deepEqual(frame(), []);
+  assert.deepEqual(frame(), [
+    "rollOver r11 null false 5,5 @305,125",
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver r11 null false 5,5 @305,125",
+  ]);
+  idle();
+  cmd("scroll", "list", null, "");
+  assert.deepEqual(frame(), []);
+  assert.deepEqual(frame(), [
+    "mouseOut r11 r10 false 5,-7 @305,125",
+    "rollOut r11 r10 false 5,-7 @305,125",
+    "rollOver r10 r11 false 5,5 @305,125",
+    "mouseOver r10 r11 false 5,5 @305,125",
+  ]);
+  idle();
+
+  cmd("box", "m", null, "300,0,10");
+  cmd("mask", "list", "m");
+  assert.deepEqual(frame(), [
+    "mouseOut r10 null false 5,5 @305,125",
+    "rollOut r10 null false 5,5 @305,125",
+    "rollOut root null false 305,125 @305,125",
+  ]);
+  idle();
+  cmd("mask", "list", null);
+  assert.deepEqual(frame(), [
+    "rollOver r10 null false 5,5 @305,125",
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver r10 null false 5,5 @305,125",
+  ]);
+  idle();
+
+  // What takes the hit changes too with no change drawn.
+  cmd("set", "list", "mouseChildren", false);
+  assert.deepEqual(frame(), [
+    "mouseOut r10 list false 5,5 @305,125",
+    "rollOut r10 list false 5,5 @305,125",
+    "mouseOver list r10 false 5,125 @305,125",
+  ]);
+  idle();
+  cmd("set", "list", "hitArea", player.root.children.find((child) => child.name === "m")?.object);
+  assert.deepEqual(frame(), [
+    "mouseOut list null false 5,125 @305,125",
+    "rollOut root null false 305,125 @305,125",
+  ]);
+  idle();
+  cmd("set", "list", "hitArea", null);
+  assert.deepEqual(frame(), [
+    "rollOver root null false 305,125 @305,125",
+    "mouseOver list null false 5,125 @305,125",
+  ]);
+  idle();
+  cmd("set", "list", "mouseChildren", true);
+  assert.deepEqual(frame(), [
+    "mouseOut list r10 false 5,125 @305,125",
+    "rollOver r10 list false 5,5 @305,125",
+    "mouseOver r10 list false 5,5 @305,125",
+  ]);
+  idle();
+
+  cmd("field", "f");
+  assert.deepEqual(input("move", 60, 210), [
+    "mouseMove stage null false 60,210 @60,210",
+    "mouseOut r10 null false -240,90 @60,210",
+    "rollOut r10 null false -240,90 @60,210",
+    "rollOut root null false 60,210 @60,210",
+  ]);
+  idle();
+  cmd("set", "f", "text", "aaaaaaaaaaaaaaaaaaaaaaaa");
+  assert.deepEqual(frame(), [
+    "rollOver f null false 60,10 @60,210",
+    "rollOver root null false 60,210 @60,210",
+    "mouseOver f null false 60,10 @60,210",
+  ]);
+  idle();
+
+  cmd("remove", "c");
+  cmd("set", "btn", "hitTestState", c);
+  assert.deepEqual(input("move", 330, 150), [
+    "mouseMove stage null false 330,150 @330,150",
+    "mouseOut f null false 330,-50 @330,150",
+    "rollOut f null false 330,-50 @330,150",
+    "rollOut root null false 330,150 @330,150",
+  ]);
+  idle();
+  cmd("set", "c", "scaleX", 2);
+  assert.deepEqual(frame(), [
+    "rollOver btn null false 130,150 @330,150",
+    "rollOver root null false 330,150 @330,150",
+    "mouseOver btn null false 130,150 @330,150",
+  ]);
+  idle();
+});
+
 test("a pick passes over what stood still away from the point, and sees what moved, scrolled or came since", () => {
   const stage = new Container();
   stage.object = { $display: stage } as never;
@@ -1387,6 +1580,172 @@ test("a pick passes over what stood still away from the point, and sees what mov
   equal(pick(10, 110), button);
   area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 150 });
   equal(pick(10, 160), button);
+});
+
+test("a still pointer's pick over a list of buttons sees each change under it, however long the list stood still", () => {
+  const stage = new Container();
+  stage.object = { $display: stage } as never;
+  stage.loaderInfo = {} as never;
+  const at = (d: { setMatrix: (m: never) => void }, x: number, y: number, scale = 1) =>
+    d.setMatrix({ a: scale, b: 0, c: 0, d: scale, tx: x, ty: y } as never);
+  const sprite = (x: number, y: number) => {
+    const s = new Container();
+    s.object = { $display: s } as never;
+    s.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    at(s, x, y);
+    return s;
+  };
+  // Rows 30 pixels apart, each a sprite and a button whose hit test state,
+  // in no container, holds the square it is hit by.
+  const list = new Container();
+  list.object = { $display: list } as never;
+  stage.addChildAt(list, 0);
+  const rows: Container[] = [];
+  const buttons: ButtonObject[] = [];
+  for (let i = 0; i < 20; i++) {
+    const row = sprite(0, i * 30);
+    const button = new ButtonObject();
+    button.object = { $display: button } as never;
+    at(button, 100, 0);
+    const state = new Container();
+    state.addChildAt(sprite(0, 0), 0);
+    button.hitTestState = state;
+    row.addChildAt(button, 1);
+    list.addChildAt(row, i);
+    rows.push(row);
+    buttons.push(button);
+  }
+
+  // Each pick made again in full too, which must find the same.
+  const checks = pickChecks.on;
+  pickChecks.on = true;
+  try {
+    // Picks enough that every bounds is worked out and kept.
+    const pick = (x: number, y: number) => {
+      for (let i = 0; i < 3; i++) {
+        pointerTarget(stage, x, y, 400, 700);
+      }
+
+      return pointerTarget(stage, x, y, 400, 700);
+    };
+
+    equal(pick(110, 70), buttons[2]);
+    equal(pick(150, 70), stage);
+    // The square inside a hit test state, in no container, moved under the point.
+    const square = buttons[2].hitTestState as Container;
+    at(square.children[0], 40, 0);
+    equal(pick(150, 70), buttons[2]);
+    equal(pick(110, 70), stage);
+    // A hit test state scaled: the square, 40 to 60 across in it, is 120
+    // to 180 across the button, off the point it was under. Then one put
+    // in its place.
+    at(square, 0, 0, 3);
+    equal(pick(150, 70), stage);
+    equal(pick(250, 70), buttons[2]);
+    buttons[3].hitTestState = sprite(200, 0);
+    equal(pick(310, 100), buttons[3]);
+    // One on the list elsewhere, hit in the button's space wherever its
+    // parent is; then moved, and a square put in it.
+    const holder = sprite(300, 0);
+    stage.addChildAt(holder, 1);
+    const elsewhere = sprite(0, 0);
+    holder.addChildAt(elsewhere, 1);
+    buttons[5].hitTestState = elsewhere;
+    equal(pick(110, 160), buttons[5]);
+    at(holder, 340, 0);
+    equal(pick(110, 160), buttons[5]);
+    at(elsewhere, 40, 0);
+    equal(pick(150, 160), buttons[5]);
+    equal(pick(110, 160), stage);
+    elsewhere.addChildAt(sprite(-40, 20), 1);
+    equal(pick(110, 175), buttons[5]);
+    // A row moved out from under the point, another in; one taken off, one scrolled away.
+    at(rows[7], 0, 400);
+    equal(pick(110, 220), stage);
+    at(rows[8], 0, 210);
+    equal(pick(110, 220), buttons[8]);
+    list.removeChild(rows[8]);
+    equal(pick(110, 220), stage);
+    rows[9].scrollRect = { xMin: 0, yMin: 0, xMax: 50, yMax: 20 };
+    rows[9].scroll = rows[9].scrollRect;
+    rows[9].invalidate(TRANSFORM);
+    equal(pick(110, 280), stage);
+    equal(pick(10, 280), rows[9]);
+    // Its bounds worked out again while scrolled, then the scroll taken off.
+    at(buttons[9], 100, 0);
+    equal(pick(110, 280), stage);
+    rows[9].scrollRect = null;
+    rows[9].scroll = null;
+    rows[9].invalidate(TRANSFORM);
+    equal(pick(110, 280), buttons[9]);
+    // One state shared by two buttons moves both; let go of by one, only the other.
+    const shared = sprite(0, 0);
+    buttons[12].hitTestState = shared;
+    buttons[13].hitTestState = shared;
+    equal(pick(110, 370), buttons[12]);
+    at(shared, 40, 0);
+    equal(pick(150, 370), buttons[12]);
+    equal(pick(150, 400), buttons[13]);
+    buttons[12].hitTestState = sprite(0, 0);
+    at(shared, 60, 0);
+    equal(pick(170, 370), stage);
+    equal(pick(110, 370), buttons[12]);
+    equal(pick(170, 400), buttons[13]);
+  } finally {
+    pickChecks.on = checks;
+  }
+});
+
+test("a change after a pick whose bounds settled a field's fit is seen above the field", () => {
+  // The field in a panel, then in a button's hit test state, in no container.
+  for (const inButton of [false, true]) {
+    const stage = new Container();
+    stage.object = { $display: stage } as never;
+    stage.loaderInfo = {} as never;
+    const panel = new Container();
+    panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
+    const button = new ButtonObject();
+    button.object = { $display: button } as never;
+    if (inButton) {
+      button.hitTestState = panel;
+      stage.addChildAt(button, 0);
+    } else {
+      panel.object = { $display: panel } as never;
+      stage.addChildAt(panel, 0);
+    }
+
+    // A hidden field, which no pick goes into, whose fit waits.
+    const field = new TextObject(null);
+    field.object = { $display: field } as never;
+    field.autoSize = "left";
+    field.visible = false;
+    panel.addChildAt(field, 1);
+    const hit = inButton ? button : panel;
+
+    const checks = pickChecks.on;
+    pickChecks.on = true;
+    try {
+      for (let i = 0; i < 4; i++) {
+        equal(pointerTarget(stage, 10, 10, 400, 400), hit);
+      }
+
+      field.model.setText("a");
+      field.deferFit();
+      field.invalidate(CONTENT);
+      // The third pick works the bounds out, which settles the fit and so
+      // marks them stale while that pick makes them.
+      for (let i = 0; i < 3; i++) {
+        equal(pointerTarget(stage, 10, 10, 400, 400), hit);
+      }
+
+      field.visible = true;
+      field.invalidate(TRANSFORM);
+      field.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 200, ty: 200 });
+      equal(pointerTarget(stage, 205, 205, 400, 400), inButton ? button : field);
+    } finally {
+      pickChecks.on = checks;
+    }
+  }
 });
 
 test("a pick sees a morph's new blend once drawn, though picks came between its ratio and its draw", () => {
@@ -1510,13 +1869,14 @@ test("a sprite's hitArea elsewhere on the list is picked for it however long bot
 
   equal(pick(160, 160), owner);
   equal(pick(10, 10), stage);
-  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 20 });
-  equal(pick(110, 30), owner);
+  // Beyond all the owner's bounds took in before.
+  area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 180 });
+  equal(pick(110, 190), owner);
   // The owner moving moves where its area is, from the owner's side, not at all.
   owner.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 50, ty: 0 });
-  equal(pick(110, 30), owner);
+  equal(pick(110, 190), owner);
   setHitArea(owner, null);
-  equal(pick(110, 30), stage);
+  equal(pick(110, 190), stage);
 });
 
 // A card turned 60 degrees about y, nearer on its right, over a sprite as

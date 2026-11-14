@@ -14,7 +14,7 @@ import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { maxScrollV } from "../text/layout.js";
 import { type Drag, dragTo, dropTargets, objectUnder } from "./drag.js";
-import { pointerTarget } from "./hit-test.js";
+import { pickChecks, pointerTarget } from "./hit-test.js";
 import type { KeyboardInput } from "./keyboard.js";
 
 export interface PointerState {
@@ -73,8 +73,17 @@ export class PointerInput implements Pointer {
   private hoverChain: DisplayObject[] = [];
   /** The pointer's last state over the player; null before it came, or once it left. */
   private last: PointerState | null = null;
-  /** pickWork's count when the hover was last picked. */
+  /** pickWork's count when the hover was last picked, and what that pick found. */
   private picked = -1;
+  private found: DisplayObject | null = null;
+  /**
+   * The stage's viewport the last pick saw, which pickWork does not count:
+   * a stage resized or moved under a still pointer picks again.
+   */
+  private viewWidth = Number.NaN;
+  private viewHeight = Number.NaN;
+  private viewX = Number.NaN;
+  private viewY = Number.NaN;
   /** Whether the left button is down after a press here. */
   private held = false;
   /** Whether the pointer has left the player, and not come back to it since. */
@@ -107,15 +116,31 @@ export class PointerInput implements Pointer {
 
   private pick(p: PointerState): DisplayObject | null {
     const s = this.scripting;
+    this.viewWidth = s.stageViewportWidth || s.stageWidth;
+    this.viewHeight = s.stageViewportHeight || s.stageHeight;
+    this.viewX = s.stageViewportX;
+    this.viewY = s.stageViewportY;
     return pointerTarget(
       this.stage,
       p.x,
       p.y,
-      s.stageViewportWidth || s.stageWidth,
-      s.stageViewportHeight || s.stageHeight,
+      this.viewWidth,
+      this.viewHeight,
       s.avm1Input?.hit,
-      s.stageViewportX,
-      s.stageViewportY,
+      this.viewX,
+      this.viewY,
+    );
+  }
+
+  /** Whether nothing a pick reads changed since the last: pickWork's count and the stage's viewport. */
+  private pickedNow(): boolean {
+    const s = this.scripting;
+    return (
+      this.picked === pickWork.changes &&
+      this.viewWidth === (s.stageViewportWidth || s.stageWidth) &&
+      this.viewHeight === (s.stageViewportHeight || s.stageHeight) &&
+      this.viewX === s.stageViewportX &&
+      this.viewY === s.stageViewportY
     );
   }
 
@@ -327,6 +352,7 @@ export class PointerInput implements Pointer {
     s.avm1Input?.broadcast(type, p);
     this.picked = pickWork.changes;
     const found = this.pick(p);
+    this.found = found;
     this.redraws += s.avm1Input?.prepare(type, p, found) ?? 0;
     // AVM1 buttons send no AS3 events. Outside, a held mouse stays the stage's.
     const target = found?.avm1Root
@@ -453,10 +479,16 @@ export class PointerInput implements Pointer {
    */
   frameEnded(): void {
     const p = this.last;
-    if (p && !this.gone && this.picked !== pickWork.changes) {
+    const unchanged = this.pickedNow();
+    if (p && !this.gone && unchanged && pickChecks.on) {
+      this.checkUnchanged(p);
+    }
+
+    if (p && !this.gone && !unchanged) {
       const s = this.scripting;
       this.picked = pickWork.changes;
       const found = this.pick(p);
+      this.found = found;
       this.redraws += s.avm1Input?.sync(p, found) ?? 0;
       const target = found?.avm1Root
         ? null
@@ -473,6 +505,19 @@ export class PointerInput implements Pointer {
     }
 
     this.updateCursor();
+  }
+
+  /**
+   * The checked build's proof that a pick left out, nothing having changed
+   * that pickWork counts since the last, would have found what that one did.
+   */
+  private checkUnchanged(p: PointerState): void {
+    const again = this.pick(p);
+    if (again !== this.found) {
+      throw new Error(
+        `nothing counted changed since the last pick, which found ${this.found?.name ?? "nothing"}, but ${again?.name ?? "nothing"} is under (${p.x}, ${p.y})`,
+      );
+    }
   }
 
   /** Move the hover to `target`: out and roll outs from what it was over, roll overs and over on what it is. */
