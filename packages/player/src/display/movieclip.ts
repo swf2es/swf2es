@@ -7,6 +7,7 @@ import { ButtonObject } from "./buttonobject.js";
 import { IDENTITY_COLOR } from "./color.js";
 import { Container } from "./container.js";
 import {
+  advancing,
   CLIP,
   CONTENT,
   type DisplayObject,
@@ -150,15 +151,9 @@ export class MovieClip extends Container {
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
   queuedPlay = false;
-  /**
-   * The frame count (Scripting.frames) at a script's goto in a SWF of
-   * version 9 or earlier, a goto to the frame it is on among them: the next
-   * frame it sits out, with all in it, as Flash has such a clip
-   * (`goto-children`). A stamp, not a flag: one a skipped parent took along,
-   * or a clip no frame reached, is past by the frame after and never skips.
-   * From version 10 a goto leaves its frames as they were.
-   */
-  skipsAfter = -1;
+  private skipStamp = -1;
+  /** The pass of the frame's advance walk that listed it last (AdvanceWatch.pass). */
+  listedFor = -1;
   /** Whether an AVM1 clip ran the actions after its last ShowFrame, which it does once. */
   private tailed = false;
 
@@ -174,6 +169,38 @@ export class MovieClip extends Container {
     this.advanceDue = true;
   }
 
+  /**
+   * The frame count (Scripting.frames) at a script's goto in a SWF of
+   * version 9 or earlier, a goto to the frame it is on among them: the next
+   * frame it sits out, with all in it, as Flash has such a clip
+   * (`goto-children`). A stamp, not a flag: one a skipped parent took along,
+   * or a clip no frame reached, is past by the frame after and never skips.
+   * From version 10 a goto leaves its frames as they were.
+   */
+  get skipsAfter(): number {
+    return this.skipStamp;
+  }
+
+  set skipsAfter(frames: number) {
+    advancing.watch?.skips(this, this.skipStamp);
+    this.skipStamp = frames;
+  }
+
+  /**
+   * It may have come to advance (`advances`): marked, and, among a tick's
+   * advances, told to them if their walk did not list it.
+   */
+  private mayAdvance(): void {
+    if (!this.advanceDue) {
+      markAdvanceDue(this);
+    }
+
+    const watch = advancing.watch;
+    if (watch !== null && this.listedFor !== watch.pass) {
+      watch.changed(this);
+    }
+  }
+
   /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
   get stream(): object | null {
     return this.playingStream;
@@ -181,8 +208,8 @@ export class MovieClip extends Container {
 
   set stream(stream: object | null) {
     this.playingStream = stream;
-    if (stream && !this.advanceDue) {
-      markAdvanceDue(this);
+    if (stream) {
+      this.mayAdvance();
     }
   }
 
@@ -197,8 +224,8 @@ export class MovieClip extends Container {
 
   set fresh(fresh: boolean) {
     this.sitsOutNext = fresh;
-    if (fresh && !this.advanceDue) {
-      markAdvanceDue(this);
+    if (fresh) {
+      this.mayAdvance();
     }
   }
 
@@ -224,7 +251,7 @@ export class MovieClip extends Container {
     this.tailed = false;
     this.queuedGoto = null;
     this.invalidate(CONTENT);
-    markAdvanceDue(this);
+    this.mayAdvance();
   }
 
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */
@@ -241,9 +268,7 @@ export class MovieClip extends Container {
       }
 
       // An AVM1 clip's tail turns on its frame (`advances`).
-      if (!this.advanceDue) {
-        markAdvanceDue(this);
-      }
+      this.mayAdvance();
     }
   }
 
@@ -298,8 +323,8 @@ export class MovieClip extends Container {
       this.library.sounds?.stopStream(this);
     }
 
-    if (play && !this.advanceDue) {
-      markAdvanceDue(this);
+    if (play) {
+      this.mayAdvance();
     }
   }
 

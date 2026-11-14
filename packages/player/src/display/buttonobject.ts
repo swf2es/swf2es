@@ -7,8 +7,9 @@ import {
   type ButtonRecord,
   type Place,
 } from "@swf2es/format";
-import { Container, childChanges } from "./container.js";
+import { Container } from "./container.js";
 import {
+  advancing,
   BUTTON,
   CHILDREN,
   type DisplayObject,
@@ -110,6 +111,7 @@ export class ButtonObject extends Container {
    * new list, so that none it let go of stays held.
    */
   private statesChanged(): void {
+    advancing.watch?.states(this, this.frameChildren);
     if (this.avm1Made) {
       this.frameChildren = this.children;
       return;
@@ -267,6 +269,7 @@ export class ButtonObject extends Container {
 
     for (const state of [this.upState, this.overState, this.downState, this.hitTestState]) {
       if (state && state !== current && state.parent === this && !this.children.includes(state)) {
+        advancing.watch?.parent(state, this);
         state.parent = null;
       }
     }
@@ -279,8 +282,9 @@ export class ButtonObject extends Container {
       }
 
       this.children.splice(0, 0, current);
-      childChanges.log?.changed(this, 0, current, null);
+      advancing.watch?.children(this, 0, current, null);
       this.puts++;
+      advancing.watch?.parent(current, current.parent);
       current.parent = this;
       this.relist(current);
       this.invalidate(CHILDREN);
@@ -298,6 +302,7 @@ export class ButtonObject extends Container {
   /** AVM1 keeps only the current state's records alive, reusing records shared by both states. */
   makeAvm1States(made: (display: DisplayObject, character: DisplayCharacter) => void): void {
     this.avm1Made = made;
+    advancing.watch?.states(this, this.frameChildren);
     this.frameChildren = this.children;
     this.show();
   }
@@ -356,6 +361,7 @@ export class ButtonObject extends Container {
     }
 
     if (this.hitTest?.parent === this) {
+      advancing.watch?.parent(this.hitTest, this);
       this.hitTest.parent = null;
     }
 

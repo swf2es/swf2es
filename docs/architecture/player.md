@@ -261,19 +261,27 @@ is not marked, and leaves a mark only where such a clip is at or under it.
 It finds them before any advances, so that list is the whole walk's but
 for clips that would do nothing in their turn, unless something made
 them do something first. Another clip's advance changes only its own
-frame, stream and children, but a script may run among the advances: a
-listener of a child the timeline took off, a named child's property on
-its parent, or a class's first script as the timeline places its symbol.
-Scripting tells the walk first (`Scripting.advancing`), which then finds
-every clip again as the whole walk found them, the children changed
-since put back as they were and the orphans made since left out, and
-advances all those after the one advancing. In `walk-bench.ts
---playing 10 --orphans 1000`, a tick went from 726 to 246 µs (median of
-three runs each), and the stage alone from 160 to 57. The checked build
-walks both ways every tick, fails unless the clips listed are the whole
-walk's that advance, in its order, advances them all, and fails if one
-left out does something before a script ran; where one ran, the clips
-found again must be the whole walk's.
+frame, stream and children, but scripts run among the advances: the
+listeners of what the timeline puts in and takes off, a named child's
+property on its parent, a class's first script as the timeline places its
+symbol. Most make no clip left out advance, and cost nothing more. One
+that does goes through a setter that marks the clip, which tells the
+advances (`AdvanceWatch.changed`) of a clip made before the walk and not
+on its list that now advances (`late`). The advances log every change
+since the walk to what it read: children, a button's states, parents,
+`skipsAfter`, the orphans made and dropped. At the first such clip they
+find every clip again as the whole walk found them, from the display list
+with those changes undone, and advance all those after the one advancing
+(after its second turn, for a button's state walked from two buttons).
+In `walk-bench.ts --playing 10 --orphans 1000`, a tick went from 785 to
+263 µs (means of three runs' medians), and the stage alone from 160 to
+54; with 50 clips whose timelines place and take off children every
+frame and hear each (`--churn 50`), from 2,465 to 569 µs, their clips
+found again in none of the 3,000 ticks. The checked build walks both ways
+every tick, fails unless the clips listed are the whole walk's that
+advance, in its order, advances them all, and fails if one left out
+advances, or changes as it does, with no clip left out told of; where one
+was, the clips found again must be the whole walk's.
 
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
 goto from its frame script, its listener or another clip's, sits the next

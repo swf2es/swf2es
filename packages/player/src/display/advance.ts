@@ -5,43 +5,43 @@
 // the walk goes only where a mark (DisplayObject.advanceDue) says such a
 // clip may be, as the rounds of frame scripts go by theirs (scriptsDue).
 // Its list is the walk of every clip less those whose advance would do
-// nothing as it walks; one of those comes to do something before its turn
-// only if a script makes it, and a script runs among the advances only by
-// an event, a named child's property or a class's first script, of which
-// Scripting tells the walk first: it then finds every clip as the walk of
-// all would have found it, and advances them all from there.
+// nothing as it walks. One of those matters only if it comes to do
+// something before its turn, which a script among the advances may make
+// it: a listener of a child the timeline took off, say. Each way a clip
+// comes to advance tells the advances (AdvanceWatch.changed), which, for
+// one made before the walk and not listed, find every clip again as the
+// walk of all found them, from a log of what changed since, and advance
+// all those after the one advancing. Scripts that make no such clip
+// advance cost nothing more.
 import type { ButtonObject } from "./buttonobject.js";
-import { type ChildChanges, Container, childChanges } from "./container.js";
-import { BUTTON, CLIP, type DisplayObject, OTHER } from "./displayobject.js";
+import { Container } from "./container.js";
+import {
+  type AdvanceWatch,
+  advancing,
+  BUTTON,
+  CLIP,
+  type DisplayObject,
+  OTHER,
+  serials,
+} from "./displayobject.js";
 import type { MovieClip } from "./movieclip.js";
 import { walkList } from "./walk.js";
-
-/** What Scripting tells the advances of (Scripting.advancing). */
-export interface AdvanceHooks {
-  /** A script is about to run. */
-  beforeScript(): void;
-  /** `display` became an orphan. */
-  orphaned(display: DisplayObject): void;
-}
 
 /** The orphans, as Lifecycle walks them. */
 export interface Orphans {
   eachOrphanRoot(f: (display: DisplayObject) => void, due?: boolean, advances?: boolean): void;
 }
 
-/** Where the walk tells of scripts among the advances: a Scripting. */
-interface ScriptHost {
-  advancing: AdvanceHooks | null;
-  readonly lifecycle: Orphans;
-}
-
 /**
  * Whether the frame's walks prove their shortcuts as they take them: the
  * checked build's tests set it (Scripting.checkRounds, SWF2ES_CHECKED).
- * `refound` counts the ticks whose advances found their clips again, for
- * a script among them, which tests read.
+ * `refound` counts the ticks whose advances found their clips again, which
+ * tests read.
  */
 export const walkChecks = { on: false, refound: 0 };
+
+/** The walks so far, each one's number its AdvanceWatch.pass. */
+let passes = 0;
 
 /** What a clip's advance reads and changes, to tell one that did nothing (AdvanceWalk.checked). */
 function advanceState(clip: MovieClip): string {
@@ -51,8 +51,11 @@ function advanceState(clip: MovieClip): string {
 export class AdvanceWalk {
   /** The list a tick fills, kept for the next; null while one runs. */
   private kept: (MovieClip | null)[] | null = [];
+  /** The advances' watch, kept for the next tick; null while one runs, as one inside it makes its own. */
+  private idle: AdvancePhase | null = new AdvancePhase();
   private clips: (MovieClip | null)[] = [];
   private count = 0;
+  private pass = 0;
   /** Scripting.frames, which a clip that sits out a frame was stamped with (MovieClip.skipsAfter). */
   private frames = -1;
   /** The clips open around the item a list's walk is at, where each ends, and whether one is due under each. */
@@ -60,42 +63,56 @@ export class AdvanceWalk {
   private readonly openEnd: number[] = [];
   private readonly openDue: boolean[] = [];
   private open = 0;
-  private readonly phase = new AdvancePhase();
 
   /**
-   * Advance every clip under `root`, and, with `host`, every orphan, as
-   * the frame does: those whose advance does something, found first.
-   * `frames` is Scripting.frames, or -1 without one. `checked`, as the
-   * checked build's tests have it (Scripting.checkRounds), proves the
-   * list: it walks all too, which must find the same clips in the same
-   * order but for those whose advance would do nothing, advances all, and
-   * throws if one of those did something before a script ran.
+   * Advance every clip under `root`, then among `orphans`, as the frame
+   * does: those whose advance does something, found first. `frames` is
+   * Scripting.frames, or -1 without one. `checked`, as the checked build's
+   * tests have it (Scripting.checkRounds), proves the list: it walks all
+   * too, which must find the same clips in the same order but for those
+   * whose advance would do nothing, advances all, and throws if one of
+   * those did something with no clip left out told of as coming to advance.
    */
-  run(root: DisplayObject, host: ScriptHost | null, frames: number, checked: boolean): void {
+  run(root: DisplayObject, orphans: Orphans | null, frames: number, checked: boolean): void {
     const clips = this.kept ?? [];
     this.kept = null;
+    const phase = this.idle ?? new AdvancePhase();
+    this.idle = null;
     this.frames = frames;
-    if (checked) {
-      try {
-        this.checked(root, host, clips);
-      } finally {
-        this.kept = clips;
+    this.pass = ++passes;
+
+    try {
+      if (checked) {
+        this.checked(root, orphans, clips, phase);
+      } else {
+        this.listed(root, orphans, clips, phase);
       }
-
-      return;
+    } finally {
+      this.kept = clips;
+      this.idle = phase;
     }
+  }
 
-    const orphans = host?.lifecycle ?? null;
+  /** The tick: the clips listed advanced, or, from where one left out comes to advance, all after. */
+  private listed(
+    root: DisplayObject,
+    orphans: Orphans | null,
+    clips: (MovieClip | null)[],
+    phase: AdvancePhase,
+  ): void {
     const count = this.collect(root, orphans, clips);
-    const phase = this.phase;
-    phase.arm(host, root, orphans, frames, null);
+    phase.arm(this.pass, root, orphans, this.frames);
+
     try {
       for (let i = 0; i < count; i++) {
         const clip = clips[i] as MovieClip;
-        phase.current = clip;
         clip.advance();
-        // A script ran in it: the rest as the walk of all would have them.
-        const rest = phase.rest;
+        if (!phase.late || phase.refound) {
+          continue;
+        }
+
+        // The rest as the walk of all would have them; the list's own, failing that.
+        const rest = phase.after(clip, occurrence(clips, i));
         if (rest !== null) {
           for (let k = 0; k < rest.length; k++) {
             rest[k].advance();
@@ -108,13 +125,16 @@ export class AdvanceWalk {
       phase.disarm();
       // Let go of once advanced, so that the kept list holds none past the tick.
       clips.fill(null, 0, count);
-      this.kept = clips;
     }
   }
 
   /** The checked tick (run). */
-  private checked(root: DisplayObject, host: ScriptHost | null, clips: (MovieClip | null)[]): void {
-    const orphans = host?.lifecycle ?? null;
+  private checked(
+    root: DisplayObject,
+    orphans: Orphans | null,
+    clips: (MovieClip | null)[],
+    phase: AdvancePhase,
+  ): void {
     // The marks first, as the walk of all makes lists again that this one would walk without.
     const count = this.collect(root, orphans, clips);
     const all: (MovieClip | null)[] = [];
@@ -133,27 +153,34 @@ export class AdvanceWalk {
       throw new Error(`the advance walk listed ${count} clips that advance, not ${j}`);
     }
 
-    const phase = this.phase;
-    phase.arm(host, root, orphans, this.frames, all);
+    phase.arm(this.pass, root, orphans, this.frames);
+
     try {
       for (let i = 0; i < total; i++) {
         const clip = all[i] as MovieClip;
-        phase.current = clip;
-        const scripted = phase.scripted;
-        if (acts[i] || scripted) {
+        if (acts[i] || phase.refound) {
           clip.advance();
-          continue;
+        } else {
+          // Left out: nothing to do, as no clip left out was told of as coming to advance.
+          const before = advanceState(clip);
+          if (clip.advances) {
+            throw new Error("a clip the advance walk left out advances");
+          }
+
+          clip.advance();
+          if (!phase.late && advanceState(clip) !== before) {
+            throw new Error("a clip the advance walk left out changed as it advanced");
+          }
         }
 
-        // Left out: nothing to do, unless a script has run since the walk.
-        const before = advanceState(clip);
-        if (clip.advances) {
-          throw new Error("a clip the advance walk left out advances");
-        }
-
-        clip.advance();
-        if (!phase.scripted && advanceState(clip) !== before) {
-          throw new Error("a clip the advance walk left out changed as it advanced");
+        // Found again where unchecked it would be, they must be the walk of all.
+        if (phase.late && !phase.refound) {
+          const found = phase.foundAgain();
+          for (let k = 0; k < found.length || k < total; k++) {
+            if (found[k] !== all[k]) {
+              throw new Error(`the advance walk found its clips again out of order at ${k}`);
+            }
+          }
         }
       }
     } finally {
@@ -172,6 +199,12 @@ export class AdvanceWalk {
     this.visit(root);
     orphans?.eachOrphanRoot(this.visitOrphan, false, true);
     return this.count;
+  }
+
+  /** `clip` on the list, marked as on this walk's (MovieClip.listedFor). */
+  private list(clip: MovieClip): void {
+    clip.listedFor = this.pass;
+    this.clips[this.count++] = clip;
   }
 
   private readonly visitOrphan = (o: DisplayObject): void => {
@@ -266,7 +299,7 @@ export class AdvanceWalk {
 
         const acts = (item as MovieClip).advances;
         if (acts) {
-          this.clips[this.count++] = item as MovieClip;
+          this.list(item as MovieClip);
           any = true;
         }
 
@@ -285,7 +318,7 @@ export class AdvanceWalk {
 
     let any = false;
     if (c.kind === CLIP && (c as MovieClip).advances) {
-      this.clips[this.count++] = c as MovieClip;
+      this.list(c as MovieClip);
       any = true;
     }
 
@@ -380,158 +413,205 @@ function settle(o: DisplayObject, due: boolean): void {
   }
 }
 
+/** Which time `clips[i]` is there from the first: a button's state shared with another is walked from each. */
+function occurrence(clips: readonly (MovieClip | null)[], i: number): number {
+  let n = 0;
+  for (let k = 0; k <= i; k++) {
+    if (clips[k] === clips[i]) {
+      n++;
+    }
+  }
+
+  return n;
+}
+
+// The log's entries (AdvancePhase).
+const CHILDREN = 0;
+const STATES = 1;
+const PARENT = 2;
+const SKIPS = 3;
+const ORPHANED = 4;
+const UNORPHANED = 5;
+
 /**
- * A tick's advances, as they run: what changed the display list since the
- * walk (ChildChanges) and which orphans they made, till a script is about
- * to run among them. Then every clip the walk of all would have found is
- * found again from those, as it was, and `rest` is those after the one
- * advancing, which the tick advances in place of what is left of its list.
+ * A tick's advances, as they run: what changed since the walk that the
+ * walk read, logged, till a clip made before it and not listed comes to
+ * advance (`late`). Then every clip the walk of all found is found again,
+ * from the display list as it was, and the tick advances those after the
+ * one advancing in place of the rest of its list.
  */
-class AdvancePhase implements AdvanceHooks, ChildChanges {
-  /** The clip advancing. */
-  current: MovieClip | null = null;
-  /** The clips left to advance, from the walk of all, once a script has run; else null. */
-  rest: MovieClip[] | null = null;
-  /** Whether a script has run since the walk. */
-  scripted = false;
-  private host: ScriptHost | null = null;
+class AdvancePhase implements AdvanceWatch {
+  pass = 0;
+  /** Whether a clip left out, made before the walk, came to advance. */
+  late = false;
+  /** Whether the clips have been found again since. */
+  refound = false;
+  /** The serial of the first display object made after the walk. */
+  private madeAfter = 0;
+  private previous: AdvanceWatch | null = null;
   private root: DisplayObject | null = null;
   private orphans: Orphans | null = null;
   private frames = -1;
-  /** The checked build's walk of all, to which the clips found again must be the same. */
-  private all: (MovieClip | null)[] | null = null;
-  // The changes to children (ChildChanges), in order.
-  private readonly parents: Container[] = [];
-  private readonly indexes: number[] = [];
-  private readonly added: (DisplayObject | null)[] = [];
-  private readonly removed: (DisplayObject | null)[] = [];
-  private readonly made: DisplayObject[] = [];
+  // The log, an entry at an index of each.
+  private readonly kinds: number[] = [];
+  private readonly subjects: DisplayObject[] = [];
+  private readonly firsts: (DisplayObject | null)[] = [];
+  private readonly seconds: (DisplayObject | null)[] = [];
+  private readonly numbers: number[] = [];
+  private readonly lists: (readonly DisplayObject[] | null)[] = [];
 
-  arm(
-    host: ScriptHost | null,
-    root: DisplayObject,
-    orphans: Orphans | null,
-    frames: number,
-    all: (MovieClip | null)[] | null,
-  ): void {
-    this.rest = null;
-    this.scripted = false;
-    if (host === null) {
-      return;
-    }
-
-    this.host = host;
+  arm(pass: number, root: DisplayObject, orphans: Orphans | null, frames: number): void {
+    this.pass = pass;
+    this.late = false;
+    this.refound = false;
+    this.madeAfter = serials();
     this.root = root;
     this.orphans = orphans;
     this.frames = frames;
-    this.all = all;
-    host.advancing = this;
-    childChanges.log = this;
+    this.previous = advancing.watch;
+    advancing.watch = this;
+  }
+
+  /** No longer watching: the watch around it back. */
+  private unwatch(): void {
+    if (advancing.watch === this) {
+      advancing.watch = this.previous;
+    }
   }
 
   disarm(): void {
-    if (this.host !== null && this.host.advancing === this) {
-      this.host.advancing = null;
-    }
-
-    if (childChanges.log === this) {
-      childChanges.log = null;
-    }
-
-    this.host = null;
+    this.unwatch();
+    this.previous = null;
     this.root = null;
     this.orphans = null;
-    this.all = null;
-    this.current = null;
-    this.rest = null;
-    this.parents.length = 0;
-    this.indexes.length = 0;
-    this.added.length = 0;
-    this.removed.length = 0;
-    this.made.length = 0;
+    this.kinds.length = 0;
+    this.subjects.length = 0;
+    this.firsts.length = 0;
+    this.seconds.length = 0;
+    this.numbers.length = 0;
+    this.lists.length = 0;
   }
 
-  changed(
-    parent: Container,
+  private log(
+    kind: number,
+    subject: DisplayObject,
+    first: DisplayObject | null,
+    second: DisplayObject | null,
+    n: number,
+    list: readonly DisplayObject[] | null,
+  ): void {
+    this.kinds.push(kind);
+    this.subjects.push(subject);
+    this.firsts.push(first);
+    this.seconds.push(second);
+    this.numbers.push(n);
+    this.lists.push(list);
+  }
+
+  changed(clip: DisplayObject): void {
+    if (!this.late && clip.serial < this.madeAfter && (clip as MovieClip).advances) {
+      this.late = true;
+    }
+  }
+
+  children(
+    parent: DisplayObject,
     index: number,
     added: DisplayObject | null,
     removed: DisplayObject | null,
   ): void {
-    this.parents.push(parent);
-    this.indexes.push(index);
-    this.added.push(added);
-    this.removed.push(removed);
+    this.log(CHILDREN, parent, added, removed, index, null);
+  }
+
+  states(button: DisplayObject, old: readonly DisplayObject[]): void {
+    this.log(STATES, button, null, null, 0, old);
+  }
+
+  parent(o: DisplayObject, old: DisplayObject | null): void {
+    this.log(PARENT, o, old, null, 0, null);
+  }
+
+  skips(clip: DisplayObject, old: number): void {
+    this.log(SKIPS, clip, null, null, old, null);
   }
 
   orphaned(display: DisplayObject): void {
-    this.made.push(display);
+    this.log(ORPHANED, display, null, null, 0, null);
   }
 
-  beforeScript(): void {
-    if (this.scripted) {
-      return;
-    }
+  unorphaned(display: DisplayObject): void {
+    this.log(UNORPHANED, display, null, null, 0, null);
+  }
 
-    this.scripted = true;
-    // Nothing more to keep: the clips are found again now, before the script.
-    if (this.host?.advancing === this) {
-      this.host.advancing = null;
-    }
-
-    if (childChanges.log === this) {
-      childChanges.log = null;
-    }
-
-    walkChecks.refound++;
+  /**
+   * The clips the walk of all found after the `n`th time it found `clip`,
+   * found again, which the tick advances in place of the rest of its list;
+   * null where it is not there, which cannot be, and the list goes on.
+   */
+  after(clip: MovieClip, n: number): MovieClip[] | null {
     const found = this.foundAgain();
-    const all = this.all;
-    if (all !== null) {
-      for (let i = 0; i < found.length || i < all.length; i++) {
-        if (found[i] !== all[i]) {
-          throw new Error(`the advance walk found its clips again out of order at ${i}`);
-        }
+    for (let k = 0; k < found.length; k++) {
+      if (found[k] === clip && --n === 0) {
+        return found.slice(k + 1);
       }
-
-      return;
     }
 
-    const at = found.indexOf(this.current as MovieClip);
-    if (at < 0) {
-      throw new Error("the advance walk did not find the clip advancing again");
-    }
-
-    this.rest = found.slice(at + 1);
+    return null;
   }
 
   /**
    * Every clip the walk of all found, from the display list as it was then:
-   * the changes to children since undone, the last first, on copies, and
-   * the orphans made since left out.
+   * what the log tells of undone, the last first, on copies, and the
+   * orphans as they were. It watches no more.
    */
-  private foundAgain(): MovieClip[] {
+  foundAgain(): MovieClip[] {
+    this.unwatch();
+    this.refound = true;
+    walkChecks.refound++;
     const then = new Map<DisplayObject, DisplayObject[]>();
+    const statesThen = new Map<DisplayObject, readonly DisplayObject[]>();
     const parentThen = new Map<DisplayObject, DisplayObject | null>();
-    for (let k = this.parents.length - 1; k >= 0; k--) {
-      const parent = this.parents[k];
-      let children = then.get(parent);
-      if (children === undefined) {
-        children = [...parent.children];
-        then.set(parent, children);
-      }
+    const skipsThen = new Map<DisplayObject, number>();
+    // Whether each orphan the log tells of was one at the walk: as its first entry has it.
+    const orphanThen = new Map<DisplayObject, boolean>();
+    for (let k = this.kinds.length - 1; k >= 0; k--) {
+      const subject = this.subjects[k];
+      switch (this.kinds[k]) {
+        case CHILDREN: {
+          let children = then.get(subject);
+          if (children === undefined) {
+            children = [...(subject as Container).children];
+            then.set(subject, children);
+          }
 
-      const index = this.indexes[k];
-      const added = this.added[k];
-      const removed = this.removed[k];
-      if (added !== null && removed !== null) {
-        children[index] = removed;
-        parentThen.set(removed, parent);
-        parentThen.set(added, parent);
-      } else if (added !== null) {
-        children.splice(index, 1);
-        parentThen.set(added, null);
-      } else if (removed !== null) {
-        children.splice(index, 0, removed);
-        parentThen.set(removed, parent);
+          const index = this.numbers[k];
+          const added = this.firsts[k];
+          const removed = this.seconds[k];
+          if (added !== null && removed !== null) {
+            children[index] = removed;
+          } else if (added !== null) {
+            children.splice(index, 1);
+          } else if (removed !== null) {
+            children.splice(index, 0, removed);
+          }
+
+          break;
+        }
+        case STATES:
+          statesThen.set(subject, this.lists[k] as readonly DisplayObject[]);
+          break;
+        case PARENT:
+          parentThen.set(subject, this.firsts[k]);
+          break;
+        case SKIPS:
+          skipsThen.set(subject, this.numbers[k]);
+          break;
+        case ORPHANED:
+          orphanThen.set(subject, false);
+          break;
+        case UNORPHANED:
+          orphanThen.set(subject, true);
+          break;
       }
     }
 
@@ -553,16 +633,20 @@ class AdvancePhase implements AdvanceHooks, ChildChanges {
     const found: MovieClip[] = [];
     const visit = (o: DisplayObject) => {
       if (o.kind === CLIP) {
-        const skips = (o as MovieClip).skipsAfter;
+        const clip = o as MovieClip;
+        const skips = skipsThen.has(clip) ? (skipsThen.get(clip) as number) : clip.skipsAfter;
         if (skips >= 0 && skips === frames) {
           return;
         }
       }
 
       if (o.kind === BUTTON) {
+        let states = statesThen.get(o) ?? o.frameChildren;
         // An AVM1 button's are its children, which may have changed.
-        const states =
-          o.frameChildren === (o as Container).children ? childrenOf(o) : o.frameChildren;
+        if (states === (o as Container).children) {
+          states = childrenOf(o);
+        }
+
         for (let i = 0; i < states.length; i++) {
           const state = states[i];
           if (!encloses(state, o) && (state.kind !== OTHER || childrenOf(state).length !== 0)) {
@@ -590,12 +674,24 @@ class AdvancePhase implements AdvanceHooks, ChildChanges {
       }
     };
     visit(this.root as DisplayObject);
-    const made = new Set(this.made);
+
+    const roots: DisplayObject[] = [];
     this.orphans?.eachOrphanRoot((o) => {
-      if (!made.has(o)) {
-        visit(o);
+      if (!orphanThen.has(o)) {
+        roots.push(o);
       }
     });
+    for (const [o, was] of orphanThen) {
+      if (was) {
+        roots.push(o);
+      }
+    }
+
+    roots.sort((a, b) => b.serial - a.serial);
+    for (let i = 0; i < roots.length; i++) {
+      visit(roots[i]);
+    }
+
     return found;
   }
 }

@@ -3,6 +3,7 @@
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
 import {
+  advancing,
   CHILDREN,
   DisplayObject,
   markAdvanceDue,
@@ -12,24 +13,6 @@ import {
 } from "./displayobject.js";
 import type { Library } from "./timeline.js";
 import type { WalkList } from "./walk.js";
-
-/**
- * What a change of a container's children is told to while a tick's
- * advances run (display/advance.ts), which may have to know the children as
- * they were when the frame's walk found its clips: an insertion at `index`,
- * a removal from it, or, with both children, one put in another's place.
- */
-export interface ChildChanges {
-  changed(
-    parent: Container,
-    index: number,
-    added: DisplayObject | null,
-    removed: DisplayObject | null,
-  ): void;
-}
-
-/** The ChildChanges told of each change, or null while none listens. */
-export const childChanges: { log: ChildChanges | null } = { log: null };
 
 export class Container extends DisplayObject {
   /** The library whose timeline this is, for what it tells of children going; a script's container has none. */
@@ -92,7 +75,7 @@ export class Container extends DisplayObject {
     child.depth = depth;
     child.parent = this;
     this.children.splice(index, 0, child);
-    childChanges.log?.changed(this, index, child, null);
+    advancing.watch?.children(this, index, child, null);
     this.puts++;
     this.depths.set(depth, child);
     this.relist(child);
@@ -137,6 +120,7 @@ export class Container extends DisplayObject {
     // A listener may have put it on this list again (which Flash does not survive). Where
     // nothing was put on it meanwhile, the search, a whole list's on every removal, is spared.
     if (child.parent === this && (this.puts === puts || !this.children.includes(child))) {
+      advancing.watch?.parent(child, this);
       child.parent = null;
       child.focusDrop?.(child);
     }
@@ -156,6 +140,7 @@ export class Container extends DisplayObject {
     }
 
     this.takeOut(child, index);
+    advancing.watch?.parent(child, this);
     child.parent = null;
     child.focusDrop?.(child);
   }
@@ -168,7 +153,7 @@ export class Container extends DisplayObject {
     }
 
     this.children.splice(index, 1);
-    childChanges.log?.changed(this, index, null, child);
+    advancing.watch?.children(this, index, null, child);
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
@@ -185,7 +170,7 @@ export class Container extends DisplayObject {
     child.parent = this;
     const at = same ? Math.min(index, this.children.length) : index;
     this.children.splice(at, 0, child);
-    childChanges.log?.changed(this, at, child, null);
+    advancing.watch?.children(this, at, child, null);
     this.puts++;
     this.relist(child);
     this.invalidate(CHILDREN);
@@ -204,8 +189,8 @@ export class Container extends DisplayObject {
     const j = this.children.indexOf(b);
     this.children[i] = b;
     this.children[j] = a;
-    childChanges.log?.changed(this, i, b, a);
-    childChanges.log?.changed(this, j, a, b);
+    advancing.watch?.children(this, i, b, a);
+    advancing.watch?.children(this, j, a, b);
     this.relist(a);
     this.relist(b);
     this.invalidate(CHILDREN);

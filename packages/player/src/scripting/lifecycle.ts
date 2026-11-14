@@ -4,7 +4,13 @@
 // orphan, which plays on as Flash's does, for a while (docs/architecture/player.md,
 // "Orphans").
 import { avm2 } from "@swf2es/runtime";
-import { Container, type DisplayObject, MovieClip, scriptWork } from "../display/display.js";
+import {
+  advancing,
+  Container,
+  type DisplayObject,
+  MovieClip,
+  scriptWork,
+} from "../display/display.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent, heard } from "./events.js";
@@ -105,8 +111,6 @@ export class Lifecycle {
     }
 
     if (byTimeline && parent && display.timelineNamed) {
-      // Its getter or setter may be a script's.
-      this.s.advancing?.beforeScript();
       const name = avm2.qname(avm2.publicNs, display.name);
       if (this.s.rt.getProperty(parent, name) === display.object) {
         this.s.rt.setProperty(parent, name, null);
@@ -177,7 +181,7 @@ export class Lifecycle {
       display.orphanEntry = entry;
       this.sortedOrphans = null;
       scriptWork.changes++;
-      this.s.advancing?.orphaned(display);
+      advancing.watch?.orphaned(display);
     }
   }
 
@@ -202,8 +206,14 @@ export class Lifecycle {
   private sortedOrphans: Orphan[] | null = null;
 
   private dropOrphan(serial: number): void {
-    if (this.orphans.delete(serial)) {
+    const orphan = this.orphans.get(serial);
+    if (orphan !== undefined) {
+      this.orphans.delete(serial);
       this.sortedOrphans = null;
+      const display = advancing.watch !== null ? orphan.ref.deref() : undefined;
+      if (display !== undefined) {
+        advancing.watch?.unorphaned(display);
+      }
     }
   }
 

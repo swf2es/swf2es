@@ -14,7 +14,7 @@ import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
-import { type AdvanceHooks, walkChecks } from "./display/advance.js";
+import { walkChecks } from "./display/advance.js";
 import {
   BitmapObject,
   BUTTON,
@@ -325,11 +325,6 @@ export class Scripting {
   frameRate = 24;
   /** Frames played since the start. */
   frames = 0;
-  /**
-   * What a tick's advances tell of a script about to run among them, and
-   * of each orphan made (display/advance.ts); null outside them.
-   */
-  advancing: AdvanceHooks | null = null;
   quality = "HIGH";
   showDefaultContextMenu = true;
   /** Display objects made with an AS3 object, which Flash numbers for their default names. */
@@ -654,19 +649,12 @@ export class Scripting {
 
     library.construct = (display, character) => this.construct(display, character, library);
     library.uncaught = (error) => this.reportUncaught(error, library);
-    // The classes constructLater has had ready, whose scripts have run.
-    const ready = new Set<string>();
     library.constructLater = (display, character) => {
       // Its class is ready as the frame plays, its script run, as the frame's
       // tags have it in Flash; only the instance waits (`delayed_symbolclass`).
       const name = library.classes.get(character.id);
       if (name) {
-        if (!ready.has(name)) {
-          this.advancing?.beforeScript();
-        }
-
         this.rt.classNamed(name, library.domain ?? null);
-        ready.add(name);
       }
 
       this.toConstruct.push({ display, character, library });

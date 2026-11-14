@@ -90,7 +90,6 @@ function invoke(
       continue;
     }
 
-    s.advancing?.beforeScript();
     try {
       s.rt.call(l.fn, null, event);
     } catch (error) {
@@ -145,7 +144,6 @@ export function dispatchToListener(
   event[f.currentTarget] = target;
   event[f.phase] = AT_TARGET;
   try {
-    s.advancing?.beforeScript();
     s.rt.call(fn, null, event);
   } catch (error) {
     s.reportUncaught(error, fn);

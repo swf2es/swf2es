@@ -372,7 +372,6 @@ export class Player {
   private readonly sortedIntervals: number[] = [];
   /** Frames played. */
   private played = 0;
-  /** The clips a tick advances, kept: the whole display list's, every frame. Null while in use. */
   /** The frame's advances (display/advance.ts). */
   private readonly advances = new AdvanceWalk();
 
@@ -645,7 +644,12 @@ export class Player {
 
     const scripting = this.scripting;
     scripting?.timers.beginFrame(1000 / this.frameRate);
-    this.advances.run(this.stage, scripting, scripting?.frames ?? -1, walkChecks.on);
+    this.advances.run(
+      this.stage,
+      scripting?.lifecycle ?? null,
+      scripting?.frames ?? -1,
+      walkChecks.on,
+    );
 
     if (this.scripting) {
       this.scripting.frame(this.stage, true, render);
