@@ -121,6 +121,7 @@ function constants(registers: number): Constants {
  */
 export class WebGLContext3D implements Context3D {
   readonly gl: WebGL2RenderingContext;
+  /** @internal */
   readonly drawState: GlState;
   width = 0;
   height = 0;
@@ -128,15 +129,22 @@ export class WebGLContext3D implements Context3D {
    * The back buffer's storage: its size, or less where the GPU allows less. The SWF still
    * sees the size it asked for, drawn at this one and stretched to it when presented.
    */
+  /** @internal */
   drawnWidth = 0;
+  /** @internal */
   drawnHeight = 0;
+  /** @internal */
   gpuMost: Int32Array | null = null;
   disposed = false;
   samplerFormats = true;
   profile: Profile = "baseline";
+  /** @internal */
   readonly buffers = new Map<Buffer3D, BufferState>();
+  /** @internal */
   vertexBuffers = 0;
+  /** @internal */
   bufferBytes = 0;
+  /** @internal */
   vertexBufferBytes = 0;
   private readonly programs = new Map<Program3D, ProgramState>();
   private readonly textures = new Map<Texture3D, TextureState>();
@@ -149,6 +157,7 @@ export class WebGLContext3D implements Context3D {
   private copy2D: CopyProgram | null = null;
   private copyCube: CopyProgram | null = null;
   private readonly targetSamples = new Int8Array(10).fill(-1);
+  /** @internal */
   renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
@@ -167,19 +176,30 @@ export class WebGLContext3D implements Context3D {
   private anisotropy: EXT_texture_filter_anisotropic | null | undefined;
   private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
+  /** @internal */
   readonly vertices: (VertexBinding | null)[] = new Array(VERTEX_SLOTS).fill(null);
   private enabledAttributes = 0;
+  /** @internal */
   indexBuffer: WebGLBuffer | null = null;
+  /** @internal */
   readonly texturesApplied = new Uint8Array(SAMPLER_SLOTS);
   private selected: Program3D | null = null;
+  /** @internal */
   framebuffer: WebGLFramebuffer | null = null;
+  /** @internal */
   texture: WebGLTexture | null = null;
+  /** @internal */
   resolveFramebuffer: WebGLFramebuffer | null = null;
+  /** @internal */
   colorBuffer: WebGLRenderbuffer | null = null;
+  /** @internal */
   resolveDirty = false;
+  /** @internal */
   depthBuffer: WebGLRenderbuffer | null = null;
+  /** @internal */
   antiAlias = 0;
   /** The back buffer's pixels to a CSS pixel and to a scissor rectangle's unit. */
+  /** @internal */
   scale = 1;
   private depthWrite = true;
   private depthCompare: CompareMode = "less";
@@ -194,6 +214,7 @@ export class WebGLContext3D implements Context3D {
   private stencilReference = 0;
   private stencilRead = 255;
   private stencilWrite = 255;
+  /** @internal */
   scissor = false;
   private scissorLeft = 0;
   private scissorTop = 0;
@@ -202,9 +223,13 @@ export class WebGLContext3D implements Context3D {
   private scissorOutside = false;
   private readonly vertexConstants = constants(VERTEX_CONSTANTS);
   private readonly fragmentConstants = constants(FRAGMENT_CONSTANTS);
+  /** @internal */
   pixels = new Uint8Array(0);
+  /** @internal */
   topDown = new Uint8Array(0);
+  /** @internal */
   readonly vao: WebGLVertexArrayObject;
+  /** @internal */
   readonly limits: Readonly<WebGLContext3DLimits>;
   private dxtEncoder: DxtEncoder | null = null;
 
@@ -247,12 +272,14 @@ export class WebGLContext3D implements Context3D {
     gl.disable(gl.DITHER);
   }
 
+  /** @internal */
   alive(): void {
     if (this.disposed || this.gl.isContextLost()) {
       throw new Context3DError("disposed", "Context3D experiment: context disposed or lost");
     }
   }
 
+  /** @internal */
   target(back = false, discardColor = false): void {
     this.alive();
     if (!this.framebuffer) {
@@ -284,6 +311,7 @@ export class WebGLContext3D implements Context3D {
   }
 
   /** Temporary attachments and separate READ/DRAW bindings bypass the hot target cache. */
+  /** @internal */
   bindFramebuffer(target: number, framebuffer: WebGLFramebuffer | null): void {
     this.drawState.forget();
     this.gl.bindFramebuffer(target, framebuffer);
@@ -505,6 +533,7 @@ export class WebGLContext3D implements Context3D {
     this.applyScissor();
   }
 
+  /** @internal */
   applyScissor(): void {
     const gl = this.gl;
     if (!this.scissor) {
@@ -605,6 +634,7 @@ export class WebGLContext3D implements Context3D {
     return allocateBuffer(this, count, stride, dynamic);
   }
 
+  /** @internal */
   buffer(buffer: Buffer3D): BufferState {
     const state = this.buffers.get(buffer);
     if (!state) {
