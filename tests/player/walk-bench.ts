@@ -17,8 +17,12 @@
 // Flash does (Scripting.construct). Each build is timed alone, the menu then
 // dropped and played till it is no orphan, --reps times after two to warm up.
 //
+// --old N loads a SWF of version 9 of N rigs onto the stage, as a game
+// loads its older asset SWFs: clips whose gotos run no cycle, which every
+// round of frame scripts lists, due or not.
+//
 //   node --expose-gc tests/player/walk-bench.ts [--rigs N] [--frames N] [--reps N]
-//     [--orphans N] [--menu K]
+//     [--orphans N] [--menu K] [--old N]
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -40,6 +44,7 @@ const frames = option("frames", 200);
 const reps = option("reps", 5);
 const orphans = option("orphans", 0);
 const menu = option("menu", 0);
+const old = option("old", 0);
 
 const SOURCE = readFileSync(new URL("./scripts/WalkBench.as", import.meta.url), "utf8");
 
@@ -62,16 +67,28 @@ const square = (id: number) =>
     ],
   });
 
-/**
- * `rigs` rigs, each a sprite of 12 parts, clips of the class WalkPart that
- * hold a shape, 4 shapes and a plain sprite of 2 shapes: 32 objects; every
- * 25th has a button too.
- */
-function treeSwf(): Uint8Array {
-  const abc = compiler()("WalkBench", SOURCE);
-  const tags: Uint8Array[] = [
-    w.fileAttributes(true),
-    w.backgroundColor(0xffffff),
+/** A rig's parts: 12 clips of character 10, 4 shapes and the sprite 11, and a button 12 too if `button`. */
+function rig(button: boolean): Uint8Array[] {
+  const parts: Uint8Array[] = [];
+  for (let i = 0; i < 12; i++) {
+    parts.push(w.place({ depth: i + 1, character: 10, matrix: { tx: i * 100, ty: 0 } }));
+  }
+
+  for (let i = 0; i < 4; i++) {
+    parts.push(w.place({ depth: 20 + i, character: 1 + (i % 2), matrix: { tx: i * 100 } }));
+  }
+
+  parts.push(w.place({ depth: 30, character: 11 }));
+  if (button) {
+    parts.push(w.place({ depth: 31, character: 12 }));
+  }
+
+  return [...parts, w.showFrame(), w.end()];
+}
+
+/** The characters rig() places: two squares, a clip of one, a sprite of both and a button. */
+function rigParts(): Uint8Array[] {
+  return [
     square(1),
     square(2),
     w.sprite(10, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
@@ -83,23 +100,31 @@ function treeSwf(): Uint8Array {
     ]),
     w.button2(12, 2),
   ];
-  const rig = (button: boolean) => {
-    const parts: Uint8Array[] = [];
-    for (let i = 0; i < 12; i++) {
-      parts.push(w.place({ depth: i + 1, character: 10, matrix: { tx: i * 100, ty: 0 } }));
-    }
+}
 
-    for (let i = 0; i < 4; i++) {
-      parts.push(w.place({ depth: 20 + i, character: 1 + (i % 2), matrix: { tx: i * 100 } }));
-    }
+/** `count` rigs in a SWF of version 9 with no code: every clip a MovieClip of its own SWF's version. */
+function oldSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), ...rigParts(), w.sprite(20, 1, rig(false))];
+  for (let i = 0; i < count; i++) {
+    tags.push(w.place({ depth: i + 1, character: 20, matrix: { tx: (i % 20) * 40, ty: 300 } }));
+  }
 
-    parts.push(w.place({ depth: 30, character: 11 }));
-    if (button) {
-      parts.push(w.place({ depth: 31, character: 12 }));
-    }
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ version: 9, width: 800, height: 600, frameRate: 24, frameCount: 1, tags });
+}
 
-    return [...parts, w.showFrame(), w.end()];
-  };
+/**
+ * `rigs` rigs, each a sprite of 12 parts, clips of the class WalkPart that
+ * hold a shape, 4 shapes and a plain sprite of 2 shapes: 32 objects; every
+ * 25th has a button too. With --old, the SWF of version 9 it loads (WalkOld).
+ */
+function treeSwf(): Uint8Array {
+  const abc = compiler()("WalkBench", SOURCE);
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff), ...rigParts()];
+  if (old > 0) {
+    tags.push(w.binaryData(40, oldSwf(old)));
+  }
+
   tags.push(w.sprite(20, 1, rig(false)), w.sprite(21, 1, rig(true)), w.sprite(22, 1, rig(false)));
   // A menu's row: a shape, and a button whose every state is a WalkPart.
   tags.push(
@@ -118,6 +143,7 @@ function treeSwf(): Uint8Array {
       [10, "WalkPart"],
       [22, "WalkPanel"],
       [23, "WalkRow"],
+      ...(old > 0 ? ([[40, "WalkOld"]] as [number, string][]) : []),
     ]),
   );
   for (let i = 0; i < rigs; i++) {
@@ -143,6 +169,19 @@ await player.start();
 const main = player.root.object as avm2.AsObject;
 const call = (name: string, ...args: avm2.Value[]) =>
   scripting.rt.call(scripting.rt.getProperty(main, avm2.qname(avm2.publicNs, name)), main, ...args);
+if (old > 0) {
+  call("loadOld");
+  const loaded = avm2.qname(avm2.publicNs, "oldLoaded");
+  for (let i = 0; i < 200 && scripting.rt.getProperty(main, loaded) !== true; i++) {
+    await scripting.settled();
+    player.tick();
+  }
+
+  if (scripting.rt.getProperty(main, loaded) !== true) {
+    throw new Error("the SWF of version 9 did not load");
+  }
+}
+
 if (orphans > 0) {
   call("keep", orphans);
   // Orphans once the frame that made them ends.
@@ -180,7 +219,9 @@ const ticks = time(() => player.tick());
 const walks = time(() => scripting.runFrameScripts(player.stage));
 const show = (runs: number[]) =>
   `median ${median(runs).toFixed(0)} us  (${runs.map((r) => r.toFixed(0)).join(", ")})`;
-console.log(`${objects} objects under the stage, ${rigs} rigs, ${frames} frames x ${reps}`);
+console.log(
+  `${objects} objects under the stage, ${rigs} rigs, ${old} of version 9, ${frames} frames x ${reps}`,
+);
 if (gc) {
   gc();
   const kb = (process.memoryUsage().heapUsed - heapBefore) / 1024;
