@@ -1296,12 +1296,11 @@ export class Scripting {
       settle(o, due);
       return due;
     };
-    // A container's list where it is current, or where the whole is walked; else its children,
-    // in the list's order, where only those marked are walked: a list made again would walk the rest.
+    // A container's list where the whole is walked (`also`); else its marked children, in the
+    // list's order: no frame's walk makes the lists any more, and one made again would walk the rest.
     const under = (c: Container, all: boolean): boolean => {
-      const list = all ? walkList(c) : c.walk;
-      if (list?.current) {
-        const { items, ends } = list;
+      if (all) {
+        const { items, ends } = walkList(c);
         const base = open;
         let any = false;
         for (let i = 0; i < items.length; i++) {
@@ -1318,11 +1317,6 @@ export class Scripting {
               }
             }
 
-            continue;
-          }
-
-          if (!item.scriptsDue && !all) {
-            i = ends[i] - 1;
             continue;
           }
 

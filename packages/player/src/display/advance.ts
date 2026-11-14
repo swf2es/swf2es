@@ -58,11 +58,6 @@ export class AdvanceWalk {
   private pass = 0;
   /** Scripting.frames, which a clip that sits out a frame was stamped with (MovieClip.skipsAfter). */
   private frames = -1;
-  /** The clips open around the item a list's walk is at, where each ends, and whether one is due under each. */
-  private readonly openClip: (DisplayObject | null)[] = [];
-  private readonly openEnd: number[] = [];
-  private readonly openDue: boolean[] = [];
-  private open = 0;
 
   /**
    * Advance every clip under `root`, then among `orphans`, as the frame
@@ -135,7 +130,7 @@ export class AdvanceWalk {
     clips: (MovieClip | null)[],
     phase: AdvancePhase,
   ): void {
-    // The marks first, as the walk of all makes lists again that this one would walk without.
+    // The walk by marks as unchecked: it reads no kept list (walkList), which the walk of all makes.
     const count = this.collect(root, orphans, clips);
     const all: (MovieClip | null)[] = [];
     const total = this.collectAll(root, orphans, all);
@@ -252,70 +247,11 @@ export class AdvanceWalk {
   }
 
   /**
-   * Whether such a clip is at or under `c`: from the list it keeps where
-   * that is current, else from its marked children, in the list's order,
-   * so as not to make the list again, which visits all.
+   * Whether such a clip is at or under `c`: its own, then its marked
+   * children's, in the order of the list it would keep (walkList), which
+   * no frame makes any more: made again it would visit all.
    */
   private under(c: Container): boolean {
-    const list = c.walk;
-    if (list?.current) {
-      const { items, ends } = list;
-      const openClip = this.openClip;
-      const openEnd = this.openEnd;
-      const openDue = this.openDue;
-      const base = this.open;
-      let any = false;
-      for (let i = 0; i < items.length; i++) {
-        while (this.open > base && openEnd[this.open - 1] <= i) {
-          this.close(base);
-        }
-
-        const item = items[i];
-        if (item.kind === BUTTON) {
-          if (this.visit(item)) {
-            any = true;
-            if (this.open > base) {
-              openDue[this.open - 1] = true;
-            }
-          }
-
-          continue;
-        }
-
-        if (!item.advanceDue) {
-          i = ends[i] - 1;
-          continue;
-        }
-
-        if (this.sitsOut(item as MovieClip)) {
-          any = true;
-          if (this.open > base) {
-            openDue[this.open - 1] = true;
-          }
-
-          i = ends[i] - 1;
-          continue;
-        }
-
-        const acts = (item as MovieClip).advances;
-        if (acts) {
-          this.list(item as MovieClip);
-          any = true;
-        }
-
-        const open = this.open++;
-        openClip[open] = item;
-        openEnd[open] = ends[i];
-        openDue[open] = acts;
-      }
-
-      while (this.open > base) {
-        this.close(base);
-      }
-
-      return any;
-    }
-
     let any = false;
     if (c.kind === CLIP && (c as MovieClip).advances) {
       this.list(c as MovieClip);
@@ -335,17 +271,6 @@ export class AdvanceWalk {
     }
 
     return any;
-  }
-
-  /** The innermost clip open in a list ends: its mark settled, and the one around it told. */
-  private close(base: number): void {
-    const open = --this.open;
-    const due = this.openDue[open];
-    settle(this.openClip[open] as DisplayObject, due);
-    this.openClip[open] = null;
-    if (due && open > base) {
-      this.openDue[open - 1] = true;
-    }
   }
 
   /**
