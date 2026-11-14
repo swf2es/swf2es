@@ -216,6 +216,31 @@ frame whose scripts only stop their clips or set properties takes one. The
 checked build's tests (`pnpm test:checked`) run each round left out
 anyway and fail if it finds anything to do.
 
+A round walks only where a script may be due. A clip is due when its
+frame is not the one whose script last ran (`scriptedFrame`); one that
+becomes due marks itself and everything a round walks to reach it
+(`markScriptsDue`): its parents, the buttons it is a state of (a state a
+button does not show has no parent), and its orphan entry, up to a clip
+or button marked already. A child put under a container carries its mark
+up, and so does a state given to a button, or a button made to run its
+states' first scripts. A round passes by an orphan, a root or a clip not
+marked with all it holds, and leaves the mark on what it walks only where
+a clip due is at or under it, as one whose script is yet to run must be
+found by a round inside its own. Its queue is the whole walk's but for
+the clips not due as it walks, which would run nothing there unless a
+script made them due before their turn: a goto does, but from version 10
+its cycle runs their script at once. Where that does not hold, rounds walk
+everything: once a clip of a SWF before version 10 is alive, after an
+overflow, and without a stage; a button being made has all under it
+walked, as its round may be the only one to reach it. Once its orphans
+held no script due, a menu of buttons a script makes, each running the
+frame scripts due, no longer walks them all for each: in
+`walk-bench.ts --orphans 300 --menu 50` a menu went from 56 to 1.5 ms,
+and a tick from 550 to 350 µs; with `--orphans 1000 --menu 200`, from
+about 560 to 5.2 ms. The checked build walks every round both
+ways, and fails unless the walk of what is marked lists the clips due in
+the whole walk's order and each of the others runs nothing in its turn.
+
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
 goto from its frame script, its listener or another clip's, sits the next
 frame out with everything in it: none of them advances, and from the

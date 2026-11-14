@@ -11,6 +11,7 @@ export {
   CONTENT,
   DisplayObject,
   LEAST_SCALE_3D,
+  markScriptsDue,
   normalizeDegrees,
   OTHER,
   type Projection,

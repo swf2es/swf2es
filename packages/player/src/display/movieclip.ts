@@ -6,7 +6,7 @@ import { BitmapObject } from "./bitmapobject.js";
 import { ButtonObject } from "./buttonobject.js";
 import { IDENTITY_COLOR } from "./color.js";
 import { Container } from "./container.js";
-import { CLIP, CONTENT, type DisplayObject, scriptWork } from "./displayobject.js";
+import { CLIP, CONTENT, type DisplayObject, markScriptsDue, scriptWork } from "./displayobject.js";
 import { construct, displayFor } from "./instantiate.js";
 import { cached, ShapeObject, StaleCache } from "./shapeobject.js";
 import { StaticTextObject, TextObject } from "./textobjects.js";
@@ -196,6 +196,9 @@ export class MovieClip extends Container {
     if (frame !== this.frame) {
       this.frame = frame;
       scriptWork.changes++;
+      if (frame !== this.scriptedFrame && !this.scriptsDue) {
+        markScriptsDue(this);
+      }
     }
   }
 

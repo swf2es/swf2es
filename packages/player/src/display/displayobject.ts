@@ -10,6 +10,7 @@ import {
 } from "@swf2es/format";
 import type { avm1, avm2 } from "@swf2es/runtime";
 import type { ShaderUse } from "../bitmap/pixel-bender.js";
+import type { ButtonObject } from "./buttonobject.js";
 import type { Container } from "./container.js";
 import type { Drawing } from "./drawing.js";
 import { type Filter, filterOfSwf } from "./filters.js";
@@ -61,6 +62,35 @@ export const unloads = { count: 0 };
 export const OTHER = 0;
 export const CLIP = 1;
 export const BUTTON = 2;
+
+/**
+ * Mark `o` as having a frame script due at or under it: it and everything a
+ * round of frame scripts (Scripting.frameScriptRound) walks to reach it, its
+ * parents and the buttons it is a state of, up to a clip or button marked
+ * already, whose own were marked with it. A container of no frames is
+ * climbed through even when marked: the walks pass it by in their lists, and
+ * leave its mark be.
+ */
+export function markScriptsDue(o: DisplayObject): void {
+  for (let p: DisplayObject | null = o; p !== null; p = p.parent) {
+    if (p.scriptsDue && p.kind !== OTHER) {
+      return;
+    }
+
+    p.scriptsDue = true;
+    const entry = p.orphanEntry;
+    if (entry !== null) {
+      entry.due = true;
+    }
+
+    const buttons = p.stateOf;
+    if (buttons !== null) {
+      for (let i = 0; i < buttons.length; i++) {
+        markScriptsDue(buttons[i]);
+      }
+    }
+  }
+}
 
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
 
@@ -297,6 +327,17 @@ export class DisplayObject {
   frameChildren: readonly DisplayObject[] = NO_CHILDREN;
   /** Whether it is a MovieClip (CLIP) or a ButtonObject (BUTTON), for those walks likewise: OTHER for the rest. */
   kind = OTHER;
+  /**
+   * Whether a frame script may be due at or under it, on the walk of a
+   * round of frame scripts: a clip's frame not yet scripted, or one under
+   * it, as markScriptsDue marks them. A round walks only what is marked,
+   * and takes the marks of what it walks off but for the clips still due.
+   */
+  scriptsDue = false;
+  /** The buttons whose state it is, which the rounds walk it from too, its parent or not; null for none. */
+  stateOf: ButtonObject[] | null = null;
+  /** Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue as an orphan; null for none. */
+  orphanEntry: { due: boolean } | null = null;
 
   private weakRef: WeakRef<this> | null = null;
 

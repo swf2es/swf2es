@@ -8,11 +8,22 @@
 // over --reps runs of --frames frames each. Run with --expose-gc, it also
 // prints what the player's objects hold of the heap once played.
 //
+// --orphans N has a script make N panels, rigs bound to a class, and keep
+// them off the display list, each held by a listener for a frame's events,
+// as a game keeps its hidden panels: thousands of clips the frames' walks
+// may visit. --menu K then times a script that builds a menu of K rows, as
+// one a click opens: each row a clip whose first frame holds a button whose
+// states are clips, each such button made running the frame scripts due, as
+// Flash does (Scripting.construct). Each build is timed alone, the menu then
+// dropped and played till it is no orphan, --reps times after two to warm up.
+//
 //   node --expose-gc tests/player/walk-bench.ts [--rigs N] [--frames N] [--reps N]
+//     [--orphans N] [--menu K]
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { avm2 } from "@swf2es/runtime";
 import { Player } from "../../packages/player/dist/player.js";
 import { Scripting } from "../../packages/player/dist/scripting.js";
 import * as w from "../swf-writer.ts";
@@ -27,6 +38,8 @@ const option = (name: string, fallback: number) => {
 const rigs = option("rigs", 400);
 const frames = option("frames", 200);
 const reps = option("reps", 5);
+const orphans = option("orphans", 0);
+const menu = option("menu", 0);
 
 const SOURCE = readFileSync(new URL("./scripts/WalkBench.as", import.meta.url), "utf8");
 
@@ -87,12 +100,24 @@ function treeSwf(): Uint8Array {
 
     return [...parts, w.showFrame(), w.end()];
   };
-  tags.push(w.sprite(20, 1, rig(false)), w.sprite(21, 1, rig(true)));
+  tags.push(w.sprite(20, 1, rig(false)), w.sprite(21, 1, rig(true)), w.sprite(22, 1, rig(false)));
+  // A menu's row: a shape, and a button whose every state is a WalkPart.
+  tags.push(
+    w.button2(24, 10),
+    w.sprite(23, 1, [
+      w.place({ depth: 1, character: 1 }),
+      w.place({ depth: 2, character: 24, matrix: { tx: 200 } }),
+      w.showFrame(),
+      w.end(),
+    ]),
+  );
   tags.push(
     w.doAbc(abc, "WalkBench"),
     w.symbolClass([
       [0, "WalkMain"],
       [10, "WalkPart"],
+      [22, "WalkPanel"],
+      [23, "WalkRow"],
     ]),
   );
   for (let i = 0; i < rigs; i++) {
@@ -114,6 +139,15 @@ gc?.();
 const heapBefore = process.memoryUsage().heapUsed;
 const player = new Player(swf, scripting);
 await player.start();
+
+const main = player.root.object as avm2.AsObject;
+const call = (name: string, ...args: avm2.Value[]) =>
+  scripting.rt.call(scripting.rt.getProperty(main, avm2.qname(avm2.publicNs, name)), main, ...args);
+if (orphans > 0) {
+  call("keep", orphans);
+  // Orphans once the frame that made them ends.
+  player.tick();
+}
 
 let objects = 0;
 const count = (o: { children?: readonly unknown[] }) => {
@@ -155,3 +189,24 @@ if (gc) {
 
 console.log(`  tick  ${show(ticks)}`);
 console.log(`  walk  ${show(walks)}`);
+
+if (menu > 0) {
+  const builds: number[] = [];
+  for (let rep = 0; rep < reps + 2; rep++) {
+    const start = performance.now();
+    call("build", menu);
+    const ms = performance.now() - start;
+    if (rep >= 2) {
+      builds.push(ms * 1000);
+    }
+
+    call("drop");
+    // Played till the dropped menu is no orphan (Lifecycle's ORPHAN_FRAMES), as each build was
+    // made in a player whose earlier menus had gone.
+    for (let i = 0; i < 121; i++) {
+      player.tick();
+    }
+  }
+
+  console.log(`  menu of ${menu} rows, ${orphans} orphan panels  ${show(builds)}`);
+}
