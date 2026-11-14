@@ -203,7 +203,8 @@ scaled to the SWF's stage, within the box CSS `object-fit` shows the
 canvas's pixels in (`contain`, `scale-down`, `cover` or `none`, centred as
 the default `object-position` has it, inside borders and padding), and
 passes it to the
-player's own hit test. It shows the cursor the player chooses, as Ruffle
+player's own hit test (`input/pointer.ts`'s `PointerInput`, its pick in
+`input/hit-test.ts`). It shows the cursor the player chooses, as Ruffle
 does: a hand over a button that uses one, disabled or not, or under the
 nearest sprite in `buttonMode` whose `useHandCursor` and `enabled` are
 true, and an I-beam over selectable text; a link in text shows no hand
@@ -323,7 +324,8 @@ an area off the list hits nothing. Ruffle stores AVM2's `hitArea` and
 picks without it. adl leaves the area's own `mouseEnabled` as it was
 (`sprite-hit-area`), so a shown, enabled area on top takes the pointer
 itself, as Flash's documentation warns; `hitTestPoint` and
-`getObjectsUnderPoint` ignore it. A drag keeps, as it moves and when it
+`getObjectsUnderPoint` ignore it. A drag (`input/drag.ts`) keeps, as it
+moves and when it
 ends, the topmost object drawn under the pointer outside the dragged
 sprite, which `dropTarget` reads: the shape, not the sprite that takes
 the pointer, as Flash's trace of the corpus's `sprite_dropTarget` names

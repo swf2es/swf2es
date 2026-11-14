@@ -52,7 +52,8 @@ and the player's paths in this document are relative to it:
   frames' headers (`mp3.ts`), what `Sound.extract` reads (`extract.ts`),
   and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
-- `input/`: the pointer and the keyboard.
+- `input/`: the pointer (`pointer.ts`), its hit test (`hit-test.ts`) and
+  drags (`drag.ts`), and the keyboard.
 - `scene/`: the view that drives `@swf2es/render` (`view.ts`,
   `RenderView`, `@swf2es/player/scene`: the display list's walk, its
   passes for `BitmapData.draw` and 3D objects, the canvas and its
