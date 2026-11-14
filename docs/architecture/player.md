@@ -233,7 +233,9 @@ its cycle runs their script at once. A clip of a SWF before version 10,
 whose gotos run no cycle, is listed by every round, due or not, as the
 whole walk lists it (`listedAlways`): it is marked as it is made alive,
 and its mark stays, so a game that loads older asset SWFs walks those
-clips and what leads to them, not everything. After an overflow and
+clips and what leads to them, not everything: with `walk-bench.ts --old
+50` (650 such clips) a menu of `--orphans 300 --menu 50` went from 58 to
+3.5 ms, and with `--old 200` (2,600) from 65 to 11 ms. After an overflow and
 without a stage, rounds walk everything; a button being made has all
 under it walked, as its round may be the only one to reach it. Once its orphans
 held no script due, a menu of buttons a script makes, each running the
