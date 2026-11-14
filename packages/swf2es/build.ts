@@ -3,7 +3,8 @@
 // folder works wherever it is served from, a CDN among them, with no
 // import map. dist/swf2es.js defines <swf2es-player>; the renderer,
 // Stage3D and the workers' host are chunks it loads as a SWF needs them;
-// dist/worker.js is what a Flash Worker runs; codegen.wasm lies beside
+// dist/worker.js is what a Flash Worker runs, dist/compiler.js what a
+// player's background compiler does; codegen.wasm lies beside
 // them. Run after `pnpm build`, which builds the packages it bundles:
 //
 //   node packages/swf2es/build.ts
@@ -22,6 +23,7 @@ const compiler = rspack({
     // Its exports @swf2es/web's, for a page's module script to import.
     swf2es: { import: "./src/swf2es.ts", library: { type: "module" } },
     worker: "./src/worker.ts",
+    compiler: "./src/compiler.ts",
   },
   target: ["web", "es2022"],
   output: {
@@ -51,9 +53,13 @@ const compiler = rspack({
       },
     ],
   },
-  // player-hosts' default worker script, its unbundled thread/ tree, which this build replaces
-  // with worker.js (src/swf2es.ts): not copied.
-  plugins: [new rspack.IgnorePlugin({ resourceRegExp: /thread\/player-hosts\/web-worker\.js$/ })],
+  // player-hosts' default worker scripts, its unbundled thread/ tree, which this build replaces
+  // with worker.js and compiler.js (src/swf2es.ts): not copied.
+  plugins: [
+    new rspack.IgnorePlugin({
+      resourceRegExp: /thread\/player-hosts\/web-(worker|compiler)\.js$/,
+    }),
+  ],
   // @swf2es/web's default codegen.wasm URL comes from an import map (import.meta.resolve), which
   // a bundle has not; src/swf2es.ts gives it the URL, so that path is never taken.
   ignoreWarnings: [{ module: /web[\\/]dist[\\/]config\.js$/, message: /import\.meta/ }],

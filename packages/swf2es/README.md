@@ -46,8 +46,10 @@ whatever version the range names by then.
 `swf2es.js` defines the element (1.8 MB, 0.7 MB compressed). The rest
 lies beside it and loads as a page needs it: `codegen.wasm`, the
 compiler, the renderer's chunk and the Flash Workers' host, a small one,
-with the first player; `worker.js` only for a SWF that uses workers;
-Stage3D's chunk only on a page that configures it.
+with the first player; `compiler.js` (180 KB) with a SWF's first load of
+another SWF, on whose Web Worker the code of the SWFs it loads then
+compiles, off the page's thread; `worker.js` only for a SWF that uses
+workers; Stage3D's chunk only on a page that configures it.
 
 ## Content-Security-Policy
 
@@ -60,10 +62,12 @@ A page with a CSP needs, in `script-src`:
   to. Without it, only modules compiled ahead of time play: see
   [Compile ahead of time](https://swf2es.github.io/swf2es/docs/#compile-ahead-of-time).
 
-and, for Flash Workers, `worker-src` with the CDN's origin and `blob:`: a
-browser starts a worker only on a script of the page's origin, so swf2es
-starts it on a `blob:` module of the page's that imports `worker.js`, and
-a module worker's imports are held to `worker-src` too. If the policy sets
+and, for Flash Workers and the compiler's worker, `worker-src` with the
+CDN's origin and `blob:`: a browser starts a worker only on a script of
+the page's origin, so swf2es starts it on a `blob:` module of the page's
+that imports `worker.js` or `compiler.js`, and a module worker's imports
+are held to `worker-src` too. Without them, Flash Workers do not start,
+and loaded SWFs compile on the page's thread. If the policy sets
 `connect-src` or `default-src`, the CDN's origin goes there as well, for
 `codegen.wasm`, and so do the origins of the SWFs and what they load; if
 it sets `style-src`, that needs `'unsafe-inline'`, for the element's

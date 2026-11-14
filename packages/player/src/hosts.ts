@@ -6,6 +6,7 @@
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
 import type { DisplayObject } from "./display/display.js";
+import type { CompilerOp, FromCompiler } from "./workers/compiler.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
 
 type Value = avm2.Value;
@@ -705,4 +706,33 @@ export interface WorkerHost {
   ): WorkerThread;
   /** The player that used it is gone: what the host keeps for its threads may go too. */
   release?(): void;
+}
+
+/** A thread the background compiler runs on, as a CompilerHost started it. */
+export interface CompilerThread {
+  /** Posts a batch of calls, the buffers in `transfer` moved, not copied. */
+  post(batch: CompilerOp[], transfer: Transferable[]): void;
+  terminate(): void;
+}
+
+/**
+ * Starts the thread a player's background compiler runs on: a Web Worker
+ * running `@swf2es/player/compiler`'s runCompilerThread, which the host
+ * posts codegen's compiled module first (@swf2es/player-hosts'
+ * webCompilerHost). With one, and without lazy compilation, the ABCs of
+ * the SWFs a player loads compile there, off the page's thread, to the
+ * modules they would compile to on it (scripting/compiler.ts).
+ */
+export interface CompilerHost {
+  /**
+   * Starts the thread: what it posts goes to `receive`, and an error that
+   * ends it to `failed`, from which nothing more comes. The player then
+   * compiles on its own thread.
+   */
+  start(receive: (message: FromCompiler) => void, failed: (error: unknown) => void): CompilerThread;
+  /**
+   * Whether each module the thread compiles is compiled on the page's
+   * thread too and compared, a load failing where they differ: for tests.
+   */
+  readonly verify?: boolean;
 }

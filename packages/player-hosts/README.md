@@ -20,7 +20,9 @@ npm install @swf2es/player-hosts
   node's TCP, and `nodeWorkerHost()`, flash.system.Worker on worker threads.
 - `@swf2es/player-hosts/workers`: `webWorkerHost()`, flash.system.Worker
   on Web Workers, which run `@swf2es/player-hosts/web-worker`
-  (`node-worker` is node's).
+  (`node-worker` is node's); and `webCompilerHost()`, a player's
+  background compiler (Scripting's `compileHost`) on a Web Worker running
+  `@swf2es/player-hosts/web-compiler`.
 - `@swf2es/player-hosts/stage3d`: `stage3DCanvasHost()`, Stage3D's canvas
   layers in a page.
 

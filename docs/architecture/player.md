@@ -598,3 +598,58 @@ players made again, and checks that the heap stays bounded, that
 codegen's memory does not grow where one player loads them all, and that
 a text field kept from a SWF let go still takes a font registered after
 a collection.
+
+### Compiling off the page's thread
+
+A player given a `compileHost` (the element's `webCompilerHost`), without
+lazy compilation, compiles the ABCs of the SWFs it loads on a thread of
+its own (`scripting/compiler.ts`, `workers/compiler.ts`); the libraries
+and the main SWF still compile on the page's thread, as the page waits
+for them anyway. A load is asynchronous, a `loadBytes` one too, whose
+frame already waits for it (`Loads.holdsFrame`), and loads link one at a
+time, so a load may wait for the thread with nothing a script sees
+changed: its events come as they did, only later by the time the
+compile took on the page's thread less the time it takes there.
+
+The compiler is deterministic and stateful: what an ABC compiles to
+follows from every call made on the compiler before, the ABCs added and
+where, the domains made, dropped, evicted, revived and compacted, the
+findings recorded, the compiles and the logs replayed. So the thread
+runs a codegen of its own, and the page's is wrapped (`BackgroundCompiler`)
+so that every call that changes what it compiles to is made on the
+thread's too, in the order the page makes them; a compile the page does
+itself, the libraries' and the main SWF's, is compiled again there, not
+replayed, so that the thread's compiler is the page's by the same calls
+alone. A compile asked of the thread is then the one the page's would
+have made at that place in the order, byte for byte, and the page's
+compiler replays its log in its place, as it does a module from the
+module cache, and is then as if it had compiled it. While a compile is
+out, the page's compiler waits for it: a call that can wait (a domain
+dropped or evicted, a compaction, a finding) is made once the compiles
+asked before it are replayed, and one that cannot (an ABC added, a domain
+made) is preceded by those compiles, made on the page's thread, the
+thread's answers to them let go. A load asks for one compile at a time,
+so a compile that throws is the last, as on the page's thread.
+
+The thread's compiler checks that each call gives what the page's did (an
+ABC's VerifyError, a domain's number, a log replayed), and the player
+gives the thread up, compiling on the page's thread from then on, as it
+does where the host cannot start one, where the thread fails, where a
+log does not replay, where a call is not one it mirrors (a lazy
+compile), and where another player resets the same codegen. `CompilerHost.verify` compiles each module on the page's thread
+too and fails the load where they differ, which the player tests do
+under the checked build. `tests/unit/player/scripting/compiler.test.ts`
+loads SWFs into domains that see one another's or not, with and without
+the thread, and checks that the modules are the same bytes and that the
+thread's compiler holds what the page's does (`usage`), evictions and
+compactions included.
+
+The thread starts with the player's first load, so that a SWF that loads
+no code starts none: until then the calls wait in a journal, the ABCs'
+bytes copied, which the thread is posted first. That load, and any asked
+for before the thread says its codegen is made, compile on the page's
+thread, the thread compiling them too. The thread then compiles the
+libraries and the main SWF again, some 85 ms for the libraries in node,
+before the loads asked of it, and holds a second copy of what the page's
+compiler holds. Its answers reach the player weakly, so that a player
+let go of without being destroyed is collected and its thread stopped.

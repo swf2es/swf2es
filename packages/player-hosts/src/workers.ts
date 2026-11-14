@@ -17,7 +17,8 @@
 // worker's start until it stopped blocking, past the script timeout. So a
 // worker counts as loaded only once it answers a message the page posted
 // it when it was made.
-import type { WorkerHost } from "@swf2es/player";
+import type { CompilerHost, WorkerHost } from "@swf2es/player";
+import type { CompilerStart } from "@swf2es/player/compiler";
 import type { ThreadStart } from "@swf2es/player/worker";
 
 export interface WebWorkerHostOptions {
@@ -249,6 +250,48 @@ export function webWorkerHost(options: WebWorkerHostOptions): WebWorkerHost {
           worker.terminate();
           return new Promise((resolve) => setTimeout(resolve, STOPPED_GRACE));
         },
+      };
+    },
+  };
+}
+
+export interface WebCompilerHostOptions {
+  /** codegen.wasm compiled, as the player's own codegen was made from. */
+  codegen: WebAssembly.Module;
+  /**
+   * The compiler's script: by default this package's
+   * dist/thread/player-hosts/web-compiler.js, beside the Flash workers'
+   * (see WebWorkerHostOptions.url), which imports codegen alone. One from
+   * another origin starts through a module of the page's own, as theirs.
+   */
+  url?: string | URL;
+}
+
+/**
+ * A player's background compiler on a module Web Worker of its own, which
+ * compiles the ABCs of the SWFs it loads off the page's thread. One a page
+ * cannot start, or that fails, leaves the player compiling on the page's.
+ */
+export function webCompilerHost(options: WebCompilerHostOptions): CompilerHost {
+  const url = options.url ?? new URL("./thread/player-hosts/web-compiler.js", import.meta.url);
+  return {
+    start(receive, failed) {
+      const worker = construct(url);
+      worker.onmessage = (event) => receive(event.data);
+      worker.onerror = (event) => {
+        event.preventDefault();
+        worker.terminate();
+        failed(new Error(`its Web Worker failed: ${event.message}`));
+      };
+      worker.onmessageerror = () => {
+        worker.terminate();
+        failed(new Error("a message from its Web Worker did not arrive"));
+      };
+      const start: CompilerStart = { codegen: options.codegen };
+      worker.postMessage(start);
+      return {
+        post: (batch, transfer) => worker.postMessage(batch, transfer),
+        terminate: () => worker.terminate(),
       };
     },
   };

@@ -19,7 +19,7 @@
       "ignoreDependencies": ["@swf2es/render"]
     },
     "packages/swf2es": {
-      "entry": ["src/swf2es.ts", "src/worker.ts"]
+      "entry": ["src/swf2es.ts", "src/worker.ts", "src/compiler.ts"]
     },
     "tests/bench": {
       "entry": ["**/*.ts"]

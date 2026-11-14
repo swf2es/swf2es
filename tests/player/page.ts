@@ -34,7 +34,7 @@ import {
 import { RenderView } from "@swf2es/player/scene";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
-import { webWorkerHost } from "@swf2es/player-hosts/workers";
+import { webCompilerHost, webWorkerHost } from "@swf2es/player-hosts/workers";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
 /**
@@ -58,9 +58,16 @@ const LIBRARIES = [
 ];
 
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
-if (new URLSearchParams(location.search).has("checked")) {
+const checked = new URLSearchParams(location.search).has("checked");
+if (checked) {
   Scripting.checkRounds = true;
 }
+
+/**
+ * Whether loaded SWFs compile on a background compiler's Web Worker, as
+ * the element has them by default; `?compileWorker=0` compiles them here.
+ */
+const compileWorker = new URLSearchParams(location.search).get("compileWorker") !== "0";
 
 interface Run {
   images: Record<number, string>;
@@ -96,6 +103,7 @@ async function scriptingFor(
     lazyCompilation = false,
     air = false,
     logFetch = false,
+    compiler = compileWorker,
   }: {
     moduleCache?: ModuleCache | null;
     onCompile?: () => void;
@@ -104,6 +112,8 @@ async function scriptingFor(
     air?: boolean;
     /** Its fetches traced, for a test with log_fetch (testFetch). */
     logFetch?: boolean;
+    /** Whether loaded SWFs compile on the background compiler's Web Worker: the page's choice by default. */
+    compiler?: boolean;
   } = {},
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
@@ -155,6 +165,13 @@ async function scriptingFor(
     fetch: testFetch(url ? new URL(url, location.href).href : undefined, trace, logFetch, true),
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
+    // Under the checked build, each module the worker compiles is compiled here too and compared.
+    compileHost: compiler
+      ? {
+          ...webCompilerHost({ codegen: wasm, url: "/worker/player-hosts/web-compiler.js" }),
+          verify: checked,
+        }
+      : null,
   });
   const libraries = await Promise.all(
     LIBRARIES.map(async (n) => {
