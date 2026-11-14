@@ -90,7 +90,6 @@ import {
   NS_Private,
   NS_Public,
   namespace,
-  prefixedNamespace,
   prefixOf,
   publicNs,
   publicQname,
@@ -105,7 +104,7 @@ import {
   storeInt,
   storeObject,
 } from "./natives/vector-elements.js";
-import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
+import { escapeAttributeValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
   defaultPrint,
@@ -131,6 +130,12 @@ import {
   ScopeFinds,
   UNFILLED,
 } from "./property-cache.js";
+import {
+  checkFilter,
+  escapeElement,
+  getDescendants,
+  setDefaultXmlNamespace,
+} from "./runtime-xml.js";
 import {
   BIND_Const,
   BIND_Get,
@@ -3693,14 +3698,9 @@ export class Runtime {
 
   // E4X.
 
-  /** getdescendants: x..name, on XML or XMLList; anything else, as avmplus, TypeError 1016. */
+  /** See getDescendants in runtime-xml.ts. */
   getDescendants(o: Value, mn: Multiname): Value {
-    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
-    if (!properties) {
-      throw this.error("TypeError", 1016, this.describe(o));
-    }
-
-    return properties.descendants(this, o, mn);
+    return getDescendants(this, o, mn);
   }
 
   /**
@@ -3717,38 +3717,19 @@ export class Runtime {
     return this.defaultXmlNamespace;
   }
 
+  /** See setDefaultXmlNamespace in runtime-xml.ts. */
   setDefaultXmlNamespace(ns: Value): void {
-    if (ns instanceof Namespace) {
-      this.defaultXmlNamespace = ns;
-    } else {
-      const uri = this.toString(ns);
-      this.defaultXmlNamespace = prefixedNamespace(uri === "" ? "" : undefined, uri);
-    }
+    setDefaultXmlNamespace(this, ns);
   }
 
-  /** checkfilter: x.(...) filters XML and XMLList only, else TypeError 1123. */
+  /** See checkFilter in runtime-xml.ts. */
   checkFilter(v: Value): void {
-    if (!v?.$traits?.properties) {
-      throw this.error("TypeError", 1123, this.describe(v));
-    }
+    checkFilter(this, v);
   }
 
-  /** esc_xelem, as AvmCore::ToXMLString: XML's own XML, else a string escaped and trimmed. */
+  /** See escapeElement in runtime-xml.ts. */
   escapeElement(v: Value): string {
-    if (typeof v === "string") {
-      return escapeElementValue(v, true);
-    }
-
-    if (typeof v !== "object" || v === null) {
-      return this.toString(v);
-    }
-
-    const properties: PropertyHook | null | undefined = v.$traits?.properties;
-    if (properties) {
-      return properties.toXMLString(this, v);
-    }
-
-    return escapeElementValue(this.toString(v), true);
+    return escapeElement(this, v);
   }
 
   escapeAttribute(v: Value): string {
