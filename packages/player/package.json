@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/player",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "description": "Browser SWF player: display list, timeline, playerglobal and renderer adapters",
   "keywords": [
     "swf",
