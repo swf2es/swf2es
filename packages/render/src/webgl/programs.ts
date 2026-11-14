@@ -83,6 +83,8 @@ export const MERGED_UNIT = RUN_UNIT + 1;
 export const MERGED_LINE = 1024;
 /** The glyph tables' unit (GlyphTables), past the merged fills' rows. */
 export const TABLE_UNIT = MERGED_UNIT + 1;
+/** The unit of a multi-draw of glyphs' rows and slots, a draw's two ints (RUN_MOST to a line). */
+export const GLYPH_RUN_UNIT = TABLE_UNIT + 1;
 
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
@@ -312,14 +314,17 @@ void main(void) {
  * sharpness), and its quad reaches out past its outline by the furthest
  * cutoff. Its colour is drawn under the row's colour transform, light or
  * dark as adl chooses its table. The text's mode and tables are in its slot
- * of uTables (uTable; GlyphTables), read by texelFetch: not a uniform array
+ * of uTables (GlyphTables), read by texelFetch: not a uniform array
  * indexed by each glyph's table start, the access that hung Intel's GPUs
- * in the fill program's run table. aOrigin: the pen, and its light and dark tables,
+ * in the fill program's run table. uRow and uTable name the text's row and
+ * slot; with `multi` (WEBGL_multi_draw), each draw of a multi-draw finds
+ * both in uGlyphRuns, an integer texture, at uGlyphBase plus gl_DrawID. aOrigin: the pen, and its light and dark tables,
  * each its first entry plus 64 times its entries; aGlyph: a corner of its
  * outline's bounds and the way out from it; aRun: its segments, first and
  * count, the pixels of a unit of its outline, and its size.
  */
-export const glyphsVertex = `#version 300 es
+export const glyphsVertex = (multi: boolean) => `#version 300 es
+${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
 precision highp float;
 layout(location = ${POSITION_AT}) in vec2 aPosition;
 layout(location = ${ORIGIN_AT}) in vec4 aOrigin;
@@ -327,11 +332,13 @@ layout(location = ${GLYPH_AT}) in vec4 aGlyph;
 layout(location = ${RUN_AT}) in vec4 aRun;
 layout(location = ${TINT_AT}) in vec4 aColor;
 uniform highp sampler2D uRows;
-uniform int uRow;
 uniform vec4 uView;
 uniform float uUnit;
 uniform highp sampler2D uTables;
-uniform int uTable;
+${multi ? "uniform highp isampler2D uGlyphRuns;\nuniform int uGlyphBase;" : "uniform int uRow;\nuniform int uTable;"}
+// The text's row and slot.
+int textRow;
+int textSlot;
 out vec2 vPixel;
 flat out vec2 vPen;
 flat out vec4 vToGlyph;
@@ -341,7 +348,7 @@ flat out vec4 vShown;
 
 // Texel i of the text's slot: its mode, then its tables' entries.
 vec4 slot(int i) {
-  int at = uTable * ${TABLE_SLOT} + i;
+  int at = textSlot * ${TABLE_SLOT} + i;
   return texelFetch(uTables, ivec2(at & ${TABLE_LINE - 1}, at >> ${Math.log2(TABLE_LINE)}), 0);
 }
 
@@ -379,7 +386,16 @@ vec2 cutoffs(vec4 mode, int start, int count, float ppem) {
 }
 
 void main(void) {
-  ivec2 at = ivec2((uRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, uRow >> ${Math.log2(ROWS_A_LINE)});
+${
+  multi
+    ? `  int draw = uGlyphBase + gl_DrawID;
+  ivec2 text = texelFetch(uGlyphRuns, ivec2(draw & ${RUN_MOST - 1}, draw >> ${Math.log2(RUN_MOST)}), 0).xy;
+  textRow = text.x;
+  textSlot = text.y;`
+    : `  textRow = uRow;
+  textSlot = uTable;`
+}
+  ivec2 at = ivec2((textRow & ${ROWS_A_LINE - 1}) * ${ROW_TEXELS}, textRow >> ${Math.log2(ROWS_A_LINE)});
   vec4 m = texelFetch(uRows, at, 0);
   vec4 t = texelFetch(uRows, at + ivec2(1, 0), 0);
   vec4 mul = texelFetch(uRows, at + ivec2(2, 0), 0);
