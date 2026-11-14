@@ -1076,6 +1076,90 @@ for (const version of [9, 10]) {
   });
 }
 
+test("a goto has a clip of version 9 under one of version 10 run its script in the round", {
+  skip,
+}, async () => {
+  // As the Hop tests, with c the root of a SWF of version 9 loaded between a
+  // and b, which are of version 10: a's goto runs no cycle for c, whose
+  // script runs in the round that listed it before b's. Rounds walk only what
+  // is marked there, so one that left c out as not due would run it after b's.
+  const inner = w.swf({
+    version: 9,
+    width: 20,
+    height: 20,
+    frameCount: 3,
+    tags: [w.fileAttributes(true), w.showFrame(), w.showFrame(), w.showFrame(), w.end()],
+  });
+  const source = `package {
+    import flash.display.Loader;
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    import flash.system.LoaderContext;
+    import flash.utils.ByteArray;
+    public dynamic class MixMain extends MovieClip {
+      public function MixMain() {
+        var bytes:ByteArray = new ByteArray();
+        for each (var b:int in [${Array.from(inner).join(",")}]) {
+          bytes.writeByte(b);
+        }
+        var loader:Loader = new Loader();
+        loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void {
+          var c:MovieClip = MovieClip(loader.content);
+          c.stop();
+          c.addFrameScript(2, function():void { trace("c 3"); c.stop(); });
+          MovieClip(getChildByName("a")).play();
+          MovieClip(getChildByName("b")).play();
+          trace("loaded");
+        });
+        var context:LoaderContext = new LoaderContext();
+        context.allowCodeImport = true;
+        loader.loadBytes(bytes, context);
+        addChildAt(loader, 1);
+      }
+    }
+    public dynamic class Mix extends MovieClip {
+      public function Mix() {
+        addFrameScript(0, function():void { stop(); },
+          1, function():void {
+            trace(name, 2);
+            stop();
+            if (name == "a") MovieClip(Loader(parent.getChildAt(1)).content).gotoAndStop(3);
+          });
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, 3, [w.showFrame(), w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("Mix", source)),
+      w.symbolClass([
+        [0, "MixMain"],
+        [2, "Mix"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "a" }),
+      w.place({ depth: 2, character: 2, name: "b" }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const player = new Player(swf, scripting);
+  await player.start();
+  for (let i = 0; i < 20 && !lines.includes("b 2"); i++) {
+    await scripting.settled();
+    player.tick();
+  }
+
+  assert.deepEqual(lines, ["loaded", "a 2", "c 3", "b 2"]);
+});
+
 test("a frame whose scripts change nothing a round reads takes one round", {
   skip,
 }, async () => {
