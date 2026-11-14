@@ -58,6 +58,12 @@ const isMainRoot = (d: DisplayObject): boolean => !!d.loaderInfo && !!d.parent &
 /** `d` itself where it takes the pointer, else the hit goes on to its parent. */
 const own = (d: DisplayObject): Pick => (mouseEnabled(d) && !isMainRoot(d) ? d : PROPAGATE);
 
+/**
+ * Whether each pick is made again without its bounds (pickBounds), and
+ * must find the same: the checked build's tests set it (Scripting.checkPicks).
+ */
+export const pickChecks = { on: false };
+
 /** Each sprite's hitArea. */
 const hitAreas = new WeakMap<DisplayObject, DisplayObject>();
 
@@ -114,6 +120,8 @@ export function pointerTarget(
   // carries down the list from parent to child, making no matrix per object.
   const probe: Probe = { x: x - 0.5, y, root: stage };
   const picks = pickWork.picks++;
+  // Off for the checked build's pick again in full.
+  let pruned = true;
 
   // Whether `d`'s artwork is under (lx, ly), in its parent's space, its children's included.
   const drawn = (d: DisplayObject, px: number, py: number): boolean => {
@@ -184,7 +192,11 @@ export function pointerTarget(
     // Nothing under it reaches the point: most of a crowded list is passed
     // over so. Bounds are worked out only for what stood still over the
     // last two picks: what changes on most frames costs less gone through.
-    if ((!d.pickStale || d.pickChangedAt < picks - 1) && !nearRect(pickBounds(d), lx, ly)) {
+    if (
+      pruned &&
+      (!d.pickStale || d.pickChangedAt < picks - 1) &&
+      !nearRect(pickBounds(d), lx, ly)
+    ) {
       return null;
     }
 
@@ -230,11 +242,24 @@ export function pointerTarget(
   };
 
   const found = pick(stage, probe.x, probe.y);
-  if (found && found !== PROPAGATE) {
-    return found;
+  const target = found && found !== PROPAGATE ? found : stage.object ? stage : null;
+  if (pickChecks.on) {
+    pruned = false;
+    const full = pick(stage, probe.x, probe.y);
+    const fullTarget = full && full !== PROPAGATE ? full : stage.object ? stage : null;
+    if (fullTarget !== target) {
+      throw new Error(
+        `the pick at (${x}, ${y}) found ${describe(target)} by its bounds, ${describe(fullTarget)} in full`,
+      );
+    }
   }
 
-  return stage.object ? stage : null;
+  return target;
+}
+
+/** An object as the checked build's errors name it. */
+function describe(d: DisplayObject | null): string {
+  return d ? `${d.constructor.name} ${d.name}`.trim() : "nothing";
 }
 
 /** Where toLocal puts a point. */

@@ -60,6 +60,7 @@ const LIBRARIES = [
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
 if (new URLSearchParams(location.search).has("checked")) {
   Scripting.checkRounds = true;
+  Scripting.checkPicks = true;
 }
 
 interface Run {

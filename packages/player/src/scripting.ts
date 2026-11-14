@@ -59,6 +59,7 @@ import {
   type WorkerHost,
 } from "./hosts.js";
 import type { LoadedAvm1Input } from "./input/avm1.js";
+import { pickChecks } from "./input/hit-test.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import type { TouchInput } from "./input/touch.js";
 import { LocalConnections } from "./localconnection.js";
@@ -154,6 +155,21 @@ export class Scripting {
 
   static set checkRounds(on: boolean) {
     walkChecks.on = on;
+  }
+
+  /**
+   * Whether each pick of what is under the pointer is made again in full,
+   * without the bounds it passes over what is far from it by, and one left
+   * out as nothing changed is made anyway: each must find the same. The
+   * checked build's tests set it (SWF2ES_CHECKED), to prove those shortcuts
+   * exact (input/hit-test.ts, input/pointer.ts).
+   */
+  static get checkPicks(): boolean {
+    return pickChecks.on;
+  }
+
+  static set checkPicks(on: boolean) {
+    pickChecks.on = on;
   }
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;

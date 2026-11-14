@@ -4,4 +4,5 @@ import { Scripting } from "../../packages/player/dist/scripting.js";
 
 if (process.env.SWF2ES_CHECKED) {
   Scripting.checkRounds = true;
+  Scripting.checkPicks = true;
 }
