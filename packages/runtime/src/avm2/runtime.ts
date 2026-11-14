@@ -52,7 +52,15 @@ import {
   traitsAt,
   walkless,
 } from "./enumeration.js";
-import { AsError, describe, detailOf, errorMessage, stackOf, UnsupportedError } from "./errors.js";
+import {
+  AsError,
+  caught,
+  describe,
+  detailOf,
+  errorMessage,
+  stackOf,
+  UnsupportedError,
+} from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -201,7 +209,8 @@ function dynamicValue(o: AsObject, name: string): Value {
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
-  private readonly onUnsupported: ((message: string) => void) | undefined;
+  /** @internal */
+  readonly onUnsupported: ((message: string) => void) | undefined;
   readonly compileAbc:
     | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
@@ -3515,51 +3524,14 @@ export class Runtime {
     return describe(this, v);
   }
 
-  /** An exception as AS3 catches it: a stack overflow is an AS3 Error; the runtime's own errors are not caught. */
+  /** See caught in errors.ts. */
   caught(e: unknown): Value {
-    if (e instanceof RangeError && /call stack/.test(e.message)) {
-      return this.error("Error", 1023);
-    }
-
-    // Domain memory's, in the handler's own method (see memoryError).
-    if (isViewRangeError(e)) {
-      return this.error("RangeError", 1506);
-    }
-
-    if (e instanceof UnsupportedError) {
-      return this.unsupportedCaught(e);
-    }
-
-    if (e instanceof Error && !(e instanceof AsError)) {
-      throw e;
-    }
-
-    return e;
+    return caught(this, e);
   }
 
-  /** What a catch was told of already (unsupportedCaught). */
-  private readonly unsupportedTold = new Set<string>();
-
-  /**
-   * What is not supported as the AS3 error a catch gets: an
-   * IllegalOperationError with its message, or an Error where the player's
-   * classes are not loaded; said once to the host, as the code may say nothing.
-   */
-  private unsupportedCaught(e: UnsupportedError): Value {
-    if (!this.unsupportedTold.has(e.message)) {
-      this.unsupportedTold.add(e.message);
-      this.onUnsupported?.(e.message);
-    }
-
-    let cls: AsObject;
-    try {
-      cls = this.resolve(this.cls(namespace(NS_Public, "flash.errors"), "IllegalOperationError"));
-    } catch {
-      cls = this.builtinClass("Error");
-    }
-
-    return this.constructClass(cls, [e.message, 0]);
-  }
+  /** What a catch was told of already (unsupportedCaught in errors.ts). */
+  /** @internal */
+  readonly unsupportedTold = new Set<string>();
 
   catches(e: Value, type: TypeRef): boolean {
     return this.isInstanceOf(e, this.traitsOfType(type));
