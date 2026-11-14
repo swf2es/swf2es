@@ -145,6 +145,10 @@ node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--
                               # mix, see docs/renderer.md; --blends: shapes alone in blend modes);
                               # keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
+node tests/player/load-bench.ts [--runs N] [--loads K] [--methods M] [--bytes] [--gpu]
+                              # a burst of K loads of sizeable ABCs while a timeline plays, compiled
+                              # on the background compiler's worker and on the page's thread in
+                              # turn: latency, the page's busy time, long tasks, worst frame gap
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh
                               # ratios, --allocs samples allocation, --counts counts native calls

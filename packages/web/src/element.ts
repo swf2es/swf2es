@@ -5,6 +5,7 @@ import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format"
 import {
   type AirApplication,
   Avm1,
+  type CompilerHost,
   type ExternalInterfaceHost,
   type FileSystemHost,
   type FullScreenHost,
@@ -19,6 +20,7 @@ import { type AirItems, airItems } from "./air-items.js";
 import { cssLength, parseColor, parseFlashVars, quality, scriptAccess } from "./attributes.js";
 import {
   codegenForPlayer,
+  compilerHostForPlayer,
   configuration,
   moduleCacheOptions,
   playerLibraries,
@@ -402,14 +404,17 @@ export class Swf2esPlayerElement extends ElementBase {
           return;
         }
 
-        const host = this.#workers() ? await workersOrNone(namesWorkers(swf)) : null;
+        const [host, compiler] = await Promise.all([
+          this.#workers() ? workersOrNone(namesWorkers(swf)) : null,
+          compilerHostForPlayer(),
+        ]);
         if (!current()) {
           host?.release?.();
           return;
         }
 
         session.workers = host;
-        session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
+        session.scripting = this.#scripting(session, codegen, url, pageUrl, host, compiler);
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
             this.#box,
@@ -530,6 +535,7 @@ export class Swf2esPlayerElement extends ElementBase {
     url: string,
     pageUrl: string,
     workerHost: WorkerHost | null,
+    compileHost: CompilerHost | null,
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const base = attribute(this, "base");
@@ -560,6 +566,7 @@ export class Swf2esPlayerElement extends ElementBase {
       fullScreen: this.#fullScreen(session),
       lazyCompilation: configuration().lazyCompilation,
       workerHost,
+      compileHost,
       ...moduleCacheOptions(),
     });
     return scripting;

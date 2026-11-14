@@ -130,7 +130,14 @@ so two players on one instance would take each other's over. `cache:
 true` gives every player one IndexedDB module cache
 (`player-hosts/indexeddb`, see [Caching modules](modules.md#caching-modules)); it
 is off by default, as the player's is, a first visit being slower for
-the writes.
+the writes. `compileWorker`, on by default, gives each player a
+background compiler (`webCompilerHost`, see [Compiling off the page's
+thread](player.md#compiling-off-the-pages-thread)) on a Web Worker of its
+own, which loads `player-hosts`' `dist/thread/player-hosts/web-compiler.js`
+(codegen and little else, 180 KB in the browser build) or `compilerUrl`;
+with `lazyCompilation`, where Web Workers cannot start, or where the
+import map does not name `@swf2es/player-hosts/workers`, a player has
+none and compiles on the page's thread.
 
 ## Workers in the page
 

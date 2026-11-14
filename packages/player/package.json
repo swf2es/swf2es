@@ -43,6 +43,10 @@
     "./worker": {
       "types": "./dist/workers/thread.d.ts",
       "default": "./dist/workers/thread.js"
+    },
+    "./compiler": {
+      "types": "./dist/workers/compiler.d.ts",
+      "default": "./dist/workers/compiler.js"
     }
   },
   "files": [

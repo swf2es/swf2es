@@ -111,6 +111,16 @@ for `@swf2es/*` (`tests/player/serve.ts` has one), the renderer's
 other ABCs to load in place of the shipped ones, each optional: a page
 that would rather play on Flash Player's own playerglobal gives its URL.
 
+The code of the SWFs a SWF loads compiles on a Web Worker of the
+player's own, so that a burst of loads does not hold the page up while
+it compiles; the modules are those the page's thread would compile.
+`configure({ compileWorker: false })` compiles them on the page's thread
+instead, and with `lazyCompilation` they always are. The worker loads
+`@swf2es/player-hosts`' `dist/thread/`, as ActionScript's workers do
+(see [Workers](#workers), whose Content-Security-Policy rules it follows
+too); `configure({ compilerUrl })` names another script. Where it cannot
+start, the player compiles on the page's thread and the console says why.
+
 ## The element and its options
 
 The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`

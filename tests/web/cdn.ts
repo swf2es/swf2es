@@ -6,8 +6,10 @@
 // AVM1 SWF plays. From the package's own URL, as jsDelivr serves the file,
 // on a cross-origin isolated page, two Flash Workers share a Mutex: their
 // Web Workers start on the CDN's worker.js through a blob: module of the
-// page's. Nothing is reported as an error, and nothing asked of the CDN is
-// missing. Run after `pnpm build`, which builds the bundle.
+// page's. A SWF that loads others has them compiled on the background
+// compiler's Web Worker, which starts on the CDN's compiler.js likewise.
+// Nothing is reported as an error or a warning, and nothing asked of the
+// CDN is missing. Run after `pnpm build`, which builds the bundle.
 //
 //   node tests/web/cdn.ts
 import assert from "node:assert/strict";
@@ -125,6 +127,46 @@ const mutex = compileScripts(["WorkerMutex"], out).get("WorkerMutex") as Uint8Ar
 const mutexSwf = bare(mutex, 1, "WorkerMutex");
 mutexSwf[3] = 26;
 writeFileSync(`${site}worker-mutex.swf`, mutexSwf);
+// Loads as3.swf, then again a second on, by when the compiler's worker has started.
+const loads = compileScripts(
+  [
+    {
+      name: "CdnLoads",
+      source: `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.setTimeout;
+
+  public class CdnLoads extends Sprite {
+    private var _loads:int;
+
+    public function CdnLoads() {
+      next();
+    }
+
+    private function next():void {
+      var loader:Loader = new Loader();
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void {
+        if (++_loads == 2) {
+          trace("loaded twice");
+        } else {
+          setTimeout(next, 1000);
+        }
+      });
+      loader.load(new URLRequest("as3.swf"),
+        new LoaderContext(false, new ApplicationDomain(ApplicationDomain.currentDomain)));
+    }
+  }
+}`,
+    },
+  ],
+  out,
+).get("CdnLoads") as Uint8Array;
+writeFileSync(`${site}loads.swf`, bare(loads, 1, "CdnLoads"));
 
 /** A page of the given players that loads the bundle from `src` under the README's policy. */
 const page = (src: string, players: string[]) => `<!doctype html>
@@ -142,6 +184,7 @@ writeFileSync(
   page(`${origin}/${VERSION}/dist/swf2es.js`, ["as3.swf", "avm1.swf"]),
 );
 writeFileSync(`${site}workers.html`, page(`${origin}/${VERSION}`, ["worker-mutex.swf"]));
+writeFileSync(`${site}loads.html`, page(`${origin}/${VERSION}/dist/swf2es.js`, ["loads.swf"]));
 
 /**
  * Load the page again, with the console and exceptions listened to from
@@ -245,6 +288,22 @@ await check("Flash Workers share memory, on an isolated page, from the package's
     },
     false,
     { page: "cdn-test/workers.html", mounts },
+  ),
+);
+
+asked.length = 0;
+await check("a SWF's loads compile on the compiler's worker from the bundle's file", () =>
+  withPage(
+    ready,
+    async (_evaluate, send, fresh, listen) => {
+      const { traces, errors } = await play(fresh, listen, send, (t) => t.includes("loaded twice"));
+      // A worker that did not start would have said so, as a warning.
+      assert.deepEqual(errors, []);
+      assert.deepEqual(traces, [as3Line, as3Line, "loaded twice"]);
+      assert.ok(asked.includes(`/${VERSION}/dist/compiler.js`), asked.join(" "));
+    },
+    false,
+    { page: "cdn-test/loads.html", mounts, isolated: false },
   ),
 );
 

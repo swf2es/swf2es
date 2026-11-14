@@ -2,7 +2,7 @@
 // domain its SWF loads into, compiled into a module once all of its SWF's
 // are added, evaluated and linked into the runtime; and, by the module a
 // stack frame is of, the domain, URL and SWF of the code that runs.
-import { libraryLog, moduleKey } from "@swf2es/codegen";
+import { type LoggedModule, libraryLog, moduleKey } from "@swf2es/codegen";
 import { readDoAbc, type Swf, tags } from "@swf2es/format";
 import { prepareMp3 } from "@swf2es/native/mp3";
 import { avm2 } from "@swf2es/runtime";
@@ -10,6 +10,7 @@ import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
 import type { CachedModule, ModuleCache } from "../hosts.js";
 import type { Scripting } from "../scripting.js";
+import type { BackgroundCompiler } from "./compiler.js";
 import { type Evaluated, evaluate, evaluateFunction, type Factory } from "./evaluate.js";
 import {
   type HandedModule,
@@ -166,6 +167,8 @@ export class Code {
    */
   recorder: ModuleRecorder | null = null;
   handover: ModuleHandover | null = null;
+  /** Where the ABCs of the SWFs loaded compile off the page's thread, if anywhere (compiler.ts). */
+  background: BackgroundCompiler | null = null;
   private mainLinked = false;
 
   constructor(private readonly s: Scripting) {}
@@ -280,9 +283,11 @@ export class Code {
       }
 
       // With a module cache, each module is read or compiled first, so
-      // that they all load into the runtime at once, as without one.
+      // that they all load into the runtime at once, as without one; and
+      // so is a loaded SWF's, compiled off the page's thread where it can be.
       const indices = added.map((a) => a.index);
-      const ready = this.cache() ? await this.prepare(indices) : undefined;
+      const away = !main && !this.handover && this.background?.available === true;
+      const ready = this.cache() || away ? await this.prepare(indices, away) : undefined;
       // Awaited only if a module's evaluation waits, so that where none does
       // the link goes on in the same turn, as it did before scripts.
       const linked = this.compileAll(indices, domain, false, { url, library }, ready);
@@ -606,6 +611,16 @@ export class Code {
     return module;
   }
 
+  /**
+   * ABC `index`'s module compiled off the page's thread, and journaled:
+   * the page's compiler is then as if it had compiled it.
+   */
+  private async compileAway(index: number): Promise<LoggedModule> {
+    const compiled = await (this.background as BackgroundCompiler).compile(this.hashes, index);
+    this.recorded(index, { text: compiled.module }, compiled.log);
+    return compiled;
+  }
+
   /** A module handed by the primordial that it had imported, imported again from its URL. */
   private async importHanded(handed: HandedModule): Promise<Module> {
     const url = this.uniqueUrl(handed.url as string);
@@ -629,16 +644,26 @@ export class Code {
    * the cache: the domain is as compiling each would have left it either
    * way, which the next one's key names. An ABC smaller than
    * MIN_CACHED_ABC is compiled, the cache not asked. Any error of the
-   * cache's is a miss.
+   * cache's is a miss. Compiled off the page's thread if `away`, one at a
+   * time: a compile that throws is the last, as here.
    */
-  private async prepare(indices: number[]): Promise<Ready[]> {
+  private async prepare(indices: number[], away = false): Promise<Ready[]> {
     const cache = this.cache();
     const ready: Ready[] = [];
-    await this.digestLibraries(indices[0]);
-    const smallest = cache?.minBytes ?? MIN_CACHED_ABC;
+    if (cache) {
+      await this.digestLibraries(indices[0]);
+    }
+
+    const smallest = cache ? (cache.minBytes ?? MIN_CACHED_ABC) : Number.POSITIVE_INFINITY;
     for (const index of indices) {
       const lazy = !this.builtins[index] && this.s.lazyCompilation && supportsLazyCompilation();
       if (this.sizes[index] < smallest) {
+        if (away) {
+          const { module } = await this.compileAway(index);
+          ready.push({ module, key: null, cached: false });
+          continue;
+        }
+
         const module = this.compileNow(index, lazy);
         ready.push({ module, key: null, cached: false, lazy });
         continue;
@@ -694,8 +719,13 @@ export class Code {
         continue;
       }
 
-      const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
-      this.recorded(index, { text: module }, log);
+      const { module, log } = away
+        ? await this.compileAway(index)
+        : this.s.codegen.compileModuleLogged(this.hashes, index);
+      if (!away) {
+        this.recorded(index, { text: module }, log);
+      }
+
       if (log !== null && !failed) {
         this.store(key, module, log);
       }

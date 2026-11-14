@@ -36,6 +36,7 @@ import {
   browserClipboard,
   browserNavigate,
   type ClipboardHost,
+  type CompilerHost,
   type Drawer,
   defaultStorage,
   type EncryptedStoreHost,
@@ -72,6 +73,7 @@ import {
 } from "./playerglobal/index.js";
 import { Clipboard } from "./scripting/clipboard.js";
 import { Code } from "./scripting/code.js";
+import { BackgroundCompiler } from "./scripting/compiler.js";
 import { dispatchTo, type EventFields, heard, WeakTargets } from "./scripting/events.js";
 import { FullScreen } from "./scripting/full-screen.js";
 import { type HandedModules, ModuleHandover, ModuleRecorder } from "./scripting/handover.js";
@@ -431,6 +433,14 @@ export class Scripting {
        * place of compiling the same ABCs (scripting/handover.ts).
        */
       handedModules?: HandedModules | null;
+      /**
+       * Starts the thread the ABCs of the SWFs this player loads compile
+       * on, off the page's, to the modules they would compile to here
+       * (scripting/compiler.ts); none by default, which compiles them
+       * here. Only without `lazyCompilation`, and not in a background
+       * worker's VM; the main SWF and the libraries compile here either way.
+       */
+      compileHost?: CompilerHost | null;
       /** Drop the final newline produced by an HTML paragraph or BR. */
       trimTrailingHtmlBreak?: boolean;
       /**
@@ -500,6 +510,17 @@ export class Scripting {
       this.codegen = handover.guard(codegen);
     } else if (options.workerHost && !options.workerParent) {
       this.code.recorder = new ModuleRecorder();
+    }
+
+    if (
+      options.compileHost &&
+      !options.lazyCompilation &&
+      !options.handedModules &&
+      !options.workerParent
+    ) {
+      const background = new BackgroundCompiler(this.codegen, options.compileHost);
+      this.code.background = background;
+      this.codegen = background.codegen;
     }
     this.sendToUrl = options.sendToUrl ?? true;
     this.moduleCache = options.moduleCache ?? null;
@@ -579,6 +600,7 @@ export class Scripting {
     this.loads.destroyAvm1();
     this.workers.stopAll();
     this.code.recorder?.drop();
+    this.code.background?.stop();
     this.localConnections.destroy(this);
     this.flushSharedObjects?.();
     stopAllSounds(this);

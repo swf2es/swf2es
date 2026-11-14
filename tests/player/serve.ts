@@ -4,7 +4,7 @@
 // bundled; the browser loads the modules as tsc wrote them. A worker sees
 // no import map, so under /worker/ the same files are served with their
 // bare specifiers resolved by it, for the Web Workers flash.system.Worker
-// runs on. The page is cross-origin isolated, as a shareable ByteArray
+// and the background compiler run on. The page is cross-origin isolated, as a shareable ByteArray
 // needs (docs/workers.md), unless a test asks for one that is not.
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
@@ -52,6 +52,7 @@ export const importMap = {
     "@swf2es/player/scene": "/player/scene/view.js",
     "@swf2es/player-hosts/stage3d": "/player-hosts/stage3d.js",
     "@swf2es/player/worker": "/player/workers/thread.js",
+    "@swf2es/player/compiler": "/player/workers/compiler.js",
     "@swf2es/player-hosts/indexeddb": "/player-hosts/indexeddb.js",
     "@swf2es/player-hosts/precompiled": "/player-hosts/precompiled.js",
     "@swf2es/player-hosts/websocket": "/player-hosts/websocket.js",

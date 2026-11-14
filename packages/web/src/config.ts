@@ -6,6 +6,7 @@ import {
   type AirApplication,
   airLibrary,
   builtinLibrary,
+  type CompilerHost,
   type EncryptedStoreHost,
   type FetchRequest,
   type FetchResult,
@@ -84,6 +85,19 @@ export interface Configuration {
   cache?: boolean;
   /** Experimental AVM2 compilation on first method-factory use; off by default. */
   lazyCompilation?: boolean;
+  /**
+   * Whether the code of the SWFs a SWF loads compiles on a Web Worker of
+   * the player's own, off the page's thread, so that a load does not hold
+   * the page up while it compiles: on by default, where Web Workers start.
+   * The modules are those the page's thread would compile. Not with
+   * lazyCompilation, which compiles a method as it first runs.
+   */
+  compileWorker?: boolean;
+  /**
+   * The compiler's Web Worker script: by default @swf2es/player-hosts'
+   * dist/thread/player-hosts/web-compiler.js, as for workerUrl.
+   */
+  compilerUrl?: string | URL;
   /**
    * Stage3D's surface factory, or a loader of one, called at a SWF's first
    * requestContext3D so that a SWF that never asks loads no backend; absent/null keeps
@@ -192,6 +206,27 @@ export async function workerHostForPlayer(ahead: boolean): Promise<WebWorkerHost
     url: config.workerUrl,
     spares: ahead ? undefined : 0,
   });
+}
+
+/**
+ * A player's background compiler (compileWorker), or none: with lazy
+ * compilation, where it is off, or where its module does not load, as
+ * under an import map that does not name @swf2es/player-hosts/workers.
+ */
+export async function compilerHostForPlayer(): Promise<CompilerHost | null> {
+  if (config.compileWorker === false || config.lazyCompilation || typeof Worker !== "function") {
+    return null;
+  }
+
+  try {
+    const { webCompilerHost } = await import("@swf2es/player-hosts/workers");
+    return webCompilerHost({ codegen: await compiledCodegen(), url: config.compilerUrl });
+  } catch (error) {
+    console.warn(
+      `swf2es: loaded SWFs compile on the page's thread, as its compiler did not load: ${error}`,
+    );
+    return null;
+  }
 }
 
 /** The libraries a player loads: builtin and playerglobal, and AIR's after them for an AIR application (`air`). */

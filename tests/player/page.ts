@@ -24,6 +24,7 @@ import {
   Avm1,
   Container,
   type DisplayObject,
+  type ExternalInterfaceHost,
   type FetchRequest,
   type FetchResult,
   type ModuleCache,
@@ -34,7 +35,7 @@ import {
 import { RenderView } from "@swf2es/player/scene";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
-import { webWorkerHost } from "@swf2es/player-hosts/workers";
+import { webCompilerHost, webWorkerHost } from "@swf2es/player-hosts/workers";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
 /**
@@ -58,9 +59,16 @@ const LIBRARIES = [
 ];
 
 // `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
-if (new URLSearchParams(location.search).has("checked")) {
+const checked = new URLSearchParams(location.search).has("checked");
+if (checked) {
   Scripting.checkRounds = true;
 }
+
+/**
+ * Whether loaded SWFs compile on a background compiler's Web Worker, as
+ * the element has them by default; `?compileWorker=0` compiles them here.
+ */
+const compileWorker = new URLSearchParams(location.search).get("compileWorker") !== "0";
 
 interface Run {
   images: Record<number, string>;
@@ -96,6 +104,9 @@ async function scriptingFor(
     lazyCompilation = false,
     air = false,
     logFetch = false,
+    compiler = compileWorker,
+    fetch: fetchHost,
+    externalInterface,
   }: {
     moduleCache?: ModuleCache | null;
     onCompile?: () => void;
@@ -104,6 +115,11 @@ async function scriptingFor(
     air?: boolean;
     /** Its fetches traced, for a test with log_fetch (testFetch). */
     logFetch?: boolean;
+    /** Whether loaded SWFs compile on the background compiler's Web Worker: the page's choice by default. */
+    compiler?: boolean;
+    /** What its loads fetch from, in place of the server. */
+    fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+    externalInterface?: ExternalInterfaceHost;
   } = {},
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
@@ -152,9 +168,19 @@ async function scriptingFor(
         uncaught.push(error);
       }
     },
-    fetch: testFetch(url ? new URL(url, location.href).href : undefined, trace, logFetch, true),
+    fetch:
+      fetchHost ??
+      testFetch(url ? new URL(url, location.href).href : undefined, trace, logFetch, true),
+    externalInterface,
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
+    // Under the checked build, each module the worker compiles is compiled here too and compared.
+    compileHost: compiler
+      ? {
+          ...webCompilerHost({ codegen: wasm, url: "/worker/player-hosts/web-compiler.js" }),
+          verify: checked,
+        }
+      : null,
   });
   const libraries = await Promise.all(
     LIBRARIES.map(async (n) => {
@@ -1516,14 +1542,14 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
 /**
  * Play the opened SWF's frames until it has traced `lines` lines, or for
  * `frames` frames at most: the lines it has traced, the size of its
- * codegen's memory, and what stopped it.
+ * codegen's memory and of its background compiler's, and what stopped it.
  */
 async function stepSwf(
   lines: number,
   frames: number,
-): Promise<{ lines: number; codegen: number; error: string | null }> {
+): Promise<{ lines: number; codegen: number; compiler: number; error: string | null }> {
   if (!opened) {
-    return { lines: 0, codegen: 0, error: "no SWF is open" };
+    return { lines: 0, codegen: 0, compiler: 0, error: "no SWF is open" };
   }
 
   const { player, scripting, trace, uncaught } = opened;
@@ -1536,9 +1562,15 @@ async function stepSwf(
       }
     }
 
-    return { lines: trace.length, codegen: codegenMemory?.buffer.byteLength ?? 0, error: null };
+    const compiler = (await scripting?.code.background?.usage())?.memory ?? 0;
+    return {
+      lines: trace.length,
+      codegen: codegenMemory?.buffer.byteLength ?? 0,
+      compiler,
+      error: null,
+    };
   } catch (e) {
-    return { lines: trace.length, codegen: 0, error: describe(e, scripting) };
+    return { lines: trace.length, codegen: 0, compiler: 0, error: describe(e, scripting) };
   }
 }
 
@@ -1767,6 +1799,172 @@ async function precompiledSwf(
   }
 }
 
+/** What load-bench.ts measures of a burst of loads, from its start to the last one's COMPLETE. */
+interface LoadBench {
+  /** Milliseconds from the loads asked to the last COMPLETE. */
+  latency: number;
+  /** Tasks of 50 ms or more the page's thread ran meanwhile, how long they took in all, and the longest. */
+  longTasks: number;
+  longTaskTime: number;
+  longest: number;
+  /**
+   * The longest time between two animation frames meanwhile, how many
+   * frames drew, and how long their ticks and draws took in all, a load's
+   * own work in a tick among it.
+   */
+  worstGap: number;
+  frames: number;
+  frameWork: number;
+  error: string | null;
+}
+
+/** The load bench in progress: its player's frame loop, and what goes the SWF the page loads in it. */
+let loadBenchState: {
+  stop: () => void;
+  go: () => Promise<LoadBench>;
+} | null = null;
+
+/**
+ * Plays `main` (load-bench.ts's), drawing a frame on each animation frame
+ * as the element's playback does, its loads served `children` from memory
+ * (child0.swf and on) and bench.txt; resolves once the SWF has said it is
+ * ready, its loads' bytes fetched where it loads them from bytes. With
+ * `compiler`, the loads compile on the background compiler's Web Worker.
+ */
+async function loadBenchSetup(
+  main: string,
+  children: string[],
+  warm: string,
+  mode: "bytes" | "url",
+  compiler: boolean,
+): Promise<void> {
+  loadBenchState?.stop();
+  const decode = (base64: string) => Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const bytes = decode(main);
+  const files = new Map<string, Uint8Array>(children.map((c, k) => [`child${k}.swf`, decode(c)]));
+  files.set("bench.txt", new TextEncoder().encode(`${children.length} ${mode}`));
+  files.set("warm.swf", decode(warm));
+  const said = new Map<string, () => void>();
+  const heard = (line: string) => new Promise<void>((resolve) => said.set(line, resolve));
+  const ready = heard("ready");
+  const trace = new Proxy([] as string[], {
+    get: (target, key) =>
+      key === "push"
+        ? (...lines: string[]) => {
+            for (const line of lines) {
+              said.get(line)?.();
+            }
+
+            return target.push(...lines);
+          }
+        : Reflect.get(target, key),
+  });
+  let go: ((request: string, args: unknown[] | null) => unknown) | null = null;
+  const uncaught: unknown[] = [];
+  const scripting = await scriptingFor(bytes, trace, "http://bench.test/main.swf", uncaught, {
+    compiler,
+    fetch: async (request) => {
+      const file = files.get(new URL(request.url).pathname.slice(1));
+      return file
+        ? { bytes: file, status: 200, headers: [] }
+        : { bytes: null, status: 404, headers: [] };
+    },
+    externalInterface: {
+      callOut: () => null,
+      addCallback: (name, callback) => {
+        if (name === "go") {
+          go = callback as typeof go;
+        }
+      },
+    },
+  });
+  const player = new Player(bytes, scripting);
+  const view = await surfaceFor(player, 1, 1, 1, false, false);
+  document.body.replaceChildren(view.canvas);
+  if (scripting) {
+    scripting.drawer = view;
+  }
+
+  await player.start();
+  let stopped = false;
+  let last = performance.now();
+  let frames = 0;
+  let worstGap = 0;
+  let frameWork = 0;
+  const frame = (now: number) => {
+    if (stopped) {
+      return;
+    }
+
+    worstGap = Math.max(worstGap, now - last);
+    const begun = performance.now();
+    player.advance(now - last);
+    last = now;
+    view.render(player.stage);
+    frameWork += performance.now() - begun;
+    frames++;
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+  await ready;
+  // A second of frames first, the timeline warm.
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+  loadBenchState = {
+    stop: () => {
+      stopped = true;
+      player.destroy();
+      scripting?.destroy();
+      view.destroy();
+    },
+    go: async () => {
+      if (uncaught.length > 0 || !go) {
+        throw uncaught[0] ?? new Error("the SWF gave no go callback");
+      }
+
+      const tasks: PerformanceEntry[] = [];
+      const observer = new PerformanceObserver((list) => tasks.push(...list.getEntries()));
+      observer.observe({ type: "longtask" });
+      const done = heard("done");
+      worstGap = 0;
+      frames = 0;
+      frameWork = 0;
+      const start = performance.now();
+      go("", []);
+      await done;
+      const latency = performance.now() - start;
+      // The entries of the last tasks, delivered after them.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      observer.disconnect();
+      const during = tasks.filter((t) => t.startTime + t.duration >= start);
+      return {
+        latency,
+        longTasks: during.length,
+        longTaskTime: during.reduce((sum, t) => sum + t.duration, 0),
+        longest: Math.max(0, ...during.map((t) => t.duration)),
+        worstGap,
+        frames,
+        frameWork,
+        error: uncaught.length > 0 ? String(uncaught[0]) : null,
+      };
+    },
+  };
+}
+
+/** The bench's burst of loads, asked of the SWF loadBenchSetup plays; it plays on after. */
+function loadBenchGo(): Promise<LoadBench> {
+  if (!loadBenchState) {
+    throw new Error("no load bench is set up");
+  }
+
+  return loadBenchState.go();
+}
+
+/** The bench's player stopped and let go of. */
+function loadBenchStop(): void {
+  loadBenchState?.stop();
+  loadBenchState = null;
+}
+
 const page = globalThis as unknown as {
   precompiledSwf: typeof precompiledSwf;
   moduleCacheSwf: typeof moduleCacheSwf;
@@ -1782,6 +1980,9 @@ const page = globalThis as unknown as {
   canvasText: typeof canvasText;
   contextLossSwf: typeof contextLossSwf;
   contextLossPlanSwf: typeof contextLossPlanSwf;
+  loadBenchSetup: typeof loadBenchSetup;
+  loadBenchGo: typeof loadBenchGo;
+  loadBenchStop: typeof loadBenchStop;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -1797,3 +1998,6 @@ page.deviceTextSwf = deviceTextSwf;
 page.canvasText = canvasText;
 page.contextLossSwf = contextLossSwf;
 page.contextLossPlanSwf = contextLossPlanSwf;
+page.loadBenchSetup = loadBenchSetup;
+page.loadBenchGo = loadBenchGo;
+page.loadBenchStop = loadBenchStop;

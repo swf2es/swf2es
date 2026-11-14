@@ -1,5 +1,5 @@
-// Writes dist/thread/: the modules a Web Worker running web-worker.js
-// loads, from this package and those it imports, with every bare
+// Writes dist/thread/: the modules a Web Worker running web-worker.js or
+// web-compiler.js loads, from this package and those they import, with every bare
 // specifier made a relative path into the same tree. A worker sees no
 // import map, so a page that loads the packages unbundled, under an
 // import map or from a CDN, gives its workers this tree, which resolves
@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = join(here, "dist/thread");
-const entry = join(here, "dist/web-worker.js");
+const entries = [join(here, "dist/web-worker.js"), join(here, "dist/web-compiler.js")];
 
 /** An import's or export's specifier, static or dynamic, as tsc writes them. */
 const SPECIFIER = /(\bfrom\s*|\bimport\s*\(?\s*)"([^"]+)"/g;
@@ -57,7 +57,7 @@ function resolveBare(specifier: string, file: string): string | null {
 
 rmSync(out, { recursive: true, force: true });
 const done = new Set<string>();
-const queue = [entry];
+const queue = [...entries];
 while (queue.length > 0) {
   const file = queue.pop() as string;
   if (done.has(file)) {

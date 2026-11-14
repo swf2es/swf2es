@@ -32,6 +32,8 @@ export type {
   CachedModule,
   ClipboardHost,
   ClipboardText,
+  CompilerHost,
+  CompilerThread,
   Drawer,
   EncryptedStoreHost,
   ExternalInterfaceHost,
@@ -66,4 +68,5 @@ export { LocalConnections } from "./localconnection.js";
 export { Player } from "./player.js";
 export type { FillTessellator } from "./scene/fills.js";
 export { airLibrary, builtinLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
+export type { CompilerOp, CompilerStart, FromCompiler } from "./workers/compiler.js";
 export type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";

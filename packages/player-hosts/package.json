@@ -44,6 +44,10 @@
       "types": "./dist/web-worker.d.ts",
       "default": "./dist/web-worker.js"
     },
+    "./web-compiler": {
+      "types": "./dist/web-compiler.d.ts",
+      "default": "./dist/web-compiler.js"
+    },
     "./node-worker": {
       "types": "./dist/node-worker.d.ts",
       "default": "./dist/node-worker.js"
