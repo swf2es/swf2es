@@ -1,8 +1,11 @@
 package
 {
+	import flash.display.Loader;
 	import flash.display.MovieClip;
 	import flash.display.Sprite;
 	import flash.events.Event;
+	import flash.system.LoaderContext;
+	import flash.utils.ByteArray;
 
 	public class WalkMain extends MovieClip
 	{
@@ -53,6 +56,28 @@ package
 			removeChild(_menu);
 			_menu = null;
 		}
+
+		public var oldLoaded:Boolean = false;
+
+		/** Load the SWF of version 9 the bench embeds (WalkOld) onto the stage, its clips beside the rest. */
+		public function loadOld():void
+		{
+			const loader:Loader = new Loader();
+			loader.contentLoaderInfo.addEventListener(Event.COMPLETE, loaded);
+			const context:LoaderContext = new LoaderContext();
+			context.allowCodeImport = true;
+			loader.loadBytes(new WalkOld(), context);
+			addChild(loader);
+		}
+
+		private function loaded(e:Event):void
+		{
+			oldLoaded = true;
+		}
+	}
+
+	public class WalkOld extends ByteArray
+	{
 	}
 
 	public class WalkPanel extends MovieClip

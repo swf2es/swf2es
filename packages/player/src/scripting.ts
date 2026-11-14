@@ -165,11 +165,6 @@ export class Scripting {
   /** Where in its queue the last walk came to `also`. */
   private alsoAt = 0;
   /**
-   * Whether a clip of a SWF before version 10 has had an AS3 object: its
-   * gotos run no cycle, and rounds of frame scripts walk everything (pruning).
-   */
-  oldClips = false;
-  /**
    * Where an error nothing caught goes as it happens, so that the frame
    * goes on, as in Flash and Ruffle; null to have the frame throw them when
    * it ends.
@@ -1185,12 +1180,13 @@ export class Scripting {
    * (queueDue): its queue then leaves out every clip that is not due as it
    * walks, which would run nothing where it stays so till its turn. One
    * that a script sends elsewhere meanwhile is due then, but a goto runs
-   * its cycle, whose round runs its script at once, in a SWF from version
-   * 10 on the stage, while gotos have not overflowed. Else the round walks
-   * them all, as the queue they make is the order those run in.
+   * its cycle, whose round runs its script at once, on the stage, while
+   * gotos have not overflowed; a clip of a SWF before version 10, whose
+   * gotos run none, is listed anyway (MovieClip.listedAlways). Else the
+   * round walks them all, as the queue they make is the order those run in.
    */
   private pruning(): boolean {
-    return !this.oldClips && !this.overflowed && this.stage !== null;
+    return !this.overflowed && this.stage !== null;
   }
 
   /**
@@ -1251,13 +1247,13 @@ export class Scripting {
   }
 
   /**
-   * The clips of queueAll's order that are due as it walks, and every one
-   * under `also`, a button being made, whose round may be the only one to
-   * reach it: what is marked alone walked (DisplayObject.scriptsDue), a
-   * clip not marked passed by with all it holds. What it walks keeps its
-   * mark only with a clip due at or under it, as their scripts are yet to
-   * run, and a round inside this one's must find them. `peeked` as
-   * queueAll's.
+   * The clips of queueAll's order that are due as it walks or listed
+   * always (MovieClip.listedAlways), and every one under `also`, a button
+   * being made, whose round may be the only one to reach it: what is marked
+   * alone walked (DisplayObject.scriptsDue), a clip not marked passed by
+   * with all it holds. What it walks keeps its mark only with such a clip
+   * at or under it, as their scripts are yet to run, and a round inside
+   * this one's must find them. `peeked` as queueAll's.
    */
   private queueDue(
     queue: (MovieClip | null)[],
@@ -1272,7 +1268,8 @@ export class Scripting {
     const openDue = this.openDue;
     let open = 0;
     let count = 0;
-    // A clip's own, before what it holds, as queueAll has them: whether it is due.
+    // A clip's own, before what it holds, as queueAll has them: whether it is due, or listed
+    // always, which keeps its mark too.
     const clip = (o: MovieClip, all: boolean) => {
       if (o.scriptedFrame !== o.currentFrame) {
         if (o.object) {
@@ -1282,11 +1279,11 @@ export class Scripting {
         return true;
       }
 
-      if (all && o.object) {
+      if ((all || o.listedAlways) && o.object) {
         queue[count++] = o;
       }
 
-      return false;
+      return o.listedAlways;
     };
     // Whether a clip at or under `o` is due, walked if marked, or anyway with `all`.
     const visit = (o: DisplayObject, all: boolean): boolean => {
@@ -1410,7 +1407,8 @@ export class Scripting {
 
   /**
    * The checked build's round: queueDue's queue, which must be queueAll's
-   * but for the clips not due as they walk, and queueAll's run, each of
+   * but for the clips not due as they walk and not listed always
+   * (MovieClip.listedAlways), and queueAll's run, each of
    * those left out shown to run nothing, so that the round is the one a
    * walk of all would be. queueDue walks first, as lists made by queueAll
    * would have it walk them in place of the children it walks without.
@@ -1439,7 +1437,7 @@ export class Scripting {
     let j = 0;
     for (let i = 0; i < total; i++) {
       const o = all[i] as MovieClip;
-      kept[i] = i >= allAlso || o.scriptedFrame !== o.currentFrame;
+      kept[i] = i >= allAlso || o.listedAlways || o.scriptedFrame !== o.currentFrame;
       if (kept[i] && queue[j++] !== o) {
         throw new Error(`a round of frame scripts walked out of order at ${j - 1}`);
       }

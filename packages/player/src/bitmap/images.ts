@@ -52,7 +52,9 @@ export async function decodeInBrowser(
       colorSpaceConversion: "none",
     });
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
-    const context = canvas.getContext("2d");
+    // A canvas in memory, not on the GPU: its pixels are read back once, which from a GPU
+    // canvas waits for the GPU (about 1.7 times as long on an Intel iGPU, 60 times on SwiftShader).
+    const context = canvas.getContext("2d", { willReadFrequently: true });
     if (!context) {
       return null;
     }
