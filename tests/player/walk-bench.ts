@@ -21,8 +21,14 @@
 // loads its older asset SWFs: clips whose gotos run no cycle, which every
 // round of frame scripts lists, due or not.
 //
+// --playing N places N clips of 8 frames that play on, each moving a shape
+// every frame, beside the rigs, whose clips have one frame: with --orphans,
+// a frame of a large still scene, much of it off the list, where a few
+// things move, as a game's when a list of hundreds of rows was rebuilt on
+// each keystroke. The tick then times mostly the frame's advance walk.
+//
 //   node --expose-gc tests/player/walk-bench.ts [--rigs N] [--frames N] [--reps N]
-//     [--orphans N] [--menu K] [--old N]
+//     [--orphans N] [--menu K] [--old N] [--playing N]
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -45,6 +51,7 @@ const reps = option("reps", 5);
 const orphans = option("orphans", 0);
 const menu = option("menu", 0);
 const old = option("old", 0);
+const playing = option("playing", 0);
 
 const SOURCE = readFileSync(new URL("./scripts/WalkBench.as", import.meta.url), "utf8");
 
@@ -126,6 +133,13 @@ function treeSwf(): Uint8Array {
   }
 
   tags.push(w.sprite(20, 1, rig(false)), w.sprite(21, 1, rig(true)), w.sprite(22, 1, rig(false)));
+  // A clip that plays: a shape moved every one of its 8 frames.
+  const moves: Uint8Array[] = [w.place({ depth: 1, character: 1 }), w.showFrame()];
+  for (let f = 1; f < 8; f++) {
+    moves.push(w.place({ depth: 1, move: true, matrix: { tx: f * 20, ty: 0 } }), w.showFrame());
+  }
+
+  tags.push(w.sprite(25, 8, [...moves, w.end()]));
   // A menu's row: a shape, and a button whose every state is a WalkPart.
   tags.push(
     w.button2(24, 10),
@@ -148,6 +162,10 @@ function treeSwf(): Uint8Array {
   );
   for (let i = 0; i < rigs; i++) {
     tags.push(w.place({ depth: i + 1, character: i % 25 === 0 ? 21 : 20 }));
+  }
+
+  for (let i = 0; i < playing; i++) {
+    tags.push(w.place({ depth: rigs + i + 1, character: 25, matrix: { tx: i * 10, ty: 400 } }));
   }
 
   tags.push(w.showFrame(), w.showFrame(), w.end());
@@ -220,7 +238,8 @@ const walks = time(() => scripting.runFrameScripts(player.stage));
 const show = (runs: number[]) =>
   `median ${median(runs).toFixed(0)} us  (${runs.map((r) => r.toFixed(0)).join(", ")})`;
 console.log(
-  `${objects} objects under the stage, ${rigs} rigs, ${old} of version 9, ${frames} frames x ${reps}`,
+  `${objects} objects under the stage, ${rigs} rigs, ${old} of version 9, ${playing} playing, ` +
+    `${orphans} orphan panels, ${frames} frames x ${reps}`,
 );
 if (gc) {
   gc();
