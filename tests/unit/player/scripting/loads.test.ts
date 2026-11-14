@@ -13,7 +13,7 @@ import { containerEngine, runOracle } from "../../../../oracle/oracle.ts";
 import type { DecodedImage } from "../../../../packages/player/dist/bitmap/images.js";
 import type { Container, MovieClip } from "../../../../packages/player/dist/display/display.js";
 import type { FetchRequest } from "../../../../packages/player/dist/hosts.js";
-import { pointerTarget } from "../../../../packages/player/dist/input/pointer.js";
+import { pointerTarget } from "../../../../packages/player/dist/input/hit-test.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { flashAssembler, script } from "../../../avm1-script.ts";

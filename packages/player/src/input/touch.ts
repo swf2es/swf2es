@@ -11,7 +11,8 @@ import type { Container, DisplayObject } from "../display/display.js";
 import { apply, invert } from "../display/geometry.js";
 import { dispatchEvent } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
-import { type PointerInput, type PointerState, pointerTarget } from "./pointer.js";
+import { pointerTarget } from "./hit-test.js";
+import type { PointerInput, PointerState } from "./pointer.js";
 
 export interface TouchState extends PointerState {
   /** The browser's pointerId, which TouchEvent.touchPointID reports. */
