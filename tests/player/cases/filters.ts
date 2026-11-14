@@ -392,6 +392,17 @@ export const filterCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // An inner drop shadow that hides its object draws as a knocked-out one, on screen and
+    // through applyFilter (scripts/FilterInnerHide.as): its object was drawn under it.
+    name: "filter-inner-hide",
+    swf: (abc) => bare(abc, 1, "Main", 400, 200),
+    script: "FilterInnerHide",
+    frames: 1,
+    capture: [1],
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  {
     // Display objects with a shadow, bevel or gradient filter cast past what adl holds
     // (scripts/FilterFar.as): the GPU's padding stays what can be drawn.
     name: "filter-far",
