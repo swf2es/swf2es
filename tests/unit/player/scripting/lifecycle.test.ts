@@ -1,6 +1,7 @@
 // What happens to display objects as they come and go through a SWF's
 // scripts: an orphan's life off the display list.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -32,27 +33,7 @@ test("an orphan plays for a while, then stops where it is until put back", { ski
   // One held stops too, as the player cannot see what holds it, and carries
   // on when put back; one that listens for ENTER_FRAME, held by it in Flash
   // too, plays on.
-  const source = `package {
-    import flash.display.MovieClip;
-    import flash.events.Event;
-    public class Bound extends MovieClip {
-      public var runs:int = 0;
-      public function Bound() {
-        addFrameScript(0, function():void { runs++; }, 1, function():void { runs++; });
-      }
-    }
-    public class Main extends MovieClip {
-      public var bound:Bound;
-      public var kept:Bound;
-      public var listening:Bound;
-      public function Main() {
-        kept = bound;
-        removeChild(bound);
-        listening = new Bound();
-        listening.addEventListener(Event.ENTER_FRAME, function(e:Event):void {});
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./OrphanAge.as", import.meta.url), "utf8");
   const scripting = new Scripting(await createCodegen(wasm), { print: () => {} });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   const player = new Player(boundClip(compiler(out)("OrphanAge", source), 10, 2), scripting);

@@ -2,6 +2,7 @@
 // in the order of their times, and getTimer by the real clock or the
 // frame's.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -157,32 +158,7 @@ test("getTimer runs on in real time by default", { skip }, async () => {
  * started in that order, c every 30 ms, shorter than a 24 fps frame, and d
  * every 50 ms, longer. Each ENTER_FRAME traces the log so far.
  */
-const paceSource = `package {
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.events.TimerEvent;
-  import flash.utils.Timer;
-  import flash.utils.getTimer;
-  public class TimerPace extends Sprite {
-    private var log:Array = [];
-    public function TimerPace() {
-      start("b", 10);
-      start("a", 10);
-      start("c", 30);
-      start("d", 50);
-      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
-        trace(log.join(" "));
-        log = ["EF" + getTimer()];
-      });
-      addEventListener(Event.FRAME_CONSTRUCTED, function(e:Event):void { log.push("FC"); });
-    }
-    private function start(name:String, delay:int):void {
-      var t:Timer = new Timer(delay);
-      t.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { log.push(name + getTimer()); });
-      t.start();
-    }
-  }
-}`;
+const paceSource = readFileSync(new URL("./TimerPace.as", import.meta.url), "utf8");
 
 /** TimerPace's traces, the host's clock moved by each of `dts` before the advance() given it. */
 async function pace(dts: number[], realTime: boolean): Promise<string[][]> {
@@ -453,33 +429,7 @@ test("by the real clock, a timer stopped, reset or started anew within a pass", 
   const swf = bare(
     compiler(out)(
       "TimerRestarts",
-      `package {
-        import flash.display.Sprite;
-        import flash.events.TimerEvent;
-        import flash.utils.Timer;
-        import flash.utils.getTimer;
-        public class TimerRestarts extends Sprite {
-          public function TimerRestarts() {
-            var a:Timer = new Timer(20);
-            var b:Timer = new Timer(20);
-            var c:Timer = new Timer(20, 3);
-            var n:int = 0;
-            a.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void {
-              n++;
-              trace("a", getTimer(), n);
-              if (n == 2) { b.stop(); }
-              if (n == 4) { b.start(); }
-              if (n == 5) { a.reset(); a.start(); }
-            });
-            b.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("b", getTimer()); });
-            c.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("c", getTimer(), c.currentCount); });
-            c.addEventListener(TimerEvent.TIMER_COMPLETE, function(e:TimerEvent):void { trace("c done", getTimer()); });
-            a.start();
-            b.start();
-            c.start();
-          }
-        }
-      }`,
+      readFileSync(new URL("./TimerRestarts.as", import.meta.url), "utf8"),
     ),
     1,
     "TimerRestarts",

@@ -4,6 +4,7 @@
 // what the first test expects is what adl traced for it, but where a
 // comment says otherwise.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -112,108 +113,7 @@ async function play(
   return lines;
 }
 
-const FACTS = `package {
-  import flash.display.Sprite;
-  import flash.display.StageDisplayState;
-  import flash.events.Event;
-  import flash.events.FullScreenEvent;
-  import flash.geom.Rectangle;
-
-  public class FullScreenFacts extends Sprite {
-    private var frame:int = 0;
-
-    public function FullScreenFacts() {
-      trace("initial", state(), stage.allowsFullScreen, stage.allowsFullScreenInteractive);
-      stage.addEventListener(FullScreenEvent.FULL_SCREEN, function(e:FullScreenEvent):void {
-        trace("  event", e.type, e.fullScreen, e.interactive, e.bubbles, e.cancelable, e.target == stage, state());
-      });
-      stage.addEventListener(Event.RESIZE, function(e:Event):void {
-        trace("  resize", state());
-      });
-      addEventListener(Event.ENTER_FRAME, step);
-    }
-
-    private function state():String {
-      return stage.displayState + " " + stage.stageWidth + "x" + stage.stageHeight + " " + stage.fullScreenSourceRect;
-    }
-
-    private function attempt(label:String, f:Function):void {
-      trace(label);
-      try {
-        f();
-      } catch (e:Error) {
-        trace("  thrown", e.name, e.errorID);
-      }
-      trace("  after", state());
-    }
-
-    private function step(e:Event):void {
-      switch (++frame) {
-        case 2:
-          attempt("fullScreen", function():void { stage.displayState = StageDisplayState.FULL_SCREEN; });
-          break;
-        case 3:
-          attempt("fullScreen again", function():void { stage.displayState = "fullScreen"; });
-          attempt("to interactive", function():void { stage.displayState = "fullScreenInteractive"; });
-          attempt("to fullScreen", function():void { stage.displayState = "fullScreen"; });
-          break;
-        case 4:
-          attempt("bogus", function():void { stage.displayState = "bogus"; });
-          attempt("null", function():void { stage.displayState = null; });
-          attempt("NORMAL", function():void { stage.displayState = "NORMAL"; });
-          break;
-        case 5:
-          attempt("source rect", function():void {
-            var set:Rectangle = new Rectangle(10, 20, 300, 200);
-            stage.fullScreenSourceRect = set;
-            set.width = 7;
-            var got:Rectangle = stage.fullScreenSourceRect;
-            got.width = 5;
-            trace("  copies", got === stage.fullScreenSourceRect, set === stage.fullScreenSourceRect);
-          });
-          attempt("mouseLock", function():void { stage.mouseLock = true; trace("  mouseLock", stage.mouseLock); });
-          break;
-        case 6:
-          attempt("normal", function():void { stage.displayState = StageDisplayState.NORMAL; trace("  mouseLock", stage.mouseLock); });
-          attempt("mouseLock in normal", function():void { stage.mouseLock = true; });
-          attempt("mouseLock off in normal", function():void { stage.mouseLock = false; });
-          attempt("normal again", function():void { stage.displayState = "normal"; });
-          break;
-        case 7:
-          attempt("as the application", function():void {
-            stage.fullScreenSourceRect = new Rectangle(0, 0, 960, 550);
-            stage.displayState = StageDisplayState.FULL_SCREEN_INTERACTIVE;
-          });
-          break;
-        case 8:
-          attempt("window restore", function():void { stage.nativeWindow.restore(); });
-          attempt("in and out", function():void { stage.displayState = "fullScreen"; stage.displayState = "normal"; });
-          attempt("no rect", function():void { stage.fullScreenSourceRect = null; });
-          break;
-        case 9:
-          attempt("noScale", function():void { stage.scaleMode = "noScale"; });
-          attempt("fullScreen in noScale", function():void { stage.displayState = "fullScreen"; });
-          break;
-        case 10:
-          attempt("rect in noScale", function():void { stage.fullScreenSourceRect = new Rectangle(0, 0, 400, 200); });
-          attempt("no rect in noScale", function():void { stage.fullScreenSourceRect = null; });
-          attempt("rect in noScale again", function():void { stage.fullScreenSourceRect = new Rectangle(0, 0, 400, 200); });
-          break;
-        case 11:
-          attempt("normal in noScale", function():void { stage.displayState = "normal"; });
-          break;
-        case 12:
-          attempt("fullScreen in noScale with the rect", function():void { stage.displayState = "fullScreen"; });
-          break;
-        case 13:
-          attempt("normal", function():void { stage.displayState = "normal"; });
-          trace("done");
-          break;
-      }
-    }
-  }
-}
-`;
+const FACTS = readFileSync(new URL("./FullScreenFacts.as", import.meta.url), "utf8");
 
 /**
  * What adl traced. Leaving full screen in noScale it dispatches two RESIZEs
@@ -330,35 +230,7 @@ test("an AIR application's stage goes full screen and back as adl's does", { ski
   ]);
 });
 
-const TOGGLE = `package {
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.events.FullScreenEvent;
-  import flash.geom.Rectangle;
-
-  public class Toggle extends Sprite {
-    private var frame:int = 0;
-
-    public function Toggle() {
-      trace("allows", stage.allowsFullScreen, stage.allowsFullScreenInteractive);
-      stage.addEventListener(FullScreenEvent.FULL_SCREEN, function(e:FullScreenEvent):void {
-        trace("event", e.fullScreen, e.interactive, stage.displayState);
-      });
-      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
-        frame++;
-        if (frame == 1 || frame == 3) {
-          try {
-            stage.displayState = frame == 1 ? "fullScreen" : "fullScreenInteractive";
-          } catch (e:Error) {
-            trace("thrown", e.name, e.errorID);
-          }
-        }
-        trace("frame", frame, stage.displayState);
-      });
-    }
-  }
-}
-`;
+const TOGGLE = readFileSync(new URL("./Toggle.as", import.meta.url), "utf8");
 
 test("a refusing host throws SecurityError #2152 and leaves the stage normal", {
   skip,
@@ -459,40 +331,7 @@ test("without a host the stage stays normal", {
   ]);
 });
 
-const KEYS = `package {
-  import flash.display.Sprite;
-  import flash.events.FullScreenEvent;
-  import flash.events.KeyboardEvent;
-
-  public class FullScreenKeys extends Sprite {
-    public function FullScreenKeys() {
-      stage.addEventListener(FullScreenEvent.FULL_SCREEN, function(e:FullScreenEvent):void {
-        trace("event", e.fullScreen);
-      });
-      // F11 on its way down, F10 on its way up, and F9 where it is refused.
-      stage.addEventListener(KeyboardEvent.KEY_DOWN, function(e:KeyboardEvent):void {
-        if (e.keyCode == 122) {
-          stage.displayState = stage.displayState == "normal" ? "fullScreenInteractive" : "normal";
-        } else if (e.keyCode == 120) {
-          try {
-            stage.displayState = "fullScreen";
-          } catch (error:SecurityError) {
-            trace("refused", error.errorID);
-          }
-        } else if (e.keyCode == 119) {
-          // To the state it is in, and to the other kind of full screen: nothing the host does.
-          stage.displayState = stage.displayState == "normal" ? "normal" : "fullScreen";
-        }
-      });
-      stage.addEventListener(KeyboardEvent.KEY_UP, function(e:KeyboardEvent):void {
-        if (e.keyCode == 121) {
-          stage.displayState = stage.displayState == "normal" ? "fullScreen" : "normal";
-        }
-      });
-    }
-  }
-}
-`;
+const KEYS = readFileSync(new URL("./FullScreenKeys.as", import.meta.url), "utf8");
 
 test("a key whose listeners change displayState is the SWF's, which a host keeps from its own", {
   skip,

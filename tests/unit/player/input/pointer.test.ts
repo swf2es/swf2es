@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -679,63 +680,7 @@ try {
 
 // Boxes "a" holding "a1", "b" beside them and a SimpleButton "btn": the
 // stage traces the mouse events it hears, and each object its roll events.
-const ORDER_SOURCE = `package {
-  import flash.display.Shape;
-  import flash.display.SimpleButton;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.events.MouseEvent;
-
-  public class MouseOrder extends Sprite {
-    private function box(name:String, x:Number, y:Number, size:Number):Sprite {
-      var s:Sprite = new Sprite();
-      s.name = name;
-      s.graphics.beginFill(0xff0000);
-      s.graphics.drawRect(0, 0, size, size);
-      s.x = x;
-      s.y = y;
-      return s;
-    }
-
-    private function nameOf(o:Object):String {
-      return o == null ? "null" : o == stage ? "stage" : o == this ? "root" : o.name;
-    }
-
-    private function heard(e:Event):void {
-      var line:String = e.type + " " + nameOf(e.target);
-      if (e is MouseEvent) {
-        var m:MouseEvent = MouseEvent(e);
-        line += " " + nameOf(m.relatedObject) + " " + m.buttonDown + " " + m.localX + "," + m.localY;
-      }
-
-      trace(line + " @" + stage.mouseX + "," + stage.mouseY);
-    }
-
-    public function MouseOrder() {
-      var a:Sprite = box("a", 0, 0, 80);
-      a.addChild(box("a1", 20, 20, 40));
-      addChild(a);
-      addChild(box("b", 100, 0, 80));
-      var hit:Shape = new Shape();
-      hit.graphics.beginFill(0);
-      hit.graphics.drawRect(0, 0, 80, 80);
-      var btn:SimpleButton = new SimpleButton(hit, hit, hit, hit);
-      btn.name = "btn";
-      btn.x = 200;
-      addChild(btn);
-      for each (var type:String in ["mouseDown", "mouseUp", "click", "mouseMove", "mouseOver", "mouseOut"]) {
-        stage.addEventListener(type, heard);
-      }
-
-      for each (var o:Object in [stage, this, a, a.getChildAt(0), getChildAt(1), btn]) {
-        o.addEventListener("rollOver", heard);
-        o.addEventListener("rollOut", heard);
-      }
-
-      stage.addEventListener("mouseLeave", heard);
-    }
-  }
-}`;
+const ORDER_SOURCE = readFileSync(new URL("./MouseOrder.as", import.meta.url), "utf8");
 
 test("the pointer's events come in Flash Player 32's order, to its targets", { skip }, async () => {
   const wasm = await WebAssembly.compile(
@@ -911,114 +856,7 @@ test("the pointer's events come in Flash Player 32's order, to its targets", { s
   ]);
 });
 
-const GAPS_SOURCE = `package {
-  import flash.display.DisplayObject;
-  import flash.display.Shape;
-  import flash.display.SimpleButton;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.events.MouseEvent;
-
-  // Boxes "a" holding "a1", "b", "c" holding "c1" holding "c2", and a
-  // SimpleButton "btn": the stage traces the mouse events it hears, each
-  // object its roll events; cmd changes them between frames. In Flash, the
-  // probe also logged each line, and took cmd, through ExternalInterface.
-  public class MouseGaps extends Sprite {
-    private var named:Object = {};
-
-    private function box(name:String, x:Number, y:Number, size:Number):Sprite {
-      var s:Sprite = new Sprite();
-      s.name = name;
-      var art:Shape = new Shape();
-      art.graphics.beginFill(0xff0000);
-      art.graphics.drawRect(0, 0, size, size);
-      s.addChild(art);
-      s.x = x;
-      s.y = y;
-      named[name] = s;
-      return s;
-    }
-
-    // Flash's float noise left out: 50.000003814697266 is 50.
-    private function round(n:Number):Number {
-      return Math.round(n * 1000) / 1000;
-    }
-
-    private function nameOf(o:Object):String {
-      return o == null ? "null" : o == stage ? "stage" : o == this ? "root" : o.name;
-    }
-
-    private function heard(e:Event):void {
-      var line:String = e.type + " " + nameOf(e.target);
-      if (e is MouseEvent) {
-        var m:MouseEvent = MouseEvent(e);
-        line += " " + nameOf(m.relatedObject) + " " + m.buttonDown + " " + round(m.localX) + "," + round(m.localY);
-        if (e.type == "mouseWheel") {
-          line += " " + m.delta;
-        }
-      }
-
-      trace(line + " @" + stage.mouseX + "," + stage.mouseY);
-    }
-
-    private function state(color:uint):Shape {
-      var s:Shape = new Shape();
-      s.graphics.beginFill(color);
-      s.graphics.drawRect(0, 0, 80, 80);
-      return s;
-    }
-
-    public function cmd(op:String, name:String, key:String, value:*):void {
-      var o:Object = name == "root" ? this : name == "stage" ? stage : named[name];
-      switch (op) {
-        case "listen":
-          o.addEventListener(key, heard);
-          break;
-        case "set":
-          o[key] = value;
-          break;
-        case "remove":
-          o.parent.removeChild(DisplayObject(o));
-          break;
-        case "add":
-          (key == "stage" ? stage : key ? named[key] : this).addChild(DisplayObject(o));
-          break;
-        case "draw":
-          var r:Array = String(value).split(",");
-          o.graphics.beginFill(0x808080);
-          o.graphics.drawRect(r[0], r[1], r[2], r[3]);
-          break;
-      }
-    }
-
-    public function MouseGaps() {
-      var a:Sprite = box("a", 0, 0, 80);
-      a.addChild(box("a1", 20, 20, 40));
-      addChild(a);
-      addChild(box("b", 100, 0, 80));
-      var c:Sprite = box("c", 0, 100, 90);
-      var c1:Sprite = box("c1", 20, 20, 50);
-      c1.addChild(box("c2", 20, 20, 20));
-      c.addChild(c1);
-      addChild(c);
-      var btn:SimpleButton = new SimpleButton(state(0xff0000), state(0x00ff00), state(0x0000ff), state(0));
-      btn.name = "btn";
-      btn.x = 200;
-      named.btn = btn;
-      addChild(btn);
-      for each (var type:String in ["mouseDown", "mouseUp", "click", "doubleClick", "mouseMove", "mouseOver", "mouseOut", "mouseWheel"]) {
-        stage.addEventListener(type, heard);
-      }
-
-      for each (var o:Object in [stage, this, a, named.a1, named.b, c, c1, named.c2, btn]) {
-        o.addEventListener("rollOver", heard);
-        o.addEventListener("rollOut", heard);
-      }
-
-      stage.addEventListener("mouseLeave", heard);
-    }
-  }
-}`;
+const GAPS_SOURCE = readFileSync(new URL("./MouseGaps.as", import.meta.url), "utf8");
 
 /**
  * MouseGaps playing, and the input a test gives it: each call returns the
@@ -1442,36 +1280,7 @@ test("a frame's end moves the hover under a mouse that stands still, and the cur
 
 // The corpus's `mouse_wheel_events`, without its embedded font: two
 // sprites, a shape of the root's, and a field of 13 lines under them.
-const WHEEL_SOURCE = `package {
-  import flash.display.Shape;
-  import flash.display.Sprite;
-  import flash.events.MouseEvent;
-  import flash.text.TextField;
-
-  public class MouseWheel extends Sprite {
-    public function MouseWheel() {
-      var text:TextField = new TextField();
-      for each (var x:int in [0, 100, 200]) {
-        var s:Sprite = new Sprite();
-        var art:Object = x == 200 ? new Shape() : s;
-        art.graphics.beginFill(0xff00ff);
-        art.graphics.drawRect(0, 0, 100, 100);
-        art.x = x;
-        art.name = x == 200 ? "shape" : "sprite" + (x / 100 + 1);
-        addChild(art == s ? s : Shape(art));
-      }
-
-      text.name = "text";
-      text.y = 100;
-      text.multiline = true;
-      text.text = "xxxx 1\\nxxxx 2\\nxxxx 3\\nxxxx 4\\nxxxx 5\\nxxxx 6\\nxxxx 7\\nxxxx 8\\nxxxx 9\\nxxxx 10\\nxxxx 11\\nxxxx 12\\nxxxx 13\\n";
-      addChild(text);
-      stage.addEventListener("mouseWheel", function (e:MouseEvent):void {
-        trace(e.type + " " + (e.target == stage ? "stage" : e.target.name) + " " + e.delta + " " + e.bubbles + " " + e.cancelable + " " + text.scrollV);
-      });
-    }
-  }
-}`;
+const WHEEL_SOURCE = readFileSync(new URL("./MouseWheel.as", import.meta.url), "utf8");
 
 test("the wheel sends mouseWheel to what is under the pointer, then scrolls a field there", {
   skip,
@@ -1711,38 +1520,7 @@ test("a sprite's hitArea elsewhere on the list is picked for it however long bot
 
 // A card turned 60 degrees about y, nearer on its right, over a sprite as
 // large as the stage: the stage traces where each mouse event lands.
-const PERSPECTIVE_SOURCE = `package {
-  import flash.display.Sprite;
-  import flash.events.MouseEvent;
-
-  public class MousePerspective extends Sprite {
-    private var card:Sprite;
-
-    public function MousePerspective() {
-      var back:Sprite = new Sprite();
-      back.name = "back";
-      back.graphics.beginFill(0xdddddd);
-      back.graphics.drawRect(0, 0, 500, 400);
-      addChild(back);
-      card = new Sprite();
-      card.name = "card";
-      card.graphics.beginFill(0x3366cc);
-      card.graphics.drawRect(-60, -80, 120, 160);
-      card.x = 330;
-      card.y = 200;
-      card.rotationY = 60;
-      addChild(card);
-      for each (var type:String in ["mouseMove", "mouseDown", "click"]) {
-        stage.addEventListener(type, heard);
-      }
-    }
-
-    private function heard(e:MouseEvent):void {
-      trace(e.type, e.target.name, Math.round(e.localX) + "," + Math.round(e.localY),
-        card.hitTestPoint(e.stageX, e.stageY, true), card.hitTestPoint(e.stageX, e.stageY, false));
-    }
-  }
-}`;
+const PERSPECTIVE_SOURCE = readFileSync(new URL("./MousePerspective.as", import.meta.url), "utf8");
 
 test("a card turned in 3D takes the pointer where it is drawn in perspective", {
   skip,

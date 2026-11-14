@@ -9,6 +9,7 @@
 // prints what the player's objects hold of the heap once played.
 //
 //   node --expose-gc tests/player/walk-bench.ts [--rigs N] [--frames N] [--reps N]
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
@@ -27,34 +28,7 @@ const rigs = option("rigs", 400);
 const frames = option("frames", 200);
 const reps = option("reps", 5);
 
-const SOURCE = `package {
-  import flash.display.MovieClip;
-
-  public class WalkMain extends MovieClip {
-    public var n:int = 0;
-
-    public function WalkMain() {
-      addFrameScript(0, tick, 1, tick);
-    }
-
-    private function tick():void {
-      n++;
-    }
-  }
-
-  public class WalkPart extends MovieClip {
-    public static var made:int = 0;
-
-    public function WalkPart() {
-      addFrameScript(0, first);
-    }
-
-    private function first():void {
-      made++;
-    }
-  }
-}
-`;
+const SOURCE = readFileSync(new URL("./scripts/WalkBench.as", import.meta.url), "utf8");
 
 const square = (id: number) =>
   w.shape({

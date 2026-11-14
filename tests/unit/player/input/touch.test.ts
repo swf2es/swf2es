@@ -1,6 +1,7 @@
 // Touches on a host with a touch screen: Multitouch's modes, the
 // TouchEvents of each point, and the mouse the primary one moves.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -28,70 +29,7 @@ const wasm = await WebAssembly.compile(
 );
 
 // A box "a" holding "b", and "c" beside it; the stage traces what it hears.
-const SOURCE = `package {
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.events.MouseEvent;
-  import flash.events.TouchEvent;
-  import flash.system.System;
-  import flash.ui.Multitouch;
-
-  public class TouchMain extends Sprite {
-    private function box(name:String, x:Number, size:Number):Sprite {
-      var s:Sprite = new Sprite();
-      s.name = name;
-      s.graphics.beginFill(0xff0000);
-      s.graphics.drawRect(0, 0, size, size);
-      s.x = x;
-      return s;
-    }
-
-    private function heard(e:Event):void {
-      var line:String = e.type + " " + e.target.name;
-      if (e is TouchEvent) {
-        var t:TouchEvent = TouchEvent(e);
-        line += " " + t.touchPointID + " " + t.isPrimaryTouchPoint + " " + t.localX + "," + t.localY + " " + t.sizeX + "," + t.sizeY + " " + t.pressure;
-        // AIR's isTouchPointCanceled, which a Flash Player SWF reads only in the event's string.
-        if (String(t).indexOf("isTouchPointCanceled=true") >= 0) {
-          line += " canceled";
-        }
-      }
-
-      trace(line);
-    }
-
-    public function TouchMain() {
-      trace(Multitouch.supportsTouchEvents, Multitouch.maxTouchPoints, Multitouch.inputMode);
-      Multitouch.inputMode = "touchPoint";
-      trace(Multitouch.inputMode);
-      Multitouch.inputMode = "none";
-      trace(Multitouch.inputMode);
-      var a:Sprite = box("a", 0, 40);
-      var b:Sprite = box("b", 10, 20);
-      b.y = 10;
-      a.addChild(b);
-      addChild(a);
-      addChild(box("c", 50, 40));
-      for each (var type:String in ["mouseDown", "mouseUp", "click", "mouseMove", "mouseOver", "mouseOut",
-          "touchBegin", "touchEnd", "touchMove", "touchOver", "touchOut", "touchTap"]) {
-        stage.addEventListener(type, heard);
-      }
-
-      a.addEventListener("touchRollOver", heard);
-      a.addEventListener("touchRollOut", heard);
-      stage.addEventListener("touchTap", function (e:TouchEvent):void {
-        System.setClipboard("tapped");
-      });
-      stage.addEventListener("touchOver", function (e:TouchEvent):void {
-        try {
-          System.setClipboard("over");
-        } catch (err:Error) {
-          trace("no clipboard in touchOver");
-        }
-      });
-    }
-  }
-}`;
+const SOURCE = readFileSync(new URL("./TouchMain.as", import.meta.url), "utf8");
 
 test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first", {
   skip,
@@ -216,43 +154,7 @@ test("touches move the mouse and, in touchPoint mode, dispatch TouchEvents first
 
 // Sprites a touch drags: "a" by the point that begins on it, "b" locked to
 // its point within a box; the stage traces where both are at each step.
-const DRAG_SOURCE = `package {
-  import flash.display.Sprite;
-  import flash.events.TouchEvent;
-  import flash.geom.Rectangle;
-  import flash.ui.Multitouch;
-
-  public class TouchDragMain extends Sprite {
-    private function box(x:Number):Sprite {
-      var s:Sprite = new Sprite();
-      s.graphics.beginFill(0xff0000);
-      s.graphics.drawRect(0, 0, 20, 20);
-      s.x = x;
-      addChild(s);
-      return s;
-    }
-
-    public function TouchDragMain() {
-      Multitouch.inputMode = "touchPoint";
-      var a:Sprite = box(0);
-      var b:Sprite = box(50);
-      a.addEventListener("touchBegin", function (e:TouchEvent):void {
-        a.startTouchDrag(e.touchPointID);
-      });
-      b.addEventListener("touchBegin", function (e:TouchEvent):void {
-        b.startTouchDrag(e.touchPointID, true, new Rectangle(40, 0, 20, 10));
-      });
-      b.addEventListener("touchEnd", function (e:TouchEvent):void {
-        b.stopTouchDrag(e.touchPointID);
-      });
-      for each (var type:String in ["touchBegin", "touchMove", "touchEnd"]) {
-        stage.addEventListener(type, function (e:TouchEvent):void {
-          trace(e.type, e.touchPointID, a.x + "," + a.y, b.x + "," + b.y, a.dropTarget == b);
-        });
-      }
-    }
-  }
-}`;
+const DRAG_SOURCE = readFileSync(new URL("./TouchDragMain.as", import.meta.url), "utf8");
 
 test("startTouchDrag drags a sprite by its touch point, one drag at a time, until stopTouchDrag", {
   skip,
