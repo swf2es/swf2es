@@ -206,7 +206,13 @@ for (const frame of capture) {
   for (const mode of ["multi", "line"]) {
     const actual = frames.get(mode)?.pixels.get(frame);
     assert.ok(actual, `frame ${frame} drawn (${mode})`);
-    const at = actual.findIndex((v, i) => v !== expected[i]);
+    let at = -1;
+    for (let i = 0; i < actual.length && at < 0; i++) {
+      if (actual[i] !== expected[i]) {
+        at = i;
+      }
+    }
+
     assert.equal(at, -1, `frame ${frame} (${mode}) differs from a text a call at byte ${at}`);
   }
 }
