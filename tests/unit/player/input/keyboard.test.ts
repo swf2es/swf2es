@@ -160,6 +160,31 @@ test("a key goes to the focused field and bubbles to the stage; with no focus, t
   assert.equal(field.model.text, "b");
 });
 
+test("a keyDown listener that focuses a field has the key's character typed there, as Flash does", () => {
+  const { stage, fields, scripting, keyboard, listen } = setUp("chat", "other");
+  const [chat, other] = fields;
+  // As a game opens its chat on "/" from the stage, with no field focused.
+  listen(stage, "keyDown", (e) => {
+    if (e.args[0] === 47) {
+      setFocus(scripting, chat);
+    }
+  });
+  // And a field whose key moves focus on to another field.
+  listen(chat, "keyDown", (e) => {
+    if (e.args[0] === 35) {
+      setFocus(scripting, other);
+    }
+  });
+
+  keyboard.handle("down", { keyCode: 191, charCode: 47 });
+  assert.equal(scripting.focus, chat);
+  assert.equal(chat.model.text, "/");
+
+  keyboard.handle("down", { keyCode: 51, charCode: 35, shiftKey: true });
+  assert.equal(chat.model.text, "/");
+  assert.equal(other.model.text, "#");
+});
+
 test("typing edits the focused field: a TextEvent a listener may cancel, then Event.CHANGE", () => {
   const { fields, scripting, heard, listen, type } = setUp("name");
   const [field] = fields;
