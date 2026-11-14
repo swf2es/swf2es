@@ -309,7 +309,9 @@ if (advance?.walkChecks) {
 
 if (list > 0) {
   const overs = scripting.rt.getProperty(main, avm2.qname(avm2.publicNs, "overs"));
-  console.log(`  list of ${list} rows, ${moving} moving${scroll ? ", scrolled" : ""}: ${overs} overs`);
+  console.log(
+    `  list of ${list} rows, ${moving} moving${scroll ? ", scrolled" : ""}: ${overs} overs`,
+  );
 }
 
 console.log(`  walk  ${show(walks)}`);
