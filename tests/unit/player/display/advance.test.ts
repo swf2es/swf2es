@@ -44,6 +44,11 @@ const TAKES_OFF = w.sprite(4, 2, [
   w.showFrame(),
   w.end(),
 ]);
+/** A class for character 2, of its own ABC. */
+const STATE = `package {
+  import flash.display.MovieClip;
+  public class AdvState extends MovieClip {}
+}`;
 /** a, p and b on the root. */
 const ABP = [
   w.place({ depth: 1, character: 2 }),
@@ -173,10 +178,11 @@ test("a clip a listener among the advances plays before the one advancing waits 
 test("a listener among the advances that makes no clip left out advance has none found again", {
   skip,
 }, async () => {
-  // b sent to a frame but stopped does not advance: nothing to find again.
+  // b sent to a frame but stopped does not advance, and a clip made now was
+  // not there for the walk: nothing to find again.
   const { player, lines, at } = await play(
     "Adv",
-    listened("b.gotoAndStop(2); a.stop();"),
+    listened("b.gotoAndStop(2); a.stop(); addChild(new MovieClip()).visible = false;"),
     [THREE, ONE, TAKES_OFF],
     ABP,
   );
@@ -329,6 +335,11 @@ test("clips found again are those of the display list as the walk found it, what
     [1, 2, 2, 2],
   );
   assert.equal(walkChecks.refound, refound + 1);
+
+  // m plays on as an orphan.
+  player.tick();
+  assert.equal(clips[2].parent, null);
+  assert.equal(clips[2].currentFrame, 3);
 });
 
 test("a button's state a listener among the advances plays advances in that frame", {
@@ -518,4 +529,164 @@ test("a frame's advances leave out the clips that stop or have one frame, and pl
   player.tick();
   assert.equal(made.advanceDue, false);
   assert.equal(s.currentFrame, 1);
+});
+
+test("a timeline button's states play, the one it shows and those it does not", {
+  skip,
+}, async () => {
+  // Its up state holds two parts, a clip of 3 frames among them; its over
+  // state is a clip of 3 frames alone, with no parent.
+  const source = `package {
+    import flash.display.MovieClip;
+    public dynamic class AdvStates extends MovieClip {}
+  }`;
+  const { player, at } = await play(
+    "AdvStates",
+    source,
+    [
+      THREE,
+      ONE,
+      w.button2Records(6, [
+        { states: 1, character: 2 },
+        { states: 1, character: 3 },
+        { states: 2, character: 2 },
+      ]),
+    ],
+    [w.place({ depth: 1, character: 6 })],
+  );
+  const button = at(1) as unknown as { upState: { children: MovieClip[] }; overState: MovieClip };
+  const up = button.upState.children[0];
+  const over = button.overState;
+  player.tick();
+  assert.equal(up.currentFrame, 2);
+  assert.equal(over.currentFrame, 2);
+});
+
+/**
+ * The root of a, p and b, all stopped, and `made`, a clip of 3 frames a
+ * script makes; go() plays p, whose second frame's removal runs `then`.
+ */
+const later = (made: string, then: string) => `package {
+  import flash.display.MovieClip;
+  import flash.display.SimpleButton;
+  import flash.events.Event;
+  public dynamic class AdvLater extends MovieClip {
+    public var made:MovieClip;
+    public var button:SimpleButton;
+    public function AdvLater() {
+      MovieClip(getChildAt(0)).stop();
+      MovieClip(getChildAt(1)).stop();
+      MovieClip(getChildAt(2)).stop();
+      made = new AdvState();
+      ${made}
+    }
+    public function go():void {
+      const p:MovieClip = MovieClip(getChildAt(1));
+      const b:MovieClip = MovieClip(getChildAt(2));
+      p.getChildAt(1).addEventListener(Event.REMOVED_FROM_STAGE, function(e:Event):void {
+        ${then}
+        b.play();
+      });
+      p.play();
+    }
+  }
+}
+import flash.display.MovieClip;
+class AdvUnused extends MovieClip {}`;
+
+test("clips found again are a button's states as the walk found them, though a script replaced one", {
+  skip,
+}, async () => {
+  // The button's up state, made, is replaced among the advances: it still
+  // advances that frame, as the walk of all found it, and its replacement not.
+  const { player, at, clip, call } = await play(
+    "AdvLater",
+    later("button = new SimpleButton(made); addChild(button);", "button.upState = new AdvState();"),
+    [THREE, ONE, TAKES_OFF],
+    ABP,
+    { symbols: [[2, "AdvState"]], more: [w.doAbc(compiler(out)("AdvState", STATE))] },
+  );
+  const made = clip("made");
+  player.tick();
+  call("go");
+  const from = made.currentFrame;
+  const refound = walkChecks.refound;
+  player.tick();
+  assert.equal(at(3).currentFrame, 2);
+  assert.equal(made.currentFrame, (from % 3) + 1);
+  assert.equal(walkChecks.refound, refound + 1);
+});
+
+test("clips found again are the orphans as the walk found them, though a script put one back", {
+  skip,
+}, async () => {
+  // made, never added, plays as an orphan; a listener among the advances
+  // adds it: it advances once that frame, where the walk found it.
+  const { player, at, clip, call } = await play(
+    "AdvLater",
+    later("", "addChild(made);"),
+    [THREE, ONE, TAKES_OFF],
+    ABP,
+    { symbols: [[2, "AdvState"]], more: [w.doAbc(compiler(out)("AdvState", STATE))] },
+  );
+  const made = clip("made");
+  player.tick();
+  call("go");
+  assert.equal(made.parent, null);
+  const from = made.currentFrame;
+  const refound = walkChecks.refound;
+  player.tick();
+  assert.equal(made.parent, player.root);
+  assert.equal(at(3).currentFrame, 2);
+  assert.equal(made.currentFrame, (from % 3) + 1);
+  assert.equal(walkChecks.refound, refound + 1);
+});
+
+test("clips found again are a button's states as the walk found them, though a script moved it into one", {
+  skip,
+}, async () => {
+  // made, the button's over state, has no parent: it advances as the
+  // button's state and as an orphan. A listener among the advances moves the
+  // button into it; as the walk found them, made did not hold the button, so
+  // it still advances twice that frame.
+  const { player, at, clip, call } = await play(
+    "AdvLater",
+    later(
+      "button = new SimpleButton(new MovieClip(), made); addChild(button);",
+      "made.addChild(button);",
+    ),
+    [THREE, ONE, TAKES_OFF],
+    ABP,
+    { symbols: [[2, "AdvState"]], more: [w.doAbc(compiler(out)("AdvState", STATE))] },
+  );
+  const made = clip("made");
+  player.tick();
+  call("go");
+  const from = made.currentFrame;
+  const refound = walkChecks.refound;
+  player.tick();
+  assert.equal(made.children.length, 1);
+  assert.equal(at(3).currentFrame, 2);
+  assert.equal(made.currentFrame, ((from + 1) % 3) + 1);
+  assert.equal(walkChecks.refound, refound + 1);
+});
+
+test("a button made with a playing clip for a state it does not show plays that state", {
+  skip,
+}, async () => {
+  // made, the over state, has no parent: it advances as the button's state
+  // and as an orphan. The button shows no up state, so only its states'
+  // link carries made's mark up to it.
+  const { player, clip } = await play(
+    "AdvLater",
+    later("button = new SimpleButton(null, made); addChild(button);", ""),
+    [THREE, ONE, TAKES_OFF],
+    ABP,
+    { symbols: [[2, "AdvState"]], more: [w.doAbc(compiler(out)("AdvState", STATE))] },
+  );
+  const made = clip("made");
+  player.tick();
+  const from = made.currentFrame;
+  player.tick();
+  assert.equal(made.currentFrame, ((from + 1) % 3) + 1);
 });
