@@ -1,6 +1,9 @@
 import {
   blockBytes,
   Context3DError,
+  compressedFormat,
+  MOST_CUBE,
+  profileLimits,
   SamplerBiasError,
   TEXEL_BYTES,
   type Texture3D,
@@ -18,22 +21,200 @@ import { dispatchEvent } from "../../scripting/events.js";
 import type { Scripting } from "../../scripting.js";
 import { storeOf } from "../flash/display/BitmapData.js";
 
+import { argumentChecks } from "./arguments.js";
 import { flashError } from "./errors.js";
 import type { AsObject, Bindings } from "./lifecycle.js";
 
 export function registerResources(natives: avm2.Natives, s: Scripting, bindings: Bindings): void {
+  const { dynamicUsage, streamingLevels, textureFormat } = argumentChecks(s);
   const {
     buffers,
     programs,
     textures,
     contexts,
     disposeResource,
+    own,
+    allocate,
+    state,
     context,
     buffer,
     program,
+    construct,
     texture,
     bytes,
   } = bindings;
+
+  /** Context3D's natives that make resources; the others are context.ts's ContextNatives. */
+  class ContextResourceNatives {
+    createVertexBuffer(
+      count: number,
+      stride: number,
+      usage: string | null = "staticDraw",
+    ): AsObject {
+      const dynamic = dynamicUsage(usage);
+      // As AIR 51 refuses them: a negative count of values, none, and more than 64.
+      if (stride < 0) {
+        throw s.rt.error("Error", 2004);
+      }
+      if (stride === 0) {
+        throw s.rt.error("ArgumentError", 3671);
+      }
+      if (stride > 64) {
+        throw s.rt.error("ArgumentError", 3670);
+      }
+
+      const owner = this as unknown as AsObject;
+      const resource = allocate(owner, () => context(owner).createBuffer(count, stride, dynamic));
+      const object = construct("VertexBuffer3D", resource);
+      buffers.set(
+        object,
+        own(object, {
+          value: resource,
+          owner,
+          disposed: false,
+          reference: new WeakRef(object),
+        }),
+      );
+
+      return object;
+    }
+
+    createIndexBuffer(count: number, usage: string | null = "staticDraw"): AsObject {
+      const dynamic = dynamicUsage(usage);
+      const owner = this as unknown as AsObject;
+      const resource = allocate(owner, () => context(owner).createBuffer(count, 0, dynamic));
+      const object = construct("IndexBuffer3D", resource);
+      buffers.set(
+        object,
+        own(object, {
+          value: resource,
+          owner,
+          disposed: false,
+          reference: new WeakRef(object),
+        }),
+      );
+
+      return object;
+    }
+
+    createProgram(): AsObject {
+      const owner = this as unknown as AsObject;
+      const resource = allocate(owner, () => context(owner).createProgram());
+      const object = construct("Program3D", resource);
+      programs.set(
+        object,
+        own(object, {
+          value: resource,
+          owner,
+          disposed: false,
+          reference: new WeakRef(object),
+        }),
+      );
+
+      return object;
+    }
+
+    createTexture(
+      width: number,
+      height: number,
+      format: string,
+      _target: boolean,
+      levels = 0,
+    ): AsObject {
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      const compressed = textureFormat(entry, format);
+      const most = profileLimits(entry.profile).textureSize;
+      if (width > most || height > most) {
+        throw s.rt.error("ArgumentError", 3683, most);
+      }
+      streamingLevels(levels, Math.max(width, height));
+      const value = allocate(this as unknown as AsObject, () =>
+        backend.createTexture(width, height, false, compressed, levels),
+      );
+      const object = construct("Texture", value, "flash.display3D.textures");
+      textures.set(
+        object,
+        own(object, {
+          value,
+          owner: this as unknown as AsObject,
+          disposed: false,
+          initialized: false,
+          reference: new WeakRef(object),
+        }),
+      );
+
+      return object;
+    }
+
+    createRectangleTexture(
+      width: number,
+      height: number,
+      format: string | null,
+      _target: boolean,
+    ): AsObject {
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      // baselineConstrained has none.
+      const most = profileLimits(entry.profile).rectangleSize;
+      if (!most) {
+        throw s.rt.error("Error", 3782);
+      }
+      const kind = textureFormat(entry, format);
+      if (width <= 0 || height <= 0) {
+        throw s.rt.error("ArgumentError", 3681);
+      }
+      if (width > most || height > most) {
+        throw s.rt.error("ArgumentError", 3766, most);
+      }
+      if (compressedFormat(kind)) {
+        throw s.rt.error("ArgumentError", 3762);
+      }
+
+      const value = allocate(this as unknown as AsObject, () =>
+        backend.createRectangleTexture(width, height, kind),
+      );
+      const object = construct("RectangleTexture", value, "flash.display3D.textures");
+      textures.set(
+        object,
+        own(object, {
+          value,
+          owner: this as unknown as AsObject,
+          disposed: false,
+          initialized: false,
+          reference: new WeakRef(object),
+        }),
+      );
+
+      return object;
+    }
+
+    createCubeTexture(size: number, format: string, _target: boolean, levels = 0): AsObject {
+      const entry = state(this as unknown as AsObject);
+      const backend = entry.backend;
+      const compressed = textureFormat(entry, format);
+      if (size > MOST_CUBE) {
+        throw s.rt.error("ArgumentError", 3705);
+      }
+      streamingLevels(levels, size);
+      const value = allocate(this as unknown as AsObject, () =>
+        backend.createTexture(size, size, true, compressed, levels),
+      );
+      const object = construct("CubeTexture", value, "flash.display3D.textures");
+      textures.set(
+        object,
+        own(object, {
+          value,
+          owner: this as unknown as AsObject,
+          disposed: false,
+          initialized: false,
+          reference: new WeakRef(object),
+        }),
+      );
+
+      return object;
+    }
+  }
 
   class BufferNatives {
     uploadFromByteArray(data: AsObject | null, offset: number, start: number, count: number): void {
@@ -402,6 +583,7 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
     }
   }
 
+  avm2.registerNativeClass(natives, "flash.display3D::Context3D", ContextResourceNatives);
   avm2.registerNativeClass(natives, "flash.display3D::VertexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::IndexBuffer3D", BufferNatives);
   avm2.registerNativeClass(natives, "flash.display3D::Program3D", ProgramNatives);
