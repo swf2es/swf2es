@@ -1,0 +1,45 @@
+package
+{
+	import flash.display.Bitmap;
+	import flash.display.BitmapData;
+	import flash.display.Shape;
+	import flash.display.Sprite;
+	import flash.events.Event;
+
+	public class Main extends Sprite
+	{
+		private var data:BitmapData;
+		private var dots:Sprite = new Sprite();
+		private var frame:int = 0;
+
+		public function Main()
+		{
+			var size:int = SIZE;
+			data = new BitmapData(size, size, true, 0);
+			addChild(new Bitmap(data));
+			for (var i:int = 0; i < 40; i++)
+			{
+				var dot:Shape = new Shape();
+				dot.graphics.beginFill(0xffc040 + i * 4, 0.8);
+				dot.graphics.drawCircle(0, 0, 2 + (i % 3));
+				dots.addChild(dot);
+			}
+
+			addEventListener(Event.ENTER_FRAME, step);
+		}
+
+		private function step(e:Event):void
+		{
+			frame++;
+			for (var i:int = 0; i < dots.numChildren; i++)
+			{
+				var dot:Shape = Shape(dots.getChildAt(i));
+				dot.x = (i * 97 + frame * (1 + i % 5)) % data.width;
+				dot.y = data.height - 8 - (i * 13 + frame) % 24;
+			}
+
+			data.draw(dots);
+			data.scroll(0, -1);
+		}
+	}
+}

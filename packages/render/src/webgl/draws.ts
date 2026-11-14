@@ -37,6 +37,7 @@ import {
   RUN_MOST,
   RUN_UNIT,
   SNAP_BIT,
+  TABLE_UNIT,
   TEXTURE_UNIT,
 } from "./programs.js";
 import { framebufferOf, type Open, type Target, type TargetPool } from "./targets.js";
@@ -166,15 +167,17 @@ export class Draws {
   private meshMode = -1;
   /**
    * Advanced text's program (GeometryData.glyphs), where it takes its row, view, Flash's
-   * pixels a stage pixel, mode and table; its vertices are in an atlas of their own.
+   * pixels a stage pixel and its text's slot in the glyph tables (GlyphTables), and the row
+   * and slot told it last, -1 for none; its vertices are in an atlas of their own.
    */
   private glyphProgram!: WebGLProgram;
   private glyphRowLocation: WebGLUniformLocation | null = null;
   private glyphViewLocation: WebGLUniformLocation | null = null;
   private glyphUnitLocation: WebGLUniformLocation | null = null;
-  private glyphModeLocation: WebGLUniformLocation | null = null;
   private glyphTableLocation: WebGLUniformLocation | null = null;
   private glyphStale = true;
+  private glyphRow = -1;
+  private glyphTable = -1;
   /** Flash's pixels a stage pixel: the target's pixels a stage pixel over those a pixel of Flash's. */
   private unit = 1;
   /**
@@ -279,12 +282,14 @@ export class Draws {
     this.glyphRowLocation = gl.getUniformLocation(this.glyphProgram, "uRow");
     this.glyphViewLocation = gl.getUniformLocation(this.glyphProgram, "uView");
     this.glyphUnitLocation = gl.getUniformLocation(this.glyphProgram, "uUnit");
-    this.glyphModeLocation = gl.getUniformLocation(this.glyphProgram, "uMode");
     this.glyphTableLocation = gl.getUniformLocation(this.glyphProgram, "uTable");
     this.state.useProgram(this.glyphProgram);
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uRows"), 0);
     gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uSegments"), OUTLINE_UNIT);
+    gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uTables"), TABLE_UNIT);
     this.glyphStale = true;
+    this.glyphRow = -1;
+    this.glyphTable = -1;
     this.lastRow = -1;
   }
 
@@ -846,7 +851,8 @@ export class Draws {
   /**
    * Entry `i`, advanced text's glyph quads (GeometryData.glyphs), drawn by the glyph
    * program from its atlas, which is told the view as it changed, and its
-   * text's mode and table; the glyph program left in use.
+   * row and its text's slot in the glyph tables as they change; the glyph
+   * program left in use.
    */
   private drawGlyphs(scene: SceneList, i: number, place: Place): void {
     const gl = this.gl;
@@ -860,11 +866,23 @@ export class Draws {
       this.glyphStale = false;
     }
 
-    gl.uniform1i(this.glyphRowLocation, scene.row[i]);
-    gl.uniform4fv(this.glyphModeLocation, glyphs.mode);
-    gl.uniform4fv(this.glyphTableLocation, glyphs.table);
+    const row = scene.row[i];
+    if (row !== this.glyphRow) {
+      gl.uniform1i(this.glyphRowLocation, row);
+      this.glyphRow = row;
+    }
+
+    const tables = this.atlas.tables;
+    const slot = glyphs.slot >= 0 ? glyphs.slot : tables.scratch(glyphs.mode, glyphs.table);
+    if (slot !== this.glyphTable) {
+      gl.uniform1i(this.glyphTableLocation, slot);
+      this.glyphTable = slot;
+    }
+
     state.bindTexture(OUTLINE_UNIT, this.gpu.outlines);
     state.bindSampler(OUTLINE_UNIT, null);
+    state.bindTexture(TABLE_UNIT, tables.texture);
+    state.bindSampler(TABLE_UNIT, null);
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
   }
 

@@ -2,7 +2,7 @@
 // is their index in AS3, and apart from it the children the timeline
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
-import { CHILDREN, DisplayObject, OTHER, scriptWork } from "./displayobject.js";
+import { CHILDREN, DisplayObject, markScriptsDue, OTHER, scriptWork } from "./displayobject.js";
 import type { Library } from "./timeline.js";
 import type { WalkList } from "./walk.js";
 
@@ -72,6 +72,9 @@ export class Container extends DisplayObject {
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
+    if (child.scriptsDue) {
+      markScriptsDue(this);
+    }
   }
 
   removeAtDepth(depth: number): DisplayObject | null {
@@ -154,6 +157,9 @@ export class Container extends DisplayObject {
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
+    if (child.scriptsDue) {
+      markScriptsDue(this);
+    }
   }
 
   swapChildren(a: DisplayObject, b: DisplayObject): void {

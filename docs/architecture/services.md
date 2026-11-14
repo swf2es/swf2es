@@ -254,8 +254,9 @@ AIR's library loaded after playerglobal, `air: true`, the host's
 (`renderer/air.ts`): the window's state, the displays, and `stat` and `list`, by
 synchronous messages, as File and NativeWindow read; its app:,
 app-storage: and file: URLs are read through the shell too. The main
-process answers them only while the application the user opened plays
-(`Sandbox.playApplication`, granted as the page reads its content SWF),
+process (`main/air-bridge.ts`) answers them only while the application
+the user opened plays (`Sandbox.playApplication`, granted as the page
+reads its content SWF),
 and its requests and sockets go unjudged, without policy files or a
 prompt, as AIR's application sandbox has them (`network.ts`'s
 "application" movie). `tests/desktop/smoke.ts` runs one in headless

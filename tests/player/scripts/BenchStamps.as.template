@@ -1,0 +1,42 @@
+package
+{
+	import flash.display.Bitmap;
+	import flash.display.BitmapData;
+	import flash.display.Shape;
+	import flash.display.Sprite;
+	import flash.events.Event;
+	import flash.geom.Matrix;
+
+	public class Main extends Sprite
+	{
+		private var data:BitmapData;
+		private var stamp:Shape = new Shape();
+		private var at:Matrix = new Matrix();
+		private var frame:int = 0;
+
+		public function Main()
+		{
+			data = new BitmapData(WIDTH, HEIGHT, false, 0x203040);
+			addChild(new Bitmap(data));
+			stamp.graphics.beginFill(0x900010, 0.7);
+			stamp.graphics.drawCircle(0, 0, 9);
+			stamp.graphics.drawCircle(12, 5, 5);
+			stamp.graphics.drawCircle(-8, 9, 4);
+			stamp.graphics.endFill();
+			addEventListener(Event.ENTER_FRAME, step);
+		}
+
+		private function step(e:Event):void
+		{
+			frame++;
+			for (var i:int = 0; i < COUNT; i++)
+			{
+				var k:int = frame * COUNT + i;
+				at.identity();
+				at.rotate(k);
+				at.translate((k * 7919) % data.width, (k * 104729) % data.height);
+				data.draw(stamp, at);
+			}
+		}
+	}
+}

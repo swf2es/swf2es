@@ -810,49 +810,10 @@ function masksSwf(count: number, unmasked: boolean): Uint8Array {
 }
 
 /** The scripted rig's classes: the root, whose setColor each part's first frame calls. */
-const SCRIPTED_SOURCE = `package {
-  import flash.display.MovieClip;
-  import flash.geom.ColorTransform;
-
-  public class Main extends MovieClip {
-    public var frames:int = 0;
-
-    public function Main() {
-      addFrameScript(0, frame, 1, frame);
-    }
-
-    private function frame():void {
-      frames++;
-    }
-
-    public var colors:Object = { skin: 0xe0b090, hair: 0x603010, cloth: 0x3050a0, trim: 0xc0c040 };
-
-    public function setColor(mc:MovieClip):void {
-      var c:uint = colors[mc.kind];
-      var ct:ColorTransform = mc.transform.colorTransform;
-      ct.redMultiplier = ((c >> 16) & 255) / 255;
-      ct.greenMultiplier = ((c >> 8) & 255) / 255;
-      ct.blueMultiplier = (c & 255) / 255;
-      mc.transform.colorTransform = ct;
-    }
-  }
-
-  public class Part extends MovieClip {
-    private static const KINDS:Array = ["skin", "hair", "cloth", "trim"];
-    private static var made:int = 0;
-    public var kind:String;
-
-    public function Part() {
-      kind = KINDS[made++ & 3];
-      addFrameScript(0, frame1);
-    }
-
-    private function frame1():void {
-      MovieClip(root).setColor(this);
-    }
-  }
-}
-`;
+const SCRIPTED_SOURCE = readFileSync(
+  new URL("./scripts/BenchScripted.as", import.meta.url),
+  "utf8",
+);
 
 /**
  * `count` rigs as --rig --swap makes them, each part a clip of the class
@@ -931,86 +892,16 @@ function scriptedSwf(count: number, still: boolean): Uint8Array {
 }
 
 /** The scrolling trail's class (--scroll): dots drawn into a bitmap each frame, then scrolled up a pixel. */
-const SCROLL_SOURCE = `package {
-  import flash.display.Bitmap;
-  import flash.display.BitmapData;
-  import flash.display.Shape;
-  import flash.display.Sprite;
-  import flash.events.Event;
-
-  public class Main extends Sprite {
-    private var data:BitmapData;
-    private var dots:Sprite = new Sprite();
-    private var frame:int = 0;
-
-    public function Main() {
-      var size:int = SIZE;
-      data = new BitmapData(size, size, true, 0);
-      addChild(new Bitmap(data));
-      for (var i:int = 0; i < 40; i++) {
-        var dot:Shape = new Shape();
-        dot.graphics.beginFill(0xffc040 + i * 4, 0.8);
-        dot.graphics.drawCircle(0, 0, 2 + (i % 3));
-        dots.addChild(dot);
-      }
-
-      addEventListener(Event.ENTER_FRAME, step);
-    }
-
-    private function step(e:Event):void {
-      frame++;
-      for (var i:int = 0; i < dots.numChildren; i++) {
-        var dot:Shape = Shape(dots.getChildAt(i));
-        dot.x = (i * 97 + frame * (1 + i % 5)) % data.width;
-        dot.y = data.height - 8 - (i * 13 + frame) % 24;
-      }
-
-      data.draw(dots);
-      data.scroll(0, -1);
-    }
-  }
-}
-`;
+const SCROLL_SOURCE = readFileSync(
+  new URL("./scripts/BenchScroll.as.template", import.meta.url),
+  "utf8",
+);
 
 /** The stamps' class (--stamps): COUNT shapes drawn each frame into a bitmap the stage's size. */
-const STAMPS_SOURCE = `package {
-  import flash.display.Bitmap;
-  import flash.display.BitmapData;
-  import flash.display.Shape;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.geom.Matrix;
-
-  public class Main extends Sprite {
-    private var data:BitmapData;
-    private var stamp:Shape = new Shape();
-    private var at:Matrix = new Matrix();
-    private var frame:int = 0;
-
-    public function Main() {
-      data = new BitmapData(WIDTH, HEIGHT, false, 0x203040);
-      addChild(new Bitmap(data));
-      stamp.graphics.beginFill(0x900010, 0.7);
-      stamp.graphics.drawCircle(0, 0, 9);
-      stamp.graphics.drawCircle(12, 5, 5);
-      stamp.graphics.drawCircle(-8, 9, 4);
-      stamp.graphics.endFill();
-      addEventListener(Event.ENTER_FRAME, step);
-    }
-
-    private function step(e:Event):void {
-      frame++;
-      for (var i:int = 0; i < COUNT; i++) {
-        var k:int = frame * COUNT + i;
-        at.identity();
-        at.rotate(k);
-        at.translate((k * 7919) % data.width, (k * 104729) % data.height);
-        data.draw(stamp, at);
-      }
-    }
-  }
-}
-`;
+const STAMPS_SOURCE = readFileSync(
+  new URL("./scripts/BenchStamps.as.template", import.meta.url),
+  "utf8",
+);
 
 /** The stamps (--stamps): `count` shapes drawn into a stage-sized bitmap each frame, never read. */
 function stampsSwf(count: number): Uint8Array {
@@ -1036,75 +927,7 @@ function stampsSwf(count: number): Uint8Array {
 }
 
 /** The pen (--pen): COUNT dots and lines drawn and stamped each frame, sprites measured, others kept off the list. */
-const PEN_SOURCE = `package {
-  import flash.display.BitmapData;
-  import flash.display.Bitmap;
-  import flash.display.Shape;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.geom.Rectangle;
-
-  public class Main extends Sprite {
-    private var data:BitmapData = new BitmapData(WIDTH, HEIGHT, true, 0);
-    private var pen:Shape = new Shape();
-    private var pane:Sprite = new Sprite();
-    private var sprites:Array = [];
-    private var hidden:Array = [];
-    private var frame:int = 0;
-
-    public function Main() {
-      addChild(new Bitmap(data));
-      pane.scrollRect = new Rectangle(0, 0, WIDTH, HEIGHT);
-      addChild(pane);
-      for (var i:int = 0; i < COUNT / 4; i++) {
-        var s:Sprite = new Sprite();
-        s.graphics.beginFill(0xffcc00);
-        s.graphics.drawRect(-8, -8, 16, 16);
-        pane.addChild(s);
-        sprites.push(s);
-      }
-
-      // Kept off the display list, heard for a frame's events, as an editor's hidden parts are.
-      for (i = 0; i < 500; i++) {
-        var part:Sprite = new Sprite();
-        part.addEventListener(Event.RENDER, idle);
-        hidden.push(part);
-      }
-
-      addEventListener(Event.ENTER_FRAME, step);
-    }
-
-    private function idle(e:Event):void {}
-
-    private function step(e:Event):void {
-      frame++;
-      data.fillRect(data.rect, 0);
-      pen.graphics.clear();
-      for (var i:int = 0; i < COUNT; i++) {
-        var x:Number = (i * 37 + frame * 3) % WIDTH;
-        var y:Number = (i * 53 + frame * 2) % HEIGHT;
-        pen.graphics.lineStyle(2, 0x3060c0 + i);
-        pen.graphics.beginFill(0x30c060 + i);
-        pen.graphics.drawCircle(x, y, 3 + i % 5);
-        pen.graphics.endFill();
-        pen.graphics.moveTo(x, y);
-        pen.graphics.lineTo(x + 20, y + 10);
-      }
-
-      data.draw(pen);
-      for (i = 0; i < sprites.length; i++) {
-        var s:Sprite = sprites[i];
-        s.x = (i * 41 + frame * 4) % WIDTH;
-        s.y = (i * 29 + frame * 3) % HEIGHT;
-        var r:Rectangle = s.getRect(stage);
-        if (r.right > WIDTH) {
-          s.x -= r.right - WIDTH;
-        }
-      }
-    }
-  }
-}
-`;
+const PEN_SOURCE = readFileSync(new URL("./scripts/BenchPen.as.template", import.meta.url), "utf8");
 
 /** The pen (--pen): `count` dots and lines drawn and stamped each frame, sprites measured, others kept. */
 function penSwf(count: number): Uint8Array {
@@ -1379,74 +1202,10 @@ function scrollSwf(size: number): Uint8Array {
 }
 
 /** The triangles' class (--triangles): a grid of textured triangles drawn anew each frame. */
-const TRIANGLES_SOURCE = `package {
-  import flash.display.BitmapData;
-  import flash.display.Shape;
-  import flash.display.Sprite;
-  import flash.events.Event;
-
-  public class Main extends Sprite {
-    private var shape:Shape = new Shape();
-    private var texture:BitmapData = new BitmapData(64, 64, false, 0);
-    private var vertices:Vector.<Number> = new Vector.<Number>();
-    private var indices:Vector.<int> = new Vector.<int>();
-    private var uvt:Vector.<Number> = new Vector.<Number>();
-    private var side:int;
-    private var frame:int = 0;
-
-    public function Main() {
-      texture.perlinNoise(16, 16, 2, 7, true, true);
-      // Two triangles a square of a grid of side by side squares.
-      side = Math.ceil(Math.sqrt(COUNT / 2));
-      for (var y:int = 0; y <= side; y++) {
-        for (var x:int = 0; x <= side; x++) {
-          vertices.push(0, 0);
-          uvt.push(x / 8, y / 8, 1);
-        }
-      }
-
-      for (var i:int = 0; i < COUNT; i++) {
-        var square:int = i >> 1;
-        var at:int = (square / side) * (side + 1) + square % side;
-        // Every other square wound the other way, so that culling drops half the triangles.
-        var a:int = i & 1 ? at + 1 : at;
-        var b:int = i & 1 ? at + side + 2 : at + 1;
-        var c:int = at + side + 1;
-        if (square & 1) {
-          indices.push(a, c, b);
-        } else {
-          indices.push(a, b, c);
-        }
-      }
-
-      addChild(shape);
-      addEventListener(Event.ENTER_FRAME, step);
-    }
-
-    private function step(e:Event):void {
-      frame++;
-      var turn:Number = frame / 48;
-      var c:Number = Math.cos(turn);
-      var s:Number = Math.sin(turn);
-      var cell:Number = 560 / side;
-      var k:int = 0;
-      for (var y:int = 0; y <= side; y++) {
-        for (var x:int = 0; x <= side; x++) {
-          var px:Number = (x - side / 2) * cell;
-          var py:Number = (y - side / 2) * cell;
-          vertices[k++] = 400 + px * c - py * s;
-          vertices[k++] = 300 + px * s + py * c;
-        }
-      }
-
-      shape.graphics.clear();
-      shape.graphics.beginBitmapFill(texture, null, true, true);
-      shape.graphics.drawTriangles(vertices, indices, uvt, CULLING);
-      shape.graphics.endFill();
-    }
-  }
-}
-`;
+const TRIANGLES_SOURCE = readFileSync(
+  new URL("./scripts/BenchTriangles.as.template", import.meta.url),
+  "utf8",
+);
 
 /** The triangles (--triangles): `count` textured triangles a script draws anew each frame. */
 function trianglesSwf(count: number, culled: boolean): Uint8Array {
@@ -1476,30 +1235,7 @@ function trianglesSwf(count: number, culled: boolean): Uint8Array {
 }
 
 /** The town's classes: the root, and each character's, whose frame scripts count its loops. */
-const TOWN_SOURCE = `package {
-  import flash.display.MovieClip;
-
-  public class Main extends MovieClip {
-    public var loops:int = 0;
-  }
-
-  public class Character extends MovieClip {
-    private var turns:int = 0;
-
-    public function Character() {
-      addFrameScript(0, first, totalFrames - 1, last);
-    }
-
-    private function first():void {
-      turns++;
-    }
-
-    private function last():void {
-      Main(root).loops++;
-    }
-  }
-}
-`;
+const TOWN_SOURCE = readFileSync(new URL("./scripts/BenchTown.as", import.meta.url), "utf8");
 
 /**
  * The town (--town): `count` characters of their own parts, on loops of

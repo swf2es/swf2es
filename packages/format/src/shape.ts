@@ -63,7 +63,10 @@ export type Fill =
 export interface Line {
   /** Width in twips; 0 is a hairline. */
   width: number;
-  /** 0xAARRGGBB, or the colour of a gradient's first stop for a filled line. */
+  /**
+   * 0xAARRGGBB; for a filled line, its fill's colour, or a gradient's first
+   * stop's, for what reads a colour alone: the line is drawn with `fill`.
+   */
   color: number;
   /** DefineShape4's LINESTYLE2 fields, else a round line. */
   startCap: number;

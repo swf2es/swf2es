@@ -16,6 +16,7 @@ import {
   CONTENT,
   type DisplayObject,
   MovieClip,
+  markScriptsDue,
   rootOf,
   scriptWork,
   TextObject,
@@ -160,6 +161,16 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
         display.object = o;
         // A clip alive now has its frame scripts to run (Scripting.runFrameScripts).
         scriptWork.changes++;
+        // Its gotos run no cycle, so every round lists it (MovieClip.listedAlways); an AVM1
+        // movie's root has none, nor any round.
+        if (
+          display instanceof MovieClip &&
+          !display.avm1Root &&
+          (display.library.version ?? 10) < 10
+        ) {
+          display.listedAlways = true;
+          markScriptsDue(display);
+        }
         // Only a MovieClip plays its timeline: a sprite bound to a class that
         // extends Sprite alone stays on its first frame, as fl.controls'
         // components do, whose second frame holds their skins. An AVM1

@@ -6,7 +6,8 @@ defined as the module loads, a function that swaps a page's Flash tags
 for it, and a configuration the page sets once. It depends on the player
 and on player-hosts, whose WebSocket relay carries flash.net.Socket.
 
-The element (`element.ts`) takes an `<embed>`'s attributes: `src`,
+The element (`element.ts`) takes an `<embed>`'s attributes, read as
+Flash read them in `attributes.ts`: `src`,
 `width` and `height` (a number is pixels, as an `<embed>`'s, anything
 else a CSS length), `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`,
 `base`, `allowscriptaccess`, `allownetworking` and `quality`, and
@@ -117,7 +118,8 @@ relays' place, as the desktop app's, which reaches TCP itself;
 `air.net.WebSocket` in place of the page's WebSocket, as the desktop
 app's, whose page has no network; `fetch`,
 an embedder's fetch in place of the browser's for what the SWFs load and
-for the SWF the element plays (purpose `movie`), with `loadPolicyFile`
+for the SWF the element plays (purpose `movie`; `fetching.ts`), with
+`loadPolicyFile`
 and `sandboxType` for the player, as the desktop app judges requests by
 Flash's sandboxes and policy files rather than CORS; and
 `cache`. The page fetches and compiles codegen.wasm once and the
@@ -137,7 +139,7 @@ the writes.
 element's `workers` attribute, `"true"` or `"false"`, decides for its own
 SWFs over the configuration, and off, `Worker.isSupported` is false. A
 player's host starts Web Workers ahead only for a SWF whose ABCs name
-`WorkerDomain`, and the element awaits them before the SWF's first
+`WorkerDomain` (`workers.ts`), and the element awaits them before the SWF's first
 frame, as Crossbridge's start a worker and wait for it in one script, for
 ten seconds at most, so that a script that never says it loaded keeps
 no SWF from playing; a

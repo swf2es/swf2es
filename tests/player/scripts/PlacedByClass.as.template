@@ -1,59 +1,70 @@
-package {
-  import flash.display.DisplayObject;
-  import flash.display.Loader;
-  import flash.display.MovieClip;
-  import flash.events.Event;
-  import flash.system.ApplicationDomain;
-  import flash.system.LoaderContext;
-  import flash.utils.ByteArray;
-  import flash.utils.getDefinitionByName;
+package
+{
+	import flash.display.DisplayObject;
+	import flash.display.Loader;
+	import flash.display.MovieClip;
+	import flash.events.Event;
+	import flash.system.ApplicationDomain;
+	import flash.system.LoaderContext;
+	import flash.utils.ByteArray;
+	import flash.utils.getDefinitionByName;
 
-  public class Main extends MovieClip {
-    private static const LIB:String = "@@LIB@@";
-    private static const VIEW:String = "@@VIEW@@";
+	public class Main extends MovieClip
+	{
+		private static const LIB:String = "@@LIB@@";
+		private static const VIEW:String = "@@VIEW@@";
 
-    public function Main() {
-      load(LIB, function ():void {
-        load(VIEW, function ():void {
-          trace("loaded");
-          var Dialog:Class = getDefinitionByName("PlacedDialog") as Class;
-          var dialog:DisplayObject = new Dialog() as DisplayObject;
-          addChild(dialog);
-        });
-      });
-    }
+		public function Main()
+		{
+			load(LIB, function():void
+				{
+					load(VIEW, function():void
+						{
+							trace("loaded");
+							var Dialog:Class = getDefinitionByName("PlacedDialog") as Class;
+							var dialog:DisplayObject = new Dialog() as DisplayObject;
+							addChild(dialog);
+						});
+				});
+		}
 
-    private function load(text:String, then:Function):void {
-      var loader:Loader = new Loader();
-      var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
-      context.allowCodeImport = true;
-      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void {
-        then();
-      });
-      loader.loadBytes(decode(text), context);
-    }
+		private function load(text:String, then:Function):void
+		{
+			var loader:Loader = new Loader();
+			var context:LoaderContext = new LoaderContext(false, ApplicationDomain.currentDomain);
+			context.allowCodeImport = true;
+			loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void
+				{
+					then();
+				});
+			loader.loadBytes(decode(text), context);
+		}
 
-    private static function decode(text:String):ByteArray {
-      const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      var out:ByteArray = new ByteArray();
-      var bits:int = 0;
-      var have:int = 0;
-      for (var i:int = 0; i < text.length; i++) {
-        var c:String = text.charAt(i);
-        if (c == "=") {
-          break;
-        }
+		private static function decode(text:String):ByteArray
+		{
+			const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			var out:ByteArray = new ByteArray();
+			var bits:int = 0;
+			var have:int = 0;
+			for (var i:int = 0; i < text.length; i++)
+			{
+				var c:String = text.charAt(i);
+				if (c == "=")
+				{
+					break;
+				}
 
-        bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
-        have += 6;
-        if (have >= 8) {
-          have -= 8;
-          out.writeByte((bits >> have) & 0xff);
-        }
-      }
+				bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
+				have += 6;
+				if (have >= 8)
+				{
+					have -= 8;
+					out.writeByte((bits >> have) & 0xff);
+				}
+			}
 
-      out.position = 0;
-      return out;
-    }
-  }
+			out.position = 0;
+			return out;
+		}
+	}
 }

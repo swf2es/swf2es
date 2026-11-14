@@ -14,14 +14,8 @@ import {
   type TextureHandle,
   type Textures,
 } from "@swf2es/render";
-import {
-  argbOf,
-  BitmapStore,
-  characterStore,
-  type GpuCopy,
-  type PixelRect,
-  rgbaInto,
-} from "../bitmap/bitmap.js";
+import { argbOf, BitmapStore, characterStore, type GpuCopy, rgbaInto } from "../bitmap/bitmap.js";
+import type { PixelRect } from "../bitmap/pixel-rect.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";

@@ -10,8 +10,9 @@ import {
   DRAW_TRANSFORM,
   DrawKernel,
 } from "@swf2es/native/render";
-import { BitmapStore, over, type PixelRect } from "./bitmap.js";
+import { BitmapStore, over } from "./bitmap.js";
 import { drawKernel } from "./kernel.js";
+import type { PixelRect } from "./pixel-rect.js";
 
 /** An affine matrix as Flash's flash.geom.Matrix has it: x' = a x + c y + tx, y' = b x + d y + ty. */
 export interface Affine {

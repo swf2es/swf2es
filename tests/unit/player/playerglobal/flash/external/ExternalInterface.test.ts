@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -489,41 +490,7 @@ function handOver(compile: ReturnType<typeof compiler>, childUrl: string) {
     "EiHandMain",
   );
   const child = bare(
-    compile(
-      "EiHandChild",
-      `package {
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.external.ExternalInterface;
-  public class EiHandChild extends Sprite {
-    public function EiHandChild() {
-      addEventListener(Event.ADDED_TO_STAGE, added);
-    }
-
-    private function added(e:Event):void {
-      var main:Object = parent.parent;
-      stage.addEventListener("relay", ExternalInterface.call);
-      stage.addEventListener("ping", ExternalInterface.call);
-      main.relayed = new EiRelay();
-      main.names = ["hello"];
-      main.sorts = ["hello", "there"];
-      main.fn = ExternalInterface.call;
-    }
-  }
-}
-
-import flash.events.Event;
-
-class EiRelay extends Event {
-  public function EiRelay() {
-    super("relay");
-  }
-
-  override public function toString():String {
-    return "hello";
-  }
-}`,
-    ),
+    compile("EiHandChild", readFileSync(new URL("./EiHandChild.as", import.meta.url), "utf8")),
     1,
     "EiHandChild",
   );
@@ -557,51 +524,7 @@ test("the main SWF's own calls are its own, a cross-origin child loaded beside i
 }, async () => {
   const compile = compiler(out);
   const main = bare(
-    compile(
-      "EiMainCalls",
-      `package {
-  import flash.display.Loader;
-  import flash.display.MovieClip;
-  import flash.events.Event;
-  import flash.external.ExternalInterface;
-  import flash.net.URLLoader;
-  import flash.net.URLLoaderDataFormat;
-  import flash.net.URLRequest;
-  import flash.system.fscommand;
-  public class EiMainCalls extends MovieClip {
-    private var ran:Boolean = false;
-
-    public function EiMainCalls() {
-      var loader:Loader = new Loader();
-      loader.load(new URLRequest("http://other.test/child.swf"));
-      addChild(loader);
-      // Bytes it loads itself: the content is the main SWF's.
-      var stream:URLLoader = new URLLoader();
-      stream.dataFormat = URLLoaderDataFormat.BINARY;
-      stream.addEventListener(Event.COMPLETE, function (e:Event):void {
-        new Loader().loadBytes(stream.data);
-      });
-      stream.load(new URLRequest("http://page.test/own.swf"));
-      addFrameScript(2, frameScript);
-      addEventListener(Event.ENTER_FRAME, enterFrame);
-    }
-
-    private function frameScript():void {
-      ExternalInterface.call("hello", "frame script");
-      fscommand("frame script", "");
-      stop();
-    }
-
-    private function enterFrame(e:Event):void {
-      if (currentFrame == 3 && !ran) {
-        ran = true;
-        ExternalInterface.call("hello", "enterFrame");
-        fscommand("enterFrame", "");
-      }
-    }
-  }
-}`,
-    ),
+    compile("EiMainCalls", readFileSync(new URL("./EiMainCalls.as", import.meta.url), "utf8")),
     4,
     "EiMainCalls",
   );

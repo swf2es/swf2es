@@ -3,6 +3,7 @@
 // codegen.wasm, constructed on the root with the timeline's children in
 // place, its frame scripts run in frame order.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -423,63 +424,7 @@ test("a goto's caller goes on when a script its cycle runs throws, as in Flash",
   // clip's frame script each land on a script that throws. A SWF that loads
   // a level and goes to its first frame from a COMPLETE listener stalled
   // when the goto passed the level's error to it.
-  const source = `package {
-    import flash.display.MovieClip;
-    import flash.events.Event;
-    public class Bound extends MovieClip {
-      public function Bound() {
-        addFrameScript(1, function():void {
-          trace("Bound script 2, goto 3");
-          gotoAndStop(3);
-          trace("Bound after its goto", currentFrame);
-        }, 2, function():void {
-          trace("Bound script 3 throws");
-          throw new Error("from script 3");
-        }, 3, function():void {
-          trace("Bound script 4 throws");
-          throw new Error("from script 4");
-        });
-      }
-    }
-    public class Main extends MovieClip {
-      public var bound:Bound;
-      private var n:int = 0;
-      public function Main() {
-        addFrameScript(2, function():void {
-          try {
-            trace("Main script 3, goto 4");
-            bound.gotoAndStop(4);
-            trace("Main script after goto", bound.currentFrame);
-          } catch (error:Error) {
-            trace("Main script caught", error.message);
-          }
-        });
-        addEventListener(Event.ENTER_FRAME, enter);
-      }
-      private function enter(e:Event):void {
-        n++;
-        if (n == 1) {
-          try {
-            trace("Main listener, goto 2");
-            bound.gotoAndStop(2);
-            trace("Main listener after goto", bound.currentFrame);
-          } catch (error:Error) {
-            trace("Main listener caught", error.message);
-          }
-        } else if (n == 3) {
-          bound.gotoAndStop(1);
-          try {
-            trace("Main listener, goto 3");
-            bound.gotoAndStop(3);
-            trace("Main listener after goto", bound.currentFrame);
-          } catch (error:Error) {
-            trace("Main listener caught", error.message);
-          }
-          removeEventListener(Event.ENTER_FRAME, enter);
-        }
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./GotoCycleThrows.as", import.meta.url), "utf8");
   const swf = w.swf({
     version: 10,
     width: 20,
@@ -540,61 +485,7 @@ test("every error nothing caught is reported, and the listeners and constructors
   // a second on Main and one on a Sprite off the display list; a listener
   // sends a clip to two frames whose scripts throw; the root's goto to its
   // second frame makes a Bad, whose constructor throws, then a Good.
-  const source = `package {
-    import flash.display.MovieClip;
-    import flash.display.Sprite;
-    import flash.events.Event;
-    public class Bound extends MovieClip {
-      public function Bound() {
-        stop();
-        addFrameScript(1, function():void { trace("Bound script 2 throws"); throw new Error("from script 2"); },
-          2, function():void { trace("Bound script 3 throws"); throw new Error("from script 3"); });
-      }
-    }
-    public class Bad extends MovieClip {
-      public function Bad() { trace("making Bad"); throw new Error("from Bad"); }
-    }
-    public class Good extends MovieClip {
-      public function Good() { trace("made Good"); }
-    }
-    public class Main extends MovieClip {
-      public var bound:Bound;
-      private var n:int = 0;
-      private var other:Sprite = new Sprite();
-      public function Main() {
-        stop();
-        addEventListener(Event.FRAME_CONSTRUCTED, function(_:Event):void {
-          if (n == 1) { trace("frameConstructed 1 throws"); throw new Error("from frameConstructed"); }
-        });
-        addEventListener(Event.FRAME_CONSTRUCTED, function(_:Event):void {
-          if (n == 1) trace("frameConstructed 2");
-        });
-        addEventListener(Event.EXIT_FRAME, function(_:Event):void {
-          if (n == 1) { trace("exitFrame 1 throws"); throw new Error("from exitFrame"); }
-        });
-        addEventListener(Event.EXIT_FRAME, function(_:Event):void {
-          if (n == 1) trace("exitFrame 2");
-        });
-        other.addEventListener(Event.EXIT_FRAME, function(_:Event):void {
-          if (n == 1) trace("exitFrame other");
-        });
-        addEventListener(Event.ENTER_FRAME, enter);
-      }
-      private function enter(e:Event):void {
-        n++;
-        if (n == 2) {
-          trace("goto 2 and 3");
-          bound.gotoAndStop(2);
-          bound.gotoAndStop(3);
-          trace("after both gotos", bound.currentFrame);
-        } else if (n == 3) {
-          trace("next frame");
-          gotoAndStop(2);
-          trace("after root goto", numChildren);
-        }
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./UncaughtErrors.as", import.meta.url), "utf8");
   const swf = w.swf({
     version: 10,
     width: 20,
@@ -660,29 +551,7 @@ test("every error nothing caught is reported, and the listeners and constructors
 
 test("without onUncaught, a frame throws all its errors once it has ended", { skip }, async () => {
   // Two gotos from one listener, each landing on a script that throws.
-  const source = `package {
-    import flash.display.MovieClip;
-    import flash.events.Event;
-    public class Bound extends MovieClip {
-      public function Bound() {
-        stop();
-        addFrameScript(1, function():void { throw new Error("from script 2"); },
-          2, function():void { throw new Error("from script 3"); });
-      }
-    }
-    public class Main extends MovieClip {
-      public var bound:Bound;
-      public function Main() {
-        addEventListener(Event.ENTER_FRAME, function(_:Event):void {
-          if (bound.currentFrame == 1) {
-            bound.gotoAndStop(2);
-            bound.gotoAndStop(3);
-          }
-        });
-        addEventListener(Event.EXIT_FRAME, function(_:Event):void { trace("exitFrame", bound.currentFrame); });
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./UncaughtThrown.as", import.meta.url), "utf8");
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
@@ -712,44 +581,7 @@ test("a listener's error never reaches the dispatcher, and the listeners after i
   // Two listeners each to a script's dispatchEvent, a Loader's INIT and a
   // Timer's TIMER, the first of each throwing: dispatchEvent still returns
   // true, COMPLETE still comes, and the timer still stops after two.
-  const source = `package {
-    import flash.display.Loader;
-    import flash.display.MovieClip;
-    import flash.events.Event;
-    import flash.events.EventDispatcher;
-    import flash.events.TimerEvent;
-    import flash.system.LoaderContext;
-    import flash.utils.ByteArray;
-    import flash.utils.Timer;
-    public class Main extends MovieClip {
-      private var timer:Timer;
-      public function Main() {
-        var d:EventDispatcher = new EventDispatcher();
-        d.addEventListener("x", function(e:Event):void { trace("x1 throws"); throw new Error("from x1"); });
-        d.addEventListener("x", function(e:Event):void { trace("x2 ran"); });
-        trace("dispatch returned", d.dispatchEvent(new Event("x")));
-        // An empty SWF of version 10: header, a zero rectangle, 12 fps, one frame, FileAttributes, ShowFrame, End.
-        var swf:ByteArray = new ByteArray();
-        for each (var b:int in [0x46, 0x57, 0x53, 10, 23, 0, 0, 0, 0, 0, 12, 1, 0, 0x44, 0x11, 8, 0, 0, 0, 0x40, 0, 0, 0]) {
-          swf.writeByte(b);
-        }
-        var loader:Loader = new Loader();
-        loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void { trace("init1 throws"); throw new Error("from init1"); });
-        loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void { trace("init2"); });
-        loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void {
-          trace("complete");
-          timer = new Timer(20, 2);
-          timer.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("timer1 throws", timer.currentCount); throw new Error("from timer1"); });
-          timer.addEventListener(TimerEvent.TIMER, function(e:TimerEvent):void { trace("timer2", timer.currentCount); });
-          timer.addEventListener(TimerEvent.TIMER_COMPLETE, function(e:TimerEvent):void { trace("timer complete", timer.running); });
-          timer.start();
-        });
-        var context:LoaderContext = new LoaderContext();
-        context.allowCodeImport = true;
-        loader.loadBytes(swf, context);
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./UncaughtListeners.as", import.meta.url), "utf8");
   const lines: string[] = [];
   const errors: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
@@ -1009,29 +841,7 @@ test("scripts that catch the stack overflow of their goto cycles stop soon, not 
   // Two clips that send each other to the other frame, at once, as a goto on
   // another clip is: each cycle runs inside the last, and each script
   // catches the overflow, which must not set the cycles going again.
-  const source = `package {
-    import flash.display.MovieClip;
-    public class Bound extends MovieClip {
-      public static var runs:int = 0;
-      public function Bound() {
-        addFrameScript(0, swap, 1, swap);
-      }
-      private function swap():void {
-        runs++;
-        var peer:MovieClip = MovieClip(parent).getChildByName(name == "a" ? "b" : "a") as MovieClip;
-        try {
-          peer.gotoAndStop(peer.currentFrame == 1 ? 2 : 1);
-        } catch (e:Error) {}
-      }
-    }
-    public class Main extends MovieClip {
-      public var a:Bound;
-      public var b:Bound;
-      public function Main() {
-        addEventListener("exitFrame", function(_:*):void { trace("runs", Bound.runs); });
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./CaughtOverflow.as", import.meta.url), "utf8");
   const swf = w.swf({
     version: 10,
     width: 20,
@@ -1143,45 +953,7 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
 // whose script ran, to a frame, or makes a Kid with `new`, and adds it or
 // not. Each makes a script due after the round has listed its clips,
 // which only another round runs.
-const SOURCE = `package {
-  import flash.display.MovieClip;
-
-  public dynamic class Clip extends MovieClip {
-    public function Clip() {
-      addFrameScript(0, function():void { trace(name, 1); },
-        1, function():void { trace(name, 2); stop(); if (name != "a") poke(); },
-        2, function():void { trace(name, 3); stop(); },
-        3, function():void { trace(name, 4); stop(); });
-    }
-
-    private function poke():void {
-      var a:MovieClip = MovieClip(parent.getChildByName("a"));
-      if (name == "goto") {
-        a.gotoAndStop(3);
-      } else if (name == "place") {
-        a.gotoAndStop(4);
-      } else {
-        var kid:Kid = new Kid();
-        kid.name = name;
-        if (name == "add") {
-          MovieClip(parent).addChild(kid);
-        }
-      }
-    }
-  }
-
-  public class Kid extends MovieClip {
-    public function Kid() {
-      addFrameScript(0, function():void { trace("kid", name); });
-    }
-  }
-
-  public dynamic class Main extends MovieClip {
-    public function Main() {
-      addFrameScript(1, function():void { trace("main", 2); stop(); });
-    }
-  }
-}`;
+const SOURCE = readFileSync(new URL("./Rounds.as", import.meta.url), "utf8");
 
 /** A version 9 root of a Clip "a" and one named `second` after it. */
 function roundsSwf(abc: Uint8Array, second: string): Uint8Array {
@@ -1243,6 +1015,151 @@ for (const [second, due] of [
   });
 }
 
+// Clips a, c and b in that order, each a Hop of three frames: c stops on
+// its first, whose script ran, and a's second sends it to its third. In a
+// SWF of version 9 the goto runs no cycle, and c's script runs in the
+// round that listed it before b's; from version 10 the goto's cycle runs
+// it, and b's with it. A round that left c out as not due when it listed
+// it would run its script after b's, in the next.
+const HOP = `package {
+  import flash.display.MovieClip;
+  public dynamic class Hop extends MovieClip {
+    public function Hop() {
+      addFrameScript(0, function():void { trace(name, 1); if (name == "c") stop(); },
+        1, function():void {
+          trace(name, 2);
+          stop();
+          if (name == "a") MovieClip(parent.getChildByName("c")).gotoAndStop(3);
+        },
+        2, function():void { trace(name, 3); stop(); });
+    }
+  }
+  public dynamic class HopMain extends MovieClip {
+    public function HopMain() { addFrameScript(1, function():void { stop(); }); }
+  }
+}`;
+
+for (const version of [9, 10]) {
+  test(`a goto has a clip listed as not due run its script in the round, version ${version}`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const swf = w.swf({
+      version,
+      width: 20,
+      height: 20,
+      frameCount: 2,
+      tags: [
+        w.fileAttributes(true),
+        w.sprite(2, 3, [w.showFrame(), w.showFrame(), w.showFrame(), w.end()]),
+        w.doAbc(compiler(out)("Hop", HOP)),
+        w.symbolClass([
+          [0, "HopMain"],
+          [2, "Hop"],
+        ]),
+        w.place({ depth: 1, character: 2, name: "a" }),
+        w.place({ depth: 2, character: 2, name: "c" }),
+        w.place({ depth: 3, character: 2, name: "b" }),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+    const player = new Player(swf, scripting);
+    await player.start();
+    assert.deepEqual(lines.splice(0), ["a 1", "c 1", "b 1"]);
+
+    player.tick();
+    assert.deepEqual(lines, ["a 2", "c 3", "b 2"]);
+  });
+}
+
+test("a goto has a clip of version 9 under one of version 10 run its script in the round", {
+  skip,
+}, async () => {
+  // As the Hop tests, with c the root of a SWF of version 9 loaded between a
+  // and b, which are of version 10: a's goto runs no cycle for c, whose
+  // script runs in the round that listed it before b's. Rounds walk only what
+  // is marked there, so one that left c out as not due would run it after b's.
+  const inner = w.swf({
+    version: 9,
+    width: 20,
+    height: 20,
+    frameCount: 3,
+    tags: [w.fileAttributes(true), w.showFrame(), w.showFrame(), w.showFrame(), w.end()],
+  });
+  const source = `package {
+    import flash.display.Loader;
+    import flash.display.MovieClip;
+    import flash.events.Event;
+    import flash.system.LoaderContext;
+    import flash.utils.ByteArray;
+    public dynamic class MixMain extends MovieClip {
+      public function MixMain() {
+        var bytes:ByteArray = new ByteArray();
+        for each (var b:int in [${Array.from(inner).join(",")}]) {
+          bytes.writeByte(b);
+        }
+        var loader:Loader = new Loader();
+        loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void {
+          var c:MovieClip = MovieClip(loader.content);
+          c.stop();
+          c.addFrameScript(2, function():void { trace("c 3"); c.stop(); });
+          MovieClip(getChildByName("a")).play();
+          MovieClip(getChildByName("b")).play();
+          trace("loaded");
+        });
+        var context:LoaderContext = new LoaderContext();
+        context.allowCodeImport = true;
+        loader.loadBytes(bytes, context);
+        addChildAt(loader, 1);
+      }
+    }
+    public dynamic class Mix extends MovieClip {
+      public function Mix() {
+        addFrameScript(0, function():void { stop(); },
+          1, function():void {
+            trace(name, 2);
+            stop();
+            if (name == "a") MovieClip(Loader(parent.getChildAt(1)).content).gotoAndStop(3);
+          });
+      }
+    }
+  }`;
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(2, 3, [w.showFrame(), w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("Mix", source)),
+      w.symbolClass([
+        [0, "MixMain"],
+        [2, "Mix"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "a" }),
+      w.place({ depth: 2, character: 2, name: "b" }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const player = new Player(swf, scripting);
+  await player.start();
+  for (let i = 0; i < 20 && !lines.includes("b 2"); i++) {
+    await scripting.settled();
+    player.tick();
+  }
+
+  assert.deepEqual(lines, ["loaded", "a 2", "c 3", "b 2"]);
+});
+
 test("a frame whose scripts change nothing a round reads takes one round", {
   skip,
 }, async () => {
@@ -1279,7 +1196,8 @@ test("a frame whose scripts change nothing a round reads takes one round", {
   // The root's script runs, and changes nothing a round reads: no second
   // round walks the list. Each walk, the tick's and each round's, starts
   // with the orphans. The checked build runs the round left out anyway, to
-  // see that it finds nothing.
+  // see that it finds nothing, and walks each round twice, what is marked
+  // and all, to see that they agree.
   let walks = 0;
   const eachOrphanRoot = scripting.lifecycle.eachOrphanRoot.bind(scripting.lifecycle);
   scripting.lifecycle.eachOrphanRoot = (f) => {
@@ -1290,7 +1208,7 @@ test("a frame whose scripts change nothing a round reads takes one round", {
     player.tick();
   }
 
-  assert.equal(walks, Scripting.checkRounds ? 12 : 8);
+  assert.equal(walks, Scripting.checkRounds ? 20 : 8);
   const n = scripting.rt.getProperty(
     player.root.object as avm2.AsObject,
     avm2.qname(avm2.publicNs, "n"),
@@ -1359,59 +1277,7 @@ test("a button's state that holds the button stays where it is, its #2150 report
   // error nothing caught and returns, the state set; the state stays in its
   // container, not the button's child. Made one, the walks of each frame
   // came back to the button without end.
-  const source = `package {
-    import flash.display.MovieClip;
-    import flash.display.Shape;
-    import flash.display.SimpleButton;
-    import flash.display.Sprite;
-    import flash.events.Event;
-
-    public class ButtonCycle extends MovieClip {
-      private var f:int = 0;
-      private var a:Sprite;
-      private var b:Sprite;
-
-      public function ButtonCycle() {
-        a = new Sprite();
-        a.addChild(new MovieClip());
-        var ba:SimpleButton = new SimpleButton(new Shape(), new Shape(), new Shape(), new Shape());
-        a.addChild(ba);
-        try {
-          ba.upState = a;
-          trace("off: set; a.parent", a.parent, "upState is a", ba.upState == a);
-        } catch (e:Error) {
-          trace("off: threw", e.errorID);
-        }
-        b = new Sprite();
-        addChild(b);
-        var bb:SimpleButton = new SimpleButton(new Shape(), new Shape(), new Shape(), new Shape());
-        b.addChild(bb);
-        try {
-          bb.upState = b;
-          trace("on: set; b.parent is this", b.parent == this, "upState is b", bb.upState == b);
-        } catch (e:Error) {
-          trace("on: threw", e.errorID);
-        }
-        try {
-          bb.overState = b;
-          trace("on: over set");
-        } catch (e:Error) {
-          trace("on: over threw", e.errorID);
-        }
-        addEventListener(Event.ENTER_FRAME, enter);
-      }
-
-      private function enter(e:Event):void {
-        f++;
-        trace("frame", f, "a.parent", a.parent, "b.parent is this", b.parent == this, "b in stage", b.stage != null);
-        if (f == 2) {
-          a.addChild(new MovieClip());
-          b.addChild(new MovieClip());
-          trace("added under the cycles");
-        }
-      }
-    }
-  }`;
+  const source = readFileSync(new URL("./ButtonCycle.as", import.meta.url), "utf8");
   const abc = compiler(out)("ButtonCycle", source);
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
@@ -1591,30 +1457,7 @@ for (const lazyCompilation of [false, true]) {
   test(`RENDER reaches only objects currently on stage (${lazyCompilation ? "lazy" : "eager"})`, {
     skip,
   }, async (t) => {
-    const source = `package {
-      import flash.display.*;
-      import flash.events.Event;
-      public class RenderMembership extends Sprite {
-        private var kept:Array = [];
-        private var on:Sprite = new Sprite();
-        private var group:Sprite = new Sprite();
-        public function RenderMembership() {
-          watch(this, "root"); watch(stage, "stage");
-          addChild(on); watch(on, "on");
-          watch(new Sprite(), "off");
-          var removed:Sprite = new Sprite(); addChild(removed); removeChild(removed); watch(removed, "removed");
-          var hidden:Sprite = new Sprite(); hidden.visible = false; addChild(hidden); watch(hidden, "hidden");
-          var child:Sprite = new Sprite(); group.addChild(child); watch(child, "offChild");
-          addEventListener(Event.ENTER_FRAME, function(e:Event):void { stage.invalidate(); });
-        }
-        private function watch(o:DisplayObject, label:String):void {
-          kept.push(o);
-          o.addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("E:" + label); });
-          o.addEventListener(Event.RENDER, function(e:Event):void { trace("R:" + label); });
-        }
-        public function swap():void { removeChild(on); addChild(group); }
-      }
-    }`;
+    const source = readFileSync(new URL("./RenderMembership.as", import.meta.url), "utf8");
     const lines: string[] = [];
     const scripting = new Scripting(await createCodegen(wasm), {
       lazyCompilation,
@@ -1727,30 +1570,7 @@ test("a symbol a script makes has its first frame placed before its constructor 
 
 test("an event dispatched again whose clone is null is a TypeError #2007", { skip }, async () => {
   // As Flash (Ruffle's event_clone_error_redispatch): a dispatched event goes out again as its clone.
-  const source = `package {
-    import flash.display.MovieClip;
-    import flash.events.Event;
-    import flash.events.EventDispatcher;
-    public class Main extends MovieClip {
-      public function Main() {
-        const first:EventDispatcher = new EventDispatcher();
-        const second:EventDispatcher = new EventDispatcher();
-        first.addEventListener("custom", function (e:Event):void {
-          try {
-            second.dispatchEvent(e);
-          } catch (error:TypeError) {
-            trace(error.errorID);
-          }
-        });
-        first.dispatchEvent(new NullClone());
-      }
-    }
-  }
-  import flash.events.Event;
-  class NullClone extends Event {
-    public function NullClone() { super("custom"); }
-    override public function clone():Event { trace("cloned"); return null; }
-  }`;
+  const source = readFileSync(new URL("./NullClone.as", import.meta.url), "utf8");
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));

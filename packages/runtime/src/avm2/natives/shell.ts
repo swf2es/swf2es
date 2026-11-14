@@ -10,16 +10,11 @@ import type { ShellThread } from "../options.js";
 import type { Runtime } from "../runtime.js";
 import { setStaticVar } from "../traits.js";
 import { fromUtf8, utf8 } from "../utf8.js";
-import {
-  byteArrayCapacity,
-  bytesOf,
-  GLOBAL_MEMORY_MIN_SIZE,
-  knownSharedByteArray,
-  setDomainMemory,
-  sharedByteArray,
-} from "./bytearray.js";
+import { setDomainMemory } from "./bytearray.js";
+import { byteArrayCapacity, bytesOf, GLOBAL_MEMORY_MIN_SIZE } from "./bytes.js";
 import { syncObject, syncOf, syncRef } from "./concurrent.js";
 import { elements, type Natives, registerNativeClass } from "./define.js";
+import { knownSharedByteArray, sharedByteArray } from "./shared-bytes.js";
 import {
   CANSTART,
   entryKey,

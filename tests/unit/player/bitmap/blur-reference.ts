@@ -6,7 +6,6 @@
 // rect, the gradient's colours) it takes from there.
 import {
   type BitmapStore,
-  type PixelRect,
   premultiply,
   unmultiply,
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
@@ -15,6 +14,7 @@ import {
   gradientTable,
   isInner,
 } from "../../../../packages/player/dist/bitmap/filters.js";
+import type { PixelRect } from "../../../../packages/player/dist/bitmap/pixel-rect.js";
 import type { Filter } from "../../../../packages/player/dist/display/filters.js";
 
 /** Where adl's offsets in 256ths run out: the most a part of one reaches, as -2^23 - 256. */

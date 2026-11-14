@@ -4,60 +4,104 @@
 // namespace and an interface's namespace do. avmplus walks its bindings in
 // a hashtable keyed by string addresses, so each element's children are
 // sorted here, as Ruffle's tests sort them.
-package {
-  public interface I { function im():void; }
-  public interface J extends I { function jm(x:int):String; }
-  [Meta(a="1", b="2")]
-  [Plain]
-  public class Base implements I {
-    public static const K:int = 1;
-    [Slot(tag="s")]
-    public var bv:Number = 2;
-    public function get acc():String { return "a"; }
-    [Setter]
-    public function set acc(v:String):void {}
-    public function im():void {}
-    [M] [N(k="v")]
-    public function bm(x:int, y:String = "d", ...rest):Array { return null; }
-    AS3 function as3Method():void {}
-  }
-  public dynamic class Sub extends Base implements J {
-    public static var sv:String;
-    public const c:uint = 3;
-    public function Sub(a:int, b:*) { super(); }
-    public function sm():void {}
-    public function jm(x:int):String { return ""; }
-    override public function bm(x:int, y:String = "d", ...rest):Array { return null; }
-  }
-  public final class Fin {}
+package
+{
+	public interface I
+	{
+		function im():void;
+	}
+	public interface J extends I
+	{
+		function jm(x:int):String;
+	}
+	[Meta(a="1", b="2")]
+	[Plain]
+	public class Base implements I
+	{
+		public static const K:int = 1;
+		[Slot(tag="s")]
+		public var bv:Number = 2;
+		public function get acc():String
+		{
+			return "a";
+		}
+		[Setter]
+		public function set acc(v:String):void
+		{
+		}
+		public function im():void
+		{
+		}
+		[M]
+		[N(k="v")]
+		public function bm(x:int, y:String = "d", ...rest):Array
+		{
+			return null;
+		}
+		AS3 function as3Method():void
+		{
+		}
+	}
+	public dynamic class Sub extends Base implements J
+	{
+		public static var sv:String;
+		public const c:uint = 3;
+		public function Sub(a:int, b:*)
+		{
+			super();
+		}
+		public function sm():void
+		{
+		}
+		public function jm(x:int):String
+		{
+			return "";
+		}
+		override public function bm(x:int, y:String = "d", ...rest):Array
+		{
+			return null;
+		}
+	}
+	public final class Fin
+	{
+	}
 }
 import avmplus.*;
 
-function normalize(x:XML, indent:String = ""):String {
-  var s:String = indent + "<" + x.name();
-  for each (var a:XML in x.attributes()) {
-    s += " " + a.name() + '="' + a.toString() + '"';
-  }
-  var kids:Array = [];
-  for each (var k:XML in x.children()) {
-    kids.push(normalize(k, indent + "  "));
-  }
-  if (kids.length == 0) {
-    return s + "/>";
-  }
-  kids.sort();
-  return s + ">\n" + kids.join("\n") + "\n" + indent + "</" + x.name() + ">";
+function normalize(x:XML, indent:String = ""):String
+{
+	var s:String = indent + "<" + x.name();
+	for each (var a:XML in x.attributes())
+	{
+		s += " " + a.name() + '="' + a.toString() + '"';
+	}
+	var kids:Array = [];
+	for each (var k:XML in x.children())
+	{
+		kids.push(normalize(k, indent + "  "));
+	}
+	if (kids.length == 0)
+	{
+		return s + "/>";
+	}
+	kids.sort();
+	return s + ">\n" + kids.join("\n") + "\n" + indent + "</" + x.name() + ">";
 }
 
-function show(label:String, v:*, flags:uint):void {
-  trace("--", label, flags);
-  try {
-    for each (var line:String in normalize(describeType(v, flags)).split("\n")) {
-      trace(line);
-    }
-  } catch (e:Error) {
-    trace("error", e.errorID);
-  }
+function show(label:String, v:*, flags:uint):void
+{
+	trace("--", label, flags);
+	try
+	{
+		for each (var line:String in normalize(describeType(v, flags)).split("\n"))
+		{
+			trace(line);
+		}
+	}
+	catch (e:Error)
+	{
+		trace("error", e.errorID);
+	}
 }
 
 show("Sub", Sub, FLASH10_FLAGS);
@@ -77,7 +121,9 @@ show("null", null, FLASH10_FLAGS);
 show("undefined", undefined, FLASH10_FLAGS);
 show("Vector.<int>", Vector.<int>, FLASH10_FLAGS);
 show("Vector.<Sub>", new <Sub>[], INCLUDE_TRAITS | INCLUDE_BASES | INCLUDE_CONSTRUCTOR);
-show("function", function():void {}, FLASH10_FLAGS);
+show("function", function():void
+	{
+	}, FLASH10_FLAGS);
 show("Object", Object, FLASH10_FLAGS);
 show("new Object", {}, FLASH10_FLAGS);
 show("Array", [], INCLUDE_TRAITS | INCLUDE_BASES | INCLUDE_METHODS | HIDE_NSURI_METHODS);

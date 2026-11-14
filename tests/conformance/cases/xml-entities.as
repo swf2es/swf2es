@@ -3,12 +3,14 @@
 // references up to 0xFFFF, and what it keeps as written, an & with no ;
 // in its value and an unknown name, including where a ; or an & comes only
 // after the value ends.
-function show(label:String, s:String):void {
-  var codes:Array = [];
-  for (var i:int = 0; i < s.length; i++) {
-    codes.push(s.charCodeAt(i));
-  }
-  trace(label, s.length, codes.join(","));
+function show(label:String, s:String):void
+{
+	var codes:Array = [];
+	for (var i:int = 0; i < s.length; i++)
+	{
+		codes.push(s.charCodeAt(i));
+	}
+	trace(label, s.length, codes.join(","));
 }
 
 var known:XML = new XML("<a>&amp;&lt;&gt;&quot;&apos;&nbsp;</a>");

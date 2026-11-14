@@ -106,7 +106,9 @@ frame the page, and it frames nothing.
 ## The network
 
 A SWF's http and https requests are the main process's to send
-(`src/main/network.ts`), not the page's: the element is configured with
+(`src/main/network.ts`; its types and limits in `network-types.ts`, the
+rules that need no state, the Referer's and redirects' among them, in
+`network-rules.ts`), not the page's: the element is configured with
 a fetch (`configure({ fetch })`, `src/renderer/network.ts`) that hands
 each one, with its purpose, over IPC, and the main process judges it as
 Flash Player judged it, by the SWF's sandbox and the policy files of the
@@ -231,7 +233,8 @@ also tells the player the sandbox, which `Security.sandboxType` reports.
 
 ## Through a proxy
 
-`--proxy=<url>` (`src/main/proxy.ts`) puts a proxy under every
+`--proxy=<url>` (`src/main/proxy.ts`, read with the other switches in
+`src/main/switches.ts`) puts a proxy under every
 connection the main process makes for a SWF: `socks5://` (RFC 1928, its
 alias `socks5h://`), with RFC 1929's username and password where the URL
 gives them, or `http://`, a `CONNECT` tunnel for each connection, plain
@@ -285,9 +288,10 @@ CommonJS script as a sandboxed one must be, puts the API on the page
 through `contextBridge` and passes the path of a dropped file
 (`webUtils.getPathForFile`) to the main process without showing it to
 the page. The main process answers a message only from the window's own
-top frame on `swf2es://app/`, and checks each argument: a path must be
-absolute and its file start with a SWF's signature, a library must be an
-ABC (major version 46), a socket's host a string and its port in range.
+top frame on `swf2es://app/` (`trusted`, `src/main/state.ts`), and
+checks each argument: a path must be absolute and its file start with a
+SWF's signature, a library must be
+an ABC (major version 46), a socket's host a string and its port in range.
 The page never navigates: `will-navigate` is refused, and a new window,
 as a SWF's navigateToURL asks for, is refused too, its URL opened in the
 system's browser with `shell.openExternal` if it is http or https, the
@@ -321,16 +325,18 @@ into the page would run beside the API.
 
 ## Files, settings and libraries
 
-The main process opens a SWF from File › Open, a drop on the window, the
-command line (the last argument that is an http or https URL or names a
+The main process (`src/main/open.ts`) opens a SWF from File › Open, a
+drop on the window, the command line (the last argument that is an
+http or https URL or names a
 .swf file there is, as a switch may take a value), macOS's `open-file`,
 a second start of the app, which hands its SWF to the first and quits,
 File › Open URL (Ctrl+L), and the recent list, and sends the page its
 swf2es://file URL, or the http or https one, which it plays with `load`
 in place of what played, the element letting the last player go. The URL
 dialog is a window of its own (`static/open-url.html`,
-`src/renderer/open-url.ts`), modal over the player's, with a preload of
-its own (`src/preload/prompt.cts`) whose only messages are what to show
+`src/renderer/open-url.ts`, `src/main/dialogs.ts`), modal over the
+player's, with a preload of its own (`src/preload/prompt.cts`) whose
+only messages are what to show
 first and the user's answer, which the main process takes only from that
 window's own page; the player's page may only ask for the dialog
 (`openUrlDialog`). So nothing a SWF runs opens a URL: a SWF's movie
@@ -352,8 +358,9 @@ The element takes the shell's SocketHost through `configure({ sockets
 })`. Each `flash.net.Socket` is an id the preload numbers, and the main
 process connects it with `node:net`, as `player-hosts/node` does,
 relaying its bytes and events over IPC. Only a SWF with the network has
-sockets, and only as the user allows: the first connection to each host
-and port asks, Allow Once (until the SWF closes), Always Allow for This
+sockets, and only as the user allows (`src/main/permissions.ts`): the
+first connection to each host and port asks, Allow Once (until the SWF
+closes), Always Allow for This
 SWF (kept in the settings by the SWF's real path) or Deny (until it
 closes); connections there while the question is open wait on its
 answer, and where no one can be asked it is a refusal. A remote SWF then

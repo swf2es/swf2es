@@ -4,7 +4,7 @@
 // thread at terminate, and the run ends.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { containerEngine, runOracle } from "../../../oracle/oracle.ts";
@@ -19,37 +19,7 @@ try {
   skip = (e as Error).message;
 }
 
-const SPINNER = `import flash.system.Worker;
-import flash.system.WorkerDomain;
-import avmplus.System;
-
-function waitFor(done:Function):Boolean {
-    var start:int = getTimer();
-    while (!done()) {
-        if (getTimer() - start > 20000) {
-            return false;
-        }
-
-        System.sleep(5);
-    }
-
-    return true;
-}
-
-if (Worker.current.isPrimordial) {
-    var w:Worker = WorkerDomain.current.createWorkerFromPrimordial();
-    w.start();
-    print("spinning " + waitFor(function():Boolean { return w.getSharedProperty("spinning") === true; }));
-    print("listed " + WorkerDomain.current.listWorkers().length + " " + w.state);
-    print("terminate " + w.terminate() + " " + w.state);
-    print("listed " + WorkerDomain.current.listWorkers().length);
-    print("terminate again " + w.terminate());
-} else {
-    Worker.current.setSharedProperty("spinning", true);
-    while (true) {
-    }
-}
-`;
+const SPINNER = readFileSync(new URL("./Spinner.as", import.meta.url), "utf8");
 
 test("terminate stops a worker spinning in a loop, and the run ends", { skip }, () => {
   mkdirSync(out, { recursive: true });

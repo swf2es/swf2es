@@ -6,7 +6,7 @@ import { BitmapObject } from "./bitmapobject.js";
 import { ButtonObject } from "./buttonobject.js";
 import { IDENTITY_COLOR } from "./color.js";
 import { Container } from "./container.js";
-import { CLIP, CONTENT, type DisplayObject, scriptWork } from "./displayobject.js";
+import { CLIP, CONTENT, type DisplayObject, markScriptsDue, scriptWork } from "./displayobject.js";
 import { construct, displayFor } from "./instantiate.js";
 import { cached, ShapeObject, StaleCache } from "./shapeobject.js";
 import { StaticTextObject, TextObject } from "./textobjects.js";
@@ -137,6 +137,14 @@ export class MovieClip extends Container {
    * (scriptWork) has it.
    */
   scriptedFrame = 0;
+  /**
+   * Whether every round of frame scripts lists it, due or not, its mark
+   * (scriptsDue) never taken off: a clip of a SWF before version 10 with an
+   * AS3 object, whose gotos run no cycle, so that it may become due in a
+   * round after the round listed what was due, and must be in its place in
+   * the round's order then (Scripting.pruning).
+   */
+  listedAlways = false;
   /** A goto a frame script asked for, taken when the script returns, as Flash defers it; null for none. */
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
@@ -196,6 +204,9 @@ export class MovieClip extends Container {
     if (frame !== this.frame) {
       this.frame = frame;
       scriptWork.changes++;
+      if (frame !== this.scriptedFrame && !this.scriptsDue) {
+        markScriptsDue(this);
+      }
     }
   }
 

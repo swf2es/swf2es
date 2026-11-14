@@ -5,6 +5,7 @@ import {
   CONVOLUTION_PASS,
   DISPLACE_PASS,
   FilterPlan,
+  FLOAT_LINE,
   FLOATS,
   GLOW_PASS,
   GRADIENT_PASS,
@@ -59,6 +60,8 @@ export interface FilterHost<T extends FilterTarget> {
 const INPUT_UNIT = 4;
 const BLURRED_UNIT = 5;
 const EXTRA_UNIT = 6;
+/** A pass's line of floats (FLOAT_LINE): a convolution's weights, which reads no gradient nor map. */
+const LINE_UNIT = EXTRA_UNIT;
 
 /**
  * A triangle over the output's frame, the viewport, reading its input
@@ -146,6 +149,10 @@ export class FilterRunner<T extends FilterTarget> {
   private readonly hasTexture = (id: number) => id >= 0 && this.host.texture(id) !== null;
   /** The target's pixels a unit of its own, for the chain running. */
   private resolution = 1;
+  /** The texture of a pass's line of floats (FLOAT_LINE), its width, and the floats' bits it holds. */
+  private line: WebGLTexture | null = null;
+  private lineWidth = 0;
+  private lineBits = new Uint32Array(0);
 
   constructor(
     gl: WebGL2RenderingContext,
@@ -356,6 +363,10 @@ export class FilterRunner<T extends FilterTarget> {
         // As many as KERNEL_IMAGES, which the plan holds a kernel to.
         this.kernels.bindImage(location, this.samplers++, values[at], this.host);
         break;
+      case FLOAT_LINE:
+        gl.uniform1i(location, LINE_UNIT);
+        this.bindLine(values, at, count);
+        break;
       case FLOATS:
         this.set(
           pass,
@@ -367,6 +378,45 @@ export class FilterRunner<T extends FilterTarget> {
           count > 3 ? values[at + 3] : 0,
         );
     }
+  }
+
+  /**
+   * `count` of `values` from `at` bound on LINE_UNIT as a line of floats,
+   * uploaded where they are not the ones it holds: a frame's filters alike
+   * take the same.
+   */
+  private bindLine(values: Float32Array, at: number, count: number): void {
+    const gl = this.gl;
+    const bits = new Uint32Array(values.buffer, values.byteOffset + at * 4, count);
+    let same = this.line !== null && count === this.lineBits.length;
+    for (let k = 0; same && k < count; k++) {
+      same = bits[k] === this.lineBits[k];
+    }
+
+    if (!same) {
+      if (!this.line || count > this.lineWidth) {
+        if (this.line) {
+          this.state.dropTexture(this.line);
+          gl.deleteTexture(this.line);
+        }
+
+        this.line = gl.createTexture() as WebGLTexture;
+        this.lineWidth = count;
+        this.state.bindTexture(LINE_UNIT, this.line);
+        this.state.activeTexture(LINE_UNIT);
+        gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32F, count, 1);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      }
+
+      this.state.bindTexture(LINE_UNIT, this.line);
+      this.state.activeTexture(LINE_UNIT);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, count, 1, gl.RED, gl.FLOAT, values, at);
+      this.lineBits = bits.slice();
+    }
+
+    this.state.bindTexture(LINE_UNIT, this.line);
+    this.state.bindSampler(LINE_UNIT, null);
   }
 
   /** The pass of program `id` (filter-plan.ts), in use. */
@@ -498,5 +548,10 @@ export class FilterRunner<T extends FilterTarget> {
     }
 
     this.passes.clear();
+    if (this.line) {
+      this.state.dropTexture(this.line);
+      this.gl.deleteTexture(this.line);
+      this.line = null;
+    }
   }
 }

@@ -9,33 +9,41 @@ import flash.utils.ByteArray;
 import avmplus.System;
 import avmshell.*;
 
-function seesAir():Boolean {
-    try {
-        return public_var_AIR_1_0;
-    } catch (e:Error) {
-    }
+function seesAir():Boolean
+{
+	try
+	{
+		return public_var_AIR_1_0;
+	}
+	catch (e:Error)
+	{
+	}
 
-    return false;
+	return false;
 }
 
 var me:Worker = Worker.current;
-if (me.isPrimordial) {
-    var log:ByteArray = new ByteArray();
-    log.shareable = true;
-    log.length = 3;
-    var w:Worker = WorkerDomain.current.createWorkerFromPrimordial();
-    w.setSharedProperty("log", log);
-    w.start();
-    var start:int = getTimer();
-    while (log[0] != 1 && getTimer() - start < 5000) {
-        System.sleep(1);
-    }
+if (me.isPrimordial)
+{
+	var log:ByteArray = new ByteArray();
+	log.shareable = true;
+	log.length = 3;
+	var w:Worker = WorkerDomain.current.createWorkerFromPrimordial();
+	w.setSharedProperty("log", log);
+	w.start();
+	var start:int = getTimer();
+	while (log[0] != 1 && getTimer() - start < 5000)
+	{
+		System.sleep(1);
+	}
 
-    print("primordial " + System.apiVersion + " " + seesAir());
-    print("worker " + log[1] + " " + (log[2] == 1));
-} else {
-    var l:ByteArray = me.getSharedProperty("log");
-    l[1] = System.apiVersion;
-    l[2] = seesAir() ? 1 : 0;
-    l[0] = 1;
+	print("primordial " + System.apiVersion + " " + seesAir());
+	print("worker " + log[1] + " " + (log[2] == 1));
+}
+else
+{
+	var l:ByteArray = me.getSharedProperty("log");
+	l[1] = System.apiVersion;
+	l[2] = seesAir() ? 1 : 0;
+	l[0] = 1;
 }

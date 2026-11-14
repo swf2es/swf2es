@@ -794,7 +794,8 @@ export class RenderView implements Drawer {
           lineBy = ownSlice ? [pa, pb, pc, pd] : this.childLineSpace(o);
         }
 
-        const even = !lineBy && this.lineCache.of(layers[i], version).even;
+        const layerLines = this.lineCache.of(layers[i], version);
+        const even = !lineBy && layerLines.even;
         if (even && stretch === undefined) {
           // Settled for the widest line of the object's layers that scale both ways (evenWidth).
           let widest = 0;
@@ -812,10 +813,63 @@ export class RenderView implements Drawer {
         }
 
         const by = even ? stretch : null;
-        const lines = by
-          ? this.lineCache.take(layers[i], version, by[0], by[1], by[2], by[3], least, null, opaque)
-          : this.lineCache.take(layers[i], version, a, b, c, d, least, lineBy, opaque);
-        if (!lines) {
+        // A layer with a painted line in pieces, each textured by its paint as a fill's part is.
+        const painted = layerLines.painted;
+        const lines = painted
+          ? null
+          : by
+            ? this.lineCache.take(
+                layers[i],
+                version,
+                by[0],
+                by[1],
+                by[2],
+                by[3],
+                least,
+                null,
+                opaque,
+                layerLines,
+              )
+            : this.lineCache.take(
+                layers[i],
+                version,
+                a,
+                b,
+                c,
+                d,
+                least,
+                lineBy,
+                opaque,
+                layerLines,
+              );
+        const pieces = !painted
+          ? null
+          : by
+            ? this.lineCache.pieces(
+                layers[i],
+                version,
+                by[0],
+                by[1],
+                by[2],
+                by[3],
+                least,
+                null,
+                opaque,
+                layerLines,
+              )
+            : this.lineCache.pieces(
+                layers[i],
+                version,
+                a,
+                b,
+                c,
+                d,
+                least,
+                lineBy,
+                opaque,
+                layerLines,
+              );
+        if (!lines && !pieces?.length) {
           continue;
         }
 
@@ -838,8 +892,33 @@ export class RenderView implements Drawer {
           lineRow = this.rows.addTranslated(this.places, at + 6, color);
         }
 
-        this.geometries.use(lines.id);
-        this.scene.draw(lines.id, by ? stretchRow : lineRow, NORMAL);
+        const placed = by ? stretchRow : lineRow;
+        if (lines) {
+          this.geometries.use(lines.id);
+          this.scene.draw(lines.id, placed, NORMAL);
+          continue;
+        }
+
+        for (const { part, handle } of pieces ?? []) {
+          // Kept while drawn, even with no texture yet, as a fill's part is.
+          this.geometries.use(handle.id);
+          const texture = part.paint ? this.paints.paintTexture(part) : null;
+          if (part.paint && !texture) {
+            continue;
+          }
+
+          if (texture) {
+            this.textures.use(texture.id);
+          }
+
+          this.scene.draw(
+            handle.id,
+            placed,
+            NORMAL,
+            texture?.id ?? -1,
+            texture ? paintSampler(part, smoothing) : 0,
+          );
+        }
       }
     }
 

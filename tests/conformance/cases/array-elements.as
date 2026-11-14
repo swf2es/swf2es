@@ -2,35 +2,74 @@
 // code reads and writes in place where the element is there: a hole, null,
 // undefined, a number that is no index and a write past the length are
 // found as any other name is, through the prototype and dynamic properties.
-package {
-  public dynamic class Counted extends Array {
-    override public function get length():uint { return 2; }
-  }
+package
+{
+	public dynamic class Counted extends Array
+	{
+		override public function get length():uint
+		{
+			return 2;
+		}
+	}
 }
-package {
-  public class Sealed extends Array {}
+package
+{
+	public class Sealed extends Array
+	{
+	}
 }
-function probe(name:String, f:Function):void {
-  try { trace(name, f()); } catch (e:Error) { trace(name, e); }
+function probe(name:String, f:Function):void
+{
+	try
+	{
+		trace(name, f());
+	}
+	catch (e:Error)
+	{
+		trace(name, e);
+	}
 }
-function getInt(a:Array, i:int):* { return a[i]; }
-function getUint(a:Array, i:uint):* { return a[i]; }
-function getNumber(a:Array, i:Number):* { return a[i]; }
-function setInt(a:Array, i:int, v:*):void { a[i] = v; }
-function setUint(a:Array, i:uint, v:*):void { a[i] = v; }
-function setNumber(a:Array, i:Number, v:*):void { a[i] = v; }
-function keys(o:*):String {
-  var names:Array = [];
-  for (var k:* in o) { names.push(k); }
-  names.sort();
-  return names.join(",");
+function getInt(a:Array, i:int):*
+{
+	return a[i];
+}
+function getUint(a:Array, i:uint):*
+{
+	return a[i];
+}
+function getNumber(a:Array, i:Number):*
+{
+	return a[i];
+}
+function setInt(a:Array, i:int, v:*):void
+{
+	a[i] = v;
+}
+function setUint(a:Array, i:uint, v:*):void
+{
+	a[i] = v;
+}
+function setNumber(a:Array, i:Number, v:*):void
+{
+	a[i] = v;
+}
+function keys(o:*):String
+{
+	var names:Array = [];
+	for (var k:* in o)
+	{
+		names.push(k);
+	}
+	names.sort();
+	return names.join(",");
 }
 
 // Present elements, and those that are not: holes and past the end.
 var a:Array = [10, null, undefined, "s"];
 a[6] = 60;
-for (var i:int = -1; i < 8; i++) {
-  trace("int", i, getInt(a, i), getUint(a, uint(i)), getNumber(a, i));
+for (var i:int = -1; i < 8; i++)
+{
+	trace("int", i, getInt(a, i), getUint(a, uint(i)), getNumber(a, i));
 }
 trace(a.length, keys(a));
 
@@ -76,8 +115,9 @@ trace(c.length, c[1], c["01"], getInt(c, 2), getNumber(c, 1), keys(c));
 
 // Writes that grow the array, below and past its length, and over holes.
 var d:Array = [];
-for (var j:uint = 0; j < 4; j++) {
-  setUint(d, j, j * 2);
+for (var j:uint = 0; j < 4; j++)
+{
+	setUint(d, j, j * 2);
 }
 setInt(d, d.length, "end");
 setNumber(d, 10, "far");
@@ -99,30 +139,61 @@ trace(ee[1], ee[3], keys(e));
 
 // A subclass that is not dynamic has no elements from SWF 13.
 var s:Sealed = new Sealed();
-probe("sealed get", function():* { return getInt(s, 0); });
-probe("sealed set", function():* { setInt(s, 0, 1); return s.length; });
-probe("sealed set uint", function():* { setUint(s, 0, 1); return s.length; });
+probe("sealed get", function():*
+	{
+		return getInt(s, 0);
+	});
+probe("sealed set", function():*
+	{
+		setInt(s, 0, 1);
+		return s.length;
+	});
+probe("sealed set uint", function():*
+	{
+		setUint(s, 0, 1);
+		return s.length;
+	});
 
 // A null Array fails before its index is looked at.
 var n:Array = null;
-probe("null get", function():* { return getInt(n, 0); });
-probe("null get minus", function():* { return getInt(n, -1); });
-probe("null set", function():* { setInt(n, 0, 1); });
-probe("null set minus", function():* { setInt(n, -1, 1); });
-probe("null set fraction", function():* { setNumber(n, 0.5, 1); });
+probe("null get", function():*
+	{
+		return getInt(n, 0);
+	});
+probe("null get minus", function():*
+	{
+		return getInt(n, -1);
+	});
+probe("null set", function():*
+	{
+		setInt(n, 0, 1);
+	});
+probe("null set minus", function():*
+	{
+		setInt(n, -1, 1);
+	});
+probe("null set fraction", function():*
+	{
+		setNumber(n, 0.5, 1);
+	});
 var u:Array;
-probe("undefined get", function():* { return getUint(u, 0); });
+probe("undefined get", function():*
+	{
+		return getUint(u, 0);
+	});
 
 // Element values of every kind read back as written.
 var f:Array = [];
 var values:Array = [0, -0, 1.5, NaN, "", "0", true, false, null, undefined, f, int.MAX_VALUE];
-for (var k:int = 0; k < values.length; k++) {
-  setInt(f, k, values[k]);
+for (var k:int = 0; k < values.length; k++)
+{
+	setInt(f, k, values[k]);
 }
 var out:Array = [];
-for (k = 0; k < values.length; k++) {
-  var v:* = getInt(f, k);
-  out.push(v === values[k] || (v != v && values[k] != values[k]) ? "same" : "differs");
+for (k = 0; k < values.length; k++)
+{
+	var v:* = getInt(f, k);
+	out.push(v === values[k] || (v != v && values[k] != values[k]) ? "same" : "differs");
 }
 trace(out.join(" "), 1 / getInt(f, 1));
 
@@ -130,14 +201,17 @@ trace(out.join(" "), 1 / getInt(f, 1));
 // changing between.
 var g:Array = [1, 2, 3];
 var sum:Number = 0;
-for (var r:int = 0; r < 6; r++) {
-  sum += Number(getInt(g, r % 4));
-  if (r == 2) {
-    g.length = 1;
-  }
+for (var r:int = 0; r < 6; r++)
+{
+	sum += Number(getInt(g, r % 4));
+	if (r == 2)
+	{
+		g.length = 1;
+	}
 
-  if (r == 4) {
-    g[3] = 30;
-  }
+	if (r == 4)
+	{
+		g[3] = 30;
+	}
 }
 trace(sum, g.length, g);

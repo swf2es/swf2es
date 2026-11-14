@@ -2,11 +2,8 @@
 // row at a time (bitmap/composite.ts): every pixel's 16 samples tested, sampled,
 // colour transformed, scaled by its coverage and blended in turn, kept as
 // the row passes' reference for a BitmapData drawn without a layer.
-import {
-  BitmapStore,
-  over,
-  type PixelRect,
-} from "../../../../packages/player/dist/bitmap/bitmap.js";
+import { BitmapStore, over } from "../../../../packages/player/dist/bitmap/bitmap.js";
+import type { PixelRect } from "../../../../packages/player/dist/bitmap/pixel-rect.js";
 
 export interface Affine {
   a: number;

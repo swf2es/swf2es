@@ -157,12 +157,15 @@ export interface ShapeSpec {
   bounds: [number, number, number, number];
   /** Solid fills, 0xRRGGBB (DefineShape) or 0xAARRGGBB (DefineShape3), or bitmap fills. */
   fills: (number | BitmapFill | GradientFillSpec)[];
-  /** Lines: width in twips and colour. */
-  lines?: { width: number; color: number }[];
+  /**
+   * Lines: width in twips and colour; in a DefineShape4, LINESTYLE2 with
+   * round caps and joins, filled with `fill` where it is given.
+   */
+  lines?: { width: number; color: number; fill?: number | BitmapFill | GradientFillSpec }[];
   /** Paths, each with the fill it has on its right (fill1) and its line; 1-based, 0 for none. */
   paths: { fill1: number; fill0?: number; line?: number; commands: PathCommand[] }[];
-  /** 1 DefineShape (RGB), 3 DefineShape3 (RGBA). */
-  version?: 1 | 3;
+  /** 1 DefineShape (RGB), 3 DefineShape3 (RGBA), 4 DefineShape4 (RGBA, LINESTYLE2). */
+  version?: 1 | 3 | 4;
 }
 
 /**
@@ -193,7 +196,7 @@ export interface GradientFillSpec {
   focal?: number;
 }
 
-/** A DefineShape or DefineShape3 tag. */
+/** A DefineShape, DefineShape3 or DefineShape4 tag. */
 export function shape(spec: ShapeSpec): Uint8Array {
   const version = spec.version ?? 1;
   const alpha = version >= 3;
@@ -201,6 +204,12 @@ export function shape(spec: ShapeSpec): Uint8Array {
   const w = new BitWriter();
   w.u16(spec.id);
   rect(w, ...spec.bounds);
+  if (version === 4) {
+    // Its edges' bounds the shape's, and scaling strokes where there are lines.
+    rect(w, ...spec.bounds);
+    w.u8(lines.length ? 1 : 0);
+  }
+
   const color = (c: number) => {
     w.u8(c >> 16)
       .u8(c >> 8)
@@ -209,8 +218,7 @@ export function shape(spec: ShapeSpec): Uint8Array {
       w.u8(c >>> 24);
     }
   };
-  w.u8(spec.fills.length);
-  for (const f of spec.fills) {
+  const fillStyle = (f: number | BitmapFill | GradientFillSpec) => {
     if (typeof f === "number") {
       w.u8(0);
       color(f);
@@ -232,11 +240,27 @@ export function shape(spec: ShapeSpec): Uint8Array {
         w.u16(Math.round((f.focal ?? 0) * 256) & 0xffff);
       }
     }
+  };
+  w.u8(spec.fills.length);
+  for (const f of spec.fills) {
+    fillStyle(f);
   }
 
   w.u8(lines.length);
   for (const l of lines) {
     w.u16(l.width);
+    if (version === 4) {
+      // Round caps and joins, scaled, closed: only HasFillFlag set, where there is a fill.
+      w.u8(l.fill === undefined ? 0 : 0x08).u8(0);
+      if (l.fill === undefined) {
+        color(l.color);
+      } else {
+        fillStyle(l.fill);
+      }
+
+      continue;
+    }
+
     color(l.color);
   }
 
@@ -244,7 +268,7 @@ export function shape(spec: ShapeSpec): Uint8Array {
   const lineBits = sbits(lines.length);
   w.ub(4, fillBits).ub(4, lineBits);
   edges(w, spec.paths, fillBits, lineBits);
-  return tag(version === 3 ? 32 : 2, w.done());
+  return tag(version === 4 ? 83 : version === 3 ? 32 : 2, w.done());
 }
 
 type MatrixSpec = { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
@@ -265,8 +289,14 @@ export interface MorphShapeSpec {
   startBounds: [number, number, number, number];
   endBounds: [number, number, number, number];
   fills: MorphFillSpec[];
-  /** Widths in twips, colours 0xAARRGGBB. */
-  lines?: { startWidth: number; endWidth: number; startColor: number; endColor: number }[];
+  /** Widths in twips, colours 0xAARRGGBB; in a DefineMorphShape2, filled with `fill` where given. */
+  lines?: {
+    startWidth: number;
+    endWidth: number;
+    startColor: number;
+    endColor: number;
+    fill?: MorphFillSpec;
+  }[];
   /** The start's paths, with their styles. */
   start: { fill1?: number; fill0?: number; line?: number; commands: PathCommand[] }[];
   /** The end's: the start's edges in order, its moves where the start has them. */
@@ -288,13 +318,12 @@ export function morphShape(spec: MorphShapeSpec): Uint8Array {
 
   // The styles and the start's records, which the offset before them spans.
   const body = new BitWriter();
-  body.u8(spec.fills.length);
-  for (const f of spec.fills) {
+  const fillStyle = (f: MorphFillSpec) => {
     if ("start" in f) {
       body.u8(0);
       color(body, f.start);
       color(body, f.end);
-      continue;
+      return;
     }
 
     body.u8(f.type);
@@ -307,14 +336,22 @@ export function morphShape(spec: MorphShapeSpec): Uint8Array {
       body.u8(endRatio);
       color(body, endColor);
     }
+  };
+  body.u8(spec.fills.length);
+  for (const f of spec.fills) {
+    fillStyle(f);
   }
 
   body.u8(lines.length);
   for (const l of lines) {
     body.u16(l.startWidth).u16(l.endWidth);
     if (version === 2) {
-      // Round caps and joins, no fill, scaled: LINESTYLE2's flags all zero.
-      body.u16(0);
+      // Round caps and joins, scaled: LINESTYLE2's flags zero but HasFillFlag where it has a fill.
+      body.u8(l.fill ? 0x08 : 0).u8(0);
+      if (l.fill) {
+        fillStyle(l.fill);
+        continue;
+      }
     }
 
     color(body, l.startColor);

@@ -5,8 +5,8 @@
 // placed through the object's plane in perspective (display/perspective.ts)
 // as Flash places it (docs/architecture/rendering.md, "3D display objects").
 import type { Matrix } from "@swf2es/format";
-import type { PixelRect } from "../bitmap/bitmap.js";
 import { filterRect } from "../bitmap/filters.js";
+import type { PixelRect } from "../bitmap/pixel-rect.js";
 import { bounds, toStage } from "./bounds.js";
 import type { DisplayObject } from "./displayobject.js";
 import { apply, concat, isProjective } from "./geometry.js";

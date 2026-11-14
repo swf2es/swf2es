@@ -7,33 +7,40 @@
 import flash.utils.ByteArray;
 import avmplus.Domain;
 import avm2.intrinsics.memory.*;
-function hex(b:ByteArray, from:int = 0, to:int = -1):String {
-  var s:String = "";
-  for (var i:int = from; i < (to < 0 ? b.length : to); i++) s += (b[i] < 16 ? "0" : "") + b[i].toString(16);
-  return s;
+function hex(b:ByteArray, from:int = 0, to:int = -1):String
+{
+	var s:String = "";
+	for (var i:int = from; i < (to < 0 ? b.length : to); i++)
+		s += (b[i] < 16 ? "0" : "") + b[i].toString(16);
+	return s;
 }
 // Whether the 8 bytes (or 4) at `at` are a NaN: every exponent bit set, and some mantissa bit.
-function isNaNDouble(b:ByteArray, at:int, little:Boolean = false):String {
-  var x:Array = [];
-  for (var i:int = 0; i < 8; i++) x.push(b[at + (little ? 7 - i : i)]);
-  var mantissa:Boolean = (x[1] & 0x0f) != 0 || x[2] || x[3] || x[4] || x[5] || x[6] || x[7];
-  return (x[0] & 0x7f) == 0x7f && (x[1] & 0xf0) == 0xf0 && mantissa ? "nan" : "not " + hex(b, at, at + 8);
+function isNaNDouble(b:ByteArray, at:int, little:Boolean = false):String
+{
+	var x:Array = [];
+	for (var i:int = 0; i < 8; i++)
+		x.push(b[at + (little ? 7 - i : i)]);
+	var mantissa:Boolean = (x[1] & 0x0f) != 0 || x[2] || x[3] || x[4] || x[5] || x[6] || x[7];
+	return (x[0] & 0x7f) == 0x7f && (x[1] & 0xf0) == 0xf0 && mantissa ? "nan" : "not " + hex(b, at, at + 8);
 }
-function isNaNFloat(b:ByteArray, at:int, little:Boolean = false):String {
-  var x:Array = [];
-  for (var i:int = 0; i < 4; i++) x.push(b[at + (little ? 3 - i : i)]);
-  var mantissa:Boolean = (x[1] & 0x7f) != 0 || x[2] || x[3];
-  return (x[0] & 0x7f) == 0x7f && (x[1] & 0x80) != 0 && mantissa ? "nan" : "not " + hex(b, at, at + 4);
+function isNaNFloat(b:ByteArray, at:int, little:Boolean = false):String
+{
+	var x:Array = [];
+	for (var i:int = 0; i < 4; i++)
+		x.push(b[at + (little ? 3 - i : i)]);
+	var mantissa:Boolean = (x[1] & 0x7f) != 0 || x[2] || x[3];
+	return (x[0] & 0x7f) == 0x7f && (x[1] & 0x80) != 0 && mantissa ? "nan" : "not " + hex(b, at, at + 4);
 }
 var zero:Number = 0;
 var nans:Array = [["NaN", NaN], ["Number.NaN", Number.NaN], ["0/0", zero / zero], ["parseFloat", parseFloat("x")], ["Number(str)", Number("x")], ["Math.sqrt", Math.sqrt(-1)], ["date time", new Date(NaN).time], ["inf-inf", Infinity - Infinity]];
-for each (var n:Array in nans) {
-  var b:ByteArray = new ByteArray();
-  b.writeDouble(n[1]);
-  b.writeFloat(n[1]);
-  b.writeObject(n[1]);
-  b.position = 0;
-  trace(n[0], isNaNDouble(b, 0), isNaNFloat(b, 8), b[12], isNaNDouble(b, 13), isNaN(b.readDouble()), isNaN(b.readFloat()), isNaN(b.readObject()));
+for each (var n:Array in nans)
+{
+	var b:ByteArray = new ByteArray();
+	b.writeDouble(n[1]);
+	b.writeFloat(n[1]);
+	b.writeObject(n[1]);
+	b.position = 0;
+	trace(n[0], isNaNDouble(b, 0), isNaNFloat(b, 8), b[12], isNaNDouble(b, 13), isNaN(b.readDouble()), isNaN(b.readFloat()), isNaN(b.readObject()));
 }
 var dates:ByteArray = new ByteArray();
 dates.writeObject(new Date(NaN));
@@ -48,7 +55,9 @@ trace("date from invalid", d2.time);
 var mem:ByteArray = new ByteArray();
 mem.length = 1024;
 Domain.currentDomain.domainMemory = mem;
-sf64(NaN, 0); sf64(zero / zero, 8); sf32(NaN, 16);
+sf64(NaN, 0);
+sf64(zero / zero, 8);
+sf32(NaN, 16);
 trace("domain memory", isNaNDouble(mem, 0, true), isNaNDouble(mem, 8, true), isNaNFloat(mem, 16, true), isNaN(lf64(0)), isNaN(lf32(16)));
 Domain.currentDomain.domainMemory = null;
 var vec:ByteArray = new ByteArray();

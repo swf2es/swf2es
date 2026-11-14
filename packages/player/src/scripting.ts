@@ -156,6 +156,12 @@ export class Scripting {
    */
   private readonly scriptQueues: (MovieClip | null)[][] = [];
   private scriptDepth = 0;
+  /** queueDue's stack of the clips open in a list it walks (openClip), kept. */
+  private readonly openClip: (DisplayObject | null)[] = [];
+  private readonly openEnd: number[] = [];
+  private readonly openDue: boolean[] = [];
+  /** Where in its queue the last walk came to `also`. */
+  private alsoAt = 0;
   /**
    * Where an error nothing caught goes as it happens, so that the frame
    * goes on, as in Flash and Ruffle; null to have the frame throw them when
@@ -1120,6 +1126,58 @@ export class Scripting {
         }
       }
     };
+    if (!this.pruning()) {
+      const count = this.queueAll(queue, root, also, null);
+      // Each let go of as it runs, so that the kept list holds none past the round.
+      for (let i = 0; i < count; i++) {
+        const o = queue[i] as MovieClip;
+        queue[i] = null;
+        own(o);
+      }
+
+      return ran;
+    }
+
+    if (Scripting.checkRounds) {
+      this.checkedRound(queue, root, also, own);
+      return ran;
+    }
+
+    const count = this.queueDue(queue, root, also, null);
+    for (let i = 0; i < count; i++) {
+      const o = queue[i] as MovieClip;
+      queue[i] = null;
+      own(o);
+    }
+
+    return ran;
+  }
+
+  /**
+   * Whether a round may walk only what is marked for a frame script due
+   * (queueDue): its queue then leaves out every clip that is not due as it
+   * walks, which would run nothing where it stays so till its turn. One
+   * that a script sends elsewhere meanwhile is due then, but a goto runs
+   * its cycle, whose round runs its script at once, on the stage, while
+   * gotos have not overflowed; a clip of a SWF before version 10, whose
+   * gotos run none, is listed anyway (MovieClip.listedAlways). Else the
+   * round walks them all, as the queue they make is the order those run in.
+   */
+  private pruning(): boolean {
+    return !this.overflowed && this.stage !== null;
+  }
+
+  /**
+   * The clips a round visits, in its order, into `queue`, from the orphans,
+   * newest first, `root`, what scripts made, and `also`: every one with an
+   * AS3 object. `peeked` makes it change nothing (scriptChildren). The count.
+   */
+  private queueAll(
+    queue: (MovieClip | null)[],
+    root: DisplayObject,
+    also: DisplayObject | null,
+    peeked: Set<DisplayObject> | null,
+  ): number {
     let count = 0;
     const visit = (o: DisplayObject) => {
       // The clips under a container from the list it keeps (walkList); a button is visited as it
@@ -1143,7 +1201,7 @@ export class Scripting {
       }
 
       // An index, not for-of, and no call for a leaf.
-      const children = scriptChildren(o);
+      const children = scriptChildren(o, peeked);
       for (let i = 0; i < children.length; i++) {
         const child = children[i];
         if (child.kind !== OTHER || child.frameChildren.length !== 0) {
@@ -1158,18 +1216,224 @@ export class Scripting {
       visit(display);
     }
 
+    this.alsoAt = count;
     if (also) {
       visit(also);
     }
 
-    // Each let go of as it runs, so that the kept list holds none past the round.
-    for (let i = 0; i < count; i++) {
-      const o = queue[i] as MovieClip;
-      queue[i] = null;
-      own(o);
+    return count;
+  }
+
+  /**
+   * The clips of queueAll's order that are due as it walks or listed
+   * always (MovieClip.listedAlways), and every one under `also`, a button
+   * being made, whose round may be the only one to reach it: what is marked
+   * alone walked (DisplayObject.scriptsDue), a clip not marked passed by
+   * with all it holds. What it walks keeps its mark only with such a clip
+   * at or under it, as their scripts are yet to run, and a round inside
+   * this one's must find them. `peeked` as queueAll's.
+   */
+  private queueDue(
+    queue: (MovieClip | null)[],
+    root: DisplayObject,
+    also: DisplayObject | null,
+    peeked: Set<DisplayObject> | null,
+  ): number {
+    // The clips open around the item a list's walk is at, where each ends, and whether one due
+    // is at or under each.
+    const openClip = this.openClip;
+    const openEnd = this.openEnd;
+    const openDue = this.openDue;
+    let open = 0;
+    let count = 0;
+    // A clip's own, before what it holds, as queueAll has them: whether it is due, or listed
+    // always, which keeps its mark too.
+    const clip = (o: MovieClip, all: boolean) => {
+      if (o.scriptedFrame !== o.currentFrame) {
+        if (o.object) {
+          queue[count++] = o;
+        }
+
+        return true;
+      }
+
+      if ((all || o.listedAlways) && o.object) {
+        queue[count++] = o;
+      }
+
+      return o.listedAlways;
+    };
+    // Whether a clip at or under `o` is due, walked if marked, or anyway with `all`.
+    const visit = (o: DisplayObject, all: boolean): boolean => {
+      if (!o.scriptsDue && !all) {
+        return false;
+      }
+
+      let due = false;
+      if (o.kind === BUTTON) {
+        const children = scriptChildren(o, peeked);
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i];
+          if ((child.kind !== OTHER || child.frameChildren.length !== 0) && visit(child, all)) {
+            due = true;
+          }
+        }
+
+        // Or one under a state it passed by, one that holds it.
+        due ||= (o as ButtonObject).statesDue;
+      } else if (o instanceof Container) {
+        due = under(o, all);
+      }
+
+      settle(o, due);
+      return due;
+    };
+    // A container's list where it is current, or where the whole is walked; else its children,
+    // in the list's order, where only those marked are walked: a list made again would walk the rest.
+    const under = (c: Container, all: boolean): boolean => {
+      const list = all ? walkList(c) : c.walk;
+      if (list?.current) {
+        const { items, ends } = list;
+        const base = open;
+        let any = false;
+        for (let i = 0; i < items.length; i++) {
+          while (open > base && openEnd[open - 1] <= i) {
+            close(base);
+          }
+
+          const item = items[i];
+          if (item.kind === BUTTON) {
+            if (visit(item, all)) {
+              any = true;
+              if (open > base) {
+                openDue[open - 1] = true;
+              }
+            }
+
+            continue;
+          }
+
+          if (!item.scriptsDue && !all) {
+            i = ends[i] - 1;
+            continue;
+          }
+
+          const due = clip(item as MovieClip, all);
+          any ||= due;
+          openClip[open] = item;
+          openEnd[open] = ends[i];
+          openDue[open++] = due;
+        }
+
+        while (open > base) {
+          close(base);
+        }
+
+        return any;
+      }
+
+      if (c.avm1Root) {
+        return false;
+      }
+
+      let any = c.kind === CLIP && clip(c as MovieClip, false);
+      const children = c.children;
+      for (let i = 0; i < children.length; i++) {
+        const child = children[i];
+        if (!child.scriptsDue) {
+          continue;
+        }
+
+        if (child.kind === BUTTON) {
+          any = visit(child, false) || any;
+        } else if (child.kind !== OTHER || child.frameChildren.length !== 0) {
+          const due = under(child as Container, false);
+          settle(child, due);
+          any ||= due;
+        }
+      }
+
+      return any;
+    };
+    // The innermost clip open in a list ends: its mark settled, and the one around it told.
+    const close = (base: number) => {
+      const due = openDue[--open];
+      settle(openClip[open] as DisplayObject, due);
+      openClip[open] = null;
+      if (due && open > base) {
+        openDue[open - 1] = true;
+      }
+    };
+    this.lifecycle.eachOrphanRoot((o) => {
+      if (!visit(o, false) && o.orphanEntry !== null) {
+        o.orphanEntry.due = false;
+      }
+    }, true);
+
+    visit(root, false);
+    for (const display of this.lifecycle.fresh) {
+      visit(display, false);
     }
 
-    return ran;
+    this.alsoAt = count;
+    if (also) {
+      visit(also, true);
+    }
+
+    return count;
+  }
+
+  /**
+   * The checked build's round: queueDue's queue, which must be queueAll's
+   * but for the clips not due as they walk and not listed always
+   * (MovieClip.listedAlways), and queueAll's run, each of
+   * those left out shown to run nothing, so that the round is the one a
+   * walk of all would be. queueDue walks first, as lists made by queueAll
+   * would have it walk them in place of the children it walks without.
+   */
+  private checkedRound(
+    queue: (MovieClip | null)[],
+    root: DisplayObject,
+    also: DisplayObject | null,
+    own: (o: MovieClip) => void,
+  ): void {
+    const firstDue = new Set<DisplayObject>();
+    const count = this.queueDue(queue, root, also, firstDue);
+    const firstAll = new Set<DisplayObject>();
+    const all: (MovieClip | null)[] = [];
+    const total = this.queueAll(all, root, also, firstAll);
+    const allAlso = this.alsoAt;
+    for (const button of firstAll) {
+      if (!firstDue.has(button)) {
+        throw new Error("a round of frame scripts left out a button's first scripts");
+      }
+
+      (button as ButtonObject).firstScripts = false;
+    }
+
+    const kept: boolean[] = [];
+    let j = 0;
+    for (let i = 0; i < total; i++) {
+      const o = all[i] as MovieClip;
+      kept[i] = i >= allAlso || o.listedAlways || o.scriptedFrame !== o.currentFrame;
+      if (kept[i] && queue[j++] !== o) {
+        throw new Error(`a round of frame scripts walked out of order at ${j - 1}`);
+      }
+    }
+
+    if (j !== count) {
+      throw new Error(`a round of frame scripts walked ${count} clips due, not ${j}`);
+    }
+
+    queue.fill(null, 0, count);
+    for (let i = 0; i < total; i++) {
+      const o = all[i] as MovieClip;
+      const marked = this.framesMarked;
+      own(o);
+      if (!kept[i] && this.framesMarked !== marked) {
+        throw new Error("a clip a round of frame scripts left out had a script due");
+      }
+    }
   }
 
   /**
@@ -1374,6 +1638,16 @@ export class Scripting {
 
 /** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
 const MAX_GOTO_CYCLES = 256;
+
+/** `o`'s mark (scriptsDue) as a round's walk found it, `due`: its orphan entry's too. */
+function settle(o: DisplayObject, due: boolean): void {
+  if (o.scriptsDue !== due) {
+    o.scriptsDue = due;
+    if (o.orphanEntry !== null) {
+      o.orphanEntry.due = due;
+    }
+  }
+}
 
 /** Whether `cls` is the class named `name` or extends it. */
 function extendsClass(cls: AsObject, name: string): boolean {

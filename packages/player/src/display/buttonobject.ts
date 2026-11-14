@@ -12,6 +12,7 @@ import {
   BUTTON,
   CHILDREN,
   type DisplayObject,
+  markScriptsDue,
   NO_CHILDREN,
   pickWork,
   scriptWork,
@@ -50,6 +51,8 @@ export class ButtonObject extends Container {
   private hitTest: DisplayObject | null = null;
   state: ButtonState = "up";
   private firstOrder = false;
+  /** The states whose stateOf names it, for a change of states to take it off those it no longer has. */
+  private linked: DisplayObject[] = [];
   private avm1Made: ((display: DisplayObject, character: DisplayCharacter) => void) | null = null;
   private avm1Flag = BUTTON_UP;
   enabled = true;
@@ -117,6 +120,38 @@ export class ButtonObject extends Container {
     );
     this.frameChildren = states.length > 0 ? states : NO_CHILDREN;
     scriptWork.changes++;
+    this.link();
+  }
+
+  /**
+   * Its states linked to it (stateOf), as the rounds of frame scripts walk
+   * them from it, whatever their parent: one not shown has none. One with a
+   * script due marks it.
+   */
+  private link(): void {
+    const states = [this.hitTest, this.up, this.down, this.over].filter(
+      (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i,
+    );
+    for (const old of this.linked) {
+      if (!states.includes(old) && old.stateOf !== null) {
+        const others = old.stateOf.filter((b) => b !== this);
+        old.stateOf = others.length > 0 ? others : null;
+      }
+    }
+
+    let due = false;
+    for (const state of states) {
+      if (!this.linked.includes(state)) {
+        state.stateOf = state.stateOf === null ? [this] : [...state.stateOf, this];
+      }
+
+      due ||= state.scriptsDue;
+    }
+
+    this.linked = states;
+    if (due) {
+      markScriptsDue(this);
+    }
   }
 
   /**
@@ -135,6 +170,18 @@ export class ButtonObject extends Container {
     return states;
   }
 
+  /** Whether any of its states is marked for a frame script due (markScriptsDue). */
+  get statesDue(): boolean {
+    const states = this.linked;
+    for (let i = 0; i < states.length; i++) {
+      if (states[i].scriptsDue) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   /** Its states' next frame scripts run up, over, down, hit: the first, in a SWF after 9 (Scripting.construct). */
   get firstScripts(): boolean {
     return this.firstOrder;
@@ -144,6 +191,10 @@ export class ButtonObject extends Container {
     if (first !== this.firstOrder) {
       this.firstOrder = first;
       scriptWork.changes++;
+      // Marked, so that the next round walks it to run them, which takes the flag off.
+      if (first) {
+        markScriptsDue(this);
+      }
     }
   }
 
@@ -214,6 +265,9 @@ export class ButtonObject extends Container {
       this.relist(current);
       this.invalidate(CHILDREN);
       scriptWork.changes++;
+      if (current.scriptsDue) {
+        markScriptsDue(this);
+      }
     }
   }
 

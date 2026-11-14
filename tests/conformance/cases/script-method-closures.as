@@ -3,48 +3,63 @@
 // only what the function pushed, so it finds its activation and catch scopes
 // at their index, however many times the function pushed `this` first, as
 // Crossbridge's generated code does.
-package scopes {
-  public function counter():Function {
-    var n:int = 0;
-    return function():int {
-      return ++n;
-    };
-  }
+package scopes
+{
+	public function counter():Function
+	{
+		var n:int = 0;
+		return function():int
+		{
+			return ++n;
+		};
+	}
 
-  public function adder(x:int):Function {
-    return function(y:int):int {
-      return x + y;
-    };
-  }
+	public function adder(x:int):Function
+	{
+		return function(y:int):int
+		{
+			return x + y;
+		};
+	}
 
-  public function nested(a:int):Function {
-    return function(b:int):Function {
-      return function(c:int):int {
-        return a * 100 + b * 10 + c;
-      };
-    };
-  }
+	public function nested(a:int):Function
+	{
+		return function(b:int):Function
+		{
+			return function(c:int):int
+			{
+				return a * 100 + b * 10 + c;
+			};
+		};
+	}
 
-  public function caught():Function {
-    try {
-      throw new Error("e");
-    } catch (e:Error) {
-      return function():String {
-        return e.message;
-      };
-    }
+	public function caught():Function
+	{
+		try
+		{
+			throw new Error("e");
+		}
+		catch (e:Error)
+		{
+			return function():String
+			{
+				return e.message;
+			};
+		}
 
-    return null;
-  }
+		return null;
+	}
 
-  public var global:String = "the global";
+	public var global:String = "the global";
 
-  public function globals():Function {
-    var local:String = "local";
-    return function():String {
-      return local + " and " + global;
-    };
-  }
+	public function globals():Function
+	{
+		var local:String = "local";
+		return function():String
+		{
+			return local + " and " + global;
+		};
+	}
 }
 
 import scopes.*;

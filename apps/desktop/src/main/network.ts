@@ -26,15 +26,42 @@
 //   is asked for that address, not the name, so a proxy's DNS that answers
 //   otherwise than this machine's reaches nothing the judgement did not.
 //
+// Its types and limits are network-types.ts, and the rules that need no
+// instance network-rules.ts.
+//
 // Without Electron, so that node tests it (tests/desktop/network.test.ts).
 import { lookup } from "node:dns/promises";
 import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { connect, isIP, isIPv4, type Socket } from "node:net";
+import { connect, isIP, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import * as tls from "node:tls";
-import { type AddressClass, addressClass, badPort, RANK } from "./addresses.ts";
+import { type AddressClass, addressClass, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
+import {
+  abortable,
+  bare,
+  cached,
+  checkPort,
+  defaultCa,
+  describe,
+  proxyFault,
+  redirectOf,
+  refererFor,
+} from "./network-rules.ts";
+import {
+  type Budget,
+  LIMITS,
+  type Limits,
+  type Movie,
+  type NetRequest,
+  type NetResponse,
+  type NetworkOptions,
+  type Origin,
+  type Pinned,
+  Refused,
+  type Session,
+} from "./network-types.ts";
 import {
   allowsAccess,
   allowsHeaders,
@@ -49,202 +76,12 @@ import {
   urlMetaPolicy,
   usablePolicies,
 } from "./policy.ts";
-import { connectThrough, type ProxyConfig, ProxyError } from "./proxy.ts";
-
-export type Purpose = "movie" | "content" | "data" | "send";
-
-export interface NetRequest {
-  url: string;
-  method: string;
-  headers: [string, string][];
-  body: Uint8Array | null;
-  purpose: Purpose;
-  /**
-   * Whether the body of a response whose status is 400 or more is read
-   * too, which an AIR application's URLLoader and URLStream complete
-   * with; only an application is given it.
-   */
-  errorBody?: boolean;
-}
-
-export interface NetResponse {
-  bytes: Uint8Array | null;
-  status: number;
-  headers: [string, string][];
-  /** Where redirects took it, where that differs from the URL asked for. */
-  url?: string;
-}
-
-/** A request refused, with why, for the terminal; the SWF sees a failed load. */
-export class Refused extends Error {}
-
-export interface Limits {
-  /** The longest URL. */
-  url: number;
-  /** The most headers a SWF sends, and their names' and values' length all told. */
-  headers: number;
-  headerBytes: number;
-  /** The largest body a SWF sends. */
-  body: number;
-  /** The largest response read: a SWF, a sound, a level's data. */
-  response: number;
-  /** The largest policy file, URL or socket. */
-  policy: number;
-  redirects: number;
-  /** From the request to its response's headers, and from one chunk of its body to the next. */
-  timeout: number;
-  /**
-   * How long a request may take all told, however its bytes trickle in, so
-   * that a server sending a byte a second holds no turn for long; a policy
-   * file's whole fetch takes `policyTimeout` at most, as a movie keeps it.
-   */
-  deadline: number;
-  /** How long a policy file may take, and port 843's socket policy, which most servers lack. */
-  policyTimeout: number;
-  masterSocketTimeout: number;
-  /**
-   * The bytes a movie's responses may hold at once, all told: past it a
-   * response is refused, so many large ones together cannot take the
-   * main process's memory, as each alone may come near `response`.
-   */
-  buffered: number;
-  /** Requests under way at once; the rest wait their turn, up to `queue`. */
-  concurrent: number;
-  queue: number;
-  /** Policy files a movie may name with Security.loadPolicyFile. */
-  policyFiles: number;
-}
-
-const LIMITS: Limits = {
-  url: 64 * 1024,
-  headers: 32,
-  headerBytes: 8 * 1024,
-  body: 32 * 1024 * 1024,
-  response: 128 * 1024 * 1024,
-  policy: 1024 * 1024,
-  redirects: 10,
-  timeout: 30_000,
-  deadline: 300_000,
-  policyTimeout: 10_000,
-  masterSocketTimeout: 3_000,
-  buffered: 256 * 1024 * 1024,
-  concurrent: 16,
-  queue: 1024,
-  policyFiles: 64,
-};
-
-/**
- * The movie whose requests are judged: a remote SWF by its URL, a local
- * one with networking, or an AIR application, whose sandbox reaches the
- * network unjudged, as AIR's application sandbox does: any address, no
- * policy file.
- */
-export type Movie = { kind: "remote"; url: string } | { kind: "local" } | { kind: "application" };
-
-export interface NetworkOptions {
-  /** A host name's addresses, in order of preference: the system's resolver by default. */
-  resolve?: (host: string) => Promise<string[]>;
-  /** Where an address is: addresses.ts's by default; null for one never reached. */
-  classify?: (address: string) => AddressClass | null;
-  /** The certificate authorities HTTPS trusts, in place of Node's and the system's. */
-  ca?: string | string[];
-  /**
-   * Hosts whose HTTPS certificate is not verified: a server with one it
-   * signed itself, as a developer's own has (--ignore-certificate-errors).
-   * None by default.
-   */
-  unverified?: (host: string) => boolean;
-  limits?: Partial<Limits>;
-  /** Where a socket server keeps its master policy: 843. */
-  socketPolicyPort?: number;
-  /** What every connection goes through (--proxy); none by default. */
-  proxy?: ProxyConfig | null;
-}
+import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
 
 /** What Flash Player 32 reported, sent as it sent it. */
 const FLASH_VERSION = "32,0,0,465";
 const USER_AGENT = "Mozilla/5.0 (compatible; swf2es) Shockwave Flash";
-
-/** A remote movie once its SWF has come, where from. */
-interface Origin {
-  /** Its URL after redirects: its loaderInfo.url, and its Referer. */
-  url: URL;
-  requester: Requester;
-  rank: number;
-}
-
-interface Pinned {
-  address: string;
-  rank: number;
-}
-
-/** What one movie's requests share, and lose as the next opens. */
-/** What one request's responses hold of its movie's `buffered`, given back as it is answered. */
-interface Budget {
-  session: Session;
-  taken: number;
-}
-
-interface Session {
-  movie: Movie;
-  origin: Origin | null;
-  abort: AbortController;
-  /** URL and socket policies, by where they came from and the address they came from. */
-  policies: Map<string, Promise<UrlPolicy | null>>;
-  socketPolicies: Map<string, Promise<SocketPolicy | null>>;
-  /** What Security.loadPolicyFile named: http(s) URLs, and xmlsocket "host:port"s. */
-  urlPolicyFiles: URL[];
-  socketPolicyFiles: { host: string; port: number }[];
-  /** The bytes its responses hold now, of `buffered`. */
-  buffered: number;
-}
-
-const REDIRECTS = new Set([301, 302, 303, 307, 308]);
 const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-
-/** The system's trusted roots beside Node's, where this Node can tell them. */
-function defaultCa(): string[] | undefined {
-  const get = (tls as { getCACertificates?: (type: string) => string[] }).getCACertificates;
-  if (typeof get !== "function") {
-    return undefined;
-  }
-
-  try {
-    return [...new Set([...get("default"), ...get("system")])];
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The hosts --ignore-certificate-errors names, of the app's arguments up to
- * an AIR application's own after "--": null without the switch; with it
- * alone, every host; with `=a.test,b.test`, those, whatever their case.
- * A host is a name or an address, with no port: every port of it.
- */
-export function unverifiedHosts(argv: string[]): { all: boolean; hosts: string[] } | null {
-  const end = argv.indexOf("--");
-  const own = end < 0 ? argv : argv.slice(0, end);
-  let named = false;
-  let all = false;
-  const hosts: string[] = [];
-  for (const arg of own) {
-    if (arg === "--ignore-certificate-errors") {
-      named = true;
-      all = true;
-    } else if (arg.startsWith("--ignore-certificate-errors=")) {
-      // The switch with nothing named ignores nothing, rather than everything by a slip.
-      named = true;
-      for (const host of arg.slice(arg.indexOf("=") + 1).split(",")) {
-        if (host.trim() !== "") {
-          hosts.push(host.trim().toLowerCase());
-        }
-      }
-    }
-  }
-
-  return named ? { all, hosts } : null;
-}
 
 export class Network {
   private readonly limits: Limits;
@@ -1180,148 +1017,4 @@ export class Network {
       request.end(body ?? undefined);
     });
   }
-}
-
-/**
- * Whether `url` is potentially trustworthy, as the Secure Contexts
- * specification has it for a Referer: https, or this machine by its
- * loopback address or a name under localhost.
- */
-function trustworthy(url: URL): boolean {
-  if (url.protocol === "https:") {
-    return true;
-  }
-
-  // A name with its root's dot is the same name; of IPv6 addresses the
-  // specification names ::1 alone, not an IPv4 loopback address inside one.
-  const host = bare(url.hostname).toLowerCase().replace(/\.$/, "");
-  return (
-    host === "localhost" ||
-    host.endsWith(".localhost") ||
-    host === "::1" ||
-    (isIPv4(host) && addressClass(host) === "loopback")
-  );
-}
-
-/** The longest Referer sent whole, as the Referrer Policy specification has it. */
-const MAX_REFERER = 4096;
-
-/**
- * The Referer a request from the SWF at `swf` to `target` carries, as
- * browsers' strict-origin-when-cross-origin has it: the SWF's URL to its
- * own origin, its origin alone to another, and nothing from https to what
- * is not potentially trustworthy; a URL longer than 4096 characters goes
- * as its origin.
- */
-export function refererFor(swf: URL | null, target: URL): string | null {
-  if (!swf || (swf.protocol === "https:" && !trustworthy(target))) {
-    return null;
-  }
-
-  const origin = `${swf.origin}/`;
-  if (swf.origin !== target.origin || swf.href.length > MAX_REFERER) {
-    return origin.length > MAX_REFERER ? null : origin;
-  }
-
-  return swf.href;
-}
-
-/** `promise`, or a Refused once `signal` aborts: a request stops waiting on a shared policy. */
-function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) {
-    return Promise.reject(new Refused("aborted"));
-  }
-
-  return new Promise((resolve, reject) => {
-    const stop = () => reject(new Refused("aborted"));
-    signal.addEventListener("abort", stop, { once: true });
-    promise.then(
-      (value) => {
-        signal.removeEventListener("abort", stop);
-        resolve(value);
-      },
-      (error) => {
-        signal.removeEventListener("abort", stop);
-        reject(error);
-      },
-    );
-  });
-}
-
-/** A host name without an IPv6 address's brackets. */
-function bare(host: string): string {
-  return host.replace(/^\[(.*)\]$/, "$1");
-}
-
-function checkPort(url: URL): void {
-  const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
-  if (badPort(port)) {
-    throw new Refused(`port ${port} is not for HTTP`);
-  }
-}
-
-/** Where a redirect goes, if `response` is one, to http or https; one elsewhere is refused. */
-function redirectOf(url: URL, response: NetResponse): URL | null {
-  if (!REDIRECTS.has(response.status)) {
-    return null;
-  }
-
-  const location = response.headers.find(([n]) => n.toLowerCase() === "location")?.[1];
-  if (location === undefined) {
-    return null;
-  }
-
-  let next: URL;
-  try {
-    next = new URL(location, url);
-  } catch {
-    throw new Refused("a redirect to no URL");
-  }
-
-  if (next.protocol !== "http:" && next.protocol !== "https:") {
-    throw new Refused(`a redirect to ${next.protocol}`);
-  }
-
-  if (next.username || next.password) {
-    throw new Refused("a redirect to a URL with credentials");
-  }
-
-  next.hash = "";
-  return next;
-}
-
-/** `key`'s value in `cache`, made once with `make`; a cache grown past its bound starts again. */
-function cached<T>(
-  cache: Map<string, Promise<T>>,
-  key: string,
-  make: () => Promise<T>,
-): Promise<T> {
-  let value = cache.get(key);
-  if (!value) {
-    if (cache.size >= 512) {
-      cache.clear();
-    }
-
-    value = make();
-    cache.set(key, value);
-    // A failure, a proxy's, is not kept: the next request asks again.
-    const made = value;
-    made.catch(() => {
-      if (cache.get(key) === made) {
-        cache.delete(key);
-      }
-    });
-  }
-
-  return value;
-}
-
-/** Whether `error` is a refusal for a proxy that failed, not a server it did not reach. */
-function proxyFault(error: unknown): boolean {
-  const cause = (error as Error | null)?.cause;
-  return cause instanceof ProxyError && cause.fault;
-}
-
-function describe(requester: Requester): string {
-  return requester.host === null ? 'a local SWF (domain="*")' : requester.host;
 }

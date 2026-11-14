@@ -3,8 +3,9 @@
 // the store premultiplying again as it writes. The rules are the ones
 // Flash traces under adl and records in Ruffle's corpus.
 import type { CopyOp } from "@swf2es/native/render";
-import { type BitmapStore, type PixelRect, premultiply, unmultiply } from "./bitmap.js";
+import { type BitmapStore, premultiply, unmultiply } from "./bitmap.js";
 import { bitmapKernel } from "./kernel.js";
+import type { PixelRect } from "./pixel-rect.js";
 import { perlinSetup } from "./turbulence.js";
 
 const M = 2147483647;

@@ -52,7 +52,8 @@ and the player's paths in this document are relative to it:
   frames' headers (`mp3.ts`), what `Sound.extract` reads (`extract.ts`),
   and the sounds the player plays, the timeline's and scripts' channels
   (`sounds.ts`).
-- `input/`: the pointer and the keyboard.
+- `input/`: the pointer (`pointer.ts`), its hit test (`hit-test.ts`) and
+  drags (`drag.ts`), and the keyboard.
 - `scene/`: the view that drives `@swf2es/render` (`view.ts`,
   `RenderView`, `@swf2es/player/scene`: the display list's walk, its
   passes for `BitmapData.draw` and 3D objects, the canvas and its
@@ -214,6 +215,36 @@ would be again, so with none of those changed another finds nothing; a
 frame whose scripts only stop their clips or set properties takes one. The
 checked build's tests (`pnpm test:checked`) run each round left out
 anyway and fail if it finds anything to do.
+
+A round walks only where a script may be due. A clip is due when its
+frame is not the one whose script last ran (`scriptedFrame`); one that
+becomes due marks itself and everything a round walks to reach it
+(`markScriptsDue`): its parents, the buttons it is a state of (a state a
+button does not show has no parent), and its orphan entry, up to a clip
+or button marked already. A child put under a container carries its mark
+up, and so does a state given to a button, or a button made to run its
+states' first scripts. A round passes by an orphan, a root or a clip not
+marked with all it holds, and leaves the mark on what it walks only where
+a clip due is at or under it, as one whose script is yet to run must be
+found by a round inside its own. Its queue is the whole walk's but for
+the clips not due as it walks, which would run nothing there unless a
+script made them due before their turn: a goto does, but from version 10
+its cycle runs their script at once. A clip of a SWF before version 10,
+whose gotos run no cycle, is listed by every round, due or not, as the
+whole walk lists it (`listedAlways`): it is marked as it is made alive,
+and its mark stays, so a game that loads older asset SWFs walks those
+clips and what leads to them, not everything: with `walk-bench.ts --old
+50` (650 such clips) a menu of `--orphans 300 --menu 50` went from 58 to
+3.5 ms, and with `--old 200` (2,600) from 65 to 11 ms. After an overflow and
+without a stage, rounds walk everything; a button being made has all
+under it walked, as its round may be the only one to reach it. Once its orphans
+held no script due, a menu of buttons a script makes, each running the
+frame scripts due, no longer walks them all for each: in
+`walk-bench.ts --orphans 300 --menu 50` a menu went from 56 to 1.5 ms,
+and a tick from 550 to 350 µs; with `--orphans 1000 --menu 200`, from
+about 560 to 5.2 ms. The checked build walks every round both
+ways, and fails unless the walk of what is marked lists the clips due in
+the whole walk's order and each of the others runs nothing in its turn.
 
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
 goto from its frame script, its listener or another clip's, sits the next

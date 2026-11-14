@@ -1,0 +1,79 @@
+package
+{
+	import flash.display.BitmapData;
+	import flash.display.Bitmap;
+	import flash.display.Shape;
+	import flash.display.Sprite;
+	import flash.events.Event;
+	import flash.geom.Rectangle;
+
+	public class Main extends Sprite
+	{
+		private var data:BitmapData = new BitmapData(WIDTH, HEIGHT, true, 0);
+		private var pen:Shape = new Shape();
+		private var pane:Sprite = new Sprite();
+		private var sprites:Array = [];
+		private var hidden:Array = [];
+		private var frame:int = 0;
+
+		public function Main()
+		{
+			addChild(new Bitmap(data));
+			pane.scrollRect = new Rectangle(0, 0, WIDTH, HEIGHT);
+			addChild(pane);
+			for (var i:int = 0; i < COUNT / 4; i++)
+			{
+				var s:Sprite = new Sprite();
+				s.graphics.beginFill(0xffcc00);
+				s.graphics.drawRect(-8, -8, 16, 16);
+				pane.addChild(s);
+				sprites.push(s);
+			}
+
+			// Kept off the display list, heard for a frame's events, as an editor's hidden parts are.
+			for (i = 0; i < 500; i++)
+			{
+				var part:Sprite = new Sprite();
+				part.addEventListener(Event.RENDER, idle);
+				hidden.push(part);
+			}
+
+			addEventListener(Event.ENTER_FRAME, step);
+		}
+
+		private function idle(e:Event):void
+		{
+		}
+
+		private function step(e:Event):void
+		{
+			frame++;
+			data.fillRect(data.rect, 0);
+			pen.graphics.clear();
+			for (var i:int = 0; i < COUNT; i++)
+			{
+				var x:Number = (i * 37 + frame * 3) % WIDTH;
+				var y:Number = (i * 53 + frame * 2) % HEIGHT;
+				pen.graphics.lineStyle(2, 0x3060c0 + i);
+				pen.graphics.beginFill(0x30c060 + i);
+				pen.graphics.drawCircle(x, y, 3 + i % 5);
+				pen.graphics.endFill();
+				pen.graphics.moveTo(x, y);
+				pen.graphics.lineTo(x + 20, y + 10);
+			}
+
+			data.draw(pen);
+			for (i = 0; i < sprites.length; i++)
+			{
+				var s:Sprite = sprites[i];
+				s.x = (i * 41 + frame * 4) % WIDTH;
+				s.y = (i * 29 + frame * 3) % HEIGHT;
+				var r:Rectangle = s.getRect(stage);
+				if (r.right > WIDTH)
+				{
+					s.x -= r.right - WIDTH;
+				}
+			}
+		}
+	}
+}

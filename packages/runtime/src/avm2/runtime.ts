@@ -52,7 +52,15 @@ import {
   traitsAt,
   walkless,
 } from "./enumeration.js";
-import { AsError, describe, detailOf, errorMessage, stackOf, UnsupportedError } from "./errors.js";
+import {
+  AsError,
+  caught,
+  describe,
+  detailOf,
+  errorMessage,
+  stackOf,
+  UnsupportedError,
+} from "./errors.js";
 import { FloatValue, floatValue } from "./float.js";
 import { type ClassHook, hookedBinding, type NativesProvider, type PropertyHook } from "./hooks.js";
 import {
@@ -82,7 +90,6 @@ import {
   NS_Private,
   NS_Public,
   namespace,
-  prefixedNamespace,
   prefixOf,
   publicNs,
   publicQname,
@@ -97,7 +104,7 @@ import {
   storeInt,
   storeObject,
 } from "./natives/vector-elements.js";
-import { escapeAttributeValue, escapeElementValue } from "./natives/xml/escape.js";
+import { escapeAttributeValue } from "./natives/xml/escape.js";
 import { numberToString, stringToNumber } from "./number-strings.js";
 import {
   defaultPrint,
@@ -123,6 +130,12 @@ import {
   ScopeFinds,
   UNFILLED,
 } from "./property-cache.js";
+import {
+  checkFilter,
+  escapeElement,
+  getDescendants,
+  setDefaultXmlNamespace,
+} from "./runtime-xml.js";
 import {
   BIND_Const,
   BIND_Get,
@@ -201,7 +214,8 @@ function dynamicValue(o: AsObject, name: string): Value {
 export class Runtime {
   readonly print: (line: string) => void;
   readonly debugger: boolean;
-  private readonly onUnsupported: ((message: string) => void) | undefined;
+  /** @internal */
+  readonly onUnsupported: ((message: string) => void) | undefined;
   readonly compileAbc:
     | ((abc: Uint8Array, unit: CompileUnit) => ((rt: Runtime) => Abc) | number)
     | null;
@@ -3515,51 +3529,14 @@ export class Runtime {
     return describe(this, v);
   }
 
-  /** An exception as AS3 catches it: a stack overflow is an AS3 Error; the runtime's own errors are not caught. */
+  /** See caught in errors.ts. */
   caught(e: unknown): Value {
-    if (e instanceof RangeError && /call stack/.test(e.message)) {
-      return this.error("Error", 1023);
-    }
-
-    // Domain memory's, in the handler's own method (see memoryError).
-    if (isViewRangeError(e)) {
-      return this.error("RangeError", 1506);
-    }
-
-    if (e instanceof UnsupportedError) {
-      return this.unsupportedCaught(e);
-    }
-
-    if (e instanceof Error && !(e instanceof AsError)) {
-      throw e;
-    }
-
-    return e;
+    return caught(this, e);
   }
 
-  /** What a catch was told of already (unsupportedCaught). */
-  private readonly unsupportedTold = new Set<string>();
-
-  /**
-   * What is not supported as the AS3 error a catch gets: an
-   * IllegalOperationError with its message, or an Error where the player's
-   * classes are not loaded; said once to the host, as the code may say nothing.
-   */
-  private unsupportedCaught(e: UnsupportedError): Value {
-    if (!this.unsupportedTold.has(e.message)) {
-      this.unsupportedTold.add(e.message);
-      this.onUnsupported?.(e.message);
-    }
-
-    let cls: AsObject;
-    try {
-      cls = this.resolve(this.cls(namespace(NS_Public, "flash.errors"), "IllegalOperationError"));
-    } catch {
-      cls = this.builtinClass("Error");
-    }
-
-    return this.constructClass(cls, [e.message, 0]);
-  }
+  /** What a catch was told of already (unsupportedCaught in errors.ts). */
+  /** @internal */
+  readonly unsupportedTold = new Set<string>();
 
   catches(e: Value, type: TypeRef): boolean {
     return this.isInstanceOf(e, this.traitsOfType(type));
@@ -3721,14 +3698,9 @@ export class Runtime {
 
   // E4X.
 
-  /** getdescendants: x..name, on XML or XMLList; anything else, as avmplus, TypeError 1016. */
+  /** See getDescendants in runtime-xml.ts. */
   getDescendants(o: Value, mn: Multiname): Value {
-    const properties: PropertyHook | null | undefined = o?.$traits?.properties;
-    if (!properties) {
-      throw this.error("TypeError", 1016, this.describe(o));
-    }
-
-    return properties.descendants(this, o, mn);
+    return getDescendants(this, o, mn);
   }
 
   /**
@@ -3745,38 +3717,19 @@ export class Runtime {
     return this.defaultXmlNamespace;
   }
 
+  /** See setDefaultXmlNamespace in runtime-xml.ts. */
   setDefaultXmlNamespace(ns: Value): void {
-    if (ns instanceof Namespace) {
-      this.defaultXmlNamespace = ns;
-    } else {
-      const uri = this.toString(ns);
-      this.defaultXmlNamespace = prefixedNamespace(uri === "" ? "" : undefined, uri);
-    }
+    setDefaultXmlNamespace(this, ns);
   }
 
-  /** checkfilter: x.(...) filters XML and XMLList only, else TypeError 1123. */
+  /** See checkFilter in runtime-xml.ts. */
   checkFilter(v: Value): void {
-    if (!v?.$traits?.properties) {
-      throw this.error("TypeError", 1123, this.describe(v));
-    }
+    checkFilter(this, v);
   }
 
-  /** esc_xelem, as AvmCore::ToXMLString: XML's own XML, else a string escaped and trimmed. */
+  /** See escapeElement in runtime-xml.ts. */
   escapeElement(v: Value): string {
-    if (typeof v === "string") {
-      return escapeElementValue(v, true);
-    }
-
-    if (typeof v !== "object" || v === null) {
-      return this.toString(v);
-    }
-
-    const properties: PropertyHook | null | undefined = v.$traits?.properties;
-    if (properties) {
-      return properties.toXMLString(this, v);
-    }
-
-    return escapeElementValue(this.toString(v), true);
+    return escapeElement(this, v);
   }
 
   escapeAttribute(v: Value): string {

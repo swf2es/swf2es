@@ -28,15 +28,14 @@ import { runInNewContext } from "node:vm";
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
 import { addressClass } from "../../apps/desktop/src/main/addresses.ts";
 import { GZIP_HEADER_MAX, GzipHeader } from "../../apps/desktop/src/main/decompress.ts";
+import { Network } from "../../apps/desktop/src/main/network.ts";
+import { refererFor, unverifiedHosts } from "../../apps/desktop/src/main/network-rules.ts";
 import {
   type Limits,
-  Network,
   type NetworkOptions,
   type Purpose,
   Refused,
-  refererFor,
-  unverifiedHosts,
-} from "../../apps/desktop/src/main/network.ts";
+} from "../../apps/desktop/src/main/network-types.ts";
 import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
 import { testProxy } from "./proxy-server.ts";
 

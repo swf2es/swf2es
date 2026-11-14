@@ -30,7 +30,7 @@
 // --cache plays with an IndexedDB module cache, which the loads share.
 //
 //   node tests/player/leak.ts [--loads N] [--snapshots DIR] [--cache] [mode...]
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { Avm1Assembler } from "../avm1-assembler.ts";
 import * as w from "../swf-writer.ts";
@@ -101,36 +101,7 @@ ${methods}
 `;
 }
 
-const main = `package {
-  import flash.display.Loader;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.net.URLRequest;
-  public class LeakMain extends Sprite {
-    private var count:int = 0;
-    private var loading:Boolean = false;
-    public function LeakMain() {
-      addEventListener(Event.ENTER_FRAME, next);
-    }
-    private function next(e:Event):void {
-      if (loading) {
-        return;
-      }
-      loading = true;
-      var params:Object = loaderInfo.parameters;
-      var kinds:int = int(params.kinds);
-      var loader:Loader = new Loader();
-      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void {
-        loader.unloadAndStop();
-        loading = false;
-        count++;
-        trace("loaded " + count);
-      });
-      loader.load(new URLRequest("child-" + (count % kinds) + ".swf"));
-    }
-  }
-}
-`;
+const main = readFileSync(new URL("./scripts/LeakMain.as", import.meta.url), "utf8");
 
 const keptChild = `package {
   import flash.display.Sprite;
@@ -150,51 +121,7 @@ const keptChild = `package {
 
 // Traces "kept" once the child is let go, and the widths once the page
 // has collected the garbage between and the font is registered.
-const kept = `package {
-  import flash.display.Loader;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.net.URLRequest;
-  import flash.system.ApplicationDomain;
-  import flash.system.LoaderContext;
-  import flash.text.Font;
-  import flash.text.TextField;
-  import flash.text.TextFormat;
-  public class LeakKept extends Sprite {
-    private var field:TextField;
-    private var frames:int = 0;
-    public function LeakKept() {
-      var loader:Loader = new Loader();
-      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void {
-        var child:Object = loader.contentLoaderInfo.applicationDomain.getDefinition("LeakKeptChild");
-        field = child.field();
-        addChild(field);
-        loader.unloadAndStop();
-        trace("kept");
-        addEventListener(Event.ENTER_FRAME, register);
-      });
-      loader.load(new URLRequest("kept-child.swf"));
-    }
-    private function register(e:Event):void {
-      if (++frames < 2) {
-        return;
-      }
-      removeEventListener(Event.ENTER_FRAME, register);
-      var loader:Loader = new Loader();
-      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function (e:Event):void {
-        Font.registerFont(loader.contentLoaderInfo.applicationDomain.getDefinition("LeakProbe") as Class);
-        field.text = "ab";
-        var fresh:TextField = new TextField();
-        fresh.embedFonts = true;
-        fresh.defaultTextFormat = new TextFormat("Probe", 20);
-        fresh.text = "ab";
-        trace(field.textWidth + " " + fresh.textWidth);
-      });
-      loader.load(new URLRequest("kept-font.swf"), new LoaderContext(false, new ApplicationDomain()));
-    }
-  }
-}
-`;
+const kept = readFileSync(new URL("./scripts/LeakKept.as", import.meta.url), "utf8");
 
 const names = Array.from({ length: KINDS }, (_, i) => `LeakChild${i}`);
 const abcs = compileScripts([

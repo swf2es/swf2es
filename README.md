@@ -74,7 +74,7 @@ that defines the element (CSP, isolation and self-hosting in
 [the guide](docs/guide.md#from-a-cdn)):
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.20"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.21"></script>
 ```
 
 Or turn an existing page's Flash tags into players:

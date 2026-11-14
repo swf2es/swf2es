@@ -156,8 +156,9 @@ pnpm as3                      # the AS3 libraries under as3/, compiled by ASC 1 
                               # image: as3:playerglobal, the player's playerglobal held to Flash
                               # Player's API and into playerglobal-library.ts; as3:air, the AIR
                               # library into air-library.ts
-pnpm as3:format               # format them with Apache Royale's asformat, in its default style
-                              # (ASFORMAT names its script if it is not on the PATH)
+pnpm as3:format               # format them and the tests' scripts with Apache Royale's asformat,
+                              # in its default style (ASFORMAT names its script if it is not on
+                              # the PATH); tools/as3-format.ts names what it leaves as written
 SWF2ES_PLAYERGLOBAL=adobe ... # the unit, player, web and corpus tests on Flash Player's
                               # playerglobal in place of the player's own (tests/player/libraries.ts)
 pnpm --filter @swf2es/native build:wasm   # rebuild packages/native's wasm (compress, mp3, and render:

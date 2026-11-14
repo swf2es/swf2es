@@ -37,6 +37,13 @@ export const DRAW_AT = 8;
 
 /** The most cutoff table entries a text's draw takes, as the player's text/saffron.ts builds them. */
 export const TABLE_ENTRIES = 48;
+/**
+ * Texels a text's slot in the glyph tables' texture (GlyphTables): its mode,
+ * then its table's entries; and texels a line of it. Powers of two, which
+ * the vertex shader splits a slot's texel into column and line with.
+ */
+export const TABLE_SLOT = 64;
+export const TABLE_LINE = 1024;
 /** Segments a row of the outlines' texture, as the player's text/saffron.ts stores them. */
 export const OUTLINE_ROW = 1024;
 
@@ -74,6 +81,8 @@ export const RUN_UNIT = FILL_UNIT + FILL_TEXTURES;
 export const MERGED_UNIT = RUN_UNIT + 1;
 /** The merged fills' rows a line of their integer texture: a power of two, as for RUN_MOST. */
 export const MERGED_LINE = 1024;
+/** The glyph tables' unit (GlyphTables), past the merged fills' rows. */
+export const TABLE_UNIT = MERGED_UNIT + 1;
 
 /**
  * Places a vertex by its row's transform, on a quarter of a pixel of
@@ -299,11 +308,14 @@ void main(void) {
  * pixels to Flash's, uUnit of them a stage pixel, on their grid from the
  * stage's origin, a BitmapData's in a draw. A glyph's pen stands where its
  * text's origin, at a whole pixel, puts it, snapped as its grid fits it
- * (uMode: gridFitType 0 none, 1 pixel, 2 subpixel, thickness, sharpness),
- * and its quad reaches out past its outline by the furthest cutoff. Its
- * colour is drawn under the row's colour transform, light or dark as adl
- * chooses its table. aOrigin: the pen, and its light and dark tables, each
- * its first entry plus 64 times its entries; aGlyph: a corner of its
+ * (its mode: gridFitType 0 none, 1 pixel, 2 subpixel, thickness,
+ * sharpness), and its quad reaches out past its outline by the furthest
+ * cutoff. Its colour is drawn under the row's colour transform, light or
+ * dark as adl chooses its table. The text's mode and tables are in its slot
+ * of uTables (uTable; GlyphTables), read by texelFetch: not a uniform array
+ * indexed by each glyph's table start, the access that hung Intel's GPUs
+ * in the fill program's run table. aOrigin: the pen, and its light and dark tables,
+ * each its first entry plus 64 times its entries; aGlyph: a corner of its
  * outline's bounds and the way out from it; aRun: its segments, first and
  * count, the pixels of a unit of its outline, and its size.
  */
@@ -318,8 +330,8 @@ uniform highp sampler2D uRows;
 uniform int uRow;
 uniform vec4 uView;
 uniform float uUnit;
-uniform vec4 uMode;
-uniform vec4 uTable[${TABLE_ENTRIES}];
+uniform highp sampler2D uTables;
+uniform int uTable;
 out vec2 vPixel;
 flat out vec2 vPen;
 flat out vec4 vToGlyph;
@@ -327,10 +339,16 @@ flat out vec4 vToPixel;
 flat out vec4 vCut;
 flat out vec4 vShown;
 
+// Texel i of the text's slot: its mode, then its tables' entries.
+vec4 slot(int i) {
+  int at = uTable * ${TABLE_SLOT} + i;
+  return texelFetch(uTables, ivec2(at & ${TABLE_LINE - 1}, at >> ${Math.log2(TABLE_LINE)}), 0);
+}
+
 // The cutoffs at ppem by the table of entries start to start + count, as text/csm.ts' cutoffs.
-vec2 cutoffs(int start, int count, float ppem) {
-  vec4 first = uTable[start];
-  vec4 last = uTable[start + count - 1];
+vec2 cutoffs(vec4 mode, int start, int count, float ppem) {
+  vec4 first = slot(1 + start);
+  vec4 last = slot(start + count);
   vec2 c = first.yz;
   if (ppem >= last.x) {
     c = last.yz;
@@ -340,9 +358,9 @@ vec2 cutoffs(int start, int count, float ppem) {
         break;
       }
 
-      vec4 b = uTable[start + i];
+      vec4 b = slot(1 + start + i);
       if (ppem <= b.x) {
-        vec4 a = uTable[start + i - 1];
+        vec4 a = slot(start + i);
         c = mix(a.yz, b.yz, (ppem - a.x) / (b.x - a.x));
         break;
       }
@@ -350,8 +368,8 @@ vec2 cutoffs(int start, int count, float ppem) {
   }
 
   float unit = 0.0001 * ppem;
-  float t = clamp(uMode.y, -200.0, 200.0);
-  float s = clamp(uMode.z, -400.0, 400.0);
+  float t = clamp(mode.y, -200.0, 200.0);
+  float s = clamp(mode.z, -400.0, 400.0);
   c -= unit * vec2(t + s * 0.5, t - s * 0.5);
   if (c.x < c.y) {
     c = vec2((c.x + c.y) * 0.5);
@@ -366,6 +384,7 @@ void main(void) {
   vec4 t = texelFetch(uRows, at + ivec2(1, 0), 0);
   vec4 mul = texelFetch(uRows, at + ivec2(2, 0), 0);
   vec4 add = texelFetch(uRows, at + ivec2(3, 0), 0);
+  vec4 mode = slot(0);
   // The text's pixels to Flash's.
   mat2 linear = mat2(m.xy, m.zw) * uUnit;
   vec2 origin = t.xy * uUnit;
@@ -373,9 +392,9 @@ void main(void) {
   float across = max(abs(linear[0][1]), abs(linear[1][0]));
   if (across > max(abs(linear[0][0]), abs(linear[1][1])) / 65536.0) {
     // Turned or skewed: no grid.
-  } else if (uMode.x == 1.0) {
+  } else if (mode.x == 1.0) {
     pen = vec2(roundEven(pen.x * 8.0) / 8.0 + 0.5, roundEven(pen.y));
-  } else if (uMode.x == 2.0) {
+  } else if (mode.x == 2.0) {
     pen = vec2(roundEven(pen.x * 4.0) / 4.0 + 0.5, roundEven(pen.y));
   } else {
     pen = roundEven(pen * 4.0) / 4.0 + vec2(0.5, 0.0);
@@ -386,7 +405,7 @@ void main(void) {
   vec4 shown = clamp(aColor * mul + add, 0.0, 1.0);
   bool light = dot(floor(shown.rgb * 255.0 + 0.5), vec3(30.0, 59.0, 11.0)) > 20000.0;
   int table = int(light ? aOrigin.z : aOrigin.w);
-  vec2 cut = cutoffs(table & 63, table >> 6, ppem);
+  vec2 cut = cutoffs(mode, table & 63, table >> 6, ppem);
   mat2 toPixel = linear * aRun.z;
   float margin = max(abs(cut.x), abs(cut.y)) + 1.0;
   float det = determinant(toPixel);

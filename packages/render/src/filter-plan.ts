@@ -38,21 +38,24 @@ export const KERNEL_PASS = 10;
 
 /**
  * How a uniform's values are set: one to four floats, an array of vec4s, a
- * 4 by 4 matrix, an array of ivec4s, or a sampler, its value the texture of
- * the frame's it reads.
+ * 4 by 4 matrix, an array of ivec4s, a sampler, its value the texture of
+ * the frame's it reads, or a sampler of a line of floats, its values, for a
+ * shader that reads them at a varying index (as a uniform array read so
+ * hangs some GPUs).
  */
 export const FLOATS = 1;
 export const VEC4S = 2;
 export const MATRIX4 = 3;
 export const IVEC4S = 4;
 export const SAMPLER = 5;
+export const FLOAT_LINE = 6;
 
 /** A pass's blurred input (FilterPass.blurred): none read, or the pass's input itself. */
 export const NO_BLUR = -2;
 export const INPUT_BLUR = -1;
 
-/** The most floats a convolution's matrix takes in its shader: 57 vec4s. */
-const CONVOLUTION_FLOATS = 57 * 4;
+/** The most floats a convolution's matrix takes in its shader: 15 by 15. */
+const CONVOLUTION_FLOATS = 15 * 15;
 
 /** One pass: a program drawn from slot `input` into slot `output`, its uniforms in its plan's. */
 export interface FilterPass {
@@ -468,7 +471,7 @@ function colorMatrix(
   return out;
 }
 
-/** A convolution's weights, its matrix by rows padded to the shader's array. */
+/** A convolution's weights, its matrix by rows padded to the shader's line. */
 const weights = new Float32Array(CONVOLUTION_FLOATS);
 
 function convolution(
@@ -485,7 +488,7 @@ function convolution(
   weights.set(v.subarray(at + 12, at + 12 + Math.min(columns * rows, weights.length)));
   const out = plan.slot(width, height);
   plan.pass(CONVOLUTION_PASS, input, width, height, out, width, height);
-  plan.uniformFrom("uMatrix", VEC4S, weights, 0, weights.length);
+  plan.uniformFrom("uWeights", FLOAT_LINE, weights, 0, weights.length);
   plan.uniform("uSize", 2, columns, rows);
   plan.uniformFrom("uEdge", FLOATS, v, at + 2, 4);
   plan.uniform("uDivisor", 1, v[at + 6]);

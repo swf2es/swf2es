@@ -1,62 +1,72 @@
 // A SWF loading one whose frame does not start at (0, 0): where Flash puts
 // its content, and what its LoaderInfo says of its size. The inner SWF's
 // bytes are put in as base64 by tests/player/cases/timeline.ts.
-package {
-  import flash.display.Loader;
-  import flash.display.MovieClip;
-  import flash.events.Event;
-  import flash.geom.Point;
-  import flash.system.LoaderContext;
-  import flash.utils.ByteArray;
+package
+{
+	import flash.display.Loader;
+	import flash.display.MovieClip;
+	import flash.events.Event;
+	import flash.geom.Point;
+	import flash.system.LoaderContext;
+	import flash.utils.ByteArray;
 
-  public class Main extends MovieClip {
-    private static const INNER:String = "@@INNER@@";
-    private var loader:Loader;
+	public class Main extends MovieClip
+	{
+		private static const INNER:String = "@@INNER@@";
+		private var loader:Loader;
 
-    public function Main() {
-      addFrameScript(0, frame1, 2, frame3);
-    }
+		public function Main()
+		{
+			addFrameScript(0, frame1, 2, frame3);
+		}
 
-    private function frame1():void {
-      loader = new Loader();
-      loader.contentLoaderInfo.addEventListener(Event.INIT, report);
-      addChild(loader);
-      var context:LoaderContext = new LoaderContext();
-      context.allowCodeImport = true;
-      loader.loadBytes(decode(INNER), context);
-    }
+		private function frame1():void
+		{
+			loader = new Loader();
+			loader.contentLoaderInfo.addEventListener(Event.INIT, report);
+			addChild(loader);
+			var context:LoaderContext = new LoaderContext();
+			context.allowCodeImport = true;
+			loader.loadBytes(decode(INNER), context);
+		}
 
-    private function report(e:Event):void {
-      trace("inner size", loader.contentLoaderInfo.width, loader.contentLoaderInfo.height);
-      trace("inner at", loader.content.x, loader.content.y);
-      trace("inner bounds", loader.content.getBounds(stage), loader.width, loader.height);
-    }
+		private function report(e:Event):void
+		{
+			trace("inner size", loader.contentLoaderInfo.width, loader.contentLoaderInfo.height);
+			trace("inner at", loader.content.x, loader.content.y);
+			trace("inner bounds", loader.content.getBounds(stage), loader.width, loader.height);
+		}
 
-    private function frame3():void {
-      trace("outer", loaderInfo.width, loaderInfo.height, loader.content.localToGlobal(new Point(0, 0)));
-    }
+		private function frame3():void
+		{
+			trace("outer", loaderInfo.width, loaderInfo.height, loader.content.localToGlobal(new Point(0, 0)));
+		}
 
-    private static function decode(text:String):ByteArray {
-      const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      var out:ByteArray = new ByteArray();
-      var bits:int = 0;
-      var have:int = 0;
-      for (var i:int = 0; i < text.length; i++) {
-        var c:String = text.charAt(i);
-        if (c == "=") {
-          break;
-        }
+		private static function decode(text:String):ByteArray
+		{
+			const ALPHABET:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			var out:ByteArray = new ByteArray();
+			var bits:int = 0;
+			var have:int = 0;
+			for (var i:int = 0; i < text.length; i++)
+			{
+				var c:String = text.charAt(i);
+				if (c == "=")
+				{
+					break;
+				}
 
-        bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
-        have += 6;
-        if (have >= 8) {
-          have -= 8;
-          out.writeByte((bits >> have) & 0xff);
-        }
-      }
+				bits = ((bits << 6) | ALPHABET.indexOf(c)) & 0xffff;
+				have += 6;
+				if (have >= 8)
+				{
+					have -= 8;
+					out.writeByte((bits >> have) & 0xff);
+				}
+			}
 
-      out.position = 0;
-      return out;
-    }
-  }
+			out.position = 0;
+			return out;
+		}
+	}
 }

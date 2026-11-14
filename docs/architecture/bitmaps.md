@@ -60,11 +60,12 @@ counts in a version the node compares.
 
 The pixel operations that read and write the store alone are in
 `bitmap/ops.ts`, beside the store and its premultiplied arithmetic in
-`bitmap/bitmap.ts`; the loops of `noise`, `perlinNoise`, `copyChannel`,
-`colorTransform`, `merge`, `paletteMap` and a colour matrix filter run in
-the render module (`packages/native/src/render/pixels.zig`), a band of rows
-at a time, which keeps their arithmetic. They write into the store in
-place; a band that traps is made again in a new instance, and where that
+`bitmap/bitmap.ts` and the pixels a rect covers in `bitmap/pixel-rect.ts`;
+the loops of `noise`, `perlinNoise`, `copyChannel`, `colorTransform`,
+`merge`, `paletteMap` and a colour matrix filter run in the render module
+(`packages/native/src/render/pixels.zig`), a band of rows at a time,
+which keeps their arithmetic. They write into the store in place; a band
+that traps is made again in a new instance, and where that
 fails too the bands before it stay written and the rest are left as they
 were. A bitmap's pixels set and read whole (`setPixels`, `setVector`,
 `getPixels`, `copyPixelsToByteArray`, `getVector`) go as runs, a rect as
@@ -283,8 +284,10 @@ through the inverse of its matrix (`scene/shapes.ts`), each draw saying
 whether it repeats or clamps and whether it is smoothed, so one texture
 serves every fill of a store. Without scripts, a SWF's
 images are decoded at `start` too, for its bitmap fills. A bitmap line
-(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) still draws its first
-colour.
+(`lineBitmapStyle`, a LINESTYLE2 bitmap fill) is filled with its bitmap
+as a fill is (`line-bitmaps`, `line-fills`); `lineBitmapStyle` fills the
+open line only while it has drawn nothing, as adl does, and takes a
+disposed BitmapData without an error.
 
 Gradient fills, a shape's linear, radial and focal ones and
 `beginGradientFill`'s, are drawn from Flash's own ramp, which adl gives
@@ -311,7 +314,11 @@ null alphas as opaque and null ratios as even, floor(255 · k / (n − 1));
 arrays of different lengths or a ratio outside 0 to 255 draw nothing,
 and stops past 16 are left out. The stage's supersampling softens a hard jump
 inside a fill, such as a repeating gradient's seam, which Flash leaves
-hard. Gradient lines still draw their first colour.
+hard. A gradient line (`lineGradientStyle`, a LINESTYLE2 gradient) is
+filled with its gradient as a fill is, its own colour and alpha unused
+(`line-gradients`, `line-fills`); `lineGradientStyle` strokes on from
+the pen as a new line style does, checks null colours before the type,
+and leaves the line as it was for arrays that would draw nothing.
 
 ## PNG
 
