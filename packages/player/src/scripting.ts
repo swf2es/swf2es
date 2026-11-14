@@ -655,6 +655,8 @@ export class Scripting {
       }
     };
     library.removing = (display, byTimeline) => this.lifecycle.removing(display, byTimeline);
+    library.placedSymbol = (className) =>
+      this.symbols.placedSymbol(className, library.domain ?? this.mainDomain);
     library.sounds = this.timelineSounds;
   }
 

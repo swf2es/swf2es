@@ -268,7 +268,7 @@ export class MovieClip extends Container {
    * clip's class constructor runs, made by Sprite's constructChildren in its
    * super(), as Flash has a constructor find them (`instantiation_on_enter_frame`).
    */
-  private held: { display: DisplayObject; character: DisplayCharacter }[] = [];
+  private held: { display: DisplayObject; character: DisplayCharacter; library: Library }[] = [];
 
   /**
    * Run frame `frame`'s commands as the playhead reaches it: place, move and
@@ -305,8 +305,20 @@ export class MovieClip extends Container {
 
       // A new character, or one that replaces what is at the depth.
       // Data is no display object: Flash places nothing for it.
-      const character =
+      let character: Character | null | undefined =
         place.character === null ? null : this.library.characters.get(place.character);
+      // Placed by class name alone, the class's symbol is placed, from the
+      // SWF that bound it: a SWF of dialogs places buttons a library SWF
+      // loaded into its domain binds (`placed-by-class`).
+      let library = this.library;
+      if (place.character === null && place.className !== null && !place.move && !place.hasImage) {
+        const symbol = this.library.placedSymbol?.(place.className) ?? null;
+        if (symbol) {
+          character = symbol.character;
+          library = symbol.library;
+        }
+      }
+
       if (
         !character ||
         character.type === "binary" ||
@@ -329,18 +341,18 @@ export class MovieClip extends Container {
         continue;
       }
 
-      const child = displayFor(character, this.library, place.hasImage);
+      const child = displayFor(character, library, place.hasImage);
       child.applyPlace(place);
       child.metaData = place.metaData;
       child.placeFrame = frame;
       this.library.avm1?.placing(child, place);
       this.placeAtDepth(child, place.depth);
-      if (later === "held" && this.library.construct) {
-        this.held.push({ display: child, character });
-      } else if (later === "frame" && this.library.constructLater) {
-        this.library.constructLater(child, character);
+      if (later === "held" && library.construct) {
+        this.held.push({ display: child, character, library });
+      } else if (later === "frame" && library.constructLater) {
+        library.constructLater(child, character);
       } else {
-        construct(child, character, this.library);
+        construct(child, character, library);
       }
     }
 
@@ -637,7 +649,7 @@ export class MovieClip extends Container {
     try {
       for (let next = this.held.shift(); next; next = this.held.shift()) {
         if (!next.display.object && next.display.parent === this) {
-          construct(next.display, next.character, this.library);
+          construct(next.display, next.character, next.library);
         }
       }
     } finally {
