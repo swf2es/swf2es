@@ -17,13 +17,8 @@ import {
   TextObject,
 } from "../display/display.js";
 import { apply, invert } from "../display/geometry.js";
-import {
-  type Cursor,
-  type Drag,
-  dragTo,
-  type Pointer,
-  type PointerState,
-} from "../input/pointer.js";
+import { type Drag, dragTo } from "../input/drag.js";
+import type { Cursor, Pointer, PointerState } from "../input/pointer.js";
 import { caretAt } from "../input/text-editor.js";
 import type { Avm1 } from "./avm1.js";
 import { stateOf } from "./globals/TextField.js";

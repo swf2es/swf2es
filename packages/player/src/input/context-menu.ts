@@ -4,7 +4,8 @@ import type { As3 } from "../as3/types.js";
 import type { Container } from "../display/display.js";
 import { dispatchTo } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
-import { type PointerState, pointerTarget } from "./pointer.js";
+import { pointerTarget } from "./hit-test.js";
+import type { PointerState } from "./pointer.js";
 
 export interface MenuItem {
   caption: string;

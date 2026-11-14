@@ -8,7 +8,8 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { type DisplayObject, MovieClip } from "../../../display/display.js";
 import type { Rect } from "../../../display/geometry.js";
-import { dropTargetOf, hitAreaOf, setHitArea } from "../../../input/pointer.js";
+import { dropTargetOf } from "../../../input/drag.js";
+import { hitAreaOf, setHitArea } from "../../../input/hit-test.js";
 import type { SoundMix } from "../../../media/audio.js";
 import { mixOf, updateTimelineMixes } from "../../../media/sounds.js";
 import type { Scripting } from "../../../scripting.js";
@@ -71,7 +72,7 @@ export function spriteNatives(s: Scripting): avm2.Natives {
       this.$useHandCursor = !!v;
     }
 
-    /** Another sprite whose drawing the pointer hits this one by (input/pointer.ts). */
+    /** Another sprite whose drawing the pointer hits this one by (input/hit-test.ts). */
     get hitArea(): Value {
       return hitAreaOf(this.$display)?.object ?? null;
     }

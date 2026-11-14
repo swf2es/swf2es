@@ -15,12 +15,9 @@ import {
   TextObject,
   TRANSFORM,
 } from "../../../../packages/player/dist/display/display.js";
-import {
-  dropTargetOf,
-  PointerInput,
-  pointerTarget,
-  setHitArea,
-} from "../../../../packages/player/dist/input/pointer.js";
+import { dropTargetOf } from "../../../../packages/player/dist/input/drag.js";
+import { pointerTarget, setHitArea } from "../../../../packages/player/dist/input/hit-test.js";
+import { PointerInput } from "../../../../packages/player/dist/input/pointer.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Clipboard } from "../../../../packages/player/dist/scripting/clipboard.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";

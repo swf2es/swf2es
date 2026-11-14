@@ -273,7 +273,7 @@ export class DisplayObject {
   dirty = TRANSFORM | CONTENT;
   /**
    * Where anything under it may take the pointer, in its own space, as the
-   * pointer's pick last worked it out (input/pointer.ts), and whether a
+   * pointer's pick last worked it out (input/hit-test.ts), and whether a
    * change under it since has made that stale: the renderer's flags are
    * cleared as it syncs, these as the pick reads them. A move alone marks
    * its ancestors, not it: its bounds in its own space stand.
@@ -376,7 +376,7 @@ export class DisplayObject {
 
   /**
    * Mark the pick bounds above it stale, and its own unless `own` is false
-   * (input/pointer.ts): an ancestor of one changed since the last pick is
+   * (input/hit-test.ts): an ancestor of one changed since the last pick is
    * marked already.
    */
   pickChanged(own: boolean): void {
