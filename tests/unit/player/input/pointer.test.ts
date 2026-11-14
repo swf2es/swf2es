@@ -26,6 +26,7 @@ import { bare } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compileScripts } from "../../../player/scripts.ts";
 import * as w from "../../../swf-writer.ts";
+import { equal } from "../../same.ts";
 
 test("the topmost artwork targets its interactive parent, with mouseChildren and visibility respected", () => {
   const stage = new Container();
@@ -44,31 +45,31 @@ test("the topmost artwork targets its interactive parent, with mouseChildren and
     root.addChildAt(d, root.children.length);
   }
 
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), front);
+  equal(pointerTarget(stage, 10, 10, 100, 100), front);
   front.visible = false;
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), back);
+  equal(pointerTarget(stage, 10, 10, 100, 100), back);
   back.visible = false;
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), stage);
+  equal(pointerTarget(stage, 10, 10, 100, 100), stage);
   back.visible = true;
   front.visible = true;
   assert.ok(root.object);
   root.object.$mouseChildren = false;
-  assert.equal(pointerTarget(stage, 50, 50, 100, 100), stage);
+  equal(pointerTarget(stage, 50, 50, 100, 100), stage);
   // A sprite takes its children's hits itself; the main root is never the
   // target, as Flash Player 32 has it, and the stage takes them.
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), stage);
+  equal(pointerTarget(stage, 10, 10, 100, 100), stage);
   const info = root.loaderInfo;
   root.loaderInfo = null;
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), root);
+  equal(pointerTarget(stage, 10, 10, 100, 100), root);
   root.loaderInfo = info;
-  assert.equal(pointerTarget(stage, -1, 10, 100, 100), null);
+  equal(pointerTarget(stage, -1, 10, 100, 100), null);
 
   const field = new TextObject(null);
   field.object = { $display: field } as never;
   field.matrix.tx = 40;
   root.addChildAt(field, root.children.length);
   root.object.$mouseChildren = true;
-  assert.equal(pointerTarget(stage, 50, 10, 100, 100), field);
+  equal(pointerTarget(stage, 50, 10, 100, 100), field);
 });
 
 test("a disabled overlay lets pointer input reach an interactive object below it", () => {
@@ -89,11 +90,11 @@ test("a disabled overlay lets pointer input reach an interactive object below it
   overlay.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 0);
   stage.addChildAt(overlay, 1);
 
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
+  equal(pointerTarget(stage, 10, 10, 100, 100), button);
 
   // A visible shape without an interactive object still blocks what is underneath.
   overlay.object.$mouseEnabled = true;
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), overlay);
+  equal(pointerTarget(stage, 10, 10, 100, 100), overlay);
 });
 
 test("a disabled field over a button lets the button take the hit, and its parent takes it where nothing does", () => {
@@ -113,15 +114,15 @@ test("a disabled field over a button lets the button take the hit, and its paren
   label.object = { $display: label, $mouseEnabled: false } as never;
   panel.addChildAt(label, 1);
 
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
-  assert.equal(pointerTarget(stage, 50, 10, 100, 100), panel);
+  equal(pointerTarget(stage, 10, 10, 100, 100), button);
+  equal(pointerTarget(stage, 50, 10, 100, 100), panel);
   panel.object.$mouseEnabled = false;
-  assert.equal(pointerTarget(stage, 50, 10, 100, 100), stage);
+  equal(pointerTarget(stage, 50, 10, 100, 100), stage);
 
   // Artwork above an interactive sibling does not hide it: interactive children are tried first.
   panel.object.$mouseEnabled = true;
   panel.addChildAt(new BitmapObject(new BitmapStore(20, 20, true, 0xffffffff)), 2);
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), button);
+  equal(pointerTarget(stage, 10, 10, 100, 100), button);
 });
 
 test("a posted move waits for a flush or the next other input, and only the last counts", () => {
@@ -134,21 +135,21 @@ test("a posted move waits for a flush or the next other input, and only the last
   const input = new PointerInput(stage, scripting);
   input.post({ x: 1, y: 1 });
   input.post({ x: 2, y: 2 });
-  assert.equal(input.handled, 0);
+  equal(input.handled, 0);
   input.flush();
-  assert.equal(input.handled, 1);
-  assert.equal(scripting.mouseStageX, 2);
+  equal(input.handled, 1);
+  equal(scripting.mouseStageX, 2);
   input.flush();
-  assert.equal(input.handled, 1);
+  equal(input.handled, 1);
 
   input.post({ x: 3, y: 3 });
   input.handle("down", { x: 4, y: 4 });
-  assert.equal(input.handled, 3);
+  equal(input.handled, 3);
   input.post({ x: 5, y: 5 });
   input.handle("move", { x: 6, y: 6 });
   input.flush();
-  assert.equal(input.handled, 4);
-  assert.equal(scripting.mouseStageX, 6);
+  equal(input.handled, 4);
+  equal(scripting.mouseStageX, 6);
 });
 
 test("sprite dragging follows the pointer in parent coordinates, clamps, and stops globally", () => {
@@ -248,44 +249,44 @@ test("a sprite with a hitArea is hit where the area draws, visible or not, and o
   area.addChildAt(square(50, 50), 0);
   area.visible = false;
   root.addChildAt(area, 1);
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), sprite);
+  equal(pointerTarget(stage, 10, 10, 100, 100), sprite);
 
   setHitArea(sprite, area);
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), stage);
-  assert.equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
+  equal(pointerTarget(stage, 10, 10, 100, 100), stage);
+  equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
 
   // Shown and enabled, the area on top takes the pointer itself, as Flash's documentation warns.
   area.visible = true;
-  assert.equal(pointerTarget(stage, 60, 60, 100, 100), area);
+  equal(pointerTarget(stage, 60, 60, 100, 100), area);
   assert.ok(area.object);
   area.object.$mouseEnabled = false;
-  assert.equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
+  equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
 
   // Its interactive children still pick for themselves, but not with mouseChildren false.
   const child = new Container();
   child.object = { $display: child } as never;
   child.addChildAt(square(0, 80), 0);
   sprite.addChildAt(child, 1);
-  assert.equal(pointerTarget(stage, 10, 90, 100, 100), child);
+  equal(pointerTarget(stage, 10, 90, 100, 100), child);
   assert.ok(sprite.object);
   sprite.object.$mouseChildren = false;
-  assert.equal(pointerTarget(stage, 10, 90, 100, 100), stage);
-  assert.equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
+  equal(pointerTarget(stage, 10, 90, 100, 100), stage);
+  equal(pointerTarget(stage, 60, 60, 100, 100), sprite);
   sprite.object.$mouseChildren = true;
 
   // An area inside the sprite moves with it; one off the display list hits nothing.
   root.removeChild(area);
   sprite.addChildAt(area, 0);
   sprite.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 10, ty: 0 });
-  assert.equal(pointerTarget(stage, 65, 60, 100, 100), sprite);
+  equal(pointerTarget(stage, 65, 60, 100, 100), sprite);
   sprite.removeChild(area);
-  assert.equal(pointerTarget(stage, 65, 60, 100, 100), stage);
+  equal(pointerTarget(stage, 65, 60, 100, 100), stage);
 
   // Without it, the sprite is hit by its own drawing again.
   sprite.addChildAt(area, 0);
   setHitArea(sprite, null);
-  assert.equal(pointerTarget(stage, 15, 10, 100, 100), sprite);
-  assert.equal(pointerTarget(stage, 75, 90, 100, 100), stage);
+  equal(pointerTarget(stage, 15, 10, 100, 100), sprite);
+  equal(pointerTarget(stage, 75, 90, 100, 100), stage);
 });
 
 test("a sprite in buttonMode with a hitArea shows its hand over the area", () => {
@@ -306,9 +307,9 @@ test("a sprite in buttonMode with a hitArea shows its hand over the area", () =>
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
   input.handle("move", { x: 10, y: 10 });
-  assert.equal(input.cursor(), "default");
+  equal(input.cursor(), "default");
   input.handle("move", { x: 60, y: 60 });
-  assert.equal(input.cursor(), "pointer");
+  equal(input.cursor(), "pointer");
 });
 
 test("dropTarget is the topmost object drawn under the pointer as a drag moves and ends, outside the dragged sprite", () => {
@@ -328,21 +329,21 @@ test("dropTarget is the topmost object drawn under the pointer as a drag moves a
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
 
-  assert.equal(dropTargetOf(sprite), null);
+  equal(dropTargetOf(sprite), null);
   input.startDrag(sprite, false, null);
-  assert.equal(dropTargetOf(sprite), null);
+  equal(dropTargetOf(sprite), null);
   input.handle("move", { x: 50, y: 10 });
-  assert.equal(dropTargetOf(sprite), shape);
+  equal(dropTargetOf(sprite), shape);
   input.handle("move", { x: 90, y: 90 });
   input.stopDrag();
-  assert.equal(dropTargetOf(sprite), null);
+  equal(dropTargetOf(sprite), null);
 
   input.startDrag(sprite, false, null);
   input.handle("move", { x: 45, y: 5 });
   input.stopDrag();
-  assert.equal(dropTargetOf(sprite), shape);
+  equal(dropTargetOf(sprite), shape);
   input.handle("move", { x: 90, y: 90 });
-  assert.equal(dropTargetOf(sprite), shape);
+  equal(dropTargetOf(sprite), shape);
 });
 
 test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, and an I-beam over selectable text", () => {
@@ -383,14 +384,14 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
   sprite.object.$useHandCursor = true;
   art.object = { $display: art, $buttonMode: true, $useHandCursor: false } as never;
   input.handle("move", { x: 11, y: 10 });
-  assert.equal(input.cursor(), "default");
+  equal(input.cursor(), "default");
   art.object = { $display: art } as never;
   sprite.object.$enabled = false;
   input.handle("move", { x: 12, y: 10 });
-  assert.equal(input.cursor(), "default");
+  equal(input.cursor(), "default");
   sprite.object.$enabled = true;
   input.handle("move", { x: 13, y: 10 });
-  assert.equal(input.cursor(), "pointer");
+  equal(input.cursor(), "pointer");
 
   // A button: a hand where it uses one, enabled or not.
   const button = new ButtonObject();
@@ -402,10 +403,10 @@ test("the cursor is a hand under a sprite in buttonMode, as useHandCursor says, 
   stage.addChildAt(button, 2);
   button.enabled = false;
   input.handle("move", { x: 10, y: 60 });
-  assert.equal(input.cursor(), "pointer");
+  equal(input.cursor(), "pointer");
   button.useHandCursor = false;
   input.handle("move", { x: 11, y: 60 });
-  assert.equal(input.cursor(), "default");
+  equal(input.cursor(), "default");
 });
 
 test("Mouse.hide and show change the host cursor without changing pointer targets", async () => {
@@ -440,7 +441,7 @@ test("Mouse.hide and show change the host cursor without changing pointer target
   hide();
   input.handle("move", { x: 11, y: 10 });
   show();
-  assert.equal(pointerTarget(stage, 11, 10, 100, 100), button);
+  equal(pointerTarget(stage, 11, 10, 100, 100), button);
   assert.deepEqual(shown, ["pointer", "none", "pointer"]);
 });
 
@@ -470,15 +471,15 @@ test("a pointer event asks for a redraw only where it changes a button, focus or
     input.handle("move", { x, y: 5 });
   }
 
-  assert.equal(input.redraws, 0);
+  equal(input.redraws, 0);
   input.handle("move", { x: 45, y: 5 });
   input.handle("move", { x: 50, y: 5 });
   input.handle("move", { x: 70, y: 5 });
-  assert.equal(input.redraws, 2);
+  equal(input.redraws, 2);
   input.handle("down", { x: 70, y: 5 });
   input.handle("up", { x: 70, y: 5 });
-  assert.equal(input.redraws, 4);
-  assert.equal(input.handled, 9);
+  equal(input.redraws, 4);
+  equal(input.handled, 9);
 });
 
 test("a pointer down dispatches capture, target and bubble with target-local coordinates", () => {
@@ -502,8 +503,8 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
     list.push({
       fn: {
         $f: (_this: unknown, event: { $mouseX: number; $target: unknown }) => {
-          assert.equal(event.$mouseX, 5);
-          assert.equal(event.$target, child.object);
+          equal(event.$mouseX, 5);
+          equal(event.$target, child.object);
           heard.push(label);
         },
       },
@@ -545,7 +546,7 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
   const input = new PointerInput(stage, scripting);
   input.handle("down", { x: 15, y: 5, button: 0, buttons: 1 });
   assert.deepEqual(heard, ["capture", "target", "bubble"]);
-  assert.equal(scripting.mouseStageX, 15);
+  equal(scripting.mouseStageX, 15);
 
   assert.ok(child.object);
   child.object.$listeners.set("click", [
@@ -554,12 +555,12 @@ test("a pointer down dispatches capture, target and bubble with target-local coo
   // A leave while the button is down is held back, as Flash keeps the mouse
   // until the release; the release outside is no click, and the leave after it counts.
   input.handle("leave", { x: 120, y: 5, button: 0, buttons: 1 });
-  assert.equal(input.handled, 1);
+  equal(input.handled, 1);
   input.handle("up", { x: 120, y: 5, button: 0, buttons: 0 });
   input.handle("leave", { x: 120, y: 5, button: 0, buttons: 0 });
   assert.deepEqual(heard, ["capture", "target", "bubble"]);
   // Each event counts as a change a host draws for.
-  assert.equal(input.handled, 3);
+  equal(input.handled, 3);
 });
 
 test("roll events reach only the objects entered or left when the pointer changes branches", () => {
@@ -589,7 +590,7 @@ test("roll events reach only the objects entered or left when the pointer change
           {
             fn: {
               $f: (_self: unknown, event: { $bubbles: boolean; $related: unknown }) => {
-                assert.equal(event.$bubbles, false);
+                equal(event.$bubbles, false);
                 const related =
                   event.$related === left.object
                     ? "left"
@@ -630,7 +631,7 @@ test("roll events reach only the objects entered or left when the pointer change
   } as unknown as Scripting;
   const input = new PointerInput(stage, scripting);
 
-  assert.equal(pointerTarget(stage, 10, 10, 100, 100), left);
+  equal(pointerTarget(stage, 10, 10, 100, 100), left);
   input.handle("move", { x: 10, y: 10 });
   assert.deepEqual(heard.splice(0), ["left:rollOver:none", "root:rollOver:none"]);
   input.handle("move", { x: 45, y: 10 });
@@ -657,15 +658,15 @@ test("a list under a timeline's mask layer takes no click where the mask hides i
   row.addChildAt(new BitmapObject(new BitmapStore(100, 100, true, 0xffffffff)), 0);
   list.placeAtDepth(row, 2);
 
-  assert.equal(pointerTarget(stage, 10, 10, 200, 200), row);
-  assert.equal(pointerTarget(stage, 10, 70, 200, 200), stage);
+  equal(pointerTarget(stage, 10, 10, 200, 200), row);
+  equal(pointerTarget(stage, 10, 70, 200, 200), stage);
 
   // One placed past the mask's depth is not under it.
   const below = new Container();
   below.object = { $display: below } as never;
   below.addChildAt(new BitmapObject(new BitmapStore(100, 100, true, 0xffffffff)), 0);
   list.placeAtDepth(below, 6);
-  assert.equal(pointerTarget(stage, 10, 70, 200, 200), below);
+  equal(pointerTarget(stage, 10, 70, 200, 200), below);
 });
 
 // Its own: node runs test files at once, and a compile writes its job list into `out`.
@@ -1148,7 +1149,7 @@ test("the middle and right buttons send their own events, and a right press hear
 
   // Over the empty stage, which hears only the Ups: the menu is the browser's.
   assert.deepEqual(press(2, 300, 250), ["rightMouseUp stage null false 300,250 @300,250"]);
-  assert.equal(pointer.taken(2), false);
+  equal(pointer.taken(2), false);
 
   // Over a, which hears a rightClick: the press is the SWF's, the Down with the button down.
   // Each line names the event's target; the stage's Up is the one bubbled from a.
@@ -1159,7 +1160,7 @@ test("the middle and right buttons send their own events, and a right press hear
     "rightMouseUp a null false 10,10 @10,10",
     "rightClick a null false 10,10 @10,10",
   ]);
-  assert.equal(pointer.taken(2), true);
+  equal(pointer.taken(2), true);
 
   // The middle button's are its own, and hearing them leaves the right's as they were.
   cmd("listen", "b", "middleClick");
@@ -1167,10 +1168,10 @@ test("the middle and right buttons send their own events, and a right press hear
     "middleMouseUp b null false 10,10 @110,10",
     "middleClick b null false 10,10 @110,10",
   ]);
-  assert.equal(pointer.taken(1), true);
-  assert.equal(pointer.taken(2), true);
+  equal(pointer.taken(1), true);
+  equal(pointer.taken(2), true);
   press(2, 110, 10);
-  assert.equal(pointer.taken(2), false);
+  equal(pointer.taken(2), false);
 });
 
 test("a frame's end moves the hover under a mouse that stands still, and the cursor with it", {
@@ -1360,21 +1361,21 @@ test("a pick passes over what stood still away from the point, and sees what mov
     return pointerTarget(stage, x, y, 200, 200);
   };
 
-  assert.equal(pick(10, 10), inner);
-  assert.equal(pick(110, 10), stage);
+  equal(pick(10, 10), inner);
+  equal(pick(110, 10), stage);
   // A child moved out to the point, its parent's bounds kept until then.
   inner.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 0 });
-  assert.equal(pick(110, 10), inner);
+  equal(pick(110, 10), inner);
   // A child put in where nothing was.
   const late = box(150);
   group.addChildAt(late, 2);
-  assert.equal(pick(160, 10), late);
+  equal(pick(160, 10), late);
   // A scroll that shows the child's other part.
   late.scrollRect = { xMin: 10, yMin: 0, xMax: 20, yMax: 20 };
   late.scroll = late.scrollRect;
   late.invalidate(TRANSFORM);
-  assert.equal(pick(155, 10), late);
-  assert.equal(pick(165, 10), stage);
+  equal(pick(155, 10), late);
+  equal(pick(165, 10), stage);
 
   // A button is hit by its hit test state, wherever that is, however long its parent stood still.
   const button = new ButtonObject();
@@ -1383,9 +1384,9 @@ test("a pick passes over what stood still away from the point, and sees what mov
   area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 100 });
   button.hitTestState = area;
   group.addChildAt(button, 3);
-  assert.equal(pick(10, 110), button);
+  equal(pick(10, 110), button);
   area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 150 });
-  assert.equal(pick(10, 160), button);
+  equal(pick(10, 160), button);
 });
 
 test("a pick sees a morph's new blend once drawn, though picks came between its ratio and its draw", () => {
@@ -1443,7 +1444,7 @@ test("a pick sees a morph's new blend once drawn, though picks came between its 
   }
 
   shape.drawn();
-  assert.equal(pointerTarget(stage, 100, 100, 200, 200), clip);
+  equal(pointerTarget(stage, 100, 100, 200, 200), clip);
 });
 
 test("an object with a NaN or infinite matrix, or drawn infinite, keeps nothing else from the pointer", () => {
@@ -1473,7 +1474,7 @@ test("an object with a NaN or infinite matrix, or drawn infinite, keeps nothing 
     root.addChildAt(other, 1);
     // Picks enough that the stage's bounds are worked out and kept.
     for (let i = 0; i < 4; i++) {
-      assert.equal(pointerTarget(stage, 110, 110, 200, 200), button, JSON.stringify(odd));
+      equal(pointerTarget(stage, 110, 110, 200, 200), button, JSON.stringify(odd));
     }
   }
 });
@@ -1507,15 +1508,15 @@ test("a sprite's hitArea elsewhere on the list is picked for it however long bot
     return pointerTarget(stage, x, y, 200, 200);
   };
 
-  assert.equal(pick(160, 160), owner);
-  assert.equal(pick(10, 10), stage);
+  equal(pick(160, 160), owner);
+  equal(pick(10, 10), stage);
   area.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 100, ty: 20 });
-  assert.equal(pick(110, 30), owner);
+  equal(pick(110, 30), owner);
   // The owner moving moves where its area is, from the owner's side, not at all.
   owner.setMatrix({ a: 1, b: 0, c: 0, d: 1, tx: 50, ty: 0 });
-  assert.equal(pick(110, 30), owner);
+  equal(pick(110, 30), owner);
   setHitArea(owner, null);
-  assert.equal(pick(110, 30), stage);
+  equal(pick(110, 30), stage);
 });
 
 // A card turned 60 degrees about y, nearer on its right, over a sprite as
@@ -1569,11 +1570,11 @@ test("pointer targets cover the translated viewport, including negative stage co
   button.matrix.ty = -16;
   button.addChildAt(new BitmapObject(new BitmapStore(8, 8, true, 0xffffffff)), 0);
   stage.addChildAt(button, 0);
-  assert.equal(pointerTarget(stage, -12, -12, 192, 144, undefined, -96, -48), button);
-  assert.equal(pointerTarget(stage, -90, -40, 192, 144, undefined, -96, -48), stage);
-  assert.equal(pointerTarget(stage, -97, -12, 192, 144, undefined, -96, -48), null);
-  assert.equal(pointerTarget(stage, -12, -49, 192, 144, undefined, -96, -48), null);
-  assert.equal(pointerTarget(stage, 96, 0, 192, 144, undefined, -96, -48), null);
-  assert.equal(pointerTarget(stage, 0, 96, 192, 144, undefined, -96, -48), null);
-  assert.equal(pointerTarget(stage, -12, -12, 192, 144), null);
+  equal(pointerTarget(stage, -12, -12, 192, 144, undefined, -96, -48), button);
+  equal(pointerTarget(stage, -90, -40, 192, 144, undefined, -96, -48), stage);
+  equal(pointerTarget(stage, -97, -12, 192, 144, undefined, -96, -48), null);
+  equal(pointerTarget(stage, -12, -49, 192, 144, undefined, -96, -48), null);
+  equal(pointerTarget(stage, 96, 0, 192, 144, undefined, -96, -48), null);
+  equal(pointerTarget(stage, 0, 96, 192, 144, undefined, -96, -48), null);
+  equal(pointerTarget(stage, -12, -12, 192, 144), null);
 });
