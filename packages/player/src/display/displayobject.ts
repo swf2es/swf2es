@@ -127,9 +127,7 @@ export function markAdvanceDue(o: DisplayObject): void {
  * its list that comes to advance, for which the list must be found again.
  */
 export interface AdvanceWatch {
-  /** The walk's number, which a clip it listed has as its listedFor. */
-  readonly pass: number;
-  /** `clip`, not listed, may have come to advance (MovieClip.advances). */
+  /** `clip` may have come to advance (MovieClip.advances). */
   changed(clip: DisplayObject): void;
   /** `parent`'s children: `added` put in at `index`, `removed` taken from it, or, both, one in the other's place. */
   children(

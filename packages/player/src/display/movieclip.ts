@@ -152,7 +152,7 @@ export class MovieClip extends Container {
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
   queuedPlay = false;
   private skipStamp = -1;
-  /** The pass of the frame's advance walk that listed it last (AdvanceWatch.pass). */
+  /** The pass of the frame's advance walk that listed it last (display/advance.ts). */
   listedFor = -1;
   /** Whether an AVM1 clip ran the actions after its last ShowFrame, which it does once. */
   private tailed = false;
@@ -188,17 +188,14 @@ export class MovieClip extends Container {
 
   /**
    * It may have come to advance (`advances`): marked, and, among a tick's
-   * advances, told to them if their walk did not list it.
+   * advances, told to them, which pass over one their walk listed.
    */
   private mayAdvance(): void {
     if (!this.advanceDue) {
       markAdvanceDue(this);
     }
 
-    const watch = advancing.watch;
-    if (watch !== null && this.listedFor !== watch.pass) {
-      watch.changed(this);
-    }
+    advancing.watch?.changed(this);
   }
 
   /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */

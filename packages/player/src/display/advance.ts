@@ -366,6 +366,7 @@ const UNORPHANED = 5;
  * one advancing in place of the rest of its list.
  */
 class AdvancePhase implements AdvanceWatch {
+  /** Its walk's number, which a clip it listed has as its listedFor. */
   pass = 0;
   /** Whether a clip left out, made before the walk, came to advance. */
   late = false;
@@ -433,8 +434,17 @@ class AdvancePhase implements AdvanceWatch {
     this.lists.push(list);
   }
 
+  // Each told on to the advances around these, of a tick inside theirs, which keep their own log
+  // and tell for themselves whether their walk listed a clip: this one's may have listed it since.
+
   changed(clip: DisplayObject): void {
-    if (!this.late && clip.serial < this.madeAfter && (clip as MovieClip).advances) {
+    this.previous?.changed(clip);
+    if (
+      !this.late &&
+      (clip as MovieClip).listedFor !== this.pass &&
+      clip.serial < this.madeAfter &&
+      (clip as MovieClip).advances
+    ) {
       this.late = true;
     }
   }
@@ -445,26 +455,32 @@ class AdvancePhase implements AdvanceWatch {
     added: DisplayObject | null,
     removed: DisplayObject | null,
   ): void {
+    this.previous?.children(parent, index, added, removed);
     this.log(CHILDREN, parent, added, removed, index, null);
   }
 
   states(button: DisplayObject, old: readonly DisplayObject[]): void {
+    this.previous?.states(button, old);
     this.log(STATES, button, null, null, 0, old);
   }
 
   parent(o: DisplayObject, old: DisplayObject | null): void {
+    this.previous?.parent(o, old);
     this.log(PARENT, o, old, null, 0, null);
   }
 
   skips(clip: DisplayObject, old: number): void {
+    this.previous?.skips(clip, old);
     this.log(SKIPS, clip, null, null, old, null);
   }
 
   orphaned(display: DisplayObject): void {
+    this.previous?.orphaned(display);
     this.log(ORPHANED, display, null, null, 0, null);
   }
 
   unorphaned(display: DisplayObject): void {
+    this.previous?.unorphaned(display);
     this.log(UNORPHANED, display, null, null, 0, null);
   }
 
