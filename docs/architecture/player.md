@@ -653,3 +653,5 @@ libraries and the main SWF again, some 85 ms for the libraries in node,
 before the loads asked of it, and holds a second copy of what the page's
 compiler holds. Its answers reach the player weakly, so that a player
 let go of without being destroyed is collected and its thread stopped.
+`tests/player/load-bench.ts` times a burst of loads while a timeline
+plays, with the thread and without.

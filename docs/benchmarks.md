@@ -70,6 +70,48 @@ not rendering or FPS measurements. Browser measurements are still needed
 for complete first-use frames. `node tests/player/run.ts --lazy` and
 `pnpm corpus --lazy avm2/` exercise existing browser cases in lazy mode.
 
+## Loads compiled off the page's thread
+
+`node tests/player/load-bench.ts [--runs 5] [--loads 12] [--methods 200]
+[--bytes] [--gpu]` plays a SWF whose 120 shapes move every frame, drawn
+on each animation frame as the element draws, in headless Chrome, and
+has it ask for K SWFs at once, each into an application domain of its
+own with some 110 KB of ABC (three classes of 200 methods), by
+`Loader.load` or, with `--bytes`, `Loader.loadBytes`: a game's room join
+in small. A small SWF is loaded first, as a game loads its interface, so
+the background compiler's thread has started. It times the burst from
+the loads asked to the last `COMPLETE`, with the loads compiled on that
+thread and on the page's in turn, a fresh document each, after a run
+each way that is not counted: the latency, the page's thread's busy time
+(Chrome's `TaskDuration`) and what of it was outside the frames' ticks
+and draws, its tasks of 50 ms or more, and the longest time between two
+frames. Run under the machine's lock.
+
+Medians of 7 runs each way, on 20 cores, 2026-11-14 (Chrome, `--gpu`
+unless noted; latency, the page's thread's busy time, of it outside the
+frames, the longest task, and the longest time between two frames):
+
+| Burst | Compiled on | Latency | Busy | Outside frames | Longest task | Worst gap |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 12 × 110 KB, `load` | page's thread | 239 ms | 259 ms | 244 ms | 227 ms | 217 ms |
+| | worker | 345 ms | 134 ms | 110 ms | none ≥ 50 ms | 17 ms |
+| 12 × 110 KB, `loadBytes` | page's thread | 248 ms | 268 ms | 253 ms | 235 ms | 217 ms |
+| | worker | 358 ms | 136 ms | 114 ms | none ≥ 50 ms | 17 ms |
+| 12 × 110 KB, `load`, software GL | page's thread | 247 ms | 270 ms | 252 ms | 233 ms | 217 ms |
+| | worker | 398 ms | 169 ms | 135 ms | none ≥ 50 ms | 17 ms |
+| 4 × 331 KB, `load` | page's thread | 242 ms | 264 ms | 248 ms | 229 ms | 217 ms |
+| | worker | 346 ms | 139 ms | 119 ms | none ≥ 50 ms | 33 ms |
+
+With the worker, the page's thread does about half the work, in no task
+of 50 ms or more, and the timeline draws at 60 fps throughout, where the
+page's thread compiling them all held it for some 220 ms. The last load
+completes some 100 to 150 ms later: the loads link one at a time, each
+waiting for its compile on the worker and then for the page's thread,
+which draws the 26 to 30 frames meanwhile that compiling there skipped.
+What is left on the page's thread is reading the SWFs, adding their ABCs
+to its compiler, replaying the logs, evaluating the modules and linking
+them.
+
 ## Inputs
 
 - **as3pb** ([33TU/as3pb](https://github.com/33TU/as3pb), MIT): a protobuf
