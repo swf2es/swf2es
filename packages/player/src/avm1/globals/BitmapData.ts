@@ -8,7 +8,7 @@
 // disposed bitmap, -2 for a source that is none, -3 for a disposed one,
 // -4 for a rectangle that is none.
 import { avm1 } from "@swf2es/runtime";
-import { BitmapStore, pixelRect, spanRect } from "../../bitmap/bitmap.js";
+import { BitmapStore } from "../../bitmap/bitmap.js";
 import { type ColorTransformValues, drawBitmap } from "../../bitmap/composite.js";
 import { drawDisplayObject } from "../../bitmap/draw.js";
 import { applyFilter, filterRefusal, GLOWS, generatedRect } from "../../bitmap/filters.js";
@@ -28,6 +28,7 @@ import {
   scroll,
   threshold,
 } from "../../bitmap/ops.js";
+import { pixelRect, spanRect } from "../../bitmap/pixel-rect.js";
 import type { DisplayObject } from "../../display/display.js";
 import { BLEND_MODES } from "../../display/displayobject.js";
 import type { Drawer } from "../../hosts.js";

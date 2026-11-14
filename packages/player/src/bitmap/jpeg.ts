@@ -7,7 +7,8 @@
 // the picture is flat or the quality low; elsewhere a coefficient next to
 // a rounding boundary may differ by one.
 import { jpegEncode } from "@swf2es/native/compress";
-import type { BitmapStore, PixelRect } from "./bitmap.js";
+import type { BitmapStore } from "./bitmap.js";
+import type { PixelRect } from "./pixel-rect.js";
 
 /** `rect` of the store, clipped to it and not empty, as a JPEG file at `quality`, 0 to 100. */
 export function encodeJpeg(store: BitmapStore, rect: PixelRect, quality: number): Uint8Array {

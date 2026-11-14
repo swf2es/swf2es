@@ -9,16 +9,9 @@
 
 import type { Filter } from "../display/filters.js";
 import { ramp } from "../display/gradients.js";
-import {
-  type BitmapStore,
-  EDGE_LIMIT,
-  NAN_EDGE,
-  over,
-  type PixelRect,
-  premultiply,
-  unmultiply,
-} from "./bitmap.js";
+import { type BitmapStore, over, premultiply, unmultiply } from "./bitmap.js";
 import { bitmapKernel } from "./kernel.js";
+import { EDGE_LIMIT, NAN_EDGE, type PixelRect } from "./pixel-rect.js";
 
 /** The filters with a glow, a shadow or a bevel, which an opaque destination refuses. */
 export const GLOWS: ReadonlySet<string> = new Set([

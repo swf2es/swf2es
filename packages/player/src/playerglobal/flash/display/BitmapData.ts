@@ -3,7 +3,7 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
-import { BitmapStore, type PixelRect, pixelRect, spanRect } from "../../../bitmap/bitmap.js";
+import { BitmapStore } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
 import { drawDisplayObject } from "../../../bitmap/draw.js";
 import {
@@ -33,6 +33,7 @@ import {
   threshold,
 } from "../../../bitmap/ops.js";
 import { shaderFilter } from "../../../bitmap/pixel-bender.js";
+import { type PixelRect, pixelRect, spanRect } from "../../../bitmap/pixel-rect.js";
 import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
