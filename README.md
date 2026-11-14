@@ -10,7 +10,20 @@ filters are computed in WebAssembly: Zig, with libtess2 for the fills.
 **Try it** at https://swf2es.github.io/swf2es/play/: open or drop a SWF (it
 is read in your browser, never uploaded), or play a demo. The site has the
 [guide](https://swf2es.github.io/swf2es/docs/) too. For Stage3D SWFs,
-select **Stage3D (experimental)** in the player controls.
+select **Stage3D** in the player controls.
+
+**On your desktop**, the app plays a local SWF or one by its URL, and AIR
+applications from their descriptor, with Stage3D on:
+
+```sh
+npx @swf2es/desktop movie.swf
+npx @swf2es/desktop https://example.com/movie.swf
+npx @swf2es/desktop app.xml
+```
+
+It needs Node 22.18 or later; the first run downloads Electron, about
+100 MB. Open, drop or reopen recent SWFs from its window; its
+[README](apps/desktop/README.md) has the rest.
 
 **Status:**
 - **ActionScript 3** runs as avmshell runs it: 97.9% of Tamarin's
@@ -20,7 +33,8 @@ select **Stage3D (experimental)** in the player controls.
   text, bitmaps, filters, blend modes, sound, input, loading, sockets,
   workers, ExternalInterface and Pixel Bender (`ShaderJob`, shader
   filters, blends and fills), each checked against Flash under AIR's
-  `adl`. Stage3D is an experimental opt-in.
+  `adl`. Stage3D covers every profile and AGAL 1 to 3: on in the desktop
+  app, an opt-in on a page.
 - **Not yet:** video, printing, and Pixel Bender's shader lines.
   Compatibility is incomplete.
 
@@ -60,7 +74,7 @@ that defines the element (CSP, isolation and self-hosting in
 [the guide](docs/guide.md#from-a-cdn)):
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.19"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.20"></script>
 ```
 
 Or turn an existing page's Flash tags into players:

@@ -113,7 +113,7 @@ document.addEventListener("drop", (event) => {
   }
 });
 
-// An open or close during optional backend loading takes precedence over the startup snapshot.
+// An open or close while the page starts takes precedence over the startup snapshot.
 let started = false;
 let pending: OpenedMovie | null | undefined;
 desktop.onOpen((movie) => {
@@ -133,12 +133,23 @@ desktop.onClose(() => {
 const state = await desktop.start();
 configure({ build: state.build ?? undefined });
 if (state.stage3D) {
-  try {
-    const { createStage3D } = await import("./stage3d.js");
-    configure({ stage3D: createStage3D });
-  } catch (error) {
-    console.warn("swf2es: Stage3D backend could not be loaded; using default playback.", error);
-  }
+  // The WebGL2 backend loads when a SWF first asks for a context, so that one that never does
+  // starts without waiting for it.
+  configure({
+    stage3D: {
+      load: () =>
+        import("./stage3d.js").then(
+          (backend) => backend.createStage3D,
+          (error) => {
+            console.warn(
+              "swf2es: Stage3D backend could not be loaded; Context3D unavailable.",
+              error,
+            );
+            throw error;
+          },
+        ),
+    },
+  });
 }
 
 useLibraries(state.libraries);

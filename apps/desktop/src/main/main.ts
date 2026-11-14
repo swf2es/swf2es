@@ -766,9 +766,9 @@ function buildMenu(): void {
         { type: "separator" },
         {
           id: "stage3d",
-          label: "Stage3D (Experimental)",
+          label: "Stage3D",
           type: "checkbox",
-          checked: settings.settings.stage3D,
+          checked: settings.stage3D,
           click: (item) => {
             if (!settings.setStage3D(item.checked)) {
               refuse(
@@ -930,7 +930,7 @@ function listen(): void {
 
     listening = true;
     return {
-      stage3D: settings.settings.stage3D,
+      stage3D: settings.stage3D,
       libraries: settings.libraries(),
       movie: current?.movie ?? null,
       build,

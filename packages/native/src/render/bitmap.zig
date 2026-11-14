@@ -179,6 +179,18 @@ export fn noisePixels(address: usize) usize {
     return ops.noise(@as([*]u32, @ptrFromInt(p.pixels))[0..p.count], &p);
 }
 
+/// The words the WordsParams at `address` name made pixels or values, in place: 1, or 0 where
+/// they are invalid.
+export fn wordsPixels(address: usize) usize {
+    if (!holds(address, @sizeOf(ops.WordsParams), @alignOf(ops.WordsParams))) return 0;
+    const p = @as(*const ops.WordsParams, @ptrFromInt(address)).*;
+    if (p.kind > 3 or p.swap > 1) return 0;
+    const bytes = ops.bytesOf(p.count, 4) orelse return 0;
+    if (p.count == 0 or !holds(p.words, bytes, 4)) return 0;
+    ops.words(@as([*]u32, @ptrFromInt(p.words))[0..p.count], @fromBackingInt(@intCast(p.kind)), p.swap != 0);
+    return 1;
+}
+
 /// perlinNoise over the rows the PerlinParams at `address` name: 1, or 0 where they are invalid.
 export fn perlinPixels(address: usize) usize {
     if (!holds(address, @sizeOf(ops.PerlinParams), @alignOf(ops.PerlinParams))) return 0;

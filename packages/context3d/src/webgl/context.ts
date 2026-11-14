@@ -1,14 +1,20 @@
-import type { ProgramType } from "../agal.js";
+import { INDIRECT_BANK, type ProgramType } from "../agal.js";
 import {
   type BlendFactor,
   type Buffer3D,
   type CompareMode,
   type Context3D,
   type CullFace,
+  compressedFormat,
+  FRAGMENT_CONSTANTS,
   MOST_BACK_BUFFER,
+  MOST_CUBE,
+  type Profile,
   type Program3D,
+  profileLimits,
   SAMPLER_FILTERS,
   SAMPLER_MIPS,
+  SAMPLER_SLOTS,
   SAMPLER_WRAPS,
   type SamplerFilter,
   type SamplerMip,
@@ -16,10 +22,13 @@ import {
   ScissorBoundsError,
   type StencilAction,
   screenPixels,
+  TEXEL_BYTES,
   type Texture3D,
   TextureBindingError,
   type TextureFormat,
+  VERTEX_CONSTANTS,
   VERTEX_FORMATS,
+  VERTEX_SLOTS,
   type VertexFormat,
   VertexOffsetError,
 } from "../backend.js";
@@ -56,6 +65,7 @@ import {
   targetFramebuffer,
 } from "./targets.js";
 import {
+  storageFormat,
   type TextureState,
   uploadCompressedLevel,
   uploadTexture,
@@ -68,7 +78,25 @@ const SAMPLER_FORMATS: Record<TextureFormat, number> = {
   bgra: 0,
   compressed: 1,
   compressedAlpha: 2,
+  bgrPacked565: 0,
+  bgraPacked4444: 0,
+  rgbaHalfFloat: 0,
 };
+
+/**
+ * A clear colour's channel as Direct3D's 8-bit clear colour holds it, which AIR fills by
+ * truncation (0.5 clears to 127): within 0 to 1 and cut to its byte, NaN kept.
+ */
+function clearChannel(value: number): number {
+  if (!(value > 0)) {
+    return value < 0 ? 0 : value;
+  }
+
+  return value >= 1 ? 1 : Math.floor(value * 255 + 1e-3) / 255;
+}
+
+/** AGAL's wraps (clamp, repeat, clamp_u_repeat_v, repeat_u_clamp_v) as SAMPLER_WRAPS indices. */
+const WRAPS = [0, 3, 2, 1];
 
 interface Constants {
   data: Float32Array;
@@ -105,6 +133,7 @@ export class WebGLContext3D implements Context3D {
   private gpuMost: Int32Array | null = null;
   disposed = false;
   samplerFormats = true;
+  profile: Profile = "baseline";
   private readonly buffers = new Map<Buffer3D, BufferState>();
   private vertexBuffers = 0;
   private bufferBytes = 0;
@@ -123,7 +152,14 @@ export class WebGLContext3D implements Context3D {
   private renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
-  private readonly textureSlots: (Texture3D | null)[] = new Array(8).fill(null);
+  /** Colour outputs 1 to 3, drawn into with renderTexture, and their cube faces. */
+  private readonly outputs: (Texture3D | null)[] = [null, null, null];
+  private readonly outputFaces = new Uint8Array(3);
+  private outputsChanged = false;
+  /** Whether any of outputs is bound, so that a draw alone into its target looks at none. */
+  private outputsBound = false;
+  private floatTargets: boolean | undefined;
+  private readonly textureSlots: (Texture3D | null)[] = new Array(SAMPLER_SLOTS).fill(null);
   private textureMask = 0;
   private readonly samplers: (WebGLSampler | null)[] = new Array(96).fill(null);
   // Two wrap bits, three filter bits and two mip bits fit each slot in one byte.
@@ -131,10 +167,10 @@ export class WebGLContext3D implements Context3D {
   private anisotropy: EXT_texture_filter_anisotropic | null | undefined;
   private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
-  private readonly vertices: (VertexBinding | null)[] = new Array(8).fill(null);
+  private readonly vertices: (VertexBinding | null)[] = new Array(VERTEX_SLOTS).fill(null);
   private enabledAttributes = 0;
   private indexBuffer: WebGLBuffer | null = null;
-  private readonly texturesApplied = new Uint8Array(8);
+  private readonly texturesApplied = new Uint8Array(SAMPLER_SLOTS);
   private selected: Program3D | null = null;
   private framebuffer: WebGLFramebuffer | null = null;
   private texture: WebGLTexture | null = null;
@@ -164,8 +200,8 @@ export class WebGLContext3D implements Context3D {
   private scissorRight = 0;
   private scissorBottom = 0;
   private scissorOutside = false;
-  private readonly vertexConstants = constants(128);
-  private readonly fragmentConstants = constants(28);
+  private readonly vertexConstants = constants(VERTEX_CONSTANTS);
+  private readonly fragmentConstants = constants(FRAGMENT_CONSTANTS);
   private pixels = new Uint8Array(0);
   private topDown = new Uint8Array(0);
   private readonly vao: WebGLVertexArrayObject;
@@ -236,6 +272,9 @@ export class WebGLContext3D implements Context3D {
       }
     }
     this.drawState.bindFramebuffer(state ? targetFramebuffer(state) : this.framebuffer);
+    if (this.outputsChanged || state?.outputs) {
+      this.attachOutputs(state);
+    }
     this.drawState.viewport(
       0,
       0,
@@ -474,7 +513,13 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     let bits = 0;
     if (mask & 1) {
-      gl.clearColor(red, green, blue, alpha);
+      // A float target too: AIR clears through Direct3D's 8-bit colour.
+      gl.clearColor(
+        clearChannel(red),
+        clearChannel(green),
+        clearChannel(blue),
+        clearChannel(alpha),
+      );
       bits |= gl.COLOR_BUFFER_BIT;
       this.changedTarget();
     }
@@ -891,6 +936,7 @@ export class WebGLContext3D implements Context3D {
       attributeMask: 0,
       vertex: [],
       vertexBank: null,
+      outputs: 1,
       fragment: [],
       samplers: [],
       samplerMask: 0,
@@ -902,11 +948,17 @@ export class WebGLContext3D implements Context3D {
       vertexVersion: -1,
     };
     const program: Program3D = {
+      get outputs() {
+        return state.outputs;
+      },
+      get attributes() {
+        return state.attributeMask;
+      },
       upload: (vertex, fragment) => {
         this.alive();
         this.program(program);
         this.drawState.forget();
-        uploadProgram(this.gl, state, vertex, fragment);
+        uploadProgram(this.gl, state, vertex, fragment, this.profile);
 
         if (this.selected === program) {
           this.setProgram(program);
@@ -968,8 +1020,8 @@ export class WebGLContext3D implements Context3D {
     return this.allocateTexture(width, height, cube, false, format, streaming);
   }
 
-  createRectangleTexture(width: number, height: number): Texture3D {
-    return this.allocateTexture(width, height, false, true, "bgra");
+  createRectangleTexture(width: number, height: number, format: TextureFormat = "bgra"): Texture3D {
+    return this.allocateTexture(width, height, false, true, format);
   }
 
   /** GL's internal format for a compressed texture's S3TC, or 0 where the context takes none. */
@@ -977,7 +1029,7 @@ export class WebGLContext3D implements Context3D {
     if (this.s3tc === undefined) {
       this.s3tc = this.gl.getExtension("WEBGL_compressed_texture_s3tc");
     }
-    if (!this.s3tc || format === "bgra") {
+    if (!this.s3tc || !compressedFormat(format)) {
       return 0;
     }
 
@@ -1003,7 +1055,9 @@ export class WebGLContext3D implements Context3D {
     for (let level = 0; level < levels; level++) {
       const w = Math.max(1, width >> level);
       const h = Math.max(1, height >> level);
-      size += format === "bgra" ? w * h * 4 : blockBytes(w, h, format === "compressedAlpha");
+      size += compressedFormat(format)
+        ? blockBytes(w, h, format === "compressedAlpha")
+        : w * h * (TEXEL_BYTES[format] ?? 4);
     }
 
     return size * faces;
@@ -1018,12 +1072,14 @@ export class WebGLContext3D implements Context3D {
     streaming = 0,
   ): Texture3D {
     this.alive();
-    range(1, width - 1, 2048);
-    range(1, height - 1, 2048);
+    const limits = profileLimits(this.profile);
+    const most = rectangle ? limits.rectangleSize : limits.textureSize;
+    range(1, width - 1, most);
+    range(1, height - 1, most);
     if (cube && width !== height) {
       throw new Context3DError("textureShape", "Context3D cube faces must be square");
     }
-    if (cube && width > 1024) {
+    if (cube && width > MOST_CUBE) {
       throw new Context3DError("textureSize", "Context3D cube faces must be at most 1024");
     }
 
@@ -1036,15 +1092,15 @@ export class WebGLContext3D implements Context3D {
         "Context3D texture size must be a power of two",
       );
     }
-    if (format !== "bgra" && rectangle) {
+    if (compressedFormat(format) && rectangle) {
       throw new Context3DError("unsupported", "Context3D rectangle textures are not compressed");
     }
-    if (format !== "bgra" && (width < 4 || height < 4)) {
+    if (compressedFormat(format) && (width < 4 || height < 4)) {
       throw new Context3DError("compressedSize", "Context3D compressed textures are at least 4x4");
     }
 
     const gl = this.gl;
-    const storage = this.s3tcFormat(format) || gl.RGBA8;
+    const storage = this.s3tcFormat(format) || storageFormat(gl, format);
     const size = this.chainBytes(width, height, levels, faces, format);
     const kind = cube ? 2 : rectangle ? 1 : 0;
     const countLimit = cube
@@ -1060,7 +1116,8 @@ export class WebGLContext3D implements Context3D {
     // AIR reserves half the base size for mips, independently of the exact
     // chain storage, and charges DXT1 an eighth of BGRA and DXT5 a quarter.
     const quotaBytes =
-      (width * height * faces * (rectangle ? 4 : 6)) /
+      (width * height * faces * (rectangle ? 4 : 6) * (TEXEL_BYTES[format] ?? 4)) /
+      4 /
       (format === "compressed" ? 8 : format === "compressedAlpha" ? 4 : 1);
     if (
       this.textures.size >= this.limits.maxTextures ||
@@ -1095,6 +1152,7 @@ export class WebGLContext3D implements Context3D {
       multisample: null,
       samples: 0,
       antiAlias: 0,
+      outputs: 0,
       base: 0,
     };
     const texture: Texture3D = {
@@ -1137,10 +1195,10 @@ export class WebGLContext3D implements Context3D {
       uploadCompressed: (blocks, level = 0, face = 0) => {
         this.alive();
         this.textureState(texture);
-        if (format === "bgra") {
+        if (!compressedFormat(format)) {
           throw new Context3DError(
             "textureUpload",
-            "Context3D experiment: BGRA texture given blocks",
+            "Context3D experiment: uncompressed texture given blocks",
           );
         }
 
@@ -1180,6 +1238,13 @@ export class WebGLContext3D implements Context3D {
         state.mipFramebuffer = null;
         state.depthBuffer = null;
 
+        for (let i = 0; i < this.outputs.length; i++) {
+          if (this.outputs[i] === texture) {
+            this.outputs[i] = null;
+            this.outputsChanged = true;
+            this.outputsBound = this.outputMask() !== 0;
+          }
+        }
         for (let i = 0; i < this.textureSlots.length; i++) {
           if (this.textureSlots[i] === texture) {
             this.texturesApplied[i] = 0;
@@ -1335,6 +1400,7 @@ export class WebGLContext3D implements Context3D {
       depth,
       this.depthWrite,
       this.stencilWrite,
+      state.storage,
     );
     if (same) {
       if (newDepth) {
@@ -1370,12 +1436,13 @@ export class WebGLContext3D implements Context3D {
     const gl = this.gl;
     if (texture) {
       this.textureState(texture);
-      if (texture.format !== "bgra") {
+      if (compressedFormat(texture.format)) {
         throw new Context3DError(
           "operation",
           "Context3D experiment: compressed textures are no render targets",
         );
       }
+      this.renderFormat(texture.format);
     }
     const samples = texture ? this.multisamples(antiAlias, depth) : 0;
     this.finishTarget();
@@ -1521,6 +1588,12 @@ export class WebGLContext3D implements Context3D {
   }
 
   private changedTarget(): void {
+    for (let i = 0; this.outputsBound && i < this.outputs.length; i++) {
+      const output = this.outputs[i];
+      if (output) {
+        this.textureState(output).dirty = true;
+      }
+    }
     if (this.renderTexture) {
       const state = this.textureState(this.renderTexture);
       state.dirty = true;
@@ -1537,22 +1610,34 @@ export class WebGLContext3D implements Context3D {
   }
 
   private finishTarget(): void {
-    if (!this.renderTexture) {
-      return;
+    if (this.renderTexture) {
+      this.finishTexture(this.renderTexture, this.renderFace);
     }
-    const texture = this.renderTexture;
+    for (let i = 0; i < this.outputs.length; i++) {
+      const output = this.outputs[i];
+      if (output) {
+        this.finishTexture(output, this.outputFaces[i]);
+      }
+    }
+  }
+
+  /** A texture drawn into made whole again: resolved, and its mips regenerated. */
+  private finishTexture(texture: Texture3D, renderFace: number): void {
     const state = this.textureState(texture);
     if (state.dirty) {
       const gl = this.gl;
       this.drawState.forget();
       this.texturesApplied[0] = 0;
-      resolveTarget(this.gl, texture, state, this.renderFace, this.scissor);
+      resolveTarget(this.gl, texture, state, renderFace, this.scissor);
       gl.activeTexture(gl.TEXTURE0);
       if (texture.cube) {
+        // An extra colour output may never have been a target of its own.
+        state.framebuffer ??= gl.createFramebuffer();
+        state.mipFramebuffer ??= gl.createFramebuffer();
         // generateMipmap(CUBE_MAP) would overwrite manually uploaded mips on
         // untouched faces. AIR regenerates only the face just rendered.
         gl.disable(gl.SCISSOR_TEST);
-        const face = gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.renderFace;
+        const face = gl.TEXTURE_CUBE_MAP_POSITIVE_X + renderFace;
         // The base-size depth attachment cannot accompany smaller mip images.
         this.bindFramebuffer(gl.FRAMEBUFFER, state.framebuffer);
         if (state.depthAttached) {
@@ -1614,14 +1699,99 @@ export class WebGLContext3D implements Context3D {
         gl.bindTexture(gl.TEXTURE_2D, state.handle);
         gl.generateMipmap(gl.TEXTURE_2D);
       }
-      state.uploaded[this.renderFace] = (1 << texture.levels) - 1;
+      state.uploaded[renderFace] = (1 << texture.levels) - 1;
       state.dirty = false;
     }
   }
 
+  /** Half floats are drawn into where the GPU's WebGL renders float colour, as every desktop one does. */
+  private renderFormat(format: TextureFormat): void {
+    if (format !== "rgbaHalfFloat") {
+      return;
+    }
+
+    this.floatTargets ??= this.gl.getExtension("EXT_color_buffer_float") !== null;
+    if (!this.floatTargets) {
+      throw new Context3DError("unsupported", "Context3D: this GPU draws into no half floats");
+    }
+  }
+
+  setColorOutput(index: number, texture: Texture3D | null, face = 0): void {
+    this.alive();
+    range(index - 1, 1, this.outputs.length);
+    if (texture) {
+      this.textureState(texture);
+      range(face, 1, texture.cube ? 6 : 1);
+      if (compressedFormat(texture.format)) {
+        throw new Context3DError(
+          "operation",
+          "Context3D experiment: compressed textures are no render targets",
+        );
+      }
+      this.renderFormat(texture.format);
+    }
+    if (this.outputs[index - 1] === texture && this.outputFaces[index - 1] === face) {
+      return;
+    }
+
+    const previous = this.outputs[index - 1];
+    if (previous) {
+      this.finishTexture(previous, this.outputFaces[index - 1]);
+    }
+    this.outputs[index - 1] = texture;
+    this.outputFaces[index - 1] = texture ? face : 0;
+    this.outputsChanged = true;
+    this.outputsBound = this.outputMask() !== 0;
+  }
+
+  /**
+   * The current target's framebuffer with the extra colour outputs attached, or without
+   * them: its draws write every output bound, and a program's unwritten ones are refused
+   * before they draw.
+   */
+  private attachOutputs(state: TextureState | null): void {
+    const want = state ? this.outputMask() : 0;
+    if (!state || (!this.outputsChanged && state.outputs === want)) {
+      return;
+    }
+    if (want && state.samples) {
+      throw new Context3DError("unsupported", "Context3D: antialiased colour outputs");
+    }
+
+    const gl = this.gl;
+    const buffers: number[] = [gl.COLOR_ATTACHMENT0];
+    for (let i = 0; i < this.outputs.length; i++) {
+      const output = this.outputs[i];
+      const handle = output ? this.textureState(output).handle : null;
+      gl.framebufferTexture2D(
+        gl.FRAMEBUFFER,
+        gl.COLOR_ATTACHMENT1 + i,
+        output?.cube ? gl.TEXTURE_CUBE_MAP_POSITIVE_X + this.outputFaces[i] : gl.TEXTURE_2D,
+        handle,
+        0,
+      );
+      buffers.push(output ? gl.COLOR_ATTACHMENT1 + i : gl.NONE);
+    }
+    gl.drawBuffers(buffers);
+    state.outputs = want;
+    this.outputsChanged = false;
+  }
+
+  /** The extra colour outputs bound, a bit each from output 1. */
+  private outputMask(): number {
+    let mask = 0;
+    for (let i = 0; i < this.outputs.length; i++) {
+      if (this.outputs[i]) {
+        mask |= 1 << i;
+      }
+    }
+
+    return mask;
+  }
+
   setTexture(index: number, texture: Texture3D | null): void {
     this.alive();
-    range(index, 1, 8);
+    range(index, 1, SAMPLER_SLOTS);
     if (texture && !this.textureOwners.has(texture)) {
       throw new Context3DError("disposed", "Context3D experiment: texture from another context");
     }
@@ -1726,7 +1896,7 @@ export class WebGLContext3D implements Context3D {
       if (!source.ignore) {
         this.setSamplerState(
           source.index,
-          (source.repeat ? 3 : 0) | (source.filter << 2) | (source.mip << 5),
+          WRAPS[source.wrap] | (source.filter << 2) | (source.mip << 5),
         );
       }
     }
@@ -1734,7 +1904,7 @@ export class WebGLContext3D implements Context3D {
 
   setVertex(index: number, buffer: Buffer3D | null, offset: number, format: VertexFormat): void {
     this.alive();
-    range(index, 1, 8);
+    range(index, 1, VERTEX_SLOTS);
     if (buffer === null) {
       this.vertices[index] = null;
       return;
@@ -1857,13 +2027,14 @@ export class WebGLContext3D implements Context3D {
 
     const gl = this.gl;
     this.drawState.bindVertexArray(this.vao);
-    for (let i = 0; i < 8; i++) {
-      const bit = 1 << i;
-      if (this.enabledAttributes & bit & ~state.attributeMask) {
-        gl.disableVertexAttribArray(i);
-        this.enabledAttributes &= ~bit;
-      }
+    // The streams enabled that the program does not read, highest first.
+    let stale = this.enabledAttributes & ~state.attributeMask;
+    while (stale) {
+      const i = 31 - Math.clz32(stale);
+      gl.disableVertexAttribArray(i);
+      stale &= ~(1 << i);
     }
+    this.enabledAttributes &= state.attributeMask;
 
     for (let i = 0; i < state.attributes.length; i++) {
       const slot = state.attributes[i];
@@ -1909,7 +2080,14 @@ export class WebGLContext3D implements Context3D {
       const binding = state.samplers[i];
       const slot = binding.source.index;
       const texture = this.textureSlots[slot];
-      if (texture && texture === this.renderTexture) {
+      if (
+        texture &&
+        (texture === this.renderTexture ||
+          (this.outputsBound &&
+            (texture === this.outputs[0] ||
+              texture === this.outputs[1] ||
+              texture === this.outputs[2])))
+      ) {
         throw new TextureBindingError("feedback");
       }
       const resource = texture && this.textures.get(texture);
@@ -1976,10 +2154,12 @@ export class WebGLContext3D implements Context3D {
 
     if (state.vertexBank) {
       if (this.vertexConstants.writing || state.vertexVersion !== this.vertexConstants.version) {
-        gl.uniform4fv(state.vertexBank, this.vertexConstants.data);
+        gl.uniform4fv(state.vertexBank, this.vertexConstants.data, 0, INDIRECT_BANK * 4);
         state.vertexVersion = this.vertexConstants.version;
       }
-    } else {
+    }
+    // An indirect program's own uniforms are only the registers past its bank.
+    if (state.vertex.length) {
       this.uniforms(state.vertex, this.vertexConstants, state.vertexVersions, state.vertexValues);
     }
     this.uniforms(

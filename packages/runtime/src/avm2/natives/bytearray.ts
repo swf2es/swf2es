@@ -529,16 +529,27 @@ export class Bytes {
    * it by default, at the position; the length grows to the position after.
    */
   write(source: Uint8Array, offset = 0, count = source.length): void {
+    // Before the buffer is read: making room may replace it.
+    const at = this.claim(count);
+    copyBytes(this.buffer, at, source, offset, count);
+  }
+
+  /**
+   * As ByteArray::Write but for the bytes, which the caller writes itself:
+   * room for `count` at the position, which moves past them, the length
+   * growing to it. Where in the buffer they start.
+   */
+  claim(count: number): number {
     if (count > 0xffffffff - this.position) {
       throw this.rt.error("flash.errors::MemoryError", 1000);
     }
 
-    const end = (this.position + count) >>> 0;
+    const at = this.position;
+    const end = (at + count) >>> 0;
     if (end > this.buffer.length) {
       this.ensure(end, false);
     }
 
-    copyBytes(this.buffer, this.position, source, offset, count);
     this.position = end;
     if (this.length < end) {
       if (this.shared === null) {
@@ -549,6 +560,7 @@ export class Bytes {
     }
 
     this.notify();
+    return at;
   }
 
   /** As ByteArray's operator[] for a write: the length grows to hold `index`. */

@@ -208,23 +208,48 @@ with the context:
   draws are still reading. Preparation also saves the index ranges and each
   run's texture bindings and sampling modes in reusable arrays; drawing uses
   those ranges directly, including when held layers reorder commands.
-  Without the extension, a call a draw.
+  Without the extension, as in Firefox, a run is merged instead (below)
+  or, where it cannot be, a call a fill, its row told by a uniform.
 - **Merged fills** (`batches.ts`): runs of at least 32 small geometries
-  unchanged since the previous frame use one indexed draw. Their vertices
-  carry the packed row as an integer attribute, so transforms, colour and
-  quarter-pixel snapping use the same shader math. The merged buffers are
-  reused while geometry, order and packed rows match; moving an object
-  only updates the row texture. A changed stream is staged on the CPU only
-  from its first draw that differs, and uploaded there before any draw:
-  the part before it stays on the GPU alone, kept by a copy there when a
-  buffer grows, so the CPU holds no copy of the stream between frames.
-  After 240 frames that used a quarter of the room or less, the GPU
-  buffers and the staging shrink to twice what they used. A geometry has
-  at most 256 vertices and 1,024 indices; the stream has room for at most
-  2,097,152 vertices and 6,291,456 indices (72 MiB). Fresh geometry,
+  unchanged since the previous frame use one indexed draw. Each run's
+  geometries are copied into a segment of a stream, their vertices
+  carrying as an integer attribute the slot of the draw's packed row in
+  an integer texture the stream keeps for its segments, written as the
+  rows change, so transforms, colour and quarter-pixel snapping use the
+  same shader math. A segment is found again by its geometries, in their
+  order, wherever its run comes in a later frame: moving, recolouring or
+  reordering objects only updates the row texture and the segments' rows.
+  The segments a frame adds are staged on the CPU after the stream's top
+  and uploaded there before any draw; what is below stays on the GPU
+  alone, kept by a copy there when a buffer grows, so the CPU holds no
+  copy of the stream between frames. A segment no run used in a frame is
+  let go of, and once the stream is twice what the last frame used it is
+  made anew. After 240 frames that used a quarter of the room or less, the
+  GPU buffers and the staging shrink to twice what they used. A geometry
+  has at most 256 vertices and 1,024 indices; the stream has room for at
+  most 2,097,152 vertices and 6,291,456 indices (72 MiB). Fresh geometry,
   masks, short or oversized runs, and frames whose run table does not fit
   keep the atlas path.
-  Context restoration rebuilds the buffers and forgets the cached stream.
+  Without `WEBGL_multi_draw` each fill of the atlas path is a call of its
+  own. Firefox has none (153, on Intel and NVIDIA alike); Chrome has it
+  on a GPU and on SwiftShader, and Safari from 15 by MDN's data, which was
+  not measured here. So there a run of two fills or more is merged, masks'
+  fills too, once it is drawn a second frame alike: a run that changes
+  every frame, as an animation's characters swapping their parts do,
+  would be copied again every frame, which in Firefox took longer than
+  the calls it saves (the site's crowd, 576 calls a frame: 4.5 ms a frame
+  copied on first sight against 2.3 ms drawn a call a fill, where it
+  stays). A run is gathered of stable geometries, of fresh ones, or of
+  ones too large to merge alone, so that a part drawn anew each frame
+  leaves the rest of its run merged. Its shader is the single-draw fill
+  program with the slot attribute and the segments' rows. In Firefox on
+  an Intel Iris Xe, a frame of `bench.ts`'s 2,000 shapes went from 3,000
+  calls to 12, from 7.3 to 5.1 ms of the main thread and from 48% to 36%
+  of a core over all its processes; `--town 100` from 5,260 calls to
+  3,622 and 16.6 to 15.4 ms. `tests/player/multi-draw.ts` compares its
+  pixels with a call a fill, and `draw-counts.ts` counts every case with
+  the extension hidden too, as `bench.ts --no-multi-draw` plays.
+  Context restoration rebuilds the buffers and forgets the segments.
 - **Held layers** (`holds.ts`): each level's held layers drawn side by
   side on pages, then their filters' passes in waves, the k-th of every
   chain at once, each wave's targets on pages of their own (`filters.ts`

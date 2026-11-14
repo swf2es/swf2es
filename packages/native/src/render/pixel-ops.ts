@@ -20,6 +20,7 @@ export interface PixelExports {
   transformPixels(params: number): number;
   noisePixels(params: number): number;
   perlinPixels(params: number): number;
+  wordsPixels(params: number): number;
 }
 
 /** The rows of a band's work: about this much of the pixels it copies in. */
@@ -285,6 +286,54 @@ export function noiseRows(
 
     pixels.set(new Uint32Array(wasm.memory.buffer, at + HEAD, count), progress.row);
     progress.state = state;
+  }
+
+  return true;
+}
+
+/** What `wordRuns` makes of each word: pixels.zig's WordKind. */
+export const WORDS_SOLID = 0;
+export const WORDS_PREMULTIPLY = 1;
+export const WORDS_UNMULTIPLY = 2;
+export const WORDS_PLAIN = 3;
+
+/**
+ * The words of `from`, four bytes each in the module's order, made the
+ * pixels of values or the values of pixels (`kind`) into `into`, as long,
+ * which may be `from`: bytes reversed, where `swap`, as the values' order
+ * asks. Band by band, which nothing but their size bounds: a word is made
+ * of itself alone. False where the module refused a band.
+ */
+export function wordRuns(
+  wasm: PixelExports,
+  into: Uint8Array,
+  from: Uint8Array,
+  kind: number,
+  swap: boolean,
+  progress: Progress,
+): boolean {
+  for (; progress.row < from.length; progress.row += BAND_BYTES) {
+    const bytes = Math.min(BAND_BYTES, from.length - progress.row);
+    const at = wasm.resetArena(HEAD + bytes);
+    if (!at) {
+      return false;
+    }
+
+    const block = at + HEAD;
+    new Uint8Array(wasm.memory.buffer).set(
+      from.subarray(progress.row, progress.row + bytes),
+      block,
+    );
+    const params = new DataView(wasm.memory.buffer, at, HEAD);
+    params.setUint32(0, bytes >> 2, true);
+    params.setUint32(4, block, true);
+    params.setUint32(8, kind, true);
+    params.setUint32(12, Number(swap), true);
+    if (!wasm.wordsPixels(at)) {
+      return false;
+    }
+
+    into.set(new Uint8Array(wasm.memory.buffer, block, bytes), progress.row);
   }
 
   return true;

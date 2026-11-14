@@ -73,9 +73,103 @@ export type SamplerFilter = (typeof SAMPLER_FILTERS)[number];
 export const SAMPLER_MIPS = ["mipnone", "mipnearest", "miplinear"] as const;
 export type SamplerMip = (typeof SAMPLER_MIPS)[number];
 
-/** The texture formats a backend stores: BGRA, and S3TC's DXT1 and DXT5 as Flash calls them. */
-export const TEXTURE_FORMATS = ["bgra", "compressed", "compressedAlpha"] as const;
+/**
+ * The texture formats a backend stores: BGRA, S3TC's DXT1 and DXT5 as Flash calls them,
+ * 16-bit 5:6:5 colour and 4:4:4:4 colour with alpha, and RGBA in half floats.
+ */
+export const TEXTURE_FORMATS = [
+  "bgra",
+  "compressed",
+  "compressedAlpha",
+  "bgrPacked565",
+  "bgraPacked4444",
+  "rgbaHalfFloat",
+] as const;
 export type TextureFormat = (typeof TEXTURE_FORMATS)[number];
+
+/** Bytes a texel of each uncompressed format takes, as its byte uploads give it. */
+export const TEXEL_BYTES: Partial<Record<TextureFormat, number>> = {
+  bgra: 4,
+  bgrPacked565: 2,
+  bgraPacked4444: 2,
+  rgbaHalfFloat: 8,
+};
+
+/** Whether a format holds S3TC blocks, which no draw renders into. */
+export function compressedFormat(format: TextureFormat): boolean {
+  return format === "compressed" || format === "compressedAlpha";
+}
+
+/** Stage3D's profiles, from what the least GPU does to the most. */
+export const PROFILES = [
+  "baselineConstrained",
+  "baseline",
+  "baselineExtended",
+  "standardConstrained",
+  "standard",
+  "standardExtended",
+] as const;
+export type Profile = (typeof PROFILES)[number];
+
+/** What a profile allows, as AIR 51 grants it on a desktop GPU (docs/architecture/rendering.md). */
+export interface ProfileLimits {
+  /** The newest AGAL version its programs may be. */
+  readonly agal: number;
+  /** The widest and tallest Texture. */
+  readonly textureSize: number;
+  /** The widest and tallest RectangleTexture, 0 where the profile has none. */
+  readonly rectangleSize: number;
+  /** Whether it creates rgbaHalfFloat textures. */
+  readonly halfFloat: boolean;
+  /** How many textures a draw renders into at once. */
+  readonly colorOutputs: number;
+}
+
+const LIMITS: Record<Profile, ProfileLimits> = {
+  baselineConstrained: {
+    agal: 1,
+    textureSize: 2048,
+    rectangleSize: 0,
+    halfFloat: false,
+    colorOutputs: 1,
+  },
+  baseline: { agal: 1, textureSize: 2048, rectangleSize: 2048, halfFloat: false, colorOutputs: 1 },
+  baselineExtended: {
+    agal: 1,
+    textureSize: 4096,
+    rectangleSize: 4096,
+    halfFloat: false,
+    colorOutputs: 1,
+  },
+  standardConstrained: {
+    agal: 2,
+    textureSize: 4096,
+    rectangleSize: 4096,
+    halfFloat: true,
+    colorOutputs: 1,
+  },
+  standard: { agal: 2, textureSize: 4096, rectangleSize: 4096, halfFloat: true, colorOutputs: 4 },
+  standardExtended: {
+    agal: 3,
+    textureSize: 4096,
+    rectangleSize: 4096,
+    halfFloat: true,
+    colorOutputs: 4,
+  },
+};
+
+export function profileLimits(profile: Profile): ProfileLimits {
+  return LIMITS[profile];
+}
+
+/** Cube faces are at most this wide in every profile. */
+export const MOST_CUBE = 1024;
+
+/** Sampler, vertex attribute and constant registers a context holds in every profile. */
+export const SAMPLER_SLOTS = 16;
+export const VERTEX_SLOTS = 16;
+export const VERTEX_CONSTANTS = 250;
+export const FRAGMENT_CONSTANTS = 200;
 
 export const VERTEX_FORMATS = ["float1", "float2", "float3", "float4", "bytes4"] as const;
 export type VertexFormat = (typeof VERTEX_FORMATS)[number];
@@ -121,6 +215,10 @@ export interface Buffer3D {
 }
 
 export interface Program3D {
+  /** The colour outputs its fragment program writes, 1 to 4; 1 before an upload. */
+  readonly outputs: number;
+  /** The vertex attributes it reads, a bit each; 0 before an upload. */
+  readonly attributes: number;
   upload(vertex: Uint8Array, fragment: Uint8Array): void;
   dispose(): void;
 }
@@ -166,6 +264,11 @@ export interface Context3DLifecycle {
 /** Loss callbacks are asynchronous. Keep the lost surface until remove(), including
  * its restoration listener; remove() must detach both listeners before releasing it. */
 export interface Stage3DHost {
+  /**
+   * What a request waits for before create(): a host that loads its backend at the first
+   * request gives the load, null once loaded. A rejection makes the context unavailable (#3702).
+   */
+  ready?(): Promise<unknown> | null;
   create(slot: number, lifecycle: Context3DLifecycle): Context3D;
   place(slot: number, x: number, y: number, visible: boolean): void;
   remove(slot: number): void;
@@ -180,6 +283,8 @@ export interface Context3D {
    * format (TextureBindingError "format"): AIR checks from SWF 17 on.
    */
   samplerFormats: boolean;
+  /** The profile it was made for: what its programs, textures and targets may be. */
+  profile: Profile;
   /** Optional acceleration for pixels uploaded to compressed textures. */
   setDxtEncoder?(encoder: DxtEncoder): void;
   /**
@@ -230,7 +335,7 @@ export interface Context3D {
     format?: TextureFormat,
     streaming?: number,
   ): Texture3D;
-  createRectangleTexture(width: number, height: number): Texture3D;
+  createRectangleTexture(width: number, height: number, format?: TextureFormat): Texture3D;
   /** Level-zero target; face selects a cube surface. Null resumes the back buffer. */
   setRenderTarget(
     texture: Texture3D | null,
@@ -238,6 +343,11 @@ export interface Context3D {
     face?: number,
     antiAlias?: number,
   ): void;
+  /**
+   * Colour output `index`, 1 to 3, draws into `texture` (`face` of a cube) beside
+   * setRenderTarget's; null stops it. The texture's size and format are the target's.
+   */
+  setColorOutput(index: number, texture: Texture3D | null, face?: number): void;
   setSampler(index: number, wrap: SamplerWrap, filter: SamplerFilter, mip: SamplerMip): void;
   setTexture(index: number, texture: Texture3D | null): void;
   setProgram(program: Program3D): void;

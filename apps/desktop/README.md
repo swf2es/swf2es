@@ -43,14 +43,19 @@ fetch-electron` does so ahead, for the tests.
   set one, and ends with Esc or F11, which the SWF hears of as a
   `FullScreenEvent`. Opening another SWF destroys the
   player before the next starts.
-- **Stage3D.** View › Stage3D (Experimental) opts in to Context3D playback.
-  It starts off, remembers the choice in `settings.json`, and restarts the
-  current movie when changed. The desktop loads the optional WebGL2 backend
-  only when enabled and uses the web element's composition, live AS3 Stage
-  layout and context recovery. If that module cannot load, playback continues
-  with the usual unavailable-context fallback and logs the cause. The saved
-  choice remains enabled. Each slot owns a separate WebGL2 context;
-  closing or reloading the movie releases its resources and browser contexts.
+- **Stage3D.** SWFs get a Context3D, as in Flash and AIR on a desktop. View ›
+  Stage3D turns it off, after which a SWF's `requestContext3D`
+  gets Error #3702 "Context3D not available", and on again; the app remembers
+  that choice in `settings.json` (`stage3DChoice`) and restarts the current
+  movie when it changes. Until it is changed there it is on, also for a
+  `settings.json` from before Stage3D was on by default: that one saved
+  `"stage3D": false` whether or not it was chosen, so it is not read. The
+  WebGL2 backend loads when a SWF first requests a context, so a SWF that
+  never does starts as fast as with Stage3D off. The desktop uses the web
+  element's composition, live AS3 Stage layout and context recovery. If the
+  backend cannot load, requests get Error #3702 and the cause is logged.
+  Each slot owns a separate WebGL2 context; closing or reloading the movie
+  releases its resources and browser contexts.
   Each resource type has its own 4,096-resource count limit.
   Buffer and texture byte allowances follow the shared backend's AIR-backed
   limits, with separate host budgets for target attachments. Supported

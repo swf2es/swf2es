@@ -3,7 +3,9 @@
 //! and Math.round, so that each kernel converts as the JS did.
 const std = @import("std");
 
-const reciprocal = blk: {
+/// The reciprocals Flash divides alpha out with, 8.8 fixed point: 256 for a solid pixel, which
+/// so stays itself, and 0 for a clear one, which so comes out 0.
+pub const reciprocal = blk: {
     var table: [256]u32 = undefined;
     table[0] = 0;
     for (1..256) |a| table[a] = 0xff00 / a;

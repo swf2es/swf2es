@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.19"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.20"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.19`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.20`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -161,6 +161,14 @@ and must be cleared again. It costs the ratio squared in memory: a
 of its colour, depth and stencil, and the canvas's two buffers, about
 130 MB, and 265 MB more in multisampled buffers at 4x antialiasing; one of
 3840 by 2160 at a ratio of 2 is four times all that.
+
+Every Stage3D profile is served, from `baselineConstrained` to
+`standardExtended`, `requestContext3DMatchingProfiles` taking the best
+asked for, as Flash does on a desktop GPU. The standard profiles run AGAL 2
+and 3 programs (conditionals, derivatives, depth output and their larger
+register files), half-float textures and up to four colour outputs at once;
+the packed 16-bit formats work in every profile. Instanced drawing, which
+only AIR has, is not there yet.
 
 ## WebAssembly and CSP
 
@@ -395,6 +403,12 @@ window full screen, with no click needed, as in AIR and Flash's projector;
 Esc or F11 leaves. F11 is the View menu's key for it; a SWF or an
 application that acts on F11 itself, setting `Stage.displayState` in its
 `keyDown` listener, has the key to itself, and one press toggles once.
+
+A SWF gets a Context3D, as in Flash Player and AIR on a desktop: Stage3D
+content plays with nothing to set up. View › Stage3D turns
+it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
+not available", and on again; the app remembers the choice and restarts
+the movie playing.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content

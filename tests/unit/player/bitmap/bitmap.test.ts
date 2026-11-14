@@ -28,6 +28,22 @@ test("a pixel goes in premultiplied and comes back as Flash rounds it", () => {
   assert.equal(premultiply(0x00123456), 0);
 });
 
+test("every alpha and channel premultiplies as the division does, and divides back as the reciprocals do", () => {
+  for (let a = 0; a < 256; a++) {
+    const k = a === 0 ? 0 : Math.floor(0xff00 / a);
+    for (let c = 0; c < 256; c++) {
+      // Three channels apart, so that none spills into the next; a store may hold a channel past its alpha.
+      const argb = ((a << 24) | (c << 16) | ((255 - c) << 8) | (c ^ 0x5a)) >>> 0;
+      const scaled = (v: number) => (a === 0 ? 0 : Math.floor((v * a + 127) / 255));
+      const divided = (v: number) => (a === 0 ? 0 : Math.min(255, (v * k + 127) >> 8));
+      const of = (f: (v: number) => number) =>
+        ((a << 24) | (f(c) << 16) | (f(255 - c) << 8) | f(c ^ 0x5a)) >>> 0;
+      assert.equal(premultiply(argb), of(scaled), argb.toString(16));
+      assert.equal(unmultiply(argb), of(divided), argb.toString(16));
+    }
+  }
+});
+
 test("a store tells the Bitmaps showing it of a change, and lets go of one dropped", async () => {
   const store = new BitmapStore(2, 2, true, 0);
   const kept = new BitmapObject(store);

@@ -9,9 +9,11 @@ import {
   type Progress,
   perlinRows,
   transformRows,
+  wordRuns,
 } from "./pixel-ops.js";
 
 export type { CopyOp, PerlinSetup, PixelRegion } from "./pixel-ops.js";
+export { WORDS_PLAIN, WORDS_PREMULTIPLY, WORDS_SOLID, WORDS_UNMULTIPLY } from "./pixel-ops.js";
 
 export interface BitmapSource {
   width: number;
@@ -803,6 +805,24 @@ export class BitmapKernel {
         true,
       ) ?? false
     );
+  }
+
+  /**
+   * The words of `from`, four bytes each, made into `into`, as long and
+   * maybe the same, the pixels of values or the values of pixels (`kind`,
+   * one of WORDS_*), reversed where `swap` (pixel-ops.ts): setPixels',
+   * setVector's, getPixels' and getVector's runs. How many bytes were
+   * made, from the first: all of them, or fewer where the module refused
+   * the rest, which are as they were.
+   */
+  words(into: Uint8Array, from: Uint8Array, kind: number, swap: boolean): number {
+    if (from.length % 4 !== 0 || into.length !== from.length) {
+      return 0;
+    }
+
+    const progress: Progress = { row: 0, state: 0 };
+    this.call((wasm) => (wordRuns(wasm, into, from, kind, swap, progress) ? true : null), true);
+    return Math.min(progress.row, from.length);
   }
 
   /** perlinNoise over every pixel of a `width`-wide store: false where the module refused it. */

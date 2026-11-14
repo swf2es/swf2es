@@ -169,7 +169,10 @@
 //     | --triangles N [--culled] | --redraw N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
-//     [--checkout DIR]
+//     [--checkout DIR] [--no-multi-draw]
+//
+// --no-multi-draw hides WEBGL_multi_draw from the renderer, which then draws
+// as it does in a browser without it, as Firefox is.
 //
 // --checkout DIR plays another built checkout's packages (its packages/*/dist)
 // with this harness and SWF, to compare two builds run in turn.
@@ -1850,6 +1853,7 @@ const result = await benchPlayer(swf, frames, {
   hover: args.includes("--hover"),
   snapshotPath: args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
   metered: args.includes("--counts"),
+  multiDraw: !args.includes("--no-multi-draw"),
 });
 if (result.error) {
   console.error(result.error);
@@ -1983,7 +1987,7 @@ if (args.includes("--json")) {
 } else {
   const ms = (v: number) => `${v.toFixed(2)} ms`;
   console.log(
-    `${summary.shapes}${typeof summary.shapes === "string" ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}`,
+    `${summary.shapes}${typeof summary.shapes === "string" ? "" : " shapes"}, ${frames} frames, SWF of ${swf.length} bytes; first frame ${ms(result.first)}; drawn by ${result.renderer}${args.includes("--no-multi-draw") ? " without WEBGL_multi_draw" : ""}`,
   );
   console.log(
     `  counts  ${JSON.stringify(result.counts)}; JS heap ${summary.heapMb[0]} to ${summary.heapMb[1]} MB`,

@@ -1,4 +1,5 @@
-// Multi-draw run boundaries and changing row data must draw exactly as individual draws do.
+// Multi-draw run boundaries and changing row data must draw exactly as individual draws do, and so
+// must runs merged without WEBGL_multi_draw, as Firefox draws them.
 import assert from "node:assert/strict";
 import { withPage } from "./chrome.ts";
 
@@ -13,20 +14,24 @@ const { value, exception } = await withPage(
     const options = { width: 256, height: 144, preserveDrawingBuffer: true };
     const multi = new RenderView({ ...options, canvas: document.createElement("canvas") });
     let destroyed = false;
+    let withoutMultiDestroyed = false;
     const prototype = WebGL2RenderingContext.prototype;
     const getExtension = prototype.getExtension;
-    let single;
+    let single, withoutMulti;
     try {
       prototype.getExtension = function (name) {
         return name === "WEBGL_multi_draw" ? null : getExtension.call(this, name);
       };
       single = new RenderView(options);
+      withoutMulti = new RenderView(options);
     } finally {
       prototype.getExtension = getExtension;
     }
+    // The reference: a call a fill.
+    single.backend.draws.merging = false;
     let frames = 0, largest = 0;
     const extension = multi.gl.getExtension("WEBGL_multi_draw");
-    if (!extension || !multi.backend.draws.multi || single.backend.draws.multi) {
+    if (!extension || !multi.backend.draws.multi || single.backend.draws.multi || withoutMulti.backend.draws.multi) {
       throw new Error("Both multi-draw and individual draws are required");
     }
     const draw = extension.multiDrawElementsWEBGL;
@@ -34,7 +39,7 @@ const { value, exception } = await withPage(
       largest = Math.max(largest, args[6]);
       return draw.apply(this, args);
     };
-    let uploads = 0, bufferUploads = 0;
+    let uploads = 0, rowUploads = 0, bufferUploads = 0;
     const bufferUpload = multi.gl.bufferSubData;
     multi.gl.bufferSubData = function (...args) {
       bufferUploads++;
@@ -46,12 +51,35 @@ const { value, exception } = await withPage(
       copies++;
       return copyBuffer.apply(this, args);
     };
+    let withoutMultiCalls = 0, withoutMultiUploads = 0;
+    const withoutMultiUpload = withoutMulti.gl.bufferSubData;
+    withoutMulti.gl.bufferSubData = function (...args) {
+      withoutMultiUploads++;
+      return withoutMultiUpload.apply(this, args);
+    };
+    const withoutMultiDraw = withoutMulti.gl.drawElements;
+    withoutMulti.gl.drawElements = function (...args) {
+      withoutMultiCalls++;
+      return withoutMultiDraw.apply(this, args);
+    };
     const upload = multi.gl.texSubImage2D;
     multi.gl.texSubImage2D = function (...args) {
+      // The merged fills' rows are uploaded 1024 texels a line; the run table, 256 at most.
       if (args[6] === this.RED_INTEGER) {
-        uploads++;
+        if (args[4] === 1024) {
+          rowUploads++;
+        } else {
+          uploads++;
+        }
       }
       return upload.apply(this, args);
+    };
+    const same = (label, expected, actual) => {
+      for (let i = 0; i < actual.length; i++) {
+        if (actual[i] !== expected[i]) {
+          throw new Error(label + ", byte " + i + " differs");
+        }
+      }
     };
     const capture = (view, root) => {
       view.render(root);
@@ -98,8 +126,21 @@ const { value, exception } = await withPage(
           }
           const expected = capture(single, root);
           uploads = 0;
+          rowUploads = 0;
           bufferUploads = 0;
           const actual = capture(multi, root);
+          withoutMultiCalls = 0;
+          withoutMultiUploads = 0;
+          same(count + " draws merged without multi-draw, frame " + frame, expected, capture(withoutMulti, root));
+          // New fills, and runs not drawn the frame before, a call each; from the third frame, a run
+          // of RUN_MOST fills a call, its copy kept as the fills move.
+          const merges = frame === 2 || frame === 3;
+          if (frame <= 3 && withoutMultiCalls !== (merges ? Math.ceil(count / 256) : count)) {
+            throw new Error(count + " draws without multi-draw, frame " + frame + ", in " + withoutMultiCalls + " calls");
+          }
+          if (frame === 3 && withoutMultiUploads !== 0) {
+            throw new Error("Moving unchanged geometry copied runs again without multi-draw");
+          }
           const fallback = frame === 1 && count > 256;
           if (multi.backend.draws.prepared === fallback || uploads !== (fallback ? Math.ceil(count / 256) : 1)) {
             throw new Error(count + " draws, frame " + frame + ": unexpected table uploads");
@@ -107,7 +148,7 @@ const { value, exception } = await withPage(
           if (frame === 2 && count >= 32 && multi.backend.draws.batches.indexTop === 0) {
             throw new Error("Stable small geometries were not merged");
           }
-          if (frame === 3 && bufferUploads !== 0) {
+          if (frame === 3 && (bufferUploads !== 0 || rowUploads !== 0)) {
             throw new Error("Moving unchanged geometry uploaded the batch again");
           }
           if (!expected.some((value, i) => i % 4 !== 3 && value !== 0)) {
@@ -180,6 +221,7 @@ const { value, exception } = await withPage(
           images[frame].setPixel32(1, 1, 0xffff0080);
           const expected = capture(single, root);
           const actual = capture(multi, root);
+          same("Textured frame " + frame + " merged without multi-draw", expected, capture(withoutMulti, root));
           if (compact && frame === 2 && multi.backend.draws.batches.indexTop === 0) {
             throw new Error("Textured runs in held layers were not merged");
           }
@@ -218,6 +260,7 @@ const { value, exception } = await withPage(
         const compare = (label) => {
           const expected = capture(single, root);
           const actual = capture(multi, root);
+          same(label + " merged without multi-draw", expected, capture(withoutMulti, root));
           for (let i = 0; i < actual.length; i++) {
             if (actual[i] !== expected[i]) {
               throw new Error(label + ", byte " + i + " differs");
@@ -258,6 +301,12 @@ const { value, exception } = await withPage(
           throw new Error("An unchanged stream uploaded again after shrinking");
         }
       }
+      const alone = withoutMulti.backend.draws.batches;
+      withoutMulti.destroy();
+      withoutMultiDestroyed = true;
+      if (withoutMulti.gl.isVertexArray(alone.vertexArray) || withoutMulti.gl.isBuffer(alone.vertexBuffer)) {
+        throw new Error("The merged stream survived renderer destruction without multi-draw");
+      }
       const table = multi.backend.draws.runTable;
       const batches = multi.backend.draws.batches;
       if (!multi.gl.isTexture(table)) {
@@ -281,6 +330,11 @@ const { value, exception } = await withPage(
       }
       multi.gl.getExtension("WEBGL_lose_context")?.loseContext();
       single.destroy();
+      withoutMulti.gl.drawElements = withoutMultiDraw;
+      withoutMulti.gl.bufferSubData = withoutMultiUpload;
+      if (!withoutMultiDestroyed) {
+        withoutMulti.destroy();
+      }
     }
   })()`),
   process.argv.includes("--gpu"),

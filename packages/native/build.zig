@@ -223,11 +223,11 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         "bucketalloc.c", "dict.c", "geom.c", "mesh.c", "priorityq.c", "sweep.c", "tess.c",
     };
     const exports = [_][]const u8{
-        "reset",       "alloc",           "run",           "vertices",     "indices",         "vertexCount", "triangleCount",
-        "highWater",   "allocated",       "setLimit",      "layer",        "lineInput",       "lineHeader",  "lineBuild",
-        "resetArena",  "convolve",        "capacity",      "bandsOnly",    "blurFilter",      "layerFilter", "channelPixels",
-        "mergePixels", "overPixels",      "palettePixels", "matrixPixels", "transformPixels", "noisePixels", "perlinPixels",
-        "drawPixels",  "compositePixels", "encodeDxt",
+        "reset",       "alloc",      "run",             "vertices",     "indices",         "vertexCount", "triangleCount",
+        "highWater",   "allocated",  "setLimit",        "layer",        "lineInput",       "lineHeader",  "lineBuild",
+        "resetArena",  "convolve",   "capacity",        "bandsOnly",    "blurFilter",      "layerFilter", "channelPixels",
+        "mergePixels", "overPixels", "palettePixels",   "matrixPixels", "transformPixels", "noisePixels", "perlinPixels",
+        "wordsPixels", "drawPixels", "compositePixels", "encodeDxt",
     };
 
     const library = b.path(vendor ++ "libtess2");
