@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "paths": {
+      "@swf2es/native/render": ["../../packages/native/dist/render/index.d.ts"],
+      "@swf2es/render": ["../../packages/render/dist/index.d.ts"],
+      "@swf2es/render/webgl": ["../../packages/render/dist/webgl/index.d.ts"]
+    }
+  },
+  "include": ["*.ts"],
+  "exclude": []
+}

@@ -1,0 +1,68 @@
+{
+  "exactArea": 7668.650000000012,
+  "rows": [
+    {
+      "name": "main-8",
+      "inkArea": 7671.639215686433,
+      "areaErrorPercent": 0.03897968594759327,
+      "exactBoxEdgeMAE": 9.097530013467322,
+      "exactBoxRMSE": 1.8559236894066669,
+      "flashBestEdgeMAE": 29.483314669652856,
+      "edgePixels": 4432
+    },
+    {
+      "name": "main-4",
+      "inkArea": 7667.592156862878,
+      "areaErrorPercent": -0.013794385415089039,
+      "exactBoxEdgeMAE": 15.89240797941847,
+      "exactBoxRMSE": 3.1545348886292626,
+      "flashBestEdgeMAE": 29.503023516237402,
+      "edgePixels": 4432
+    },
+    {
+      "name": "shader-only-8",
+      "inkArea": 7671.639215686433,
+      "areaErrorPercent": 0.03897968594759327,
+      "exactBoxEdgeMAE": 9.097530013467322,
+      "exactBoxRMSE": 1.8559236894066669,
+      "flashBestEdgeMAE": 29.483314669652856,
+      "edgePixels": 4432
+    },
+    {
+      "name": "coverage-4",
+      "inkArea": 7674.517647058826,
+      "areaErrorPercent": 0.07651473282537236,
+      "exactBoxEdgeMAE": 9.509416663239051,
+      "exactBoxRMSE": 2.0668933642999843,
+      "flashBestEdgeMAE": 30.049944008958565,
+      "edgePixels": 4432
+    },
+    {
+      "name": "coverage-1",
+      "inkArea": 7670.188235294116,
+      "areaErrorPercent": 0.020058749507456675,
+      "exactBoxEdgeMAE": 0.6651167208861519,
+      "exactBoxRMSE": 0.37015734727814376,
+      "flashBestEdgeMAE": 29.318924972004478,
+      "edgePixels": 4432
+    },
+    {
+      "name": "flash-high",
+      "inkArea": 7669.164705882118,
+      "areaErrorPercent": 0.006711818665672276,
+      "exactBoxEdgeMAE": 29.261803940204903,
+      "exactBoxRMSE": 5.550095192937097,
+      "flashBestEdgeMAE": 0,
+      "edgePixels": 4432
+    },
+    {
+      "name": "flash-best",
+      "inkArea": 7669.164705882118,
+      "areaErrorPercent": 0.006711818665672276,
+      "exactBoxEdgeMAE": 29.261803940204903,
+      "exactBoxRMSE": 5.550095192937097,
+      "flashBestEdgeMAE": 0,
+      "edgePixels": 4432
+    }
+  ]
+}
