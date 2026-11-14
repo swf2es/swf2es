@@ -185,7 +185,10 @@ whose entries go once unused for their idle frames:
   Saffron's outlines in a texture, and each text's mode and CSM cutoff
   tables in a slot of a float texture (`glyph-tables.ts`), texts alike
   sharing one, uploaded as a text is placed; a draw names its slot by one
-  int. No shader of the renderer indexes a uniform array by anything but a
+  int. With `WEBGL_multi_draw`, texts that follow one another in a run or
+  a mask are one multi-draw, as fills are, each draw's row and slot two
+  ints of an integer texture read at `gl_DrawID`, written for the frame
+  before any draw; without it, as in Firefox, a text is a draw. No shader of the renderer indexes a uniform array by anything but a
   constant: a table indexed by `gl_DrawID` hung Intel's GPUs (i915
   engine resets) where NVIDIA's ran it, and the glyph program's, indexed
   by each glyph's table start, was the likely cause of like hangs with

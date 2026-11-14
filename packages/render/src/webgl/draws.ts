@@ -28,6 +28,7 @@ import {
   FILL_UNIT,
   fillFragment,
   fillVertex,
+  GLYPH_RUN_UNIT,
   glyphsFragment,
   glyphsVertex,
   MERGED_UNIT,
@@ -57,6 +58,8 @@ interface MultiDraw {
 
 /** Last entry, table start, draws, units, batch start/count, then each unit's texture and sampling. */
 const RUN_STRIDE = 6 + FILL_TEXTURES * 2;
+/** A glyph run's last entry, table start and draws, and its entry past the glyph tables' room or -1. */
+const GLYPH_STRIDE = 4;
 
 /**
  * The fewest fills a run copies into the merged stream (FillBatches): with
@@ -178,6 +181,27 @@ export class Draws {
   private glyphStale = true;
   private glyphRow = -1;
   private glyphTable = -1;
+  /**
+   * With WEBGL_multi_draw, consecutive texts are a multi-draw (drawGlyphs), each draw's row and
+   * slot two ints of an integer texture (GLYPH_RUN_UNIT) read at uGlyphBase plus gl_DrawID: not a
+   * uniform array, which hung Intel's GPUs indexed so (#717). The table is written for the frame
+   * (prepare), its runs a command's in order from glyphStarts; or, where it did not fit, a run at
+   * a time as it is drawn (glyphsPrepared false).
+   */
+  private glyphRunTable: WebGLTexture | null = null;
+  private glyphRunHeight = 0;
+  private glyphBaseLocation: WebGLUniformLocation | null = null;
+  private glyphBase = -1;
+  private glyphsPrepared = false;
+  private glyphEntries = new Int32Array(RUN_MOST * 2);
+  private glyphCounts = new Int32Array(RUN_MOST);
+  private glyphOffsets = new Int32Array(RUN_MOST);
+  private glyphRuns = new Int32Array(GLYPH_STRIDE * 64);
+  private glyphStarts = new Uint32Array(256);
+  /** The glyph run drawEntries draws next, and what gatherGlyphs gathered: draws and its scratch entry. */
+  private glyphRun = 0;
+  private glyphCount = 0;
+  private glyphScratch = -1;
   /** Flash's pixels a stage pixel: the target's pixels a stage pixel over those a pixel of Flash's. */
   private unit = 1;
   /**
@@ -278,7 +302,8 @@ export class Draws {
     this.meshStale = true;
     this.meshRow = -1;
     this.meshMode = -1;
-    this.glyphProgram = linkProgram(gl, glyphsVertex, glyphsFragment);
+    // As the fill program: multi-drawn where its directive was taken.
+    this.glyphProgram = linkProgram(gl, glyphsVertex(this.multi !== null), glyphsFragment);
     this.glyphRowLocation = gl.getUniformLocation(this.glyphProgram, "uRow");
     this.glyphViewLocation = gl.getUniformLocation(this.glyphProgram, "uView");
     this.glyphUnitLocation = gl.getUniformLocation(this.glyphProgram, "uUnit");
@@ -290,6 +315,15 @@ export class Draws {
     this.glyphStale = true;
     this.glyphRow = -1;
     this.glyphTable = -1;
+    this.glyphRunTable = null;
+    this.glyphRunHeight = 0;
+    this.glyphBase = -1;
+    this.glyphsPrepared = false;
+    this.glyphBaseLocation = gl.getUniformLocation(this.glyphProgram, "uGlyphBase");
+    if (this.multi) {
+      this.sizeGlyphTable(1);
+      gl.uniform1i(gl.getUniformLocation(this.glyphProgram, "uGlyphRuns"), GLYPH_RUN_UNIT);
+    }
     this.lastRow = -1;
   }
 
@@ -299,6 +333,7 @@ export class Draws {
    * stream and its rows.
    */
   prepare(commands: Commands, scene: SceneList): void {
+    this.prepareGlyphs(commands, scene);
     this.prepared = false;
     const multi = this.multi !== null;
     // Without a multi-draw, rows are told by uniform or merged; the table is not read.
@@ -440,6 +475,172 @@ export class Draws {
     this.state.bindTexture(RUN_UNIT, this.runTable);
     this.state.activeTexture(RUN_UNIT);
     gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R32I, RUN_MOST, this.runTableHeight);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  }
+
+  /**
+   * With WEBGL_multi_draw, the frame's glyph runs gathered command by command
+   * as drawEntries will meet them, and their rows and slots uploaded before
+   * any draw; left unprepared where they pass the table's room.
+   */
+  private prepareGlyphs(commands: Commands, scene: SceneList): void {
+    this.glyphsPrepared = false;
+    if (!this.multi) {
+      return;
+    }
+
+    if (commands.length > this.glyphStarts.length) {
+      this.glyphStarts = new Uint32Array(commands.ops.length / 4);
+    }
+
+    const most = RUN_MOST * this.runTableMost;
+    const places = this.atlas.places;
+    const ops = commands.ops;
+    let count = 0;
+    let run = 0;
+    for (let k = 0; k < commands.length; k++) {
+      const at = k * 4;
+      const op = ops[at];
+      if (op !== RUN && op !== STENCIL_PUSH && op !== STENCIL_POP) {
+        continue;
+      }
+
+      const end = ops[at + 1] + ops[at + 2];
+      this.glyphStarts[k] = run;
+      for (let i = ops[at + 1]; i < end; i++) {
+        if (scene.kind[i] !== DRAW || !places[scene.geometry[i]]?.glyphs) {
+          continue;
+        }
+
+        i = this.gatherGlyphs(scene, i, end, count, most - count);
+        if (this.glyphCount === 0) {
+          // An unusually large frame draws its glyph runs a line of the table at a time.
+          return;
+        }
+
+        if (run + GLYPH_STRIDE > this.glyphRuns.length) {
+          const runs = new Int32Array(this.glyphRuns.length * 2);
+          runs.set(this.glyphRuns);
+          this.glyphRuns = runs;
+        }
+
+        this.glyphRuns[run] = i;
+        this.glyphRuns[run + 1] = count;
+        this.glyphRuns[run + 2] = this.glyphCount;
+        this.glyphRuns[run + 3] = this.glyphScratch;
+        run += GLYPH_STRIDE;
+        count += this.glyphCount;
+      }
+    }
+
+    const height = Math.ceil(count / RUN_MOST);
+    if (height > 0) {
+      this.sizeGlyphTable(height);
+      const gl = this.gl;
+      this.state.bindTexture(GLYPH_RUN_UNIT, this.glyphRunTable);
+      this.state.activeTexture(GLYPH_RUN_UNIT);
+      gl.texSubImage2D(
+        gl.TEXTURE_2D,
+        0,
+        0,
+        0,
+        RUN_MOST,
+        height,
+        gl.RG_INTEGER,
+        gl.INT,
+        this.glyphEntries,
+      );
+    }
+
+    this.glyphsPrepared = true;
+  }
+
+  /**
+   * The texts from entry `i` on that one multi-draw draws, `most` at most, into the glyph table
+   * from `from`: each one's row and slot, index count and offset. They differ in those alone, so
+   * they run till an entry drawn otherwise; a text past the glyph tables' room is a run of its
+   * own, drawn from the scratch slot it is given as it is drawn, its entry in glyphScratch. The
+   * last entry gathered, and the draws in glyphCount.
+   */
+  private gatherGlyphs(
+    scene: SceneList,
+    i: number,
+    end: number,
+    from: number,
+    most: number,
+  ): number {
+    const places = this.atlas.places;
+    let draws = 0;
+    let last = i;
+    this.glyphScratch = -1;
+    for (let j = i; j < end && draws < most; j++) {
+      if (scene.kind[j] !== DRAW) {
+        continue;
+      }
+
+      const place = places[scene.geometry[j]];
+      if (!place) {
+        continue;
+      }
+
+      const glyphs = place.glyphs;
+      if (!glyphs || (glyphs.slot < 0 && draws > 0)) {
+        break;
+      }
+
+      const at = from + draws;
+      this.growGlyphs(at + 1);
+      this.glyphEntries[at * 2] = scene.row[j];
+      this.glyphEntries[at * 2 + 1] = Math.max(glyphs.slot, 0);
+      this.glyphCounts[at] = place.indices;
+      this.glyphOffsets[at] = place.indexStart * 4;
+      draws++;
+      last = j;
+      if (glyphs.slot < 0) {
+        this.glyphScratch = j;
+        break;
+      }
+    }
+
+    this.glyphCount = draws;
+    return last;
+  }
+
+  /** Room for `needed` draws in the glyph table's arrays, a whole line of it at a time. */
+  private growGlyphs(needed: number): void {
+    if (needed <= this.glyphCounts.length) {
+      return;
+    }
+
+    const size = Math.ceil(Math.max(needed, this.glyphCounts.length * 2) / RUN_MOST) * RUN_MOST;
+    const entries = new Int32Array(size * 2);
+    entries.set(this.glyphEntries);
+    this.glyphEntries = entries;
+    const counts = new Int32Array(size);
+    counts.set(this.glyphCounts);
+    this.glyphCounts = counts;
+    const offsets = new Int32Array(size);
+    offsets.set(this.glyphOffsets);
+    this.glyphOffsets = offsets;
+  }
+
+  private sizeGlyphTable(height: number): void {
+    if (height <= this.glyphRunHeight) {
+      return;
+    }
+
+    const gl = this.gl;
+    if (this.glyphRunTable) {
+      this.state.dropTexture(this.glyphRunTable);
+      gl.deleteTexture(this.glyphRunTable);
+    }
+
+    this.glyphRunHeight = Math.min(this.runTableMost, Math.max(height, this.glyphRunHeight * 2));
+    this.glyphRunTable = gl.createTexture();
+    this.state.bindTexture(GLYPH_RUN_UNIT, this.glyphRunTable);
+    this.state.activeTexture(GLYPH_RUN_UNIT);
+    gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RG32I, RUN_MOST, this.glyphRunHeight);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   }
@@ -608,6 +809,7 @@ export class Draws {
     const state = this.state;
     const places = this.atlas.places;
     let run = this.prepared ? this.commandStarts[command] : 0;
+    this.glyphRun = this.glyphsPrepared ? this.glyphStarts[command] : 0;
 
     // Whether the mesh or the glyph program is in use, till the next entry of neither.
     let other = false;
@@ -624,7 +826,7 @@ export class Draws {
       // A mesh by the mesh program; in a mask, its triangles' coverage as a fill's. Glyphs by the
       // glyph program, in a mask too, which covers their shapes alone.
       if (place.glyphs) {
-        this.drawGlyphs(scene, i, place);
+        i = this.drawGlyphs(scene, i, end, place);
         other = true;
         continue;
       }
@@ -849,15 +1051,17 @@ export class Draws {
   }
 
   /**
-   * Entry `i`, advanced text's glyph quads (GeometryData.glyphs), drawn by the glyph
-   * program from its atlas, which is told the view as it changed, and its
-   * row and its text's slot in the glyph tables as they change; the glyph
-   * program left in use.
+   * Entry `i`, advanced text's glyph quads (GeometryData.glyphs), drawn by the glyph program from
+   * its atlas, which is told the view as it changed; with WEBGL_multi_draw, with the texts after
+   * it up to `end` that gatherGlyphs runs it with, in one multi-draw in their order, else alone,
+   * its row and its text's slot in the glyph tables told as they change. The last entry drawn,
+   * the glyph program left in use.
    */
-  private drawGlyphs(scene: SceneList, i: number, place: Place): void {
+  private drawGlyphs(scene: SceneList, i: number, end: number, place: Place): number {
     const gl = this.gl;
     const state = this.state;
     const glyphs = place.glyphs as NonNullable<Place["glyphs"]>;
+    const tables = this.atlas.tables;
     state.useProgram(this.glyphProgram);
     state.bindVertexArray(this.atlas.glyphArray);
     if (this.glyphStale) {
@@ -866,24 +1070,81 @@ export class Draws {
       this.glyphStale = false;
     }
 
+    state.bindTexture(OUTLINE_UNIT, this.gpu.outlines);
+    state.bindSampler(OUTLINE_UNIT, null);
+    state.bindTexture(TABLE_UNIT, tables.texture);
+    state.bindSampler(TABLE_UNIT, null);
+    if (this.multi) {
+      let last: number;
+      let base = 0;
+      let draws: number;
+      let scratch: number;
+      if (this.glyphsPrepared) {
+        const run = this.glyphRun;
+        last = this.glyphRuns[run];
+        base = this.glyphRuns[run + 1];
+        draws = this.glyphRuns[run + 2];
+        scratch = this.glyphRuns[run + 3];
+        this.glyphRun += GLYPH_STRIDE;
+      } else {
+        last = this.gatherGlyphs(scene, i, end, 0, RUN_MOST);
+        draws = this.glyphCount;
+        scratch = this.glyphScratch;
+      }
+
+      state.bindTexture(GLYPH_RUN_UNIT, this.glyphRunTable);
+      state.bindSampler(GLYPH_RUN_UNIT, null);
+      if (!this.glyphsPrepared) {
+        state.activeTexture(GLYPH_RUN_UNIT);
+        gl.texSubImage2D(
+          gl.TEXTURE_2D,
+          0,
+          0,
+          0,
+          draws,
+          1,
+          gl.RG_INTEGER,
+          gl.INT,
+          this.glyphEntries,
+        );
+      }
+
+      if (scratch >= 0) {
+        const text = this.atlas.places[scene.geometry[scratch]]?.glyphs as typeof glyphs;
+        tables.scratch(text.mode, text.table);
+      }
+
+      if (base !== this.glyphBase) {
+        this.glyphBase = base;
+        gl.uniform1i(this.glyphBaseLocation, base);
+      }
+
+      this.multi.multiDrawElementsWEBGL(
+        gl.TRIANGLES,
+        this.glyphCounts,
+        base,
+        gl.UNSIGNED_INT,
+        this.glyphOffsets,
+        base,
+        draws,
+      );
+      return last;
+    }
+
     const row = scene.row[i];
     if (row !== this.glyphRow) {
       gl.uniform1i(this.glyphRowLocation, row);
       this.glyphRow = row;
     }
 
-    const tables = this.atlas.tables;
     const slot = glyphs.slot >= 0 ? glyphs.slot : tables.scratch(glyphs.mode, glyphs.table);
     if (slot !== this.glyphTable) {
       gl.uniform1i(this.glyphTableLocation, slot);
       this.glyphTable = slot;
     }
 
-    state.bindTexture(OUTLINE_UNIT, this.gpu.outlines);
-    state.bindSampler(OUTLINE_UNIT, null);
-    state.bindTexture(TABLE_UNIT, tables.texture);
-    state.bindSampler(TABLE_UNIT, null);
     gl.drawElements(gl.TRIANGLES, place.indices, gl.UNSIGNED_INT, place.indexStart * 4);
+    return i;
   }
 
   /**
@@ -1006,6 +1267,12 @@ export class Draws {
       this.state.dropTexture(this.runTable);
       this.gl.deleteTexture(this.runTable);
       this.runTable = null;
+    }
+
+    if (this.glyphRunTable) {
+      this.state.dropTexture(this.glyphRunTable);
+      this.gl.deleteTexture(this.glyphRunTable);
+      this.glyphRunTable = null;
     }
 
     const gl = this.gl;
