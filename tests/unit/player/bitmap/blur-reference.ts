@@ -600,7 +600,7 @@ function glow(result: Uint32Array, [a, r, g, b]: Int32Array[], moved: Int32Array
       or = (gr * (255 - sa)) / 255;
       og = (gg * (255 - sa)) / 255;
       ob = (gb * (255 - sa)) / 255;
-    } else if (f.inner && !f.knockout) {
+    } else if (f.inner && !f.knockout && !hide) {
       // Over the source's straight colour by the glow's own alpha, the glow's in 255ths and the
       // source's in 256ths, truncated; the source keeps its alpha, which then multiplies the
       // colour back in (apply-filter-inner, fitted to adl's pixels).
