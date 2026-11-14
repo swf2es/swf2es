@@ -229,10 +229,13 @@ a clip due is at or under it, as one whose script is yet to run must be
 found by a round inside its own. Its queue is the whole walk's but for
 the clips not due as it walks, which would run nothing there unless a
 script made them due before their turn: a goto does, but from version 10
-its cycle runs their script at once. Where that does not hold, rounds walk
-everything: once a clip of a SWF before version 10 is alive, after an
-overflow, and without a stage; a button being made has all under it
-walked, as its round may be the only one to reach it. Once its orphans
+its cycle runs their script at once. A clip of a SWF before version 10,
+whose gotos run no cycle, is listed by every round, due or not, as the
+whole walk lists it (`listedAlways`): it is marked as it is made alive,
+and its mark stays, so a game that loads older asset SWFs walks those
+clips and what leads to them, not everything. After an overflow and
+without a stage, rounds walk everything; a button being made has all
+under it walked, as its round may be the only one to reach it. Once its orphans
 held no script due, a menu of buttons a script makes, each running the
 frame scripts due, no longer walks them all for each: in
 `walk-bench.ts --orphans 300 --menu 50` a menu went from 56 to 1.5 ms,
