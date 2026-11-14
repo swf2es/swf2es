@@ -28,7 +28,7 @@ import type { MovieClip } from "./movieclip.js";
 import { walkList } from "./walk.js";
 
 /** The orphans, as Lifecycle walks them. */
-export interface Orphans {
+interface Orphans {
   eachOrphanRoot(f: (display: DisplayObject) => void, due?: boolean, advances?: boolean): void;
 }
 
@@ -136,6 +136,7 @@ export class AdvanceWalk {
     const total = this.collectAll(root, orphans, all);
     const acts: boolean[] = [];
     let j = 0;
+
     for (let i = 0; i < total; i++) {
       acts[i] = (all[i] as MovieClip).advances;
       if (acts[i] && clips[j++] !== all[i]) {
@@ -515,6 +516,7 @@ class AdvancePhase implements AdvanceWatch {
     const skipsThen = new Map<DisplayObject, number>();
     // Whether each orphan the log tells of was one at the walk: as its first entry has it.
     const orphanThen = new Map<DisplayObject, boolean>();
+
     for (let k = this.kinds.length - 1; k >= 0; k--) {
       const subject = this.subjects[k];
       switch (this.kinds[k]) {
@@ -622,6 +624,7 @@ class AdvancePhase implements AdvanceWatch {
         roots.push(o);
       }
     });
+
     for (const [o, was] of orphanThen) {
       if (was) {
         roots.push(o);

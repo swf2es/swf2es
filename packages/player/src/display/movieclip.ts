@@ -264,7 +264,7 @@ export class MovieClip extends Container {
         markScriptsDue(this);
       }
 
-      // An AVM1 clip's tail turns on its frame (`advances`).
+      // A playing clip of frames still to go to advances, as does an AVM1 clip's tail (`advances`).
       this.mayAdvance();
     }
   }
