@@ -24,11 +24,12 @@ export function fixtureSource(name: string): string {
     }
 
     // Without what SWFs before 26 cannot see (backBufferWidth, maxBackBufferWidth, profile),
-    // which swf2es still shows them.
+    // which swf2es still shows them. A probe's call ends at its function's `});`, on its
+    // line or, as asformat writes it, lines below.
     return source
       .replace(/return read\("backBufferWidth"\)[^;]*;/, 'return "-";')
       .replace('read("profile")', '"-"')
-      .replace(/^ *probe\("(disposed-)?most-.*\n/gm, "");
+      .replace(/^[ \t]*probe\("(disposed-)?most-[\s\S]*?\}\);\n/gm, "");
   }
 
   // AtfTextures' textures, inlined as base64 for ASC, which embeds no files.
