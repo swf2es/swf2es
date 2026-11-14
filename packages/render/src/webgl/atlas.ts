@@ -1,5 +1,6 @@
 import type { GlState } from "@swf2es/context3d/device";
 import { type Geometries, type GeometryData, GLYPH_FLOATS } from "../geometry.js";
+import { GlyphTables } from "./glyph-tables.js";
 import {
   COLOR_AT,
   DEPTH_AT,
@@ -67,13 +68,16 @@ function interleave(
   }
 }
 
-/** Where a geometry lies in the atlas, or the glyph atlas with its text's mode and table. */
+/**
+ * Where a geometry lies in the atlas, or the glyph atlas with its text's
+ * mode and table, and their slot in the glyph tables (-1 past their room).
+ */
 export interface Place {
   vertexStart: number;
   vertices: number;
   indexStart: number;
   indices: number;
-  glyphs: { mode: Float32Array; table: Float32Array } | null;
+  glyphs: { mode: Float32Array; table: Float32Array; slot: number } | null;
   /** Its geometry's flat (GeometryData.flat). */
   flat: boolean;
   /** Small, unchanged geometries may be copied into a run's streaming buffer. */
@@ -122,10 +126,13 @@ export class GeometryAtlas {
     live: 0,
     holes: 0,
   };
+  /** The texts' modes and tables, which the glyph program reads. */
+  readonly tables: GlyphTables;
 
   constructor(gl: WebGL2RenderingContext, state: GlState) {
     this.gl = gl;
     this.state = state;
+    this.tables = new GlyphTables(gl, state);
   }
 
   /** The buffers and vertex arrays made, both atlases empty, as the context comes or comes back. */
@@ -177,6 +184,7 @@ export class GeometryAtlas {
     this.stagedVertices = 0;
     this.stagedIndexCount = 0;
     this.places = [];
+    this.tables.setUp();
   }
 
   /**
@@ -254,7 +262,8 @@ export class GeometryAtlas {
     const texts =
       g.top + glyphVertices > g.capacity ||
       g.indexTop + glyphIndices > g.indexCapacity ||
-      (g.holes > GLYPHS_LEAST && g.holes > g.live);
+      (g.holes > GLYPHS_LEAST && g.holes > g.live) ||
+      this.tables.full;
     if (shapes) {
       this.repack(geometries);
     }
@@ -272,6 +281,7 @@ export class GeometryAtlas {
 
     geometries.added.length = 0;
     this.flush();
+    this.tables.upload();
   }
 
   /** Every live shape's geometry copied into new buffers, with room for twice what is live. */
@@ -336,12 +346,16 @@ export class GeometryAtlas {
     g.indexTop = 0;
     g.live = 0;
     g.holes = 0;
+    // Only the live texts' tables kept.
+    this.tables.reset();
     for (const id of ids) {
       const data = geometries.get(id) as GeometryData;
       if (data.glyphs) {
         this.copyGlyphs(id, data);
       }
     }
+
+    this.tables.upload();
   }
 
   /** `data` copied in at the top of the atlas, its indices made absolute. */
@@ -483,7 +497,11 @@ export class GeometryAtlas {
       vertices: count,
       indexStart: g.indexTop,
       indices: indices.length,
-      glyphs: { mode: glyphs.mode, table: glyphs.table },
+      glyphs: {
+        mode: glyphs.mode,
+        table: glyphs.table,
+        slot: this.tables.slot(glyphs.mode, glyphs.table),
+      },
       flat: false,
       batch: null,
     };
@@ -501,5 +519,6 @@ export class GeometryAtlas {
     gl.deleteVertexArray(this.glyphArray);
     gl.deleteBuffer(this.glyphBuffer);
     gl.deleteBuffer(this.glyphIndexBuffer);
+    this.tables.destroy();
   }
 }

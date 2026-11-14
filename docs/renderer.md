@@ -181,8 +181,16 @@ whose entries go once unused for their idle frames:
   On a busy recorded scene trimming each pool against the other's bytes
   let go of a frame's small layers while full-screen multisampled buffers
   stayed, making 7.3 layers a frame again; now 1.6.
-- **Glyphs:** advanced text's glyph quads, in an atlas of their own, and
-  Saffron's outlines in a texture.
+- **Glyphs:** advanced text's glyph quads, in an atlas of their own,
+  Saffron's outlines in a texture, and each text's mode and CSM cutoff
+  tables in a slot of a float texture (`glyph-tables.ts`), texts alike
+  sharing one, uploaded as a text is placed; a draw names its slot by one
+  int. No shader of the renderer indexes a uniform array by anything but a
+  constant: a table indexed by `gl_DrawID` hung Intel's GPUs (i915
+  engine resets) where NVIDIA's ran it, and the glyph program's, indexed
+  by each glyph's table start, was the likely cause of like hangs with
+  much advanced text shown. Stage3D's AGAL is the exception, its relative
+  addressing reading `vc[]` by a vertex's value as its programs ask.
 
 After a lost context everything is made again from what the player
 keeps, as it is for Stage3D.
