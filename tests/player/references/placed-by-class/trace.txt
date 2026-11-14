@@ -1,0 +1,8 @@
+loaded
+PlacedButton btnA 1 true true
+PlacedButton sub 1 true true
+PlacedLocal local 1 true
+PlacedDialog 3 true true true false
+ child 0 btnA PlacedButton 20 20
+ child 1 sub PlacedButton 80 20
+ child 2 local PlacedLocal 120 20
