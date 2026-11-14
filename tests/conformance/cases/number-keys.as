@@ -5,11 +5,13 @@ import flash.utils.Dictionary;
 import flash.utils.Proxy;
 import flash.utils.flash_proxy;
 
-function read(o:*, i:uint):* {
-  return o[i];
+function read(o:*, i:uint):*
+{
+	return o[i];
 }
-function readInt(o:*, i:int):* {
-  return o[i];
+function readInt(o:*, i:int):*
+{
+	return o[i];
 }
 
 var handles:Dictionary = new Dictionary();
@@ -46,35 +48,51 @@ var key:Object = {};
 handles[key] = "object key";
 trace("object key beside", handles[key], read(handles, 0));
 
-dynamic class Box {
-  public var value:int = 3;
+dynamic class Box
+{
+	public var value:int = 3;
 }
 var box:Box = new Box();
 box[2] = "two";
 trace("dynamic class", read(box, 2), read(box, 3));
 
-class Sealed {}
-try {
-  trace(read(new Sealed(), 1));
-} catch (e:Error) {
-  trace("sealed", e.errorID);
+class Sealed
+{
+}
+try
+{
+	trace(read(new Sealed(), 1));
+}
+catch (e:Error)
+{
+	trace("sealed", e.errorID);
 }
 
-class Names extends Proxy {
-  override flash_proxy function getProperty(name:*):* { return "proxy " + name; }
+class Names extends Proxy
+{
+	override flash_proxy function getProperty(name:*):*
+	{
+		return "proxy " + name;
+	}
 }
 trace(read(new Names(), 6));
 
 var array:Array = [1, 2];
 array[5] = 6;
 trace("array", read(array, 1), read(array, 3), read(array, 5));
-var fn:Function = function():void {};
+var fn:Function = function():void
+{
+};
 fn[4] = "on a function";
 trace("function", read(fn, 4));
-for each (var primitive:* in ["abc", 5]) {
-  try {
-    trace("primitive", read(primitive, 1));
-  } catch (e:Error) {
-    trace("primitive", e.errorID);
-  }
+for each (var primitive:* in ["abc", 5])
+{
+	try
+	{
+		trace("primitive", read(primitive, 1));
+	}
+	catch (e:Error)
+	{
+		trace("primitive", e.errorID);
+	}
 }

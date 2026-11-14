@@ -1,3 +1,6 @@
-package {
-  public class CurrentDomainOnly {}
+package
+{
+	public class CurrentDomainOnly
+	{
+	}
 }

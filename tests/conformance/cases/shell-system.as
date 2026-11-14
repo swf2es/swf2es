@@ -10,18 +10,24 @@ System.forceFullCollection();
 System.queueCollection();
 System.pauseForGCIfCollectionImminent(0.5);
 // A ByteArray past 32-bit avmshell's limit fails before allocating.
-try {
-  new ByteArray().length = 0xFFFFF000;
-  trace("grew");
-} catch (e:Error) {
-  trace(e, e.errorID);
+try
+{
+	new ByteArray().length = 0xFFFFF000;
+	trace("grew");
+}
+catch (e:Error)
+{
+	trace(e, e.errorID);
 }
 // The memory System reports, which differs from run to run in avmshell.
 trace(System.totalMemory > 0, System.freeMemory >= 0, System.freeMemory <= System.totalMemory);
 trace(System.privateMemory > 0);
 // exec runs nothing without a command.
-try {
-  System.exec(null);
-} catch (e:Error) {
-  trace(e, e.errorID);
+try
+{
+	System.exec(null);
+}
+catch (e:Error)
+{
+	trace(e, e.errorID);
 }

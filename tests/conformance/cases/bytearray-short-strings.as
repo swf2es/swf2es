@@ -3,21 +3,25 @@
 // past ASCII, a BOM, none at all, and the position after each.
 import flash.utils.ByteArray;
 
-function show(label:String, s:String, b:ByteArray):void {
-  var codes:Array = [];
-  for (var i:int = 0; i < s.length; i++) {
-    codes.push(s.charCodeAt(i));
-  }
-  trace(label, s.length, codes.join(","), "at", b.position);
+function show(label:String, s:String, b:ByteArray):void
+{
+	var codes:Array = [];
+	for (var i:int = 0; i < s.length; i++)
+	{
+		codes.push(s.charCodeAt(i));
+	}
+	trace(label, s.length, codes.join(","), "at", b.position);
 }
 
-function bytes(...values):ByteArray {
-  var b:ByteArray = new ByteArray();
-  for each (var v:int in values) {
-    b.writeByte(v);
-  }
-  b.position = 0;
-  return b;
+function bytes(...values):ByteArray
+{
+	var b:ByteArray = new ByteArray();
+	for each (var v:int in values)
+	{
+		b.writeByte(v);
+	}
+	b.position = 0;
+	return b;
 }
 
 var b:ByteArray = bytes(97);
@@ -54,8 +58,11 @@ show("readUTF", b.readUTF(), b);
 b = bytes(0, 3, 104, 0, 105);
 show("readUTF nul", b.readUTF(), b);
 b = bytes(97, 98);
-try {
-  b.readUTFBytes(3);
-} catch (e:Error) {
-  trace("past the end", e.errorID, b.position);
+try
+{
+	b.readUTFBytes(3);
+}
+catch (e:Error)
+{
+	trace("past the end", e.errorID, b.position);
 }

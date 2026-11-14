@@ -5,61 +5,73 @@
 // sorted. A walk that starts after a change goes through exactly what is
 // there then.
 
-dynamic class Sub extends Array {
+dynamic class Sub extends Array
+{
 }
 
-function spread(n:int, gap:int):Array {
-  var a:Array = [];
-  for (var i:int = 0; i < n; i++) {
-    a[i * gap] = i;
-  }
+function spread(n:int, gap:int):Array
+{
+	var a:Array = [];
+	for (var i:int = 0; i < n; i++)
+	{
+		a[i * gap] = i;
+	}
 
-  return a;
+	return a;
 }
 
-function names(x:*):String {
-  var seen:Array = [];
-  for (var k:* in x) {
-    seen.push(int(k));
-  }
+function names(x:*):String
+{
+	var seen:Array = [];
+	for (var k:* in x)
+	{
+		seen.push(int(k));
+	}
 
-  seen.sort(Array.NUMERIC);
-  return seen.join(",");
+	seen.sort(Array.NUMERIC);
+	return seen.join(",");
 }
 
-function values(x:*):String {
-  var seen:Array = [];
-  for each (var v:* in x) {
-    seen.push(String(v));
-  }
+function values(x:*):String
+{
+	var seen:Array = [];
+	for each (var v:* in x)
+	{
+		seen.push(String(v));
+	}
 
-  seen.sort();
-  return seen.join(",");
+	seen.sort();
+	return seen.join(",");
 }
 
 // Those of `seen` that were there from the start, each once however often
 // it was seen: avmshell's table, grown by what a walk adds, is laid out
 // anew, and the walk goes through some of it again.
-function originals(seen:Array, gap:int):String {
-  var kept:Array = [];
-  for (var i:int = 0; i < seen.length; i++) {
-    if (int(seen[i]) % gap == 0 && kept.indexOf(int(seen[i])) < 0) {
-      kept.push(int(seen[i]));
-    }
-  }
+function originals(seen:Array, gap:int):String
+{
+	var kept:Array = [];
+	for (var i:int = 0; i < seen.length; i++)
+	{
+		if (int(seen[i]) % gap == 0 && kept.indexOf(int(seen[i])) < 0)
+		{
+			kept.push(int(seen[i]));
+		}
+	}
 
-  kept.sort(Array.NUMERIC);
-  return kept.join(",");
+	kept.sort(Array.NUMERIC);
+	return kept.join(",");
 }
 
 // Pushed onto at every step: those there from the start are each gone through.
 var pushed:Array = spread(8, 1000);
 var seen:Array = [];
-for (var k:* in pushed) {
-  seen.push(k);
-  if (pushed.length < 7100) {
-    pushed.push("pushed");
-  }
+for (var k:* in pushed)
+{
+	seen.push(k);
+	if (pushed.length < 7100)
+	{
+		pushed.push("pushed");
+	}
 }
 trace("push", originals(seen, 1000), pushed.length);
 trace("push after", names(pushed));
@@ -67,17 +79,19 @@ trace("push after", names(pushed));
 // The element a step gave deleted at that step: every one is still gone through.
 var behind:Array = spread(8, 1000);
 seen = [];
-for (k in behind) {
-  seen.push(k);
-  delete behind[k];
+for (k in behind)
+{
+	seen.push(k);
+	delete behind[k];
 }
 trace("delete behind", originals(seen, 1000), behind.length, names(behind) == "");
 
 seen = [];
 behind = spread(8, 1000);
-for each (var v:* in behind) {
-  seen.push(v);
-  delete behind[v * 1000];
+for each (var v:* in behind)
+{
+	seen.push(v);
+	delete behind[v * 1000];
 }
 seen.sort(Array.NUMERIC);
 trace("delete behind each", seen.join(","), values(behind) == "");
@@ -85,34 +99,41 @@ trace("delete behind each", seen.join(","), values(behind) == "");
 // All but the one the first step gave deleted: no step follows the first.
 var ahead:Array = spread(8, 1000);
 var steps:int = 0;
-for (k in ahead) {
-  steps++;
-  if (steps == 1) {
-    for (var d:int = 0; d < 8000; d += 1000) {
-      if (d != int(k)) {
-        delete ahead[d];
-      }
-    }
-  }
+for (k in ahead)
+{
+	steps++;
+	if (steps == 1)
+	{
+		for (var d:int = 0; d < 8000; d += 1000)
+		{
+			if (d != int(k))
+			{
+				delete ahead[d];
+			}
+		}
+	}
 }
 trace("delete ahead", steps, names(ahead).split(",").length);
 
 // The length cut to nothing at the first step, and at a later one.
 var cut:Array = spread(8, 1000);
 steps = 0;
-for (k in cut) {
-  steps++;
-  cut.length = 0;
+for (k in cut)
+{
+	steps++;
+	cut.length = 0;
 }
 trace("length 0", steps, cut.length, names(cut) == "");
 
 cut = spread(8, 1000);
 steps = 0;
-for each (v in cut) {
-  steps++;
-  if (steps == 3) {
-    cut.length = 0;
-  }
+for each (v in cut)
+{
+	steps++;
+	if (steps == 3)
+	{
+		cut.length = 0;
+	}
 }
 trace("length 0 at third", steps, cut.length);
 
@@ -121,22 +142,26 @@ trace("length 0 at third", steps, cut.length);
 // in the upper.
 var halved:Array = spread(8, 1000);
 seen = [];
-for (k in halved) {
-  if (seen.length == 0) {
-    halved.length = 3500;
-  }
-  if (int(k) < 3500) {
-    seen.push(k);
-  }
+for (k in halved)
+{
+	if (seen.length == 0)
+	{
+		halved.length = 3500;
+	}
+	if (int(k) < 3500)
+	{
+		seen.push(k);
+	}
 }
 trace("length cut", originals(seen, 1000), halved.length, names(halved));
 
 // The length grown without an element added: nothing more to go through.
 var grown:Array = spread(8, 1000);
 seen = [];
-for (k in grown) {
-  seen.push(k);
-  grown.length += 100000;
+for (k in grown)
+{
+	seen.push(k);
+	grown.length += 100000;
 }
 trace("length grown", originals(seen, 1000), grown.length);
 
@@ -145,11 +170,13 @@ trace("length grown", originals(seen, 1000), grown.length);
 // is not traced.
 var reversed:Array = spread(6, 1000);
 seen = [];
-for (k in reversed) {
-  if (seen.length == 0) {
-    reversed.reverse();
-  }
-  seen.push(k);
+for (k in reversed)
+{
+	if (seen.length == 0)
+	{
+		reversed.reverse();
+	}
+	seen.push(k);
 }
 trace("reversed", originals(seen, 1000), reversed.length);
 
@@ -159,35 +186,43 @@ var nest:Array = spread(7, 3000);
 var outer:int = 0;
 var inner:int = 0;
 var innermost:int = 0;
-for (var k1:* in nest) {
-  outer++;
-  var third:int = 0;
-  for (var k2:* in nest) {
-    inner++;
-    if (++third == 3) {
-      break;
-    }
-    for each (var v3:* in nest) {
-      innermost++;
-    }
-  }
+for (var k1:* in nest)
+{
+	outer++;
+	var third:int = 0;
+	for (var k2:* in nest)
+	{
+		inner++;
+		if (++third == 3)
+		{
+			break;
+		}
+		for each (var v3:* in nest)
+		{
+			innermost++;
+		}
+	}
 }
 trace("nested", outer, inner, innermost);
 
 // A walk left off, then others from the start: each goes through everything.
 var left:Array = spread(9, 2500);
 steps = 0;
-for (k in left) {
-  if (++steps == 4) {
-    break;
-  }
+for (k in left)
+{
+	if (++steps == 4)
+	{
+		break;
+	}
 }
 trace("left off", steps, names(left), values(left));
 steps = 0;
-for each (v in left) {
-  if (++steps == 2) {
-    break;
-  }
+for each (v in left)
+{
+	if (++steps == 2)
+	{
+		break;
+	}
 }
 trace("left off each", steps, values(left), names(left));
 
@@ -214,25 +249,29 @@ trace("named", values(between));
 // goes through it.
 var again:Array = spread(40, 500);
 var counts:Array = [];
-for (var round:int = 0; round < 6; round++) {
-  var n:int = 0;
-  for (k in again) {
-    n++;
-  }
-  counts.push(n);
-  again[round * 500 + 7] = round;
-  if (round == 3) {
-    delete again[1500];
-    delete again[2000];
-  }
+for (var round:int = 0; round < 6; round++)
+{
+	var n:int = 0;
+	for (k in again)
+	{
+		n++;
+	}
+	counts.push(n);
+	again[round * 500 + 7] = round;
+	if (round == 3)
+	{
+		delete again[1500];
+		delete again[2000];
+	}
 }
 trace("again", counts.join(","), names(again).split(",").length);
 
 // Thirty elements side by side, then others far off: a walk by index, then
 // by the Array's indices.
 var mixed:Array = [];
-for (var m:int = 0; m < 30; m++) {
-  mixed[m] = m;
+for (var m:int = 0; m < 30; m++)
+{
+	mixed[m] = m;
 }
 mixed[5000] = "a";
 mixed[70000] = "b";
@@ -248,8 +287,9 @@ holding[10000] = null;
 trace("undefined", names(holding), values(holding));
 
 var sub:Sub = new Sub();
-for (var s:int = 0; s < 5; s++) {
-  sub[s * 3000] = "s" + s;
+for (var s:int = 0; s < 5; s++)
+{
+	sub[s * 3000] = "s" + s;
 }
 sub.note = "n";
 trace("subclass", names(sub), values(sub), sub.length);

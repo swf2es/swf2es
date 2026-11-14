@@ -1,67 +1,79 @@
-package {
-  import flash.display.BitmapData;
-  import flash.display.Shape;
-  import flash.display.Sprite;
-  import flash.events.Event;
+package
+{
+	import flash.display.BitmapData;
+	import flash.display.Shape;
+	import flash.display.Sprite;
+	import flash.events.Event;
 
-  public class Main extends Sprite {
-    private var shape:Shape = new Shape();
-    private var texture:BitmapData = new BitmapData(64, 64, false, 0);
-    private var vertices:Vector.<Number> = new Vector.<Number>();
-    private var indices:Vector.<int> = new Vector.<int>();
-    private var uvt:Vector.<Number> = new Vector.<Number>();
-    private var side:int;
-    private var frame:int = 0;
+	public class Main extends Sprite
+	{
+		private var shape:Shape = new Shape();
+		private var texture:BitmapData = new BitmapData(64, 64, false, 0);
+		private var vertices:Vector.<Number> = new Vector.<Number>();
+		private var indices:Vector.<int> = new Vector.<int>();
+		private var uvt:Vector.<Number> = new Vector.<Number>();
+		private var side:int;
+		private var frame:int = 0;
 
-    public function Main() {
-      texture.perlinNoise(16, 16, 2, 7, true, true);
-      // Two triangles a square of a grid of side by side squares.
-      side = Math.ceil(Math.sqrt(COUNT / 2));
-      for (var y:int = 0; y <= side; y++) {
-        for (var x:int = 0; x <= side; x++) {
-          vertices.push(0, 0);
-          uvt.push(x / 8, y / 8, 1);
-        }
-      }
+		public function Main()
+		{
+			texture.perlinNoise(16, 16, 2, 7, true, true);
+			// Two triangles a square of a grid of side by side squares.
+			side = Math.ceil(Math.sqrt(COUNT / 2));
+			for (var y:int = 0; y <= side; y++)
+			{
+				for (var x:int = 0; x <= side; x++)
+				{
+					vertices.push(0, 0);
+					uvt.push(x / 8, y / 8, 1);
+				}
+			}
 
-      for (var i:int = 0; i < COUNT; i++) {
-        var square:int = i >> 1;
-        var at:int = (square / side) * (side + 1) + square % side;
-        // Every other square wound the other way, so that culling drops half the triangles.
-        var a:int = i & 1 ? at + 1 : at;
-        var b:int = i & 1 ? at + side + 2 : at + 1;
-        var c:int = at + side + 1;
-        if (square & 1) {
-          indices.push(a, c, b);
-        } else {
-          indices.push(a, b, c);
-        }
-      }
+			for (var i:int = 0; i < COUNT; i++)
+			{
+				var square:int = i >> 1;
+				var at:int = (square / side) * (side + 1) + square % side;
+				// Every other square wound the other way, so that culling drops half the triangles.
+				var a:int = i & 1 ? at + 1 : at;
+				var b:int = i & 1 ? at + side + 2 : at + 1;
+				var c:int = at + side + 1;
+				if (square & 1)
+				{
+					indices.push(a, c, b);
+				}
+				else
+				{
+					indices.push(a, b, c);
+				}
+			}
 
-      addChild(shape);
-      addEventListener(Event.ENTER_FRAME, step);
-    }
+			addChild(shape);
+			addEventListener(Event.ENTER_FRAME, step);
+		}
 
-    private function step(e:Event):void {
-      frame++;
-      var turn:Number = frame / 48;
-      var c:Number = Math.cos(turn);
-      var s:Number = Math.sin(turn);
-      var cell:Number = 560 / side;
-      var k:int = 0;
-      for (var y:int = 0; y <= side; y++) {
-        for (var x:int = 0; x <= side; x++) {
-          var px:Number = (x - side / 2) * cell;
-          var py:Number = (y - side / 2) * cell;
-          vertices[k++] = 400 + px * c - py * s;
-          vertices[k++] = 300 + px * s + py * c;
-        }
-      }
+		private function step(e:Event):void
+		{
+			frame++;
+			var turn:Number = frame / 48;
+			var c:Number = Math.cos(turn);
+			var s:Number = Math.sin(turn);
+			var cell:Number = 560 / side;
+			var k:int = 0;
+			for (var y:int = 0; y <= side; y++)
+			{
+				for (var x:int = 0; x <= side; x++)
+				{
+					var px:Number = (x - side / 2) * cell;
+					var py:Number = (y - side / 2) * cell;
+					vertices[k++] = 400 + px * c - py * s;
+					vertices[k++] = 300 + px * s + py * c;
+				}
+			}
 
-      shape.graphics.clear();
-      shape.graphics.beginBitmapFill(texture, null, true, true);
-      shape.graphics.drawTriangles(vertices, indices, uvt, CULLING);
-      shape.graphics.endFill();
-    }
-  }
+			shape.graphics.clear();
+			shape.graphics.beginBitmapFill(texture, null, true, true);
+			shape.graphics.drawTriangles(vertices, indices, uvt, CULLING);
+			shape.graphics.endFill();
+		}
+	}
 }
