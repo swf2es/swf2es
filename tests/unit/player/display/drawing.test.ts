@@ -318,3 +318,75 @@ test("drawTriangles' triangles are a layer of fills of their own, the line aroun
   assert.deepEqual(s.layers[0].strokes, []);
   assert.deepEqual(s.bounds(false), { xMin: 0, yMin: 0, xMax: 10, yMax: 10 });
 });
+
+test("a gradient set on a line strokes on from the pen with it; a bitmap only while the line has drawn nothing, as in adl", () => {
+  const line = {
+    width: 80,
+    color: 0xff00a000,
+    startCap: 0,
+    endCap: 0,
+    join: 0,
+    miterLimit: 3,
+    noHScale: false,
+    noVScale: false,
+    pixelHinting: false,
+    noClose: false,
+    fill: null,
+  };
+  const gradient = {
+    type: "gradient" as const,
+    radial: false,
+    focal: 0,
+    stops: [
+      { ratio: 0, color: 0xffff0000 },
+      { ratio: 255, color: 0xff0000ff },
+    ],
+    spread: 0,
+    linearRgb: false,
+    matrix: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+  };
+  const bitmap = {
+    type: "image" as const,
+    image: new BitmapStore(2, 2, true, 0xff000000),
+    matrix: { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 },
+    repeat: true,
+    smooth: false,
+  };
+
+  // No line: nothing.
+  const none = new Drawing();
+  none.lineGradient(gradient);
+  none.lineBitmap(bitmap);
+  assert.equal(none.layers.length, 0);
+
+  const d = new Drawing();
+  d.lineStyle(line);
+  d.moveTo(0, 0);
+  d.lineTo(10, 0);
+  d.lineGradient(gradient);
+  d.lineTo(20, 10);
+  // Set mid-path, a bitmap leaves the line as it is.
+  d.lineBitmap(bitmap);
+  d.lineTo(30, 0);
+  const strokes = d.layers[0].strokes;
+  assert.equal(strokes.length, 2);
+  assert.equal(strokes[0].paint, undefined);
+  assert.equal(strokes[1].paint, gradient);
+  assert.deepEqual(strokes[1].paths, [[MOVE, 10, 0, LINE, 20, 10, LINE, 30, 0]]);
+
+  // Before anything is drawn, it fills the line, and goes on with it into a fill's layer.
+  const b = new Drawing();
+  b.lineStyle(line);
+  b.lineBitmap(bitmap);
+  b.moveTo(0, 0);
+  b.lineTo(10, 0);
+  b.beginFill(red);
+  b.lineTo(10, 10);
+  assert.equal(b.layers[0].strokes[0].paint, bitmap);
+  assert.equal(b.layers[1].strokes[0].paint, bitmap);
+
+  // Copied with its paint.
+  const copy = new Drawing();
+  copy.copyFrom(b);
+  assert.equal(copy.layers[1].strokes[0].paint, bitmap);
+});

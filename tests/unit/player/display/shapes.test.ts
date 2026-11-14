@@ -189,3 +189,54 @@ test("an edge with one fill on both sides bounds none, and is still stroked", ()
   ]);
   assert.deepEqual(layer.strokes[0].paths, [[1, 0, 5, 2, 10, 5]]);
 });
+
+test("a DefineShape4 line's gradient or bitmap fill paints it, mapped as a fill's; a solid one is its colour", () => {
+  const character = { type: "bitmap", id: 1 } as BitmapCharacter;
+  const layerOf = (fill: number | w.BitmapFill | w.GradientFillSpec) => {
+    const swf = readSwf(
+      w.swf({
+        width: 10,
+        height: 10,
+        frameCount: 1,
+        tags: [
+          w.shape({
+            id: 2,
+            version: 4,
+            bounds: [0, 200, 0, 200],
+            fills: [],
+            lines: [{ width: 40, color: 0, fill }],
+            paths: [{ fill1: 0, line: 1, commands: [{ move: [0, 0] }, { line: [200, 0] }] }],
+          }),
+          w.end(),
+        ],
+      }),
+    );
+    const t = swf.tags[0];
+    const [layer] = shapeLayers(readShape(swf.bytes, t.code, t.offset, t.length), (id) =>
+      id === 1 ? character : null,
+    );
+    return layer.strokes[0];
+  };
+
+  const gradient = layerOf({
+    type: 0x10,
+    matrix: { a: 0.5, d: 0.5, tx: 100, ty: 40 },
+    stops: [
+      [0, 0x80ff0000],
+      [255, 0xff0000ff],
+    ],
+  });
+  assert.equal(gradient.paint?.type, "gradient");
+  assert.deepEqual(gradient.paint?.matrix, { a: 0.5, b: 0, c: 0, d: 0.5, tx: 5, ty: 2 });
+  // The colour stays for what reads one alone: the first stop's.
+  assert.equal(gradient.line.color, 0x80ff0000);
+
+  const bitmap = layerOf({ bitmap: 1, type: 0x42, matrix: { a: 20, d: 20 } });
+  assert.equal(bitmap.paint?.type, "image");
+  assert.deepEqual(bitmap.paint?.matrix, { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 });
+
+  assert.equal(layerOf(0xff336699).paint, undefined);
+  assert.equal(layerOf(0xff336699).line.color, 0xff336699);
+  // One of a bitmap the SWF lacks is its colour.
+  assert.equal(layerOf({ bitmap: 7, type: 0x42 }).paint, undefined);
+});

@@ -10,7 +10,7 @@ import { CONTENT, Container, ShapeObject } from "../../../display/display.js";
 import { Drawing } from "../../../display/drawing.js";
 import { concat } from "../../../display/geometry.js";
 import { type GraphicsDatum, graphicsData } from "../../../display/graphicsdata.js";
-import type { Paint } from "../../../display/shapes.js";
+import type { GradientFill, ImageFill, Paint } from "../../../display/shapes.js";
 import type { Scripting } from "../../../scripting.js";
 import { CHECK, COPY, kernelOfShader, shaderUse } from "./shaders.js";
 
@@ -86,6 +86,52 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       tx: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[4])),
       ty: rt.toNumber(rt.getProperty(m, MATRIX_NAMES[5])),
     };
+  };
+
+  /**
+   * A gradient as beginGradientFill and lineGradientStyle take one, of a
+   * type already checked; null for arrays of different lengths, or a ratio
+   * outside 0 to 255, which adl draws nothing of. Past 16 stops are left
+   * out; an unknown spread or interpolation is pad or RGB; null alphas and
+   * ratios are opaque and even.
+   */
+  const gradientOf = (
+    kind: string,
+    colors: Value,
+    alphas: Value,
+    ratios: Value,
+    matrix: Value,
+    spreadMethod: Value,
+    interpolationMethod: Value,
+    focalPointRatio: Value,
+  ): GradientFill | null => {
+    // Null alphas are opaque, and null ratios spread evenly, floor(255 k / (n - 1)), as adl draws them.
+    const array = (v: Value) => ((v as AsObject).$a as Value[] | undefined) ?? [];
+    const c = array(colors);
+    const a = alphas === null || alphas === undefined ? c.map(() => 1) : array(alphas);
+    const r =
+      ratios === null || ratios === undefined
+        ? c.map((_, k) => (c.length > 1 ? Math.floor((255 * k) / (c.length - 1)) : 0))
+        : array(ratios).map((v) => Math.trunc(s.rt.toNumber(v)));
+    if (a.length !== c.length || r.length !== c.length || r.some((v) => !(v >= 0 && v <= 255))) {
+      return null;
+    }
+
+    const spread = s.rt.toString(spreadMethod);
+    const gradient: GradientFill = {
+      type: "gradient",
+      radial: kind === "radial",
+      focal: kind === "radial" ? num(focalPointRatio) : 0,
+      stops: c.slice(0, 16).map((color, i) => ({ ratio: r[i], color: argb(color, a[i]) })),
+      spread: spread === "reflect" ? 1 : spread === "repeat" ? 2 : 0,
+      linearRgb: s.rt.toString(interpolationMethod) === "linearRGB",
+      matrix: matrixFrom(matrix),
+    };
+    if (matrix === null || matrix === undefined) {
+      unplaced.add(gradient);
+    }
+
+    return gradient;
   };
 
   /** The data of `display`'s drawing, a timeline shape's too, and with `recurse` its children's, each through `m`. */
@@ -184,12 +230,9 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       drawing(this).beginFill({ type: "solid", color: argb(color, alpha) });
     }
 
-    /** Recorded as a shape's gradient is drawn: its first stop's color, until gradients draw. */
     /**
-     * As adl draws one: arrays of different lengths, or a ratio outside 0
-     * to 255, draw nothing; no stops draw black; past 16 stops are left
-     * out; an unknown spread or interpolation is pad or RGB; null alphas
-     * and ratios are opaque and even, null colours TypeError 2007.
+     * As adl draws one (gradientOf): arrays that draw nothing fill black, as
+     * no stops do; null colours are TypeError 2007.
      */
     beginGradientFill(
       type: Value,
@@ -210,34 +253,17 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "colors");
       }
 
-      // Null alphas are opaque, and null ratios spread evenly, floor(255 k / (n - 1)), as adl draws them.
-      const array = (v: Value) => ((v as AsObject).$a as Value[] | undefined) ?? [];
-      const c = array(colors);
-      const a = alphas === null || alphas === undefined ? c.map(() => 1) : array(alphas);
-      const r =
-        ratios === null || ratios === undefined
-          ? c.map((_, k) => (c.length > 1 ? Math.floor((255 * k) / (c.length - 1)) : 0))
-          : array(ratios).map((v) => Math.trunc(s.rt.toNumber(v)));
-      if (a.length !== c.length || r.length !== c.length || r.some((v) => !(v >= 0 && v <= 255))) {
-        drawing(this).beginFill({ type: "solid", color: 0 });
-        return;
-      }
-
-      const spread = s.rt.toString(spreadMethod);
-      const fill: Paint = {
-        type: "gradient",
-        radial: kind === "radial",
-        focal: kind === "radial" ? num(focalPointRatio) : 0,
-        stops: c.slice(0, 16).map((color, i) => ({ ratio: r[i], color: argb(color, a[i]) })),
-        spread: spread === "reflect" ? 1 : spread === "repeat" ? 2 : 0,
-        linearRgb: s.rt.toString(interpolationMethod) === "linearRGB",
-        matrix: matrixFrom(matrix),
-      };
-      if (matrix === null || matrix === undefined) {
-        unplaced.add(fill);
-      }
-
-      drawing(this).beginFill(fill);
+      const fill = gradientOf(
+        kind,
+        colors,
+        alphas,
+        ratios,
+        matrix,
+        spreadMethod,
+        interpolationMethod,
+        focalPointRatio,
+      );
+      drawing(this).beginFill(fill ?? { type: "solid", color: 0 });
     }
 
     /** The BitmapData itself, not a copy: the fill shows its later changes, the shape a view of its store. */
@@ -316,15 +342,81 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
       drawing(this).lineStyle(line);
     }
 
-    lineGradientStyle(): void {
-      // The line keeps the color lineStyle gave it, as a shape's gradient line does.
+    /**
+     * The line filled with the gradient from the pen on, as a new line style
+     * (Drawing's lineGradient), its colour and alpha unused. As adl checks
+     * it, line or none: null colours are TypeError 2007, then a type
+     * neither linear nor radial ArgumentError 2008. Arrays that draw
+     * nothing (gradientOf) leave the line as it is.
+     */
+    lineGradientStyle(
+      type: Value,
+      colors: Value,
+      alphas: Value,
+      ratios: Value,
+      matrix: Value = null,
+      spreadMethod: Value = "pad",
+      interpolationMethod: Value = "rgb",
+      focalPointRatio: Value = 0,
+    ): void {
+      if (colors === null || colors === undefined) {
+        throw s.rt.error("TypeError", 2007, "colors");
+      }
+
+      const kind = s.rt.toString(type);
+      if (kind !== "linear" && kind !== "radial") {
+        throw s.rt.error("ArgumentError", 2008, "type");
+      }
+
+      const gradient = gradientOf(
+        kind,
+        colors,
+        alphas,
+        ratios,
+        matrix,
+        spreadMethod,
+        interpolationMethod,
+        focalPointRatio,
+      );
+      if (gradient) {
+        drawing(this).lineGradient(gradient);
+      }
     }
 
-    lineBitmapStyle(): void {
-      // As lineGradientStyle.
+    /**
+     * The open line filled with the bitmap, while it has drawn nothing
+     * (Drawing's lineBitmap), as beginBitmapFill fills: the BitmapData
+     * itself, its later changes shown. Null is TypeError 2007, line or
+     * none; a disposed one is taken without an error, as adl takes it, and
+     * draws the line's colour.
+     */
+    lineBitmapStyle(
+      bitmap: Value,
+      matrix: Value = null,
+      repeat: Value = true,
+      smooth: Value = false,
+    ): void {
+      if (bitmap === null || bitmap === undefined) {
+        throw s.rt.error("TypeError", 2007, "bitmap");
+      }
+
+      const store: BitmapStore | null | undefined = (bitmap as AsObject).$store;
+      if (!store) {
+        return;
+      }
+
+      const paint: ImageFill = {
+        type: "image",
+        image: store,
+        matrix: matrixFrom(matrix),
+        repeat: !!repeat,
+        smooth: !!smooth,
+      };
+      store.views.add(this.$display.ref);
+      drawing(this).lineBitmap(paint);
     }
 
-    /** Checked as adl checks it; the line keeps its colour, as a gradient's does. */
+    /** Checked as adl checks it; the line keeps its colour, as no shader draws on a line yet. */
     lineShaderStyle(shader: Value): void {
       shaderOf(shader, CHECK);
     }
@@ -471,6 +563,12 @@ export function graphicsNatives(s: Scripting): avm2.Natives {
           for (const { fill } of layer.fills) {
             if (fill.type === "image" && fill.image instanceof BitmapStore) {
               fill.image.views.add(this.$display.ref);
+            }
+          }
+
+          for (const { paint } of layer.strokes) {
+            if (paint?.type === "image" && paint.image instanceof BitmapStore) {
+              paint.image.views.add(this.$display.ref);
             }
           }
 

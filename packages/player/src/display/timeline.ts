@@ -462,20 +462,23 @@ function shapeOf(
   }
 
   const shape = readShape(bytes, t.code, t.offset, t.length, version);
-  // Its bitmap fills' bitmaps as the SWF has them now, which defines them before the shapes that
-  // use them; a shape with any is the SWF's own, not shared.
+  // Its bitmap fills' bitmaps, its lines' too, as the SWF has them now, which defines them before
+  // the shapes that use them; a shape with any is the SWF's own, not shared.
   // The parse is not kept: no function made here refers to it, so its records go.
   const bitmaps = new Map<number, BitmapCharacter | null>();
-  const styles = [shape.fills];
+  const styles = [shape.fills, shape.lines.map((l) => l.fill)];
   for (const r of shape.records) {
     if (r.type === "style" && r.styles) {
-      styles.push(r.styles.fills);
+      styles.push(
+        r.styles.fills,
+        r.styles.lines.map((l) => l.fill),
+      );
     }
   }
 
   for (const fills of styles) {
     for (const fill of fills) {
-      if (fill.type === "bitmap" && !bitmaps.has(fill.bitmap)) {
+      if (fill?.type === "bitmap" && !bitmaps.has(fill.bitmap)) {
         bitmaps.set(fill.bitmap, bitmap(fill.bitmap));
       }
     }

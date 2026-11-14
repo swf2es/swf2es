@@ -20,15 +20,15 @@ import {
   CURVE,
   extent,
   LINE,
+  type LinePaint,
   MOVE,
   type Paint,
   type Path,
   type ShapeLayer,
+  type Stroke,
   type TriangleParts,
   type Winding,
 } from "./shapes.js";
-
-type Stroke = ShapeLayer["strokes"][number];
 
 const TWIPS = 20;
 /** The quadratic approximation of a quarter ellipse Flash's drawRoundRect uses: two curves, meeting at 45°. */
@@ -59,6 +59,16 @@ const QUARTERS = [
   [-1, 0, 0, -1],
   [0, -1, 1, 0],
 ];
+
+/** A stroke of `line`, filled with `paint` where there is one. */
+function strokeOf(line: Line, paths: Path[], paint: LinePaint | undefined): Stroke {
+  return paint ? { line, paths, paint } : { line, paths };
+}
+
+/** Whether `stroke` has drawn anything: a segment, or a line closing a fill. */
+function strokeDrawn(stroke: Stroke): boolean {
+  return Boolean(stroke.closes?.length) || stroke.paths.some((p) => p.length > 3);
+}
 
 /** `kind` and `points` onto the last of `paths`. */
 function append(paths: Path[], kind: number, points: readonly number[]): void {
@@ -118,6 +128,7 @@ export class Drawing {
     this.closing = null;
     this.pathed = false;
     const line = this.stroke?.line;
+    const linePaint = this.stroke?.paint;
     this.dropStroke();
     this.fill = { fill, contours: [], winding: "evenOdd" };
     // On in the last layer while it holds fills alone, as many as SHARED_FILLS: within a layer
@@ -136,7 +147,7 @@ export class Drawing {
 
     this.beginContour();
     if (line) {
-      this.stroke = { line, paths: [] };
+      this.stroke = strokeOf(line, [], linePaint);
       this.fillLayer.strokes.push(this.stroke);
       this.begin(this.stroke.paths);
     }
@@ -176,6 +187,37 @@ export class Drawing {
       this.layers.pop();
     }
 
+    this.version++;
+  }
+
+  /**
+   * The line from here on filled with `paint`, as lineGradientStyle sets
+   * it: a stroke of its own from the pen, as a new line style is, which a
+   * gradient set mid-path is in Flash. Nothing without a line.
+   */
+  lineGradient(paint: LinePaint): void {
+    const line = this.stroke?.line;
+    if (!line) {
+      return;
+    }
+
+    this.lineStyle(line);
+    (this.stroke as Stroke).paint = paint;
+    this.version++;
+  }
+
+  /**
+   * The open line filled with `paint`, as lineBitmapStyle sets it: only
+   * while it has drawn nothing, as adl leaves a line it is set on mid-path
+   * as it was. Nothing without a line.
+   */
+  lineBitmap(paint: LinePaint): void {
+    const stroke = this.stroke;
+    if (!stroke || strokeDrawn(stroke)) {
+      return;
+    }
+
+    stroke.paint = paint;
     this.version++;
   }
 
@@ -431,6 +473,7 @@ export class Drawing {
     this.version++;
     const fill = this.fill;
     const line = this.stroke?.line ?? null;
+    const linePaint = this.stroke?.paint;
     const contour = fill?.contours[fill.contours.length - 1];
     const origin = contour ? [contour[1], contour[2]] : [this.x, this.y];
     // The open contour ends for good, with any closing line it has.
@@ -498,7 +541,8 @@ export class Drawing {
           paths.push(outline(list, k));
         }
 
-        out.stroke = { line, paths, triangles: true };
+        out.stroke = strokeOf(line, paths, linePaint);
+        out.stroke.triangles = true;
       }
 
       return out;
@@ -543,7 +587,7 @@ export class Drawing {
     }
 
     if (line) {
-      this.stroke = { line, paths: [] };
+      this.stroke = strokeOf(line, [], linePaint);
       next.strokes.push(this.stroke);
       this.begin(this.stroke.paths);
     }
@@ -578,6 +622,7 @@ export class Drawing {
           paths: s.paths.map((c) => c.slice()),
           closes: s.closes?.map((c) => ({ ...c })),
           triangles: s.triangles,
+          paint: s.paint,
         })),
         // A mesh's arrays never change once drawn.
         meshes: layer.meshes?.slice(),
@@ -635,7 +680,7 @@ export class Drawing {
     const stroke = this.stroke;
     const layer = this.layers[this.layers.length - 1];
     this.stroke = null;
-    if (!stroke || !layer || stroke.closes?.length || stroke.paths.some((p) => p.length > 3)) {
+    if (!stroke || !layer || strokeDrawn(stroke)) {
       return;
     }
 
