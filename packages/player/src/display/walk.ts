@@ -127,11 +127,21 @@ function listInto(c: Container, list: WalkList, at: number, keep = true): number
  * The display objects whose frame scripts a display object's run: those
  * whose frames its frames run, but a button's first, in a SWF after 9, up,
  * over, down, then hit test, as Flash runs them while the button is made.
+ * That order is had once: `peeked`, where given, keeps the buttons that had
+ * it in place of taking their flag off, for a walk that changes nothing.
  */
-export function scriptChildren(d: DisplayObject): readonly DisplayObject[] {
-  if (d.kind === BUTTON && (d as ButtonObject).firstScripts) {
+export function scriptChildren(
+  d: DisplayObject,
+  peeked: Set<DisplayObject> | null = null,
+): readonly DisplayObject[] {
+  if (d.kind === BUTTON && (d as ButtonObject).firstScripts && !peeked?.has(d)) {
     const b = d as ButtonObject;
-    b.firstScripts = false;
+    if (peeked) {
+      peeked.add(b);
+    } else {
+      b.firstScripts = false;
+    }
+
     return [b.upState, b.overState, b.downState, b.hitTestState].filter(
       (o, i, all): o is DisplayObject => o !== null && all.indexOf(o) === i && !o.encloses(b),
     );

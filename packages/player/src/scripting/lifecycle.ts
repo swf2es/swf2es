@@ -11,6 +11,15 @@ import { dispatchEvent, heard } from "./events.js";
 
 type AsObject = avm2.AsObject;
 
+/** An orphan: `due` is its display object's scriptsDue, kept here so that a round passes one by unread. */
+interface Orphan {
+  serial: number;
+  ref: WeakRef<DisplayObject>;
+  keep: boolean;
+  since: number;
+  due: boolean;
+}
+
 export class Lifecycle {
   /**
    * Clips taken off the display list, which play on as Flash's do: held
@@ -18,10 +27,7 @@ export class Lifecycle {
    * does once collected, and for ORPHAN_FRAMES at most. One the timeline
    * took is kept for its frame only.
    */
-  private readonly orphans = new Map<
-    number,
-    { ref: WeakRef<DisplayObject>; keep: boolean; since: number }
-  >();
+  private readonly orphans = new Map<number, Orphan>();
   private readonly madeThisFrame: DisplayObject[] = [];
   /**
    * The children whose removal is being told of, by the error Flash throws
@@ -151,7 +157,16 @@ export class Lifecycle {
    */
   orphan(display: DisplayObject, keep = true): void {
     if (display.object && !this.orphans.has(display.serial)) {
-      this.orphans.set(display.serial, { ref: display.ref, keep, since: this.s.frames });
+      const serial = display.serial;
+      const entry = {
+        serial,
+        ref: display.ref,
+        keep,
+        since: this.s.frames,
+        due: display.scriptsDue,
+      };
+      this.orphans.set(serial, entry);
+      display.orphanEntry = entry;
       this.sortedOrphans = null;
       scriptWork.changes++;
     }
@@ -175,7 +190,7 @@ export class Lifecycle {
    * The orphans, newest first, as Flash runs their frames: kept sorted
    * until one comes or goes, as the player walks them twice a frame.
    */
-  private sortedOrphans: { serial: number; ref: WeakRef<DisplayObject> }[] | null = null;
+  private sortedOrphans: Orphan[] | null = null;
 
   private dropOrphan(serial: number): void {
     if (this.orphans.delete(serial)) {
@@ -183,20 +198,23 @@ export class Lifecycle {
     }
   }
 
-  /** Each orphan still there, newest first, to `f`, which must leave the orphans as they are. */
-  eachOrphanRoot(f: (display: DisplayObject) => void): void {
+  /**
+   * Each orphan still there, newest first, to `f`, which must leave the
+   * orphans as they are; only those with scriptsDue, `due`.
+   */
+  eachOrphanRoot(f: (display: DisplayObject) => void, due = false): void {
     let sorted = this.sortedOrphans;
     if (!sorted) {
-      sorted = [];
-      for (const [serial, orphan] of this.orphans) {
-        sorted.push({ serial, ref: orphan.ref });
-      }
-
+      sorted = [...this.orphans.values()];
       sorted.sort((a, b) => b.serial - a.serial);
       this.sortedOrphans = sorted;
     }
 
     for (let i = 0; i < sorted.length; i++) {
+      if (due && !sorted[i].due) {
+        continue;
+      }
+
       const display = sorted[i].ref.deref();
       if (!display) {
         this.dropOrphan(sorted[i].serial);

@@ -1015,6 +1015,67 @@ for (const [second, due] of [
   });
 }
 
+// Clips a, c and b in that order, each a Hop of three frames: c stops on
+// its first, whose script ran, and a's second sends it to its third. In a
+// SWF of version 9 the goto runs no cycle, and c's script runs in the
+// round that listed it before b's; from version 10 the goto's cycle runs
+// it, and b's with it. A round that left c out as not due when it listed
+// it would run its script after b's, in the next.
+const HOP = `package {
+  import flash.display.MovieClip;
+  public dynamic class Hop extends MovieClip {
+    public function Hop() {
+      addFrameScript(0, function():void { trace(name, 1); if (name == "c") stop(); },
+        1, function():void {
+          trace(name, 2);
+          stop();
+          if (name == "a") MovieClip(parent.getChildByName("c")).gotoAndStop(3);
+        },
+        2, function():void { trace(name, 3); stop(); });
+    }
+  }
+  public dynamic class HopMain extends MovieClip {
+    public function HopMain() { addFrameScript(1, function():void { stop(); }); }
+  }
+}`;
+
+for (const version of [9, 10]) {
+  test(`a goto has a clip listed as not due run its script in the round, version ${version}`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const swf = w.swf({
+      version,
+      width: 20,
+      height: 20,
+      frameCount: 2,
+      tags: [
+        w.fileAttributes(true),
+        w.sprite(2, 3, [w.showFrame(), w.showFrame(), w.showFrame(), w.end()]),
+        w.doAbc(compiler(out)("Hop", HOP)),
+        w.symbolClass([
+          [0, "HopMain"],
+          [2, "Hop"],
+        ]),
+        w.place({ depth: 1, character: 2, name: "a" }),
+        w.place({ depth: 2, character: 2, name: "c" }),
+        w.place({ depth: 3, character: 2, name: "b" }),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+    const player = new Player(swf, scripting);
+    await player.start();
+    assert.deepEqual(lines.splice(0), ["a 1", "c 1", "b 1"]);
+
+    player.tick();
+    assert.deepEqual(lines, ["a 2", "c 3", "b 2"]);
+  });
+}
+
 test("a frame whose scripts change nothing a round reads takes one round", {
   skip,
 }, async () => {
@@ -1051,7 +1112,8 @@ test("a frame whose scripts change nothing a round reads takes one round", {
   // The root's script runs, and changes nothing a round reads: no second
   // round walks the list. Each walk, the tick's and each round's, starts
   // with the orphans. The checked build runs the round left out anyway, to
-  // see that it finds nothing.
+  // see that it finds nothing, and walks each round twice, what is marked
+  // and all, to see that they agree.
   let walks = 0;
   const eachOrphanRoot = scripting.lifecycle.eachOrphanRoot.bind(scripting.lifecycle);
   scripting.lifecycle.eachOrphanRoot = (f) => {
@@ -1062,7 +1124,7 @@ test("a frame whose scripts change nothing a round reads takes one round", {
     player.tick();
   }
 
-  assert.equal(walks, Scripting.checkRounds ? 12 : 8);
+  assert.equal(walks, Scripting.checkRounds ? 20 : 8);
   const n = scripting.rt.getProperty(
     player.root.object as avm2.AsObject,
     avm2.qname(avm2.publicNs, "n"),
