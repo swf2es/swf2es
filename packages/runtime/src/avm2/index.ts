@@ -17,18 +17,8 @@ export { floatLibrary } from "./float-library.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";
 export { messages } from "./messages.js";
 export { publicNs, qname } from "./names.js";
-export {
-  Bytes,
-  byteArrayHook,
-  bytesOf,
-  canShareMemory,
-  GLOBAL_MEMORY_MIN_SIZE,
-  notIsolated,
-  type SharedBytesMemory,
-  setDomainMemory,
-  shareBytes,
-  sharedByteArray,
-} from "./natives/bytearray.js";
+export { byteArrayHook, setDomainMemory } from "./natives/bytearray.js";
+export { Bytes, bytesOf, GLOBAL_MEMORY_MIN_SIZE } from "./natives/bytes.js";
 export {
   type SyncRef,
   syncError,
@@ -40,6 +30,13 @@ export type { Natives } from "./natives/define.js";
 export { type NativeClass, plain, registerNativeClass } from "./natives/define.js";
 // The builtins' natives and hooks, for a player that adds playerglobal's to them.
 export { builtinHooks, builtinNatives } from "./natives/index.js";
+export {
+  canShareMemory,
+  notIsolated,
+  type SharedBytesMemory,
+  shareBytes,
+  sharedByteArray,
+} from "./natives/shared-bytes.js";
 export {
   endShellWorker,
   shellWorkerTerminated,

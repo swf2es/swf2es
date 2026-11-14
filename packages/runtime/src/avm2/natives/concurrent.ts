@@ -7,7 +7,7 @@
 
 import type { AsObject, Value } from "../descriptors.js";
 import type { Runtime } from "../runtime.js";
-import { bytesOf } from "./bytearray.js";
+import { bytesOf } from "./bytes.js";
 import { type Natives, plain, registerNativeClass } from "./define.js";
 import { newSyncMemory, Sync, SyncFull, SyncTimeout } from "./sync.js";
 
