@@ -159,6 +159,75 @@ function currentDomain(compile: Compile): Uint8Array {
   });
 }
 
+// Children a clip places by class name (PlaceObject3's HasClassName, no
+// character), as a SWF of dialogs places buttons from a library SWF loaded
+// before it into the same domain (scripts/PlacedByClass.as.template). The
+// library (scripts/PlacedLib.as) binds a clip of a square to PlacedButton;
+// the dialogs' SWF (scripts/PlacedView.as) binds PlacedDialog to a clip
+// that places by name PlacedButton, its unbound subclass, a class bound in
+// its own SWF and classes bound to nothing. (A class no domain defines
+// places nothing either: Flash reports a ReferenceError #1065 but goes on.)
+function placedByClass(compile: Compile): Uint8Array {
+  const lib = w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(1, 0xff0000, 600),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1, name: "face" }), w.showFrame(), w.end()]),
+      w.doAbc(compile("PlacedLib"), "PlacedLib"),
+      w.symbolClass([[2, "PlacedButton"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const at = (x: number) => ({ tx: x * 20, ty: 400 });
+  const view = w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(3, 0x0000ff, 300),
+      w.doAbc(compile("PlacedView"), "PlacedView"),
+      w.sprite(11, 1, [w.place({ depth: 1, character: 3 }), w.showFrame(), w.end()]),
+      w.sprite(10, 1, [
+        w.place({ depth: 1, className: "PlacedButton", name: "btnA", matrix: at(20) }),
+        w.place({ depth: 2, className: "PlacedPlain", name: "plain", matrix: at(60) }),
+        w.place({ depth: 3, className: "PlacedButtonSub", name: "sub", matrix: at(80) }),
+        w.place({ depth: 4, className: "flash.display.Sprite", name: "builtin" }),
+        w.place({ depth: 5, className: "flash.geom.Point", name: "point" }),
+        w.place({ depth: 6, className: "PlacedLocal", name: "local", matrix: at(120) }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.symbolClass([
+        [10, "PlacedDialog"],
+        [11, "PlacedLocal"],
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const template = readFileSync(
+    new URL("../scripts/PlacedByClass.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "PlacedByClass",
+    template
+      .replaceAll("@@LIB@@", Buffer.from(lib).toString("base64"))
+      .replaceAll("@@VIEW@@", Buffer.from(view).toString("base64")),
+  );
+  return bare(abc, PLACED_BY_CLASS_FRAMES, "Main", 200, 100);
+}
+
+/** Two loads, a frame or two each, then a frame drawn. */
+const PLACED_BY_CLASS_FRAMES = 8;
+
 // The same, unloading from INIT (scripts/LoadsInit.as.template). The inner
 // SWF has one frame: a clip taken off the display list plays on in Flash,
 // which is not this case's.
@@ -846,6 +915,14 @@ export const scriptingCases: PlayerCase[] = [
     build: currentDomain,
     frames: 4,
     capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "placed-by-class",
+    build: placedByClass,
+    frames: PLACED_BY_CLASS_FRAMES,
+    capture: [PLACED_BY_CLASS_FRAMES],
     tolerance: 0,
     maxOutliers: 0,
   },

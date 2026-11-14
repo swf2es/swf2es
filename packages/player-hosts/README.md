@@ -22,7 +22,7 @@ npm install @swf2es/player-hosts
   on Web Workers, which run `@swf2es/player-hosts/web-worker`
   (`node-worker` is node's).
 - `@swf2es/player-hosts/stage3d`: `stage3DCanvasHost()`, Stage3D's canvas
-  layers in a page (experimental).
+  layers in a page.
 
 ```js
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";

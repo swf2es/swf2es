@@ -17,8 +17,8 @@ links; how much of AS3 and Flash's behaviour it matches, in
   acceptance tests it compares, E4X included, and AVM1 by SWF version.
 - **The player** plays AS3 and AVM1 SWFs: the display list and
   timelines, its own playerglobal, text, bitmaps and filters, sound,
-  loading and security, input, workers, Stage3D as an experimental
-  option, and AIR's WebSocket client. It passes 1,380 of the 1,984
+  loading and security, input, workers, Stage3D in every profile,
+  and AIR's WebSocket client. It passes 1,380 of the 1,984
   tests of Ruffle's corpus it runs.
 - **The renderer** is its own ([renderer.md](renderer.md)), with
   fills, lines and BitmapData's CPU kernels in one Zig module.
@@ -92,7 +92,7 @@ order:
 - modules compiled ahead of time and cached in IndexedDB, and pages
   without `'unsafe-eval'`;
 - the web element, the desktop app and the demo site;
-- Stage3D, as an experimental option;
+- Stage3D, on by default in the desktop app and an option on a page;
 - zlib, LZMA, MP3 and libtess2 in wasm, built by one pinned Zig, then
   lines and BitmapData's kernels in Zig too, with no JavaScript paths
   left;

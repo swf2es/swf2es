@@ -312,6 +312,14 @@ export interface Library {
   constructPlaced:
     | ((placed: { display: DisplayObject; character: DisplayCharacter }[]) => void)
     | null;
+  /**
+   * The character, and its library, a place by class name makes
+   * (Symbols.placedSymbol): the class's symbol, from whichever SWF bound
+   * it; null for none. Absent where there are no scripts.
+   */
+  placedSymbol?:
+    | ((className: string) => { character: DisplayCharacter; library: Library } | null)
+    | null;
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
   /** What an AVM1 movie's timelines tell its AVM1 (avm1/avm1.ts); null in an AS3 movie. */

@@ -21,6 +21,7 @@ import {
   type AnyFontCharacter,
   type BitmapCharacter,
   type Character,
+  type DisplayCharacter,
   INVALID_PIXELS,
   type Library,
   type SoundCharacter,
@@ -166,6 +167,41 @@ export class Symbols {
         return symbol.character.type === "font" || symbol.character.type === "fontCff"
           ? symbol.character
           : null;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * What a timeline's place by class name (PlaceObject3's HasClassName)
+   * makes: the character, and its library, SymbolClass bound the class or
+   * its nearest bound base to, from whichever SWF bound it, the class as
+   * `domain` finds it. Its instance is of the class bound to that
+   * character, a base's for an unbound subclass, as in Flash
+   * (`placed-by-class`). Null for a class no domain defines, or one bound
+   * to no display character, where Flash places nothing.
+   */
+  placedSymbol(
+    name: string,
+    domain: avm2.Domain,
+  ): { character: DisplayCharacter; library: Library } | null {
+    const qualified = qualify(name);
+    if (!this.s.rt.definingAbc(qualified, domain)) {
+      return null;
+    }
+
+    const cls = this.s.rt.classNamed(qualified, domain);
+    for (let t: SymbolTraits | null = cls.$it; t; t = t.base as SymbolTraits | null) {
+      const symbol = this.symbolOf(t);
+      if (symbol) {
+        const character = symbol.character;
+        return character.type === "binary" ||
+          character.type === "font" ||
+          character.type === "fontCff" ||
+          character.type === "sound"
+          ? null
+          : { character, library: symbol.library };
       }
     }
 

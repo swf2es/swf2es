@@ -1,4 +1,4 @@
-# Experimental Context3D backend
+# Context3D backend
 
 `@swf2es/context3d` provides resource/lifecycle contracts and AGAL 1, 2 and 3 to
 GLSL ES 3.00 translation, for every Stage3D profile. Its core has no dependencies or browser types. The optional
@@ -14,7 +14,7 @@ and render-state constants live beside those modules. These are internal splits;
 the package entries and ownership contracts stay the same.
 
 This package does not enable Stage3D playback. The separate
-`@swf2es/player/context3d` entry installs experimental Flash bindings, and
+`@swf2es/player/context3d` entry installs the Flash bindings, and
 `@swf2es/player-hosts/stage3d` places canvases and attaches browser loss/restoration
 listeners. Install the bindings before loading playerglobal, and call their
 returned teardown before destroying Scripting. Default playback still reports
@@ -217,7 +217,7 @@ not prompt or guaranteed; explicit disposal remains preferable, and the hard
 resource budgets still apply. Direct backend callers own their resources and
 must dispose them or the context.
 
-The current API and validation are experimental. Supported operations, AIR
+Supported operations, AIR
 references, unsupported formats/profiles and lifecycle stress tests are tracked
 in [tests/context3d](../../tests/context3d/README.md). Stage3D playback is off by
 default in the web element, and on in the desktop app, whose View menu turns it
@@ -256,7 +256,7 @@ Each requested slot needs a fresh surface. In place of the factory, `stage3D` ta
 a loader, `{ load: () => import("./my-stage3d.js").then((m) => m.create) }`, which
 the element calls at a SWF's first `requestContext3D`: a SWF that never asks loads
 no backend, and one whose load fails gets #3702. `configure({ stage3D: null })` disables
-the experiment for subsequent loads. The web element owns native installation,
+Stage3D for subsequent loads. The web element owns native installation,
 composition, cancellation, restoration and teardown for each load. GPU backend
 selection stays with the host; the default web entry does not eagerly import
 the optional bindings or a backend. No new dependencies are required by `web`.
@@ -268,28 +268,26 @@ they are host policy, not AIR limits or a guarantee against context loss. Tune
 them for the workload and account for concurrent slots and players. The limits
 exclude driver overhead and back-buffer attachments, so the browser can still
 lose a context before a logical allocation limit is reached. The public demo
-keeps Stage3D off by default; its experimental checkbox opts in with these lower budgets.
+keeps Stage3D off by default; its checkbox opts in with these lower budgets.
 
 Stage3D positions follow the embedding's `scale`/`salign` placement. Configured
 buffer sizes remain in pixels; resizing or changing device pixel ratio never
 implicitly reallocates them. The host clips the viewports, makes the display
 list transparent while contexts exist, and keeps overlapping players' canvases
 in separate stacks. The web host honors ActionScript changes to
-`Stage.scaleMode` and `Stage.align`, with Stage3D opted in or not; only the
-opt-in gives the top and left edges precedence when an alignment names both
+`Stage.scaleMode` and `Stage.align`, with Stage3D configured or not; only with it configured do the top and left edges take precedence when an alignment names both
 opposite edges. In `noScale`, Stage dimensions follow the
 embedding's CSS size and resize events are synchronous after placement updates;
 other modes report the authored dimensions. Display-list pixels and input use
 the same viewport, including coordinates outside the authored rectangle.
 A DPR change affects display-list resolution without changing Stage dimensions
 or reallocating Stage3D buffers. Script settings override embedding defaults
-independently. The desktop app offers the same host through View › Stage3D
-(Experimental), off by default, with a remembered choice that restarts the
-movie when changed. It uses the backend's per-type resource count limits and
+independently. The desktop app uses the same host, on by default; View › Stage3D turns it
+off and on, with a remembered choice that restarts the movie when changed. It uses the backend's per-type resource count limits and
 byte budgets. The public demo lazily loads the backend when Stage3D is selected
 and restarts the current SWF when the option changes. Its Restart and Close
-controls release the preceding contexts. Best-resolution buffers remain later
-work. None of this changes the ActionScript Worker API.
+controls release the preceding contexts. `wantsBestResolution` back buffers are drawn at the screen's pixels
+(see tests/context3d). None of this changes the ActionScript Worker API.
 
 A future WebGPU backend can reuse the Flash adapter, resource contracts and AIR
 fixtures. It still needs AGAL-to-WGSL translation, GPU resource/binding handling,
@@ -301,7 +299,7 @@ Flash execution would need validation before full compatibility could be claimed
 
 The display list and Stage3D use separate canvases. Display-list blend effects
 sample the transparent 2D back buffer rather than Stage3D color, so blending
-across those layers is an experimental limitation. `Playback.destroy()` disposes
+across those layers is a known limitation. `Playback.destroy()` disposes
 the display-list scene before the renderer on ordinary loads as well as Stage3D
 loads; this intentional shared cleanup releases cached text-style listeners.
 

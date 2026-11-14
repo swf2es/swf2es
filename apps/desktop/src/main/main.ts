@@ -766,7 +766,7 @@ function buildMenu(): void {
         { type: "separator" },
         {
           id: "stage3d",
-          label: "Stage3D (Experimental)",
+          label: "Stage3D",
           type: "checkbox",
           checked: settings.stage3D,
           click: (item) => {
