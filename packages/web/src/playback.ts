@@ -51,6 +51,15 @@ export class Playback {
   private destroyed = false;
   /** The stage's quality it last drew by. */
   private quality = "";
+  /** The last animation frame's time. */
+  private frameTime: number | null = null;
+  /**
+   * performance.now() as the last animation frame that came in time ended, by which the timer
+   * tells that they stopped: a minimized window's come a second apart, which is not in time.
+   */
+  private framed = Number.NEGATIVE_INFINITY;
+  /** The timer that plays on while no animation frame comes. */
+  private pump: ReturnType<typeof setTimeout> | undefined;
 
   private constructor(
     private readonly box: HTMLElement,
@@ -131,10 +140,11 @@ export class Playback {
     return this.view.gl;
   }
 
-  /** Play and draw on every animation frame, from now. */
+  /** Play and draw on every animation frame, from now; play on by a timer while none comes. */
   run(): void {
     if (!this.destroyed && !this.frame) {
       this.frame = requestAnimationFrame(this.tick);
+      this.pump = setTimeout(this.idle, STALL_MS);
     }
   }
 
@@ -157,6 +167,35 @@ export class Playback {
 
   private readonly tick = (now: number) => {
     this.frame = requestAnimationFrame(this.tick);
+    const steady = this.frameTime !== null && now - this.frameTime < STALL_MS;
+    this.frameTime = now;
+    this.step(now, true);
+    if (steady) {
+      this.framed = performance.now();
+    }
+  };
+
+  /**
+   * A hidden page gets no animation frames: a minimized window's, or on Windows one another
+   * window covers, Electron's included, and an Electron window that is never throttled gets
+   * one a second while minimized. Played only by them, the player stopped dead: no timer
+   * fired, nothing went out, and what its sockets received piled up, all of it handled, and
+   * answered, in the first frame once shown, a burst a server may take for a flood, after a
+   * silence it may take for a lost client. Flash kept a hidden SWF playing; here a timer plays
+   * the frames while they do not come in time, at the SWF's rate as far as the page's timers
+   * may run (a browser slows a hidden page's to one a second), and draws nothing.
+   */
+  private readonly idle = () => {
+    const now = performance.now();
+    const stalled = now - this.framed >= STALL_MS;
+    // Set before the step, as tick asks for its next frame first: a destroy inside clears it.
+    this.pump = setTimeout(this.idle, stalled ? 1000 / (this.player.frameRate || 24) : STALL_MS);
+    if (stalled) {
+      this.step(now, false);
+    }
+  };
+
+  private step(now: number, show: boolean): void {
     const dt = this.last === null ? 0 : now - this.last;
     this.last = now;
     // Moved to a display of another density, or zoomed: drawn anew for its pixels.
@@ -179,10 +218,10 @@ export class Playback {
       this.requality();
     }
 
-    if (this.player.changes !== this.drawn || this.dirty) {
+    if (show && (this.player.changes !== this.drawn || this.dirty)) {
       this.draw();
     }
-  };
+  }
 
   /**
    * Drawn by the stage's quality as a script or the page changes it:
@@ -364,6 +403,7 @@ export class Playback {
 
     this.destroyed = true;
     cancelAnimationFrame(this.frame);
+    clearTimeout(this.pump);
     this.resize.disconnect();
     for (const unbind of this.unbind.splice(0)) {
       unbind();
@@ -401,6 +441,12 @@ function stageAround(
     resolution: view.resolution,
   };
 }
+
+/**
+ * How long without an animation frame, in ms, before the timer plays one: well past a frame
+ * at any display's rate or a slow one's draw, so that it never plays between frames that come.
+ */
+const STALL_MS = 250;
 
 /** The most a canvas's multisampled buffers may take, colour and depth-stencil together. */
 const STAGE_BYTES = 256 * 1024 * 1024;

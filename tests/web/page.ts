@@ -286,6 +286,37 @@ function externalInterface() {
   };
 }
 
+/**
+ * The scripted SWF's frames while the page gets no animation frames, as a
+ * minimized or covered window gets none: those it played in a second, and
+ * at what rate. The frames asked for meanwhile are given back after, so the
+ * player draws again.
+ */
+async function playsUnframed() {
+  const player = element("movie").player as unknown as {
+    scripting: { frames: number };
+    frameRate: number;
+  };
+  const frame = requestAnimationFrame;
+  const asked: FrameRequestCallback[] = [];
+  globalThis.requestAnimationFrame = (callback) => {
+    asked.push(callback);
+    return 1;
+  };
+  try {
+    // Past the last frame asked for before, and the time it takes to tell they stopped.
+    await new Promise((done) => setTimeout(done, 600));
+    const before = player.scripting.frames;
+    await new Promise((done) => setTimeout(done, 1000));
+    return { played: player.scripting.frames - before, rate: player.frameRate };
+  } finally {
+    globalThis.requestAnimationFrame = frame;
+    for (const callback of asked.splice(0)) {
+      requestAnimationFrame(callback);
+    }
+  }
+}
+
 /** Destroy the scripted SWF: its callbacks leave the element, and its socket and audio close. */
 async function destroyMovie() {
   const movie = element("movie");
@@ -1059,6 +1090,7 @@ Object.assign(globalThis, {
   replacement,
   externalInterface,
   destroyMovie,
+  playsUnframed,
   resize,
   requality,
   embedderFetch,
