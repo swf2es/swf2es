@@ -804,6 +804,12 @@ check("watchFlash replaces the Flash tags the page adds or makes Flash later", a
   });
 });
 
+check("a SWF plays on while the page gets no animation frames", async (evaluate) => {
+  // A minimized window's page gets none: a timer plays the frames, drawing nothing.
+  const r = await call<{ played: number; rate: number }>(evaluate, "playsUnframed()");
+  assert.ok(r.played >= r.rate / 2, `played ${r.played} frames in a second at ${r.rate} fps`);
+});
+
 check("destroy takes the callbacks off and closes the socket and the audio", async (evaluate) => {
   const before = await call<Record<string, number>>(evaluate, "webCounts()");
   const r = await call<{

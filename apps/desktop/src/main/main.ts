@@ -176,6 +176,11 @@ function createWindow(): void {
       nodeIntegration: false,
       webSecurity: true,
       spellcheck: false,
+      // A SWF plays on, as in Flash, while the window is minimized or covered: throttled, its
+      // timers would fire once a second at most, and a covered window on Windows would count
+      // as hidden. A game's server takes the silence for a lost client, and what the SWF then
+      // answers all at once for a flood (Playback's timer, in @swf2es/web).
+      backgroundThrottling: false,
     },
   });
   setWindow(window);
