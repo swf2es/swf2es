@@ -8,88 +8,109 @@
 // order Flash runs orphans' scripts in, among themselves and against the
 // display list's, shifts with the case's layout, so the trace must not
 // depend on it.
-package {
-  import flash.display.MovieClip;
-  import flash.events.Event;
+package
+{
+	import flash.display.MovieClip;
+	import flash.events.Event;
 
-  public class Clip extends MovieClip {
-    /** Each clip's frame scripts so far, as "frame+" on the display list and "frame-" off it. */
-    public static var runs:Object = {};
+	public class Clip extends MovieClip
+	{
+		/** Each clip's frame scripts so far, as "frame+" on the display list and "frame-" off it. */
+		public static var runs:Object = {};
 
-    public function Clip() {
-      addFrameScript(0, frame1, 1, frame2, 2, frame3);
-    }
+		public function Clip()
+		{
+			addFrameScript(0, frame1, 1, frame2, 2, frame3);
+		}
 
-    private function ran(frame:int):void {
-      runs[name] = (runs[name] || "") + frame + (parent ? "+" : "-");
-    }
+		private function ran(frame:int):void
+		{
+			runs[name] = (runs[name] || "") + frame + (parent ? "+" : "-");
+		}
 
-    private function frame1():void {
-      ran(1);
-    }
+		private function frame1():void
+		{
+			ran(1);
+		}
 
-    private function frame2():void {
-      ran(2);
-    }
+		private function frame2():void
+		{
+			ran(2);
+		}
 
-    private function frame3():void {
-      ran(3);
-    }
-  }
+		private function frame3():void
+		{
+			ran(3);
+		}
+	}
 
-  public class Main extends MovieClip {
-    public var a:Clip;
-    public var b:Clip;
-    public var c:Clip;
-    private var kept:Clip;
-    private var keptB:Clip;
-    private var made:Clip;
-    private var shown:Clip;
-    private var late:Clip;
+	public class Main extends MovieClip
+	{
+		public var a:Clip;
+		public var b:Clip;
+		public var c:Clip;
+		private var kept:Clip;
+		private var keptB:Clip;
+		private var made:Clip;
+		private var shown:Clip;
+		private var late:Clip;
 
-    public function Main() {
-      addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4);
-      addEventListener(Event.ENTER_FRAME, function(e:Event):void { trace("root enterFrame", currentFrame); });
-      addEventListener(Event.EXIT_FRAME, function(e:Event):void { report("exit " + currentFrame); });
-      made = new Clip();
-      made.name = "made";
-      trace("made", made.currentFrame, made.parent == null, made.stage == null);
-      shown = new Clip();
-      shown.name = "shown";
-      shown.x = 120;
-      shown.y = 60;
-      addChild(shown);
-    }
+		public function Main()
+		{
+			addFrameScript(0, frame1, 1, frame2, 2, frame3, 3, frame4);
+			addEventListener(Event.ENTER_FRAME, function(e:Event):void
+				{
+					trace("root enterFrame", currentFrame);
+				});
+			addEventListener(Event.EXIT_FRAME, function(e:Event):void
+				{
+					report("exit " + currentFrame);
+				});
+			made = new Clip();
+			made.name = "made";
+			trace("made", made.currentFrame, made.parent == null, made.stage == null);
+			shown = new Clip();
+			shown.name = "shown";
+			shown.x = 120;
+			shown.y = 60;
+			addChild(shown);
+		}
 
-    private function frame1():void {
-      kept = a;
-      keptB = b;
-      removeChild(a);
-      removeChild(c);
-      late = new Clip();
-      late.name = "late";
-    }
+		private function frame1():void
+		{
+			kept = a;
+			keptB = b;
+			removeChild(a);
+			removeChild(c);
+			late = new Clip();
+			late.name = "late";
+		}
 
-    private function frame2():void {
-      // The timeline took b off: Flash's word on the property that named it.
-      trace("b is null", b == null, "a is null", a == null);
-    }
+		private function frame2():void
+		{
+			// The timeline took b off: Flash's word on the property that named it.
+			trace("b is null", b == null, "a is null", a == null);
+		}
 
-    private function frame3():void {
-      addChild(c);
-    }
+		private function frame3():void
+		{
+			addChild(c);
+		}
 
-    private function frame4():void {
-      trace("root frame 4");
-    }
+		private function frame4():void
+		{
+			trace("root frame 4");
+		}
 
-    private function report(label:String):void {
-      trace("root", label, numChildren, state(kept), state(keptB), state(c), state(made), state(shown), state(late));
-    }
+		private function report(label:String):void
+		{
+			trace("root", label, numChildren, state(kept), state(keptB), state(c), state(made), state(shown), state(late));
+		}
 
-    /** name:currentFrame:runs, with the clip's parent as + or -. */
-    private static function state(clip:Clip):String {
-      return clip.name + ":" + clip.currentFrame + (clip.parent ? "+" : "-") + ":" + (Clip.runs[clip.name] || "");
-    }
-  }
+		/** name:currentFrame:runs, with the clip's parent as + or -. */
+		private static function state(clip:Clip):String
+		{
+			return clip.name + ":" + clip.currentFrame + (clip.parent ? "+" : "-") + ":" + (Clip.runs[clip.name] || "");
+		}
+	}
 }

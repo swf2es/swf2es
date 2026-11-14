@@ -10,12 +10,14 @@
 // and Array, not their prototypes' functions.
 use namespace AS3;
 
-class Item {
-  public var x:int;
+class Item
+{
+	public var x:int;
 
-  public function Item(x:int) {
-    this.x = x;
-  }
+	public function Item(x:int)
+	{
+		this.x = x;
+	}
 }
 
 const N:int = 10000;
@@ -33,440 +35,531 @@ var numberArray:Array = [];
 var stringArray:Array = [];
 var objectArray:Array = [];
 
-for (var k:int = 0; k < N; k++) {
-  ints.push(k);
-  fixedInts[k] = k;
-  numbers.push(k + 0.5);
-  fixedNumbers[k] = k + 0.5;
-  strings.push("s" + k);
-  objects.push(k % 7 == 0 ? marker : {});
-  items.push(new Item(k));
-  intArray.push(k);
-  numberArray.push(k + 0.5);
-  stringArray.push("s" + k);
-  objectArray.push(objects[k]);
+for (var k:int = 0; k < N; k++)
+{
+	ints.push(k);
+	fixedInts[k] = k;
+	numbers.push(k + 0.5);
+	fixedNumbers[k] = k + 0.5;
+	strings.push("s" + k);
+	objects.push(k % 7 == 0 ? marker : {});
+	items.push(new Item(k));
+	intArray.push(k);
+	numberArray.push(k + 0.5);
+	stringArray.push("s" + k);
+	objectArray.push(objects[k]);
 }
 
-function intRead(v:Vector.<int>):int {
-  var sum:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += v[i];
-  }
+function intRead(v:Vector.<int>):int
+{
+	var sum:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += v[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function intReadLength(v:Vector.<int>):int {
-  var sum:int = 0;
-  for (var i:int = 0; i < v.length; i++) {
-    sum += v[i];
-  }
+function intReadLength(v:Vector.<int>):int
+{
+	var sum:int = 0;
+	for (var i:int = 0; i < v.length; i++)
+	{
+		sum += v[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function intWrite(v:Vector.<int>):int {
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = i;
-  }
+function intWrite(v:Vector.<int>):int
+{
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = i;
+	}
 
-  return v[n - 1];
+	return v[n - 1];
 }
 
-function intRmw(v:Vector.<int>):int {
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] += 3;
-  }
+function intRmw(v:Vector.<int>):int
+{
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] += 3;
+	}
 
-  return v[n - 1];
+	return v[n - 1];
 }
 
-function intAppend(v:Vector.<int>):int {
-  var n:int = v.length;
-  v.length = 0;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = i;
-  }
+function intAppend(v:Vector.<int>):int
+{
+	var n:int = v.length;
+	v.length = 0;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = i;
+	}
 
-  return v.length;
+	return v.length;
 }
 
-function intPushPop(v:Vector.<int>):int {
-  var sum:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v.push(i);
-  }
+function intPushPop(v:Vector.<int>):int
+{
+	var sum:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v.push(i);
+	}
 
-  for (var j:int = 0; j < n; j++) {
-    sum += v.pop();
-  }
+	for (var j:int = 0; j < n; j++)
+	{
+		sum += v.pop();
+	}
 
-  return sum;
+	return sum;
 }
 
-function numberRead(v:Vector.<Number>):Number {
-  var sum:Number = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += v[i];
-  }
+function numberRead(v:Vector.<Number>):Number
+{
+	var sum:Number = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += v[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function numberReadLength(v:Vector.<Number>):Number {
-  var sum:Number = 0;
-  for (var i:int = 0; i < v.length; i++) {
-    sum += v[i];
-  }
+function numberReadLength(v:Vector.<Number>):Number
+{
+	var sum:Number = 0;
+	for (var i:int = 0; i < v.length; i++)
+	{
+		sum += v[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function numberWrite(v:Vector.<Number>):Number {
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = i + 0.25;
-  }
+function numberWrite(v:Vector.<Number>):Number
+{
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = i + 0.25;
+	}
 
-  return v[n - 1];
+	return v[n - 1];
 }
 
-function numberRmw(v:Vector.<Number>):Number {
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] += 0.5;
-  }
+function numberRmw(v:Vector.<Number>):Number
+{
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] += 0.5;
+	}
 
-  return v[n - 1];
+	return v[n - 1];
 }
 
-function numberAppend(v:Vector.<Number>):Number {
-  var n:int = v.length;
-  v.length = 0;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = i + 0.5;
-  }
+function numberAppend(v:Vector.<Number>):Number
+{
+	var n:int = v.length;
+	v.length = 0;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = i + 0.5;
+	}
 
-  return v.length;
+	return v.length;
 }
 
-function numberPushPop(v:Vector.<Number>):Number {
-  var sum:Number = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v.push(i + 0.5);
-  }
+function numberPushPop(v:Vector.<Number>):Number
+{
+	var sum:Number = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v.push(i + 0.5);
+	}
 
-  for (var j:int = 0; j < n; j++) {
-    sum += v.pop();
-  }
+	for (var j:int = 0; j < n; j++)
+	{
+		sum += v.pop();
+	}
 
-  return sum;
+	return sum;
 }
 
-function stringRead(v:Vector.<String>):int {
-  var sum:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += v[i].length;
-  }
+function stringRead(v:Vector.<String>):int
+{
+	var sum:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += v[i].length;
+	}
 
-  return sum;
+	return sum;
 }
 
-function stringReadLength(v:Vector.<String>):int {
-  var sum:int = 0;
-  for (var i:int = 0; i < v.length; i++) {
-    sum += v[i].length;
-  }
+function stringReadLength(v:Vector.<String>):int
+{
+	var sum:int = 0;
+	for (var i:int = 0; i < v.length; i++)
+	{
+		sum += v[i].length;
+	}
 
-  return sum;
+	return sum;
 }
 
-function stringWrite(v:Vector.<String>):int {
-  var s:String = "w";
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = s;
-  }
+function stringWrite(v:Vector.<String>):int
+{
+	var s:String = "w";
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = s;
+	}
 
-  return v[n - 1].length;
+	return v[n - 1].length;
 }
 
-function stringPushPop(v:Vector.<String>):int {
-  var s:String = "p";
-  var sum:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v.push(s);
-  }
+function stringPushPop(v:Vector.<String>):int
+{
+	var s:String = "p";
+	var sum:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v.push(s);
+	}
 
-  for (var j:int = 0; j < n; j++) {
-    sum += v.pop().length;
-  }
+	for (var j:int = 0; j < n; j++)
+	{
+		sum += v.pop().length;
+	}
 
-  return sum;
+	return sum;
 }
 
-function objectRead(v:Vector.<Object>):int {
-  var found:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    if (v[i] === marker) {
-      found++;
-    }
-  }
+function objectRead(v:Vector.<Object>):int
+{
+	var found:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		if (v[i] === marker)
+		{
+			found++;
+		}
+	}
 
-  return found;
+	return found;
 }
 
-function objectReadLength(v:Vector.<Object>):int {
-  var found:int = 0;
-  for (var i:int = 0; i < v.length; i++) {
-    if (v[i] === marker) {
-      found++;
-    }
-  }
+function objectReadLength(v:Vector.<Object>):int
+{
+	var found:int = 0;
+	for (var i:int = 0; i < v.length; i++)
+	{
+		if (v[i] === marker)
+		{
+			found++;
+		}
+	}
 
-  return found;
+	return found;
 }
 
-function objectWrite(v:Vector.<Object>):int {
-  var o:Object = marker;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = o;
-  }
+function objectWrite(v:Vector.<Object>):int
+{
+	var o:Object = marker;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = o;
+	}
 
-  return v[n - 1] === marker ? 1 : 0;
+	return v[n - 1] === marker ? 1 : 0;
 }
 
-function objectPushPop(v:Vector.<Object>):int {
-  var o:Object = marker;
-  var found:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v.push(o);
-  }
+function objectPushPop(v:Vector.<Object>):int
+{
+	var o:Object = marker;
+	var found:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v.push(o);
+	}
 
-  for (var j:int = 0; j < n; j++) {
-    if (v.pop() === marker) {
-      found++;
-    }
-  }
+	for (var j:int = 0; j < n; j++)
+	{
+		if (v.pop() === marker)
+		{
+			found++;
+		}
+	}
 
-  return found;
+	return found;
 }
 
-function itemRead(v:Vector.<Item>):int {
-  var sum:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += v[i].x;
-  }
+function itemRead(v:Vector.<Item>):int
+{
+	var sum:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += v[i].x;
+	}
 
-  return sum;
+	return sum;
 }
 
-function itemReadLength(v:Vector.<Item>):int {
-  var sum:int = 0;
-  for (var i:int = 0; i < v.length; i++) {
-    sum += v[i].x;
-  }
+function itemReadLength(v:Vector.<Item>):int
+{
+	var sum:int = 0;
+	for (var i:int = 0; i < v.length; i++)
+	{
+		sum += v[i].x;
+	}
 
-  return sum;
+	return sum;
 }
 
-function itemWrite(v:Vector.<Item>):int {
-  var item:Item = v[0];
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v[i] = item;
-  }
+function itemWrite(v:Vector.<Item>):int
+{
+	var item:Item = v[0];
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v[i] = item;
+	}
 
-  return v[n - 1].x;
+	return v[n - 1].x;
 }
 
-function itemPushPop(v:Vector.<Item>):int {
-  var item:Item = v[0];
-  var sum:int = 0;
-  var n:int = v.length;
-  for (var i:int = 0; i < n; i++) {
-    v.push(item);
-  }
+function itemPushPop(v:Vector.<Item>):int
+{
+	var item:Item = v[0];
+	var sum:int = 0;
+	var n:int = v.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		v.push(item);
+	}
 
-  for (var j:int = 0; j < n; j++) {
-    sum += v.pop().x;
-  }
+	for (var j:int = 0; j < n; j++)
+	{
+		sum += v.pop().x;
+	}
 
-  return sum;
+	return sum;
 }
 
 // The same reads and writes where the code does not know it has a Vector.
 
-function untypedRead(u:*):Number {
-  var sum:Number = 0;
-  var n:int = u.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += u[i];
-  }
+function untypedRead(u:*):Number
+{
+	var sum:Number = 0;
+	var n:int = u.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += u[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function untypedFind(u:*):int {
-  var found:int = 0;
-  var n:int = u.length;
-  for (var i:int = 0; i < n; i++) {
-    if (u[i] === marker) {
-      found++;
-    }
-  }
+function untypedFind(u:*):int
+{
+	var found:int = 0;
+	var n:int = u.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		if (u[i] === marker)
+		{
+			found++;
+		}
+	}
 
-  return found;
+	return found;
 }
 
-function untypedWrite(u:*):Number {
-  var n:int = u.length;
-  for (var i:int = 0; i < n; i++) {
-    u[i] = i;
-  }
+function untypedWrite(u:*):Number
+{
+	var n:int = u.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		u[i] = i;
+	}
 
-  return u[n - 1];
+	return u[n - 1];
 }
 
 // Arrays of the same contents.
 
-function arrayIntRead(a:Array):int {
-  var sum:int = 0;
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += a[i];
-  }
+function arrayIntRead(a:Array):int
+{
+	var sum:int = 0;
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += a[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function arrayIntReadLength(a:Array):int {
-  var sum:int = 0;
-  for (var i:int = 0; i < a.length; i++) {
-    sum += a[i];
-  }
+function arrayIntReadLength(a:Array):int
+{
+	var sum:int = 0;
+	for (var i:int = 0; i < a.length; i++)
+	{
+		sum += a[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function arrayIntWrite(a:Array):int {
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    a[i] = i;
-  }
+function arrayIntWrite(a:Array):int
+{
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		a[i] = i;
+	}
 
-  return a[n - 1];
+	return a[n - 1];
 }
 
-function arrayIntRmw(a:Array):int {
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    a[i] += 3;
-  }
+function arrayIntRmw(a:Array):int
+{
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		a[i] += 3;
+	}
 
-  return a[n - 1];
+	return a[n - 1];
 }
 
-function arrayIntPushPop(a:Array):int {
-  var sum:int = 0;
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    a.push(i);
-  }
+function arrayIntPushPop(a:Array):int
+{
+	var sum:int = 0;
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		a.push(i);
+	}
 
-  for (var j:int = 0; j < n; j++) {
-    sum += a.pop();
-  }
+	for (var j:int = 0; j < n; j++)
+	{
+		sum += a.pop();
+	}
 
-  return sum;
+	return sum;
 }
 
-function arrayNumberRead(a:Array):Number {
-  var sum:Number = 0;
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += a[i];
-  }
+function arrayNumberRead(a:Array):Number
+{
+	var sum:Number = 0;
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += a[i];
+	}
 
-  return sum;
+	return sum;
 }
 
-function arrayNumberWrite(a:Array):Number {
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    a[i] = i + 0.25;
-  }
+function arrayNumberWrite(a:Array):Number
+{
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		a[i] = i + 0.25;
+	}
 
-  return a[n - 1];
+	return a[n - 1];
 }
 
-function arrayNumberRmw(a:Array):Number {
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    a[i] += 0.5;
-  }
+function arrayNumberRmw(a:Array):Number
+{
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		a[i] += 0.5;
+	}
 
-  return a[n - 1];
+	return a[n - 1];
 }
 
-function arrayStringRead(a:Array):int {
-  var sum:int = 0;
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    sum += a[i].length;
-  }
+function arrayStringRead(a:Array):int
+{
+	var sum:int = 0;
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		sum += a[i].length;
+	}
 
-  return sum;
+	return sum;
 }
 
-function arrayObjectRead(a:Array):int {
-  var found:int = 0;
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    if (a[i] === marker) {
-      found++;
-    }
-  }
+function arrayObjectRead(a:Array):int
+{
+	var found:int = 0;
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		if (a[i] === marker)
+		{
+			found++;
+		}
+	}
 
-  return found;
+	return found;
 }
 
-function arrayObjectWrite(a:Array):int {
-  var o:Object = marker;
-  var n:int = a.length;
-  for (var i:int = 0; i < n; i++) {
-    a[i] = o;
-  }
+function arrayObjectWrite(a:Array):int
+{
+	var o:Object = marker;
+	var n:int = a.length;
+	for (var i:int = 0; i < n; i++)
+	{
+		a[i] = o;
+	}
 
-  return a[n - 1] === marker ? 1 : 0;
+	return a[n - 1] === marker ? 1 : 0;
 }
 
 var checksum:Number = 0;
 
-function bench(name:String, rounds:int, f:Function, x:*):void {
-  trace(name, f(x));
-  for (var warm:int = 0; warm < rounds / 10; warm++) {
-    checksum += f(x);
-  }
+function bench(name:String, rounds:int, f:Function, x:*):void
+{
+	trace(name, f(x));
+	for (var warm:int = 0; warm < rounds / 10; warm++)
+	{
+		checksum += f(x);
+	}
 
-  var started:Number = new Date().time;
-  for (var j:int = 0; j < rounds; j++) {
-    checksum += f(x);
-  }
+	var started:Number = new Date().time;
+	for (var j:int = 0; j < rounds; j++)
+	{
+		checksum += f(x);
+	}
 
-  trace("time:", name, new Date().time - started);
+	trace("time:", name, new Date().time - started);
 }
 
 bench("int-read", 6000, intRead, ints);

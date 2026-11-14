@@ -3,66 +3,82 @@
 // does, and codegen writes JavaScript's own operators for them; those typed
 // XML, XMLList, QName, Namespace, Object or * compare by content or convert,
 // through the runtime.
-interface IShape {
+interface IShape
+{
 }
 
-class Shape implements IShape {
-  public var next:Shape;
+class Shape implements IShape
+{
+	public var next:Shape;
 }
 
-class Square extends Shape {
+class Square extends Shape
+{
 }
 
-class Other {
+class Other
+{
 }
 
-function same(a:Shape, b:Shape):Array {
-  return [a == b, a != b, a === b, a !== b];
+function same(a:Shape, b:Shape):Array
+{
+	return [a == b, a != b, a === b, a !== b];
 }
 
-function mixed(a:Shape, b:Square, c:IShape, d:Other):Array {
-  return [a == b, b == a, a == c, c == a, a == d, c == null, null == c, a == null];
+function mixed(a:Shape, b:Square, c:IShape, d:Other):Array
+{
+	return [a == b, b == a, a == c, c == a, a == d, c == null, null == c, a == null];
 }
 
-function walk(first:Shape, wanted:Shape):int {
-  var n:int = 0;
-  for (var s:Shape = first; s != null; s = s.next) {
-    if (s == wanted) {
-      return n;
-    }
+function walk(first:Shape, wanted:Shape):int
+{
+	var n:int = 0;
+	for (var s:Shape = first; s != null; s = s.next)
+	{
+		if (s == wanted)
+		{
+			return n;
+		}
 
-    n++;
-  }
+		n++;
+	}
 
-  return -1;
+	return -1;
 }
 
-function classes(a:Class, b:Class):Array {
-  return [a == b, a === b, a != null];
+function classes(a:Class, b:Class):Array
+{
+	return [a == b, a === b, a != null];
 }
 
-function dates(a:Date, b:Date, s:String, o:Object):Array {
-  return [a == b, a === b, a == s, s == a, a == o, o == a, a == null];
+function dates(a:Date, b:Date, s:String, o:Object):Array
+{
+	return [a == b, a === b, a == s, s == a, a == o, o == a, a == null];
 }
 
-function xmls(a:XML, b:XML, l:XMLList, s:Shape):Array {
-  return [a == b, a === b, a == l, l == a, a == s, a == null, l == null];
+function xmls(a:XML, b:XML, l:XMLList, s:Shape):Array
+{
+	return [a == b, a === b, a == l, l == a, a == s, a == null, l == null];
 }
 
-function names(a:QName, b:QName, n:Namespace, m:Namespace):Array {
-  return [a == b, a === b, n == m, n === m, a == null, n == null];
+function names(a:QName, b:QName, n:Namespace, m:Namespace):Array
+{
+	return [a == b, a === b, n == m, n === m, a == null, n == null];
 }
 
-function functions(f:Function, g:Function):Array {
-  return [f == g, f === g, f == null];
+function functions(f:Function, g:Function):Array
+{
+	return [f == g, f === g, f == null];
 }
 
-function untyped(a:*, b:Object, s:Shape):Array {
-  return [a == s, s == a, b == s, s == b, a == null, a === undefined];
+function untyped(a:*, b:Object, s:Shape):Array
+{
+	return [a == s, s == a, b == s, s == b, a == null, a === undefined];
 }
 
-function arrays(a:Array, b:Array, v:Vector.<int>, w:Vector.<int>):Array {
-  return [a == b, a === b, v == w, v === w, a == null];
+function arrays(a:Array, b:Array, v:Vector.<int>, w:Vector.<int>):Array
+{
+	return [a == b, a === b, v == w, v === w, a == null];
 }
 
 var x:Shape = new Shape();
@@ -87,8 +103,12 @@ trace(names(new QName("u", "n"), new QName("u", "n"), new Namespace("p", "u"), n
 trace(names(new QName("u", "n"), new QName("v", "n"), new Namespace("u"), new Namespace("v")));
 trace(names(null, null, null, null));
 
-var f:Function = function():void {};
-trace(functions(f, f), functions(f, function():void {}), functions(null, null));
+var f:Function = function():void
+{
+};
+trace(functions(f, f), functions(f, function():void
+		{
+		}), functions(null, null));
 trace(functions(x.toString, x.toString), functions(trace, trace));
 trace(untyped(x, x, x), untyped(undefined, null, null), untyped(null, undefined, x), untyped("s", "s", x));
 

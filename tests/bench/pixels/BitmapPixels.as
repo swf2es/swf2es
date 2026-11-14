@@ -19,59 +19,69 @@ var big:ByteArray = new ByteArray();
 var little:ByteArray = new ByteArray();
 little.endian = Endian.LITTLE_ENDIAN;
 var vector:Vector.<uint> = new Vector.<uint>(W * H, true);
-for (var k:int = 0; k < W * H; k++) {
-  // Every alpha, some clear: a transparent bitmap premultiplies each.
-  var argb:uint = ((k * 7) & 0xff) << 24 | (k * 2654435761) & 0xffffff;
-  big.writeUnsignedInt(argb);
-  little.writeUnsignedInt(argb);
-  vector[k] = argb;
+for (var k:int = 0; k < W * H; k++)
+{
+	// Every alpha, some clear: a transparent bitmap premultiplies each.
+	var argb:uint = ((k * 7) & 0xff) << 24 | (k * 2654435761) & 0xffffff;
+	big.writeUnsignedInt(argb);
+	little.writeUnsignedInt(argb);
+	vector[k] = argb;
 }
 
-function sample(bd:BitmapData):Number {
-  return bd.getPixel32(1, 0) + bd.getPixel32(W - 1, H / 2) + bd.getPixel32(W / 3, H - 1);
+function sample(bd:BitmapData):Number
+{
+	return bd.getPixel32(1, 0) + bd.getPixel32(W - 1, H / 2) + bd.getPixel32(W / 3, H - 1);
 }
 
-function setBig(bd:BitmapData):Number {
-  big.position = 0;
-  bd.setPixels(rect, big);
-  return big.position + sample(bd);
+function setBig(bd:BitmapData):Number
+{
+	big.position = 0;
+	bd.setPixels(rect, big);
+	return big.position + sample(bd);
 }
 
-function setLittle(bd:BitmapData):Number {
-  little.position = 0;
-  bd.setPixels(rect, little);
-  return little.position + sample(bd);
+function setLittle(bd:BitmapData):Number
+{
+	little.position = 0;
+	bd.setPixels(rect, little);
+	return little.position + sample(bd);
 }
 
-function setVector(bd:BitmapData):Number {
-  bd.setVector(rect, vector);
-  return sample(bd);
+function setVector(bd:BitmapData):Number
+{
+	bd.setVector(rect, vector);
+	return sample(bd);
 }
 
-function getPixels(bd:BitmapData):Number {
-  var bytes:ByteArray = bd.getPixels(rect);
-  return bytes.length + bytes[5] + bytes[bytes.length - 3];
+function getPixels(bd:BitmapData):Number
+{
+	var bytes:ByteArray = bd.getPixels(rect);
+	return bytes.length + bytes[5] + bytes[bytes.length - 3];
 }
 
-function getVector(bd:BitmapData):Number {
-  var v:Vector.<uint> = bd.getVector(rect);
-  return v.length + v[1] + v[v.length - 1];
+function getVector(bd:BitmapData):Number
+{
+	var v:Vector.<uint> = bd.getVector(rect);
+	return v.length + v[1] + v[v.length - 1];
 }
 
 var checksum:Number = 0;
 
-function bench(name:String, rounds:int, f:Function, x:*):void {
-  trace(name, f(x));
-  for (var warm:int = 0; warm < rounds / 10; warm++) {
-    checksum += f(x);
-  }
+function bench(name:String, rounds:int, f:Function, x:*):void
+{
+	trace(name, f(x));
+	for (var warm:int = 0; warm < rounds / 10; warm++)
+	{
+		checksum += f(x);
+	}
 
-  var started:Number = new Date().time;
-  for (var j:int = 0; j < rounds; j++) {
-    checksum += f(x);
-  }
+	var started:Number = new Date().time;
+	for (var j:int = 0; j < rounds; j++)
+	{
+		checksum += f(x);
+	}
 
-  trace("time:", name, new Date().time - started);
+	trace("time:", name, new Date().time - started);
 }
 
 bench("setPixels-opaque", 100, setBig, opaque);

@@ -1,19 +1,33 @@
 // A class declared before the interfaces it implements, in one script:
 // its class is made first, and its interfaces are its all the same, and
 // its subclasses', for is, as and a coercion to them.
-package {
-  public class Impl implements Later, Middle {
-    public function f():String { return "f"; }
-    public function g():String { return "g"; }
-  }
-  public class Sub extends Impl {}
-  public interface Later {
-    function f():String;
-  }
-  public interface Middle extends Base {
-    function g():String;
-  }
-  public interface Base {}
+package
+{
+	public class Impl implements Later, Middle
+	{
+		public function f():String
+		{
+			return "f";
+		}
+		public function g():String
+		{
+			return "g";
+		}
+	}
+	public class Sub extends Impl
+	{
+	}
+	public interface Later
+	{
+		function f():String;
+	}
+	public interface Middle extends Base
+	{
+		function g():String;
+	}
+	public interface Base
+	{
+	}
 }
 var i:Impl = new Impl();
 var s:Sub = new Sub();

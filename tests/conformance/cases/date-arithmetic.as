@@ -2,8 +2,9 @@
 // clip the time, years below 100 (negative ones too) are 1900's, a year
 // out of a 32-bit int's range wraps, and a setter changes only the fields
 // it is given, a NaN among them, used or not, making the time NaN.
-function show(d:Date):void {
-  trace(d.getTime(), isNaN(d.getTime()) ? "" : d.getUTCFullYear() + "-" + d.getUTCMonth() + "-" + d.getUTCDate());
+function show(d:Date):void
+{
+	trace(d.getTime(), isNaN(d.getTime()) ? "" : d.getUTCFullYear() + "-" + d.getUTCMonth() + "-" + d.getUTCDate());
 }
 show(new Date(-1, 0));
 show(new Date(99.5, 0));

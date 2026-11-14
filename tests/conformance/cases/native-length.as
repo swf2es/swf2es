@@ -13,5 +13,7 @@ trace("exec", /a/.exec.length);
 trace("indexOf", "abc".indexOf.length);
 trace("String", String.length);
 
-function two(a:int, c:int = 1):void {}
+function two(a:int, c:int = 1):void
+{
+}
 trace("two", two.length);

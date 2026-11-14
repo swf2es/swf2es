@@ -278,7 +278,11 @@ test("a module imported into two sibling domains is two modules, each its domain
     new URL("../../player/scripts/Loads.as.template", import.meta.url),
     "utf8",
   );
-  const decoder = decode.slice(decode.indexOf("    /** Base64"), decode.lastIndexOf("  }\n}"));
+  // From the decoder's comment to the class's closing brace, however the script is indented.
+  const decoder = decode.slice(
+    decode.lastIndexOf("\n", decode.indexOf("/** Base64")) + 1,
+    decode.lastIndexOf("}", decode.lastIndexOf("}") - 1),
+  );
   const parent = `package {
     import flash.display.Loader;
     import flash.display.Sprite;

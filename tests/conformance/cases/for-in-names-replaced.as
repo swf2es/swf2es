@@ -3,28 +3,33 @@
 // it is when the walk gets there.
 import flash.utils.Dictionary;
 
-dynamic class Dynamic {
-  public var fixed:int = 7;
+dynamic class Dynamic
+{
+	public var fixed:int = 7;
 }
 
-function names(x:*):String {
-  var seen:Array = [];
-  for (var k:* in x) {
-    seen.push(String(k));
-  }
+function names(x:*):String
+{
+	var seen:Array = [];
+	for (var k:* in x)
+	{
+		seen.push(String(k));
+	}
 
-  seen.sort();
-  return seen.join(",");
+	seen.sort();
+	return seen.join(",");
 }
 
-function values(x:*):String {
-  var seen:Array = [];
-  for each (var v:* in x) {
-    seen.push(String(v));
-  }
+function values(x:*):String
+{
+	var seen:Array = [];
+	for each (var v:* in x)
+	{
+		seen.push(String(v));
+	}
 
-  seen.sort();
-  return seen.join(",");
+	seen.sort();
+	return seen.join(",");
 }
 
 var o:Object = {a: 1, b: 2};
@@ -43,8 +48,9 @@ o.f = 6;
 trace("hidden, deleted, added", names(o), values(o));
 
 var big:Object = {};
-for (var i:int = 0; i < 40; i++) {
-  big["n" + i] = i;
+for (var i:int = 0; i < 40; i++)
+{
+	big["n" + i] = i;
 }
 
 names(big);
@@ -72,11 +78,13 @@ trace("dynamic class", names(dynamicObject), values(dynamicObject));
 // Each value as it is when the walk gets there.
 var w:Object = {p: 1, q: 1, r: 1};
 var seen:Array = [];
-for each (var v:* in w) {
-  seen.push(v);
-  for (var k:* in w) {
-    w[k] = 10;
-  }
+for each (var v:* in w)
+{
+	seen.push(v);
+	for (var k:* in w)
+	{
+		w[k] = 10;
+	}
 }
 
 seen.sort(Array.NUMERIC);
@@ -84,13 +92,16 @@ trace("values changed during the walk", seen.join(","));
 
 var gone:Object = {p: 1, q: 2, r: 3};
 var count:int = 0;
-for each (var g:* in gone) {
-  count++;
-  for (var k2:* in gone) {
-    if (gone[k2] !== g) {
-      delete gone[k2];
-    }
-  }
+for each (var g:* in gone)
+{
+	count++;
+	for (var k2:* in gone)
+	{
+		if (gone[k2] !== g)
+		{
+			delete gone[k2];
+		}
+	}
 }
 
 trace("others deleted during the walk", count, names(gone).split(",").length);

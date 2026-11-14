@@ -1,7 +1,10 @@
 // A class whose script throws, as it runs, the error of looking up an
 // invalid Vector (scripts/Definitions.as).
-package {
-  public class Indirect {}
+package
+{
+	public class Indirect
+	{
+	}
 }
 
 import flash.system.ApplicationDomain;

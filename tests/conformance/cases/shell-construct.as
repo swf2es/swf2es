@@ -1,28 +1,52 @@
 // How avmshell's native classes limit their construction: abstract ones
 // only through a subclass, restricted ones not through a subclass from
 // another ABC, or what extends that; native ones not from AS3 at all.
-package {
-  import avmshell.AbstractBase;
-  public class FromAbstract extends AbstractBase {}
+package
+{
+	import avmshell.AbstractBase;
+	public class FromAbstract extends AbstractBase
+	{
+	}
 }
-package {
-  import avmshell.RestrictedBase;
-  public class FromRestricted extends RestrictedBase {}
+package
+{
+	import avmshell.RestrictedBase;
+	public class FromRestricted extends RestrictedBase
+	{
+	}
 }
-package {
-  public class FromFromRestricted extends FromRestricted {}
+package
+{
+	public class FromFromRestricted extends FromRestricted
+	{
+	}
 }
-package {
-  import avmshell.SubclassOfRestrictedBase;
-  public class FromShellChild extends SubclassOfRestrictedBase {}
+package
+{
+	import avmshell.SubclassOfRestrictedBase;
+	public class FromShellChild extends SubclassOfRestrictedBase
+	{
+	}
 }
-package {
-  import avmshell.AbstractRestrictedBase;
-  public class FromAbstractRestricted extends AbstractRestrictedBase {}
+package
+{
+	import avmshell.AbstractRestrictedBase;
+	public class FromAbstractRestricted extends AbstractRestrictedBase
+	{
+	}
 }
 import avmshell.*;
-function make(name:String, cls:Class):void {
-  try { new cls(); trace(name, "made"); } catch (e:Error) { trace(name, e); }
+function make(name:String, cls:Class):void
+{
+	try
+	{
+		new cls();
+		trace(name, "made");
+	}
+	catch (e:Error)
+	{
+		trace(name, e);
+	}
 }
 make("abstract", AbstractBase);
 make("abstract's subclass", FromAbstract);

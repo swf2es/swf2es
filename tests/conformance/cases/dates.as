@@ -1,9 +1,10 @@
 // Dates: Date.parse and new Date(string) as avmplus' own parser reads,
 // the formats toString writes, a few others, and what it refuses; the
 // fields, UTC and local (the oracle runs in UTC), and the constructor.
-function show(s:String):void {
-  var t:Number = Date.parse(s);
-  trace("[" + s + "]", t, isNaN(t) ? "" : new Date(t).toUTCString());
+function show(s:String):void
+{
+	var t:Number = Date.parse(s);
+	trace("[" + s + "]", t, isNaN(t) ? "" : new Date(t).toUTCString());
 }
 show("Thu Jan 1 00:00:00 GMT+0000 1970");
 show("Mon Jan 1 00:00:00 GMT-0800 1900");
@@ -37,7 +38,11 @@ show(new Date(123456789000).toUTCString());
 show(new Date(0).toDateString());
 show(new Date(0).toLocaleString());
 trace(new Date("Jan 2 1970 UTC").time, new Date("nonsense").time);
-var v:Object = { valueOf: function():* { return "Jan 2 1970"; } };
+var v:Object = {valueOf: function():*
+	{
+		return "Jan 2 1970";
+	}
+};
 trace(new Date(v).time);
 var d:Date = new Date(2004, 8, 12, 11, 11, 11, 500);
 trace(d.time, d.fullYear, d.month, d.date, d.day, d.hours, d.minutes, d.seconds, d.milliseconds);

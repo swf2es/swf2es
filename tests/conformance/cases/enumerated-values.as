@@ -1,41 +1,74 @@
 // Reading enumerated values still respects native hooks, inherited indices and subclasses.
-package {
-  public dynamic class EnumeratedArray extends Array {
-    override public function get length():uint {
-      trace("subclass length");
-      return 2;
-    }
-  }
+package
+{
+	public dynamic class EnumeratedArray extends Array
+	{
+		override public function get length():uint
+		{
+			trace("subclass length");
+			return 2;
+		}
+	}
 }
-package {
-  public dynamic class EnumeratedObject {
-    public function get bound():String { return "getter"; }
-  }
+package
+{
+	public dynamic class EnumeratedObject
+	{
+		public function get bound():String
+		{
+			return "getter";
+		}
+	}
 }
-package {
-  import flash.utils.Proxy;
-  import flash.utils.flash_proxy;
-  public dynamic class EnumeratedProxy extends Proxy {
-    override flash_proxy function nextNameIndex(i:int):int { return i < 2 ? i + 1 : 0; }
-    override flash_proxy function nextName(i:int):String { return "key" + i; }
-    override flash_proxy function nextValue(i:int):* { return "value" + i; }
-    override flash_proxy function getProperty(name:*):* { return "get:" + String(name); }
-    override flash_proxy function hasProperty(name:*):Boolean { return String(name) == "key1"; }
-  }
+package
+{
+	import flash.utils.Proxy;
+	import flash.utils.flash_proxy;
+	public dynamic class EnumeratedProxy extends Proxy
+	{
+		override flash_proxy function nextNameIndex(i:int):int
+		{
+			return i < 2 ? i + 1 : 0;
+		}
+		override flash_proxy function nextName(i:int):String
+		{
+			return "key" + i;
+		}
+		override flash_proxy function nextValue(i:int):*
+		{
+			return "value" + i;
+		}
+		override flash_proxy function getProperty(name:*):*
+		{
+			return "get:" + String(name);
+		}
+		override flash_proxy function hasProperty(name:*):Boolean
+		{
+			return String(name) == "key1";
+		}
+	}
 }
 
 import flash.utils.ByteArray;
 import flash.utils.Dictionary;
 
-function values(o:*):String {
-  var out:Array = [];
-  for each (var value:* in o) { out.push(String(value)); }
-  return out.sort().join("|");
+function values(o:*):String
+{
+	var out:Array = [];
+	for each (var value:* in o)
+	{
+		out.push(String(value));
+	}
+	return out.sort().join("|");
 }
-function pairs(o:*):String {
-  var out:Array = [];
-  for (var name:* in o) { out.push(String(name) + ":" + String(o[name])); }
-  return out.sort().join("|");
+function pairs(o:*):String
+{
+	var out:Array = [];
+	for (var name:* in o)
+	{
+		out.push(String(name) + ":" + String(o[name]));
+	}
+	return out.sort().join("|");
 }
 
 var dense:Array = [10, null, undefined, 40];
@@ -74,7 +107,11 @@ delete EnumeratedObject.prototype.inherited;
 var proxy:* = new EnumeratedProxy();
 trace("proxy", values(proxy), pairs(proxy), 0 in proxy);
 var dictionary:Dictionary = new Dictionary();
-var key:Object = {toString: function():String { return "object-key"; }};
+var key:Object = {toString: function():String
+	{
+		return "object-key";
+	}
+};
 dictionary[key] = "object-value";
 dictionary["text"] = "string-value";
 dictionary[0] = "number-value";
@@ -93,20 +130,26 @@ trace("xmllist", values(xml.v), pairs(xml.v));
 
 var changing:Array = [1, 2, 3];
 var seen:Array = [];
-for each (var v:* in changing) {
-  seen.push(v);
-  if (v === 1) {
-    delete changing[1];
-    changing[2] = 30;
-  }
+for each (var v:* in changing)
+{
+	seen.push(v);
+	if (v === 1)
+	{
+		delete changing[1];
+		changing[2] = 30;
+	}
 }
 trace("delete array", seen, changing.length);
 var changingObject:Object = {only: "original"};
 var nested:Array = [];
-for each (var outer:* in changingObject) {
-  delete changingObject.only;
-  changingObject.only = "new";
-  for each (var inner:* in changingObject) { nested.push(inner); }
-  nested.push(outer);
+for each (var outer:* in changingObject)
+{
+	delete changingObject.only;
+	changingObject.only = "new";
+	for each (var inner:* in changingObject)
+	{
+		nested.push(inner);
+	}
+	nested.push(outer);
 }
 trace("delete object", nested);

@@ -15,16 +15,29 @@ delete obj.prop;
 obj.prop = 2;
 trace("deleted and set", obj.propertyIsEnumerable("prop"));
 var keys:Array = [];
-for (var k:String in obj) { keys.push(k); }
+for (var k:String in obj)
+{
+	keys.push(k);
+}
 trace("keys", keys);
-function argprops():* { return arguments.callee; }
+function argprops():*
+{
+	return arguments.callee;
+}
 var fvar:Function = argprops;
 trace("callee", argprops() === argprops, fvar() === argprops, typeof argprops());
-function enumArgs():String {
-  var s:String = "";
-  for (var k:* in arguments) { s += k + ";"; }
-  return s + "|" + arguments.hasOwnProperty("callee") + "|" + arguments.propertyIsEnumerable("callee") + "|" + arguments.length + "|" + (arguments.callee === enumArgs);
+function enumArgs():String
+{
+	var s:String = "";
+	for (var k:* in arguments)
+	{
+		s += k + ";";
+	}
+	return s + "|" + arguments.hasOwnProperty("callee") + "|" + arguments.propertyIsEnumerable("callee") + "|" + arguments.length + "|" + (arguments.callee === enumArgs);
 }
 trace("arguments", enumArgs(1, 2));
-var anon:Function = function():* { return arguments.callee; };
+var anon:Function = function():*
+{
+	return arguments.callee;
+};
 trace("anon", anon() === anon, anon() === anon());

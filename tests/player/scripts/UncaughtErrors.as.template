@@ -2,299 +2,451 @@
 // of the LoaderInfo of the SWF whose code the player called, then, for a
 // loaded SWF, its Loader's and those of the SWF the Loader is shown in.
 // Every one is prevented, so that the player reports none itself.
-package {
-  import flash.display.Loader;
-  import flash.display.MovieClip;
-  import flash.display.Sprite;
-  import flash.events.ErrorEvent;
-  import flash.events.Event;
-  import flash.events.EventDispatcher;
-  import flash.events.IOErrorEvent;
-  import flash.events.TimerEvent;
-  import flash.events.UncaughtErrorEvent;
-  import flash.events.UncaughtErrorEvents;
-  import flash.net.URLLoader;
-  import flash.net.URLRequest;
-  import flash.system.ApplicationDomain;
-  import flash.system.LoaderContext;
-  import flash.utils.ByteArray;
-  import flash.utils.Dictionary;
-  import flash.utils.Timer;
-  import flash.utils.getQualifiedClassName;
-  import flash.utils.setTimeout;
+package
+{
+	import flash.display.Loader;
+	import flash.display.MovieClip;
+	import flash.display.Sprite;
+	import flash.events.ErrorEvent;
+	import flash.events.Event;
+	import flash.events.EventDispatcher;
+	import flash.events.IOErrorEvent;
+	import flash.events.TimerEvent;
+	import flash.events.UncaughtErrorEvent;
+	import flash.events.UncaughtErrorEvents;
+	import flash.net.URLLoader;
+	import flash.net.URLRequest;
+	import flash.system.ApplicationDomain;
+	import flash.system.LoaderContext;
+	import flash.utils.ByteArray;
+	import flash.utils.Dictionary;
+	import flash.utils.Timer;
+	import flash.utils.getQualifiedClassName;
+	import flash.utils.setTimeout;
 
-  public class Main extends MovieClip {
-    private static const INNER:String = "@@INNER@@";
-    private static const BAD:String = "@@BAD@@";
-    private var names:Dictionary = new Dictionary();
-    private var loader:Loader;
-    private var bad:Loader;
-    private var child:Object;
-    private var wait:int = 0;
-    private var mode:String = "";
-    private var steps:Array = [];
+	public class Main extends MovieClip
+	{
+		private static const INNER:String = "@@INNER@@";
+		private static const BAD:String = "@@BAD@@";
+		private var names:Dictionary = new Dictionary();
+		private var loader:Loader;
+		private var bad:Loader;
+		private var child:Object;
+		private var wait:int = 0;
+		private var mode:String = "";
+		private var steps:Array = [];
 
-    public function Main() {
-      var own:UncaughtErrorEvents = loaderInfo.uncaughtErrorEvents;
-      trace("the same at each ask", own == loaderInfo.uncaughtErrorEvents);
-      names[loaderInfo] = "main's LoaderInfo";
-      listen(own, "main's");
-      loader = new Loader();
-      names[loader] = "the Loader";
-      names[loader.contentLoaderInfo] = "the child's LoaderInfo";
-      trace("a Loader's are its LoaderInfo's", loader.uncaughtErrorEvents == loader.contentLoaderInfo.uncaughtErrorEvents);
-      listen(loader.contentLoaderInfo.uncaughtErrorEvents, "the child's");
-      listen(loader.uncaughtErrorEvents, "the Loader's");
-      loader.contentLoaderInfo.addEventListener(Event.INIT, function (e:Event):void {
-        child = loader.content;
-        plan();
-      });
-      loader.loadBytes(decode(INNER), context());
-      // A step every third frame: what one sets off, a timer too, is told before the next.
-      addEventListener(Event.ENTER_FRAME, function (e:Event):void {
-        if (steps.length && --wait <= 0) {
-          wait = 3;
-          var step:Array = steps.shift();
-          mode = "";
-          trace("-- " + step[0]);
-          step[1]();
-        }
-      });
-      addEventListener(Event.ENTER_FRAME, function (e:Event):void {
-        if (mode == "second") {
-          mode = "";
-          trace("the listener after it runs");
-        }
-      });
-    }
+		public function Main()
+		{
+			var own:UncaughtErrorEvents = loaderInfo.uncaughtErrorEvents;
+			trace("the same at each ask", own == loaderInfo.uncaughtErrorEvents);
+			names[loaderInfo] = "main's LoaderInfo";
+			listen(own, "main's");
+			loader = new Loader();
+			names[loader] = "the Loader";
+			names[loader.contentLoaderInfo] = "the child's LoaderInfo";
+			trace("a Loader's are its LoaderInfo's", loader.uncaughtErrorEvents == loader.contentLoaderInfo.uncaughtErrorEvents);
+			listen(loader.contentLoaderInfo.uncaughtErrorEvents, "the child's");
+			listen(loader.uncaughtErrorEvents, "the Loader's");
+			loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void
+				{
+					child = loader.content;
+					plan();
+				});
+			loader.loadBytes(decode(INNER), context());
+			// A step every third frame: what one sets off, a timer too, is told before the next.
+			addEventListener(Event.ENTER_FRAME, function(e:Event):void
+				{
+					if (steps.length && --wait <= 0)
+					{
+						wait = 3;
+						var step:Array = steps.shift();
+						mode = "";
+						trace("-- " + step[0]);
+						step[1]();
+					}
+				});
+			addEventListener(Event.ENTER_FRAME, function(e:Event):void
+				{
+					if (mode == "second")
+					{
+						mode = "";
+						trace("the listener after it runs");
+					}
+				});
+		}
 
-    private function context():LoaderContext {
-      var context:LoaderContext = new LoaderContext(false, new ApplicationDomain(ApplicationDomain.currentDomain));
-      context.allowCodeImport = true;
-      return context;
-    }
+		private function context():LoaderContext
+		{
+			var context:LoaderContext = new LoaderContext(false, new ApplicationDomain(ApplicationDomain.currentDomain));
+			context.allowCodeImport = true;
+			return context;
+		}
 
-    private function unheard(event:ErrorEvent, d:EventDispatcher = null):void {
-      trace("dispatchEvent returns", (d || new EventDispatcher()).dispatchEvent(event));
-    }
+		private function unheard(event:ErrorEvent, d:EventDispatcher = null):void
+		{
+			trace("dispatchEvent returns", (d || new EventDispatcher()).dispatchEvent(event));
+		}
 
-    private function plan():void {
-      steps.push(["an Error in an enterFrame listener", function ():void {
-        mode = "second";
-        throw new RangeError("main's enterFrame", 77);
-      }]);
-      steps.push(["a String", function ():void { throw "a string"; }]);
-      steps.push(["a Number", function ():void { throw 42; }]);
-      steps.push(["null", function ():void { throw null; }]);
-      steps.push(["undefined", function ():void { throw undefined; }]);
-      steps.push(["an Object", function ():void { throw {toString: function ():String { return "an object"; }}; }]);
-      steps.push(["an error of the player's", function ():void { var o:Object = null; o.x; }]);
-      steps.push(["an IOErrorEvent no listener hears", function ():void {
-        unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "unheard", 7));
-        trace("after the dispatch");
-      }]);
-      steps.push(["an ErrorEvent of a type of its own", function ():void {
-        unheard(new ErrorEvent("other", false, false, "other", 8));
-      }]);
-      steps.push(["an IOErrorEvent where another type is heard", function ():void {
-        var d:EventDispatcher = new EventDispatcher();
-        d.addEventListener("other", function (e:Event):void {});
-        unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "half heard", 7), d);
-      }]);
-      steps.push(["an UncaughtErrorEvent no listener hears", function ():void {
-        unheard(new UncaughtErrorEvent(UncaughtErrorEvent.UNCAUGHT_ERROR, true, true, "inner"));
-      }]);
-      steps.push(["IOErrorEvents a parent listens for", function ():void {
-        var sprite:Sprite = new Sprite();
-        addChild(sprite);
-        var heard:Function = function (e:Event):void { trace("main hears it, phase", e.eventPhase); };
-        addEventListener(IOErrorEvent.IO_ERROR, heard);
-        unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, true, false, "bubbling", 1), sprite);
-        // One that does not bubble reaches no listener, and is no error either.
-        unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "not bubbling", 2), sprite);
-        removeEventListener(IOErrorEvent.IO_ERROR, heard);
-        addEventListener(IOErrorEvent.IO_ERROR, heard, true);
-        unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "captured", 3), sprite);
-        removeEventListener(IOErrorEvent.IO_ERROR, heard, true);
-        // Nor one whose target listens in the capture phase alone.
-        sprite.addEventListener(IOErrorEvent.IO_ERROR, heard, true);
-        unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "capture at the target", 4), sprite);
-        removeChild(sprite);
-      }]);
-      steps.push(["a listener of a script's dispatch throws", function ():void {
-        var d:EventDispatcher = new EventDispatcher();
-        d.addEventListener("x", function (e:Event):void { throw new Error("in a script's dispatch"); });
-        d.addEventListener("x", function (e:Event):void { trace("the listener after it runs"); });
-        try {
-          trace("dispatchEvent returns", d.dispatchEvent(new Event("x")));
-        } catch (error:Error) {
-          trace("the dispatcher catches", error.message);
-        }
-      }]);
-      steps.push(["a listener of the uncaught error throws", function ():void {
-        mode = "throw";
-        throw new Error("first");
-      }]);
-      steps.push(["a Timer", function ():void {
-        var t:Timer = new Timer(1, 1);
-        t.addEventListener(TimerEvent.TIMER, function (e:Event):void { throw new Error("main's timer"); });
-        t.start();
-      }]);
-      steps.push(["setTimeout", function ():void {
-        setTimeout(function ():void { throw new Error("main's timeout"); }, 1);
-      }]);
-      steps.push(["a frame script", function ():void {
-        addFrameScript(currentFrame % totalFrames, function ():void {
-          addFrameScript(currentFrame - 1, null);
-          throw new Error("main's frame script");
-        });
-      }]);
-      steps.push(["the child's enterFrame listener, its Loader on no display list", function ():void {
-        child.later("enterFrame");
-      }]);
-      steps.push(["the child's Timer", function ():void { child.timer("timer"); }]);
-      steps.push(["the child's listener calls a function of main's that throws", function ():void {
-        child.later("", function ():void { throw new Error("main's function, called by the child"); });
-      }]);
-      steps.push(["main's listener calls a method of the child's that throws", function ():void {
-        child.fail("method, called by main");
-      }]);
-      steps.push(["the child dispatches an IOErrorEvent no listener hears", function ():void {
-        child.later("", function ():void { child.unheard(); });
-      }]);
-      steps.push(["main dispatches one, called by the child's listener", function ():void {
-        child.later("", function ():void {
-          unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "main's, called by the child", 7));
-        });
-      }]);
-      steps.push(["stopPropagation at the child's", function ():void {
-        mode = "stop the child's";
-        child.later("stopped");
-      }]);
-      steps.push(["stopImmediatePropagation at the child's", function ():void {
-        mode = "stop at once the child's";
-        child.later("stopped at once");
-      }]);
-      steps.push(["stopPropagation at the Loader's, capturing", function ():void {
-        mode = "stop the Loader's capturing";
-        child.later("stopped on the way down");
-      }]);
-      steps.push(["a child whose constructor throws", function ():void {
-        bad = new Loader();
-        names[bad] = "the bad Loader";
-        names[bad.contentLoaderInfo] = "the bad child's LoaderInfo";
-        listen(bad.contentLoaderInfo.uncaughtErrorEvents, "the bad child's");
-        listen(bad.uncaughtErrorEvents, "the bad Loader's");
-        bad.loadBytes(decode(BAD), context());
-      }]);
-      steps.push(["the Loader on the display list", function ():void {
-        addChild(loader);
-        // The display list itself hears nothing.
-        stage.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function (e:Event):void { trace("  the stage hears"); });
-        addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function (e:Event):void { trace("  the root hears"); }, true);
-        child.later("enterFrame");
-      }]);
-      steps.push(["stopPropagation at the Loader's", function ():void {
-        mode = "stop the Loader's";
-        child.later("stopped at the Loader");
-      }]);
-      steps.push(["a script dispatches one", function ():void {
-        mode = "full";
-        trace("returns", loaderInfo.uncaughtErrorEvents.dispatchEvent(
-          new UncaughtErrorEvent(UncaughtErrorEvent.UNCAUGHT_ERROR, true, true, "made by a script")));
-        trace("returns", loader.uncaughtErrorEvents.dispatchEvent(
-          new UncaughtErrorEvent(UncaughtErrorEvent.UNCAUGHT_ERROR, false, false, "made by a script")));
-        var e:UncaughtErrorEvent = new UncaughtErrorEvent();
-        trace(e.type, e.bubbles, e.cancelable, e.error, e.errorID, JSON.stringify(e.text), e);
-      }]);
-      steps.push(["a URLLoader's IOErrorEvent no listener hears", function ():void {
-        mode = "class";
-        new URLLoader().load(new URLRequest("missing-for-main.txt"));
-      }]);
-      steps.push(["the child's URLLoader's", function ():void {
-        mode = "class";
-        child.load();
-      }]);
-      steps.push(["done", function ():void {}]);
-    }
+		private function plan():void
+		{
+			steps.push(["an Error in an enterFrame listener", function():void
+					{
+						mode = "second";
+						throw new RangeError("main's enterFrame", 77);
+					}
+				]);
+			steps.push(["a String", function():void
+					{
+						throw "a string";
+					}
+				]);
+			steps.push(["a Number", function():void
+					{
+						throw 42;
+					}
+				]);
+			steps.push(["null", function():void
+					{
+						throw null;
+					}
+				]);
+			steps.push(["undefined", function():void
+					{
+						throw undefined;
+					}
+				]);
+			steps.push(["an Object", function():void
+					{
+						throw {toString: function():String
+							{
+								return "an object";
+							}
+						};
+					}
+				]);
+			steps.push(["an error of the player's", function():void
+					{
+						var o:Object = null;
+						o.x;
+					}
+				]);
+			steps.push(["an IOErrorEvent no listener hears", function():void
+					{
+						unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "unheard", 7));
+						trace("after the dispatch");
+					}
+				]);
+			steps.push(["an ErrorEvent of a type of its own", function():void
+					{
+						unheard(new ErrorEvent("other", false, false, "other", 8));
+					}
+				]);
+			steps.push(["an IOErrorEvent where another type is heard", function():void
+					{
+						var d:EventDispatcher = new EventDispatcher();
+						d.addEventListener("other", function(e:Event):void
+							{
+							});
+						unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "half heard", 7), d);
+					}
+				]);
+			steps.push(["an UncaughtErrorEvent no listener hears", function():void
+					{
+						unheard(new UncaughtErrorEvent(UncaughtErrorEvent.UNCAUGHT_ERROR, true, true, "inner"));
+					}
+				]);
+			steps.push(["IOErrorEvents a parent listens for", function():void
+					{
+						var sprite:Sprite = new Sprite();
+						addChild(sprite);
+						var heard:Function = function(e:Event):void
+						{
+							trace("main hears it, phase", e.eventPhase);
+						};
+						addEventListener(IOErrorEvent.IO_ERROR, heard);
+						unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, true, false, "bubbling", 1), sprite);
+						// One that does not bubble reaches no listener, and is no error either.
+						unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "not bubbling", 2), sprite);
+						removeEventListener(IOErrorEvent.IO_ERROR, heard);
+						addEventListener(IOErrorEvent.IO_ERROR, heard, true);
+						unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "captured", 3), sprite);
+						removeEventListener(IOErrorEvent.IO_ERROR, heard, true);
+						// Nor one whose target listens in the capture phase alone.
+						sprite.addEventListener(IOErrorEvent.IO_ERROR, heard, true);
+						unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "capture at the target", 4), sprite);
+						removeChild(sprite);
+					}
+				]);
+			steps.push(["a listener of a script's dispatch throws", function():void
+					{
+						var d:EventDispatcher = new EventDispatcher();
+						d.addEventListener("x", function(e:Event):void
+							{
+								throw new Error("in a script's dispatch");
+							});
+						d.addEventListener("x", function(e:Event):void
+							{
+								trace("the listener after it runs");
+							});
+						try
+						{
+							trace("dispatchEvent returns", d.dispatchEvent(new Event("x")));
+						}
+						catch (error:Error)
+						{
+							trace("the dispatcher catches", error.message);
+						}
+					}
+				]);
+			steps.push(["a listener of the uncaught error throws", function():void
+					{
+						mode = "throw";
+						throw new Error("first");
+					}
+				]);
+			steps.push(["a Timer", function():void
+					{
+						var t:Timer = new Timer(1, 1);
+						t.addEventListener(TimerEvent.TIMER, function(e:Event):void
+							{
+								throw new Error("main's timer");
+							});
+						t.start();
+					}
+				]);
+			steps.push(["setTimeout", function():void
+					{
+						setTimeout(function():void
+							{
+								throw new Error("main's timeout");
+							}, 1);
+					}
+				]);
+			steps.push(["a frame script", function():void
+					{
+						addFrameScript(currentFrame % totalFrames, function():void
+							{
+								addFrameScript(currentFrame - 1, null);
+								throw new Error("main's frame script");
+							});
+					}
+				]);
+			steps.push(["the child's enterFrame listener, its Loader on no display list", function():void
+					{
+						child.later("enterFrame");
+					}
+				]);
+			steps.push(["the child's Timer", function():void
+					{
+						child.timer("timer");
+					}
+				]);
+			steps.push(["the child's listener calls a function of main's that throws", function():void
+					{
+						child.later("", function():void
+							{
+								throw new Error("main's function, called by the child");
+							});
+					}
+				]);
+			steps.push(["main's listener calls a method of the child's that throws", function():void
+					{
+						child.fail("method, called by main");
+					}
+				]);
+			steps.push(["the child dispatches an IOErrorEvent no listener hears", function():void
+					{
+						child.later("", function():void
+							{
+								child.unheard();
+							});
+					}
+				]);
+			steps.push(["main dispatches one, called by the child's listener", function():void
+					{
+						child.later("", function():void
+							{
+								unheard(new IOErrorEvent(IOErrorEvent.IO_ERROR, false, false, "main's, called by the child", 7));
+							});
+					}
+				]);
+			steps.push(["stopPropagation at the child's", function():void
+					{
+						mode = "stop the child's";
+						child.later("stopped");
+					}
+				]);
+			steps.push(["stopImmediatePropagation at the child's", function():void
+					{
+						mode = "stop at once the child's";
+						child.later("stopped at once");
+					}
+				]);
+			steps.push(["stopPropagation at the Loader's, capturing", function():void
+					{
+						mode = "stop the Loader's capturing";
+						child.later("stopped on the way down");
+					}
+				]);
+			steps.push(["a child whose constructor throws", function():void
+					{
+						bad = new Loader();
+						names[bad] = "the bad Loader";
+						names[bad.contentLoaderInfo] = "the bad child's LoaderInfo";
+						listen(bad.contentLoaderInfo.uncaughtErrorEvents, "the bad child's");
+						listen(bad.uncaughtErrorEvents, "the bad Loader's");
+						bad.loadBytes(decode(BAD), context());
+					}
+				]);
+			steps.push(["the Loader on the display list", function():void
+					{
+						addChild(loader);
+						// The display list itself hears nothing.
+						stage.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function(e:Event):void
+							{
+								trace("  the stage hears");
+							});
+						addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function(e:Event):void
+							{
+								trace("  the root hears");
+							}, true);
+						child.later("enterFrame");
+					}
+				]);
+			steps.push(["stopPropagation at the Loader's", function():void
+					{
+						mode = "stop the Loader's";
+						child.later("stopped at the Loader");
+					}
+				]);
+			steps.push(["a script dispatches one", function():void
+					{
+						mode = "full";
+						trace("returns", loaderInfo.uncaughtErrorEvents.dispatchEvent(
+									new UncaughtErrorEvent(UncaughtErrorEvent.UNCAUGHT_ERROR, true, true, "made by a script")));
+						trace("returns", loader.uncaughtErrorEvents.dispatchEvent(
+									new UncaughtErrorEvent(UncaughtErrorEvent.UNCAUGHT_ERROR, false, false, "made by a script")));
+						var e:UncaughtErrorEvent = new UncaughtErrorEvent();
+						trace(e.type, e.bubbles, e.cancelable, e.error, e.errorID, JSON.stringify(e.text), e);
+					}
+				]);
+			steps.push(["a URLLoader's IOErrorEvent no listener hears", function():void
+					{
+						mode = "class";
+						new URLLoader().load(new URLRequest("missing-for-main.txt"));
+					}
+				]);
+			steps.push(["the child's URLLoader's", function():void
+					{
+						mode = "class";
+						child.load();
+					}
+				]);
+			steps.push(["done", function():void
+					{
+					}
+				]);
+		}
 
-    /** Listeners of `events` that tell what they hear, do what `mode` asks of them, and prevent the default. */
-    private function listen(events:EventDispatcher, name:String):void {
-      names[events] = name + " uncaughtErrorEvents";
-      events.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function (e:UncaughtErrorEvent):void {
-        trace("  " + name + ", capturing: " + describe(e));
-        if (mode == "stop " + name + " capturing") {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-      }, true);
-      events.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function (e:UncaughtErrorEvent):void {
-        trace("  " + name + ": " + describe(e));
-        if (mode == "stop " + name) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
+		/** Listeners of `events` that tell what they hear, do what `mode` asks of them, and prevent the default. */
+		private function listen(events:EventDispatcher, name:String):void
+		{
+			names[events] = name + " uncaughtErrorEvents";
+			events.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function(e:UncaughtErrorEvent):void
+				{
+					trace("  " + name + ", capturing: " + describe(e));
+					if (mode == "stop " + name + " capturing")
+					{
+						e.preventDefault();
+						e.stopPropagation();
+					}
+				}, true);
+			events.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function(e:UncaughtErrorEvent):void
+				{
+					trace("  " + name + ": " + describe(e));
+					if (mode == "stop " + name)
+					{
+						e.preventDefault();
+						e.stopPropagation();
+					}
 
-        if (mode == "stop at once " + name) {
-          e.preventDefault();
-          e.stopImmediatePropagation();
-        }
+					if (mode == "stop at once " + name)
+					{
+						e.preventDefault();
+						e.stopImmediatePropagation();
+					}
 
-        if (mode == "throw") {
-          trace("  it throws");
-          throw new Error("from the listener");
-        }
-      });
-      events.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function (e:UncaughtErrorEvent):void {
-        trace("  " + name + ", the listener after it" + (e.isDefaultPrevented() ? "" : ": prevents the default"));
-        e.preventDefault();
-      });
-    }
+					if (mode == "throw")
+					{
+						trace("  it throws");
+						throw new Error("from the listener");
+					}
+				});
+			events.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR, function(e:UncaughtErrorEvent):void
+				{
+					trace("  " + name + ", the listener after it" + (e.isDefaultPrevented() ? "" : ": prevents the default"));
+					e.preventDefault();
+				});
+		}
 
-    private function nameOf(o:Object):String {
-      return o == null ? "null" : names[o] || String(o);
-    }
+		private function nameOf(o:Object):String
+		{
+			return o == null ? "null" : names[o] || String(o);
+		}
 
-    private function describe(e:UncaughtErrorEvent):String {
-      var error:* = e.error;
-      var what:String;
-      if (mode == "class") {
-        what = getQualifiedClassName(error) + " " + error.errorID;
-      } else if (error is Error) {
-        what = getQualifiedClassName(error) + " " + (error as Error).name + " " + JSON.stringify((error as Error).message) + " " + (error as Error).errorID;
-      } else if (error is Event) {
-        what = String(error) + " whose target is " + nameOf(Event(error).target);
-      } else {
-        what = typeof error + " " + error;
-      }
+		private function describe(e:UncaughtErrorEvent):String
+		{
+			var error:* = e.error;
+			var what:String;
+			if (mode == "class")
+			{
+				what = getQualifiedClassName(error) + " " + error.errorID;
+			}
+			else if (error is Error)
+			{
+				what = getQualifiedClassName(error) + " " + (error as Error).name + " " + JSON.stringify((error as Error).message) + " " + (error as Error).errorID;
+			}
+			else if (error is Event)
+			{
+				what = String(error) + " whose target is " + nameOf(Event(error).target);
+			}
+			else
+			{
+				what = typeof error + " " + error;
+			}
 
-      return "target " + nameOf(e.target) + ", current target " + nameOf(e.currentTarget) + ", phase " + e.eventPhase
-        + (mode == "second" || mode == "full" ? ", bubbles " + e.bubbles + ", cancelable " + e.cancelable + ", errorID " + e.errorID
-          + ", text " + JSON.stringify(e.text) : "")
-        + ", prevented " + e.isDefaultPrevented() + ", error " + what;
-    }
+			return "target " + nameOf(e.target) + ", current target " + nameOf(e.currentTarget) + ", phase " + e.eventPhase
+				+ (mode == "second" || mode == "full" ? ", bubbles " + e.bubbles + ", cancelable " + e.cancelable + ", errorID " + e.errorID
+					+ ", text " + JSON.stringify(e.text) : "")
+				+ ", prevented " + e.isDefaultPrevented() + ", error " + what;
+		}
 
-    private static function decode(text:String):ByteArray {
-      const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      var out:ByteArray = new ByteArray();
-      var bits:int = 0;
-      var have:int = 0;
-      for (var i:int = 0; i < text.length; i++) {
-        var c:String = text.charAt(i);
-        if (c == "=") {
-          break;
-        }
+		private static function decode(text:String):ByteArray
+		{
+			const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			var out:ByteArray = new ByteArray();
+			var bits:int = 0;
+			var have:int = 0;
+			for (var i:int = 0; i < text.length; i++)
+			{
+				var c:String = text.charAt(i);
+				if (c == "=")
+				{
+					break;
+				}
 
-        bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
-        have += 6;
-        if (have >= 8) {
-          have -= 8;
-          out.writeByte((bits >> have) & 0xff);
-        }
-      }
+				bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
+				have += 6;
+				if (have >= 8)
+				{
+					have -= 8;
+					out.writeByte((bits >> have) & 0xff);
+				}
+			}
 
-      out.position = 0;
-      return out;
-    }
-  }
+			out.position = 0;
+			return out;
+		}
+	}
 }
