@@ -155,6 +155,29 @@ export function serials(): number {
   return made;
 }
 
+/**
+ * A change in the hit test state `d` changes where its buttons are hit:
+ * each not marked since pick `picks` is. Those let go of are dropped, into
+ * a new list, as a button's mark may come back here.
+ */
+function hitTestChanged(d: DisplayObject, picks: number): void {
+  const buttons = d.hitTestOf as WeakRef<ButtonObject>[];
+  let gone = false;
+  for (let i = 0; i < buttons.length; i++) {
+    const button = buttons[i].deref();
+    if (button === undefined) {
+      gone = true;
+    } else if (button.pickChangedAt !== picks) {
+      button.pickChanged(true);
+    }
+  }
+
+  if (gone) {
+    const kept = buttons.filter((b) => b.deref() !== undefined);
+    d.hitTestOf = kept.length > 0 ? kept : null;
+  }
+}
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
 
 /** What a leaf has to walk: one for all, as the frame's walks visit every object once or more a frame. */
@@ -406,6 +429,13 @@ export class DisplayObject {
   /** The buttons whose state it is, which the rounds walk it from too, its parent or not; null for none. */
   stateOf: ButtonObject[] | null = null;
   /**
+   * The buttons whose hit test state it is, AS3's or AVM1's, whose pick
+   * bounds take it in from no container: a change in it or under it marks
+   * theirs stale too (pickChanged); null for none. Weak, as a state shared
+   * by many buttons, or on the list, may outlive them.
+   */
+  hitTestOf: WeakRef<ButtonObject>[] | null = null;
+  /**
    * Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue
    * and `advances` its advanceDue, as an orphan; null for none.
    */
@@ -489,8 +519,9 @@ export class DisplayObject {
 
   /**
    * Mark the pick bounds above it stale, and its own unless `own` is false
-   * (input/hit-test.ts): an ancestor of one changed since the last pick is
-   * marked already.
+   * (input/hit-test.ts), and those of the buttons it or one above it is the
+   * hit test state of, and above them: one marked since the last pick has
+   * had all that marked already.
    */
   pickChanged(own: boolean): void {
     const picks = pickWork.picks;
@@ -499,9 +530,16 @@ export class DisplayObject {
       this.pickChangedAt = picks;
     }
 
+    if (this.hitTestOf !== null) {
+      hitTestChanged(this, picks);
+    }
+
     for (let p = this.parent; p && p.pickChangedAt !== picks; p = p.parent) {
       p.pickStale = true;
       p.pickChangedAt = picks;
+      if (p.hitTestOf !== null) {
+        hitTestChanged(p, picks);
+      }
     }
   }
 

@@ -327,9 +327,9 @@ function nearRect(r: Rect | null, x: number, y: number): boolean {
  * and its children draw, a scroll's rectangle in their place, and a
  * button's hit test state; masks are left out, which only take hits away.
  * Kept on `d` until a change in it or below it marks it stale
- * (invalidate), or its scroll changes. A
- * button's hit test state is in no container, so no change reaches its
- * button from it: a button, and all above it, are worked out each time.
+ * (invalidate), or its scroll changes. A button's hit test state is in no
+ * container, or in another: a change in it marks its buttons through
+ * hitTestOf (DisplayObject.pickChanged), as one in a child marks its parent.
  */
 function pickBounds(d: DisplayObject): Rect | null {
   if (!d.pickStale && d.pickScroll === d.scroll) {
@@ -351,14 +351,16 @@ function pickBounds(d: DisplayObject): Rect | null {
     extend(box, scroll ?? ownBounds(d, true), null);
     if (d instanceof ButtonObject) {
       const area = d.hitTestState;
-      stale = true;
       if (area && !scroll) {
         extend(box, pickBounds(area), area.placed);
+        // A 3D state's plane moves with what is above it, where it is on the list.
+        stale ||= area.pickStale || area.space !== null;
       }
     }
 
-    // A hitArea, wherever it is on the list, through the stage to here; as
-    // for a button's, no change to it reaches this sprite, measured each time.
+    // A hitArea, wherever it is on the list, through the stage to here:
+    // unlike a button's hit test state, it marks nothing when it changes,
+    // so it is measured each time.
     const area = hitAreas.get(d);
     if (area && area !== d) {
       stale = true;

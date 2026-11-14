@@ -99,9 +99,25 @@ export class ButtonObject extends Container {
   }
 
   set hitTestState(d: DisplayObject | null) {
+    // Where it is hit changes with its state, and what is under it, which marks it so (hitTestOf).
+    const old = this.hitTest;
+    if (old !== null && old !== d && old.hitTestOf !== null) {
+      const others = old.hitTestOf.filter((b) => {
+        const button = b.deref();
+        return button !== undefined && button !== this;
+      });
+      old.hitTestOf = others.length > 0 ? others : null;
+    }
+
+    if (d !== null && d !== old) {
+      const self = new WeakRef(this);
+      d.hitTestOf = d.hitTestOf === null ? [self] : [...d.hitTestOf, self];
+    }
+
     this.hitTest = d;
     // Where it is hit, which no change in the display list tells the pointer.
     pickWork.changes++;
+    this.pickChanged(true);
     this.statesChanged();
   }
 

@@ -6,6 +6,8 @@ package
 	import flash.display.Sprite;
 	import flash.events.Event;
 	import flash.events.MouseEvent;
+	import flash.geom.Rectangle;
+	import flash.text.TextField;
 
 	// Boxes "a" holding "a1", "b", "c" holding "c1" holding "c2", and a
 	// SimpleButton "btn": the stage traces the mouse events it hears, each
@@ -85,6 +87,29 @@ package
 					var r:Array = String(value).split(",");
 					o.graphics.beginFill(0x808080);
 					o.graphics.drawRect(r[0], r[1], r[2], r[3]);
+					break;
+				case "box":
+					var at:Array = String(value).split(",");
+					(key ? named[key] : this).addChild(box(name, at[0], at[1], at[2]));
+					break;
+				case "field":
+					var field:TextField = new TextField();
+					field.name = name;
+					field.autoSize = "left";
+					field.text = "a";
+					field.x = 0;
+					field.y = 200;
+					named[name] = field;
+					field.addEventListener("rollOver", heard);
+					field.addEventListener("rollOut", heard);
+					addChild(field);
+					break;
+				case "mask":
+					o.mask = key ? named[key] : null;
+					break;
+				case "scroll":
+					var s:Array = String(value).split(",");
+					o.scrollRect = value ? new Rectangle(s[0], s[1], s[2], s[3]) : null;
 					break;
 			}
 		}
