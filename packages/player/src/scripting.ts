@@ -1390,8 +1390,8 @@ export class Scripting {
    * but for the clips not due as they walk and not listed always
    * (MovieClip.listedAlways), and queueAll's run, each of
    * those left out shown to run nothing, so that the round is the one a
-   * walk of all would be. queueDue walks first, as lists made by queueAll
-   * would have it walk them in place of the children it walks without.
+   * walk of all would be. queueDue walks first, settling the marks as
+   * the unchecked round does, before queueAll's walk, which reads none.
    */
   private checkedRound(
     queue: (MovieClip | null)[],

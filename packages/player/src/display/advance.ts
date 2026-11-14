@@ -368,7 +368,7 @@ const UNORPHANED = 5;
  */
 class AdvancePhase implements AdvanceWatch {
   /** Its walk's number, which a clip it listed has as its listedFor. */
-  pass = 0;
+  private pass = 0;
   /** Whether a clip left out, made before the walk, came to advance. */
   late = false;
   /** Whether the clips have been found again since. */

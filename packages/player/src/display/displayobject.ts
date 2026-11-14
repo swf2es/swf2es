@@ -68,8 +68,8 @@ export const BUTTON = 2;
  * round of frame scripts (Scripting.frameScriptRound) walks to reach it, its
  * parents and the buttons it is a state of, up to a clip or button marked
  * already, whose own were marked with it. A container of no frames is
- * climbed through even when marked: the walks pass it by in their lists, and
- * leave its mark be.
+ * climbed through even when marked: a walk of a button being made passes
+ * it by in its list, and leaves its mark be.
  */
 export function markScriptsDue(o: DisplayObject): void {
   for (let p: DisplayObject | null = o; p !== null; p = p.parent) {
