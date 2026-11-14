@@ -10,6 +10,7 @@ import { defineElement } from "./element.js";
 // SWFs out for.
 export { filtersGreyOutFiles } from "@swf2es/player";
 export { AirApp, type AirAppFile, openAirApp } from "./air.js";
+export { parseColor, parseFlashVars, scriptAccess } from "./attributes.js";
 export {
   type Configuration,
   configuration,
@@ -17,15 +18,7 @@ export {
   type SocketProxy,
   type WindowFullScreen,
 } from "./config.js";
-export {
-  defineElement,
-  parseColor,
-  parseFlashVars,
-  Swf2esPlayerElement,
-  type SwfSource,
-  scriptAccess,
-  TAG,
-} from "./element.js";
+export { defineElement, Swf2esPlayerElement, type SwfSource, TAG } from "./element.js";
 export { ExternalInterfaceError, type PageValue } from "./external.js";
 export { type Placement, place, type ScaleMode, scaleMode } from "./layout.js";
 export { flashAttributes, isFlash, replaceFlash, watchFlash } from "./replace.js";

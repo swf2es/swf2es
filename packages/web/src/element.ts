@@ -1,13 +1,11 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
-import { definesInput, isAs3, readActions, readSwf, type Swf, tags } from "@swf2es/format";
+import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   type AirApplication,
   Avm1,
   type ExternalInterfaceHost,
-  type FetchRequest,
-  type FetchResult,
   type FileSystemHost,
   type FullScreenHost,
   Player,
@@ -18,19 +16,21 @@ import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
 import { type AirFiles, airFiles } from "./air-files.js";
 import { type AirItems, airItems } from "./air-items.js";
+import { cssLength, parseColor, parseFlashVars, quality, scriptAccess } from "./attributes.js";
 import {
   codegenForPlayer,
   configuration,
   moduleCacheOptions,
   playerLibraries,
   socketHost,
-  workerHostForPlayer,
 } from "./config.js";
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
+import { fetchFor, fetchMovie } from "./fetching.js";
 import { scaleMode } from "./layout.js";
 import { type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
 import { UncaughtReports } from "./uncaught.js";
+import { namesWorkers, READY_WAIT, workersOrNone } from "./workers.js";
 
 export const TAG = "swf2es-player";
 
@@ -68,7 +68,7 @@ const connected = (e: HTMLElement): boolean => Boolean(dom?.isConnected?.call(e)
 const idOf = (e: HTMLElement): string => String(dom?.id?.call(e) ?? "");
 
 /** What one load holds, let go of all at once when the next load or destroy comes. */
-interface Session {
+export interface Session {
   scripting: Scripting | null;
   player: Player | null;
   playback: Playback | null;
@@ -123,196 +123,6 @@ function deferred(): Deferred {
     },
   };
   return d;
-}
-
-/** "550" is pixels, as an <embed>'s width is; "100%" and other CSS lengths are themselves. */
-function cssLength(value: string | null): string | null {
-  if (value === null || value.trim() === "") {
-    return null;
-  }
-
-  return /^\s*\d+(\.\d+)?\s*$/.test(value) ? `${Number(value)}px` : value.trim();
-}
-
-/** A colour as Flash's bgcolor gives it, "#RRGGBB" or "RRGGBB"; null for none or another form. */
-export function parseColor(value: string | null): number | null {
-  const hex = /^\s*#?([0-9a-f]{6})\s*$/i.exec(value ?? "")?.[1];
-  return hex ? Number.parseInt(hex, 16) : null;
-}
-
-/** FlashVars, "name=value&...", URL-encoded, as Flash read them. */
-export function parseFlashVars(value: string | null): Record<string, string> {
-  const vars: Record<string, string> = {};
-  for (const [name, text] of new URLSearchParams(value ?? "")) {
-    vars[name] = text;
-  }
-
-  return vars;
-}
-
-/**
- * Whether a SWF from `swfUrl` may script its page, by allowScriptAccess as
- * Flash read it: "always", "never", or by default "sameDomain", the SWF's
- * origin the page's.
- */
-export function scriptAccess(value: string | null, swfUrl: string, pageUrl: string): boolean {
-  switch (value?.toLowerCase()) {
-    case "always":
-      return true;
-    case "never":
-      return false;
-    default:
-      try {
-        const origin = new URL(swfUrl, pageUrl).origin;
-        // An opaque origin ("null": data:, a sandboxed frame) is no one's domain, not even its own.
-        return origin !== "null" && origin === new URL(pageUrl).origin;
-      } catch {
-        return false;
-      }
-  }
-}
-
-/** The bytes of "WorkerDomain", the class a SWF's ActionScript names to start a worker. */
-const WORKER_DOMAIN = new TextEncoder().encode("WorkerDomain");
-
-/**
- * Whether a SWF's ActionScript names WorkerDomain, in its ABCs' strings:
- * one that does may start a worker and wait for it in the same script,
- * which only a Web Worker started ahead can answer.
- */
-export function namesWorkers(swf: Swf): boolean {
-  const bytes = swf.bytes;
-  const first = WORKER_DOMAIN[0];
-  for (const tag of swf.tags) {
-    if (tag.code !== tags.DoABC && tag.code !== tags.DoABC2) {
-      continue;
-    }
-
-    const end = tag.offset + tag.length - WORKER_DOMAIN.length;
-    for (let at = bytes.indexOf(first, tag.offset); at !== -1 && at <= end; ) {
-      let k = 1;
-      while (k < WORKER_DOMAIN.length && bytes[at + k] === WORKER_DOMAIN[k]) {
-        k++;
-      }
-
-      if (k === WORKER_DOMAIN.length) {
-        return true;
-      }
-
-      at = bytes.indexOf(first, at + 1);
-    }
-  }
-
-  return false;
-}
-
-/**
- * How long a SWF that names workers waits for the Web Workers started
- * ahead before its first frame: past it, it plays on, and a worker it
- * starts takes one still loading.
- */
-const READY_WAIT = 10_000;
-
-/** A player's Web Workers, or none where their module does not load, as under an import map that does not name it. */
-async function workersOrNone(ahead: boolean): Promise<WebWorkerHost | null> {
-  try {
-    return await workerHostForPlayer(ahead);
-  } catch (error) {
-    console.warn(`swf2es: workers are off, as their host did not load: ${error}`);
-    return null;
-  }
-}
-
-/** Flash's quality names; the auto ones as what they start at. */
-function quality(value: string | null): string {
-  const named = (value ?? "high").toUpperCase();
-  if (named === "AUTOLOW") {
-    return "LOW";
-  }
-
-  return ["LOW", "MEDIUM", "HIGH", "BEST"].includes(named) ? named : "HIGH";
-}
-
-/** The SWF at `url`, by the embedder's fetch where it gave one, and the URL a redirect took it to. */
-async function fetchMovie(
-  url: string,
-  signal: AbortSignal,
-): Promise<{ bytes: Uint8Array; url: string }> {
-  const fetchOf = configuration().fetch;
-  if (fetchOf) {
-    const result = await fetchOf(
-      { url, method: "GET", headers: [], body: null, purpose: "movie" },
-      signal,
-    );
-    if (!result.bytes) {
-      throw new Error(`swf2es: ${result.status} for ${url}`);
-    }
-
-    return { bytes: result.bytes, url: result.url ?? url };
-  }
-
-  const response = await fetch(url, { signal });
-  if (!response.ok) {
-    throw new Error(`swf2es: ${response.status} for ${url}`);
-  }
-
-  return { bytes: new Uint8Array(await response.arrayBuffer()), url: response.url || url };
-}
-
-/**
- * What a session's SWFs load by: its AIR application's files, then the
- * embedder's fetch or the browser's; `offline` (allowNetworking "none"),
- * nothing past the application's own files, which are no network.
- */
-function fetchFor(
-  session: Session,
-  offline: boolean,
-): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
-  const fetchOf: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> = offline
-    ? () => Promise.reject(new Error("allowNetworking is none"))
-    : (configuration().fetch ?? browserFetch);
-  const app = session.air?.app;
-  if (!app) {
-    return fetchOf;
-  }
-
-  return (request, signal) => {
-    const local = app.fetch(request, session.air?.files);
-    if (!local) {
-      return fetchOf(request, signal);
-    }
-
-    // A file the application does not hold, from the directory it came from: one the server
-    // has none of is a file that is not there, not its error's body.
-    const remote = local.bytes ? null : app.remote(request.url);
-    return remote
-      ? fetchOf({ ...request, url: remote, errorBody: false }, signal)
-      : Promise.resolve(local);
-  };
-}
-
-/** The host's fetch for what a SWF loads: the browser's, its status and headers as they come. */
-async function browserFetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
-  const response = await fetch(request.url, {
-    signal,
-    method: request.method,
-    headers: request.headers.map(([name, value]) => [name, value]),
-    body: request.body ? new Uint8Array(request.body).buffer : null,
-  });
-  const headers: [string, string][] = [];
-  response.headers.forEach((value, name) => {
-    headers.push([name, value]);
-  });
-
-  // An error's body only where it is asked for, as an AIR application's URLLoader reads it.
-  const read = response.ok || (!!request.errorBody && response.status >= 400);
-  return {
-    bytes: read ? new Uint8Array(await response.arrayBuffer()) : null,
-    status: response.status,
-    headers,
-    // Where a redirect took it: the SWF is judged and named by that.
-    ...(response.redirected ? { url: response.url } : {}),
-  };
 }
 
 /**
