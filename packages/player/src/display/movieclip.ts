@@ -6,7 +6,14 @@ import { BitmapObject } from "./bitmapobject.js";
 import { ButtonObject } from "./buttonobject.js";
 import { IDENTITY_COLOR } from "./color.js";
 import { Container } from "./container.js";
-import { CLIP, CONTENT, type DisplayObject, markScriptsDue, scriptWork } from "./displayobject.js";
+import {
+  CLIP,
+  CONTENT,
+  type DisplayObject,
+  markAdvanceDue,
+  markScriptsDue,
+  scriptWork,
+} from "./displayobject.js";
 import { construct, displayFor } from "./instantiate.js";
 import { cached, ShapeObject, StaleCache } from "./shapeobject.js";
 import { StaticTextObject, TextObject } from "./textobjects.js";
@@ -123,14 +130,8 @@ export class MovieClip extends Container {
   private making = false;
   private placedByTimeline = false;
   private running = true;
-  /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
-  stream: object | null = null;
-  /**
-   * Made by a script with `new`, or placed on the first frame of one that
-   * was as it was made: Flash has such a clip sit out the next frame's
-   * advance, wherever it is by then (`fresh-clips`).
-   */
-  fresh = false;
+  private playingStream: object | null = null;
+  private sitsOutNext = false;
   /**
    * The frame whose script last ran, so that entering a frame runs its
    * script once: set to currentFrame alone, as a round's skipping
@@ -169,6 +170,36 @@ export class MovieClip extends Container {
     this.kind = CLIP;
     this.timeline = timeline;
     this.library = library;
+    // Playing, of frames not yet known to the walk: its first walk settles it.
+    this.advanceDue = true;
+  }
+
+  /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
+  get stream(): object | null {
+    return this.playingStream;
+  }
+
+  set stream(stream: object | null) {
+    this.playingStream = stream;
+    if (stream && !this.advanceDue) {
+      markAdvanceDue(this);
+    }
+  }
+
+  /**
+   * Made by a script with `new`, or placed on the first frame of one that
+   * was as it was made: Flash has such a clip sit out the next frame's
+   * advance, wherever it is by then (`fresh-clips`).
+   */
+  get fresh(): boolean {
+    return this.sitsOutNext;
+  }
+
+  set fresh(fresh: boolean) {
+    this.sitsOutNext = fresh;
+    if (fresh && !this.advanceDue) {
+      markAdvanceDue(this);
+    }
   }
 
   /**
@@ -193,6 +224,7 @@ export class MovieClip extends Container {
     this.tailed = false;
     this.queuedGoto = null;
     this.invalidate(CONTENT);
+    markAdvanceDue(this);
   }
 
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */
@@ -206,6 +238,11 @@ export class MovieClip extends Container {
       scriptWork.changes++;
       if (frame !== this.scriptedFrame && !this.scriptsDue) {
         markScriptsDue(this);
+      }
+
+      // An AVM1 clip's tail turns on its frame (`advances`).
+      if (!this.advanceDue) {
+        markAdvanceDue(this);
       }
     }
   }
@@ -259,6 +296,10 @@ export class MovieClip extends Container {
     this.running = play;
     if (!play && this.stream) {
       this.library.sounds?.stopStream(this);
+    }
+
+    if (play && !this.advanceDue) {
+      markAdvanceDue(this);
     }
   }
 
@@ -687,8 +728,37 @@ export class MovieClip extends Container {
   }
 
   /**
+   * Whether advance() would do anything now, read from it case by case:
+   * sit out, an AVM1 clip's tail, a stopped one's stream, a frame or a loop.
+   * What it reads changes through the setters that mark the clip
+   * (markAdvanceDue) as it may come to be so, and a new timeline.
+   */
+  get advances(): boolean {
+    if (this.sitsOutNext) {
+      return true;
+    }
+
+    const timeline = this.timeline;
+    const total = timeline.frames.length;
+    if (!this.running) {
+      return !!this.playingStream;
+    }
+
+    if (this.frame >= total && this.library.avm1 && !(timeline.loops && total > 1)) {
+      return true;
+    }
+
+    if (total <= 1) {
+      return !!this.playingStream;
+    }
+
+    return this.frame < total || timeline.loops;
+  }
+
+  /**
    * On to the next frame, if it plays and has one. From the last frame it
    * loops to the first as a goto, so what the first frame placed stays.
+   * Its cases are `advances`', which must follow them.
    */
   advance(): void {
     if (this.fresh) {

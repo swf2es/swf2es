@@ -11,13 +11,18 @@ import { dispatchEvent, heard } from "./events.js";
 
 type AsObject = avm2.AsObject;
 
-/** An orphan: `due` is its display object's scriptsDue, kept here so that a round passes one by unread. */
+/**
+ * An orphan: `due` is its display object's scriptsDue and `advances` its
+ * advanceDue, kept here so that a round or the advance walk passes one by
+ * unread.
+ */
 interface Orphan {
   serial: number;
   ref: WeakRef<DisplayObject>;
   keep: boolean;
   since: number;
   due: boolean;
+  advances: boolean;
 }
 
 export class Lifecycle {
@@ -100,6 +105,8 @@ export class Lifecycle {
     }
 
     if (byTimeline && parent && display.timelineNamed) {
+      // Its getter or setter may be a script's.
+      this.s.advancing?.beforeScript();
       const name = avm2.qname(avm2.publicNs, display.name);
       if (this.s.rt.getProperty(parent, name) === display.object) {
         this.s.rt.setProperty(parent, name, null);
@@ -164,11 +171,13 @@ export class Lifecycle {
         keep,
         since: this.s.frames,
         due: display.scriptsDue,
+        advances: display.advanceDue,
       };
       this.orphans.set(serial, entry);
       display.orphanEntry = entry;
       this.sortedOrphans = null;
       scriptWork.changes++;
+      this.s.advancing?.orphaned(display);
     }
   }
 
@@ -200,9 +209,10 @@ export class Lifecycle {
 
   /**
    * Each orphan still there, newest first, to `f`, which must leave the
-   * orphans as they are; only those with scriptsDue, `due`.
+   * orphans as they are; only those with scriptsDue, `due`, or with
+   * advanceDue, `advances`.
    */
-  eachOrphanRoot(f: (display: DisplayObject) => void, due = false): void {
+  eachOrphanRoot(f: (display: DisplayObject) => void, due = false, advances = false): void {
     let sorted = this.sortedOrphans;
     if (!sorted) {
       sorted = [...this.orphans.values()];
@@ -211,7 +221,7 @@ export class Lifecycle {
     }
 
     for (let i = 0; i < sorted.length; i++) {
-      if (due && !sorted[i].due) {
+      if ((due && !sorted[i].due) || (advances && !sorted[i].advances)) {
         continue;
       }
 

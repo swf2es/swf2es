@@ -7,11 +7,12 @@ import {
   type ButtonRecord,
   type Place,
 } from "@swf2es/format";
-import { Container } from "./container.js";
+import { Container, childChanges } from "./container.js";
 import {
   BUTTON,
   CHILDREN,
   type DisplayObject,
+  markAdvanceDue,
   markScriptsDue,
   NO_CHILDREN,
   pickWork,
@@ -140,17 +141,23 @@ export class ButtonObject extends Container {
     }
 
     let due = false;
+    let advances = false;
     for (const state of states) {
       if (!this.linked.includes(state)) {
         state.stateOf = state.stateOf === null ? [this] : [...state.stateOf, this];
       }
 
       due ||= state.scriptsDue;
+      advances ||= state.advanceDue;
     }
 
     this.linked = states;
     if (due) {
       markScriptsDue(this);
+    }
+
+    if (advances) {
+      markAdvanceDue(this);
     }
   }
 
@@ -175,6 +182,18 @@ export class ButtonObject extends Container {
     const states = this.linked;
     for (let i = 0; i < states.length; i++) {
       if (states[i].scriptsDue) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Whether any of its states is marked for a clip whose advance does something (markAdvanceDue). */
+  get statesAdvance(): boolean {
+    const states = this.linked;
+    for (let i = 0; i < states.length; i++) {
+      if (states[i].advanceDue) {
         return true;
       }
     }
@@ -260,6 +279,7 @@ export class ButtonObject extends Container {
       }
 
       this.children.splice(0, 0, current);
+      childChanges.log?.changed(this, 0, current, null);
       this.puts++;
       current.parent = this;
       this.relist(current);
@@ -267,6 +287,10 @@ export class ButtonObject extends Container {
       scriptWork.changes++;
       if (current.scriptsDue) {
         markScriptsDue(this);
+      }
+
+      if (current.advanceDue) {
+        markAdvanceDue(this);
       }
     }
   }

@@ -246,6 +246,35 @@ about 560 to 5.2 ms. The checked build walks every round both
 ways, and fails unless the walk of what is marked lists the clips due in
 the whole walk's order and each of the others runs nothing in its turn.
 
+The walk that finds the clips to advance goes by marks too
+(`advanceDue`, display/advance.ts), as most clips' advance does nothing:
+stopped, or of one frame. A clip's advance does something when it is to
+sit the frame out (`fresh`), has a stream to stop, is an AVM1 clip to
+stop on its last frame, or plays and has a frame to go on to or loop to
+(`MovieClip.advances`, read from `advance` case by case). What makes a
+clip so marks it and everything the walk passes to reach it, with the
+stops `markScriptsDue` has: `fresh`, a stream, `playing` set, a new frame
+or timeline; a new clip is marked as it is made, and a child put under a
+container, or a state given to a button, carries its mark up. The walk
+lists the clips that advance, in the whole walk's order, passes by what
+is not marked, and leaves a mark only where such a clip is at or under it.
+It finds them before any advances, so that list is the whole walk's but
+for clips that would do nothing in their turn, unless something made
+them do something first. Another clip's advance changes only its own
+frame, stream and children, but a script may run among the advances: a
+listener of a child the timeline took off, a named child's property on
+its parent, or a class's first script as the timeline places its symbol.
+Scripting tells the walk first (`Scripting.advancing`), which then finds
+every clip again as the whole walk found them, the children changed
+since put back as they were and the orphans made since left out, and
+advances all those after the one advancing. In `walk-bench.ts
+--playing 10 --orphans 1000`, a tick went from 726 to 246 µs (median of
+three runs each), and the stage alone from 160 to 57. The checked build
+walks both ways every tick, fails unless the clips listed are the whole
+walk's that advance, in its order, advances them all, and fails if one
+left out does something before a script ran; where one ran, the clips
+found again must be the whole walk's.
+
 In a SWF of version 9 or earlier, a clip a script sends to a frame, by a
 goto from its frame script, its listener or another clip's, sits the next
 frame out with everything in it: none of them advances, and from the

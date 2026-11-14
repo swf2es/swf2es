@@ -2,9 +2,34 @@
 // is their index in AS3, and apart from it the children the timeline
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
-import { CHILDREN, DisplayObject, markScriptsDue, OTHER, scriptWork } from "./displayobject.js";
+import {
+  CHILDREN,
+  DisplayObject,
+  markAdvanceDue,
+  markScriptsDue,
+  OTHER,
+  scriptWork,
+} from "./displayobject.js";
 import type { Library } from "./timeline.js";
 import type { WalkList } from "./walk.js";
+
+/**
+ * What a change of a container's children is told to while a tick's
+ * advances run (display/advance.ts), which may have to know the children as
+ * they were when the frame's walk found its clips: an insertion at `index`,
+ * a removal from it, or, with both children, one put in another's place.
+ */
+export interface ChildChanges {
+  changed(
+    parent: Container,
+    index: number,
+    added: DisplayObject | null,
+    removed: DisplayObject | null,
+  ): void;
+}
+
+/** The ChildChanges told of each change, or null while none listens. */
+export const childChanges: { log: ChildChanges | null } = { log: null };
 
 export class Container extends DisplayObject {
   /** The library whose timeline this is, for what it tells of children going; a script's container has none. */
@@ -67,6 +92,7 @@ export class Container extends DisplayObject {
     child.depth = depth;
     child.parent = this;
     this.children.splice(index, 0, child);
+    childChanges.log?.changed(this, index, child, null);
     this.puts++;
     this.depths.set(depth, child);
     this.relist(child);
@@ -74,6 +100,10 @@ export class Container extends DisplayObject {
     scriptWork.changes++;
     if (child.scriptsDue) {
       markScriptsDue(this);
+    }
+
+    if (child.advanceDue) {
+      markAdvanceDue(this);
     }
   }
 
@@ -138,6 +168,7 @@ export class Container extends DisplayObject {
     }
 
     this.children.splice(index, 1);
+    childChanges.log?.changed(this, index, null, child);
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
@@ -152,13 +183,19 @@ export class Container extends DisplayObject {
     const same = child.parent === this;
     child.parent?.removeChild(child);
     child.parent = this;
-    this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    const at = same ? Math.min(index, this.children.length) : index;
+    this.children.splice(at, 0, child);
+    childChanges.log?.changed(this, at, child, null);
     this.puts++;
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
     if (child.scriptsDue) {
       markScriptsDue(this);
+    }
+
+    if (child.advanceDue) {
+      markAdvanceDue(this);
     }
   }
 
@@ -167,6 +204,8 @@ export class Container extends DisplayObject {
     const j = this.children.indexOf(b);
     this.children[i] = b;
     this.children[j] = a;
+    childChanges.log?.changed(this, i, b, a);
+    childChanges.log?.changed(this, j, a, b);
     this.relist(a);
     this.relist(b);
     this.invalidate(CHILDREN);

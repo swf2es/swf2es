@@ -92,6 +92,34 @@ export function markScriptsDue(o: DisplayObject): void {
   }
 }
 
+/**
+ * Mark `o` as having a clip at or under it whose advance may do something
+ * (MovieClip.advances): it and everything the frame's advance walk
+ * (display/advance.ts) passes to reach it, as markScriptsDue marks for the
+ * rounds of frame scripts, and with the same stops: up to a clip or button
+ * marked already, through a container of no frames, marked or not.
+ */
+export function markAdvanceDue(o: DisplayObject): void {
+  for (let p: DisplayObject | null = o; p !== null; p = p.parent) {
+    if (p.advanceDue && p.kind !== OTHER) {
+      return;
+    }
+
+    p.advanceDue = true;
+    const entry = p.orphanEntry;
+    if (entry !== null) {
+      entry.advances = true;
+    }
+
+    const buttons = p.stateOf;
+    if (buttons !== null) {
+      for (let i = 0; i < buttons.length; i++) {
+        markAdvanceDue(buttons[i]);
+      }
+    }
+  }
+}
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
 
 /** What a leaf has to walk: one for all, as the frame's walks visit every object once or more a frame. */
@@ -334,10 +362,19 @@ export class DisplayObject {
    * and takes the marks of what it walks off but for the clips still due.
    */
   scriptsDue = false;
+  /**
+   * Whether a clip whose advance does something may be at or under it, on
+   * the frame's advance walk (display/advance.ts): marked by markAdvanceDue
+   * as such a clip comes to be, and taken off by the walk where none is.
+   */
+  advanceDue = false;
   /** The buttons whose state it is, which the rounds walk it from too, its parent or not; null for none. */
   stateOf: ButtonObject[] | null = null;
-  /** Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue as an orphan; null for none. */
-  orphanEntry: { due: boolean } | null = null;
+  /**
+   * Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue
+   * and `advances` its advanceDue, as an orphan; null for none.
+   */
+  orphanEntry: { due: boolean; advances: boolean } | null = null;
 
   private weakRef: WeakRef<this> | null = null;
 

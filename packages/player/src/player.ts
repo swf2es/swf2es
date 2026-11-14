@@ -9,17 +9,8 @@ import { Avm1Keyboard } from "./avm1/keyboard.js";
 import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import { drawKernelFrame, drawKernelLetGo, drawKernelUsed } from "./bitmap/kernel.js";
-import {
-  BUTTON,
-  type ButtonObject,
-  CLIP,
-  Container,
-  type DisplayObject,
-  MovieClip,
-  OTHER,
-  unloads,
-  walkList,
-} from "./display/display.js";
+import { AdvanceWalk, walkChecks } from "./display/advance.js";
+import { Container, MovieClip, unloads } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
 import { settleFits } from "./display/textobjects.js";
 import { type Library, readLibrary } from "./display/timeline.js";
@@ -382,7 +373,8 @@ export class Player {
   /** Frames played. */
   private played = 0;
   /** The clips a tick advances, kept: the whole display list's, every frame. Null while in use. */
-  private ticking: (MovieClip | null)[] | null = [];
+  /** The frame's advances (display/advance.ts). */
+  private readonly advances = new AdvanceWalk();
 
   /**
    * A count that moves whenever what the player shows may have changed: a
@@ -631,8 +623,10 @@ export class Player {
    * The next frame: every clip advances, those on the display list, parents
    * before children, loaded SWFs' too, and the orphans a script took off it,
    * which play on; all of them, found first, so that one a parent's frame
-   * takes off still has its frame, as in Flash. Then the frame's scripts.
-   * A batch defers rendering until its last frame has played.
+   * takes off still has its frame, as in Flash; those whose advance does
+   * something, which the others would not change (display/advance.ts).
+   * Then the frame's scripts. A batch defers rendering until its last
+   * frame has played.
    */
   tick(render = true): void {
     this.applyActive();
@@ -649,63 +643,9 @@ export class Player {
       return;
     }
 
-    this.scripting?.timers.beginFrame(1000 / this.frameRate);
-    const clips = this.ticking ?? [];
-    this.ticking = null;
-    let count = 0;
-    const frames = this.scripting?.frames;
-    // One a goto made sit this frame out takes all in it along.
-    const sitsOut = (clip: MovieClip) => clip.skipsAfter >= 0 && clip.skipsAfter === frames;
-    const collect = (o: DisplayObject) => {
-      if (o.kind === CLIP && sitsOut(o as MovieClip)) {
-        return;
-      }
-
-      // The clips under a container from the list it keeps (walkList); a button's states all
-      // play, whichever it shows, walked as they are.
-      if (o instanceof Container && o.kind !== BUTTON) {
-        const { items, ends } = walkList(o);
-        for (let i = 0; i < items.length; ) {
-          const item = items[i];
-          if (item.kind === BUTTON) {
-            collect(item);
-          } else if (sitsOut(item as MovieClip)) {
-            i = ends[i];
-            continue;
-          } else {
-            clips[count++] = item as MovieClip;
-          }
-
-          i++;
-        }
-
-        return;
-      }
-
-      if (o.kind === CLIP) {
-        clips[count++] = o as MovieClip;
-      }
-
-      const children = o.kind === BUTTON ? (o as ButtonObject).playingStates() : o.frameChildren;
-      for (let i = 0; i < children.length; i++) {
-        const child = children[i];
-        if (child.kind !== OTHER || child.frameChildren.length !== 0) {
-          collect(child);
-        }
-      }
-    };
-    collect(this.stage);
-    this.scripting?.lifecycle.eachOrphanRoot(collect);
-
-    // Let go of once advanced, so that the kept list holds none past the tick.
-    try {
-      for (let i = 0; i < count; i++) {
-        (clips[i] as MovieClip).advance();
-      }
-    } finally {
-      clips.fill(null, 0, count);
-      this.ticking = clips;
-    }
+    const scripting = this.scripting;
+    scripting?.timers.beginFrame(1000 / this.frameRate);
+    this.advances.run(this.stage, scripting, scripting?.frames ?? -1, walkChecks.on);
 
     if (this.scripting) {
       this.scripting.frame(this.stage, true, render);
