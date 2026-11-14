@@ -3,6 +3,7 @@
 // once it listens, the descriptor, and the window's bounds, title and
 // state. What the traces expect is what adl traced for the same scripts.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -90,40 +91,7 @@ function window(bounds: WindowBounds, title: string) {
   };
 }
 
-const INVOKE = `package {
-  import flash.desktop.NativeApplication;
-  import flash.display.Sprite;
-  import flash.events.Event;
-  import flash.events.InvokeEvent;
-
-  public class Invoke extends Sprite {
-    public function Invoke() {
-      var app:NativeApplication = NativeApplication.nativeApplication;
-      trace("ctor: adding");
-      app.addEventListener(InvokeEvent.INVOKE, function(i:InvokeEvent):void {
-        trace("invoke A", i.target == app, i.currentTarget == app, i.eventPhase, i.bubbles, i.cancelable, i.arguments.join("|"), i.reason);
-      });
-      trace("ctor: added");
-      app.addEventListener(InvokeEvent.INVOKE, function(i:InvokeEvent):void {
-        trace("invoke B");
-      });
-      trace("ctor: added B");
-      var frames:int = 0;
-      addEventListener(Event.ENTER_FRAME, function(e:Event):void {
-        frames++;
-        trace("frame", frames);
-        if (frames == 2) {
-          trace("frame 2: adding C");
-          app.addEventListener(InvokeEvent.INVOKE, function(i:InvokeEvent):void { trace("invoke C"); });
-          trace("frame 2: added C");
-          app.dispatchEvent(new InvokeEvent(InvokeEvent.INVOKE, false, false, null, ["manual"]));
-          trace("frame 2: dispatched manual");
-        }
-      });
-    }
-  }
-}
-`;
+const INVOKE = readFileSync(new URL("./Invoke.as", import.meta.url), "utf8");
 
 test("the launch reaches each invoke listener once it listens, as adl hands it out", {
   skip,
@@ -157,35 +125,7 @@ test("the launch reaches each invoke listener once it listens, as adl hands it o
   ]);
 });
 
-const FACTS = `package {
-  import flash.desktop.NativeApplication;
-  import flash.display.NativeWindow;
-  import flash.display.Sprite;
-  import flash.geom.Point;
-
-  public class Facts extends Sprite {
-    public function Facts() {
-      var a:NativeApplication = NativeApplication.nativeApplication;
-      trace("app", a.runtimeVersion, a.runtimePatchLevel, a.applicationID, "[" + a.publisherID + "]", a.autoExit, a.idleThreshold, a.systemIdleMode, a.executeInBackground, a.menu);
-      try {
-        trace(a.startAtLogin);
-      } catch (e:Error) {
-        trace("startAtLogin", e.errorID);
-      }
-      var w:NativeWindow = stage.nativeWindow;
-      trace("windows", a.openedWindows.length, a.openedWindows[0] == w, a.activeWindow == w);
-      trace("descriptor", a.applicationDescriptor.name(), a.applicationDescriptor.children().length());
-      trace("window", w.width, w.height, w.x, w.y, w.title, w.displayState, w.active, w.visible, w.closed, w.stage == stage);
-      trace("chrome", w.systemChrome, w.transparent, w.type, w.minimizable, w.maximizable, w.resizable, w.alwaysInFront, w.menu);
-      trace("screen", w.globalToScreen(new Point(10, 20)));
-      w.title = "Changed";
-      w.width = 420;
-      trace("after set", w.title, w.width, w.height, w.bounds);
-      a.exit(3);
-    }
-  }
-}
-`;
+const FACTS = readFileSync(new URL("./Facts.as", import.meta.url), "utf8");
 
 test("the application and its window are the host's, as adl reports its own", {
   skip,
