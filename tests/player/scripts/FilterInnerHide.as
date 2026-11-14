@@ -30,11 +30,14 @@ package
 			hidden.applyFilter(src, src.rect, new Point(), new DropShadowFilter(5, 103, 0, 1, 20, 20, 1, 1, true, false, true));
 			const knocked:BitmapData = new BitmapData(100, 60, true, 0);
 			knocked.applyFilter(src, src.rect, new Point(), new DropShadowFilter(5, 103, 0, 1, 20, 20, 1, 1, true, true, false));
+			// Both at once.
+			const both:BitmapData = new BitmapData(100, 60, true, 0);
+			both.applyFilter(src, src.rect, new Point(), new DropShadowFilter(5, 103, 0, 1, 20, 20, 1, 1, true, true, true));
 			const points:Array = [[2, 2], [50, 30], [98, 58], [50, 3]];
 			for (var k:int = 0; k < points.length; k++)
 			{
 				const p:Array = points[k];
-				trace("at", p, "hidden", hidden.getPixel32(p[0], p[1]).toString(16), "knocked out", knocked.getPixel32(p[0], p[1]).toString(16));
+				trace("at", p, "hidden", hidden.getPixel32(p[0], p[1]).toString(16), "knocked out", knocked.getPixel32(p[0], p[1]).toString(16), "both", both.getPixel32(p[0], p[1]).toString(16));
 			}
 		}
 
