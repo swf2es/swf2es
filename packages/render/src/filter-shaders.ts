@@ -312,7 +312,7 @@ export const CONVOLUTION = `in vec2 vTextureCoord;
 out vec4 finalColor;
 uniform sampler2D uTexture;
 uniform highp vec4 uInputSize;
-uniform vec4 uMatrix[57];
+uniform highp sampler2D uWeights;
 uniform vec2 uSize;
 uniform vec4 uBox;
 uniform vec4 uEdge;
@@ -342,10 +342,10 @@ void main(void) {
   int cols = int(uSize.x);
   int count = cols * int(uSize.y);
   vec4 sum = vec4(0.0);
-  // One loop, its index alone indexing the weights, as GLSL ES 1 allows.
   for (int k = 0; k < 225; k++) {
     if (k >= count) { break; }
-    float w = dot(uMatrix[k / 4], vec4(equal(vec4(float(k - k / 4 * 4)), vec4(0.0, 1.0, 2.0, 3.0))));
+    // From a texture: a uniform array indexed so is what hung Intel's GPUs in other programs.
+    float w = texelFetch(uWeights, ivec2(k, 0), 0).r;
     if (w != 0.0) {
       int j = k / cols;
       vec2 at = vec2(float(k - j * cols), float(j)) - reach;
