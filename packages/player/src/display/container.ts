@@ -73,6 +73,7 @@ export class Container extends DisplayObject {
     }
 
     child.depth = depth;
+    advancing.watch?.parent(child, child.parent);
     child.parent = this;
     this.children.splice(index, 0, child);
     advancing.watch?.children(this, index, child, null);
@@ -167,6 +168,7 @@ export class Container extends DisplayObject {
   addChildAt(child: DisplayObject, index: number): void {
     const same = child.parent === this;
     child.parent?.removeChild(child);
+    advancing.watch?.parent(child, child.parent);
     child.parent = this;
     const at = same ? Math.min(index, this.children.length) : index;
     this.children.splice(at, 0, child);
