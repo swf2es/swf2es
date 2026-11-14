@@ -7,11 +7,14 @@ WebGL2 context exclusively. It does not share GL state or resources with the
 display list's renderer.
 
 The WebGL entry re-exports the context owner from `webgl/context.ts`. That owner
-keeps resource maps, byte accounting, bindings and draw/present ordering together.
-`buffers.ts` and `textures.ts` handle uploads; `programs.ts` handles shader linking
-and uniform locations; `targets.ts` handles framebuffer allocation and resolves. Limits
-and render-state constants live beside those modules. These are internal splits;
-the package entries and ownership contracts stay the same.
+keeps resource maps, byte accounting, bindings, state and draws together.
+`buffers.ts` creates buffers and handles their uploads, and `textures.ts` texture
+uploads; `programs.ts` handles shader linking and uniform locations; `targets.ts`
+handles framebuffer allocation and resolves; `back-buffer.ts` configures the back
+buffer, resolves and presents it, and `readback.ts` reads it back. Limits and
+render-state constants live beside those modules. These are internal splits, the
+moved parts functions over the context: the package entries and ownership contracts
+stay the same.
 
 This package does not enable Stage3D playback. The separate
 `@swf2es/player/context3d` entry installs the Flash bindings, and

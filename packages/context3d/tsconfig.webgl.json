@@ -5,7 +5,8 @@
     "outDir": "dist/webgl",
     "tsBuildInfoFile": "dist/webgl/.tsbuildinfo",
     "types": [],
-    "lib": ["ES2022", "DOM"]
+    "lib": ["ES2022", "DOM"],
+    "stripInternal": true
   },
   "include": ["src/webgl"],
   "references": [

@@ -7,7 +7,6 @@ import {
   type CullFace,
   compressedFormat,
   FRAGMENT_CONSTANTS,
-  MOST_BACK_BUFFER,
   MOST_CUBE,
   type Profile,
   type Program3D,
@@ -36,12 +35,8 @@ import { GlState } from "../device/state.js";
 import { blockBytes, type DxtEncoder } from "../dxt.js";
 import { Context3DError } from "../errors.js";
 
-import {
-  type BufferState,
-  uploadBuffer,
-  uploadBufferBytes,
-  type VertexBinding,
-} from "./buffers.js";
+import { configureBackBuffer, presentBackBuffer, unconfigureBackBuffer } from "./back-buffer.js";
+import { allocateBuffer, type BufferState, type VertexBinding } from "./buffers.js";
 import { resourceLimits, type WebGLContext3DLimits } from "./limits.js";
 import {
   type CopyProgram,
@@ -49,6 +44,7 @@ import {
   type ProgramState,
   uploadProgram,
 } from "./programs.js";
+import { readBackBuffer } from "./readback.js";
 import {
   BLEND_FUNCTIONS,
   DEPTH_FUNCTIONS,
@@ -118,26 +114,38 @@ function constants(registers: number): Constants {
   };
 }
 
-/** An owned WebGL2 context, deliberately independent of the 2D renderer. */
+/**
+ * An owned WebGL2 context, deliberately independent of the 2D renderer. Its members that are
+ * neither private nor Context3D's are for back-buffer.ts, buffers.ts and readback.ts, which
+ * hold parts of it as functions over it.
+ */
 export class WebGLContext3D implements Context3D {
   readonly gl: WebGL2RenderingContext;
-  private readonly drawState: GlState;
+  /** @internal */
+  readonly drawState: GlState;
   width = 0;
   height = 0;
   /**
    * The back buffer's storage: its size, or less where the GPU allows less. The SWF still
    * sees the size it asked for, drawn at this one and stretched to it when presented.
    */
-  private drawnWidth = 0;
-  private drawnHeight = 0;
-  private gpuMost: Int32Array | null = null;
+  /** @internal */
+  drawnWidth = 0;
+  /** @internal */
+  drawnHeight = 0;
+  /** @internal */
+  gpuMost: Int32Array | null = null;
   disposed = false;
   samplerFormats = true;
   profile: Profile = "baseline";
-  private readonly buffers = new Map<Buffer3D, BufferState>();
-  private vertexBuffers = 0;
-  private bufferBytes = 0;
-  private vertexBufferBytes = 0;
+  /** @internal */
+  readonly buffers = new Map<Buffer3D, BufferState>();
+  /** @internal */
+  vertexBuffers = 0;
+  /** @internal */
+  bufferBytes = 0;
+  /** @internal */
+  vertexBufferBytes = 0;
   private readonly programs = new Map<Program3D, ProgramState>();
   private readonly textures = new Map<Texture3D, TextureState>();
   private readonly textureCounts = new Float64Array(3);
@@ -149,7 +157,8 @@ export class WebGLContext3D implements Context3D {
   private copy2D: CopyProgram | null = null;
   private copyCube: CopyProgram | null = null;
   private readonly targetSamples = new Int8Array(10).fill(-1);
-  private renderTexture: Texture3D | null = null;
+  /** @internal */
+  renderTexture: Texture3D | null = null;
   private renderDepth = false;
   private renderFace = 0;
   /** Colour outputs 1 to 3, drawn into with renderTexture, and their cube faces. */
@@ -167,20 +176,31 @@ export class WebGLContext3D implements Context3D {
   private anisotropy: EXT_texture_filter_anisotropic | null | undefined;
   private s3tc: WEBGL_compressed_texture_s3tc | null | undefined;
   private maxAnisotropy = 1;
-  private readonly vertices: (VertexBinding | null)[] = new Array(VERTEX_SLOTS).fill(null);
+  /** @internal */
+  readonly vertices: (VertexBinding | null)[] = new Array(VERTEX_SLOTS).fill(null);
   private enabledAttributes = 0;
-  private indexBuffer: WebGLBuffer | null = null;
-  private readonly texturesApplied = new Uint8Array(SAMPLER_SLOTS);
+  /** @internal */
+  indexBuffer: WebGLBuffer | null = null;
+  /** @internal */
+  readonly texturesApplied = new Uint8Array(SAMPLER_SLOTS);
   private selected: Program3D | null = null;
-  private framebuffer: WebGLFramebuffer | null = null;
-  private texture: WebGLTexture | null = null;
-  private resolveFramebuffer: WebGLFramebuffer | null = null;
-  private colorBuffer: WebGLRenderbuffer | null = null;
-  private resolveDirty = false;
-  private depthBuffer: WebGLRenderbuffer | null = null;
-  private antiAlias = 0;
+  /** @internal */
+  framebuffer: WebGLFramebuffer | null = null;
+  /** @internal */
+  texture: WebGLTexture | null = null;
+  /** @internal */
+  resolveFramebuffer: WebGLFramebuffer | null = null;
+  /** @internal */
+  colorBuffer: WebGLRenderbuffer | null = null;
+  /** @internal */
+  resolveDirty = false;
+  /** @internal */
+  depthBuffer: WebGLRenderbuffer | null = null;
+  /** @internal */
+  antiAlias = 0;
   /** The back buffer's pixels to a CSS pixel and to a scissor rectangle's unit. */
-  private scale = 1;
+  /** @internal */
+  scale = 1;
   private depthWrite = true;
   private depthCompare: CompareMode = "less";
   private blendEnabled = false;
@@ -194,7 +214,8 @@ export class WebGLContext3D implements Context3D {
   private stencilReference = 0;
   private stencilRead = 255;
   private stencilWrite = 255;
-  private scissor = false;
+  /** @internal */
+  scissor = false;
   private scissorLeft = 0;
   private scissorTop = 0;
   private scissorRight = 0;
@@ -202,10 +223,14 @@ export class WebGLContext3D implements Context3D {
   private scissorOutside = false;
   private readonly vertexConstants = constants(VERTEX_CONSTANTS);
   private readonly fragmentConstants = constants(FRAGMENT_CONSTANTS);
-  private pixels = new Uint8Array(0);
-  private topDown = new Uint8Array(0);
-  private readonly vao: WebGLVertexArrayObject;
-  private readonly limits: Readonly<WebGLContext3DLimits>;
+  /** @internal */
+  pixels = new Uint8Array(0);
+  /** @internal */
+  topDown = new Uint8Array(0);
+  /** @internal */
+  readonly vao: WebGLVertexArrayObject;
+  /** @internal */
+  readonly limits: Readonly<WebGLContext3DLimits>;
   private dxtEncoder: DxtEncoder | null = null;
 
   /** The host's whole-level encoder; a refusal retains the TypeScript path. */
@@ -247,13 +272,15 @@ export class WebGLContext3D implements Context3D {
     gl.disable(gl.DITHER);
   }
 
-  private alive(): void {
+  /** @internal */
+  alive(): void {
     if (this.disposed || this.gl.isContextLost()) {
       throw new Context3DError("disposed", "Context3D experiment: context disposed or lost");
     }
   }
 
-  private target(back = false, discardColor = false): void {
+  /** @internal */
+  target(back = false, discardColor = false): void {
     this.alive();
     if (!this.framebuffer) {
       throw new Context3DError(
@@ -284,220 +311,18 @@ export class WebGLContext3D implements Context3D {
   }
 
   /** Temporary attachments and separate READ/DRAW bindings bypass the hot target cache. */
-  private bindFramebuffer(target: number, framebuffer: WebGLFramebuffer | null): void {
+  /** @internal */
+  bindFramebuffer(target: number, framebuffer: WebGLFramebuffer | null): void {
     this.drawState.forget();
     this.gl.bindFramebuffer(target, framebuffer);
   }
 
   configure(width: number, height: number, depth = false, antiAlias = 0, scale = 1): void {
-    this.alive();
-    range(32, width - 32, MOST_BACK_BUFFER);
-    range(32, height - 32, MOST_BACK_BUFFER);
-    if (this.renderTexture) {
-      throw new Context3DError(
-        "operation",
-        "Context3D experiment: resize while rendering to texture",
-      );
-    }
-
-    // AIR preserves color, depth and bindings when the request is unchanged.
-    // Shadow passes can issue this every frame when returning to the back buffer.
-    if (
-      this.framebuffer &&
-      width === this.width &&
-      height === this.height &&
-      depth === (this.depthBuffer !== null) &&
-      antiAlias === this.antiAlias
-    ) {
-      if (scale !== this.scale) {
-        this.scale = scale;
-        this.showAt();
-        this.applyScissor();
-      }
-
-      return;
-    }
-
-    const samples = selectSamples(this.gl, antiAlias, depth);
-    const gl = this.gl;
-    const most = this.storageLimit();
-    const drawnWidth = Math.min(width, most[0]);
-    const drawnHeight = Math.min(height, most[1]);
-    const texture = gl.createTexture();
-    const framebuffer = gl.createFramebuffer();
-    const depthBuffer = depth ? gl.createRenderbuffer() : null;
-    const resolveFramebuffer = samples ? gl.createFramebuffer() : null;
-    const colorBuffer = samples ? gl.createRenderbuffer() : null;
-    try {
-      if (
-        !texture ||
-        !framebuffer ||
-        (depth && !depthBuffer) ||
-        (samples && (!resolveFramebuffer || !colorBuffer))
-      ) {
-        throw new Context3DError("operation", "Context3D experiment: cannot allocate back buffer");
-      }
-
-      this.texturesApplied[0] = 0;
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-      gl.texImage2D(
-        gl.TEXTURE_2D,
-        0,
-        gl.RGBA8,
-        drawnWidth,
-        drawnHeight,
-        0,
-        gl.RGBA,
-        gl.UNSIGNED_BYTE,
-        null,
-      );
-      this.bindFramebuffer(gl.FRAMEBUFFER, resolveFramebuffer ?? framebuffer);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-      if (resolveFramebuffer) {
-        if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-          throw new Context3DError("operation", "Context3D experiment: incomplete resolve buffer");
-        }
-
-        this.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-        gl.bindRenderbuffer(gl.RENDERBUFFER, colorBuffer);
-        gl.renderbufferStorageMultisample(
-          gl.RENDERBUFFER,
-          samples,
-          gl.RGBA8,
-          drawnWidth,
-          drawnHeight,
-        );
-        gl.framebufferRenderbuffer(
-          gl.FRAMEBUFFER,
-          gl.COLOR_ATTACHMENT0,
-          gl.RENDERBUFFER,
-          colorBuffer,
-        );
-      }
-      if (depthBuffer) {
-        gl.bindRenderbuffer(gl.RENDERBUFFER, depthBuffer);
-        if (samples) {
-          gl.renderbufferStorageMultisample(
-            gl.RENDERBUFFER,
-            samples,
-            gl.DEPTH24_STENCIL8,
-            drawnWidth,
-            drawnHeight,
-          );
-        } else {
-          gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, drawnWidth, drawnHeight);
-        }
-        gl.framebufferRenderbuffer(
-          gl.FRAMEBUFFER,
-          gl.DEPTH_STENCIL_ATTACHMENT,
-          gl.RENDERBUFFER,
-          depthBuffer,
-        );
-      }
-      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
-        throw new Context3DError("operation", "Context3D experiment: incomplete back buffer");
-      }
-    } catch (error) {
-      gl.deleteTexture(texture);
-      gl.deleteFramebuffer(framebuffer);
-      gl.deleteFramebuffer(resolveFramebuffer);
-      gl.deleteRenderbuffer(depthBuffer);
-      gl.deleteRenderbuffer(colorBuffer);
-      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-      this.bindFramebuffer(gl.FRAMEBUFFER, this.framebuffer);
-      throw error;
-    }
-
-    gl.deleteTexture(this.texture);
-    gl.deleteFramebuffer(this.framebuffer);
-    gl.deleteFramebuffer(this.resolveFramebuffer);
-    gl.deleteRenderbuffer(this.depthBuffer);
-    gl.deleteRenderbuffer(this.colorBuffer);
-    this.texture = texture;
-    this.framebuffer = framebuffer;
-    this.resolveFramebuffer = resolveFramebuffer;
-    this.colorBuffer = colorBuffer;
-    this.depthBuffer = depthBuffer;
-    this.antiAlias = antiAlias;
-    this.width = width;
-    this.height = height;
-    this.drawnWidth = drawnWidth;
-    this.drawnHeight = drawnHeight;
-    this.scale = scale;
-    gl.canvas.width = drawnWidth;
-    gl.canvas.height = drawnHeight;
-    this.showAt();
-    // Readback's storage waits for a read: a back buffer as large as a 4K screen is 33 MB each.
-    this.pixels = new Uint8Array(0);
-    this.topDown = new Uint8Array(0);
-    this.applyScissor();
-    this.clear(0, 0, 0, 1);
-  }
-
-  /**
-   * Shown at the size asked for, in CSS pixels, as an unstyled canvas of that size would be,
-   * divided by its scale: a best-resolution back buffer shows its pixels at the screen's.
-   */
-  private showAt(): void {
-    const style = (this.gl.canvas as Partial<HTMLCanvasElement>).style;
-    if (!style) {
-      return;
-    }
-
-    const plain = this.scale === 1;
-    style.width = plain && this.drawnWidth === this.width ? "" : `${this.width / this.scale}px`;
-    style.height = plain && this.drawnHeight === this.height ? "" : `${this.height / this.scale}px`;
-  }
-
-  /** The largest back buffer storage the GPU gives: a texture, a renderbuffer and a viewport. */
-  private storageLimit(): Int32Array {
-    if (!this.gpuMost) {
-      const gl = this.gl;
-      const viewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
-      const side = Math.min(
-        gl.getParameter(gl.MAX_TEXTURE_SIZE) as number,
-        gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) as number,
-      );
-      this.gpuMost = Int32Array.of(Math.min(side, viewport[0]), Math.min(side, viewport[1]));
-    }
-
-    return this.gpuMost;
+    configureBackBuffer(this, width, height, depth, antiAlias, scale);
   }
 
   unconfigure(): void {
-    this.alive();
-    if (this.renderTexture) {
-      throw new Context3DError(
-        "operation",
-        "Context3D experiment: resize while rendering to texture",
-      );
-    }
-
-    const gl = this.gl;
-    gl.deleteTexture(this.texture);
-    gl.deleteFramebuffer(this.framebuffer);
-    gl.deleteFramebuffer(this.resolveFramebuffer);
-    gl.deleteRenderbuffer(this.depthBuffer);
-    gl.deleteRenderbuffer(this.colorBuffer);
-    this.drawState.forget();
-    this.texture = null;
-    this.framebuffer = null;
-    this.resolveFramebuffer = null;
-    this.colorBuffer = null;
-    this.depthBuffer = null;
-    this.resolveDirty = false;
-    this.antiAlias = 0;
-    this.scale = 1;
-    this.width = 0;
-    this.height = 0;
-    this.drawnWidth = 0;
-    this.drawnHeight = 0;
-    this.pixels = new Uint8Array(0);
-    this.topDown = new Uint8Array(0);
+    unconfigureBackBuffer(this);
   }
 
   clear(
@@ -708,7 +533,8 @@ export class WebGLContext3D implements Context3D {
     this.applyScissor();
   }
 
-  private applyScissor(): void {
+  /** @internal */
+  applyScissor(): void {
     const gl = this.gl;
     if (!this.scissor) {
       this.scissorOutside = false;
@@ -805,112 +631,11 @@ export class WebGLContext3D implements Context3D {
   }
 
   createBuffer(count: number, stride: number, dynamic = false): Buffer3D {
-    this.alive();
-    range(1, count - 1, stride === 0 ? 524287 : 65535);
-    range(0, stride, 64);
-    const countLimit = stride === 0 ? this.limits.maxIndexBuffers : this.limits.maxVertexBuffers;
-    const used = stride === 0 ? this.buffers.size - this.vertexBuffers : this.vertexBuffers;
-    if (this.buffers.size >= this.limits.maxBuffers || used >= countLimit) {
-      throw new Context3DError("limit", "Context3D experiment: buffer limit");
-    }
-
-    const bytes = count * (stride === 0 ? 2 : stride * 4);
-    const usedBytes =
-      stride === 0 ? this.bufferBytes - this.vertexBufferBytes : this.vertexBufferBytes;
-    const byteLimit =
-      stride === 0 ? this.limits.maxIndexBufferBytes : this.limits.maxVertexBufferBytes;
-    if (this.bufferBytes + bytes > this.limits.maxBufferBytes || usedBytes + bytes > byteLimit) {
-      throw new Context3DError("limit", "Context3D experiment: buffer memory limit");
-    }
-
-    const gl = this.gl;
-    const handle = gl.createBuffer();
-    if (!handle) {
-      throw new Context3DError("bufferAllocation", "Context3D experiment: cannot allocate buffer");
-    }
-
-    const target = stride === 0 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
-    if (stride === 0) {
-      this.indexBuffer = null;
-    }
-    gl.bindVertexArray(this.vao);
-    gl.bindBuffer(target, handle);
-    gl.bufferData(target, bytes, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
-    const state: BufferState = {
-      handle,
-      indices: stride === 0 ? new Uint16Array(count) : null,
-      uploaded: new Uint8Array(count),
-      prefix: 0,
-      version: 0,
-      checkedVersion: -1,
-      checkedFirst: 0,
-      checkedCount: 0,
-      maximum: -1,
-      ranges: null,
-    };
-    const buffer: Buffer3D = {
-      count,
-      stride,
-      upload: (values, start, amount) => {
-        this.alive();
-        this.buffer(buffer);
-        try {
-          uploadBuffer(gl, this.vao, buffer, state, values, start, amount);
-        } finally {
-          // Source getters can draw before the upload replaces the VAO's index binding.
-          if (stride === 0) {
-            this.indexBuffer = null;
-          }
-        }
-      },
-      uploadBytes: (data, offset, start, amount) => {
-        this.alive();
-        this.buffer(buffer);
-        try {
-          uploadBufferBytes(gl, this.vao, buffer, state, data, offset, start, amount);
-        } finally {
-          if (stride === 0) {
-            this.indexBuffer = null;
-          }
-        }
-      },
-      dispose: () => {
-        if (!this.buffers.delete(buffer)) {
-          return;
-        }
-
-        if (this.indexBuffer === handle) {
-          this.indexBuffer = null;
-        }
-        gl.deleteBuffer(handle);
-        this.bufferBytes -= bytes;
-        if (stride !== 0) {
-          this.vertexBuffers--;
-          this.vertexBufferBytes -= bytes;
-        }
-        state.indices = null;
-        state.ranges = null;
-        state.uploaded = new Uint8Array(0);
-        for (let i = 0; i < this.vertices.length; i++) {
-          const binding = this.vertices[i];
-          if (binding?.buffer === buffer) {
-            this.vertices[i] = null;
-          } else if (binding?.checkedIndex === state) {
-            binding.checkedIndex = null;
-          }
-        }
-      },
-    };
-    this.buffers.set(buffer, state);
-    if (stride !== 0) {
-      this.vertexBuffers++;
-      this.vertexBufferBytes += bytes;
-    }
-    this.bufferBytes += bytes;
-    return buffer;
+    return allocateBuffer(this, count, stride, dynamic);
   }
 
-  private buffer(buffer: Buffer3D): BufferState {
+  /** @internal */
+  buffer(buffer: Buffer3D): BufferState {
     const state = this.buffers.get(buffer);
     if (!state) {
       throw new Context3DError(
@@ -2252,115 +1977,12 @@ export class WebGLContext3D implements Context3D {
     }
   }
 
-  private resolve(): void {
-    if (!this.resolveFramebuffer) {
-      return;
-    }
-
-    const gl = this.gl;
-    if (this.resolveDirty) {
-      this.bindFramebuffer(gl.READ_FRAMEBUFFER, this.framebuffer);
-      this.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.resolveFramebuffer);
-      if (this.scissor) {
-        gl.disable(gl.SCISSOR_TEST);
-      }
-      gl.blitFramebuffer(
-        0,
-        0,
-        this.drawnWidth,
-        this.drawnHeight,
-        0,
-        0,
-        this.drawnWidth,
-        this.drawnHeight,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
-      if (this.scissor) {
-        gl.enable(gl.SCISSOR_TEST);
-      }
-      this.resolveDirty = false;
-    }
-    this.bindFramebuffer(gl.READ_FRAMEBUFFER, this.resolveFramebuffer);
-  }
-
   read(width = this.width, height = this.height): Uint8Array {
-    width = Math.max(0, Math.min(this.width, Math.floor(width) || 0));
-    height = Math.max(0, Math.min(this.height, Math.floor(height) || 0));
-    this.target(true);
-    this.resolve();
-    const gl = this.gl;
-    const scaleX = this.drawnWidth / this.width;
-    const scaleY = this.drawnHeight / this.height;
-    const drawnWidth = Math.min(this.drawnWidth, Math.ceil(width * scaleX));
-    const drawnHeight = Math.min(this.drawnHeight, Math.ceil(height * scaleY));
-    if (this.pixels.length < drawnWidth * drawnHeight * 4) {
-      this.pixels = new Uint8Array(drawnWidth * drawnHeight * 4);
-    }
-    if (this.topDown.length < width * height * 4) {
-      this.topDown = new Uint8Array(width * height * 4);
-    }
-
-    // GL's rows run bottom-up, so the top-left region starts height rows below the top.
-    gl.readPixels(
-      0,
-      this.drawnHeight - drawnHeight,
-      drawnWidth,
-      drawnHeight,
-      gl.RGBA,
-      gl.UNSIGNED_BYTE,
-      this.pixels,
-    );
-    const row = width * 4;
-    if (drawnWidth === width && drawnHeight === height) {
-      for (let y = 0; y < height; y++) {
-        const from = (height - y - 1) * row;
-        this.topDown.set(this.pixels.subarray(from, from + row), y * row);
-      }
-
-      return this.topDown;
-    }
-
-    // Storage smaller than the back buffer: each pixel is the stored one it falls on.
-    const source = new Uint32Array(this.pixels.buffer, 0, drawnWidth * drawnHeight);
-    const target = new Uint32Array(this.topDown.buffer, 0, width * height);
-    for (let y = 0; y < height; y++) {
-      const from =
-        (drawnHeight - 1 - Math.min(drawnHeight - 1, Math.floor(y * scaleY))) * drawnWidth;
-      for (let x = 0; x < width; x++) {
-        target[y * width + x] = source[from + Math.min(drawnWidth - 1, Math.floor(x * scaleX))];
-      }
-    }
-
-    return this.topDown;
+    return readBackBuffer(this, width, height);
   }
 
   present(): void {
-    this.setRenderTarget(null);
-    this.target();
-    this.resolve();
-    const gl = this.gl;
-    this.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
-    if (this.scissor) {
-      gl.disable(gl.SCISSOR_TEST);
-    }
-    // To the drawing buffer the browser gave, which it may have made smaller than the canvas.
-    gl.blitFramebuffer(
-      0,
-      0,
-      this.drawnWidth,
-      this.drawnHeight,
-      0,
-      0,
-      gl.drawingBufferWidth,
-      gl.drawingBufferHeight,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
-    if (this.scissor) {
-      gl.enable(gl.SCISSOR_TEST);
-    }
-    gl.flush();
+    presentBackBuffer(this);
   }
 
   dispose(): void {

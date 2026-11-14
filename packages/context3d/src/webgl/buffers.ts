@@ -1,4 +1,7 @@
 import type { Buffer3D } from "../backend.js";
+import { Context3DError } from "../errors.js";
+
+import type { WebGLContext3D } from "./context.js";
 import { range } from "./state.js";
 
 export interface BufferState {
@@ -42,7 +45,7 @@ function uploaded(state: BufferState, start: number, amount: number): void {
   }
 }
 
-export function uploadBuffer(
+function uploadBuffer(
   gl: WebGL2RenderingContext,
   vao: WebGLVertexArrayObject,
   buffer: Buffer3D,
@@ -69,7 +72,7 @@ export function uploadBuffer(
   gl.bufferSubData(target, start * size * (stride === 0 ? 2 : 4), data);
 }
 
-export function uploadBufferBytes(
+function uploadBufferBytes(
   gl: WebGL2RenderingContext,
   vao: WebGLVertexArrayObject,
   buffer: Buffer3D,
@@ -103,4 +106,113 @@ export function uploadBufferBytes(
   gl.bindVertexArray(vao);
   gl.bindBuffer(target, handle);
   gl.bufferSubData(target, start * bytesPerEntry, data, offset, length);
+}
+
+export function allocateBuffer(
+  ctx: WebGLContext3D,
+  count: number,
+  stride: number,
+  dynamic: boolean,
+): Buffer3D {
+  ctx.alive();
+  range(1, count - 1, stride === 0 ? 524287 : 65535);
+  range(0, stride, 64);
+  const countLimit = stride === 0 ? ctx.limits.maxIndexBuffers : ctx.limits.maxVertexBuffers;
+  const used = stride === 0 ? ctx.buffers.size - ctx.vertexBuffers : ctx.vertexBuffers;
+  if (ctx.buffers.size >= ctx.limits.maxBuffers || used >= countLimit) {
+    throw new Context3DError("limit", "Context3D experiment: buffer limit");
+  }
+
+  const bytes = count * (stride === 0 ? 2 : stride * 4);
+  const usedBytes = stride === 0 ? ctx.bufferBytes - ctx.vertexBufferBytes : ctx.vertexBufferBytes;
+  const byteLimit = stride === 0 ? ctx.limits.maxIndexBufferBytes : ctx.limits.maxVertexBufferBytes;
+  if (ctx.bufferBytes + bytes > ctx.limits.maxBufferBytes || usedBytes + bytes > byteLimit) {
+    throw new Context3DError("limit", "Context3D experiment: buffer memory limit");
+  }
+
+  const gl = ctx.gl;
+  const handle = gl.createBuffer();
+  if (!handle) {
+    throw new Context3DError("bufferAllocation", "Context3D experiment: cannot allocate buffer");
+  }
+
+  const target = stride === 0 ? gl.ELEMENT_ARRAY_BUFFER : gl.ARRAY_BUFFER;
+  if (stride === 0) {
+    ctx.indexBuffer = null;
+  }
+  gl.bindVertexArray(ctx.vao);
+  gl.bindBuffer(target, handle);
+  gl.bufferData(target, bytes, dynamic ? gl.DYNAMIC_DRAW : gl.STATIC_DRAW);
+  const state: BufferState = {
+    handle,
+    indices: stride === 0 ? new Uint16Array(count) : null,
+    uploaded: new Uint8Array(count),
+    prefix: 0,
+    version: 0,
+    checkedVersion: -1,
+    checkedFirst: 0,
+    checkedCount: 0,
+    maximum: -1,
+    ranges: null,
+  };
+  const buffer: Buffer3D = {
+    count,
+    stride,
+    upload: (values, start, amount) => {
+      ctx.alive();
+      ctx.buffer(buffer);
+      try {
+        uploadBuffer(gl, ctx.vao, buffer, state, values, start, amount);
+      } finally {
+        // Source getters can draw before the upload replaces the VAO's index binding.
+        if (stride === 0) {
+          ctx.indexBuffer = null;
+        }
+      }
+    },
+    uploadBytes: (data, offset, start, amount) => {
+      ctx.alive();
+      ctx.buffer(buffer);
+      try {
+        uploadBufferBytes(gl, ctx.vao, buffer, state, data, offset, start, amount);
+      } finally {
+        if (stride === 0) {
+          ctx.indexBuffer = null;
+        }
+      }
+    },
+    dispose: () => {
+      if (!ctx.buffers.delete(buffer)) {
+        return;
+      }
+
+      if (ctx.indexBuffer === handle) {
+        ctx.indexBuffer = null;
+      }
+      gl.deleteBuffer(handle);
+      ctx.bufferBytes -= bytes;
+      if (stride !== 0) {
+        ctx.vertexBuffers--;
+        ctx.vertexBufferBytes -= bytes;
+      }
+      state.indices = null;
+      state.ranges = null;
+      state.uploaded = new Uint8Array(0);
+      for (let i = 0; i < ctx.vertices.length; i++) {
+        const binding = ctx.vertices[i];
+        if (binding?.buffer === buffer) {
+          ctx.vertices[i] = null;
+        } else if (binding?.checkedIndex === state) {
+          binding.checkedIndex = null;
+        }
+      }
+    },
+  };
+  ctx.buffers.set(buffer, state);
+  if (stride !== 0) {
+    ctx.vertexBuffers++;
+    ctx.vertexBufferBytes += bytes;
+  }
+  ctx.bufferBytes += bytes;
+  return buffer;
 }

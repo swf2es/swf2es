@@ -942,9 +942,11 @@ playback retains the ErrorEvent #3702 fallback.
 
 The native entry registers Stage3D and delegates to `playerglobal/context3d/`:
 `lifecycle.ts` owns context creation, recovery and resource reclamation;
-`context.ts` registers Context3D commands; `resources.ts` registers buffer,
-program and texture commands. They share one installation's ownership maps and
-capture their helpers during registration, without rebuilding them for draws.
+`context.ts` registers Context3D commands; `resources.ts` registers those that
+create buffers, programs and textures, and the resources' own commands;
+`arguments.ts` holds the argument checks both use. They share one installation's
+ownership maps and capture their helpers during registration, without rebuilding
+them for draws.
 
 `@swf2es/player-hosts/stage3d` owns canvas placement and loss/restoration wiring.
 `stage3DCanvasHost` takes a surface factory and a caller-supplied clipped parent;
