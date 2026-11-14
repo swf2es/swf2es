@@ -1533,14 +1533,14 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
 /**
  * Play the opened SWF's frames until it has traced `lines` lines, or for
  * `frames` frames at most: the lines it has traced, the size of its
- * codegen's memory, and what stopped it.
+ * codegen's memory and of its background compiler's, and what stopped it.
  */
 async function stepSwf(
   lines: number,
   frames: number,
-): Promise<{ lines: number; codegen: number; error: string | null }> {
+): Promise<{ lines: number; codegen: number; compiler: number; error: string | null }> {
   if (!opened) {
-    return { lines: 0, codegen: 0, error: "no SWF is open" };
+    return { lines: 0, codegen: 0, compiler: 0, error: "no SWF is open" };
   }
 
   const { player, scripting, trace, uncaught } = opened;
@@ -1553,9 +1553,15 @@ async function stepSwf(
       }
     }
 
-    return { lines: trace.length, codegen: codegenMemory?.buffer.byteLength ?? 0, error: null };
+    const compiler = (await scripting?.code.background?.usage())?.memory ?? 0;
+    return {
+      lines: trace.length,
+      codegen: codegenMemory?.buffer.byteLength ?? 0,
+      compiler,
+      error: null,
+    };
   } catch (e) {
-    return { lines: trace.length, codegen: 0, error: describe(e, scripting) };
+    return { lines: trace.length, codegen: 0, compiler: 0, error: describe(e, scripting) };
   }
 }
 

@@ -738,7 +738,7 @@ export interface SteppedPage {
   step(
     lines: number,
     frames: number,
-  ): Promise<{ lines: number; codegen: number; error: string | null }>;
+  ): Promise<{ lines: number; codegen: number; compiler: number; error: string | null }>;
   /** Play a SWF for a frame, as runPlayer does a job; what stopped it, if anything. */
   run(swf: Uint8Array, url: string): Promise<string | null>;
   /** What the opened SWF has traced, a line each. */

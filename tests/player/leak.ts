@@ -23,7 +23,8 @@
 // fails if it grew by more than BOUND bytes a load in between; where one
 // player loads them all, also if codegen's memory grew past what it took
 // after WARM loads, or 32 MiB if that was less, which wasm never
-// gives back: the compiler must reuse what each load's ABC took.
+// gives back: the compiler must reuse what each load's ABC took. So must
+// the background compiler's on its Web Worker, which mirrors it.
 //
 // --snapshots DIR writes a heap snapshot at each measure,
 // for DevTools' Memory panel to compare and find what keeps a load's objects.
@@ -230,6 +231,7 @@ await withSteppedPage(
       // where one player loads them all, and when the warm loads ended.
       const heaps: number[] = [];
       const codegen: number[] = [];
+      const compiler: number[] = [];
       const memories: number[] = [];
       let warmed = 0;
       let error: string | null = null;
@@ -269,6 +271,7 @@ await withSteppedPage(
           const stepped = await page.step(n, n * 20);
           error = stepped.error ?? (stepped.lines < n ? `only ${stepped.lines} loads` : null);
           codegen.push(stepped.codegen);
+          compiler.push(stepped.compiler);
           await measure(n);
         }
 
@@ -286,13 +289,18 @@ await withSteppedPage(
       const ms = (performance.now() - warmed) / loads;
       const ok = perLoad <= BOUND;
       const codegenOk = codegen.length < 2 || codegen[1] <= Math.max(codegen[0], CODEGEN_CEILING);
+      const compilerOk =
+        compiler.length < 2 || compiler[1] <= Math.max(compiler[0], CODEGEN_CEILING);
       const memoriesOk = memories.length < 2 || memories[1] <= memories[0];
-      failed ||= !ok || !codegenOk || !memoriesOk;
+      failed ||= !ok || !codegenOk || !compilerOk || !memoriesOk;
       console.log(
         `${mode}: heap ${mb(heaps[0])} after ${WARM} loads, ${mb(heaps[1])} after ${LOADS}, ` +
           `${(perLoad / 1024).toFixed(1)} KB a load${ok ? "" : ` (more than ${BOUND / 1024} KB)`}; ` +
           (codegen.length
             ? `codegen ${mb(codegen[0])} to ${mb(codegen[1])}${codegenOk ? "" : " (grew)"}; `
+            : "") +
+          (compiler.length && compiler[1] > 0
+            ? `its worker's ${mb(compiler[0])} to ${mb(compiler[1])}${compilerOk ? "" : " (grew)"}; `
             : "") +
           (memories.length
             ? `wasm memories ${memories[0]} to ${memories[1]}${memoriesOk ? "" : " (grew)"}; `
