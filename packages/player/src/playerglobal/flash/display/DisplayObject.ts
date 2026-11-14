@@ -160,7 +160,12 @@ export function displayObjectHooks(s: Scripting): Record<string, avm2.ClassHook>
         display.object = o;
         // A clip alive now has its frame scripts to run (Scripting.runFrameScripts).
         scriptWork.changes++;
-        if (display instanceof MovieClip && (display.library.version ?? 10) < 10) {
+        // Its gotos run no cycle (Scripting.pruning); an AVM1 movie's root has none, nor any round.
+        if (
+          display instanceof MovieClip &&
+          !display.avm1Root &&
+          (display.library.version ?? 10) < 10
+        ) {
           s.oldClips = true;
         }
         // Only a MovieClip plays its timeline: a sprite bound to a class that

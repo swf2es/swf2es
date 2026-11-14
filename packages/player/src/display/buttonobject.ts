@@ -191,7 +191,7 @@ export class ButtonObject extends Container {
     if (first !== this.firstOrder) {
       this.firstOrder = first;
       scriptWork.changes++;
-      // The next round walks it for them, which takes the flag off.
+      // Marked, so that the next round walks it to run them, which takes the flag off.
       if (first) {
         markScriptsDue(this);
       }
