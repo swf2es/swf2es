@@ -235,8 +235,9 @@ overflow, and without a stage; a button being made has all under it
 walked, as its round may be the only one to reach it. Once its orphans
 held no script due, a menu of buttons a script makes, each running the
 frame scripts due, no longer walks them all for each: in
-`walk-bench.ts --orphans 300 --menu 50` a menu went from 48 to 3.8 ms,
-and a tick from 520 to 350 µs. The checked build walks every round both
+`walk-bench.ts --orphans 300 --menu 50` a menu went from 56 to 1.5 ms,
+and a tick from 550 to 350 µs; with `--orphans 1000 --menu 200`, from
+about 560 to 5.2 ms. The checked build walks every round both
 ways, and fails unless the walk of what is marked lists the clips due in
 the whole walk's order and each of the others runs nothing in its turn.
 

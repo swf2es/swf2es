@@ -26,7 +26,7 @@ package
 			for (var i:int = 0; i < count; i++)
 			{
 				const panel:WalkPanel = new WalkPanel();
-				panel.addEventListener(Event.EXIT_FRAME, idle);
+				panel.addEventListener(Event.ENTER_FRAME, idle);
 				_kept.push(panel);
 			}
 		}
