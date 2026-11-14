@@ -92,6 +92,71 @@ export function markScriptsDue(o: DisplayObject): void {
   }
 }
 
+/**
+ * Mark `o` as having a clip at or under it whose advance may do something
+ * (MovieClip.advances): it and everything the frame's advance walk
+ * (display/advance.ts) passes to reach it, as markScriptsDue marks for the
+ * rounds of frame scripts, and with the same stops: up to a clip or button
+ * marked already, through a container of no frames, marked or not.
+ */
+export function markAdvanceDue(o: DisplayObject): void {
+  for (let p: DisplayObject | null = o; p !== null; p = p.parent) {
+    if (p.advanceDue && p.kind !== OTHER) {
+      return;
+    }
+
+    p.advanceDue = true;
+    const entry = p.orphanEntry;
+    if (entry !== null) {
+      entry.advances = true;
+    }
+
+    const buttons = p.stateOf;
+    if (buttons !== null) {
+      for (let i = 0; i < buttons.length; i++) {
+        markAdvanceDue(buttons[i]);
+      }
+    }
+  }
+}
+
+/**
+ * What a tick's advances watch while they run (display/advance.ts): every
+ * change to what the frame's walk read, to know the display list as the
+ * walk found it again, and each clip made before the walk and left out of
+ * its list that comes to advance, for which the list must be found again.
+ */
+export interface AdvanceWatch {
+  /** The walk's number, which a clip it listed has as its listedFor. */
+  readonly pass: number;
+  /** `clip`, not listed, may have come to advance (MovieClip.advances). */
+  changed(clip: DisplayObject): void;
+  /** `parent`'s children: `added` put in at `index`, `removed` taken from it, or, both, one in the other's place. */
+  children(
+    parent: DisplayObject,
+    index: number,
+    added: DisplayObject | null,
+    removed: DisplayObject | null,
+  ): void;
+  /** A button's frameChildren, its states, replaced; `old` were they. */
+  states(button: DisplayObject, old: readonly DisplayObject[]): void;
+  /** `o`'s parent set outside a change of children; `old` was it. */
+  parent(o: DisplayObject, old: DisplayObject | null): void;
+  /** A clip's skipsAfter set; `old` was it. */
+  skips(clip: DisplayObject, old: number): void;
+  /** `display` became an orphan, or stopped being one. */
+  orphaned(display: DisplayObject): void;
+  unorphaned(display: DisplayObject): void;
+}
+
+/** The AdvanceWatch of the advances that run, or null. */
+export const advancing: { watch: AdvanceWatch | null } = { watch: null };
+
+/** How many display objects have been made: one made from now on has this serial or a later one. */
+export function serials(): number {
+  return made;
+}
+
 const NO_FILTERS: readonly Filter[] = Object.freeze([]);
 
 /** What a leaf has to walk: one for all, as the frame's walks visit every object once or more a frame. */
@@ -334,10 +399,19 @@ export class DisplayObject {
    * and takes the marks of what it walks off but for the clips still due.
    */
   scriptsDue = false;
+  /**
+   * Whether a clip whose advance does something may be at or under it, on
+   * the frame's advance walk (display/advance.ts): marked by markAdvanceDue
+   * as such a clip comes to be, and taken off by the walk where none is.
+   */
+  advanceDue = false;
   /** The buttons whose state it is, which the rounds walk it from too, its parent or not; null for none. */
   stateOf: ButtonObject[] | null = null;
-  /** Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue as an orphan; null for none. */
-  orphanEntry: { due: boolean } | null = null;
+  /**
+   * Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue
+   * and `advances` its advanceDue, as an orphan; null for none.
+   */
+  orphanEntry: { due: boolean; advances: boolean } | null = null;
 
   private weakRef: WeakRef<this> | null = null;
 

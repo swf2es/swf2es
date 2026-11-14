@@ -2,7 +2,15 @@
 // is their index in AS3, and apart from it the children the timeline
 // placed, by depth, which is how SWF tags address them; a child the
 // timeline places goes before the first child of a greater depth.
-import { CHILDREN, DisplayObject, markScriptsDue, OTHER, scriptWork } from "./displayobject.js";
+import {
+  advancing,
+  CHILDREN,
+  DisplayObject,
+  markAdvanceDue,
+  markScriptsDue,
+  OTHER,
+  scriptWork,
+} from "./displayobject.js";
 import type { Library } from "./timeline.js";
 import type { WalkList } from "./walk.js";
 
@@ -67,6 +75,7 @@ export class Container extends DisplayObject {
     child.depth = depth;
     child.parent = this;
     this.children.splice(index, 0, child);
+    advancing.watch?.children(this, index, child, null);
     this.puts++;
     this.depths.set(depth, child);
     this.relist(child);
@@ -74,6 +83,10 @@ export class Container extends DisplayObject {
     scriptWork.changes++;
     if (child.scriptsDue) {
       markScriptsDue(this);
+    }
+
+    if (child.advanceDue) {
+      markAdvanceDue(this);
     }
   }
 
@@ -107,6 +120,7 @@ export class Container extends DisplayObject {
     // A listener may have put it on this list again (which Flash does not survive). Where
     // nothing was put on it meanwhile, the search, a whole list's on every removal, is spared.
     if (child.parent === this && (this.puts === puts || !this.children.includes(child))) {
+      advancing.watch?.parent(child, this);
       child.parent = null;
       child.focusDrop?.(child);
     }
@@ -126,6 +140,7 @@ export class Container extends DisplayObject {
     }
 
     this.takeOut(child, index);
+    advancing.watch?.parent(child, this);
     child.parent = null;
     child.focusDrop?.(child);
   }
@@ -138,6 +153,7 @@ export class Container extends DisplayObject {
     }
 
     this.children.splice(index, 1);
+    advancing.watch?.children(this, index, null, child);
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
@@ -152,13 +168,19 @@ export class Container extends DisplayObject {
     const same = child.parent === this;
     child.parent?.removeChild(child);
     child.parent = this;
-    this.children.splice(same ? Math.min(index, this.children.length) : index, 0, child);
+    const at = same ? Math.min(index, this.children.length) : index;
+    this.children.splice(at, 0, child);
+    advancing.watch?.children(this, at, child, null);
     this.puts++;
     this.relist(child);
     this.invalidate(CHILDREN);
     scriptWork.changes++;
     if (child.scriptsDue) {
       markScriptsDue(this);
+    }
+
+    if (child.advanceDue) {
+      markAdvanceDue(this);
     }
   }
 
@@ -167,6 +189,8 @@ export class Container extends DisplayObject {
     const j = this.children.indexOf(b);
     this.children[i] = b;
     this.children[j] = a;
+    advancing.watch?.children(this, i, b, a);
+    advancing.watch?.children(this, j, a, b);
     this.relist(a);
     this.relist(b);
     this.invalidate(CHILDREN);

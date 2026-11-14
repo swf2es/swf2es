@@ -14,6 +14,7 @@ import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
+import { walkChecks } from "./display/advance.js";
 import {
   BitmapObject,
   BUTTON,
@@ -145,8 +146,15 @@ export class Scripting {
    * Whether a round of frame scripts left out as having nothing to do is
    * run anyway and must find nothing: the checked build's tests set it
    * (SWF2ES_CHECKED), to prove the rounds' count (scriptWork) complete.
+   * The frame's advances prove theirs with it (display/advance.ts).
    */
-  static checkRounds = false;
+  static get checkRounds(): boolean {
+    return walkChecks.on;
+  }
+
+  static set checkRounds(on: boolean) {
+    walkChecks.on = on;
+  }
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**

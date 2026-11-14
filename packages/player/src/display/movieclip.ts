@@ -6,7 +6,15 @@ import { BitmapObject } from "./bitmapobject.js";
 import { ButtonObject } from "./buttonobject.js";
 import { IDENTITY_COLOR } from "./color.js";
 import { Container } from "./container.js";
-import { CLIP, CONTENT, type DisplayObject, markScriptsDue, scriptWork } from "./displayobject.js";
+import {
+  advancing,
+  CLIP,
+  CONTENT,
+  type DisplayObject,
+  markAdvanceDue,
+  markScriptsDue,
+  scriptWork,
+} from "./displayobject.js";
 import { construct, displayFor } from "./instantiate.js";
 import { cached, ShapeObject, StaleCache } from "./shapeobject.js";
 import { StaticTextObject, TextObject } from "./textobjects.js";
@@ -123,14 +131,8 @@ export class MovieClip extends Container {
   private making = false;
   private placedByTimeline = false;
   private running = true;
-  /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
-  stream: object | null = null;
-  /**
-   * Made by a script with `new`, or placed on the first frame of one that
-   * was as it was made: Flash has such a clip sit out the next frame's
-   * advance, wherever it is by then (`fresh-clips`).
-   */
-  fresh = false;
+  private playingStream: object | null = null;
+  private sitsOutNext = false;
   /**
    * The frame whose script last ran, so that entering a frame runs its
    * script once: set to currentFrame alone, as a round's skipping
@@ -149,15 +151,9 @@ export class MovieClip extends Container {
   queuedGoto: number | null = null;
   /** Whether that goto plays or stops the clip, as it happens, not as it is asked for. */
   queuedPlay = false;
-  /**
-   * The frame count (Scripting.frames) at a script's goto in a SWF of
-   * version 9 or earlier, a goto to the frame it is on among them: the next
-   * frame it sits out, with all in it, as Flash has such a clip
-   * (`goto-children`). A stamp, not a flag: one a skipped parent took along,
-   * or a clip no frame reached, is past by the frame after and never skips.
-   * From version 10 a goto leaves its frames as they were.
-   */
-  skipsAfter = -1;
+  private skipStamp = -1;
+  /** The pass of the frame's advance walk that listed it last (AdvanceWatch.pass). */
+  listedFor = -1;
   /** Whether an AVM1 clip ran the actions after its last ShowFrame, which it does once. */
   private tailed = false;
 
@@ -169,6 +165,68 @@ export class MovieClip extends Container {
     this.kind = CLIP;
     this.timeline = timeline;
     this.library = library;
+    // Playing, of frames not yet known to the walk: its first walk settles it.
+    this.advanceDue = true;
+  }
+
+  /**
+   * The frame count (Scripting.frames) at a script's goto in a SWF of
+   * version 9 or earlier, a goto to the frame it is on among them: the next
+   * frame it sits out, with all in it, as Flash has such a clip
+   * (`goto-children`). A stamp, not a flag: one a skipped parent took along,
+   * or a clip no frame reached, is past by the frame after and never skips.
+   * From version 10 a goto leaves its frames as they were.
+   */
+  get skipsAfter(): number {
+    return this.skipStamp;
+  }
+
+  set skipsAfter(frames: number) {
+    advancing.watch?.skips(this, this.skipStamp);
+    this.skipStamp = frames;
+  }
+
+  /**
+   * It may have come to advance (`advances`): marked, and, among a tick's
+   * advances, told to them if their walk did not list it.
+   */
+  private mayAdvance(): void {
+    if (!this.advanceDue) {
+      markAdvanceDue(this);
+    }
+
+    const watch = advancing.watch;
+    if (watch !== null && this.listedFor !== watch.pass) {
+      watch.changed(this);
+    }
+  }
+
+  /** Its timeline's stream as it plays, for what plays it (TimelineSounds); null while none does. */
+  get stream(): object | null {
+    return this.playingStream;
+  }
+
+  set stream(stream: object | null) {
+    this.playingStream = stream;
+    if (stream) {
+      this.mayAdvance();
+    }
+  }
+
+  /**
+   * Made by a script with `new`, or placed on the first frame of one that
+   * was as it was made: Flash has such a clip sit out the next frame's
+   * advance, wherever it is by then (`fresh-clips`).
+   */
+  get fresh(): boolean {
+    return this.sitsOutNext;
+  }
+
+  set fresh(fresh: boolean) {
+    this.sitsOutNext = fresh;
+    if (fresh) {
+      this.mayAdvance();
+    }
   }
 
   /**
@@ -193,6 +251,7 @@ export class MovieClip extends Container {
     this.tailed = false;
     this.queuedGoto = null;
     this.invalidate(CONTENT);
+    this.mayAdvance();
   }
 
   /** The frame it shows, 1 the first; 0 before its first frame is entered. */
@@ -207,6 +266,9 @@ export class MovieClip extends Container {
       if (frame !== this.scriptedFrame && !this.scriptsDue) {
         markScriptsDue(this);
       }
+
+      // An AVM1 clip's tail turns on its frame (`advances`).
+      this.mayAdvance();
     }
   }
 
@@ -259,6 +321,10 @@ export class MovieClip extends Container {
     this.running = play;
     if (!play && this.stream) {
       this.library.sounds?.stopStream(this);
+    }
+
+    if (play) {
+      this.mayAdvance();
     }
   }
 
@@ -687,8 +753,37 @@ export class MovieClip extends Container {
   }
 
   /**
+   * Whether advance() would do anything now, read from it case by case:
+   * sit out, an AVM1 clip's tail, a stopped one's stream, a frame or a loop.
+   * What it reads changes through the setters that mark the clip
+   * (markAdvanceDue) as it may come to be so, and a new timeline.
+   */
+  get advances(): boolean {
+    if (this.sitsOutNext) {
+      return true;
+    }
+
+    const timeline = this.timeline;
+    const total = timeline.frames.length;
+    if (!this.running) {
+      return !!this.playingStream;
+    }
+
+    if (this.frame >= total && this.library.avm1 && !(timeline.loops && total > 1)) {
+      return true;
+    }
+
+    if (total <= 1) {
+      return !!this.playingStream;
+    }
+
+    return this.frame < total || timeline.loops;
+  }
+
+  /**
    * On to the next frame, if it plays and has one. From the last frame it
    * loops to the first as a goto, so what the first frame placed stays.
+   * Its cases are `advances`', which must follow them.
    */
   advance(): void {
     if (this.fresh) {

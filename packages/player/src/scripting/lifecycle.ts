@@ -4,20 +4,31 @@
 // orphan, which plays on as Flash's does, for a while (docs/architecture/player.md,
 // "Orphans").
 import { avm2 } from "@swf2es/runtime";
-import { Container, type DisplayObject, MovieClip, scriptWork } from "../display/display.js";
+import {
+  advancing,
+  Container,
+  type DisplayObject,
+  MovieClip,
+  scriptWork,
+} from "../display/display.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent, heard } from "./events.js";
 
 type AsObject = avm2.AsObject;
 
-/** An orphan: `due` is its display object's scriptsDue, kept here so that a round passes one by unread. */
+/**
+ * An orphan: `due` is its display object's scriptsDue and `advances` its
+ * advanceDue, kept here so that a round or the advance walk passes one by
+ * unread.
+ */
 interface Orphan {
   serial: number;
   ref: WeakRef<DisplayObject>;
   keep: boolean;
   since: number;
   due: boolean;
+  advances: boolean;
 }
 
 export class Lifecycle {
@@ -164,11 +175,13 @@ export class Lifecycle {
         keep,
         since: this.s.frames,
         due: display.scriptsDue,
+        advances: display.advanceDue,
       };
       this.orphans.set(serial, entry);
       display.orphanEntry = entry;
       this.sortedOrphans = null;
       scriptWork.changes++;
+      advancing.watch?.orphaned(display);
     }
   }
 
@@ -193,16 +206,23 @@ export class Lifecycle {
   private sortedOrphans: Orphan[] | null = null;
 
   private dropOrphan(serial: number): void {
-    if (this.orphans.delete(serial)) {
+    const orphan = this.orphans.get(serial);
+    if (orphan !== undefined) {
+      this.orphans.delete(serial);
       this.sortedOrphans = null;
+      const display = advancing.watch !== null ? orphan.ref.deref() : undefined;
+      if (display !== undefined) {
+        advancing.watch?.unorphaned(display);
+      }
     }
   }
 
   /**
    * Each orphan still there, newest first, to `f`, which must leave the
-   * orphans as they are; only those with scriptsDue, `due`.
+   * orphans as they are; only those with scriptsDue, `due`, or with
+   * advanceDue, `advances`.
    */
-  eachOrphanRoot(f: (display: DisplayObject) => void, due = false): void {
+  eachOrphanRoot(f: (display: DisplayObject) => void, due = false, advances = false): void {
     let sorted = this.sortedOrphans;
     if (!sorted) {
       sorted = [...this.orphans.values()];
@@ -211,7 +231,7 @@ export class Lifecycle {
     }
 
     for (let i = 0; i < sorted.length; i++) {
-      if (due && !sorted[i].due) {
+      if ((due && !sorted[i].due) || (advances && !sorted[i].advances)) {
         continue;
       }
 
