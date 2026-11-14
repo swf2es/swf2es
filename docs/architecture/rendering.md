@@ -82,7 +82,13 @@ would distort, keeps the transform exactly. Kept lines are held within a
 budget of a million vertices for those not drawn lately
 (`LINE_VERTICES`). A line drawn at whole alpha, where an overlap shows
 nothing, is triangles along its path; any other is outlined and filled
-non-zero, so that where it overlaps itself it is drawn once. No line is
+non-zero, so that where it overlaps itself it is drawn once. A line
+filled with a gradient or a bitmap (`lineGradientStyle`,
+`lineBitmapStyle`, a LINESTYLE2 fill) is outlined white on its own and
+textured as a fill is, each vertex sampling where it lies in the shape's
+space, so its paint maps as a fill's of the same matrix would; a layer
+with one keeps its lines in pieces, in order, each run of lines of a
+colour still together. No line is
 thinner than a pixel of the screen, which is how wide Flash draws a
 hairline however far its stage is zoomed: `RenderView.screenScale`
 screen pixels to a stage pixel, the view's scale and resolution unless
