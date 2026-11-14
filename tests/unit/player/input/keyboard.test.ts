@@ -160,10 +160,11 @@ test("a key goes to the focused field and bubbles to the stage; with no focus, t
   assert.equal(field.model.text, "b");
 });
 
-test("a keyDown listener that focuses a field has the key's character typed there, as Flash does", () => {
+test("a key's character goes to what has focus once its keyDown listeners ran", () => {
   const { stage, fields, scripting, keyboard, listen } = setUp("chat", "other");
   const [chat, other] = fields;
-  // As a game opens its chat on "/" from the stage, with no field focused.
+  // As a game opens its chat on "/" from the stage, with no field focused (Flash and AIR type
+  // the "/" into the chat on that first press).
   listen(stage, "keyDown", (e) => {
     if (e.args[0] === 47) {
       setFocus(scripting, chat);
@@ -176,13 +177,49 @@ test("a keyDown listener that focuses a field has the key's character typed ther
     }
   });
 
-  keyboard.handle("down", { keyCode: 191, charCode: 47 });
+  // Used, so a host keeps the key from the browser, as it does a field's typing.
+  assert.equal(keyboard.handle("down", { keyCode: 191, charCode: 47 }), true);
   assert.equal(scripting.focus, chat);
   assert.equal(chat.model.text, "/");
 
   keyboard.handle("down", { keyCode: 51, charCode: 35, shiftKey: true });
   assert.equal(chat.model.text, "/");
   assert.equal(other.model.text, "#");
+});
+
+test("a keyDown listener that takes focus away, or the field off the stage, types nothing", () => {
+  const { stage, fields, scripting, keyboard, listen } = setUp("name", "next");
+  const [field, next] = fields;
+  setFocus(scripting, field);
+  listen(field, "keyDown", (e) => {
+    if (e.args[0] === 120) {
+      setFocus(scripting, null);
+    }
+
+    if (e.args[0] === 121) {
+      stage.removeChild(field);
+    }
+  });
+  listen(next, "keyDown", (e) => {
+    if (e.args[0] === 97) {
+      setFocus(scripting, field);
+    }
+  });
+
+  assert.equal(keyboard.handle("down", { keyCode: 88, charCode: 120 }), false);
+  assert.equal(field.model.text, "");
+
+  setFocus(scripting, field);
+  keyboard.handle("down", { keyCode: 89, charCode: 121 });
+  assert.equal(field.model.text, "");
+
+  // Ctrl+A follows the new focus too: the field the listener focused selects all.
+  stage.addChildAt(field, 0);
+  field.model.text = "abc";
+  setFocus(scripting, next);
+  keyboard.handle("down", { keyCode: 65, charCode: 97, ctrlKey: true });
+  assert.equal(scripting.focus, field);
+  assert.deepEqual(field.selection, [0, 3]);
 });
 
 test("typing edits the focused field: a TextEvent a listener may cancel, then Event.CHANGE", () => {

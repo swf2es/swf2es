@@ -308,6 +308,7 @@ export class KeyboardInput implements Keyboard {
     // What has focus once the key's listeners ran, as Flash types into it: a keyDown listener
     // that focuses a field, as a chat opened by its key, has the key's character typed there.
     const focus = this.focused();
+
     // Ctrl with Alt is AltGr on some layouts, which types characters.
     if (k.ctrlKey && !k.altKey && (k.keyCode === 65 || k.charCode === 97 || k.charCode === 65)) {
       return this.selectAll(focus);
