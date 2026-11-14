@@ -53,7 +53,9 @@ import {
 import { resolveCase } from "./case-paths.ts";
 import { bridgeFiles } from "./files.ts";
 import { failureLine, requestLine } from "./netlog.ts";
-import { type Movie, Network, Refused, unverifiedHosts } from "./network.ts";
+import { Network } from "./network.ts";
+import { unverifiedHosts } from "./network-rules.ts";
+import { type Movie, Refused } from "./network-types.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { describeProxy, proxyArgument, sameProxy } from "./proxy.ts";
 import { Sandbox } from "./sandbox.ts";
