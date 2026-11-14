@@ -794,7 +794,8 @@ export class RenderView implements Drawer {
           lineBy = ownSlice ? [pa, pb, pc, pd] : this.childLineSpace(o);
         }
 
-        const even = !lineBy && this.lineCache.of(layers[i], version).even;
+        const layerLines = this.lineCache.of(layers[i], version);
+        const even = !lineBy && layerLines.even;
         if (even && stretch === undefined) {
           // Settled for the widest line of the object's layers that scale both ways (evenWidth).
           let widest = 0;
@@ -813,7 +814,7 @@ export class RenderView implements Drawer {
 
         const by = even ? stretch : null;
         // A layer with a painted line in pieces, each textured by its paint as a fill's part is.
-        const painted = this.lineCache.of(layers[i], version).painted;
+        const painted = layerLines.painted;
         const lines = painted
           ? null
           : by
@@ -827,8 +828,20 @@ export class RenderView implements Drawer {
                 least,
                 null,
                 opaque,
+                layerLines,
               )
-            : this.lineCache.take(layers[i], version, a, b, c, d, least, lineBy, opaque);
+            : this.lineCache.take(
+                layers[i],
+                version,
+                a,
+                b,
+                c,
+                d,
+                least,
+                lineBy,
+                opaque,
+                layerLines,
+              );
         const pieces = !painted
           ? null
           : by
@@ -842,8 +855,20 @@ export class RenderView implements Drawer {
                 least,
                 null,
                 opaque,
+                layerLines,
               )
-            : this.lineCache.pieces(layers[i], version, a, b, c, d, least, lineBy, opaque);
+            : this.lineCache.pieces(
+                layers[i],
+                version,
+                a,
+                b,
+                c,
+                d,
+                least,
+                lineBy,
+                opaque,
+                layerLines,
+              );
         if (!lines && !pieces?.length) {
           continue;
         }

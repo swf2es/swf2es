@@ -155,7 +155,8 @@ export class LineCache {
    * `layer`'s lines through the linear transform (a b c d), at least `least`
    * wide, drawn opaque or not: stroked again for another transform, screen
    * or version of its drawing, the old ones kept while drawn as the
-   * geometries keep them. A layer of no painted line (LayerLines' painted).
+   * geometries keep them. A layer of no painted line (LayerLines' painted);
+   * `layerLines`, where given, is what `of` gave for the layer and version.
    */
   take(
     layer: ShapeLayer,
@@ -167,8 +168,11 @@ export class LineCache {
     least: number,
     by: readonly number[] | null,
     drawnOpaque: boolean,
+    layerLines?: LayerLines,
   ): GeometryHandle | null {
-    return this.entry(layer, version, a, b, c, d, least, by, drawnOpaque)?.handle ?? null;
+    return (
+      this.entry(layer, version, a, b, c, d, least, by, drawnOpaque, layerLines)?.handle ?? null
+    );
   }
 
   /** As take, a painted layer's lines in their pieces, in order; null for none. */
@@ -182,8 +186,11 @@ export class LineCache {
     least: number,
     by: readonly number[] | null,
     drawnOpaque: boolean,
+    layerLines?: LayerLines,
   ): readonly LinePiece[] | null {
-    return this.entry(layer, version, a, b, c, d, least, by, drawnOpaque)?.pieces ?? null;
+    return (
+      this.entry(layer, version, a, b, c, d, least, by, drawnOpaque, layerLines)?.pieces ?? null
+    );
   }
 
   /** The entry take and pieces read, stroked if it was not, or its geometries were let go of. */
@@ -197,13 +204,14 @@ export class LineCache {
     least: number,
     by: readonly number[] | null,
     drawnOpaque: boolean,
+    layerLines?: LayerLines,
   ): LineEntry | null {
     const frame = this.geometries.frame;
     if (frame - this.swept >= SWEEP_FRAMES) {
       this.trim(frame);
     }
 
-    const lines = this.of(layer, version);
+    const lines = layerLines ?? this.of(layer, version);
     // Only a line of whole alpha draws otherwise when opaque (layerStrokes): a layer of none keeps
     // one geometry through a fade.
     const opaque = drawnOpaque && lines.whole;
