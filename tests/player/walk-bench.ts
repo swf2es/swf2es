@@ -27,8 +27,13 @@
 // things move, as a game's when a list of hundreds of rows was rebuilt on
 // each keystroke. The tick then times mostly the frame's advance walk.
 //
+// --churn N places N clips whose timelines place and take off a clip and a
+// shape every frame, each listening for ADDED and REMOVED, as a game's
+// avatars do: scripts that run among the frame's advances. It prints how
+// many ticks had the advances find their clips again (display/advance.ts).
+//
 //   node --expose-gc tests/player/walk-bench.ts [--rigs N] [--frames N] [--reps N]
-//     [--orphans N] [--menu K] [--old N] [--playing N]
+//     [--orphans N] [--menu K] [--old N] [--playing N] [--churn N]
 import { readFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -52,6 +57,7 @@ const orphans = option("orphans", 0);
 const menu = option("menu", 0);
 const old = option("old", 0);
 const playing = option("playing", 0);
+const churn = option("churn", 0);
 
 const SOURCE = readFileSync(new URL("./scripts/WalkBench.as", import.meta.url), "utf8");
 
@@ -140,6 +146,17 @@ function treeSwf(): Uint8Array {
   }
 
   tags.push(w.sprite(25, 8, [...moves, w.end()]));
+  // A clip whose children come and go every frame: a part, then a shape.
+  tags.push(
+    w.sprite(26, 2, [
+      w.place({ depth: 1, character: 10 }),
+      w.showFrame(),
+      w.remove(1),
+      w.place({ depth: 2, character: 2 }),
+      w.showFrame(),
+      w.end(),
+    ]),
+  );
   // A menu's row: a shape, and a button whose every state is a WalkPart.
   tags.push(
     w.button2(24, 10),
@@ -157,6 +174,7 @@ function treeSwf(): Uint8Array {
       [10, "WalkPart"],
       [22, "WalkPanel"],
       [23, "WalkRow"],
+      [26, "WalkChurn"],
       ...(old > 0 ? ([[40, "WalkOld"]] as [number, string][]) : []),
     ]),
   );
@@ -166,6 +184,12 @@ function treeSwf(): Uint8Array {
 
   for (let i = 0; i < playing; i++) {
     tags.push(w.place({ depth: rigs + i + 1, character: 25, matrix: { tx: i * 10, ty: 400 } }));
+  }
+
+  for (let i = 0; i < churn; i++) {
+    tags.push(
+      w.place({ depth: rigs + playing + i + 1, character: 26, matrix: { tx: i * 10, ty: 500 } }),
+    );
   }
 
   tags.push(w.showFrame(), w.showFrame(), w.end());
@@ -230,10 +254,16 @@ const time = (f: () => void) => {
   return runs;
 };
 
+// How many ticks found their clips again, where this checkout counts them (display/advance.ts).
+const advance = (await import("../../packages/player/dist/display/advance.js").catch(
+  () => null,
+)) as { walkChecks?: { refound: number } } | null;
 // Warmed up first, so that the JIT has settled on both.
 time(() => player.tick());
 time(() => scripting.runFrameScripts(player.stage));
+const refound = advance?.walkChecks?.refound ?? 0;
 const ticks = time(() => player.tick());
+const refoundIn = (advance?.walkChecks?.refound ?? 0) - refound;
 const walks = time(() => scripting.runFrameScripts(player.stage));
 const show = (runs: number[]) =>
   `median ${median(runs).toFixed(0)} us  (${runs.map((r) => r.toFixed(0)).join(", ")})`;
@@ -248,6 +278,15 @@ if (gc) {
 }
 
 console.log(`  tick  ${show(ticks)}`);
+if (churn > 0) {
+  const churning = scripting.rt.classNamed("WalkChurn", scripting.mainDomain);
+  const heard = scripting.rt.getProperty(churning, avm2.qname(avm2.publicNs, "heard"));
+  console.log(`  ADDED and REMOVED heard ${heard} times`);
+}
+
+if (advance?.walkChecks) {
+  console.log(`  found again in ${refoundIn} of ${frames * reps} ticks`);
+}
 console.log(`  walk  ${show(walks)}`);
 
 if (menu > 0) {

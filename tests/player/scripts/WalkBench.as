@@ -88,6 +88,23 @@ package
 	{
 	}
 
+	/** A clip whose timeline places and takes off children every frame, and hears each. */
+	public class WalkChurn extends MovieClip
+	{
+		public static var heard:int = 0;
+
+		public function WalkChurn()
+		{
+			addEventListener(Event.ADDED, hear);
+			addEventListener(Event.REMOVED, hear);
+		}
+
+		private function hear(e:Event):void
+		{
+			heard++;
+		}
+	}
+
 	public class WalkPart extends MovieClip
 	{
 		public static var made:int = 0;
