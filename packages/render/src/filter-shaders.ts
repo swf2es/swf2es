@@ -94,7 +94,8 @@ void main(void) {
   if (uInner > 0.5) {
     float g = clamp((1.0 - a) * uStrength, 0.0, 1.0) * uAlpha * src.a;
     vec4 glow = vec4(uColor * g, g);
-    c = uKnockout > 0.5 ? glow : glow + src * (1.0 - g);
+    // A shadow that hides its object leaves the inner shadow alone, as knocked out (adl).
+    c = uKnockout > 0.5 || uHide > 0.5 ? glow : glow + src * (1.0 - g);
   } else {
     float g = clamp(a * uStrength, 0.0, 1.0) * uAlpha;
     vec4 glow = vec4(uColor * g, g);
