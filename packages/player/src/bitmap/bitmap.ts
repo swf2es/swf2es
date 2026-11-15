@@ -122,6 +122,9 @@ function setRun(
   }
 }
 
+/** The fewest pixels of a run that setRunOf writes through a view of it, an object made for it. */
+const VIEWED_RUN = 64;
+
 /** `setRun` from a Vector's elements, an array of numbers. */
 function setRunOf(
   pixels: Uint32Array,
@@ -134,6 +137,14 @@ function setRunOf(
   if (transparent) {
     for (let i = 0; i < n; i++) {
       pixels[to + i] = premultiply(values[from + i] | 0);
+    }
+  } else if (from === 0 && n >= VIEWED_RUN) {
+    // A Vector's elements from its start, as a rect as wide as the store takes them, into a view
+    // of the run: V8 runs this loop a quarter faster than the one below (setVector-opaque in
+    // tests/bench/players.ts, 38 to 27 ms in Chrome).
+    const run = pixels.subarray(to, to + n);
+    for (let i = 0; i < n; i++) {
+      run[i] = values[i] | 0xff000000;
     }
   } else {
     for (let i = 0; i < n; i++) {
