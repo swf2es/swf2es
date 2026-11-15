@@ -12,6 +12,7 @@ import { builtinLibrary } from "@swf2es/runtime/avm2";
 import { shellToplevelLibrary } from "../../packages/cli/dist/shell-toplevel-library.js";
 import { abcOf, embedded, LIBRARIES } from "../../tools/avmplus-libraries.ts";
 import {
+  APP_DEPENDENCIES,
   BUNDLED_PACKAGES,
   expected,
   type Origin,
@@ -65,6 +66,23 @@ test("each package's license names what it holds, and it ships its notices", { s
       name,
     );
   }
+});
+
+test("the desktop app's notices are those of every dependency from elsewhere it loads", () => {
+  const pkg = JSON.parse(readFileSync(`${root}apps/desktop/package.json`, "utf8"));
+  const loaded = Object.keys(pkg.dependencies).filter(
+    (name) => !name.startsWith("@swf2es/") && name !== "electron",
+  );
+  assert.deepEqual(loaded.sort(), [...APP_DEPENDENCIES.desktop].sort());
+  const notices = readFileSync(`${root}apps/desktop/LICENSE.third-party`, "utf8");
+  for (const name of loaded) {
+    const license = readFileSync(`${root}apps/desktop/node_modules/${name}/LICENSE`, "utf8");
+    assert.ok(notices.includes(license), `${name}'s LICENSE`);
+  }
+
+  assert.ok(pkg.files.includes("LICENSE.third-party"));
+  // It holds none of their code: its own licence is the repository's.
+  assert.equal(pkg.license, "Apache-2.0");
 });
 
 // What a file's header says it comes from.

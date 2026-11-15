@@ -27,6 +27,8 @@ export interface NetResponse {
   headers: [string, string][];
   /** Where redirects took it, where that differs from the URL asked for. */
   url?: string;
+  /** Where the HTTP cache answered, for --log-network: stored and fresh, or a 304 confirmed it. */
+  cache?: "hit" | "revalidated";
 }
 
 /** A request refused, with why, for the terminal; the SWF sees a failed load. */

@@ -25,6 +25,10 @@
 //   the address its host was pinned to, judged as without one: the proxy
 //   is asked for that address, not the name, so a proxy's DNS that answers
 //   otherwise than this machine's reaches nothing the judgement did not.
+// - A GET's answer may come from the HTTP cache (http-cache.ts) in place of
+//   the server, or the server's 304 to its revalidation: only once the
+//   request has been judged as any other, so a policy that refuses it
+//   refuses it whatever is stored.
 //
 // Its types and limits are network-types.ts, and the rules that need no
 // instance network-rules.ts.
@@ -38,6 +42,7 @@ import type { Duplex } from "node:stream";
 import * as tls from "node:tls";
 import { type AddressClass, addressClass, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
+import type { CacheEntry, CacheRequest, HttpCache } from "./http-cache.ts";
 import {
   abortable,
   bare,
@@ -85,6 +90,39 @@ const FLASH_VERSION = "32,0,0,465";
 const USER_AGENT = "Mozilla/5.0 (compatible; swf2es) Shockwave Flash";
 const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
+interface SendOptions {
+  read: boolean;
+  /** Whether a response whose status is 400 or more is read too. */
+  errorBody?: boolean;
+  max: number;
+  referer: string | null;
+  timeout?: number;
+  deadline?: number;
+  /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
+  budget?: Budget;
+}
+
+/** The headers a request goes with: the SWF's own over what every request sends. */
+function outgoingHeaders(
+  headers: [string, string][],
+  referer: string | null,
+): Record<string, string> {
+  const outgoing: Record<string, string> = {
+    "User-Agent": USER_AGENT,
+    Accept: "*/*",
+    "x-flash-version": FLASH_VERSION,
+  };
+  if (referer) {
+    outgoing.Referer = referer;
+  }
+
+  for (const [name, value] of headers) {
+    outgoing[name] = value;
+  }
+
+  return outgoing;
+}
+
 export class Network {
   private readonly limits: Limits;
   private readonly resolveHost: (host: string) => Promise<string[]>;
@@ -94,6 +132,8 @@ export class Network {
   private readonly socketPolicyPort: number;
   private readonly proxy: ProxyConfig | null;
   private session: Session | null = null;
+  /** What answers a GET in place of the network where it can; none by default, or when turned off. */
+  cache: HttpCache | null = null;
   private running = 0;
   private readonly waiting: (() => void)[] = [];
 
@@ -462,7 +502,7 @@ export class Network {
         throw new Refused(`a redirect to ${url.href}, somewhere more private`);
       }
 
-      const response = await this.send(url, target.address, "GET", [], null, signal, {
+      const response = await this.exchange(url, target.address, "GET", [], null, signal, {
         read: true,
         max: this.limits.response,
         referer: null,
@@ -542,7 +582,7 @@ export class Network {
         }
       }
 
-      const response = await this.send(url, target.address, method, headers, body, signal, {
+      const response = await this.exchange(url, target.address, method, headers, body, signal, {
         // sendToURL's answer is no one's to read.
         read: request.purpose !== "send",
         // In AIR's application sandbox alone: Flash Player's fail such a load, with no data.
@@ -611,7 +651,7 @@ export class Network {
   ): Promise<UrlPolicy | null> {
     let response: NetResponse;
     try {
-      response = await this.send(url, address, "GET", [], null, signal, {
+      response = await this.exchange(url, address, "GET", [], null, signal, {
         read: true,
         max: this.limits.policy,
         referer: null,
@@ -756,6 +796,109 @@ export class Network {
   }
 
   /**
+   * A request's answer from the cache where it can give one, a stored
+   * response fresh or revalidated with a 304, else from send(), what comes
+   * kept where it may be. Its body counts as send()'s would, against `max`
+   * and the movie's budget. Only what send() would read is asked of it: a
+   * GET whose body is read.
+   */
+  private async exchange(
+    url: URL,
+    address: string,
+    method: string,
+    headers: [string, string][],
+    body: Uint8Array | null,
+    signal: AbortSignal,
+    options: SendOptions,
+  ): Promise<NetResponse> {
+    const cache = this.cache;
+    const request: CacheRequest = {
+      method,
+      url: url.href,
+      headers: Object.entries(outgoingHeaders(headers, options.referer)),
+    };
+    if (!cache || !options.read || !cache.handles(request)) {
+      return this.send(url, address, method, headers, body, signal, options);
+    }
+
+    const found = cache.lookup(request);
+    if (found?.fresh) {
+      const bytes = await this.storedBody(cache, found, signal, options);
+      if (bytes) {
+        return { bytes, status: found.status, headers: found.headers, cache: "hit" };
+      }
+    }
+
+    const conditional = found && !found.fresh ? found.conditional : [];
+    const response = await this.send(
+      url,
+      address,
+      method,
+      [...headers, ...conditional],
+      body,
+      signal,
+      options,
+    );
+    if (found && conditional.length > 0 && response.status === 304) {
+      const refreshed = cache.revalidated(found, request, response);
+      const bytes = refreshed && (await this.storedBody(cache, refreshed, signal, options));
+      if (refreshed && bytes) {
+        return {
+          bytes,
+          status: refreshed.status,
+          headers: refreshed.headers,
+          cache: "revalidated",
+        };
+      }
+
+      // What the 304 was to confirm is gone, or does not match: asked again, whole.
+      const whole = await this.send(url, address, method, headers, body, signal, options);
+      void cache.store(request, whole);
+      return whole;
+    }
+
+    void cache.store(request, response);
+    return response;
+  }
+
+  /**
+   * A stored body, counted as a response's against `max` and the movie's
+   * budget; null where its file is not what was stored.
+   */
+  private async storedBody(
+    cache: HttpCache,
+    entry: CacheEntry,
+    signal: AbortSignal,
+    options: SendOptions,
+  ): Promise<Uint8Array | null> {
+    if (entry.size > options.max) {
+      throw new Refused(`its response is larger than ${options.max} bytes`);
+    }
+
+    const budget = options.budget;
+    if (budget) {
+      if (budget.session.buffered + entry.size > this.limits.buffered) {
+        throw new Refused("the SWF's responses under way hold too much at once");
+      }
+
+      budget.session.buffered += entry.size;
+      budget.taken += entry.size;
+    }
+
+    const bytes = await cache.body(entry);
+    if (!bytes && budget) {
+      budget.session.buffered -= entry.size;
+      budget.taken -= entry.size;
+    }
+
+    if (signal.aborted) {
+      throw new Refused("aborted");
+    }
+
+    return bytes;
+  }
+
+  /**
    * One HTTP exchange with `address`, the URL's host pinned to it: its
    * status and headers, and its body if `read` and the status is a
    * success, or an error whose body was asked for (`errorBody`), up to
@@ -769,17 +912,7 @@ export class Network {
     headers: [string, string][],
     body: Uint8Array | null,
     signal: AbortSignal,
-    options: {
-      read: boolean;
-      /** Whether a response whose status is 400 or more is read too. */
-      errorBody?: boolean;
-      max: number;
-      referer: string | null;
-      timeout?: number;
-      deadline?: number;
-      /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
-      budget?: Budget;
-    },
+    options: SendOptions,
   ): Promise<NetResponse> {
     const timeout = options.timeout ?? this.limits.timeout;
     const deadline = options.deadline ?? this.limits.deadline;
@@ -790,19 +923,7 @@ export class Network {
       }
 
       const host = bare(url.hostname);
-      const outgoing: Record<string, string> = {
-        "User-Agent": USER_AGENT,
-        Accept: "*/*",
-        "x-flash-version": FLASH_VERSION,
-      };
-      if (options.referer) {
-        outgoing.Referer = options.referer;
-      }
-
-      for (const [name, value] of headers) {
-        outgoing[name] = value;
-      }
-
+      const outgoing = outgoingHeaders(headers, options.referer);
       if (body) {
         outgoing["Content-Length"] = String(body.length);
       }
