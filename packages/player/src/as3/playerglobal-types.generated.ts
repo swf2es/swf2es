@@ -2279,7 +2279,7 @@ export interface As3_flash_display_NativeMenu extends As3_flash_events_EventDisp
   addSubmenuAt(submenu: avm2.Ref<As3_flash_display_NativeMenu> | null, index: number, label: string | null): avm2.Ref<As3_flash_display_NativeMenuItem> | null;
   clone(): avm2.Ref<As3_flash_display_NativeMenu> | null;
   containsItem(item: avm2.Ref<As3_flash_display_NativeMenuItem> | null): boolean;
-  dispatchContextMenuSelect(arg0: avm2.Ref<As3_flash_events_MouseEvent> | null): avm2.Value;
+  dispatchContextMenuSelect(event: avm2.Ref<As3_flash_events_MouseEvent> | null): avm2.Value;
   display(stage: avm2.Ref<As3_flash_display_Stage> | null, stageX: number, stageY: number): void;
   getItemAt(index: number): avm2.Ref<As3_flash_display_NativeMenuItem> | null;
   getItemByName(name: string | null): avm2.Ref<As3_flash_display_NativeMenuItem> | null;

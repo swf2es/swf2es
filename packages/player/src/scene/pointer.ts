@@ -77,6 +77,14 @@ export function bindCanvasPointer(
       return [x, y];
     },
     () => shown.bounds,
+    (x, y) => {
+      // The inverse of place: where a point on the stage is in the page.
+      const [x0, y0, sx, sy] = canvasPoint(canvas, style, 0, 0);
+      const bounds = shown.bounds;
+      const cx = ((x - bounds.x) * canvas.width) / bounds.width;
+      const cy = ((y - bounds.y) * canvas.height) / bounds.height;
+      return [(cx - x0) * sx, (cy - y0) * sy];
+    },
   );
 
   // Each touch's last point, which a cancel, whose own may be anywhere, ends at.

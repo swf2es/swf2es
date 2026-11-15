@@ -1,7 +1,10 @@
 package
 {
+	import flash.display.NativeMenu;
+	import flash.display.NativeMenuItem;
 	import flash.display.Sprite;
 	import flash.events.ContextMenuEvent;
+	import flash.events.Event;
 	import flash.events.MouseEvent;
 	import flash.external.ExternalInterface;
 	import flash.ui.ContextMenu;
@@ -78,6 +81,21 @@ package
 						e.bubbles, e.cancelable, e.eventPhase]);
 		}
 
+		// NativeMenu.display's menu at a point on the stage, whose choice selects up to the menu.
+		private function displayMenu():void
+		{
+			const shown:NativeMenu = new NativeMenu();
+			shown.addItem(new NativeMenuItem("Pick"));
+			shown.addItem(new NativeMenuItem("", true));
+			const off:NativeMenuItem = shown.addItem(new NativeMenuItem("Off"));
+			off.enabled = false;
+			shown.addEventListener(Event.SELECT, function(e:Event):void
+				{
+					ExternalInterface.call("menuTrace", [e.type, NativeMenuItem(e.target).label, e.eventPhase]);
+				});
+			shown.display(stage, 60, 70);
+		}
+
 		public function menuMode(value:String):void
 		{
 			switch (value)
@@ -101,6 +119,9 @@ package
 					break;
 				case "noDefaults":
 					stage.showDefaultContextMenu = false;
+					break;
+				case "display":
+					displayMenu();
 					break;
 				case "throw":
 					menu.addEventListener(ContextMenuEvent.MENU_SELECT, function(e:ContextMenuEvent):void

@@ -163,6 +163,8 @@
     "flash.filesystem::FileStream#writeUTF",
     "flash.filesystem::FileStream#writeUTFBytes",
     "flash.filesystem::FileStream#writeUnsignedInt",
+    "flash.display::NativeMenu#flash.display:NativeMenu::show",
+    "flash.display::NativeMenu.get:isSupported",
     "flash.display::NativeWindow#activate",
     "flash.display::NativeWindow#close",
     "flash.display::NativeWindow#get:active",

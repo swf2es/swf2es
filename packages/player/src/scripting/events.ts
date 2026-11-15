@@ -151,14 +151,15 @@ export function dispatchToListener(
 }
 
 /**
- * Dispatch `event`, an UncaughtErrorEvent, along `path`: its target first,
- * a LoaderInfo, then what is above it, nearest first, each with the
- * dispatcher that keeps its listeners, its uncaughtErrorEvents, if it has
- * made one. The event has the LoaderInfo for its target, and each
- * LoaderInfo or Loader for its current target, as in Flash. Whether no
- * listener prevented its default.
+ * Dispatch `event` along `path`, a chain that is not the display list's:
+ * its target first, then what is above it, nearest first, each with the
+ * dispatcher that keeps its listeners. An UncaughtErrorEvent's has a
+ * LoaderInfo for its target and each LoaderInfo or Loader above it, whose
+ * uncaughtErrorEvents keeps the listeners, if it has made one; a menu
+ * item's select goes up through its menus. Whether no listener prevented
+ * its default.
  */
-export function dispatchUncaught(
+export function dispatchAlong(
   s: Scripting,
   event: AsObject,
   path: readonly (readonly [current: AsObject, listeners: AsObject | undefined])[],

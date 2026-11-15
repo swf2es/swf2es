@@ -14,7 +14,7 @@ import type { As3 } from "../as3/types.js";
 import { rootOf } from "../display/display.js";
 import type { Library } from "../display/timeline.js";
 import type { Scripting } from "../scripting.js";
-import { dispatchUncaught } from "./events.js";
+import { dispatchAlong } from "./events.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
@@ -157,7 +157,7 @@ export class UncaughtErrors {
         error,
       );
 
-      return dispatchUncaught(this.s, event, path);
+      return dispatchAlong(this.s, event, path);
     } finally {
       this.telling = false;
     }

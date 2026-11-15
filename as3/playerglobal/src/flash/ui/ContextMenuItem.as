@@ -7,12 +7,11 @@ package flash.ui
 
 	public class ContextMenuItem extends NativeMenuItem
 	{
-		public function ContextMenuItem(
-				caption:String,
-				separatorBefore:Boolean = false,
-				enabled:Boolean = true,
-				visible:Boolean = true
-			)
+		private var _separatorBefore:Boolean;
+
+		private var _visible:Boolean;
+
+		public function ContextMenuItem(caption:String, separatorBefore:Boolean = false, enabled:Boolean = true, visible:Boolean = true)
 		{
 			this.caption = caption;
 			this.separatorBefore = separatorBefore;
@@ -20,19 +19,22 @@ package flash.ui
 			this.visible = visible;
 		}
 
+		// The item's label, as in AIR.
 		public function get caption():String
 		{
-			return this._caption;
+			return this.label;
 		}
+
 		public function set caption(value:String):void
 		{
-			this._caption = value;
+			this.label = value;
 		}
 
 		public function get separatorBefore():Boolean
 		{
 			return this._separatorBefore;
 		}
+
 		public function set separatorBefore(value:Boolean):void
 		{
 			this._separatorBefore = value;
@@ -42,20 +44,27 @@ package flash.ui
 		{
 			return this._visible;
 		}
+
 		public function set visible(value:Boolean):void
 		{
 			this._visible = value;
 		}
 
+		// As NativeMenuItem's clone: all but its data, menu and listeners.
 		override public function clone():NativeMenuItem
 		{
-			return new ContextMenuItem(this.caption, this.separatorBefore, this.enabled, this.visible);
+			const copy:ContextMenuItem = new ContextMenuItem(this.caption, this.separatorBefore, this.enabled, this.visible);
+			copy.checked = this.checked;
+			copy.name = this.name;
+			copy.keyEquivalent = this.keyEquivalent;
+			copy.keyEquivalentModifiers = this.keyEquivalentModifiers;
+			copy.mnemonicIndex = this.mnemonicIndex;
+			if (this.submenu != null)
+			{
+				copy.submenu = this.submenu.clone();
+			}
+
+			return copy;
 		}
-
-		private var _caption:String;
-
-		private var _separatorBefore:Boolean;
-
-		private var _visible:Boolean;
 	}
 }
