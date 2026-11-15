@@ -410,17 +410,37 @@ export function colorBounds(
   // copy. A mask of alpha alone needs no unmultiply, which keeps alpha.
   const pixels = store.readable;
   const raw = premultiplied || (mask & 0xffffff) === 0;
+  const width = store.width;
+  // A row's first pixel found from the left and its last from the right bound it: what lies
+  // between, often most of it, is never read.
   for (let y = 0; y < store.height; y++) {
-    for (let x = 0; x < store.width; x++) {
-      const pixel = pixels[y * store.width + x];
-      const hit = ((raw ? pixel : unmultiply(pixel)) & mask) >>> 0 === target;
-      if (hit === find) {
-        x0 = Math.min(x0, x);
-        y0 = Math.min(y0, y);
-        x1 = Math.max(x1, x);
-        y1 = Math.max(y1, y);
+    const row = y * width;
+    let first = -1;
+    for (let x = 0; x < width; x++) {
+      const pixel = pixels[row + x];
+      if ((((raw ? pixel : unmultiply(pixel)) & mask) >>> 0 === target) === find) {
+        first = x;
+        break;
       }
     }
+
+    if (first < 0) {
+      continue;
+    }
+
+    let last = first;
+    for (let x = width - 1; x > first; x--) {
+      const pixel = pixels[row + x];
+      if ((((raw ? pixel : unmultiply(pixel)) & mask) >>> 0 === target) === find) {
+        last = x;
+        break;
+      }
+    }
+
+    x0 = Math.min(x0, first);
+    x1 = Math.max(x1, last);
+    y0 = Math.min(y0, y);
+    y1 = y;
   }
 
   // Flash takes extents that end at the origin for none found: a lone hit at (0, 0) gives an empty rect.
