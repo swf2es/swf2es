@@ -51,6 +51,15 @@ export const scriptWork = { changes: 0 };
 export const pickWork = { changes: 0, picks: 0 };
 
 /**
+ * A count that moves whenever a display object's parent is set, the hit
+ * areas' passing ones too, and whenever an AVM1 level is made: whether an
+ * object is on a level follows from its parents alone, so what a walk up
+ * them found holds while this stands still (avm1/avm1.ts's removed). One
+ * for every player.
+ */
+export const parentage = { changes: 0 };
+
+/**
  * How many times a SWF's content was let go of, a Loader's unloaded or
  * replaced or a player destroyed: a renderer lets go then of what it kept
  * of objects off the list for others to take, which holds their SWF's

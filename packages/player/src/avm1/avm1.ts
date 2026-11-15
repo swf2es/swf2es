@@ -36,6 +36,7 @@ import {
   type DisplayObject,
   EMPTY_TIMELINE,
   MovieClip,
+  parentage,
   TextObject,
   VideoObject,
 } from "../display/display.js";
@@ -521,6 +522,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.rate = frameRate;
     this.levels.set(0, root);
     this.levelNumbers.set(root, 0);
+    parentage.changes++;
     if (isAs3(swf) || !library.actions) {
       return;
     }
@@ -839,6 +841,22 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * scripts reach but by its path.
    */
   removed(d: DisplayObject): boolean {
+    // A clip's answer is kept until a parent changes, as references ask it at every member.
+    const native = d.avm1?.display;
+    if (native instanceof ClipNative && native.movie === this) {
+      if (native.walked !== parentage.changes) {
+        native.walked = parentage.changes;
+        native.gone = this.offLevels(d);
+      }
+
+      return native.gone;
+    }
+
+    return this.offLevels(d);
+  }
+
+  /** removed's walk up from `d` to its level. */
+  private offLevels(d: DisplayObject): boolean {
     let top = d;
     while (top.parent !== null && !this.levelNumbers.has(top)) {
       top = top.parent;
@@ -1337,6 +1355,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const clip = new MovieClip(EMPTY_TIMELINE, this.root.library);
     this.levels.set(n, clip);
     this.levelNumbers.set(clip, n);
+    parentage.changes++;
     this.root.parent?.placeAtDepth(clip, n);
     this.made(clip);
     return clip;
