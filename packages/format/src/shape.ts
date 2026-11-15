@@ -289,10 +289,14 @@ function readLines(r: SwfReader, version: number): Line[] {
   return lines;
 }
 
-/** The records from the reader's position: fill and line bit counts first, then records to the end record. */
+/**
+ * The records from the reader's position: fill and line bit counts first,
+ * then records to the end record. A style change brings new styles of the
+ * shape `version`, null where records bring none (glyphs, morph shapes).
+ */
 export function readRecords(
   r: SwfReader,
-  version: number,
+  version: number | null,
 ): { records: ShapeRecord[]; truncated: boolean } {
   r.align();
   let fillBits = r.ub(4);
@@ -337,7 +341,9 @@ export function readRecords(
     const line = flags & 8 ? r.ub(lineBits) : null;
     let styles: { fills: Fill[]; lines: Line[] } | null = null;
 
-    if (flags & 16 && version >= 2) {
+    // SWF 19 gives new styles to DefineShape2 and later only, but Flash
+    // reads them in a DefineShape too, as some tools write its styles.
+    if (flags & 16 && version !== null) {
       styles = { fills: readFills(r, version), lines: readLines(r, version) };
       r.align();
       fillBits = r.ub(4);
@@ -585,15 +591,14 @@ export function readMorphShape(
 
   // The start's records stop at the end's, where the offset lies past the
   // styles and in the tag: one missing its end record reads no further. A
-  // style change in either end's records brings no new styles: version 1
-  // reads none.
+  // style change in either end's records brings no new styles.
   const offsetValid = endOffset !== 0 && endAt >= r.pos && endAt <= r.end;
-  const start = readRecords(offsetValid ? new SwfReader(r.bytes, r.pos, endAt) : r, 1);
+  const start = readRecords(offsetValid ? new SwfReader(r.bytes, r.pos, endAt) : r, null);
   if (offsetValid) {
     r.pos = endAt;
   }
 
-  const end = readRecords(r, 1);
+  const end = readRecords(r, null);
   if (swfVersion < SMOOTHED_FILLS_VERSION) {
     for (let i = 0; i < fills.length; i++) {
       unsmooth(fills[i].start);

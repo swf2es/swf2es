@@ -166,6 +166,12 @@ export interface ShapeSpec {
   paths: { fill1: number; fill0?: number; line?: number; commands: PathCommand[] }[];
   /** 1 DefineShape (RGB), 3 DefineShape3 (RGBA), 4 DefineShape4 (RGBA, LINESTYLE2). */
   version?: 1 | 3 | 4;
+  /**
+   * The styles brought by a style change at the records' start, the
+   * shape's own lists empty, as some tools write even a DefineShape though
+   * SWF 19 gives new styles to DefineShape2 and later only.
+   */
+  newStyles?: boolean;
 }
 
 /**
@@ -241,29 +247,37 @@ export function shape(spec: ShapeSpec): Uint8Array {
       }
     }
   };
-  w.u8(spec.fills.length);
-  for (const f of spec.fills) {
-    fillStyle(f);
-  }
-
-  w.u8(lines.length);
-  for (const l of lines) {
-    w.u16(l.width);
-    if (version === 4) {
-      // Round caps and joins, scaled, closed: only HasFillFlag set, where there is a fill.
-      w.u8(l.fill === undefined ? 0 : 0x08).u8(0);
-      if (l.fill === undefined) {
-        color(l.color);
-      } else {
-        fillStyle(l.fill);
-      }
-
-      continue;
+  const styles = () => {
+    w.align().u8(spec.fills.length);
+    for (const f of spec.fills) {
+      fillStyle(f);
     }
 
-    color(l.color);
+    w.u8(lines.length);
+    for (const l of lines) {
+      w.u16(l.width);
+      if (version === 4) {
+        // Round caps and joins, scaled, closed: only HasFillFlag set, where there is a fill.
+        w.u8(l.fill === undefined ? 0 : 0x08).u8(0);
+        if (l.fill === undefined) {
+          color(l.color);
+        } else {
+          fillStyle(l.fill);
+        }
+
+        continue;
+      }
+
+      color(l.color);
+    }
+  };
+
+  if (spec.newStyles) {
+    // No styles and no bits for their indices, then a style change with only new styles.
+    w.u8(0).u8(0).u8(0).ub(1, 0).ub(5, 16);
   }
 
+  styles();
   const fillBits = sbits(spec.fills.length);
   const lineBits = sbits(lines.length);
   w.ub(4, fillBits).ub(4, lineBits);

@@ -133,6 +133,46 @@ test("a bitmap fill is smoothed as its type says from SWF 8, and never before it
   assert.deepEqual(smooth(7), [false, false, false, false]);
 });
 
+test("a DefineShape's styles may come in its records, as Flash reads them", () => {
+  const tag = w.shape({
+    id: 1,
+    bounds: [0, 400, 0, 400],
+    fills: [{ bitmap: 2, type: 0x41, matrix: { a: 20, d: 20 } }],
+    lines: [{ width: 20, color: 0x000080 }],
+    paths: [
+      { fill1: 1, line: 1, commands: [{ move: [0, 0] }, { line: [400, 0] }, { line: [0, 0] }] },
+    ],
+    newStyles: true,
+  });
+  const swf = readSwf(w.swf({ version: 8, width: 20, height: 20, frameCount: 1, tags: [tag] }));
+  const t = swf.tags[0];
+  const s = readShape(swf.bytes, t.code, t.offset, t.length, 8);
+  assert.equal(t.code, tags.DefineShape);
+  assert.deepEqual(s.fills, []);
+  assert.deepEqual(s.lines, []);
+  assert.equal(s.truncated, false);
+  const first = s.records[0];
+  assert.ok(first.type === "style" && first.styles);
+  assert.deepEqual([first.moveTo, first.fill0, first.fill1, first.line], [null, null, null, null]);
+  assert.deepEqual(first.styles.fills, [
+    {
+      type: "bitmap",
+      bitmap: 2,
+      matrix: { a: 20, b: 0, c: 0, d: 20, tx: 0, ty: 0 },
+      repeat: false,
+      smooth: true,
+    },
+  ]);
+  assert.equal(first.styles.lines.length, 1);
+  assert.equal(first.styles.lines[0].width, 20);
+  assert.equal(first.styles.lines[0].color, 0xff000080);
+  assert.deepEqual(s.records.slice(1), [
+    { type: "style", moveTo: { x: 0, y: 0 }, fill0: 0, fill1: 1, line: 1, styles: null },
+    { type: "line", dx: 400, dy: 0 },
+    { type: "line", dx: -400, dy: 0 },
+  ]);
+});
+
 test("places, removes, sprites, scaling grids and symbols read as written", () => {
   const swf = readSwf(movie);
   const first = readPlace(swf.bytes, swf.tags[3]);
