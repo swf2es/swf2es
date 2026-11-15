@@ -1069,6 +1069,340 @@ async function benchSwf(
   }
 }
 
+/** A step of playSwf: an animation frame's call to the player and its draw. */
+interface PlayedStep {
+  /** The animation frame's time, from the first's, in ms. */
+  at: number;
+  /** When its work began, in ms from the profile's start where one is taken. */
+  begun: number;
+  /** How many of the SWF's frames the call played, and how many had played before it. */
+  frames: number;
+  played: number;
+  advance: number;
+  draw: number;
+  gl: number;
+  /** What the renderer asked of GL in it (firstUses), and morph shapes blended for a new ratio. */
+  work: Record<string, number>;
+}
+
+interface Played {
+  steps: PlayedStep[];
+  /** From the player's construction to its first frame drawn, and the renderer's making. */
+  first: number;
+  renderer: number;
+  frameRate: number;
+  frameCount: number;
+  samples: number;
+  /** What the renderer asked of GL before the first frame (firstUses). */
+  startup: Record<string, number>;
+  /** Every program linked, in order: the step it was linked in (-1 before the first) and its ms. */
+  links: { step: number; ms: number }[];
+  gpu: string;
+  /** Whether the context compiles programs in parallel (KHR_parallel_shader_compile). */
+  parallel: boolean;
+  error: string | null;
+}
+
+/**
+ * What the renderer asks of GL that a frame may stall on, counted between
+ * reads: programs linked and the ms spent compiling, linking and reading
+ * their status (where Chrome waits for its GPU process), programs drawn
+ * with for the first time (where a driver may build what it put off),
+ * buffers made and copied, texture uploads and their bytes, filter passes (and compositeOver: a
+ * triangle over the output) and layers composited. Each link goes to
+ * `links` with the step it was made in, `step` as it is read.
+ */
+function firstUses(links: { step: number; ms: number }[]): {
+  watch(gl: WebGL2RenderingContext): void;
+  read(next: number): Record<string, number>;
+} {
+  let work: Record<string, number> = {};
+  let step = -1;
+  const add = (key: string, by = 1) => {
+    work[key] = (work[key] ?? 0) + by;
+  };
+  // On the prototype, so that what the renderer links as it is made counts too.
+  const gl = WebGL2RenderingContext;
+  const target = gl.prototype as unknown as Record<string, (...args: unknown[]) => unknown>;
+  const wrap = (
+    object: Record<string, unknown> | null,
+    method: string,
+    before: (args: unknown[]) => void,
+  ) => {
+    const original = object?.[method] as ((...args: unknown[]) => unknown) | undefined;
+    if (!object || !original) {
+      return;
+    }
+
+    object[method] = function (this: unknown, ...args: unknown[]) {
+      before(args);
+      return original.apply(this, args);
+    };
+  };
+  // A link is timed from its shaders' compile to its status read, where Chrome waits.
+  let linking = 0;
+  const timed = (method: string, after: (ms: number, args: unknown[]) => void) => {
+    const original = target[method];
+    target[method] = function (this: unknown, ...args: unknown[]) {
+      const begun = performance.now();
+      const out = original.apply(this, args);
+      const ms = performance.now() - begun;
+      add("shaderMs", ms);
+      linking += ms;
+      after(ms, args);
+      return out;
+    };
+  };
+  timed("compileShader", () => {});
+  timed("getShaderParameter", () => {});
+  timed("linkProgram", () => add("links"));
+  timed("getProgramParameter", (_ms, args) => {
+    if (args[1] === gl.LINK_STATUS) {
+      links.push({ step, ms: linking });
+      linking = 0;
+    }
+  });
+  const used = new WeakSet<object>();
+  let current: object | null = null;
+  wrap(target, "useProgram", (args) => {
+    current = args[0] as object | null;
+  });
+  const drawn = () => {
+    if (current && !used.has(current)) {
+      used.add(current);
+      add("firstDraws");
+    }
+  };
+  for (const method of ["drawElements", "drawArraysInstanced", "drawElementsInstanced"]) {
+    wrap(target, method, drawn);
+  }
+  wrap(target, "drawArrays", (args) => {
+    drawn();
+    if (args[2] === 3) {
+      add("passes");
+    } else if (args[2] === 6) {
+      add("composites");
+    }
+  });
+  // Buffers made anew and copied on the GPU, as the geometry atlas grows or is packed again.
+  wrap(target, "bufferData", (args) => {
+    add("buffers");
+    const data = args[1] as number | ArrayBufferView | null;
+    add("bufferBytes", typeof data === "number" ? data : (data?.byteLength ?? 0));
+  });
+  wrap(target, "copyBufferSubData", () => add("bufferCopies"));
+  for (const method of ["texImage2D", "texSubImage2D", "compressedTexImage2D"]) {
+    wrap(target, method, (args) => {
+      add("textures");
+      const data = args.find((a) => ArrayBuffer.isView(a)) as ArrayBufferView | undefined;
+      const image = args.find(
+        (a) => typeof a === "object" && a !== null && !ArrayBuffer.isView(a) && "width" in a,
+      ) as { width: number; height: number } | undefined;
+      add("textureBytes", data?.byteLength ?? (image ? image.width * image.height * 4 : 0));
+    });
+  }
+
+  return {
+    watch(context: WebGL2RenderingContext): void {
+      const multi = context.getExtension("WEBGL_multi_draw") as Record<string, unknown> | null;
+      for (const method of ["multiDrawArraysWEBGL", "multiDrawElementsWEBGL"]) {
+        wrap(multi, method, drawn);
+      }
+    },
+    read(next: number): Record<string, number> {
+      const out = work;
+      work = {};
+      step = next;
+      return out;
+    },
+  };
+}
+
+/**
+ * A few ms spent where a profile shows it by name: the moment playSwf's steps are timed from,
+ * in the profile's own clock (bench.ts, within).
+ */
+function profileMark(): void {
+  const end = performance.now() + 3;
+  while (performance.now() < end) {
+    // Spinning.
+  }
+}
+
+/**
+ * Play a SWF in real time as the web element plays it (Playback): on every
+ * animation frame the player advances by the time since the last, by its
+ * own pacing, streamed sound and all, and the stage is drawn when it
+ * changed, at `resolution` canvas pixels a stage pixel, with the samples
+ * the element takes for the quality. Each step is timed, the GPU waited
+ * for, until `frames` of the SWF's frames have played (0: its length).
+ */
+async function playSwf(
+  base64: string,
+  frames: number,
+  resolution: number,
+  cpuProfile = false,
+): Promise<Played> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const steps: PlayedStep[] = [];
+  const links: { step: number; ms: number }[] = [];
+  let gpu = "";
+  try {
+    const start = performance.now();
+    const uncaught: unknown[] = [];
+    const scripting = await scriptingFor(bytes, [], null, uncaught);
+    const player = new Player(bytes, scripting);
+    const morphs = morphMetrics(player);
+    const meter = firstUses(links);
+    const made = performance.now();
+    const view = await surfaceFor(player, 1, 1, 1, false, false);
+    const renderer = performance.now() - made;
+    view.screenScale = null;
+    view.resize(player.width, player.height, resolution);
+    view.canvas.style.width = `${player.width}px`;
+    document.body.replaceChildren(view.canvas);
+    if (scripting) {
+      scripting.drawer = view;
+    }
+
+    if (player.avm1) {
+      player.avm1.drawer = view;
+    }
+
+    const gl = view.gl;
+    gpu = rendererName(gl);
+    const parallel = gl.getSupportedExtensions()?.includes("KHR_parallel_shader_compile") ?? false;
+    meter.watch(gl);
+    // As the element's stageSamples: 4 at medium, 8 at high, 16 at best, fewer on a denser canvas.
+    const samplesFor = (quality: string) => {
+      const samples = quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16;
+      let dense = 4;
+      while (dense < samples / (resolution * resolution)) {
+        dense *= 2;
+      }
+
+      return Math.min(samples, dense);
+    };
+    let quality = "";
+    await player.start();
+    if (uncaught.length > 0) {
+      throw uncaught[0];
+    }
+
+    const finish = () => gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
+    const length = frames > 0 ? frames : player.swf.frameCount;
+    let played = 0;
+    let origin = -1;
+    let last = -1;
+    let first = -1;
+    let busy = 0;
+    let drawn = -1;
+    morphs.reset();
+    const startup = meter.read(0);
+    if (cpuProfile) {
+      (console as Profiling).profile("play");
+    }
+
+    const profiled = performance.now();
+    if (cpuProfile) {
+      profileMark();
+    }
+
+    while (played < length) {
+      const now = await new Promise<number>((resolve) => requestAnimationFrame(resolve));
+      const dt = last < 0 ? 0 : now - last;
+      last = now;
+      if (origin < 0) {
+        origin = now;
+      }
+
+      const begun = performance.now();
+      const n = player.advance(dt, busy);
+      const advanced = performance.now();
+      busy = advanced - begun;
+      if (uncaught.length > 0) {
+        throw uncaught[0];
+      }
+
+      if (player.quality !== quality) {
+        quality = player.quality;
+        view.quality = quality;
+        view.samples = samplesFor(quality);
+        drawn = -1;
+      }
+
+      let rendered = advanced;
+      let finished = advanced;
+      if (player.changes !== drawn) {
+        drawn = player.changes;
+        if (!view.unchanged(player.stage)) {
+          view.render(player.stage);
+          rendered = performance.now();
+          finish();
+          finished = performance.now();
+        }
+      }
+
+      if (first < 0) {
+        first = finished - start;
+      }
+
+      morphs.frame();
+      steps.push({
+        at: now - origin,
+        begun: begun - profiled,
+        frames: n,
+        played,
+        advance: advanced - begun,
+        draw: rendered - advanced,
+        gl: finished - rendered,
+        work: meter.read(steps.length + 1),
+      });
+      played += n;
+    }
+
+    if (cpuProfile) {
+      (console as Profiling).profileEnd("play");
+    }
+
+    const blended = morphs.result().misses;
+    for (const [k, step] of steps.entries()) {
+      if (blended[k]) {
+        step.work.morphs = blended[k];
+      }
+    }
+
+    view.destroy();
+    return {
+      steps,
+      first,
+      renderer,
+      frameRate: player.frameRate,
+      frameCount: player.swf.frameCount,
+      samples: samplesFor(quality),
+      startup,
+      links,
+      gpu,
+      parallel,
+      error: null,
+    };
+  } catch (e) {
+    return {
+      steps,
+      first: 0,
+      renderer: 0,
+      frameRate: 0,
+      frameCount: 0,
+      samples: 0,
+      startup: {},
+      links,
+      gpu,
+      parallel: false,
+      error: describe(e, null),
+    };
+  }
+}
+
 /**
  * The root's children and `count` sprites more, each drawn with 40 round
  * rectangles of its own, at the depths after them: what `toggle` takes off
@@ -1799,6 +2133,7 @@ const page = globalThis as unknown as {
   moduleCacheSwf: typeof moduleCacheSwf;
   runSwf: typeof runSwf;
   benchSwf: typeof benchSwf;
+  playSwf: typeof playSwf;
   openSwf: typeof openSwf;
   stepSwf: typeof stepSwf;
   closeSwf: typeof closeSwf;
@@ -1814,6 +2149,7 @@ page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
 page.moduleCacheSwf = moduleCacheSwf;
 page.benchSwf = benchSwf;
+page.playSwf = playSwf;
 page.openSwf = openSwf;
 page.stepSwf = stepSwf;
 page.closeSwf = closeSwf;
