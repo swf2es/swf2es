@@ -541,3 +541,178 @@ test("the browser host's warm opens its context once, which decodes use, and non
     }
   }
 });
+
+test("a sound on a context the browser holds is told as blocked, and the context's run as unblocked", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const contexts: FakeAudioContext[] = [];
+  const node = { connect: () => {}, disconnect: () => {} };
+  class FakeAudioContext extends EventTarget {
+    state = "suspended";
+    /** Whether the page's gesture lets a resume run it. */
+    allowed = false;
+    resumes = 0;
+    currentTime = 0;
+    destination = {};
+    constructor() {
+      super();
+      contexts.push(this);
+    }
+    createBuffer(count: number, samples: number, rate: number) {
+      return {
+        duration: samples / rate,
+        numberOfChannels: count,
+        getChannelData: () => new Float32Array(samples),
+      };
+    }
+    createBufferSource() {
+      return { ...node, buffer: null, start: () => {}, stop: () => {} };
+    }
+    createChannelSplitter() {
+      return node;
+    }
+    createChannelMerger() {
+      return node;
+    }
+    createGain() {
+      return { ...node, gain: { value: 0 } };
+    }
+    async resume() {
+      this.resumes++;
+      if (this.allowed && this.state !== "running") {
+        this.state = "running";
+        this.dispatchEvent(new Event("statechange"));
+      }
+    }
+    async close() {}
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host?.resume);
+    const told: boolean[] = [];
+    host.onBlocked = (blocked) => told.push(blocked);
+    // Opened as the movie loads, the context waits, but no sound has asked for it yet.
+    host.warm?.();
+    t.mock.timers.tick(5000);
+    assert.deepEqual(told, []);
+
+    const clip = await host.decode({
+      id: 1,
+      format: 3,
+      sampleRate: 5512,
+      sampleSize: 8,
+      channels: 1,
+      sampleCount: 5512,
+      seekSamples: 0,
+      data: new Uint8Array(5512).fill(128),
+    });
+    const mix = { volume: 1, leftToLeft: 1, leftToRight: 0, rightToLeft: 0, rightToRight: 1 };
+    assert.ok(clip.play(0, 1, mix, { atMs: 0 }));
+    // A context may take a while to open its device: not held yet.
+    t.mock.timers.tick(500);
+    assert.deepEqual(told, []);
+    t.mock.timers.tick(500);
+    assert.deepEqual(told, [true]);
+    assert.equal(host.blocked, true);
+
+    // A resume without the user's gesture leaves it held; one within it runs it.
+    host.resume();
+    await Promise.resolve();
+    assert.deepEqual(told, [true]);
+    contexts[0].allowed = true;
+    host.resume();
+    await Promise.resolve();
+    assert.deepEqual(told, [true, false]);
+    assert.equal(host.blocked, false);
+
+    // Running, a sound asks nothing more.
+    assert.ok(clip.play(0, 1, mix));
+    t.mock.timers.tick(5000);
+    assert.deepEqual(told, [true, false]);
+    assert.equal(contexts.length, 1);
+    host.close?.();
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});
+
+test("a context the browser runs a moment after the sound asks is never told as blocked", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "AudioContext");
+  const node = { connect: () => {}, disconnect: () => {} };
+  class FakeAudioContext extends EventTarget {
+    state = "suspended";
+    currentTime = 0;
+    destination = {};
+    createBuffer(count: number, samples: number, rate: number) {
+      return {
+        duration: samples / rate,
+        numberOfChannels: count,
+        getChannelData: () => new Float32Array(samples),
+      };
+    }
+    createBufferSource() {
+      return { ...node, buffer: null, start: () => {}, stop: () => {} };
+    }
+    createChannelSplitter() {
+      return node;
+    }
+    createChannelMerger() {
+      return node;
+    }
+    createGain() {
+      return { ...node, gain: { value: 0 } };
+    }
+    async resume() {
+      // The device opens a moment later, as a browser that allows autoplay opens it.
+      setTimeout(() => {
+        this.state = "running";
+        this.dispatchEvent(new Event("statechange"));
+      }, 300);
+    }
+    async close() {}
+  }
+
+  Object.defineProperty(globalThis, "AudioContext", {
+    configurable: true,
+    value: FakeAudioContext,
+  });
+  try {
+    const host = browserAudioHost();
+    assert.ok(host);
+    const told: boolean[] = [];
+    host.onBlocked = (blocked) => told.push(blocked);
+    const clip = await host.decode({
+      id: 1,
+      format: 3,
+      sampleRate: 5512,
+      sampleSize: 8,
+      channels: 1,
+      sampleCount: 5512,
+      seekSamples: 0,
+      data: new Uint8Array(5512).fill(128),
+    });
+    const mix = { volume: 1, leftToLeft: 1, leftToRight: 0, rightToLeft: 0, rightToRight: 1 };
+    assert.ok(clip.play(0, 1, mix, { atMs: 0 }));
+    await Promise.resolve();
+    t.mock.timers.tick(5000);
+    assert.deepEqual(told, []);
+    assert.equal(host.blocked, false);
+    host.close?.();
+  } finally {
+    if (previous) {
+      Object.defineProperty(globalThis, "AudioContext", previous);
+    } else {
+      Reflect.deleteProperty(globalThis, "AudioContext");
+    }
+  }
+});

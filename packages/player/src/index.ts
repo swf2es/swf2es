@@ -64,6 +64,7 @@ export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js"
 export type { Pointer, PointerState } from "./input/pointer.js";
 export { bindTextInput, type TextInput } from "./input/text-input.js";
 export { LocalConnections } from "./localconnection.js";
+export type { AudioHost } from "./media/audio.js";
 export { Player } from "./player.js";
 export type { FillTessellator } from "./scene/fills.js";
 export { airLibrary, builtinLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
