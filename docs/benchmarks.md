@@ -148,6 +148,21 @@ the ABC parser, the bytecode decoder and typed verification in the
 release build (abcdump.abc from the last conformance run without files),
 and `tests/bench/dxt.ts` the native DXT encoder against TypeScript's.
 
+### The desktop app's sockets and WebSockets
+
+`tests/desktop/relay-bench.ts` has servers in a process of their own send
+many small messages, 8 sockets 20,000 of 48 bytes each and 4 WebSockets
+20,000 of 32, and the desktop app's main-process side of them
+(`connections.ts`, `websocket-connections.ts`, through `relay.ts` where
+the checkout has it) take them in node, without Electron. It counts the
+IPC messages the page would be sent, the socket's reads and the buffers
+each made, collections and CPU time.
+
+    node tests/desktop/relay-bench.ts [runs]                             this checkout
+    node tests/desktop/relay-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
+        [--burst N]   the messages a server writes a turn, 40 by default
+        [--busy MS]   the main process held MS ms of every 2 MS, as by its other work
+
 ## AVM1 startup and scene changes
 
 `pnpm bench:avm1 [--runs 5] [--frames 600]` measures what AVM1 content
@@ -516,6 +531,21 @@ The player:
 - #994: the tick advances only clips whose advance does something.
 - #997: a button's pick bounds kept while its hit test state stands
   still.
+
+The desktop app:
+
+- #1010: sockets read into a buffer of their own, each read copied out at
+  its length, one store a read rather than Node's Buffer and a copy (2.0
+  → 1.0 bytes made a byte received); a page's events gathered into one
+  IPC message a turn of the main process's loop
+  (`tests/desktop/relay-bench.ts`, medians of 6). WebSockets: 80,008 →
+  27,069 messages, 3,871 with the main process held 1 ms of every 2
+  (`--busy 1`), 1,413 with `--busy 4`. Sockets: 0.82 messages a read, 0.78
+  with `--busy 4`; but a read that costs less comes sooner and carries
+  less, so with the main process free the reads went from 6,263 to
+  15,223 (1,227 → 505 bytes each), the messages from 6,279 to 12,600 and
+  its CPU from 73 to 119 ms, and with `--busy 4` from 3,501 to 4,212
+  messages at the same CPU (108 → 115 ms).
 
 The renderer's are described in [renderer.md](renderer.md).
 
