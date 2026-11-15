@@ -236,33 +236,54 @@ also tells the player the sandbox, which `Security.sandboxType` reports.
 The main process keeps a private HTTP cache, as RFC 9111 has one
 (`src/main/http-cache.ts`), of the GET responses it receives for a SWF:
 its own SWF when opened by its URL, what it loads, and the policy files
-it needs, each by the same rules. It stands where the network would, in
-`network.ts`'s `exchange`, after the request has been judged: its sandbox,
-the policy files, the address's place and its port are decided first,
-hit or miss, so a load a policy refuses is refused whatever is stored,
-and a hit still resolves the host to judge it. What may be stored,
-whether a stored response is fresh, the conditional headers of its
-revalidation and what a 304 changes are http-cache-semantics' `CachePolicy`
-for a private cache (`shared: false`), which reads Cache-Control's
-max-age, no-cache, no-store, private, must-revalidate (revalidated even
-while fresh, as it has it) and stale-while-revalidate (revalidated at
-once), Expires, Age, and a tenth of the time since Last-Modified where
-nothing else gives a freshness. A fresh response is served without the
-network; a stale one goes with If-None-Match or If-Modified-Since from
-its ETag or Last-Modified, a 304 refreshing its stored headers (but
-Content-Length and the like) and serving its body, a 200 replacing it; a
-stale one without a validator is fetched again whole. Only a 200 whose
-body was read is kept, neither no-store nor `Vary: *`, nor what answered
-an Authorization without public, must-revalidate or s-maxage (RFC 9111,
-3.5; no SWF may send one, as Flash refused it, so this only guards),
-nor anything never fresh with no validator to revalidate it; Set-Cookie
-is dropped from what is kept, as from what the SWF gets. A request that
+it needs. It stands where the network would, in `network.ts`'s
+`exchange`, for one hop at a time, once that hop has been judged: its
+sandbox, the policy files, the address's place and its port are decided
+first, hit or miss, so a load a policy refuses is refused whatever is
+stored, and a hit still resolves the host to judge it. What it answers
+with is what that very address answered for this movie's origin, and
+nothing else: each response is kept for the address its host was pinned
+to and for the playing movie's origin, its partition (a local SWF's
+partition is `local`, an application's `application`). So DNS that
+rebinds a name gains nothing through the cache: a policy file kept from
+a public address never answers for the name now at a private one, which
+is asked for its own, as the session's policy files are kept by their
+address; a body from one address never serves a request judged against
+another, nor does one address's 304 confirm another's body. And one
+movie never reads, nor times, what another origin's movie loaded, as a
+browser partitions its cache by site.
+
+What may be stored, whether a stored response is fresh, the conditional
+headers of its revalidation and what a 304 changes are
+http-cache-semantics' `CachePolicy` for a private cache (`shared:
+false`), which reads Cache-Control's max-age, no-cache, no-store,
+private, must-revalidate (revalidated even while fresh, as it has it)
+and stale-while-revalidate (revalidated at once), Expires, Age, and a
+tenth of the time since Last-Modified where nothing else gives a
+freshness. That guess holds a day at most, and never for a policy file,
+which is fresh only for as long as its server's max-age or Expires says
+and otherwise revalidated each time a movie needs it. A fresh response
+is served without the network, with an Age of its age now; a stale one
+goes with If-None-Match or If-Modified-Since from its ETag or
+Last-Modified, a 304 refreshing its stored headers (but Content-Length
+and the like) and serving its body, a 200 replacing it; a stale one
+without a validator is fetched again whole. Only a 200 whose body was
+read is kept, neither no-store nor `Vary: *`, nor what answered an
+Authorization without public, must-revalidate or s-maxage (RFC 9111,
+3.5; no SWF may send one, as Flash refused it, so this only guards), nor
+anything never fresh with no validator to revalidate it; Set-Cookie is
+dropped from what is kept, as from what the SWF gets. A request that
 asks something conditional of its own (If-None-Match, If-Modified-Since,
-If-Match, If-Unmodified-Since, If-Range) is neither answered nor kept: its
-answer is the SWF's to have. Each response's key is the SHA-256 of its
+If-Match, If-Unmodified-Since, If-Range, Range) is neither answered nor
+kept: its answer is the SWF's to have. A POST answered with a 2xx or 3xx
+forgets what its URL has in the movie's partition, and what the URLs its
+Location and Content-Location name on its origin have (RFC 9111, 4.4).
+Each response's key is the SHA-256 of its partition, its address, its
 method, its URL and the request headers its Vary names, as sent, so each
-value of those is an entry of its own. A stored body counts as a fetched
-one, against the largest response (128 MB, a policy file's 1 MB) and the
+value of those is an entry of its own; a URL whose response comes to
+vary otherwise, or at all, has its responses of before dropped, so none
+answers what it no longer would. A stored body counts as a fetched one,
+against the largest response (128 MB, a policy file's 1 MB) and the
 movie's 256 MB under way, and `--log-network` ends its line in `from
 cache`, or `revalidated` after a 304.
 
@@ -277,14 +298,15 @@ and holds metadata only, a row a response:
 
 | Column | |
 | --- | --- |
-| `key` (primary key) | The SHA-256 of the method, URL and the Vary'd request headers. |
+| `key` (primary key) | The SHA-256 of the partition, address, method, URL and the Vary'd request headers. |
 | `file` | The body's name in `bodies/`: the key. |
-| `method`, `url` | What was asked; indexed together, to find a request's entries. |
+| `partition`, `address` | The movie's origin it was kept for, and the address it came from. |
+| `method`, `url` | What was asked; indexed by URL and partition, to find a request's entries and forget a URL's. |
 | `vary` | The request headers the Vary named, and their values, as JSON. |
 | `status`, `headers` | The response, its headers as received but Set-Cookie, as JSON. |
 | `policy` | http-cache-semantics' `CachePolicy`, serialized: what freshness is judged by. |
-| `stored`, `expires` | When it was kept or last revalidated, and when it goes stale (indexed). |
-| `etag`, `last_modified` | Its validators. |
+| `stored`, `expires` | When it was kept or last revalidated, and when it goes stale. |
+| `etag`, `last_modified` | Its validators; `expires` is indexed where both are null, the entries of no more use once stale. |
 | `size`, `last_access` | Its body's bytes, and when it was last served (indexed). |
 
 Every body is a file in one flat directory, `bodies/`, named by its key,
@@ -292,14 +314,19 @@ with no name of the server's. A body is written to a temporary file,
 synced, renamed into place, and only then its row written, the writes in
 the background one at a time; a row is deleted before its file. A serve
 opens the file and checks its size against the row's, and a file gone or
-of another size is a miss and its row dropped; each start sweeps away
-temporary files, files with no row and rows whose file is gone or of
-another size. So a crash leaves no row pointing at half a file. Past the
-budget, 512 MB, the least recently served go first, and an entry stale
-with no validator, of no more use, is dropped as the cache next writes;
-no body larger than an eighth of the budget is kept, as Chromium keeps
-none, so that no one response empties it. An index that does not open is
-started again empty, the bodies with it.
+of another size is a miss and its row dropped; each start sweeps away,
+beside the writes rather than before them, temporary files, files with
+no row and rows whose file is gone or of another size, dropping a row
+only as it found it. So a crash leaves no row pointing at half a file.
+Past the budget, 512 MB, the least recently served go first, by their
+index, the bodies' total kept in memory rather than summed; an entry
+stale with no validator, of no more use, is dropped as the cache next
+writes; no body larger than an eighth of the budget is kept, as Chromium
+keeps none, so that no one response empties it. An index that does not
+open is started again empty, the bodies with it. A cache that fails
+after, its disk full, read only or gone, or a row that does not parse,
+is left out where it fails, said once on stderr: the request goes to the
+network.
 
 File › HTTP Cache turns it off and on, remembered in `settings.json`
 (`httpCache`); off, nothing is read from it nor kept. File › Clear HTTP

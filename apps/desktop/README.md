@@ -88,7 +88,11 @@ fetch-electron` does so ahead, for the tests.
   Last-Modified, Vary): a fresh response is served from the cache, a
   stale one is revalidated, and its 304 serves what is stored. Flash's
   sandbox and policy files still judge every request first, cached or
-  not. It lives in `HTTP Cache` under the system's cache directory
+  not, and a response is kept for the address it came from and the
+  origin of the SWF that asked, so no SWF reads another site's cached
+  responses. A freshness the cache guesses from Last-Modified alone lasts
+  a day at most; a SWF updated on its server within it shows after File ›
+  Clear HTTP Cache. It lives in `HTTP Cache` under the system's cache directory
   (`~/.cache/@swf2es/desktop/` on Linux, `~/Library/Caches/@swf2es/desktop/`
   on macOS, `%LOCALAPPDATA%\@swf2es\desktop\` on Windows) and holds 512 MB
   at most, the least recently used going first. File › Clear HTTP Cache

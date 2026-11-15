@@ -412,8 +412,12 @@ refuses plain http and sockets on other ports.
 The app caches the SWF's http and https GETs as a browser would, by what
 the server's Cache-Control, Expires, ETag, Last-Modified and Vary say, up to
 512 MB under the system's cache directory, after Flash's sandbox and policy
-files have judged each request, cached or not. File › Clear HTTP Cache
-empties it, and File › HTTP Cache turns it off, which the app remembers.
+files have judged each request, cached or not; each SWF's origin has a
+cache of its own. A response with no Cache-Control or Expires of its own is
+kept for a day at most, by a guess from its Last-Modified, so a SWF updated
+on its server may play in its old version until then: File › Clear HTTP
+Cache empties the cache and picks up the new one. File › HTTP Cache turns it
+off, which the app remembers.
 
 In a checkout of the repository the app runs from its sources:
 
