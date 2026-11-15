@@ -454,8 +454,8 @@ const OBJECT_PROTO = member(getVar("Object"), "prototype");
 // What AVM1's objects do in a SWF of `version`, as adl traces it
 // (docs/avm1.md, "Objects"): for..in's order and its terminator, names by
 // the version's case, ASSetPropFlags' attributes and version bits,
-// addProperty, watch and __resolve with native functions, which are all a
-// SWF can call before step 7 brings its own, delete, the prototypes of
+// addProperty, watch and __resolve with native functions, as a SWF calls
+// them on functions of its own too, delete, the prototypes of
 // primitives, _global, Object, and variables and paths on the root.
 function avm1Objects(version: number): Uint8Array {
   const v6 = version >= 6;

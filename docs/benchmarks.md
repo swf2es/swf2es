@@ -230,8 +230,10 @@ both versions, except:
 | stage3d-20000 | Intel | 32.2 (31.4–33.2) | 32.5 (32.1–32.6) |
 
 Intel's filters-400 flips between about 55 and 60 fps from run to run in
-every version, as its frames fall either side of the frame-pairing rule;
-it is not a regression (its median frame went from 27 to 21 ms).
+every version, as its frames fall either side of the frame-pairing rule
+(Player.advance runs SWF frames in pairs where the display seems to miss
+half its vsyncs); its p50 column moves with the same flip, so neither
+figure is a regression.
 
 `pixels` on Intel, ms:
 
@@ -259,8 +261,8 @@ The same within their ranges.
 | 2,000 shapes, SwiftShader | frame | 14.80 (14.72–14.84) | 14.81 (14.79–14.99) |
 | `--text 600 --gpu`, Intel | frame | 5.50 (5.37–5.75) | 5.47 (5.29–5.95) |
 
-The town's tick is lower and steadier, from the advance walk (#994);
-the rest is within noise.
+The town's tick is steadier (its spread narrowed; its median is within
+noise), from the advance walk (#994); the rest is within noise.
 
 ### The walks, 2026-11-14
 
@@ -322,12 +324,12 @@ Totals, encode plus decode, in ms:
 |---|---|---|
 | First working version (#20) | 1104 | 1412 |
 | Structured control flow (#22) | 289 | 410 |
-| Runtime hot paths (#23, milestone 1) | 207 | 251 |
+| Runtime hot paths (#23, milestone 1, 2026-09-28) | 207 | 251 |
 | finddef read at its site (#513, 2026-10-23) | 155 | 148 |
-| AwayFL JIT, headless, first run | 525 | 689 |
+| AwayFL JIT, headless, first run (2026-09-28) | 525 | 689 |
 | Ruffle 0.6.0, web, first run (2026-10-02) | 1118 | 1389 |
-| PepperFlash | 188 | 83 |
-| avmshell (its JIT, in the oracle's container) | 107 | 74 |
+| PepperFlash (2026-09-28) | 188 | 83 |
+| avmshell (its JIT, in the oracle's container, 2026-09-28) | 107 | 74 |
 
 `pnpm bench`, after a warm-up, median of 5 samples, as last recorded
 (2026-09-28, with typed verification):
@@ -355,7 +357,8 @@ The compiler and runtime:
   coercions without the builtin switch and no rest arrays on ByteArray's
   methods; as3pb 1104 → 207 ms.
 - #27, #29: domain memory's length in a field and its DataView kept
-  until the bytes move (253 → 224 ms); registers swapped through a
+  until the bytes move (253 → 224 ms, from a run of the build the table
+  times at 251; runs vary by a few percent); registers swapped through a
   temporary rather than by destructuring, an array and an iterator a
   swap (224 → 199 ms). V8 refuses to inline the codec's small methods
   for their bytecode size; raising its limits gains about 7% more.

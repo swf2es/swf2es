@@ -57,8 +57,8 @@ Each waits for a profile, a case or a user that asks for it:
   leaves touches to the mouse.
 - **NetStream and video:** H.264 through WebCodecs first, the older
   codecs as small wasm modules later.
-- **The compiler's measured candidates,** after its baseline of steps
-  12 to 15 (#30–#33, [benchmarks.md](benchmarks.md#what-changed-and-why)):
+- **The compiler's measured candidates,** after its baseline of #30–#33
+  ([benchmarks.md](benchmarks.md#what-changed-and-why)):
   verification's IR kept from the first walk, where its second pass is
   34% of as3pb's verification and 52% of
   initializerLargeVector's; copy forwarding over only the registers

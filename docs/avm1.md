@@ -2,7 +2,7 @@
 
 ActionScript 1 and 2 in swf2es: what AVM1 bytecode is compiled to,
 where each piece lives, and how the runtime and the player run it. The
-player passes 590 of the 715 `avm1/` tests of Ruffle's corpus
+player passes 592 of the 715 `avm1/` tests of Ruffle's corpus
 ([coverage.md](coverage.md#ruffles-corpus)); what it leaves out is under
 "Known gaps". [architecture.md](architecture.md) describes the rest of
 the player.

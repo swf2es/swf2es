@@ -45,7 +45,8 @@ with `swf2es-baseline.json`.
 ### Results
 
 Counted 2026-11-15 from `dev`'s baselines (0.1.23), unchanged since
-2026-10-29 (#668), scored as `swf2es.ts` scores a run: of the 2,578 tests avmshell compiled, the 2,566 whose counts are
+2026-10-29 (#668), scored as `swf2es.ts` scores a run: of the 2,578
+tests avmshell compiled, the 2,566 whose counts are
 compared and whose result does not vary. Checks passed are left out: a
 test may pass more checks in swf2es than avmshell runs, so their sum over
 a directory overstates.
