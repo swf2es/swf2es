@@ -121,6 +121,20 @@ and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
 holds both): a page may size the element to the SWF's own size while it
 asks for `noScale`, as an embedding at that size shows it.
 
+Browsers hold a page's sound until the user first clicks or presses a key
+in it, where Flash Player's plug-in played it at once. When a SWF's sound
+waits so, the element fires `audioblocked` and shows a "Click to unmute"
+button over the stage; a click on it, or Enter or Space, lets the sound
+play, as far in as a streamed soundtrack has gone meanwhile, and does not
+reach the SWF. A click or key on the SWF itself lets the sound play too,
+the SWF hearing it as usual. Either way the element fires
+`audiounblocked`, and a SWF that plays no sound shows no button.
+`unmuteprompt="false"` on the element, or `configure({ unmutePrompt:
+false })` for the page's elements, leaves the button out, for a page that
+shows its own: its click handler calls `element.player?.audio?.resume()`,
+which a browser allows only while it handles the user's click or key. The
+desktop app's window lets sound play at once.
+
 A SWF goes full screen by setting `Stage.displayState`, as under Flash
 Player's plug-in: only with `allowfullscreen="true"` on the element
 (`allowfullscreeninteractive="true"` for `"fullScreenInteractive"`), and

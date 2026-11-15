@@ -37,6 +37,11 @@ ship with the packages. The packages are ES modules: serve them through a
 bundler or an import map. The page must let them compile WebAssembly
 (`'wasm-unsafe-eval'` under a CSP).
 
+Where the browser holds a page's sound until the user's first click, the
+element shows a "Click to unmute" button over the SWF and fires
+`audioblocked`, then `audiounblocked` once the sound plays;
+`unmuteprompt="false"` leaves the button to the page.
+
 The [guide](https://swf2es.github.io/swf2es/docs/) covers the element's
 attributes and options, workers, sockets, files, ExternalInterface and
 precompiled modules.

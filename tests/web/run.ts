@@ -15,6 +15,9 @@
 // page, off by the attribute or configure, from a script of another
 // origin, and on a page that is not isolated passing messages, refusing
 // to share memory, and their Web Workers let go after the last player.
+// Under Chrome's autoplay rule, a SWF's held stream shows the unmute
+// button and fires audioblocked, and a click on the button, which the SWF
+// never hears, or on the stage, which it does, lets the stream play.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -65,6 +68,7 @@ const abcs = compileScripts(
     { name: "FullScreenTest", source: readFileSync(`${here}scripts/FullScreenTest.as`, "utf8") },
     { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
     { name: "AirAloneTest", source: readFileSync(`${here}scripts/AirAloneTest.as`, "utf8") },
+    { name: "UnmuteTest", source: readFileSync(`${here}scripts/UnmuteTest.as`, "utf8") },
   ],
   out,
 );
@@ -250,6 +254,47 @@ const scriptFreeButton = (as3: boolean) =>
       w.end(),
     ],
   });
+/**
+ * A streamed tone on the root's frames, ten seconds of 440 Hz at 22 kHz in 8-bit PCM, a block a
+ * frame: with no code at all for AVM1, or the unmute SWF's for AS3.
+ */
+const streamedTone = (as3: boolean) => {
+  const rate = 22050;
+  const fps = 25;
+  const block = rate / fps;
+  const frames: Uint8Array[] = [];
+  for (let f = 0; f < 10 * fps; f++) {
+    const samples = new Uint8Array(block);
+    for (let i = 0; i < block; i++) {
+      samples[i] = 128 + Math.round(30 * Math.sin((2 * Math.PI * 440 * (f * block + i)) / rate));
+    }
+
+    frames.push(w.soundStreamBlock(samples), w.showFrame());
+  }
+
+  return w.swf({
+    version: as3 ? 10 : 8,
+    width: 200,
+    height: 150,
+    frameRate: fps,
+    frameCount: 10 * fps,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0x204060),
+      ...(as3
+        ? [
+            w.doAbc(abcs.get("UnmuteTest") as Uint8Array, "UnmuteTest"),
+            w.symbolClass([[0, "UnmuteTest"]]),
+          ]
+        : []),
+      w.soundStreamHead({ rate: 2, samplesPerBlock: block }),
+      ...frames,
+      w.end(),
+    ],
+  });
+};
+writeFileSync(`${site}tone-avm1.swf`, streamedTone(false));
+writeFileSync(`${site}tone-as3.swf`, streamedTone(true));
 writeFileSync(`${site}button-as3.swf`, scriptFreeButton(true));
 writeFileSync(`${site}button-avm1.swf`, scriptFreeButton(false));
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
@@ -2311,7 +2356,116 @@ try {
   );
 }
 
-if (failures + unisolated + fillFailures + bitmapFailures > 0) {
-  console.log(`${failures + unisolated + fillFailures + bitmapFailures} checks failed`);
+// Under Chrome's autoplay rule as a page meets it, each run a page of its own, which no gesture
+// has reached yet: the sound a SWF streams waits, the element says so and shows its button, a
+// click on which lets it play and reaches the SWF no further; or a click on the stage, which the
+// SWF hears.
+interface UnmuteState {
+  events: string[];
+  traces: string[];
+  button: { label: string; text: string; focusable: boolean; center: [number, number] } | null;
+  context: string | null;
+  starts: string[];
+}
+let unmuteFailures = 0;
+for (const [name, src, attributes] of [
+  ["a script-free SWF's stream, unmuted by the button", "tone-avm1.swf", {}],
+  ["an AS3 SWF's stream, unmuted by the button and then the stage", "tone-as3.swf", {}],
+  [
+    "an AS3 SWF's stream, no button, unmuted by the stage",
+    "tone-as3.swf",
+    { unmuteprompt: "false" },
+  ],
+] as const) {
+  try {
+    await withPage(
+      "unmutePlayer",
+      async (evaluate, send) => {
+        const state = () => call<UnmuteState>(evaluate, "unmuteState()");
+        const until = async (what: string, test: (s: UnmuteState) => boolean) => {
+          const start = Date.now();
+          let last = await state();
+          while (!test(last)) {
+            if (Date.now() - start > 15_000) {
+              assert.fail(`${what}: ${JSON.stringify(last)}`);
+            }
+
+            await new Promise((done) => setTimeout(done, 50));
+            last = await state();
+          }
+
+          return last;
+        };
+        const click = async (x: number, y: number) => {
+          await send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+          for (const type of ["mousePressed", "mouseReleased"]) {
+            await send("Input.dispatchMouseEvent", { type, x, y, button: "left", clickCount: 1 });
+          }
+        };
+        const [left, top] = await call<[number, number]>(
+          evaluate,
+          `unmutePlayer(${JSON.stringify(`/web-test/${src}`)}, ${JSON.stringify(attributes)})`,
+        );
+        try {
+          const blocked = await until("the sound held", (s) => s.events.length > 0);
+          assert.deepEqual(blocked.events, ["audioblocked"]);
+          assert.equal(blocked.context, "suspended");
+          assert.deepEqual(blocked.starts, [], "the stream started on a held context");
+          const prompt = !("unmuteprompt" in attributes);
+          if (prompt) {
+            assert.ok(blocked.button, "no unmute button");
+            assert.equal(blocked.button.label, "Click to unmute the sound");
+            assert.equal(blocked.button.text, "Click to unmute");
+            assert.ok(blocked.button.focusable);
+            await click(...blocked.button.center);
+          } else {
+            assert.equal(blocked.button, null, "a button though the element says none");
+            await click(left + 10, top + 10);
+          }
+
+          const unblocked = await until("the sound let go", (s) => s.events.length > 1);
+          assert.deepEqual(unblocked.events, ["audioblocked", "audiounblocked"]);
+          assert.equal(unblocked.button, null, "the button outlived the sound's hold");
+          assert.equal(unblocked.context, "running");
+          const playing = await until("the stream started", (s) => s.starts.length > 0);
+          assert.deepEqual(playing.starts, ["running"]);
+          if (src === "tone-as3.swf") {
+            // A few frames for a press to reach the SWF, if it went through the button.
+            await new Promise((done) => setTimeout(done, 300));
+            if (prompt) {
+              assert.deepEqual((await state()).traces, [], "the button's press reached the SWF");
+              await click(left + 10, top + 10);
+            }
+
+            const pressed = await until("the stage's press", (s) => s.traces.length > 0);
+            assert.deepEqual(pressed.traces, ["unmute: down 10 10"]);
+          }
+        } finally {
+          await call(evaluate, "unmuteDestroy()");
+        }
+      },
+      false,
+      {
+        page: "web-test/workers.html",
+        args: ["--autoplay-policy=document-user-activation-required"],
+        mounts: [
+          ["/web-test/", site],
+          ["/web-src/", here],
+          ["/libraries/", `${out}libraries/`],
+        ],
+      },
+    );
+    console.log(`ok unmute: ${name}`);
+  } catch (error) {
+    unmuteFailures++;
+    console.log(
+      `not ok unmute: ${name}\n  ${error instanceof Error ? error.stack : String(error)}`,
+    );
+  }
+}
+
+const failed = failures + unisolated + fillFailures + bitmapFailures + unmuteFailures;
+if (failed > 0) {
+  console.log(`${failed} checks failed`);
   process.exitCode = 1;
 }
