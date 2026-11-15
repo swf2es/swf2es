@@ -59,11 +59,15 @@ Ruffle's web build. Each is an AS1 source under `tests/bench/avm1/`,
 compiled by `tests/avm1-script.ts` as Flash's compiler writes it into a
 SWF 8, after `Bench.as`, which times each section by the Date over its
 rounds after a tenth of them to warm up. Every section also traces a
-checksum of its work, which must match Flash's.
+checksum of its work, from its first call; `players.ts` prints where a
+player's trace parts from Flash's and still times it, so a run is only
+sound if it prints none.
 
 - **avm1-loop** (`Loop.as`): int-like and Number arithmetic, Math's
   functions and a string built by `+=`, in functions (registers), and the
-  int loop again on the timeline (variables by name).
+  int loop again on the timeline (variables by name), for a quarter of the
+  rounds: 10 to the function's 40, so per iteration the timeline's is
+  about 3.3 times slower than the function's, not faster.
 - **avm1-members** (`Members.as`): an object's members by literal name
   and by a name in a variable, an Array read, written, pushed and popped
   by index, and for..in over 100 members.
@@ -83,8 +87,11 @@ checksum of its work, which must match Flash's.
   so it is only a warm-up and is not timed. swf2es draws each changed
   frame as the web host does, multisampled, because adl draws its hidden
   window: larger shapes made Flash's display phase twenty times slower.
-  Ruffle's web build plays at the display's rate, so its avm1-frames
-  numbers are held to about 31 frames at 60 Hz, not its work alone.
+  A phase is timed over 31 ticks for its 30 frames of work, so Flash may
+  wait out one idle frame at its pace (4 ms or more), a few percent at
+  most. Ruffle's web build plays at the display's rate and is drawn at
+  100 × 50 CSS pixels, so its avm1-frames numbers, bracketed, are not its
+  work alone and not comparable.
 
 Medians of 5 runs, 2026-11-15, i9-13900H, Chrome 157 (SwiftShader), AIR
 51.5.1's adl under Wine, Ruffle 0.7.1, in ms:
@@ -120,9 +127,10 @@ Medians of 5 runs, 2026-11-15, i9-13900H, Chrome 157 (SwiftShader), AIR
 | enterframe-display | 379 | 687 | (1576) | 1.8× |
 
 swf2es is ahead of Flash's AVM1 interpreter in every section, 4 to 12
-times in script alone. It is closest where clips are involved: making and
-removing them (1.3×), the display's properties and drawing (1.8×), and
-paths through clips (2.8–3.2×). Ahead of an interpreter is still slow for
+times in script that touches no clip. It is closest where clips are
+involved: making and removing them (1.3–1.4×), the display's properties
+and drawing (1.8×), paths through clips (2.8–3.2×), and onEnterFrame on
+2,000 clips (3.3×). Ahead of an interpreter is still slow for
 JavaScript: the int loop's iteration takes about 130 ns. A profile in
 node points at:
 

@@ -1,5 +1,5 @@
 // Members by name and by index: an object's named members read and
-// written, members by a name built at run time, an Array's elements read
+// written, members by a name held in a variable, an Array's elements read
 // and written by index and grown by push, and for..in over an object.
 
 var keys = [];

@@ -1,6 +1,7 @@
 // Calls: functions defined on the timeline, methods on prototypes as AS2's
 // classes compile to them (a constructor in _global, Extends, super), an
-// inherited method found up the chain, `new`, and Function's call.
+// inherited method found up the chain, `new`, and Function's call and
+// apply.
 
 function add(a, b) {
   return a + b;

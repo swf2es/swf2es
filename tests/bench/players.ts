@@ -37,6 +37,7 @@ import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
+
 interface Bench {
   source: string;
   /** AS1 for AVM1, not AS3. */
@@ -44,6 +45,7 @@ interface Bench {
   /** Frames it runs for, its frame rate: one that times frames calls done() itself. */
   frames?: [number, number];
 }
+
 const BENCHES: Record<string, Bench> = {
   enumeration: { source: "enumeration/Enumeration.as" },
   dictionary: { source: "dictionary/DictionaryAccess.as" },
@@ -173,8 +175,7 @@ function avm1Swf(bench: string): Uint8Array {
 const framesOf = (bench: string) => BENCHES[bench].frames?.[0] ?? 2;
 
 // A benchmark of frames has them drawn, multisampled, as a host draws them: Flash draws its too.
-async function playSwf2es(swf: Uint8Array, frames: number): Promise<string[]> {
-  const drawn = frames > 2;
+async function playSwf2es(swf: Uint8Array, frames: number, drawn: boolean): Promise<string[]> {
   const [result] = await runPlayer([{ swf, frames, capture: [], draw: drawn, antialias: drawn }], {
     timeout: SCRIPT_SECONDS * 1000,
   });
@@ -247,7 +248,10 @@ async function playFlash(swf: Uint8Array, frames: number): Promise<string[]> {
   return result.output;
 }
 
-const play: Record<PlayerName, (swf: Uint8Array, frames: number) => Promise<string[]>> = {
+const play: Record<
+  PlayerName,
+  (swf: Uint8Array, frames: number, drawn: boolean) => Promise<string[]>
+> = {
   swf2es: playSwf2es,
   ruffle: playRuffle,
   flash: playFlash,
@@ -276,7 +280,7 @@ for (const bench of benches) {
     // Each run starts at another player.
     const order = players.map((_, i) => players[(i + run) % players.length]);
     for (const player of order) {
-      const lines = await play[player](swf, framesOf(bench));
+      const lines = await play[player](swf, framesOf(bench), BENCHES[bench].frames !== undefined);
       if (!lines.includes(DONE)) {
         throw new Error(`${player} did not finish ${bench}:\n${lines.join("\n")}`);
       }
