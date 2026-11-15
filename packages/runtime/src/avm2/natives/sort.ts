@@ -292,7 +292,13 @@ function sortWith(
     index[r] = t;
   };
 
-  if (j > 1) {
+  // Numbers by the options' own comparison: the same quicksort on the values themselves, which
+  // makes the same comparisons and so the same order, without a call through the elements' indices
+  // and a conversion of both for each comparison.
+  const values = numeric && j === len ? numbersOf(atoms) : null;
+  if (values !== null) {
+    qsortNumbers(values, index, j - 1, (options & kDescending) !== 0);
+  } else if (j > 1) {
     qsort(0, j - 1, cmp, swap);
   }
 
@@ -347,6 +353,127 @@ function sortWith(
   }
 
   return d;
+}
+
+/**
+ * The elements if every one is a number, which numericCompare compares as it is: a copy in a
+ * plain array, as a Float64Array of more than 8 is stored off V8's heap, a cost each sort of
+ * the 10 or 20 numbers of game code would pay.
+ */
+function numbersOf(atoms: Value[]): number[] | null {
+  for (let i = 0; i < atoms.length; i++) {
+    if (typeof atoms[i] !== "number") {
+      return null;
+    }
+  }
+
+  return atoms.slice() as number[];
+}
+
+/** numericCompare of two numbers. */
+function compareNumbers(a: number, b: number): number {
+  const diff = a - b;
+  if (!Number.isNaN(diff)) {
+    return diff < 0 ? -1 : diff > 0 ? 1 : 0;
+  }
+
+  return !Number.isNaN(b) ? 1 : !Number.isNaN(a) ? -1 : 0;
+}
+
+/**
+ * qsort from 0 to `hiIn` by compareNumbers, descending as compareOf turns it, on `values`, each
+ * swap made in `index` too: step for step the same as qsort's, with the comparison inline.
+ */
+function qsortNumbers(values: number[], index: number[], hiIn: number, descending: boolean): void {
+  let lo = 0;
+  let hi = hiIn;
+  const stack: number[] = [];
+  if (lo >= hi) {
+    return;
+  }
+
+  const compare = (l: number, r: number) =>
+    descending ? compareNumbers(values[r], values[l]) : compareNumbers(values[l], values[r]);
+  const swap = (l: number, r: number) => {
+    const v = values[l];
+    values[l] = values[r];
+    values[r] = v;
+    const t = index[l];
+    index[l] = index[r];
+    index[r] = t;
+  };
+
+  for (;;) {
+    const size = hi - lo + 1;
+    if (size < 4) {
+      if (size === 3) {
+        if (compare(lo, lo + 1) > 0) {
+          swap(lo, lo + 1);
+          if (compare(lo + 1, lo + 2) > 0) {
+            swap(lo + 1, lo + 2);
+            if (compare(lo, lo + 1) > 0) {
+              swap(lo, lo + 1);
+            }
+          }
+        } else if (compare(lo + 1, lo + 2) > 0) {
+          swap(lo + 1, lo + 2);
+          if (compare(lo, lo + 1) > 0) {
+            swap(lo, lo + 1);
+          }
+        }
+      } else if (size === 2 && compare(lo, lo + 1) > 0) {
+        swap(lo, lo + 1);
+      }
+    } else {
+      swap(lo + Math.floor(size / 2), lo);
+      let left = lo;
+      let right = hi + 1;
+      for (;;) {
+        do {
+          left++;
+        } while (left <= hi && compare(left, lo) <= 0);
+
+        do {
+          right--;
+        } while (right > lo && compare(right, lo) >= 0);
+
+        if (right < left) {
+          break;
+        }
+
+        swap(left, right);
+      }
+
+      swap(lo, right);
+      // Unsigned in avmplus: right - 1 - lo wraps when right is lo.
+      if ((right - 1 - lo) >>> 0 >= (hi - left) >>> 0) {
+        if (lo + 1 < right) {
+          stack.push(lo, right - 1);
+        }
+
+        if (left < hi) {
+          lo = left;
+          continue;
+        }
+      } else {
+        if (left < hi) {
+          stack.push(left, hi);
+        }
+
+        if (lo + 1 < right) {
+          hi = right - 1;
+          continue;
+        }
+      }
+    }
+
+    if (stack.length === 0) {
+      return;
+    }
+
+    hi = stack.pop() as number;
+    lo = stack.pop() as number;
+  }
 }
 
 /** As ArraySort::qsort: iterative, the middle element as pivot, the smaller partition first. */
