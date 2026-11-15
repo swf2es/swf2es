@@ -287,3 +287,179 @@ a._xscale = 100; a._yscale = 100; a._rotation = 30; a._xscale = 200; a._yscale =
     ],
   );
 });
+
+// References: a reference finds its clip while the clip is on a level, and
+// after it is removed the clip at its path, as Flash's do from SWF 6. The
+// movie keeps whether a clip is removed until a parent changes, so each
+// test asks, changes the list, and asks again, in a frame and across
+// frames, a level and a clip loaded into again and unloaded among them.
+
+test("a reference to a removed clip finds nothing, then the clip made at its path, in the same frame", async () => {
+  const played = await play(`var a = createEmptyMovieClip("a", 1);
+a.v = 1;
+trace(a.v + " " + a);
+a.removeMovieClip();
+trace(typeof a.v + " [" + a + "]");
+var b = createEmptyMovieClip("a", 2);
+b.v = 2;
+trace(a.v + " " + a + " " + (a == b));`);
+
+  assert.deepEqual(take(played), ["1 _level0.a", "undefined []", "2 _level0.a true"]);
+});
+
+test("a reference held across frames follows its clip's removal, a new clip at its path and a parent's removal", async () => {
+  const played = await play(`var outer = createEmptyMovieClip("outer", 1);
+var ref = outer.createEmptyMovieClip("inner", 1);
+ref.v = "first";
+var frames = 0;
+this.onEnterFrame = function () {
+  frames++;
+  trace(frames + " " + ref.v + " " + ref._name);
+  if (frames == 1) {
+    ref.removeMovieClip();
+  } else if (frames == 2) {
+    outer.createEmptyMovieClip("inner", 3).v = "second";
+  } else if (frames == 3) {
+    outer.removeMovieClip();
+  } else if (frames == 4) {
+    createEmptyMovieClip("outer", 2).createEmptyMovieClip("inner", 1).v = "third";
+  } else if (frames == 5) {
+    delete this.onEnterFrame;
+  }
+};`);
+
+  for (let i = 0; i < 6; i++) {
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played), [
+    "1 first inner",
+    "2 undefined undefined",
+    "3 second inner",
+    "4 undefined undefined",
+    "5 third inner",
+  ]);
+});
+
+test("a reference to a clip removed with an onUnload finds it until the next frame, and then nothing", async () => {
+  const played = await play(`var c = createEmptyMovieClip("c", 1);
+c.v = "kept";
+var ref = c;
+trace(ref.v);
+c.onUnload = function () { trace("unload " + ref.v); };
+c.removeMovieClip();
+trace("removed " + ref.v);
+var frames = 0;
+this.onEnterFrame = function () {
+  frames++;
+  trace(frames + " " + ref.v);
+  if (frames == 2) {
+    delete this.onEnterFrame;
+  }
+};`);
+
+  for (let i = 0; i < 3; i++) {
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played), [
+    "kept",
+    "removed kept",
+    "unload kept",
+    "1 undefined",
+    "2 undefined",
+  ]);
+});
+
+test("references into a level follow a load into it again and its unloading", async () => {
+  const played = await play(
+    `var mcl = new MovieClipLoader();
+mcl.loadClip("one.swf", 1);
+var ref;
+var level;
+var frames = 0;
+this.onEnterFrame = function () {
+  frames++;
+  if (ref == undefined && _level1.k != undefined) {
+    ref = _level1.k;
+    level = _level1;
+  }
+  // What an unloaded level keeps of its variables is not this test's.
+  trace(frames + " " + ref.v + (frames < 9 ? " " + level.w : ""));
+  if (frames == 2) {
+    mcl.loadClip("two.swf", 1);
+  } else if (frames == 4) {
+    mcl.loadClip("none.swf", 1);
+  } else if (frames == 6) {
+    mcl.loadClip("two.swf", 1);
+  } else if (frames == 8) {
+    mcl.unloadClip(1);
+  } else if (frames == 10) {
+    delete this.onEnterFrame;
+  }
+};`,
+    {
+      fetch: files({
+        "one.swf": movie(`createEmptyMovieClip("k", 1).v = "one"; w = "one";`),
+        "two.swf": movie(`createEmptyMovieClip("k", 1).v = "two"; w = "two";`),
+        "none.swf": movie(`w = "none";`),
+      }),
+    },
+  );
+
+  for (let i = 0; i < 11; i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played), [
+    "1 one one",
+    "2 one one",
+    "3 two two",
+    "4 two two",
+    "5 undefined none",
+    "6 undefined none",
+    "7 two two",
+    "8 two two",
+    "9 undefined",
+    "10 undefined",
+  ]);
+});
+
+test("a reference into a clip loaded into follows its unloadMovie and a load into it again", async () => {
+  const played = await play(
+    `var holder = createEmptyMovieClip("holder", 1);
+holder.loadMovie("one.swf");
+var ref;
+var frames = 0;
+this.onEnterFrame = function () {
+  frames++;
+  if (ref == undefined && holder.k != undefined) {
+    ref = holder.k;
+  }
+  trace(frames + " " + ref.v + " " + (ref == holder.k));
+  if (frames == 2) {
+    holder.unloadMovie();
+  } else if (frames == 4) {
+    holder.loadMovie("one.swf");
+  } else if (frames == 6) {
+    delete this.onEnterFrame;
+  }
+};`,
+    { fetch: files({ "one.swf": movie(`createEmptyMovieClip("k", 1).v = "one";`) }) },
+  );
+
+  for (let i = 0; i < 7; i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played), [
+    "1 one true",
+    "2 one true",
+    "3 undefined false",
+    "4 undefined false",
+    "5 one true",
+    "6 one true",
+  ]);
+});

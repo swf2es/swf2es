@@ -283,12 +283,26 @@ node points at:
   object for locals at every call, though a DefineFunction2 that keeps
   everything in registers never reads that object; with property lookups
   by Map (`exact`), it is most of avm1-calls.
-- **Clips removed from the front.** Removing clips in depth order takes
-  each out of its parent's children by `splice` at index 0
-  (`Container.takeOut`), quadratic in the clips left.
-- **Liveness walks.** `removed()` walks a clip up to its level to tell
-  whether a reference to it still holds, and `targetPath` parses a path
-  each time: a sizeable part of avm1-scope's path sections.
+- **A clip's allocations.** A clip attached and removed allocates about
+  5 KB: the clip itself, Maps for its depths and its AVM1 object's
+  properties, an activation, its face, native and name, and splice's
+  arrays; the collector is about 11% of avm1-clips. `splice` at index 0
+  (`Container.takeOut`) is about 6% of its samples, but moving the
+  children by hand gained nothing that repeated.
+- **Path parsing.** `targetPath` parses a path each time, about 10% of
+  eval-set; the rest of it is the lookups the parse interleaves.
+
+Changes since, on the same machine, medians of 6 interleaved runs of
+`--only swf2es`, in ms:
+
+- 2026-11-15: `removed()` keeps its answer on the clip until a parent
+  changes or a level is made (`parentage`), rather than walking to the
+  level at every reference: with-clip 78.5 → 74, root-paths 92.5 → 68,
+  parent-paths 99 → 69, eval-set 117.5 → 113.
+- 2026-11-15: a clip's frame entry a field of it, and only clips' places
+  in a WeakMap, so placing and entering add no WeakMap entries for the
+  collector to walk (with the line above): attach-remove 115 → 107,
+  duplicate-remove 107.5 → 95.5, create-remove 97.5 → 87.5.
 
 ## AVM2 eager and lazy compilation
 

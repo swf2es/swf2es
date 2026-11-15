@@ -16,6 +16,7 @@ import {
   markAdvanceDue,
   markScriptsDue,
   NO_CHILDREN,
+  parentage,
   pickWork,
   scriptWork,
 } from "./displayobject.js";
@@ -283,6 +284,7 @@ export class ButtonObject extends Container {
       if (state && state !== current && state.parent === this && !this.children.includes(state)) {
         advancing.watch?.parent(state, this);
         state.parent = null;
+        parentage.changes++;
       }
     }
 
@@ -298,6 +300,7 @@ export class ButtonObject extends Container {
       this.puts++;
       advancing.watch?.parent(current, current.parent);
       current.parent = this;
+      parentage.changes++;
       this.relist(current);
       this.invalidate(CHILDREN);
       scriptWork.changes++;
@@ -375,6 +378,7 @@ export class ButtonObject extends Container {
     if (this.hitTest?.parent === this) {
       advancing.watch?.parent(this.hitTest, this);
       this.hitTest.parent = null;
+      parentage.changes++;
     }
 
     this.avm1Flag = flag;
@@ -420,12 +424,14 @@ export function buttonStates(
     // script sees the stage from them, and no parent above them.
     if (parts.length === 1) {
       parts[0].display.parent = button;
+      parentage.changes++;
       made(parts[0].display, parts[0].character);
       return parts[0].display;
     }
 
     const holder = new Container();
     holder.parent = button;
+    parentage.changes++;
     for (const part of parts) {
       holder.placeAtDepth(part.display, part.record.depth);
       made(part.display, part.character);

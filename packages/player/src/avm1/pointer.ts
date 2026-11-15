@@ -14,6 +14,7 @@ import {
   type Container,
   type DisplayObject,
   MovieClip,
+  parentage,
   TextObject,
 } from "../display/display.js";
 import { apply, invert } from "../display/geometry.js";
@@ -496,10 +497,12 @@ export class Avm1Pointer implements Pointer {
 
       const parent = area.parent;
       area.parent = d;
+      parentage.changes++;
       try {
         return hitsPoint(area, x, y, true, this.stage) ? d : null;
       } finally {
         area.parent = parent;
+        parentage.changes++;
       }
     }
 
