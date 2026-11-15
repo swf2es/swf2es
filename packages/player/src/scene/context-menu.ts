@@ -275,6 +275,7 @@ export function bindContextMenu(
   };
   // NativeMenu.display's menu, at its point on the stage, where it is in the page.
   const scripting = player.scripting;
+  let unbound = false;
   const showMenu = (items: MenuItem[], x: number, y: number) => {
     if (player.destroyed || !client) {
       return;
@@ -282,7 +283,7 @@ export function bindContextMenu(
 
     // After the event the script ran in, whose pointerdown would close it at once.
     window?.setTimeout(() => {
-      if (player.destroyed) {
+      if (player.destroyed || unbound) {
         return;
       }
 
@@ -303,6 +304,7 @@ export function bindContextMenu(
   }
 
   return () => {
+    unbound = true;
     dismiss?.();
     if (scripting?.showMenu === showMenu) {
       scripting.showMenu = null;

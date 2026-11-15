@@ -23,7 +23,9 @@ export function nativeMenuNatives(s: Scripting): avm2.Natives {
       }
 
       const items = nativeMenuItems(s, this as unknown as avm2.AsObject, shown);
-      show(items, s.rt.toNumber(stageX), s.rt.toNumber(stageY));
+      if (items.length > 0) {
+        show(items, s.rt.toNumber(stageX), s.rt.toNumber(stageY));
+      }
     }
   }
 

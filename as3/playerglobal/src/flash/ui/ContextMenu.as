@@ -37,10 +37,18 @@ package flash.ui
 			return this._customItems;
 		}
 
-		// The old items out of this menu and the new in, each checked as
+		// In AIR the old items out of this menu and the new in, each checked as
 		// NativeMenu.addItem checks it; one refused leaves the array as it was.
+		// Flash Player keeps the array as given: only AIR was measured, and one
+		// array or item shared by several objects' menus is common there.
 		public function set customItems(value:Array):void
 		{
+			if (!NativeMenu.isSupported)
+			{
+				this._customItems = value;
+				return;
+			}
+
 			if (value == null)
 			{
 				throw new ArgumentError("Error #2005: Parameter value is of the incorrect type. Should be type .", 2005);
