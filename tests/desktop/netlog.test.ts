@@ -41,6 +41,17 @@ test("a line says where the HTTP cache answered, fresh or after a 304", () => {
   );
 });
 
+test("a line says where its connection was kept from an earlier request", () => {
+  assert.equal(
+    requestLine("GET", "http://h/a.swf", 200, 2048, 2, undefined, true),
+    "swf2es: net GET http://h/a.swf 200 2.0 kB 2 ms reused",
+  );
+  assert.equal(
+    requestLine("GET", "http://h/a.swf", 200, 2048, 9, "revalidated", true),
+    "swf2es: net GET http://h/a.swf 200 2.0 kB 9 ms revalidated reused",
+  );
+});
+
 test("a line carries no control characters, and no more than 2048 of a URL", () => {
   const line = requestLine("GET", `http://h/\u001b[31m\n${"a".repeat(5000)}`, 200, 1, 1);
   assert.ok([...line].every((c) => c.charCodeAt(0) >= 32));

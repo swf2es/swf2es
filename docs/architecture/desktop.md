@@ -196,7 +196,45 @@ policy file fetched from the same one (Node's `lookup` pinned, the name
 kept for TLS's server name and the Host header), so DNS that changes its
 answer between the policy and the request, rebinding, gains nothing:
 same-origin by name, a request now at 127.0.0.1 is judged as one to this
-machine. Every redirect is judged as a request of its own, a POST
+machine.
+
+Connections are kept alive between requests (`src/main/http-pool.ts`),
+HTTP/1.1 only, as a browser keeps them, but a request is given a kept
+connection only where it would have opened exactly that one: one of the
+same key, which is the scheme, the host's name (TLS's server name and the
+certificate it is checked against), the address the request pinned that
+name to, the port, the route (`direct`, or the proxy by its kind, host and
+port, never its credentials) and, for https, whether the host's
+certificate goes unchecked under `--ignore-certificate-errors`; the
+authorities are the network's own, one set for all. So the pool keeps the
+rebinding protection whole: a name pinned to another address, as DNS that
+changes its answer gives it, gets a connection to that address, judged
+there, and never one kept to the address before; a host whose certificate
+goes unchecked shares no connection with one checked, nor with another
+host; and a tunnel, which is to one target, serves only that target. Each
+key is a Node Agent of its own (`keepAlive`), whose connections reach the
+pinned address whatever the resolver says now, through a `lookup` that
+answers with it, or through a tunnel to it; Node's Agent can keep that
+pin, since its options override each request's, so no pool of the app's
+own was needed. A key keeps six connections at most, idle or in use, as
+browsers keep to a host, more requests waiting for one; an idle one is
+closed after four seconds, or sooner where the server's `Keep-Alive`
+says it closes sooner, and no more than 64 are kept idle all told. A
+connection goes back to the pool only once its response has been read
+to the end and the server meant to keep it: one whose body is not
+wanted, a redirect's, a 304's or a sendToURL's answer, is read to its end
+where it is small (64 KB, two seconds), so that a redirect's next hop
+reuses it, and closed otherwise, as is any connection of a request that
+fails, times out or is aborted, so that none comes back with half a
+response on it. A connection the server closes while idle leaves the pool
+(Node's Agent drops it); a GET whose kept connection the server closed
+just as it was reused, before any answer, is sent once more on another,
+as browsers do, and a POST's failure is the SWF's. Every connection,
+idle or in use, is closed as the page goes, reloads or opens another
+movie, and as the app quits. `--log-network` ends the line of a request
+answered over a kept connection in `reused`.
+
+Every redirect is judged as a request of its own, a POST
 redirected by a 301, 302 or 303 going on as a GET without its body, to
 http or https only and ten at most. HTTPS is verified against Node's
 roots and the system's. A response is read up to 128 MB, and a movie's
@@ -366,11 +404,13 @@ first, which would otherwise play what it names past the proxy it asked
 for.
 
 Each path keeps what it judged and only changes how it connects.
-`network.ts`'s requests and URL policy files give Node's request a
-`createConnection` that makes the tunnel and, for https, TLS over it with
-the same server name, authorities and `--ignore-certificate-errors`
-hosts; the socket policies (port 843, and the others) go through the same
-tunnel. The address rules above still resolve the host on this machine
+`network.ts`'s requests and URL policy files go through an Agent of the
+pool whose `createConnection` makes the tunnel and, for https, TLS over
+it with the same server name, authorities and `--ignore-certificate-errors`
+hosts; a tunnel kept alive serves only requests to its own target, by the
+key above, and one still being made is given up as the page goes. The
+socket policies (port 843, and the others) go through tunnels of their
+own, never kept. The address rules above still resolve the host on this machine
 and place that address, and the proxy is then asked for that address,
 never the name: a proxy's DNS that answers otherwise, or rebinding
 between the two, reaches nothing the judgement did not, and the policy
@@ -659,7 +699,14 @@ meta-policies and named policy files, redirects, this machine reached by
 address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
-limits. `tests/desktop/stage3d.ts` drives the native View menu through the main
+limits; `http-pool.test.ts` the kept connections against servers that
+count the connections they take: one for two requests, one of its own for
+a name pinned to another address (127.0.0.2, then 127.0.0.3), for a host
+whose certificate goes unchecked and for a tunnel to another target, the
+idle time, a key's limit, and aborts, servers that close a kept one and a
+page that goes. `tests/desktop/keepalive-bench.ts` times many small loads
+over http and https, one checkout or two (docs/benchmarks.md).
+`tests/desktop/stage3d.ts` drives the native View menu through the main
 process's test-only inspector: Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context

@@ -2,6 +2,7 @@
 // response a SWF's fetch carries, the movie they are judged for, the
 // limits, and the state one movie's requests share.
 import type { AddressClass } from "./addresses.ts";
+import type { PoolLimits } from "./http-pool.ts";
 import type { Requester, SocketPolicy, UrlPolicy } from "./policy.ts";
 import type { ProxyConfig } from "./proxy.ts";
 
@@ -29,6 +30,8 @@ export interface NetResponse {
   url?: string;
   /** Where the HTTP cache answered, for --log-network: stored and fresh, or a 304 confirmed it. */
   cache?: "hit" | "revalidated";
+  /** Whether it came over a connection kept from an earlier request, for --log-network. */
+  reused?: true;
 }
 
 /** A request refused, with why, for the terminal; the SWF sees a failed load. */
@@ -115,6 +118,8 @@ export interface NetworkOptions {
   socketPolicyPort?: number;
   /** What every connection goes through (--proxy); none by default. */
   proxy?: ProxyConfig | null;
+  /** How many connections are kept, and how long (http-pool.ts's POOL_LIMITS by default). */
+  pool?: Partial<PoolLimits>;
 }
 
 /** A remote movie once its SWF has come, where from. */

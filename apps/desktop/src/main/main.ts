@@ -362,6 +362,7 @@ async function fetchForPage(
         response.bytes?.length ?? null,
         performance.now() - started,
         response.cache,
+        response.reused,
       ) + (response.cache === "hit" ? "" : via),
     );
     return response;
@@ -445,7 +446,11 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("window-all-closed", () => app.quit());
-app.on("will-quit", () => httpCache?.close());
+app.on("will-quit", () => {
+  // No connection a SWF's requests kept outlives the app.
+  network.close();
+  httpCache?.close();
+});
 
 // Not awaited at the top level: Electron makes the app ready only once the main module has run.
 void app.whenReady().then(() => {

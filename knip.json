@@ -31,6 +31,7 @@
       "entry": ["*.ts", "atf/make.ts"]
     },
     "tests/desktop": {
+      "entry": ["*.test.ts", "*-bench.ts"],
       "ignoreDependencies": ["@swf2es/desktop"]
     },
     "tests/player": {
