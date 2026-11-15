@@ -24,7 +24,7 @@
 // objects, function expressions, `new`, `typeof`, `delete`, `instanceof`.
 // `trace(e)` is the Trace action; the timeline's functions (`gotoAndStop`,
 // `play`, `nextFrame`, `setProperty`, `getProperty`, `eval`,
-// `targetPath`, `call`, `getTimer`, `duplicateMovieClip`,
+// `targetPath`, `call`, `getTimer`, `set`, `duplicateMovieClip`,
 // `removeMovieClip`...), `tellTarget` and `ifFrameLoaded` are their
 // actions, a constant frame or target as an operand; `with` is With. A call of `__op("Name", ...values)`
 // pushes the values and writes the action of that name, for the actions
@@ -1252,6 +1252,7 @@ const TIMELINE: Record<string, true> = {
   stopAllSounds: true,
   toggleHighQuality: true,
   setProperty: true,
+  set: true,
   call: true,
   duplicateMovieClip: true,
   removeMovieClip: true,
@@ -1309,6 +1310,13 @@ function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
         v(a);
       }
       a.op("SetProperty");
+      return;
+    // A variable by a path, `set("a.b", v)` and `set("/a:b", v)`: the path and the value, SetVariable.
+    case "set":
+      for (const v of args) {
+        v(a);
+      }
+      a.op("SetVariable");
       return;
     case "call":
       args[0](a);
