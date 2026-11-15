@@ -155,8 +155,11 @@ many small messages, 8 sockets 20,000 of 48 bytes each and 4 WebSockets
 20,000 of 32, and the desktop app's main-process side of them
 (`connections.ts`, `websocket-connections.ts`, through `relay.ts` where
 the checkout has it) take them in node, without Electron. It counts the
-IPC messages the page would be sent, the socket's reads and the buffers
-each made, collections and CPU time.
+IPC messages the page would be sent, the socket's reads, the stores they
+made and a batch's joins among them, collections and CPU time. Each
+message is serialized by V8's serializer, as IPC serializes it, so the
+CPU time holds serialization, but not the posting to the page nor the
+page's side.
 
     node tests/desktop/relay-bench.ts [runs]                             this checkout
     node tests/desktop/relay-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
@@ -534,18 +537,18 @@ The player:
 
 The desktop app:
 
-- #1010: sockets read into a buffer of their own, each read copied out at
-  its length, one store a read rather than Node's Buffer and a copy (2.0
-  → 1.0 bytes made a byte received); a page's events gathered into one
-  IPC message a turn of the main process's loop
-  (`tests/desktop/relay-bench.ts`, medians of 6). WebSockets: 80,008 →
-  27,069 messages, 3,871 with the main process held 1 ms of every 2
-  (`--busy 1`), 1,413 with `--busy 4`. Sockets: 0.82 messages a read, 0.78
-  with `--busy 4`; but a read that costs less comes sooner and carries
-  less, so with the main process free the reads went from 6,263 to
-  15,223 (1,227 → 505 bytes each), the messages from 6,279 to 12,600 and
-  its CPU from 73 to 119 ms, and with `--busy 4` from 3,501 to 4,212
-  messages at the same CPU (108 → 115 ms).
+- #1010: a page's socket and WebSocket events gathered into one IPC
+  message a millisecond at most, the first after a quiet spell at once;
+  sockets read into a buffer of their own, each read copied out at its
+  length (`tests/desktop/relay-bench.ts`, medians of 6, with the main
+  process free and then held 4 ms of every 8, `--busy 4`). IPC messages:
+  WebSockets 80,008 → 200 and → 23; sockets 7,580 → 116 and 2,639 → 63.
+  CPU: WebSockets 445 → 384 ms and 417 → 286; sockets 121 → 113 and 114
+  → 113. Stores a read: 2.00 → 1.05, but a socket's reads in one batch
+  are joined into another, so the bytes made a byte received went 2.00 →
+  1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
+  2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
+  15,790 and 2,623 → 5,852.
 
 The renderer's are described in [renderer.md](renderer.md).
 

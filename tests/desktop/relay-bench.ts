@@ -3,8 +3,9 @@
 // small messages, and the main process's side of them (connections.ts and
 // websocket-connections.ts, through relay.ts where the build has it) takes
 // them in node, without Electron. Counted: the IPC messages it would send
-// (one per event without the relay), the socket's reads, the buffers each
-// read made, and the collector's work.
+// (one per event without the relay), each serialized by V8's serializer as
+// IPC serializes it, though not posted; the socket's reads, the stores
+// they made, a batch's joins among them, the collector's work and CPU.
 //
 //   node tests/desktop/relay-bench.ts [runs, 5]                             this checkout
 //   node tests/desktop/relay-bench.ts <checkout A> <checkout B> [runs, 6]   two, interleaved
@@ -20,6 +21,7 @@ import { createServer, Socket } from "node:net";
 import { resolve } from "node:path";
 import { PerformanceObserver } from "node:perf_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { serialize } from "node:v8";
 import { webSocketServer } from "./websocket-server.ts";
 
 const SOCKETS = 8;
@@ -47,6 +49,11 @@ interface Result {
   /** The copies handed on, and the bytes of their stores. */
   copies: number;
   copyBytes: number;
+  /** A socket's reads in a batch joined into one store, and its bytes. */
+  joins: number;
+  joinBytes: number;
+  /** What the socket's messages took serialized. */
+  socketSerialized: number;
   socketGcs: number;
   socketGcMs: number;
   /** The process's CPU time, user and system, while the sockets ran. */
@@ -118,11 +125,30 @@ async function measure(checkout: string, ports: { tcp: number; ws: number }): Pr
   type ByteSink = Sink & {
     bytes(id: number, bytes: Uint8Array, wrap: (b: Uint8Array) => unknown): void;
   };
+  // Each message serialized as IPC would serialize it, by V8's serializer.
   let sends = 0;
+  let serializedBytes = 0;
+  const post = (message: unknown) => {
+    sends++;
+    serializedBytes += serialize(message).length;
+  };
+  // A data event in a batch whose bytes are no read's copy is a socket's reads joined.
+  const readCopies = new WeakSet<Uint8Array>();
+  let joins = 0;
+  let joinBytes = 0;
   let relay: ByteSink | null = null;
   if (relayed) {
     const { Relay } = await import(pathToFileURL(`${main}/relay.ts`).href);
-    relay = new Relay(() => sends++) as ByteSink;
+    relay = new Relay((batch: [number, { type: string; bytes?: Uint8Array }][]) => {
+      for (const [, event] of batch) {
+        if (event.bytes && !readCopies.has(event.bytes)) {
+          joins++;
+          joinBytes += event.bytes.buffer.byteLength;
+        }
+      }
+
+      post(batch);
+    }) as ByteSink;
   }
 
   // Node's own read Buffers, where the build has the stream make them.
@@ -173,14 +199,15 @@ async function measure(checkout: string, ports: { tcp: number; ws: number }): Pr
       copies++;
       copyBytes += event.bytes.buffer.byteLength;
       if (relay) {
+        readCopies.add(event.bytes);
         relay.bytes(id, event.bytes, wrap);
       } else {
-        sends++;
+        post([id, event]);
       }
     } else if (relay) {
       relay.push(id, event);
     } else {
-      sends++;
+      post([id, event]);
     }
 
     if (event.type === "close" && ++closed === SOCKETS) {
@@ -194,11 +221,12 @@ async function measure(checkout: string, ports: { tcp: number; ws: number }): Pr
   }
 
   await socketsClosed;
-  // The last batch goes after the turn.
-  await new Promise((done) => setImmediate(done));
   const socketMs = performance.now() - socketStart;
   const socketCpuMs = cpuMs(socketCpu);
+  // The last batch goes when its window ends.
+  await new Promise((done) => setTimeout(done, 10));
   const socketSends = sends;
+  const socketSerialized = serializedBytes;
   // Entries come after the collection that made them.
   await new Promise((done) => setTimeout(done, 50));
   observer.disconnect();
@@ -222,7 +250,7 @@ async function measure(checkout: string, ports: { tcp: number; ws: number }): Pr
     if (relay) {
       relay.push(id, event, event.type === "message" ? WEBSOCKET_MESSAGE * 2 : 0);
     } else {
-      sends++;
+      post([id, event]);
     }
 
     if (event.type === "close" && ++wsClosed === WEBSOCKETS) {
@@ -236,9 +264,9 @@ async function measure(checkout: string, ports: { tcp: number; ws: number }): Pr
   }
 
   await webSocketsClosed;
-  await new Promise((done) => setImmediate(done));
   const webSocketMs = performance.now() - webSocketStart;
   const webSocketCpuMs = cpuMs(webSocketCpu);
+  await new Promise((done) => setTimeout(done, 10));
   if (busy) {
     clearInterval(busy);
   }
@@ -252,6 +280,9 @@ async function measure(checkout: string, ports: { tcp: number; ws: number }): Pr
     nodeBufferBytes,
     copies,
     copyBytes,
+    joins,
+    joinBytes,
+    socketSerialized,
     socketGcs,
     socketGcMs,
     socketCpuMs,
@@ -318,9 +349,15 @@ if (process.argv[2] === "--server") {
     ["  per 1000 reads", (r) => (1000 * r.socketSends) / r.reads, 1],
     ["  per MB received", (r) => (1024 * 1024 * r.socketSends) / r.copyBytes, 0],
     ["  per second", (r) => (1000 * r.socketSends) / r.socketMs, 0],
-    ["buffers made per read", (r) => (r.nodeBuffers + r.copies) / r.reads, 2],
+    ["buffers made per read", (r) => (r.nodeBuffers + r.copies + (r.joins ?? 0)) / r.reads, 2],
     ["bytes received per read", (r) => r.copyBytes / r.reads, 0],
-    ["store bytes made per byte", (r) => (r.nodeBufferBytes + r.copyBytes) / r.copyBytes, 2],
+    [
+      "store bytes made per byte",
+      (r) => (r.nodeBufferBytes + r.copyBytes + (r.joinBytes ?? 0)) / r.copyBytes,
+      2,
+    ],
+    ["  of them in joins", (r) => (r.joinBytes ?? 0) / r.copyBytes, 2],
+    ["serialized bytes per byte", (r) => r.socketSerialized / r.copyBytes, 2],
     ["collections (sockets)", (r) => r.socketGcs, 0],
     ["collection ms (sockets)", (r) => r.socketGcMs, 1],
     ["socket ms", (r) => r.socketMs, 0],
