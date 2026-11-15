@@ -78,6 +78,8 @@ import {
 } from "./policy.ts";
 import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
 
+const textDecoder = new TextDecoder();
+
 /** What Flash Player 32 reported, sent as it sent it. */
 const FLASH_VERSION = "32,0,0,465";
 const USER_AGENT = "Mozilla/5.0 (compatible; swf2es) Shockwave Flash";
@@ -644,7 +646,7 @@ export class Network {
       return null;
     }
 
-    const policy = parsePolicy(new TextDecoder().decode(response.bytes));
+    const policy = parsePolicy(textDecoder.decode(response.bytes));
     return policy && { policy, url, contentType, permitted };
   }
 

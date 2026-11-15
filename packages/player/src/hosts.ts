@@ -8,6 +8,8 @@ import type { BitmapStore } from "./bitmap/bitmap.js";
 import type { DisplayObject } from "./display/display.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
 
+const textDecoder = new TextDecoder();
+
 type Value = avm2.Value;
 
 /**
@@ -69,7 +71,7 @@ export function browserNavigate(): Navigate | null {
     form.target = "_blank";
     form.rel = "noopener";
     form.style.display = "none";
-    for (const [name, value] of new URLSearchParams(new TextDecoder().decode(request.body))) {
+    for (const [name, value] of new URLSearchParams(textDecoder.decode(request.body))) {
       const input = document.createElement("input");
       input.type = "hidden";
       input.name = name;

@@ -4,6 +4,8 @@ import { avm2 } from "@swf2es/runtime";
 import { hex, sha256Here } from "../../../scripting/sha256.js";
 import type { Scripting } from "../../../scripting.js";
 
+const textEncoder = new TextEncoder();
+
 export function securityDomainNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   let current: avm2.AsObject | null = null;
@@ -23,7 +25,7 @@ export function securityDomainNatives(s: Scripting): avm2.Natives {
      * application's SWF, which the SWFs it loads share.
      */
     get domainID(): string {
-      return hex(sha256Here(new TextEncoder().encode(s.url))).toUpperCase();
+      return hex(sha256Here(textEncoder.encode(s.url))).toUpperCase();
     }
 
     "flash.system:SecurityDomain::ctor_impl"(): void {

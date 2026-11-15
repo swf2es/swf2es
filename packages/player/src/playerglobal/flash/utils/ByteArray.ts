@@ -12,6 +12,7 @@ type Value = avm2.Value;
 // AIR retains BOMs here, unlike readUTFBytes. Bound the cache for SWF-supplied labels.
 const decoders = new Map<string, TextDecoder>();
 let fallback: TextDecoder | undefined;
+const textEncoder = new TextEncoder();
 
 function decoderFor(name: string): TextDecoder {
   let decoder = decoders.get(name);
@@ -165,7 +166,7 @@ function utf16Bytes(text: string, little: boolean): Uint8Array {
 function encode(text: string, name: string): Uint8Array {
   switch (name) {
     case "utf-8":
-      return new TextEncoder().encode(text);
+      return textEncoder.encode(text);
     case "utf-16":
     case "utf-16le":
     case "unicode":

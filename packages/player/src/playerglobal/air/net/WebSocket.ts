@@ -30,6 +30,9 @@ const TEXT = 1;
 const BINARY = 2;
 const CLOSE = 8;
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
+
 /** The close codes a browser lets a page send. */
 const sendable = (code: number) => code === 1000 || (code >= 3000 && code <= 4999);
 
@@ -98,7 +101,7 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
     switch (opcode & 0x0f) {
       case TEXT:
         // A leading BOM is the SWF's bytes, as AIR sends them, not a mark to drop.
-        transport.send(new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes));
+        transport.send(textDecoder.decode(bytes));
         break;
       case BINARY:
         transport.send(bytes);
@@ -183,7 +186,7 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
 
               const array = s.rt.construct(byteArray());
               const bytes = avm2.bytesOf(s.rt, array);
-              bytes.write(typeof data === "string" ? new TextEncoder().encode(data) : data.slice());
+              bytes.write(typeof data === "string" ? textEncoder.encode(data) : data.slice());
               bytes.position = 0;
               const format = typeof data === "string" ? TEXT : BINARY;
               const cls = s.rt.classNamed("flash.events::WebSocketEvent");
@@ -234,7 +237,7 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
     sendMessage(opcode: Value, data: Value): void {
       let bytes: Uint8Array;
       if (typeof data === "string") {
-        bytes = new TextEncoder().encode(data);
+        bytes = textEncoder.encode(data);
       } else if (data !== null && data !== undefined && s.rt.isInstance(data, byteArray())) {
         const b = avm2.bytesOf(s.rt, data as AsObject);
         bytes = b.buffer.slice(0, b.length);

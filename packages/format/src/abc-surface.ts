@@ -75,6 +75,8 @@ export type Value = [string, string | number | boolean | null];
 /** A metadata entry: its name and its [key, value] items, key "" for a bare value. */
 export type Meta = [string, [string, string][]];
 
+const textDecoder = new TextDecoder();
+
 const NS_KINDS: Record<number, string> = {
   5: "private",
   8: "namespace",
@@ -159,7 +161,7 @@ class Reader {
   }
 
   utf8(length: number): string {
-    const s = new TextDecoder().decode(this.bytes.subarray(this.at, this.at + length));
+    const s = textDecoder.decode(this.bytes.subarray(this.at, this.at + length));
     this.at += length;
     return s;
   }
