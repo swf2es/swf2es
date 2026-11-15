@@ -89,7 +89,8 @@ order:
   sound, loading, input, ExternalInterface, globalization, touch, AIR's
   WebSocket;
 - workers ([workers.md](workers.md));
-- AVM1, steps 1 to 15 ([avm1.md](avm1.md#the-plan));
+- AVM1 ([avm1.md](avm1.md); what is left under
+  [Known gaps](avm1.md#known-gaps));
 - modules compiled ahead of time and cached in IndexedDB, and pages
   without `'unsafe-eval'`;
 - the web element, the desktop app and the demo site;

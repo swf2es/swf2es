@@ -10,8 +10,8 @@ export type Primitive = undefined | null | boolean | number | string;
 
 /**
  * An AVM1 value: a JavaScript primitive, a number always a double, as
- * AVM1 has no int, or an object, which the objects' step (docs/avm1.md,
- * step 6) makes an `Avm1Object`.
+ * AVM1 has no int, or an object, an `Avm1Object` (docs/avm1.md,
+ * "Objects").
  */
 export type Value = Primitive | object;
 

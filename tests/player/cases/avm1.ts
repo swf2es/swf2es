@@ -910,8 +910,8 @@ const ifThen =
 const proto = (name: string) => member(getVar(name), "prototype");
 
 /**
- * "root" for the root, else the value's type: the player's root is no clip
- * yet (docs/avm1.md, step 10), whose `typeof` is "movieclip".
+ * "root" for the root, else the value's type, which for a clip is
+ * "movieclip".
  */
 const kind =
   (e: Avm1Expr): Avm1Expr =>

@@ -7,8 +7,7 @@
 //
 // A path walks objects, and a clip's children by name, which only the
 // player has: it gives them through the host (`child`, `parent`, `root`,
-// `level`), as step 10 of docs/avm1.md fills in; until then a path walks
-// objects' properties only.
+// `level`; docs/avm1.md, "Scopes, targets and names").
 import type { Host, Target } from "./host.js";
 import { PRIMITIVE } from "./inheritance.js";
 import {
