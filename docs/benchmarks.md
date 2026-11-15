@@ -828,6 +828,8 @@ The player:
   transparent one, 7.70 → 6.98 ms (opaque 8.77 → 8.27);
   getColorBoundsRect reading each row from both ends to its first and
   last match, 6.98 → 4.77 ms.
+- #1020: setVector on an opaque bitmap into a view of a run from the
+  Vector's start (pixels' setVector-opaque 38 → 27 ms).
 
 The desktop app:
 
