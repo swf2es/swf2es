@@ -25,7 +25,8 @@ by about 1.7× on object creation). The players take turns in an order
 that changes each run, every section traces its time by the SWF's own
 clock, and every other line must be as Flash traces it.
 
-    node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash] [bench...]
+    node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash]
+      [--write-swf OUT] [bench...]
 
 - `enumeration`: for-in and for each over Arrays, Vectors, Objects and
   Dictionaries (`tests/bench/enumeration/Enumeration.as`);
@@ -34,15 +35,21 @@ clock, and every other line must be as Flash traces it.
 - `vector`: indexed reads, writes, push and pop on Vectors and Arrays of
   int, Number, String, Object and a class (`vector/VectorAccess.as`);
 - `pixels`: a BitmapData's pixels set and read whole, by ByteArray and by
-  Vector (`pixels/BitmapPixels.as`).
+  Vector (`pixels/BitmapPixels.as`);
+- `primitives`, `typed`, `untyped`, `native-collections`, `display`,
+  `display-frames`, `as3pb` and `lz4`: see "AVM2 against Flash" below;
+- `avm1-*`: see "AVM1 against Flash".
 
-`--ruffle DIR` (or `RUFFLE`) names Ruffle's unpacked self-hosted build;
-without it Ruffle is left out. The draft comparison branch (#835) adds
-`drawing`, scenes of vectors, bitmaps, filters, text, redrawn graphics
-and a Pixel Bender fill at three loads each, and `stage3d`, played at 60
-frames a second on the GPU through the browser build's element, with
-frame times and memory; as3pb; startup; and Flash Player's projectors
-under Wine. The 0.1.23 numbers below were taken with it.
+`avm1` and `avm2` name the groups. `--ruffle DIR` (or `RUFFLE`) names
+Ruffle's unpacked self-hosted build; without it Ruffle is left out.
+`--write-swf OUT` writes each benchmark's SWF into OUT and plays none,
+to profile one in node or open it elsewhere. The draft comparison branch
+(#835) adds `drawing`, scenes of vectors, bitmaps, filters, text,
+redrawn graphics and a Pixel Bender fill at three loads each, and
+`stage3d`, played at 60 frames a second on the GPU through the browser
+build's element, with frame times and memory; startup; and Flash
+Player's projectors under Wine. The 0.1.23 numbers below were taken with
+it.
 
 ### The player in Chrome
 
@@ -304,6 +311,260 @@ Changes since, on the same machine, medians of 6 interleaved runs of
   collector to walk (with the line above): attach-remove 115 → 107,
   duplicate-remove 107.5 → 95.5, create-remove 97.5 → 87.5.
 
+## AVM2 against Flash
+
+`node tests/bench/players.ts avm2` times every AS3 benchmark in swf2es
+(headless Chrome), Flash (adl `-nodebug`) and, given `--ruffle DIR`,
+Ruffle's web build: the four above (enumeration, dictionary, vector,
+pixels) and eight more. Each but lz4 is compiled by ASC 2.0 against
+playerglobal into a SWF of version 18 (Flash Player 11.5's, for JSON;
+the four older ones ran as SWF 10 in the earlier dated rows, and Flash's
+enumeration total moved 3,759 to 3,756 with it),
+and times its sections by the Date. Every section also traces a checksum
+or a count of its work, which must be as Flash traces it: `players.ts`
+prints a line a player traces otherwise beside Flash's, and still times
+it, so a run is only sound if it prints none for swf2es. Each runs as
+one long script, which ScriptLimits allows 1,200 s, in the first frame
+(lz4's in the second, after Crossbridge's preloader), but for
+display-frames.
+
+- **primitives** (`primitives/Primitives.as`): String's `charCodeAt`,
+  `charAt`, `indexOf`, `substring`, `substr` and `slice`, and int's and
+  Number's `toString` and `toFixed`, on typed values.
+- **typed** (`typed/Typed.as`): `new` of classes shallow and deep in a
+  hierarchy and with class-typed arguments, and calls the compiler binds:
+  a class's method given its own class, a subclass and null, through an
+  interface (one class, then four), through `super`, with parameters of
+  int, uint, Number, Boolean and String, and on a final class. Each
+  section is one loop of 3 to 9 million iterations, without a warm-up.
+- **untyped** (`untyped/Untyped.as`): names on values typed `*`: a tree
+  of the file's own display-like classes (getters, setters and methods by
+  name, no flash.display), JSON-decoded data objects, dynamic Objects,
+  calls on several classes, string building, names on many classes,
+  number and object keys into Arrays, Vectors, Dictionaries and Objects,
+  methods on a prototype, and names written as strings. One run of each
+  loop, without a warm-up.
+- **native-collections** (`native-collections/Collections.as`): Array's
+  `map`, `filter`, `forEach`, `every` and `some`, Vector's `map` and
+  `filter`, a numeric `sort` of a copy of each, over 8,192 numbers, and a
+  Vector made from the Array; 80 rounds after 12.
+- **display** (`display/Display.as`): 300 Sprites made, placed, added to a
+  layer on the stage and removed; 300 of the library's "ball" (a
+  MovieClip of one shape, linked to Ball) added, their `width` read, and
+  removed from the top; 300 Shapes drawn by `graphics` and added, then
+  `removeChildren`; 300 named Sprites found by `getChildByName` and
+  removed by name; and 300 kept Sprites moved by `addChildAt`,
+  `swapChildrenAt` and `setChildIndex`. 200 rounds each after 20 to warm
+  up, as avm1/Bench.as runs its own.
+- **display-frames** (`display/EnterFrame.as`): 10,000 Sprites, each a
+  square drawn once, each with an ENTER_FRAME listener of its own: 30
+  frames that move them in their own fields (script), then 30 that also
+  set `x`, `y`, `rotation` and `alpha` (display), after an untimed
+  warm-up. As avm1-frames, at 255 frames a second, drawn as the web host
+  draws, multisampled; five times its clips, since Flash's JIT ran 2,000
+  listeners in less than a frame at 255 fps, which would have timed its
+  pace (about 121 ms for 31 frames) rather than its work.
+- **as3pb** (`tests/programs/as3pb`): its benchmark, 100 messages
+  encoded and decoded 300 times by protobuf through ByteArray and
+  through domain memory, by AMF3 (`writeObject`/`readObject`) and by
+  JSON; the data sizes and the wire checksum are compared.
+- **lz4** (`tests/programs/lz4`): LZ4's C compiled by Crossbridge's gcc
+  `-O4` into a SWF, with `lz4/Console.as` as its console: 2 MB of
+  prose, of noise and of sparse records, each compressed and
+  decompressed 50 times by the block format and compressed once by HC
+  at level 9, in domain memory; sizes and xxh32 checksums compared. It times itself by getTimer, which the test page
+  then keeps by the wall clock.
+
+Medians of 5 runs, 2026-11-15, i9-13900H, Chrome 157 (SwiftShader),
+AIR 51.5.1's adl under Wine, Ruffle 0.7.1, in ms. Ruffle's figures are
+bracketed where they are not comparable: display-frames is played at
+the display's rate in a page 100 × 50 CSS pixels, as avm1-frames is; and
+Ruffle computes other results for as3pb (its JSON size and wire
+checksum) and lz4 (every xxh32 checksum), so its times there are of
+other work. swf2es and Flash traced the same lines in every benchmark.
+
+| Section | swf2es | Flash | Ruffle | Flash / swf2es |
+|---|---|---|---|---|
+| **primitives** | | | | |
+| charCodeAt | 14 | 40 | 692 | 2.86× |
+| charAt | 22 | 74 | 534 | 3.36× |
+| indexOf | 59 | 64 | 469 | 1.08× |
+| substring | 50 | 313 | 446 | 6.26× |
+| substr-slice | 52 | 227 | 399 | 4.37× |
+| int-toString | 56 | 326 | 608 | 5.82× |
+| number-toString | 67 | 607 | 233 | 9.06× |
+| toFixed | 138 | 214 | 150 | 1.55× |
+| total | 458 | 1,865 | 3,531 | 4.07× |
+| **typed** | | | | |
+| newSmall | 111 | 221 | 548 | 1.99× |
+| newDeep | 147 | 252 | 956 | 1.71× |
+| newChained | 93 | 235 | 719 | 2.53× |
+| callClass | 38 | 34 | 1,230 | 0.89× |
+| callSubclass | 43 | 33 | 1,219 | 0.77× |
+| callInterface | 10 | 52 | 1,299 | 5.20× |
+| interfaceCall | 14 | 20 | 554 | 1.43× |
+| interfacePoly | 16 | 11 | 475 | 0.69× |
+| superCall | 18 | 15 | 691 | 0.83× |
+| newArgs | 94 | 242 | 558 | 2.57× |
+| callNull | 4 | 30 | 989 | 7.50× |
+| callNumbers | 31 | 63 | 2,480 | 2.03× |
+| callFinal | 14 | 26 | 1,071 | 1.86× |
+| total | 633 | 1,234 | 12,789 | 1.95× |
+| **untyped** | | | | |
+| display | 145 | 80 | 473 | 0.55× |
+| data | 72 | 63 | 181 | 0.88× |
+| object | 293 | 354 | 815 | 1.21× |
+| poly | 77 | 132 | 296 | 1.71× |
+| string | 94 | 101 | 228 | 1.07× |
+| names | 49 | 63 | 153 | 1.29× |
+| churn | 83 | 69 | 159 | 0.83× |
+| handles | 44 | 43 | 179 | 0.98× |
+| many | 94 | 98 | 162 | 1.04× |
+| proto | 27 | 38 | 99 | 1.41× |
+| numkeys | 33 | 34 | 130 | 1.03× |
+| objkeys | 34 | 93 | 106 | 2.74× |
+| litkeys | 127 | 183 | 357 | 1.44× |
+| total | 1,172 | 1,351 | 3,338 | 1.15× |
+| **native-collections** | | | | |
+| array-map | 12 | 41 | 48 | 3.42× |
+| array-filter | 10 | 27 | 64 | 2.70× |
+| array-forEach | 10 | 26 | 63 | 2.60× |
+| array-every | 8 | 15 | 42 | 1.88× |
+| array-some | 8 | 16 | 43 | 2.00× |
+| vector-map | 16 | 28 | 48 | 1.75× |
+| vector-filter | 11 | 22 | 68 | 2.00× |
+| array-sort | 94 | 78 | 93 | 0.83× |
+| vector-sort | 95 | 72 | 156 | 0.76× |
+| vector-convert | 4 | 7 | 15 | 1.75× |
+| total | 268 | 332 | 640 | 1.24× |
+| **display** | | | | |
+| sprite-add-remove | 117 | 229 | 1,468 | 1.96× |
+| clip-add-remove | 189 | 739 | 4,002 | 3.91× |
+| shape-add-remove | 177 | 228 | 147 | 1.29× |
+| by-name | 127 | 321 | 6,342 | 2.53× |
+| reorder | 93 | 1,209 | 112 | 13.00× |
+| total | 703 | 2,726 | 12,071 | 3.88× |
+| **display-frames** | | | | |
+| enterframe-script | 50 | 225 | (3,678) | 4.50× |
+| enterframe-display | 776 | 1,554 | (3,897) | 2.00× |
+| total | 826 | 1,779 | (7,575) | 2.15× |
+| **as3pb** | | | | |
+| serialize-as3pb-bytes | 57 | 193 | (405) | 3.39× |
+| serialize-as3pb-memory | 37 | 38 | (592) | 1.03× |
+| serialize-amf3 | 303 | 506 | (562) | 1.67× |
+| serialize-json | 462 | 3,305 | (457) | 7.15× |
+| deserialize-as3pb-bytes | 63 | 78 | (584) | 1.24× |
+| deserialize-as3pb-memory | 45 | 51 | (673) | 1.13× |
+| deserialize-amf3 | 358 | 841 | (518) | 2.35× |
+| deserialize-json | 279 | 728 | (499) | 2.61× |
+| total | 1,604 | 5,740 | (4,290) | 3.58× |
+| **lz4** | | | | |
+| prose-compress | 41 | 80 | (1,949) | 1.95× |
+| prose-decompress | 24 | 37 | (1,228) | 1.54× |
+| prose-compress-hc | 6 | 13 | (45) | 2.17× |
+| noise-compress | 18 | 10 | (208) | 0.56× |
+| noise-decompress | 8 | 6 | (40) | 0.75× |
+| noise-compress-hc | 123 | 128 | (5,884) | 1.04× |
+| records-compress | 104 | 178 | (6,569) | 1.71× |
+| records-decompress | 52 | 94 | (3,448) | 1.81× |
+| records-compress-hc | 311 | 522 | (25,536) | 1.68× |
+| total | 687 | 1,068 | (44,907) | 1.55× |
+
+In the same run, the four older benchmarks' totals, and their sections
+where swf2es is behind:
+
+| Section | swf2es | Flash | Ruffle | Flash / swf2es |
+|---|---|---|---|---|
+| enumeration holey-each | 70 | 58 | 444 | 0.83× |
+| enumeration sparse-in | 169 | 67 | 134 | 0.40× |
+| enumeration sparse-each | 189 | 71 | 380 | 0.38× |
+| enumeration named-in | 63 | 61 | 144 | 0.97× |
+| enumeration named-each | 90 | 57 | 443 | 0.63× |
+| enumeration vector-object-each | 80 | 73 | 491 | 0.91× |
+| enumeration vector-string-each | 81 | 73 | 491 | 0.90× |
+| enumeration object16-each | 136 | 120 | 313 | 0.88× |
+| enumeration object1k-each | 89 | 62 | 177 | 0.70× |
+| enumeration dict-strings-in | 76 | 68 | 92 | 0.89× |
+| enumeration dict-strings-each | 92 | 69 | 93 | 0.75× |
+| enumeration nested-each | 107 | 74 | 414 | 0.69× |
+| enumeration queue-in | 157 | 154 | 636 | 0.98× |
+| enumeration queue-each | 170 | 152 | 734 | 0.89× |
+| enumeration total | 3,490 | 3,756 | 10,542 | 1.08× |
+| dictionary strong16-miss | 25 | 22 | 44 | 0.88× |
+| dictionary total | 669 | 2,154 | 1,627 | 3.22× |
+| vector total | 1,568 | 5,002 | 55,277 | 3.19× |
+| pixels setPixels-opaque | 17 | 15 | 131 | 0.88× |
+| pixels setPixels-little-opaque | 15 | 14 | 117 | 0.93× |
+| pixels setVector-opaque | 37 | 9 | 207 | 0.24× |
+| pixels setVector-transparent | 90 | 84 | 207 | 0.93× |
+| pixels total | 377 | 448 | 1,257 | 1.19× |
+
+Against Flash's JIT, swf2es is ahead in total in every benchmark: from
+1.1× (enumeration, untyped) to 4× (primitives, display), 3.2–3.6× on
+Vectors, Dictionaries and as3pb, and 1.55× on LZ4's C. The display list
+is well ahead (1.3–13× in display, 2× drawing 10,000 moving Sprites, 4.5×
+dispatching their ENTER_FRAME, though Flash's time there is under twice
+its frame pace's floor and may hold some pacing), and so is Flash's slow string, number
+formatting and JSON (as3pb's JSON encoding 7×). But ahead in total
+hides what is behind, which is the work list, furthest first, down to
+about 0.85× (the tables show the rest, up to 0.98×):
+
+- **setVector on an opaque bitmap** (0.24×), already explained above: a
+  `Vector.<uint>`'s elements are doubles converted one at a time.
+- **for-in and for each over a sparse Array** (0.38–0.40×), and walks of
+  named Arrays, nested Arrays, Objects of 1,000 names and string-keyed
+  Dictionaries by for each (0.63–0.75×).
+- **untyped names on a tree of objects** (untyped's display, 0.55×), and
+  its data, churn and handles loops (0.83–0.98×): getters, setters and
+  methods called by name on class instances, dynamic properties of a
+  dynamic class and of JSON's Objects.
+- **LZ4 on incompressible data** (noise-compress 0.56×, noise-decompress
+  0.75×): the loop that hashes four bytes at every position and finds no
+  match is nearly all domain memory reads and writes.
+- **typed calls V8 does not make as cheap as Flash's JIT**: a method
+  given a subclass of its parameter's class (0.77×), an interface method
+  on four classes in turn (0.69×), `super` (0.83×) and a class's own
+  method (0.89×): 4.2–6.0 ns an iteration against Flash's 3.7–5.0.
+- **numeric sort** of 8,192 numbers (Array 0.83×, Vector 0.76×).
+- **Shapes drawn by `graphics` and added** are the display section
+  closest to Flash (1.29×), and Ruffle is faster there (147 ms to 177).
+
+A profile in node (the player playing each section alone, its rounds
+raised, `--cpu-prof`; its timings were within 10% of Chrome's, but
+LZ4's were up to twice them under the profiler)
+points at:
+
+- **Sparse Arrays' indices taken at every walk.** A for-in over the
+  sparse Array takes its indices again each time it starts, by
+  `Object.keys` and a `Number()` of each key (`indicesOf`, 25% of the
+  section), as they are dropped when a walk ends; the step's
+  `enumerable` check is 18% more, and `startOrGoOn`, `takeSparse` and
+  `sparseElement` 18% between them. avmplus walks its hashtable in place.
+- **Untyped names through the runtime.** Every get, set and call on a
+  value typed `*` is a call of `rt.getProperty` (17% of untyped's
+  display), `setProperty` or `callProperty`, which looks the name up in
+  the receiver traits' cache (`receiverTraits`, 7.5%) and dispatches on
+  the entry's kind: a getter by `e.get.call(o)`, a dynamic property by
+  a Map's `get` and then `has`. The site keeps nothing of what it found,
+  where Flash's JIT caches it at the call site.
+- **Domain memory by `rt.view`.** Crossbridge's loads and stores are
+  `rt.view.getInt32(address, true)` and the like, the DataView read
+  from the runtime at every access, as it changes when memory grows; the
+  four hottest functions of the C program are 50% of lz4's samples, and
+  on noise they do little else. Flash's JIT emits a bounds check and a
+  load.
+- **Typed calls.** The loops are compiled as they should be: `l1.$b4(l2)`
+  calls the method's unchecked entry with no coercion when the argument
+  is known to be a subclass, and an interface call is
+  `o["$i0.5:Shape:area"]()`. What is left is V8's: the method fetched
+  from the prototype at each call, the field loads in `Vec.dot` made
+  polymorphic once Vec and Vec3 (one more field) both reach it, and an
+  interface method on four prototypes.
+- **Sorting through closures.** `qsort` (60% of the sort sections)
+  calls a compare and a swap closure by index for every step, and the
+  compare converts both elements to Number each time, where avmplus'
+  ArraySort compares the elements' doubles in C++.
+
 ## AVM2 eager and lazy compilation
 
 `pnpm bench:avm2 [--runs 5] [--frames 600] [--json /tmp/avm2.json]`
@@ -404,11 +665,15 @@ memory rather than on the GPU (#980) from 8.4 to 4.9 ms on Intel and from
 | enumeration, total (#729) | 2026-11-05 | 5,350 | 3,759 | 10,371 (before #729) |
 | dictionary, total (#727) | 2026-11-05 | 1,518 | 2,148 | 1,607 |
 | vector, total (#745) | 2026-11-06 | 6,415 | 5,449 | |
+| enumeration, total | 2026-11-15 | 3,490 | 3,756 | 10,542 |
+| dictionary, total | 2026-11-15 | 669 | 2,154 | 1,627 |
+| vector, total | 2026-11-15 | 1,568 | 5,002 | 55,277 |
 
-Flash leads on enumeration by its sparse Arrays and nested walks, both
-since made faster (#747, #948, #949, measured in node only); swf2es leads
-on strong Dictionaries and `in`. The vector figures predate the typed
-Vector accesses at the call site (#752) and are due a new run.
+Flash led on enumeration by its sparse Arrays and nested walks, both
+since made faster (#747, #948, #949); swf2es leads on strong
+Dictionaries and `in`, and since the typed Vector accesses at the call
+site (#752) on Vectors too. The rows of 2026-11-15 are from "AVM2
+against Flash" above, where every AS3 benchmark's sections are.
 
 Bitmap pixel transfers (`pixels`, #962, 2026-11-13), medians of five
 interleaved rounds, ms:

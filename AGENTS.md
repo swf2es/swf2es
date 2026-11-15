@@ -192,6 +192,8 @@ node tests/bench/players.ts --only swf2es,flash vector   # indexed reads, writes
                               # Vectors of int, Number, String, Object and a class, and on Arrays
 node tests/bench/players.ts avm1   # AVM1: loops, members, calls, scopes, clips made and removed,
                               # onEnterFrame on 2,000 clips (docs/benchmarks.md, "AVM1 against Flash")
+node tests/bench/players.ts avm2   # AS3: the avmshell benchmarks above, display objects, ENTER_FRAME
+                              # on many Sprites, as3pb and LZ4 by Crossbridge ("AVM2 against Flash")
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
