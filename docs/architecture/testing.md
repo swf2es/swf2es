@@ -110,6 +110,49 @@ them (above). The full Tamarin suite runs nightly (`tamarin.yml`), and
 the desktop app's builds and the site's publishing have workflows of
 their own.
 
+## Proving the player's shortcuts
+
+The player skips work it can show is idle: a round of frame scripts walks
+only where a script may be due, a tick advances only the clips whose
+advance does something, and a still pointer's pick keeps the bounds of
+what has not moved. Each such shortcut has a check that does the full
+work beside it and throws where the two differ, on in the checked build
+(`SWF2ES_CHECKED`):
+
+- `Scripting.checkRounds` walks every round of frame scripts in full and
+  compares the queue with the pruned one, and runs the full queue to find
+  a left-out clip that comes to mark a frame;
+- the same flag has the advance walk (`display/advance.ts`) list every
+  clip, compare its pruned list with that, and throw if a left-out clip
+  advances before a late mark;
+- `Scripting.checkPicks` makes a full pick, without kept bounds, beside
+  each pick that used them, and picks at a frame end that would have
+  skipped it.
+
+Unit tests are checked only when `tests/unit/checked.ts` is loaded, as
+`tests/unit`'s test script and `pnpm test:checked` do; `SWF2ES_CHECKED=1
+node --test file.test.ts` alone does not turn the checks on, so run one
+file checked with `SWF2ES_CHECKED=1 node --import ./tests/unit/checked.ts
+--test file.test.ts`. In Chrome, `SWF2ES_CHECKED=1` has the player cases
+and the corpus open their page with `?checked`.
+
+A check that never fails proves nothing, so a new shortcut comes with
+mutation checks: drop one mark or invalidation on purpose, and a unit
+test, or the checked build, must catch it. Marks that no test can catch
+should be redundant by construction, and the pull request says why.
+
+Two habits keep long runs from taking the machine down:
+
+- **Compare display objects with `equal` from `tests/unit/same.ts`,**
+  never `assert.equal`, `strictEqual` or `deepEqual`: node's assertion
+  error prints both values in full, and a display object reaches its
+  whole tree, bitmaps included, so one failed comparison has used tens
+  of gigabytes.
+- **Cap a long local run's memory with a cgroup** (`systemd-run --user
+  --scope -p MemoryMax=8G -p MemorySwapMax=0 ...`), not `ulimit -v`: a
+  virtual memory limit breaks WebAssembly, which reserves far more
+  address space than it uses.
+
 ## Fuzzing the compiler
 
 The JIT compiles whatever bytes a SWF holds, so codegen must reject any

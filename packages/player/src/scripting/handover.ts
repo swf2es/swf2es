@@ -1,5 +1,5 @@
 // The primordial's compiled modules handed to its background workers
-// (docs/workers.md, slice 5), so that a worker running the same ABCs does
+// (docs/workers.md, "Compiled code"), so that a worker running the same ABCs does
 // not compile them again: each Crossbridge thread is a worker, and a large
 // Crossbridge SWF takes minutes to compile.
 //
