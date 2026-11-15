@@ -355,19 +355,19 @@ function sortWith(
   return d;
 }
 
-/** The elements as doubles if every one is a number, which numericCompare compares as it is. */
-function numbersOf(atoms: Value[]): Float64Array | null {
-  const values = new Float64Array(atoms.length);
+/**
+ * The elements if every one is a number, which numericCompare compares as it is: a copy in a
+ * plain array, as a Float64Array of more than 8 is stored off V8's heap, a cost each sort of
+ * the 10 or 20 numbers of game code would pay.
+ */
+function numbersOf(atoms: Value[]): number[] | null {
   for (let i = 0; i < atoms.length; i++) {
-    const v = atoms[i];
-    if (typeof v !== "number") {
+    if (typeof atoms[i] !== "number") {
       return null;
     }
-
-    values[i] = v;
   }
 
-  return values;
+  return atoms.slice() as number[];
 }
 
 /** numericCompare of two numbers. */
@@ -384,12 +384,7 @@ function compareNumbers(a: number, b: number): number {
  * qsort from 0 to `hiIn` by compareNumbers, descending as compareOf turns it, on `values`, each
  * swap made in `index` too: step for step the same as qsort's, with the comparison inline.
  */
-function qsortNumbers(
-  values: Float64Array,
-  index: number[],
-  hiIn: number,
-  descending: boolean,
-): void {
+function qsortNumbers(values: number[], index: number[], hiIn: number, descending: boolean): void {
   let lo = 0;
   let hi = hiIn;
   const stack: number[] = [];
@@ -450,6 +445,7 @@ function qsortNumbers(
       }
 
       swap(lo, right);
+      // Unsigned in avmplus: right - 1 - lo wraps when right is lo.
       if ((right - 1 - lo) >>> 0 >= (hi - left) >>> 0) {
         if (lo + 1 < right) {
           stack.push(lo, right - 1);
