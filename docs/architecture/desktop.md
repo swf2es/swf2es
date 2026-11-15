@@ -391,6 +391,20 @@ paused once the tunnel is made, the bytes that came with the proxy's
 reply are its first data, and it reads on once the page is told it is
 open. Its reads never pause it, as its stream never paused before.
 
+The page is sent its sockets' events, and its WebSockets', gathered
+(`src/main/relay.ts`): one IPC message, `socket:events` or
+`websocket:events`, carries what a turn of the main process's event loop
+brought, each event with its connection's id, in the order they came. A
+socket's reads in a turn are one data event, up to its next event, so
+its bytes always come before its close or error; each WebSocket message
+stays an event of its own, as AIR dispatches one for each. A batch that
+reaches 256 KB goes at once, so that neither the main process nor one
+message holds more than that and a read. The page
+(`src/renderer/sockets.ts`, `websockets.ts`) hands each on in turn. What
+is gathered is dropped with the connections as the page navigates or
+goes, so that no event of the last page's reaches the next, which numbers
+its connections from 1 again.
+
 ## WebSockets
 
 `air.net.WebSocket` runs over a WebSocketHost
@@ -424,7 +438,8 @@ no such dispatcher the app would say so at its start and verify every
 certificate; the unit test fails if node's does not.
 
 A page holds at most 64 at once, and one with more than 16 MB its peer
-has not read fails. A page's WebSockets close, silently, as it navigates
+has not read fails. Its events reach the page gathered, as its sockets'
+do ([Sockets](#sockets)). A page's WebSockets close, silently, as it navigates
 or reloads, and with it: the client has no way to drop a connection, so
 each is sent a close frame, and is gone once its server answers.
 `--log-network` says each connection asked for, opened, refused, failed
@@ -477,7 +492,9 @@ body, and fails for the remote SWF.
 `sandbox.test.ts` test the sockets' limits and reads, each copied out at
 its length, through a proxy whose reply comes with the first bytes too,
 and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, close
-codes, refusals, limits and certificates, `addresses.test.ts` where each address is, in every form an IPv4
+codes, refusals, limits and certificates, `relay.test.ts` the events
+gathered for the page, in order, joined, sent at 256 KB and dropped with
+the page, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and
 what policies grant, by the specification's examples, and
 `proxy.test.ts` `--proxy`'s URL and the tunnels through a SOCKS5 and an

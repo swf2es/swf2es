@@ -2,6 +2,7 @@
 // each checked again by the main process. A sandboxed preload is a
 // CommonJS script that may require only Electron's renderer modules.
 import type {
+  ConnectionEvents,
   DesktopApi,
   LibraryName,
   NetworkResponse,
@@ -55,9 +56,9 @@ const api: DesktopApi = {
     },
     send: (id, bytes) => ipcRenderer.send("socket:send", id, bytes),
     close: (id) => ipcRenderer.send("socket:close", id),
-    onEvent: (listener) => {
-      ipcRenderer.on("socket:event", (_event, id: number, event: SocketEvent) =>
-        listener(id, event),
+    onEvents: (listener) => {
+      ipcRenderer.on("socket:events", (_event, events: ConnectionEvents<SocketEvent>) =>
+        listener(events),
       );
     },
   },
@@ -69,9 +70,9 @@ const api: DesktopApi = {
     },
     send: (id, data) => ipcRenderer.send("websocket:send", id, data),
     close: (id, code) => ipcRenderer.send("websocket:close", id, code),
-    onEvent: (listener) => {
-      ipcRenderer.on("websocket:event", (_event, id: number, event: WebSocketEvent) =>
-        listener(id, event),
+    onEvents: (listener) => {
+      ipcRenderer.on("websocket:events", (_event, events: ConnectionEvents<WebSocketEvent>) =>
+        listener(events),
       );
     },
   },

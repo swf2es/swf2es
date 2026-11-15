@@ -1,15 +1,22 @@
 // air.net.WebSocket's connections, made here for the page, which has no
 // network of its own, and carried over IPC as flash.net.Socket's are
 // (sockets.ts). Each page's connections (websocket-connections.ts) close
-// as it navigates, reloads or goes.
+// as it navigates, reloads or goes, and their events go to it gathered,
+// one message a turn (relay.ts), each message an event of its own.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
+import type { WebSocketEvent } from "../shared/api.js";
 import { webSocketDataLine, webSocketLine } from "./netlog.ts";
+import { Relay } from "./relay.ts";
 import {
   type Opener,
   validProtocols,
   validWebSocketUrl,
   WebSocketConnections,
 } from "./websocket-connections.ts";
+
+/** About what a message takes to send: a string's UTF-16 is two bytes a unit. */
+const messageSize = (data: string | Uint8Array): number =>
+  typeof data === "string" ? data.length * 2 : data.length;
 
 /**
  * Carry WebSocket messages from pages that `trusted` accepts, each
@@ -35,6 +42,11 @@ export function bridgeWebSockets(
       return known;
     }
 
+    const relay = new Relay<WebSocketEvent>((batch) => {
+      if (!contents.isDestroyed()) {
+        contents.send("websocket:events", batch);
+      }
+    });
     const connections = new WebSocketConnections((id, event) => {
       if (log) {
         switch (event.type) {
@@ -56,18 +68,18 @@ export function bridgeWebSockets(
         }
       }
 
-      if (!contents.isDestroyed()) {
-        contents.send("websocket:event", id, event);
-      }
+      relay.push(id, event, event.type === "message" ? messageSize(event.data) : 0);
     }, open);
     pages.set(contents, connections);
     contents.on("did-start-navigation", (details) => {
       if (details.isMainFrame && !details.isSameDocument) {
         connections.closeAll();
+        relay.drop();
       }
     });
     contents.once("destroyed", () => {
       connections.closeAll();
+      relay.drop();
       pages.delete(contents);
     });
     return connections;

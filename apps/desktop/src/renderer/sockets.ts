@@ -6,26 +6,35 @@ import type { DesktopSockets } from "../shared/api.js";
 export function shellSocketHost(sockets: DesktopSockets): SocketHost {
   // Until its close, which the shell sends after an error and after a close asked for.
   const open = new Map<number, SocketEvents>();
-  sockets.onEvent((id, event) => {
-    const events = open.get(id);
-    if (!events) {
-      return;
-    }
+  // A turn's events at once, each to its connection in turn.
+  sockets.onEvents((batch) => {
+    for (let i = 0; i < batch.length; i++) {
+      const [id, event] = batch[i];
+      const events = open.get(id);
+      if (!events) {
+        continue;
+      }
 
-    switch (event.type) {
-      case "open":
-        events.open(event);
-        break;
-      case "data":
-        events.data(event.bytes);
-        break;
-      case "error":
-        events.error(event.message);
-        break;
-      case "close":
-        open.delete(id);
-        events.close();
-        break;
+      // One that throws leaves the rest to run, as when each came in a message of its own.
+      try {
+        switch (event.type) {
+          case "open":
+            events.open(event);
+            break;
+          case "data":
+            events.data(event.bytes);
+            break;
+          case "error":
+            events.error(event.message);
+            break;
+          case "close":
+            open.delete(id);
+            events.close();
+            break;
+        }
+      } catch (error) {
+        reportError(error);
+      }
     }
   });
 
