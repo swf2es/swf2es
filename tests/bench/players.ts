@@ -273,7 +273,7 @@ function as3pbSections(lines: string[]): (readonly [string, number])[] {
  * script, so it is given room as the others are.
  */
 function lz4Swf(): Uint8Array {
-  const [console] = runOracle(
+  const [built] = runOracle(
     [
       {
         source: `${here}lz4/Console.as`,
@@ -297,8 +297,8 @@ function lz4Swf(): Uint8Array {
       run: false,
     },
   );
-  if (!console.compiled) {
-    throw new Error(`lz4's console did not compile:\n${console.compileLog}`);
+  if (!built.compiled) {
+    throw new Error(`lz4's console did not compile:\n${built.compileLog}`);
   }
 
   const vendor = "tests/programs/com-lz4-as3/native/vendor";
@@ -414,7 +414,7 @@ async function playSwf2es(swf: Uint8Array, bench: string): Promise<string[]> {
   return result.trace;
 }
 
-async function playRuffle(swf: Uint8Array, _bench: string): Promise<string[]> {
+async function playRuffle(swf: Uint8Array): Promise<string[]> {
   return withPage(
     "runSwf",
     async (evaluate) => {

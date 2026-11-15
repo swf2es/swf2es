@@ -317,7 +317,9 @@ Changes since, on the same machine, medians of 6 interleaved runs of
 (headless Chrome), Flash (adl `-nodebug`) and, given `--ruffle DIR`,
 Ruffle's web build: the four above (enumeration, dictionary, vector,
 pixels) and eight more. Each but lz4 is compiled by ASC 2.0 against
-playerglobal into a SWF of version 18 (Flash Player 11.5's, for JSON),
+playerglobal into a SWF of version 18 (Flash Player 11.5's, for JSON;
+the four older ones ran as SWF 10 in the earlier dated rows, and Flash's
+enumeration total moved 3,759 to 3,756 with it),
 and times its sections by the Date. Every section also traces a checksum
 or a count of its work, which must be as Flash traces it: `players.ts`
 prints a line a player traces otherwise beside Flash's, and still times
@@ -500,10 +502,12 @@ where swf2es is behind:
 Against Flash's JIT, swf2es is ahead in total in every benchmark: from
 1.1× (enumeration, untyped) to 4× (primitives, display), 3.2–3.6× on
 Vectors, Dictionaries and as3pb, and 1.55× on LZ4's C. The display list
-is well ahead (2–13× in display, 2× drawing 10,000 moving Sprites, 4.5×
-dispatching their ENTER_FRAME), and so is Flash's slow string, number
+is well ahead (1.3–13× in display, 2× drawing 10,000 moving Sprites, 4.5×
+dispatching their ENTER_FRAME, though Flash's time there is under twice
+its frame pace's floor and may hold some pacing), and so is Flash's slow string, number
 formatting and JSON (as3pb's JSON encoding 7×). But ahead in total
-hides what is behind, which is the work list, furthest first:
+hides what is behind, which is the work list, furthest first, down to
+about 0.85× (the tables show the rest, up to 0.98×):
 
 - **setVector on an opaque bitmap** (0.24×), already explained above: a
   `Vector.<uint>`'s elements are doubles converted one at a time.
@@ -520,7 +524,7 @@ hides what is behind, which is the work list, furthest first:
 - **typed calls V8 does not make as cheap as Flash's JIT**: a method
   given a subclass of its parameter's class (0.77×), an interface method
   on four classes in turn (0.69×), `super` (0.83×) and a class's own
-  method (0.89×): 1.4–2.0 ns a call against Flash's 1.2–1.7.
+  method (0.89×): 4.2–6.0 ns an iteration against Flash's 3.7–5.0.
 - **numeric sort** of 8,192 numbers (Array 0.83×, Vector 0.76×).
 - **Shapes drawn by `graphics` and added** are the display section
   closest to Flash (1.29×), and Ruffle is faster there (147 ms to 177).
