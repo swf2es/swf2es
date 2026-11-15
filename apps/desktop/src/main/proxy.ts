@@ -7,7 +7,7 @@
 // command line's alone: never kept, and never said.
 //
 // Without Electron, so that node tests it (tests/desktop/proxy.test.ts).
-import { connect, isIP, isIPv4, type Socket } from "node:net";
+import { connect, isIP, isIPv4, type OnReadOpts, type Socket } from "node:net";
 import { domainToASCII } from "node:url";
 
 export interface ProxyConfig {
@@ -200,26 +200,39 @@ function ipv6Bytes(address: string): Buffer {
   return bytes;
 }
 
-/** Reads a socket's bytes as a handshake needs them, and gives back what it did not need. */
+/**
+ * Reads a socket's bytes as a handshake needs them, and gives back what it
+ * did not need. A socket read by its stream is read here by "readable"; one
+ * read by `onread` (net.connect's option) is fed what it reads.
+ */
 class Reader {
   private buffered = Buffer.alloc(0);
   private wake: (() => void) | null = null;
   private ended = false;
   private readonly socket: Socket;
+  private readonly streamed: boolean;
 
-  constructor(socket: Socket) {
+  constructor(socket: Socket, streamed: boolean) {
     this.socket = socket;
-    socket.on("readable", this.readable);
+    this.streamed = streamed;
+    if (streamed) {
+      socket.on("readable", this.readable);
+    }
+
     socket.on("end", this.end);
   }
 
   private readonly readable = () => {
     for (let chunk = this.socket.read() as Buffer | null; chunk; chunk = this.socket.read()) {
-      this.buffered = Buffer.concat([this.buffered, chunk]);
+      this.feed(chunk);
     }
-
-    this.wake?.();
   };
+
+  /** Bytes read, copied: an `onread` buffer is read into again. */
+  feed(bytes: Uint8Array): void {
+    this.buffered = Buffer.concat([this.buffered, bytes]);
+    this.wake?.();
+  }
 
   private readonly end = () => {
     this.ended = true;
@@ -263,13 +276,25 @@ class Reader {
     }
   }
 
-  /** Stop reading; what came past the handshake goes back, for the socket's next reader. */
-  release(): void {
+  /**
+   * Stop reading. What came past the handshake goes back to the stream for
+   * its next reader, or, for a socket read by `onread`, is given back, a
+   * copy of its own.
+   */
+  release(): Uint8Array {
     this.socket.removeListener("readable", this.readable);
     this.socket.removeListener("end", this.end);
-    if (this.buffered.length > 0) {
-      this.socket.unshift(this.buffered);
+    const rest = this.buffered;
+    this.buffered = Buffer.alloc(0);
+    if (!this.streamed) {
+      return new Uint8Array(rest);
     }
+
+    if (rest.length > 0) {
+      this.socket.unshift(rest);
+    }
+
+    return new Uint8Array(0);
   }
 }
 
@@ -427,6 +452,32 @@ export function connectThrough(
   port: number,
   options: { signal?: AbortSignal; timeout?: number } = {},
 ): Promise<Socket> {
+  return tunnel(proxy, host, port, options, null).then(({ socket }) => socket);
+}
+
+/**
+ * As connectThrough, the tunnel's bytes read by `onread` (net.connect's
+ * option) rather than its stream: the socket comes paused, with the bytes
+ * that came with the proxy's reply, for its reader to take before it
+ * resumes the socket, so that nothing is read before whoever reads is
+ * ready. The handshake reads through `onread`'s buffer too.
+ */
+export function tunnelThrough(
+  proxy: ProxyConfig,
+  host: string,
+  port: number,
+  options: { signal?: AbortSignal; timeout?: number; onread: OnReadOpts },
+): Promise<{ socket: Socket; rest: Uint8Array }> {
+  return tunnel(proxy, host, port, options, options.onread);
+}
+
+function tunnel(
+  proxy: ProxyConfig,
+  host: string,
+  port: number,
+  options: { signal?: AbortSignal; timeout?: number },
+  onread: OnReadOpts | null,
+): Promise<{ socket: Socket; rest: Uint8Array }> {
   const where = describeProxy(proxy);
   return new Promise((resolve, reject) => {
     let target: ReturnType<typeof targetHost>;
@@ -448,8 +499,26 @@ export function connectThrough(
       return;
     }
 
-    const socket = connect({ host: proxy.host, port: proxy.port });
-    const reader = new Reader(socket);
+    // Until the tunnel is made its bytes are the handshake's; then onread's own.
+    let tunnelled = false;
+    const socket = onread
+      ? connect({
+          host: proxy.host,
+          port: proxy.port,
+          onread: {
+            buffer: onread.buffer,
+            callback: (length, buffer) => {
+              if (tunnelled) {
+                return onread.callback(length, buffer);
+              }
+
+              reader.feed(buffer.subarray(0, length));
+              return true;
+            },
+          },
+        })
+      : connect({ host: proxy.host, port: proxy.port });
+    const reader = new Reader(socket, !onread);
     let settled = false;
     const finish = (error: ProxyError | null) => {
       if (settled) {
@@ -466,8 +535,12 @@ export function connectThrough(
         socket.destroy();
         reject(error);
       } else {
-        reader.release();
-        resolve(socket);
+        if (onread) {
+          socket.pause();
+          tunnelled = true;
+        }
+
+        resolve({ socket, rest: reader.release() });
       }
     };
     const abort = () => finish(new ProxyError("aborted", false));

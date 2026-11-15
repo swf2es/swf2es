@@ -1,9 +1,15 @@
 // flash.net.Socket's TCP connections, made here for the page, which has
 // no network of its own beyond fetch, and carried over IPC. Each page's
-// connections (connections.ts) close as it navigates, reloads or goes.
+// connections (connections.ts) close as it navigates, reloads or goes, and
+// their events go to it gathered, a message a millisecond at most
+// (relay.ts).
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
+import type { SocketEvent } from "../shared/api.js";
 import { type ConnectionOptions, Connections, validEndpoint } from "./connections.ts";
 import { socketDataLine, socketLine } from "./netlog.ts";
+import { Relay } from "./relay.ts";
+
+const dataEvent = (bytes: Uint8Array): SocketEvent => ({ type: "data", bytes });
 
 /**
  * Carry socket messages from pages that `trusted` accepts, each connection
@@ -28,6 +34,11 @@ export function bridgeSockets(
       return known;
     }
 
+    const relay = new Relay<SocketEvent>((batch) => {
+      if (!contents.isDestroyed()) {
+        contents.send("socket:events", batch);
+      }
+    });
     const connections = new Connections((id, event) => {
       if (log && event.type !== "data") {
         log(socketLine(id, event.type === "error" ? `error: ${event.message}` : event.type));
@@ -35,18 +46,22 @@ export function bridgeSockets(
         log(socketDataLine(id, false, event.bytes));
       }
 
-      if (!contents.isDestroyed()) {
-        contents.send("socket:event", id, event);
+      if (event.type === "data") {
+        relay.bytes(id, event.bytes, dataEvent);
+      } else {
+        relay.push(id, event);
       }
     }, options);
     pages.set(contents, connections);
     contents.on("did-start-navigation", (details) => {
       if (details.isMainFrame && !details.isSameDocument) {
         connections.closeAll();
+        relay.drop();
       }
     });
     contents.once("destroyed", () => {
       connections.closeAll();
+      relay.drop();
       pages.delete(contents);
     });
     return connections;

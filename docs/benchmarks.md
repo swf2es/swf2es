@@ -155,6 +155,24 @@ the ABC parser, the bytecode decoder and typed verification in the
 release build (abcdump.abc from the last conformance run without files),
 and `tests/bench/dxt.ts` the native DXT encoder against TypeScript's.
 
+### The desktop app's sockets and WebSockets
+
+`tests/desktop/relay-bench.ts` has servers in a process of their own send
+many small messages, 8 sockets 20,000 of 48 bytes each and 4 WebSockets
+20,000 of 32, and the desktop app's main-process side of them
+(`connections.ts`, `websocket-connections.ts`, through `relay.ts` where
+the checkout has it) take them in node, without Electron. It counts the
+IPC messages the page would be sent, the socket's reads, the stores they
+made and a batch's joins among them, collections and CPU time. Each
+message is serialized by V8's serializer, as IPC serializes it, so the
+CPU time holds serialization, but not the posting to the page nor the
+page's side.
+
+    node tests/desktop/relay-bench.ts [runs]                             this checkout
+    node tests/desktop/relay-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
+        [--burst N]   the messages a server writes a turn, 40 by default
+        [--busy MS]   the main process held MS ms of every 2 MS, as by its other work
+
 ## AVM1 startup and scene changes
 
 `pnpm bench:avm1 [--runs 5] [--frames 600]` measures what AVM1 content
@@ -781,6 +799,21 @@ The player:
 - #994: the tick advances only clips whose advance does something.
 - #997: a button's pick bounds kept while its hit test state stands
   still.
+
+The desktop app:
+
+- #1010: a page's socket and WebSocket events gathered into one IPC
+  message a millisecond at most, the first after a quiet spell at once;
+  sockets read into a buffer of their own, each read copied out at its
+  length (`tests/desktop/relay-bench.ts`, medians of 6, with the main
+  process free and then held 4 ms of every 8, `--busy 4`). IPC messages:
+  WebSockets 80,008 → 200 and → 23; sockets 7,580 → 116 and 2,639 → 63.
+  CPU: WebSockets 445 → 384 ms and 417 → 286; sockets 121 → 113 and 114
+  → 113. Stores a read: 2.00 → 1.05, but a socket's reads in one batch
+  are joined into another, so the bytes made a byte received went 2.00 →
+  1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
+  2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
+  15,790 and 2,623 → 5,852.
 
 The renderer's are described in [renderer.md](renderer.md).
 

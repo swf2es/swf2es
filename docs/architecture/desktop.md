@@ -382,6 +382,52 @@ stops reading cannot fill the main process's memory. A page's sockets
 close, silently, as it navigates or reloads, and with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
+Each socket is read into a 64 KB buffer of its own (net's `onread`), and
+each read copied out at its length, where Node's stream would make a
+Buffer of the read besides: Electron's IPC sends a typed array's whole
+store, so a view of the buffer would not do. A socket's reads that go to
+the page in one batch (below) are joined into a store of their own, a
+second copy of their bytes, but one data event, and so one `socketData`
+event for the SWF, rather than one for each read, which costs it far
+more than the copy. A socket through the proxy is read the same way from
+its start, its handshake included; it is paused once the tunnel is made,
+the bytes that came with the proxy's reply are its first data, and it
+reads on once the page is told it is open. Its reads never pause it, as
+its stream never paused before.
+
+The page is sent its sockets' events, and its WebSockets', gathered
+(`src/main/relay.ts`): one IPC message, `socket:events` or
+`websocket:events`, carries each event with its connection's id, in the
+order they came, a millisecond's at most. The window has a leading edge:
+the first event after a millisecond with nothing sent goes at the end of
+its turn of the main process's event loop, so that an answer to a
+request waits for nothing, and what comes within the millisecond after a
+batch waits for its end, by one timer, and goes with the rest that came
+by then. Reads that cost little come many to a millisecond, each with a
+few bytes: a batch a turn alone still left a message for most of them. A
+socket's reads in a batch are one data event, up to its next event, so
+its bytes always come before its close or error; each WebSocket message
+stays an event of its own, as AIR dispatches one for each. A batch that
+reaches 256 KB goes at once, so that neither the main process nor one
+message holds more than that and a read.
+
+A batch is one task of the page's: its listener
+(`src/renderer/sockets.ts`, `websockets.ts`) hands every event in it on
+in one loop, and one that throws leaves the rest to run. What is
+gathered is dropped with the connections, its timer cleared, as the page
+navigates or goes, so that no event of the last page's reaches the next,
+which numbers its connections from 1 again.
+
+On Windows a timer waits for the system's timer resolution, about
+15.6 ms unless the process has raised it, as Chromium does only at times,
+so the end of a window may come up to about 16 ms late there. That is
+acceptable: the leading edge sends the first event after a quiet spell
+at once, so a request and its answer wait no more than they did, and
+only the tail of a burst waits; and the player hands a socket's bytes,
+and a WebSocket's messages, to the SWF only at its next frame anyway
+(`Loads.deferHostEvent`, run by `completeLoads` as the frame begins:
+`packages/player/src/scripting/loads.ts`, `scripting.ts`).
+
 ## WebSockets
 
 `air.net.WebSocket` runs over a WebSocketHost
@@ -415,7 +461,8 @@ no such dispatcher the app would say so at its start and verify every
 certificate; the unit test fails if node's does not.
 
 A page holds at most 64 at once, and one with more than 16 MB its peer
-has not read fails. A page's WebSockets close, silently, as it navigates
+has not read fails. Its events reach the page gathered, as its sockets'
+do ([Sockets](#sockets)). A page's WebSockets close, silently, as it navigates
 or reloads, and with it: the client has no way to drop a connection, so
 each is sent a close frame, and is gone once its server answers.
 `--log-network` says each connection asked for, opened, refused, failed
@@ -465,9 +512,12 @@ where the SWF with no such listener enters and leaves by the menu's F11.
 A URL answered 404 completes for the application, with the response's
 body, and fails for the remote SWF.
 `connections.test.ts` and
-`sandbox.test.ts` test the sockets' limits and the sandbox's grants in
-node, `websocket-connections.test.ts` the WebSockets' messages, close
-codes, refusals, limits and certificates, `addresses.test.ts` where each address is, in every form an IPv4
+`sandbox.test.ts` test the sockets' limits and reads, each copied out at
+its length, through a proxy whose reply comes with the first bytes too,
+and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, close
+codes, refusals, limits and certificates, `relay.test.ts` the events
+gathered for the page, the window's leading edge, the order kept, reads
+joined, a batch sent at 256 KB and dropped with the page, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and
 what policies grant, by the specification's examples, and
 `proxy.test.ts` `--proxy`'s URL and the tunnels through a SOCKS5 and an

@@ -140,6 +140,9 @@ node tests/site/run.ts [--serve]   # the built site in Chrome under /swf2es/: th
                               # at (part of pnpm test)
 node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
                               # socket, a drop (part of pnpm test; skipped without Electron's binary)
+node tests/desktop/relay-bench.ts [<checkout A> <checkout B>] [runs] [--burst N] [--busy MS]
+                              # the desktop app's sockets and WebSockets relayed in node from servers
+                              # sending many small messages: IPC messages, reads, buffers, CPU
 node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--gpu]   # time the
                               # player on a busy synthetic timeline in Chrome (--town: a busy room's
                               # mix, see docs/renderer.md; --blends: shapes alone in blend modes);

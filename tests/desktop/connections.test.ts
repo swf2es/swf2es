@@ -170,3 +170,70 @@ test("through a proxy: by the pinned address or by name, refused as one no serve
 
   server.close();
 });
+
+test("each read is copied out at its length, a store of its own", async () => {
+  const total = 1024 * 1024;
+  const pattern = Buffer.alloc(total);
+  for (let i = 0; i < total; i++) {
+    pattern[i] = (i * 31 + (i >> 11)) & 0xff;
+  }
+
+  const [server, port] = await listen((socket) => socket.end(pattern));
+  const { connections, events, next } = recorded();
+  connections.connect(1, "127.0.0.1", port);
+  await next("close");
+  const reads = events.flatMap((e) => (e.type === "data" ? [e.bytes] : []));
+  assert.ok(Buffer.concat(reads).equals(pattern));
+  // The socket's buffer is read into again, and IPC sends a typed array's whole store.
+  for (const bytes of reads) {
+    assert.equal(bytes.buffer.byteLength, bytes.length);
+  }
+
+  server.close();
+});
+
+test("through a proxy: what came with its reply first, then the tunnel's reads, once open", {
+  timeout: 30_000,
+}, async () => {
+  // A SOCKS5 proxy that sends its reply and the server's first bytes in one write.
+  const tail = Buffer.alloc(2 * 1024 * 1024, 7);
+  const eager = createServer((socket) => {
+    let step = 0;
+    socket.on("data", (bytes) => {
+      step++;
+      if (step === 1) {
+        socket.write(Buffer.from([5, 0]));
+      } else if (step === 2) {
+        socket.write(
+          Buffer.concat([Buffer.from([5, 0, 0, 1, 127, 0, 0, 1, 0, 1]), Buffer.from("hello")]),
+        );
+      } else if (bytes.toString() === "more") {
+        socket.end(tail);
+      }
+    });
+  });
+  await new Promise<void>((done) => eager.listen(0, "127.0.0.1", done));
+  const proxyPort = (eager.address() as { port: number }).port;
+  const { connections, events, next } = recorded({
+    proxy: parseProxy(`socks5://127.0.0.1:${proxyPort}`),
+  });
+  connections.connect(1, "127.0.0.1", 9);
+  await next("data");
+  assert.deepEqual(
+    events.map((e) => e.type),
+    ["open", "data"],
+  );
+  const reads = () => events.flatMap((e) => (e.type === "data" ? [e.bytes] : []));
+  assert.equal(new TextDecoder().decode(reads()[0]), "hello");
+
+  // It reads on once open, through its own buffer.
+  connections.send(1, new TextEncoder().encode("more"));
+  await next("close");
+  assert.ok(Buffer.concat(reads()).equals(Buffer.concat([Buffer.from("hello"), tail])));
+  assert.ok(reads().length > 2, "the tunnel's own reads");
+  for (const bytes of reads()) {
+    assert.equal(bytes.buffer.byteLength, bytes.length);
+  }
+
+  eager.close();
+});
