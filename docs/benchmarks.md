@@ -48,7 +48,7 @@ to profile one in node or open it elsewhere. The draft comparison branch
 redrawn graphics and a Pixel Bender fill at three loads each, and
 `stage3d`, played at 60 frames a second on the GPU through the browser
 build's element, with frame times and memory; startup; and Flash
-Player's projectors under Wine. The 0.1.23 numbers below were taken with
+Player's projectors under Wine. The 0.1.24 numbers below were taken with
 it.
 
 ### The player in Chrome
@@ -607,59 +607,73 @@ Measured on one laptop (Intel Core i9-13900H; Intel Iris Xe and an
 NVIDIA RTX 4060 Laptop GPU), Node 24 and Chrome, one benchmark at a time.
 They are for comparing changes on this machine, not across machines.
 
-### 0.1.23 against 0.1.22
+### 0.1.24 against 0.1.23
 
 2026-11-15, the CDN build of each release swapped into the comparison
-branch's `players.ts --only swf2es drawing stage3d pixels` (three rounds
-on Intel, two on NVIDIA, old and new in turn), then `bench.ts` four
-rounds each in alternating order. Medians, with ranges.
+branch's `players.ts --only swf2es drawing stage3d pixels startup-hello
+startup-as3pb` (three rounds on Intel, two on NVIDIA, old and new in
+turn), then `bench.ts` four rounds each in alternating order. Medians,
+with ranges.
 
 Every drawing and Stage3D level holds 60 fps with a 17 ms median frame in
 both versions, except:
 
-| Level | GPU | 0.1.22 fps | 0.1.23 fps |
+| Level | GPU | 0.1.23 fps | 0.1.24 fps |
 |---|---|---|---|
-| vectors-8000 | Intel | 57.3 (56.9–57.3) | 57.4 (57.0–57.4) |
-| filters-400 | Intel | 59.7 (55.7–59.9) | 55.3 (55.1–56.6) |
-| text-800 | Intel | 59.0 (59–60) | 59.2 (59–60) |
-| text-800 | NVIDIA | 58.5 (58.4–58.6) | 59.0 (58.8–59.2) |
-| stage3d-8000 | Intel | 47.8 (46.3–48.9) | 47.9 (46.1–50.0) |
-| stage3d-20000 | Intel | 32.2 (31.4–33.2) | 32.5 (32.1–32.6) |
+| vectors-8000 | Intel | 57.1 (57.0–57.1) | 57.1 (56.8–57.3) |
+| filters-100 | Intel | 59.0 (58.9–60.0) | 58.6 (58.3–60.0) |
+| filters-400 | Intel | 55.6 (55.5–60.0) | 54.3 (53.7–60.1) |
+| text-800 | Intel | 59.2 (59.0–60.0) | 59.2 (59.0–59.4) |
+| text-800 | NVIDIA | 58.6 (58.4–58.8) | 57.5 (57.0–58.0) |
+| stage3d-8000 | Intel | 48.6 (48.4–49.6) | 49.2 (47.9–52.2) |
+| stage3d-20000 | Intel | 33.9 (31.9–35.7) | 33.2 (32.2–33.3) |
 
-Intel's filters-400 flips between about 55 and 60 fps from run to run in
-every version, as its frames fall either side of the frame-pairing rule
-(Player.advance runs SWF frames in pairs where the display seems to miss
-half its vsyncs); its p50 column moves with the same flip, so neither
-figure is a regression.
+Intel's filters levels flip between about 55 and 60 fps from run to run
+in every version (the frame-pairing rule). NVIDIA's text-800 is a frame a
+second lower on two runs each, its ranges apart; Intel's text bench below
+is level, so it is watched rather than called a regression. Memory, which
+these runs also record, moves both ways by tens of percent with the
+collector's timing and is left out.
 
 `pixels` on Intel, ms:
 
-| Section | 0.1.22 | 0.1.23 |
+| Section | 0.1.23 | 0.1.24 |
 |---|---|---|
-| setPixels-opaque | 17 (16–17) | 19 (16–22) |
-| setPixels-little-opaque | 15 (15–15) | 19 (15–27) |
-| setPixels-transparent | 34 (33–34) | 38 (34–41) |
-| setVector-opaque | 37 (37–40) | 36 (36–44) |
-| setVector-transparent | 96 (95–101) | 90 (89–101) |
-| getPixels-transparent | 91 (90–92) | 91 (90–93) |
-| getVector-transparent | 96 (93–97) | 93 (93–95) |
-| total | 387 (383–391) | 399 (376–407) |
+| setPixels-opaque | 17 (17–21) | 17 (17–19) |
+| setPixels-little-opaque | 16 (15–16) | 14 (14–15) |
+| setPixels-transparent | 34 (34–34) | 34 (34–34) |
+| setVector-opaque | 37 (37–38) | 36 (36–37) |
+| setVector-transparent | 90 (90–90) | 89 (89–90) |
+| getPixels-transparent | 90 (89–93) | 90 (90–90) |
+| getVector-transparent | 95 (94–96) | 94 (94–97) |
+| total | 378 (377–388) | 374 (374–382) |
 
-The same within their ranges.
+Startup in Chrome, ms (Intel; cold in a new profile with the player's
+code fetched, warm in the same page):
+
+| SWF | | 0.1.23 | 0.1.24 |
+|---|---|---|---|
+| hello | cold | 334 (326–340) | 341 (339–344) |
+| | warm | 90 (89–95) | 92 (89–94) |
+| as3pb | cold | 480 (467–486) | 469 (458–472) |
+| | warm | 154 (151–164) | 161 (159–163) |
+
+The browser build's fetched files are 2,624 KB (791 KB in brotli), 11 KB
+(5 KB) more than 0.1.23's: native menus and the unmute prompt.
 
 `tests/player/bench.ts`, frame medians in ms:
 
-| Scene | | 0.1.22 | 0.1.23 |
+| Scene | | 0.1.23 | 0.1.24 |
 |---|---|---|---|
-| `--town 200 --gpu`, Intel | frame | 25.5 (23.1–29.9) | 25.2 (23.7–26.1) |
-| | tick | 3.88 (3.21–5.16) | 3.38 (3.14–3.59) |
-| | draw | 7.52 (6.91–9.58) | 7.87 (7.28–8.03) |
-| | gl | 13.7 (13.0–14.5) | 13.8 (13.4–14.0) |
-| 2,000 shapes, SwiftShader | frame | 14.80 (14.72–14.84) | 14.81 (14.79–14.99) |
-| `--text 600 --gpu`, Intel | frame | 5.50 (5.37–5.75) | 5.47 (5.29–5.95) |
+| `--town 200 --gpu`, Intel | frame | 28.76 (24.87–30.26) | 25.87 (24.26–28.31) |
+| | tick | 4.41 (3.48–4.78) | 3.54 (3.03–3.88) |
+| | draw | 8.80 (7.86–9.68) | 8.28 (7.26–8.70) |
+| | gl | 14.18 (14.00–14.46) | 14.07 (13.89–14.25) |
+| 2,000 shapes, SwiftShader | frame | 14.84 (14.82–14.96) | 14.82 (14.77–14.85) |
+| `--text 600 --gpu`, Intel | frame | 5.54 (4.82–5.91) | 5.65 (5.28–5.75) |
 
-The town's tick is steadier (its spread narrowed; its median is within
-noise), from the advance walk (#994); the rest is within noise.
+The town's frame is about 10% shorter and its tick about 20%; the rest is
+within noise.
 
 ### The walks, 2026-11-14
 
