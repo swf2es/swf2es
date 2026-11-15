@@ -563,6 +563,11 @@ points at:
   section), as they are dropped when a walk ends; the step's
   `enumerable` check is 18% more, and `startOrGoOn`, `takeSparse` and
   `sparseElement` 18% between them. avmplus walks its hashtable in place.
+  Keeping the indices between walks would save about 40%, but cannot be
+  kept exact cheaply: generated code stores an Array's elements in place
+  and fills a hole within the length unseen by the runtime, so a cache
+  could miss an index; a guard on that store, or a backing store that
+  is not a plain array, would cost other code (tried 2026-11-16).
 - **Untyped names through the runtime.** Every get, set and call on a
   value typed `*` is a call of `rt.getProperty` (17% of untyped's
   display), `setProperty` or `callProperty`, which looks the name up in
@@ -570,12 +575,14 @@ points at:
   the entry's kind: a getter by `e.get.call(o)`, a dynamic property by
   a Map's `get` and then `has`. The site keeps nothing of what it found,
   where Flash's JIT caches it at the call site.
-- **Domain memory by `rt.view`.** Crossbridge's loads and stores are
-  `rt.view.getInt32(address, true)` and the like, the DataView read
-  from the runtime at every access, as it changes when memory grows; the
-  four hottest functions of the C program are 50% of lz4's samples, and
-  on noise they do little else. Flash's JIT emits a bounds check and a
-  load.
+- **Domain memory by `rt.view`, ruled out.** Crossbridge's loads and
+  stores are `rt.view.getInt32(address, true)` and the like, the DataView
+  read from the runtime at every access. Holding the view in a local for
+  the method, read again only after what can change the memory, was tried
+  on 2026-11-16 and gained nothing (lz4's total 684–687 ms before, 682–687
+  after; prose-compress slower): V8 makes the read cheap. The noise
+  sections' gap looks like warm-up; the program's first run in node is
+  about four times its steady state.
 - **Typed calls.** The loops are compiled as they should be: `l1.$b4(l2)`
   calls the method's unchecked entry with no coercion when the argument
   is known to be a subclass, and an interface call is
