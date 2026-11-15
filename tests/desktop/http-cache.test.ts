@@ -6,23 +6,32 @@
 // a response kept for the address and the movie's origin it came for, so
 // that DNS that changes its answer reaches nothing through the cache.
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingHttpHeaders } from "node:http";
+import { createServer as createHttpsServer } from "node:https";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
 import { type CacheRequest, HttpCache } from "../../apps/desktop/src/main/http-cache.ts";
 import { Network } from "../../apps/desktop/src/main/network.ts";
-import { type NetResponse, Refused } from "../../apps/desktop/src/main/network-types.ts";
+import {
+  type NetResponse,
+  type NetworkOptions,
+  Refused,
+} from "../../apps/desktop/src/main/network-types.ts";
+import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
+import { testProxy } from "./proxy-server.ts";
 
 const PUBLIC = "127.0.0.2";
 /** Where rebind.test may also be: an address the test's network takes for a private one. */
@@ -117,7 +126,13 @@ const inside = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://x");
   insideSeen.push(url.pathname);
   if (url.pathname === "/crossdomain.xml" && insidePolicy !== null) {
-    response.writeHead(200, { "content-type": "text/x-cross-domain-policy" }).end(insidePolicy);
+    // Fresh for long, as a server may say: kept all the same for no other network's machine.
+    response
+      .writeHead(200, {
+        "content-type": "text/x-cross-domain-policy",
+        "cache-control": "max-age=600",
+      })
+      .end(insidePolicy);
   } else if (url.pathname.startsWith("/r/")) {
     response.writeHead(200, { "cache-control": "max-age=600" }).end("inside");
   } else {
@@ -169,17 +184,25 @@ const clock = () => Date.now() + offset;
 /** What the caches said of their failures. */
 const warnings: string[] = [];
 
-function cache(at = directory(), budget?: number): HttpCache {
+function cache(at = directory(), budget?: number, maxEntries?: number): HttpCache {
   return new HttpCache(at, {
     now: clock,
     warn: (message) => warnings.push(message),
     ...(budget === undefined ? {} : { budget }),
+    ...(maxEntries === undefined ? {} : { maxEntries }),
   });
 }
 
 /** A request as network.ts asks the cache, from the address and for the partition it names. */
 function ask(url: string, headers: [string, string][] = []): CacheRequest {
-  return { method: "GET", url, headers, address: PUBLIC, partition: "http://swf.test" };
+  return {
+    method: "GET",
+    url,
+    headers,
+    address: PUBLIC,
+    partition: "http://swf.test",
+    route: "direct",
+  };
 }
 
 const swf = () => `http://swf.test:${port}`;
@@ -189,7 +212,12 @@ const rebind = () => `http://rebind.test:${port}`;
 let rebindTo = PUBLIC;
 
 /** A network playing a remote SWF from `from` (swf.test's), answered from `store`. */
-async function playing(store: HttpCache | null, limits = {}, from = swf()): Promise<Network> {
+async function playing(
+  store: HttpCache | null,
+  limits = {},
+  from = swf(),
+  more: Partial<NetworkOptions> = {},
+): Promise<Network> {
   const net = new Network({
     resolve: async (host) => {
       switch (host) {
@@ -198,12 +226,15 @@ async function playing(store: HttpCache | null, limits = {}, from = swf()): Prom
           return [PUBLIC];
         case "rebind.test":
           return [rebindTo];
+        case "secure.test":
+          return [PUBLIC];
         default:
           throw new Error("no such host");
       }
     },
     classify: (address) => (address === PRIVATE ? "private" : "public"),
     limits,
+    ...more,
   });
   net.cache = store;
   net.play({ kind: "remote", url: `${from}/movie.swf` });
@@ -443,11 +474,11 @@ test("what answered an Authorization only where public; Set-Cookie never kept", 
   store.close();
 });
 
-test("past its budget the least recently served go first", async () => {
+test("past its cap on entries the least recently served go first", async () => {
   offset = 0;
-  // 2000 bytes, so 250 at most a body: eight of 240 fit, the ninth and tenth do not.
+  // Eight entries at most; 80,000 bytes, so 10,000 at most an entry, its body and its row.
   const at = directory();
-  const store = cache(at, 2000);
+  const store = cache(at, 80_000, 8);
   const request = (n: number) => ask(`http://example.test/${n}`);
   const response = {
     status: 200,
@@ -460,7 +491,7 @@ test("past its budget the least recently served go first", async () => {
   }
 
   // Too large for the budget: never kept.
-  await store.store(request(99), { ...response, bytes: new Uint8Array(251) });
+  await store.store(request(99), { ...response, bytes: new Uint8Array(10_000) });
   assert.equal(store.lookup(request(99)), null);
 
   // 0 served again: 1 and 2 are now the least recently served.
@@ -474,7 +505,7 @@ test("past its budget the least recently served go first", async () => {
 
   const kept = [...Array(10).keys()].filter((n) => store.lookup(request(n)));
   assert.deepEqual(kept, [0, 3, 4, 5, 6, 7, 8, 9]);
-  assert.equal(store.usage().bytes, 1920);
+  assert.deepEqual([store.usage().entries, store.usage().bytes], [8, 8 * 240]);
   // Their files went with them.
   assert.equal(readdirSync(join(at, "bodies")).length, 8);
   store.close();
@@ -676,7 +707,7 @@ test("an index that cannot be read starts again empty", async () => {
   );
   const store = cache(at);
   await store.settled();
-  assert.deepEqual(store.usage(), { entries: 0, bytes: 0 });
+  assert.deepEqual(store.usage(), { entries: 0, bytes: 0, charges: 0 });
   await store.store(ask("http://example.test/"), {
     status: 200,
     headers: [["Cache-Control", "max-age=60"]],
@@ -718,10 +749,23 @@ test("DNS that rebinds reaches nothing through the cache: each address is asked 
     insidePolicy = xml("swf.test");
     const third = await playing(store);
     const granted = await get(third, `${rebind()}/r/rebound`);
+    await store.settled();
     assert.equal(new TextDecoder().decode(granted.bytes ?? undefined), "inside");
     assert.equal(granted.cache, undefined);
     assert.deepEqual(insideSeen, ["/crossdomain.xml", "/crossdomain.xml", "/r/rebound"]);
     assert.equal(seen.get("rebound")?.length, 1);
+
+    // The private address's policy file, though it says it is fresh for ten minutes, is not
+    // kept: on another network the same address is another machine. Its data is.
+    const fourth = await playing(store);
+    const again = await get(fourth, `${rebind()}/r/rebound`);
+    assert.equal(again.cache, "hit");
+    assert.deepEqual(insideSeen, [
+      "/crossdomain.xml",
+      "/crossdomain.xml",
+      "/r/rebound",
+      "/crossdomain.xml",
+    ]);
   } finally {
     rebindTo = PUBLIC;
     policy = null;
@@ -909,4 +953,154 @@ test("a cache that fails is left out where it fails, said once, and no request f
   } finally {
     chmodSync(locked, 0o755);
   }
+});
+
+test("nothing fetched with its certificate unchecked is read from the cache or kept", async (t) => {
+  const dir = directory();
+  const made = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-days",
+      "1",
+      "-subj",
+      "/CN=secure.test",
+      "-addext",
+      "subjectAltName=DNS:secure.test",
+      "-keyout",
+      join(dir, "key.pem"),
+      "-out",
+      join(dir, "cert.pem"),
+    ],
+    { encoding: "utf8" },
+  );
+  if (made.status !== 0) {
+    t.skip(`no openssl to make a certificate: ${made.stderr ?? made.error}`);
+    return;
+  }
+
+  let served = 0;
+  const secure = createHttpsServer(
+    { key: readFileSync(join(dir, "key.pem")), cert: readFileSync(join(dir, "cert.pem")) },
+    (_request, response) => {
+      served++;
+      response.writeHead(200, { "cache-control": "max-age=600" }).end("secure");
+    },
+  );
+  await new Promise<void>((done) => secure.listen(0, PUBLIC, done));
+  t.after(() => {
+    secure.close();
+    secure.closeAllConnections();
+  });
+  const url = `https://secure.test:${(secure.address() as { port: number }).port}/asset`;
+  offset = 0;
+  const store = cache();
+  // --ignore-certificate-errors=secure.test: whoever is on the way could have written it.
+  const net = await playing(store, {}, swf(), { unverified: (host) => host === "secure.test" });
+  for (let n = 0; n < 2; n++) {
+    const response = await get(net, url, "content");
+    await store.settled();
+    assert.equal(response.cache, undefined);
+  }
+
+  assert.equal(served, 2);
+  assert.equal(store.usage().entries, 0);
+  store.close();
+});
+
+test("an address through a proxy is another than the same one reached directly", async () => {
+  offset = 0;
+  resources.set("routed", { headers: { "cache-control": "max-age=600" } });
+  const tunnel = await testProxy("http");
+  const store = cache();
+  try {
+    const content = async (net: Network) => {
+      const response = await get(net, `${swf()}/r/routed`, "content");
+      await store.settled();
+      return [response.cache ?? "network", seen.get("routed")?.length];
+    };
+    const direct = await playing(store);
+    assert.deepEqual(await content(direct), ["network", 1]);
+    assert.deepEqual(await content(direct), ["hit", 1]);
+    const proxied = await playing(store, {}, swf(), { proxy: parseProxy(tunnel.url()) });
+    assert.deepEqual(await content(proxied), ["network", 2]);
+    assert.deepEqual(await content(proxied), ["hit", 2]);
+    assert.ok(tunnel.targets.length > 0);
+  } finally {
+    store.close();
+    await tunnel.close();
+  }
+});
+
+test("each entry charges the budget its row and a disk block, not its body alone", async () => {
+  offset = 0;
+  // 100,000 bytes: a one-byte body with 2 KB of headers takes some 8 KB of it, row and block.
+  const store = cache(directory(), 100_000);
+  const big = "x".repeat(2048);
+  for (let n = 0; n < 100; n++) {
+    offset = n;
+    await store.store(ask(`http://example.test/busted?${n}`), {
+      status: 200,
+      headers: [
+        ["Cache-Control", "max-age=600"],
+        ["X-Padding", big],
+      ],
+      bytes: new Uint8Array(1),
+    });
+  }
+
+  const { entries, bytes, charges } = store.usage();
+  assert.ok(entries > 0 && entries <= 100_000 / (4096 + 2048), `${entries} entries`);
+  assert.equal(bytes, entries);
+  assert.ok(charges <= 100_000 && charges > entries * (4096 + 2048), String(charges));
+  // The most recent stay.
+  assert.ok(store.lookup(ask("http://example.test/busted?99")));
+  assert.equal(store.lookup(ask("http://example.test/busted?0")), null);
+  store.close();
+});
+
+test("a policy file's fetch and a SWF's own GET of its URL are entries apart", async () => {
+  offset = 0;
+  const store = cache();
+  const url = "http://example.test/crossdomain.xml";
+  await store.store(ask(url), {
+    status: 200,
+    headers: [["Cache-Control", "max-age=600"]],
+    bytes: new TextEncoder().encode("<cross-domain-policy/>"),
+  });
+  assert.ok(store.lookup(ask(url)));
+  assert.equal(store.lookup({ ...ask(url), policyFile: true }), null);
+  store.close();
+});
+
+test("a 304 to a response a write has since replaced revalidates nothing", async () => {
+  offset = 0;
+  const store = cache();
+  const request = ask("http://example.test/raced");
+  const response = {
+    status: 200,
+    headers: [
+      ["Cache-Control", "no-cache"],
+      ["ETag", '"one"'],
+    ] as [string, string][],
+    bytes: new Uint8Array(3),
+  };
+  await store.store(request, response);
+  const found = store.lookup(request);
+  assert.ok(found && !found.fresh);
+  offset = 1000;
+  await store.store(request, {
+    ...response,
+    headers: [...response.headers.slice(0, 1), ["ETag", '"two"']],
+  });
+  assert.equal(
+    store.revalidated(found, request, { status: 304, headers: [["ETag", '"one"']], bytes: null }),
+    null,
+  );
+  assert.equal(store.lookup(request)?.headers.find(([n]) => n === "ETag")?.[1], '"two"');
+  store.close();
 });

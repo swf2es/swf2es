@@ -4,18 +4,21 @@
 // revalidation asks and what its 304 changes are http-cache-semantics'
 // (its CachePolicy, a private cache's); where they are kept is this file's.
 //
-// - Each response is kept for the address it came from and the movie that
-//   asked: its key is the hash of the playing movie's origin (its
-//   partition, as a browser partitions its cache by site), the address the
-//   request's host was pinned to, its method, URL and the request headers
-//   its Vary names. So a response from one address never answers a request
-//   judged against another, the policy file that granted it included, as
-//   DNS that changes its answer would have it; and one movie neither reads
-//   nor probes what another origin's loaded.
+// - Each response is kept for the address it came from, the way it went
+//   there and the movie that asked: its key is the hash of the playing
+//   movie's origin (its partition, as a browser partitions its cache by
+//   site), its route (the proxy it went through, or none), the address the
+//   request's host was pinned to, whether it was a policy file's fetch,
+//   its method, URL and the request headers its Vary names. So a response
+//   from one address never answers a request judged against another, the
+//   policy file that granted it included, as DNS that changes its answer
+//   would have it, nor one reached through a proxy one reached directly;
+//   and one movie neither reads nor probes what another origin's loaded.
 // - The index is SQLite (node:sqlite), metadata only, a row a response:
-//   its key, status, headers and policy; when it expires; its size; when
-//   it was last served, by which the least recently served go first once
-//   the bodies pass the budget, whose running total is kept in memory.
+//   its key, status, headers and policy; when it expires; its size and its
+//   charge against the budget, its body, its row and a disk block; when it
+//   was last served, by which the least recently served go first once the
+//   charges pass the budget or the rows their cap, both counted in memory.
 // - Every body is a file of its own in one flat directory, named by its
 //   key. A body is written to a temporary file, synced and renamed into
 //   place before its row is written; a row goes before its file. So a
@@ -32,7 +35,7 @@
 //
 // Without Electron, so that node tests it (tests/desktop/http-cache.test.ts).
 import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { open, readdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync, type StatementSync } from "node:sqlite";
@@ -47,12 +50,14 @@ export interface CacheRequest {
   address: string;
   /** The playing movie's origin, or "local" or "application": whose cache it is. */
   partition: string;
+  /** How it reaches the address: the proxy it goes through, or "direct". */
+  route: string;
   /**
-   * Whether a freshness of the cache's own guessing, from Last-Modified,
-   * may serve it: not a policy file's, which is fresh only as long as its
-   * server says, else revalidated.
+   * A policy file's fetch: kept apart from a SWF's own GET of the same URL,
+   * and never fresh by the cache's guess from Last-Modified, only as long
+   * as its server says, else revalidated.
    */
-  heuristic?: boolean;
+  policyFile?: boolean;
 }
 
 /** A response as network.ts has it: its body read, for a status that has one. */
@@ -77,6 +82,8 @@ export interface CacheEntry {
   conditional: [string, string][];
   /** When its row was written, which a serve that finds its file wrong drops it by. */
   stored: number;
+  /** What it takes of the budget. */
+  charge: number;
   policy: CachePolicy;
 }
 
@@ -87,9 +94,20 @@ export interface CacheOptions {
   now?: () => number;
   /** What says, once, that the cache failed: a line on stderr. */
   warn?: (message: string) => void;
+  /** The most responses kept, whatever their size: 50,000. */
+  maxEntries?: number;
 }
 
 const CACHE_BUDGET = 512 * 1024 * 1024;
+const MAX_ENTRIES = 50_000;
+/**
+ * What each entry takes besides its body and its row's text: a disk block
+ * for its file, and its row's share of the index. So many small responses
+ * with large headers fill the budget as one large one does.
+ */
+const ENTRY_OVERHEAD = 4096;
+/** Rows and names the start's sweep takes at once before it lets the rest of the app go on. */
+const SWEEP_PAGE = 512;
 
 /** The longest a freshness the cache guesses from Last-Modified holds, as Chromium's does not: a day. */
 const HEURISTIC_LIMIT = 24 * 60 * 60;
@@ -118,7 +136,7 @@ const NOT_REPLACED = new Set([
   "age",
 ]);
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 const INDEX = "index.sqlite";
 const BODIES = "bodies";
 const TEMPORARY = /\.tmp$/;
@@ -146,7 +164,14 @@ function varyNames(headers: Record<string, string>): string[] {
 /** The key of a response whose Vary names `names` to `request`. */
 function keyOf(request: CacheRequest, names: string[], headers: Record<string, string>): string {
   const hash = createHash("sha256").update(
-    `${request.partition}\n${request.address}\n${request.method} ${request.url}\n`,
+    [
+      request.partition,
+      request.route,
+      request.address,
+      request.policyFile ? "policy" : "load",
+      `${request.method} ${request.url}`,
+      "",
+    ].join("\n"),
   );
   for (const name of names) {
     // A header the request lacks differs from one it sends empty.
@@ -180,11 +205,17 @@ interface Row {
   policy: string;
   stored: number;
   size: number;
+  charge: number;
+}
+
+/** What a response takes of the budget: its body, its row's text and a disk block. */
+function chargeOf(size: number, ...texts: string[]): number {
+  return size + ENTRY_OVERHEAD + texts.reduce((sum, text) => sum + text.length, 0);
 }
 
 interface Statements {
   candidates: StatementSync;
-  sizeOf: StatementSync;
+  chargeFor: StatementSync;
   upsert: StatementSync;
   touch: StatementSync;
   refresh: StatementSync;
@@ -194,7 +225,7 @@ interface Statements {
   usage: StatementSync;
   oldest: StatementSync;
   useless: StatementSync;
-  all: StatementSync;
+  page: StatementSync;
 }
 
 export class HttpCache {
@@ -202,13 +233,15 @@ export class HttpCache {
   private readonly statements: Statements;
   private readonly bodies: string;
   private readonly budget: number;
-  /** The largest body kept, an eighth of the budget, as Chromium keeps: no one response empties it. */
+  /** The largest charge kept, an eighth of the budget, as Chromium keeps: no one response empties it. */
   private readonly largest: number;
+  private readonly maxEntries: number;
   private readonly now: () => number;
   private readonly warn: (message: string) => void;
   private readonly Policy: typeof CachePolicy;
-  /** The bodies' bytes all told, as the rows say: read once, then kept as they change. */
+  /** The entries' charges all told, and how many, as the rows say: read once, then kept. */
   private total: number;
+  private count: number;
   /** Writes go one at a time, so that two of one key never cross between their renames and rows. */
   private writing: Promise<void> = Promise.resolve();
   /** The start's sweep, which runs beside the writes. */
@@ -228,6 +261,7 @@ export class HttpCache {
     this.bodies = join(directory, BODIES);
     this.budget = options.budget ?? CACHE_BUDGET;
     this.largest = Math.floor(this.budget / 8);
+    this.maxEntries = options.maxEntries ?? MAX_ENTRIES;
     this.warn = options.warn ?? ((message) => process.stderr.write(`swf2es: ${message}\n`));
     const clock = options.now ?? Date.now;
     this.now = clock;
@@ -253,7 +287,9 @@ export class HttpCache {
     }
 
     [this.db, this.statements] = opened;
-    this.total = (this.statements.usage.get() as { bytes: number }).bytes;
+    const usage = this.statements.usage.get() as { entries: number; charges: number };
+    this.total = usage.charges;
+    this.count = usage.entries;
     this.sweeping = this.sweep().catch((error) => this.failed(error));
   }
 
@@ -272,6 +308,7 @@ export class HttpCache {
           key TEXT PRIMARY KEY,
           file TEXT NOT NULL,
           partition TEXT NOT NULL,
+          route TEXT NOT NULL,
           address TEXT NOT NULL,
           method TEXT NOT NULL,
           url TEXT NOT NULL,
@@ -284,6 +321,7 @@ export class HttpCache {
           etag TEXT,
           last_modified TEXT,
           size INTEGER NOT NULL,
+          charge INTEGER NOT NULL,
           last_access INTEGER NOT NULL
         ) WITHOUT ROWID;
         CREATE INDEX IF NOT EXISTS entries_last_access ON entries (last_access);
@@ -297,44 +335,47 @@ export class HttpCache {
         db,
         {
           candidates: prepare(
-            `SELECT key, file, vary, status, headers, policy, stored, size FROM entries
-             WHERE url = ? AND partition = ? AND address = ? AND method = ?`,
+            `SELECT key, file, vary, status, headers, policy, stored, size, charge FROM entries
+             WHERE url = ? AND partition = ? AND route = ? AND address = ? AND method = ?`,
           ),
-          sizeOf: prepare("SELECT size FROM entries WHERE key = ?"),
+          chargeFor: prepare("SELECT charge FROM entries WHERE key = ?"),
           upsert: prepare(
-            `INSERT INTO entries (key, file, partition, address, method, url, vary, status, headers,
-               policy, stored, expires, etag, last_modified, size, last_access)
-             VALUES ($key, $file, $partition, $address, $method, $url, $vary, $status, $headers,
-               $policy, $stored, $expires, $etag, $lastModified, $size, $stored)
+            `INSERT INTO entries (key, file, partition, route, address, method, url, vary, status,
+               headers, policy, stored, expires, etag, last_modified, size, charge, last_access)
+             VALUES ($key, $file, $partition, $route, $address, $method, $url, $vary, $status,
+               $headers, $policy, $stored, $expires, $etag, $lastModified, $size, $charge, $stored)
              ON CONFLICT (key) DO UPDATE SET file = excluded.file, vary = excluded.vary,
                status = excluded.status, headers = excluded.headers, policy = excluded.policy,
                stored = excluded.stored, expires = excluded.expires, etag = excluded.etag,
                last_modified = excluded.last_modified, size = excluded.size,
-               last_access = excluded.last_access`,
+               charge = excluded.charge, last_access = excluded.last_access`,
           ),
           touch: prepare("UPDATE entries SET last_access = ? WHERE key = ?"),
           refresh: prepare(
             `UPDATE entries SET headers = $headers, policy = $policy, stored = $stored,
                expires = $expires, etag = $etag, last_modified = $lastModified,
-               last_access = $stored
+               charge = $charge, last_access = $stored
              WHERE key = $key AND stored = $was`,
           ),
-          remove: prepare("DELETE FROM entries WHERE key = ? RETURNING file, size"),
+          remove: prepare("DELETE FROM entries WHERE key = ? RETURNING file, charge"),
           removeIf: prepare(
-            "DELETE FROM entries WHERE key = ? AND stored = ? RETURNING file, size",
+            "DELETE FROM entries WHERE key = ? AND stored = ? RETURNING file, charge",
           ),
           invalidate: prepare(
-            "DELETE FROM entries WHERE url = ? AND partition = ? RETURNING file, size",
+            "DELETE FROM entries WHERE url = ? AND partition = ? RETURNING file, charge",
           ),
           usage: prepare(
-            "SELECT COUNT(*) AS entries, COALESCE(SUM(size), 0) AS bytes FROM entries",
+            `SELECT COUNT(*) AS entries, COALESCE(SUM(size), 0) AS bytes,
+               COALESCE(SUM(charge), 0) AS charges FROM entries`,
           ),
           oldest: prepare("SELECT key FROM entries ORDER BY last_access LIMIT 64"),
           useless: prepare(
             `DELETE FROM entries WHERE expires <= ? AND etag IS NULL AND last_modified IS NULL
-             RETURNING file, size`,
+             RETURNING file, charge`,
           ),
-          all: prepare("SELECT key, file, size, stored FROM entries"),
+          page: prepare(
+            "SELECT key, file, size, stored FROM entries WHERE key > ? ORDER BY key LIMIT ?",
+          ),
         },
       ];
     } catch (error) {
@@ -371,6 +412,7 @@ export class HttpCache {
     const rows = this.statements.candidates.all(
       request.url,
       request.partition,
+      request.route,
       request.address,
       request.method,
     ) as unknown as Row[];
@@ -388,7 +430,7 @@ export class HttpCache {
       let fresh = !!response && !revalidation;
       // A freshness guessed from Last-Modified serves a day at most, and no policy file.
       if (fresh && !explicit(record(stored))) {
-        fresh = request.heuristic !== false && policy.age() < HEURISTIC_LIMIT;
+        fresh = !request.policyFile && policy.age() < HEURISTIC_LIMIT;
       }
 
       const conditional: [string, string][] = [];
@@ -412,6 +454,7 @@ export class HttpCache {
         fresh,
         conditional,
         stored: row.stored,
+        charge: row.charge,
         policy,
       };
     }
@@ -504,17 +547,27 @@ export class HttpCache {
       ];
       const stored = this.now();
       const merged = record(headers);
-      this.statements.refresh.run({
+      const headersText = JSON.stringify(headers);
+      const policyText = JSON.stringify(policy.toObject());
+      const charge = chargeOf(entry.size, headersText, policyText, request.url);
+      const { changes } = this.statements.refresh.run({
         $key: entry.key,
         $was: entry.stored,
-        $headers: JSON.stringify(headers),
-        $policy: JSON.stringify(policy.toObject()),
+        $headers: headersText,
+        $policy: policyText,
         $stored: stored,
         $expires: stored + this.lifetime(policy, merged),
         $etag: merged.etag ?? null,
         $lastModified: merged["last-modified"] ?? null,
+        $charge: charge,
       });
-      return { ...entry, headers, age: 0, fresh: true, conditional: [], stored, policy };
+      // A write has put another response in its place since it was found: that one stands.
+      if (changes === 0) {
+        return null;
+      }
+
+      this.total += charge - entry.charge;
+      return { ...entry, headers, age: 0, fresh: true, conditional: [], stored, charge, policy };
     } catch (error) {
       this.failed(error);
       return null;
@@ -559,8 +612,8 @@ export class HttpCache {
    * Keep `response` to `request` where RFC 9111 lets a private cache: a
    * 200 to a GET, with its body, neither no-store nor Vary: *, nor
    * answering an Authorization the response does not make public, nor
-   * larger than an eighth of the budget. Written in the background, one
-   * write at a time; the promise is for tests.
+   * charging more than an eighth of the budget. Written in the background,
+   * one write at a time; the promise is for tests.
    */
   store(request: CacheRequest, response: CacheResponse): Promise<void> {
     try {
@@ -618,6 +671,13 @@ export class HttpCache {
       return Promise.resolve();
     }
 
+    const headersText = JSON.stringify(kept);
+    const policyText = JSON.stringify(policy.toObject());
+    const charge = chargeOf(bytes.length, headersText, policyText, request.url);
+    if (charge > this.largest) {
+      return Promise.resolve();
+    }
+
     const vary = names.map((name) => [name, requestHeaders[name] ?? null]);
     const key = keyOf(request, names, requestHeaders);
     const generation = this.generation;
@@ -664,36 +724,50 @@ export class HttpCache {
       const others = this.statements.candidates.all(
         request.url,
         request.partition,
+        request.route,
         request.address,
         request.method,
       ) as unknown as Row[];
       for (const other of others) {
-        const otherNames = (JSON.parse(other.vary) as [string, string][]).map(([n]) => n);
-        if (other.key !== key && otherNames.join() !== names.join()) {
+        const varied = JSON.parse(other.vary) as [string, string | null][];
+        const otherNames = varied.map(([n]) => n);
+        const asked: Record<string, string> = {};
+        for (const [name, value] of varied) {
+          if (value !== null) {
+            asked[name] = value;
+          }
+        }
+
+        // Of this kind of fetch (a policy file's or a load) alone: its key, as this request's.
+        const same = keyOf(request, otherNames, asked) === other.key;
+        if (same && other.key !== key && otherNames.join() !== names.join()) {
           this.drop(this.statements.remove.all(other.key));
         }
       }
 
-      const before = this.statements.sizeOf.get(key) as { size: number } | undefined;
+      const before = this.statements.chargeFor.get(key) as { charge: number } | undefined;
       const stored = this.now();
       this.statements.upsert.run({
         $key: key,
         $file: key,
         $partition: request.partition,
+        $route: request.route,
         $address: request.address,
         $method: request.method,
         $url: request.url,
         $vary: JSON.stringify(vary),
         $status: response.status,
-        $headers: JSON.stringify(kept),
-        $policy: JSON.stringify(policy.toObject()),
+        $headers: headersText,
+        $policy: policyText,
         $stored: stored,
         $expires: stored + this.lifetime(policy, responseHeaders),
         $etag: etag,
         $lastModified: lastModified,
         $size: bytes.length,
+        $charge: charge,
       });
-      this.total += bytes.length - (before?.size ?? 0);
+      this.total += charge - (before?.charge ?? 0);
+      this.count += before ? 0 : 1;
       this.evict();
     };
     const done = this.writing
@@ -706,9 +780,11 @@ export class HttpCache {
     return done;
   }
 
-  /** What is stored now and how much: for tests and the menu. */
-  usage(): { entries: number; bytes: number } {
-    return { ...(this.statements.usage.get() as { entries: number; bytes: number }) };
+  /** What is stored now: how many, their bodies' bytes, and what they charge the budget. */
+  usage(): { entries: number; bytes: number; charges: number } {
+    return {
+      ...(this.statements.usage.get() as { entries: number; bytes: number; charges: number }),
+    };
   }
 
   /**
@@ -724,6 +800,7 @@ export class HttpCache {
     this.generation++;
     this.db.exec("DELETE FROM entries");
     this.total = 0;
+    this.count = 0;
     const wipe = this.writing.then(async () => {
       for (const name of await readdir(this.bodies)) {
         await rm(join(this.bodies, name), { force: true, recursive: true });
@@ -760,40 +837,45 @@ export class HttpCache {
     return explicit(headers) ? ttl : Math.min(ttl, HEURISTIC_LIMIT * 1000);
   }
 
-  /** Rows a statement deleted, their files after them and their bytes off the total. */
+  /** Rows a statement deleted, their files after them, their charges off the total. */
   private drop(rows: unknown[]): void {
-    for (const { file, size } of rows as { file: string; size: number }[]) {
-      this.total -= size;
+    for (const { file, charge } of rows as { file: string; charge: number }[]) {
+      this.total -= charge;
+      this.count--;
       rmSync(join(this.bodies, file), { force: true });
     }
   }
 
   /**
    * Responses that can no longer be used dropped, stale without a
-   * validator; then, past the budget, the least recently served. Each by
-   * an index: the total is kept, not summed.
+   * validator; then, past the budget or the cap on entries, the least
+   * recently served. Each by an index: the total and the count are kept,
+   * not summed.
    */
   private evict(): void {
     const rows: unknown[] = [];
     this.db.exec("BEGIN");
     try {
-      const useless = this.statements.useless.all(this.now()) as { size: number }[];
-      let total = this.total - useless.reduce((sum, row) => sum + row.size, 0);
+      const useless = this.statements.useless.all(this.now()) as { charge: number }[];
+      let total = this.total - useless.reduce((sum, row) => sum + row.charge, 0);
+      let count = this.count - useless.length;
       rows.push(...useless);
-      while (total > this.budget) {
+      const over = () => total > this.budget || count > this.maxEntries;
+      while (over()) {
         const oldest = this.statements.oldest.all() as { key: string }[];
         if (oldest.length === 0) {
           break;
         }
 
         for (const { key } of oldest) {
-          if (total <= this.budget) {
+          if (!over()) {
             break;
           }
 
-          for (const row of this.statements.remove.all(key) as { size: number }[]) {
+          for (const row of this.statements.remove.all(key) as { charge: number }[]) {
             rows.push(row);
-            total -= row.size;
+            total -= row.charge;
+            count--;
           }
         }
       }
@@ -809,18 +891,19 @@ export class HttpCache {
 
   /**
    * What a crash or another version left: temporary files and files with
-   * no row removed, rows whose file is gone or of another size dropped.
-   * Beside the writes, so it judges only what it found as it began, and
-   * drops a row only as it found it.
+   * no row removed, rows whose file is gone or of another size dropped. It
+   * runs beside the writes, a page of names or rows at a time, so it never
+   * holds the main process long: a file is removed only while no row names
+   * it, and a row dropped only while it is as the sweep read it.
    */
   private async sweep(): Promise<void> {
-    const names = readdirSync(this.bodies);
-    const rows = this.statements.all.all() as unknown as (Row & { stored: number })[];
-    const known = new Set(rows.map((row) => row.file));
-    for (const name of names) {
-      // Not one a write has since given a row, its file renamed over the one found.
-      if (TEMPORARY.test(name) || (!known.has(name) && !this.statements.sizeOf.get(name))) {
+    const names = await readdir(this.bodies);
+    for (let at = 0; at < names.length; at++) {
+      const name = names[at];
+      if (TEMPORARY.test(name) || !this.statements.chargeFor.get(name)) {
         await rm(join(this.bodies, name), { force: true, recursive: true });
+      } else if (at % SWEEP_PAGE === 0) {
+        await new Promise((go) => setImmediate(go));
       }
 
       if (this.closed) {
@@ -828,24 +911,31 @@ export class HttpCache {
       }
     }
 
-    const listed = new Set(names);
-    for (const row of rows) {
-      let size = -1;
-      if (listed.has(row.file)) {
+    let after = "";
+    for (;;) {
+      const rows = this.statements.page.all(after, SWEEP_PAGE) as unknown as Row[];
+      if (rows.length === 0) {
+        return;
+      }
+
+      for (const row of rows) {
+        let size = -1;
         try {
           size = (await stat(join(this.bodies, row.file))).size;
         } catch {
           size = -1;
         }
+
+        if (this.closed) {
+          return;
+        }
+
+        if (size !== row.size) {
+          this.drop(this.statements.removeIf.all(row.key, row.stored));
+        }
       }
 
-      if (this.closed) {
-        return;
-      }
-
-      if (size !== row.size) {
-        this.drop(this.statements.removeIf.all(row.key, row.stored));
-      }
+      after = rows[rows.length - 1].key;
     }
   }
 }

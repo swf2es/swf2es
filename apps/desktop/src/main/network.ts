@@ -29,9 +29,11 @@
 // - A GET's answer may come from the HTTP cache (http-cache.ts) in place of
 //   the server, or the server's 304 to its revalidation: only once the
 //   request has been judged as any other, so a policy that refuses it
-//   refuses it whatever is stored, and only from what that very address
-//   answered for this movie's origin, the policy files that judged it
-//   included. A POST answered with success forgets what its URL had.
+//   refuses it whatever is stored, and only from what that very address,
+//   by the same way (the proxy or none), answered for this movie's origin,
+//   the policy files that judged it included; never a private address's
+//   policy file, nor anything unverified under --ignore-certificate-errors.
+//   A POST answered with success forgets what its URL had.
 //
 // Its types and limits are network-types.ts, and the rules that need no
 // instance network-rules.ts.
@@ -84,7 +86,7 @@ import {
   urlMetaPolicy,
   usablePolicies,
 } from "./policy.ts";
-import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
+import { connectThrough, describeProxy, type ProxyConfig, type ProxyError } from "./proxy.ts";
 
 const textDecoder = new TextDecoder();
 
@@ -845,7 +847,15 @@ export class Network {
   ): Promise<NetResponse> {
     const cache = this.cache;
     const partition = options.partition;
-    if (!cache || partition === undefined) {
+    if (
+      !cache ||
+      partition === undefined ||
+      // Unverified, as --ignore-certificate-errors leaves it: whoever was on the way may have
+      // written it, and nothing so written outlives the run that allowed it.
+      (url.protocol === "https:" && this.unverified(bare(url.hostname))) ||
+      // A grant only one network's machines make, which on another the same address is not.
+      (options.policyFile && this.classify(address) !== "public")
+    ) {
       return this.send(url, address, method, headers, body, signal, options);
     }
 
@@ -861,7 +871,9 @@ export class Network {
       headers: Object.entries(outgoingHeaders(headers, options.referer)),
       address,
       partition,
-      heuristic: !options.policyFile,
+      // An address is a machine only along one way to it: through a proxy, another may be.
+      route: this.proxy ? describeProxy(this.proxy) : "direct",
+      policyFile: options.policyFile === true,
     };
     if (!options.read || !cache.handles(request)) {
       return this.send(url, address, method, headers, body, signal, options);
