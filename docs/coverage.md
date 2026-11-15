@@ -44,8 +44,8 @@ with `swf2es-baseline.json`.
 
 ### Results
 
-2026-10-29, from `main`'s baselines (#668), scored as `swf2es.ts` scores
-a run: of the 2,578 tests avmshell compiled, the 2,566 whose counts are
+Counted 2026-11-15 from `dev`'s baselines (0.1.23), unchanged since
+2026-10-29 (#668), scored as `swf2es.ts` scores a run: of the 2,578 tests avmshell compiled, the 2,566 whose counts are
 compared and whose result does not vary. Checks passed are left out: a
 test may pass more checks in swf2es than avmshell runs, so their sum over
 a directory overstates.
@@ -111,13 +111,14 @@ matched, no more were traced, and nothing stopped it. A change may not
 lower a test's standing; one that raises it is kept with
 `--update-baseline`.
 
-From `baseline.json` on `main` (last raised 2026-10-24):
+Counted 2026-11-15 from `baseline.json` on `dev` (0.1.23; last raised
+2026-11-13):
 
 | | Tests | Pass | Lines matched |
 |---|---|---|---|
-| **All** | 1984 | **1380 (69.6%)** | 167,322 of 287,667 (58.2%) |
-| avm1 | 715 | 590 (82.5%) | 88,414 of 131,812 |
-| avm2 | 1252 | 784 (62.6%) | 78,718 of 155,484 |
+| **All** | 1984 | **1439 (72.5%)** | 173,882 of 287,667 (60.4%) |
+| avm1 | 715 | 592 (82.8%) | 87,844 of 131,812 |
+| avm2 | 1252 | 841 (67.2%) | 85,848 of 155,484 |
 | timeline | 17 | 6 | 190 of 371 |
 
 The natives most often in the way are the Flash Text Engine's
