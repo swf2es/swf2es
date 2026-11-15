@@ -97,6 +97,7 @@ async function scriptingFor(
     lazyCompilation = false,
     air = false,
     logFetch = false,
+    realTime = false,
   }: {
     moduleCache?: ModuleCache | null;
     onCompile?: () => void;
@@ -105,6 +106,8 @@ async function scriptingFor(
     air?: boolean;
     /** Its fetches traced, for a test with log_fetch (testFetch). */
     logFetch?: boolean;
+    /** getTimer and timers by the wall clock, as a benchmark needs, not by the frames. */
+    realTime?: boolean;
   } = {},
 ): Promise<Scripting | null> {
   const swf = readSwf(bytes);
@@ -137,8 +140,9 @@ async function scriptingFor(
     print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
     debugger: true,
-    // The frame clock: traces that tell getTimer are the same on every run.
-    realTime: null,
+    // The frame clock, so that traces that tell getTimer are the same on every run; or the
+    // wall clock, the player's own, for a benchmark that times itself by it.
+    realTime: realTime ? undefined : null,
     // These corpus traces were recorded on a 1536×864 Flash host.
     screenCapabilities: url?.startsWith("/corpus/")
       ? { screenResolutionX: 1536, screenResolutionY: 864, pixelAspectRatio: 1, screenDPI: 72 }
@@ -452,6 +456,8 @@ interface RunSwfOptions {
   air?: boolean;
   /** Every frame drawn at the stage's size, as a host draws it, and waited for (chrome.ts). */
   draw?: boolean;
+  /** getTimer and timers by the wall clock rather than the frames (scriptingFor). */
+  realTime?: boolean;
 }
 
 async function runSwf(
@@ -471,6 +477,7 @@ async function runSwf(
     lazyCompilation = false,
     air = false,
     draw = false,
+    realTime = false,
   }: RunSwfOptions,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -486,7 +493,12 @@ async function runSwf(
     }
   };
   try {
-    scripting = await scriptingFor(bytes, trace, url, uncaught, { lazyCompilation, air, logFetch });
+    scripting = await scriptingFor(bytes, trace, url, uncaught, {
+      lazyCompilation,
+      air,
+      logFetch,
+      realTime,
+    });
     const player = new Player(
       bytes,
       scripting,
