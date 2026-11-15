@@ -1,7 +1,7 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
-import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { definesInput, definesSound, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   type AirApplication,
   Avm1,
@@ -30,6 +30,7 @@ import { scaleMode } from "./layout.js";
 import { type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
 import { UncaughtReports } from "./uncaught.js";
+import { UNMUTE_STYLE, UnmutePrompt } from "./unmute.js";
 import { namesWorkers, READY_WAIT, workersOrNone } from "./workers.js";
 
 export const TAG = "swf2es-player";
@@ -81,6 +82,8 @@ export interface Session {
   abort: AbortController;
   /** The Web Workers its SWF starts, let go of with it. */
   workers: WebWorkerHost | null;
+  /** Whether the browser holds its sound until the user's click or key (AudioHost's blocked). */
+  audioBlocked: boolean;
   /** The AIR application it plays (`loadAir`), its hosts made for this element; null for a SWF. */
   air: {
     app: AirApp;
@@ -145,6 +148,7 @@ export class Swf2esPlayerElement extends ElementBase {
     "bgcolor",
     "quality",
     "menu",
+    "unmuteprompt",
   ];
 
   #session: Session | null = null;
@@ -155,6 +159,8 @@ export class Swf2esPlayerElement extends ElementBase {
   readonly #sizing: HTMLStyleElement;
   /** The stage's size once a SWF is read, the element's own where the page gives it none. */
   #stageSize: [number, number] | null = null;
+  /** The button over the player while its sound is held, made the first time it is. */
+  #prompt: UnmutePrompt | null = null;
 
   constructor() {
     super();
@@ -163,7 +169,8 @@ export class Swf2esPlayerElement extends ElementBase {
     // :host's rules give way to the page's, which may size it as it likes.
     style.textContent =
       ":host { display: inline-block; position: relative; overflow: hidden; outline: none }" +
-      " .box { position: absolute; inset: 0; overflow: hidden }";
+      " .box { position: absolute; inset: 0; overflow: hidden }" +
+      UNMUTE_STYLE;
     this.#sizing = document.createElement("style");
     this.#box = document.createElement("div");
     this.#box.className = "box";
@@ -175,6 +182,12 @@ export class Swf2esPlayerElement extends ElementBase {
         focus(this);
       }
     });
+    // A click or key on the element is the user's gesture too: the sound runs, held or still
+    // waiting to be told as held, and the SWF has the click or key as ever. A touch's gesture
+    // is its release.
+    for (const type of ["pointerdown", "pointerup", "keydown"]) {
+      this.addEventListener(type, (e) => this.#gesture(e), { capture: true });
+    }
   }
 
   /** Resolves once the SWF loading, or the next one asked for, plays; rejects if it fails. */
@@ -250,6 +263,11 @@ export class Swf2esPlayerElement extends ElementBase {
       this.#session.player.showDefaultContextMenu = value?.toLowerCase() !== "false";
     }
 
+    if (name === "unmuteprompt") {
+      this.#showPrompt();
+      return;
+    }
+
     this.#session?.playback?.changed();
   }
 
@@ -296,6 +314,7 @@ export class Swf2esPlayerElement extends ElementBase {
       workers: null,
       abort: new AbortController(),
       air: null,
+      audioBlocked: false,
     };
     if (source instanceof AirApp) {
       this.#playAsAir(session, source, args, keep);
@@ -387,9 +406,11 @@ export class Swf2esPlayerElement extends ElementBase {
       ];
       this.#size();
       // A SWF with no code still needs its VM for the input its buttons and fields take.
+      // So does one with a sound of its own, which its VM's SoundHost plays.
       const scripted =
         isAs3(swf) &&
         (definesInput(swf) ||
+          definesSound(swf) ||
           swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2));
       if (scripted) {
         const stage3D = configuration().stage3D;
@@ -424,9 +445,13 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       }
 
-      // An AVM1 SWF's actions, compiled by the same codegen.
+      // An AVM1 SWF's actions, compiled by the same codegen; one with none still needs its VM
+      // for its buttons' and fields' input, and to play its sounds.
       let avm1: Avm1 | null = null;
-      if (!isAs3(swf) && (readActions(swf).blocks.length > 0 || definesInput(swf))) {
+      if (
+        !isAs3(swf) &&
+        (readActions(swf).blocks.length > 0 || definesInput(swf) || definesSound(swf))
+      ) {
         const codegen = await codegenForPlayer();
         if (!current()) {
           return;
@@ -460,6 +485,10 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.player = new Player(bytes, session.scripting, avm1);
+      const audio = session.player.audio;
+      if (audio) {
+        audio.onBlocked = (blocked) => this.#audioBlocked(session, blocked);
+      }
       // A page reloaded or closed never destroys its players: SharedObjects
       // a script did not flush are written as it goes, as Flash wrote them as
       // a SWF closed, and as it is hidden, the last a phone may tell.
@@ -521,6 +550,51 @@ export class Swf2esPlayerElement extends ElementBase {
       ready.reject(error);
       dispatch(this, new CustomEvent("error", { detail: { error } }));
     }
+  }
+
+  /**
+   * The browser holds `session`'s sound until the user's click or key, or
+   * no longer: the page told by `audioblocked` and `audiounblocked`, and the
+   * button shown over the player meanwhile, unless the page or the element
+   * says not to.
+   */
+  #audioBlocked(session: Session, blocked: boolean): void {
+    if (this.#session !== session || session.audioBlocked === blocked) {
+      return;
+    }
+
+    session.audioBlocked = blocked;
+    this.#showPrompt();
+    dispatch(this, new Event(blocked ? "audioblocked" : "audiounblocked"));
+  }
+
+  /** The unmute button shown while the sound is held, where the `unmuteprompt` attribute or the page's configuration allows it. */
+  #showPrompt(): void {
+    const own = attribute(this, "unmuteprompt")?.trim().toLowerCase();
+    const allowed = own === "true" || (own !== "false" && configuration().unmutePrompt !== false);
+    if (!(allowed && this.#session?.audioBlocked)) {
+      this.#prompt?.hide();
+      return;
+    }
+
+    this.#prompt ??= new UnmutePrompt(this.#box.parentNode as ShadowRoot, () => {
+      // The focus goes from the button to the element, where the SWF's keys are, and stays
+      // within it: the button hides only once the sound runs, and the SWF is not deactivated.
+      focus(this);
+      this.#unmute();
+    });
+    this.#prompt.show();
+  }
+
+  /** A click or key on the element, the user's gesture, in which the browser lets a suspended device run. */
+  #gesture(event: Event): void {
+    if (this.#session && !this.#prompt?.holds(event)) {
+      this.#unmute();
+    }
+  }
+
+  #unmute(): void {
+    this.#session?.player?.audio?.resume?.();
   }
 
   /** The scripting of a load from `url`, its ExternalInterface and fscommand the page's only for the SWFs it lets script it. */
@@ -858,7 +932,13 @@ export class Swf2esPlayerElement extends ElementBase {
     // Its scripting let it go already, if it had any: a release counts once.
     session.workers?.release?.();
     session.air?.release();
+    this.#prompt?.hide();
     this.#box.style.background = "";
+    // Its sound is held no more, gone with it: each audioblocked has its audiounblocked.
+    if (session.audioBlocked) {
+      session.audioBlocked = false;
+      dispatch(this, new Event("audiounblocked"));
+    }
   }
 }
 

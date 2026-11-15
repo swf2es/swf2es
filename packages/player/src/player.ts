@@ -18,6 +18,7 @@ import { customContextMenu, type MenuItem } from "./input/context-menu.js";
 import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
 import { type Pointer, PointerInput, type PointerState } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
+import type { AudioHost } from "./media/audio.js";
 import { soundHostOf, streamFrames, warmAudioFor } from "./media/sounds.js";
 import type { Scripting } from "./scripting.js";
 
@@ -230,6 +231,15 @@ export class Player {
     this.root.enterFirstFrame();
     s.frame(this.stage, false);
     this.frameRate = s.frameRate;
+  }
+
+  /**
+   * The device the movie's sounds play on, its scripting's or its AVM1's,
+   * through which a host hears that the browser holds them and lets them
+   * run (AudioHost's blocked, onBlocked and resume); null for none.
+   */
+  get audio(): AudioHost | null {
+    return this.scripting?.audio ?? this.avm1?.audio ?? null;
   }
 
   /** Whether destroy has been called. */

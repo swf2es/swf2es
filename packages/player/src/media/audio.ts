@@ -11,6 +11,13 @@ import { browserStream } from "./streaming-audio.js";
 /** Below Firefox's limit for a scheduled stop, 2^23 s, with room for the context's own clock. */
 const SCHEDULED_STOP_LIMIT = 2 ** 22;
 
+/**
+ * How long a sound waits on a suspended context before the host tells that
+ * the browser holds it: a context the browser lets run may still take half a
+ * second to open its device (PulseAudio or PipeWire under Linux).
+ */
+const BLOCKED_AFTER_MS = 1000;
+
 export interface SoundMix {
   volume: number;
   leftToLeft: number;
@@ -68,6 +75,19 @@ export interface AudioHost {
   warm?(): void;
   /** Let the device go, as the player is destroyed: nothing plays on it after. */
   close?(): void;
+  /**
+   * Whether a sound waits for the user: asked to play while the browser's
+   * autoplay rule holds the device until a click or a key on the page. A
+   * host whose device never waits leaves it out.
+   */
+  readonly blocked?: boolean;
+  /** Told as `blocked` changes, set by the embedder: true as a sound comes to wait, false as the device runs. */
+  onBlocked?: ((blocked: boolean) => void) | null;
+  /**
+   * Let a held device run. A browser lets it only while it handles the
+   * user's click or key, so an embedder calls this from such a handler.
+   */
+  resume?(): void;
 }
 
 export interface StreamingSound extends PlayingSound {
@@ -86,6 +106,28 @@ export function browserAudioHost(): AudioHost | null {
   let context: AudioContext | null = null;
   let closed = false;
   const streams = new Set<StreamingSound>();
+  let blocked = false;
+  /** The context a sound waits on, heard for its run, and the wait after which it counts as held. */
+  let watched: AudioContext | null = null;
+  let holding: ReturnType<typeof setTimeout> | undefined;
+  const tell = (value: boolean) => {
+    if (blocked !== value) {
+      blocked = value;
+      host.onBlocked?.(value);
+    }
+  };
+  const unwatch = () => {
+    watched?.removeEventListener?.("statechange", ran);
+    watched = null;
+    clearTimeout(holding);
+    holding = undefined;
+  };
+  function ran(): void {
+    if (watched?.state === "running") {
+      unwatch();
+      tell(false);
+    }
+  }
   // Closed, it decodes nothing more: a new context would outlive the player.
   const getContext = () => {
     if (closed) {
@@ -95,10 +137,39 @@ export function browserAudioHost(): AudioHost | null {
     context ??= new Context();
     return context;
   };
-  return {
+  // A sound asked to play: the context resumed, if it may, and held if it still waits a while
+  // after, as a browser holds one until the page's first click or key. A movie that never asks
+  // for a sound is never held, though its context waits all the same.
+  const wanted = (ctx: AudioContext) => {
+    void ctx.resume().catch(() => {});
+    if (ctx.state !== "suspended" || watched) {
+      return;
+    }
+
+    watched = ctx;
+    ctx.addEventListener?.("statechange", ran);
+    holding = setTimeout(() => {
+      holding = undefined;
+      if (!closed && watched === ctx && ctx.state === "suspended") {
+        tell(true);
+      }
+    }, BLOCKED_AFTER_MS);
+  };
+  const host: AudioHost = {
+    get blocked() {
+      return blocked;
+    },
+    onBlocked: null,
+    resume() {
+      if (!closed && context?.state === "suspended") {
+        void context.resume().catch(() => {});
+      }
+    },
     stream(mix, refill) {
-      const stream = browserStream(getContext(), mix, refill, () => streams.delete(stream));
+      const ctx = getContext();
+      const stream = browserStream(ctx, mix, refill, () => streams.delete(stream));
       streams.add(stream);
+      wanted(ctx);
       return stream;
     },
     warm() {
@@ -115,6 +186,7 @@ export function browserAudioHost(): AudioHost | null {
     close() {
       // A browser keeps a context, and its thread, until it is closed.
       closed = true;
+      unwatch();
       for (const stream of streams) {
         stream.stop();
       }
@@ -311,7 +383,7 @@ export function browserAudioHost(): AudioHost | null {
             begin(0);
           }
 
-          void ctx.resume().catch(() => {});
+          wanted(ctx);
           return {
             stop: () => {
               if (!ended) {
@@ -338,6 +410,7 @@ export function browserAudioHost(): AudioHost | null {
       };
     },
   };
+  return host;
 }
 
 /**

@@ -11,17 +11,38 @@ Flash read them in `attributes.ts`: `src`,
 `width` and `height` (a number is pixels, as an `<embed>`'s, anything
 else a CSS length), `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`,
 `base`, `allowscriptaccess`, `allownetworking` and `quality`, and
-`workers` of its own ([Workers in the page](#workers-in-the-page)). Its
+`workers` and `unmuteprompt` of its own ([Workers in the page](#workers-in-the-page)). Its
 JavaScript side is `load(url | ArrayBuffer | Uint8Array)`, which plays a SWF in place of the
 one playing; `ready`, which resolves once the SWF loading plays and
 rejects with what kept it from playing; `destroy()`; and the events
-`load`, `error` (the error in `detail`) and `fscommand`, which also goes
-to the page's `<id>_DoFSCommand` as the plug-in's did. Its size is its
+`load`, `error` (the error in `detail`), `audioblocked`, `audiounblocked`
+and `fscommand`, which also goes to the page's `<id>_DoFSCommand` as the
+plug-in's did. Its size is its
 attributes', or its SWF's stage, in `:host` rules the page's own styles
 override. A SWF with no code plays with no VM, unless it defines a
 button or a text field: those take the pointer and the keys with no
 script, as Flash's do, so such a SWF gets the VM its FileAttributes
-name, Scripting or AVM1, with nothing to run in it.
+name, Scripting or AVM1, with nothing to run in it. So does a SWF
+with a sound of its own, a DefineSound or a stream's head
+(`definesSound`): the timeline's sounds play through its VM's
+SoundHost.
+
+A browser holds a page's audio until the user's first click or key
+(Chrome's autoplay rule), which Flash's plug-in never met. The player's
+`AudioHost` tells the element when a sound waits on it (`blocked` and
+`onBlocked`, `Player.audio`), and the element fires `audioblocked`,
+shows a "Click to unmute" button over the stage (`unmute.ts`) unless
+its `unmuteprompt` attribute or the page's `configure({ unmutePrompt })`
+says not to, and fires `audiounblocked` as the device runs, or as the
+SWF that held it is destroyed or replaced. The browser lets the device
+resume only within the user's gesture, so the button's click calls
+`AudioHost.resume` in its own handler, and stops there: the SWF and the
+page's listeners never hear it. The click gives the element the focus
+the button took, so the SWF keeps the keys and is not deactivated, and
+the button hides only as the device runs, so a click the browser does not
+count leaves it. A press or key anywhere else on the element is a gesture
+too, and resumes a suspended device in a capturing listener, before the
+host has told it as held as well as after, the SWF hearing it as ever.
 
 ## Showing a player
 
