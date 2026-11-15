@@ -191,6 +191,105 @@ and a script reading members a clip does not have, then a child by name.
 There is no AVM1 benchmark against Flash yet; one in `players.ts` is
 planned next.
 
+## AVM1 against Flash
+
+`node tests/bench/players.ts avm1` times six AVM1 benchmarks in swf2es
+(headless Chrome), Flash (adl `-nodebug`) and, given `--ruffle DIR`,
+Ruffle's web build. Each is an AS1 source under `tests/bench/avm1/`,
+compiled by `tests/avm1-script.ts` as Flash's compiler writes it into a
+SWF 8, after `Bench.as`, which times each section by the Date over its
+rounds after a tenth of them to warm up. Every section also traces a
+checksum of its work, from its first call; `players.ts` prints where a
+player's trace parts from Flash's and still times it, so a run is only
+sound if it prints none.
+
+- **avm1-loop** (`Loop.as`): int-like and Number arithmetic, Math's
+  functions and a string built by `+=`, in functions (registers), and the
+  int loop again on the timeline (variables by name), for a quarter of the
+  rounds: 10 to the function's 40, so per iteration the timeline's is
+  about 3.3 times slower than the function's, not faster.
+- **avm1-members** (`Members.as`): an object's members by literal name
+  and by a name in a variable, an Array read, written, pushed and popped
+  by index, and for..in over 100 members.
+- **avm1-calls** (`Calls.as`): a timeline function, methods on prototypes
+  as AS2's classes compile (`_global`, Extends, `super`), an inherited
+  method, `new`, and Function's `call` and `apply`.
+- **avm1-scope** (`Scope.as`): timeline variables from a function, `with`
+  on an object and on a clip, `_root` and `_parent` paths, and `eval` and
+  `set` of dotted and slash paths.
+- **avm1-clips** (`Clips.as`): 300 clips attached, duplicated or created
+  empty, then removed; the attached one is a library symbol of one shape.
+- **avm1-frames** (`EnterFrame.as`): 2,000 clips, each with an
+  `onEnterFrame`; 30 frames that move them in their own variables only
+  (script), then 30 that also set `_x`, `_y`, `_rotation` and `_alpha`
+  (display). The SWF's frame rate is 255 so that Flash's frames are not
+  held to its pace; an empty handler on the same clips runs at that pace,
+  so it is only a warm-up and is not timed. swf2es draws each changed
+  frame as the web host does, multisampled, because adl draws its hidden
+  window: larger shapes made Flash's display phase twenty times slower.
+  A phase is timed over 31 ticks for its 30 frames of work, so Flash may
+  wait out one idle frame at its pace (4 ms or more), a few percent at
+  most. Ruffle's web build plays at the display's rate and is drawn at
+  100 × 50 CSS pixels, so its avm1-frames numbers, bracketed, are not its
+  work alone and not comparable.
+
+Medians of 5 runs, 2026-11-15, i9-13900H, Chrome 157 (SwiftShader), AIR
+51.5.1's adl under Wine, Ruffle 0.7.1, in ms:
+
+| Section | swf2es | Flash | Ruffle | Flash / swf2es |
+|---|---|---|---|---|
+| int-arith | 109 | 470 | 608 | 4.3× |
+| number-arith | 119 | 512 | 471 | 4.3× |
+| math-calls | 198 | 813 | 762 | 4.1× |
+| string-concat | 38 | 444 | 246 | 11.7× |
+| int-arith-timeline | 91 | 721 | 474 | 7.9× |
+| object-named | 115 | 689 | 758 | 6.0× |
+| object-keyed | 107 | 669 | 687 | 6.3× |
+| array-read | 28 | 159 | 241 | 5.7× |
+| array-write | 29 | 231 | 339 | 8.0× |
+| array-push-pop | 49 | 234 | 296 | 4.8× |
+| for-in | 26 | 147 | 131 | 5.7× |
+| function-call | 86 | 529 | 335 | 6.2× |
+| method-call | 187 | 1003 | 808 | 5.4× |
+| inherited-call | 194 | 995 | 739 | 5.1× |
+| construct | 201 | 858 | 777 | 4.3× |
+| call-apply | 179 | 858 | 600 | 4.8× |
+| timeline-vars | 90 | 538 | 474 | 6.0× |
+| with-object | 71 | 437 | 326 | 6.2× |
+| with-clip | 82 | 365 | 491 | 4.5× |
+| root-paths | 94 | 303 | 773 | 3.2× |
+| parent-paths | 99 | 279 | 874 | 2.8× |
+| eval-set | 119 | 383 | 268 | 3.2× |
+| attach-remove | 121 | 154 | 140 | 1.3× |
+| duplicate-remove | 104 | 142 | 102 | 1.4× |
+| create-remove | 99 | 129 | 111 | 1.3× |
+| enterframe-script | 108 | 361 | (1245) | 3.3× |
+| enterframe-display | 379 | 687 | (1576) | 1.8× |
+
+swf2es is ahead of Flash's AVM1 interpreter in every section, 4 to 12
+times in script that touches no clip. It is closest where clips are
+involved: making and removing them (1.3–1.4×), the display's properties
+and drawing (1.8×), paths through clips (2.8–3.2×), and onEnterFrame on
+2,000 clips (3.3×). Ahead of an interpreter is still slow for
+JavaScript: the int loop's iteration takes about 130 ns. A profile in
+node points at:
+
+- **The operand stack in memory.** A function's code keeps AVM1's stack
+  as an array across actions, `st.push(r1 = st.pop()); st.pop();` for a
+  store to a register, and every operation is a `V.*` call that checks
+  its operands' types, `V.toBoolean(V.not(V.less2(...)))` for a loop's
+  test.
+- **A call's allocations.** `call` makes an activation, a Scope and an
+  object for locals at every call, though a DefineFunction2 that keeps
+  everything in registers never reads that object; with property lookups
+  by Map (`exact`), it is most of avm1-calls.
+- **Clips removed from the front.** Removing clips in depth order takes
+  each out of its parent's children by `splice` at index 0
+  (`Container.takeOut`), quadratic in the clips left.
+- **Liveness walks.** `removed()` walks a clip up to its level to tell
+  whether a reference to it still holds, and `targetPath` parses a path
+  each time: a sizeable part of avm1-scope's path sections.
+
 ## AVM2 eager and lazy compilation
 
 `pnpm bench:avm2 [--runs 5] [--frames 600] [--json /tmp/avm2.json]`

@@ -190,6 +190,8 @@ node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flas
                               # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug
 node tests/bench/players.ts --only swf2es,flash vector   # indexed reads, writes, push and pop on
                               # Vectors of int, Number, String, Object and a class, and on Arrays
+node tests/bench/players.ts avm1   # AVM1: loops, members, calls, scopes, clips made and removed,
+                              # onEnterFrame on 2,000 clips (docs/benchmarks.md, "AVM1 against Flash")
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before
