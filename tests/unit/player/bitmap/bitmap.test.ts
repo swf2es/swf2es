@@ -838,7 +838,8 @@ test("a store made of one colour makes its pixels only as they are first read or
     };
     store.copies.add(copy);
     store.drawnOnGpu(copy);
-    assert.equal(store.solidPixel, pixel, "unmade while the GPU holds the store");
+    // Its pixels unmade still, but no longer one colour to a renderer that has no texture of it.
+    assert.equal(store.solidPixel, null, "the GPU's drawing, not the fill");
     const clone = store.clone();
     assert.deepEqual([clone.solidPixel, clone.pixels], [null, gpu], label);
     assert.deepEqual([store.solidPixel, store.pixels], [null, gpu], label);

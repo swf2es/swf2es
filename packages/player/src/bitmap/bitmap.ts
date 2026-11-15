@@ -20,6 +20,8 @@ const NO_PIXELS = new Uint32Array(0);
  * The most pixels a store made of one colour leaves unmade till they are
  * used: a larger one is allocated as it is made, so that one the browser
  * cannot allocate is refused there, as BitmapData's constructor refuses it.
+ * A smaller one that cannot be allocated when first used fails there, with
+ * the engine's RangeError rather than ArgumentError 2015: 64 MB at most.
  */
 const LAZY_PIXELS = 1 << 24;
 /** No gaps, shared by every copy that leaves none. */
@@ -357,10 +359,12 @@ export class BitmapStore {
 
   /**
    * The premultiplied pixel every pixel is, for a store made of one colour
-   * whose pixels nothing has made since (`solid`); else null.
+   * whose pixels nothing has made since (`solid`); else null. Null too
+   * while a GPU copy is newer: a renderer that made no texture of it yet
+   * must take the drawing, not the fill.
    */
   get solidPixel(): number | null {
-    return this.solid;
+    return this.gpuNewer ? null : this.solid;
   }
 
   /**
