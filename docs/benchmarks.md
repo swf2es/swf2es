@@ -75,6 +75,11 @@ draws on the machine's GPU (on a machine with two,
 - `--scripted N`: N rigs whose parts are scripted clips, replaced each
   frame (`--still` keeps them, for the walk of a deep tree whose scripts
   rarely run);
+- `--readback N`: each frame a new BitmapData of 546 by 693, an outline
+  of N edges drawn into it, its getColorBoundsRect and those pixels read
+  into a ByteArray after a 54-byte header (`--opaque` for an opaque
+  bitmap): a fresh bitmap's texture, the readback after a draw and the
+  scan;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).
@@ -799,6 +804,16 @@ The player:
 - #994: the tick advances only clips whose advance does something.
 - #997: a button's pick bounds kept while its hit test state stands
   still.
+- #1012, on `bench.ts --readback 300 --gpu` (RTX 4060), a frame of a
+  bitmap made, drawn into, scanned and read: a readback's bytes turned
+  into words by swapping red and blue in whole words, and the bounds'
+  pixels taken once, 10.55 → 9.69 ms; a fresh BitmapData's texture
+  cleared on the GPU and its pixels made only when used, 9.69 → 7.70 ms
+  (opaque 9.99 → 8.77); a ByteArray's words written at an unaligned
+  offset by bytes for an opaque store, and through the scratch row for a
+  transparent one, 7.70 → 6.98 ms (opaque 8.77 → 8.27);
+  getColorBoundsRect reading each row from both ends to its first and
+  last match, 6.98 → 4.77 ms.
 
 The desktop app:
 

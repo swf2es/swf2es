@@ -14,6 +14,16 @@ import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
 import { bitmapKernel } from "./kernel.js";
 import type { PixelRect } from "./pixel-rect.js";
 
+/** The pixels of a store that has none yet, shared by every such store. */
+const NO_PIXELS = new Uint32Array(0);
+/**
+ * The most pixels a store made of one colour leaves unmade till they are
+ * used: a larger one is allocated as it is made, so that one the browser
+ * cannot allocate is refused there, as BitmapData's constructor refuses it.
+ * A smaller one that cannot be allocated when first used fails there, with
+ * the engine's RangeError rather than ArgumentError 2015: 64 MB at most.
+ */
+const LAZY_PIXELS = 1 << 24;
 /** No gaps, shared by every copy that leaves none. */
 const NO_GAPS: readonly PixelRect[] = [];
 /** The fewest pixels copyPixels blends in the native module rather than here. */
@@ -271,6 +281,14 @@ export interface GpuCopy {
 export class BitmapStore {
   private cpu: Uint32Array;
   /**
+   * The premultiplied pixel every pixel of a store is as made of one colour,
+   * while nothing wrote or read its pixels, which are not made till then
+   * (`readable`): its texture is cleared to it rather than uploaded, and a
+   * store drawn into on the GPU and read back never makes them. Null once
+   * they are made.
+   */
+  private solid: number | null = null;
+  /**
    * Whether `cpu` is a library bitmap's pixels, which every store made of it
    * shares: copied before it is first written, so an atlas a SWF only reads
    * from is one array, not one for the library and one for each BitmapData.
@@ -319,8 +337,34 @@ export class BitmapStore {
       return;
     }
 
-    this.cpu = new Uint32Array(width * height);
-    this.cpu.fill(this.premultiplied(fill));
+    this.solid = this.premultiplied(fill);
+    this.cpu = NO_PIXELS;
+    if (width * height > LAZY_PIXELS) {
+      this.made();
+    }
+  }
+
+  /** The pixels made of the one colour the store is, where they were not. */
+  private made(): void {
+    if (this.solid !== null) {
+      const pixels = new Uint32Array(this.width * this.height);
+      if (this.solid !== 0) {
+        pixels.fill(this.solid);
+      }
+
+      this.cpu = pixels;
+      this.solid = null;
+    }
+  }
+
+  /**
+   * The premultiplied pixel every pixel is, for a store made of one colour
+   * whose pixels nothing has made since (`solid`); else null. Null too
+   * while a GPU copy is newer: a renderer that made no texture of it yet
+   * must take the drawing, not the fill.
+   */
+  get solidPixel(): number | null {
+    return this.gpuNewer ? null : this.solid;
   }
 
   /**
@@ -341,6 +385,7 @@ export class BitmapStore {
 
   set pixels(pixels: Uint32Array) {
     this.cpu = pixels;
+    this.solid = null;
     this.shared = false;
     this.gpuNewer = false;
   }
@@ -353,10 +398,12 @@ export class BitmapStore {
   get readable(): Uint32Array {
     if (this.gpuNewer && this.gpu) {
       this.cpu = this.gpu.read();
+      this.solid = null;
       this.shared = false;
     }
 
     this.gpuNewer = false;
+    this.made();
     return this.cpu;
   }
 
@@ -815,8 +862,16 @@ export class BitmapStore {
     // What is left to the loops here writes words, which a typed array holds at a multiple of four alone.
     const aligned = ((bytes.byteOffset + at) & 3) === 0;
     const swap = littleEndian !== HOST_LITTLE;
+    // An opaque store's words in the host's order are its pixels' bytes, copied as bytes wherever
+    // they land, with no words made between.
+    const plain = !this.transparent && !swap;
     for (let k = 0, row = r.y * this.width + r.x; k < count; k += run, row += this.width) {
       const to = at + k * 4;
+      if (plain) {
+        bytes.set(bytesOf(pixels, row, run), to);
+        continue;
+      }
+
       const into = bytes.subarray(to, to + run * 4);
       const done = kernel
         ? kernel.words(into, bytesOf(pixels, row, run), kind, !littleEndian) >> 2
@@ -826,9 +881,12 @@ export class BitmapStore {
       }
 
       const left = run - done;
+      // Unaligned, the words are made in the scratch row and copied, rather than in a row made for each.
       const words = aligned
         ? new Uint32Array(bytes.buffer, bytes.byteOffset + to + done * 4, left)
-        : new Uint32Array(left);
+        : left <= SCRATCH.length
+          ? SCRATCH
+          : new Uint32Array(left);
       getRun(words, 0, pixels, row + done, left, swap, this.transparent);
       if (!aligned) {
         into.set(bytesOf(words, 0, left), done * 4);
@@ -913,7 +971,15 @@ export class BitmapStore {
 
   clone(): BitmapStore {
     const copy = new BitmapStore(this.width, this.height, this.transparent, 0);
-    copy.pixels.set(this.readable);
+    // One colour still, the copy is too; else it takes a copy of the pixels, made at once.
+    if (this.solid !== null && !this.gpuNewer) {
+      copy.solid = this.solid;
+    } else if (copy.solid === null) {
+      copy.pixels.set(this.readable);
+    } else {
+      copy.pixels = this.readable.slice();
+    }
+
     return copy;
   }
 
@@ -1053,6 +1119,18 @@ export function rgbaInto(pixels: Uint32Array, out: Uint8Array, opaque = false): 
 /** RGBA bytes read from a texture as premultiplied ARGB. */
 export function argbOf(bytes: Uint8Array | Uint8ClampedArray): Uint32Array {
   const out = new Uint32Array(bytes.length / 4);
+  // A readback is a whole store's pixels: swapping red and blue in whole words is several times
+  // faster than gathering four bytes for each.
+  if (LITTLE_ENDIAN && bytes.byteOffset % 4 === 0) {
+    const words = new Uint32Array(bytes.buffer, bytes.byteOffset, out.length);
+    for (let i = 0; i < out.length; i++) {
+      const p = words[i];
+      out[i] = ((p & 0xff00ff00) | ((p >>> 16) & 0xff) | ((p & 0xff) << 16)) >>> 0;
+    }
+
+    return out;
+  }
+
   for (let i = 0; i < out.length; i++) {
     const j = i * 4;
     out[i] = ((bytes[j + 3] << 24) | (bytes[j] << 16) | (bytes[j + 1] << 8) | bytes[j + 2]) >>> 0;

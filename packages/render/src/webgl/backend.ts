@@ -262,7 +262,7 @@ export class WebGLBackend {
 
     this.frameFilters = filters;
     this.atlas.place(geometries);
-    this.gpu.uploadTextures(textures);
+    this.gpu.uploadTextures(textures, this.clearTexture);
     for (const id of keeps.removed) {
       this.pool.release(id);
     }
@@ -675,13 +675,34 @@ export class WebGLBackend {
     height: number,
     pixel: number,
   ): boolean {
-    const gl = this.gl;
-    this.gpu.uploadTextures(textures);
-    const framebuffer = gl.isContextLost() ? null : this.textureFramebuffer(id);
+    this.gpu.uploadTextures(textures, this.clearTexture);
+    const framebuffer = this.gl.isContextLost() ? null : this.textureFramebuffer(id);
     if (!framebuffer) {
       return false;
     }
 
+    this.clearRect(framebuffer, x, y, width, height, pixel);
+    return true;
+  }
+
+  /** A texture of one colour, `width` by `height`, made: cleared to it (GpuTextures' uploadTextures). */
+  private readonly clearTexture = (id: number, width: number, height: number, pixel: number) => {
+    const framebuffer = this.textureFramebuffer(id);
+    if (framebuffer) {
+      this.clearRect(framebuffer, 0, 0, width, height, pixel);
+    }
+  };
+
+  /** `width` by `height` texels at (x, y) of `framebuffer` cleared to `pixel`, premultiplied ARGB, exactly. */
+  private clearRect(
+    framebuffer: WebGLFramebuffer,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    pixel: number,
+  ): void {
+    const gl = this.gl;
     this.state.bindFramebuffer(framebuffer);
     this.state.colorMask(15);
     this.state.scissor([x, y, width, height]);
@@ -693,7 +714,6 @@ export class WebGLBackend {
     );
     gl.clear(gl.COLOR_BUFFER_BIT);
     this.state.scissor(null);
-    return true;
   }
 
   /**
@@ -715,7 +735,7 @@ export class WebGLBackend {
     dy: number,
   ): boolean {
     const gl = this.gl;
-    this.gpu.uploadTextures(textures);
+    this.gpu.uploadTextures(textures, this.clearTexture);
     const source = gl.isContextLost() ? null : this.textureFramebuffer(from);
     const target = source ? this.textureFramebuffer(to) : null;
     if (!source || !target) {

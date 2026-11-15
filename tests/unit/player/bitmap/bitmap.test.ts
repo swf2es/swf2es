@@ -1,16 +1,19 @@
-// The pixel store on its own: Flash's premultiplication arithmetic, and that
-// a store holds the Bitmaps showing it weakly.
+// The pixel store on its own: Flash's premultiplication arithmetic, that
+// a store holds the Bitmaps showing it weakly, that one made of a colour
+// makes its pixels only when used, and its reads of words, bounds and a
+// texture's bytes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import {
+  argbOf,
   BitmapStore,
   premultiply,
   unmultiply,
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { drawBitmap } from "../../../../packages/player/dist/bitmap/composite.js";
-import { merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
+import { colorBounds, merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
 import { BitmapObject } from "../../../../packages/player/dist/display/display.js";
 import { type Affine, referenceDraw, storeOf } from "./draw-reference.ts";
 
@@ -724,6 +727,258 @@ test("copyPixels without an alpha bitmap writes what it writes with one of alpha
                 Array.from(fast.dest.pixels),
                 Array.from(general.dest.pixels),
                 JSON.stringify({ w, h, into, source, mergeAlpha, dx, dy }),
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+});
+
+/** A 32-bit LCG's next numbers, as a function. */
+function lcg(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state;
+  };
+}
+
+/** A store of `w` by `h` of random pixels, kept as `transparent` keeps them; some clear, some solid. */
+function randomStore(next: () => number, w: number, h: number, transparent: boolean): BitmapStore {
+  const store = new BitmapStore(w, h, transparent, 0);
+  const pixels = store.pixels;
+  for (let i = 0; i < pixels.length; i++) {
+    const k = next() % 4;
+    const a = k === 0 ? 0 : k === 1 ? 255 : next() >>> 24;
+    pixels[i] = store.premultiplied(((a << 24) | (next() & 0xffffff)) >>> 0);
+  }
+
+  store.changed();
+  return store;
+}
+
+test("a store made of one colour makes its pixels only as they are first read or written", () => {
+  for (const [transparent, fill, pixel] of [
+    [true, 0x80402010, 0x80201008],
+    [true, 0, 0],
+    [true, 0x00ffffff, 0],
+    [false, 0x12336699, 0xff336699],
+    [false, 0, 0xff000000],
+  ] as const) {
+    const label = `${transparent} ${fill.toString(16)}`;
+    const fresh = () => new BitmapStore(3, 2, transparent, fill);
+    const all = (p: number) => new Uint32Array(6).fill(p);
+
+    // Read: the colour, premultiplied as made, opaque in an opaque store.
+    let store = fresh();
+    assert.equal(store.solidPixel, pixel, label);
+    const value = transparent ? unmultiply(pixel) : pixel;
+    assert.equal(store.getPixel32(2, 1), value, label);
+    assert.equal(store.getPixel(0, 0), value & 0xffffff, label);
+    assert.equal(store.solidPixel, null, label);
+    assert.deepEqual(store.pixels, all(pixel), label);
+
+    // Written.
+    store = fresh();
+    store.setPixel32(1, 1, 0xff010203);
+    const written = all(pixel);
+    written[4] = 0xff010203;
+    assert.deepEqual([store.solidPixel, store.pixels], [null, written], label);
+
+    // Cloned, the copy is of the colour too, and neither makes pixels.
+    store = fresh();
+    const twin = store.clone();
+    assert.deepEqual([store.solidPixel, twin.solidPixel], [pixel, pixel], label);
+    assert.deepEqual(twin.pixels, all(pixel), label);
+    assert.equal(store.solidPixel, pixel, label);
+    store.setPixel32(0, 0, 0xff00ff00);
+    assert.deepEqual(twin.pixels, all(pixel), "a clone of its own");
+    const copied = store.clone();
+    assert.deepEqual(copied.pixels, store.pixels, label);
+    copied.setPixel32(0, 0, 0xff0000ff);
+    assert.equal(store.getPixel32(0, 0), 0xff00ff00, "a copy's pixels of their own");
+
+    // Copied from and into.
+    store = fresh();
+    const other = new BitmapStore(3, 2, true, 0xff808080);
+    other.copyPixels(store, { x: 0, y: 0, width: 2, height: 2 }, 1, 0, false);
+    const expected = all(0xff808080);
+    for (const p of [1, 2, 4, 5]) {
+      expected[p] = pixel;
+    }
+
+    assert.deepEqual(other.pixels, expected, label);
+    store = fresh();
+    store.copyPixels(
+      randomStore(lcg(3), 2, 2, true),
+      { x: 0, y: 0, width: 2, height: 2 },
+      0,
+      0,
+      false,
+    );
+    assert.equal(store.solidPixel, null, label);
+    assert.equal(store.pixels[2], pixel, "the pixels the copy left");
+
+    // Disposed: no pixels at all.
+    store = fresh();
+    store.dispose();
+    assert.deepEqual([store.solidPixel, store.pixels.length], [null, 0], label);
+
+    // Drawn into on the GPU and read back: the GPU's pixels, never the colour's.
+    store = fresh();
+    const gpu = Uint32Array.of(1, 2, 3, 4, 5, 0xff000006);
+    const copy = {
+      version: -1,
+      read: () => gpu.slice(),
+      copy: () => false,
+      fill: () => false,
+      destroy: () => {},
+    };
+    store.copies.add(copy);
+    store.drawnOnGpu(copy);
+    // Its pixels unmade still, but no longer one colour to a renderer that has no texture of it.
+    assert.equal(store.solidPixel, null, "the GPU's drawing, not the fill");
+    const clone = store.clone();
+    assert.deepEqual([clone.solidPixel, clone.pixels], [null, gpu], label);
+    assert.deepEqual([store.solidPixel, store.pixels], [null, gpu], label);
+  }
+});
+
+test("a large store made of one colour makes its pixels as it is made", () => {
+  const store = new BitmapStore(4097, 4096, true, 0x80ffffff);
+  assert.equal(store.solidPixel, null);
+  assert.equal(store.pixels[4097 * 4096 - 1], 0x80808080);
+  assert.equal(new BitmapStore(4096, 4096, true, 0).solidPixel, 0);
+});
+
+/** getColorBoundsRect as it was, every pixel unmultiplied unless `premultiplied`. */
+function referenceBounds(
+  store: BitmapStore,
+  mask: number,
+  color: number,
+  find: boolean,
+  premultiplied: boolean,
+) {
+  let x0 = store.width;
+  let y0 = store.height;
+  let x1 = -1;
+  let y1 = -1;
+  const m = premultiplied && !store.transparent ? (mask | 0xff000000) >>> 0 : mask;
+  const target = premultiplied ? store.premultiplied(color >>> 0) : (color & m) >>> 0;
+  for (let y = 0; y < store.height; y++) {
+    for (let x = 0; x < store.width; x++) {
+      const pixel = store.pixels[y * store.width + x];
+      if ((((premultiplied ? pixel : unmultiply(pixel)) & m) >>> 0 === target) === find) {
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+    }
+  }
+
+  return x1 <= 0 && y1 <= 0
+    ? { x: 0, y: 0, width: 0, height: 0 }
+    : { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+}
+
+test("colour bounds by any mask find what unmultiplying each pixel found", () => {
+  const next = lcg(21);
+  for (let round = 0; round < 40; round++) {
+    const transparent = round % 2 === 0;
+    const store = randomStore(next, 1 + (next() % 9), 1 + (next() % 9), transparent);
+    if (!transparent && round % 4 === 1) {
+      store.pixels[next() % store.pixels.length] = 0x30101010;
+      store.holdsAlpha = true;
+    }
+
+    // A pixel's own value, so that some masks find it.
+    const some = unmultiply(store.pixels[next() % store.pixels.length]);
+    for (const mask of [
+      0xff000000, 0x80000000, 0x0f000000, 0xffffffff, 0x00ff0000, 0xff00ff00, 0x00ffffff, 0,
+    ]) {
+      for (const color of [0, some, 0xff000000, next()]) {
+        for (const find of [true, false]) {
+          for (const premultiplied of [false, true]) {
+            assert.deepEqual(
+              colorBounds(store, mask, color, find, premultiplied),
+              referenceBounds(store, mask, color, find, premultiplied),
+              JSON.stringify({ round, transparent, mask, color, find, premultiplied }),
+            );
+          }
+        }
+      }
+    }
+  }
+});
+
+test("a texture's bytes read back are its pixels, aligned or not", () => {
+  const next = lcg(5);
+  const bytes = new Uint8Array(4 * 37 + 3);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = next() >>> 24;
+  }
+
+  for (const shift of [0, 1, 2, 3]) {
+    const from = bytes.subarray(shift, shift + 4 * 37);
+    const expected = Array.from(
+      { length: 37 },
+      (_, i) =>
+        ((from[i * 4 + 3] << 24) |
+          (from[i * 4] << 16) |
+          (from[i * 4 + 1] << 8) |
+          from[i * 4 + 2]) >>>
+        0,
+    );
+    assert.deepEqual([...argbOf(from)], expected, `shifted ${shift}`);
+    assert.deepEqual(
+      [...argbOf(new Uint8ClampedArray(from.buffer, from.byteOffset, from.length))],
+      expected,
+    );
+  }
+});
+
+test("words read into bytes at any offset are each pixel's value in the order given", () => {
+  const next = lcg(9);
+  for (const transparent of [true, false]) {
+    for (const holdsAlpha of transparent ? [false] : [false, true]) {
+      const store = randomStore(next, 13, 7, transparent);
+      if (holdsAlpha) {
+        // As erase leaves an opaque store: alpha below 255, read as it is.
+        store.pixels[5] = 0x40102030;
+        store.pixels[20] = 0;
+        store.holdsAlpha = true;
+        store.changed();
+      }
+
+      for (const rect of [
+        { x: 0, y: 0, width: 13, height: 7 },
+        { x: 2, y: 1, width: 9, height: 5 },
+        { x: 12, y: 6, width: 1, height: 1 },
+      ]) {
+        for (const little of [true, false]) {
+          for (let at = 0; at < 4; at++) {
+            for (const shift of [0, 1, 3]) {
+              const label = JSON.stringify({ transparent, holdsAlpha, rect, little, at, shift });
+              const count = rect.width * rect.height;
+              const buffer = new Uint8Array(new ArrayBuffer(count * 4 + 12), shift, count * 4 + 8);
+              buffer.fill(0xa5);
+              store.getWords(rect, buffer, at, little);
+              const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length);
+              for (let i = 0; i < count; i++) {
+                const x = rect.x + (i % rect.width);
+                const y = rect.y + Math.floor(i / rect.width);
+                const value = store.unmultiplied(store.pixels[y * 13 + x]);
+                assert.equal(view.getUint32(at + i * 4, little), value, `${label} ${i}`);
+              }
+
+              // Nothing written before or past them.
+              assert.deepEqual(
+                [...buffer.subarray(0, at), ...buffer.subarray(at + count * 4)],
+                new Array(8).fill(0xa5),
+                label,
               );
             }
           }
