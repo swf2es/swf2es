@@ -1,16 +1,18 @@
-// The pixel store on its own: Flash's premultiplication arithmetic, and that
-// a store holds the Bitmaps showing it weakly.
+// The pixel store on its own: Flash's premultiplication arithmetic, that
+// a store holds the Bitmaps showing it weakly, and its reads of bounds and
+// a texture's bytes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import {
+  argbOf,
   BitmapStore,
   premultiply,
   unmultiply,
 } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { drawBitmap } from "../../../../packages/player/dist/bitmap/composite.js";
-import { merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
+import { colorBounds, merge, scroll } from "../../../../packages/player/dist/bitmap/ops.js";
 import { BitmapObject } from "../../../../packages/player/dist/display/display.js";
 import { type Affine, referenceDraw, storeOf } from "./draw-reference.ts";
 
@@ -730,5 +732,115 @@ test("copyPixels without an alpha bitmap writes what it writes with one of alpha
         }
       }
     }
+  }
+});
+
+/** A 32-bit LCG's next numbers, as a function. */
+function lcg(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state;
+  };
+}
+
+/** A store of `w` by `h` of random pixels, kept as `transparent` keeps them; some clear, some solid. */
+function randomStore(next: () => number, w: number, h: number, transparent: boolean): BitmapStore {
+  const store = new BitmapStore(w, h, transparent, 0);
+  const pixels = store.pixels;
+  for (let i = 0; i < pixels.length; i++) {
+    const k = next() % 4;
+    const a = k === 0 ? 0 : k === 1 ? 255 : next() >>> 24;
+    pixels[i] = store.premultiplied(((a << 24) | (next() & 0xffffff)) >>> 0);
+  }
+
+  store.changed();
+  return store;
+}
+
+/** getColorBoundsRect as it was, every pixel unmultiplied unless `premultiplied`. */
+function referenceBounds(
+  store: BitmapStore,
+  mask: number,
+  color: number,
+  find: boolean,
+  premultiplied: boolean,
+) {
+  let x0 = store.width;
+  let y0 = store.height;
+  let x1 = -1;
+  let y1 = -1;
+  const m = premultiplied && !store.transparent ? (mask | 0xff000000) >>> 0 : mask;
+  const target = premultiplied ? store.premultiplied(color >>> 0) : (color & m) >>> 0;
+  for (let y = 0; y < store.height; y++) {
+    for (let x = 0; x < store.width; x++) {
+      const pixel = store.pixels[y * store.width + x];
+      if ((((premultiplied ? pixel : unmultiply(pixel)) & m) >>> 0 === target) === find) {
+        x0 = Math.min(x0, x);
+        y0 = Math.min(y0, y);
+        x1 = Math.max(x1, x);
+        y1 = Math.max(y1, y);
+      }
+    }
+  }
+
+  return x1 <= 0 && y1 <= 0
+    ? { x: 0, y: 0, width: 0, height: 0 }
+    : { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
+}
+
+test("colour bounds by any mask find what unmultiplying each pixel found", () => {
+  const next = lcg(21);
+  for (let round = 0; round < 40; round++) {
+    const transparent = round % 2 === 0;
+    const store = randomStore(next, 1 + (next() % 9), 1 + (next() % 9), transparent);
+    if (!transparent && round % 4 === 1) {
+      store.pixels[next() % store.pixels.length] = 0x30101010;
+      store.holdsAlpha = true;
+    }
+
+    // A pixel's own value, so that some masks find it.
+    const some = unmultiply(store.pixels[next() % store.pixels.length]);
+    for (const mask of [
+      0xff000000, 0x80000000, 0x0f000000, 0xffffffff, 0x00ff0000, 0xff00ff00, 0x00ffffff, 0,
+    ]) {
+      for (const color of [0, some, 0xff000000, next()]) {
+        for (const find of [true, false]) {
+          for (const premultiplied of [false, true]) {
+            assert.deepEqual(
+              colorBounds(store, mask, color, find, premultiplied),
+              referenceBounds(store, mask, color, find, premultiplied),
+              JSON.stringify({ round, transparent, mask, color, find, premultiplied }),
+            );
+          }
+        }
+      }
+    }
+  }
+});
+
+test("a texture's bytes read back are its pixels, aligned or not", () => {
+  const next = lcg(5);
+  const bytes = new Uint8Array(4 * 37 + 3);
+  for (let i = 0; i < bytes.length; i++) {
+    bytes[i] = next() >>> 24;
+  }
+
+  for (const shift of [0, 1, 2, 3]) {
+    const from = bytes.subarray(shift, shift + 4 * 37);
+    const expected = Array.from(
+      { length: 37 },
+      (_, i) =>
+        ((from[i * 4 + 3] << 24) |
+          (from[i * 4] << 16) |
+          (from[i * 4 + 1] << 8) |
+          from[i * 4 + 2]) >>>
+        0,
+    );
+    assert.deepEqual([...argbOf(from)], expected, `shifted ${shift}`);
+    assert.deepEqual(
+      [...argbOf(new Uint8ClampedArray(from.buffer, from.byteOffset, from.length))],
+      expected,
+    );
   }
 });

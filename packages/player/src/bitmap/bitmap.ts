@@ -1053,6 +1053,18 @@ export function rgbaInto(pixels: Uint32Array, out: Uint8Array, opaque = false): 
 /** RGBA bytes read from a texture as premultiplied ARGB. */
 export function argbOf(bytes: Uint8Array | Uint8ClampedArray): Uint32Array {
   const out = new Uint32Array(bytes.length / 4);
+  // A readback is a whole store's pixels: swapping red and blue in whole words is several times
+  // faster than gathering four bytes for each.
+  if (LITTLE_ENDIAN && bytes.byteOffset % 4 === 0) {
+    const words = new Uint32Array(bytes.buffer, bytes.byteOffset, out.length);
+    for (let i = 0; i < out.length; i++) {
+      const p = words[i];
+      out[i] = ((p & 0xff00ff00) | ((p >>> 16) & 0xff) | ((p & 0xff) << 16)) >>> 0;
+    }
+
+    return out;
+  }
+
   for (let i = 0; i < out.length; i++) {
     const j = i * 4;
     out[i] = ((bytes[j + 3] << 24) | (bytes[j] << 16) | (bytes[j + 1] << 8) | bytes[j + 2]) >>> 0;

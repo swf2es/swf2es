@@ -406,10 +406,14 @@ export function colorBounds(
   }
 
   const target = premultiplied ? store.premultiplied(color >>> 0) : (color & mask) >>> 0;
+  // Read once, as they are, which never copies shared pixels: each read checks for a newer GPU
+  // copy. A mask of alpha alone needs no unmultiply, which keeps alpha.
+  const pixels = store.readable;
+  const raw = premultiplied || (mask & 0xffffff) === 0;
   for (let y = 0; y < store.height; y++) {
     for (let x = 0; x < store.width; x++) {
-      const pixel = store.pixels[y * store.width + x];
-      const hit = ((premultiplied ? pixel : unmultiply(pixel)) & mask) >>> 0 === target;
+      const pixel = pixels[y * store.width + x];
+      const hit = ((raw ? pixel : unmultiply(pixel)) & mask) >>> 0 === target;
       if (hit === find) {
         x0 = Math.min(x0, x);
         y0 = Math.min(y0, y);
