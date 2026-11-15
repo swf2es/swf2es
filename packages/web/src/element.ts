@@ -1,7 +1,7 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
-import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { definesInput, definesSound, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   type AirApplication,
   Avm1,
@@ -424,9 +424,13 @@ export class Swf2esPlayerElement extends ElementBase {
         }
       }
 
-      // An AVM1 SWF's actions, compiled by the same codegen.
+      // An AVM1 SWF's actions, compiled by the same codegen; one with none still needs its VM
+      // for its buttons' and fields' input, and to play its sounds.
       let avm1: Avm1 | null = null;
-      if (!isAs3(swf) && (readActions(swf).blocks.length > 0 || definesInput(swf))) {
+      if (
+        !isAs3(swf) &&
+        (readActions(swf).blocks.length > 0 || definesInput(swf) || definesSound(swf))
+      ) {
         const codegen = await codegenForPlayer();
         if (!current()) {
           return;

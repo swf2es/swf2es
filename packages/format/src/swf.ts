@@ -7,9 +7,13 @@ import {
   DefineButton,
   DefineButton2,
   DefineEditText,
+  DefineSound,
+  DefineSprite,
   End,
   FileAttributes,
   SetBackgroundColor,
+  SoundStreamHead,
+  SoundStreamHead2,
 } from "./tags.js";
 
 export type SwfCompression = "none" | "zlib" | "lzma";
@@ -251,4 +255,28 @@ export function definesInput(swf: Swf): boolean {
   return swf.tags.some(
     (t) => t.code === DefineButton || t.code === DefineButton2 || t.code === DefineEditText,
   );
+}
+
+/**
+ * Whether the SWF has a sound of its own to play: a DefineSound, which a
+ * frame or a button starts, or a stream's head, on the main timeline or a
+ * sprite's. A host gives such a SWF the VM that plays its sounds even when
+ * it has no code to run.
+ */
+export function definesSound(swf: Swf): boolean {
+  for (const t of swf.tags) {
+    if (t.code === DefineSound || t.code === SoundStreamHead || t.code === SoundStreamHead2) {
+      return true;
+    }
+
+    // A sprite's tags follow its id and frame count.
+    if (t.code === DefineSprite && t.length > 4) {
+      const inner = readTags(swf.bytes, t.offset + 4, t.offset + t.length).tags;
+      if (inner.some((i) => i.code === SoundStreamHead || i.code === SoundStreamHead2)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }

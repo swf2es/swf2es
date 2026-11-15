@@ -21,7 +21,9 @@ attributes', or its SWF's stage, in `:host` rules the page's own styles
 override. A SWF with no code plays with no VM, unless it defines a
 button or a text field: those take the pointer and the keys with no
 script, as Flash's do, so such a SWF gets the VM its FileAttributes
-name, Scripting or AVM1, with nothing to run in it.
+name, Scripting or AVM1, with nothing to run in it. An AVM1 SWF with a
+sound of its own, a DefineSound or a stream's head (`definesSound`),
+gets AVM1 too, whose SoundHost plays its sounds.
 
 ## Showing a player
 
