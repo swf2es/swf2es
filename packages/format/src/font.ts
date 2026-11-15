@@ -101,7 +101,7 @@ function readFont1(bytes: Uint8Array, tag: Tag): Font {
   for (let i = 0; i < offsets.length - 1; i++) {
     const start = offsets[i];
     const end = offsets[i + 1];
-    const records = readRecords(new SwfReader(bytes, table + start, table + end), 1).records;
+    const records = readRecords(new SwfReader(bytes, table + start, table + end), null).records;
     font.glyphs.push({ code: -1, records, advance: 0, bounds: null });
   }
 
@@ -161,7 +161,7 @@ export function readFont(bytes: Uint8Array, tag: Tag): Font {
   const glyphs: Glyph[] = [];
   for (let i = 0; i < count; i++) {
     const shape = new SwfReader(bytes, table + offsets[i], tag.offset + tag.length);
-    glyphs.push({ code: 0, records: readRecords(shape, 1).records, advance: 0, bounds: null });
+    glyphs.push({ code: 0, records: readRecords(shape, null).records, advance: 0, bounds: null });
   }
 
   const font: Font = {

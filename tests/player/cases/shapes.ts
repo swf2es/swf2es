@@ -479,6 +479,55 @@ function sharedFillEdges(): Uint8Array {
 }
 
 /**
+ * DefineShapes whose styles come in their records, by a style change with
+ * new styles after empty lists, as some tools write them: an outlined
+ * square, a bitmap filling the stage behind it, and the square again a
+ * frame later, removed and placed at the same depth.
+ */
+function recordStyles(): Uint8Array {
+  // 4 by 4 premultiplied ARGB, opaque: a red and blue checkerboard.
+  const pixels: number[] = [];
+  for (let i = 0; i < 16; i++) {
+    pixels.push(255, ...((i + (i >> 2)) % 2 ? [0, 0, 255] : [255, 0, 0]));
+  }
+
+  const lossless = [1, 0, 5, 4, 0, 4, 0, ...zlibCompress(Uint8Array.from(pixels))];
+  const square = w.shape({
+    id: 3,
+    bounds: [-40, 1040, -40, 1040],
+    fills: [0x33aa33],
+    lines: [{ width: 80, color: 0x000080 }],
+    paths: [{ fill1: 1, line: 1, commands: rectPath(0, 0, 50, 50) }],
+    newStyles: true,
+  });
+  return w.swf({
+    version: 8,
+    width: 160,
+    height: 120,
+    frameCount: 2,
+    tags: [
+      w.backgroundColor(0x000000),
+      w.tag(20, Uint8Array.from(lossless), true),
+      w.shape({
+        id: 2,
+        bounds: [0, 3200, 0, 2400],
+        fills: [{ bitmap: 1, type: 0x43, matrix: { a: 800, d: 600 } }],
+        paths: [{ fill1: 1, commands: rectPath(0, 0, 160, 120) }],
+        newStyles: true,
+      }),
+      square,
+      w.place({ depth: 1, character: 2 }),
+      w.place({ depth: 2, character: 3, matrix: { tx: 400, ty: 400 } }),
+      w.showFrame(),
+      w.remove(2),
+      w.place({ depth: 2, character: 3, matrix: { tx: 1800, ty: 1000 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/**
  * One fill's regions and holes: a square, then one with
  * two holes, then one with a hole holding an island and a second hole.
  * Each hole is its own region's, not the region drawn before it.
@@ -1384,6 +1433,14 @@ export const shapeCases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "record-styles",
+    swf: recordStyles(),
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 32,
+    maxOutliers: 200,
+  },
   {
     name: "static-mask-winding",
     swf: staticMaskWinding(),
