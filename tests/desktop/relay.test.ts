@@ -1,6 +1,7 @@
 // The desktop app's relay (apps/desktop/src/main/relay.ts), which gathers a
-// page's socket and WebSocket events into one IPC message a turn, with the
-// connections that feed it in node: the order kept, each connection's bytes
+// page's socket and WebSocket events into one IPC message a millisecond at
+// most, with the connections that feed it in node: the first after a quiet
+// spell at the end of its turn, the order kept, each connection's bytes
 // joined, a full batch sent at once, and a dropped one never.
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
@@ -15,13 +16,14 @@ type Event = { type: "data"; bytes: Uint8Array } | { type: "close" } | { type: "
 
 const data = (bytes: Uint8Array): Event => ({ type: "data", bytes });
 const turn = () => new Promise((done) => setImmediate(done));
+const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
 const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const bytesOf = (s: string) => new TextEncoder().encode(s);
 
 /** A relay whose batches are kept. */
-function kept<E>(flushAt?: number) {
+function kept<E>(flushAt?: number, window?: number) {
   const batches: Batch<E>[] = [];
-  const relay = new Relay<E>((batch) => batches.push(batch), flushAt);
+  const relay = new Relay<E>((batch) => batches.push(batch), flushAt, window);
   return { relay, batches };
 }
 
@@ -29,7 +31,7 @@ function kept<E>(flushAt?: number) {
 const said = (batch: Batch<Event>) =>
   batch.map(([id, e]) => (e.type === "data" ? `${id}:data:${text(e.bytes)}` : `${id}:${e.type}`));
 
-test("a turn's events go in one batch, in order, each connection's bytes joined until its next event", async () => {
+test("a quiet relay's events go in one batch at the turn's end, in order, each connection's bytes joined until its next event", async () => {
   const { relay, batches } = kept<Event>();
   relay.push(1, { type: "open" });
   relay.bytes(1, bytesOf("he"), data);
@@ -47,7 +49,7 @@ test("a turn's events go in one batch, in order, each connection's bytes joined 
   assert.equal(joined.bytes.buffer.byteLength, 5, "joined bytes are a store of their own");
 
   // Nothing more, no batch.
-  await turn();
+  await wait(20);
   assert.equal(batches.length, 1);
 });
 
@@ -71,12 +73,34 @@ test("a batch that holds FLUSH_AT bytes goes at once", async () => {
     ],
   );
 
-  // What follows waits for the turn again.
+  // What follows waits for the window that batch began.
   relay.bytes(1, chunk, data);
   assert.equal(batches.length, 1);
-  await turn();
+  await wait(20);
   assert.equal(batches.length, 2);
   assert.equal(batches[1].length, 1);
+});
+
+test("the first event after a quiet spell goes at its turn's end, what follows within the window at its end", async () => {
+  const { relay, batches } = kept<Event>(undefined, 40);
+  relay.bytes(1, bytesOf("ping"), data);
+  await turn();
+  assert.deepEqual(batches.map(said), [["1:data:ping"]]);
+
+  relay.bytes(1, bytesOf("a"), data);
+  await turn();
+  relay.bytes(2, bytesOf("b"), data);
+  relay.bytes(1, bytesOf("c"), data);
+  await turn();
+  assert.equal(batches.length, 1, "held while the window lasts");
+  await wait(60);
+  assert.deepEqual(batches.map(said).slice(1), [["1:data:ac", "2:data:b"]]);
+
+  // Quiet for a window: the next goes at once again.
+  await wait(60);
+  relay.push(1, { type: "close" });
+  await turn();
+  assert.deepEqual(batches.map(said).slice(2), [["1:close"]]);
 });
 
 test("a dropped batch is never sent", async () => {
@@ -90,6 +114,12 @@ test("a dropped batch is never sent", async () => {
   relay.bytes(1, bytesOf("new"), data);
   await turn();
   assert.deepEqual(batches.map(said), [["1:data:new"]]);
+
+  // One held for its window is dropped too, its timer with it.
+  relay.bytes(1, bytesOf("held"), data);
+  relay.drop();
+  await wait(20);
+  assert.equal(batches.length, 1);
 });
 
 async function listen(onConnection: (socket: Socket) => void): Promise<[Server, number]> {
@@ -178,7 +208,7 @@ test("two sockets' bytes go in one batch", async () => {
     });
   }
 
-  // Both write in the same turn, so both reads land before the relay's turn ends; the
+  // Both write in the same turn, so both reads land in one batch; the
   // machine may be busy enough to part them once, so they have a few tries.
   const both = () =>
     batches.some((batch) => {

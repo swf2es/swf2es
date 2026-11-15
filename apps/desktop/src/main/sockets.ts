@@ -1,7 +1,8 @@
 // flash.net.Socket's TCP connections, made here for the page, which has
 // no network of its own beyond fetch, and carried over IPC. Each page's
 // connections (connections.ts) close as it navigates, reloads or goes, and
-// their events go to it gathered, one message a turn (relay.ts).
+// their events go to it gathered, a message a millisecond at most
+// (relay.ts).
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import type { SocketEvent } from "../shared/api.js";
 import { type ConnectionOptions, Connections, validEndpoint } from "./connections.ts";

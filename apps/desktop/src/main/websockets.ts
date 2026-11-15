@@ -2,7 +2,8 @@
 // network of its own, and carried over IPC as flash.net.Socket's are
 // (sockets.ts). Each page's connections (websocket-connections.ts) close
 // as it navigates, reloads or goes, and their events go to it gathered,
-// one message a turn (relay.ts), each message an event of its own.
+// a message a millisecond at most (relay.ts), each message an event of its
+// own.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import type { WebSocketEvent } from "../shared/api.js";
 import { webSocketDataLine, webSocketLine } from "./netlog.ts";

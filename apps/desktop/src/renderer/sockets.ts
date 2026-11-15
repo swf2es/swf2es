@@ -6,7 +6,7 @@ import type { DesktopSockets } from "../shared/api.js";
 export function shellSocketHost(sockets: DesktopSockets): SocketHost {
   // Until its close, which the shell sends after an error and after a close asked for.
   const open = new Map<number, SocketEvents>();
-  // A turn's events at once, each to its connection in turn.
+  // A batch is one task: its events go to their connections in one loop.
   sockets.onEvents((batch) => {
     for (let i = 0; i < batch.length; i++) {
       const [id, event] = batch[i];

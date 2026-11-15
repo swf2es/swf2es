@@ -7,7 +7,7 @@ import type { DesktopWebSockets } from "../shared/api.js";
 export function shellWebSocketHost(webSockets: DesktopWebSockets): WebSocketHost {
   // Until its close, which the shell sends after a failure too.
   const open = new Map<number, WebSocketEvents>();
-  // A turn's events at once, each message one of them, to its connection in turn.
+  // A batch is one task: its events, a message each, go to their connections in one loop.
   webSockets.onEvents((batch) => {
     for (let i = 0; i < batch.length; i++) {
       const [id, event] = batch[i];

@@ -136,7 +136,7 @@ export type SocketEvent =
   | { type: "error"; message: string };
 
 /**
- * Events as the shell sends them, gathered over a turn of its event loop:
+ * Events as the shell sends them, gathered over a millisecond at most:
  * each with its connection's id, in the order they came.
  */
 export type ConnectionEvents<E> = readonly (readonly [id: number, event: E])[];

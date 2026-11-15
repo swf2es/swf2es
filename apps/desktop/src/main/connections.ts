@@ -19,8 +19,8 @@ export const MAX_BUFFERED = 4 * 1024 * 1024;
 
 /**
  * Each connection's read buffer, read into again and again, so that a read
- * makes one store, the copy the page is sent, where Node's stream would
- * make a Buffer for it besides.
+ * makes one store, its copy for the page, where Node's stream would make a
+ * Buffer for it besides.
  */
 const READ_BUFFER = 64 * 1024;
 
@@ -148,8 +148,8 @@ export class Connections {
 
   /**
    * How `id`'s socket is read: into a buffer of its own, each read copied
-   * out at its length, the one copy, which the page is given. It never
-   * pauses the socket: the page's events go as they come (relay.ts).
+   * out at its length for the page. It never pauses the socket, as its
+   * stream never did.
    */
   private reader(id: number): OnReadOpts {
     return {
