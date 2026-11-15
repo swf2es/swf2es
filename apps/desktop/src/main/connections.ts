@@ -2,9 +2,9 @@
 // the proxy (--proxy, proxy.ts): what the socket bridge (sockets.ts) holds
 // for each page, apart from Electron so that node runs it in the tests
 // (tests/desktop/connections.test.ts).
-import { connect, type Socket } from "node:net";
+import { connect, type OnReadOpts, type Socket } from "node:net";
 import type { SocketEvent } from "../shared/api.js";
-import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
+import { type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
 
 /** As many as a page may hold open at once; past it a connection is refused. */
 const MAX_OPEN = 64;
@@ -16,6 +16,13 @@ const MAX_OPEN = 64;
  * Flash's did when a write could not go.
  */
 export const MAX_BUFFERED = 4 * 1024 * 1024;
+
+/**
+ * Each connection's read buffer, read into again and again, so that a read
+ * makes one store, the copy the page is sent, where Node's stream would
+ * make a Buffer for it besides.
+ */
+const READ_BUFFER = 64 * 1024;
 
 const SOCKET_ERROR = "Error #2031: Socket Error.";
 
@@ -82,7 +89,7 @@ export class Connections {
       return;
     }
 
-    const socket = connect({ host: target, port: port as number });
+    const socket = connect({ host: target, port: port as number, onread: this.reader(id) });
     socket.on("connect", () =>
       this.tell(id, {
         type: "open",
@@ -104,8 +111,8 @@ export class Connections {
   private connectThrough(proxy: ProxyConfig, id: number, target: string, port: number): void {
     const opening = new AbortController();
     this.opening.set(id, opening);
-    connectThrough(proxy, target, port, { signal: opening.signal }).then(
-      (socket) => {
+    tunnelThrough(proxy, target, port, { signal: opening.signal, onread: this.reader(id) }).then(
+      ({ socket, rest }) => {
         if (this.opening.get(id) !== opening) {
           socket.destroy();
           return;
@@ -120,6 +127,12 @@ export class Connections {
           remoteAddress: target,
           remotePort: port,
         });
+        // What came with the proxy's reply is the connection's first.
+        if (rest.length > 0) {
+          this.tell(id, { type: "data", bytes: rest });
+        }
+
+        socket.resume();
       },
       (error: ProxyError) => {
         if (this.opening.get(id) !== opening) {
@@ -133,9 +146,23 @@ export class Connections {
     );
   }
 
+  /**
+   * How `id`'s socket is read: into a buffer of its own, each read copied
+   * out at its length, the one copy, which the page is given. It never
+   * pauses the socket: the page's events go as they come (relay.ts).
+   */
+  private reader(id: number): OnReadOpts {
+    return {
+      buffer: new Uint8Array(READ_BUFFER),
+      callback: (length, buffer) => {
+        this.tell(id, { type: "data", bytes: new Uint8Array(buffer.subarray(0, length)) });
+        return true;
+      },
+    };
+  }
+
   private attach(id: number, socket: Socket): void {
     this.sockets.set(id, socket);
-    socket.on("data", (bytes) => this.tell(id, { type: "data", bytes: new Uint8Array(bytes) }));
     socket.on("error", () => this.tell(id, { type: "error", message: SOCKET_ERROR }));
     socket.on("close", () => {
       // Only the socket under this id: a page that reused it has another by now.

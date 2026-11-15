@@ -382,6 +382,15 @@ stops reading cannot fill the main process's memory. A page's sockets
 close, silently, as it navigates or reloads, and with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
+Each socket is read into a 64 KB buffer of its own (net's `onread`), and
+each read copied out at its length, the one store a read makes: Node's
+own Buffers would be a second, and Electron's IPC sends a typed array's
+whole store, so a view of the buffer would not do. A socket through the
+proxy is read the same way from its start, its handshake included; it is
+paused once the tunnel is made, the bytes that came with the proxy's
+reply are its first data, and it reads on once the page is told it is
+open. Its reads never pause it, as its stream never paused before.
+
 ## WebSockets
 
 `air.net.WebSocket` runs over a WebSocketHost
@@ -465,8 +474,9 @@ where the SWF with no such listener enters and leaves by the menu's F11.
 A URL answered 404 completes for the application, with the response's
 body, and fails for the remote SWF.
 `connections.test.ts` and
-`sandbox.test.ts` test the sockets' limits and the sandbox's grants in
-node, `websocket-connections.test.ts` the WebSockets' messages, close
+`sandbox.test.ts` test the sockets' limits and reads, each copied out at
+its length, through a proxy whose reply comes with the first bytes too,
+and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, close
 codes, refusals, limits and certificates, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and
 what policies grant, by the specification's examples, and
