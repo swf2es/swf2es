@@ -798,6 +798,8 @@ The compiler and runtime:
   through an unchecked entry, interface and super calls bound, interface
   methods by an alias every implementer shares.
 - #797: script objects of thousands of slots kept fast in V8.
+- #1019: Array.NUMERIC sorts of numbers by the same quicksort on their
+  doubles, the comparison inline (native-collections' sorts 95 → 55 ms).
 - #908, #912, #891, #882: untyped keys and string names made cheaply.
 - #938, #941, #943: a String's length read in place, a primitive's
   methods kept from their first call.
