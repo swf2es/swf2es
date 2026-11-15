@@ -90,7 +90,8 @@ fetch-electron` does so ahead, for the tests.
   sandbox and policy files still judge every request first, cached or
   not, and a response is kept for the address it came from and the
   origin of the SWF that asked, so no SWF reads another site's cached
-  responses. A freshness the cache guesses from Last-Modified alone lasts
+  responses. Nothing from a host `--ignore-certificate-errors` names is
+  cached. A freshness the cache guesses from Last-Modified alone lasts
   a day at most; a SWF updated on its server within it shows after File ›
   Clear HTTP Cache. It lives in `HTTP Cache` under the system's cache directory
   (`~/.cache/@swf2es/desktop/` on Linux, `~/Library/Caches/@swf2es/desktop/`

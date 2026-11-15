@@ -241,17 +241,27 @@ it needs. It stands where the network would, in `network.ts`'s
 sandbox, the policy files, the address's place and its port are decided
 first, hit or miss, so a load a policy refuses is refused whatever is
 stored, and a hit still resolves the host to judge it. What it answers
-with is what that very address answered for this movie's origin, and
-nothing else: each response is kept for the address its host was pinned
-to and for the playing movie's origin, its partition (a local SWF's
-partition is `local`, an application's `application`). So DNS that
+with is what that very address answered, by the same route, for this
+movie's origin, and nothing else: each response is kept for the address
+its host was pinned to, for its route (the `--proxy` it went through, by
+its kind, host and port, or `direct`: an address is a machine only along
+one way to it), and for the playing movie's origin, its partition (a
+local SWF's partition is `local`, an application's `application`). A
+policy file's fetch is kept apart from a SWF's own GET of the same URL. So DNS that
 rebinds a name gains nothing through the cache: a policy file kept from
 a public address never answers for the name now at a private one, which
 is asked for its own, as the session's policy files are kept by their
 address; a body from one address never serves a request judged against
 another, nor does one address's 304 confirm another's body. And one
 movie never reads, nor times, what another origin's movie loaded, as a
-browser partitions its cache by site.
+browser partitions its cache by site. Two things are never cached at
+all, neither read nor kept: what comes from an https host whose
+certificate `--ignore-certificate-errors` leaves unchecked, which whoever
+was on the way may have written and which would otherwise outlive the run
+that allowed it; and a policy file from an address that is not public (a
+private network's, link-local, this machine's), whose grant is one
+network's alone, while the same address on another network is another
+machine, however long its max-age.
 
 What may be stored, whether a stored response is fresh, the conditional
 headers of its revalidation and what a 304 changes are
@@ -298,16 +308,17 @@ and holds metadata only, a row a response:
 
 | Column | |
 | --- | --- |
-| `key` (primary key) | The SHA-256 of the partition, address, method, URL and the Vary'd request headers. |
+| `key` (primary key) | The SHA-256 of the partition, route, address, kind of fetch (a policy file's or a load), method, URL and the Vary'd request headers. |
 | `file` | The body's name in `bodies/`: the key. |
-| `partition`, `address` | The movie's origin it was kept for, and the address it came from. |
+| `partition`, `route`, `address` | The movie's origin it was kept for, the proxy or `direct`, and the address it came from. |
 | `method`, `url` | What was asked; indexed by URL and partition, to find a request's entries and forget a URL's. |
 | `vary` | The request headers the Vary named, and their values, as JSON. |
 | `status`, `headers` | The response, its headers as received but Set-Cookie, as JSON. |
 | `policy` | http-cache-semantics' `CachePolicy`, serialized: what freshness is judged by. |
 | `stored`, `expires` | When it was kept or last revalidated, and when it goes stale. |
 | `etag`, `last_modified` | Its validators; `expires` is indexed where both are null, the entries of no more use once stale. |
-| `size`, `last_access` | Its body's bytes, and when it was last served (indexed). |
+| `size`, `charge` | Its body's bytes, and what it charges the budget: those, its headers', policy's and URL's text, and 4 KB for its file's disk block and its share of the index. |
+| `last_access` | When it was last served (indexed). |
 
 Every body is a file in one flat directory, `bodies/`, named by its key,
 with no name of the server's. A body is written to a temporary file,
@@ -315,14 +326,17 @@ synced, renamed into place, and only then its row written, the writes in
 the background one at a time; a row is deleted before its file. A serve
 opens the file and checks its size against the row's, and a file gone or
 of another size is a miss and its row dropped; each start sweeps away,
-beside the writes rather than before them, temporary files, files with
-no row and rows whose file is gone or of another size, dropping a row
-only as it found it. So a crash leaves no row pointing at half a file.
-Past the budget, 512 MB, the least recently served go first, by their
-index, the bodies' total kept in memory rather than summed; an entry
+beside the writes rather than before them, and a page of 512 names or
+rows at a time, temporary files, files no row names and rows whose file
+is gone or of another size, dropping a row only as it read it. So a
+crash leaves no row pointing at half a file. Past the budget, 512 MB of
+charges, or past 50,000 entries, the least recently served go first, by
+their index, the charges' total and the count kept in memory rather than
+summed, so that the index and the files are bounded as the bodies are,
+cache-busted small responses with large headers among them; an entry
 stale with no validator, of no more use, is dropped as the cache next
-writes; no body larger than an eighth of the budget is kept, as Chromium
-keeps none, so that no one response empties it. An index that does not
+writes; no entry charging more than an eighth of the budget is kept, as
+Chromium keeps no larger body, so that no one response empties it. An index that does not
 open is started again empty, the bodies with it. A cache that fails
 after, its disk full, read only or gone, or a row that does not parse,
 is left out where it fails, said once on stderr: the request goes to the
