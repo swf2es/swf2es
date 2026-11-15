@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { nodeSocketHost } from "@swf2es/player-hosts/node";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
+import { noDelayOf, socketsOpenedBy } from "../../tcp-nodelay.ts";
 
 test("the Node host exchanges bytes with a TCP socket and reports its close", async () => {
   const server = createServer((peer) => {
@@ -63,6 +64,25 @@ test("the Node host exchanges bytes with a TCP socket and reports its close", as
   } finally {
     transport.close();
     server.close();
+  }
+});
+
+test("the Node host sends at once unless the script set tcpNoDelay to false", () => {
+  const events = { open() {}, data() {}, close() {}, error() {} };
+  for (const [options, expected] of [
+    [undefined, true],
+    [{}, true],
+    [{ noDelay: true }, true],
+    [{ noDelay: false }, false],
+  ] as const) {
+    let transport: { close(): void } | undefined;
+    const opened = socketsOpenedBy(() => {
+      // Port 9 on loopback: nothing need answer, only the socket is looked at.
+      transport = nodeSocketHost().connect("127.0.0.1", 9, events, options);
+    });
+    assert.equal(opened.length, 1);
+    assert.equal(noDelayOf(opened[0]), expected);
+    transport?.close();
   }
 });
 

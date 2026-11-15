@@ -143,8 +143,11 @@ export type ConnectionEvents<E> = readonly (readonly [id: number, event: E])[];
 
 /** flash.net.Socket's TCP connections, opened by the shell. */
 export interface DesktopSockets {
-  /** A connection's id; its events follow, an "error" one if the shell refuses it. */
-  connect(host: string, port: number): number;
+  /**
+   * A connection's id; its events follow, an "error" one if the shell refuses it. `noDelay` is
+   * tcpNoDelay as the SWF set it, absent where it did not: the shell then sends at once.
+   */
+  connect(host: string, port: number, noDelay?: boolean): number;
   send(id: number, bytes: Uint8Array): void;
   close(id: number): void;
   onEvents(listener: (events: ConnectionEvents<SocketEvent>) => void): void;

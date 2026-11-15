@@ -501,8 +501,11 @@ configure({
 A player you set up yourself takes `socket:` from
 `webSocketSocketHost(urlFor)` (`@swf2es/player-hosts/websocket`). In node,
 `nodeSocketHost()` (`@swf2es/player-hosts/node`) connects directly, and
-so does the desktop app, through its main process; an embedder with a
-transport of its own gives it as `configure({ sockets })`.
+so does the desktop app, through its main process; both send each write
+at once, without Nagle's algorithm, unless an AIR SWF set `tcpNoDelay`
+to false before it connected. An embedder with a transport of its own
+gives it as `configure({ sockets })`; its `connect(host, port, events,
+options)` gets `options.noDelay` where the SWF set `tcpNoDelay`.
 
 An AIR application's `air.net.WebSocket` uses the page's own `WebSocket`.
 An embedder whose page may not connect, as the desktop app's, whose main

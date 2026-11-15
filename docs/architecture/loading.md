@@ -293,9 +293,10 @@ timing showed it, a write, write, read exchange waiting some 40 ms on
 the peer's delayed acknowledgement each time (Nagle's algorithm, AIR's
 default) unless `tcpNoDelay` was true when `connect()` ran. The host
 gets it with the connect, as `options.noDelay`, absent where the script
-never set it, for the host's own default. A WebSocket relay ignores it:
-the relay's own TCP connection to the server is the relay's to
-configure.
+never set it; then the host's default holds, which for the Node host and
+the desktop app is to send at once, so a script's explicit false alone
+turns Nagle's algorithm on. A WebSocket relay ignores it: the relay's
+own TCP connection to the server is the relay's to configure.
 
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from

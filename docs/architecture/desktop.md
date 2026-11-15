@@ -378,7 +378,16 @@ connects to the address the policy came from. A local SWF with
 networking needs no socket policy, as before. A refused socket fails
 with #2031, as one no server took. A page holds at most 64 at once, and
 one with more than 4 MB its peer has not read fails, so a peer that
-stops reading cannot fill the main process's memory. A page's sockets
+stops reading cannot fill the main process's memory. Each sends at once
+(TCP_NODELAY) unless the SWF set AIR's `tcpNoDelay` to false before it
+connected: with Nagle's algorithm, node's default and AIR's, the second
+of two small writes waits for the peer to acknowledge the first, which
+a peer with nothing to send back delays (about 40 ms on Linux, up to
+200 ms on Windows), so a chatty protocol's every exchange would wait
+too. `tcpNoDelay` as `connect()` saw it goes with `socket:connect`. A
+socket through the proxy takes it once the tunnel is up, Nagle's
+algorithm staying on through the handshake, which never writes twice
+without an answer between, so nothing in it waits. A page's sockets
 close, silently, as it navigates or reloads, and with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
