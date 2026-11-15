@@ -41,6 +41,8 @@ declare module "http-cache-semantics" {
       response: HttpResponse,
     ): { policy: CachePolicy; modified: boolean; matches: boolean };
     timeToLive(): number;
+    /** Seconds since the response was made, by its Age and its time here. */
+    age(): number;
     toObject(): object;
   }
 

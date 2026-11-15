@@ -17,7 +17,8 @@
 //   a request to an address more private than the SWF's own (addresses.ts)
 //   needs a policy from that address granting it, whatever its purpose,
 //   same origin or not. Each request resolves its host once and connects
-//   to that address, its policy file fetched from the same one, so DNS
+//   to that address, its policy file fetched from the same one, and the
+//   HTTP cache keeps each response for the address it came from, so DNS
 //   that changes its answer (rebinding) changes nothing.
 // - Requests are bounded: methods, headers, sizes, redirects, time, and
 //   how many run at once; and each movie's are aborted as the next opens.
@@ -28,7 +29,9 @@
 // - A GET's answer may come from the HTTP cache (http-cache.ts) in place of
 //   the server, or the server's 304 to its revalidation: only once the
 //   request has been judged as any other, so a policy that refuses it
-//   refuses it whatever is stored.
+//   refuses it whatever is stored, and only from what that very address
+//   answered for this movie's origin, the policy files that judged it
+//   included. A POST answered with success forgets what its URL had.
 //
 // Its types and limits are network-types.ts, and the rules that need no
 // instance network-rules.ts.
@@ -42,7 +45,7 @@ import type { Duplex } from "node:stream";
 import * as tls from "node:tls";
 import { type AddressClass, addressClass, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
-import type { CacheEntry, CacheRequest, HttpCache } from "./http-cache.ts";
+import { type CacheEntry, type CacheRequest, type HttpCache, servedHeaders } from "./http-cache.ts";
 import {
   abortable,
   bare,
@@ -100,6 +103,28 @@ interface SendOptions {
   deadline?: number;
   /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
   budget?: Budget;
+  /** Whose HTTP cache answers and keeps it (partitionOf); none, where absent. */
+  partition?: string;
+  /** A policy file's fetch: fresh only as long as its server says. */
+  policyFile?: boolean;
+}
+
+/**
+ * Whose cache a movie's requests use: its origin, as a browser partitions
+ * its cache by site, so that no movie reads or probes another origin's;
+ * the URL it was opened by until it has come. Local movies share one, and
+ * applications another.
+ */
+function partitionOf(session: Session): string {
+  const movie = session.movie;
+  switch (movie.kind) {
+    case "remote":
+      return session.origin?.url.origin ?? new URL(movie.url).origin;
+    case "local":
+      return "local";
+    case "application":
+      return "application";
+  }
 }
 
 /** The headers a request goes with: the SWF's own over what every request sends. */
@@ -507,6 +532,7 @@ export class Network {
         max: this.limits.response,
         referer: null,
         budget,
+        partition: partitionOf(session),
       });
       const next = redirectOf(url, response);
       if (next) {
@@ -590,6 +616,7 @@ export class Network {
         max: this.limits.response,
         budget,
         referer: refererFor(session.origin?.url ?? null, url),
+        partition: partitionOf(session),
       });
       const next = redirectOf(url, response);
       if (!next) {
@@ -619,7 +646,7 @@ export class Network {
   private async policiesFor(session: Session, url: URL, address: string): Promise<UrlPolicy[]> {
     const get = (policyUrl: URL) =>
       cached(session.policies, `${policyUrl.href}|${address}`, () =>
-        this.urlPolicy(policyUrl, address, session.abort.signal),
+        this.urlPolicy(policyUrl, address, session.abort.signal, partitionOf(session)),
       );
     const master = await get(new URL("/crossdomain.xml", url.origin));
     const meta = urlMetaPolicy(master);
@@ -648,6 +675,7 @@ export class Network {
     url: URL,
     address: string,
     signal: AbortSignal,
+    partition: string,
   ): Promise<UrlPolicy | null> {
     let response: NetResponse;
     try {
@@ -655,6 +683,8 @@ export class Network {
         read: true,
         max: this.limits.policy,
         referer: null,
+        partition,
+        policyFile: true,
         timeout: this.limits.policyTimeout,
         deadline: this.limits.policyTimeout,
       });
@@ -800,7 +830,9 @@ export class Network {
    * response fresh or revalidated with a 304, else from send(), what comes
    * kept where it may be. Its body counts as send()'s would, against `max`
    * and the movie's budget. Only what send() would read is asked of it: a
-   * GET whose body is read.
+   * GET whose body is read, for the address it was judged against and the
+   * movie's partition. Anything else that succeeds, a POST, forgets what
+   * its URL had (RFC 9111, 4.4).
    */
   private async exchange(
     url: URL,
@@ -812,12 +844,26 @@ export class Network {
     options: SendOptions,
   ): Promise<NetResponse> {
     const cache = this.cache;
+    const partition = options.partition;
+    if (!cache || partition === undefined) {
+      return this.send(url, address, method, headers, body, signal, options);
+    }
+
+    if (method !== "GET") {
+      const response = await this.send(url, address, method, headers, body, signal, options);
+      cache.invalidate(url, response, partition);
+      return response;
+    }
+
     const request: CacheRequest = {
       method,
       url: url.href,
       headers: Object.entries(outgoingHeaders(headers, options.referer)),
+      address,
+      partition,
+      heuristic: !options.policyFile,
     };
-    if (!cache || !options.read || !cache.handles(request)) {
+    if (!options.read || !cache.handles(request)) {
       return this.send(url, address, method, headers, body, signal, options);
     }
 
@@ -825,7 +871,7 @@ export class Network {
     if (found?.fresh) {
       const bytes = await this.storedBody(cache, found, signal, options);
       if (bytes) {
-        return { bytes, status: found.status, headers: found.headers, cache: "hit" };
+        return { bytes, status: found.status, headers: servedHeaders(found), cache: "hit" };
       }
     }
 
@@ -846,7 +892,7 @@ export class Network {
         return {
           bytes,
           status: refreshed.status,
-          headers: refreshed.headers,
+          headers: servedHeaders(refreshed),
           cache: "revalidated",
         };
       }

@@ -1,20 +1,32 @@
 // The desktop app's HTTP cache (apps/desktop/src/main/http-cache.ts), alone
 // and under its network (network.ts), against a server of the test's own:
 // RFC 9111's freshness and revalidation as http-cache-semantics reads them,
-// Vary, the budget, what a crash leaves, and Flash's rules still judging
-// every request the cache could answer.
+// Vary, invalidation, the budget, what a crash or a failing disk leaves,
+// and Flash's rules still judging every request the cache could answer:
+// a response kept for the address and the movie's origin it came for, so
+// that DNS that changes its answer reaches nothing through the cache.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { after, before, test } from "node:test";
-import { HttpCache } from "../../apps/desktop/src/main/http-cache.ts";
+import { type CacheRequest, HttpCache } from "../../apps/desktop/src/main/http-cache.ts";
 import { Network } from "../../apps/desktop/src/main/network.ts";
 import { type NetResponse, Refused } from "../../apps/desktop/src/main/network-types.ts";
 
 const PUBLIC = "127.0.0.2";
+/** Where rebind.test may also be: an address the test's network takes for a private one. */
+const PRIVATE = "127.0.0.3";
 
 interface Resource {
   headers?: Record<string, string>;
@@ -25,21 +37,38 @@ interface Resource {
   lastModified?: string;
   /** What a 304 adds beside the validators. */
   notModified?: Record<string, string>;
+  /** What a POST answers, a 200 by default. */
+  post?: { status: number; headers?: Record<string, string> };
 }
 
 /** What each /r/<name> answers, and the requests each got. */
 const resources = new Map<string, Resource>();
 const seen = new Map<string, IncomingHttpHeaders[]>();
 let policy: string | null = null;
+/** What the policy file comes with, and the requests for it. */
+let policyHeaders: Record<string, string> = {};
+const policyRequests: IncomingHttpHeaders[] = [];
+/** What the private address's own policy says, and the paths it was asked for. */
+let insidePolicy: string | null = null;
+const insideSeen: string[] = [];
 let port = 0;
+
+const xml = (domain: string) =>
+  `<?xml version="1.0"?><cross-domain-policy><allow-access-from domain="${domain}"/></cross-domain-policy>`;
 
 const server = createServer((request, response) => {
   const url = new URL(request.url ?? "/", "http://x");
   if (url.pathname === "/crossdomain.xml") {
+    policyRequests.push(request.headers);
+    const since = request.headers["if-modified-since"];
     if (policy === null) {
       response.writeHead(404).end();
+    } else if (since && since === policyHeaders["last-modified"]) {
+      response.writeHead(304, policyHeaders).end();
     } else {
-      response.writeHead(200, { "content-type": "text/x-cross-domain-policy" }).end(policy);
+      response
+        .writeHead(200, { "content-type": "text/x-cross-domain-policy", ...policyHeaders })
+        .end(policy);
     }
 
     return;
@@ -58,6 +87,12 @@ const server = createServer((request, response) => {
   }
 
   seen.set(name, [...(seen.get(name) ?? []), request.headers]);
+  if (request.method === "POST") {
+    request.resume();
+    response.writeHead(resource.post?.status ?? 200, resource.post?.headers).end("posted");
+    return;
+  }
+
   const validators: Record<string, string> = {
     ...(resource.etag ? { etag: resource.etag } : {}),
     ...(resource.lastModified ? { "last-modified": resource.lastModified } : {}),
@@ -77,14 +112,41 @@ const server = createServer((request, response) => {
     .end(resource.body ?? name);
 });
 
+/** The private address's server, at the same port: what rebind.test reaches once it rebinds. */
+const inside = createServer((request, response) => {
+  const url = new URL(request.url ?? "/", "http://x");
+  insideSeen.push(url.pathname);
+  if (url.pathname === "/crossdomain.xml" && insidePolicy !== null) {
+    response.writeHead(200, { "content-type": "text/x-cross-domain-policy" }).end(insidePolicy);
+  } else if (url.pathname.startsWith("/r/")) {
+    response.writeHead(200, { "cache-control": "max-age=600" }).end("inside");
+  } else {
+    response.writeHead(404).end();
+  }
+});
+
 before(async () => {
-  await new Promise<void>((done) => server.listen(0, PUBLIC, done));
-  port = (server.address() as { port: number }).port;
+  // A port both addresses have free.
+  for (;;) {
+    await new Promise<void>((done) => server.listen(0, PUBLIC, done));
+    port = (server.address() as { port: number }).port;
+    const free = await new Promise<boolean>((done) => {
+      inside.once("error", () => done(false));
+      inside.listen(port, PRIVATE, () => done(true));
+    });
+    if (free) {
+      return;
+    }
+
+    await new Promise((done) => server.close(done));
+  }
 });
 
 after(() => {
-  server.close();
-  server.closeAllConnections();
+  for (const each of [server, inside]) {
+    each.close();
+    each.closeAllConnections();
+  }
 });
 
 const directories: string[] = [];
@@ -104,29 +166,48 @@ function directory(): string {
 let offset = 0;
 const clock = () => Date.now() + offset;
 
+/** What the caches said of their failures. */
+const warnings: string[] = [];
+
 function cache(at = directory(), budget?: number): HttpCache {
-  return new HttpCache(at, { now: clock, ...(budget === undefined ? {} : { budget }) });
+  return new HttpCache(at, {
+    now: clock,
+    warn: (message) => warnings.push(message),
+    ...(budget === undefined ? {} : { budget }),
+  });
+}
+
+/** A request as network.ts asks the cache, from the address and for the partition it names. */
+function ask(url: string, headers: [string, string][] = []): CacheRequest {
+  return { method: "GET", url, headers, address: PUBLIC, partition: "http://swf.test" };
 }
 
 const swf = () => `http://swf.test:${port}`;
 const other = () => `http://other.test:${port}`;
+const rebind = () => `http://rebind.test:${port}`;
+/** Where rebind.test is now. */
+let rebindTo = PUBLIC;
 
-/** A network playing a remote SWF from swf.test, answered from `store`. */
-async function playing(store: HttpCache | null, limits = {}): Promise<Network> {
+/** A network playing a remote SWF from `from` (swf.test's), answered from `store`. */
+async function playing(store: HttpCache | null, limits = {}, from = swf()): Promise<Network> {
   const net = new Network({
     resolve: async (host) => {
-      if (host === "swf.test" || host === "other.test") {
-        return [PUBLIC];
+      switch (host) {
+        case "swf.test":
+        case "other.test":
+          return [PUBLIC];
+        case "rebind.test":
+          return [rebindTo];
+        default:
+          throw new Error("no such host");
       }
-
-      throw new Error("no such host");
     },
-    classify: () => "public",
+    classify: (address) => (address === PRIVATE ? "private" : "public"),
     limits,
   });
   net.cache = store;
-  net.play({ kind: "remote", url: `${swf()}/movie.swf` });
-  await get(net, `${swf()}/movie.swf`, "movie");
+  net.play({ kind: "remote", url: `${from}/movie.swf` });
+  await get(net, `${from}/movie.swf`, "movie");
   return net;
 }
 
@@ -317,11 +398,7 @@ test("Vary: each value of a header it names an entry of its own; Vary: * none", 
     ] as [string, string][],
     bytes: new TextEncoder().encode(bytes),
   });
-  const request = (coding: string) => ({
-    method: "GET",
-    url,
-    headers: [["Accept-Encoding", coding]] as [string, string][],
-  });
+  const request = (coding: string) => ask(url, [["Accept-Encoding", coding]]);
   await alone.store(request("gzip"), response("gzipped"));
   await alone.store(request("br"), response("brotli"));
   for (const [coding, text] of [
@@ -342,11 +419,7 @@ test("what answered an Authorization only where public; Set-Cookie never kept", 
   offset = 0;
   const store = cache();
   const url = "http://example.test/private";
-  const authorized = {
-    method: "GET",
-    url,
-    headers: [["Authorization", "Basic eDp5"]] as [string, string][],
-  };
+  const authorized = ask(url, [["Authorization", "Basic eDp5"]]);
   const answer = (control: string) => ({
     status: 200,
     headers: [
@@ -363,11 +436,7 @@ test("what answered an Authorization only where public; Set-Cookie never kept", 
   assert.deepEqual(entry.headers, [["Cache-Control", "public, max-age=60"]]);
 
   // A request conditional of its own is the SWF's to make: neither answered nor kept.
-  const conditional = {
-    method: "GET",
-    url,
-    headers: [["If-None-Match", '"x"']] as [string, string][],
-  };
+  const conditional = ask(url, [["If-None-Match", '"x"']]);
   assert.equal(store.lookup(conditional), null);
   await store.store({ ...conditional, url: `${url}2` }, answer("max-age=60"));
   assert.equal(store.usage().entries, 1);
@@ -379,7 +448,7 @@ test("past its budget the least recently served go first", async () => {
   // 2000 bytes, so 250 at most a body: eight of 240 fit, the ninth and tenth do not.
   const at = directory();
   const store = cache(at, 2000);
-  const request = (n: number) => ({ method: "GET", url: `http://example.test/${n}`, headers: [] });
+  const request = (n: number) => ask(`http://example.test/${n}`);
   const response = {
     status: 200,
     headers: [["Cache-Control", "max-age=600"]] as [string, string][],
@@ -415,7 +484,7 @@ test("a start sweeps away files with no row, temporary files and rows whose file
   offset = 0;
   const at = directory();
   let store = cache(at);
-  const request = (n: number) => ({ method: "GET", url: `http://example.test/${n}`, headers: [] });
+  const request = (n: number) => ask(`http://example.test/${n}`);
   const response = {
     status: 200,
     headers: [["Cache-Control", "max-age=600"]] as [string, string][],
@@ -464,9 +533,8 @@ test("a body file gone under a row is a miss, and the row dropped", async () => 
   const net = await playing(store);
   assert.deepEqual(await load(net, store, "vanish"), ["vanish", "network", 1]);
   const entry = store.lookup({
-    method: "GET",
-    url: `${swf()}/r/vanish`,
-    headers: requestHeaders(),
+    ...ask(`${swf()}/r/vanish`, requestHeaders()),
+    partition: swf(),
   });
   assert.ok(entry, "kept under the headers network.ts sends");
   unlinkSync(join(at, "bodies", entry.key));
@@ -490,7 +558,7 @@ test("a crash mid-write leaves no row pointing at a partial file", async () => {
   offset = 0;
   const at = directory();
   let store = cache(at);
-  const request = { method: "GET", url: "http://example.test/partial", headers: [] };
+  const request = ask("http://example.test/partial");
   const response = {
     status: 200,
     headers: [["Cache-Control", "max-age=600"]] as [string, string][],
@@ -539,8 +607,7 @@ test("Flash's policy still judges a request the cache could answer", async () =>
     return true;
   });
   // Granted, the stored response serves it.
-  policy =
-    '<?xml version="1.0"?><cross-domain-policy><allow-access-from domain="swf.test"/></cross-domain-policy>';
+  policy = xml("swf.test");
   const granted = await playing(store);
   const data = await get(granted, `${other()}/r/elsewhere`, "data");
   assert.equal(data.cache, "hit");
@@ -583,7 +650,7 @@ test("a clear forgets every response, and drops one being written", async () => 
   offset = 0;
   const at = directory();
   const store = cache(at);
-  const request = (n: number) => ({ method: "GET", url: `http://example.test/${n}`, headers: [] });
+  const request = (n: number) => ask(`http://example.test/${n}`);
   const response = {
     status: 200,
     headers: [["Cache-Control", "max-age=600"]] as [string, string][],
@@ -610,10 +677,236 @@ test("an index that cannot be read starts again empty", async () => {
   const store = cache(at);
   await store.settled();
   assert.deepEqual(store.usage(), { entries: 0, bytes: 0 });
-  await store.store(
-    { method: "GET", url: "http://example.test/", headers: [] },
-    { status: 200, headers: [["Cache-Control", "max-age=60"]], bytes: new Uint8Array(1) },
-  );
+  await store.store(ask("http://example.test/"), {
+    status: 200,
+    headers: [["Cache-Control", "max-age=60"]],
+    bytes: new Uint8Array(1),
+  });
   assert.equal(store.usage().entries, 1);
   store.close();
+});
+
+test("DNS that rebinds reaches nothing through the cache: each address is asked itself", async () => {
+  offset = 0;
+  policy = xml("swf.test");
+  policyHeaders = { "cache-control": "max-age=600" };
+  insidePolicy = null;
+  insideSeen.length = 0;
+  resources.set("rebound", { headers: { "cache-control": "max-age=600" }, body: "outside" });
+  const store = cache();
+  try {
+    // While rebind.test is public, its policy grants the SWF, and both it and the data are kept.
+    rebindTo = PUBLIC;
+    const first = await playing(store);
+    const outside = await get(first, `${rebind()}/r/rebound`);
+    await store.settled();
+    assert.equal(new TextDecoder().decode(outside.bytes ?? undefined), "outside");
+    assert.equal(store.usage().entries, 2, "the policy file and the data");
+
+    // Rebound to a private address, the next movie needs that address's own word: the public
+    // address's policy file, however fresh, is not it, nor its data the private one's.
+    rebindTo = PRIVATE;
+    const second = await playing(store);
+    await assert.rejects(get(second, `${rebind()}/r/rebound`), (error) => {
+      assert.ok(error instanceof Refused);
+      assert.match(error.message, /more private than the SWF, and no policy file there grants/);
+      return true;
+    });
+    assert.deepEqual(insideSeen, ["/crossdomain.xml"]);
+
+    // Granted there, the private address answers for itself, not the public one's response.
+    insidePolicy = xml("swf.test");
+    const third = await playing(store);
+    const granted = await get(third, `${rebind()}/r/rebound`);
+    assert.equal(new TextDecoder().decode(granted.bytes ?? undefined), "inside");
+    assert.equal(granted.cache, undefined);
+    assert.deepEqual(insideSeen, ["/crossdomain.xml", "/crossdomain.xml", "/r/rebound"]);
+    assert.equal(seen.get("rebound")?.length, 1);
+  } finally {
+    rebindTo = PUBLIC;
+    policy = null;
+    policyHeaders = {};
+    insidePolicy = null;
+    store.close();
+  }
+});
+
+test("each movie's origin has a cache of its own: one never reads another's", async () => {
+  offset = 0;
+  resources.set("shared", { headers: { "cache-control": "max-age=600" } });
+  const store = cache();
+  const content = async (net: Network) => {
+    const response = await get(net, `${swf()}/r/shared`, "content");
+    await store.settled();
+    return [response.cache ?? "network", seen.get("shared")?.length];
+  };
+  const mine = await playing(store);
+  assert.deepEqual(await content(mine), ["network", 1]);
+  assert.deepEqual(await content(mine), ["hit", 1]);
+  const theirs = await playing(store, {}, other());
+  assert.deepEqual(await content(theirs), ["network", 2]);
+  assert.deepEqual(await content(theirs), ["hit", 2]);
+  store.close();
+});
+
+test("a POST answered with success forgets its URL's responses, and its Location's", async () => {
+  offset = 0;
+  resources.set("posted", { headers: { "cache-control": "max-age=600" } });
+  resources.set("created", { headers: { "cache-control": "max-age=600" } });
+  resources.set("poster", {
+    headers: { "cache-control": "max-age=600" },
+    post: {
+      status: 201,
+      headers: { location: "/r/created", "content-location": "http://elsewhere.test/r/x" },
+    },
+  });
+  resources.set("refusing", {
+    headers: { "cache-control": "max-age=600" },
+    post: { status: 500 },
+  });
+  const store = cache();
+  const net = await playing(store);
+  const post = (name: string) =>
+    net.fetch(
+      {
+        url: `${swf()}/r/${name}`,
+        method: "POST",
+        headers: [],
+        body: new TextEncoder().encode("a=1"),
+        purpose: "data",
+      },
+      never,
+    );
+  for (const name of ["posted", "created", "refusing"]) {
+    assert.deepEqual(await load(net, store, name), [name, "network", 1]);
+    assert.deepEqual(await load(net, store, name), [name, "hit", 1]);
+  }
+
+  await post("posted");
+  assert.deepEqual(await load(net, store, "posted"), ["posted", "network", 3]);
+  await post("poster");
+  assert.deepEqual(await load(net, store, "created"), ["created", "network", 2]);
+  // A failure changed nothing it had.
+  await post("refusing");
+  assert.deepEqual(await load(net, store, "refusing"), ["refusing", "hit", 2]);
+  store.close();
+});
+
+test("a policy file is never fresh by a guess, and no guess lasts past a day", async () => {
+  offset = 0;
+  policy = xml("swf.test");
+  // Only Last-Modified: a tenth of a year's age would be a guess of over a month.
+  policyHeaders = { "last-modified": new Date(Date.now() - 400 * 86_400_000).toUTCString() };
+  policyRequests.length = 0;
+  resources.set("guarded", { headers: { "cache-control": "max-age=600" } });
+  const store = cache();
+  try {
+    const first = await playing(store);
+    await get(first, `${other()}/r/guarded`);
+    await store.settled();
+    // The next movie revalidates the policy file it has, rather than trusting it.
+    const second = await playing(store);
+    await get(second, `${other()}/r/guarded`);
+    assert.equal(policyRequests.length, 2);
+    assert.equal(policyRequests[1]["if-modified-since"], policyHeaders["last-modified"]);
+  } finally {
+    policy = null;
+    policyHeaders = {};
+    store.close();
+  }
+
+  const lastModified = new Date(Date.now() - 1000 * 86_400_000).toUTCString();
+  resources.set("old", { lastModified });
+  const guessed = cache();
+  const net = await playing(guessed);
+  assert.deepEqual(await load(net, guessed, "old"), ["old", "network", 1]);
+  offset = 23 * 3_600_000;
+  assert.deepEqual(await load(net, guessed, "old"), ["old", "hit", 1]);
+  offset = 25 * 3_600_000;
+  assert.deepEqual(await load(net, guessed, "old"), ["old", "revalidated", 2]);
+  guessed.close();
+});
+
+test("a response from the cache says its age", async () => {
+  offset = 0;
+  resources.set("aged", { headers: { "cache-control": "max-age=600", age: "5" } });
+  const store = cache();
+  const net = await playing(store);
+  await load(net, store, "aged");
+  offset = 30_000;
+  const hit = await get(net, `${swf()}/r/aged`);
+  assert.equal(hit.cache, "hit");
+  assert.deepEqual(
+    hit.headers.filter(([n]) => n.toLowerCase() === "age"),
+    [["Age", "35"]],
+  );
+  store.close();
+});
+
+test("a URL that comes to vary leaves no response of before that would answer any request", async () => {
+  offset = 0;
+  resources.set("varies", { headers: { "cache-control": "max-age=600" }, body: "plain" });
+  const store = cache();
+  const net = await playing(store);
+  assert.deepEqual(await load(net, store, "varies"), ["plain", "network", 1]);
+  resources.set("varies", {
+    headers: { "cache-control": "max-age=600", vary: "Accept" },
+    body: "varied",
+  });
+  // A request the stored one does not answer: Cache-Control of its own asks the server.
+  assert.deepEqual(await load(net, store, "varies", [["Cache-Control", "no-cache"]]), [
+    "varied",
+    "network",
+    2,
+  ]);
+  assert.equal(store.usage().entries, 1);
+  assert.deepEqual(await load(net, store, "varies"), ["varied", "hit", 2]);
+  store.close();
+});
+
+test("a cache that fails is left out where it fails, said once, and no request fails", async () => {
+  offset = 0;
+  resources.set("sturdy", { headers: { "cache-control": "max-age=600" } });
+  resources.set("sturdy-2", { headers: { "cache-control": "max-age=600" } });
+  const at = directory();
+  const store = cache(at);
+  const net = await playing(store);
+  assert.deepEqual(await load(net, store, "sturdy"), ["sturdy", "network", 1]);
+  warnings.length = 0;
+
+  // A row whose headers do not parse: asked of the network instead, and kept again from it.
+  const db = new DatabaseSync(join(at, "index.sqlite"));
+  db.prepare("UPDATE entries SET headers = '{'").run();
+  db.close();
+  assert.deepEqual(await load(net, store, "sturdy"), ["sturdy", "network", 2]);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /the HTTP cache failed/);
+
+  // An index that can no longer be written, and bodies that cannot be: read as they are.
+  (store as unknown as { db: DatabaseSync }).db.exec("PRAGMA query_only = ON");
+  chmodSync(join(at, "bodies"), 0o555);
+  try {
+    assert.deepEqual(await load(net, store, "sturdy"), ["sturdy", "hit", 2]);
+    assert.deepEqual(await load(net, store, "sturdy-2"), ["sturdy-2", "network", 1]);
+    assert.deepEqual(await load(net, store, "sturdy-2"), ["sturdy-2", "network", 2]);
+  } finally {
+    chmodSync(join(at, "bodies"), 0o755);
+    (store as unknown as { db: DatabaseSync }).db.exec("PRAGMA query_only = OFF");
+  }
+
+  // Its directory gone from under it.
+  rmSync(at, { recursive: true, force: true });
+  assert.deepEqual(await load(net, store, "sturdy"), ["sturdy", "network", 3]);
+  assert.deepEqual(await load(net, store, "sturdy"), ["sturdy", "network", 4]);
+  assert.equal(warnings.length, 1, warnings.join("\n"));
+  store.close();
+
+  // A directory that cannot be written opens no cache: the app goes without one.
+  const locked = directory();
+  chmodSync(locked, 0o555);
+  try {
+    assert.throws(() => cache(locked));
+  } finally {
+    chmodSync(locked, 0o755);
+  }
 });

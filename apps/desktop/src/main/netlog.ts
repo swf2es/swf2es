@@ -33,7 +33,16 @@ export function requestLine(
   cache?: "hit" | "revalidated",
 ): string {
   const body = bytes === null ? "no body" : size(bytes);
-  const from = cache === "hit" ? " from cache" : cache === "revalidated" ? " revalidated" : "";
+  let from = "";
+  switch (cache) {
+    case "hit":
+      from = " from cache";
+      break;
+    case "revalidated":
+      from = " revalidated";
+      break;
+  }
+
   return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}`;
 }
 
