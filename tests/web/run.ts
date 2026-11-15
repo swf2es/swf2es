@@ -1744,6 +1744,60 @@ check(
       });
       assert.equal(await call(evaluate, "menuHost() === null"), true);
 
+      // NativeMenu.display: the same menu, at its point on the stage, with no About.
+      await call(evaluate, 'menuPlayer.menuMode("display"); true');
+      assert.equal(
+        await call(
+          evaluate,
+          `(async () => {
+        for (let i = 0; i < 100 && !menuHost(); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return menuHost() !== null;
+      })()`,
+        ),
+        true,
+        "display shows the menu",
+      );
+      assert.deepEqual(
+        await call(evaluate, "menuButtons().map(b => [b.textContent, b.disabled])"),
+        [
+          ["Pick", false],
+          ["Off", true],
+        ],
+      );
+      assert.equal(await call(evaluate, 'menuHost().shadowRoot.querySelectorAll("hr").length'), 1);
+      const shownAt = await call<number[]>(
+        evaluate,
+        "(() => { const r = menuHost().getBoundingClientRect(); return [r.x, r.y]; })()",
+      );
+      assert.deepEqual(
+        shownAt.map((v) => Math.round(v)),
+        [at[0] + 60, at[1] + 70],
+      );
+      const pick = await call<number[]>(
+        evaluate,
+        `(() => {
+      const r = menuButtons()[0].getBoundingClientRect();
+      return [r.x + r.width / 2, r.y + r.height / 2];
+    })()`,
+      );
+      for (const type of ["mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: pick[0],
+          y: pick[1],
+          button: "left",
+          clickCount: 1,
+        });
+      }
+      assert.equal(await call(evaluate, "menuHost() === null"), true);
+      assert.deepEqual(await call(evaluate, "menuLines[menuLines.length - 1]"), [
+        "select",
+        "Pick",
+        3,
+      ]);
+
       await call(evaluate, 'menuPlayer.menuMode("defaults"); true');
       await open();
       assert.equal(

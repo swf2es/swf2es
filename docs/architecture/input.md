@@ -511,9 +511,27 @@ visibility, disabled items, quality actions and an About entry.
 `ContextMenu.isSupported` is true. `Stage.showDefaultContextMenu`,
 the web element's `menu="false"`, and `hideBuiltInItems` control
 built-in quality entries while keeping custom entries. AVM1 custom
-menus, programmatic `ContextMenu.display`, AIR menu trees and the
-other Flash built-in actions remain unimplemented. The model is
-renderer-independent so those can reuse the presentation.
+menus and the other Flash built-in actions remain unimplemented. The
+model is renderer-independent so those can reuse the presentation.
+
+`NativeMenu`, `NativeMenuItem` and `ContextMenu`'s menu members are AS3
+(as3/playerglobal), held to adl by the `native-menu-natives` player case:
+an item is in one menu at a time, a submenu's `parent` is the menu of
+the item that last took it, `clone` is deep but for data and listeners,
+and a `ContextMenu`'s items are its `customItems` array itself. In AIR a
+`ContextMenu` has no built-in items. `NativeMenu.display` (and
+`ContextMenu.display`) dispatches `preparing`, then `displaying`, to the
+menu and to each item it shows, as adl does, then shows the menu in the
+same popover at that point on the stage, through `Scripting.showMenu`,
+which the pointer's binding sets; where no host sets it nothing shows.
+A choice dispatches `select` from the item up through the menu and those
+above it, or a `ContextMenuItem`'s `menuItemSelect`. adl's `display`
+waits for the choice; ours returns at once. Not done yet: a submenu's
+item is shown but cannot be opened, a plain `NativeMenu` set as an
+object's `contextMenu` is not shown on a right click, key equivalents
+and mnemonics do nothing, and Flash Player's plugin, which hides AIR's
+menu members (`NativeMenu`'s methods, the items' `label`, `name` and
+the rest), finds them all in a SWF played on the web.
 
 ## The clipboard
 
