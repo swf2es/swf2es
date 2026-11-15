@@ -309,8 +309,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly queue = new ActionQueue(this);
   /** Whether the module is loaded: until it is, the first frame's actions wait in the queue. */
   loaded = false;
-  /** Each clip's latest frame entry, which its queued blocks are of. */
-  private readonly entries = new WeakMap<MovieClip, number>();
   private entryCount = 0;
   /** What names the next object without a name of its own: instance1, instance2... */
   private instances = 0;
@@ -324,7 +322,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private clipProto: avm1.Avm1Object | null = null;
   private buttonProto: avm1.Avm1Object | null = null;
   private textFieldProto: avm1.Avm1Object | null = null;
-  /** The places of display objects being placed, until they are made. */
+  /** The places of clips being placed, until they are made. */
   private readonly places = new WeakMap<DisplayObject, Place>();
   /** The clips removed with an unload handler, kept until the next frame. */
   private pending: DisplayObject[] = [];
@@ -633,7 +631,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     this.swfs.set(library, swf);
     library.avm1 = {
-      placing: (display, place) => this.places.set(display, place),
+      placing: (display, place) => {
+        // Only a clip's is read, as it is made: a shape's would wait for the collector.
+        if (display instanceof MovieClip) {
+          this.places.set(display, place);
+        }
+      },
       made: (display) => this.made(display),
       entered: (clip, frame) => this.entered(clip, frame),
       skipped: (clip, first, last) => {
@@ -1387,7 +1390,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     this.contents.set(target, swf);
     swf.root = target;
-    this.entries.set(target, ++this.entryCount);
+    target.avm1Entry = ++this.entryCount;
     const native = nativeOf(target);
     if (native !== null) {
       native.loaded = false;
@@ -1573,7 +1576,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** A clip entered a frame: its load on its first; the root's frames have their exports, inits, limits and stops. */
   private entered(clip: MovieClip, frame: number): void {
-    this.entries.set(clip, ++this.entryCount);
+    clip.avm1Entry = ++this.entryCount;
     const native = nativeOf(clip);
     if (native !== null && !native.loaded) {
       native.loaded = true;
@@ -1703,9 +1706,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** A DoAction tag a clip's frame reached: its blocks wait for the queue. */
   private queueTag(clip: MovieClip, tag: number): void {
-    this.queue.enqueue(
-      NORMAL,
-      new Queued(FRAME, clip, this.swfOf(clip), tag, this.entries.get(clip) ?? 0),
-    );
+    this.queue.enqueue(NORMAL, new Queued(FRAME, clip, this.swfOf(clip), tag, clip.avm1Entry));
   }
 }
