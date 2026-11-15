@@ -12,7 +12,7 @@ import { zlibCompress } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display/display.js";
-import type { SocketEndpoints } from "../../../packages/player/dist/hosts.js";
+import type { SocketEndpoints, SocketOptions } from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { square } from "../../player/cases/common.ts";
@@ -183,6 +183,78 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   player.tick();
   assert.equal(get("connected"), true);
   assert.deepEqual(ends(), ["", 0, "", 0]);
+});
+
+// AIR's tcpNoDelay, as adl has it: false until set, then what was set, read
+// back at any time and never refused. A connection takes it as connect() is
+// called, as adl's showed in its timing (Nagle's 40 ms waits on a write,
+// write, read exchange): set after that, while connecting or connected, it
+// leaves the connection as it was and is taken by the next connect.
+test("Socket's tcpNoDelay reaches the host as connect() is called", { skip }, async () => {
+  const compile = compiler(out);
+  const root = compile(
+    "SocketNoDelayRoot",
+    "package { import flash.display.Sprite; public class SocketNoDelayRoot extends Sprite {} }",
+  );
+  const asked: (SocketOptions | undefined)[] = [];
+  let opened: (() => void) | undefined;
+  let failed: ((message: string) => void) | undefined;
+  const scripting = new Scripting(await createCodegen(wasm), {
+    air: true,
+    socket: {
+      connect(_host, _port, events, options) {
+        asked.push(options);
+        opened = () => events.open();
+        failed = events.error;
+        return { send: () => {}, close: () => {} };
+      },
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(root, 1, "SocketNoDelayRoot"), scripting);
+  await player.start();
+  const rt = scripting.rt;
+  const socket = rt.construct(rt.classNamed("flash.net::Socket")) as avm2.AsObject;
+  // Heard, or the failure below would be an unhandled ioError.
+  socket.$listeners = new Map([
+    ["ioError", [{ fn: { $f: () => {} }, capture: false, priority: 0 }]],
+  ]);
+  const call = (name: string, ...args: avm2.Value[]) =>
+    rt.callProperty(socket, rt.publicName(name), ...args);
+  const noDelay = () => rt.getProperty(socket, rt.publicName("tcpNoDelay"));
+  const setNoDelay = (value: boolean) => rt.setProperty(socket, rt.publicName("tcpNoDelay"), value);
+
+  assert.equal(noDelay(), false);
+  // Never set: the host's own default.
+  call("connect", "example.test", 1234);
+  assert.deepEqual(asked, [undefined]);
+  setNoDelay(true);
+  assert.equal(noDelay(), true);
+  opened?.();
+  player.tick();
+  assert.equal(rt.getProperty(socket, rt.publicName("connected")), true);
+  setNoDelay(false);
+  setNoDelay(true);
+  assert.deepEqual(asked, [undefined]);
+  call("close");
+  assert.equal(noDelay(), true);
+
+  call("connect", "example.test", 1234);
+  opened?.();
+  player.tick();
+  setNoDelay(false);
+  assert.equal(noDelay(), false);
+  call("close");
+  call("connect", "example.test", 1234);
+  assert.deepEqual(asked, [undefined, { noDelay: true }, { noDelay: false }]);
+
+  failed?.("Error #2031: Socket Error.");
+  player.tick();
+  assert.equal(noDelay(), false);
+  setNoDelay(true);
+  assert.equal(noDelay(), true);
+  call("connect", "example.test", 1234);
+  assert.deepEqual(asked.at(-1), { noDelay: true });
 });
 
 test("Mouse.hide and show set the host's cursor as a script calls them", { skip }, async () => {

@@ -20,6 +20,8 @@ interface Connection {
   failed: boolean;
   /** Null before a connection and after close(); UNKNOWN while one opens, or open where the host does not know them. */
   endpoints: SocketEndpoints | null;
+  /** AIR's tcpNoDelay as the script set it; null until it does, for the host's default. */
+  noDelay: boolean | null;
 }
 
 const UNKNOWN: SocketEndpoints = {
@@ -45,6 +47,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
         connecting: false,
         failed: false,
         endpoints: null,
+        noDelay: null,
       };
       connections.set(o, c);
     }
@@ -185,6 +188,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
               }),
             error: (message) => s.loads.deferHostEvent(() => fail(message)),
           },
+          c.noDelay === null ? undefined : { noDelay: c.noDelay },
         );
       } catch (e) {
         s.loads.deferHostEvent(() => fail(String(e)));
@@ -238,6 +242,19 @@ export function socketNatives(s: Scripting): avm2.Natives {
 
     get connected(): boolean {
       return connection(this).connected;
+    }
+
+    /**
+     * Harman's AIR's, as adl has it: false until set, then what was set, at
+     * any time and never refused; a connection takes it as connect() is
+     * called, so a set after that waits for the next connect.
+     */
+    get tcpNoDelay(): boolean {
+      return connection(this).noDelay ?? false;
+    }
+
+    set tcpNoDelay(value: Value) {
+      connection(this).noDelay = Boolean(value);
     }
 
     get bytesAvailable(): number {

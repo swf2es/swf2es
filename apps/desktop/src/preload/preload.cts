@@ -49,9 +49,10 @@ const api: DesktopApi = {
   openDropped: (file) => ipcRenderer.send("desktop:open-path", webUtils.getPathForFile(file)),
   chooseLibrary: (name: LibraryName) => ipcRenderer.send("desktop:choose-library", name),
   sockets: {
-    connect: (host, port) => {
+    connect: (host, port, noDelay) => {
       const id = nextSocket++;
-      ipcRenderer.send("socket:connect", id, String(host), Number(port));
+      const asked = typeof noDelay === "boolean" ? noDelay : undefined;
+      ipcRenderer.send("socket:connect", id, String(host), Number(port), asked);
       return id;
     },
     send: (id, bytes) => ipcRenderer.send("socket:send", id, bytes),

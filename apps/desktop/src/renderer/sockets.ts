@@ -39,8 +39,8 @@ export function shellSocketHost(sockets: DesktopSockets): SocketHost {
   });
 
   return {
-    connect(host, port, events) {
-      const id = sockets.connect(host, port);
+    connect(host, port, events, options) {
+      const id = sockets.connect(host, port, options?.noDelay);
       open.set(id, events);
       return {
         send: (bytes) => sockets.send(id, bytes),

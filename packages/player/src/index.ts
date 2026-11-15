@@ -48,6 +48,7 @@ export type {
   SocketEndpoints,
   SocketEvents,
   SocketHost,
+  SocketOptions,
   SocketTransport,
   WebSocketEvents,
   WebSocketHost,

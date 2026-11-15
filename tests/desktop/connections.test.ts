@@ -1,6 +1,7 @@
 // The desktop app's socket connections (apps/desktop/src/main/connections.ts)
 // in node, without Electron: what they carry, what they refuse, and that a
-// peer that stops reading cannot make the main process buffer without end.
+// peer that stops reading cannot make the main process buffer without end,
+// and that each sends at once unless the SWF's tcpNoDelay said otherwise.
 import assert from "node:assert/strict";
 import { createServer, type Server, type Socket } from "node:net";
 import { test } from "node:test";
@@ -11,6 +12,7 @@ import {
 } from "../../apps/desktop/src/main/connections.ts";
 import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
 import type { SocketEvent } from "../../apps/desktop/src/shared/api.ts";
+import { noDelayOf, socketsOpenedBy } from "../tcp-nodelay.ts";
 import { testProxy } from "./proxy-server.ts";
 
 async function listen(onConnection: (socket: Socket) => void): Promise<[Server, number]> {
@@ -236,4 +238,47 @@ test("through a proxy: what came with its reply first, then the tunnel's reads, 
   }
 
   eager.close();
+});
+
+test("sends at once unless the SWF set tcpNoDelay to false, directly and through a proxy", async () => {
+  const [server, port] = await listen((socket) => socket.resume());
+  const cases = [
+    [undefined, true],
+    [true, true],
+    [false, false],
+  ] as const;
+  for (const [asked, expected] of cases) {
+    const { connections, next } = recorded();
+    const opened = socketsOpenedBy(() =>
+      connections.connect(1, "127.0.0.1", port, undefined, asked),
+    );
+    assert.equal(opened.length, 1);
+    assert.equal(noDelayOf(opened[0]), expected);
+    await next("open");
+    assert.equal(noDelayOf(opened[0]), expected);
+    connections.close(1);
+    await next("close");
+  }
+
+  for (const kind of ["socks5", "http"] as const) {
+    const proxy = await testProxy(kind);
+    for (const [asked, expected] of cases) {
+      const { connections, next } = recorded({ proxy: parseProxy(proxy.url()) });
+      // The proxy's own connection to the target comes later, and is not the page's.
+      const opened = socketsOpenedBy(() =>
+        connections.connect(1, "127.0.0.1", port, undefined, asked),
+      );
+      assert.equal(opened.length, 1);
+      // Node's default through the handshake; the SWF's choice once the tunnel is up.
+      assert.equal(noDelayOf(opened[0]), false);
+      await next("open");
+      assert.equal(noDelayOf(opened[0]), expected, `${kind} ${asked}`);
+      connections.close(1);
+      await next("close");
+    }
+
+    await proxy.close();
+  }
+
+  server.close();
 });

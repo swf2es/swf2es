@@ -71,8 +71,12 @@ export class Connections {
   /**
    * Connect `id` to `host`:`port`, each checked, as the page asks, at `address` where the host's
    * was pinned (a remote SWF's socket policy came from there); a refusal is an error, then a close.
+   * It sends at once (TCP_NODELAY) unless `noDelay` is false, as a SWF's tcpNoDelay set so asks:
+   * with Nagle's algorithm, node's default, the second of two small writes waits for the peer to
+   * acknowledge the first, which a peer that has nothing to send back delays (some 40 ms on Linux,
+   * up to 200 ms on Windows), and a chatty protocol's every exchange with it.
    */
-  connect(id: number, host: unknown, port: unknown, address?: string): void {
+  connect(id: number, host: unknown, port: unknown, address?: string, noDelay = true): void {
     if (
       !validEndpoint(host, port) ||
       this.sockets.has(id) ||
@@ -85,11 +89,16 @@ export class Connections {
 
     const target = address ?? host;
     if (this.proxy) {
-      this.connectThrough(this.proxy, id, target, port as number);
+      this.connectThrough(this.proxy, id, target, port as number, noDelay);
       return;
     }
 
-    const socket = connect({ host: target, port: port as number, onread: this.reader(id) });
+    const socket = connect({
+      host: target,
+      port: port as number,
+      noDelay,
+      onread: this.reader(id),
+    });
     socket.on("connect", () =>
       this.tell(id, {
         type: "open",
@@ -106,9 +115,17 @@ export class Connections {
    * Connect `id` through `proxy`, by the address where one was pinned, else
    * by name for the proxy to resolve. Its peer is the target: the proxy's
    * address is no business of the SWF's. A proxy that fails is a refusal,
-   * said with why.
+   * said with why. Nagle's algorithm is left on through the handshake,
+   * which never writes twice without an answer between, so nothing in it
+   * waits; it goes off as the tunnel opens, before the SWF's first byte.
    */
-  private connectThrough(proxy: ProxyConfig, id: number, target: string, port: number): void {
+  private connectThrough(
+    proxy: ProxyConfig,
+    id: number,
+    target: string,
+    port: number,
+    noDelay: boolean,
+  ): void {
     const opening = new AbortController();
     this.opening.set(id, opening);
     tunnelThrough(proxy, target, port, { signal: opening.signal, onread: this.reader(id) }).then(
@@ -119,6 +136,7 @@ export class Connections {
         }
 
         this.opening.delete(id);
+        socket.setNoDelay(noDelay);
         this.attach(id, socket);
         this.tell(id, {
           type: "open",

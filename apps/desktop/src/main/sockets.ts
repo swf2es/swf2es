@@ -67,35 +67,40 @@ export function bridgeSockets(
     return connections;
   };
 
-  ipcMain.on("socket:connect", (event, id: unknown, host: unknown, port: unknown) => {
-    if (!trusted(event) || typeof id !== "number") {
-      return;
-    }
+  ipcMain.on(
+    "socket:connect",
+    (event, id: unknown, host: unknown, port: unknown, asked: unknown) => {
+      if (!trusted(event) || typeof id !== "number") {
+        return;
+      }
 
-    const connections = connectionsOf(event.sender);
-    if (!validEndpoint(host, port)) {
-      connections.refuse(id);
-      return;
-    }
+      // At once unless the SWF set tcpNoDelay to false (connections.ts).
+      const noDelay = asked !== false;
+      const connections = connectionsOf(event.sender);
+      if (!validEndpoint(host, port)) {
+        connections.refuse(id);
+        return;
+      }
 
-    const generation = connections.generation;
-    void permit(host, port as number)
-      .catch(() => null)
-      .then((allowed) => {
-        // The page that asked may have gone while the user was asked.
-        if (connections.generation !== generation) {
-          return;
-        }
+      const generation = connections.generation;
+      void permit(host, port as number)
+        .catch(() => null)
+        .then((allowed) => {
+          // The page that asked may have gone while the user was asked.
+          if (connections.generation !== generation) {
+            return;
+          }
 
-        const via = allowed && options.proxy ? " via proxy" : "";
-        log?.(socketLine(id, `${allowed ? "connecting to" : "refused"} ${host}:${port}${via}`));
-        if (allowed) {
-          connections.connect(id, host, port, allowed.address);
-        } else {
-          connections.refuse(id);
-        }
-      });
-  });
+          const via = allowed && options.proxy ? " via proxy" : "";
+          log?.(socketLine(id, `${allowed ? "connecting to" : "refused"} ${host}:${port}${via}`));
+          if (allowed) {
+            connections.connect(id, host, port, allowed.address, noDelay);
+          } else {
+            connections.refuse(id);
+          }
+        });
+    },
+  );
 
   ipcMain.on("socket:send", (event, id: unknown, bytes: unknown) => {
     if (trusted(event) && typeof id === "number" && bytes instanceof Uint8Array) {
