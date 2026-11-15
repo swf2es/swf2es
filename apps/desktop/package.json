@@ -31,7 +31,8 @@
     "dist",
     "!dist/**/.tsbuildinfo",
     "static",
-    "src"
+    "src",
+    "LICENSE.third-party"
   ],
   "scripts": {
     "fetch-electron": "node node_modules/electron/install.js",
@@ -44,6 +45,7 @@
     "@swf2es/player": "workspace:*",
     "@swf2es/player-hosts": "workspace:*",
     "@swf2es/web": "workspace:*",
-    "electron": "44.10.2"
+    "electron": "44.10.2",
+    "http-cache-semantics": "4.3.0"
   }
 }

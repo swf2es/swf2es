@@ -378,6 +378,7 @@ the builtin.abc and playerglobal the player ships.
 | `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
+| `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
@@ -407,6 +408,16 @@ not reached through the proxy either. A proxy that fails or refuses is a
 failed load or socket to the SWF, and a line on stderr saying why. An HTTP
 proxy that allows `CONNECT` only to port 443, as Squid does by default,
 refuses plain http and sockets on other ports.
+
+The app caches the SWF's http and https GETs as a browser would, by what
+the server's Cache-Control, Expires, ETag, Last-Modified and Vary say, up to
+512 MB under the system's cache directory, after Flash's sandbox and policy
+files have judged each request, cached or not; each SWF's origin has a
+cache of its own. A response with no Cache-Control or Expires of its own is
+kept for a day at most, by a guess from its Last-Modified, so a SWF updated
+on its server may play in its old version until then: File › Clear HTTP
+Cache empties the cache and picks up the new one. File › HTTP Cache turns it
+off, which the app remembers.
 
 In a checkout of the repository the app runs from its sources:
 

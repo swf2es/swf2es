@@ -267,6 +267,11 @@ test("the desktop app's tarball is what npm is to publish: its command, the app 
   assert.equal(pkg.repository?.directory, "apps/desktop");
   assert.ok(!pkg.private);
   assert.equal(await read("package/LICENSE"), readFileSync(join(root, "LICENSE"), "utf8"));
+  // The notices of what it loads from elsewhere, which npm installs beside it.
+  assert.equal(
+    await read("package/LICENSE.third-party"),
+    readFileSync(join(dir, "LICENSE.third-party"), "utf8"),
+  );
   assert.ok(files.has("package/README.md"));
   // The packages it loads at their release's version, and Electron, pinned: an install
   // gets the browser the app was tested in.
