@@ -858,8 +858,16 @@ export class BitmapStore {
     // What is left to the loops here writes words, which a typed array holds at a multiple of four alone.
     const aligned = ((bytes.byteOffset + at) & 3) === 0;
     const swap = littleEndian !== HOST_LITTLE;
+    // An opaque store's words in the host's order are its pixels' bytes, copied as bytes wherever
+    // they land, with no words made between.
+    const plain = !this.transparent && !swap;
     for (let k = 0, row = r.y * this.width + r.x; k < count; k += run, row += this.width) {
       const to = at + k * 4;
+      if (plain) {
+        bytes.set(bytesOf(pixels, row, run), to);
+        continue;
+      }
+
       const into = bytes.subarray(to, to + run * 4);
       const done = kernel
         ? kernel.words(into, bytesOf(pixels, row, run), kind, !littleEndian) >> 2
@@ -869,9 +877,12 @@ export class BitmapStore {
       }
 
       const left = run - done;
+      // Unaligned, the words are made in the scratch row and copied, rather than in a row made for each.
       const words = aligned
         ? new Uint32Array(bytes.buffer, bytes.byteOffset + to + done * 4, left)
-        : new Uint32Array(left);
+        : left <= SCRATCH.length
+          ? SCRATCH
+          : new Uint32Array(left);
       getRun(words, 0, pixels, row + done, left, swap, this.transparent);
       if (!aligned) {
         into.set(bytesOf(words, 0, left), done * 4);

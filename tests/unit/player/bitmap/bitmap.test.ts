@@ -1,7 +1,7 @@
 // The pixel store on its own: Flash's premultiplication arithmetic, that
 // a store holds the Bitmaps showing it weakly, that one made of a colour
-// makes its pixels only when used, and its reads of bounds and a texture's
-// bytes.
+// makes its pixels only when used, and its reads of words, bounds and a
+// texture's bytes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
@@ -936,5 +936,53 @@ test("a texture's bytes read back are its pixels, aligned or not", () => {
       [...argbOf(new Uint8ClampedArray(from.buffer, from.byteOffset, from.length))],
       expected,
     );
+  }
+});
+
+test("words read into bytes at any offset are each pixel's value in the order given", () => {
+  const next = lcg(9);
+  for (const transparent of [true, false]) {
+    for (const holdsAlpha of transparent ? [false] : [false, true]) {
+      const store = randomStore(next, 13, 7, transparent);
+      if (holdsAlpha) {
+        // As erase leaves an opaque store: alpha below 255, read as it is.
+        store.pixels[5] = 0x40102030;
+        store.pixels[20] = 0;
+        store.holdsAlpha = true;
+        store.changed();
+      }
+
+      for (const rect of [
+        { x: 0, y: 0, width: 13, height: 7 },
+        { x: 2, y: 1, width: 9, height: 5 },
+        { x: 12, y: 6, width: 1, height: 1 },
+      ]) {
+        for (const little of [true, false]) {
+          for (let at = 0; at < 4; at++) {
+            for (const shift of [0, 1, 3]) {
+              const label = JSON.stringify({ transparent, holdsAlpha, rect, little, at, shift });
+              const count = rect.width * rect.height;
+              const buffer = new Uint8Array(new ArrayBuffer(count * 4 + 12), shift, count * 4 + 8);
+              buffer.fill(0xa5);
+              store.getWords(rect, buffer, at, little);
+              const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.length);
+              for (let i = 0; i < count; i++) {
+                const x = rect.x + (i % rect.width);
+                const y = rect.y + Math.floor(i / rect.width);
+                const value = store.unmultiplied(store.pixels[y * 13 + x]);
+                assert.equal(view.getUint32(at + i * 4, little), value, `${label} ${i}`);
+              }
+
+              // Nothing written before or past them.
+              assert.deepEqual(
+                [...buffer.subarray(0, at), ...buffer.subarray(at + count * 4)],
+                new Array(8).fill(0xa5),
+                label,
+              );
+            }
+          }
+        }
+      }
+    }
   }
 });
