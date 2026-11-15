@@ -450,6 +450,8 @@ interface RunSwfOptions {
   lazyCompilation?: boolean;
   /** Played as AIR plays it (Scripting's `air`). */
   air?: boolean;
+  /** Every frame drawn at the stage's size, as a host draws it, and waited for (chrome.ts). */
+  draw?: boolean;
 }
 
 async function runSwf(
@@ -468,6 +470,7 @@ async function runSwf(
     socket = null,
     lazyCompilation = false,
     air = false,
+    draw = false,
   }: RunSwfOptions,
 ): Promise<Run> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -489,7 +492,8 @@ async function runSwf(
       scripting,
       await avm1For(bytes, trace, uncaught, url, logFetch, socket),
     );
-    const n = GRID[quality] ?? 4;
+    // A host draws a pixel a stage pixel, not the grid of samples a capture averages.
+    const n = draw ? 1 : (GRID[quality] ?? 4);
     const shownAt = shown ? zoom : 1;
     player.quality = ["LOW", "MEDIUM", "HIGH", "BEST"][quality] ?? "HIGH";
     const surface = await surfaceFor(player, n * zoom, shownAt, zoom, antialias);
@@ -514,6 +518,7 @@ async function runSwf(
     await player.start();
     stopOnUncaught();
     const replay = input ? new Replay(player, input, viewport) : null;
+    let drawn = -1;
     for (let frame = 1; frame <= frames; frame++) {
       if (frame > 1) {
         // What a frame asked to load is linked between frames, as in a browser's.
@@ -533,6 +538,15 @@ async function runSwf(
       if (replay) {
         replay.frame();
         stopOnUncaught();
+      }
+
+      // As the web host draws: a frame that changed nothing drawn is left as it shows.
+      if (draw && player.changes !== drawn && !surface.unchanged(player.stage)) {
+        drawn = player.changes;
+        surface.render(player.stage);
+        // Chrome's finish returns before the GPU process has drawn; a read waits for it.
+        const gl = surface.gl;
+        gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
       }
 
       if (capture.includes(frame)) {

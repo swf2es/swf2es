@@ -35,6 +35,12 @@ export interface PlayerJob {
   socket?: unknown[];
   /** Played as AIR plays it, AIR's API defined (Scripting's `air`). */
   air?: boolean;
+  /**
+   * Every frame drawn, as a host draws it, at the stage's size and no
+   * larger, and waited for: a benchmark's frames then take their drawing's
+   * time as Flash's do (players.ts). No frame is captured.
+   */
+  draw?: boolean;
 }
 
 /** How to run jobs: a time each job's scripts may take, a listener for each result, and more directories to serve. */
@@ -358,6 +364,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               socket: job.socket,
               lazyCompilation: job.lazyCompilation,
               air: job.air,
+              draw: job.draw,
             })})`,
           );
           // The timeout stops a script that runs on, not one awaiting what never comes.
