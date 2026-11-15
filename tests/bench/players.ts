@@ -1,6 +1,6 @@
 // Times a benchmark's sections in the players a SWF plays in: swf2es and
 // Ruffle's web build, each in headless Chrome, and Flash, AIR's adl without
-// the debugger. The benchmarks are those that time themselves for
+// the debugger. The AS3 benchmarks are those that time themselves for
 // avmshell (enumeration/Enumeration.as, dictionary/DictionaryAccess.as),
 // vector/VectorAccess.as, indexed access to Vectors and Arrays, and
 // pixels/BitmapPixels.as, a bitmap's pixels set and read whole, each
@@ -8,6 +8,12 @@
 // their script runs as it is loaded, its sections tracing their times
 // ("time: dense1k-in 120") by the Date, which each player keeps the same
 // way. Their other lines must be as Flash traces them.
+//
+// The AVM1 benchmarks (avm1-*, or the group `avm1`) are AS1 sources under
+// avm1/, compiled by tests/avm1-script.ts as Flash's compiler writes them
+// into a SWF 8 whose first frame runs avm1/Bench.as and then them, beside a
+// library clip "ball" to attach. They report the same way; avm1-frames
+// times onEnterFrame on many clips over frames rather than in one script.
 //
 //   node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash] [bench...]
 //
@@ -23,17 +29,36 @@ import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { runFlash } from "../../oracle/flash.ts";
 import { tags } from "../../packages/format/dist/index.js";
+import { flashAssembler, script } from "../avm1-script.ts";
+import { square } from "../player/cases/common.ts";
 import { runPlayer, withPage } from "../player/chrome.ts";
 import { libraryAbcs } from "../player/libraries.ts";
 import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
-const BENCHES: Record<string, string> = {
-  enumeration: "enumeration/Enumeration.as",
-  dictionary: "dictionary/DictionaryAccess.as",
-  vector: "vector/VectorAccess.as",
-  pixels: "pixels/BitmapPixels.as",
+interface Bench {
+  source: string;
+  /** AS1 for AVM1, not AS3. */
+  avm1?: boolean;
+  /** Frames it runs for, its frame rate: one that times frames calls done() itself. */
+  frames?: [number, number];
+}
+const BENCHES: Record<string, Bench> = {
+  enumeration: { source: "enumeration/Enumeration.as" },
+  dictionary: { source: "dictionary/DictionaryAccess.as" },
+  vector: { source: "vector/VectorAccess.as" },
+  pixels: { source: "pixels/BitmapPixels.as" },
+  "avm1-loop": { source: "avm1/Loop.as", avm1: true },
+  "avm1-members": { source: "avm1/Members.as", avm1: true },
+  "avm1-calls": { source: "avm1/Calls.as", avm1: true },
+  "avm1-scope": { source: "avm1/Scope.as", avm1: true },
+  "avm1-clips": { source: "avm1/Clips.as", avm1: true },
+  // Three phases of 30 frames and one more each, after the first; 255 frames a second, SWF's most.
+  "avm1-frames": { source: "avm1/EnterFrame.as", avm1: true, frames: [100, 255] },
+};
+const GROUPS: Record<string, string[]> = {
+  avm1: Object.keys(BENCHES).filter((b) => BENCHES[b].avm1),
 };
 const PLAYERS = ["swf2es", "ruffle", "flash"] as const;
 type PlayerName = (typeof PLAYERS)[number];
@@ -60,17 +85,33 @@ if (values.only.includes("ruffle") && ruffle === undefined) {
   console.log("Ruffle left out: --ruffle or RUFFLE names its self-hosted web build");
 }
 
-const benches = positionals.length ? positionals : Object.keys(BENCHES);
+const benches = (positionals.length ? positionals : Object.keys(BENCHES)).flatMap(
+  (b) => GROUPS[b] ?? [b],
+);
 for (const bench of benches) {
   if (!BENCHES[bench]) {
-    console.log(`no benchmark ${bench}: ${Object.keys(BENCHES).join(", ")}`);
+    console.log(
+      `no benchmark ${bench}: ${[...Object.keys(BENCHES), ...Object.keys(GROUPS)].join(", ")}`,
+    );
     process.exit(1);
   }
 }
 
+/** A ScriptLimits tag's body: room to recurse, and SCRIPT_SECONDS to run. */
+function limits(): Uint8Array {
+  const body = new Uint8Array(4);
+  new DataView(body.buffer).setUint16(0, 1000, true);
+  new DataView(body.buffer).setUint16(2, SCRIPT_SECONDS, true);
+  return body;
+}
+
 /** The benchmark as a SWF: its script, with an empty document class beside it, and room to run. */
 function benchSwf(bench: string): Uint8Array {
-  const source = readFileSync(`${here}${BENCHES[bench]}`, "utf8");
+  if (BENCHES[bench].avm1) {
+    return avm1Swf(bench);
+  }
+
+  const source = readFileSync(`${here}${BENCHES[bench].source}`, "utf8");
   const name = `Players${bench[0].toUpperCase()}${bench.slice(1)}`;
   const abc = compileScripts(
     [
@@ -81,9 +122,6 @@ function benchSwf(bench: string): Uint8Array {
     ],
     `${here}out/players`,
   ).get(name) as Uint8Array;
-  const limits = new Uint8Array(4);
-  new DataView(limits.buffer).setUint16(0, 1000, true);
-  new DataView(limits.buffer).setUint16(2, SCRIPT_SECONDS, true);
   return w.swf({
     width: 100,
     height: 50,
@@ -91,7 +129,7 @@ function benchSwf(bench: string): Uint8Array {
     frameCount: 2,
     tags: [
       w.fileAttributes(true),
-      w.tag(tags.ScriptLimits, limits),
+      w.tag(tags.ScriptLimits, limits()),
       w.doAbc(abc, "Main"),
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
@@ -101,8 +139,43 @@ function benchSwf(bench: string): Uint8Array {
   });
 }
 
-async function playSwf2es(swf: Uint8Array): Promise<string[]> {
-  const [result] = await runPlayer([{ swf, frames: 2, capture: [] }], {
+/** An AVM1 benchmark as a SWF 8: Bench.as and its source in the first frame, "ball" in the library. */
+function avm1Swf(bench: string): Uint8Array {
+  const { source, frames } = BENCHES[bench];
+  const as1 = [
+    readFileSync(`${here}avm1/Bench.as`, "utf8"),
+    readFileSync(`${here}${source}`, "utf8"),
+  ];
+  if (!frames) {
+    as1.push("done();\n");
+  }
+
+  const ball = w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    version: 8,
+    width: 400,
+    height: 300,
+    frameRate: frames?.[1] ?? 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.tag(tags.ScriptLimits, limits()),
+      square(1, 0x3366cc, 200),
+      ball,
+      w.exportAssets([[2, "ball"]]),
+      w.doAction([...script(as1.join("\n"), 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+const framesOf = (bench: string) => BENCHES[bench].frames?.[0] ?? 2;
+
+// A benchmark of frames has them drawn, multisampled, as a host draws them: Flash draws its too.
+async function playSwf2es(swf: Uint8Array, frames: number): Promise<string[]> {
+  const drawn = frames > 2;
+  const [result] = await runPlayer([{ swf, frames, capture: [], draw: drawn, antialias: drawn }], {
     timeout: SCRIPT_SECONDS * 1000,
   });
   if (result.error) {
@@ -163,8 +236,8 @@ async function playRuffle(swf: Uint8Array): Promise<string[]> {
   );
 }
 
-async function playFlash(swf: Uint8Array): Promise<string[]> {
-  const [result] = await runFlash([{ swf, frames: 2, capture: [], alone: true }], 60_000, {
+async function playFlash(swf: Uint8Array, frames: number): Promise<string[]> {
+  const [result] = await runFlash([{ swf, frames, capture: [], alone: true }], 60_000, {
     timed: true,
   });
   if (result.incomplete || result.errors.length) {
@@ -174,7 +247,7 @@ async function playFlash(swf: Uint8Array): Promise<string[]> {
   return result.output;
 }
 
-const play: Record<PlayerName, (swf: Uint8Array) => Promise<string[]>> = {
+const play: Record<PlayerName, (swf: Uint8Array, frames: number) => Promise<string[]>> = {
   swf2es: playSwf2es,
   ruffle: playRuffle,
   flash: playFlash,
@@ -203,7 +276,7 @@ for (const bench of benches) {
     // Each run starts at another player.
     const order = players.map((_, i) => players[(i + run) % players.length]);
     for (const player of order) {
-      const lines = await play[player](swf);
+      const lines = await play[player](swf, framesOf(bench));
       if (!lines.includes(DONE)) {
         throw new Error(`${player} did not finish ${bench}:\n${lines.join("\n")}`);
       }
