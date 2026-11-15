@@ -231,6 +231,82 @@ than the SWF without that place's own policy. What a SWF reads from the
 internet that way is what its author's own server could fetch. The page
 also tells the player the sandbox, which `Security.sandboxType` reports.
 
+### The HTTP cache
+
+The main process keeps a private HTTP cache, as RFC 9111 has one
+(`src/main/http-cache.ts`), of the GET responses it receives for a SWF:
+its own SWF when opened by its URL, what it loads, and the policy files
+it needs, each by the same rules. It stands where the network would, in
+`network.ts`'s `exchange`, after the request has been judged: its sandbox,
+the policy files, the address's place and its port are decided first,
+hit or miss, so a load a policy refuses is refused whatever is stored,
+and a hit still resolves the host to judge it. What may be stored,
+whether a stored response is fresh, the conditional headers of its
+revalidation and what a 304 changes are http-cache-semantics' `CachePolicy`
+for a private cache (`shared: false`), which reads Cache-Control's
+max-age, no-cache, no-store, private, must-revalidate (revalidated even
+while fresh, as it has it) and stale-while-revalidate (revalidated at
+once), Expires, Age, and a tenth of the time since Last-Modified where
+nothing else gives a freshness. A fresh response is served without the
+network; a stale one goes with If-None-Match or If-Modified-Since from
+its ETag or Last-Modified, a 304 refreshing its stored headers (but
+Content-Length and the like) and serving its body, a 200 replacing it; a
+stale one without a validator is fetched again whole. Only a 200 whose
+body was read is kept, neither no-store nor `Vary: *`, nor what answered
+an Authorization without public, must-revalidate or s-maxage (RFC 9111,
+3.5; no SWF may send one, as Flash refused it, so this only guards),
+nor anything never fresh with no validator to revalidate it; Set-Cookie
+is dropped from what is kept, as from what the SWF gets. A request that
+asks something conditional of its own (If-None-Match, If-Modified-Since,
+If-Match, If-Unmodified-Since, If-Range) is neither answered nor kept: its
+answer is the SWF's to have. Each response's key is the SHA-256 of its
+method, its URL and the request headers its Vary names, as sent, so each
+value of those is an entry of its own. A stored body counts as a fetched
+one, against the largest response (128 MB, a policy file's 1 MB) and the
+movie's 256 MB under way, and `--log-network` ends its line in `from
+cache`, or `revalidated` after a 304.
+
+The cache lives in `HTTP Cache` under the system's cache directory, the
+app's name after it (`~/.cache/@swf2es/desktop/HTTP Cache` on Linux, or
+under `$XDG_CACHE_HOME`; `~/Library/Caches/…` on macOS;
+`%LOCALAPPDATA%\…` on Windows), apart from the settings, which are kept
+and backed up; under `SWF2ES_DESKTOP_USER_DATA` where the tests name one.
+Its index is SQLite (`node:sqlite`, which Electron's Node 24 has without a
+flag or a warning), `index.sqlite` in WAL mode with synchronous=NORMAL,
+and holds metadata only, a row a response:
+
+| Column | |
+| --- | --- |
+| `key` (primary key) | The SHA-256 of the method, URL and the Vary'd request headers. |
+| `file` | The body's name in `bodies/`: the key. |
+| `method`, `url` | What was asked; indexed together, to find a request's entries. |
+| `vary` | The request headers the Vary named, and their values, as JSON. |
+| `status`, `headers` | The response, its headers as received but Set-Cookie, as JSON. |
+| `policy` | http-cache-semantics' `CachePolicy`, serialized: what freshness is judged by. |
+| `stored`, `expires` | When it was kept or last revalidated, and when it goes stale (indexed). |
+| `etag`, `last_modified` | Its validators. |
+| `size`, `last_access` | Its body's bytes, and when it was last served (indexed). |
+
+Every body is a file in one flat directory, `bodies/`, named by its key,
+with no name of the server's. A body is written to a temporary file,
+synced, renamed into place, and only then its row written, the writes in
+the background one at a time; a row is deleted before its file. A serve
+opens the file and checks its size against the row's, and a file gone or
+of another size is a miss and its row dropped; each start sweeps away
+temporary files, files with no row and rows whose file is gone or of
+another size. So a crash leaves no row pointing at half a file. Past the
+budget, 512 MB, the least recently served go first, and an entry stale
+with no validator, of no more use, is dropped as the cache next writes;
+no body larger than an eighth of the budget is kept, as Chromium keeps
+none, so that no one response empties it. An index that does not open is
+started again empty, the bodies with it.
+
+File › HTTP Cache turns it off and on, remembered in `settings.json`
+(`httpCache`); off, nothing is read from it nor kept. File › Clear HTTP
+Cache forgets every response, the rows at once and the files after the
+writes under way, which are dropped. `--no-http-cache` leaves it closed
+for the run, whatever the setting says, and the menu's items with it.
+
 ## Through a proxy
 
 `--proxy=<url>` (`src/main/proxy.ts`, read with the other switches in
@@ -345,7 +421,8 @@ that choice the user's. Only http and https URLs open, with a host and
 without credentials, their fragment dropped. It keeps `settings.json` in
 Electron's user data directory (`SWF2ES_DESKTOP_USER_DATA` names
 another, for the tests): a chosen playerglobal's path, the last ten SWFs, by
-path or URL, and the servers each SWF, by path or URL, may always reach.
+path or URL, the servers each SWF, by path or URL, may always reach, and
+whether the HTTP cache is on ([The HTTP cache](#the-http-cache)).
 A settings file that cannot be written keeps them for the run, with a
 word. ActionScript 3 plays on the builtin.abc and playerglobal the player
 ships; a playerglobal.abc the user chooses, such as Flash Player's, takes

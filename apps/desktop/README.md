@@ -82,6 +82,21 @@ fetch-electron` does so ahead, for the tests.
   bytes, as text where it is text and in hex otherwise, a WebSocket's
   text message as its text. That is whatever the SWF sends, a login
   and its password among it: mind where the terminal's output goes.
+- **HTTP cache.** The SWF's http and https GETs, its own SWF and the
+  policy files they need among them, are cached as a browser's private
+  cache would, by what the server says (Cache-Control, Expires, ETag,
+  Last-Modified, Vary): a fresh response is served from the cache, a
+  stale one is revalidated, and its 304 serves what is stored. Flash's
+  sandbox and policy files still judge every request first, cached or
+  not. It lives in `HTTP Cache` under the system's cache directory
+  (`~/.cache/@swf2es/desktop/` on Linux, `~/Library/Caches/@swf2es/desktop/`
+  on macOS, `%LOCALAPPDATA%\@swf2es\desktop\` on Windows) and holds 512 MB
+  at most, the least recently used going first. File › Clear HTTP Cache
+  empties it; File › HTTP Cache turns it off and on, which the app
+  remembers in `settings.json` (`httpCache`); `--no-http-cache` leaves it
+  off for one run, neither read nor written. `--log-network`'s line for a
+  response from the cache ends in `from cache`, or `revalidated` after a
+  304.
 - **Certificates.** `--ignore-certificate-errors` leaves every HTTPS
   server's certificate, and every `wss:` server's that an AIR
   application's WebSocket connects to, unverified for this run, and
