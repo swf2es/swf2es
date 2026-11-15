@@ -119,6 +119,19 @@ import { Avm1Sounds } from "./sound.js";
 import { Avm1Swf, handlersOf, NO_HANDLERS, readRootFrames, stopOf } from "./swf.js";
 import { defaultClock, Timers } from "./timers.js";
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+let windows1252: TextDecoder | undefined;
+
+/**
+ * SWF 5's text decoder, made at first use: an engine without the code
+ * page fails that load, not this module.
+ */
+function windows1252Decoder(): TextDecoder {
+  windows1252 ??= new TextDecoder("windows-1252");
+  return windows1252;
+}
+
 type Value = avm1.Value;
 
 export interface Avm1Options {
@@ -227,7 +240,7 @@ export function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1N
     const query = form === null ? "" : new URLSearchParams(form.vars).toString();
     if (form?.method === "POST") {
       const headers: [string, string][] = [["Content-Type", "application/x-www-form-urlencoded"]];
-      const body = new TextEncoder().encode(query);
+      const body = textEncoder.encode(query);
       navigate({ url: resolved, method: "POST", headers, body }, window);
     } else {
       const sent = form === null ? resolved : `${resolved}${url.includes("?") ? "&" : "?"}${query}`;
@@ -1265,7 +1278,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       }
 
       const v = this.swfVersion;
-      const text = new TextDecoder(v <= 5 ? "windows-1252" : "utf-8").decode(result.bytes);
+      const decoder = v <= 5 ? windows1252Decoder() : textDecoder;
+      const text = decoder.decode(result.bytes);
       for (const [name, value] of parseForm(textFor(text, v), v)) {
         avm1.set(face, name, value, v);
       }

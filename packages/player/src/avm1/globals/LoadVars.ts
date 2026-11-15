@@ -11,6 +11,9 @@ import { avm1 } from "@swf2es/runtime";
 import type { FetchResult } from "../../hosts.js";
 import { type Avm1Net, type NetRequest, textFor } from "../net.js";
 
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+
 type Value = avm1.Value;
 type Obj = avm1.Avm1Object;
 
@@ -40,7 +43,7 @@ function setHidden(o: Obj, name: string, value: Value, version: number): void {
 
 /** The text of a load's answer as Flash reads it: UTF-8, a BOM dropped, bad bytes replaced. */
 function textOf(bytes: Uint8Array): string {
-  return new TextDecoder().decode(bytes);
+  return textDecoder.decode(bytes);
 }
 
 /** `request` loaded for `target`, by LoadVars' and XML's rules (above). */
@@ -142,7 +145,7 @@ export function formRequest(
     url,
     method,
     headers: [...headers, ["Content-Type", contentType]],
-    body: new TextEncoder().encode(query),
+    body: textEncoder.encode(query),
   };
 }
 
