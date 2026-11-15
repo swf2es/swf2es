@@ -22,9 +22,10 @@ attributes', or its SWF's stage, in `:host` rules the page's own styles
 override. A SWF with no code plays with no VM, unless it defines a
 button or a text field: those take the pointer and the keys with no
 script, as Flash's do, so such a SWF gets the VM its FileAttributes
-name, Scripting or AVM1, with nothing to run in it. An AVM1 SWF with a
-sound of its own, a DefineSound or a stream's head (`definesSound`),
-gets AVM1 too, whose SoundHost plays its sounds.
+name, Scripting or AVM1, with nothing to run in it. So does a SWF
+with a sound of its own, a DefineSound or a stream's head
+(`definesSound`): the timeline's sounds play through its VM's
+SoundHost.
 
 A browser holds a page's audio until the user's first click or key
 (Chrome's autoplay rule), which Flash's plug-in never met. The player's

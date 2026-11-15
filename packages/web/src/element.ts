@@ -405,9 +405,11 @@ export class Swf2esPlayerElement extends ElementBase {
       ];
       this.#size();
       // A SWF with no code still needs its VM for the input its buttons and fields take.
+      // So does one with a sound of its own, which its VM's SoundHost plays.
       const scripted =
         isAs3(swf) &&
         (definesInput(swf) ||
+          definesSound(swf) ||
           swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2));
       if (scripted) {
         const stage3D = configuration().stage3D;
