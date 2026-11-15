@@ -506,17 +506,29 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     border-top: 2px solid var(--sl-color-gray-5);
   }
 
+  /* Each package a block of its own, every other one shaded, so its figures and bar read as one. */
   .packages details {
     margin-top: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 0.4rem;
+  }
+
+  .packages details:nth-child(even) {
+    background: var(--sl-color-gray-6);
   }
 
   .packages summary {
     cursor: pointer;
   }
 
+  /* The packages' rows lay out by the list's own width, as a sidebar narrows it as a phone does. */
+  .packages {
+    container-type: inline-size;
+  }
+
   .package {
     display: inline-grid;
-    grid-template-columns: minmax(11rem, 1fr) minmax(9rem, auto) 8rem;
+    grid-template-columns: max-content 1fr 8rem;
     gap: 0.25rem 1rem;
     align-items: center;
     width: calc(100% - 1.5rem);
@@ -529,14 +541,29 @@ const features: { name: string; status: Status; note: string; href: string }[] =
 
   .package .counts {
     justify-self: end;
+    white-space: nowrap;
+  }
+
+  /* Narrow, a package's name and figures share a line, its bar the whole width under them. */
+  @container (max-width: 38rem) {
+    .package {
+      grid-template-columns: 1fr auto;
+      gap: 0.35rem 0.75rem;
+    }
+
+    .package .counts {
+      white-space: normal;
+      text-align: end;
+    }
+
+    .package .bar {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
   }
 
   /* On a phone the figures say it: the bars of the tables go. */
   @media (max-width: 40rem) {
-    .package {
-      grid-template-columns: 1fr;
-    }
-
     .bar-cell {
       display: none;
     }
