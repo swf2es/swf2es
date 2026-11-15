@@ -867,7 +867,7 @@ The desktop app:
   1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
   2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
   15,790 and 2,623 → 5,852.
-- Keep-alive connections, a pool keyed by scheme, name, pinned address,
+- #1023: keep-alive connections, a pool keyed by scheme, name, pinned address,
   port, route and certificate checking (`tests/desktop/keepalive-bench.ts`,
   200 loads of 1 KB from one loopback server, medians of 6): http one by
   one 74.1 → 47.6 ms, all at once 43.6 → 25.1 ms; https one by one 334.3
