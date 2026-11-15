@@ -505,8 +505,8 @@ export class Scripting {
     const socket = options.socket;
     this.socket = socket
       ? {
-          connect: (host, port, events) =>
-            this.track(events, (tracked) => socket.connect(host, port, tracked)),
+          connect: (host, port, events, connectOptions) =>
+            this.track(events, (tracked) => socket.connect(host, port, tracked, connectOptions)),
         }
       : null;
     const webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;

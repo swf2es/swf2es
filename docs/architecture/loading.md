@@ -286,6 +286,16 @@ while one opens and after it fails, and once open the ends the host gives
 with its open report, kept after the peer closes. The Node host gives its
 socket's; a WebSocket relay's are not the script's, so they stay "" and 0,
 what Flash reads while it does not know them.
+AIR's `tcpNoDelay` reads as adl's: false until set, then what was set, at
+any time and never refused. A connection takes it as `connect()` is
+called, and a set after that waits for the next connect: adl's own
+timing showed it, a write, write, read exchange waiting some 40 ms on
+the peer's delayed acknowledgement each time (Nagle's algorithm, AIR's
+default) unless `tcpNoDelay` was true when `connect()` ran. The host
+gets it with the connect, as `options.noDelay`, absent where the script
+never set it, for the host's own default. A WebSocket relay ignores it:
+the relay's own TCP connection to the server is the relay's to
+configure.
 
 The Flash cases use `loadBytes`, the inner SWF carried in the outer's
 script as base64; the oracle runs under AIR, which refuses code from
