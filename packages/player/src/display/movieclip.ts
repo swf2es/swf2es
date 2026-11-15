@@ -126,7 +126,10 @@ interface Jump {
 export class MovieClip extends Container {
   /** A clip always has its library: the one its timeline came from. */
   declare library: Library;
-  /** In an AVM1 movie, its latest frame entry, which its queued blocks are of (avm1/avm1.ts); 0 before. */
+  /**
+   * In an AVM1 movie, its latest frame entry, which its queued blocks are
+   * of (avm1/avm1.ts); 0 before.
+   */
   avm1Entry = 0;
   private frame = 0;
   private scripts = new Map<number, avm2.Value>();

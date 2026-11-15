@@ -323,7 +323,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private buttonProto: avm1.Avm1Object | null = null;
   private textFieldProto: avm1.Avm1Object | null = null;
   /** The places of clips being placed, until they are made. */
-  private readonly places = new WeakMap<DisplayObject, Place>();
+  private readonly places = new WeakMap<MovieClip, Place>();
   /** The clips removed with an unload handler, kept until the next frame. */
   private pending: DisplayObject[] = [];
   /** The player's clock, the scripts' timeout and setInterval's timers. */
@@ -844,7 +844,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * scripts reach but by its path.
    */
   removed(d: DisplayObject): boolean {
-    // A clip's answer is kept until a parent changes, as references ask it at every member.
+    // An object's answer is kept until a parent changes, as references ask it at every member.
     const native = d.avm1?.display;
     if (native instanceof ClipNative && native.movie === this) {
       if (native.walked !== parentage.changes) {

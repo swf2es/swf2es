@@ -717,7 +717,10 @@ export class ClipNative implements avm1.DisplayNative {
   focusRect: boolean | null = null;
   /** Where it was as it was removed, the path its references find a clip at from then on. */
   removedAt: string | null = null;
-  /** parentage's count as the movie last walked from it to its level, -1 before; `gone` what it found. */
+  /**
+   * parentage's count as the movie last walked from it to its level, -1
+   * before; `gone` what it found.
+   */
   walked = -1;
   gone = false;
   /** A clip's clip actions, from its place or the clip it duplicates; null for none. */
