@@ -25,6 +25,7 @@ import * as shaders from "../filter-shaders.js";
 import type { Filters } from "../filters.js";
 import { CLAMP, SMOOTH } from "../scene.js";
 import type { KernelPrograms } from "./kernels.js";
+import type { ProgramQueue } from "./precompile.js";
 
 /**
  * A texture a pass draws into through its framebuffer, and reads: at least
@@ -118,6 +119,20 @@ void main(void) {
   finalColor = texture(uTexture, vTextureCoord);
 }`;
 
+/** Every pass a chain may run, by name, and its fragment shader: all linked ahead (ProgramQueue). */
+const PASSES: readonly (readonly [string, string])[] = [
+  ["copy", COPY],
+  ["box", shaders.BOX],
+  ["shrink", shaders.SHRINK],
+  ["readBack", shaders.READ_BACK],
+  ["glow", shaders.GLOW],
+  ["bevel", shaders.BEVEL],
+  ["gradient", shaders.GRADIENT],
+  ["colorMatrix", shaders.MATRIX],
+  ["convolution", shaders.CONVOLUTION],
+  ["displacement", shaders.DISPLACE],
+];
+
 interface Pass {
   program: WebGLProgram;
   uniforms: Map<string, WebGLUniformLocation | null>;
@@ -159,10 +174,20 @@ export class FilterRunner<T extends FilterTarget> {
     state: GlState,
     host: FilterHost<T>,
     private readonly kernels: KernelPrograms,
+    private readonly queue: ProgramQueue,
   ) {
     this.gl = gl;
     this.state = state;
     this.host = host;
+    for (const [name, fragment] of PASSES) {
+      queue.add(
+        `filter:${name}`,
+        VERTEX,
+        HEADER + withinRects(fragment),
+        [INPUT_UNIT, BLURRED_UNIT, EXTRA_UNIT],
+        (program) => this.made(name, program),
+      );
+    }
   }
 
   /**
@@ -501,27 +526,32 @@ export class FilterRunner<T extends FilterTarget> {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  /** The pass of `fragment`, linked as first used, in use. */
+  /**
+   * The pass of `fragment`, in use: linked ahead (ProgramQueue), its link
+   * finished now if it is not yet, or linked now where it would not link
+   * ahead, which throws why.
+   */
   private use(name: string, fragment: string): Pass {
-    const gl = this.gl;
     let pass = this.passes.get(name);
-    if (!pass) {
-      const program = linkProgram(gl, VERTEX, HEADER + withinRects(fragment));
-      pass = {
-        program,
-        uniforms: new Map(),
-        told: new Map(),
-      };
-      this.passes.set(name, pass);
+    if (!pass && !this.queue.take(`filter:${name}`)) {
+      const program = linkProgram(this.gl, VERTEX, HEADER + withinRects(fragment));
       this.state.useProgram(program);
-      gl.uniform1i(gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);
-      gl.uniform1i(gl.getUniformLocation(program, "uBlurred"), BLURRED_UNIT);
-      gl.uniform1i(gl.getUniformLocation(program, "uGradient"), EXTRA_UNIT);
-      gl.uniform1i(gl.getUniformLocation(program, "uMap"), EXTRA_UNIT);
+      this.made(name, program);
     }
 
+    pass ??= this.passes.get(name) as Pass;
     this.state.useProgram(pass.program);
     return pass;
+  }
+
+  /** Pass `name` of `program`, linked and in use, its samplers told their units. */
+  private made(name: string, program: WebGLProgram): void {
+    const gl = this.gl;
+    this.passes.set(name, { program, uniforms: new Map(), told: new Map() });
+    gl.uniform1i(gl.getUniformLocation(program, "uTexture"), INPUT_UNIT);
+    gl.uniform1i(gl.getUniformLocation(program, "uBlurred"), BLURRED_UNIT);
+    gl.uniform1i(gl.getUniformLocation(program, "uGradient"), EXTRA_UNIT);
+    gl.uniform1i(gl.getUniformLocation(program, "uMap"), EXTRA_UNIT);
   }
 
   /** The pass of a kernel's fragment shader (KernelPrograms), in use; null where it would not link. */
