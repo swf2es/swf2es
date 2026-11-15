@@ -135,13 +135,22 @@ export type SocketEvent =
   | { type: "close" }
   | { type: "error"; message: string };
 
+/**
+ * Events as the shell sends them, gathered over a millisecond at most:
+ * each with its connection's id, in the order they came.
+ */
+export type ConnectionEvents<E> = readonly (readonly [id: number, event: E])[];
+
 /** flash.net.Socket's TCP connections, opened by the shell. */
 export interface DesktopSockets {
-  /** A connection's id; its events follow, an "error" one if the shell refuses it. */
-  connect(host: string, port: number): number;
+  /**
+   * A connection's id; its events follow, an "error" one if the shell refuses it. `noDelay` is
+   * tcpNoDelay as the SWF set it, absent where it did not: the shell then sends at once.
+   */
+  connect(host: string, port: number, noDelay?: boolean): number;
   send(id: number, bytes: Uint8Array): void;
   close(id: number): void;
-  onEvent(listener: (id: number, event: SocketEvent) => void): void;
+  onEvents(listener: (events: ConnectionEvents<SocketEvent>) => void): void;
 }
 
 /** What befalls a WebSocket, as player's WebSocketEvents has it. */
@@ -158,7 +167,7 @@ export interface DesktopWebSockets {
   /** A text message for a string, a binary one for bytes. */
   send(id: number, data: string | Uint8Array): void;
   close(id: number, code?: number): void;
-  onEvent(listener: (id: number, event: WebSocketEvent) => void): void;
+  onEvents(listener: (events: ConnectionEvents<WebSocketEvent>) => void): void;
 }
 
 /** A request of a SWF's, as player's FetchRequest has it. */

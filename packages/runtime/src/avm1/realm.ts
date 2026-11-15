@@ -5,9 +5,9 @@
 // Ruffle LLC and Ruffle contributors. Where adl parts from Ruffle, adl
 // decides (docs/avm1.md, "Objects").
 //
-// So far Object, Function and the global functions on objects; Array,
-// String, Number and Boolean are what boxing, InitArray and the
-// conversions need of them, which step 9 completes with their classes.
+// Object, Function and the global functions on objects, and Array,
+// String, Number and Boolean as boxing, InitArray and the conversions
+// need them, completed by their classes (docs/avm1.md, "Objects").
 // The realm also holds what runs AVM1 code across calls: the activation
 // running, how many function calls are, and the movie's global registers.
 import type { Activation, Region, Units } from "./activation.js";
@@ -356,7 +356,7 @@ export class Realm implements Boxer {
    * Error, as far as Throw's values need it: a `message` and a `name`,
    * both "Error" on the prototype and listed by for..in, as adl has them,
    * and a `toString` that gives the message. Called as a function it gives
-   * undefined. Step 9 completes the classes.
+   * undefined.
    */
   private errorClass(): Class {
     const proto = new Avm1Object(this.objectProto);

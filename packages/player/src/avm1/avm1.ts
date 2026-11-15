@@ -36,6 +36,7 @@ import {
   type DisplayObject,
   EMPTY_TIMELINE,
   MovieClip,
+  parentage,
   TextObject,
   VideoObject,
 } from "../display/display.js";
@@ -118,6 +119,19 @@ import {
 import { Avm1Sounds } from "./sound.js";
 import { Avm1Swf, handlersOf, NO_HANDLERS, readRootFrames, stopOf } from "./swf.js";
 import { defaultClock, Timers } from "./timers.js";
+
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
+let windows1252: TextDecoder | undefined;
+
+/**
+ * SWF 5's text decoder, made at first use: an engine without the code
+ * page fails that load, not this module.
+ */
+function windows1252Decoder(): TextDecoder {
+  windows1252 ??= new TextDecoder("windows-1252");
+  return windows1252;
+}
 
 type Value = avm1.Value;
 
@@ -227,7 +241,7 @@ export function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1N
     const query = form === null ? "" : new URLSearchParams(form.vars).toString();
     if (form?.method === "POST") {
       const headers: [string, string][] = [["Content-Type", "application/x-www-form-urlencoded"]];
-      const body = new TextEncoder().encode(query);
+      const body = textEncoder.encode(query);
       navigate({ url: resolved, method: "POST", headers, body }, window);
     } else {
       const sent = form === null ? resolved : `${resolved}${url.includes("?") ? "&" : "?"}${query}`;
@@ -295,8 +309,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly queue = new ActionQueue(this);
   /** Whether the module is loaded: until it is, the first frame's actions wait in the queue. */
   loaded = false;
-  /** Each clip's latest frame entry, which its queued blocks are of. */
-  private readonly entries = new WeakMap<MovieClip, number>();
   private entryCount = 0;
   /** What names the next object without a name of its own: instance1, instance2... */
   private instances = 0;
@@ -310,8 +322,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private clipProto: avm1.Avm1Object | null = null;
   private buttonProto: avm1.Avm1Object | null = null;
   private textFieldProto: avm1.Avm1Object | null = null;
-  /** The places of display objects being placed, until they are made. */
-  private readonly places = new WeakMap<DisplayObject, Place>();
+  /** The places of clips being placed, until they are made. */
+  private readonly places = new WeakMap<MovieClip, Place>();
   /** The clips removed with an unload handler, kept until the next frame. */
   private pending: DisplayObject[] = [];
   /** The player's clock, the scripts' timeout and setInterval's timers. */
@@ -508,6 +520,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.rate = frameRate;
     this.levels.set(0, root);
     this.levelNumbers.set(root, 0);
+    parentage.changes++;
     if (isAs3(swf) || !library.actions) {
       return;
     }
@@ -618,7 +631,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     this.swfs.set(library, swf);
     library.avm1 = {
-      placing: (display, place) => this.places.set(display, place),
+      placing: (display, place) => {
+        // Only a clip's is read, as it is made: a shape's would wait for the collector.
+        if (display instanceof MovieClip) {
+          this.places.set(display, place);
+        }
+      },
       made: (display) => this.made(display),
       entered: (clip, frame) => this.entered(clip, frame),
       skipped: (clip, first, last) => {
@@ -826,6 +844,22 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * scripts reach but by its path.
    */
   removed(d: DisplayObject): boolean {
+    // An object's answer is kept until a parent changes, as references ask it at every member.
+    const native = d.avm1?.display;
+    if (native instanceof ClipNative && native.movie === this) {
+      if (native.walked !== parentage.changes) {
+        native.walked = parentage.changes;
+        native.gone = this.offLevels(d);
+      }
+
+      return native.gone;
+    }
+
+    return this.offLevels(d);
+  }
+
+  /** removed's walk up from `d` to its level. */
+  private offLevels(d: DisplayObject): boolean {
     let top = d;
     while (top.parent !== null && !this.levelNumbers.has(top)) {
       top = top.parent;
@@ -1265,7 +1299,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       }
 
       const v = this.swfVersion;
-      const text = new TextDecoder(v <= 5 ? "windows-1252" : "utf-8").decode(result.bytes);
+      const decoder = v <= 5 ? windows1252Decoder() : textDecoder;
+      const text = decoder.decode(result.bytes);
       for (const [name, value] of parseForm(textFor(text, v), v)) {
         avm1.set(face, name, value, v);
       }
@@ -1323,6 +1358,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const clip = new MovieClip(EMPTY_TIMELINE, this.root.library);
     this.levels.set(n, clip);
     this.levelNumbers.set(clip, n);
+    parentage.changes++;
     this.root.parent?.placeAtDepth(clip, n);
     this.made(clip);
     return clip;
@@ -1354,7 +1390,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     this.contents.set(target, swf);
     swf.root = target;
-    this.entries.set(target, ++this.entryCount);
+    target.avm1Entry = ++this.entryCount;
     const native = nativeOf(target);
     if (native !== null) {
       native.loaded = false;
@@ -1540,7 +1576,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** A clip entered a frame: its load on its first; the root's frames have their exports, inits, limits and stops. */
   private entered(clip: MovieClip, frame: number): void {
-    this.entries.set(clip, ++this.entryCount);
+    clip.avm1Entry = ++this.entryCount;
     const native = nativeOf(clip);
     if (native !== null && !native.loaded) {
       native.loaded = true;
@@ -1670,9 +1706,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** A DoAction tag a clip's frame reached: its blocks wait for the queue. */
   private queueTag(clip: MovieClip, tag: number): void {
-    this.queue.enqueue(
-      NORMAL,
-      new Queued(FRAME, clip, this.swfOf(clip), tag, this.entries.get(clip) ?? 0),
-    );
+    this.queue.enqueue(NORMAL, new Queued(FRAME, clip, this.swfOf(clip), tag, clip.avm1Entry));
   }
 }

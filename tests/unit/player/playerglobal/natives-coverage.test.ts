@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../../oracle/oracle.ts";
+import { installContext3D } from "../../../../packages/player/dist/playerglobal/context3d.js";
 import {
   airLibrary,
   playerglobalLibrary,
@@ -72,9 +73,20 @@ test("every native the player's libraries declare is implemented or allowlisted"
   );
   const declared = await declaredNatives(wasm);
   const s = new Scripting(await createCodegen(wasm));
+  const natives = Object.keys(playerNatives(s));
+  // Stage3D's natives are installed where a host gives Stage3D, as the web and desktop hosts do;
+  // a context is never asked for here, so the host need not make one.
+  installContext3D(s, {
+    create: () => {
+      throw new Error("no context in this test");
+    },
+    place: () => {},
+    remove: () => {},
+  });
   const implemented = new Set([
     ...Object.keys(avm2.builtinNatives(s.rt)),
-    ...Object.keys(playerNatives(s)),
+    ...natives,
+    ...Object.keys(s.rt.natives),
   ]);
 
   const listed = new Map<string, string>();

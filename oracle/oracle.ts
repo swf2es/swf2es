@@ -683,15 +683,16 @@ function projectorAbc(projector: Uint8Array): Uint8Array {
 }
 
 /**
- * Build a Crossbridge program as a SWF with the image's g++ (`gccArgs` its
- * sources and arguments, -emit-swf among them), into <outDir>/<name>.swf,
- * with g++'s output in <name>.log; reused, as runCrossbridge's projectors
- * are, while its build key is unchanged. The SWF is null if it did not build.
+ * Build a Crossbridge program as a SWF with the image's g++, or `compiler`
+ * gcc for C (`gccArgs` its sources and arguments, -emit-swf among them),
+ * into <outDir>/<name>.swf, with the compiler's output in <name>.log;
+ * reused, as runCrossbridge's projectors are, while its build key is
+ * unchanged. The SWF is null if it did not build.
  */
 export function buildCrossbridgeSwf(
   job: CrossbridgeJob,
   outDir: string,
-  { engine = undefined as string | undefined } = {},
+  { engine = undefined as string | undefined, compiler = "g++" as "g++" | "gcc" } = {},
 ): { swf: Uint8Array | null; log: string } {
   mkdirSync(outDir, { recursive: true });
   const out = rel(outDir);
@@ -701,14 +702,14 @@ export function buildCrossbridgeSwf(
 
   const swf = join(outDir, `${job.name}.swf`);
   const log = join(outDir, `${job.name}.log`);
-  const key = keyOf("g++ swf", crossbridgeKey(job, `${out}/${job.name}.swf`));
+  const key = keyOf(`${compiler} swf`, crossbridgeKey(job, `${out}/${job.name}.swf`));
   if (!(stored(key, "log") && take(key, "swf", swf) && take(key, "log", log))) {
     rmSync(swf, { force: true });
     rmSync(log, { force: true });
     const script = join(outDir, `${job.name}.sh`);
     writeFileSync(
       script,
-      `/opt/crossbridge/sdk/usr/bin/g++ ${job.gccArgs.join(" ")} -o "${out}/${job.name}.swf" > "${out}/${job.name}.log" 2>&1\n`,
+      `/opt/crossbridge/sdk/usr/bin/${compiler} ${job.gccArgs.join(" ")} -o "${out}/${job.name}.swf" > "${out}/${job.name}.log" 2>&1\n`,
     );
     const r = container(engine, [`${out}/${job.name}.sh`]);
     if (r.status !== 0 && !existsSync(log)) {

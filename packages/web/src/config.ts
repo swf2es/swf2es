@@ -106,6 +106,13 @@ export interface Configuration {
    * starts through a `blob:` module that imports it.
    */
   workerUrl?: string | URL;
+  /**
+   * Whether an element shows its "Click to unmute" button over the player
+   * while the browser's autoplay rule holds the SWF's sound: on by default;
+   * an element's `unmuteprompt` attribute decides for its own SWFs. The
+   * element fires `audioblocked` and `audiounblocked` either way.
+   */
+  unmutePrompt?: boolean;
   /** The page's build, a short commit or a version, which the context menu's About item names. */
   build?: string;
   /**

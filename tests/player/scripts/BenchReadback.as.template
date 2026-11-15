@@ -1,0 +1,62 @@
+package
+{
+	import flash.display.BitmapData;
+	import flash.display.Shape;
+	import flash.display.Sprite;
+	import flash.events.Event;
+	import flash.geom.Matrix;
+	import flash.geom.Rectangle;
+	import flash.utils.ByteArray;
+	import flash.utils.Endian;
+
+	public class Main extends Sprite
+	{
+		private const WIDTH:int = 546;
+		private const HEIGHT:int = 693;
+
+		private var shape:Shape = new Shape();
+		private var bytes:ByteArray = new ByteArray();
+		private var matrix:Matrix = new Matrix();
+		private var frame:int = 0;
+
+		public function Main()
+		{
+			// A wobbly outline of EDGES edges, filled and lined, as a character's art is.
+			var edges:int = EDGES;
+			shape.graphics.lineStyle(2, 0x203040);
+			shape.graphics.beginFill(0xc08040);
+			for (var i:int = 0; i <= edges; i++)
+			{
+				var turn:Number = (i % edges) * Math.PI * 2 / edges;
+				var r:Number = 200 + 40 * Math.sin(turn * 7) + 15 * Math.cos(turn * 23);
+				if (i == 0)
+				{
+					shape.graphics.moveTo(r * Math.cos(turn), r * Math.sin(turn) * 1.4);
+				}
+				else
+				{
+					shape.graphics.lineTo(r * Math.cos(turn), r * Math.sin(turn) * 1.4);
+				}
+			}
+
+			shape.graphics.endFill();
+			bytes.endian = Endian.LITTLE_ENDIAN;
+			addEventListener(Event.ENTER_FRAME, step);
+		}
+
+		private function step(e:Event):void
+		{
+			frame++;
+			// A new bitmap each frame, the art drawn into it, the art's bounds found, and those
+			// pixels read after a 54-byte header, as a SWF that writes an image file each frame does.
+			var data:BitmapData = new BitmapData(WIDTH, HEIGHT, TRANSPARENT, 0);
+			matrix.identity();
+			matrix.translate(WIDTH / 2 + (frame % 20) - 10, HEIGHT / 2);
+			data.draw(shape, matrix);
+			var rect:Rectangle = data.getColorBoundsRect(0xff000000, 0, false);
+			bytes.length = 0;
+			bytes.position = 54;
+			data.copyPixelsToByteArray(rect, bytes);
+		}
+	}
+}

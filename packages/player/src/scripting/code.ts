@@ -21,6 +21,8 @@ import {
 import { methodCompiler, supportsLazyCompilation } from "./lazy.js";
 import { sha256 } from "./sha256.js";
 
+const textEncoder = new TextEncoder();
+
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
@@ -1050,7 +1052,7 @@ interface Ready {
 
 /** The SHA-256 of `text`'s UTF-8, a cache key of fixed length however many ABCs it names. */
 function sha256Text(text: string): Promise<string> {
-  return sha256(new TextEncoder().encode(text));
+  return sha256(textEncoder.encode(text));
 }
 
 /**

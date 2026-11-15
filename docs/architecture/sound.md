@@ -79,6 +79,17 @@ a timeline stream; as a loadMovie, MovieClipLoader or Loader load is read,
 before the frame that shows it, for one that has; and as `Sound.load` asks
 for its URL. A SWF with none of them opens no device until a sound plays.
 
+A browser may hold the device, suspended, until the page's first click
+or key, by its autoplay rule; a stream then starts as the device runs, as
+far in as the wait, and any other sound plays whole. The browser host
+tells nobody of a device that only waits: a sound asked to play while it
+is suspended starts a wait of a second, the time a device the browser
+lets run may take to open, after which `AudioHost.blocked` is true and
+`onBlocked` is told; the context's run sets it false and tells it again.
+A host lets it run with `resume`, from within the user's gesture, as the
+browser asks; `@swf2es/web`'s element does so from its unmute button
+and from any press or key on it.
+
 An empty `Sound` with a `sampleData` listener streams stereo float PCM at
 44.1 kHz. `media/dynamic-sound.ts` requests samples synchronously on first
 play, then refills against the audio device's consumed samples. Each channel

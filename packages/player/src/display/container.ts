@@ -9,6 +9,7 @@ import {
   markAdvanceDue,
   markScriptsDue,
   OTHER,
+  parentage,
   scriptWork,
 } from "./displayobject.js";
 import type { Library } from "./timeline.js";
@@ -75,6 +76,7 @@ export class Container extends DisplayObject {
     child.depth = depth;
     advancing.watch?.parent(child, child.parent);
     child.parent = this;
+    parentage.changes++;
     this.children.splice(index, 0, child);
     advancing.watch?.children(this, index, child, null);
     this.puts++;
@@ -123,6 +125,7 @@ export class Container extends DisplayObject {
     if (child.parent === this && (this.puts === puts || !this.children.includes(child))) {
       advancing.watch?.parent(child, this);
       child.parent = null;
+      parentage.changes++;
       child.focusDrop?.(child);
     }
 
@@ -143,6 +146,7 @@ export class Container extends DisplayObject {
     this.takeOut(child, index);
     advancing.watch?.parent(child, this);
     child.parent = null;
+    parentage.changes++;
     child.focusDrop?.(child);
   }
 
@@ -170,6 +174,7 @@ export class Container extends DisplayObject {
     child.parent?.removeChild(child);
     advancing.watch?.parent(child, child.parent);
     child.parent = this;
+    parentage.changes++;
     const at = same ? Math.min(index, this.children.length) : index;
     this.children.splice(at, 0, child);
     advancing.watch?.children(this, at, child, null);

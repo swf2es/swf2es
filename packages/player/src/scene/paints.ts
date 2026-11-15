@@ -128,7 +128,9 @@ export class Paints {
   /**
    * `store`'s texture, its pixels as drawn (`drawable`) uploaded again if
    * they changed since, converted into the bytes the texture keeps (Textures'
-   * `bytes`), so that a store drawn into every frame allocates none.
+   * `bytes`), so that a store drawn into every frame allocates none. A
+   * store still of the one colour it was made (`solidPixel`) is made by
+   * clearing the texture to it, with no pixels made, converted or uploaded.
    */
   storeTexture(store: BitmapStore, idle?: number): TextureHandle {
     const kept = this.stores.get(store);
@@ -163,8 +165,11 @@ export class Paints {
       this.collected.unregister(kept);
     }
 
-    const bytes = this.bytesOf(store, -1);
-    const handle = this.textures.add(store.width, store.height, bytes, idle);
+    const solid = store.holdsAlpha ? null : store.solidPixel;
+    const handle =
+      solid === null
+        ? this.textures.add(store.width, store.height, this.bytesOf(store, -1), idle)
+        : this.textures.addFilled(store.width, store.height, solid, idle);
     this.stores.set(store, { handle, version: store.version, copy: null, pinned: false });
     return handle;
   }

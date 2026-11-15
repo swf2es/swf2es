@@ -19,6 +19,7 @@ import {
   Container,
   type DisplayObject,
   MovieClip,
+  parentage,
   TextObject,
 } from "../display/display.js";
 import type { Avm1 } from "./avm1.js";
@@ -105,6 +106,7 @@ function placeKey(d: DisplayObject, stage: Container): number {
   const parent = area?.parent ?? null;
   if (area) {
     area.parent = d as ButtonObject;
+    parentage.changes++;
   }
 
   try {
@@ -113,6 +115,7 @@ function placeKey(d: DisplayObject, stage: Container): number {
   } finally {
     if (area) {
       area.parent = parent;
+      parentage.changes++;
     }
   }
 }
@@ -245,6 +248,7 @@ export class FocusTracker implements TabHost {
     const parent = area?.parent ?? null;
     if (area) {
       area.parent = d as ButtonObject;
+      parentage.changes++;
     }
 
     try {
@@ -253,6 +257,7 @@ export class FocusTracker implements TabHost {
     } finally {
       if (area) {
         area.parent = parent;
+        parentage.changes++;
       }
     }
   }

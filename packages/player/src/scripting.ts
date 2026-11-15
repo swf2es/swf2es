@@ -59,6 +59,7 @@ import {
   type WorkerHost,
 } from "./hosts.js";
 import type { LoadedAvm1Input } from "./input/avm1.js";
+import type { MenuItem } from "./input/context-menu.js";
 import { pickChecks } from "./input/hit-test.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import type { TouchInput } from "./input/touch.js";
@@ -240,6 +241,12 @@ export class Scripting {
    * has a renderer (a RenderView); null where there is none.
    */
   drawer: Drawer | null = null;
+  /**
+   * Shows NativeMenu.display's menu at a point on the stage, set by the host
+   * that shows the player's own menu (scene/context-menu.ts); null where
+   * there is none, and display shows nothing.
+   */
+  showMenu: ((items: MenuItem[], stageX: number, stageY: number) => void) | null = null;
   /** The main SWF's URL, as its LoaderInfo reports it. */
   url = "file:///";
   /** Security.sandboxType, as the host placed the SWF: "remote" by default, a web page's; "application" in AIR. */
@@ -498,8 +505,8 @@ export class Scripting {
     const socket = options.socket;
     this.socket = socket
       ? {
-          connect: (host, port, events) =>
-            this.track(events, (tracked) => socket.connect(host, port, tracked)),
+          connect: (host, port, events, connectOptions) =>
+            this.track(events, (tracked) => socket.connect(host, port, tracked, connectOptions)),
         }
       : null;
     const webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;

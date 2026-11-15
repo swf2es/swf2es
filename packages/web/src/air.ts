@@ -28,6 +28,8 @@ import {
 } from "@swf2es/player";
 import { AirFiles } from "./air-files.js";
 
+const textDecoder = new TextDecoder();
+
 /** One of an application's files, its path relative to the folder it came in, "/"-separated. */
 export interface AirAppFile {
   path: string;
@@ -346,7 +348,7 @@ export function openAirApp(source: Uint8Array | ArrayBuffer | Iterable<AirAppFil
     }
   }
 
-  const xml = new TextDecoder().decode(all.get(descriptor)?.bytes());
+  const xml = textDecoder.decode(all.get(descriptor)?.bytes());
   return new AirApp(xml, files);
 }
 

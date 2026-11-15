@@ -8,6 +8,8 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 
+const textDecoder = new TextDecoder();
+
 const SECTION = "swf2es.build";
 
 function leb(value: number): number[] {
@@ -42,7 +44,7 @@ function unstamped(wasm: Uint8Array): Uint8Array {
     let ours = false;
     if (id === 0) {
       const length = wasm[at];
-      ours = new TextDecoder().decode(wasm.subarray(at + 1, at + 1 + length)) === SECTION;
+      ours = textDecoder.decode(wasm.subarray(at + 1, at + 1 + length)) === SECTION;
     }
 
     if (!ours) {

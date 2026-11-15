@@ -2,9 +2,9 @@
 // the proxy (--proxy, proxy.ts): what the socket bridge (sockets.ts) holds
 // for each page, apart from Electron so that node runs it in the tests
 // (tests/desktop/connections.test.ts).
-import { connect, type Socket } from "node:net";
+import { connect, type OnReadOpts, type Socket } from "node:net";
 import type { SocketEvent } from "../shared/api.js";
-import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
+import { type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
 
 /** As many as a page may hold open at once; past it a connection is refused. */
 const MAX_OPEN = 64;
@@ -16,6 +16,13 @@ const MAX_OPEN = 64;
  * Flash's did when a write could not go.
  */
 export const MAX_BUFFERED = 4 * 1024 * 1024;
+
+/**
+ * Each connection's read buffer, read into again and again, so that a read
+ * makes one store, its copy for the page, where Node's stream would make a
+ * Buffer for it besides.
+ */
+const READ_BUFFER = 64 * 1024;
 
 const SOCKET_ERROR = "Error #2031: Socket Error.";
 
@@ -64,8 +71,12 @@ export class Connections {
   /**
    * Connect `id` to `host`:`port`, each checked, as the page asks, at `address` where the host's
    * was pinned (a remote SWF's socket policy came from there); a refusal is an error, then a close.
+   * It sends at once (TCP_NODELAY) unless `noDelay` is false, as a SWF's tcpNoDelay set so asks:
+   * with Nagle's algorithm, node's default, the second of two small writes waits for the peer to
+   * acknowledge the first, which a peer that has nothing to send back delays (some 40 ms on Linux,
+   * up to 200 ms on Windows), and a chatty protocol's every exchange with it.
    */
-  connect(id: number, host: unknown, port: unknown, address?: string): void {
+  connect(id: number, host: unknown, port: unknown, address?: string, noDelay = true): void {
     if (
       !validEndpoint(host, port) ||
       this.sockets.has(id) ||
@@ -78,11 +89,16 @@ export class Connections {
 
     const target = address ?? host;
     if (this.proxy) {
-      this.connectThrough(this.proxy, id, target, port as number);
+      this.connectThrough(this.proxy, id, target, port as number, noDelay);
       return;
     }
 
-    const socket = connect({ host: target, port: port as number });
+    const socket = connect({
+      host: target,
+      port: port as number,
+      noDelay,
+      onread: this.reader(id),
+    });
     socket.on("connect", () =>
       this.tell(id, {
         type: "open",
@@ -99,19 +115,28 @@ export class Connections {
    * Connect `id` through `proxy`, by the address where one was pinned, else
    * by name for the proxy to resolve. Its peer is the target: the proxy's
    * address is no business of the SWF's. A proxy that fails is a refusal,
-   * said with why.
+   * said with why. Nagle's algorithm is left on through the handshake,
+   * which never writes twice without an answer between, so nothing in it
+   * waits; it goes off as the tunnel opens, before the SWF's first byte.
    */
-  private connectThrough(proxy: ProxyConfig, id: number, target: string, port: number): void {
+  private connectThrough(
+    proxy: ProxyConfig,
+    id: number,
+    target: string,
+    port: number,
+    noDelay: boolean,
+  ): void {
     const opening = new AbortController();
     this.opening.set(id, opening);
-    connectThrough(proxy, target, port, { signal: opening.signal }).then(
-      (socket) => {
+    tunnelThrough(proxy, target, port, { signal: opening.signal, onread: this.reader(id) }).then(
+      ({ socket, rest }) => {
         if (this.opening.get(id) !== opening) {
           socket.destroy();
           return;
         }
 
         this.opening.delete(id);
+        socket.setNoDelay(noDelay);
         this.attach(id, socket);
         this.tell(id, {
           type: "open",
@@ -120,6 +145,12 @@ export class Connections {
           remoteAddress: target,
           remotePort: port,
         });
+        // What came with the proxy's reply is the connection's first.
+        if (rest.length > 0) {
+          this.tell(id, { type: "data", bytes: rest });
+        }
+
+        socket.resume();
       },
       (error: ProxyError) => {
         if (this.opening.get(id) !== opening) {
@@ -133,9 +164,23 @@ export class Connections {
     );
   }
 
+  /**
+   * How `id`'s socket is read: into a buffer of its own, each read copied
+   * out at its length for the page. It never pauses the socket, as its
+   * stream never did.
+   */
+  private reader(id: number): OnReadOpts {
+    return {
+      buffer: new Uint8Array(READ_BUFFER),
+      callback: (length, buffer) => {
+        this.tell(id, { type: "data", bytes: new Uint8Array(buffer.subarray(0, length)) });
+        return true;
+      },
+    };
+  }
+
   private attach(id: number, socket: Socket): void {
     this.sockets.set(id, socket);
-    socket.on("data", (bytes) => this.tell(id, { type: "data", bytes: new Uint8Array(bytes) }));
     socket.on("error", () => this.tell(id, { type: "error", message: SOCKET_ERROR }));
     socket.on("close", () => {
       // Only the socket under this id: a page that reused it has another by now.

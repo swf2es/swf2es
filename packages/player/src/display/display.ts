@@ -16,6 +16,7 @@ export {
   normalizeDegrees,
   OTHER,
   type Projection,
+  parentage,
   pickWork,
   rootOf,
   scriptWork,

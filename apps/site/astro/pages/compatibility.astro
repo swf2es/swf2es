@@ -54,14 +54,12 @@ const GROUPS: Record<string, string> = {
   unlisted: "Other natives",
 };
 
-type Status = "supported" | "partial" | "experimental" | "missing";
-const STATUS: Record<Status, { text: string; variant: "success" | "caution" | "note" | "danger" }> =
-  {
-    supported: { text: "Supported", variant: "success" },
-    partial: { text: "Partial", variant: "caution" },
-    experimental: { text: "Experimental", variant: "note" },
-    missing: { text: "Missing", variant: "danger" },
-  };
+type Status = "supported" | "partial" | "missing";
+const STATUS: Record<Status, { text: string; variant: "success" | "caution" | "danger" }> = {
+  supported: { text: "Supported", variant: "success" },
+  partial: { text: "Partial", variant: "caution" },
+  missing: { text: "Missing", variant: "danger" },
+};
 const avm1 = corpus.areas.find((a) => a.name === "avm1");
 const features: { name: string; status: Status; note: string; href: string }[] = [
   {
@@ -134,8 +132,8 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   },
   {
     name: "Stage3D",
-    status: "experimental",
-    note: `An opt-in. Without it a SWF is told there is no GPU, as Flash would tell it, and its ${natives("stage3D")} natives count as missing above.`,
+    status: "supported",
+    note: "Every profile, AGAL 1 to 3, on WebGL 2: on by default in the desktop app, and on a page that configures it, as this site's player does with its Stage3D box. Without it a SWF is told there is no GPU, as Flash would tell it.",
     href: source("docs/architecture/services.md"),
   },
   {
@@ -374,8 +372,8 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     <a href={source("tests/unit/player/playerglobal/unimplemented-natives.json")}>the list the
     tests keep</a> names them; AS3 bodies, constants and variables count as implemented. A
     class is complete when all its members are. AIR's own API, {number(api.air)} members, is left
-    out. Stage3D's natives count as missing: the player registers them only with its experimental
-    opt-in.
+    out. Stage3D's natives count as implemented: the player registers them wherever Stage3D is
+    on, in the desktop app by default and on a page that configures it.
   </p>
   <div class="packages">
     {
@@ -506,17 +504,29 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     border-top: 2px solid var(--sl-color-gray-5);
   }
 
+  /* Each package a block of its own, every other one shaded, so its figures and bar read as one. */
   .packages details {
     margin-top: 0.25rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 0.4rem;
+  }
+
+  .packages details:nth-child(even) {
+    background: var(--sl-color-gray-6);
   }
 
   .packages summary {
     cursor: pointer;
   }
 
+  /* The packages' rows lay out by the list's own width, as a sidebar narrows it as a phone does. */
+  .packages {
+    container-type: inline-size;
+  }
+
   .package {
     display: inline-grid;
-    grid-template-columns: minmax(11rem, 1fr) minmax(9rem, auto) 8rem;
+    grid-template-columns: max-content 1fr 8rem;
     gap: 0.25rem 1rem;
     align-items: center;
     width: calc(100% - 1.5rem);
@@ -529,14 +539,29 @@ const features: { name: string; status: Status; note: string; href: string }[] =
 
   .package .counts {
     justify-self: end;
+    white-space: nowrap;
+  }
+
+  /* Narrow, a package's name and figures share a line, its bar the whole width under them. */
+  @container (max-width: 38rem) {
+    .package {
+      grid-template-columns: 1fr auto;
+      gap: 0.35rem 0.75rem;
+    }
+
+    .package .counts {
+      white-space: normal;
+      text-align: end;
+    }
+
+    .package .bar {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
   }
 
   /* On a phone the figures say it: the bars of the tables go. */
   @media (max-width: 40rem) {
-    .package {
-      grid-template-columns: 1fr;
-    }
-
     .bar-cell {
       display: none;
     }

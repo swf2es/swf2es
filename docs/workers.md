@@ -2,9 +2,8 @@
 
 What ActionScript 3's workers (`flash.system.Worker`, `WorkerDomain`,
 `MessageChannel`, shared properties, a shareable `ByteArray` and
-`flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, how they map
-onto a browser's and node's threads, and the order to build them in.
-Slices 1 to 6 are built (see [Slices](#slices)).
+`flash.concurrent`'s `Mutex` and `Condition`) need of swf2es, and how
+they map onto a browser's and node's threads.
 
 ## What content needs
 
@@ -15,24 +14,22 @@ them all with every assertion passing (`tests/tamarin/baseline.json`; four
 print nondeterministic output, so only their counts are compared). Its API is
 the shell's own, not Flash's: `WorkerDomain.createWorkerFromPrimordial()` and
 `createWorkerFromByteArray(bytes)`, no `MessageChannel`, no events, and
-`avmplus.System.sleep` to wait. Since slice 2, swf2es runs them as avmshell
-does, its background workers on node's threads (see
-[avmshell's workers](#avmshells-workers)), so, by
-`tests/tamarin/swf2es-baseline.json` (assertions passed and failed before
-the test stops):
+`avmplus.System.sleep` to wait. swf2es runs them as avmshell does, its
+background workers on node's threads (see
+[avmshell's workers](#avmshells-workers)); all 76 of avmshell's checks
+pass (`tests/tamarin/swf2es-baseline.json`):
 
-| Test | Needs | swf2es now |
-|------|-------|------------|
-| `Worker`, `WorkerDomain`, `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | create, start, terminate, state, `listWorkers`, errors 1511 | as avmshell (8, 9, 2, 2, 1 and 1 passed); before slice 2 they stopped at the first creation, 4 assertions passed of 23 |
-| `ConditionAndMutexAPI` | Mutex and Condition on one thread | passes (12/12) |
-| `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` | passes (17/17) since slice 3; 14/17 before |
-| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes | as avmshell (12 passed) since slice 3; before, it stopped after the six on one thread, where it passed the shareable ByteArray to the worker |
-| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes | as avmshell (4 and 8 passed) since slice 4; before, they stopped where they passed the Mutex to the first worker, and before slice 3 at the shareable ByteArray |
+| Test | Needs |
+|------|-------|
+| `Worker`, `WorkerDomain`, `WorkerErrors`, `WorkerCreateMax`, `regress/bug774294`, `regress/bug774302` | create, start, terminate, state, `listWorkers`, errors 1511 |
+| `ConditionAndMutexAPI` | Mutex and Condition on one thread |
+| `ByteArrayAPI` | `atomicCompareAndSwapIntAt`/`Length`, `shareable` |
+| `ByteArrayWorkersLzma` | an LZMA round trip on a shareable ByteArray on one thread, then a worker doing it again on the same bytes |
+| `ByteArrayWorkers`, `RemoteCall` | five workers over one shareable ByteArray, a cross-thread Mutex, CAS, the primordial busy-waiting on the bytes |
 
-So all 76 of avmshell's checks pass in swf2es. The last three are what
-real threads need: the primordial spins reading the shared bytes while
-five workers write them, and takes the shared Mutex around `trace`. They
-run only where memory is truly shared.
+The last three are what real threads need: the primordial spins reading
+the shared bytes while five workers write them, and takes the shared
+Mutex around `trace`. They run only where memory is truly shared.
 
 The `worker-mutex` conformance case holds the rest of what avmshell shows
 of Mutex and Condition across workers: each crosses by reference, one
@@ -50,18 +47,8 @@ waiters; swf2es passes over it.
 
 ### Crossbridge
 
-The samples of Crossbridge's SDK (`samples/`), built with it (SWF 26) and
-played in Chrome with swf2es before slice 1:
-
-| Sample | Where it stops |
-|--------|----------------|
-| `01_HelloWorld/hello-*.swf` | `CRun::newThread`, `WorkerDomain.createWorker`: "creating a Worker is not supported yet" |
-| `09_Pthreads/pthreads.swf`, `sound.swf`, `pthread_swc1.swf` | the same |
-| `11_OpenMP/mandel.swf` | the same |
-| `09_Pthreads/pthread_swc2.swf` | nothing traced, no error in 60 frames (its document class drives a SWC; to look at once workers run) |
-| `10_MessageChannel/mc.swf` (40 MB uncompressed, its ABC alone takes the compiler some minutes) | TypeError 1009 in its own `Console.init` after `CModule.startBackground`, which swallowed the same "not supported" |
-
-So every Crossbridge sample needs workers, even Hello World: its `Console`
+Every sample of Crossbridge's SDK (`samples/`, built with it as SWF 26)
+needs workers, even Hello World: its `Console`
 runs `main()` on a background worker whenever `CModule.canUseWorkers`, which
 is only whether `flash.system.Worker` resolves. It never reads
 `Worker.isSupported`. What its runtime (`C_Run.abc`, `CModule.abc`,
@@ -94,53 +81,29 @@ is only whether `flash.system.Worker` resolves. It never reads
 - `10_MessageChannel` passes C++ values through `MessageChannel` and
   `channelMessage` events, from a thread's own event handler.
 
-With slice 1's workers, Hello World and `mandel.swf` get one step
-further: `createWorker` succeeds, and `newThread` stops at setting
-`flascc.threadArbMutex`, "passing a Mutex to another worker is not
-supported yet". Slice 3 shares `flascc.ram` and its domain memory, but
-the Mutex comes first, so they stop there still.
-
-Since slice 4, in Chrome on an isolated page with a worker host:
+Through `<swf2es-player>` with its default worker host, in headless
+Chrome on the player tests' isolated page, on the demo site isolated by
+its service worker, and in the desktop app:
 
 | Sample | Now |
 |--------|-----|
-| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits |
+| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits; 10 of 10 cold runs of each play |
 | `09_Pthreads/pthread_swc1.swf` | runs: its thread proc runs and is joined |
-| `11_OpenMP/mandel.swf` | runs and draws its zoom, at 36 to 67 fps with one thread in headless Chrome (software GL), the deeper the zoom the slower; a click, which should add a thread, fails with Crossbridge's "null function pointer called" in the click's callback on the primordial |
-| `09_Pthreads/pthreads.swf` | its threads start; the mouse callback it registers fails the same way, so the circle does not follow the mouse |
-| `09_Pthreads/sound.swf` | its threads start and the Sound plays; its `sampleData` callback fails the same way |
-| `09_Pthreads/pthread_swc2.swf` | nothing traced, as before |
-
-What was missing on the way: a worker a background worker makes (each
-pthread is one, made by the C main thread's worker), a primordial that
-takes such a request while it waits (Crossbridge's primordial waits for
-the main thread, which waits for the thread it starts), Web Workers
-started ahead (a browser starts one only while the page's thread is in
-its event loop), and shared properties seen at once (the primordial reads
-`flascc.uiThread.*` back while it waits). The callbacks C code registers
-with AS3 events (`AS3_DELEGATE`) failed then: they run on the primordial
-through Crossbridge's function pointer table (`ptr2fun`), which had no
-entry for them there. They run since a script's methods run in an empty
-scope chain, as avmplus runs them (#532), before which closures made in
-them read the wrong scope: most likely what kept the table's entries
-from them.
-
-Since slice 6, through `<swf2es-player>` with its default worker host,
-in headless Chrome (software GL) on the player tests' isolated page, on
-the demo site isolated by its service worker, and in the desktop app:
-
-| Sample | Now |
-|--------|-----|
-| `01_HelloWorld/hello-*.swf` (all four) | run: "Hello World" on the stage, the thread exits; `hello-debug.swf`, the first SWF in a cold browser, once in a few runs stopped with the script timeout (1502, caught by its `Console`, which then fails with 1009 on `getStackTrace()`'s null), as `mandel.swf` did about every other run: the start of its C main thread's worker was held by the page (see [Blocking](#blocking)); since slice 5, 10 of 10 cold runs of each play |
-| `09_Pthreads/pthread_swc1.swf` | runs: its thread proc runs and is joined |
+| `09_Pthreads/pthread_swc2.swf` | starts its two threads, once its root gets `addedToStage` after its constructor, as Flash and AIR send it |
 | `09_Pthreads/pthreads.swf` | runs: the mouse's moves reach its thread, which prints each |
 | `11_OpenMP/mandel.swf` | runs; each click adds a thread, up to 6 measured: its own count of frames a second stays between about 55 and 140 at every count, as its zoom deepens, with no gain from more threads |
 
-`09_Pthreads/pthread_swc2.swf` traced nothing because its document class
-starts on `addedToStage`, which Flash and AIR send a main SWF's root once
-its constructor returns, and swf2es did not. Since it does, the sample
-starts its two threads in node's player as it does as AIR's main content
-(adl), each `AlcWorkerSprite::run` traced.
+Each piece below was found missing on the way: a worker a background
+worker makes (each pthread is one, made by the C main thread's worker),
+a primordial that takes such a request while it waits (Crossbridge's
+primordial waits for the main thread, which waits for the thread it
+starts), Web Workers started ahead (a browser starts one only while the
+page's thread is in its event loop), and shared properties seen at once
+(the primordial reads `flascc.uiThread.*` back while it waits). The
+callbacks C code registers with AS3 events (`AS3_DELEGATE`) run on the
+primordial through Crossbridge's function pointer table (`ptr2fun`),
+which needs a script's methods to run in an empty scope chain, as
+avmplus runs them (#532).
 
 Crossbridge therefore needs, all at once: workers, a shareable ByteArray
 whose memory every thread sees (as domain memory), Mutex and Condition
@@ -151,7 +114,7 @@ the samples.
 ### Flash's semantics, measured
 
 The `worker-basics` player case (`tests/player/scripts/WorkerBasics.as`)
-traced in adl (AIR 51), and is the reference for slice 1:
+traced in adl (AIR 51), and is the reference:
 
 - `Worker.isSupported` and `WorkerDomain.isSupported` are true.
 - `createWorker` gives a worker in state `new`; `listWorkers` lists only
@@ -237,10 +200,10 @@ isolated, the site through its service worker, which serves the worker
 scripts too, and the app through its protocol, which serves them under
 `/modules/player-hosts/thread/`; their import maps name
 `@swf2es/player-hosts/workers`, which the element imports only when a
-SWF has workers, and without which its SWFs play without them. On a page that is not isolated, workers pass
-messages, and sharing a shareable ByteArray, a Mutex or a Condition
-throws the error that says it needs isolation (decision 1 of
-[Decisions](#decisions-for-the-user)).
+SWF has workers, and without which its SWFs play without them. On a
+page that is not isolated, workers pass messages, and sharing a
+shareable ByteArray, a Mutex or a Condition throws the error that says it
+needs isolation (see [Shared memory](#shared-memory)).
 
 The primordial is the hub: every background thread talks only to the
 primordial, which routes messages between workers. A background worker
@@ -385,8 +348,8 @@ ByteArray for an id, as avmplus interns one for a Buffer:
   shrink, so a smaller capacity zeroes what it would have dropped.
 - Its length is an accessor of the shared word on that object alone: every
   read sees another worker's change and every write is seen. A ByteArray
-  that shares nothing keeps its plain field, and its natives are as fast
-  as before (`as3pb`, interleaved against the slice before).
+  that shares nothing keeps its plain field, so its natives cost what
+  they did before sharing existed (measured on `as3pb`).
 - `shareable` cannot be set back to false, as in avmplus. `clear()` empties
   it for every worker, zeroing the memory before it makes the length 0,
   so that a worker growing it then writes into zeroes; `compress()` and the others
@@ -435,10 +398,19 @@ shared memory, which a browser gives only a cross-origin isolated page
 writes; a Mutex or a Condition the same ("sharing a Mutex with another
 worker needs shared memory, ..."), rather than a lock no other worker
 takes. A background worker cannot make a worker there either. Mutexes
-and Conditions work on the one thread, as in slice 1, and a
-`Condition.wait` without a timeout spins to the script timeout, as
-nothing can notify it. `flash.system.Worker` is not hidden (see
-[Decisions](#decisions-for-the-user)).
+and Conditions work on the one thread, and a `Condition.wait` without a
+timeout spins to the script timeout, as nothing can notify it.
+
+The alternatives were worse: `Worker.isSupported` false without
+isolation would not help Crossbridge, which never reads it, and would
+stop content that only passes messages; copies in place of shared memory
+would hang silently where this fails loudly. Nor is `flash.system.Worker`
+hidden there, though Crossbridge would then run `main()` on the UI thread
+(`startAsync`): that would change what a SWF sees of playerglobal. Flash
+Player 32 could refuse `Worker.start` when a user had turned shared
+memory off after Spectre (error 3807, "Worker.start has been disabled by
+the user"); that error could replace swf2es's own once its exact
+behaviour is checked.
 
 Where swf2es's own pages are isolated:
 
@@ -464,6 +436,10 @@ Where swf2es's own pages are isolated:
   `Cross-Origin-Embedder-Policy: credentialless` (or `require-corp`, which
   needs every cross-origin subresource to opt in) for a shareable
   ByteArray to cross; without them, workers pass messages only.
+
+All of swf2es's own pages ask for `credentialless`, which keeps a SWF's
+cross-origin no-cors loads working; Safari, which lacks it, stays
+unisolated rather than have `require-corp` block what does not opt in.
 
 ### Blocking
 
@@ -535,32 +511,21 @@ the primordial does in real content:
   a `lock` or `wait` that does not return within 15 s throws the
   ScriptTimeoutError (1502), as any long script.
 
-The options for the primordial:
-
-1. **Spin**: `lock` loops on `Atomics.compareExchange`, `wait(ms)`
-   releases the mutex and loops on `Atomics.load` of the condition's word
-   until notified or timed out, then takes the mutex again. Both stop with
-   Error 1502 after Flash's 15 s, which is Flash's own answer to a
-   primordial that waits too long. The page is frozen meanwhile, as Flash's
-   UI was. Exactly Flash's semantics for the content that exists, at the
-   cost of CPU while spinning.
-2. **tryLock only**: `lock` fails when contended. Wrong for Crossbridge's
-   handshake.
-3. **The primordial VM in a worker**, the stage drawn on the main thread
-   from what it sends (the paused "VM in a worker, drawing on main" plan
-   of 2026-10-19): the primordial may then truly block. It is the render
-   worker project in full: the scene protocol, synchronous
-   ExternalInterface both ways, `BitmapData.draw`. It would make blocking
-   free, but blocking does not need it.
-
-Decided and built: spin (1), with the 15 s limit; reconsider 3 on its own
-merits, as the render-worker evaluation planned, and let it take over
-blocking if it lands. A thread that cannot `Atomics.wait` (a browser's
-main thread) spins on `Atomics.load` with a backoff that never sleeps,
-and fails with Error 1502 (ScriptTimeoutError in a player) once it has
-spun for 15 s without returning to its event loop: Crossbridge's startup
-waits a millisecond at a time in a loop, which a limit on each wait would
-never stop. The page is frozen meanwhile, as Flash's was.
+So the primordial spins: `lock` loops on `Atomics.compareExchange`, and
+`wait(ms)` lets go of the mutex and loops on `Atomics.load` of the
+condition's word until notified or timed out, then takes the mutex
+again, with a backoff that never sleeps. Both fail with Error 1502
+(ScriptTimeoutError in a player) once they have spun for 15 s without
+returning to the event loop, Flash's own answer to a primordial that
+waits too long; the limit is on the spin, not on each wait, because
+Crossbridge's startup waits a millisecond at a time in a loop. The page
+is frozen meanwhile, as Flash's UI was: exactly Flash's semantics for the
+content that exists, at the cost of CPU while spinning. `tryLock` alone
+would break Crossbridge's handshake. Running the primordial's VM in a
+worker, the stage drawn on the main thread from what it sends, would let
+it truly block, but that is the whole render-worker project (a scene
+protocol, synchronous ExternalInterface both ways, `BitmapData.draw`);
+if it lands, it can take blocking over.
 
 A browser also starts a Web Worker only while the page's thread is in its
 event loop, so a primordial that starts a worker and waits for it in the
@@ -724,120 +689,23 @@ Where swf2es differs from the oracle's avmshell:
   avmshell interrupts them; what a thread had printed and not yet posted
   may be lost.
 
-## Slices
+## Tests
 
-Each a PR, in this order:
-
-1. **Message-passing workers** (built): `Worker.isSupported`,
-   `WorkerDomain.createWorker` on a host's thread, `start`, `terminate`,
-   `listWorkers`, `workerState`, shared properties of copied values,
-   `MessageChannel` with copied values (`send`, `receive(false)`,
-   `messageAvailable`, `channelMessage`, `close`, `channelState`), and the
-   worker's `trace` in the page's output. A Web Worker host and a node
-   `worker_threads` host. And avmshell's copies of the primordial's
-   shared properties in the runtime. Tests: the `worker-basics` player
-   case against Flash's trace in Chrome, the same case in node over a
-   `worker_threads` thread (`tests/unit/player/scripting/workers.test.ts`),
-   and the `worker-shared-properties` conformance case against avmshell.
-   Unlocks: AS3 content that only passes messages (image or data
-   processing workers). No Crossbridge sample.
-2. **avmshell's workers** (built, see
-   [avmshell's workers](#avmshells-workers)) in the runtime's shell
-   natives and the CLI, over node's threads: `createWorkerFromPrimordial`,
-   `createWorkerFromByteArray`, `start`, `terminate`, `state`,
-   `listWorkers`, `isParentOf`, shared properties seen at once across
-   threads, `System.sleep`. Tests: the six lifecycle Tamarin tests, and
-   the `worker-threads` conformance case against avmshell. Unlocks:
-   avmshell-checked semantics for what the rest builds on.
-3. **Shared memory** (built, see [Shared memory](#shared-memory)): a
-   shareable ByteArray over a growable
-   SharedArrayBuffer, passed by reference (one object a worker, as
-   avmplus interns it), real `atomicCompareAndSwapIntAt` and `Length`,
-   domain memory over a shared ByteArray; cross-origin isolation for the
-   test server, the desktop app and the demo site, and the documented
-   headers for other hosts. Tests: Tamarin's `ByteArrayAPI` (17/17) and
-   `ByteArrayWorkersLzma`, the `worker-shareable` conformance case against
-   avmshell (both ways across threads, growth, the atomics, domain memory
-   on both sides, compress and clear), the `worker-shared-bytes` player
-   case (two workers counting in one ByteArray and growing it) against
-   adl's trace in Chrome and on node's threads, `tests/player/isolation.ts`
-   on a page that is not isolated, and the site's and desktop app's
-   isolation in their tests.
-4. **Blocking across threads** (built, see [Blocking](#blocking)): Mutex
-   and Condition in shared memory for the player's and avmshell's
-   workers, `Atomics.wait` in workers, the spinning primordial with the
-   15 s limit, shared properties and channel queues in shared memory
-   (seen at once, `receive(true)`), workers made by background workers,
-   and Web Workers started ahead. Tests: Tamarin's `ByteArrayWorkers` and
-   `RemoteCall` (as3/Workers 76/76), the `worker-mutex` conformance case
-   against avmshell, the `worker-mutex` player case against adl's trace
-   in Chrome and on node's threads, `isolation.ts` for a Mutex on a page
-   that is not isolated, stress tests of the sync memory on node's
-   threads (`tests/unit/runtime/sync.test.ts`: contention, ordering,
-   timeouts, holders and waiters that end, queues, the spinning timeout),
-   and the player's on node's threads (blocking receive, locks across
-   threads, properties seen at once, a background worker making one).
-   Unlocks: Crossbridge's Hello World, `pthread_swc1` and `mandel` with
-   one thread; `pthreads`, `sound` and `mandel`'s added threads wait for
-   the C callbacks (see [Crossbridge](#crossbridge)).
-5. **Compiled code shared with workers** (built, see [Compiled
-   code](#compiled-code)): a worker loads the primordial's compiled
-   modules rather than compiling its SWF again, and imports those the
-   primordial imported, so that a page without `'unsafe-eval'` that
-   plays from modules compiled ahead of time runs its workers too; Web
-   Workers counted loaded once the page's messages reach them. Tests: a
-   worker's modules equal to those it would compile, and its compiler as
-   compiling them would leave it (`tests/unit/player/scripting/handover.test.ts`),
-   a worker under the precompiled test's policy (`tests/player/precompiled.ts`),
-   and the worker cases in Chrome and on node's threads, the web, site
-   and desktop tests as before.
-6. **The embeddings** (built, see [The embeddings](#the-embeddings)):
-   `@swf2es/web`'s worker host, on by default, with the `workers`
-   attribute and configuration and `workerUrl`; `player-hosts`' worker
-   script tree that loads without an import map, and through a `blob:`
-   module from another origin; the demo site and the desktop app
-   (isolated, so with shared memory). Tests: `tests/web/run.ts` plays
-   `worker-mutex` through the element by default, `worker-basics` with
-   workers off by the attribute and by `configure`, and on again by the
-   attribute, the script from another origin, and on a page that is not
-   isolated `worker-basics` passing messages, `worker-mutex` refused with
-   the isolation error, and the page's Web Workers gone after its last
-   player; `tests/site/run.ts` and the desktop smoke test play
-   `worker-mutex`. Unlocks `10_MessageChannel`, once 5 makes it start in
-   time.
-
-## Decisions for the user
-
-- **A page that is not cross-origin isolated.** Flash reports
-  `Worker.isSupported` true and shares memory. Without isolation a
-  browser cannot share memory, so the choices are:
-  1. workers that pass messages everywhere, and shared memory only where
-     the page is isolated; elsewhere passing a shareable ByteArray, a
-     Mutex or a Condition to another worker throws swf2es's "not
-     supported" error naming cross-origin isolation, rather than copying
-     it and leaving a program waiting on memory nobody writes;
-  2. `Worker.isSupported` false and `createWorker` refused without
-     isolation, as before slice 1;
-  3. copies in place of shared memory, silently.
-
-  Decided: 1 (built in slice 3). It is honest (it fails loudly, where 3
-  hangs), keeps `isSupported` as Flash reports it for the content that
-  only passes messages, and 2 does not help Crossbridge, which never reads
-  `isSupported`. Flash Player 32 itself could refuse `Worker.start` when
-  a user disabled shared memory after Spectre (error 3807, "Worker.start
-  has been disabled by the user"); that could be the error instead, if its
-  exact behaviour is checked first.
-- **The primordial's blocking.** Decided: spin, with Flash's 15 s
-  script timeout (built in slice 4). The alternative is the primordial in
-  a worker, which is the render-worker project.
-- **Which embedder policy the embeddings ask for.** `credentialless`
-  keeps a SWF's cross-origin no-cors loads working but is not in Safari;
-  `require-corp` works everywhere but blocks what does not opt in.
-  Decided: `credentialless` for the documented headers, the player
-  tests' server, the desktop app's own pages, and the demo site behind a
-  service worker that adds the headers (built in slice 3).
-- **Hiding workers from Crossbridge without isolation.** Crossbridge would
-  fall back to running `main()` on the UI thread (`startAsync`) if
-  `flash.system.Worker` did not resolve. Making it not resolve on a page
-  that is not isolated would let the samples without pthreads play there,
-  but changes what a SWF sees of playerglobal. Decided: not hidden.
+- **Against avmshell:** Tamarin's `as3/Workers` (76 of 76 checks), and
+  the conformance cases `worker-shared-properties`, `worker-threads`,
+  `worker-shareable`, `worker-mutex`, `worker-self-terminate` and
+  `worker-api-version`.
+- **Against adl's trace:** the player cases `worker-basics`,
+  `worker-shared-bytes` and `worker-mutex`, in Chrome and on node's
+  threads (`tests/unit/player/scripting/workers.test.ts`).
+- **The sync memory** on node's threads (`tests/unit/runtime/sync.test.ts`):
+  contention, ordering, timeouts, holders and waiters that end, queues
+  and the spinning timeout.
+- **Compiled code handed over** equals what the worker would compile
+  (`tests/unit/player/scripting/handover.test.ts`), and a worker runs
+  under a policy without `'unsafe-eval'` (`tests/player/precompiled.ts`).
+- **Isolation:** `tests/player/isolation.ts` on a page that is not
+  isolated; `tests/web/run.ts` through the element, with workers on, off
+  by attribute and by `configure`, from another origin, and the page's
+  Web Workers let go after its last player; `tests/site/run.ts` and the
+  desktop smoke test play `worker-mutex` on their isolated pages.

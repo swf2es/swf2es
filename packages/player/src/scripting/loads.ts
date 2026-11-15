@@ -17,6 +17,8 @@ import { streamFrames, warmAudioFor } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
+const textEncoder = new TextEncoder();
+
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 
@@ -572,7 +574,7 @@ export class Loads {
         if (get) {
           url = appendQuery(url, text);
         } else {
-          body = new TextEncoder().encode(text);
+          body = textEncoder.encode(text);
         }
       }
     }

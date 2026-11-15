@@ -137,6 +137,7 @@ export {
 export {
   backgroundColor,
   definesInput,
+  definesSound,
   fileAttributes,
   isAs3,
   type Rect,

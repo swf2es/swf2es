@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   backgroundColor,
+  definesSound,
   isAs3,
   readFilters,
   readMorphShape,
@@ -241,6 +242,20 @@ test("a string's malformed bytes stand for themselves, as avmplus reads them", (
 test("FileAttributes tells ActionScript 3 from an AVM1 movie", () => {
   assert.equal(isAs3(readSwf(movie)), false);
   assert.equal(isAs3(readSwf(frame(w.fileAttributes(true)))), true);
+});
+
+test("a sound of its own is a DefineSound or a stream's head, a sprite's too", () => {
+  const movie = (tags: Uint8Array[]) =>
+    readSwf(w.swf({ width: 10, height: 10, frameCount: 1, tags: [...tags, w.end()] }));
+  const head = w.soundStreamHead({ rate: 0, samplesPerBlock: 230 });
+  assert.equal(definesSound(movie([square, w.showFrame()])), false);
+  assert.equal(definesSound(movie([w.sprite(2, 1, [w.showFrame(), w.end()])])), false);
+  assert.equal(definesSound(movie([head, w.showFrame()])), true);
+  assert.equal(definesSound(movie([w.sprite(2, 1, [head, w.showFrame(), w.end()])])), true);
+  assert.equal(
+    definesSound(movie([w.defineSound(1, { rate: 0, samples: 4 }, new Uint8Array(4))])),
+    true,
+  );
 });
 
 test("a FILTERLIST reads its blur, glow and bevel, the bevel's highlight first as adl has it", () => {

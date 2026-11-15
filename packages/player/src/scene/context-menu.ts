@@ -12,13 +12,15 @@ export function aboutCaption(build: string | null): string {
  * DOM menus stay outside the canvas and exist only while open.
  * `shown` is what the canvas shows in stage coordinates, which may reach
  * past the stage into the margins, as Flash takes the pointer there too;
- * the stage where it is not given.
+ * the stage where it is not given. `client` takes a point on the stage to
+ * the page, where NativeMenu.display's menu shows; without it none does.
  */
 export function bindContextMenu(
   canvas: HTMLCanvasElement,
   player: Player,
   point: (event: MouseEvent) => [number, number],
   shown: () => { x: number; y: number; width: number; height: number } | null = () => null,
+  client: ((x: number, y: number) => [number, number]) | null = null,
 ): () => void {
   const document = canvas.ownerDocument;
   const window = document.defaultView;
@@ -76,6 +78,10 @@ export function bindContextMenu(
       separatorBefore: items.length > 0,
       select: () => window?.open("https://swf2es.github.io/swf2es/", "_blank", "noopener"),
     });
+    present(items, keyboard, event.clientX, event.clientY);
+  };
+  // The menu at a point in the page, or from the keyboard at the canvas's middle.
+  const present = (items: MenuItem[], keyboard: boolean, atX: number, atY: number) => {
     const lifetime = new AbortController();
     const options = { capture: true, signal: lifetime.signal };
     const prior = document.activeElement as HTMLElement | null;
@@ -170,8 +176,8 @@ export function bindContextMenu(
     host.showPopover?.();
     const rect = host.getBoundingClientRect();
     const canvasRect = canvas.getBoundingClientRect();
-    const clientX = keyboard ? canvasRect.left + canvasRect.width / 2 : event.clientX;
-    const clientY = keyboard ? canvasRect.top + canvasRect.height / 2 : event.clientY;
+    const clientX = keyboard ? canvasRect.left + canvasRect.width / 2 : atX;
+    const clientY = keyboard ? canvasRect.top + canvasRect.height / 2 : atY;
     host.style.left = `${Math.max(4, Math.min(clientX, (window?.innerWidth ?? 0) - rect.width - 4))}px`;
     host.style.top = `${Math.max(4, Math.min(clientY, (window?.innerHeight ?? 0) - rect.height - 4))}px`;
     // From the keyboard the first item takes focus; from the pointer none does, as in a native
@@ -267,6 +273,30 @@ export function bindContextMenu(
     keyboardEvents.add(menu);
     canvas.dispatchEvent(menu);
   };
+  // NativeMenu.display's menu, at its point on the stage, where it is in the page.
+  const scripting = player.scripting;
+  let unbound = false;
+  const showMenu = (items: MenuItem[], x: number, y: number) => {
+    if (player.destroyed || !client) {
+      return;
+    }
+
+    // After the event the script ran in, whose pointerdown would close it at once.
+    window?.setTimeout(() => {
+      if (player.destroyed || unbound) {
+        return;
+      }
+
+      openMenus.get(document)?.();
+      dismiss?.();
+      const [atX, atY] = client(x, y);
+      present(items, false, atX, atY);
+    }, 0);
+  };
+  if (scripting && client) {
+    scripting.showMenu = showMenu;
+  }
+
   canvas.addEventListener("contextmenu", open);
   focusTarget.addEventListener("keydown", keyboardMenu, { capture: true });
   if (focusTarget !== canvas) {
@@ -274,7 +304,12 @@ export function bindContextMenu(
   }
 
   return () => {
+    unbound = true;
     dismiss?.();
+    if (scripting?.showMenu === showMenu) {
+      scripting.showMenu = null;
+    }
+
     canvas.removeEventListener("contextmenu", open);
     focusTarget.removeEventListener("contextmenu", open as EventListener);
     focusTarget.removeEventListener("keydown", keyboardMenu, { capture: true });

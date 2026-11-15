@@ -99,6 +99,8 @@ class RelaySocket extends EventTarget {
 }
 (globalThis as { WebSocket: unknown }).WebSocket = RelaySocket;
 
+/** The AudioContext made last, whose state tells whether the browser holds its sound. */
+let lastAudio: AudioContext | null = null;
 const PageAudio = globalThis.AudioContext;
 globalThis.AudioContext = class extends PageAudio {
   private open = true;
@@ -107,6 +109,7 @@ globalThis.AudioContext = class extends PageAudio {
     super(options);
     counts.openAudio++;
     counts.audioMade++;
+    lastAudio = this;
   }
 
   close(): Promise<void> {
@@ -117,6 +120,17 @@ globalThis.AudioContext = class extends PageAudio {
 
     return super.close();
   }
+};
+
+/** Each sound's start, as the state of its context then: a stream held starts once it runs. */
+const sourceStarts: AudioContextState[] = [];
+const sourceStart = AudioBufferSourceNode.prototype.start;
+AudioBufferSourceNode.prototype.start = function (
+  this: AudioBufferSourceNode,
+  ...args: Parameters<AudioBufferSourceNode["start"]>
+) {
+  sourceStarts.push(this.context.state);
+  return sourceStart.apply(this, args);
 };
 
 /** The Web Workers flash.system.Worker's host made, and those not yet terminated. */
@@ -848,6 +862,55 @@ async function scriptFreePlayer(src: string) {
   return [box.left, box.top];
 }
 
+/** The unmute player's events and traces, from its load on. */
+const unmuteEvents: string[] = [];
+const unmuteTraces: string[] = [];
+const pageLog = console.log;
+
+/** A player of `src` with `attributes`, at the page's top left, once it plays: where it is. */
+async function unmutePlayer(src: string, attributes: Record<string, string>) {
+  const p = document.createElement("swf2es-player") as Player;
+  p.id = "unmute";
+  p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  for (const [name, value] of Object.entries(attributes)) {
+    p.setAttribute(name, value);
+  }
+
+  for (const type of ["audioblocked", "audiounblocked"]) {
+    p.addEventListener(type, () => unmuteEvents.push(type));
+  }
+
+  console.log = (...args: unknown[]) => unmuteTraces.push(args.join(" "));
+  p.setAttribute("src", src);
+  document.body.append(p);
+  await p.ready;
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top];
+}
+
+/** The unmute player's events, traces and button, its context's state and the sounds started. */
+function unmuteState() {
+  const button = element("unmute").shadowRoot?.querySelector("button");
+  const shown = button instanceof HTMLButtonElement && !button.hidden;
+  const box = button?.getBoundingClientRect();
+  return {
+    events: [...unmuteEvents],
+    traces: unmuteTraces.filter((t) => t.startsWith("unmute: ")),
+    button:
+      shown && box
+        ? {
+            label: button.getAttribute("aria-label"),
+            text: button.textContent,
+            focusable: button.tabIndex >= 0,
+            center: [box.left + box.width / 2, box.top + box.height / 2],
+          }
+        : null,
+    context: lastAudio?.state ?? null,
+    starts: [...sourceStarts],
+    focused: document.activeElement === element("unmute"),
+  };
+}
+
 /** A player of the activation SWF, focused, and a textarea of the page's beside it. */
 async function activationPlayer() {
   const p = document.createElement("swf2es-player") as Player;
@@ -1060,6 +1123,20 @@ Object.assign(globalThis, {
     return true;
   },
   frames,
+  unmutePlayer,
+  unmuteState,
+  unmuteEvents: () => [...unmuteEvents],
+  /** A click on the button by script, which no browser counts as the user's gesture. */
+  unmuteScriptClick: () => {
+    element("unmute").shadowRoot?.querySelector("button")?.click();
+    return true;
+  },
+  unmuteDestroy: () => {
+    element("unmute").destroy();
+    element("unmute").remove();
+    console.log = pageLog;
+    return true;
+  },
   scriptFreePlayer,
   scriptFreeDestroy: () => {
     element("script-free").destroy();

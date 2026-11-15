@@ -8,8 +8,9 @@ import type { ThreadStart } from "@swf2es/player/worker";
 /** A host that connects ActionScript sockets to TCP directly from Node. */
 export function nodeSocketHost(): SocketHost {
   return {
-    connect(host, port, events) {
-      const socket = connect({ host, port });
+    connect(host, port, events, options) {
+      // At once unless the SWF set tcpNoDelay to false, as the desktop's sockets.
+      const socket = connect({ host, port, noDelay: options?.noDelay ?? true });
       socket.on("connect", () =>
         events.open({
           localAddress: socket.localAddress ?? "",

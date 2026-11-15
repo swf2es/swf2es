@@ -1,8 +1,9 @@
 // Button's AS2 face as far as the frame needs it, a button's prototype, as
 // Ruffle's (https://github.com/ruffle-rs/ruffle) core/src/avm1/globals/
 // button.rs has it: MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC
-// and Ruffle contributors. Its events and the rest of its properties come
-// with the pointer (docs/avm1.md, step 12).
+// and Ruffle contributors. Its events are the pointer's (docs/avm1.md,
+// "Clip events and buttons"); the rest of its properties are among the
+// known gaps.
 import { avm1 } from "@swf2es/runtime";
 import { ButtonObject } from "../../display/display.js";
 import { filtersProperty } from "./filters.js";

@@ -41,7 +41,8 @@ it needs. Its pages, under the base path:
     file of Adobe's is needed: a member counts as implemented unless it is
     a native `unimplemented-natives.json` lists, which
     `natives-coverage.test.ts` keeps to exactly the natives the player
-    does not register. AIR's own API is left out, by its API versions
+    does not register, Stage3D's counted as a host that gives Stage3D
+    installs them (`installContext3D`). AIR's own API is left out, by its API versions
     (`tools/playerglobal-air.ts` marks the AIR-only classes Flash's
     playerglobal leaves unmarked) and the list's `air` group;
   - the player's features, by hand, with counts from the same list.

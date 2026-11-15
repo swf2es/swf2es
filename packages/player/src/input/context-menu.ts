@@ -2,7 +2,7 @@
 import type { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../as3/types.js";
 import type { Container } from "../display/display.js";
-import { dispatchTo } from "../scripting/events.js";
+import { dispatchAlong, dispatchTo } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { pointerTarget } from "./hit-test.js";
 import type { PointerState } from "./pointer.js";
@@ -111,4 +111,80 @@ export function customContextMenu(s: Scripting, stage: Container, p: PointerStat
   }
 
   return result;
+}
+
+/**
+ * NativeMenu.display's menu of `shown`, the items of `menu` it shows: a
+ * separator item draws a line before the next, and a submenu's item is
+ * there but cannot be opened yet. A choice is AIR's: a ContextMenuItem's
+ * menuItemSelect, any other item's select, from the item up through `menu`
+ * and the menus above it.
+ */
+export function nativeMenuItems(s: Scripting, menu: avm2.AsObject, shown: avm2.Value): MenuItem[] {
+  const rt = s.rt;
+  const at = (o: avm2.Value, i: number) => rt.getProperty(o, rt.publicName(String(i)));
+  const length = rt.toUint(rt.prop(shown as As3<"Array">, "length"));
+  const contextItem = rt.classNamed("flash.ui::ContextMenuItem");
+  const items: MenuItem[] = [];
+  let separator = false;
+  let selected = false;
+  for (let i = 0; i < length; i++) {
+    const item = at(shown, i) as As3<"flash.display::NativeMenuItem">;
+    if (rt.prop(item, "isSeparator")) {
+      separator = items.length > 0;
+      continue;
+    }
+
+    const isContext = rt.isInstance(item, contextItem);
+    const submenu = rt.prop(item, "submenu");
+    const enabled = !submenu && rt.prop(item, "enabled");
+    const before =
+      isContext && rt.prop(item as As3<"flash.ui::ContextMenuItem">, "separatorBefore");
+    items.push({
+      caption: `${rt.prop(item, "label") ?? ""}${submenu ? " \u25b8" : ""}`,
+      enabled,
+      separatorBefore: separator || before,
+      checked: rt.prop(item, "checked") || undefined,
+      select: () => {
+        if (!enabled || selected || s.destroyed) {
+          return;
+        }
+
+        selected = true;
+        s.clipboard.gesture(() => {
+          if (isContext) {
+            const event = rt.construct(
+              rt.classNamed("flash.events::ContextMenuEvent"),
+              "menuItemSelect",
+              false,
+              false,
+              null,
+              null,
+            );
+            dispatchTo(s, item, event);
+            return;
+          }
+
+          // Up through the menus, each once: a submenu set later may have closed a loop.
+          const path: (readonly [avm2.AsObject, avm2.AsObject])[] = [[item, item]];
+          const seen = new Set<avm2.AsObject>();
+          for (
+            let m: avm2.AsObject | null = menu;
+            m && !seen.has(m);
+            m = rt.prop(m as As3<"flash.display::NativeMenu">, "parent")
+          ) {
+            seen.add(m);
+            path.push([m, m]);
+          }
+
+          const event = rt.construct(rt.classNamed("flash.events::Event"), "select", true, false);
+          dispatchAlong(s, event, path);
+        });
+        s.updates++;
+      },
+    });
+    separator = false;
+  }
+
+  return items;
 }

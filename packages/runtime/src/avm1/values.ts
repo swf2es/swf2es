@@ -10,16 +10,16 @@ export type Primitive = undefined | null | boolean | number | string;
 
 /**
  * An AVM1 value: a JavaScript primitive, a number always a double, as
- * AVM1 has no int, or an object, which the objects' step (docs/avm1.md,
- * step 6) makes an `Avm1Object`.
+ * AVM1 has no int, or an object, an `Avm1Object` (docs/avm1.md,
+ * "Objects").
  */
 export type Value = Primitive | object;
 
 /**
  * What converting an object asks of it, by calling its `valueOf` or
- * `toString`, which the step that brings objects (6) and the one that
- * brings their classes (9) give; until then each throws NotYet, ending the
- * block, as an action not done yet does. They are set once, on this
+ * `toString`, which the realm sets with Object and its classes
+ * (docs/avm1.md, "Objects"); unset, each throws NotYet, ending the block,
+ * as an action not done yet does. They are set once, on this
  * object, never per version: the version is an argument.
  */
 export interface ObjectConversions {

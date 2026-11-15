@@ -140,6 +140,9 @@ node tests/site/run.ts [--serve]   # the built site in Chrome under /swf2es/: th
                               # at (part of pnpm test)
 node tests/desktop/smoke.ts         # the desktop app in headless Electron: plays, draws, loads, a
                               # socket, a drop (part of pnpm test; skipped without Electron's binary)
+node tests/desktop/relay-bench.ts [<checkout A> <checkout B>] [runs] [--burst N] [--busy MS]
+                              # the desktop app's sockets and WebSockets relayed in node from servers
+                              # sending many small messages: IPC messages, reads, buffers, CPU
 node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--gpu]   # time the
                               # player on a busy synthetic timeline in Chrome (--town: a busy room's
                               # mix, see docs/renderer.md; --blends: shapes alone in blend modes);
@@ -190,6 +193,10 @@ node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flas
                               # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug
 node tests/bench/players.ts --only swf2es,flash vector   # indexed reads, writes, push and pop on
                               # Vectors of int, Number, String, Object and a class, and on Arrays
+node tests/bench/players.ts avm1   # AVM1: loops, members, calls, scopes, clips made and removed,
+                              # onEnterFrame on 2,000 clips (docs/benchmarks.md, "AVM1 against Flash")
+node tests/bench/players.ts avm2   # AS3: the avmshell benchmarks above, display objects, ENTER_FRAME
+                              # on many Sprites, as3pb and LZ4 by Crossbridge ("AVM2 against Flash")
 ```
 
 Run `pnpm check`, `pnpm build`, `pnpm typecheck` and `pnpm test` before

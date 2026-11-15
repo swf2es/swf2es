@@ -8,6 +8,8 @@ import type { BitmapStore } from "./bitmap/bitmap.js";
 import type { DisplayObject } from "./display/display.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
 
+const textDecoder = new TextDecoder();
+
 type Value = avm2.Value;
 
 /**
@@ -69,7 +71,7 @@ export function browserNavigate(): Navigate | null {
     form.target = "_blank";
     form.rel = "noopener";
     form.style.display = "none";
-    for (const [name, value] of new URLSearchParams(new TextDecoder().decode(request.body))) {
+    for (const [name, value] of new URLSearchParams(textDecoder.decode(request.body))) {
       const input = document.createElement("input");
       input.type = "hidden";
       input.name = name;
@@ -372,8 +374,23 @@ export interface SocketEvents {
   error(message: string): void;
 }
 
+/** How a connection is made, as the script asked before it connected. */
+export interface SocketOptions {
+  /**
+   * Whether small writes go at once (TCP_NODELAY), as AIR's
+   * Socket.tcpNoDelay was when connect() was called; absent where the
+   * script never set it, for the host's own default. A host may ignore it.
+   */
+  noDelay?: boolean;
+}
+
 export interface SocketHost {
-  connect(host: string, port: number, events: SocketEvents): SocketTransport;
+  connect(
+    host: string,
+    port: number,
+    events: SocketEvents,
+    options?: SocketOptions,
+  ): SocketTransport;
 }
 
 /** A window's place and size on the screen, in pixels, its frame included. */

@@ -1,33 +1,200 @@
 # Benchmarks
 
-The compiler's and the runtime's benchmarks, and what they measured. The
-renderer's are in [renderer.md](renderer.md#measuring): the synthetic
-scenes of `tests/player/bench.ts` and the draw counts of
-`tests/player/draw-counts.ts`. The native module's kernels are held to
-the JavaScript they replaced by unit tests, not timed by a benchmark of
-their own; their speed-ups are in the pull requests that moved them
-(#653, #655, #657, #660).
+How to time swf2es, the reference numbers to compare a change with, and
+a line for each change that moved them. The renderer's design and what
+it is judged by are in [renderer.md](renderer.md#measuring); the native
+module's kernels are held to the JavaScript they replaced by unit tests,
+and their speed-ups are in the pull requests that moved them (#653,
+#655, #657, #660).
+
+A change is measured on a benchmark made for the path it touches first,
+then on a real scene for the overall picture. Two builds are run in turn,
+interleaved (A, B, B, A, ...), each in a process of its own, so that both
+see the same load on the machine; a build against a copy of itself
+differs by 2 or 3%, so only a gain that repeats is kept. Run one
+benchmark at a time, on a machine doing nothing else heavy.
+
+## Running them
+
+### Against other players
+
+`tests/bench/players.ts` compiles a self-timing benchmark into a SWF and
+plays it in swf2es and in Ruffle's web build, each in headless Chrome,
+and in Flash, as AIR's `adl -nodebug` runs it (the debugger slows its JIT
+by about 1.7× on object creation). The players take turns in an order
+that changes each run, every section traces its time by the SWF's own
+clock, and every other line must be as Flash traces it.
+
+    node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flash]
+      [--write-swf OUT] [bench...]
+
+- `enumeration`: for-in and for each over Arrays, Vectors, Objects and
+  Dictionaries (`tests/bench/enumeration/Enumeration.as`);
+- `dictionary`: gets, misses, writes, `in` and deletion on strong and weak
+  Dictionaries (`dictionary/DictionaryAccess.as`);
+- `vector`: indexed reads, writes, push and pop on Vectors and Arrays of
+  int, Number, String, Object and a class (`vector/VectorAccess.as`);
+- `pixels`: a BitmapData's pixels set and read whole, by ByteArray and by
+  Vector (`pixels/BitmapPixels.as`);
+- `primitives`, `typed`, `untyped`, `native-collections`, `display`,
+  `display-frames`, `as3pb` and `lz4`: see "AVM2 against Flash" below;
+- `avm1-*`: see "AVM1 against Flash".
+
+`avm1` and `avm2` name the groups. `--ruffle DIR` (or `RUFFLE`) names
+Ruffle's unpacked self-hosted build; without it Ruffle is left out.
+`--write-swf OUT` writes each benchmark's SWF into OUT and plays none,
+to profile one in node or open it elsewhere. The draft comparison branch
+(#835) adds `drawing`, scenes of vectors, bitmaps, filters, text,
+redrawn graphics and a Pixel Bender fill at three loads each, and
+`stage3d`, played at 60 frames a second on the GPU through the browser
+build's element, with frame times and memory; startup; and Flash
+Player's projectors under Wine. The 0.1.24 numbers below were taken with
+it.
+
+### The player in Chrome
+
+`tests/player/bench.ts` plays a synthetic SWF in headless Chrome and
+prints the median and p90 of a frame's tick (the timeline and scripts),
+draw (the display list's walk, plan and GL calls) and gl (the wait for GL
+to finish), after the first frames warm up. Chrome draws with SwiftShader
+by default, CPU time that compares run to run on one machine; `--gpu`
+draws on the machine's GPU (on a machine with two,
+`VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.x86_64.json` or
+`nvidia_icd.x86_64.json` picks one).
+
+    node tests/player/bench.ts [scene] [--gpu] [--counts] [--allocs] [--checkout DIR] [--json]
+
+- by default, 2,000 shapes placed from a few characters, some moving,
+  turning and replaced each frame (`--shapes N`);
+- `--town N`: N hairline-outlined characters of many parts on loops of
+  different lengths, some glowing, mirrored or walking, among scenery,
+  all clips with frame scripts; nearest a busy room;
+- `--text N`: N TextFields of an embedded font, a tenth taking new text
+  each frame (`--normal`, `--device` for other kinds);
+- `--blends N`: N shapes alone in a blend mode each, over bands;
+- `--scripted N`: N rigs whose parts are scripted clips, replaced each
+  frame (`--still` keeps them, for the walk of a deep tree whose scripts
+  rarely run);
+- `--readback N`: each frame a new BitmapData of 546 by 693, an outline
+  of N edges drawn into it, its getColorBoundsRect and those pixels read
+  into a ByteArray after a 54-byte header (`--opaque` for an opaque
+  bitmap): a fresh bitmap's texture, the readback after a draw and the
+  scan;
+- and others for one path each: `--rig`, `--pulse`, `--branches`,
+  `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
+  `--redraw`, `--vectors` (the script's header says what each plays).
+
+`--counts` adds the GL calls a frame, `--allocs` the KB allocated,
+`--checkout DIR` plays another built checkout on the same SWF, and
+`--write-swf FILE` writes the SWF for another player.
+`tests/player/draw-counts.ts` holds the GL calls a frame to
+`draw-counts.json`, which may only go down.
+
+### The player's walks in node
+
+`tests/player/walk-bench.ts` times the walks a frame makes of the display
+list, on a tree of some 13,000 objects (`--rigs 400`) without rendering:
+the median of a whole tick, and of a lone `runFrameScripts` that finds
+nothing to run, in microseconds, over `--reps 5` runs of `--frames 200`.
+
+    node --expose-gc tests/player/walk-bench.ts [--orphans N] [--menu K] [--old N]
+      [--playing N] [--churn N] [--list N [--moving K] [--scroll]]
+
+- `--orphans N`: N hidden panels kept off the list, each held by an
+  event listener, as content keeps hidden panels;
+- `--menu K`: a script builds a menu of K rows whose buttons' states are
+  scripted clips, each made running the frame scripts due, as Flash does;
+- `--old N`: N rigs of a version 9 SWF on the stage, which every round of
+  frame scripts lists;
+- `--playing N`: N clips that play on beside the still rigs, so the tick
+  times mostly the advance walk;
+- `--churn N`: N clips whose timelines place and remove children every
+  frame, listening for ADDED and REMOVED;
+- `--list N`: a still pointer over a scrolled list of N rows of text
+  fields and buttons, what an idle UI list asks each frame end.
+
+### Morphs
+
+`tests/player/morph-bench.ts` animates curved, outlined morphs, shared or
+unique (`--unique`), in step or phased (`--phases`), at repeating or
+fresh ratios (`--loop 0`); it reports frame times, cache requests and
+misses, and retained memory, `--allocs` allocation and `--counts` the
+native calls.
+
+    node tests/player/morph-bench.ts [--morphs 32] [--edges 32] [--loop 96] [--phases] [--unique] [--gpu]
+
+### Two builds, pixel for pixel
+
+- `node tests/player/render-bench.ts <checkout A> <checkout B> [--gpu]
+  [--runs 3]`: the renderer's fixtures in two checkouts, A/B then B/A,
+  with pixel hashes compared ([renderer.md](renderer.md#measuring)).
+- `node tests/bench/bitmap-draws.ts <checkout A> <checkout B> [cases,
+  6000] [seed, 1] [--big]`: random BitmapData draws and copies in every
+  blend mode, each pixel compared, for a change to `drawBitmap` or
+  `copyPixels` that must draw what it drew before, faster.
+
+### The compiler and runtime in node
+
+Each of these compiles an AS3 file with swf2es, runs it in node, and
+checks its lines other than the times against avmshell's:
+
+| Benchmark | Times |
+|---|---|
+| `tests/bench/untyped/run.ts` | names read, written and called on values typed `*`, through the runtime's lookup |
+| `tests/bench/typed/run.ts` | `new` of known classes, and calls the compiler binds, through interfaces and `super` too |
+| `tests/bench/enumeration/run.ts` | for-in and for each over every kind of collection |
+| `tests/bench/native-collections/run.ts` | the natives that walk Arrays and Vectors: map, filter, sort, conversion |
+| `tests/bench/vector/run.ts` | indexed Vector and Array access |
+| `tests/bench/primitives/run.ts` | String's, int's and Number's methods on typed values |
+| `tests/bench/dictionary/run.ts` | Dictionary access; `memory.ts` beside it, what one keeps |
+| `tests/bench/globals/run.ts` | thousands of script-level variables and functions, as Crossbridge compiles C |
+
+    node tests/bench/<name>/run.ts [runs]                  the builds now
+    node tests/bench/<name>/run.ts <dir A> <dir B> [runs]  two snapshots, interleaved
+
+A snapshot is `node tests/programs/ab.ts --snapshot <dir>`: the runtime's
+and the compiler's builds as they are, so a change can be timed by
+snapshot, change, build, snapshot again. `node tests/programs/ab.ts <dir
+A> <dir B>` times as3pb with the two. `pnpm bench [file.abc...]` times
+the ABC parser, the bytecode decoder and typed verification in the
+release build (abcdump.abc from the last conformance run without files),
+and `tests/bench/dxt.ts` the native DXT encoder against TypeScript's.
+
+### The desktop app's sockets and WebSockets
+
+`tests/desktop/relay-bench.ts` has servers in a process of their own send
+many small messages, 8 sockets 20,000 of 48 bytes each and 4 WebSockets
+20,000 of 32, and the desktop app's main-process side of them
+(`connections.ts`, `websocket-connections.ts`, through `relay.ts` where
+the checkout has it) take them in node, without Electron. It counts the
+IPC messages the page would be sent, the socket's reads, the stores they
+made and a batch's joins among them, collections and CPU time. Each
+message is serialized by V8's serializer, as IPC serializes it, so the
+CPU time holds serialization, but not the posting to the page nor the
+page's side.
+
+    node tests/desktop/relay-bench.ts [runs]                             this checkout
+    node tests/desktop/relay-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
+        [--burst N]   the messages a server writes a turn, 40 by default
+        [--busy MS]   the main process held MS ms of every 2 MS, as by its other work
 
 ## AVM1 startup and scene changes
 
-`pnpm bench:avm1 [--runs 5] [--frames 600]` runs a generated, three-scene
-AVM1 movie in fresh Node processes. Each stopped scene installs an
-`onEnterFrame` function doing arithmetic, property and array access. It
-reports startup, first-use scene entry and warmed ticks separately,
-including compiler time, compiled block counts, the JS heap after GC and
-Wasm memory. Warmed execution must compile no further blocks, and the
-script's result is checked.
+`pnpm bench:avm1 [--runs 5] [--frames 600]` measures what AVM1 content
+pays to start, to enter a scene for the first time and to run warmed
+ticks, in fresh node processes and without rendering: a generated,
+three-scene movie whose stopped scenes each install an `onEnterFrame`
+doing arithmetic, property and array access. It reports compiler time,
+compiled block counts, the JS heap after collection and wasm memory;
+warmed ticks must compile no further blocks, and the script's result is
+checked.
 
 `pnpm bench:avm1 --compare /path/to/built-checkout --json /tmp/avm1.json`
-compares that checkout (A) with the current build (B), alternating A/B and
-B/A order in fresh processes. Build both checkouts first. Each displayed
-timing is the median of that statistic across runs; JSON retains every
-run. Collection happens outside the measured work at each checkpoint.
-These are script/timeline CPU timings, excluding rendering, browser
-scheduling and GPU work; they do not measure FPS.
+compares that checkout (A) with this one (B), alternating A/B and B/A
+order. Each timing shown is the median across runs; the JSON keeps every
+run. These are script and timeline CPU times, not frame rates.
 
-To replay a local movie, pass `--swf /path/to/movie.swf --replay steps.json`.
-A replay is an array of steps, for example:
+`--swf /path/to/movie.swf --replay steps.json` replays a local movie:
 
 ```json
 [
@@ -38,583 +205,675 @@ A replay is an array of steps, for example:
 ]
 ```
 
-Clicks use stage coordinates or the origin of a named clip reached through
-its parents. A step may also supply `text` for keyboard input, `next: true`
-to resume a stopped root, or `expectFrame` to check the replay's position.
-Without a replay, a supplied SWF simply plays for `--frames` ticks. Local
-movie assets are not copied into the repository. Browser profiling remains
-necessary to assess complete scene-entry frames in an actual game.
+A click is in stage coordinates or at the origin of a named clip reached
+through its parents; a step may also give `text` for keyboard input,
+`next: true` to resume a stopped root, or `expectFrame` to check where
+the replay is. Without a replay, the SWF plays for `--frames` ticks.
+`tests/bench/avm1-sas2.json` replays a locally supplied AVM1 game through
+its first victory and level-up screen; the SWF is not in the repository.
 
-`tests/bench/avm1-sas2.json` replays the locally supplied Swords and Sandals II
-movie through its first victory and level-up screen:
-`pnpm bench:avm1 --swf /path/to/sas2.swf --replay tests/bench/avm1-sas2.json`.
-The SWF itself is not supplied. This replay tests script/timeline costs;
-the browser's first-use rendering costs require a separate measurement.
+`node tests/bench/avm1-names.ts [<checkout A> <checkout B>] [runs, 5]`
+times AVM1's name lookups on clips with many children, two built
+checkouts interleaved: the pointer moved over a thousand clips, each
+asked whether it takes the pointer as a button (`onPress` and the rest),
+and a script reading members a clip does not have, then a child by name.
+
+There is no AVM1 benchmark against Flash yet; one in `players.ts` is
+planned next.
+
+## AVM1 against Flash
+
+`node tests/bench/players.ts avm1` times six AVM1 benchmarks in swf2es
+(headless Chrome), Flash (adl `-nodebug`) and, given `--ruffle DIR`,
+Ruffle's web build. Each is an AS1 source under `tests/bench/avm1/`,
+compiled by `tests/avm1-script.ts` as Flash's compiler writes it into a
+SWF 8, after `Bench.as`, which times each section by the Date over its
+rounds after a tenth of them to warm up. Every section also traces a
+checksum of its work, from its first call; `players.ts` prints where a
+player's trace parts from Flash's and still times it, so a run is only
+sound if it prints none.
+
+- **avm1-loop** (`Loop.as`): int-like and Number arithmetic, Math's
+  functions and a string built by `+=`, in functions (registers), and the
+  int loop again on the timeline (variables by name), for a quarter of the
+  rounds: 10 to the function's 40, so per iteration the timeline's is
+  about 3.3 times slower than the function's, not faster.
+- **avm1-members** (`Members.as`): an object's members by literal name
+  and by a name in a variable, an Array read, written, pushed and popped
+  by index, and for..in over 100 members.
+- **avm1-calls** (`Calls.as`): a timeline function, methods on prototypes
+  as AS2's classes compile (`_global`, Extends, `super`), an inherited
+  method, `new`, and Function's `call` and `apply`.
+- **avm1-scope** (`Scope.as`): timeline variables from a function, `with`
+  on an object and on a clip, `_root` and `_parent` paths, and `eval` and
+  `set` of dotted and slash paths.
+- **avm1-clips** (`Clips.as`): 300 clips attached, duplicated or created
+  empty, then removed; the attached one is a library symbol of one shape.
+- **avm1-frames** (`EnterFrame.as`): 2,000 clips, each with an
+  `onEnterFrame`; 30 frames that move them in their own variables only
+  (script), then 30 that also set `_x`, `_y`, `_rotation` and `_alpha`
+  (display). The SWF's frame rate is 255 so that Flash's frames are not
+  held to its pace; an empty handler on the same clips runs at that pace,
+  so it is only a warm-up and is not timed. swf2es draws each changed
+  frame as the web host does, multisampled, because adl draws its hidden
+  window: larger shapes made Flash's display phase twenty times slower.
+  A phase is timed over 31 ticks for its 30 frames of work, so Flash may
+  wait out one idle frame at its pace (4 ms or more), a few percent at
+  most. Ruffle's web build plays at the display's rate and is drawn at
+  100 × 50 CSS pixels, so its avm1-frames numbers, bracketed, are not its
+  work alone and not comparable.
+
+Medians of 5 runs, 2026-11-15, i9-13900H, Chrome 157 (SwiftShader), AIR
+51.5.1's adl under Wine, Ruffle 0.7.1, in ms:
+
+| Section | swf2es | Flash | Ruffle | Flash / swf2es |
+|---|---|---|---|---|
+| int-arith | 109 | 470 | 608 | 4.3× |
+| number-arith | 119 | 512 | 471 | 4.3× |
+| math-calls | 198 | 813 | 762 | 4.1× |
+| string-concat | 38 | 444 | 246 | 11.7× |
+| int-arith-timeline | 91 | 721 | 474 | 7.9× |
+| object-named | 115 | 689 | 758 | 6.0× |
+| object-keyed | 107 | 669 | 687 | 6.3× |
+| array-read | 28 | 159 | 241 | 5.7× |
+| array-write | 29 | 231 | 339 | 8.0× |
+| array-push-pop | 49 | 234 | 296 | 4.8× |
+| for-in | 26 | 147 | 131 | 5.7× |
+| function-call | 86 | 529 | 335 | 6.2× |
+| method-call | 187 | 1003 | 808 | 5.4× |
+| inherited-call | 194 | 995 | 739 | 5.1× |
+| construct | 201 | 858 | 777 | 4.3× |
+| call-apply | 179 | 858 | 600 | 4.8× |
+| timeline-vars | 90 | 538 | 474 | 6.0× |
+| with-object | 71 | 437 | 326 | 6.2× |
+| with-clip | 82 | 365 | 491 | 4.5× |
+| root-paths | 94 | 303 | 773 | 3.2× |
+| parent-paths | 99 | 279 | 874 | 2.8× |
+| eval-set | 119 | 383 | 268 | 3.2× |
+| attach-remove | 121 | 154 | 140 | 1.3× |
+| duplicate-remove | 104 | 142 | 102 | 1.4× |
+| create-remove | 99 | 129 | 111 | 1.3× |
+| enterframe-script | 108 | 361 | (1245) | 3.3× |
+| enterframe-display | 379 | 687 | (1576) | 1.8× |
+
+swf2es is ahead of Flash's AVM1 interpreter in every section, 4 to 12
+times in script that touches no clip. It is closest where clips are
+involved: making and removing them (1.3–1.4×), the display's properties
+and drawing (1.8×), paths through clips (2.8–3.2×), and onEnterFrame on
+2,000 clips (3.3×). Ahead of an interpreter is still slow for
+JavaScript: the int loop's iteration takes about 130 ns. A profile in
+node points at:
+
+- **The operand stack in memory.** A function's code keeps AVM1's stack
+  as an array across actions, `st.push(r1 = st.pop()); st.pop();` for a
+  store to a register, and every operation is a `V.*` call that checks
+  its operands' types, `V.toBoolean(V.not(V.less2(...)))` for a loop's
+  test.
+- **A call's allocations.** `call` makes an activation, a Scope and an
+  object for locals at every call, though a DefineFunction2 that keeps
+  everything in registers never reads that object; with property lookups
+  by Map (`exact`), it is most of avm1-calls.
+- **A clip's allocations.** A clip attached and removed allocates about
+  5 KB: the clip itself, Maps for its depths and its AVM1 object's
+  properties, an activation, its face, native and name, and splice's
+  arrays; the collector is about 11% of avm1-clips. `splice` at index 0
+  (`Container.takeOut`) is about 6% of its samples, but moving the
+  children by hand gained nothing that repeated.
+- **Path parsing.** `targetPath` parses a path each time, about 10% of
+  eval-set; the rest of it is the lookups the parse interleaves.
+
+Changes since, on the same machine, medians of 6 interleaved runs of
+`--only swf2es`, in ms:
+
+- 2026-11-15: `removed()` keeps its answer on the clip until a parent
+  changes or a level is made (`parentage`), rather than walking to the
+  level at every reference: with-clip 78.5 → 74, root-paths 92.5 → 68,
+  parent-paths 99 → 69, eval-set 117.5 → 113.
+- 2026-11-15: a clip's frame entry a field of it, and only clips' places
+  in a WeakMap, so placing and entering add no WeakMap entries for the
+  collector to walk (with the line above): attach-remove 115 → 107,
+  duplicate-remove 107.5 → 95.5, create-remove 97.5 → 87.5.
+
+## AVM2 against Flash
+
+`node tests/bench/players.ts avm2` times every AS3 benchmark in swf2es
+(headless Chrome), Flash (adl `-nodebug`) and, given `--ruffle DIR`,
+Ruffle's web build: the four above (enumeration, dictionary, vector,
+pixels) and eight more. Each but lz4 is compiled by ASC 2.0 against
+playerglobal into a SWF of version 18 (Flash Player 11.5's, for JSON;
+the four older ones ran as SWF 10 in the earlier dated rows, and Flash's
+enumeration total moved 3,759 to 3,756 with it),
+and times its sections by the Date. Every section also traces a checksum
+or a count of its work, which must be as Flash traces it: `players.ts`
+prints a line a player traces otherwise beside Flash's, and still times
+it, so a run is only sound if it prints none for swf2es. Each runs as
+one long script, which ScriptLimits allows 1,200 s, in the first frame
+(lz4's in the second, after Crossbridge's preloader), but for
+display-frames.
+
+- **primitives** (`primitives/Primitives.as`): String's `charCodeAt`,
+  `charAt`, `indexOf`, `substring`, `substr` and `slice`, and int's and
+  Number's `toString` and `toFixed`, on typed values.
+- **typed** (`typed/Typed.as`): `new` of classes shallow and deep in a
+  hierarchy and with class-typed arguments, and calls the compiler binds:
+  a class's method given its own class, a subclass and null, through an
+  interface (one class, then four), through `super`, with parameters of
+  int, uint, Number, Boolean and String, and on a final class. Each
+  section is one loop of 3 to 9 million iterations, without a warm-up.
+- **untyped** (`untyped/Untyped.as`): names on values typed `*`: a tree
+  of the file's own display-like classes (getters, setters and methods by
+  name, no flash.display), JSON-decoded data objects, dynamic Objects,
+  calls on several classes, string building, names on many classes,
+  number and object keys into Arrays, Vectors, Dictionaries and Objects,
+  methods on a prototype, and names written as strings. One run of each
+  loop, without a warm-up.
+- **native-collections** (`native-collections/Collections.as`): Array's
+  `map`, `filter`, `forEach`, `every` and `some`, Vector's `map` and
+  `filter`, a numeric `sort` of a copy of each, over 8,192 numbers, and a
+  Vector made from the Array; 80 rounds after 12.
+- **display** (`display/Display.as`): 300 Sprites made, placed, added to a
+  layer on the stage and removed; 300 of the library's "ball" (a
+  MovieClip of one shape, linked to Ball) added, their `width` read, and
+  removed from the top; 300 Shapes drawn by `graphics` and added, then
+  `removeChildren`; 300 named Sprites found by `getChildByName` and
+  removed by name; and 300 kept Sprites moved by `addChildAt`,
+  `swapChildrenAt` and `setChildIndex`. 200 rounds each after 20 to warm
+  up, as avm1/Bench.as runs its own.
+- **display-frames** (`display/EnterFrame.as`): 10,000 Sprites, each a
+  square drawn once, each with an ENTER_FRAME listener of its own: 30
+  frames that move them in their own fields (script), then 30 that also
+  set `x`, `y`, `rotation` and `alpha` (display), after an untimed
+  warm-up. As avm1-frames, at 255 frames a second, drawn as the web host
+  draws, multisampled; five times its clips, since Flash's JIT ran 2,000
+  listeners in less than a frame at 255 fps, which would have timed its
+  pace (about 121 ms for 31 frames) rather than its work.
+- **as3pb** (`tests/programs/as3pb`): its benchmark, 100 messages
+  encoded and decoded 300 times by protobuf through ByteArray and
+  through domain memory, by AMF3 (`writeObject`/`readObject`) and by
+  JSON; the data sizes and the wire checksum are compared.
+- **lz4** (`tests/programs/lz4`): LZ4's C compiled by Crossbridge's gcc
+  `-O4` into a SWF, with `lz4/Console.as` as its console: 2 MB of
+  prose, of noise and of sparse records, each compressed and
+  decompressed 50 times by the block format and compressed once by HC
+  at level 9, in domain memory; sizes and xxh32 checksums compared. It times itself by getTimer, which the test page
+  then keeps by the wall clock.
+
+Medians of 5 runs, 2026-11-15, i9-13900H, Chrome 157 (SwiftShader),
+AIR 51.5.1's adl under Wine, Ruffle 0.7.1, in ms. Ruffle's figures are
+bracketed where they are not comparable: display-frames is played at
+the display's rate in a page 100 × 50 CSS pixels, as avm1-frames is; and
+Ruffle computes other results for as3pb (its JSON size and wire
+checksum) and lz4 (every xxh32 checksum), so its times there are of
+other work. swf2es and Flash traced the same lines in every benchmark.
+
+| Section | swf2es | Flash | Ruffle | Flash / swf2es |
+|---|---|---|---|---|
+| **primitives** | | | | |
+| charCodeAt | 14 | 40 | 692 | 2.86× |
+| charAt | 22 | 74 | 534 | 3.36× |
+| indexOf | 59 | 64 | 469 | 1.08× |
+| substring | 50 | 313 | 446 | 6.26× |
+| substr-slice | 52 | 227 | 399 | 4.37× |
+| int-toString | 56 | 326 | 608 | 5.82× |
+| number-toString | 67 | 607 | 233 | 9.06× |
+| toFixed | 138 | 214 | 150 | 1.55× |
+| total | 458 | 1,865 | 3,531 | 4.07× |
+| **typed** | | | | |
+| newSmall | 111 | 221 | 548 | 1.99× |
+| newDeep | 147 | 252 | 956 | 1.71× |
+| newChained | 93 | 235 | 719 | 2.53× |
+| callClass | 38 | 34 | 1,230 | 0.89× |
+| callSubclass | 43 | 33 | 1,219 | 0.77× |
+| callInterface | 10 | 52 | 1,299 | 5.20× |
+| interfaceCall | 14 | 20 | 554 | 1.43× |
+| interfacePoly | 16 | 11 | 475 | 0.69× |
+| superCall | 18 | 15 | 691 | 0.83× |
+| newArgs | 94 | 242 | 558 | 2.57× |
+| callNull | 4 | 30 | 989 | 7.50× |
+| callNumbers | 31 | 63 | 2,480 | 2.03× |
+| callFinal | 14 | 26 | 1,071 | 1.86× |
+| total | 633 | 1,234 | 12,789 | 1.95× |
+| **untyped** | | | | |
+| display | 145 | 80 | 473 | 0.55× |
+| data | 72 | 63 | 181 | 0.88× |
+| object | 293 | 354 | 815 | 1.21× |
+| poly | 77 | 132 | 296 | 1.71× |
+| string | 94 | 101 | 228 | 1.07× |
+| names | 49 | 63 | 153 | 1.29× |
+| churn | 83 | 69 | 159 | 0.83× |
+| handles | 44 | 43 | 179 | 0.98× |
+| many | 94 | 98 | 162 | 1.04× |
+| proto | 27 | 38 | 99 | 1.41× |
+| numkeys | 33 | 34 | 130 | 1.03× |
+| objkeys | 34 | 93 | 106 | 2.74× |
+| litkeys | 127 | 183 | 357 | 1.44× |
+| total | 1,172 | 1,351 | 3,338 | 1.15× |
+| **native-collections** | | | | |
+| array-map | 12 | 41 | 48 | 3.42× |
+| array-filter | 10 | 27 | 64 | 2.70× |
+| array-forEach | 10 | 26 | 63 | 2.60× |
+| array-every | 8 | 15 | 42 | 1.88× |
+| array-some | 8 | 16 | 43 | 2.00× |
+| vector-map | 16 | 28 | 48 | 1.75× |
+| vector-filter | 11 | 22 | 68 | 2.00× |
+| array-sort | 94 | 78 | 93 | 0.83× |
+| vector-sort | 95 | 72 | 156 | 0.76× |
+| vector-convert | 4 | 7 | 15 | 1.75× |
+| total | 268 | 332 | 640 | 1.24× |
+| **display** | | | | |
+| sprite-add-remove | 117 | 229 | 1,468 | 1.96× |
+| clip-add-remove | 189 | 739 | 4,002 | 3.91× |
+| shape-add-remove | 177 | 228 | 147 | 1.29× |
+| by-name | 127 | 321 | 6,342 | 2.53× |
+| reorder | 93 | 1,209 | 112 | 13.00× |
+| total | 703 | 2,726 | 12,071 | 3.88× |
+| **display-frames** | | | | |
+| enterframe-script | 50 | 225 | (3,678) | 4.50× |
+| enterframe-display | 776 | 1,554 | (3,897) | 2.00× |
+| total | 826 | 1,779 | (7,575) | 2.15× |
+| **as3pb** | | | | |
+| serialize-as3pb-bytes | 57 | 193 | (405) | 3.39× |
+| serialize-as3pb-memory | 37 | 38 | (592) | 1.03× |
+| serialize-amf3 | 303 | 506 | (562) | 1.67× |
+| serialize-json | 462 | 3,305 | (457) | 7.15× |
+| deserialize-as3pb-bytes | 63 | 78 | (584) | 1.24× |
+| deserialize-as3pb-memory | 45 | 51 | (673) | 1.13× |
+| deserialize-amf3 | 358 | 841 | (518) | 2.35× |
+| deserialize-json | 279 | 728 | (499) | 2.61× |
+| total | 1,604 | 5,740 | (4,290) | 3.58× |
+| **lz4** | | | | |
+| prose-compress | 41 | 80 | (1,949) | 1.95× |
+| prose-decompress | 24 | 37 | (1,228) | 1.54× |
+| prose-compress-hc | 6 | 13 | (45) | 2.17× |
+| noise-compress | 18 | 10 | (208) | 0.56× |
+| noise-decompress | 8 | 6 | (40) | 0.75× |
+| noise-compress-hc | 123 | 128 | (5,884) | 1.04× |
+| records-compress | 104 | 178 | (6,569) | 1.71× |
+| records-decompress | 52 | 94 | (3,448) | 1.81× |
+| records-compress-hc | 311 | 522 | (25,536) | 1.68× |
+| total | 687 | 1,068 | (44,907) | 1.55× |
+
+In the same run, the four older benchmarks' totals, and their sections
+where swf2es is behind:
+
+| Section | swf2es | Flash | Ruffle | Flash / swf2es |
+|---|---|---|---|---|
+| enumeration holey-each | 70 | 58 | 444 | 0.83× |
+| enumeration sparse-in | 169 | 67 | 134 | 0.40× |
+| enumeration sparse-each | 189 | 71 | 380 | 0.38× |
+| enumeration named-in | 63 | 61 | 144 | 0.97× |
+| enumeration named-each | 90 | 57 | 443 | 0.63× |
+| enumeration vector-object-each | 80 | 73 | 491 | 0.91× |
+| enumeration vector-string-each | 81 | 73 | 491 | 0.90× |
+| enumeration object16-each | 136 | 120 | 313 | 0.88× |
+| enumeration object1k-each | 89 | 62 | 177 | 0.70× |
+| enumeration dict-strings-in | 76 | 68 | 92 | 0.89× |
+| enumeration dict-strings-each | 92 | 69 | 93 | 0.75× |
+| enumeration nested-each | 107 | 74 | 414 | 0.69× |
+| enumeration queue-in | 157 | 154 | 636 | 0.98× |
+| enumeration queue-each | 170 | 152 | 734 | 0.89× |
+| enumeration total | 3,490 | 3,756 | 10,542 | 1.08× |
+| dictionary strong16-miss | 25 | 22 | 44 | 0.88× |
+| dictionary total | 669 | 2,154 | 1,627 | 3.22× |
+| vector total | 1,568 | 5,002 | 55,277 | 3.19× |
+| pixels setPixels-opaque | 17 | 15 | 131 | 0.88× |
+| pixels setPixels-little-opaque | 15 | 14 | 117 | 0.93× |
+| pixels setVector-opaque | 37 | 9 | 207 | 0.24× |
+| pixels setVector-transparent | 90 | 84 | 207 | 0.93× |
+| pixels total | 377 | 448 | 1,257 | 1.19× |
+
+Against Flash's JIT, swf2es is ahead in total in every benchmark: from
+1.1× (enumeration, untyped) to 4× (primitives, display), 3.2–3.6× on
+Vectors, Dictionaries and as3pb, and 1.55× on LZ4's C. The display list
+is well ahead (1.3–13× in display, 2× drawing 10,000 moving Sprites, 4.5×
+dispatching their ENTER_FRAME, though Flash's time there is under twice
+its frame pace's floor and may hold some pacing), and so is Flash's slow string, number
+formatting and JSON (as3pb's JSON encoding 7×). But ahead in total
+hides what is behind, which is the work list, furthest first, down to
+about 0.85× (the tables show the rest, up to 0.98×):
+
+- **setVector on an opaque bitmap** (0.24×), already explained above: a
+  `Vector.<uint>`'s elements are doubles converted one at a time.
+- **for-in and for each over a sparse Array** (0.38–0.40×), and walks of
+  named Arrays, nested Arrays, Objects of 1,000 names and string-keyed
+  Dictionaries by for each (0.63–0.75×).
+- **untyped names on a tree of objects** (untyped's display, 0.55×), and
+  its data, churn and handles loops (0.83–0.98×): getters, setters and
+  methods called by name on class instances, dynamic properties of a
+  dynamic class and of JSON's Objects.
+- **LZ4 on incompressible data** (noise-compress 0.56×, noise-decompress
+  0.75×): the loop that hashes four bytes at every position and finds no
+  match is nearly all domain memory reads and writes.
+- **typed calls V8 does not make as cheap as Flash's JIT**: a method
+  given a subclass of its parameter's class (0.77×), an interface method
+  on four classes in turn (0.69×), `super` (0.83×) and a class's own
+  method (0.89×): 4.2–6.0 ns an iteration against Flash's 3.7–5.0.
+- **numeric sort** of 8,192 numbers (Array 0.83×, Vector 0.76×).
+- **Shapes drawn by `graphics` and added** are the display section
+  closest to Flash (1.29×), and Ruffle is faster there (147 ms to 177).
+
+A profile in node (the player playing each section alone, its rounds
+raised, `--cpu-prof`; its timings were within 10% of Chrome's, but
+LZ4's were up to twice them under the profiler)
+points at:
+
+- **Sparse Arrays' indices taken at every walk.** A for-in over the
+  sparse Array takes its indices again each time it starts, by
+  `Object.keys` and a `Number()` of each key (`indicesOf`, 25% of the
+  section), as they are dropped when a walk ends; the step's
+  `enumerable` check is 18% more, and `startOrGoOn`, `takeSparse` and
+  `sparseElement` 18% between them. avmplus walks its hashtable in place.
+- **Untyped names through the runtime.** Every get, set and call on a
+  value typed `*` is a call of `rt.getProperty` (17% of untyped's
+  display), `setProperty` or `callProperty`, which looks the name up in
+  the receiver traits' cache (`receiverTraits`, 7.5%) and dispatches on
+  the entry's kind: a getter by `e.get.call(o)`, a dynamic property by
+  a Map's `get` and then `has`. The site keeps nothing of what it found,
+  where Flash's JIT caches it at the call site.
+- **Domain memory by `rt.view`.** Crossbridge's loads and stores are
+  `rt.view.getInt32(address, true)` and the like, the DataView read
+  from the runtime at every access, as it changes when memory grows; the
+  four hottest functions of the C program are 50% of lz4's samples, and
+  on noise they do little else. Flash's JIT emits a bounds check and a
+  load.
+- **Typed calls.** The loops are compiled as they should be: `l1.$b4(l2)`
+  calls the method's unchecked entry with no coercion when the argument
+  is known to be a subclass, and an interface call is
+  `o["$i0.5:Shape:area"]()`. What is left is V8's: the method fetched
+  from the prototype at each call, the field loads in `Vec.dot` made
+  polymorphic once Vec and Vec3 (one more field) both reach it, and an
+  interface method on four prototypes.
+- **Sorting through closures.** `qsort` (60% of the sort sections)
+  calls a compare and a swap closure by index for every step, and the
+  compare converts both elements to Number each time, where avmplus'
+  ArraySort compares the elements' doubles in C++.
 
 ## AVM2 eager and lazy compilation
 
 `pnpm bench:avm2 [--runs 5] [--frames 600] [--json /tmp/avm2.json]`
-compares the default eager loader with the optional lazy compiler. Each run
-uses a fresh Node process, alternating eager/lazy and lazy/eager order. The
-generated movie exercises captured functions, arrays, properties and frame
-events across three scenes, with unused nested bodies. The libraries,
-startup, first-use scenes and warmed ticks are measured separately.
-Results check each scene's computed value and require warmed ticks to
-compile no further methods. Source bytes count emitted module and method
-text; the reported heap follows GC, outside the timing.
+compares the default eager loader with the optional lazy compiler, in
+fresh node processes, alternating their order. The generated movie
+exercises captured functions, arrays, properties and frame events across
+three scenes, with nested bodies left unused; the libraries, startup,
+first-use scenes and warmed ticks are measured apart, each scene's value
+is checked, and warmed ticks must compile no further methods.
+`--swf /path/to/movie.swf` measures a local movie's startup and ticks,
+without interaction. `node tests/player/run.ts --lazy` and `pnpm corpus
+--lazy avm2/` run the browser cases lazily.
 
-`pnpm bench:avm2 --swf /path/to/movie.swf` measures a local movie's startup
-and subsequent ticks; it does not replay user interaction. The input movie is
-not copied into the repository. These are Node script/timeline CPU timings,
-not rendering or FPS measurements. Browser measurements are still needed
-for complete first-use frames. `node tests/player/run.ts --lazy` and
-`pnpm corpus --lazy avm2/` exercise existing browser cases in lazy mode.
+## Reference numbers
 
-## Inputs
+Measured on one laptop (Intel Core i9-13900H; Intel Iris Xe and an
+NVIDIA RTX 4060 Laptop GPU), Node 24 and Chrome, one benchmark at a time.
+They are for comparing changes on this machine, not across machines.
 
-- **as3pb** ([33TU/as3pb](https://github.com/33TU/as3pb), MIT): a protobuf
-  runtime for AS3. Its benchmark (`runtime/test/bench/Main.as`, built by the
-  `build-runtime-bench` target of its `justfile`) encodes and decodes
-  messages through `ByteArray` and domain memory, so its bytecode covers bit
-  operations, `lookupswitch`, `int`/`uint` coercions and the `li*`/`si*`
-  opcodes: many of the less common instructions, in hot loops.
+### 0.1.24 against 0.1.23
 
-  Build it with **`-compiler.float=false`** (`AS3_FLOAT=false`). Without it,
-  the AIR SDK compiler may emit ABC 47.16 float instructions. swf2es supports those, using AIR as the
-  reference, but the shared benchmark still disables them so the same
-  input can run in Flash Player and the non-float avmshell oracle.
+2026-11-15, the CDN build of each release swapped into the comparison
+branch's `players.ts --only swf2es drawing stage3d pixels startup-hello
+startup-as3pb` (three rounds on Intel, two on NVIDIA, old and new in
+turn), then `bench.ts` four rounds each in alternating order. Medians,
+with ranges.
 
-  The benchmark reports through a `TextField`, so for avmshell it needs a
-  shell entry point that only calls `trace()` (milestone 1).
-- **abcdump.abc**: avmplus' `utils/abcdump.as`, compiled by the oracle into
-  `tests/conformance/out/` on every conformance run. It is MPL-2.0 derived,
-  so it is regenerated rather than committed.
+Every drawing and Stage3D level holds 60 fps with a 17 ms median frame in
+both versions, except:
 
-## Results
+| Level | GPU | 0.1.23 fps | 0.1.24 fps |
+|---|---|---|---|
+| vectors-8000 | Intel | 57.1 (57.0–57.1) | 57.1 (56.8–57.3) |
+| filters-100 | Intel | 59.0 (58.9–60.0) | 58.6 (58.3–60.0) |
+| filters-400 | Intel | 55.6 (55.5–60.0) | 54.3 (53.7–60.1) |
+| text-800 | Intel | 59.2 (59.0–60.0) | 59.2 (59.0–59.4) |
+| text-800 | NVIDIA | 58.6 (58.4–58.8) | 57.5 (57.0–58.0) |
+| stage3d-8000 | Intel | 48.6 (48.4–49.6) | 49.2 (47.9–52.2) |
+| stage3d-20000 | Intel | 33.9 (31.9–35.7) | 33.2 (32.2–33.3) |
 
-Node 24, x86-64, after a warm-up, the median of 5 samples of about 40 ms
-each. Numbers are for comparing changes on one machine, not across machines.
+Intel's filters levels flip between about 55 and 60 fps from run to run
+in every version (the frame-pairing rule). NVIDIA's text-800 is a frame a
+second lower on two runs each, its ranges apart; Intel's text bench below
+is level, so it is watched rather than called a regression. Memory, which
+these runs also record, moves both ways by tens of percent with the
+collector's timing and is left out.
 
-`pnpm bench [file.abc...]` measures these; without files it uses abcdump.abc.
+`pixels` on Intel, ms:
 
-Decoding includes the structural verifier's checks, without types.
+| Section | 0.1.23 | 0.1.24 |
+|---|---|---|
+| setPixels-opaque | 17 (17–21) | 17 (17–19) |
+| setPixels-little-opaque | 16 (15–16) | 14 (14–15) |
+| setPixels-transparent | 34 (34–34) | 34 (34–34) |
+| setVector-opaque | 37 (37–38) | 36 (36–37) |
+| setVector-transparent | 90 (90–90) | 89 (89–90) |
+| getPixels-transparent | 90 (89–93) | 90 (90–90) |
+| getVector-transparent | 95 (94–96) | 94 (94–97) |
+| total | 378 (377–388) | 374 (374–382) |
 
-| ABC | Size | Instructions | Parse | Decode every body | Per instruction |
-|---|---|---|---|---|---|
-| abcdump.abc | 32 KB | 6,489 | 0.056 ms | 0.240 ms | 37 ns |
-| as3pb, avmshell build (`tests/programs`) | 209 KB | 96,575 | 0.128 ms | 2.90 ms | 30 ns |
-| Tamarin `as3/Vector/initializerLargeVector` | 3.8 MB | 1,002,071 | 1.33 ms | 68.2 ms | 68 ns |
+Startup in Chrome, ms (Intel; cold in a new profile with the player's
+code fetched, warm in the same page):
+
+| SWF | | 0.1.23 | 0.1.24 |
+|---|---|---|---|
+| hello | cold | 334 (326–340) | 341 (339–344) |
+| | warm | 90 (89–95) | 92 (89–94) |
+| as3pb | cold | 480 (467–486) | 469 (458–472) |
+| | warm | 154 (151–164) | 161 (159–163) |
+
+The browser build's fetched files are 2,624 KB (791 KB in brotli), 11 KB
+(5 KB) more than 0.1.23's: native menus and the unmute prompt.
+
+`tests/player/bench.ts`, frame medians in ms:
+
+| Scene | | 0.1.23 | 0.1.24 |
+|---|---|---|---|
+| `--town 200 --gpu`, Intel | frame | 28.76 (24.87–30.26) | 25.87 (24.26–28.31) |
+| | tick | 4.41 (3.48–4.78) | 3.54 (3.03–3.88) |
+| | draw | 8.80 (7.86–9.68) | 8.28 (7.26–8.70) |
+| | gl | 14.18 (14.00–14.46) | 14.07 (13.89–14.25) |
+| 2,000 shapes, SwiftShader | frame | 14.84 (14.82–14.96) | 14.82 (14.77–14.85) |
+| `--text 600 --gpu`, Intel | frame | 5.54 (4.82–5.91) | 5.65 (5.28–5.75) |
+
+The town's frame is about 10% shorter and its tick about 20%; the rest is
+within noise.
+
+### The walks, 2026-11-14
+
+From `walk-bench.ts`, each change against the dev before it, interleaved:
+
+| Change | Scene | Before | After |
+|---|---|---|---|
+| Frame-script rounds by marks (#979) | menu of 200 rows built beside 1,000 orphans | 514–617 ms | 5.1–5.3 ms |
+| | the same, tick | 1,575–1,770 µs | 720–776 µs |
+| Old-version clips listed, not everything (#981) | menu of 50 beside 2,600 clips of a version 9 SWF | 64–66 ms | 10.8–11.1 ms |
+| Advance only clips that advance (#994) | 1,000 orphans, 10 playing, 50 churning, tick | 2,250–2,580 µs | 543–588 µs |
+| | default tree, tick | 156–163 µs | 53–55 µs |
+| Pointer pick by kept bounds (#997) | still pointer over a list of 800 rows, tick | 2.05–2.16 ms | 0.156–0.160 ms |
+
+The same week, `bench.ts --text 600` (#984) went from 1,804 to 604
+uniform calls a frame, and decoding a 1,200 × 900 JPEG on a canvas in
+memory rather than on the GPU (#980) from 8.4 to 4.9 ms on Intel and from
+500 to 7.5 ms on SwiftShader.
+
+### Against Flash
+
+`players.ts`, swf2es in Chrome against `adl -nodebug`, ms:
+
+| Benchmark | Date | swf2es | Flash | Ruffle |
+|---|---|---|---|---|
+| enumeration, total (#729) | 2026-11-05 | 5,350 | 3,759 | 10,371 (before #729) |
+| dictionary, total (#727) | 2026-11-05 | 1,518 | 2,148 | 1,607 |
+| vector, total (#745) | 2026-11-06 | 6,415 | 5,449 | |
+| enumeration, total | 2026-11-15 | 3,490 | 3,756 | 10,542 |
+| dictionary, total | 2026-11-15 | 669 | 2,154 | 1,627 |
+| vector, total | 2026-11-15 | 1,568 | 5,002 | 55,277 |
+
+Flash led on enumeration by its sparse Arrays and nested walks, both
+since made faster (#747, #948, #949); swf2es leads on strong
+Dictionaries and `in`, and since the typed Vector accesses at the call
+site (#752) on Vectors too. The rows of 2026-11-15 are from "AVM2
+against Flash" above, where every AS3 benchmark's sections are.
+
+Bitmap pixel transfers (`pixels`, #962, 2026-11-13), medians of five
+interleaved rounds, ms:
+
+| Section | swf2es | adl |
+|---|---|---|
+| setPixels-opaque | 22 (17–30) | 15 |
+| setPixels-little-opaque | 16 (15–19) | 14 |
+| setPixels-transparent | 38 (34–46) | 93 |
+| setVector-opaque | 38 (37–44) | 9 |
+| setVector-transparent | 93 (90–105) | 85 |
+| getPixels-transparent | 96 (88–107) | 123 |
+| getVector-transparent | 100 (97–119) | 125 |
+
+`setVector` on an opaque bitmap is still about four times adl's: a
+`Vector.<uint>`'s elements are doubles read and converted one at a time,
+which another storage for the Vector would fix.
 
 ### Generated code: as3pb
 
-as3pb's benchmark (100 messages, 300 iterations), compiled by swf2es and
-run in node by `tests/programs`, with its output matching avmshell's.
-Totals, encode plus decode, in ms, as roadmap step 7 went:
+as3pb's benchmark (100 messages, 300 iterations; see Inputs below),
+compiled by swf2es and run in node, its output matching avmshell's.
+Totals, encode plus decode, in ms:
 
-| Change | Through ByteArray | Through domain memory |
+| | Through ByteArray | Through domain memory |
 |---|---|---|
 | First working version (#20) | 1104 | 1412 |
-| Typed comparisons and branches | 1018 | 1256 |
-| Type references made once per module | 732 | 821 |
-| Builtin traits kept, for-in names taken once, ASCII UTF-8 | 593 | 751 |
-| Elements read and written by number | 341 | 458 |
-| Defining scripts kept, classes matched first | 313 | 414 |
 | Structured control flow (#22) | 289 | 410 |
-| Runtime hot paths (#23) | 207 | 251 |
-| AwayFL JIT, headless, first run | 525 | 689 |
-| AwayFL JIT, headless, runs after | 406–462 | 611–654 |
-| Ruffle 0.6.0 (web, headless Chrome), first run | 1118 | 1389 |
-| Ruffle 0.6.0, runs after | 1165–1355 | 1438–1530 |
-| swf2es with domain memory in place (#80), ab.ts medians | 193 | 194 |
-| PepperFlash | 188 | 83 |
-| avmshell (the oracle, its JIT in a container) | 107 | 74 |
-
-Each change was found with `node --cpu-prof` on the benchmark. swf2es's
-times are medians of 5 runs, each in a node process of its own, so each a
-first run; #23's, with AwayFL's, measured on 2026-09-28 on an otherwise
-idle machine (swf2es 207–210 and 250–254 ms). AwayFL runs the same
-benchmark (as3pb's codecs unchanged since the SWF it plays was built),
-its page read from DevTools screenshots after its first run and after 4
-more. AMF3 and JSON take about 1120 and 2730 ms; they are the runtime's
-own code (amf.ts, json.ts), not generated.
-
-Ruffle, measured on 2026-10-02, plays that SWF the same way, its 0.6.0
-web build served beside it and read from screenshots: after its first
-run and after 4 more, about 6 and 7.5 times swf2es's totals. Its AVM2
-interprets the bytecode; swf2es's figures are node's, as above, since
-the player's getTimer then followed its frame clock and could not time
-within a frame (it tells real time now, unless a host asks for the frame
-clock).
-
-From step 7.4 on, a change is timed against the build before it with
-`tests/programs/ab.ts`: both builds run as3pb in turn, interleaved
-(A, B, B, A, ...), each run in a process of its own, so that both see the
-same load on the machine. Kept are the changes whose gain repeats; a build
-against a copy of itself differs by up to 2 or 3%. These were measured
-with another process busy on the machine, so they run slower than the
-table above; medians of 7 to 9 runs each, in ms:
-
-| Step 7.4 change | ByteArray | Domain memory | Kept |
-|---|---|---|---|
-| Vector length 0 as a new array, grown by pushing (packed) | −10.3% | −8.9% | yes |
-| Class coercions without the builtin switch, traits on the reference | −8.2% | −14.4% | yes |
-| Typed Vector elements by kind, not through the hooks | −7.1% | −12.9% | yes |
-| ByteArray methods' arguments passed, not a rest array spread | −6.2% | −1.3% | yes |
-| Vector push by `arguments`, not a rest array | −1.2% | −2.0% | no |
-| Vector grown by pushing, without the new array for 0 (runs one after another, not interleaved) | +2% | +4% | no |
-| findDef's global kept on the multiname | −0.6% | +0.9% | no |
-| Vector constructed by pushing (packed) | +1.7% | −1.3% | no |
-| Domain memory loads and stores inline, not the helpers | −0.9% | −2.3% | no |
-| **Step 7.4 against #22** | **325 → 229 (−29.5%)** | **437 → 302 (−30.9%)** | |
-| AwayFL, same load, cold / warm | 559 / 409–462 | 709 / 622–701 | |
-
-Step 10, domain memory against PepperFlash's 83 ms, the same way:
-
-| Step 10 change | ByteArray | Domain memory | Kept |
-|---|---|---|---|
-| Domain memory's length in a field, not DataView's getter, for the range check | 0.0% | −9% | yes |
-| A new DataView for domain memory only when its bytes move or resize | −0.5% | −5.4% | yes |
-| **Both, against #25** | **0.0%** | **253 → 224 (−11.5%)** | |
-| `writeBytes` through a view, not a copy | 0.0% | −1.3% | no |
-| `coerceTo` keeping the last subtype it found | −0.5% | +0.9% | no |
-| findDef's global kept on the multiname (again, on an idle machine) | +1.0% | +0.9% | no |
-
-What is left is spread over the generated code: the three methods that
-take most (the codec's serializeMemory and deserializeMemory, and the
-benchmark's loop) each make a static call per field, `Pack.writeVarint(...)`,
-as `rt.findDef(M[k]).$slot` and a direct method call; findDef costs 3.7%
-itself, but V8 inlines it well enough that keeping its result gains
-nothing. More would need the compiler to bind such calls to a class it
-knows, with the script's initialization kept exact.
-
-Step 10's follow-up asked why V8 does not inline more of the codec. With
-the generated functions named after their methods (`function
-$as3pb_proto__Pack_writeVarint32(...)`, kept, as stacks and profiles read
-better), V8's `--trace-turbo-inlining` shows the codec's small methods
-refused for their bytecode size (`kExceedsBytecodeLimit`), and
-`--trace-deopt` no deoptimizations in its loops worth the name:
-
-| Step 10 follow-up | ByteArray | Domain memory | Kept |
-|---|---|---|---|
-| Two registers swapped through a temporary, not `[a, b] = [b, a]` (an array and the iterator protocol) | +1.6% | −9.5% | yes |
-| **Against #27** | **+0.5%** | **224 → 199 (−11.2%)** | |
-| A null check once per register until it is written | +1.6% | +1.0% | no |
-
-Raising V8's inlining limits (`--max-inlined-bytecode-size=2000
---max-inlined-bytecode-size-cumulative=4000`, a flag, not a change)
-improves this workload by about 7%. That measures those settings on the
-code as it is, not a bound: smaller code could also save work, compiling
-and registers, and other limits on inlining remain. Against the swap, as
-medians of 7 interleaved pairs each (`AB_NODE_ARGS` in `tests/programs/ab.ts`):
-
-| | ByteArray | Domain memory |
-|---|---|---|
-| Swap by destructuring, V8's limits | 193 | 222 |
-| Swap through a temporary, V8's limits | 194 | 199 |
-| Swap by destructuring, limits raised | 181 | 213 |
-| Swap through a temporary, limits raised | 182 | 185 |
-
-Both gains persist when combined: the swap is worth as much with the
-limits raised (−13%), and raising the limits still helps after it. The null checks' dedup
-gained nothing measurable, which does not show that V8 removes every one.
-
-What paid: a runtime helper that many call sites share with many kinds of
-values, where the emitter knows the type and can call one made for it
-(`coerceTo`, the Vector accessors); arrays kept as V8 wants them, packed
-and emptied without a call into its runtime; and no rest arrays on calls
-made millions of times. What did not: small helpers V8 already inlines
-(domain memory's, `findDef`).
-
-### Step 13: unrolled loops
-
-Each candidate was measured on its own path, then on as3pb with
-`tests/programs/ab.ts`. as3pb, over 11 interleaved pairs, is unchanged
-by all three (ByteArray 194 → 195 ms, domain memory 201 → 201): it
-writes short strings and no AMF Vectors.
-
-| Change | Measured on | Before | After | Kept |
-|---|---|---|---|---|
-| `utf8()` ASCII detection and copy, 4 or 8 characters at a time | ns per character, strings of 6 to 2000 | 4.2–16.4 | 3.8–16.2 (within noise, 8 slower on short strings) | no |
-| `utf8()` through `TextEncoder` from 96 characters (the crossover is about 90) | ns per character, 96 / 512 / 2000 characters | 7.4 / 5.0 / 4.2 | 4.5 / 1.2 / 0.8 | yes |
-| The emitter's `Output.text()`, 4 characters per step | compiling the builtins and as3pb, median of 9, 5 interleaved pairs | 122.4 ms | 121.0 ms (−1.1%, lower in 10 of 10 runs) | yes |
-| AMF numeric Vectors, their bytes reserved at once | 60 × `writeObject` of a 100,000-element `Vector.<Number>` and `Vector.<int>` | 47 ms | 15 ms (avmshell: 115) | yes |
-
-`TextEncoder` writes a lone surrogate as U+FFFD, as the loop does. There
-avmshell's `writeUTFBytes` loses characters instead: a lone high
-surrogate takes the one after it, and one at the end disappears. swf2es
-keeps valid UTF-8.
-
-### Step 14: JSON through the host's own
-
-as3pb's JSON lines (100 messages of 750 bytes, 300 rounds), then a nested
-document of 2000 items (277 KB of text, 20 rounds), in ms:
-
-| | as3pb stringify | as3pb parse | nested stringify | nested parse |
-|---|---|---|---|---|
-| avmshell | 2240 | 386 | 400 | 104 |
-| swf2es before | 2279 | 434 | 363 | 99 |
-| Numbers in the host's digits, not avmplus' (its D2A, with big numbers, was half the time) | 1080 | | | |
-| toJSON found through a cached binding and the dynamic properties, elements and own properties read directly | 670 | | | |
-| Strings quoted by the host's `JSON.stringify` | 650 | | | |
-| A tree of the host's values, written by its `JSON.stringify` | 522 | | 96 | |
-| Parsed by the host's `JSON.parse`, then made AS3's in place | | 300 | | 56 |
-
-Output reads back as the same keys and values, not the same text (key
-order, escapes and digits differ). avmplus' probe for an AS3 toJSON
-never finds a script's, so swf2es looks only for a public one. The text
-the host rejects, such as `01`, goes to the old parser. Conversion
-recurses to a depth of 500, then uses a stack of its own, as avmplus
-reads 100,000-deep text.
-
-### Step 15: AMF3 decoding
-
-as3pb's AMF3 deserialize line (`readObject` of 100 typed messages, 300
-rounds), medians of interleaved runs (`AB_PATHS` in `tests/programs/ab.ts`),
-in ms. avmshell: 317.
-
-| Change | AMF3 decode | JSON decode | Kept |
-|---|---|---|---|
-| Before (dev) | 821 | 300 | |
-| Vector classes kept once made, in `vectorClass` and in `Vector.<T>`'s apply, and builtin classes by name; a Vector's elements through its own setter | 565 | | yes |
-| Strings and ByteArray contents read from views of the input, not copies | 497 | | yes |
-| A table of each class's variables, set straight to their slots | ~497 (−2%) | | no |
-| ASCII read at once from 16 bytes | 497 | 266 (−11%) | yes |
-| A short ASCII string a character at a time | 486 (−2.6%) | | yes |
-| After review: a numeric Vector's elements at once into its storage, when all are there | 473 (−2.5%) | | yes |
-| After review: uint29 through a local cursor when four bytes are there | 478 (+0.2%) | | no |
-| After review: a short ASCII string straight from the input, no view | 461 (−3.2%) | | yes |
-| **Against dev** | **457 (−43.5%)** | **266 (−10.4%)** | |
-
-What is left is mostly constructing the objects read (38%), about two
-thirds of it as3pb's own constructors, which avmshell runs too.
-
-### Step 12: typed verification
-
-`pnpm bench` now times typed verification too: every body the ABC's
-scripts can run, in a domain after builtin and shell_toplevel, as the
-compiler verifies, with `getBinding`'s memo cleared each round. In ms, then
-ns per instruction verified:
-
-| Change | abcdump | as3pb | initializerLargeVector |
-|---|---|---|---|
-| Before | 2.38 (367) | 19.7 (204) | 135.8 (135) |
-| A binding's probe compares the slot's hash before its key | 2.13 | 18.9 | 135.2 |
-| The domain's hash tables at most half full, not three quarters | 2.12 | 16.1 | 135.5 |
-| `mergeEntry` in two ranges, skipping a value whose type and flags stay | 2.10 | 15.5 | 135.6 |
-| `getBinding`'s answers kept, by type, ABC and multiname | 1.39 | 14.9 | 136.3 |
-| A handler edge skipped when its locals are as at its last merge | 1.42 (219) | 13.3 (138) | 135.4 (135) |
-| A table of each traits' names, before each namespace's probe | no gain once the memo was in | | |
-
-Compiling builtin, shell_toplevel and as3pb to modules: 121.9 to 110.9 ms
-(−9%), in 5 interleaved pairs.
-
-What is left is the verifier's second pass, which walks every block again
-to emit its IR: 34% of as3pb's verification and 52% of
-initializerLargeVector's, a body of a million instructions with no handlers.
-In a worklist that reaches a fixed point, each block's last visit follows
-the last change to its entry state, so the IR could be kept from that visit
-instead, once whatever only the second pass does is done in the first.
-
-### finddef at the site
-
-Step 10 kept findDef's result on the multiname inside `rt.findDef` and
-gained nothing, as V8 inlined the call. In a large method it does not:
-in Away3D's Lines demo, whose noise function reads its own class's
-statics some forty times a call, `findDef` itself was 6% of a frame. The
-module now reads the global object kept on the name, `M[k].global ??
-rt.findDef(M[k])`, and calls the runtime only until the defining script
-has been asked to run. Medians in ms, interleaved, on an idle machine
-(load under 2.5):
-
-| | A, before | B, after | B/A |
-|---|---|---|---|
-| as3pb ByteArray (9 pairs, twice) | 170, 169 | 155, 154 | −8.8%, −8.9% |
-| as3pb domain memory | 181, 182 | 148, 149 | −18.2%, −18.1% |
-| Untyped display / data / object / poly / string (7 pairs) | 193 / 86 / 594 / 114 / 130 | 183 / 83 / 582 / 104 / 128 | −5.2% / −3.5% / −2.0% / −8.8% / −1.5% |
-| Lines, busy ms per frame (headless Chrome on the GPU, drawn by Pixi then, 4 pairs) | 12.10 (11.96–12.47) | 10.51 (10.33–10.89) | −13.1% |
-| Perelith Knight MD2, busy ms per frame | 13.30 | 13.41 | +0.8% |
-
-### Untyped property access
-
-`tests/bench/untyped/Untyped.as` reads, writes and calls names on values
-typed `*`, as a large Flash application does through untyped fields:
-display objects deep in a class hierarchy (getters, setters, slots and
-methods of sealed classes), data decoded from JSON (dynamic properties),
-an Object and an Array, eight classes sharing the same names, a
-String's methods, a name read on 25 classes and then mostly on another
-(`many`), and functions and values a script gives a sealed class's
-prototype, got and called by name (`proto`). None binds early, so each
-goes through the runtime's
-`getProperty`, `setProperty` or `callProperty`. Its sections trace their
-times and the rest must match avmshell's output:
-
-    node tests/bench/untyped/run.ts [runs]
-    node tests/bench/untyped/run.ts <dir A> <dir B> [runs]
-
-the second with two snapshots of `tests/programs/ab.ts`, interleaved as
-it interleaves them. Before any inline cache, medians of 3, in ms:
-
-| | display | data | object | poly | string |
-|---|---|---|---|---|---|
-| swf2es | 268 | 88 | 411 | 159 | 79 |
-| avmshell | 40 | 23 | 135 | 71 | 39 |
-
-Then with each name's inline cache (`property-cache.ts`), each against
-the build before it, medians of 7 interleaved pairs, in ms:
-
-| Change | display | data | object | poly | string |
-|---|---|---|---|---|---|
-| One entry per name, objects only | 269 → 102 | 87 → 49 | 413 → 395 | 157 → 195 | 80 → 89 |
-| One entry, primitives too (a name shared by strings and objects, as `length`, then thrashes) | 103 → 94 | 49 → 58 | 397 → 400 | 199 → 227 | 94 → 76 |
-| Four entries per name | 94 → 83 | 60 → 46 | 392 → 410 | 233 → 190 | 82 → 77 |
-| No more replacing after 16, nor working out an entry it will not keep | 85 → 85 | 47 → 46 | 417 → 412 | 193 → 109 | 76 → 74 |
-| Eight entries per name | 85 → 85 | 46 → 46 | 410 → 411 | 110 → 56 | 76 → 73 |
-| **All, against the build before (9 pairs)** | **259 → 84** | **84 → 47** | **416 → 417** | **155 → 58** | **78 → 73** |
-
-poly's 8 classes fit in eight entries. With 8 more classes in its array,
-16 per name, four entries took 327 → 310 ms and eight 345 → 265 against
-the build before; without the stop, four took 347 → 445, a miss on every
-lookup paying for its replacement.
-
-A name such as `x`, read on every display object and on a physics
-engine's vectors, outgrows its entries all the same, and was left to the
-full lookup on the class most of its reads are on; so was a function on
-a sealed class's prototype, which obfuscated code calls methods through.
-Each against the build before it, medians of 7 interleaved pairs, in ms:
-
-| Change | display | data | object | poly | string | many | proto |
-|---|---|---|---|---|---|---|---|
-| Entries kept on the traits past a name's own, and a sealed object's prototypes' names cached | 197 → 196 | 90 → 89 | 395 → 384 | 110 → 107 | 140 → 133 | 208 → 111 | 125 → 40 |
-| An object's own traits read before testing it as a float or a Namespace | 190 → 160 | 87 → 80 | 380 → 357 | 106 → 96 | 131 → 131 | 109 → 105 | 39 → 38 |
-
-avmshell takes 52, 32, 207, 103, 53, 70 and 23 ms. Together with keeping,
-on a captured scope chain the compiler could not type, the object each
-name was found on, the runtime's lookups took 2.2–2.3 s of the 17 s an
-obfuscated physics game was busy in a run of its explosions in Chrome,
-and 0.95–1.0 s after, as it drew 2–3% more frames and a fifth fewer over
-25 ms.
-
-A string read through the lookup has one property, `length`, and that
-read cost several times the rest of a loop over an Array of strings
-(`a[i].length`, VectorAccess.as's array-string-read): the cache finds
-the getter, which is then called through the entry. Where the code reads
-a public `length` on a value typed `*` or Object, it now tells a string
-first and reads its length in place, `typeof x === "string" ? x.length :
-rt.getProperty(x ?? nn(x), M[k])`; anything else is looked up as before.
-`tests/bench/vector/run.ts`, medians of 9 interleaved pairs, in ms:
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| array-string-read | 150 | 25 | −83.3% | 66 |
-| string-push-pop (`v.pop().length`) | 139 | 110 | −20.9% | 74 |
-
-The other sections, which read `length` on Arrays and Vectors through
-untyped references once a call, are unchanged.
-
-### Typed construction and bound calls
-
-`tests/bench/typed/Typed.as` times what the compiler binds: `new` of
-classes it finds in a slot (a small class, one three levels deep, a
-method returning a new instance), and calls of methods it knows whose
-class-typed parameters are given the class's own instances, a
-subclass's, an interface's and null, besides int, Number, Boolean and
-String parameters and a final class's method. Two sections call through
-an interface, on one class (`interfaceCall`) and on four, at two
-dispatch ids (`interfacePoly`); one calls a base's method through
-`super` (`superCall`); one constructs a class whose constructor takes
-class-typed parameters, given a subclass's instances (`newArgs`). Its
-other lines must match avmshell's:
-
-    node tests/bench/typed/run.ts [runs]
-    node tests/bench/typed/run.ts <dir A> <dir B> [runs]
-
-Constructing in place (`$new`) and the entry for bound calls (`$b`, see
-docs/architecture/compiler.md), together against the build before them,
-medians of 7 interleaved pairs, in ms (as3pb of 11):
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| newSmall | 104 | 100 | −3.8% | 110 |
-| newDeep | 167 | 130 | −22.2% | 140 |
-| newChained | 129 | 87 | −32.6% | 120 |
-| callClass | 43 | 42 | −2.3% | 39 |
-| callSubclass | 160 | 43 | −73.1% | 39 |
-| callInterface (parameter) | 225 | 13 | −94.2% | 50 |
-| interfaceCall (`rt.callInterface`) | 302 | 233 | −22.8% | 26 |
-| callNull | 18 | 4 | −77.8% | 29 |
-| callNumbers | 121 | 122 | +0.8% | 118 |
-| callFinal | 14 | 14 | 0% | 27 |
-| as3pb bytes / memory | 114 / 109 | 111 / 105 | −2.6% / −3.7% | |
-
-lz4 (total of its sections 725 → 731 ms), Untyped.as and Enumeration.as
-are unchanged within their noise.
-
-A call through an interface was then still an order of magnitude slower
-than avmshell's: on every call, `rt.callInterface` searched the
-interface's bindings for the dispatch id, made a QName of what it found
-and called it by name, with no inline cache, the QName being new. Now
-the call is the module's, by the key `rt.interfaceKey` keeps for the
-receiver's class (see docs/architecture/compiler.md), medians of 7
-interleaved pairs, in ms (as3pb of 9):
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| interfaceCall | 244 | 16 | −93.4% | 21 |
-| interfacePoly | 254 | 56 | −78.0% | 12 |
-| as3pb bytes / memory | 109 / 107 | 111 / 106 | +1.8% / −0.9% | |
-
-The other sections are unchanged. On four classes, the key is the same
-lookup, but the call's feedback sees four shapes and two keys.
-
-Calls through an interface now read an alias of the class's method that
-every implementing class has under one name, set on the prototype as the
-class is made (see docs/architecture/compiler.md), so a site sees one
-key whatever the receiver. Two runs of 9 interleaved pairs, medians and
-ranges, in ms:
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| interfacePoly, run 1 | 56 (54–62) | 16 (16–19) | −71.4% | 12 |
-| interfacePoly, run 2 | 55 (53–109) | 16 (16–18) | −70.9% | 19 |
-| interfaceCall, run 1 | 16 (15–18) | 15 (14–15) | −6.3% | 22 |
-| interfaceCall, run 2 | 15 (15–30) | 15 (14–16) | 0% | 21 |
-| as3pb bytes / memory (11) | 113 / 107 | 112 / 107 | −0.9% / 0% | |
-| as3pb bytes / memory (9) | 111 / 105 | 111 / 105 | 0% / 0% | |
-| lz4 total (7) | 805 | 804 | −0.1% | |
-
-The other typed sections, `tests/bench/untyped` (7 pairs) and
-`tests/bench/enumeration` (5 pairs) are unchanged within their noise.
-Installed lazily, once prototypes and instances were in use, the same
-aliases had made the times unstable (interfaceCall 17–66 ms,
-interfacePoly 35–136 ms over 5 pairs); installed with the methods, before
-any instance exists, they are as steady as the rest.
-
-`callsuper` went by name through `rt.callSuper` too, a lookup on the
-base's traits and the arguments in an array on every call. Bound where
-the base binds the name to a method, as avmplus binds it (see
-docs/architecture/compiler.md), medians of 7 interleaved pairs:
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| superCall | 71 | 17 | −76.1% | 21 |
-| as3pb bytes / memory (11) | 109 / 105 | 112 / 104 | +2.8% / −1.0% | |
-| lz4 total (7) | 732 | 728 | −0.5% | |
-
-as3pb's ranges overlap (107–128 against 107–129); a run of 9 pairs
-before it had bytes even and memory +2.8%.
-
-A constructor's arguments were coerced on entry, after `new` of a known
-class had already found it: `rt.coerceTo` for a subclass's instances.
-With an entry for bound calls (`$binit`), which `new` and `super()` call
-with the arguments coerced at the site, medians of 7 interleaved pairs:
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| newArgs | 186 | 88 | −52.7% | 125 |
-| as3pb bytes / memory (11) | 110 / 104 | 109 / 104 | −0.9% / 0% | |
-
-### Vectors and Arrays by index
-
-`tests/bench/vector/VectorAccess.as` times indexed reads, writes, push
-and pop on Vectors of int, Number, String, Object and a class, growable
-and fixed, on Arrays of the same, and through an untyped reference
-(`tests/bench/players.ts vector` times it as a SWF in the players). Its
-other lines must match avmshell's:
-
-    node tests/bench/vector/run.ts [runs]
-    node tests/bench/vector/run.ts <dir A> <dir B> [runs]
-
-Reading a `Vector.<String>` was several times slower than in Flash, and
-not by the read: the loop sums `v[i].length`, and a String's `length` was
-a call of the getter through `rt.prototypeOf("String")`, which looked the
-class up by name at every call. Now a getter on a value typed String is
-the string's own `length`, and `prototypeOf` reads a String's, a Number's
-and a Boolean's prototype from their traits, which helps every method
-called on one. Medians of 7 interleaved pairs, in ms:
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| string-read | 123 | 8 | −93.5% | 12 |
-| string-read-length | 124 | 14 | −88.7% | 18 |
-| string-push-pop | 139 | 140 | +0.7% | 74 |
-| object-read | 78 | 78 | 0% | 79 |
-| array-string-read | 151 | 151 | 0% | 69 |
-| int-read | 22 | 22 | 0% | 48 |
-| `charCodeAt` over a String of 10,000, 1000 times | 134 | 100 | −25% | 40 |
-| `charAt` over the same, compared with a letter | 140 | 102 | −27% | 20 |
-
-The other sections are unchanged within their noise. array-string-read
-is another path: an Array's element is untyped, so its `length` is the
-runtime's lookup (`rt.getProperty`), whose inline cache holds the name
-for the traits of every receiver the file reads `length` on (alone in a
-file, the section takes 117 ms), and whose getter is called through the
-cache's entry. object-read compares each element with a global by
-`rt.strictEquals`, at avmshell's speed.
-
-### Methods of primitives
-
-`tests/bench/primitives/Primitives.as` times the methods of String, int
-and Number the compiler binds on values typed as them, in the AS3
-namespace: a string of 10,000 walked by `charCodeAt` and by `charAt`,
-searched, cut by `substring`, `substr` and `slice`, and numbers made
-strings. Its other lines must match avmshell's:
-
-    node tests/bench/primitives/run.ts [runs]
-    node tests/bench/primitives/run.ts <dir A> <dir B> [runs]
-
-Such a call was `rt.prototypeOf("String").$m10.call(s, i)`, and reading
-the method from the prototype was most of it: a primitive's class's
-prototype is no object's prototype, so the engine keeps its methods, of
-which String has dozens, in a dictionary, and each read is a lookup
-there, of a function it then cannot take for a constant. Now a method
-keeps each such method it calls in an entry of its table from the first
-call on (`(T[0] ??= rt.prototypeOf("String").$m10).call(s, i)`), and
-`AS3::charAt` and `AS3::charCodeAt` by a number are the string's own
-(`s.charCodeAt(i)`), which is what the natives call. Medians of 7
-interleaved pairs, in ms:
-
-| Section | Before | After | Change | avmshell |
-|---|---|---|---|---|
-| charCodeAt | 98 | 20 | −79.6% | 39 |
-| charAt | 103 | 30 | −70.9% | 21 |
-| indexOf | 78 | 61 | −21.8% | 47 |
-| substring | 73 | 56 | −23.3% | 132 |
-| substr-slice | 81 | 52 | −35.8% | 135 |
-| int-toString | 87 | 50 | −42.5% | 184 |
-| number-toString | 90 | 89 | −1.1% | 465 |
-| toFixed | 158 | 158 | 0% | 169 |
-
-The last two are the conversions' own time. VectorAccess.as, which
-calls no such method in a loop, is unchanged.
-
-### The AssemblyScript runtime
+| Runtime hot paths (#23, milestone 1, 2026-09-28) | 207 | 251 |
+| finddef read at its site (#513, 2026-10-23) | 155 | 148 |
+| AwayFL JIT, headless, first run (2026-09-28) | 525 | 689 |
+| Ruffle 0.6.0, web, first run (2026-10-02) | 1118 | 1389 |
+| PepperFlash (2026-09-28) | 188 | 83 |
+| avmshell (its JIT, in the oracle's container, 2026-09-28) | 107 | 74 |
+
+`pnpm bench`, after a warm-up, median of 5 samples, as last recorded
+(2026-09-28, with typed verification):
+
+| ABC | Size | Instructions | Parse | Decode every body | Per instruction | Typed verification |
+|---|---|---|---|---|---|---|
+| abcdump.abc | 32 KB | 6,489 | 0.056 ms | 0.240 ms | 37 ns | 1.42 ms |
+| as3pb (avmshell build) | 209 KB | 96,575 | 0.128 ms | 2.90 ms | 30 ns | 13.3 ms |
+| Tamarin `as3/Vector/initializerLargeVector` | 3.8 MB | 1,002,071 | 1.33 ms | 68.2 ms | 68 ns | 135 ms |
+
+Verification's second pass, which walks every block again to emit its
+IR, is 34% of as3pb's and 52% of initializerLargeVector's: in a worklist
+that reaches a fixed point, each block's last visit follows the last
+change to its entry state, so the IR could be kept from that visit.
+
+## What changed and why
+
+The compiler and runtime:
+
+- #5: one decoder's buffers reused across bodies, 3.4 to 5.2 times
+  faster decoding.
+- #14: AssemblyScript's minimal runtime (below).
+- #20–#23: typed comparisons, type references made once a module,
+  elements by number, structured control flow, then Vectors kept packed,
+  coercions without the builtin switch and no rest arrays on ByteArray's
+  methods; as3pb 1104 → 207 ms.
+- #27, #29: domain memory's length in a field and its DataView kept
+  until the bytes move (253 → 224 ms, from a run of the build the table
+  times at 251; runs vary by a few percent); registers swapped through a
+  temporary rather than by destructuring, an array and an iterator a
+  swap (224 → 199 ms). V8 refuses to inline the codec's small methods
+  for their bytecode size; raising its limits gains about 7% more.
+- #30: `utf8()` through `TextEncoder` from 96 characters; AMF numeric
+  Vectors reserved at once (47 → 15 ms).
+- #31: JSON through the host's `JSON.stringify` and `JSON.parse`,
+  numbers in the host's digits (as3pb's stringify 2279 → 522 ms).
+- #32: AMF3 decoding from views of the input, Vector classes kept
+  (821 → 457 ms).
+- #33: typed verification's bindings memoized, its tables half full.
+- #248, #904: inline caches for untyped names, eight entries a name,
+  kept on the traits past a name's room, and a sealed prototype's names.
+- #513: finddef reads the global kept on the name at its site, as V8
+  does not inline the call in a large method.
+- #724–#730, #747, #948, #949: cheaper for-in starts, steps and ends,
+  sparse Arrays by their indices, a step record that keeps what it read.
+- #759, #947: an absent Dictionary key at a third of the cost; a weak
+  Dictionary's references read once a job.
+- #752, #754: typed Vector elements read and written at the call site;
+  a class-typed parameter's own class tested inline.
+- #762, #768, #770: known classes constructed in place, bound calls
+  through an unchecked entry, interface and super calls bound, interface
+  methods by an alias every implementer shares.
+- #797: script objects of thousands of slots kept fast in V8.
+- #908, #912, #891, #882: untyped keys and string names made cheaply.
+- #938, #941, #943: a String's length read in place, a primitive's
+  methods kept from their first call.
+
+The player:
+
+- #803: only objects ever given a pointer method are asked whether a
+  clip is a button.
+- #950, #854: a still stage ticks by a timer and leaves the canvas be.
+- #954, #962: a BitmapData's pixels set and read in runs, the long ones
+  in the native module; #900, #902 copyPixels by rows and SIMD.
+- #979, #981: frame-script rounds walk only where a script may be due,
+  with old-version clips always listed, since their gotos run no cycle.
+- #980: images decoded on a canvas in memory, as a GPU canvas's readback
+  waits for the GPU.
+- #984: advanced text's tables in a texture rather than uniform arrays,
+  which hung Intel GPUs and cost a 49-vector upload a draw.
+- #994: the tick advances only clips whose advance does something.
+- #997: a button's pick bounds kept while its hit test state stands
+  still.
+- #1012, on `bench.ts --readback 300 --gpu` (RTX 4060), a frame of a
+  bitmap made, drawn into, scanned and read: a readback's bytes turned
+  into words by swapping red and blue in whole words, and the bounds'
+  pixels taken once, 10.55 → 9.69 ms; a fresh BitmapData's texture
+  cleared on the GPU and its pixels made only when used, 9.69 → 7.70 ms
+  (opaque 9.99 → 8.77); a ByteArray's words written at an unaligned
+  offset by bytes for an opaque store, and through the scratch row for a
+  transparent one, 7.70 → 6.98 ms (opaque 8.77 → 8.27);
+  getColorBoundsRect reading each row from both ends to its first and
+  last match, 6.98 → 4.77 ms.
+
+The desktop app:
+
+- #1010: a page's socket and WebSocket events gathered into one IPC
+  message a millisecond at most, the first after a quiet spell at once;
+  sockets read into a buffer of their own, each read copied out at its
+  length (`tests/desktop/relay-bench.ts`, medians of 6, with the main
+  process free and then held 4 ms of every 8, `--busy 4`). IPC messages:
+  WebSockets 80,008 → 200 and → 23; sockets 7,580 → 116 and 2,639 → 63.
+  CPU: WebSockets 445 → 384 ms and 417 → 286; sockets 121 → 113 and 114
+  → 113. Stores a read: 2.00 → 1.05, but a socket's reads in one batch
+  are joined into another, so the bytes made a byte received went 2.00 →
+  1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
+  2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
+  15,790 and 2,623 → 5,852.
+
+The renderer's are described in [renderer.md](renderer.md).
+
+What paid, in the compiler: a call the emitter can make for a known type
+in place of a helper shared by many kinds of values (`coerceTo`, the
+Vector accessors), arrays kept as V8 wants them, and no rest arrays on
+calls made millions of times. Small helpers V8 already inlines (domain
+memory's, `findDef` in a small method) gained nothing when kept.
+
+## The AssemblyScript runtime
 
 codegen.wasm uses AssemblyScript's `minimal` runtime: the TLSF allocator
 and a collector that runs only when the host calls `__collect()`, which
 the wrapper does between calls once memory has grown by 64 MB. The
-`incremental` runtime collects during calls, and pays for it with a write
-barrier on every store of an object reference. Switching made the same
-builds, with the same output:
+`incremental` runtime collects during calls and pays a write barrier on
+every store of an object reference: switching halved the decoder's time
+per instruction on abcdump.abc and as3pb (67.5 → 37.0 and 61.6 → 30.0
+ns) and took loading and verifying every Tamarin ABC from 9.8 to 5.5 s.
+The `stub` runtime, which never frees, was no faster. Neither were the
+optimizer's `converge` and `noAssert`, nor `uncheckedBehavior: "always"`;
+releases use the last anyway, so the code needs no `unchecked()`, and
+`pnpm test:checked` runs the tests with every access checked instead.
 
-| ABC | Parse, incremental | minimal | Decode per instruction, incremental | minimal |
-|---|---|---|---|---|
-| abcdump.abc | 0.075 ms | 0.056 ms | 67.5 ns | 37.0 ns |
-| as3pb (avmshell build) | 0.185 ms | 0.128 ms | 61.6 ns | 30.0 ns |
-| initializerLargeVector | 1.41 ms | 1.33 ms | 63.8 ns | 68.0 ns |
+## Inputs
 
-The one huge body of initializerLargeVector spends its time in per-body
-scratch, not in managed stores. Loading, linking, resolving and verifying
-with types every Tamarin ABC, each in a new domain after builtin and
-shell_toplevel, went from 9.8 to 5.5 s. The `stub` runtime, which never
-frees, was no faster. The optimizer's `converge` and `noAssert` made no
-measurable difference at `optimizeLevel` 3. Neither did `uncheckedBehavior: "always"`,
-as the hot loops were already unchecked; releases use it anyway, so the
-code needs no `unchecked()`, and `pnpm test:checked` runs the tests with
-every access checked instead (see AGENTS.md).
-
-Before the BodyDecoder rewrite (a new decoder with code-sized scratch per
-body, growing output arrays and a final copy into offset order), decoding
-cost 181, 152 and 123 ns per instruction for the same three files. Reusing
-one decoder's buffers across bodies, writing instructions into offset slots
-and packing them in one pass made it 3.4 to 5.2 times faster, with output
-identical for all 2,579 compiled Tamarin ABCs.
+- **as3pb** ([33TU/as3pb](https://github.com/33TU/as3pb), MIT): a
+  protobuf runtime for AS3, whose benchmark encodes and decodes through
+  `ByteArray` and domain memory, so its bytecode covers bit operations,
+  `lookupswitch`, `int`/`uint` coercions and the `li*`/`si*` opcodes in
+  hot loops. Build it with `-compiler.float=false` (`AS3_FLOAT=false`),
+  so that the same SWF runs in Flash Player and the non-float avmshell.
+- **abcdump.abc**: avmplus' `utils/abcdump.as`, compiled by the oracle
+  into `tests/conformance/out/` on every conformance run; MPL-2.0
+  derived, so regenerated rather than committed.

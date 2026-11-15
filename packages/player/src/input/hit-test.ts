@@ -15,6 +15,7 @@ import {
   Container,
   type DisplayObject,
   type MovieClip,
+  parentage,
   pickWork,
   ShapeObject,
   StaticTextObject,
@@ -177,11 +178,13 @@ export function pointerTarget(
 
       const parent = area.parent;
       area.parent = d;
+      parentage.changes++;
       // A disabled button is missed, not passed up: what is under it gets the hit (Ruffle).
       try {
         return mouseEnabled(d) && drawn(area, lx, ly) ? d : null;
       } finally {
         area.parent = parent;
+        parentage.changes++;
       }
     }
 

@@ -1,6 +1,8 @@
 // FileReference's host boundary. Paths stay with the host; scripts see metadata and bytes only.
 import type { FetchRequest, FetchResult } from "./hosts.js";
 
+const textDecoder = new TextDecoder();
+
 export interface FileFilter {
   description: string;
   extension: string;
@@ -456,7 +458,7 @@ export class FileReference {
           "uploadCompleteData",
           0,
           0,
-          new TextDecoder().decode(result.bytes as Uint8Array),
+          textDecoder.decode(result.bytes as Uint8Array),
         );
       }
     });
@@ -472,7 +474,7 @@ async function multipart(
 ): Promise<FetchRequest> {
   const form = new FormData();
   if (request.body) {
-    for (const [key, value] of new URLSearchParams(new TextDecoder().decode(request.body))) {
+    for (const [key, value] of new URLSearchParams(textDecoder.decode(request.body))) {
       form.append(key, value);
     }
   }

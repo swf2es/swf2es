@@ -7,12 +7,15 @@ export type TextureHandle = Handle;
 /**
  * A texture's size, and its pixels while they wait to be uploaded:
  * premultiplied RGBA bytes, or RGBA floats, which only a kernel reads, a
- * texel at a time.
+ * texel at a time; or, with no pixels, the one colour every texel is,
+ * premultiplied ARGB, which the backend clears the texture to rather than
+ * uploading as many bytes.
  */
 export interface TextureData {
   width: number;
   height: number;
   pixels: Uint8Array | Float32Array | null;
+  fill: number | null;
 }
 
 /**
@@ -85,8 +88,22 @@ export class Textures extends Registry {
     idle = IDLE_FRAMES,
   ): TextureHandle {
     const handle = this.hold(idle);
-    this.data[handle.id] = { width, height, pixels };
+    this.data[handle.id] = { width, height, pixels, fill: null };
     this.keep(handle.id, pixels);
+    this.changing[handle.id] = false;
+    this.pending.push(handle.id);
+    return handle;
+  }
+
+  /**
+   * A texture every texel of which is `pixel`, premultiplied ARGB, as a
+   * BitmapData is made: cleared to it on the GPU, with no bytes to fill
+   * or upload. Let go of once undrawn for `idle` frames.
+   */
+  addFilled(width: number, height: number, pixel: number, idle = IDLE_FRAMES): TextureHandle {
+    const handle = this.hold(idle);
+    this.data[handle.id] = { width, height, pixels: null, fill: pixel >>> 0 };
+    this.keep(handle.id, null);
     this.changing[handle.id] = false;
     this.pending.push(handle.id);
     return handle;
@@ -102,6 +119,7 @@ export class Textures extends Registry {
       data.width = width;
       data.height = height;
       data.pixels = pixels;
+      data.fill = null;
       this.keep(id, pixels);
       this.changing[id] = true;
       this.pending.push(id);
@@ -156,7 +174,7 @@ export class Textures extends Registry {
   }
 
   /** `pixels` kept for `id` where `bytes` lent them; those it kept before spared. */
-  private keep(id: number, pixels: Uint8Array | Float32Array): void {
+  private keep(id: number, pixels: Uint8Array | Float32Array | null): void {
     const before = this.kept[id];
     const own = pixels instanceof Uint8Array && this.lent.has(pixels) ? pixels : null;
     if (before && before !== own) {

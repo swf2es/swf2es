@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.23"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.24"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.23`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.24`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -120,6 +120,23 @@ gives back its GL context, audio and sockets. It fires `load`, `error` and
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
 holds both): a page may size the element to the SWF's own size while it
 asks for `noScale`, as an embedding at that size shows it.
+
+Browsers hold a page's sound until the user first clicks or presses a key
+in it, where Flash Player's plug-in played it at once. When a SWF's sound
+waits so, the element fires `audioblocked` and shows a "Click to unmute"
+button over the stage; a click on it, or Enter or Space, lets the sound
+play, as far in as a streamed soundtrack has gone meanwhile, and does not
+reach the SWF. A click or key on the SWF itself lets the sound play too,
+the SWF hearing it as usual. Either way the element fires
+`audiounblocked`, as it does when the SWF that held the sound is
+destroyed or another is loaded in its place; a SWF that plays no sound
+shows no button. Each element on a page shows a button of its own, whose
+click unmutes its own SWF.
+`unmuteprompt="false"` on the element, or `configure({ unmutePrompt:
+false })` for the page's elements, leaves the button out, for a page that
+shows its own: its click handler calls `element.player?.audio?.resume()`,
+which a browser allows only while it handles the user's click or key. The
+desktop app's window lets sound play at once.
 
 A SWF goes full screen by setting `Stage.displayState`, as under Flash
 Player's plug-in: only with `allowfullscreen="true"` on the element
@@ -501,8 +518,11 @@ configure({
 A player you set up yourself takes `socket:` from
 `webSocketSocketHost(urlFor)` (`@swf2es/player-hosts/websocket`). In node,
 `nodeSocketHost()` (`@swf2es/player-hosts/node`) connects directly, and
-so does the desktop app, through its main process; an embedder with a
-transport of its own gives it as `configure({ sockets })`.
+so does the desktop app, through its main process; both send each write
+at once, without Nagle's algorithm, unless an AIR SWF set `tcpNoDelay`
+to false before it connected. An embedder with a transport of its own
+gives it as `configure({ sockets })`; its `connect(host, port, events,
+options)` gets `options.noDelay` where the SWF set `tcpNoDelay`.
 
 An AIR application's `air.net.WebSocket` uses the page's own `WebSocket`.
 An embedder whose page may not connect, as the desktop app's, whose main

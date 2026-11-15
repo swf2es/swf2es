@@ -57,14 +57,15 @@ Each waits for a profile, a case or a user that asks for it:
   leaves touches to the mouse.
 - **NetStream and video:** H.264 through WebCodecs first, the older
   codecs as small wasm modules later.
-- **The compiler's measured candidates,** after its baseline of
-  benchmarks.md's steps 12 to 15: verification's IR kept from the first
-  walk, where its second pass is 34% of as3pb's verification and 52% of
+- **The compiler's measured candidates,** after its baseline of #30–#33
+  ([benchmarks.md](benchmarks.md#what-changed-and-why)):
+  verification's IR kept from the first walk, where its second pass is
+  34% of as3pb's verification and 52% of
   initializerLargeVector's; copy forwarding over only the registers
   that hold copies; and the rest of AMF3 decoding (457 ms on as3pb
   against avmshell's 317), mostly as3pb's own constructors.
 - **Domain memory against PepperFlash:** 148 ms on as3pb against its 83
-  ([benchmarks.md](benchmarks.md#finddef-at-the-site)).
+  ([benchmarks.md](benchmarks.md#generated-code-as3pb)).
 - **A second Tamarin run with ASC 1.0** from the Flex SDK.
 
 ## Done
@@ -87,8 +88,9 @@ order:
   Ruffle's and skeletons, no Adobe bodies), text, bitmaps, filters,
   sound, loading, input, ExternalInterface, globalization, touch, AIR's
   WebSocket;
-- workers, slices 1 to 6 ([workers.md](workers.md));
-- AVM1, steps 1 to 15 ([avm1.md](avm1.md#the-plan));
+- workers ([workers.md](workers.md));
+- AVM1 ([avm1.md](avm1.md); what is left under
+  [Known gaps](avm1.md#known-gaps));
 - modules compiled ahead of time and cached in IndexedDB, and pages
   without `'unsafe-eval'`;
 - the web element, the desktop app and the demo site;

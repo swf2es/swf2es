@@ -148,9 +148,9 @@ final class Counter
 
 function time(name:String, f:Function):void
 {
-	var start:int = getTimer();
+	var start:Number = new Date().time;
 	var r:* = f();
-	trace("time: " + name + " " + (getTimer() - start));
+	trace("time: " + name + " " + (new Date().time - start));
 	trace(name + " " + r);
 }
 
