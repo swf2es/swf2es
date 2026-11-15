@@ -615,6 +615,17 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Played as AIR, as adl plays it: Flash Player 32 hides AIR's menu members.
+    name: "native-menu-natives",
+    swf: (abc) => bare(abc, 1, "NativeMenuNatives"),
+    script: "NativeMenuNatives",
+    air: true,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "system-small-natives",
     swf: (abc) => bare(abc, 1, "SystemSmallNatives"),
     script: "SystemSmallNatives",

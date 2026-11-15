@@ -10,7 +10,8 @@ package flash.ui
 		private var _copy:Boolean;
 		private var _cut:Boolean;
 		private var _paste:Boolean;
-		private var _selectAll:Boolean;
+		// On by default in Flash Player and AIR alike.
+		private var _selectAll:Boolean = true;
 
 		public function get clear():Boolean
 		{
