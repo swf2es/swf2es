@@ -2,7 +2,8 @@
 // rule holds the SWF's sound, as Flash's plug-in never needed one. A click
 // on it, or Enter or Space, lets the sound run while the browser still
 // counts the gesture, and goes no further: neither the SWF nor the page's
-// own listeners on the element hear it.
+// own listeners on the element hear it. It stays until the sound runs, so
+// a click the browser does not count, a script's, leaves it there.
 
 export const UNMUTE_STYLE =
   " .unmute { position: absolute; inset: 0; z-index: 2; margin: auto; width: max-content;" +
@@ -48,8 +49,8 @@ const OWN = ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "keydo
 export class UnmutePrompt {
   readonly #button: HTMLButtonElement;
 
-  /** `unmute` runs as the button is pressed, within the user's gesture. */
-  constructor(parent: Node, unmute: () => void) {
+  /** `press` runs as the button is pressed, within the user's gesture. */
+  constructor(parent: Node, press: () => void) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "unmute";
@@ -63,16 +64,9 @@ export class UnmutePrompt {
     }
 
     // A button clicks on Enter and Space itself.
-    button.addEventListener("click", () => {
-      button.hidden = true;
-      unmute();
-    });
+    button.addEventListener("click", press);
     parent.appendChild(button);
     this.#button = button;
-  }
-
-  get shown(): boolean {
-    return !this.#button.hidden;
   }
 
   show(): void {

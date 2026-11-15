@@ -33,12 +33,16 @@ A browser holds a page's audio until the user's first click or key
 `onBlocked`, `Player.audio`), and the element fires `audioblocked`,
 shows a "Click to unmute" button over the stage (`unmute.ts`) unless
 its `unmuteprompt` attribute or the page's `configure({ unmutePrompt })`
-says not to, and fires `audiounblocked` as the device runs. The browser
-lets the device resume only within the user's gesture, so the button's
-click calls `AudioHost.resume` in its own handler, and stops there: the
-SWF and the page's listeners never hear it. A press or key anywhere on
-the element is a gesture too, and resumes the device in a capturing
-listener, the SWF hearing it as ever.
+says not to, and fires `audiounblocked` as the device runs, or as the
+SWF that held it is destroyed or replaced. The browser lets the device
+resume only within the user's gesture, so the button's click calls
+`AudioHost.resume` in its own handler, and stops there: the SWF and the
+page's listeners never hear it. The click gives the element the focus
+the button took, so the SWF keeps the keys and is not deactivated, and
+the button hides only as the device runs, so a click the browser does not
+count leaves it. A press or key anywhere else on the element is a gesture
+too, and resumes a suspended device in a capturing listener, before the
+host has told it as held as well as after, the SWF hearing it as ever.
 
 ## Showing a player
 

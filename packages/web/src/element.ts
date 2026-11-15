@@ -182,8 +182,9 @@ export class Swf2esPlayerElement extends ElementBase {
         focus(this);
       }
     });
-    // A click or key on the element is the user's gesture too: held sound runs, and the SWF has
-    // the click or key as ever. A touch's gesture is its release.
+    // A click or key on the element is the user's gesture too: the sound runs, held or still
+    // waiting to be told as held, and the SWF has the click or key as ever. A touch's gesture
+    // is its release.
     for (const type of ["pointerdown", "pointerup", "keydown"]) {
       this.addEventListener(type, (e) => this.#gesture(e), { capture: true });
     }
@@ -576,13 +577,18 @@ export class Swf2esPlayerElement extends ElementBase {
       return;
     }
 
-    this.#prompt ??= new UnmutePrompt(this.#box.parentNode as ShadowRoot, () => this.#unmute());
+    this.#prompt ??= new UnmutePrompt(this.#box.parentNode as ShadowRoot, () => {
+      // The focus goes from the button to the element, where the SWF's keys are, and stays
+      // within it: the button hides only once the sound runs, and the SWF is not deactivated.
+      focus(this);
+      this.#unmute();
+    });
     this.#prompt.show();
   }
 
-  /** A click or key on the element, the user's gesture, in which the browser lets held sound run. */
+  /** A click or key on the element, the user's gesture, in which the browser lets a suspended device run. */
   #gesture(event: Event): void {
-    if (this.#session?.audioBlocked && !this.#prompt?.holds(event)) {
+    if (this.#session && !this.#prompt?.holds(event)) {
       this.#unmute();
     }
   }
@@ -928,6 +934,11 @@ export class Swf2esPlayerElement extends ElementBase {
     session.air?.release();
     this.#prompt?.hide();
     this.#box.style.background = "";
+    // Its sound is held no more, gone with it: each audioblocked has its audiounblocked.
+    if (session.audioBlocked) {
+      session.audioBlocked = false;
+      dispatch(this, new Event("audiounblocked"));
+    }
   }
 }
 

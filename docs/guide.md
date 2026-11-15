@@ -128,7 +128,10 @@ button over the stage; a click on it, or Enter or Space, lets the sound
 play, as far in as a streamed soundtrack has gone meanwhile, and does not
 reach the SWF. A click or key on the SWF itself lets the sound play too,
 the SWF hearing it as usual. Either way the element fires
-`audiounblocked`, and a SWF that plays no sound shows no button.
+`audiounblocked`, as it does when the SWF that held the sound is
+destroyed or another is loaded in its place; a SWF that plays no sound
+shows no button. Each element on a page shows a button of its own, whose
+click unmutes its own SWF.
 `unmuteprompt="false"` on the element, or `configure({ unmutePrompt:
 false })` for the page's elements, leaves the button out, for a page that
 shows its own: its click handler calls `element.player?.audio?.resume()`,

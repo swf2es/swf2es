@@ -907,6 +907,7 @@ function unmuteState() {
         : null,
     context: lastAudio?.state ?? null,
     starts: [...sourceStarts],
+    focused: document.activeElement === element("unmute"),
   };
 }
 
@@ -1124,6 +1125,12 @@ Object.assign(globalThis, {
   frames,
   unmutePlayer,
   unmuteState,
+  unmuteEvents: () => [...unmuteEvents],
+  /** A click on the button by script, which no browser counts as the user's gesture. */
+  unmuteScriptClick: () => {
+    element("unmute").shadowRoot?.querySelector("button")?.click();
+    return true;
+  },
   unmuteDestroy: () => {
     element("unmute").destroy();
     element("unmute").remove();
