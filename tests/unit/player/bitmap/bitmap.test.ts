@@ -1,6 +1,7 @@
 // The pixel store on its own: Flash's premultiplication arithmetic, that
-// a store holds the Bitmaps showing it weakly, and its reads of bounds and
-// a texture's bytes.
+// a store holds the Bitmaps showing it weakly, that one made of a colour
+// makes its pixels only when used, and its reads of bounds and a texture's
+// bytes.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setFlagsFromString } from "node:v8";
@@ -757,6 +758,99 @@ function randomStore(next: () => number, w: number, h: number, transparent: bool
   store.changed();
   return store;
 }
+
+test("a store made of one colour makes its pixels only as they are first read or written", () => {
+  for (const [transparent, fill, pixel] of [
+    [true, 0x80402010, 0x80201008],
+    [true, 0, 0],
+    [true, 0x00ffffff, 0],
+    [false, 0x12336699, 0xff336699],
+    [false, 0, 0xff000000],
+  ] as const) {
+    const label = `${transparent} ${fill.toString(16)}`;
+    const fresh = () => new BitmapStore(3, 2, transparent, fill);
+    const all = (p: number) => new Uint32Array(6).fill(p);
+
+    // Read: the colour, premultiplied as made, opaque in an opaque store.
+    let store = fresh();
+    assert.equal(store.solidPixel, pixel, label);
+    const value = transparent ? unmultiply(pixel) : pixel;
+    assert.equal(store.getPixel32(2, 1), value, label);
+    assert.equal(store.getPixel(0, 0), value & 0xffffff, label);
+    assert.equal(store.solidPixel, null, label);
+    assert.deepEqual(store.pixels, all(pixel), label);
+
+    // Written.
+    store = fresh();
+    store.setPixel32(1, 1, 0xff010203);
+    const written = all(pixel);
+    written[4] = 0xff010203;
+    assert.deepEqual([store.solidPixel, store.pixels], [null, written], label);
+
+    // Cloned, the copy is of the colour too, and neither makes pixels.
+    store = fresh();
+    const twin = store.clone();
+    assert.deepEqual([store.solidPixel, twin.solidPixel], [pixel, pixel], label);
+    assert.deepEqual(twin.pixels, all(pixel), label);
+    assert.equal(store.solidPixel, pixel, label);
+    store.setPixel32(0, 0, 0xff00ff00);
+    assert.deepEqual(twin.pixels, all(pixel), "a clone of its own");
+    const copied = store.clone();
+    assert.deepEqual(copied.pixels, store.pixels, label);
+    copied.setPixel32(0, 0, 0xff0000ff);
+    assert.equal(store.getPixel32(0, 0), 0xff00ff00, "a copy's pixels of their own");
+
+    // Copied from and into.
+    store = fresh();
+    const other = new BitmapStore(3, 2, true, 0xff808080);
+    other.copyPixels(store, { x: 0, y: 0, width: 2, height: 2 }, 1, 0, false);
+    const expected = all(0xff808080);
+    for (const p of [1, 2, 4, 5]) {
+      expected[p] = pixel;
+    }
+
+    assert.deepEqual(other.pixels, expected, label);
+    store = fresh();
+    store.copyPixels(
+      randomStore(lcg(3), 2, 2, true),
+      { x: 0, y: 0, width: 2, height: 2 },
+      0,
+      0,
+      false,
+    );
+    assert.equal(store.solidPixel, null, label);
+    assert.equal(store.pixels[2], pixel, "the pixels the copy left");
+
+    // Disposed: no pixels at all.
+    store = fresh();
+    store.dispose();
+    assert.deepEqual([store.solidPixel, store.pixels.length], [null, 0], label);
+
+    // Drawn into on the GPU and read back: the GPU's pixels, never the colour's.
+    store = fresh();
+    const gpu = Uint32Array.of(1, 2, 3, 4, 5, 0xff000006);
+    const copy = {
+      version: -1,
+      read: () => gpu.slice(),
+      copy: () => false,
+      fill: () => false,
+      destroy: () => {},
+    };
+    store.copies.add(copy);
+    store.drawnOnGpu(copy);
+    assert.equal(store.solidPixel, pixel, "unmade while the GPU holds the store");
+    const clone = store.clone();
+    assert.deepEqual([clone.solidPixel, clone.pixels], [null, gpu], label);
+    assert.deepEqual([store.solidPixel, store.pixels], [null, gpu], label);
+  }
+});
+
+test("a large store made of one colour makes its pixels as it is made", () => {
+  const store = new BitmapStore(4097, 4096, true, 0x80ffffff);
+  assert.equal(store.solidPixel, null);
+  assert.equal(store.pixels[4097 * 4096 - 1], 0x80808080);
+  assert.equal(new BitmapStore(4096, 4096, true, 0).solidPixel, 0);
+});
 
 /** getColorBoundsRect as it was, every pixel unmultiplied unless `premultiplied`. */
 function referenceBounds(

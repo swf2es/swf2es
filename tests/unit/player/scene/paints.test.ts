@@ -3,7 +3,8 @@
 // holds; a store that changes uploaded again from the same bytes rather
 // than from new ones every frame; and those bytes lent again after an idle
 // texture or a lost context let them go, and let go of once they stop
-// changing.
+// changing. A store still of the one colour it was made is cleared to it
+// on the GPU instead, with no pixels made or uploaded.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BitmapStore, rgbaInto, rgbaOf } from "../../../../packages/player/dist/bitmap/bitmap.js";
@@ -73,8 +74,10 @@ test("a store that changes is uploaded again from the same bytes", () => {
   const textures = new Textures();
   const paints = new Paints(textures);
   const store = new BitmapStore(3, 2, true, 0x80402010);
+  store.setPixel32(1, 0, 0x40ff8000);
   const handle = paints.storeTexture(store);
   const first = frame(textures, handle.id).get(handle.id);
+  assert.ok(first);
   assert.deepEqual([...(first ?? [])], bytewise(store.pixels));
 
   store.fillRect({ x: 0, y: 0, width: 1, height: 1 }, 0xff112233);
@@ -111,8 +114,10 @@ test("a texture added again after a lost context or going idle takes the bytes i
   const textures = new Textures();
   const paints = new Paints(textures);
   const store = new BitmapStore(4, 4, true, 0x80402010);
+  store.setPixel32(3, 3, 0xff102030);
   let handle = paints.storeTexture(store);
   const bytes = frame(textures, handle.id).get(handle.id);
+  assert.ok(bytes);
 
   // A lost context takes every texture; the store's is added again, from the same bytes.
   textures.lost();
@@ -129,6 +134,46 @@ test("a texture added again after a lost context or going idle takes the bytes i
   assert.equal(textures.alive(handle), false, "let go of after the 2 idle frames asked for");
   handle = paints.storeTexture(store);
   assert.equal(frame(textures, handle.id).get(handle.id), bytes);
+});
+
+test("a store of one colour as made is cleared to it, with no bytes, till it is written", () => {
+  const textures = new Textures();
+  const paints = new Paints(textures);
+  for (const [transparent, fill, pixel] of [
+    [true, 0x80402010, 0x80201008],
+    [true, 0, 0],
+    [false, 0x00336699, 0xff336699],
+  ] as const) {
+    const store = new BitmapStore(5, 3, transparent, fill);
+    assert.equal(store.solidPixel, pixel);
+    const handle = paints.storeTexture(store);
+    const data = textures.get(handle.id);
+    assert.deepEqual(
+      { pixels: data?.pixels, fill: data?.fill, width: data?.width, height: data?.height },
+      { pixels: null, fill: pixel, width: 5, height: 3 },
+    );
+    assert.equal(frame(textures, handle.id).size, 0, "no bytes uploaded");
+    assert.equal(store.solidPixel, pixel, "still unmade");
+
+    // Written, it is uploaded from its pixels, made of the colour first.
+    store.setPixel32(0, 0, 0xff000000);
+    assert.equal(store.solidPixel, null);
+    assert.equal(paints.storeTexture(store), handle);
+    const bytes = frame(textures, handle.id).get(handle.id) as Uint8Array;
+    const expected = new Uint32Array(15).fill(pixel);
+    expected[0] = 0xff000000;
+    assert.deepEqual([...bytes], bytewise(expected));
+  }
+
+  // An opaque store said to hold alpha is uploaded from its pixels, as drawn.
+  const holding = new BitmapStore(2, 2, false, 0xff336699);
+  holding.holdsAlpha = true;
+  const handle = paints.storeTexture(holding);
+  assert.equal(textures.get(handle.id)?.fill, null);
+  assert.deepEqual(
+    [...(frame(textures, handle.id).get(handle.id) as Uint8Array)],
+    bytewise(new Uint32Array(4).fill(0xff336699)),
+  );
 });
 
 test("bytes a texture set again keeps go once it stops changing, and spare ones after them", () => {

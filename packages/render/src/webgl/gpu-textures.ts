@@ -101,8 +101,15 @@ export class GpuTextures {
     this.outlineCount = count;
   }
 
-  /** The textures removed since the last frame deleted, and those added or changed uploaded, their pixels let go. */
-  uploadTextures(textures: Textures): void {
+  /**
+   * The textures removed since the last frame deleted, and those added or
+   * changed uploaded, their pixels let go; one of a single colour made with
+   * no pixels and cleared to it by `clear`, on the texture made.
+   */
+  uploadTextures(
+    textures: Textures,
+    clear: (id: number, width: number, height: number, pixel: number) => void,
+  ): void {
     const gl = this.gl;
     for (const id of textures.removed) {
       const texture = this.textures[id];
@@ -116,7 +123,8 @@ export class GpuTextures {
     textures.removed.length = 0;
     for (const id of textures.pending) {
       const data = textures.get(id);
-      if (!data?.pixels) {
+      const fill = data?.pixels ? null : (data?.fill ?? null);
+      if (!data || (!data.pixels && fill === null)) {
         continue;
       }
 
@@ -144,6 +152,34 @@ export class GpuTextures {
           data.pixels,
         );
         data.pixels = null;
+        continue;
+      }
+
+      if (fill !== null) {
+        // WebGL makes a texture given no pixels clear: a clear fill needs nothing more, nor a
+        // framebuffer bound for it.
+        const made = this.sizes[id * 2] !== data.width || this.sizes[id * 2 + 1] !== data.height;
+        if (made) {
+          this.sizes[id * 2] = data.width;
+          this.sizes[id * 2 + 1] = data.height;
+          gl.texImage2D(
+            gl.TEXTURE_2D,
+            0,
+            gl.RGBA8,
+            data.width,
+            data.height,
+            0,
+            gl.RGBA,
+            gl.UNSIGNED_BYTE,
+            null,
+          );
+        }
+
+        data.fill = null;
+        if (!made || fill !== 0) {
+          clear(id, data.width, data.height, fill);
+        }
+
         continue;
       }
 

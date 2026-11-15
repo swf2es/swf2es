@@ -14,6 +14,14 @@ import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
 import { bitmapKernel } from "./kernel.js";
 import type { PixelRect } from "./pixel-rect.js";
 
+/** The pixels of a store that has none yet, shared by every such store. */
+const NO_PIXELS = new Uint32Array(0);
+/**
+ * The most pixels a store made of one colour leaves unmade till they are
+ * used: a larger one is allocated as it is made, so that one the browser
+ * cannot allocate is refused there, as BitmapData's constructor refuses it.
+ */
+const LAZY_PIXELS = 1 << 24;
 /** No gaps, shared by every copy that leaves none. */
 const NO_GAPS: readonly PixelRect[] = [];
 /** The fewest pixels copyPixels blends in the native module rather than here. */
@@ -271,6 +279,14 @@ export interface GpuCopy {
 export class BitmapStore {
   private cpu: Uint32Array;
   /**
+   * The premultiplied pixel every pixel of a store is as made of one colour,
+   * while nothing wrote or read its pixels, which are not made till then
+   * (`readable`): its texture is cleared to it rather than uploaded, and a
+   * store drawn into on the GPU and read back never makes them. Null once
+   * they are made.
+   */
+  private solid: number | null = null;
+  /**
    * Whether `cpu` is a library bitmap's pixels, which every store made of it
    * shares: copied before it is first written, so an atlas a SWF only reads
    * from is one array, not one for the library and one for each BitmapData.
@@ -319,8 +335,32 @@ export class BitmapStore {
       return;
     }
 
-    this.cpu = new Uint32Array(width * height);
-    this.cpu.fill(this.premultiplied(fill));
+    this.solid = this.premultiplied(fill);
+    this.cpu = NO_PIXELS;
+    if (width * height > LAZY_PIXELS) {
+      this.made();
+    }
+  }
+
+  /** The pixels made of the one colour the store is, where they were not. */
+  private made(): void {
+    if (this.solid !== null) {
+      const pixels = new Uint32Array(this.width * this.height);
+      if (this.solid !== 0) {
+        pixels.fill(this.solid);
+      }
+
+      this.cpu = pixels;
+      this.solid = null;
+    }
+  }
+
+  /**
+   * The premultiplied pixel every pixel is, for a store made of one colour
+   * whose pixels nothing has made since (`solid`); else null.
+   */
+  get solidPixel(): number | null {
+    return this.solid;
   }
 
   /**
@@ -341,6 +381,7 @@ export class BitmapStore {
 
   set pixels(pixels: Uint32Array) {
     this.cpu = pixels;
+    this.solid = null;
     this.shared = false;
     this.gpuNewer = false;
   }
@@ -353,10 +394,12 @@ export class BitmapStore {
   get readable(): Uint32Array {
     if (this.gpuNewer && this.gpu) {
       this.cpu = this.gpu.read();
+      this.solid = null;
       this.shared = false;
     }
 
     this.gpuNewer = false;
+    this.made();
     return this.cpu;
   }
 
@@ -913,7 +956,15 @@ export class BitmapStore {
 
   clone(): BitmapStore {
     const copy = new BitmapStore(this.width, this.height, this.transparent, 0);
-    copy.pixels.set(this.readable);
+    // One colour still, the copy is too; else it takes a copy of the pixels, made at once.
+    if (this.solid !== null && !this.gpuNewer) {
+      copy.solid = this.solid;
+    } else if (copy.solid === null) {
+      copy.pixels.set(this.readable);
+    } else {
+      copy.pixels = this.readable.slice();
+    }
+
     return copy;
   }
 
