@@ -87,7 +87,7 @@ order:
   Ruffle's and skeletons, no Adobe bodies), text, bitmaps, filters,
   sound, loading, input, ExternalInterface, globalization, touch, AIR's
   WebSocket;
-- workers, slices 1 to 6 ([workers.md](workers.md));
+- workers ([workers.md](workers.md));
 - AVM1, steps 1 to 15 ([avm1.md](avm1.md#the-plan));
 - modules compiled ahead of time and cached in IndexedDB, and pages
   without `'unsafe-eval'`;
