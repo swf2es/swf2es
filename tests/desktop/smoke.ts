@@ -144,12 +144,20 @@ const networked = smokeSwf("network", true);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** An HTTP server on 127.0.0.1 answering each path with what `files` has for it, else a 404. */
-async function httpSite(files: Record<string, [type: string, body: string | Uint8Array]>) {
+/**
+ * An HTTP server on 127.0.0.1 answering each path with what `files` has for it, with the
+ * headers it names, else a 404.
+ */
+async function httpSite(
+  files: Record<
+    string,
+    [type: string, body: string | Uint8Array, headers?: Record<string, string>]
+  >,
+) {
   const http = createHttpServer((request, response) => {
     const file = files[new URL(request.url ?? "/", "http://x").pathname];
     if (file) {
-      response.writeHead(200, { "content-type": file[0] }).end(file[1]);
+      response.writeHead(200, { "content-type": file[0], ...file[2] }).end(file[1]);
     } else {
       response.writeHead(404, { "content-type": "text/plain" }).end("no such file");
     }
@@ -206,7 +214,8 @@ async function remote(through: TestProxy | null = null, credentials = ""): Promi
   });
   const home = await httpSite({
     "/remote.swf": ["application/x-shockwave-flash", swfBytes],
-    "/data.txt": ["text/plain", "same"],
+    // Kept by the HTTP cache, and read from it as the SWF plays again.
+    "/data.txt": ["text/plain", "same", { "cache-control": "max-age=600" }],
   });
   const allowed = await httpSite({
     "/crossdomain.xml": [
@@ -363,6 +372,11 @@ async function remote(through: TestProxy | null = null, credentials = ""): Promi
       assert.equal(traced("remote: denied refused"), 2);
       assert.equal(traced("remote: socket-ok pong"), 2);
       assert.equal(traced("remote: socket-no refused"), 2);
+      // The second time from the HTTP cache, which node:sqlite keeps in the user data the
+      // test gives, with no warning on stderr.
+      assert.match(stderr(), /swf2es: net GET \S+\/data\.txt 200 4 B \d+ ms from cache/);
+      assert.ok(existsSync(join(userData, "HTTP Cache", "index.sqlite")));
+      assert.ok(!/ExperimentalWarning|no HTTP cache/.test(stderr()), stderr());
 
       // Both URLs are in the recent list.
       const recent = JSON.parse(readFileSync(join(userData, "settings.json"), "utf8")).recent;

@@ -68,3 +68,20 @@ test("a chosen playerglobal is kept until the app's own is chosen again", () => 
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("the HTTP cache is on unless the File menu turned it off", () => {
+  const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
+  try {
+    const settings = new SettingsFile(directory);
+    assert.equal(settings.httpCache, true);
+    assert.equal(settings.setHttpCache(false), true);
+    settings.opened("example.swf");
+    assert.equal(new SettingsFile(directory).httpCache, false);
+    assert.equal(settings.setHttpCache(true), true);
+    assert.equal(new SettingsFile(directory).httpCache, true);
+    writeFileSync(join(directory, "settings.json"), JSON.stringify({ httpCache: "no" }));
+    assert.equal(new SettingsFile(directory).httpCache, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
