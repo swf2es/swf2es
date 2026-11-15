@@ -6,6 +6,7 @@ export { BitmapObject } from "./bitmapobject.js";
 export { ButtonObject, type ButtonState, buttonStates } from "./buttonobject.js";
 export { Container } from "./container.js";
 export {
+  advancing,
   BUTTON,
   CLIP,
   CONTENT,

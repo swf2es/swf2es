@@ -429,7 +429,7 @@ fn glow(pixels: []u32, moved: []const u8, p: *const LayerParams) void {
             o_r = (gr * (255 - sa)) / 255;
             og = (gg * (255 - sa)) / 255;
             ob = (gb * (255 - sa)) / 255;
-        } else if (inner and !knockout) {
+        } else if (inner and !knockout and !hide) {
             // Over the source's straight colour by the glow's own alpha, the glow's in 255ths and
             // the source's in 256ths, truncated; the source keeps its alpha.
             const keep = 256 - raw;

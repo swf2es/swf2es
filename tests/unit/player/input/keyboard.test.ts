@@ -15,6 +15,7 @@ import {
 } from "../../../../packages/player/dist/input/keyboard.js";
 import { Clipboard } from "../../../../packages/player/dist/scripting/clipboard.js";
 import type { Scripting } from "../../../../packages/player/dist/scripting.js";
+import { equal } from "../../same.ts";
 
 type Event = {
   cls: string;
@@ -143,7 +144,7 @@ const RESTRICTED: [string | null, string][] = [
 
 test("restrict keeps what Flash keeps: ranges, ^ switching, escapes, a letter in its other case", () => {
   for (const [restrict, kept] of RESTRICTED) {
-    assert.equal(restrictText(restrict, TYPED), kept, `restrict ${JSON.stringify(restrict)}`);
+    equal(restrictText(restrict, TYPED), kept, `restrict ${JSON.stringify(restrict)}`);
   }
 });
 
@@ -157,7 +158,69 @@ test("a key goes to the focused field and bubbles to the stage; with no focus, t
   setFocus(scripting, field);
   keyboard.handle("down", { keyCode: 66, charCode: 98 });
   assert.deepEqual(heard, ["stage", "field 66", "stage"]);
-  assert.equal(field.model.text, "b");
+  equal(field.model.text, "b");
+});
+
+test("a key's character goes to what has focus once its keyDown listeners ran", () => {
+  const { stage, fields, scripting, keyboard, listen } = setUp("chat", "other");
+  const [chat, other] = fields;
+  // As a game opens its chat on "/" from the stage, with no field focused (Flash and AIR type
+  // the "/" into the chat on that first press).
+  listen(stage, "keyDown", (e) => {
+    if (e.args[0] === 47) {
+      setFocus(scripting, chat);
+    }
+  });
+  // And a field whose key moves focus on to another field.
+  listen(chat, "keyDown", (e) => {
+    if (e.args[0] === 35) {
+      setFocus(scripting, other);
+    }
+  });
+
+  // Used, so a host keeps the key from the browser, as it does a field's typing.
+  equal(keyboard.handle("down", { keyCode: 191, charCode: 47 }), true);
+  equal(scripting.focus, chat);
+  equal(chat.model.text, "/");
+
+  keyboard.handle("down", { keyCode: 51, charCode: 35, shiftKey: true });
+  equal(chat.model.text, "/");
+  equal(other.model.text, "#");
+});
+
+test("a keyDown listener that takes focus away, or the field off the stage, types nothing", () => {
+  const { stage, fields, scripting, keyboard, listen } = setUp("name", "next");
+  const [field, next] = fields;
+  setFocus(scripting, field);
+  listen(field, "keyDown", (e) => {
+    if (e.args[0] === 120) {
+      setFocus(scripting, null);
+    }
+
+    if (e.args[0] === 121) {
+      stage.removeChild(field);
+    }
+  });
+  listen(next, "keyDown", (e) => {
+    if (e.args[0] === 97) {
+      setFocus(scripting, field);
+    }
+  });
+
+  equal(keyboard.handle("down", { keyCode: 88, charCode: 120 }), false);
+  equal(field.model.text, "");
+
+  setFocus(scripting, field);
+  keyboard.handle("down", { keyCode: 89, charCode: 121 });
+  equal(field.model.text, "");
+
+  // Ctrl+A follows the new focus too: the field the listener focused selects all.
+  stage.addChildAt(field, 0);
+  field.model.text = "abc";
+  setFocus(scripting, next);
+  keyboard.handle("down", { keyCode: 65, charCode: 97, ctrlKey: true });
+  equal(scripting.focus, field);
+  assert.deepEqual(field.selection, [0, 3]);
 });
 
 test("typing edits the focused field: a TextEvent a listener may cancel, then Event.CHANGE", () => {
@@ -173,15 +236,15 @@ test("typing edits the focused field: a TextEvent a listener may cancel, then Ev
   listen(field, "change", () => heard.push("change"));
 
   type("axb");
-  assert.equal(field.model.text, "ab");
+  equal(field.model.text, "ab");
   assert.deepEqual(heard, ["text a", "change", "text x", "text b", "change"]);
-  assert.equal(field.caret, 2);
+  equal(field.caret, 2);
 
   // A character restrict refuses still goes to listeners, and the field still changes (none put in).
   heard.length = 0;
   field.restrict = "a-z";
   type("Y1");
-  assert.equal(field.model.text, "aby");
+  equal(field.model.text, "aby");
   assert.deepEqual(heard, ["text Y", "change", "text 1", "change"]);
 });
 
@@ -193,15 +256,15 @@ test("backspace, delete, the arrows and shift's selection edit as a field's keys
 
   keyboard.handle("down", { keyCode: 37, charCode: 0 });
   keyboard.handle("down", { keyCode: 8, charCode: 8 });
-  assert.equal(field.model.text, "abd");
+  equal(field.model.text, "abd");
   keyboard.handle("down", { keyCode: 46, charCode: 127 });
-  assert.equal(field.model.text, "ab");
+  equal(field.model.text, "ab");
 
   keyboard.handle("down", { keyCode: 36, charCode: 0 });
   keyboard.handle("down", { keyCode: 39, charCode: 0, shiftKey: true });
   assert.deepEqual(field.selection, [0, 1]);
   type("z");
-  assert.equal(field.model.text, "zb");
+  equal(field.model.text, "zb");
 });
 
 test("a key without edits sends its events and moves focus; text edits with no key events", () => {
@@ -212,24 +275,24 @@ test("a key without edits sends its events and moves focus; text edits with no k
   listen(first, "change", () => heard.push("change"));
 
   keyboard.handle("down", { keyCode: 65, charCode: 97 }, false);
-  assert.equal(first.model.text, "");
+  equal(first.model.text, "");
   assert.ok(keyboard.text({ keyCode: 0, charCode: 97 }));
   assert.ok(keyboard.text({ keyCode: 0, charCode: 98 }));
   assert.ok(keyboard.text({ keyCode: 8, charCode: 8 }));
-  assert.equal(first.model.text, "a");
+  equal(first.model.text, "a");
   assert.deepEqual(heard, ["down 65", "change", "change", "change"]);
 
   keyboard.handle("down", { keyCode: 9, charCode: 9 }, false);
-  assert.equal(scripting.focus, second);
+  equal(scripting.focus, second);
 });
 
 test("an input method's text is typed whole, with one TextEvent and no key events", () => {
   const { fields, scripting, keyboard, heard, listen } = setUp("name");
   const [field] = fields;
-  assert.equal(keyboard.editing, false);
-  assert.equal(keyboard.insert("x"), false);
+  equal(keyboard.editing, false);
+  equal(keyboard.insert("x"), false);
   setFocus(scripting, field);
-  assert.equal(keyboard.editing, true);
+  equal(keyboard.editing, true);
   listen(field, "keyDown", () => heard.push("down"));
   listen(field, "textInput", (e) => heard.push(`text ${e.args[0]}`));
   listen(field, "change", () => heard.push("change"));
@@ -237,13 +300,13 @@ test("an input method's text is typed whole, with one TextEvent and no key event
   assert.ok(keyboard.insert("日本語"));
   // A single-line field drops the line break, as a paste's.
   assert.ok(keyboard.insert("a\nb"));
-  assert.equal(field.model.text, "日本語ab");
+  equal(field.model.text, "日本語ab");
   assert.deepEqual(heard, ["text 日本語", "change", "text ab", "change"]);
 
   field.type = "dynamic";
-  assert.equal(keyboard.editing, false);
-  assert.equal(keyboard.insert("c"), false);
-  assert.equal(field.model.text, "日本語ab");
+  equal(keyboard.editing, false);
+  equal(keyboard.insert("c"), false);
+  equal(field.model.text, "日本語ab");
 });
 
 test("maxChars cuts what is typed to the room left, and a full field hears nothing", () => {
@@ -253,7 +316,7 @@ test("maxChars cuts what is typed to the room left, and a full field hears nothi
   field.maxChars = 3;
   listen(field, "textInput", () => heard.push("text"));
   type("abcd");
-  assert.equal(field.model.text, "abc");
+  equal(field.model.text, "abc");
   assert.deepEqual(heard, ["text", "text", "text"]);
 });
 
@@ -263,7 +326,7 @@ test("Ctrl with Alt, as AltGr types, is typing, not a shortcut", () => {
   setFocus(scripting, field);
   keyboard.handle("down", { keyCode: 50, charCode: 64, ctrlKey: true, altKey: true });
   keyboard.handle("down", { keyCode: 65, charCode: 97, ctrlKey: true });
-  assert.equal(field.model.text, "@");
+  equal(field.model.text, "@");
   assert.deepEqual(field.selection, [0, 1]);
 });
 
@@ -275,8 +338,8 @@ test("focus moves with focusOut then focusIn, each naming the other", () => {
   setFocus(scripting, name);
   setFocus(scripting, pass);
   assert.deepEqual(heard, ["out true", "in true"]);
-  assert.equal(name.focused, false);
-  assert.equal(pass.focused, true);
+  equal(name.focused, false);
+  equal(pass.focused, true);
 });
 
 test("tab moves by tabIndex where any has one, else by place, after a keyFocusChange a listener may cancel", () => {
@@ -285,26 +348,26 @@ test("tab moves by tabIndex where any has one, else by place, after a keyFocusCh
   const tab = (shiftKey = false) => keyboard.handle("down", { keyCode: 9, charCode: 9, shiftKey });
 
   tab();
-  assert.equal(scripting.focus, a);
+  equal(scripting.focus, a);
   tab();
-  assert.equal(scripting.focus, b);
+  equal(scripting.focus, b);
   tab(true);
-  assert.equal(scripting.focus, a);
+  equal(scripting.focus, a);
 
   // Indices put c first; b, which has none, is left out.
   (c.object as { $tabIndex?: number }).$tabIndex = 1;
   (a.object as { $tabIndex?: number }).$tabIndex = 2;
   tab();
-  assert.equal(scripting.focus, c);
+  equal(scripting.focus, c);
   tab();
-  assert.equal(scripting.focus, a);
+  equal(scripting.focus, a);
 
   // Cancelled where focus is, Tab moves nothing.
   listen(a, "keyFocusChange", (e) => {
     e.$prevented = true;
   });
   tab();
-  assert.equal(scripting.focus, a);
+  equal(scripting.focus, a);
 });
 
 test("a click focuses a field after a mouseFocusChange, and the stage's click takes it away", () => {
@@ -312,10 +375,10 @@ test("a click focuses a field after a mouseFocusChange, and the stage's click ta
   const [a] = fields;
   listen(stage, "mouseFocusChange", (e) => heard.push(`change ${e.args[0] === a.object}`));
   keyboard.pressed(a, 0, 0);
-  assert.equal(scripting.focus, a);
+  equal(scripting.focus, a);
   // The stage's: a change on the field, bubbling to the stage, naming nothing.
   keyboard.pressed(stage, 0, 0);
-  assert.equal(scripting.focus, null);
+  equal(scripting.focus, null);
   assert.deepEqual(heard, ["change true", "change false"]);
 });
 
@@ -324,7 +387,7 @@ test("an object taken off its parent, or hidden, loses focus", () => {
   const [a, b] = fields;
   setFocus(scripting, a);
   stage.removeChild(a);
-  assert.equal(scripting.focus, null);
+  equal(scripting.focus, null);
 
   setFocus(scripting, b);
   b.applyPlace({
@@ -336,7 +399,7 @@ test("an object taken off its parent, or hidden, loses focus", () => {
     blendMode: null,
     filters: null,
   } as never);
-  assert.equal(scripting.focus, null);
+  equal(scripting.focus, null);
 });
 
 test("a drag selects from the press, by characters, or by words and lines after a double or triple click", () => {
@@ -386,10 +449,10 @@ test("a paste types the clipboard's text: a TextEvent, then restrict, maxChars a
   listen(field, "change", () => heard.push("change"));
 
   // A single-line field drops the line breaks, and every control character.
-  assert.equal(keyboard.paste({ text: "ab\r\ncd\tef" }), true);
-  assert.equal(field.model.text, "abcdef");
+  equal(keyboard.paste({ text: "ab\r\ncd\tef" }), true);
+  equal(field.model.text, "abcdef");
   assert.deepEqual(heard, ['text "abcdef"', "change"]);
-  assert.equal(field.caret, 6);
+  equal(field.caret, 6);
 
   // Over the selection, what restrict lets through, cut to the room maxChars leaves.
   heard.length = 0;
@@ -397,7 +460,7 @@ test("a paste types the clipboard's text: a TextEvent, then restrict, maxChars a
   field.restrict = "a-z";
   field.maxChars = 7;
   keyboard.paste({ text: "XY12z" });
-  assert.equal(field.model.text, "axyzdef");
+  equal(field.model.text, "axyzdef");
   assert.deepEqual(heard, ['text "XY12z"', "change"]);
 
   // Full, it hears nothing; with an empty clipboard nothing is pasted, the selection kept.
@@ -406,7 +469,7 @@ test("a paste types the clipboard's text: a TextEvent, then restrict, maxChars a
   field.maxChars = 0;
   field.select(0, 2);
   keyboard.paste({ text: "" });
-  assert.equal(field.model.text, "axyzdef");
+  equal(field.model.text, "axyzdef");
   assert.deepEqual(field.selection, [0, 2]);
   assert.deepEqual(heard, []);
 });
@@ -422,10 +485,10 @@ test("a multiline field keeps a paste's line breaks as Flash's, and a listener m
   });
 
   keyboard.paste({ text: "one\r\ntwo\nthree" });
-  assert.equal(field.model.text, "one\rtwo\rthree");
+  equal(field.model.text, "one\rtwo\rthree");
   assert.deepEqual(heard, ['"one\\ntwo\\nthree"']);
   keyboard.paste({ text: "no" });
-  assert.equal(field.model.text, "one\rtwo\rthree");
+  equal(field.model.text, "one\rtwo\rthree");
 });
 
 test("copy and cut give the selection, a cut deleting it; a password gives nothing", () => {
@@ -438,28 +501,28 @@ test("copy and cut give the selection, a cut deleting it; a password gives nothi
 
   field.select(2, 5);
   assert.deepEqual(keyboard.copy(), { text: "e\nt" });
-  assert.equal(field.model.text, "one\rtwo");
+  equal(field.model.text, "one\rtwo");
   assert.deepEqual(keyboard.copy(true), { text: "e\nt" });
-  assert.equal(field.model.text, "onwo");
-  assert.equal(field.caret, 2);
+  equal(field.model.text, "onwo");
+  equal(field.caret, 2);
   assert.deepEqual(heard, ["change"]);
   // The copy event carries the data: no write of the host's own.
   assert.deepEqual(written, []);
-  assert.equal(clipboard.data.text, "e\nt");
+  equal(clipboard.data.text, "e\nt");
 
   // Nothing selected, nothing copied.
-  assert.equal(keyboard.copy(), null);
+  equal(keyboard.copy(), null);
 
   pass.displayAsPassword = true;
   pass.model.setText("secret");
   pass.select(0, 6);
   setFocus(scripting, pass);
-  assert.equal(keyboard.copy(), null);
-  assert.equal(keyboard.copy(true), null);
-  assert.equal(pass.model.text, "secret");
+  equal(keyboard.copy(), null);
+  equal(keyboard.copy(true), null);
+  equal(pass.model.text, "secret");
   // But a password field takes a paste: what the SWF itself last copied, where the host gives nothing.
   keyboard.paste();
-  assert.equal(pass.model.text, "et");
+  equal(pass.model.text, "et");
 });
 
 test("a selectable dynamic field copies and selects all, but neither cuts nor takes a paste", () => {
@@ -469,23 +532,23 @@ test("a selectable dynamic field copies and selects all, but neither cuts nor ta
   field.model.setText("hello");
   setFocus(scripting, field);
 
-  assert.equal(ctrl(keyboard, "a"), true);
+  equal(ctrl(keyboard, "a"), true);
   assert.deepEqual(field.selection, [0, 5]);
   keyboard.handle("down", { keyCode: 37, charCode: 0, shiftKey: true });
   assert.deepEqual(field.selection, [0, 4]);
   assert.deepEqual(keyboard.copy(), { text: "hell" });
-  assert.equal(keyboard.copy(true), null);
-  assert.equal(keyboard.paste({ text: "x" }), false);
+  equal(keyboard.copy(true), null);
+  equal(keyboard.paste({ text: "x" }), false);
   // Typing does nothing to it, and goes on to the page.
-  assert.equal(keyboard.handle("down", { keyCode: 66, charCode: 98 }), false);
-  assert.equal(field.model.text, "hello");
+  equal(keyboard.handle("down", { keyCode: 66, charCode: 98 }), false);
+  equal(field.model.text, "hello");
 
   // One that cannot be selected selects nothing, and keeps no keys from the page.
   field.selectable = false;
   field.select(0, 0);
   ctrl(keyboard, "a");
   assert.deepEqual(field.selection, [0, 0]);
-  assert.equal(keyboard.handle("down", { keyCode: 37, charCode: 0 }), false);
+  equal(keyboard.handle("down", { keyCode: 37, charCode: 0 }), false);
 });
 
 test("an object with focus that is not a field hears copy, cut, paste and selectAll", () => {
@@ -505,23 +568,23 @@ test("an object with focus that is not a field hears copy, cut, paste and select
   listen(sprite, "copy", () => clipboard.set("air:text", "from copy"));
   assert.deepEqual(keyboard.copy(), { text: "from copy" });
   // A cut that writes nothing leaves the browser's event alone.
-  assert.equal(keyboard.copy(true), null);
-  assert.equal(keyboard.paste({ text: "pasted" }), true);
-  assert.equal(ctrl(keyboard, "a"), true);
+  equal(keyboard.copy(true), null);
+  equal(keyboard.paste({ text: "pasted" }), true);
+  equal(ctrl(keyboard, "a"), true);
   assert.deepEqual(heard, [
     "copy bubbles false read false write true",
     "cut bubbles false read false write true",
     "paste bubbles true read true write true",
     "selectAll bubbles false read false write true",
   ]);
-  assert.equal(clipboard.data.text, "pasted");
+  equal(clipboard.data.text, "pasted");
   assert.deepEqual(written, []);
 
   // Nothing with focus: the stage hears none of them, and the browser keeps Ctrl+A.
   setFocus(scripting, null);
-  assert.equal(ctrl(keyboard, "a"), false);
-  assert.equal(keyboard.copy(), null);
-  assert.equal(keyboard.paste({ text: "x" }), false);
+  equal(ctrl(keyboard, "a"), false);
+  equal(keyboard.copy(), null);
+  equal(keyboard.paste({ text: "x" }), false);
 });
 
 test("a key handler's write reaches the host when the key's handling ends", () => {
@@ -532,8 +595,8 @@ test("a key handler's write reaches the host when the key's handling ends", () =
   });
   keyboard.handle("down", { keyCode: 66, charCode: 98 });
   assert.deepEqual(written, [{ text: "one", html: "<b>one</b>" }]);
-  assert.equal(clipboard.writable, false);
+  equal(clipboard.writable, false);
   // A key whose handlers write nothing writes nothing to the host.
   keyboard.handle("up", { keyCode: 66, charCode: 98 });
-  assert.equal(written.length, 1);
+  equal(written.length, 1);
 });

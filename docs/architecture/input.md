@@ -283,16 +283,23 @@ a change in it or under it, and not by its own move, which only its
 ancestors' bounds see. They are worked out only for what stood still over
 the last two picks, as what changes on most frames costs less gone
 through than measured; a timeline shape is checked against its recorded
-bounds before its fills. A button's hit test state is in no container,
-so a button and those above it are measured each time, as is a sprite
-with a `hitArea`, which may be anywhere on the list, its bounds taken
-through the stage into the sprite's. A NaN in bounds, from a NaN or
+bounds before its fills. A button's hit test state is in no container:
+it keeps the buttons it is the state of (`hitTestOf`), and a change in it
+or under it marks them and all above them, as a child's marks its
+parent. A mark climbs till an object still stale and marked this pick;
+one a pick measured again after its mark, as a field's fit settled in
+that pick, is marked again. A sprite with a `hitArea`, which may be
+anywhere on the list, is measured each time, its bounds taken through
+the stage into the sprite's. A NaN in bounds, from a NaN or
 infinite matrix or an infinite drawing, rules no point out.
 On 400 rigs of 12 moving parts (10,000 objects), a pick takes 0.01 ms
 where it took 0.5 ms and 125 KB, and
 `tests/player/bench.ts --scripted 400 --still --hover` ticks as without a
 mouse over the stage, 0.3 to 0.4 ms, where it took 0.8; where every part
 is new each frame, a pick after a tick takes 0.2 to 0.3 ms, against 0.7.
+Over a still list of 800 rows of buttons (`tests/player/walk-bench.ts
+--list 800`), a tick takes 0.16 ms where it took 2.1, its buttons' bounds
+kept as a container's are.
 `DisplayObject.mouseX` and `mouseY` follow the last pointer position.
 The pick follows Flash's order, as Ruffle's `mouse_pick_avm2` has it:
 interactive children before artwork, and a hit on what takes no pointer

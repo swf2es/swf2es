@@ -9,9 +9,11 @@ import {
 } from "@swf2es/format";
 import { Container } from "./container.js";
 import {
+  advancing,
   BUTTON,
   CHILDREN,
   type DisplayObject,
+  markAdvanceDue,
   markScriptsDue,
   NO_CHILDREN,
   pickWork,
@@ -97,9 +99,21 @@ export class ButtonObject extends Container {
   }
 
   set hitTestState(d: DisplayObject | null) {
+    // Where it is hit changes with its state, and what is under it, which marks it so (hitTestOf).
+    const old = this.hitTest;
+    if (old !== null && old !== d && old.hitTestOf !== null) {
+      const others = old.hitTestOf.filter((b) => b !== this);
+      old.hitTestOf = others.length > 0 ? others : null;
+    }
+
+    if (d !== null && d !== old) {
+      d.hitTestOf = d.hitTestOf === null ? [this] : [...d.hitTestOf, this];
+    }
+
     this.hitTest = d;
     // Where it is hit, which no change in the display list tells the pointer.
     pickWork.changes++;
+    this.pickChanged(true);
     this.statesChanged();
   }
 
@@ -109,6 +123,7 @@ export class ButtonObject extends Container {
    * new list, so that none it let go of stays held.
    */
   private statesChanged(): void {
+    advancing.watch?.states(this, this.frameChildren);
     if (this.avm1Made) {
       this.frameChildren = this.children;
       return;
@@ -140,17 +155,23 @@ export class ButtonObject extends Container {
     }
 
     let due = false;
+    let advances = false;
     for (const state of states) {
       if (!this.linked.includes(state)) {
         state.stateOf = state.stateOf === null ? [this] : [...state.stateOf, this];
       }
 
       due ||= state.scriptsDue;
+      advances ||= state.advanceDue;
     }
 
     this.linked = states;
     if (due) {
       markScriptsDue(this);
+    }
+
+    if (advances) {
+      markAdvanceDue(this);
     }
   }
 
@@ -175,6 +196,18 @@ export class ButtonObject extends Container {
     const states = this.linked;
     for (let i = 0; i < states.length; i++) {
       if (states[i].scriptsDue) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /** Whether any of its states is marked for a clip whose advance does something (markAdvanceDue). */
+  get statesAdvance(): boolean {
+    const states = this.linked;
+    for (let i = 0; i < states.length; i++) {
+      if (states[i].advanceDue) {
         return true;
       }
     }
@@ -248,6 +281,7 @@ export class ButtonObject extends Container {
 
     for (const state of [this.upState, this.overState, this.downState, this.hitTestState]) {
       if (state && state !== current && state.parent === this && !this.children.includes(state)) {
+        advancing.watch?.parent(state, this);
         state.parent = null;
       }
     }
@@ -260,7 +294,9 @@ export class ButtonObject extends Container {
       }
 
       this.children.splice(0, 0, current);
+      advancing.watch?.children(this, 0, current, null);
       this.puts++;
+      advancing.watch?.parent(current, current.parent);
       current.parent = this;
       this.relist(current);
       this.invalidate(CHILDREN);
@@ -268,12 +304,17 @@ export class ButtonObject extends Container {
       if (current.scriptsDue) {
         markScriptsDue(this);
       }
+
+      if (current.advanceDue) {
+        markAdvanceDue(this);
+      }
     }
   }
 
   /** AVM1 keeps only the current state's records alive, reusing records shared by both states. */
   makeAvm1States(made: (display: DisplayObject, character: DisplayCharacter) => void): void {
     this.avm1Made = made;
+    advancing.watch?.states(this, this.frameChildren);
     this.frameChildren = this.children;
     this.show();
   }
@@ -332,6 +373,7 @@ export class ButtonObject extends Container {
     }
 
     if (this.hitTest?.parent === this) {
+      advancing.watch?.parent(this.hitTest, this);
       this.hitTest.parent = null;
     }
 

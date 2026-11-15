@@ -1,17 +1,19 @@
-// The walks of the display list the player makes every frame: the clips
-// and buttons whose frames run, kept on each container between changes,
+// The walks of the display list: the clips and buttons whose frames run,
+// kept on each container between changes for the walks that visit them all,
 // and a container's children through the timeline masks that clip them.
 import type { ButtonObject } from "./buttonobject.js";
 import type { Container } from "./container.js";
 import { BUTTON, CLIP, type DisplayObject, OTHER } from "./displayobject.js";
 
 /**
- * The clips and buttons the frame's walks visit at and under a container,
- * in tree order, parents first (Player.tick's collect, a round of frame
- * scripts): `ends[i]` is the index after `items[i]` and all under it, to
- * leave a clip out with what it holds. A button's states are not in it,
- * its end the index after it: they are walked as they are, which a button
- * changes without its parent knowing (`frameChildren`, `scriptChildren`).
+ * The clips and buttons a walk of them all visits at and under a container,
+ * in tree order, parents first (a round of frame scripts that walks
+ * everything, the checked build's walk of every clip to advance), the
+ * order the walks by marks keep too: `ends[i]` is the index after
+ * `items[i]` and all under it, to leave a clip out with what it holds. A
+ * button's states are not in it, its end the index after it: they are
+ * walked as they are, which a button changes without its parent knowing
+ * (`frameChildren`, `scriptChildren`).
  */
 export interface WalkList {
   items: DisplayObject[];
@@ -24,12 +26,12 @@ export interface WalkList {
 const KEPT_WALK = 32;
 
 /**
- * Those the frame's walks visit at and under `root`, as WalkList lays them
- * out: kept on each container till a clip or a container comes or goes
- * under it (Container.relist), so that a frame visits the clips alone,
- * where its walks visited every object with children, twice or more.
- * Made again in the arrays it had, as a busy movie's are made again every
- * frame, some ten thousand objects long.
+ * Those a walk of them all visits at and under `root`, as WalkList lays
+ * them out: kept on each container till a clip or a container comes or goes
+ * under it (Container.relist), so that such a walk visits the clips alone,
+ * not every object with children. Made again in the arrays it had. The
+ * frame's own walks go by marks (display/advance.ts, Scripting.queueDue)
+ * and make none.
  */
 export function walkList(root: Container): WalkList {
   let list = root.walk;

@@ -1,0 +1,4 @@
+at 2,2 hidden bc000000 knocked out bc000000 both bc000000
+at 50,30 hidden 0 knocked out 0 both 0
+at 98,58 hidden 92000000 knocked out 92000000 both 92000000
+at 50,3 hidden 90000000 knocked out 90000000 both 90000000

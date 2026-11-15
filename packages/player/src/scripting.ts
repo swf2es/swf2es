@@ -14,6 +14,7 @@ import type { Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
+import { walkChecks } from "./display/advance.js";
 import {
   BitmapObject,
   BUTTON,
@@ -58,6 +59,7 @@ import {
   type WorkerHost,
 } from "./hosts.js";
 import type { LoadedAvm1Input } from "./input/avm1.js";
+import { pickChecks } from "./input/hit-test.js";
 import type { Cursor, PointerInput } from "./input/pointer.js";
 import type { TouchInput } from "./input/touch.js";
 import { LocalConnections } from "./localconnection.js";
@@ -145,8 +147,30 @@ export class Scripting {
    * Whether a round of frame scripts left out as having nothing to do is
    * run anyway and must find nothing: the checked build's tests set it
    * (SWF2ES_CHECKED), to prove the rounds' count (scriptWork) complete.
+   * The frame's advances prove theirs with it (display/advance.ts).
    */
-  static checkRounds = false;
+  static get checkRounds(): boolean {
+    return walkChecks.on;
+  }
+
+  static set checkRounds(on: boolean) {
+    walkChecks.on = on;
+  }
+
+  /**
+   * Whether each pick of what is under the pointer is made again in full,
+   * without the bounds it passes over what is far from it by, and one left
+   * out as nothing changed is made anyway: each must find the same. The
+   * checked build's tests set it (SWF2ES_CHECKED), to prove those shortcuts
+   * exact (input/hit-test.ts, input/pointer.ts).
+   */
+  static get checkPicks(): boolean {
+    return pickChecks.on;
+  }
+
+  static set checkPicks(on: boolean) {
+    pickChecks.on = on;
+  }
   /** Whether they nested too deep this frame, which stops them all till the next. */
   private overflowed = false;
   /**
@@ -1288,12 +1312,11 @@ export class Scripting {
       settle(o, due);
       return due;
     };
-    // A container's list where it is current, or where the whole is walked; else its children,
-    // in the list's order, where only those marked are walked: a list made again would walk the rest.
+    // A container's list where the whole is walked (`also`); else its marked children, in the
+    // list's order: no frame's walk makes the lists any more, and one made again would walk the rest.
     const under = (c: Container, all: boolean): boolean => {
-      const list = all ? walkList(c) : c.walk;
-      if (list?.current) {
-        const { items, ends } = list;
+      if (all) {
+        const { items, ends } = walkList(c);
         const base = open;
         let any = false;
         for (let i = 0; i < items.length; i++) {
@@ -1310,11 +1333,6 @@ export class Scripting {
               }
             }
 
-            continue;
-          }
-
-          if (!item.scriptsDue && !all) {
-            i = ends[i] - 1;
             continue;
           }
 
@@ -1388,8 +1406,8 @@ export class Scripting {
    * but for the clips not due as they walk and not listed always
    * (MovieClip.listedAlways), and queueAll's run, each of
    * those left out shown to run nothing, so that the round is the one a
-   * walk of all would be. queueDue walks first, as lists made by queueAll
-   * would have it walk them in place of the children it walks without.
+   * walk of all would be. queueDue walks first, settling the marks as
+   * the unchecked round does, before queueAll's walk, which reads none.
    */
   private checkedRound(
     queue: (MovieClip | null)[],

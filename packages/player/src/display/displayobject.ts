@@ -68,8 +68,8 @@ export const BUTTON = 2;
  * round of frame scripts (Scripting.frameScriptRound) walks to reach it, its
  * parents and the buttons it is a state of, up to a clip or button marked
  * already, whose own were marked with it. A container of no frames is
- * climbed through even when marked: the walks pass it by in their lists, and
- * leave its mark be.
+ * climbed through even when marked: a walk of a button being made passes
+ * it by in its list, and leaves its mark be.
  */
 export function markScriptsDue(o: DisplayObject): void {
   for (let p: DisplayObject | null = o; p !== null; p = p.parent) {
@@ -88,6 +88,92 @@ export function markScriptsDue(o: DisplayObject): void {
       for (let i = 0; i < buttons.length; i++) {
         markScriptsDue(buttons[i]);
       }
+    }
+  }
+}
+
+/**
+ * Mark `o` as having a clip at or under it whose advance may do something
+ * (MovieClip.advances): it and everything the frame's advance walk
+ * (display/advance.ts) passes to reach it, as markScriptsDue marks for the
+ * rounds of frame scripts, and with the same stops: up to a clip or button
+ * marked already, through a container of no frames, marked or not.
+ */
+export function markAdvanceDue(o: DisplayObject): void {
+  for (let p: DisplayObject | null = o; p !== null; p = p.parent) {
+    if (p.advanceDue && p.kind !== OTHER) {
+      return;
+    }
+
+    p.advanceDue = true;
+    const entry = p.orphanEntry;
+    if (entry !== null) {
+      entry.advances = true;
+    }
+
+    const buttons = p.stateOf;
+    if (buttons !== null) {
+      for (let i = 0; i < buttons.length; i++) {
+        markAdvanceDue(buttons[i]);
+      }
+    }
+  }
+}
+
+/**
+ * What a tick's advances watch while they run (display/advance.ts): every
+ * change to what the frame's walk read, to know the display list as the
+ * walk found it again, and each clip made before the walk and left out of
+ * its list that comes to advance, for which the list must be found again.
+ */
+export interface AdvanceWatch {
+  /** `clip` may have come to advance (MovieClip.advances). */
+  changed(clip: DisplayObject): void;
+  /** `parent`'s children: `added` put in at `index`, `removed` taken from it, or, both, one in the other's place. */
+  children(
+    parent: DisplayObject,
+    index: number,
+    added: DisplayObject | null,
+    removed: DisplayObject | null,
+  ): void;
+  /** A button's frameChildren, its states, replaced; `old` were they. */
+  states(button: DisplayObject, old: readonly DisplayObject[]): void;
+  /** `o`'s parent set outside a change of children; `old` was it. */
+  parent(o: DisplayObject, old: DisplayObject | null): void;
+  /** A clip's skipsAfter set; `old` was it. */
+  skips(clip: DisplayObject, old: number): void;
+  /** `display` became an orphan, or stopped being one. */
+  orphaned(display: DisplayObject): void;
+  unorphaned(display: DisplayObject): void;
+}
+
+/** The AdvanceWatch of the advances that run, or null. */
+export const advancing: { watch: AdvanceWatch | null } = { watch: null };
+
+/** How many display objects have been made: one made from now on has this serial or a later one. */
+export function serials(): number {
+  return made;
+}
+
+/**
+ * Whether `d`'s pick bounds were marked stale since pick `picks` and are
+ * stale still: all above it, and the buttons it or one above it is the hit
+ * test state of, were marked then too (DisplayObject.pickChanged). One a
+ * pick worked out again since its mark, as a field's fit settled within
+ * that pick marks it, has to be marked again.
+ */
+const markedSince = (d: DisplayObject, picks: number): boolean =>
+  d.pickStale && d.pickChangedAt === picks;
+
+/**
+ * A change in the hit test state `d` changes where its buttons are hit:
+ * each not marked since pick `picks` is.
+ */
+function hitTestChanged(d: DisplayObject, picks: number): void {
+  const buttons = d.hitTestOf as ButtonObject[];
+  for (let i = 0; i < buttons.length; i++) {
+    if (!markedSince(buttons[i], picks)) {
+      buttons[i].pickChanged(true);
     }
   }
 }
@@ -334,10 +420,26 @@ export class DisplayObject {
    * and takes the marks of what it walks off but for the clips still due.
    */
   scriptsDue = false;
+  /**
+   * Whether a clip whose advance does something may be at or under it, on
+   * the frame's advance walk (display/advance.ts): marked by markAdvanceDue
+   * as such a clip comes to be, and taken off by the walk where none is.
+   */
+  advanceDue = false;
   /** The buttons whose state it is, which the rounds walk it from too, its parent or not; null for none. */
   stateOf: ButtonObject[] | null = null;
-  /** Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue as an orphan; null for none. */
-  orphanEntry: { due: boolean } | null = null;
+  /**
+   * The buttons whose hit test state it is, AS3's or AVM1's, whose pick
+   * bounds take it in from no container: a change in it or under it marks
+   * theirs stale too (pickChanged); null for none. Held as stateOf holds
+   * them, which keeps a button alive as long as its state already.
+   */
+  hitTestOf: ButtonObject[] | null = null;
+  /**
+   * Its entry among the orphans (Lifecycle), whose `due` is its scriptsDue
+   * and `advances` its advanceDue, as an orphan; null for none.
+   */
+  orphanEntry: { due: boolean; advances: boolean } | null = null;
 
   private weakRef: WeakRef<this> | null = null;
 
@@ -417,8 +519,9 @@ export class DisplayObject {
 
   /**
    * Mark the pick bounds above it stale, and its own unless `own` is false
-   * (input/hit-test.ts): an ancestor of one changed since the last pick is
-   * marked already.
+   * (input/hit-test.ts), and those of the buttons it or one above it is the
+   * hit test state of, and above them: one marked since the last pick, and
+   * stale still, has had all that marked already (markedSince).
    */
   pickChanged(own: boolean): void {
     const picks = pickWork.picks;
@@ -427,9 +530,16 @@ export class DisplayObject {
       this.pickChangedAt = picks;
     }
 
-    for (let p = this.parent; p && p.pickChangedAt !== picks; p = p.parent) {
+    if (this.hitTestOf !== null) {
+      hitTestChanged(this, picks);
+    }
+
+    for (let p = this.parent; p && !markedSince(p, picks); p = p.parent) {
       p.pickStale = true;
       p.pickChangedAt = picks;
+      if (p.hitTestOf !== null) {
+        hitTestChanged(p, picks);
+      }
     }
   }
 
