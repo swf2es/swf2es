@@ -106,6 +106,7 @@ only an argument.
 
     node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
       [--gpu] [--cpu-profile FILE] [--checkout DIR] [--json]
+
 `tests/player/draw-counts.ts` holds the GL calls a frame to
 `draw-counts.json`, which may only go down.
 
