@@ -87,6 +87,26 @@ draws on the machine's GPU (on a machine with two,
 `--counts` adds the GL calls a frame, `--allocs` the KB allocated,
 `--checkout DIR` plays another built checkout on the same SWF, and
 `--write-swf FILE` writes the SWF for another player.
+
+`--swf FILE` plays a SWF of one's own instead, in real time as the web
+element plays it: on each animation frame the player advances by the time
+passed, streamed sound and all, and draws what changed, with the samples
+the element takes for the quality, at `--resolution R` canvas pixels a
+stage pixel (a device pixel ratio). It plays `--frames N` of the SWF's
+frames, all by default, and lists the animation frames whose work took
+longer than one of the SWF's frames (`--spike MS`), the worst `--top N`,
+each with what the renderer did in it: programs linked and the ms Chrome
+waited for them, programs drawn with for the first time, buffers made
+and copied, textures uploaded, filter passes, layers composited and morph shapes blended for a
+new ratio. `--cpu-profile FILE` samples the whole play and names the
+functions each listed frame spent its time in. It reports too how long
+the first frame took and how many programs the renderer linked before
+it. Keep SWFs that may not be shared out of the repository: the file is
+only an argument.
+
+    node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
+      [--gpu] [--cpu-profile FILE] [--checkout DIR] [--json]
+
 `tests/player/draw-counts.ts` holds the GL calls a frame to
 `draw-counts.json`, which may only go down.
 

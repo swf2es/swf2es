@@ -9,6 +9,7 @@ import type {
   IpcMainInvokeEvent,
   WebContents,
 } from "electron";
+import { onPageEnd } from "./page-end.ts";
 
 type Event = IpcMainEvent | IpcMainInvokeEvent;
 type FileBridgeHost = {
@@ -38,12 +39,7 @@ export function bridgeFiles(
     }
 
     watched.add(contents);
-    contents.on("did-start-navigation", (details) => {
-      if (details.isMainFrame && !details.isSameDocument) {
-        revoke();
-      }
-    });
-    contents.once("destroyed", revoke);
+    onPageEnd(contents, revoke);
   };
   ipcMain.on("files:release", (event, id: unknown) => {
     if (trusted(event) && typeof id === "number") {

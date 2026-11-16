@@ -37,7 +37,9 @@ fetch-electron` does so ahead, for the tests.
   open; File › Open Recent lists the last ten, files and URLs. The
   window takes the SWF's name. View › Reload Movie (Ctrl+R) starts it
   again, View › Toggle Full Screen (F11) fills the screen, and File ›
-  Close Movie (Ctrl+W) stops it. A SWF's own full screen
+  Close Movie (Ctrl+W) stops it. Should the page's process stop, crashed
+  or out of memory, its sockets close, stderr says why, and the window
+  offers to reload the movie, which it never does unasked. A SWF's own full screen
   (`Stage.displayState`) is the window's too: it needs no click, as in AIR
   and Flash's projector, draws its `fullScreenSourceRect` alone where it
   set one, and ends with Esc or F11, which the SWF hears of as a
@@ -102,6 +104,21 @@ fetch-electron` does so ahead, for the tests.
   so; an HTML page wrapping a SWF does not open.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
+- **Without a GPU.** The player draws with WebGL 2. Where Chromium takes
+  no GPU, because there is none or its blocklist refuses the one there is
+  (a server, a CI runner, a virtual machine, Xvfb, whose only GL is Mesa's
+  llvmpipe), there is no WebGL 2 and nothing draws, and the app says so on
+  stderr. `--software-gl` draws with SwiftShader, Chromium's GPU on the CPU,
+  there, and also where Chromium takes a GPU that gives WebGL but not WebGL 2
+  or draws wrong. It is a switch, not a fallback, because Chromium calls
+  SwiftShader unsafe for untrusted content: it compiles code in the GPU
+  process, which on Linux runs outside Chromium's sandbox (see
+  [What draws](../../docs/architecture/desktop.md#what-draws)). SwiftShader
+  is slower than a GPU, more so the larger the window. On a server with no
+  display: `xvfb-run -a swf2es-desktop --software-gl movie.swf`. Where a
+  Wayland session is about (`WAYLAND_DISPLAY`, or
+  `XDG_SESSION_TYPE=wayland`), Electron goes to it rather than to Xvfb
+  unless told otherwise: add `--ozone-platform=x11`.
 - **Network log.** `--log-network` prints each of the SWF's requests to
   stderr as it is answered (`swf2es: net GET https://… 200 12.3 kB 48 ms`),
   an aborted one too, and each socket and each WebSocket of an AIR

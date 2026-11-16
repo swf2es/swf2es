@@ -1,4 +1,4 @@
-import { type GlState, linkProgram } from "@swf2es/context3d/device";
+import { beginProgram, endProgram, type GlState, linkProgram } from "@swf2es/context3d/device";
 import { type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import { FILL_SHADER, type Filters } from "../filters.js";
 import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
@@ -218,8 +218,14 @@ export class Draws {
   setUp(textureMost: number): void {
     const gl = this.gl;
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
+    // All begun before any is asked after, so that a driver that compiles on threads of its own
+    // (KHR_parallel_shader_compile) compiles them at once.
+    const fill = beginProgram(gl, fillVertex(this.multi !== null, true), fillFragment);
+    const blend = beginProgram(gl, fillVertex(false), blendFillFragment);
+    const mesh = beginProgram(gl, meshVertex, meshFragment);
+    const glyphs = beginProgram(gl, glyphsVertex, glyphsFragment);
     try {
-      this.program = linkProgram(gl, fillVertex(this.multi !== null, true), fillFragment);
+      this.program = endProgram(gl, fill);
     } catch (e) {
       if (!this.multi) {
         throw e;
@@ -253,7 +259,7 @@ export class Draws {
     }
 
     this.fillUnitLocation = gl.getUniformLocation(this.program, "uUnit");
-    this.blendProgram = linkProgram(gl, fillVertex(false), blendFillFragment);
+    this.blendProgram = endProgram(gl, blend);
     this.blendRowLocation = gl.getUniformLocation(this.blendProgram, "uRow");
     this.blendViewLocation = gl.getUniformLocation(this.blendProgram, "uView");
     this.blendUnitLocation = gl.getUniformLocation(this.blendProgram, "uUnit");
@@ -267,7 +273,7 @@ export class Draws {
       gl.getUniformLocation(this.blendProgram, "uTextures"),
       Array.from({ length: FILL_TEXTURES }, (_, k) => FILL_UNIT + k),
     );
-    this.mesh = linkProgram(gl, meshVertex, meshFragment);
+    this.mesh = endProgram(gl, mesh);
     this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
     this.meshViewLocation = gl.getUniformLocation(this.mesh, "uView");
     this.meshFragLocation = gl.getUniformLocation(this.mesh, "uFrag");
@@ -278,7 +284,7 @@ export class Draws {
     this.meshStale = true;
     this.meshRow = -1;
     this.meshMode = -1;
-    this.glyphProgram = linkProgram(gl, glyphsVertex, glyphsFragment);
+    this.glyphProgram = endProgram(gl, glyphs);
     this.glyphRowLocation = gl.getUniformLocation(this.glyphProgram, "uRow");
     this.glyphViewLocation = gl.getUniformLocation(this.glyphProgram, "uView");
     this.glyphUnitLocation = gl.getUniformLocation(this.glyphProgram, "uUnit");

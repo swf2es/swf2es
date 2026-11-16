@@ -18,12 +18,9 @@ export const FLUSH_AT = 256 * 1024;
 /**
  * The least time between two batches, in milliseconds. The first event
  * after a quiet spell goes at the end of its turn, so that a request's
- * answer waits for nothing; what follows within the window waits for its
- * end, and goes with the rest that came by then. Socket reads that cost
- * little come many to a millisecond, each with a few bytes: a turn's
- * batch alone left one message for most of them. On Windows the timer
- * may wait for the system's resolution, about 16 ms: docs/architecture/
- * desktop.md says why that does.
+ * answer waits for nothing; what follows within the window goes at its
+ * end, since cheap reads come many to a millisecond. On Windows the timer
+ * may wait about 16 ms: docs/architecture/desktop.md says why that does.
  */
 export const WINDOW = 1;
 

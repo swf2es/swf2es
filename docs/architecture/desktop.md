@@ -490,6 +490,35 @@ into the page would run beside the API. No embedding the command line
 names changes that ([The embedding](#the-embedding)), and the page never
 sets that attribute from one.
 
+### When the page's process goes
+
+A page ends for the main process as it navigates or reloads, as its
+WebContents is destroyed, and as its renderer process goes, crashed,
+killed or out of memory: the WebContents lives on then, white, and
+neither of the others comes, so a SWF kept connected overnight once kept
+its server talking to no one, every packet an error on stderr.
+The main process learns of a crash only as the process exits, which is
+once the system has written its core dump, if it writes one: a second
+with systemd-coredump here, over a minute on a CI runner, so the test
+below runs the app with core dumps off (`prlimit`). `src/main/page-end.ts`
+names the three, and what is the page's goes at each: its sockets and WebSockets, what they had gathered for it, its
+requests under way, its file grants. Nothing is sent to a page whose
+process is gone, and nothing it sent before is acted on after: a
+connection it asked for would be the dead page's. Unless it exited cleanly, stderr says so once, `swf2es:
+the page stopped: <reason> (exit <code>)`, with the directory a crash
+report would be in (`crashReporter`, started with nothing uploaded, so
+a crash leaves a minidump there for the user to look at or send: it
+holds what the crashed process had in memory, which may be what the SWF
+held, a login or a chat among it, so it is best read before it is sent
+to anyone), and
+a message box on the window offers Reload Movie, which opens the movie
+again as View › Reload Movie does, or Close. Nothing reloads unasked: a
+page out of memory would only go again. Reload Movie, opening another
+movie or closing it loads a gone page again, as does Reload Movie for a
+page that failed to load, and the new page asks for the movie as any
+does; a page back by any of them closes the box. A page that goes as the
+app quits has not stopped, and says nothing.
+
 ## Files, settings and libraries
 
 The main process (`src/main/open.ts`) opens a SWF from File › Open, a
@@ -606,7 +635,8 @@ too. `tcpNoDelay` as `connect()` saw it goes with `socket:connect`. A
 socket through the proxy takes it once the tunnel is up, Nagle's
 algorithm staying on through the handshake, which never writes twice
 without an answer between, so nothing in it waits. A page's sockets
-close, silently, as it navigates or reloads, and with it. TLS
+close, silently, as it navigates or reloads, as its process goes, and
+with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
 Each socket is read into a 64 KB buffer of its own (net's `onread`), and
@@ -735,12 +765,57 @@ coming that is larger than 32 MB fails the connection, ws closing it
 with 1009: adl took messages of 20 MB, which this leaves room above,
 while bounding what one connection holds as a message comes. Its events reach the page gathered, as its sockets' do
 ([Sockets](#sockets)). A page's WebSockets drop, silently, as it
-navigates or reloads, and with it, without a close frame, as AIR's go as
+navigates or reloads, as its process goes, and with it, without a close frame, as AIR's go as
 it exits; what is still being made, a lookup, a tunnel or a question
 about a certificate, goes with them. `--log-network` says each connection
 asked for, opened, refused, failed and closed, and each certificate
 asked about and answered, and `--log-sockets` each frame sent and message
 received, a text one as its text (`src/main/netlog.ts`).
+
+## What draws
+
+The player draws with WebGL 2, which Chromium gives on the GPU where its
+blocklist takes the GPU. Where it takes none, there being none or its
+blocklist refusing the one there is (Mesa's llvmpipe among them, Xvfb's
+only GL, so every server and CI runner), Chromium no longer falls back to
+SwiftShader, its GPU on the CPU, for WebGL unless started with
+`--enable-unsafe-swiftshader`, so there is no WebGL 2 and nothing plays.
+The app does not append that switch on its own: `--software-gl` does
+(`src/main/gpu.ts`), with `--use-angle=swiftshader`, which draws everything
+with SwiftShader, compositing included, even where there is a GPU (for one
+Chromium takes for WebGL but not WebGL 2, or one that draws wrong). Both go
+in before the app is ready, as Chromium reads its GPU switches as it starts
+the GPU process, and only in the instance that holds the single-instance
+lock; a second start chooses nothing.
+
+It is a switch and not a fallback because it is unsafe by Chromium's own
+word: its
+[SwiftShader document](https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/swiftshader.md)
+calls SwiftShader "a high security risk due to JIT-ed code running in
+Chromium's GPU process", and the fallback "not intended for running
+untrusted content". The surface is SwiftShader's whole pipeline, its
+Reactor JIT, rasteriser and sampling, under draws a SWF drives: what
+shapes, bitmaps, filters and Stage3D calls it makes, with sizes and data of
+its choosing, not only the shaders' text. A SWF never gives GLSL: Stage3D's
+AGAL is validated and translated by `packages/context3d/src/agal.ts`, and
+Pixel Bender's bytecode by `packages/format/src/pbj.ts` and the player's
+translation, so the shaders SwiftShader compiles are the player's. The
+page, where a SWF's compiled code runs, is in Chromium's sandbox
+(seccomp-bpf on Linux) unless the user passes `--no-sandbox`. The GPU
+process is not: with Electron 44 on Linux it runs without seccomp (`Seccomp:
+0` in its `/proc` status, `sandboxed: false` in Chromium's GPU info), so
+what SwiftShader does under a SWF's draws runs with the user's rights.
+
+Where nothing draws, the app says so on stderr and names `--software-gl`.
+It reads WebGL's status once, at the GPU process's first report
+(`gpu-info-update`, about 200 ms in): before it, WebGL reads `disabled_off`
+even where the GPU will draw, and the reports after it include the quit's,
+which read disabled too. Electron 44 reports no WebGL 2 status, so a GPU that
+gives WebGL but not WebGL 2 gets no hint; `disabled_off` or `unavailable_off`
+is a GPU refused with no fallback, while `unavailable_software` is SwiftShader
+drawing (as with Chromium's own `--enable-unsafe-swiftshader`). A second start
+with `--software-gl`, which hands its SWF to the app already open, says that
+app keeps drawing as it started.
 
 ## Running and testing
 
@@ -817,11 +892,25 @@ idle time and the bound on idle ones, a key's limit direct and through a
 proxy, the drain's bounds, and aborts, servers that close a kept one and
 a page that goes, with tunnels in use and being made. `tests/desktop/keepalive-bench.ts` times many small loads
 over http and https, one checkout or two (docs/benchmarks.md).
+`tests/desktop/xvfb.ts` runs the app as a server does, in a window on an
+Xvfb with no switch of the test's for the GPU: it has no WebGL 2, takes no
+SwiftShader and says to pass `--software-gl`; then with `--software-gl` a
+SWF plays and draws on SwiftShader, which a second start does not claim; it
+skips where there is no Xvfb, or where the Xvfb's GL is a GPU's.
 `tests/desktop/stage3d.ts` drives the native View menu through the main
 process's test-only inspector: Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context
-loss/restoration, repeated movie reloads and close. It shares the isolated
+loss/restoration, repeated movie reloads and close.
+`tests/desktop/page-gone.ts` crashes the page's renderer through that
+inspector while a SWF's socket, and an AIR application's socket and
+WebSocket, receive from servers that keep sending: each server sees its
+connection closed within two seconds of `render-process-gone`, stderr says the page stopped once
+and nothing for each packet, the app stays up, and the offer, answered
+through the inspector, or View › Reload Movie brings the movie back, the
+offer closed reloading nothing; another movie opened brings the page
+back and closes an offer left open, and Close Movie brings it back
+empty. It shares the isolated
 display and process harness in `tests/desktop/app.ts` with the ordinary smoke
 test. `settings.test.ts` covers the default, the stored choice and its persistence.
 `embedding.test.ts` reads `--flashvars` and `--param` in both forms, refuses

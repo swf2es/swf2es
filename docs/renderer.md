@@ -211,7 +211,19 @@ with the context:
   colour transforms, by row), drawTriangles' meshes (textured in
   perspective, their bitmap read as adl reads it), the glyph program, the
   filter passes, the blend formulas, the 3D plane. A closed set, compiled
-  once a context.
+  once a context. The programs every frame draws with are linked as the
+  context comes, begun together so that a driver that compiles in
+  parallel compiles them at once; the filter passes and `compositeOver`'s
+  program after the first frame (`precompile.ts`): with
+  `KHR_parallel_shader_compile` all begun at once and asked after only
+  once complete, without it one a frame, then each drawn with once into a
+  target of a texel, one a frame, so that what a driver builds at a
+  program's first draw (a Vulkan pipeline, a Direct3D variant) is built
+  then. Linked as a filter first ran, each stalled that frame: on ANGLE's
+  Direct3D 11 back end, which compiles HLSL, for tens or hundreds of
+  milliseconds. A frame that needs one before it is ready finishes its
+  link at once. Pixel Bender kernels' programs are the SWF's, linked as
+  first used.
 - **Runs** (`draws.ts`): consecutive fills are one multi-draw of the
   atlas's index ranges (`WEBGL_multi_draw`, up to 256 draws a call) for
   as long as their textures fit the fill program's eight units, each draw

@@ -178,9 +178,22 @@
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //     [--checkout DIR] [--no-multi-draw]
+//   node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
+//     [--gpu] [--cpu-profile FILE] [--checkout DIR] [--json]
 //
 // --no-multi-draw hides WEBGL_multi_draw from the renderer, which then draws
 // as it does in a browser without it, as Firefox is.
+//
+// --swf FILE plays a SWF of one's own instead, in real time as the web element plays it
+// (page.ts, playSwf): each animation frame advances the player by the time passed, streamed
+// sound and all, and draws what changed, with the element's samples for the quality, at
+// --resolution R canvas pixels a stage pixel. It plays --frames N of the SWF's frames (all by
+// default) and lists the animation frames whose work took longer than one of the SWF's
+// (--spike MS), the worst --top N, with what the renderer did in each: programs linked and the
+// ms waited for them, programs first drawn with, buffers made and copied, textures uploaded,
+// filter passes, composites and morphs blended anew. --cpu-profile FILE samples the whole play
+// and names the functions each listed frame spent its time in. The SWF is only an argument: keep
+// one that may not be shared out of the repository.
 //
 // --checkout DIR plays another built checkout's packages (its packages/*/dist)
 // with this harness and SWF, to compare two builds run in turn.
@@ -192,7 +205,7 @@ import { resolve } from "node:path";
 import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
 import { stemFont } from "./cases.ts";
-import { benchPlayer } from "./chrome.ts";
+import { benchPlayer, playPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 import { compiler } from "./scripts.ts";
 
@@ -1543,6 +1556,234 @@ function branchSwf(count: number): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+// --checkout DIR plays another built checkout's packages with this harness, for an A/B.
+const checkout = args.includes("--checkout") ? args[args.indexOf("--checkout") + 1] : undefined;
+const mounts: [string, string][] = [];
+if (checkout) {
+  for (const [prefix, pkg] of [
+    ["player", "player"],
+    ["native", "native"],
+    ["format", "format"],
+    ["render", "render"],
+    ["codegen", "codegen"],
+    ["context3d-backend", "context3d"],
+    ["runtime", "runtime"],
+  ]) {
+    mounts.push([`/${prefix}/`, `${resolve(checkout)}/packages/${pkg}/dist/`]);
+  }
+}
+
+if (args.includes("--swf")) {
+  await playFile(args[args.indexOf("--swf") + 1]);
+  process.exit(0);
+}
+
+/**
+ * --swf: the SWF at `path` played in real time, as the web element plays it, and each animation
+ * frame's work timed: the frames that took longer than one of the SWF's listed with what the
+ * renderer did in them.
+ */
+async function playFile(path: string): Promise<void> {
+  const played = await playPlayer(new Uint8Array(readFileSync(path)), option("frames", 0), {
+    gpu: args.includes("--gpu"),
+    resolution: option("resolution", 1),
+    mounts,
+    cpuProfilePath: cpuProfile,
+  });
+  if (played.error) {
+    console.error(played.error);
+    process.exit(1);
+  }
+
+  const steps = played.steps;
+  const profile = cpuProfile ? readProfile(cpuProfile) : null;
+  const budget = 1000 / played.frameRate;
+  const spikeMs = option("spike", budget);
+  const total = steps.map((s) => s.advance + s.draw + s.gl);
+  // The animation frames that played a frame or drew: at 30 fps on a 60 Hz display, half do neither.
+  const working = total.filter((_, k) => steps[k].frames > 0 || steps[k].draw > 0);
+  const spikes = steps.map((s, k) => ({ ...s, k, ms: total[k] })).filter((s) => s.ms > spikeMs);
+  const linked = played.links.filter((l) => l.step >= 0);
+  const startupLinks = played.links.filter((l) => l.step < 0);
+  const playedFrames = steps.reduce((n, s) => n + s.frames, 0);
+  const seconds = (steps.at(-1)?.at ?? 0) / 1000;
+  const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+  const round = (v: number) => Math.round(v * 100) / 100;
+  // The animation frames that played more than one of the SWF's, catching up, and none.
+  const doubled = steps.filter((s) => s.frames > 1).length;
+  const report = {
+    renderer: played.gpu,
+    parallel: played.parallel,
+    resolution: option("resolution", 1),
+    samples: played.samples,
+    frameRate: played.frameRate,
+    frameCount: played.frameCount,
+    frames: playedFrames,
+    seconds: round(seconds),
+    // Of the SWF's frames, the share its rate asked for in that time that played.
+    kept: round(playedFrames / Math.max(1, seconds * played.frameRate)),
+    firstFrameMs: round(played.first),
+    rendererMadeMs: round(played.renderer),
+    startupLinks: startupLinks.length,
+    startupLinkMs: round(sum(startupLinks.map((l) => l.ms))),
+    links: linked.length,
+    linkMs: round(sum(linked.map((l) => l.ms))),
+    worstLinkMs: round(Math.max(0, ...linked.map((l) => l.ms))),
+    step: {
+      median: round(quantile(working, 0.5)),
+      p90: round(quantile(working, 0.9)),
+      p99: round(quantile(working, 0.99)),
+      max: round(Math.max(0, ...total)),
+    },
+    doubled,
+    spikeMs: round(spikeMs),
+    spikes: spikes.map((s) => ({
+      ...(profile ? { functions: within(profile, s.begun, s.ms) } : {}),
+      // The frame shown after it: 0 before the first.
+      frame: s.played + s.frames,
+      frames: s.frames,
+      atS: round(s.at / 1000),
+      ms: round(s.ms),
+      advance: round(s.advance),
+      draw: round(s.draw),
+      gl: round(s.gl),
+      work: Object.fromEntries(Object.entries(s.work).map(([key, v]) => [key, round(v)])),
+    })),
+  };
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(report));
+    return;
+  }
+
+  const ms = (v: number) => `${v.toFixed(1)} ms`;
+  console.log(
+    `${path.split("/").at(-1)}: ${report.frames} of ${report.frameCount} frames at ${report.frameRate} fps in ${report.seconds} s (${Math.round(report.kept * 100)}% of its rate kept), drawn by ${report.renderer}${report.parallel ? ", compiling in parallel" : ""} at ${report.resolution}x, ${report.samples} samples`,
+  );
+  console.log(
+    `  start   first frame ${ms(report.firstFrameMs)}, renderer made in ${ms(report.rendererMadeMs)} with ${report.startupLinks} programs linked (${ms(report.startupLinkMs)})`,
+  );
+  console.log(
+    `  links   ${report.links} while playing, ${ms(report.linkMs)} in all, the worst ${ms(report.worstLinkMs)}`,
+  );
+  console.log(
+    `  step    median ${ms(report.step.median)}  p90 ${ms(report.step.p90)}  p99 ${ms(report.step.p99)}  max ${ms(report.step.max)}; ${doubled} played more than one frame`,
+  );
+  console.log(`  spikes  ${spikes.length} over ${ms(spikeMs)}:`);
+  const shown = option("top", 40);
+  // The worst, listed in order of play.
+  const worst = [...report.spikes]
+    .sort((a, b) => b.ms - a.ms)
+    .slice(0, shown)
+    .sort((a, b) => a.frame - b.frame);
+  for (const spike of worst) {
+    const work = Object.entries(spike.work)
+      .map(([key, v]) => `${key} ${v}`)
+      .join(", ");
+    console.log(
+      `    frame ${String(spike.frame).padStart(5)}${spike.frames > 1 ? ` (${spike.frames} played)` : ""} ${spike.atS.toFixed(1).padStart(6)} s  ${ms(spike.ms).padStart(9)} (advance ${spike.advance.toFixed(1)}, draw ${spike.draw.toFixed(1)}, gl ${spike.gl.toFixed(1)})  ${work}`,
+    );
+    for (const line of spike.functions ?? []) {
+      console.log(`        ${line}`);
+    }
+  }
+  if (spikes.length > shown) {
+    console.log(`    and ${spikes.length - shown} more (--top N, --json)`);
+  }
+}
+
+/** A sampled profile's samples, each at its time, and the frames they were taken in. */
+interface SampledProfile {
+  /** When playSwf's steps were timed from, in the profile's clock (µs). */
+  startTime: number;
+  times: Float64Array;
+  samples: number[];
+  frames: Map<number, { functionName: string; url: string; lineNumber: number }>;
+}
+
+function readProfile(path: string): SampledProfile {
+  const profile = JSON.parse(readFileSync(path, "utf8")) as {
+    startTime: number;
+    nodes: {
+      id: number;
+      callFrame: { functionName: string; url: string; lineNumber: number };
+      children?: number[];
+    }[];
+    samples: number[];
+    timeDeltas: number[];
+  };
+  const times = new Float64Array(profile.samples.length);
+  let t = profile.startTime;
+  for (let i = 0; i < times.length; i++) {
+    t += profile.timeDeltas[i];
+    times[i] = t;
+  }
+
+  // The steps are timed from the page's profileMark, its first sample.
+  const marks = new Set(
+    profile.nodes.filter((n) => n.callFrame.functionName === "profileMark").map((n) => n.id),
+  );
+  const mark = profile.samples.findIndex((id) => marks.has(id));
+  // A sample in wasm counts to the JS function that called into it: a tessellator's, a stroker's.
+  const callers = new Map<number, number>();
+  for (const node of profile.nodes) {
+    for (const child of node.children ?? []) {
+      callers.set(child, node.id);
+    }
+  }
+  const frames = new Map(profile.nodes.map((n) => [n.id, n.callFrame]));
+  const named = (id: number) => {
+    let at: number | undefined = id;
+    while (
+      at !== undefined &&
+      /^(wasm-function|js-to-wasm|wasm-to-js)/.test(frames.get(at)?.functionName ?? "")
+    ) {
+      at = callers.get(at);
+    }
+
+    return at ?? id;
+  };
+  return {
+    startTime: mark >= 0 ? times[mark] : profile.startTime,
+    times,
+    samples: profile.samples.map(named),
+    frames,
+  };
+}
+
+/**
+ * The functions that took the most time themselves in `profile` between `from` ms after the
+ * steps' start and `ms` later, each with its ms: what a spike's frame spent its time on.
+ */
+function within(profile: SampledProfile, from: number, ms: number): string[] {
+  const { startTime, times, samples, frames } = profile;
+  const begin = startTime + from * 1000;
+  const end = begin + ms * 1000;
+  const self = new Map<string, number>();
+  for (let i = 0; i < times.length; i++) {
+    if (times[i] < begin || times[i] >= end) {
+      continue;
+    }
+
+    const frame = frames.get(samples[i]);
+    if (!frame || frame.functionName === "(idle)") {
+      continue;
+    }
+
+    const dt = ((times[i + 1] ?? times[i]) - times[i]) / 1000;
+    const name = `${frame.functionName || "(anonymous)"} ${frame.url
+      .replace(/[?#].*/, "")
+      .split("/")
+      .slice(-2)
+      .join("/")}:${frame.lineNumber + 1}`;
+    self.set(name, (self.get(name) ?? 0) + dt);
+  }
+
+  return [...self]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name, t]) => `${t.toFixed(1)} ms ${name}`);
+}
+
 const swf =
   vectors > 0
     ? vectorsSwf(vectors)
@@ -1597,23 +1838,6 @@ const swf =
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
-}
-
-// --checkout DIR plays another built checkout's packages with this harness, for an A/B.
-const checkout = args.includes("--checkout") ? args[args.indexOf("--checkout") + 1] : undefined;
-const mounts: [string, string][] = [];
-if (checkout) {
-  for (const [prefix, pkg] of [
-    ["player", "player"],
-    ["native", "native"],
-    ["format", "format"],
-    ["render", "render"],
-    ["codegen", "codegen"],
-    ["context3d-backend", "context3d"],
-    ["runtime", "runtime"],
-  ]) {
-    mounts.push([`/${prefix}/`, `${resolve(checkout)}/packages/${pkg}/dist/`]);
-  }
 }
 
 const result = await benchPlayer(swf, frames, {
