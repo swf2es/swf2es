@@ -394,6 +394,70 @@ test("a kept connection the server closed is not reused; a GET broken on one goe
   assert.equal((await get(net, `http://closing.test:${closing.port}/b`)).reused, undefined);
 });
 
+test("a GET whose kept connection breaks with EPIPE as it is written goes again; a POST does not", async () => {
+  const [server] = await pair();
+  names.set("pipe.test", [A]);
+  const net = network();
+  const url = `http://pipe.test:${server.port}`;
+  /** The idle connection a first request leaves, made to fail as the next is written to it. */
+  const breakNextWrite = async () => {
+    await get(net, `${url}/first`);
+    const agent = net.pool.agent({
+      secure: false,
+      host: "pipe.test",
+      address: A,
+      port: server.port,
+      unverified: false,
+    });
+    const idle = Object.values(agent.freeSockets).flat() as Socket[];
+    assert.equal(idle.length, 1);
+    const socket = idle[0];
+    socket.write = () => {
+      const error: NodeJS.ErrnoException = new Error("write EPIPE");
+      error.code = "EPIPE";
+      process.nextTick(() => socket.destroy(error));
+      return true;
+    };
+  };
+
+  await breakNextWrite();
+  const again = await get(net, `${url}/b`);
+  assert.equal(text(again.bytes), "at /b");
+  assert.equal(again.reused, undefined);
+  assert.equal(server.opened, 2);
+
+  await breakNextWrite();
+  assert.equal(await refusal(get(net, `${url}/c`, undefined, "POST")), "write EPIPE");
+});
+
+test("an unread body said to be past the drain bound closes its connection at once", async () => {
+  const [server] = await pair((request, response) => {
+    if (request.url === "/held") {
+      // Past the bound by its length, and never finished: drained, it would wait for drainTime.
+      response.writeHead(404, { "Content-Length": "4096" });
+      response.write("0123456789");
+      return;
+    }
+
+    ok(request, response);
+  });
+  names.set("held.test", [A]);
+  const net = network({ limits: { drainBytes: 1024, drainTime: 5000 } });
+  const url = `http://held.test:${server.port}`;
+
+  const started = performance.now();
+  assert.equal((await get(net, `${url}/held`)).status, 404);
+  const took = performance.now() - started;
+  assert.ok(took < 2000, `${took} ms`);
+  for (let i = 0; i < 100 && server.open.size > 0; i++) {
+    await wait(10);
+  }
+
+  assert.equal(server.open.size, 0);
+  assert.equal((await get(net, `${url}/next`)).reused, undefined);
+  assert.equal(server.opened, 2);
+});
+
 test("a page that goes closes its connections, and so does the app as it quits", async () => {
   const [server] = await pair();
   names.set("page.test", [A]);

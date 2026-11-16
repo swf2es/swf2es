@@ -80,6 +80,8 @@ async function site(handle: Handler, make = () => createHttpServer()): Promise<n
 
 /** What each site's /crossdomain.xml says, and where the named policy files are; null for a 404. */
 const policies = new Map<string, string | null>();
+/** Headers a policy file of `policies` comes with beside its type, or in place of it. */
+const policyHeaders = new Map<string, Record<string, string>>();
 const xml = (body: string) =>
   `<?xml version="1.0"?><cross-domain-policy>${body}</cross-domain-policy>`;
 
@@ -100,7 +102,12 @@ function serve(name: string): Handler {
       if (body === undefined || body === null) {
         response.writeHead(404).end();
       } else {
-        response.writeHead(200, { "content-type": "text/x-cross-domain-policy" }).end(body);
+        response
+          .writeHead(200, {
+            "content-type": "text/x-cross-domain-policy",
+            ...policyHeaders.get(key),
+          })
+          .end(body);
       }
 
       return;
@@ -200,6 +207,12 @@ function serve(name: string): Handler {
         return;
       case "/slow":
         // Never answers.
+        return;
+      case "/broken":
+        // Its connection gone with 93 of the 100 bytes it promised still to come.
+        response.writeHead(200, { "content-length": "100" });
+        response.write("partial");
+        setTimeout(() => request.socket.destroy(), 50);
         return;
       case "/redirect": {
         response.writeHead(302, { location: url.searchParams.get("to") ?? "/" }).end();
@@ -451,6 +464,79 @@ test("a policy loadPolicyFile named counts as the master allows, in its director
   assert.match(await outcome(ask(net, `${other()}/data`)), /refused/);
 });
 
+test("loadPolicyFile takes no URL with credentials, and no more files than its bound", async () => {
+  policies.clear();
+  policies.set(
+    "other/crossdomain.xml",
+    xml('<site-control permitted-cross-domain-policies="all"/>'),
+  );
+  policies.set("other/api/policy.xml", xml('<allow-access-from domain="swf.test"/>'));
+  const named = `${other()}/api/policy.xml`;
+  let net = await playing();
+  net.addPolicyFile(`http://me:pw@other.test:${otherPort}/api/policy.xml`);
+  assert.match(await outcome(ask(net, `${other()}/api/data`)), /refused: no policy file/);
+
+  // Socket policies and URL policies count against one bound; past it, a file is not taken.
+  const bounded = { limits: { policyFiles: 2 } };
+  net = await playing(`${swf()}/movie.swf`, bounded);
+  net.addPolicyFile(`xmlsocket://other.test:${otherPort}`);
+  net.addPolicyFile(`${other()}/elsewhere/policy.xml`);
+  net.addPolicyFile(named);
+  assert.match(await outcome(ask(net, `${other()}/api/data`)), /refused: no policy file/);
+  net = await playing(`${swf()}/movie.swf`, bounded);
+  net.addPolicyFile(named);
+  assert.equal(await outcome(ask(net, `${other()}/api/data`)), "other/api/data");
+});
+
+test("a policy file not served as one, or refusing to be one, is none", async () => {
+  const granting = xml('<allow-access-from domain="swf.test"/>');
+  const refusal = `refused: no policy file on ${other()} grants swf.test`;
+  try {
+    for (const [headers, counts] of [
+      [{}, true],
+      [{ "content-type": "text/x-cross-domain-policy; charset=utf-8" }, true],
+      [{ "content-type": "text/plain" }, true],
+      [{ "content-type": "application/xml" }, true],
+      [{ "content-type": "application/json" }, false],
+      [{ "content-type": "application/octet-stream" }, false],
+      [{ "x-permitted-cross-domain-policies": "all" }, true],
+      [{ "x-permitted-cross-domain-policies": "none-this-response" }, false],
+      [{ "x-permitted-cross-domain-policies": "all, None-This-Response" }, false],
+    ] as const) {
+      const what = JSON.stringify(headers);
+      // The master policy file served so.
+      policies.clear();
+      policyHeaders.clear();
+      policies.set("other/crossdomain.xml", granting);
+      policyHeaders.set("other/crossdomain.xml", headers);
+      let net = await playing();
+      assert.equal(
+        await outcome(ask(net, `${other()}/data.txt`)),
+        counts ? "other/data.txt" : refusal,
+        what,
+      );
+
+      // One loadPolicyFile named, under a master that permits all.
+      policies.set(
+        "other/crossdomain.xml",
+        xml('<site-control permitted-cross-domain-policies="all"/>'),
+      );
+      policies.set("other/api/policy.xml", granting);
+      policyHeaders.clear();
+      policyHeaders.set("other/api/policy.xml", headers);
+      net = await playing();
+      net.addPolicyFile(`${other()}/api/policy.xml`);
+      assert.equal(
+        await outcome(ask(net, `${other()}/api/data`)),
+        counts ? "other/api/data" : refusal,
+        what,
+      );
+    }
+  } finally {
+    policyHeaders.clear();
+  }
+});
+
 test("each redirect is judged as a request of its own", async () => {
   policies.clear();
   let net = await playing();
@@ -483,6 +569,24 @@ test("each redirect is judged as a request of its own", async () => {
   );
   assert.equal(echo.method, "GET");
   assert.equal(echo.body, "");
+});
+
+test("no redirect is followed to a URL with credentials, the movie's or a request's", async () => {
+  policies.clear();
+  const withCredentials = encodeURIComponent(`http://me:pw@other.test:${otherPort}/movie.swf`);
+  const net = await playing();
+  assert.equal(
+    await outcome(ask(net, `${swf()}/redirect?to=${withCredentials}`, "content")),
+    "refused: a redirect to a URL with credentials",
+  );
+
+  const movie = network();
+  const url = `${swf()}/redirect?to=${withCredentials}`;
+  movie.play({ kind: "remote", url });
+  assert.equal(
+    await outcome(ask(movie, url, "movie")),
+    "refused: a redirect to a URL with credentials",
+  );
 });
 
 test("a SWF from the internet reaches this machine only as its own policy grants", async () => {
@@ -746,6 +850,15 @@ test("a movie's responses hold no more than their budget, given back as each is 
   // A response is bytes of its own, not a view of a larger buffer.
   const { bytes } = await ask(net, `${swf()}/data.txt`);
   assert.equal(bytes?.byteLength, bytes?.buffer.byteLength);
+});
+
+test("a response whose connection goes before its body has come is refused, not cut short", async () => {
+  policies.clear();
+  const net = await playing();
+  assert.equal(await outcome(ask(net, `${swf()}/broken`)), "refused: the response broke off");
+  // What it held of the movie's budget is given back.
+  assert.equal((net as unknown as { session: { buffered: number } }).session.buffered, 0);
+  assert.equal(await outcome(ask(net, `${swf()}/data.txt`)), "swf/data.txt");
 });
 
 test("a body sent a byte at a time takes memory for its bytes, not its chunks", async (t) => {
@@ -1065,6 +1178,58 @@ test("a remote SWF's socket needs a policy: port 843's, the port's own, or one n
   fresh.play({ kind: "remote", url: `${swf()}/movie.swf` });
   await assert.rejects(fresh.socketAddress("swf.test", targetPort), /has not loaded/);
   await assert.rejects((await net()).socketAddress("0.0.0.0", targetPort), /no request reaches/);
+});
+
+test("a socket policy longer than the largest policy file is none", async () => {
+  // Granting, but padded past 300 bytes before its NUL.
+  const answer = xml(`${" ".repeat(400)}<allow-access-from domain="swf.test" to-ports="*"/>`);
+  const masterPort = await socketServer(() => answer);
+  const targetPort = await socketServer(() => null);
+  const roomy = await playing(`${swf()}/movie.swf`, { socketPolicyPort: masterPort });
+  assert.equal(await roomy.socketAddress("swf.test", targetPort), PUBLIC);
+  const tight = await playing(`${swf()}/movie.swf`, {
+    socketPolicyPort: masterPort,
+    limits: { policy: 300 },
+  });
+  await assert.rejects(
+    tight.socketAddress("swf.test", targetPort),
+    (error: Error) =>
+      error instanceof Refused && error.message === "no socket policy on swf.test grants swf.test",
+  );
+});
+
+test("through a proxy, a socket policy's port it does not reach has none; a proxy that fails is said", async () => {
+  const masterPort = await socketServer(() =>
+    xml('<allow-access-from domain="swf.test" to-ports="*"/>'),
+  );
+  let targetPort = 0;
+  targetPort = await socketServer(() =>
+    xml(`<allow-access-from domain="swf.test" to-ports="${targetPort}"/>`),
+  );
+  // 403: the target refused, no fault of the proxy's; 407: the proxy's own failure.
+  let status = 403;
+  const proxy = await testProxy("http", {
+    refuse: (_host, port) => (port === masterPort ? status : null),
+  });
+  try {
+    const options = { proxy: parseProxy(proxy.url()), socketPolicyPort: masterPort };
+    // Port 843's policy, which grants it, never comes; the port's own does.
+    let net = await playing(`${swf()}/movie.swf`, options);
+    assert.equal(await net.socketAddress("swf.test", targetPort), PUBLIC);
+    assert.ok(proxy.targets.includes(`${PUBLIC}:${masterPort}`), proxy.targets.join());
+    assert.ok(proxy.targets.includes(`${PUBLIC}:${targetPort}`), proxy.targets.join());
+
+    status = 407;
+    net = await playing(`${swf()}/movie.swf`, options);
+    await assert.rejects(
+      net.socketAddress("swf.test", targetPort),
+      (error: Error) =>
+        error instanceof Refused &&
+        /^the proxy \S+ asks for a username and password \(HTTP 407\)/.test(error.message),
+    );
+  } finally {
+    await proxy.close();
+  }
 });
 
 /** A gzip header with what `flags` asks for: FHCRC 2, FEXTRA 4, FNAME 8, FCOMMENT 16. */

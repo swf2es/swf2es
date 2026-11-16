@@ -788,6 +788,35 @@ test("a connection that takes too long to be made, or a certificate unanswered, 
   await self.close();
 });
 
+test("a connection closed while its host is resolved says nothing on stderr", async () => {
+  const warned: string[] = [];
+  let asked = 0;
+  const { connections, events, next } = recorded({
+    resolve: () => {
+      asked++;
+      return new Promise(() => {});
+    },
+    warn: (message) => warned.push(message),
+  });
+
+  // The page gone: nothing told, nothing said.
+  connections.connect(1, "ws://slow.test:1234/", []);
+  await until(() => asked === 1);
+  connections.closeAll();
+  await settle();
+  assert.deepEqual(events, []);
+
+  // Closed by the page as it connects: an error and a close for it, but nothing said.
+  connections.connect(1, "ws://slow.test:1234/", []);
+  await until(() => asked === 2);
+  connections.frame(1, CLOSE, new Uint8Array([0x03, 0xe8]));
+  await next("error");
+  assert.equal((await next("close")).code, 1006);
+  await settle();
+  assert.deepEqual(warned, []);
+  assert.equal(connections.size, 0);
+});
+
 test("an expired self-signed certificate is refused without a question", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "swf2es-wss-"));
   dirs.push(dir);
