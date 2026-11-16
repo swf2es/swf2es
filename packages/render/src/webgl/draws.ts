@@ -534,7 +534,6 @@ export class Draws {
     const gl = this.gl;
     const state = this.state;
     state.useProgram(this.blendProgram);
-    state.bindVertexArray(this.atlas.vertexArray);
     state.bindTexture(0, this.gpu.rowsTexture);
     gl.uniform4fv(this.blendViewLocation, this.view);
     gl.uniform1f(this.blendUnitLocation, this.unit);
@@ -547,6 +546,7 @@ export class Draws {
       return;
     }
 
+    state.bindVertexArray(this.atlas.pages[this.runPlaces[0].page].vertexArray);
     for (let k = 0; k < FILL_TEXTURES; k++) {
       if (this.runUnits & (1 << k)) {
         state.bindTexture(FILL_UNIT + k, this.gpu.textures[this.unitIds[k]] as WebGLTexture);
@@ -685,7 +685,8 @@ export class Draws {
         continue;
       }
 
-      state.bindVertexArray(this.atlas.vertexArray);
+      // A run's geometries all in the page of its first.
+      state.bindVertexArray(this.atlas.pages[place.page].vertexArray);
       if (!this.multi) {
         // A run not merged: a call a fill, its row told as it changes.
         const rows = this.prepared ? this.tableRows : this.runRows;
@@ -908,7 +909,7 @@ export class Draws {
     const state = this.state;
     state.useProgram(this.mesh);
     // The atlas' vertices, which a glyph draw before may have left bound for its own.
-    state.bindVertexArray(this.atlas.vertexArray);
+    state.bindVertexArray(this.atlas.pages[place.page].vertexArray);
     if (this.meshStale) {
       gl.uniform4fv(this.meshViewLocation, this.view);
       gl.uniform4fv(this.meshFragLocation, this.frag);
@@ -963,7 +964,7 @@ export class Draws {
     }
 
     const gl = this.gl;
-    this.state.bindVertexArray(this.atlas.vertexArray);
+    this.state.bindVertexArray(this.atlas.pages[place.page].vertexArray);
     gl.uniform4fv(kernel.at("uView"), this.view);
     gl.uniform4fv(kernel.at("uFrag"), this.frag);
     gl.uniform1i(kernel.at("uRow"), scene.row[i]);

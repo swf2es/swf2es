@@ -190,6 +190,9 @@ export class FillBatches {
     let vertices = 0;
     let indices = 0;
     // The run's geometries by where they lie in the atlas, which no two live geometries share.
+    // A range let go of and taken again holds a geometry added that frame, which no run keys
+    // till the next, and the frame before keyed only what was live beside it, never the one
+    // let go of: no key left from that one matches.
     let key = count;
     for (let i = 0; i < count; i++) {
       const place = places[i];
