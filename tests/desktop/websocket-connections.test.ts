@@ -7,6 +7,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -699,4 +700,133 @@ test("through a proxy, by name, over TLS too, its certificate as the switch says
 
   await plain.close();
   await secure?.close();
+});
+
+test("a URL with credentials is refused, nothing sent, as adl connects nowhere with one", async () => {
+  let reached = 0;
+  const server = await webSocketServer({ open: () => reached++ });
+  const warned: string[] = [];
+  const { connections, next } = recorded({ warn: (message) => warned.push(message) });
+  connections.connect(1, `ws://me:secret@127.0.0.1:${server.port}/`, []);
+  assert.deepEqual(await next("error"), { type: "error" });
+  assert.equal((await next("close")).code, 1006);
+  await settle();
+  assert.equal(reached, 0);
+  assert.deepEqual(warned, [
+    `no WebSocket to 127.0.0.1:${server.port}: its URL carries credentials`,
+  ]);
+  assert.ok(!warned.join().includes("secret"));
+  await server.close();
+});
+
+test("a message past the largest one taken fails the connection", async () => {
+  const { list, handlers } = peers({
+    message: (peer, data) => peer.send(new Uint8Array(Number(data))),
+  });
+  const server = await webSocketServer(handlers);
+  const { connections, next } = recorded({ maxPayload: 1024 });
+  connections.connect(1, `ws://127.0.0.1:${server.port}/`, []);
+  await next("open");
+  connections.frame(1, TEXT, bytes("1024"));
+  assert.equal((await next("message")).data.length, 1024);
+  connections.frame(1, TEXT, bytes("1025"));
+  await next("error");
+  // ws sends 1009, Message Too Big, and reads no more, so its own close has no frame.
+  assert.equal((await next("close")).code, 1006);
+  await until(() => list[0].closeCode !== null);
+  assert.equal(list[0].closeCode, 1009);
+  await server.close();
+});
+
+test("a connection that takes too long to be made, or a certificate unanswered, fails", async (t) => {
+  const warned: string[] = [];
+  const timeout = 200;
+
+  // A lookup that never answers.
+  const lookup = recorded({
+    timeout,
+    resolve: () => new Promise(() => {}),
+    warn: (message) => warned.push(message),
+  });
+  lookup.connections.connect(1, "ws://slow.test:1234/", []);
+  assert.deepEqual(await lookup.next("error"), { type: "error" });
+  assert.equal((await lookup.next("close")).code, 1006);
+  assert.deepEqual(warned, ["no WebSocket to slow.test:1234: it took too long"]);
+
+  // A server that takes the connection and never begins TLS.
+  const sockets: Socket[] = [];
+  const silent = createServer((socket) => sockets.push(socket));
+  await new Promise<void>((done) => silent.listen(0, "127.0.0.1", done));
+  const port = (silent.address() as { port: number }).port;
+  const tls = recorded({ timeout, warn: (message) => warned.push(message) });
+  tls.connections.connect(1, `wss://127.0.0.1:${port}/`, []);
+  await tls.next("error");
+  await tls.next("close");
+  assert.equal(warned.at(-1), `no WebSocket to 127.0.0.1:${port}: it took too long`);
+  for (const socket of sockets) {
+    socket.destroy();
+  }
+
+  silent.close();
+
+  // A self-signed certificate the page never answers about: refused, a late answer unheard.
+  const made = certificates();
+  if (!made) {
+    t.diagnostic("no openssl to make a certificate: the unanswered question is not tested");
+    return;
+  }
+
+  const self = await webSocketServer(echo, made.self);
+  const asked = recorded({ timeout, resolve: async () => ["127.0.0.1"] });
+  asked.connections.connect(1, `wss://localhost:${self.port}/`, []);
+  await asked.next("certificate");
+  assert.deepEqual(await asked.next("error"), { type: "error" });
+  assert.equal((await asked.next("close")).code, 1006);
+  asked.connections.certificate(1, true);
+  await settle();
+  assert.equal(asked.events.length, 3);
+  await self.close();
+});
+
+test("an expired self-signed certificate is refused without a question", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "swf2es-wss-"));
+  dirs.push(dir);
+  const made = spawnSync(
+    "openssl",
+    [
+      "req",
+      "-x509",
+      "-newkey",
+      "rsa:2048",
+      "-nodes",
+      "-subj",
+      "/CN=localhost",
+      "-addext",
+      "subjectAltName=DNS:localhost",
+      "-not_before",
+      "20200101000000Z",
+      "-not_after",
+      "20200201000000Z",
+      "-keyout",
+      join(dir, "old.key"),
+      "-out",
+      join(dir, "old.pem"),
+    ],
+    { encoding: "utf8" },
+  );
+  if (made.status !== 0) {
+    t.skip("no openssl that makes an expired certificate");
+    return;
+  }
+
+  const old = await webSocketServer(echo, {
+    key: readFileSync(join(dir, "old.key")),
+    cert: readFileSync(join(dir, "old.pem")),
+  });
+  const { connections, next } = recorded({ resolve: async () => ["127.0.0.1"] });
+  connections.connect(1, `wss://localhost:${old.port}/`, []);
+  // adl asks about it, as self-signed; OpenSSL names its expiry first, and it fails closed.
+  assert.deepEqual(await next("error"), { type: "error" });
+  await next("close");
+  await old.close();
 });

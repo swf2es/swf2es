@@ -1,9 +1,9 @@
 // air.net.WebSocket's connections, made here for the page, which has no
 // network of its own, and carried over IPC as flash.net.Socket's are
-// (sockets.ts), each frame the page sends as AIR sends it. Each page's connections (websocket-connections.ts) close
-// as it navigates, reloads or goes, and their events go to it gathered,
-// a message a millisecond at most (relay.ts), each message an event of its
-// own.
+// (sockets.ts), each frame the page sends as AIR sends it. Each page's
+// connections (websocket-connections.ts) close as it navigates, reloads or
+// goes, and their events go to it gathered, a message a millisecond at most
+// (relay.ts), each message an event of its own.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import type { WebSocketEvent } from "../shared/api.js";
 import { webSocketDataLine, webSocketLine } from "./netlog.ts";
@@ -15,6 +15,9 @@ import {
   WebSocketConnections,
   type WebSocketOptions,
 } from "./websocket-connections.ts";
+
+/** A connection's id, as the preload numbers them. */
+const validId = (id: unknown): id is number => Number.isInteger(id);
 
 /**
  * Carry WebSocket frames from pages that `trusted` accepts, each
@@ -87,7 +90,7 @@ export function bridgeWebSockets(
   };
 
   ipcMain.on("websocket:connect", (event, id: unknown, url: unknown, protocols: unknown) => {
-    if (!trusted(event) || typeof id !== "number") {
+    if (!trusted(event) || !validId(id)) {
       return;
     }
 
@@ -109,12 +112,7 @@ export function bridgeWebSockets(
   });
 
   ipcMain.on("websocket:frame", (event, id: unknown, opcode: unknown, payload: unknown) => {
-    if (
-      trusted(event) &&
-      typeof id === "number" &&
-      validOpcode(opcode) &&
-      payload instanceof Uint8Array
-    ) {
+    if (trusted(event) && validId(id) && validOpcode(opcode) && payload instanceof Uint8Array) {
       if (log && data) {
         log(webSocketDataLine(id, true, opcode, payload));
       }
@@ -124,7 +122,7 @@ export function bridgeWebSockets(
   });
 
   ipcMain.on("websocket:certificate", (event, id: unknown, accepted: unknown) => {
-    if (trusted(event) && typeof id === "number" && typeof accepted === "boolean") {
+    if (trusted(event) && validId(id) && typeof accepted === "boolean") {
       log?.(webSocketLine(id, accepted ? "certificate accepted" : "certificate refused"));
       pages.get(event.sender)?.certificate(id, accepted);
     }

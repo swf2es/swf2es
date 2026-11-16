@@ -33,8 +33,19 @@ const MAX_PROTOCOL = 256;
  */
 export const MAX_BUFFERED = 16 * 1024 * 1024;
 
-/** How long a connection may take to be made, its TLS included, and then its handshake. */
+/**
+ * How long a connection may take to be made, its lookup, tunnel and TLS
+ * included, until ws takes it; then its handshake; and how long the page
+ * may take to answer about a self-signed certificate.
+ */
 const TIMEOUT = 30_000;
+
+/**
+ * The largest message a connection takes; a larger one fails it (ws closes
+ * with 1009). adl took messages of 20 MB, so this leaves room above them,
+ * while bounding what one connection holds as a message comes.
+ */
+const MAX_PAYLOAD = 32 * 1024 * 1024;
 
 const TEXT = 1;
 const BINARY = 2;
@@ -87,6 +98,9 @@ export interface WebSocketOptions {
   ca?: string | string[];
   /** Told why a connection was refused, or the proxy did not make it, for stderr. */
   warn?: (message: string) => void;
+  /** TIMEOUT, and MAX_PAYLOAD, but where a test asks for less. */
+  timeout?: number;
+  maxPayload?: number;
 }
 
 /** What makes a connection: its lookup, tunnel, TLS and certificate's question. */
@@ -114,6 +128,8 @@ export class WebSocketConnections {
   private readonly classify: (address: string) => AddressClass | null;
   private readonly ca: string | string[] | undefined;
   private readonly warn: (message: string) => void;
+  private readonly timeout: number;
+  private readonly maxPayload: number;
 
   /** `tell` carries each connection's events to its page. */
   constructor(tell: (id: number, event: WebSocketEvent) => void, options: WebSocketOptions = {}) {
@@ -127,6 +143,8 @@ export class WebSocketConnections {
     this.classify = options.classify ?? addressClass;
     this.ca = options.ca ?? defaultCa();
     this.warn = options.warn ?? (() => {});
+    this.timeout = options.timeout ?? TIMEOUT;
+    this.maxPayload = options.maxPayload ?? MAX_PAYLOAD;
   }
 
   get size(): number {
@@ -150,15 +168,25 @@ export class WebSocketConnections {
     }
 
     const target = new URL(url);
+    // adl takes what comes before a URL's ":" for its host, and so connects nowhere with
+    // credentials; ws would send them as Authorization: Basic. Refused, nothing sent.
+    if (target.username !== "" || target.password !== "") {
+      this.warn(`no WebSocket to ${target.host}: its URL carries credentials`);
+      this.refuse(id);
+      return;
+    }
+
     const host = bare(target.hostname);
     const secure = target.protocol === "wss:";
     const port = Number(target.port) || (secure ? 443 : 80);
     const opening: Opening = { controller: new AbortController(), answer: null };
+
     /** The connection was made: a failure after it is the handshake's. */
     let reached = false;
     let opened = false;
     let chosen: string | undefined;
     let unoffered = false;
+
     let client: WebSocket;
     try {
       client = new WebSocket(url, {
@@ -178,9 +206,13 @@ export class WebSocketConnections {
         // AIR offers no extension, answers pings itself, and keeps a text message's bytes as
         // they came, whether they are UTF-8 or not.
         perMessageDeflate: false,
+        // Answered by the "ping" listener, within MAX_BUFFERED: ws 8.22.1, pinned, answers
+        // without bound, the ping flood 8.23.0 fixed. On 8.23.0 or later, after 2026-11-26,
+        // when it is two weeks old, ws may answer them again.
         autoPong: false,
         skipUTF8Validation: true,
-        handshakeTimeout: TIMEOUT,
+        maxPayload: this.maxPayload,
+        handshakeTimeout: this.timeout,
       });
     } catch {
       opening.controller.abort();
@@ -317,7 +349,11 @@ export class WebSocketConnections {
     this.connections.clear();
   }
 
-  /** The connection made for `id`: by the proxy, or to the address its host resolves to now. */
+  /**
+   * The connection made for `id`: by the proxy, or to the address its host
+   * resolves to now, within the timeout, which pauses while the page is
+   * asked about a certificate.
+   */
   private async reach(
     id: number,
     opening: Opening,
@@ -327,20 +363,37 @@ export class WebSocketConnections {
   ): Promise<Duplex> {
     const signal = opening.controller.signal;
     const where = `${host.includes(":") ? `[${host}]` : host}:${port}`;
-    let socket: Socket;
+    let late = false;
+    const timer = setTimeout(() => {
+      late = true;
+      opening.controller.abort();
+    }, this.timeout);
     try {
-      socket = this.proxy
-        ? await connectThrough(this.proxy, host, port, { signal })
-        : await this.direct(host, port, signal);
+      let socket: Socket;
+      try {
+        socket = this.proxy
+          ? await connectThrough(this.proxy, host, port, { signal })
+          : await this.direct(host, port, signal);
+      } catch (error) {
+        if (!late && (error instanceof ProxyError || error instanceof Refusal)) {
+          this.warn(`no WebSocket to ${where}: ${error.message}`);
+        }
+
+        throw error;
+      }
+
+      return secure
+        ? await this.secure(id, opening, socket, host, () => clearTimeout(timer))
+        : socket;
     } catch (error) {
-      if (error instanceof ProxyError || error instanceof Refusal) {
-        this.warn(`no WebSocket to ${where}: ${error.message}`);
+      if (late) {
+        this.warn(`no WebSocket to ${where}: it took too long`);
       }
 
       throw error;
+    } finally {
+      clearTimeout(timer);
     }
-
-    return secure ? this.secure(id, opening, socket, host) : socket;
   }
 
   /**
@@ -376,17 +429,14 @@ export class WebSocketConnections {
     return new Promise((resolve, reject) => {
       const socket = connect({ host: address, port });
       const fail = (error: Error) => {
-        clearTimeout(timer);
         signal.removeEventListener("abort", abort);
         socket.destroy();
         reject(error);
       };
       const abort = () => fail(new Error("aborted"));
-      const timer = setTimeout(() => fail(new Error("it timed out")), TIMEOUT);
       signal.addEventListener("abort", abort, { once: true });
       socket.once("error", fail);
       socket.once("connect", () => {
-        clearTimeout(timer);
         signal.removeEventListener("abort", abort);
         socket.removeListener("error", fail);
         resolve(socket);
@@ -398,10 +448,17 @@ export class WebSocketConnections {
    * TLS over `socket`, its certificate checked against `host`, the URL's,
    * not the address it was reached at: unchecked where
    * --ignore-certificate-errors names the host; a self-signed one left to
-   * the application, which AIR asks with a certificateError; any other
-   * fault fails the connection.
+   * the application, which AIR asks with a certificateError, `asking`
+   * told first; any other fault fails the connection, as does a page that
+   * does not answer within the timeout.
    */
-  private secure(id: number, opening: Opening, socket: Socket, host: string): Promise<Duplex> {
+  private secure(
+    id: number,
+    opening: Opening,
+    socket: Socket,
+    host: string,
+    asking: () => void,
+  ): Promise<Duplex> {
     const signal = opening.controller.signal;
     // Dropped as the TCP connection was made: no question goes to a page that may be another.
     if (signal.aborted) {
@@ -420,29 +477,31 @@ export class WebSocketConnections {
         // Checked below, so that a self-signed certificate can be the application's to accept.
         rejectUnauthorized: false,
       });
+      let unanswered: NodeJS.Timeout | undefined;
       const done = () => {
+        clearTimeout(unanswered);
         signal.removeEventListener("abort", abort);
         secure.removeListener("error", fail);
         resolve(secure);
       };
       const fail = (error: Error) => {
-        clearTimeout(timer);
+        clearTimeout(unanswered);
         opening.answer = null;
         signal.removeEventListener("abort", abort);
         secure.destroy();
         reject(error);
       };
       const abort = () => fail(new Error("aborted"));
-      const timer = setTimeout(() => fail(new Error("it timed out")), TIMEOUT);
       signal.addEventListener("abort", abort, { once: true });
       secure.once("error", fail);
       secure.once("secureConnect", () => {
-        clearTimeout(timer);
         if (secure.authorized || this.unverified(host)) {
           done();
           return;
         }
 
+        // Only a certificate that is self-signed and otherwise sound is asked about, as adl
+        // asks: OpenSSL says CERT_HAS_EXPIRED for an expired one, which fails without a word.
         const why = String(secure.authorizationError);
         if (why !== "DEPTH_ZERO_SELF_SIGNED_CERT") {
           fail(new Error(`its certificate is refused: ${why}`));
@@ -457,6 +516,12 @@ export class WebSocketConnections {
             fail(new Error("its certificate is self-signed"));
           }
         };
+        asking();
+        unanswered = setTimeout(
+          () =>
+            fail(new Error("its certificate is self-signed, and the application did not answer")),
+          this.timeout,
+        );
         this.tell(id, { type: "certificate" });
       });
     });
