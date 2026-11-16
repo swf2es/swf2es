@@ -3,6 +3,7 @@
 // It reaches the shell only through window.swf2esDesktop (shared/api.ts).
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
 import type { AirLaunch, DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
+import { embeddingAttributes } from "../shared/embedding.js";
 import { airHosts, airPath } from "./air.js";
 import { shellFiles } from "./files.js";
 import { windowFullScreen } from "./full-screen.js";
@@ -58,6 +59,26 @@ function showFailure(message: string | null): void {
 }
 
 let loadGeneration = 0;
+/** The attributes the last movie's embedding set on the element, taken off for the next. */
+let embedded: string[] = [];
+
+/**
+ * The element's attributes as the shell's `params` give them, as a page's
+ * tag would: FlashVars, quality, scale and the rest, and nothing but those
+ * (shared/embedding.ts), allowscriptaccess least of all, which keeps
+ * ExternalInterface off here.
+ */
+function embed(params: OpenedMovie["params"]): void {
+  for (const name of embedded) {
+    player.removeAttribute(name);
+  }
+
+  const attributes = embeddingAttributes(params);
+  embedded = attributes.map(([name]) => name);
+  for (const [name, value] of attributes) {
+    player.setAttribute(name, value);
+  }
+}
 
 function play(movie: OpenedMovie): void {
   const generation = ++loadGeneration;
@@ -67,6 +88,7 @@ function play(movie: OpenedMovie): void {
     air: movie.air ? airHosts(movie.air, desktop.air) : null,
   });
   showFailure(null);
+  embed(movie.params);
   welcome.hidden = true;
   player.hidden = false;
   player.load(movie.url).then(

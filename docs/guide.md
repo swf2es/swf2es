@@ -374,6 +374,8 @@ the builtin.abc and playerglobal the player ships.
 | Option | What it does |
 | --- | --- |
 | `--trace` | Prints what the SWF traces to the terminal: `trace()` to stdout, warnings and errors to stderr. |
+| `--flashvars="a=1&b=2"` | Gives the SWF FlashVars, as a page's `flashvars` parameter: its `loaderInfo.parameters`, or an AVM1 SWF's `_root` variables. Repeated, they are joined. |
+| `--param=name=value` | Gives the SWF one of the parameters a page's `<object>` or `<embed>` gave it, as the element's attribute of that name: `quality`, `scale`, `salign`, `wmode`, `bgcolor`, `menu`, `base` or `allowNetworking`. Repeatable. |
 | `--log-network` | Prints each request, socket and WebSocket of the SWF to stderr: method, URL, status, size and time. The window's DevTools show none of them, as the main process sends them. |
 | `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
@@ -382,6 +384,31 @@ the builtin.abc and playerglobal the player ships.
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
+
+A SWF built for a page reads what its `<object>` or `<embed>` gave it, and
+gets it from the command line:
+
+```sh
+npx @swf2es/desktop --flashvars="user=guest&lang=en" --param=scale=noScale --param=salign=TL movie.swf
+npx @swf2es/desktop "https://example.com/movie.swf?user=guest"   # the query is among its parameters
+```
+
+They mean what they mean to the element, case-insensitive in their names
+as in a page; any other name is left out, as the app says. Write them with
+`=`: a value may also follow as an argument of its own, but not one that
+starts with `-`, which other switches would read as theirs. `base` is an
+http or https URL, or a relative one, resolved against the SWF's own URL
+as a page's against the page's: for a local SWF, its directory or below,
+where it reads. The loads it resolves are judged by the SWF's sandbox as
+any other. A SWF URL's query
+is among its parameters as Flash had it, the FlashVars over it. They are
+for the SWF the command line names, a second start's handed to the app
+already open too, and stay with it as it is reloaded; one opened from the
+menus, the recent list or a drop gets none. `allowScriptAccess`,
+`allowFullScreen` and `allowFullScreenInteractive` change nothing here, as
+the app says: ExternalInterface stays off, and a SWF's full screen is the
+window's, always allowed. An AIR application gets none, as the app says:
+it has no page.
 
 npx reads the first `--` on its command line as the end of its own
 options, so an application's arguments need one before the package too:

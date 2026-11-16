@@ -23,6 +23,7 @@ import { basename, dirname, join, resolve, sep } from "node:path";
 import { readAirDescriptor } from "@swf2es/format";
 import type { AirFileStat, AirLaunch } from "../shared/api.js";
 import { resolveCase } from "./case-paths.ts";
+import { embeddingArguments } from "./embedding.ts";
 
 /** What the command line asks adl's way: the descriptor, the application's directory, the arguments. */
 export interface AirCommand {
@@ -35,7 +36,9 @@ export interface AirCommand {
  * The AIR application `argv` names, from `cwd`: a descriptor (`.xml`), the
  * directory its content is under if one follows, and what follows `--`.
  */
-export function airCommand(argv: string[], cwd: string): AirCommand | null {
+export function airCommand(given: string[], cwd: string): AirCommand | null {
+  // A switch's value is no descriptor, though it may end in .xml.
+  const argv = embeddingArguments(given).rest;
   const end = argv.indexOf("--");
   const own = (end < 0 ? argv : argv.slice(0, end)).filter((a) => !a.startsWith("-"));
   const at = own.findIndex((a) => /\.xml$/i.test(a));

@@ -19,6 +19,7 @@ Nothing is loaded from `file:`. One privileged scheme, `swf2es:`,
 standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
 as https, has two hosts. `swf2es://app/` is the page,
 `static/index.html` and its stylesheet, the renderer's build,
+`/shared/` for what it shares with the main process (`src/shared`),
 `/modules/<package>/` for the packages' builds, which the page's import
 map names as
 `tests/player/serve.ts`'s does, and `/libraries/playerglobal.abc`, read
@@ -483,7 +484,9 @@ and in the main menu's key equivalents on macOS. A SWF that does nothing
 with F11 leaves it to the menu. One that acts on the key's `keyUp`
 instead is not covered: the menu has taken the key by then.
 ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
-into the page would run beside the API.
+into the page would run beside the API. No embedding the command line
+names changes that ([The embedding](#the-embedding)), and the page never
+sets that attribute from one.
 
 ## Files, settings and libraries
 
@@ -514,6 +517,56 @@ word. ActionScript 3 plays on the builtin.abc and playerglobal the player
 ships; a playerglobal.abc the user chooses, such as Flash Player's, takes
 the place of swf2es's own, and choosing one reloads the page, which
 fetches it once.
+
+## The embedding
+
+A SWF made for a page reads what its `<object>` or `<embed>` gave Flash,
+and the command line gives the same (`src/main/embedding.ts`):
+`--flashvars` and `--param name=value`, each taking its value after `=`
+or as the next argument, read from the app's arguments before an AIR
+application's `--`, and set aside before the movie or a descriptor is
+looked for among the rest, so that a value ending in `.swf` or `.xml` is
+neither. A value as the next argument may not start with `-`: the other
+switches (`--proxy`, `--trace`, `--ignore-certificate-errors`) look at
+every argument, and would take it for theirs too; the docs write the `=`
+form. The parameters are the element's, by the same names and with the
+same meaning, since the page plays the SWF with the element: nine of them,
+listed once in `src/shared/embedding.ts`, which the main process reads
+the command line by and the page sets attributes by, so a name the main
+process let through by mistake still never reaches the element. The main
+process sends them with the movie (`OpenedMovie.params`), and the page
+sets them on its `<swf2es-player>` as attributes before it loads the SWF,
+taking off the last movie's. So the page's own Scripting and Avm1 options
+follow from them as in any page: `flashvars` as `loaderInfo.parameters`
+and an AVM1 root's variables, after the SWF URL's own query, which the
+player merges as Flash did; `quality`, `scale` and `salign` as the stage's;
+`bgcolor` and `wmode` as the background drawn behind the stage, or none;
+`menu` as the context menu's; and `allowNetworking` taking away what
+Flash's did. Those that would widen
+what the page lets a SWF do are refused, with a word on stderr:
+`allowScriptAccess`, as ExternalInterface stays off ([What the page may
+do](#what-the-page-may-do)), and `allowFullScreen` and
+`allowFullScreenInteractive`, as a SWF's full screen is the window's here
+anyway. `base` is an http or https URL or a relative one, resolved against
+the SWF's URL, which stands in for the page it has not; for a local SWF a
+relative one must come to its own directory or below, where alone its
+relative loads could be read, and an absolute one other than http or
+https is left out. A relative load it resolves is a request like any
+other, judged by the SWF's sandbox, the file host's grant and Flash's
+policy files, so it reaches nothing the SWF could not name itself.
+
+What the command line leaves out is said once, on the stderr of the start
+it was given to, as that start reads it (`settleEmbedding`): a second
+start says its own and quits, and the app already open plays the movie
+with what is left, silently, as it does again for each Reload Movie.
+
+The embedding goes with the movie the command line names: a second
+start's, which Electron would hand over reordered, a switch apart from its
+value, comes as the second start's own arguments in the single-instance
+lock's data; View › Reload Movie opens it again with it, and a reload of
+the page gets it with the movie from `start`. What the menus, a drop or
+the recent list open has none, and the settings keep none. An AIR
+application has no page, and gets none, which its start says.
 
 ## Sockets
 
@@ -768,7 +821,22 @@ opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context
 loss/restoration, repeated movie reloads and close. It shares the isolated
 display and process harness in `tests/desktop/app.ts` with the ordinary smoke
-test. `settings.test.ts` covers the default, the stored choice and its persistence. CI's `desktop`
+test. `settings.test.ts` covers the default, the stored choice and its persistence.
+`embedding.test.ts` reads `--flashvars` and `--param` in both forms, refuses
+what changes nothing here and values apart that start with `-`, keeps
+their values from being taken for the movie or a descriptor, lets no name
+but the nine reach the element, from the command line or in the page's
+own filter, settles `base` (http, https, or relative and, for a local
+SWF, below its directory) and resolves it, takes a second start's
+arguments as it sent them or Electron's, and has the launcher keep the
+switches' values rather than make them paths; `tests/desktop/params.ts`
+plays an AS3 SWF given them, which traces its parameters, its stage's
+quality, scale mode and alignment and the file `base` makes a relative
+URL read, the same SWF dropped on the window with none of them, then an
+AVM1 SWF a second start names by its URL with a query and FlashVars of
+its own, as its root's variables, again by View › Reload Movie, and a SWF
+by its URL alone, with its query and none of the last's, again as the
+page reloads. CI's `desktop`
 workflow fetches Electron and runs them.
 
 Not done yet: packaging and installers, `SecureSocket`, Flash's Settings

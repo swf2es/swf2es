@@ -102,6 +102,12 @@ export interface OpenedMovie {
   sandbox: SandboxType;
   /** For an AIR application opened by its descriptor: its launch, which plays it as AIR's. */
   air?: AirLaunch;
+  /**
+   * What the command line gave it as a page's <object> or <embed> would
+   * (--flashvars, --param): the element's attributes by their lower-case
+   * names, flashvars, quality, scale and the rest, `base` an absolute URL.
+   */
+  params?: Readonly<Record<string, string>>;
 }
 
 /** The libraries' paths on disk, null for one the shell has not found. */
