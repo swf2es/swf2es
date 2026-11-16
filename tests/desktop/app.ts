@@ -20,7 +20,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * an Xvfb where there is one, and draws there; elsewhere it leaves the
  * user's display out, which GTK still finds through XDG_RUNTIME_DIR.
  */
-export async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void }> {
+export async function display(): Promise<{
+  env: NodeJS.ProcessEnv;
+  /** Whether the display is an Xvfb of the test's own. */
+  xvfb: boolean;
+  stop(): void;
+}> {
   const base = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) => name !== "DISPLAY" && name !== "WAYLAND_DISPLAY",
@@ -28,7 +33,7 @@ export async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void 
   );
   const xvfb = spawnSync("sh", ["-c", "command -v Xvfb"], { encoding: "utf8" }).stdout.trim();
   if (!xvfb) {
-    return { env: base, stop() {} };
+    return { env: base, xvfb: false, stop() {} };
   }
 
   // Xvfb writes the display it chose to the descriptor -displayfd names.
@@ -47,6 +52,7 @@ export async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void 
   });
   return {
     env: { ...base, DISPLAY: `:${number}`, GDK_BACKEND: "x11", XDG_SESSION_TYPE: "x11" },
+    xvfb: true,
     stop: () => x.kill(),
   };
 }
@@ -69,11 +75,16 @@ export interface App {
   userData: string;
 }
 
+/**
+ * `plain` runs the app as a user does: a window on the display, with no
+ * switch of the test's choosing for the GPU, so the app picks what draws.
+ */
 export async function withApp(
   env: NodeJS.ProcessEnv,
   settings: object,
   args: string[],
   run: (app: App) => Promise<void>,
+  { plain = false }: { plain?: boolean } = {},
 ): Promise<void> {
   const userData = mkdtempSync(join(tmpdir(), "swf2es-desktop-"));
   writeFileSync(join(userData, "settings.json"), JSON.stringify(settings));
@@ -91,12 +102,12 @@ export async function withApp(
         appDir,
         // Chromium's headless mode, which Electron keeps (its build has no
         // headless Ozone), on the test's own display (display()), and a GPU
-        // of software: it draws alike anywhere.
-        "--headless",
+        // of software: it draws alike anywhere. A plain run has neither: a
+        // window, and what draws is the app's choice.
+        ...(plain ? [] : ["--headless"]),
         // Electron can still find Wayland through XDG_RUNTIME_DIR while Xvfb owns DISPLAY.
         ...(env.GDK_BACKEND === "x11" ? ["--ozone-platform=x11"] : []),
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
+        ...(plain ? [] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]),
         ...more,
       ],
       {

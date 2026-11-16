@@ -1,8 +1,8 @@
 // The command line's switches for this run alone, and what they make:
 // --trace and the network's logs, --ignore-certificate-errors and --proxy,
 // the network judged through them and what opens an AIR application's
-// WebSockets, each said on stderr as the app starts; --no-http-cache; and
-// --flashvars and --param, the SWF's embedding (embedding.ts).
+// WebSockets, each said on stderr as the app starts; --no-http-cache;
+// --flashvars and --param, the SWF's embedding (embedding.ts); and --software-gl.
 import { embeddingArguments } from "./embedding.ts";
 import { Network } from "./network.ts";
 import { unverifiedHosts } from "./network-rules.ts";
@@ -24,6 +24,8 @@ for (const warning of embedding.warnings) {
   process.stderr.write(`swf2es: ${warning}\n`);
 }
 
+/** --software-gl: SwiftShader draws, on the CPU, where Chromium takes no GPU or even where it does (gpu.ts). */
+export const softwareGl = own.includes("--software-gl");
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 export const trace = process.argv.includes("--trace");
 // Each request and socket of the SWF's said on stderr: the page's DevTools show none of them.

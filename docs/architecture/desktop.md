@@ -742,6 +742,51 @@ asked for, opened, refused, failed and closed, and each certificate
 asked about and answered, and `--log-sockets` each frame sent and message
 received, a text one as its text (`src/main/netlog.ts`).
 
+## What draws
+
+The player draws with WebGL 2, which Chromium gives on the GPU where its
+blocklist takes the GPU. Where it takes none, there being none or its
+blocklist refusing the one there is (Mesa's llvmpipe among them, Xvfb's
+only GL, so every server and CI runner), Chromium no longer falls back to
+SwiftShader, its GPU on the CPU, for WebGL unless started with
+`--enable-unsafe-swiftshader`, so there is no WebGL 2 and nothing plays.
+The app does not append that switch on its own: `--software-gl` does
+(`src/main/gpu.ts`), with `--use-angle=swiftshader`, which draws everything
+with SwiftShader, compositing included, even where there is a GPU (for one
+Chromium takes for WebGL but not WebGL 2, or one that draws wrong). Both go
+in before the app is ready, as Chromium reads its GPU switches as it starts
+the GPU process, and only in the instance that holds the single-instance
+lock; a second start chooses nothing.
+
+It is a switch and not a fallback because it is unsafe by Chromium's own
+word: its
+[SwiftShader document](https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/swiftshader.md)
+calls SwiftShader "a high security risk due to JIT-ed code running in
+Chromium's GPU process", and the fallback "not intended for running
+untrusted content". The surface is SwiftShader's whole pipeline, its
+Reactor JIT, rasteriser and sampling, under draws a SWF drives: what
+shapes, bitmaps, filters and Stage3D calls it makes, with sizes and data of
+its choosing, not only the shaders' text. A SWF never gives GLSL: Stage3D's
+AGAL is validated and translated by `packages/context3d/src/agal.ts`, and
+Pixel Bender's bytecode by `packages/format/src/pbj.ts` and the player's
+translation, so the shaders SwiftShader compiles are the player's. The
+page, where a SWF's compiled code runs, is in Chromium's sandbox
+(seccomp-bpf on Linux) unless the user passes `--no-sandbox`. The GPU
+process is not: with Electron 44 on Linux it runs without seccomp (`Seccomp:
+0` in its `/proc` status, `sandboxed: false` in Chromium's GPU info), so
+what SwiftShader does under a SWF's draws runs with the user's rights.
+
+Where nothing draws, the app says so on stderr and names `--software-gl`.
+It reads WebGL's status once, at the GPU process's first report
+(`gpu-info-update`, about 200 ms in): before it, WebGL reads `disabled_off`
+even where the GPU will draw, and the reports after it include the quit's,
+which read disabled too. Electron 44 reports no WebGL 2 status, so a GPU that
+gives WebGL but not WebGL 2 gets no hint; `disabled_off` or `unavailable_off`
+is a GPU refused with no fallback, while `unavailable_software` is SwiftShader
+drawing (as with Chromium's own `--enable-unsafe-swiftshader`). A second start
+with `--software-gl`, which hands its SWF to the app already open, says that
+app keeps drawing as it started.
+
 ## Running and testing
 
 `pnpm install` leaves Electron's binary undownloaded (pnpm's
@@ -817,6 +862,11 @@ idle time and the bound on idle ones, a key's limit direct and through a
 proxy, the drain's bounds, and aborts, servers that close a kept one and
 a page that goes, with tunnels in use and being made. `tests/desktop/keepalive-bench.ts` times many small loads
 over http and https, one checkout or two (docs/benchmarks.md).
+`tests/desktop/xvfb.ts` runs the app as a server does, in a window on an
+Xvfb with no switch of the test's for the GPU: it has no WebGL 2, takes no
+SwiftShader and says to pass `--software-gl`; then with `--software-gl` a
+SWF plays and draws on SwiftShader, which a second start does not claim; it
+skips where there is no Xvfb, or where the Xvfb's GL is a GPU's.
 `tests/desktop/stage3d.ts` drives the native View menu through the main
 process's test-only inspector: Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,

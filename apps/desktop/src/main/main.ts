@@ -9,6 +9,7 @@
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
+// --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
 // --flashvars and --param give the SWF what a page's <object> or <embed> would (embedding.ts).
 //
 // The second runs an AIR application by its descriptor, as adl does.
@@ -26,6 +27,7 @@ import { listenForAir } from "./air-bridge.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { embeddingArguments, exactArguments, settleEmbedding } from "./embedding.ts";
 import { bridgeFiles } from "./files.ts";
+import { chooseGl } from "./gpu.ts";
 import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
 import { failureLine, requestLine } from "./netlog.ts";
@@ -65,6 +67,7 @@ import {
   network,
   proxied,
   proxy,
+  softwareGl,
   trace,
   via,
   warn,
@@ -398,7 +401,17 @@ if (!first) {
     );
   }
 
+  if (softwareGl) {
+    process.stderr.write(
+      "swf2es: handed to the app already open, which draws as it started: " +
+        "--software-gl counts only for the first start\n",
+    );
+  }
+
   app.quit();
+} else {
+  // Still before ready: Chromium reads the GPU switches as it starts the GPU process.
+  chooseGl(softwareGl);
 }
 
 app.on("second-instance", (_event, given, workingDirectory, data) => {

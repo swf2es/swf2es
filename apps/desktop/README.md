@@ -102,6 +102,21 @@ fetch-electron` does so ahead, for the tests.
   so; an HTML page wrapping a SWF does not open.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
+- **Without a GPU.** The player draws with WebGL 2. Where Chromium takes
+  no GPU, because there is none or its blocklist refuses the one there is
+  (a server, a CI runner, a virtual machine, Xvfb, whose only GL is Mesa's
+  llvmpipe), there is no WebGL 2 and nothing draws, and the app says so on
+  stderr. `--software-gl` draws with SwiftShader, Chromium's GPU on the CPU,
+  there, and also where Chromium takes a GPU that gives WebGL but not WebGL 2
+  or draws wrong. It is a switch, not a fallback, because Chromium calls
+  SwiftShader unsafe for untrusted content: it compiles code in the GPU
+  process, which on Linux runs outside Chromium's sandbox (see
+  [What draws](../../docs/architecture/desktop.md#what-draws)). SwiftShader
+  is slower than a GPU, more so the larger the window. On a server with no
+  display: `xvfb-run -a swf2es-desktop --software-gl movie.swf`. Where a
+  Wayland session is about (`WAYLAND_DISPLAY`, or
+  `XDG_SESSION_TYPE=wayland`), Electron goes to it rather than to Xvfb
+  unless told otherwise: add `--ozone-platform=x11`.
 - **Network log.** `--log-network` prints each of the SWF's requests to
   stderr as it is answered (`swf2es: net GET https://… 200 12.3 kB 48 ms`),
   an aborted one too, and each socket and each WebSocket of an AIR
