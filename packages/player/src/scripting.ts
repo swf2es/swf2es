@@ -657,12 +657,24 @@ export class Scripting {
       this.connections.add(entry);
     }
 
+    // A WebSocket host's frames, where it sends them (WebSocketTransport.frame): a close frame
+    // ends the connection as close does.
+    const frame = (transport as { frame?: (opcode: number, payload: Uint8Array) => void }).frame;
     return {
       send: (data: never) => transport.send(data),
       close: (code?: number) => {
         forget();
         transport.close(code);
       },
+      ...(frame && {
+        frame: (opcode: number, payload: Uint8Array) => {
+          if (opcode === 8) {
+            forget();
+          }
+
+          frame.call(transport, opcode, payload);
+        },
+      }),
     } as T;
   }
 

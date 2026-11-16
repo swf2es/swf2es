@@ -5,13 +5,7 @@
 import { Network } from "./network.ts";
 import { unverifiedHosts } from "./network-rules.ts";
 import { describeProxy, proxyArgument } from "./proxy.ts";
-import {
-  dispatchedOpener,
-  type Opener,
-  proxiedDispatcher,
-  unverifiedDispatcher,
-  webSocketOpener,
-} from "./websocket-connections.ts";
+import type { WebSocketOptions } from "./websocket-connections.ts";
 
 /** The app's own arguments: not an AIR application's, after "--". */
 const own = process.argv.includes("--")
@@ -71,26 +65,9 @@ if (proxy) {
 export const via = proxy ? " via proxy" : "";
 export const warn = (message: string) => process.stderr.write(`swf2es: ${message}\n`);
 export const network = new Network({ unverified: unverifiedHost, proxy });
-// What opens an AIR application's WebSockets: the global's client, a wss: server's certificate
-// unchecked where the switch names its host; or every one through the proxy.
-const insecureWebSockets = unverified && !proxy ? unverifiedDispatcher() : null;
-if (unverified && !proxy && !insecureWebSockets) {
-  process.stderr.write(
-    "swf2es: --ignore-certificate-errors: a WebSocket's certificate is verified all the same\n",
-  );
-}
-
-export const proxiedWebSockets = proxy ? proxiedDispatcher(proxy, unverifiedHost, warn) : null;
-// Never past the proxy: where none can be made, no WebSocket opens.
-export const webSocketOpen: Opener | undefined = proxy
-  ? proxiedWebSockets
-    ? dispatchedOpener(proxiedWebSockets)
-    : () => {
-        throw new Error("no WebSocket through the proxy");
-      }
-  : insecureWebSockets
-    ? webSocketOpener(unverifiedHost, insecureWebSockets)
-    : undefined;
-if (proxy && !proxiedWebSockets) {
-  process.stderr.write("swf2es: --proxy: this Electron's WebSocket cannot go through a proxy\n");
-}
+/**
+ * How an AIR application's WebSockets connect: through the proxy where
+ * there is one, a wss: server's certificate unchecked where
+ * --ignore-certificate-errors names its host.
+ */
+export const webSocketOptions: WebSocketOptions = { proxy, unverified: unverifiedHost, warn };

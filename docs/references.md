@@ -40,7 +40,8 @@ add a conformance case for the difference.
   for the browser's `WebSocket`, which `air.net.WebSocket` and the socket
   relay (`player-hosts/websocket`) run over, and
   [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) for the frames and
-  close codes AIR sends that a browser cannot.
+  close codes AIR sends that a browser cannot, and the desktop app's
+  client, [ws](https://github.com/websockets/ws), sends.
 - **Content Security Policy Level 3**: `'unsafe-eval'` and
   `'wasm-unsafe-eval'`, which decide how the player may run its modules
   ([spec](https://www.w3.org/TR/CSP3/); see [Pages without

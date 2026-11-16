@@ -46,6 +46,7 @@
     "@swf2es/player-hosts": "workspace:*",
     "@swf2es/web": "workspace:*",
     "electron": "44.10.2",
-    "http-cache-semantics": "4.3.0"
+    "http-cache-semantics": "4.3.0",
+    "ws": "8.22.1"
   }
 }

@@ -69,8 +69,8 @@ const api: DesktopApi = {
       ipcRenderer.send("websocket:connect", id, String(url), Array.from(protocols, String));
       return id;
     },
-    send: (id, data) => ipcRenderer.send("websocket:send", id, data),
-    close: (id, code) => ipcRenderer.send("websocket:close", id, code),
+    frame: (id, opcode, payload) => ipcRenderer.send("websocket:frame", id, opcode, payload),
+    certificate: (id, accepted) => ipcRenderer.send("websocket:certificate", id, accepted),
     onEvents: (listener) => {
       ipcRenderer.on("websocket:events", (_event, events: ConnectionEvents<WebSocketEvent>) =>
         listener(events),

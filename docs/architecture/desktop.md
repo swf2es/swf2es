@@ -426,11 +426,10 @@ proxy resolves is not reached. Where no rule judges an address, a local
 SWF's sockets and an AIR application's sockets and WebSockets, the
 proxy is asked for the name, and resolves it itself. A socket
 (`connections.ts`) is opened once the tunnel is, its peer reported as
-the target; one closed before is closed. A WebSocket goes through an
-undici Agent, of the class the global dispatcher has, whose `connect`
-makes the tunnel and the TLS, passed as the dispatcher, as
-`--ignore-certificate-errors` passes its own; where none can be made, no
-WebSocket opens.
+the target; one closed before is closed. A WebSocket's connection is
+the tunnel, made by the `createConnection` ws is given, with TLS over it
+for `wss:`, its certificate checked as without the proxy
+([WebSockets](#websockets)).
 
 The proxy's own address is not judged: it is the user's. Anything a SWF
 names is judged as before, the proxy's host and port as a target among
@@ -610,37 +609,83 @@ and by the session's `webRequest`. Neither is loosened: the element
 takes the shell's host through `configure({ webSockets })`
 (`src/renderer/websockets.ts`), and each connection is an id the preload
 numbers, which the main process opens (`src/main/websockets.ts`,
-`websocket-connections.ts`) with the WHATWG `WebSocket` of Electron's
-Node, undici's, relaying its events over IPC: `open` with the
-subprotocol the server chose, `message` with a string for a text message
-and bytes for a binary one, `close` with its code and `error`. Only an
-AIR application has them (`sandbox.application`), to any `ws:` or `wss:`
-URL and unasked, as AIR's application sandbox connects and as its
-sockets do here; for anything else the connection is refused with a
-word on stderr, and a refusal is an error and then a close with 1006, as
-a server that took no connection. The client is a browser's: it sends
-the close codes 1000 and 3000 to 4999, any other closing with none,
-answers pings itself and sends no ping or pong of the application's, and
-fails a connection whose server chose none of the subprotocols offered.
+`websocket-connections.ts`) with [ws](https://github.com/websockets/ws),
+a dependency of the app's alone (without its optional native modules),
+pinned at 8.22.1, relaying its events over IPC: `open` with the subprotocol the server
+chose, `message` with its bytes and whether it is text, `close` with its
+code, `error` with how it failed where that is known, and `certificate`
+for a self-signed certificate. Only an AIR application has them
+(`sandbox.application`), to any `ws:` or `wss:` URL and unasked, as AIR's
+application sandbox connects and as its sockets do here; for anything
+else the connection is refused with a word on stderr, and a refusal is
+an error and then a close with 1006, as a server that took no
+connection.
 
-`--ignore-certificate-errors` holds for `wss:` as for https. The WHATWG
-WebSocket has no option for it, and Node exports none of undici's
-classes, so the connection to a host the switch names is given, in the
-options undici's constructor takes in the protocols' place, a dispatcher
-made from the class of the one undici keeps for everything else
-(`Symbol.for("undici.globalDispatcher.1")`), with `rejectUnauthorized`
-off; every other connection is the global's as it is. Where a Node gave
-no such dispatcher the app would say so at its start and verify every
-certificate; the unit test fails if node's does not.
+The page sends frames, not messages (`websocket:frame`: an opcode and its
+payload), so the host has WebSocketTransport's `frame` and the client
+sends what AIR sends, as adl was seen to: text with its bytes as they
+are, a leading BOM or bytes that are no UTF-8 among them; binary; pings
+and pongs with their payloads; and a close frame with the SWF's code and
+reason, any code RFC 6455 lets a frame carry (1001 and 1011 too), one it
+does not closing with none, a reason past 123 bytes left out. ws refuses
+a ping or pong past 125 bytes, which is not sent, and has no way to send
+a reserved opcode, which is dropped. What comes is as adl keeps it: a
+text message's bytes unchecked and with its BOM, a server's ping answered
+with its payload and, like a pong, not told to the page. The request is
+adl's too: no extension offered, no Origin, the subprotocols joined by
+", ", and whatever the server chose taken, one offered or not, or none,
+but for one not offered when some were, which fails as in adl. A URL
+with credentials (`ws://user:pass@host/`) is refused, with a word on
+stderr: ws would send them as `Authorization: Basic`, and adl takes what
+comes before the `:` for its host and connects nowhere, so no credentials
+go anywhere.
 
-A page holds at most 64 at once, and one with more than 16 MB its peer
-has not read fails. Its events reach the page gathered, as its sockets'
-do ([Sockets](#sockets)). A page's WebSockets close, silently, as it navigates
-or reloads, and with it: the client has no way to drop a connection, so
-each is sent a close frame, and is gone once its server answers.
-`--log-network` says each connection asked for, opened, refused, failed
-and closed, and `--log-sockets` each message, a text one as its text
-(`src/main/netlog.ts`).
+The connection is ws's `createConnection`, ours. Without the proxy, the
+host is resolved here once and the connection made to its first address,
+refused, with why on stderr, for none or for one no request reaches
+(addresses.ts), as an application's HTTP requests are; each connection
+resolves again, so a name that rebinds gets a connection of its own to
+an address checked in turn, and nothing it did not place. Through the
+proxy, the tunnel is to the name, for the proxy to resolve, as an AIR
+application's sockets are ([Through a proxy](#through-a-proxy)). For
+`wss:`, TLS goes over that connection with the URL's host as the server
+name, its certificate checked against that name, not the address, by the
+system's roots beside Node's, as the network checks https. A host that
+`--ignore-certificate-errors` names goes unchecked. A self-signed
+certificate otherwise is the application's to accept, as in AIR: the page
+dispatches a certificateError, and only a listener that prevents its
+default lets the connection go on (`websocket:certificate`), a page that
+does not answer within 30 s refusing it. Only OpenSSL's
+`DEPTH_ZERO_SELF_SIGNED_CERT` is asked about: a certificate signed by
+itself and otherwise sound for the chain, whatever name it carries. Any
+other fault fails the connection unasked, as adl fails a certificate
+signed by a CA it does not trust; an expired self-signed one among them,
+which adl asks about as self-signed but OpenSSL reports as
+`CERT_HAS_EXPIRED`, so it fails closed here. A failure before the server was reached is told as such,
+one after, a refused handshake, as `handshake`, and a subprotocol not
+offered as `subprotocol`, which the natives dispatch as adl does.
+
+A connection is made within 30 s, its lookup, tunnel and TLS included,
+until ws takes it (the clock stops while the page is asked about a
+certificate), and its handshake within 30 s after; a later one fails as a
+server not there, with a word on stderr. A page holds at most 64 at
+once. One with more than 16 MB its peer has not read fails, whether what
+waits is what the application sent, a message that would take what is
+unsent past 16 MB, a single message larger than that among them, or the
+pongs a server's pings ask for. ws 8.22.1 would answer those without
+bound, the flood 8.23.0 fixed, so the app answers them itself
+(`autoPong: false`); once ws 8.23.0 or later is two weeks old, after
+2026-11-26, the pin moves to it and ws may answer them again. A message
+coming that is larger than 32 MB fails the connection, ws closing it
+with 1009: adl took messages of 20 MB, which this leaves room above,
+while bounding what one connection holds as a message comes. Its events reach the page gathered, as its sockets' do
+([Sockets](#sockets)). A page's WebSockets drop, silently, as it
+navigates or reloads, and with it, without a close frame, as AIR's go as
+it exits; what is still being made, a lookup, a tunnel or a question
+about a certificate, goes with them. `--log-network` says each connection
+asked for, opened, refused, failed and closed, and each certificate
+asked about and answered, and `--log-sockets` each frame sent and message
+received, a text one as its text (`src/main/netlog.ts`).
 
 ## Running and testing
 
@@ -687,8 +732,12 @@ body, and fails for the remote SWF.
 `connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and reads, each copied out at
 its length, through a proxy whose reply comes with the first bytes too,
-and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, close
-codes, refusals, limits and certificates, `relay.test.ts` the events
+and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, a text one's
+bytes as they are, pings and pongs, close codes and reasons, refusals,
+refused handshakes and subprotocols, URLs with credentials, limits and
+deadlines, the address each name resolves to, rebinding included, and
+certificates, self-signed ones accepted, refused or unanswered, expired
+ones refused, `relay.test.ts` the events
 gathered for the page, the window's leading edge, the order kept, reads
 joined, a batch sent at 256 KB and dropped with the page, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and

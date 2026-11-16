@@ -140,25 +140,43 @@ subprotocol the server chose, `connect`'s vector offered, not
 `protocol`. A send or close while connecting ends the connection, an
 IOErrorEvent with the URL and a close, as adl's handshake breaks on the
 frame. A failed connection is an IOErrorEvent with its host, as adl's
-refused one; a browser does not tell a refused connection from a
-refused handshake, which adl reports with the URL and a close. A host
-that throws a `SecurityError`, as a browser does for a blocked port,
-gives a SecurityErrorEvent. Before connect, where adl crashes, a send or
+refused one; where the host tells (WebSocketEvents' `error` with a
+failure), a refused handshake is an IOErrorEvent with the URL and a
+close, and a subprotocol chosen that was not offered the URL alone, the
+connection left failed, as adl reports each; a browser tells none of
+them apart. A self-signed certificate, where the host asks
+(`certificateError`), is a cancelable SecurityErrorEvent
+`certificateError` with adl's text, "Certificate for socket server is
+self-signed", and errorID 0; a listener that prevents its default lets
+the connection go on, as in adl, and otherwise the host fails it, an
+IOErrorEvent with the host after. A host that throws a `SecurityError`,
+as a browser does for a blocked port, gives a SecurityErrorEvent. Before connect, where adl crashes, a send or
 close throws IOError 2002. `startServer` throws AIR's IllegalOperationError
 for a method its profile lacks, as `Updater.update` in adl.
 
-A browser sends no frame but text, binary and close, and close codes
-1000 and 3000 to 4999 alone. AIR sends any opcode's low four bits as
-they are: text and binary go, `fmtCLOSE` closes with the payload's
-first two bytes as the code (AIR sends no reason either, and then
-dispatches the close), and pings, pongs and reserved opcodes are
-dropped, since the browser answers the server's pings itself and AIR
-dispatches nothing for a pong. `close` with a code a browser refuses
-closes without one. There is no `certificateError`: a browser rejects a
-bad certificate as any failed connection. A text message's leading BOM
-is sent, as AIR sends the bytes, but one received is gone, as a browser
-decodes it away, where adl's `data` keeps its three bytes. Two of adl's
-races the player does not run: a send in the close listener of a
+AIR sends any opcode's low four bits as they are. A host with `frame`,
+the desktop app's ([WebSockets](desktop.md#websockets)), sends them as
+adl was seen to: text with its bytes unchecked, a leading BOM among
+them; binary; pings and pongs with their payloads; `fmtCLOSE` with the
+payload's first two bytes as the code and the rest as its reason, as
+adl sends both, and then dispatches the close; and `close` with any
+code RFC 6455 lets a frame carry, 1001 and 1011 among them. It answers a
+server's ping with its payload and dispatches nothing for it nor for a
+pong, as adl, and keeps a text message's bytes as they came, a BOM's
+three and bytes that are no UTF-8 too, format 1. Where it still differs:
+a code no frame may carry, such as 999, which adl sends, closes with
+none; a reason past 123 bytes is left out, and a ping or pong past 125
+bytes and a reserved opcode are not sent. A browser, without `frame`,
+sends no frame but text, binary and close, and close codes 1000 and 3000
+to 4999 alone: `fmtCLOSE` closes with its code alone, pings, pongs and
+reserved opcodes are dropped, since the browser answers the server's
+pings itself, and `close` with a code it refuses closes without one.
+It has no `certificateError`, rejecting a bad certificate as any failed
+connection, sends a text message's leading BOM, as AIR sends the bytes,
+but drops one received as it decodes, where adl's `data` keeps its three
+bytes, and fails a connection whose server chose none of the
+subprotocols offered, which adl opens. Two of adl's races the player
+does not run: a send in the close listener of a
 connection a send or close ended while connecting goes in adl, where it
 throws #2002 here, and adl at times dispatches a close after `close()`
 when a send goes out while it closes, where the player never does.
