@@ -372,7 +372,9 @@ opens the file and checks its size against the row's, and a file gone or
 of another size is a miss and its row dropped; each start sweeps away,
 beside the writes rather than before them, and a page of 512 names or
 rows at a time, temporary files, files no row names and rows whose file
-is gone or of another size, dropping a row only as it read it. So a
+is gone or of another size, dropping a row only as it read it, from a
+listing it takes before the first write begins: a temporary file it
+finds is a crash's, never one of a write under way. So a
 crash leaves no row pointing at half a file. Past the budget, 512 MB of
 charges, or past 50,000 entries, the least recently served go first, by
 their index, the charges' total and the count kept in memory rather than
