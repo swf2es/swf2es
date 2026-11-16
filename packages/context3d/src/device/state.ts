@@ -60,6 +60,11 @@ export class GlState {
     }
   }
 
+  /** The framebuffer bound, as last set through it; undefined where unknown (forget). */
+  get boundFramebuffer(): WebGLFramebuffer | null | undefined {
+    return this.framebuffer;
+  }
+
   bindFramebuffer(framebuffer: WebGLFramebuffer | null): void {
     if (framebuffer !== this.framebuffer) {
       this.framebuffer = framebuffer;
