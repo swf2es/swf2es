@@ -497,8 +497,11 @@ WebContents is destroyed, and as its renderer process goes, crashed,
 killed or out of memory: the WebContents lives on then, white, and
 neither of the others comes, so a SWF kept connected overnight once kept
 its server talking to no one, every packet an error on stderr.
-`src/main/page-end.ts` names the three, and what is the page's goes at
-each: its sockets and WebSockets, what they had gathered for it, its
+The main process learns of a crash only as the process exits, which is
+once the system has written its core dump, if it writes one: a second
+with systemd-coredump here, over a minute on a CI runner, so the test
+below runs the app with core dumps off (`prlimit`). `src/main/page-end.ts`
+names the three, and what is the page's goes at each: its sockets and WebSockets, what they had gathered for it, its
 requests under way, its file grants. Nothing is sent to a page whose
 process is gone, and nothing it sent before is acted on after: a
 connection it asked for would be the dead page's. Unless it exited cleanly, stderr says so once, `swf2es:
@@ -902,7 +905,7 @@ loss/restoration, repeated movie reloads and close.
 `tests/desktop/page-gone.ts` crashes the page's renderer through that
 inspector while a SWF's socket, and an AIR application's socket and
 WebSocket, receive from servers that keep sending: each server sees its
-connection closed within five seconds, stderr says the page stopped once
+connection closed within two seconds of `render-process-gone`, stderr says the page stopped once
 and nothing for each packet, the app stays up, and the offer, answered
 through the inspector, or View › Reload Movie brings the movie back, the
 offer closed reloading nothing; another movie opened brings the page

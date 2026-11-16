@@ -78,13 +78,16 @@ export interface App {
 /**
  * `plain` runs the app as a user does: a window on the display, with no
  * switch of the test's choosing for the GPU, so the app picks what draws.
+ * `coreDumps: false` has the system write no core dump of a process of
+ * the app's that crashes, where prlimit is (Linux): the process is gone
+ * only once its dump is written, which has taken a runner over a minute.
  */
 export async function withApp(
   env: NodeJS.ProcessEnv,
   settings: object,
   args: string[],
   run: (app: App) => Promise<void>,
-  { plain = false }: { plain?: boolean } = {},
+  { plain = false, coreDumps = true }: { plain?: boolean; coreDumps?: boolean } = {},
 ): Promise<void> {
   const userData = mkdtempSync(join(tmpdir(), "swf2es-desktop-"));
   writeFileSync(join(userData, "settings.json"), JSON.stringify(settings));
@@ -95,10 +98,14 @@ export async function withApp(
   let socket: WebSocket | null = null;
   /** The other pages' DevTools connections. */
   const sockets: WebSocket[] = [];
+  // A limit of one byte: the kernel writes no dump to a file below it, nor to a pipe at all.
+  const noCore =
+    !coreDumps && spawnSync("prlimit", ["--version"]).status === 0 ? ["--core=1:1", "--"] : null;
   const start = (more: string[]) =>
     spawn(
-      electronBinary() as string,
+      noCore ? "prlimit" : (electronBinary() as string),
       [
+        ...(noCore ? [...noCore, electronBinary() as string] : []),
         appDir,
         // Chromium's headless mode, which Electron keeps (its build has no
         // headless Ozone), on the test's own display (display()), and a GPU

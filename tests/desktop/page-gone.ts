@@ -35,8 +35,9 @@ if (why) {
 /**
  * How soon a server must see its connection closed once render-process-gone
  * has come: the app's part. The process itself goes only once the system has
- * written its dump, a core dump or crashpad's, which takes a second here and
- * may take far longer on a busy runner; GONE_WITHIN_MS bounds that.
+ * written its core dump, which took a second here and over a minute on CI's
+ * runner, so the app runs without them (withApp's `coreDumps`), and the
+ * process goes in tens of milliseconds; GONE_WITHIN_MS bounds that.
  */
 const CLOSED_WITHIN_MS = 2000;
 const GONE_WITHIN_MS = 60_000;
@@ -227,6 +228,10 @@ async function whyOpen(app: App, crashed: Crash): Promise<string> {
   try {
     const lines = readFileSync(`/proc/${crashed.pid}/status`, "utf8").split("\n");
     status = lines.filter((l) => /^(State|TracerPid|PPid):/.test(l)).join(", ");
+    const core = readFileSync(`/proc/${crashed.pid}/limits`, "utf8")
+      .split("\n")
+      .find((l) => l.startsWith("Max core file size"));
+    status += `, ${core?.replace(/\s+/g, " ")}, wchan ${readFileSync(`/proc/${crashed.pid}/wchan`, "utf8")}`;
     tracer = /^TracerPid:\s*(\d+)/m.exec(lines.join("\n"))?.[1] ?? "0";
   } catch {
     // No such process: it has gone.
@@ -252,6 +257,7 @@ async function whyOpen(app: App, crashed: Crash): Promise<string> {
   return [
     `renderer ${crashed.pid}: ${status}`,
     `render-process-gone: ${gone.join("; ") || "none"}`,
+    `core_pattern: ${readFileSync("/proc/sys/kernel/core_pattern", "utf8").trim()}`,
     `processes:\n${processes.join("\n")}`,
     `stderr:\n${app.stderr().split("\n").slice(-40).join("\n")}`,
   ].join("\n");
@@ -296,84 +302,93 @@ const stoppedLines = (stderr: string) => [...stderr.matchAll(stopped)];
 
 const screen = await display();
 try {
-  await withApp(screen.env, settings, ["--inspect=0", movie], async (app) => {
-    const { stdout, stderr, until, main } = app;
-    const count = (prefix: string) => stdout.filter((l) => l.startsWith(prefix)).length;
-    const name = movie.slice(site.length);
+  await withApp(
+    screen.env,
+    settings,
+    ["--inspect=0", movie],
+    async (app) => {
+      const { stdout, stderr, until, main } = app;
+      const count = (prefix: string) => stdout.filter((l) => l.startsWith(prefix)).length;
+      const name = movie.slice(site.length);
 
-    await until("the SWF's socket", () => count("smoke: socket pong") === 1);
-    await until("the server's ticks", () => count("smoke: socket tick") >= 3);
+      await until("the SWF's socket", () => count("smoke: socket pong") === 1);
+      await until("the server's ticks", () => count("smoke: socket tick") >= 3);
 
-    // Closed, the offer reloads nothing, and the socket is closed all the same; View › Reload
-    // Movie brings the movie back.
-    await answerBoxes(main, 1);
-    const first = await crash(main);
-    await closedSoon(app, "the first socket closed", tcp.held[0], first);
-    await until("the page stopped", () => stoppedLines(stderr()).length === 1);
-    const [line] = stoppedLines(stderr());
-    assert.notEqual(line[1], "clean-exit");
-    assert.ok(line[2].startsWith(app.userData), `crash reports outside the user data: ${line[2]}`);
-    // Whatever the server sent meanwhile, for half a second, went nowhere, unsaid.
-    await sleep(500);
-    assert.equal(count("smoke: started"), 1, "the page reloaded unasked");
-    assert.equal(tcp.held.length, 1);
-    assert.deepEqual(await main("globalThis.offered"), [
-      { message: `${name} stopped.`, buttons: ["Reload Movie", "Close"], closed: false },
-    ]);
-    await click(main, "reload-movie");
-    await until("the movie reloaded by the menu", () => count("smoke: started") === 2);
-    await until("its socket again", () => count("smoke: socket pong") === 2);
+      // Closed, the offer reloads nothing, and the socket is closed all the same; View › Reload
+      // Movie brings the movie back.
+      await answerBoxes(main, 1);
+      const first = await crash(main);
+      await closedSoon(app, "the first socket closed", tcp.held[0], first);
+      await until("the page stopped", () => stoppedLines(stderr()).length === 1);
+      const [line] = stoppedLines(stderr());
+      assert.notEqual(line[1], "clean-exit");
+      assert.ok(
+        line[2].startsWith(app.userData),
+        `crash reports outside the user data: ${line[2]}`,
+      );
+      // Whatever the server sent meanwhile, for half a second, went nowhere, unsaid.
+      await sleep(500);
+      assert.equal(count("smoke: started"), 1, "the page reloaded unasked");
+      assert.equal(tcp.held.length, 1);
+      assert.deepEqual(await main("globalThis.offered"), [
+        { message: `${name} stopped.`, buttons: ["Reload Movie", "Close"], closed: false },
+      ]);
+      await click(main, "reload-movie");
+      await until("the movie reloaded by the menu", () => count("smoke: started") === 2);
+      await until("its socket again", () => count("smoke: socket pong") === 2);
 
-    // Answered with Reload Movie, the offer brings it back.
-    await answerBoxes(main, 0);
-    const second = await crash(main);
-    await closedSoon(app, "the second socket closed", tcp.held[1], second);
-    await until("the page stopped again", () => stoppedLines(stderr()).length === 2);
-    await until("the movie reloaded by the offer", () => count("smoke: started") === 3);
-    await until("its socket a third time", () => count("smoke: socket pong") === 3);
-    assert.equal(tcp.held.length, 3);
-    assert.equal(await main("globalThis.offered.length"), 2);
+      // Answered with Reload Movie, the offer brings it back.
+      await answerBoxes(main, 0);
+      const second = await crash(main);
+      await closedSoon(app, "the second socket closed", tcp.held[1], second);
+      await until("the page stopped again", () => stoppedLines(stderr()).length === 2);
+      await until("the movie reloaded by the offer", () => count("smoke: started") === 3);
+      await until("its socket a third time", () => count("smoke: socket pong") === 3);
+      assert.equal(tcp.held.length, 3);
+      assert.equal(await main("globalThis.offered.length"), 2);
 
-    // Left open, the offer closes as another movie, opened by a second start, brings the page back.
-    await answerBoxes(main, null);
-    const third = await crash(main);
-    await closedSoon(app, "the third socket closed", tcp.held[2], third);
-    await until("the page stopped a third time", () => stoppedLines(stderr()).length === 3);
-    assert.equal(await app.again([other]), 0);
-    await until("the other movie", () => count("smoke: started") === 4);
-    await until("its socket", () => count("smoke: socket pong") === 4);
-    assert.ok(
-      stdout
-        .filter((l) => l.startsWith("smoke: url "))
-        .at(-1)
-        ?.endsWith(`/other-${port}.swf`),
-    );
-    assert.deepEqual(await main("globalThis.offered.map((shown) => shown.closed)"), [
-      false,
-      false,
-      true,
-    ]);
+      // Left open, the offer closes as another movie, opened by a second start, brings the page back.
+      await answerBoxes(main, null);
+      const third = await crash(main);
+      await closedSoon(app, "the third socket closed", tcp.held[2], third);
+      await until("the page stopped a third time", () => stoppedLines(stderr()).length === 3);
+      assert.equal(await app.again([other]), 0);
+      await until("the other movie", () => count("smoke: started") === 4);
+      await until("its socket", () => count("smoke: socket pong") === 4);
+      assert.ok(
+        stdout
+          .filter((l) => l.startsWith("smoke: url "))
+          .at(-1)
+          ?.endsWith(`/other-${port}.swf`),
+      );
+      assert.deepEqual(await main("globalThis.offered.map((shown) => shown.closed)"), [
+        false,
+        false,
+        true,
+      ]);
 
-    // Closing the movie brings a gone page back, empty, rather than leave the window white.
-    await answerBoxes(main, 1);
-    const fourth = await crash(main);
-    await closedSoon(app, "the fourth socket closed", tcp.held[3], fourth);
-    await until("the page stopped a fourth time", () => stoppedLines(stderr()).length === 4);
-    await click(main, "close-movie");
-    let lives = false;
-    for (let tries = 0; !lives && tries < 100; tries++) {
-      lives = await pageLives(main);
-      await sleep(100);
-    }
+      // Closing the movie brings a gone page back, empty, rather than leave the window white.
+      await answerBoxes(main, 1);
+      const fourth = await crash(main);
+      await closedSoon(app, "the fourth socket closed", tcp.held[3], fourth);
+      await until("the page stopped a fourth time", () => stoppedLines(stderr()).length === 4);
+      await click(main, "close-movie");
+      let lives = false;
+      for (let tries = 0; !lives && tries < 100; tries++) {
+        lives = await pageLives(main);
+        await sleep(100);
+      }
 
-    assert.ok(lives, "the page did not come back after Close Movie");
-    assert.equal(count("smoke: started"), 4, "a movie played after Close Movie");
-    assert.equal(tcp.held.length, 4);
+      assert.ok(lives, "the page did not come back after Close Movie");
+      assert.equal(count("smoke: started"), 4, "a movie played after Close Movie");
+      assert.equal(tcp.held.length, 4);
 
-    assert.equal(await main("1 + 1"), 2, "the main process");
-    assert.equal(stoppedLines(stderr()).length, 4);
-    assert.doesNotMatch(stderr(), /Error sending from webContents/);
-  });
+      assert.equal(await main("1 + 1"), 2, "the main process");
+      assert.equal(stoppedLines(stderr()).length, 4);
+      assert.doesNotMatch(stderr(), /Error sending from webContents/);
+    },
+    { coreDumps: false },
+  );
 
   // An AIR application's WebSocket, and its socket, the same way.
   const ws = { held: [] as Held[] };
@@ -463,6 +478,7 @@ try {
           }
         }
       },
+      { coreDumps: false },
     );
   } finally {
     await webSockets.close();
