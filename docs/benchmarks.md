@@ -178,6 +178,19 @@ page's side.
         [--burst N]   the messages a server writes a turn, 40 by default
         [--busy MS]   the main process held MS ms of every 2 MS, as by its other work
 
+`tests/desktop/keepalive-bench.ts` has servers in a process of their own,
+http and https on loopback (the certificate made with openssl, https
+skipped without), answer 1 KB to each of 200 GETs, one after another and
+then all at once, made by `network.ts` in node as a SWF's URLLoaders make
+them, and counts the connections the servers took. Loopback has no round
+trip to speak of, so what a connection saves there is the main process's
+own work, TLS's handshake above all; over a real network each also saves
+its round trips.
+
+    node tests/desktop/keepalive-bench.ts [runs]                             this checkout
+    node tests/desktop/keepalive-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
+        [--loads N]   the loads of each kind, 200 by default
+
 ## AVM1 startup and scene changes
 
 `pnpm bench:avm1 [--runs 5] [--frames 600]` measures what AVM1 content
@@ -854,6 +867,12 @@ The desktop app:
   1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
   2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
   15,790 and 2,623 → 5,852.
+- #1023: keep-alive connections, a pool keyed by scheme, name, pinned address,
+  port, route and certificate checking (`tests/desktop/keepalive-bench.ts`,
+  200 loads of 1 KB from one loopback server, medians of 6): http one by
+  one 74.1 → 47.6 ms, all at once 43.6 → 25.1 ms; https one by one 334.3
+  → 39.6 ms, all at once 228.4 → 28.9 ms. Connections: 200 → 1 one by
+  one, 200 → 6 all at once, a key's limit.
 
 The renderer's are described in [renderer.md](renderer.md).
 

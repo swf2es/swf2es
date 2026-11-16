@@ -22,6 +22,11 @@
 //   that changes its answer (rebinding) changes nothing.
 // - Requests are bounded: methods, headers, sizes, redirects, time, and
 //   how many run at once; and each movie's are aborted as the next opens.
+// - Connections are kept alive between requests (http-pool.ts), but only
+//   for exactly the request that would open the same one: the same scheme,
+//   name, pinned address, port, route and certificate checking. So a
+//   rebinding name, pinned elsewhere, gets a connection of its own, and the
+//   pin holds as without a pool. Each page's are closed as it goes.
 // - Through a proxy (--proxy, proxy.ts), each connection is a tunnel to
 //   the address its host was pinned to, judged as without one: the proxy
 //   is asked for that address, not the name, so a proxy's DNS that answers
@@ -43,11 +48,10 @@ import { lookup } from "node:dns/promises";
 import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect, isIP, type Socket } from "node:net";
-import type { Duplex } from "node:stream";
-import * as tls from "node:tls";
 import { type AddressClass, addressClass, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
 import { type CacheEntry, type CacheRequest, type HttpCache, servedHeaders } from "./http-cache.ts";
+import { ConnectionPool } from "./http-pool.ts";
 import {
   abortable,
   bare,
@@ -86,7 +90,7 @@ import {
   urlMetaPolicy,
   usablePolicies,
 } from "./policy.ts";
-import { connectThrough, describeProxy, type ProxyConfig, type ProxyError } from "./proxy.ts";
+import { connectThrough, type ProxyConfig, type ProxyError } from "./proxy.ts";
 
 const textDecoder = new TextDecoder();
 
@@ -158,6 +162,8 @@ export class Network {
   private readonly unverified: (host: string) => boolean;
   private readonly socketPolicyPort: number;
   private readonly proxy: ProxyConfig | null;
+  /** The keep-alive connections requests share (http-pool.ts), closed with each page. */
+  readonly pool: ConnectionPool;
   private session: Session | null = null;
   /** What answers a GET in place of the network where it can; none by default, or when turned off. */
   cache: HttpCache | null = null;
@@ -175,14 +181,17 @@ export class Network {
     this.unverified = options.unverified ?? (() => false);
     this.socketPolicyPort = options.socketPolicyPort ?? 843;
     this.proxy = options.proxy ?? null;
+    this.pool = new ConnectionPool({ ca: this.ca, proxy: this.proxy, limits: options.pool });
   }
 
   /**
    * Judge requests for `movie` from now on, or for none: what the last
-   * movie had under way is aborted, and its policy files forgotten.
+   * movie had under way is aborted, its policy files forgotten and its
+   * connections closed.
    */
   play(movie: Movie | null): void {
     this.session?.abort.abort();
+    this.pool.destroy();
     this.session = movie
       ? {
           movie,
@@ -195,6 +204,11 @@ export class Network {
           buffered: 0,
         }
       : null;
+  }
+
+  /** Every request aborted and every connection closed, as the app quits. */
+  close(): void {
+    this.play(null);
   }
 
   /** The movie's URL after its redirects, once it has come; null before, and for a local movie. */
@@ -806,28 +820,6 @@ export class Network {
   }
 
   /**
-   * A request's createConnection: a tunnel through `proxy` to `address`,
-   * with TLS over it where `secure` says how, as Node's callback form takes
-   * it. A proxy's failure is a refusal saying why, the ProxyError its cause.
-   */
-  private tunnel(
-    proxy: ProxyConfig,
-    address: string,
-    port: number,
-    secure: tls.ConnectionOptions | false,
-    signal: AbortSignal,
-  ) {
-    return (_options: unknown, done: (error: Error | null, socket: Duplex) => void) => {
-      connectThrough(proxy, address, port, { signal }).then(
-        (tunnel) => done(null, secure ? tls.connect({ ...secure, socket: tunnel }) : tunnel),
-        (error: ProxyError) =>
-          done(new Refused(error.message, { cause: error }), undefined as unknown as Duplex),
-      );
-      return undefined;
-    };
-  }
-
-  /**
    * A request's answer from the cache where it can give one, a stored
    * response fresh or revalidated with a 304, else from send(), what comes
    * kept where it may be. Its body counts as send()'s would, against `max`
@@ -872,7 +864,7 @@ export class Network {
       address,
       partition,
       // An address is a machine only along one way to it: through a proxy, another may be.
-      route: this.proxy ? describeProxy(this.proxy) : "direct",
+      route: this.pool.route,
       policyFile: options.policyFile === true,
     };
     if (!options.read || !cache.handles(request)) {
@@ -906,6 +898,7 @@ export class Network {
           status: refreshed.status,
           headers: servedHeaders(refreshed),
           cache: "revalidated",
+          ...(response.reused ? { reused: true } : {}),
         };
       }
 
@@ -960,8 +953,12 @@ export class Network {
    * One HTTP exchange with `address`, the URL's host pinned to it: its
    * status and headers, and its body if `read` and the status is a
    * success, or an error whose body was asked for (`errorBody`), up to
-   * `max` bytes. No cookies, no credentials, no
-   * compression asked for, no connection kept.
+   * `max` bytes. No cookies, no credentials, no compression asked for.
+   * Its connection is the pool's (http-pool.ts): one kept idle for the
+   * same scheme, name, address, port, route and certificate checking,
+   * where there is one, and kept after only once its response has been
+   * read to the end. A GET whose kept connection the server closed as it
+   * was reused, before any answer, is sent once more, as browsers do.
    */
   private send(
     url: URL,
@@ -987,43 +984,28 @@ export class Network {
       }
 
       const https = url.protocol === "https:";
-      const family = isIP(address);
       const port = Number(url.port || (https ? 443 : 80));
-      const secure: tls.ConnectionOptions = {
-        servername: isIP(host) ? undefined : host,
-        ca: this.ca,
-        // Only where the user asked for this host: its certificate goes unchecked.
-        ...(this.unverified(host) ? { rejectUnauthorized: false } : {}),
-      };
-      let request: ClientRequest;
-      try {
-        request = (https ? httpsRequest : httpRequest)({
+      // The agent of this request's key: its connections reach the pinned address, through
+      // the proxy where there is one, TLS by the host's name, as the key says.
+      const agent = this.pool.agent({
+        secure: https,
+        host,
+        address,
+        port,
+        unverified: https && this.unverified(host),
+      });
+      const make = () =>
+        (https ? httpsRequest : httpRequest)({
           host,
           port,
           path: `${url.pathname}${url.search}`,
           method,
           headers: outgoing,
-          ...(this.proxy
-            ? // Through the proxy to the pinned address, TLS over the tunnel for https; the
-              // request's own timers and signal bound the proxy's part too. No agent: the
-              // connection is this one's.
-              { createConnection: this.tunnel(this.proxy, address, port, https && secure, signal) }
-            : {
-                agent: false,
-                // The address pinned for this request, whatever the resolver would say now.
-                lookup: (_name, opts, callback) => {
-                  if ((opts as { all?: boolean }).all) {
-                    (callback as (e: null, a: { address: string; family: number }[]) => void)(
-                      null,
-                      [{ address, family }],
-                    );
-                  } else {
-                    (callback as (e: null, a: string, f: number) => void)(null, address, family);
-                  }
-                },
-                ...(https ? secure : {}),
-              }),
+          agent,
         });
+      let request: ClientRequest;
+      try {
+        request = make();
       } catch (error) {
         // What check() let through and Node still refuses: a refusal like any other.
         fail(new Refused((error as Error).message));
@@ -1032,6 +1014,7 @@ export class Network {
       let timer: NodeJS.Timeout;
       const overall = setTimeout(() => stop(new Refused("it took too long")), deadline);
       let finished = false;
+      let retried = false;
       /** What else a stop takes down: a decompressor. */
       const stopping: (() => void)[] = [];
       const stop = (error: Refused) => {
@@ -1055,11 +1038,106 @@ export class Network {
       const abort = () => stop(new Refused("aborted"));
       signal.addEventListener("abort", abort, { once: true });
       arm();
-      // A proxy's refusal comes as it was made, with its cause.
-      request.on("error", (error) =>
-        stop(error instanceof Refused ? error : new Refused(error.message)),
-      );
-      request.on("response", (response: IncomingMessage) => {
+      /**
+       * The connection back to the pool once its response has been read to
+       * its end, which one no one reads is too where it is small, a
+       * redirect's or a 304's, so that the next request may have it; any
+       * other closed. The request's timers and abort hold until then: an
+       * abort while it drains refuses it as before.
+       */
+      let releasing = false;
+      const release = (response: IncomingMessage, then: () => void) => {
+        if (releasing) {
+          return;
+        }
+
+        releasing = true;
+        if (response.complete) {
+          then();
+          return;
+        }
+
+        if (Number(response.headers["content-length"]) > this.limits.drainBytes) {
+          request.destroy();
+          then();
+          return;
+        }
+
+        // Answered once it has been read, so that a redirect's next hop finds it free; a
+        // body chunked past the bound, or slow, closes it instead.
+        const draining = request;
+        let settled = false;
+        let drained = 0;
+        const settle = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(late);
+            then();
+          }
+        };
+        const late = setTimeout(() => {
+          draining.destroy();
+          settle();
+        }, this.limits.drainTime);
+        response.on("data", (chunk: Buffer) => {
+          drained += chunk.length;
+          // What has come whole leaves the connection clean, however long.
+          if (drained > this.limits.drainBytes && !response.complete) {
+            draining.destroy();
+            settle();
+            return;
+          }
+
+          arm();
+        });
+        response.on("end", settle);
+        response.on("close", settle);
+        response.on("error", () => {});
+      };
+      let reused = false;
+      const wire = (current: ClientRequest) => {
+        let answered = false;
+        current.on("socket", (socket) => {
+          if (current === request) {
+            reused = this.pool.serves(socket);
+          }
+        });
+        current.on("error", (error) => {
+          if (current !== request) {
+            return;
+          }
+
+          if (
+            !answered &&
+            !retried &&
+            !finished &&
+            method === "GET" &&
+            reused &&
+            ((error as NodeJS.ErrnoException).code === "ECONNRESET" ||
+              (error as NodeJS.ErrnoException).code === "EPIPE")
+          ) {
+            retried = true;
+            try {
+              request = make();
+            } catch (again) {
+              stop(new Refused((again as Error).message));
+              return;
+            }
+
+            wire(request);
+            return;
+          }
+
+          // A proxy's refusal comes as it was made, with its cause.
+          stop(error instanceof Refused ? error : new Refused(error.message));
+        });
+        current.on("response", (response: IncomingMessage) => {
+          answered = true;
+          respond(response);
+        });
+        current.end(body ?? undefined);
+      };
+      const respond = (response: IncomingMessage) => {
         const status = response.statusCode ?? 0;
         const received: [string, string][] = [];
         const raw = response.rawHeaders;
@@ -1073,12 +1151,15 @@ export class Network {
         const wanted = (status >= 200 && status < 300) || (!!options.errorBody && status >= 400);
         const end = (bytes: Uint8Array | null) => {
           if (!finished) {
-            finished = true;
-            clearTimeout(timer);
-            clearTimeout(overall);
-            signal.removeEventListener("abort", abort);
-            request.destroy();
-            answer({ bytes, status, headers: received });
+            release(response, () => {
+              if (!finished) {
+                finished = true;
+                clearTimeout(timer);
+                clearTimeout(overall);
+                signal.removeEventListener("abort", abort);
+                answer({ bytes, status, headers: received, ...(reused ? { reused: true } : {}) });
+              }
+            });
           }
         };
         if (!wanted || !options.read) {
@@ -1194,8 +1275,8 @@ export class Network {
 
         response.on("error", (error) => stop(new Refused(error.message)));
         response.on("aborted", () => stop(new Refused("the response broke off")));
-      });
-      request.end(body ?? undefined);
+      };
+      wire(request);
     });
   }
 }

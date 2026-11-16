@@ -22,7 +22,8 @@ function shown(url: string): string {
 
 /**
  * A request answered: its method, URL, status, body's size and how long it
- * took, and where the HTTP cache answered it, fresh or after a 304.
+ * took, where the HTTP cache answered it, fresh or after a 304, and
+ * whether its connection was one kept from an earlier request.
  */
 export function requestLine(
   method: string,
@@ -31,6 +32,7 @@ export function requestLine(
   bytes: number | null,
   ms: number,
   cache?: "hit" | "revalidated",
+  reused?: boolean,
 ): string {
   const body = bytes === null ? "no body" : size(bytes);
   let from = "";
@@ -43,7 +45,8 @@ export function requestLine(
       break;
   }
 
-  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}`;
+  const connection = reused ? " reused" : "";
+  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}${connection}`;
 }
 
 /** A request that got no answer: refused, failed or aborted, and why. */
