@@ -19,6 +19,7 @@
     "tests/**/*.ts",
     "apps/desktop/*.ts",
     "apps/desktop/src/main/http-cache-semantics.d.ts",
+    "apps/desktop/src/main/ws.d.ts",
     "apps/site/*.ts",
     "oracle/*.ts",
     "tools/**/*.ts",

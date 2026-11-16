@@ -48,7 +48,7 @@ to profile one in node or open it elsewhere. The draft comparison branch
 redrawn graphics and a Pixel Bender fill at three loads each, and
 `stage3d`, played at 60 frames a second on the GPU through the browser
 build's element, with frame times and memory; startup; and Flash
-Player's projectors under Wine. The 0.1.24 numbers below were taken with
+Player's projectors under Wine. The 0.1.25 numbers below were taken with
 it.
 
 ### The player in Chrome
@@ -87,6 +87,26 @@ draws on the machine's GPU (on a machine with two,
 `--counts` adds the GL calls a frame, `--allocs` the KB allocated,
 `--checkout DIR` plays another built checkout on the same SWF, and
 `--write-swf FILE` writes the SWF for another player.
+
+`--swf FILE` plays a SWF of one's own instead, in real time as the web
+element plays it: on each animation frame the player advances by the time
+passed, streamed sound and all, and draws what changed, with the samples
+the element takes for the quality, at `--resolution R` canvas pixels a
+stage pixel (a device pixel ratio). It plays `--frames N` of the SWF's
+frames, all by default, and lists the animation frames whose work took
+longer than one of the SWF's frames (`--spike MS`), the worst `--top N`,
+each with what the renderer did in it: programs linked and the ms Chrome
+waited for them, programs drawn with for the first time, buffers made
+and copied, textures uploaded, filter passes, layers composited and morph shapes blended for a
+new ratio. `--cpu-profile FILE` samples the whole play and names the
+functions each listed frame spent its time in. It reports too how long
+the first frame took and how many programs the renderer linked before
+it. Keep SWFs that may not be shared out of the repository: the file is
+only an argument.
+
+    node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
+      [--gpu] [--cpu-profile FILE] [--checkout DIR] [--json]
+
 `tests/player/draw-counts.ts` holds the GL calls a frame to
 `draw-counts.json`, which may only go down.
 
@@ -177,6 +197,19 @@ page's side.
     node tests/desktop/relay-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
         [--burst N]   the messages a server writes a turn, 40 by default
         [--busy MS]   the main process held MS ms of every 2 MS, as by its other work
+
+`tests/desktop/keepalive-bench.ts` has servers in a process of their own,
+http and https on loopback (the certificate made with openssl, https
+skipped without), answer 1 KB to each of 200 GETs, one after another and
+then all at once, made by `network.ts` in node as a SWF's URLLoaders make
+them, and counts the connections the servers took. Loopback has no round
+trip to speak of, so what a connection saves there is the main process's
+own work, TLS's handshake above all; over a real network each also saves
+its round trips.
+
+    node tests/desktop/keepalive-bench.ts [runs]                             this checkout
+    node tests/desktop/keepalive-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
+        [--loads N]   the loads of each kind, 200 by default
 
 ## AVM1 startup and scene changes
 
@@ -614,9 +647,9 @@ Measured on one laptop (Intel Core i9-13900H; Intel Iris Xe and an
 NVIDIA RTX 4060 Laptop GPU), Node 24 and Chrome, one benchmark at a time.
 They are for comparing changes on this machine, not across machines.
 
-### 0.1.24 against 0.1.23
+### 0.1.25 against 0.1.24
 
-2026-11-15, the CDN build of each release swapped into the comparison
+2026-11-16, the CDN build of each release swapped into the comparison
 branch's `players.ts --only swf2es drawing stage3d pixels startup-hello
 startup-as3pb` (three rounds on Intel, two on NVIDIA, old and new in
 turn), then `bench.ts` four rounds each in alternating order. Medians,
@@ -625,62 +658,63 @@ with ranges.
 Every drawing and Stage3D level holds 60 fps with a 17 ms median frame in
 both versions, except:
 
-| Level | GPU | 0.1.23 fps | 0.1.24 fps |
+| Level | GPU | 0.1.24 fps | 0.1.25 fps |
 |---|---|---|---|
-| vectors-8000 | Intel | 57.1 (57.0–57.1) | 57.1 (56.8–57.3) |
-| filters-100 | Intel | 59.0 (58.9–60.0) | 58.6 (58.3–60.0) |
-| filters-400 | Intel | 55.6 (55.5–60.0) | 54.3 (53.7–60.1) |
-| text-800 | Intel | 59.2 (59.0–60.0) | 59.2 (59.0–59.4) |
-| text-800 | NVIDIA | 58.6 (58.4–58.8) | 57.5 (57.0–58.0) |
-| stage3d-8000 | Intel | 48.6 (48.4–49.6) | 49.2 (47.9–52.2) |
-| stage3d-20000 | Intel | 33.9 (31.9–35.7) | 33.2 (32.2–33.3) |
+| vectors-8000 | Intel | 56.8 (56.6–56.8) | 56.6 (56.3–56.7) |
+| filters-100 | Intel | 59.8 (56.8–60.1) | 60.0 (60.0–60.0) |
+| filters-400 | Intel | 54.7 (53.0–55.3) | 57.0 (55.9–60.0) |
+| text-800 | Intel | 59.2 (59.2–59.2) | 59.2 (59.2–59.2) |
+| text-800 | NVIDIA | 57.7 (57.6–57.8) | 58.5 (58.4–58.6) |
+| stage3d-8000 | Intel | 59.9 (46.8–60.0) | 48.1 (47.2–48.7) |
+| stage3d-20000 | Intel | 34.2 (31.4–34.5) | 33.2 (32.2–35.1) |
 
-Intel's filters levels flip between about 55 and 60 fps from run to run
-in every version (the frame-pairing rule). NVIDIA's text-800 is a frame a
-second lower on two runs each, its ranges apart; Intel's text bench below
-is level, so it is watched rather than called a regression. Memory, which
-these runs also record, moves both ways by tens of percent with the
-collector's timing and is left out.
+stage3d-8000 on Intel is 47 to 52 fps in every run of either version but
+two of 0.1.24's here, which fell on the frame-pairing rule's other side
+as filters-400 does, so it is no change. NVIDIA's text-800, a frame a
+second lower in 0.1.24's comparison, is back.
 
 `pixels` on Intel, ms:
 
-| Section | 0.1.23 | 0.1.24 |
+| Section | 0.1.24 | 0.1.25 |
 |---|---|---|
-| setPixels-opaque | 17 (17–21) | 17 (17–19) |
-| setPixels-little-opaque | 16 (15–16) | 14 (14–15) |
-| setPixels-transparent | 34 (34–34) | 34 (34–34) |
-| setVector-opaque | 37 (37–38) | 36 (36–37) |
-| setVector-transparent | 90 (90–90) | 89 (89–90) |
-| getPixels-transparent | 90 (89–93) | 90 (90–90) |
-| getVector-transparent | 95 (94–96) | 94 (94–97) |
-| total | 378 (377–388) | 374 (374–382) |
+| setPixels-opaque | 18 (17–20) | 17 (17–31) |
+| setPixels-little-opaque | 15 (15–27) | 15 (15–22) |
+| setPixels-transparent | 35 (35–41) | 35 (35–36) |
+| setVector-opaque | 45 (42–59) | 37 (36–41) |
+| setVector-transparent | 92 (90–100) | 90 (89–93) |
+| getPixels-transparent | 89 (88–89) | 90 (88–90) |
+| getVector-transparent | 94 (93–97) | 96 (93–97) |
+| total | 397 (385–419) | 380 (380–403) |
+
+setVector-opaque is #1020's.
 
 Startup in Chrome, ms (Intel; cold in a new profile with the player's
 code fetched, warm in the same page):
 
-| SWF | | 0.1.23 | 0.1.24 |
+| SWF | | 0.1.24 | 0.1.25 |
 |---|---|---|---|
-| hello | cold | 334 (326–340) | 341 (339–344) |
-| | warm | 90 (89–95) | 92 (89–94) |
-| as3pb | cold | 480 (467–486) | 469 (458–472) |
-| | warm | 154 (151–164) | 161 (159–163) |
+| hello | cold | 344 (330–357) | 357 (357–359) |
+| | warm | 95 (90–97) | 96 (90–97) |
+| as3pb | cold | 474 (466–490) | 460 (459–485) |
+| | warm | 156 (156–167) | 154 (152–157) |
 
-The browser build's fetched files are 2,624 KB (791 KB in brotli), 11 KB
-(5 KB) more than 0.1.23's: native menus and the unmute prompt.
+The browser build's fetched files are 2,625 KB (791 KB in brotli), 1 KB
+more than 0.1.24's.
 
 `tests/player/bench.ts`, frame medians in ms:
 
-| Scene | | 0.1.23 | 0.1.24 |
+| Scene | | 0.1.24 | 0.1.25 |
 |---|---|---|---|
-| `--town 200 --gpu`, Intel | frame | 28.76 (24.87–30.26) | 25.87 (24.26–28.31) |
-| | tick | 4.41 (3.48–4.78) | 3.54 (3.03–3.88) |
-| | draw | 8.80 (7.86–9.68) | 8.28 (7.26–8.70) |
-| | gl | 14.18 (14.00–14.46) | 14.07 (13.89–14.25) |
-| 2,000 shapes, SwiftShader | frame | 14.84 (14.82–14.96) | 14.82 (14.77–14.85) |
-| `--text 600 --gpu`, Intel | frame | 5.54 (4.82–5.91) | 5.65 (5.28–5.75) |
+| `--town 200 --gpu`, Intel | frame | 25.89 (23.76–28.58) | 25.67 (23.14–27.44) |
+| | tick | 3.67 (3.22–4.16) | 3.64 (3.08–4.30) |
+| | draw | 8.15 (7.19–9.01) | 7.82 (7.11–8.94) |
+| | gl | 13.94 (13.50–14.51) | 13.91 (13.27–14.23) |
+| 2,000 shapes, SwiftShader | frame | 14.91 (14.89–15.01) | 15.03 (14.98–15.09) |
+| `--text 600 --gpu`, Intel | frame | 5.54 (4.62–5.80) | 5.76 (5.60–6.11) |
 
-The town's frame is about 10% shorter and its tick about 20%; the rest is
-within noise.
+Within noise, though the text bench's new build has come out a little
+slower two releases running (5.54 to 5.65 ms, then 5.54 to 5.76), its
+ranges overlapping each time: it is watched.
 
 ### The walks, 2026-11-14
 
@@ -854,6 +888,12 @@ The desktop app:
   1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
   2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
   15,790 and 2,623 → 5,852.
+- #1023: keep-alive connections, a pool keyed by scheme, name, pinned address,
+  port, route and certificate checking (`tests/desktop/keepalive-bench.ts`,
+  200 loads of 1 KB from one loopback server, medians of 6): http one by
+  one 74.1 → 47.6 ms, all at once 43.6 → 25.1 ms; https one by one 334.3
+  → 39.6 ms, all at once 228.4 → 28.9 ms. Connections: 200 → 1 one by
+  one, 200 → 6 all at once, a key's limit.
 
 The renderer's are described in [renderer.md](renderer.md).
 

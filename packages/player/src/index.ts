@@ -51,6 +51,7 @@ export type {
   SocketOptions,
   SocketTransport,
   WebSocketEvents,
+  WebSocketFailure,
   WebSocketHost,
   WebSocketTransport,
   WindowBounds,

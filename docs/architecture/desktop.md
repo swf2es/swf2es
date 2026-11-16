@@ -19,6 +19,7 @@ Nothing is loaded from `file:`. One privileged scheme, `swf2es:`,
 standard and secure, so fetch, CORS, IndexedDB and localStorage treat it
 as https, has two hosts. `swf2es://app/` is the page,
 `static/index.html` and its stylesheet, the renderer's build,
+`/shared/` for what it shares with the main process (`src/shared`),
 `/modules/<package>/` for the packages' builds, which the page's import
 map names as
 `tests/player/serve.ts`'s does, and `/libraries/playerglobal.abc`, read
@@ -196,7 +197,51 @@ policy file fetched from the same one (Node's `lookup` pinned, the name
 kept for TLS's server name and the Host header), so DNS that changes its
 answer between the policy and the request, rebinding, gains nothing:
 same-origin by name, a request now at 127.0.0.1 is judged as one to this
-machine. Every redirect is judged as a request of its own, a POST
+machine.
+
+Connections are kept alive between requests (`src/main/http-pool.ts`),
+HTTP/1.1 only, as a browser keeps them, but a request is given a kept
+connection only where it would have opened exactly that one: one of the
+same key, which is the scheme, the host's name (TLS's server name and the
+certificate it is checked against), the address the request pinned that
+name to, the port, the route (`direct`, or the proxy by its kind, host and
+port, never its credentials) and, for https, whether the host's
+certificate goes unchecked under `--ignore-certificate-errors`; the
+authorities are the network's own, one set for all. So the pool keeps the
+rebinding protection whole: a name pinned to another address, as DNS that
+changes its answer gives it, gets a connection to that address, judged
+there, and never one kept to the address before; a host whose certificate
+goes unchecked shares no connection with one checked, nor with another
+host; and a tunnel, which is to one target, serves only that target. Each
+key is a Node Agent of its own (`keepAlive`), whose connections reach the
+pinned address whatever the resolver says now, through a `lookup` that
+answers with it, or through a tunnel to it; Node's Agent can keep that
+pin, since its options override each request's, so no pool of the app's
+own was needed. A key keeps six connections at most, idle, in use or,
+through a proxy, a tunnel still being made (which Node's Agent does not
+count until it is made, so the pool counts it), as browsers keep to a
+host. A request queued behind six busy connections to one host waits
+for one to come free, its own timeout counting as it waits: thirty
+seconds of silence, five minutes all told. An idle one is closed after
+four seconds, or sooner where the server's `Keep-Alive` says it closes
+sooner, and no more than 64 are kept idle all told, direct and proxied. A
+connection goes back to the pool only once its response has been read
+to the end and the server meant to keep it: one whose body is not
+wanted, a redirect's, a 304's or a sendToURL's answer, is read to its end
+where it is small (64 KB, two seconds), so that a redirect's next hop
+reuses it, the request's timers and abort holding until it has been, and
+closed otherwise, as is any connection of a request that
+fails, times out or is aborted, so that none comes back with half a
+response on it. A connection the server closes while idle leaves the pool
+(Node's Agent drops it); a GET whose kept connection the server closed
+just as it was reused, before any answer, is sent once more on another,
+as browsers do, and a POST's failure is the SWF's. Every connection,
+idle, in use or a tunnel still being made, is closed as the page goes,
+reloads or opens another movie, and as the app quits: the pool keeps
+each one it opened until it closes, whichever agent holds it. `--log-network` ends the line of a request
+answered over a kept connection in `reused`.
+
+Every redirect is judged as a request of its own, a POST
 redirected by a 301, 302 or 303 going on as a GET without its body, to
 http or https only and ten at most. HTTPS is verified against Node's
 roots and the system's. A response is read up to 128 MB, and a movie's
@@ -328,7 +373,9 @@ opens the file and checks its size against the row's, and a file gone or
 of another size is a miss and its row dropped; each start sweeps away,
 beside the writes rather than before them, and a page of 512 names or
 rows at a time, temporary files, files no row names and rows whose file
-is gone or of another size, dropping a row only as it read it. So a
+is gone or of another size, dropping a row only as it read it, from a
+listing it takes before the first write begins: a temporary file it
+finds is a crash's, never one of a write under way. So a
 crash leaves no row pointing at half a file. Past the budget, 512 MB of
 charges, or past 50,000 entries, the least recently served go first, by
 their index, the charges' total and the count kept in memory rather than
@@ -366,11 +413,13 @@ first, which would otherwise play what it names past the proxy it asked
 for.
 
 Each path keeps what it judged and only changes how it connects.
-`network.ts`'s requests and URL policy files give Node's request a
-`createConnection` that makes the tunnel and, for https, TLS over it with
-the same server name, authorities and `--ignore-certificate-errors`
-hosts; the socket policies (port 843, and the others) go through the same
-tunnel. The address rules above still resolve the host on this machine
+`network.ts`'s requests and URL policy files go through an Agent of the
+pool whose `createConnection` makes the tunnel and, for https, TLS over
+it with the same server name, authorities and `--ignore-certificate-errors`
+hosts; a tunnel kept alive serves only requests to its own target, by the
+key above, and one still being made is given up as the page goes. The
+socket policies (port 843, and the others) go through tunnels of their
+own, never kept. The address rules above still resolve the host on this machine
 and place that address, and the proxy is then asked for that address,
 never the name: a proxy's DNS that answers otherwise, or rebinding
 between the two, reaches nothing the judgement did not, and the policy
@@ -380,11 +429,10 @@ proxy resolves is not reached. Where no rule judges an address, a local
 SWF's sockets and an AIR application's sockets and WebSockets, the
 proxy is asked for the name, and resolves it itself. A socket
 (`connections.ts`) is opened once the tunnel is, its peer reported as
-the target; one closed before is closed. A WebSocket goes through an
-undici Agent, of the class the global dispatcher has, whose `connect`
-makes the tunnel and the TLS, passed as the dispatcher, as
-`--ignore-certificate-errors` passes its own; where none can be made, no
-WebSocket opens.
+the target; one closed before is closed. A WebSocket's connection is
+the tunnel, made by the `createConnection` ws is given, with TLS over it
+for `wss:`, its certificate checked as without the proxy
+([WebSockets](#websockets)).
 
 The proxy's own address is not judged: it is the user's. Anything a SWF
 names is judged as before, the proxy's host and port as a target among
@@ -438,7 +486,9 @@ and in the main menu's key equivalents on macOS. A SWF that does nothing
 with F11 leaves it to the menu. One that acts on the key's `keyUp`
 instead is not covered: the menu has taken the key by then.
 ExternalInterface is off (`allowscriptaccess="never"`): a SWF's calls
-into the page would run beside the API.
+into the page would run beside the API. No embedding the command line
+names changes that ([The embedding](#the-embedding)), and the page never
+sets that attribute from one.
 
 ## Files, settings and libraries
 
@@ -469,6 +519,56 @@ word. ActionScript 3 plays on the builtin.abc and playerglobal the player
 ships; a playerglobal.abc the user chooses, such as Flash Player's, takes
 the place of swf2es's own, and choosing one reloads the page, which
 fetches it once.
+
+## The embedding
+
+A SWF made for a page reads what its `<object>` or `<embed>` gave Flash,
+and the command line gives the same (`src/main/embedding.ts`):
+`--flashvars` and `--param name=value`, each taking its value after `=`
+or as the next argument, read from the app's arguments before an AIR
+application's `--`, and set aside before the movie or a descriptor is
+looked for among the rest, so that a value ending in `.swf` or `.xml` is
+neither. A value as the next argument may not start with `-`: the other
+switches (`--proxy`, `--trace`, `--ignore-certificate-errors`) look at
+every argument, and would take it for theirs too; the docs write the `=`
+form. The parameters are the element's, by the same names and with the
+same meaning, since the page plays the SWF with the element: nine of them,
+listed once in `src/shared/embedding.ts`, which the main process reads
+the command line by and the page sets attributes by, so a name the main
+process let through by mistake still never reaches the element. The main
+process sends them with the movie (`OpenedMovie.params`), and the page
+sets them on its `<swf2es-player>` as attributes before it loads the SWF,
+taking off the last movie's. So the page's own Scripting and Avm1 options
+follow from them as in any page: `flashvars` as `loaderInfo.parameters`
+and an AVM1 root's variables, after the SWF URL's own query, which the
+player merges as Flash did; `quality`, `scale` and `salign` as the stage's;
+`bgcolor` and `wmode` as the background drawn behind the stage, or none;
+`menu` as the context menu's; and `allowNetworking` taking away what
+Flash's did. Those that would widen
+what the page lets a SWF do are refused, with a word on stderr:
+`allowScriptAccess`, as ExternalInterface stays off ([What the page may
+do](#what-the-page-may-do)), and `allowFullScreen` and
+`allowFullScreenInteractive`, as a SWF's full screen is the window's here
+anyway. `base` is an http or https URL or a relative one, resolved against
+the SWF's URL, which stands in for the page it has not; for a local SWF a
+relative one must come to its own directory or below, where alone its
+relative loads could be read, and an absolute one other than http or
+https is left out. A relative load it resolves is a request like any
+other, judged by the SWF's sandbox, the file host's grant and Flash's
+policy files, so it reaches nothing the SWF could not name itself.
+
+What the command line leaves out is said once, on the stderr of the start
+it was given to, as that start reads it (`settleEmbedding`): a second
+start says its own and quits, and the app already open plays the movie
+with what is left, silently, as it does again for each Reload Movie.
+
+The embedding goes with the movie the command line names: a second
+start's, which Electron would hand over reordered, a switch apart from its
+value, comes as the second start's own arguments in the single-instance
+lock's data; View › Reload Movie opens it again with it, and a reload of
+the page gets it with the movie from `start`. What the menus, a drop or
+the recent list open has none, and the settings keep none. An AIR
+application has no page, and gets none, which its start says.
 
 ## Sockets
 
@@ -564,37 +664,83 @@ and by the session's `webRequest`. Neither is loosened: the element
 takes the shell's host through `configure({ webSockets })`
 (`src/renderer/websockets.ts`), and each connection is an id the preload
 numbers, which the main process opens (`src/main/websockets.ts`,
-`websocket-connections.ts`) with the WHATWG `WebSocket` of Electron's
-Node, undici's, relaying its events over IPC: `open` with the
-subprotocol the server chose, `message` with a string for a text message
-and bytes for a binary one, `close` with its code and `error`. Only an
-AIR application has them (`sandbox.application`), to any `ws:` or `wss:`
-URL and unasked, as AIR's application sandbox connects and as its
-sockets do here; for anything else the connection is refused with a
-word on stderr, and a refusal is an error and then a close with 1006, as
-a server that took no connection. The client is a browser's: it sends
-the close codes 1000 and 3000 to 4999, any other closing with none,
-answers pings itself and sends no ping or pong of the application's, and
-fails a connection whose server chose none of the subprotocols offered.
+`websocket-connections.ts`) with [ws](https://github.com/websockets/ws),
+a dependency of the app's alone (without its optional native modules),
+pinned at 8.22.1, relaying its events over IPC: `open` with the subprotocol the server
+chose, `message` with its bytes and whether it is text, `close` with its
+code, `error` with how it failed where that is known, and `certificate`
+for a self-signed certificate. Only an AIR application has them
+(`sandbox.application`), to any `ws:` or `wss:` URL and unasked, as AIR's
+application sandbox connects and as its sockets do here; for anything
+else the connection is refused with a word on stderr, and a refusal is
+an error and then a close with 1006, as a server that took no
+connection.
 
-`--ignore-certificate-errors` holds for `wss:` as for https. The WHATWG
-WebSocket has no option for it, and Node exports none of undici's
-classes, so the connection to a host the switch names is given, in the
-options undici's constructor takes in the protocols' place, a dispatcher
-made from the class of the one undici keeps for everything else
-(`Symbol.for("undici.globalDispatcher.1")`), with `rejectUnauthorized`
-off; every other connection is the global's as it is. Where a Node gave
-no such dispatcher the app would say so at its start and verify every
-certificate; the unit test fails if node's does not.
+The page sends frames, not messages (`websocket:frame`: an opcode and its
+payload), so the host has WebSocketTransport's `frame` and the client
+sends what AIR sends, as adl was seen to: text with its bytes as they
+are, a leading BOM or bytes that are no UTF-8 among them; binary; pings
+and pongs with their payloads; and a close frame with the SWF's code and
+reason, any code RFC 6455 lets a frame carry (1001 and 1011 too), one it
+does not closing with none, a reason past 123 bytes left out. ws refuses
+a ping or pong past 125 bytes, which is not sent, and has no way to send
+a reserved opcode, which is dropped. What comes is as adl keeps it: a
+text message's bytes unchecked and with its BOM, a server's ping answered
+with its payload and, like a pong, not told to the page. The request is
+adl's too: no extension offered, no Origin, the subprotocols joined by
+", ", and whatever the server chose taken, one offered or not, or none,
+but for one not offered when some were, which fails as in adl. A URL
+with credentials (`ws://user:pass@host/`) is refused, with a word on
+stderr: ws would send them as `Authorization: Basic`, and adl takes what
+comes before the `:` for its host and connects nowhere, so no credentials
+go anywhere.
 
-A page holds at most 64 at once, and one with more than 16 MB its peer
-has not read fails. Its events reach the page gathered, as its sockets'
-do ([Sockets](#sockets)). A page's WebSockets close, silently, as it navigates
-or reloads, and with it: the client has no way to drop a connection, so
-each is sent a close frame, and is gone once its server answers.
-`--log-network` says each connection asked for, opened, refused, failed
-and closed, and `--log-sockets` each message, a text one as its text
-(`src/main/netlog.ts`).
+The connection is ws's `createConnection`, ours. Without the proxy, the
+host is resolved here once and the connection made to its first address,
+refused, with why on stderr, for none or for one no request reaches
+(addresses.ts), as an application's HTTP requests are; each connection
+resolves again, so a name that rebinds gets a connection of its own to
+an address checked in turn, and nothing it did not place. Through the
+proxy, the tunnel is to the name, for the proxy to resolve, as an AIR
+application's sockets are ([Through a proxy](#through-a-proxy)). For
+`wss:`, TLS goes over that connection with the URL's host as the server
+name, its certificate checked against that name, not the address, by the
+system's roots beside Node's, as the network checks https. A host that
+`--ignore-certificate-errors` names goes unchecked. A self-signed
+certificate otherwise is the application's to accept, as in AIR: the page
+dispatches a certificateError, and only a listener that prevents its
+default lets the connection go on (`websocket:certificate`), a page that
+does not answer within 30 s refusing it. Only OpenSSL's
+`DEPTH_ZERO_SELF_SIGNED_CERT` is asked about: a certificate signed by
+itself and otherwise sound for the chain, whatever name it carries. Any
+other fault fails the connection unasked, as adl fails a certificate
+signed by a CA it does not trust; an expired self-signed one among them,
+which adl asks about as self-signed but OpenSSL reports as
+`CERT_HAS_EXPIRED`, so it fails closed here. A failure before the server was reached is told as such,
+one after, a refused handshake, as `handshake`, and a subprotocol not
+offered as `subprotocol`, which the natives dispatch as adl does.
+
+A connection is made within 30 s, its lookup, tunnel and TLS included,
+until ws takes it (the clock stops while the page is asked about a
+certificate), and its handshake within 30 s after; a later one fails as a
+server not there, with a word on stderr. A page holds at most 64 at
+once. One with more than 16 MB its peer has not read fails, whether what
+waits is what the application sent, a message that would take what is
+unsent past 16 MB, a single message larger than that among them, or the
+pongs a server's pings ask for. ws 8.22.1 would answer those without
+bound, the flood 8.23.0 fixed, so the app answers them itself
+(`autoPong: false`); once ws 8.23.0 or later is two weeks old, after
+2026-11-26, the pin moves to it and ws may answer them again. A message
+coming that is larger than 32 MB fails the connection, ws closing it
+with 1009: adl took messages of 20 MB, which this leaves room above,
+while bounding what one connection holds as a message comes. Its events reach the page gathered, as its sockets' do
+([Sockets](#sockets)). A page's WebSockets drop, silently, as it
+navigates or reloads, and with it, without a close frame, as AIR's go as
+it exits; what is still being made, a lookup, a tunnel or a question
+about a certificate, goes with them. `--log-network` says each connection
+asked for, opened, refused, failed and closed, and each certificate
+asked about and answered, and `--log-sockets` each frame sent and message
+received, a text one as its text (`src/main/netlog.ts`).
 
 ## What draws
 
@@ -686,8 +832,12 @@ body, and fails for the remote SWF.
 `connections.test.ts` and
 `sandbox.test.ts` test the sockets' limits and reads, each copied out at
 its length, through a proxy whose reply comes with the first bytes too,
-and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, close
-codes, refusals, limits and certificates, `relay.test.ts` the events
+and the sandbox's grants in node, `websocket-connections.test.ts` the WebSockets' messages, a text one's
+bytes as they are, pings and pongs, close codes and reasons, refusals,
+refused handshakes and subprotocols, URLs with credentials, limits and
+deadlines, the address each name resolves to, rebinding included, and
+certificates, self-signed ones accepted, refused or unanswered, expired
+ones refused, `relay.test.ts` the events
 gathered for the page, the window's leading edge, the order kept, reads
 joined, a batch sent at 256 KB and dropped with the page, `addresses.test.ts` where each address is, in every form an IPv4
 address takes inside an IPv6 one, `policy.test.ts` the policy parser and
@@ -704,19 +854,41 @@ meta-policies and named policy files, redirects, this machine reached by
 address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
-limits. `tests/desktop/xvfb.ts` runs the app as a server does, in a
-window on an Xvfb with no switch of the test's for the GPU: it has no
-WebGL 2, takes no SwiftShader and says to pass `--software-gl`; then with
-`--software-gl` a SWF plays and draws on SwiftShader, which a second start
-does not claim; it skips where there
-is no Xvfb, or where the Xvfb's GL is a GPU's. `tests/desktop/stage3d.ts`
-drives the native View menu through the main process's test-only inspector:
-Stage3D on for a fresh profile and for the
+limits; `http-pool.test.ts` the kept connections against servers that
+count the connections they take: one for two requests, one of its own for
+a name pinned to another address (127.0.0.2, then 127.0.0.3), for a host
+whose certificate goes unchecked and for a tunnel to another target, the
+idle time and the bound on idle ones, a key's limit direct and through a
+proxy, the drain's bounds, and aborts, servers that close a kept one and
+a page that goes, with tunnels in use and being made. `tests/desktop/keepalive-bench.ts` times many small loads
+over http and https, one checkout or two (docs/benchmarks.md).
+`tests/desktop/xvfb.ts` runs the app as a server does, in a window on an
+Xvfb with no switch of the test's for the GPU: it has no WebGL 2, takes no
+SwiftShader and says to pass `--software-gl`; then with `--software-gl` a
+SWF plays and draws on SwiftShader, which a second start does not claim; it
+skips where there is no Xvfb, or where the Xvfb's GL is a GPU's.
+`tests/desktop/stage3d.ts` drives the native View menu through the main
+process's test-only inspector: Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context
 loss/restoration, repeated movie reloads and close. It shares the isolated
 display and process harness in `tests/desktop/app.ts` with the ordinary smoke
-test. `settings.test.ts` covers the default, the stored choice and its persistence. CI's `desktop`
+test. `settings.test.ts` covers the default, the stored choice and its persistence.
+`embedding.test.ts` reads `--flashvars` and `--param` in both forms, refuses
+what changes nothing here and values apart that start with `-`, keeps
+their values from being taken for the movie or a descriptor, lets no name
+but the nine reach the element, from the command line or in the page's
+own filter, settles `base` (http, https, or relative and, for a local
+SWF, below its directory) and resolves it, takes a second start's
+arguments as it sent them or Electron's, and has the launcher keep the
+switches' values rather than make them paths; `tests/desktop/params.ts`
+plays an AS3 SWF given them, which traces its parameters, its stage's
+quality, scale mode and alignment and the file `base` makes a relative
+URL read, the same SWF dropped on the window with none of them, then an
+AVM1 SWF a second start names by its URL with a query and FlashVars of
+its own, as its root's variables, again by View › Reload Movie, and a SWF
+by its URL alone, with its query and none of the last's, again as the
+page reloads. CI's `desktop`
 workflow fetches Electron and runs them.
 
 Not done yet: packaging and installers, `SecureSocket`, Flash's Settings

@@ -102,6 +102,12 @@ export interface OpenedMovie {
   sandbox: SandboxType;
   /** For an AIR application opened by its descriptor: its launch, which plays it as AIR's. */
   air?: AirLaunch;
+  /**
+   * What the command line gave it as a page's <object> or <embed> would
+   * (--flashvars, --param): the element's attributes by their lower-case
+   * names, flashvars, quality, scale and the rest, `base` an absolute URL.
+   */
+  params?: Readonly<Record<string, string>>;
 }
 
 /** The libraries' paths on disk, null for one the shell has not found. */
@@ -153,20 +159,30 @@ export interface DesktopSockets {
   onEvents(listener: (events: ConnectionEvents<SocketEvent>) => void): void;
 }
 
-/** What befalls a WebSocket, as player's WebSocketEvents has it. */
+/**
+ * What befalls a WebSocket, as player's WebSocketEvents has it: a message's
+ * bytes, a text one's as they came, "certificate" for a self-signed
+ * certificate the page is asked to accept (DesktopWebSockets.certificate).
+ */
 export type WebSocketEvent =
   | { type: "open"; protocol: string }
-  | { type: "message"; data: string | Uint8Array }
+  | { type: "message"; data: Uint8Array; text: boolean }
   | { type: "close"; code: number }
-  | { type: "error" };
+  | { type: "error"; failure?: "handshake" | "subprotocol" }
+  | { type: "certificate" };
 
 /** air.net.WebSocket's connections, opened by the shell, for an AIR application alone. */
 export interface DesktopWebSockets {
   /** A connection's id; its events follow, an "error" then a "close" if the shell refuses it. */
   connect(url: string, protocols: string[]): number;
-  /** A text message for a string, a binary one for bytes. */
-  send(id: number, data: string | Uint8Array): void;
-  close(id: number, code?: number): void;
+  /**
+   * A frame of `opcode` with `payload` as it is, as AIR sends it: text (1),
+   * binary (2), close (8) with the payload's code and reason, ping (9) and
+   * pong (10). Any frame before the connection is open ends it.
+   */
+  frame(id: number, opcode: number, payload: Uint8Array): void;
+  /** Whether the connection asked about its self-signed certificate goes on. */
+  certificate(id: number, accepted: boolean): void;
   onEvents(listener: (events: ConnectionEvents<WebSocketEvent>) => void): void;
 }
 

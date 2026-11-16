@@ -41,6 +41,17 @@ test("a line says where the HTTP cache answered, fresh or after a 304", () => {
   );
 });
 
+test("a line says where its connection was kept from an earlier request", () => {
+  assert.equal(
+    requestLine("GET", "http://h/a.swf", 200, 2048, 2, undefined, true),
+    "swf2es: net GET http://h/a.swf 200 2.0 kB 2 ms reused",
+  );
+  assert.equal(
+    requestLine("GET", "http://h/a.swf", 200, 2048, 9, "revalidated", true),
+    "swf2es: net GET http://h/a.swf 200 2.0 kB 9 ms revalidated reused",
+  );
+});
+
 test("a line carries no control characters, and no more than 2048 of a URL", () => {
   const line = requestLine("GET", `http://h/\u001b[31m\n${"a".repeat(5000)}`, 200, 1, 1);
   assert.ok([...line].every((c) => c.charCodeAt(0) >= 32));
@@ -75,16 +86,28 @@ test("a WebSocket's lines name it, and a text message is shown as its text", () 
     "swf2es: websocket #1 connecting to ws://127.0.0.1:6588/?",
   );
   assert.equal(webSocketLine(1, "close 1000"), "swf2es: websocket #1 close 1000");
+  const utf8 = (text: string) => new TextEncoder().encode(text);
   assert.equal(
-    webSocketDataLine(1, true, '{"cmd":"héllo"}\n\u001b[2J'),
+    webSocketDataLine(1, true, 1, utf8('{"cmd":"héllo"}\n\u001b[2J')),
     'swf2es: websocket #1 > text 21 B  {"cmd":"héllo"}..[2J',
   );
   assert.equal(
-    webSocketDataLine(1, false, new Uint8Array([0, 255, 16, 128, 1])),
+    webSocketDataLine(1, false, 2, new Uint8Array([0, 255, 16, 128, 1])),
     "swf2es: websocket #1 < binary 5 B  00 ff 10 80 01",
   );
-  const long = webSocketDataLine(2, false, "😀".repeat(600));
+  // A text message's bytes as they came: what is no UTF-8 shown as U+FFFD.
+  assert.equal(
+    webSocketDataLine(1, false, 1, new Uint8Array([0x66, 0xff, 0x67])),
+    "swf2es: websocket #1 < text 3 B  f\ufffdg",
+  );
+  assert.equal(webSocketDataLine(3, true, 9, utf8("hi")), "swf2es: websocket #3 > ping 2 B  hi");
+  assert.equal(
+    webSocketDataLine(3, true, 8, new Uint8Array([0x0f, 0xa1])),
+    "swf2es: websocket #3 > close 2 B  0f a1",
+  );
+  const long = webSocketDataLine(2, false, 1, utf8("😀".repeat(600)));
   assert.ok(long.startsWith("swf2es: websocket #2 < text 2400 B  😀"));
   assert.ok(long.endsWith(`${"😀".repeat(512)}…`));
-  assert.ok(!webSocketDataLine(2, true, "a".repeat(512)).endsWith("…"));
+  assert.ok(!webSocketDataLine(2, true, 1, utf8("a".repeat(512))).endsWith("…"));
+  assert.ok(webSocketDataLine(2, true, 1, utf8("a".repeat(513))).endsWith("…"));
 });

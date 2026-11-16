@@ -2429,12 +2429,13 @@ for (const [name, src, attributes, unmute] of [
         let destroyed = false;
         try {
           if (unmute === "early stage") {
-            // Two frames in, well within the wait. Whether the SWF hears the stage's press the
-            // runs above check: one this early has gone unheard.
+            // Two frames in, well within the wait: the SWF hears the press as the sound runs.
             await call(evaluate, "frames(2).then(() => true)");
             await click(left + 10, top + 10);
             const playing = await until("the stream started", (s) => s.starts.length > 0);
             assert.deepEqual(playing.starts, ["running"]);
+            const pressed = await until("the stage's press", (s) => s.traces.length > 0);
+            assert.deepEqual(pressed.traces, ["unmute: down 10 10"]);
             // Past the wait after which a sound held would have been told.
             await new Promise((done) => setTimeout(done, 1500));
             const after = await state();

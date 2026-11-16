@@ -85,7 +85,8 @@ export function buildMenu(): void {
           label: "&Reload Movie",
           accelerator: "CmdOrCtrl+R",
           enabled: !!current,
-          click: () => current && void openEntry(current.path),
+          // With the embedding it was opened with, as a page reloaded keeps its tag's.
+          click: () => current && void openEntry(current.path, current.embedding),
         },
         { role: "togglefullscreen", accelerator: "F11" },
         { type: "separator" },

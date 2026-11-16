@@ -22,7 +22,8 @@ function shown(url: string): string {
 
 /**
  * A request answered: its method, URL, status, body's size and how long it
- * took, and where the HTTP cache answered it, fresh or after a 304.
+ * took, where the HTTP cache answered it, fresh or after a 304, and
+ * whether its connection was one kept from an earlier request.
  */
 export function requestLine(
   method: string,
@@ -31,6 +32,7 @@ export function requestLine(
   bytes: number | null,
   ms: number,
   cache?: "hit" | "revalidated",
+  reused?: boolean,
 ): string {
   const body = bytes === null ? "no body" : size(bytes);
   let from = "";
@@ -43,7 +45,8 @@ export function requestLine(
       break;
   }
 
-  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}`;
+  const connection = reused ? " reused" : "";
+  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}${connection}`;
 }
 
 /** A request that got no answer: refused, failed or aborted, and why. */
@@ -100,23 +103,37 @@ export function webSocketLine(id: number, what: string): string {
   return `swf2es: websocket #${id} ${shown(what)}`;
 }
 
+/** What a WebSocket frame that is not text is called in a line, by its opcode. */
+const FRAMES: Record<number, string> = { 2: "binary", 8: "close", 9: "ping", 10: "pong" };
+
+const utf8 = new TextDecoder();
+
 /**
- * What a WebSocket sent (">") or received ("<"): a text message's size
- * in UTF-8 and its first PREVIEW characters, control characters as dots;
- * a binary one's as a socket's.
+ * What a WebSocket sent (">") or received ("<"), by its opcode: a text
+ * message's size and its first PREVIEW characters, control characters as
+ * dots; a binary one's, a ping's, a pong's and a close frame's as a
+ * socket's.
  */
-export function webSocketDataLine(id: number, sent: boolean, data: string | Uint8Array): string {
+export function webSocketDataLine(
+  id: number,
+  sent: boolean,
+  opcode: number,
+  payload: Uint8Array,
+): string {
   const head = `swf2es: websocket #${id} ${sent ? ">" : "<"}`;
-  if (typeof data !== "string") {
-    return `${head} binary ${data.length} B  ${preview(data)}`;
+  if (opcode !== 1) {
+    const kind = FRAMES[opcode] ?? `opcode ${opcode}`;
+    return `${head} ${kind} ${payload.length} B  ${preview(payload)}`;
   }
 
-  // By code point, so that no pair is cut in two.
-  const characters = Array.from(data.slice(0, PREVIEW * 2)).slice(0, PREVIEW);
+  // By code point, so that no pair is cut in two; bytes that are no UTF-8 as U+FFFD. PREVIEW
+  // characters take no more than four bytes each.
+  const decoded = Array.from(utf8.decode(payload.subarray(0, PREVIEW * 4)));
+  const characters = decoded.slice(0, PREVIEW);
   const text = characters
     .join("")
     // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what is taken out
     .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, ".");
-  const more = text.length < data.length ? "…" : "";
-  return `${head} text ${Buffer.byteLength(data)} B  ${text}${more}`;
+  const more = decoded.length > PREVIEW || payload.length > PREVIEW * 4 ? "…" : "";
+  return `${head} text ${payload.length} B  ${text}${more}`;
 }
