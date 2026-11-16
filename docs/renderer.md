@@ -153,12 +153,17 @@ whose entries go once unused for their idle frames:
 
 - **Geometries** (`geometry.ts`): fills and lines as the native module
   writes them, copied once into the atlas's vertex and index buffers
-  (`webgl/atlas.ts`), those a frame adds staged and uploaded together, a
-  hole left where one goes and the atlas packed again once the holes
-  outweigh what is live; an atlas left empty is filled again from its
-  start, in the buffers it has. An atlas that outgrows its
-  largest buffer starts again with only what is live, rather than
-  failing.
+  (`webgl/atlas.ts`, one page of them for now), those a frame adds staged
+  and uploaded together. A geometry let go of leaves holes, kept sorted
+  and merged with their neighbours (`webgl/free-ranges.ts`); what is added
+  goes at the top while it fits, so that a frame's additions lie in a row
+  and go up in one upload, then in the first hole that holds it. Only what
+  finds no room packs the atlas again, into buffers twice what is live:
+  packing it again for its holes alone copied and uploaded every
+  geometry, tens of megabytes, every few seconds of a busy SWF. An atlas
+  left empty is filled again from its start, in the buffers it has. An
+  atlas that outgrows its largest buffer starts again with only what is
+  live, rather than failing.
 - **Textures** (`textures.ts`): bitmaps, device text, gradients, their
   pixels uploaded and then let go of on the CPU
   (`webgl/gpu-textures.ts`).
