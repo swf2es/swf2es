@@ -46,12 +46,17 @@ export function setPageGone(now: boolean): void {
   pageGone = now;
 }
 
-/** Whether a message comes from the window's own page, on swf2es://app/. */
+/** Whether a message comes from the window's own page, on swf2es://app/, while it lives. */
 export function trusted(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   return (
     window !== null &&
     event.sender === window.webContents &&
+    // What a page sent before its process went may still come: a connection it asked for would
+    // be the dead page's. The next page starts with a navigation, which clears this. Its frame,
+    // gone before render-process-gone comes, would throw for its URL.
+    !pageGone &&
+    !event.sender.isCrashed() &&
     frame !== null &&
     frame.parent === null &&
     // Node's URL gives a scheme it does not know no origin: compare the text.

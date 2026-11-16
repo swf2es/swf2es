@@ -500,15 +500,21 @@ its server talking to no one, every packet an error on stderr.
 `src/main/page-end.ts` names the three, and what is the page's goes at
 each: its sockets and WebSockets, what they had gathered for it, its
 requests under way, its file grants. Nothing is sent to a page whose
-process is gone. Unless it exited cleanly, stderr says so once, `swf2es:
+process is gone, and nothing it sent before is acted on after: a
+connection it asked for would be the dead page's. Unless it exited cleanly, stderr says so once, `swf2es:
 the page stopped: <reason> (exit <code>)`, with the directory a crash
 report would be in (`crashReporter`, started with nothing uploaded, so
-a crash leaves a minidump there for the user to look at or send), and
+a crash leaves a minidump there for the user to look at or send: it
+holds what the crashed process had in memory, which may be what the SWF
+held, a login or a chat among it, so it is best read before it is sent
+to anyone), and
 a message box on the window offers Reload Movie, which opens the movie
 again as View › Reload Movie does, or Close. Nothing reloads unasked: a
-page out of memory would only go again. Reload Movie, or opening another
-movie, loads a gone page again, and the new page asks for the movie as
-any does; a page back by either closes the box.
+page out of memory would only go again. Reload Movie, opening another
+movie or closing it loads a gone page again, as does Reload Movie for a
+page that failed to load, and the new page asks for the movie as any
+does; a page back by any of them closes the box. A page that goes as the
+app quits has not stopped, and says nothing.
 
 ## Files, settings and libraries
 
@@ -899,7 +905,9 @@ WebSocket, receive from servers that keep sending: each server sees its
 connection closed within five seconds, stderr says the page stopped once
 and nothing for each packet, the app stays up, and the offer, answered
 through the inspector, or View › Reload Movie brings the movie back, the
-offer closed reloading nothing. It shares the isolated
+offer closed reloading nothing; another movie opened brings the page
+back and closes an offer left open, and Close Movie brings it back
+empty. It shares the isolated
 display and process harness in `tests/desktop/app.ts` with the ordinary smoke
 test. `settings.test.ts` covers the default, the stored choice and its persistence.
 `embedding.test.ts` reads `--flashvars` and `--param` in both forms, refuses

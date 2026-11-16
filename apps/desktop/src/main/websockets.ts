@@ -45,10 +45,10 @@ export function bridgeWebSockets(
       return known;
     }
 
-    let gone = false;
     const relay = new Relay<WebSocketEvent>((batch) => {
-      // Never to a page whose process is gone: Electron would say so for each batch.
-      if (!gone && !contents.isDestroyed()) {
+      // Never to a page whose process is gone, which its frame shows before render-process-gone
+      // comes: Electron would say so for each batch.
+      if (!contents.isDestroyed() && !contents.isCrashed()) {
         contents.send("websocket:events", batch);
       }
     });
@@ -83,7 +83,6 @@ export function bridgeWebSockets(
     onPageEnd(contents, (how) => {
       connections.closeAll();
       relay.drop();
-      gone = how !== "navigated";
       if (how === "destroyed") {
         pages.delete(contents);
       }

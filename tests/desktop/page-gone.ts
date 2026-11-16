@@ -107,33 +107,70 @@ writeFileSync(
   }),
 );
 
+// Another movie, opened while the page is gone.
+const other = `${site}other-${port}.swf`;
+writeFileSync(other, readFileSync(movie));
+
 const settings = {
   ...(process.env.SWF2ES_PLAYERGLOBAL === "adobe"
     ? { playerglobal: `${libraries}playerglobal-adobe.abc` }
     : {}),
   recent: [],
   // Allowed, as if the user had said so: a prompt cannot be answered here.
-  sockets: { [realpathSync(movie)]: [`127.0.0.1:${port}`] },
+  sockets: {
+    [realpathSync(movie)]: [`127.0.0.1:${port}`],
+    [realpathSync(other)]: [`127.0.0.1:${port}`],
+  },
 };
 
 const electron = `process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron")`;
 
 /**
  * From now on the app's message boxes are answered with the button at
- * `answer` as they show, each one's options kept in `globalThis.offered`:
- * the box itself would wait for a click no test can give it.
+ * `answer` as they show, or, for null, left open until the app closes
+ * them, each one's options kept in `globalThis.offered`: the box itself
+ * would wait for a click no test can give it.
  */
-async function answerBoxes(main: App["main"], answer: number): Promise<void> {
+async function answerBoxes(main: App["main"], answer: number | null): Promise<void> {
   await main(`(() => {
     const { dialog } = ${electron};
     globalThis.offered ??= [];
-    dialog.showMessageBox = async (_window, options) => {
-      globalThis.offered.push({ message: options.message, buttons: options.buttons });
-      return { response: ${answer}, checkboxChecked: false };
-    };
+    dialog.showMessageBox = (_window, options) => new Promise((done) => {
+      const shown = { message: options.message, buttons: options.buttons, closed: false };
+      globalThis.offered.push(shown);
+      options.signal?.addEventListener("abort", () => {
+        shown.closed = true;
+        done({ response: options.cancelId, checkboxChecked: false });
+      });
+      if (${answer} !== null) {
+        done({ response: ${answer}, checkboxChecked: false });
+      }
+    });
     return true;
   })()`);
 }
+
+/** Click the menu item `id` through the main process, failing if it is not there or disabled. */
+async function click(main: App["main"], id: string): Promise<void> {
+  await main(`(() => {
+    const item = ${electron}.Menu.getApplicationMenu().getMenuItemById(${JSON.stringify(id)});
+    if (!item || !item.enabled) throw new Error(${JSON.stringify(`${id} unavailable`)});
+    item.click();
+    return true;
+  })()`);
+}
+
+/** Whether the window shows a page that lives and has loaded, as the main process sees it. */
+const pageLives = (main: App["main"]) =>
+  main<boolean>(`(async () => {
+    const page = ${electron}.BrowserWindow.getAllWindows()[0].webContents;
+    if (page.isCrashed() || page.isLoading()) {
+      return false;
+    }
+
+    const state = page.executeJavaScript("document.readyState");
+    return (await Promise.race([state, new Promise((r) => setTimeout(r, 500))])) === "complete";
+  })()`);
 
 /** The window's renderer process crashed, as Chromium crashes one; when, by performance.now(). */
 async function crash(main: App["main"]): Promise<number> {
@@ -184,14 +221,9 @@ try {
     assert.equal(count("smoke: started"), 1, "the page reloaded unasked");
     assert.equal(tcp.held.length, 1);
     assert.deepEqual(await main("globalThis.offered"), [
-      { message: `${name} stopped.`, buttons: ["Reload Movie", "Close"] },
+      { message: `${name} stopped.`, buttons: ["Reload Movie", "Close"], closed: false },
     ]);
-    await main(`(() => {
-      const item = ${electron}.Menu.getApplicationMenu().getMenuItemById("reload-movie");
-      if (!item || !item.enabled) throw new Error("Reload Movie unavailable");
-      item.click();
-      return true;
-    })()`);
+    await click(main, "reload-movie");
     await until("the movie reloaded by the menu", () => count("smoke: started") === 2);
     await until("its socket again", () => count("smoke: socket pong") === 2);
 
@@ -205,8 +237,44 @@ try {
     assert.equal(tcp.held.length, 3);
     assert.equal(await main("globalThis.offered.length"), 2);
 
+    // Left open, the offer closes as another movie, opened by a second start, brings the page back.
+    await answerBoxes(main, null);
+    const third = await crash(main);
+    await closedSoon(app, "the third socket closed", tcp.held[2], third);
+    await until("the page stopped a third time", () => stoppedLines(stderr()).length === 3);
+    assert.equal(await app.again([other]), 0);
+    await until("the other movie", () => count("smoke: started") === 4);
+    await until("its socket", () => count("smoke: socket pong") === 4);
+    assert.ok(
+      stdout
+        .filter((l) => l.startsWith("smoke: url "))
+        .at(-1)
+        ?.endsWith(`/other-${port}.swf`),
+    );
+    assert.deepEqual(await main("globalThis.offered.map((shown) => shown.closed)"), [
+      false,
+      false,
+      true,
+    ]);
+
+    // Closing the movie brings a gone page back, empty, rather than leave the window white.
+    await answerBoxes(main, 1);
+    const fourth = await crash(main);
+    await closedSoon(app, "the fourth socket closed", tcp.held[3], fourth);
+    await until("the page stopped a fourth time", () => stoppedLines(stderr()).length === 4);
+    await click(main, "close-movie");
+    let lives = false;
+    for (let tries = 0; !lives && tries < 100; tries++) {
+      lives = await pageLives(main);
+      await sleep(100);
+    }
+
+    assert.ok(lives, "the page did not come back after Close Movie");
+    assert.equal(count("smoke: started"), 4, "a movie played after Close Movie");
+    assert.equal(tcp.held.length, 4);
+
     assert.equal(await main("1 + 1"), 2, "the main process");
-    assert.equal(stoppedLines(stderr()).length, 2);
+    assert.equal(stoppedLines(stderr()).length, 4);
     assert.doesNotMatch(stderr(), /Error sending from webContents/);
   });
 

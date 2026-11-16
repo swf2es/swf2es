@@ -138,17 +138,31 @@ export function openEntry(entry: string, embedding: Embedding = {}): Promise<voi
 export async function reloadMovie(): Promise<void> {
   if (current) {
     await openEntry(current.path, current.embedding);
-  } else {
-    reloadGonePage();
   }
+
+  // Still gone where nothing played, or it would not open again: the page comes back all the same.
+  reloadGonePage();
 }
 
-/** A page whose process is gone hears nothing: a new one asks for the movie as it starts. */
+/** Whether a load of the page reloadGonePage made is under way. */
+let reloading = false;
+
+/**
+ * A page whose process is gone hears nothing: a new one asks for the movie as it starts. Once the
+ * load is over, made or failed, another may be tried (main.ts counts a failed one as gone).
+ */
 function reloadGonePage(): void {
-  if (pageGone && window) {
-    // A load that another overtakes rejects, which says nothing here.
-    window.loadURL(`${APP_ORIGIN}/`).catch(() => {});
+  if (!pageGone || !window || reloading) {
+    return;
   }
+
+  reloading = true;
+  window
+    .loadURL(`${APP_ORIGIN}/`)
+    .catch(() => {})
+    .finally(() => {
+      reloading = false;
+    });
 }
 
 /**
@@ -350,5 +364,7 @@ export function closeMovie(): void {
   window?.setTitle(TITLE);
   if (listening) {
     window?.webContents.send("desktop:close");
+  } else {
+    reloadGonePage();
   }
 }

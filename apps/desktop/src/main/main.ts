@@ -61,7 +61,7 @@ import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
 import {
   httpCache,
-  pageGone,
+  listening,
   sandbox,
   setHttpCache,
   setListening,
@@ -186,8 +186,17 @@ function guard(contents: WebContents): void {
     if (how === "navigated") {
       // The page is back, by the offer or otherwise: the offer has had its day.
       reloadOffer?.abort();
-    } else if (gone && gone.reason !== "clean-exit") {
+      reloadOffer = null;
+    } else if (gone && gone.reason !== "clean-exit" && !quitting) {
       pageStopped(gone);
+    }
+  });
+  // A page that did not load, and so never started, is no better than a gone one: Reload Movie,
+  // or opening a movie, loads it.
+  contents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
+    // ERR_ABORTED: another load overtook it.
+    if (isMainFrame && code !== -3 && !listening) {
+      setPageGone(true);
     }
   });
   if (trace) {
@@ -200,6 +209,8 @@ function guard(contents: WebContents): void {
 
 /** Closes the offer to reload the page after its process went, while it is shown. */
 let reloadOffer: AbortController | null = null;
+/** The app is quitting: a page that goes with it has not stopped. */
+let quitting = false;
 
 /**
  * The page's process went other than by a clean exit, crashed, killed or
@@ -214,6 +225,11 @@ function pageStopped({ reason, exitCode }: RenderProcessGoneDetails): void {
   );
   if (!window || reloadOffer) {
     return;
+  }
+
+  // An AIR application may have hidden its window: the offer is to be seen.
+  if (!window.isVisible()) {
+    window.show();
   }
 
   const offer = new AbortController();
@@ -270,8 +286,13 @@ function createWindow(): void {
     setWindow(null);
   });
   // The page hears of full screen however it came, a SWF's Stage.displayState or the menu's F11.
-  window.on("enter-full-screen", () => window?.webContents.send("desktop:full-screen", true));
-  window.on("leave-full-screen", () => window?.webContents.send("desktop:full-screen", false));
+  const fullScreen = (now: boolean) => {
+    if (window && !window.webContents.isCrashed()) {
+      window.webContents.send("desktop:full-screen", now);
+    }
+  };
+  window.on("enter-full-screen", () => fullScreen(true));
+  window.on("leave-full-screen", () => fullScreen(false));
   guard(window.webContents);
   void window.loadURL(`${APP_ORIGIN}/`);
 }
@@ -360,7 +381,7 @@ function listen(): void {
     // Electron would print as one.
     const contents = event.sender;
     const deliver = (response: NetworkResponse) => {
-      if (!contents.isDestroyed() && !pageGone) {
+      if (!contents.isDestroyed() && !contents.isCrashed()) {
         contents.send("net:response", id, response);
       }
     };
@@ -545,6 +566,9 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("window-all-closed", () => app.quit());
+app.on("before-quit", () => {
+  quitting = true;
+});
 app.on("will-quit", () => {
   // No connection a SWF's requests kept outlives the app.
   network.close();
