@@ -2,12 +2,14 @@
 // the files the user opens, the libraries they point at, and the page's
 // few requests (shared/api.ts), each checked to come from that page.
 //
-//   electron apps/desktop [--trace] [file.swf | http(s)://host/movie.swf]
+//   electron apps/desktop [--trace] [--flashvars vars] [--param name=value]...
+//                         [file.swf | http(s)://host/movie.swf]
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
+// --flashvars and --param give the SWF what a page's <object> or <embed> would (embedding.ts).
 //
 // The second runs an AIR application by its descriptor, as adl does.
 //
@@ -22,6 +24,7 @@ import type { NetworkResponse, StartState } from "../shared/api.js";
 import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
+import { embeddingArguments } from "./embedding.ts";
 import { bridgeFiles } from "./files.ts";
 import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
@@ -55,6 +58,7 @@ import {
   window,
 } from "./state.ts";
 import {
+  embedding,
   httpCacheOff,
   logSockets,
   netLog,
@@ -383,8 +387,10 @@ async function fetchForPage(
   }
 }
 
-// One app to a user data directory: a second start hands its SWF to the first and quits.
-const first = app.requestSingleInstanceLock();
+// One app to a user data directory: a second start hands its SWF to the first and quits,
+// with its arguments as they were: Electron's argv for it may come reordered, a switch's
+// value apart from the switch.
+const first = app.requestSingleInstanceLock({ argv: process.argv });
 if (!first) {
   if (proxied) {
     process.stderr.write(
@@ -395,7 +401,14 @@ if (!first) {
   app.quit();
 }
 
-app.on("second-instance", (_event, argv, workingDirectory) => {
+/** The arguments a second start sent as they were, if it sent them. */
+function exactArguments(data: unknown): string[] | null {
+  const argv = (data as { argv?: unknown } | null)?.argv;
+  return Array.isArray(argv) && argv.every((a) => typeof a === "string") ? argv : null;
+}
+
+app.on("second-instance", (_event, given, workingDirectory, data) => {
+  const argv = exactArguments(data) ?? given;
   // What it names would go through another proxy than this app's, or past it.
   const asked = proxyArgument(argv.slice(1));
   if (asked && !("proxy" in asked && sameProxy(asked.proxy, proxy))) {
@@ -419,9 +432,10 @@ app.on("second-instance", (_event, argv, workingDirectory) => {
     return;
   }
 
+  // Its own embedding, its warnings said by the second start itself.
   const entry = movieFromArguments(argv, workingDirectory);
   if (entry && settings) {
-    void openEntry(entry);
+    void openEntry(entry, embeddingArguments(argv).params);
   }
 });
 
@@ -500,8 +514,12 @@ void app.whenReady().then(() => {
   createWindow();
   buildMenu();
   if (pendingAir) {
+    if (Object.keys(embedding.params).length > 0) {
+      warn("--flashvars and --param: ignored for an AIR application, which has no page");
+    }
+
     void openAir(pendingAir, process.cwd());
   } else if (pending) {
-    void (pendingChosen ? openChosen(pending) : openEntry(pending));
+    void (pendingChosen ? openChosen(pending) : openEntry(pending, embedding.params));
   }
 });

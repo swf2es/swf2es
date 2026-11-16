@@ -1,7 +1,9 @@
 // The command line's switches for this run alone, and what they make:
 // --trace and the network's logs, --ignore-certificate-errors and --proxy,
 // the network judged through them and what opens an AIR application's
-// WebSockets, each said on stderr as the app starts; and --no-http-cache.
+// WebSockets, each said on stderr as the app starts; --no-http-cache; and
+// --flashvars and --param, the SWF's embedding (embedding.ts).
+import { embeddingArguments } from "./embedding.ts";
 import { Network } from "./network.ts";
 import { unverifiedHosts } from "./network-rules.ts";
 import { describeProxy, proxyArgument } from "./proxy.ts";
@@ -16,6 +18,12 @@ const own = process.argv.includes("--")
  * cache opened, for this run, whatever the File menu says.
  */
 export const httpCacheOff = own.includes("--no-http-cache");
+/** --flashvars and --param: what the SWF the command line names is given, as a page's tag gave it. */
+export const embedding = embeddingArguments(process.argv);
+for (const warning of embedding.warnings) {
+  process.stderr.write(`swf2es: ${warning}\n`);
+}
+
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 export const trace = process.argv.includes("--trace");
 // Each request and socket of the SWF's said on stderr: the page's DevTools show none of them.

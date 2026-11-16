@@ -58,6 +58,26 @@ function showFailure(message: string | null): void {
 }
 
 let loadGeneration = 0;
+/** The attributes the last movie's embedding set on the element, taken off for the next. */
+let embedded: string[] = [];
+
+/**
+ * The element's attributes as the shell's `params` give them, as a page's
+ * tag would: FlashVars, quality, scale and the rest. Never
+ * allowscriptaccess, which keeps ExternalInterface off here.
+ */
+function embed(params: OpenedMovie["params"] = {}): void {
+  for (const name of embedded) {
+    player.removeAttribute(name);
+  }
+
+  embedded = Object.keys(params).filter(
+    (name) => name !== "allowscriptaccess" && name !== "id" && name !== "src",
+  );
+  for (const name of embedded) {
+    player.setAttribute(name, params[name]);
+  }
+}
 
 function play(movie: OpenedMovie): void {
   const generation = ++loadGeneration;
@@ -67,6 +87,7 @@ function play(movie: OpenedMovie): void {
     air: movie.air ? airHosts(movie.air, desktop.air) : null,
   });
   showFailure(null);
+  embed(movie.params);
   welcome.hidden = true;
   player.hidden = false;
   player.load(movie.url).then(

@@ -38,13 +38,16 @@ if (why) {
 }
 
 const cwd = process.env.INIT_CWD ?? process.cwd();
-// Switches and URLs as they are; a path from where the command was run. What follows "--" is
-// an AIR application's own arguments, as they are.
+// Switches and URLs as they are, and the value after --flashvars or --param; a path from
+// where the command was run. What follows "--" is an AIR application's own arguments, as they are.
 const given = process.argv.slice(2);
 const end = given.indexOf("--");
 const own = end < 0 ? given : given.slice(0, end);
+const valued = (a: string | undefined) => /^--(flashvars|param)$/i.test(a ?? "");
 const args = [
-  ...own.map((a) => (a.startsWith("-") || /^https?:\/\//i.test(a) ? a : resolve(cwd, a))),
+  ...own.map((a, i) =>
+    a.startsWith("-") || /^https?:\/\//i.test(a) || valued(own[i - 1]) ? a : resolve(cwd, a),
+  ),
   ...(end < 0 ? [] : given.slice(end)),
 ];
 // What the context menu's About item names: a checkout's commit, else the package's version.
