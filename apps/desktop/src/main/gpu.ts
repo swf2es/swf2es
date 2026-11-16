@@ -12,7 +12,8 @@ import { app } from "electron";
  * WebGL 2, or draws wrong.
  */
 export function chooseGl(software: boolean): void {
-  // Only a fallback: where Chromium takes the GPU, this changes nothing.
+  // A fallback: where Chromium takes the GPU, the GPU draws. A GPU process that crashes again
+  // and again is Chromium's to recover from, by modes the switch may add SwiftShader to.
   app.commandLine.appendSwitch("enable-unsafe-swiftshader");
   if (software) {
     app.commandLine.appendSwitch("use-angle", "swiftshader");

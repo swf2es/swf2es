@@ -22,7 +22,7 @@ const own = process.argv.includes("--")
  * cache opened, for this run, whatever the File menu says.
  */
 export const httpCacheOff = own.includes("--no-http-cache");
-/** --software-gl: SwiftShader draws, on the CPU, even where Chromium would take the GPU (gpu.ts). */
+/** --software-gl: SwiftShader draws, on the CPU, even where Chromium takes the GPU (gpu.ts). */
 export const softwareGl = own.includes("--software-gl");
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 export const trace = process.argv.includes("--trace");

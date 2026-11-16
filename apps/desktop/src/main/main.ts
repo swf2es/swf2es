@@ -88,7 +88,6 @@ const build = /^[\w.+-]{1,40}$/.test(process.env.SWF2ES_DESKTOP_BUILD ?? "")
 
 registerScheme();
 app.enableSandbox();
-chooseGl(softwareGl);
 
 /** What the page's requests under way abort with, by the preload's number. */
 const requests = new Map<number, AbortController>();
@@ -395,7 +394,17 @@ if (!first) {
     );
   }
 
+  if (softwareGl) {
+    process.stderr.write(
+      "swf2es: handed to the app already open, which draws as it started: " +
+        "--software-gl counts only for the first start\n",
+    );
+  }
+
   app.quit();
+} else {
+  // Still before ready: Chromium reads the GPU switches as it starts the GPU process.
+  chooseGl(softwareGl);
 }
 
 app.on("second-instance", (_event, argv, workingDirectory) => {

@@ -413,7 +413,14 @@ refuses plain http and sockets on other ports.
 The player draws with WebGL 2. Where Chromium takes no GPU, because there
 is none or its blocklist refuses the one there is, as on a server, a CI
 runner or a virtual machine, the app draws with SwiftShader, Chromium's GPU
-on the CPU, and says so on stderr; where it takes the GPU nothing changes.
+on the CPU, and says so on stderr; where it takes the GPU, the GPU draws,
+as it did without the fallback. Chromium calls SwiftShader unsafe for
+untrusted content, as it compiles code in the GPU process, which on Linux
+runs outside Chromium's sandbox, as it does with a GPU. The page, where a
+SWF's code runs, is sandboxed: do not play a SWF you do not trust with
+`--no-sandbox`, which running as root needs, as in some Docker and CI
+setups.
+
 On a server with no display, run the app under Xvfb, whose only GL Chromium
 refuses, so SwiftShader draws:
 

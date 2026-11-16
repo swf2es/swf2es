@@ -102,7 +102,8 @@ export async function withApp(
         appDir,
         // Chromium's headless mode, which Electron keeps (its build has no
         // headless Ozone), on the test's own display (display()), and a GPU
-        // of software: it draws alike anywhere.
+        // of software: it draws alike anywhere. A plain run has neither: a
+        // window, and what draws is the app's choice.
         ...(plain ? [] : ["--headless"]),
         // Electron can still find Wayland through XDG_RUNTIME_DIR while Xvfb owns DISPLAY.
         ...(env.GDK_BACKEND === "x11" ? ["--ozone-platform=x11"] : []),

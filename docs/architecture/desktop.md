@@ -605,20 +605,45 @@ only GL, so every server and CI runner), Chromium falls back to SwiftShader,
 its GPU on the CPU, for WebGL, but no longer without
 `--enable-unsafe-swiftshader`, and without WebGL 2 nothing plays. So the main
 process appends that switch before the app is ready (`src/main/gpu.ts`), as
-Chromium reads its GPU switches as it starts the GPU process. It is a
-fallback alone: where Chromium takes the GPU it changes nothing, and the
-choice is Chromium's, made with what the GPU process found, so the app
-needs no guess of its own about the display or a relaunch. Chromium calls
-the fallback unsafe as SwiftShader compiles a page's shaders in the GPU
-process, which a web page should not reach; here the page is the player's,
-and a SWF's shaders, Stage3D's and Pixel Bender's, come to it as bytecode the
-player translates to GLSL.
+Chromium reads its GPU switches as it starts the GPU process, and only in
+the instance that holds the single-instance lock. It is a fallback: where
+Chromium takes the GPU, the GPU draws, and the choice is Chromium's, made
+with what the GPU process found, so the app needs no guess of its own about
+the display or a relaunch. A GPU process that crashes again and again is
+the other case where Chromium leaves the GPU, falling back by modes of its
+own, and the switch may let SwiftShader be one of them. With Electron 44
+(Chromium 152) on an Intel GPU it was not: the GPU process killed twice, the
+page had no WebGL 2, not SwiftShader's, and Chromium gave up on the GPU
+process ("crashed too many times with software GL") after a few more.
+
+The switch is unsafe by Chromium's own word: its
+[SwiftShader document](https://chromium.googlesource.com/chromium/src/+/main/docs/gpu/swiftshader.md)
+calls SwiftShader "a high security risk due to JIT-ed code running in
+Chromium's GPU process", and the fallback "not intended for running
+untrusted content". The surface is SwiftShader's whole pipeline, its
+Reactor JIT, rasteriser and sampling, under draws a SWF drives: what
+shapes, bitmaps, filters and Stage3D calls it makes, with sizes and data of
+its choosing, not only the shaders' text. A SWF never gives GLSL: Stage3D's
+AGAL is validated and translated by `packages/context3d/src/agal.ts`, and
+Pixel Bender's bytecode by `packages/format/src/pbj.ts` and the player's
+translation, so the shaders SwiftShader compiles are the player's. The
+page, where a SWF's compiled code runs, is in Chromium's sandbox (seccomp-bpf
+on Linux) unless the user passes `--no-sandbox`, which running as root
+needs, as in some Docker and CI setups; an untrusted SWF should not be
+played that way. The GPU process is not: with Electron 44 on Linux it runs
+without seccomp, on the GPU and on SwiftShader alike (`Seccomp: 0` in its
+`/proc` status, `sandboxed: false` in Chromium's GPU info). So what
+SwiftShader does under a SWF's draws runs with the user's rights, as what a
+GPU driver does under them already did; the fallback trades the driver's
+surface for SwiftShader's, which Chromium trusts less.
+
 Where the fallback draws, Chromium reports WebGL as `unavailable_software`
 once the GPU process has started (`gpu-info-update`), and the app says so on
 stderr, once. `--software-gl` appends `--use-angle=swiftshader` too, which
 draws everything with SwiftShader, compositing included, even where there
 is a GPU: for one Chromium takes for WebGL but not WebGL 2, which the
-fallback never reaches, or one that draws wrong.
+fallback never reaches, or one that draws wrong. A second start, which hands
+its SWF to the app already open, chooses nothing and says so.
 
 ## Running and testing
 
@@ -684,10 +709,12 @@ address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
 limits. `tests/desktop/xvfb.ts` runs the app as a server does, in a
-window on an Xvfb with no switch of the test's for the GPU: it falls back to
-SwiftShader, says so, and a SWF plays and draws; then the same with
-`--software-gl`; it skips where there is no Xvfb. `tests/desktop/stage3d.ts` drives the native View menu through the main
-process's test-only inspector: Stage3D on for a fresh profile and for the
+window on an Xvfb with no switch of the test's for the GPU: it falls back
+to SwiftShader, says so, and a SWF plays and draws; then the same with
+`--software-gl`, which a second start does not claim; it skips where there
+is no Xvfb, or where the Xvfb's GL is a GPU's. `tests/desktop/stage3d.ts`
+drives the native View menu through the main process's test-only inspector:
+Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context
 loss/restoration, repeated movie reloads and close. It shares the isolated
