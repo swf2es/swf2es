@@ -21,9 +21,12 @@
 // the pool only once its response has been read to the end and the server
 // meant to keep it, drops one the server closes or that errors while idle,
 // and closes one idle past its timeout, the server's Keep-Alive hint if
-// shorter; the pool adds the key, a bound on idle connections all told,
-// and destroy(), which ends every connection, as a page goes, reloads or
-// the app quits.
+// shorter. The pool adds the key; a count of the tunnels still being made,
+// which Node's Agent counts only once made, so that a proxied key keeps to
+// its six and its agent is not forgotten under one; a bound on idle
+// connections all told; and destroy(), which ends every connection it
+// opened, idle, in use or still being made, as a page goes, reloads or the
+// app quits.
 //
 // Without Electron, so that node tests it (tests/desktop/http-pool.test.ts).
 import { type AgentOptions, Agent as HttpAgent } from "node:http";
@@ -72,10 +75,20 @@ function pinnedLookup(address: string): LookupFunction {
 }
 
 type Create = (options: object, done: (error: Error | null, socket?: Duplex) => void) => unknown;
+type AddRequest = (request: unknown, options: object) => void;
+type CreateSocket = (
+  request: unknown,
+  options: object,
+  done: (error: Error | null, socket?: Duplex) => void,
+) => void;
 
 export class ConnectionPool {
   private readonly agents = new Map<string, HttpAgent>();
   private readonly served = new WeakSet<object>();
+  /** Every connection open, whichever agent holds it: what destroy() closes. */
+  private readonly open = new Set<Duplex>();
+  /** A proxied agent's tunnels still being made, which Node's Agent does not count. */
+  private readonly building = new Map<HttpAgent, { count: number; name: string }>();
   private readonly ca: string | string[] | undefined;
   private readonly proxy: ProxyConfig | null;
   private readonly limits: PoolLimits;
@@ -151,7 +164,14 @@ export class ConnectionPool {
       agent.destroy();
     }
 
+    // And any an agent no longer holds, should one have slipped past it.
+    for (const socket of this.open) {
+      socket.destroy();
+    }
+
     this.agents.clear();
+    this.building.clear();
+    this.open.clear();
   }
 
   private make(key: string, target: PoolTarget): HttpAgent {
@@ -175,22 +195,82 @@ export class ConnectionPool {
     };
     const agent = target.secure ? new HttpsAgent(options) : new HttpAgent(options);
     const base = (agent.createConnection as Create).bind(agent);
-    const proxy = this.proxy;
-    const closing = this.closing.signal;
     const opened = (socket: Duplex) => {
       this.opened++;
-      socket.once("close", () => setImmediate(() => this.prune(key, agent)));
+      this.open.add(socket);
+      socket.once("close", () => {
+        this.open.delete(socket);
+        setImmediate(() => this.prune(key, agent));
+      });
     };
-    (agent as unknown as { createConnection: Create }).createConnection = (connection, done) => {
-      if (!proxy) {
+    const keep = agent.keepSocketAlive.bind(agent) as (socket: Duplex) => boolean;
+    (agent as unknown as { keepSocketAlive: typeof keep }).keepSocketAlive = (socket) =>
+      this.idle() < this.limits.idleTotal && keep(socket);
+    const proxy = this.proxy;
+    if (!proxy) {
+      (agent as unknown as { createConnection: Create }).createConnection = (connection, done) => {
         const socket = base(connection, done) as Duplex;
         opened(socket);
         return socket;
+      };
+      return agent;
+    }
+
+    // A tunnel is made asynchronously, and Node's Agent counts a connection only once it is
+    // made: one still being made is counted here, so that the key keeps to its limit and the
+    // agent is not forgotten under it.
+    const building = { count: 0, name: "" };
+    this.building.set(agent, building);
+    const queued = (agent as unknown as { requests: Record<string, unknown[]> }).requests;
+    const add = (agent as unknown as { addRequest: AddRequest }).addRequest.bind(agent);
+    (agent as unknown as { addRequest: AddRequest }).addRequest = (request, more) => {
+      const name = building.name;
+      const free = (agent.freeSockets[name] ?? []).some((socket) => !socket.destroyed);
+      const busy = agent.sockets[name]?.length ?? 0;
+      if (building.count > 0 && !free && busy + building.count >= this.limits.perKey) {
+        // Waits as Node's own queue waits, for the next connection freed, closed or failed.
+        queued[name] ??= [];
+        queued[name].push(request);
+        return;
       }
 
+      add(request, more);
+    };
+    const createSocket = (agent as unknown as { createSocket: CreateSocket }).createSocket.bind(
+      agent,
+    );
+    /** A connection for the request first in the queue, where a tunnel that failed left room. */
+    const next = (connection: object) => {
+      const waiting = queued[building.name];
+      const busy = agent.sockets[building.name]?.length ?? 0;
+      if (!waiting?.length || busy + building.count >= this.limits.perKey) {
+        return;
+      }
+
+      const request = waiting[0] as { onSocket(socket: null, error: Error): void };
+      createSocket(request, connection, (error, socket) => {
+        if (error) {
+          const at = waiting.indexOf(request);
+          if (at >= 0) {
+            waiting.splice(at, 1);
+          }
+
+          request.onSocket(null, error);
+          return;
+        }
+
+        // Node's Agent hands a connection freed to the first request waiting.
+        socket?.emit("free");
+      });
+    };
+    const closing = this.closing.signal;
+    (agent as unknown as { createConnection: Create }).createConnection = (connection, done) => {
+      building.name = (connection as { _agentKey?: string })._agentKey ?? "";
+      building.count++;
       // Through the proxy to the pinned address, TLS over the tunnel for https.
       connectThrough(proxy, target.address, target.port, { signal: closing }).then(
         (tunnel) => {
+          building.count--;
           // Made as the pool closed: no connection outlives it.
           if (closing.aborted) {
             tunnel.destroy();
@@ -204,27 +284,34 @@ export class ConnectionPool {
           opened(socket);
           done(null, socket);
         },
-        (error: ProxyError) => done(new Refused(error.message, { cause: error })),
+        (error: ProxyError) => {
+          building.count--;
+          done(new Refused(error.message, { cause: error }));
+          if (!closing.aborted) {
+            next(connection);
+          }
+
+          setImmediate(() => this.prune(key, agent));
+        },
       );
       return undefined;
     };
-    const keep = agent.keepSocketAlive.bind(agent) as (socket: Duplex) => boolean;
-    (agent as unknown as { keepSocketAlive: typeof keep }).keepSocketAlive = (socket) =>
-      this.idle() < this.limits.idleTotal && keep(socket);
     return agent;
   }
 
-  /** `agent` forgotten once it has no connection nor request left. */
+  /** `agent` forgotten once it has no connection, request nor tunnel being made left. */
   private prune(key: string, agent: HttpAgent): void {
     const empty = (sockets: NodeJS.ReadOnlyDict<unknown[]>) =>
       Object.values(sockets).every((list) => !list?.length);
     if (
       this.agents.get(key) === agent &&
+      !this.building.get(agent)?.count &&
       empty(agent.sockets) &&
       empty(agent.freeSockets) &&
       empty(agent.requests)
     ) {
       this.agents.delete(key);
+      this.building.delete(agent);
     }
   }
 }

@@ -98,13 +98,6 @@ const textDecoder = new TextDecoder();
 const FLASH_VERSION = "32,0,0,465";
 const USER_AGENT = "Mozilla/5.0 (compatible; swf2es) Shockwave Flash";
 const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
-/**
- * The most of a response no one reads that is read anyway, to its end, so
- * that its connection may serve the next request: a redirect's or a 304's.
- */
-const DRAIN_BYTES = 64 * 1024;
-/** How long such a body may take to come before its connection is closed instead. */
-const DRAIN_MS = 2_000;
 
 interface SendOptions {
   read: boolean;
@@ -1049,15 +1042,22 @@ export class Network {
        * The connection back to the pool once its response has been read to
        * its end, which one no one reads is too where it is small, a
        * redirect's or a 304's, so that the next request may have it; any
-       * other closed.
+       * other closed. The request's timers and abort hold until then: an
+       * abort while it drains refuses it as before.
        */
+      let releasing = false;
       const release = (response: IncomingMessage, then: () => void) => {
+        if (releasing) {
+          return;
+        }
+
+        releasing = true;
         if (response.complete) {
           then();
           return;
         }
 
-        if (Number(response.headers["content-length"]) > DRAIN_BYTES) {
+        if (Number(response.headers["content-length"]) > this.limits.drainBytes) {
           request.destroy();
           then();
           return;
@@ -1078,13 +1078,17 @@ export class Network {
         const late = setTimeout(() => {
           draining.destroy();
           settle();
-        }, DRAIN_MS);
+        }, this.limits.drainTime);
         response.on("data", (chunk: Buffer) => {
           drained += chunk.length;
-          if (drained > DRAIN_BYTES) {
+          // What has come whole leaves the connection clean, however long.
+          if (drained > this.limits.drainBytes && !response.complete) {
             draining.destroy();
             settle();
+            return;
           }
+
+          arm();
         });
         response.on("end", settle);
         response.on("close", settle);
@@ -1147,13 +1151,15 @@ export class Network {
         const wanted = (status >= 200 && status < 300) || (!!options.errorBody && status >= 400);
         const end = (bytes: Uint8Array | null) => {
           if (!finished) {
-            finished = true;
-            clearTimeout(timer);
-            clearTimeout(overall);
-            signal.removeEventListener("abort", abort);
-            release(response, () =>
-              answer({ bytes, status, headers: received, ...(reused ? { reused: true } : {}) }),
-            );
+            release(response, () => {
+              if (!finished) {
+                finished = true;
+                clearTimeout(timer);
+                clearTimeout(overall);
+                signal.removeEventListener("abort", abort);
+                answer({ bytes, status, headers: received, ...(reused ? { reused: true } : {}) });
+              }
+            });
           }
         };
         if (!wanted || !options.read) {

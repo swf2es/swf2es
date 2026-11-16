@@ -72,6 +72,13 @@ export interface Limits {
   queue: number;
   /** Policy files a movie may name with Security.loadPolicyFile. */
   policyFiles: number;
+  /**
+   * The most of a response no one reads that is still read to its end, and
+   * how long it may take, so that its connection may serve the next
+   * request: a redirect's or a 304's. Past either it is closed instead.
+   */
+  drainBytes: number;
+  drainTime: number;
 }
 
 export const LIMITS: Limits = {
@@ -90,6 +97,8 @@ export const LIMITS: Limits = {
   concurrent: 16,
   queue: 1024,
   policyFiles: 64,
+  drainBytes: 64 * 1024,
+  drainTime: 2_000,
 };
 
 /**

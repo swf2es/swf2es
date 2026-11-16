@@ -412,3 +412,174 @@ test("a page that goes closes its connections, and so does the app as it quits",
   assert.equal(server.open.size, 0);
   await assert.rejects(get(net, `http://page.test:${server.port}/c`), /no SWF plays/);
 });
+
+test("through a proxy, a key keeps to its connections at once, tunnels being made counted", async () => {
+  const [server] = await pair((request, response) => {
+    setTimeout(() => ok(request, response), 50);
+  });
+  names.set("busy-proxied.test", [A]);
+  const proxy = await testProxy("http");
+  try {
+    const net = network({ proxy: parseProxy(proxy.url()), pool: { perKey: 2 } });
+    const url = `http://busy-proxied.test:${server.port}`;
+    const all = [1, 2, 3, 4, 5, 6, 7];
+
+    const answers = await Promise.all(all.map((i) => get(net, `${url}/${i}`)));
+    assert.deepEqual(
+      answers.map((a) => text(a.bytes)),
+      all.map((i) => `at /${i}`),
+    );
+    assert.equal(proxy.targets.length, 2);
+    assert.equal(server.opened, 2);
+    assert.equal(server.most, 2);
+    assert.equal(net.pool.idle(), 2);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("through a proxy, a tunnel made as the last one closed is kept and reused", async () => {
+  const [server] = await pair((request, response) => {
+    if (request.url === "/close") {
+      response.setHeader("Connection", "close");
+    }
+
+    ok(request, response);
+  });
+  names.set("close-proxied.test", [A]);
+  const proxy = await testProxy("http");
+  try {
+    const net = network({ proxy: parseProxy(proxy.url()) });
+    const url = `http://close-proxied.test:${server.port}`;
+    const rounds = 5;
+    let reused = 0;
+    for (let i = 0; i < rounds; i++) {
+      // The server closes the connection this answer came over; the next request makes a
+      // tunnel while the agent has nothing else, which must not forget it.
+      reused += (await get(net, `${url}/close`)).reused ? 1 : 0;
+      await get(net, `${url}/after`);
+    }
+
+    assert.equal(reused, rounds - 1);
+    assert.equal(proxy.targets.length, rounds + 1);
+    assert.equal(net.pool.idle(), 1);
+
+    net.play({ kind: "application" });
+    await wait(100);
+    assert.equal(server.open.size, 0);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("through a proxy, a page that goes closes its tunnels, those being made too", async () => {
+  const [server] = await pair((request, response) => {
+    if (request.url !== "/hang") {
+      ok(request, response);
+    }
+  });
+  names.set("page-proxied.test", [A]);
+  // Called as the proxy is asked for a tunnel: while it is still being made.
+  let asked = () => {};
+  const proxy = await testProxy("http", {
+    refuse: () => {
+      asked();
+      return null;
+    },
+  });
+  try {
+    const net = network({ proxy: parseProxy(proxy.url()) });
+    const url = `http://page-proxied.test:${server.port}`;
+    await get(net, `${url}/a`);
+    // Over the tunnel the first one left, kept.
+    const hanging = get(net, `${url}/hang`);
+    await wait(50);
+    assert.equal(server.open.size, 1);
+
+    net.play({ kind: "application" });
+    assert.equal(await refusal(hanging), "aborted");
+    await wait(100);
+    assert.equal(server.open.size, 0);
+    assert.equal(net.pool.idle(), 0);
+
+    // A page that goes while a tunnel is being made leaves nothing open.
+    asked = () => {
+      asked = () => {};
+      net.play({ kind: "application" });
+    };
+    assert.equal(await refusal(get(net, `${url}/b`)), "aborted");
+    await wait(200);
+    assert.equal(server.open.size, 0);
+    assert.equal(net.pool.idle(), 0);
+    assert.equal(proxy.targets.length, 2);
+  } finally {
+    await proxy.close();
+  }
+});
+
+test("no more connections are kept idle than the pool's bound, all keys told", async () => {
+  const [server] = await pair();
+  for (const name of ["i1.test", "i2.test", "i3.test"]) {
+    names.set(name, [A]);
+  }
+  const net = network({ pool: { idleTotal: 2 } });
+
+  for (const name of ["i1.test", "i2.test", "i3.test"]) {
+    await get(net, `http://${name}:${server.port}/`);
+  }
+  await wait(50);
+  assert.equal(server.opened, 3);
+  assert.equal(net.pool.idle(), 2);
+  assert.equal(server.open.size, 2);
+});
+
+test("an unread body is drained only within its bounds; an abort while it drains refuses", async () => {
+  const [server] = await pair((request, response) => {
+    switch (request.url) {
+      case "/chunked":
+        // No length: drained until past the bound, then closed.
+        response.writeHead(404);
+        response.write(Buffer.alloc(512, 0x61));
+        setTimeout(() => response.end(Buffer.alloc(2048, 0x61)), 50);
+        break;
+      case "/long":
+        // Said to be past the bound: closed at once.
+        response.writeHead(404, { "Content-Length": "4096" });
+        response.write(Buffer.alloc(512, 0x61));
+        setTimeout(() => response.end(Buffer.alloc(3584, 0x61)), 50);
+        break;
+      case "/slow":
+        response.writeHead(404, { "Content-Length": "20" });
+        response.write("0123456789");
+        break;
+      case "/short":
+        response.writeHead(404, { "Content-Length": "10" });
+        response.end("0123456789");
+        break;
+      default:
+        ok(request, response);
+    }
+  });
+  names.set("drain.test", [A]);
+  const net = network({ limits: { drainBytes: 1024, drainTime: 200 } });
+  const url = `http://drain.test:${server.port}`;
+  const reusedAfter = async (path: string) => {
+    assert.equal((await get(net, `${url}${path}`)).status, 404);
+    return (await get(net, `${url}/next`)).reused === true;
+  };
+
+  assert.equal(await reusedAfter("/short"), true);
+  assert.equal(await reusedAfter("/chunked"), false);
+  assert.equal(await reusedAfter("/long"), false);
+  const started = performance.now();
+  assert.equal(await reusedAfter("/slow"), false);
+  const took = performance.now() - started;
+  assert.ok(took >= 180 && took < 1500, `${took} ms`);
+
+  // The request's abort holds while it drains.
+  const patient = network();
+  const controller = new AbortController();
+  const draining = get(patient, `${url}/slow`, controller.signal);
+  setTimeout(() => controller.abort(), 100);
+  assert.equal(await refusal(draining), "aborted");
+});
