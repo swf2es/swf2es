@@ -1,32 +1,16 @@
-// The connections network.ts's requests keep open between them: an idle
-// keep-alive connection is handed to the next request that would open
-// exactly the same one, as a browser's pool hands it, and to no other.
+// The keep-alive connections network.ts's requests share, each handed only
+// to a request that would have opened exactly that one. Its key is the
+// scheme, the host's name (TLS's server name), the address the request
+// pinned it to, the port, the route (direct, or the proxy by its kind, host
+// and port, never its credentials) and, for https, whether the certificate
+// goes unchecked (--ignore-certificate-errors). So a name that rebinds never
+// gets a connection to its old address, a checked host never shares one made
+// unchecked, and a tunnel serves only its own target.
 //
-// A connection is kept under its key: the scheme, the host's name (TLS's
-// server name and the certificate it is checked against), the address the
-// request pinned that name to, the port, the route (direct, or the proxy
-// by its kind, host and port, never its credentials) and, for https,
-// whether the host's certificate goes unchecked (--ignore-certificate-
-// errors); the authorities are the pool's, one set a network. So a request
-// pinned to another address, as a name that rebinds gives it, never gets a
-// connection to the old one; a host checked never shares a connection
-// made unchecked; and a tunnel, which is to one target, serves only that
-// target.
-//
-// Each key is a Node Agent of its own (keepAlive, at most six connections
-// as browsers keep to a host), whose connections reach the pinned address
-// whatever the resolver says now: a direct one through a `lookup` that
-// answers with it, a proxied one through a tunnel to it, TLS over the
-// tunnel by the host's name. Node's Agent already returns a connection to
-// the pool only once its response has been read to the end and the server
-// meant to keep it, drops one the server closes or that errors while idle,
-// and closes one idle past its timeout, the server's Keep-Alive hint if
-// shorter. The pool adds the key; a count of the tunnels still being made,
-// which Node's Agent counts only once made, so that a proxied key keeps to
-// its six and its agent is not forgotten under one; a bound on idle
-// connections all told; and destroy(), which ends every connection it
-// opened, idle, in use or still being made, as a page goes, reloads or the
-// app quits.
+// Each key is a Node Agent, its connections pinned by its options; the pool
+// adds what the Agent lacks: tunnels still being made counted against the
+// key's limit, a bound on idle connections all told, and destroy() for every
+// connection it opened. The limits are in docs/architecture/desktop.md.
 //
 // Without Electron, so that node tests it (tests/desktop/http-pool.test.ts).
 import { type AgentOptions, Agent as HttpAgent } from "node:http";
@@ -216,9 +200,8 @@ export class ConnectionPool {
       return agent;
     }
 
-    // A tunnel is made asynchronously, and Node's Agent counts a connection only once it is
-    // made: one still being made is counted here, so that the key keeps to its limit and the
-    // agent is not forgotten under it.
+    // Node's Agent counts a tunnel only once it is made: those still being made count here,
+    // so that the key keeps to its limit and prune() keeps its agent.
     const building = { count: 0, name: "" };
     this.building.set(agent, building);
     const queued = (agent as unknown as { requests: Record<string, unknown[]> }).requests;
@@ -267,7 +250,6 @@ export class ConnectionPool {
     (agent as unknown as { createConnection: Create }).createConnection = (connection, done) => {
       building.name = (connection as { _agentKey?: string })._agentKey ?? "";
       building.count++;
-      // Through the proxy to the pinned address, TLS over the tunnel for https.
       connectThrough(proxy, target.address, target.port, { signal: closing }).then(
         (tunnel) => {
           building.count--;

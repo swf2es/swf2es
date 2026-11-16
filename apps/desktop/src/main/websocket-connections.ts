@@ -206,9 +206,8 @@ export class WebSocketConnections {
         // AIR offers no extension, answers pings itself, and keeps a text message's bytes as
         // they came, whether they are UTF-8 or not.
         perMessageDeflate: false,
-        // Answered by the "ping" listener, within MAX_BUFFERED: ws 8.22.1, pinned, answers
-        // without bound, the ping flood 8.23.0 fixed. On 8.23.0 or later, after 2026-11-26,
-        // when it is two weeks old, ws may answer them again.
+        // Answered by the "ping" listener, within MAX_BUFFERED: the pinned ws answers without
+        // bound. A bump to ws >= 8.23.0, which bounds them, is planned; it may answer them then.
         autoPong: false,
         skipUTF8Validation: true,
         maxPayload: this.maxPayload,
@@ -445,12 +444,9 @@ export class WebSocketConnections {
   }
 
   /**
-   * TLS over `socket`, its certificate checked against `host`, the URL's,
-   * not the address it was reached at: unchecked where
-   * --ignore-certificate-errors names the host; a self-signed one left to
-   * the application, which AIR asks with a certificateError, `asking`
-   * told first; any other fault fails the connection, as does a page that
-   * does not answer within the timeout.
+   * TLS over `socket`, its certificate checked against the URL's `host`,
+   * not the address it was reached at; a self-signed one left to the
+   * application, as AIR asks with a certificateError, `asking` told first.
    */
   private secure(
     id: number,
@@ -531,8 +527,7 @@ export class WebSocketConnections {
   private overflow(id: number, connection: Connection): void {
     this.silence(connection);
     this.connections.delete(id);
-    this.tell(id, { type: "error" });
-    this.tell(id, { type: "close", code: 1006 });
+    this.refuse(id);
   }
 
   /** Drop a connection, its events no one's: nothing is told of it after. */
