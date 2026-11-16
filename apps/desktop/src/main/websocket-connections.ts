@@ -374,7 +374,8 @@ export class WebSocketConnections {
           ? await connectThrough(this.proxy, host, port, { signal })
           : await this.direct(host, port, signal);
       } catch (error) {
-        if (!late && (error instanceof ProxyError || error instanceof Refusal)) {
+        // Not where the page closed it or went first (aborted), as the direct path says nothing.
+        if (!late && !signal.aborted && (error instanceof ProxyError || error instanceof Refusal)) {
           this.warn(`no WebSocket to ${where}: ${error.message}`);
         }
 
