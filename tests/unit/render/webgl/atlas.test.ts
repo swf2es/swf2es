@@ -306,3 +306,59 @@ test("an id added twice in a frame keeps one place, its first copy's room given 
   assert.equal(page.vertices.top, 0);
   assert.equal(page.indices.top, 0);
 });
+
+test("random adds, removals and in-place updates keep every live shape whole and apart", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const seeds = new Map<number, number>();
+  // mulberry32, so that a failure repeats.
+  let state = 7;
+  const random = () => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  let next = 1;
+  for (let frame = 0; frame < 300; frame++) {
+    const ops = 1 + Math.floor(random() * 24);
+    for (let op = 0; op < ops; op++) {
+      const roll = random();
+      const ids = [...seeds.keys()];
+      if (roll < 0.45 || ids.length === 0) {
+        // Mostly small, now and then empty, or past what one staged upload holds.
+        const big = random() < 0.03;
+        const count = big ? 17000 + Math.floor(random() * 4000) : Math.floor(random() * 900);
+        const seed = next++;
+        seeds.set(geometries.add(shape(seed, count)).id, seed);
+      } else if (roll < 0.85) {
+        const id = ids[Math.floor(random() * ids.length)];
+        geometries.remove(id);
+        seeds.delete(id);
+      } else {
+        // The same lengths, new values: copied again where it lies.
+        const id = ids[Math.floor(random() * ids.length)];
+        const data = geometries.get(id) as GeometryData;
+        const seed = next++;
+        for (let i = 0; i < data.colors.length; i++) {
+          data.positions[i * 2] = seed;
+          data.colors[i] = seed;
+        }
+
+        geometries.update(id);
+        seeds.set(id, seed);
+      }
+    }
+
+    atlas.place(geometries);
+    check(atlas, geometries, seeds);
+    // No place outlives its geometry.
+    for (let id = 0; id < atlas.places.length; id++) {
+      if (atlas.places[id] && !seeds.has(id)) {
+        assert.fail(`geometry ${id}, let go of, still has a place`);
+      }
+    }
+  }
+});
