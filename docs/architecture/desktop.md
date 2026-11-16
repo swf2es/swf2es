@@ -596,6 +596,30 @@ each is sent a close frame, and is gone once its server answers.
 and closed, and `--log-sockets` each message, a text one as its text
 (`src/main/netlog.ts`).
 
+## What draws
+
+The player draws with WebGL 2, which Chromium gives on the GPU where its
+blocklist takes the GPU. Where it takes none, there being none or its
+blocklist refusing the one there is (Mesa's llvmpipe among them, Xvfb's
+only GL, so every server and CI runner), Chromium falls back to SwiftShader,
+its GPU on the CPU, for WebGL, but no longer without
+`--enable-unsafe-swiftshader`, and without WebGL 2 nothing plays. So the main
+process appends that switch before the app is ready (`src/main/gpu.ts`), as
+Chromium reads its GPU switches as it starts the GPU process. It is a
+fallback alone: where Chromium takes the GPU it changes nothing, and the
+choice is Chromium's, made with what the GPU process found, so the app
+needs no guess of its own about the display or a relaunch. Chromium calls
+the fallback unsafe as SwiftShader compiles a page's shaders in the GPU
+process, which a web page should not reach; here the page is the player's,
+and a SWF's shaders, Stage3D's and Pixel Bender's, come to it as bytecode the
+player translates to GLSL.
+Where the fallback draws, Chromium reports WebGL as `unavailable_software`
+once the GPU process has started (`gpu-info-update`), and the app says so on
+stderr, once. `--software-gl` appends `--use-angle=swiftshader` too, which
+draws everything with SwiftShader, compositing included, even where there
+is a GPU: for one Chromium takes for WebGL but not WebGL 2, which the
+fallback never reaches, or one that draws wrong.
+
 ## Running and testing
 
 `pnpm install` leaves Electron's binary undownloaded (pnpm's
@@ -659,7 +683,10 @@ meta-policies and named policy files, redirects, this machine reached by
 address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
 policies on a stand-in for port 843 and on the port itself, and the
-limits. `tests/desktop/stage3d.ts` drives the native View menu through the main
+limits. `tests/desktop/xvfb.ts` runs the app as a server does, in a
+window on an Xvfb with no switch of the test's for the GPU: it falls back to
+SwiftShader, says so, and a SWF plays and draws; then the same with
+`--software-gl`; it skips where there is no Xvfb. `tests/desktop/stage3d.ts` drives the native View menu through the main
 process's test-only inspector: Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context

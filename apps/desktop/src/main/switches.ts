@@ -1,7 +1,7 @@
 // The command line's switches for this run alone, and what they make:
 // --trace and the network's logs, --ignore-certificate-errors and --proxy,
 // the network judged through them and what opens an AIR application's
-// WebSockets, each said on stderr as the app starts; and --no-http-cache.
+// WebSockets, each said on stderr as the app starts; --no-http-cache; and --software-gl.
 import { Network } from "./network.ts";
 import { unverifiedHosts } from "./network-rules.ts";
 import { describeProxy, proxyArgument } from "./proxy.ts";
@@ -22,6 +22,8 @@ const own = process.argv.includes("--")
  * cache opened, for this run, whatever the File menu says.
  */
 export const httpCacheOff = own.includes("--no-http-cache");
+/** --software-gl: SwiftShader draws, on the CPU, even where Chromium would take the GPU (gpu.ts). */
+export const softwareGl = own.includes("--software-gl");
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 export const trace = process.argv.includes("--trace");
 // Each request and socket of the SWF's said on stderr: the page's DevTools show none of them.

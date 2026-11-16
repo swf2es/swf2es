@@ -379,6 +379,7 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
+| `--software-gl` | Draws with SwiftShader, on the CPU, even where there is a GPU, for one that gives WebGL but not WebGL 2. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
@@ -408,6 +409,21 @@ not reached through the proxy either. A proxy that fails or refuses is a
 failed load or socket to the SWF, and a line on stderr saying why. An HTTP
 proxy that allows `CONNECT` only to port 443, as Squid does by default,
 refuses plain http and sockets on other ports.
+
+The player draws with WebGL 2. Where Chromium takes no GPU, because there
+is none or its blocklist refuses the one there is, as on a server, a CI
+runner or a virtual machine, the app draws with SwiftShader, Chromium's GPU
+on the CPU, and says so on stderr; where it takes the GPU nothing changes.
+On a server with no display, run the app under Xvfb, whose only GL Chromium
+refuses, so SwiftShader draws:
+
+```sh
+xvfb-run -a npx @swf2es/desktop --trace movie.swf
+```
+
+Where a Wayland session is about (`WAYLAND_DISPLAY`, or
+`XDG_SESSION_TYPE=wayland`), Electron goes to it rather than to Xvfb: add
+`--ozone-platform=x11`.
 
 The app caches the SWF's http and https GETs as a browser would, by what
 the server's Cache-Control, Expires, ETag, Last-Modified and Vary say, up to

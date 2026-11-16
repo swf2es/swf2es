@@ -8,6 +8,7 @@
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
+// --software-gl draws with SwiftShader, on the CPU, even where there is a GPU.
 //
 // The second runs an AIR application by its descriptor, as adl does.
 //
@@ -23,6 +24,7 @@ import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { bridgeFiles } from "./files.ts";
+import { chooseGl } from "./gpu.ts";
 import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
 import { failureLine, requestLine } from "./netlog.ts";
@@ -61,6 +63,7 @@ import {
   network,
   proxied,
   proxy,
+  softwareGl,
   trace,
   via,
   warn,
@@ -85,6 +88,7 @@ const build = /^[\w.+-]{1,40}$/.test(process.env.SWF2ES_DESKTOP_BUILD ?? "")
 
 registerScheme();
 app.enableSandbox();
+chooseGl(softwareGl);
 
 /** What the page's requests under way abort with, by the preload's number. */
 const requests = new Map<number, AbortController>();
