@@ -49,6 +49,9 @@ importers:
       http-cache-semantics:
         specifier: 4.3.0
         version: 4.3.0
+      undici:
+        specifier: 8.12.3
+        version: 8.12.3
       ws:
         specifier: 8.22.1
         version: 8.22.1
@@ -1964,6 +1967,10 @@ packages:
   undici@7.30.2:
     resolution: {integrity: sha512-mLyPQnHwUxaM/rideoK/+KL8DaAJLRl4aBCfmX444aCSLnIaomqPLtNRe2jdCYcsk5wZzXrDIQC8ZeYNRAYyIA==}
     engines: {node: '>=20.18.1'}
+
+  undici@8.12.3:
+    resolution: {integrity: sha512-+fdndUTwBP86cVjihTp21hZHo7d6oj1c/47XPA3lL8mM0XHs+C4EkcjmgRsFnFk2f/UONGDy9ItBItmXsLOQHw==}
+    engines: {node: '>=22.19.0'}
 
   undici@8.12.4:
     resolution: {integrity: sha512-8Mx+uNKKER2bA4AdtedkqRbwUCIJFr2nJckXRe5yrDqzePqwLP7VNcctN8/XdmDSbF7mS+jJKIszlL+vbam1VA==}
@@ -3990,6 +3997,8 @@ snapshots:
 
   undici@7.30.2:
     optional: true
+
+  undici@8.12.3: {}
 
   undici@8.12.4: {}
 

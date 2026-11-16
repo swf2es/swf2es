@@ -874,6 +874,12 @@ The desktop app:
   one 74.1 → 47.6 ms, all at once 43.6 → 25.1 ms; https one by one 334.3
   → 39.6 ms, all at once 228.4 → 28.9 ms. Connections: 200 → 1 one by
   one, 200 → 6 all at once, a key's limit.
+- #PR: the keep-alive pool on undici's Clients, which parse the responses
+  and keep the connections, in place of Node's Agents and `node:http`
+  (`tests/desktop/keepalive-bench.ts`, 200 loads of 1 KB from one loopback
+  server, medians of 6, interleaved with dev): http one by one 44.8 → 35.7
+  ms, all at once 25.1 → 17.1 ms; https one by one 39.3 → 24.8 ms, all at
+  once 28.5 → 17.9 ms. Connections as before: 1 one by one, 6 all at once.
 
 The renderer's are described in [renderer.md](renderer.md).
 

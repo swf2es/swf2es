@@ -15,11 +15,12 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createSecureServer as createHttp2Server } from "node:http2";
 import { createServer as createHttpsServer } from "node:https";
-import type { Socket } from "node:net";
+import { createServer as createNetServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after, test } from "node:test";
+import { after, type TestContext, test } from "node:test";
 import { setTimeout as wait } from "node:timers/promises";
 import { ConnectionPool } from "../../apps/desktop/src/main/http-pool.ts";
 import { Network } from "../../apps/desktop/src/main/network.ts";
@@ -45,7 +46,8 @@ const servers: Server[] = [];
 after(() => {
   for (const server of servers) {
     server.close();
-    server.closeAllConnections();
+    // An HTTP/2 server has none to close.
+    server.closeAllConnections?.();
   }
 });
 
@@ -198,7 +200,8 @@ test("a name pinned to another address gets a connection of its own", async () =
   assert.deepEqual([first.opened, second.opened], [1, 1]);
 });
 
-test("a host whose certificate goes unchecked shares no connection with one checked", async (t) => {
+/** A certificate for secure.test of the test's own; null, the test skipped, without openssl. */
+function certificate(t: TestContext): { key: Buffer; cert: string } | null {
   const dir = mkdtempSync(join(tmpdir(), "swf2es-pool-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const made = spawnSync(
@@ -224,11 +227,22 @@ test("a host whose certificate goes unchecked shares no connection with one chec
   );
   if (made.status !== 0) {
     t.skip(`no openssl to make a certificate: ${made.stderr ?? made.error}`);
+    return null;
+  }
+
+  return {
+    key: readFileSync(join(dir, "key.pem")),
+    cert: readFileSync(join(dir, "cert.pem")).toString(),
+  };
+}
+
+test("a host whose certificate goes unchecked shares no connection with one checked", async (t) => {
+  const made = certificate(t);
+  if (!made) {
     return;
   }
 
-  const key = readFileSync(join(dir, "key.pem"));
-  const cert = readFileSync(join(dir, "cert.pem")).toString();
+  const { key, cert } = made;
   const server = await counted(A, ok, () => createHttpsServer({ key, cert }));
   // One server under three names: its own, checked against its authority; another its
   // certificate does not name, checked; and a third the user let go unchecked.
@@ -251,14 +265,13 @@ test("a host whose certificate goes unchecked shares no connection with one chec
   const pool = new ConnectionPool({ ca: cert });
   const target = { secure: true, host: "secure.test", address: A, port: server.port };
   assert.notEqual(
-    pool.agent({ ...target, unverified: true }),
-    pool.agent({ ...target, unverified: false }),
+    pool.keyOf({ ...target, unverified: true }),
+    pool.keyOf({ ...target, unverified: false }),
   );
   assert.equal(
-    pool.agent({ ...target, unverified: false }),
-    pool.agent({ ...target, unverified: false }),
+    pool.keyOf({ ...target, unverified: false }),
+    pool.keyOf({ ...target, unverified: false }),
   );
-  pool.destroy();
 });
 
 test("through a proxy, a tunnel serves its own target again and no other", async () => {
@@ -380,7 +393,10 @@ test("a kept connection the server closed is not reused; a GET broken on one goe
   assert.equal(text(again.bytes), "at /b");
   assert.equal(server.opened, 2);
   // A POST is not sent twice: its failure is the SWF's.
-  assert.match(await refusal(get(net, `${url}/c`, undefined, "POST")), /socket hang up|ECONNRESET/);
+  assert.match(
+    await refusal(get(net, `${url}/c`, undefined, "POST")),
+    /other side closed|ECONNRESET/,
+  );
 
   // A server that closes an idle connection itself takes it from the pool.
   const [closing] = await pair((request, response) => {
@@ -582,4 +598,125 @@ test("an unread body is drained only within its bounds; an abort while it drains
   const draining = get(patient, `${url}/slow`, controller.signal);
   setTimeout(() => controller.abort(), 100);
   assert.equal(await refusal(draining), "aborted");
+});
+
+test("a key whose connection the server closed sends on its idle one, not a new one", async () => {
+  const [server] = await pair((request, response) => {
+    if (request.url === "/close") {
+      response.setHeader("Connection", "close");
+    }
+
+    setTimeout(() => ok(request, response), 50);
+  });
+  names.set("two.test", [A]);
+  const net = network();
+  const url = `http://two.test:${server.port}`;
+
+  // Two at once, two connections; the server closes one of them.
+  await Promise.all([get(net, `${url}/close`), get(net, `${url}/keep`)]);
+  await wait(50);
+  assert.equal(server.opened, 2);
+  assert.equal(server.open.size, 1);
+
+  const next = await get(net, `${url}/next`);
+  assert.equal(next.reused, true);
+  assert.equal(server.opened, 2);
+});
+
+test("response headers keep the case they came in", async () => {
+  const [server] = await pair((_request, response) => {
+    response.setHeader("X-Mixed-Case", "1");
+    response.setHeader("content-type", "text/plain");
+    response.end("ok");
+  });
+  names.set("case.test", [A]);
+  const received = (await get(network(), `http://case.test:${server.port}/`)).headers.map(
+    ([name]) => name,
+  );
+  assert.ok(received.includes("X-Mixed-Case"), String(received));
+  assert.ok(received.includes("content-type"), String(received));
+});
+
+test("https goes over HTTP/1.1, also to a server that speaks HTTP/2", async (t) => {
+  const made = certificate(t);
+  if (!made) {
+    return;
+  }
+
+  const versions: string[] = [];
+  const server = await counted(
+    A,
+    (request, response) => {
+      versions.push(request.httpVersion);
+      ok(request, response);
+    },
+    () => createHttp2Server({ ...made, allowHTTP1: true }) as unknown as Server,
+  );
+  names.set("secure.test", [A]);
+  const net = network({ ca: made.cert });
+  const url = `https://secure.test:${server.port}`;
+
+  const answers = await Promise.all([1, 2, 3].map((i) => get(net, `${url}/${i}`)));
+  assert.deepEqual(
+    answers.map((a) => text(a.bytes)),
+    ["at /1", "at /2", "at /3"],
+  );
+  assert.deepEqual(versions, ["1.1", "1.1", "1.1"]);
+  // One request a connection at a time, as HTTP/1.1 has it.
+  assert.equal(server.opened, 3);
+});
+
+test("a request aborted as its connection is made closes that connection alone", async () => {
+  // A server that takes the connection and never answers TLS's handshake.
+  const taken = new Set<Socket>();
+  const silent = createNetServer((socket) => {
+    taken.add(socket);
+    // Read, so that its end is heard.
+    socket.resume();
+    socket.on("close", () => taken.delete(socket));
+  });
+  await new Promise<void>((done) => silent.listen(0, A, () => done()));
+  after(() => silent.close());
+  const port = (silent.address() as { port: number }).port;
+  names.set("silent.test", [A]);
+  const net = network({ pool: { perKey: 1 } });
+
+  const controller = new AbortController();
+  const hanging = get(net, `https://silent.test:${port}/`, controller.signal);
+  await wait(100);
+  assert.equal(taken.size, 1);
+  controller.abort();
+  assert.equal(await refusal(hanging), "aborted");
+  await wait(100);
+  assert.equal(taken.size, 0);
+  assert.equal(net.pool.opened, 0);
+
+  // Through a proxy, the tunnel being made is given up; the key's turn comes back.
+  const [server] = await pair();
+  names.set("tunnel.test", [A]);
+  let asked = () => {};
+  const proxy = await testProxy("http", {
+    refuse: () => {
+      asked();
+      return null;
+    },
+  });
+  try {
+    const proxied = network({ proxy: parseProxy(proxy.url()), pool: { perKey: 1 } });
+    const url = `http://tunnel.test:${server.port}`;
+    const giving = new AbortController();
+    asked = () => {
+      asked = () => {};
+      giving.abort();
+    };
+    assert.equal(await refusal(get(proxied, `${url}/a`, giving.signal)), "aborted");
+    const next = await get(proxied, `${url}/b`);
+    assert.equal(text(next.bytes), "at /b");
+    assert.equal(next.reused, undefined);
+    await wait(100);
+    assert.equal(server.open.size, 1);
+    assert.equal(proxied.pool.opened, 1);
+  } finally {
+    await proxy.close();
+  }
 });

@@ -299,7 +299,7 @@ https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement`),
 
 /** The dependencies from elsewhere that an app's code loads, beside Electron, which runs it. */
 export const APP_DEPENDENCIES: Record<string, string[]> = {
-  desktop: ["http-cache-semantics", "ws"],
+  desktop: ["http-cache-semantics", "undici", "ws"],
 };
 
 /** An app's notices: those of the dependencies from elsewhere it loads, which it does not hold. */

@@ -192,11 +192,11 @@ service that is to stay private should listen on loopback or a private
 address, or ask for authentication.
 
 Each request resolves its host once and connects to that address, its
-policy file fetched from the same one (Node's `lookup` pinned, the name
-kept for TLS's server name and the Host header), so DNS that changes its
-answer between the policy and the request, rebinding, gains nothing:
-same-origin by name, a request now at 127.0.0.1 is judged as one to this
-machine.
+policy file fetched from the same one (the connection made to that
+address, the name kept for TLS's server name and the Host header), so DNS
+that changes its answer between the policy and the request, rebinding,
+gains nothing: same-origin by name, a request now at 127.0.0.1 is judged
+as one to this machine.
 
 Connections are kept alive between requests (`src/main/http-pool.ts`),
 HTTP/1.1 only, as a browser keeps them, but a request is given a kept
@@ -211,34 +211,58 @@ rebinding protection whole: a name pinned to another address, as DNS that
 changes its answer gives it, gets a connection to that address, judged
 there, and never one kept to the address before; a host whose certificate
 goes unchecked shares no connection with one checked, nor with another
-host; and a tunnel, which is to one target, serves only that target. Each
-key is a Node Agent of its own (`keepAlive`), whose connections reach the
-pinned address whatever the resolver says now, through a `lookup` that
-answers with it, or through a tunnel to it; Node's Agent can keep that
-pin, since its options override each request's, so no pool of the app's
-own was needed. A key keeps six connections at most, idle, in use or,
-through a proxy, a tunnel still being made (which Node's Agent does not
-count until it is made, so the pool counts it), as browsers keep to a
-host. A request queued behind six busy connections to one host waits
-for one to come free, its own timeout counting as it waits: thirty
-seconds of silence, five minutes all told. An idle one is closed after
-four seconds, or sooner where the server's `Keep-Alive` says it closes
-sooner, and no more than 64 are kept idle all told, direct and proxied. A
-connection goes back to the pool only once its response has been read
-to the end and the server meant to keep it: one whose body is not
-wanted, a redirect's, a 304's or a sendToURL's answer, is read to its end
-where it is small (64 KB, two seconds), so that a redirect's next hop
-reuses it, the request's timers and abort holding until it has been, and
-closed otherwise, as is any connection of a request that
-fails, times out or is aborted, so that none comes back with half a
+host; and a tunnel, which is to one target, serves only that target.
+
+Each connection is an [undici](https://github.com/nodejs/undici) `Client`
+(MIT, a dependency of the desktop app alone), which writes the request,
+parses the response and keeps the connection or closes it; the pool's
+connector makes it, to the pinned address whatever the resolver says now,
+directly or through a tunnel to it, and TLS over either by the host's name
+(undici's `buildConnector`, its sessions resumed within the key alone).
+The pool keys them and chooses: a request goes on the key's idle
+connection used last, and only where there is none on a new one. Undici's
+own dispatchers would each lose something: its `Agent` keys its pools by
+origin alone, so a name pinned elsewhere would be handed the connection
+kept to the address before; its `ProxyAgent` and `Socks5ProxyAgent` ask
+the proxy for the name, not the address that was judged; and its `Pool`
+hands a request to the first of its clients not busy, connected or not,
+so that one whose connection closed opens another while an idle one
+waits, and lets a request in its queue go only once it has a connection,
+which it then closes. HTTP/2, which undici would otherwise offer over
+TLS, is off: it would carry every request to a host over one connection,
+past the six a browser keeps to one over HTTP/1.1, and no Flash Player
+spoke it. Undici's own timeouts are off too, the request's below counting
+from its turn; its cache and its decompression are not used, the HTTP
+cache below and `decompress.ts` being the app's; and loading undici, which
+puts a dispatcher of its own where Node's `fetch` and `WebSocket` find
+theirs, touches nothing of the main process's, which uses neither.
+
+A key keeps six connections at most, idle, in use or still being made,
+through a proxy a tunnel among them, as browsers keep to a host: a request
+takes one of its key's six turns, and one that finds them taken waits for
+one to come back, its own timeout counting as it waits: thirty seconds of
+silence, five minutes all told. A request given up as it waits leaves
+nothing behind, and one given up while its connection is still being
+made, the TCP connection, the TLS handshake or the tunnel, closes that
+connection alone. An idle one is closed after four seconds, or sooner
+where the server's `Keep-Alive` says it closes sooner (its timeout less a
+second, as Node's Agent takes it), and no more than 64 are kept idle all
+told, direct and proxied. A connection goes back to the pool only once its
+response has been read to the end and the server meant to keep it: one
+whose body is not wanted, a redirect's, a 304's or a sendToURL's answer, is
+read to its end where it is small (64 KB, two seconds), so that a
+redirect's next hop reuses it, the request's timers and abort holding
+until it has been, and closed otherwise, as is any connection of a request
+that fails, times out or is aborted, so that none comes back with half a
 response on it. A connection the server closes while idle leaves the pool
-(Node's Agent drops it); a GET whose kept connection the server closed
-just as it was reused, before any answer, is sent once more on another,
-as browsers do, and a POST's failure is the SWF's. Every connection,
-idle, in use or a tunnel still being made, is closed as the page goes,
-reloads or opens another movie, and as the app quits: the pool keeps
-each one it opened until it closes, whichever agent holds it. `--log-network` ends the line of a request
-answered over a kept connection in `reused`.
+(undici drops it, and the pool its client); a GET whose kept connection
+the server closed just as it was reused, before any answer, is sent once
+more on another, as browsers do, which undici does not, and a POST's
+failure is the SWF's. Every connection, idle, in use or still being made,
+is closed as the page goes, reloads or opens another movie, and as the app
+quits: the pool keeps each one it opened until it closes, whichever client
+holds it. `--log-network` ends the line of a request answered over a kept
+connection in `reused`.
 
 Every redirect is judged as a request of its own, a POST
 redirected by a 301, 302 or 303 going on as a GET without its body, to
@@ -410,11 +434,12 @@ first, which would otherwise play what it names past the proxy it asked
 for.
 
 Each path keeps what it judged and only changes how it connects.
-`network.ts`'s requests and URL policy files go through an Agent of the
-pool whose `createConnection` makes the tunnel and, for https, TLS over
-it with the same server name, authorities and `--ignore-certificate-errors`
-hosts; a tunnel kept alive serves only requests to its own target, by the
-key above, and one still being made is given up as the page goes. The
+`network.ts`'s requests and URL policy files go over connections of the
+pool whose connector makes the tunnel and, for https, TLS over it with the
+same server name, authorities and `--ignore-certificate-errors` hosts; a
+tunnel kept alive serves only requests to its own target, by the key
+above, and one still being made is given up as the page goes, or as the
+request it was made for is. The
 socket policies (port 843, and the others) go through tunnels of their
 own, never kept. The address rules above still resolve the host on this machine
 and place that address, and the proxy is then asked for that address,

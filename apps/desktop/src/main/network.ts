@@ -45,13 +45,12 @@
 //
 // Without Electron, so that node tests it (tests/desktop/network.test.ts).
 import { lookup } from "node:dns/promises";
-import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
-import { request as httpsRequest } from "node:https";
 import { connect, isIP, type Socket } from "node:net";
+import type { Dispatcher } from "undici";
 import { type AddressClass, addressClass, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
 import { type CacheEntry, type CacheRequest, type HttpCache, servedHeaders } from "./http-cache.ts";
-import { ConnectionPool } from "./http-pool.ts";
+import { type Attempt, ConnectionPool, type Turn } from "./http-pool.ts";
 import {
   abortable,
   bare,
@@ -984,50 +983,49 @@ export class Network {
       }
 
       const https = url.protocol === "https:";
-      const port = Number(url.port || (https ? 443 : 80));
-      // The agent of this request's key: its connections reach the pinned address, through
-      // the proxy where there is one, TLS by the host's name, as the key says.
-      const agent = this.pool.agent({
-        secure: https,
-        host,
-        address,
-        port,
-        unverified: https && this.unverified(host),
-      });
-      const make = () =>
-        (https ? httpsRequest : httpRequest)({
-          host,
-          port,
-          path: `${url.pathname}${url.search}`,
-          method,
-          headers: outgoing,
-          agent,
-        });
-      let request: ClientRequest;
-      try {
-        request = make();
-      } catch (error) {
-        // What check() let through and Node still refuses: a refusal like any other.
-        fail(new Refused((error as Error).message));
-        return;
-      }
+      const request: Dispatcher.DispatchOptions = {
+        path: `${url.pathname}${url.search}`,
+        method,
+        headers: outgoing,
+        body,
+      };
       let timer: NodeJS.Timeout;
       const overall = setTimeout(() => stop(new Refused("it took too long")), deadline);
       let finished = false;
       let retried = false;
+      /** The request's turn on its key once it has one, and before, how it gives up waiting. */
+      let turn: Turn | null = null;
+      let leave: (() => void) | null = null;
+      /** Its try under way, and what undici gave it to pause, resume or abort it with. */
+      let attempt: Attempt | null = null;
+      let controller: Dispatcher.DispatchController | null = null;
+      let answered = false;
+      /** Where the body's bytes go once it is answered, and what its end and a break do. */
+      let sink: ((chunk: Buffer) => void) | null = null;
+      let ending: (() => void) | null = null;
+      let breaking: (() => void) | null = null;
+      let complete = false;
       /** What else a stop takes down: a decompressor. */
       const stopping: (() => void)[] = [];
+      const settle = () => {
+        finished = true;
+        clearTimeout(timer);
+        clearTimeout(overall);
+        signal.removeEventListener("abort", abort);
+        leave?.();
+        turn?.release();
+      };
       const stop = (error: Refused) => {
         if (!finished) {
-          finished = true;
           for (const down of stopping) {
             down();
           }
 
-          clearTimeout(timer);
-          clearTimeout(overall);
-          signal.removeEventListener("abort", abort);
-          request.destroy();
+          // Finished first, so that what undici says of the cancel is not taken for an answer;
+          // its connection closed, or the one being made for it, before its turn goes back.
+          finished = true;
+          attempt?.cancel(new Refused("aborted"));
+          settle();
           fail(error);
         }
       };
@@ -1046,29 +1044,29 @@ export class Network {
        * abort while it drains refuses it as before.
        */
       let releasing = false;
-      const release = (response: IncomingMessage, then: () => void) => {
+      const release = (declared: number, then: () => void) => {
         if (releasing) {
           return;
         }
 
         releasing = true;
-        if (response.complete) {
+        if (complete) {
           then();
           return;
         }
 
-        if (Number(response.headers["content-length"]) > this.limits.drainBytes) {
-          request.destroy();
+        const close = () => controller?.abort(new Refused("its body is not read"));
+        if (declared > this.limits.drainBytes) {
+          close();
           then();
           return;
         }
 
         // Answered once it has been read, so that a redirect's next hop finds it free; a
         // body chunked past the bound, or slow, closes it instead.
-        const draining = request;
         let settled = false;
         let drained = 0;
-        const settle = () => {
+        const drainedAll = () => {
           if (!settled) {
             settled = true;
             clearTimeout(late);
@@ -1076,87 +1074,46 @@ export class Network {
           }
         };
         const late = setTimeout(() => {
-          draining.destroy();
-          settle();
+          close();
+          drainedAll();
         }, this.limits.drainTime);
-        response.on("data", (chunk: Buffer) => {
+        sink = (chunk) => {
           drained += chunk.length;
           // What has come whole leaves the connection clean, however long.
-          if (drained > this.limits.drainBytes && !response.complete) {
-            draining.destroy();
-            settle();
+          if (drained > this.limits.drainBytes && drained !== declared) {
+            close();
+            drainedAll();
             return;
           }
 
           arm();
-        });
-        response.on("end", settle);
-        response.on("close", settle);
-        response.on("error", () => {});
+        };
+        // A connection that breaks as it drains is undici's to close; the answer stands.
+        ending = drainedAll;
+        breaking = drainedAll;
       };
-      let reused = false;
-      const wire = (current: ClientRequest) => {
-        let answered = false;
-        current.on("socket", (socket) => {
-          if (current === request) {
-            reused = this.pool.serves(socket);
-          }
-        });
-        current.on("error", (error) => {
-          if (current !== request) {
-            return;
-          }
-
-          if (
-            !answered &&
-            !retried &&
-            !finished &&
-            method === "GET" &&
-            reused &&
-            ((error as NodeJS.ErrnoException).code === "ECONNRESET" ||
-              (error as NodeJS.ErrnoException).code === "EPIPE")
-          ) {
-            retried = true;
-            try {
-              request = make();
-            } catch (again) {
-              stop(new Refused((again as Error).message));
-              return;
-            }
-
-            wire(request);
-            return;
-          }
-
-          // A proxy's refusal comes as it was made, with its cause.
-          stop(error instanceof Refused ? error : new Refused(error.message));
-        });
-        current.on("response", (response: IncomingMessage) => {
-          answered = true;
-          respond(response);
-        });
-        current.end(body ?? undefined);
-      };
-      const respond = (response: IncomingMessage) => {
-        const status = response.statusCode ?? 0;
+      const respond = (status: number, parsed: Record<string, string | string[] | undefined>) => {
         const received: [string, string][] = [];
-        const raw = response.rawHeaders;
+        // As they came, their names' case kept: undici's own are lower case.
+        const raw = (controller?.rawHeaders ?? []) as (Buffer | string)[];
+        const text = (value: Buffer | string) =>
+          typeof value === "string" ? value : value.toString("latin1");
         for (let i = 0; i + 1 < raw.length; i += 2) {
+          const name = text(raw[i]);
           // The SWF has no cookie jar to keep them in.
-          if (!/^set-cookie2?$/i.test(raw[i])) {
-            received.push([raw[i], raw[i + 1]]);
+          if (!/^set-cookie2?$/i.test(name)) {
+            received.push([name, text(raw[i + 1])]);
           }
         }
 
+        const declared = Number(parsed["content-length"]);
         const wanted = (status >= 200 && status < 300) || (!!options.errorBody && status >= 400);
         const end = (bytes: Uint8Array | null) => {
           if (!finished) {
-            release(response, () => {
+            release(declared, () => {
               if (!finished) {
-                finished = true;
-                clearTimeout(timer);
-                clearTimeout(overall);
-                signal.removeEventListener("abort", abort);
+                const reused = attempt?.reused === true;
+                settle();
                 answer({ bytes, status, headers: received, ...(reused ? { reused: true } : {}) });
               }
             });
@@ -1167,7 +1124,6 @@ export class Network {
           return;
         }
 
-        const declared = Number(response.headers["content-length"]);
         if (declared > options.max) {
           stop(new Refused(`its response is larger than ${options.max} bytes`));
           return;
@@ -1176,7 +1132,8 @@ export class Network {
         // A body a server compressed though no one asked: decompressed as it
         // comes, the limits counting what comes out. One coding is undone;
         // more than one, which no server needs, is refused.
-        const codings = String(response.headers["content-encoding"] ?? "")
+        const encoding = parsed["content-encoding"];
+        const codings = (Array.isArray(encoding) ? encoding.join(",") : (encoding ?? ""))
           .split(",")
           .map((c) => c.trim().toLowerCase())
           .filter((c) => c !== "" && c !== "identity");
@@ -1222,7 +1179,7 @@ export class Network {
           return;
         }
 
-        const take = (chunk: Buffer) => {
+        const take = (chunk: Uint8Array) => {
           if (finished) {
             return;
           }
@@ -1256,27 +1213,110 @@ export class Network {
         };
         arm();
         if (!coded) {
-          response.on("data", take);
-          response.on("end", done);
-        } else {
-          const decompressor = new Decompressor(coding, take, done, () =>
-            stop(new Refused("its response does not decompress")),
-          );
-          stopping.push(() => decompressor.destroy());
-          decompressor.onDrain = () => response.resume();
-          response.on("data", (chunk: Buffer) => {
-            arm();
-            if (!decompressor.write(chunk)) {
-              response.pause();
-            }
-          });
-          response.on("end", () => decompressor.end());
+          sink = take;
+          ending = done;
+          return;
         }
 
-        response.on("error", (error) => stop(new Refused(error.message)));
-        response.on("aborted", () => stop(new Refused("the response broke off")));
+        const decompressor = new Decompressor(coding, take, done, () =>
+          stop(new Refused("its response does not decompress")),
+        );
+        stopping.push(() => decompressor.destroy());
+        decompressor.onDrain = () => controller?.resume();
+        sink = (chunk) => {
+          arm();
+          if (!decompressor.write(chunk)) {
+            controller?.pause();
+          }
+        };
+        ending = () => decompressor.end();
       };
-      wire(request);
+      const broken = (error: Error) => {
+        const code = (error as NodeJS.ErrnoException).code;
+        return code === "UND_ERR_SOCKET" || code === "ECONNRESET" || code === "EPIPE";
+      };
+      /** A try at the request on its turn: a GET broken on a reused connection has one more. */
+      const start = (given: Turn) => {
+        let gone = false;
+        const sent = given.send(request, {
+          onRequestStart: (started) => {
+            controller = started;
+          },
+          onResponseStart: (started, status, parsed) => {
+            controller = started;
+            answered = true;
+            respond(status, parsed as Record<string, string | string[] | undefined>);
+          },
+          onResponseData: (_controller, chunk) => {
+            if (!finished) {
+              sink?.(chunk);
+            }
+          },
+          onResponseEnd: () => {
+            complete = true;
+            if (!finished) {
+              ending?.();
+            }
+          },
+          onResponseError: (_controller, error) => {
+            if (gone || finished) {
+              return;
+            }
+
+            if (releasing) {
+              breaking?.();
+              return;
+            }
+
+            if (
+              !answered &&
+              !retried &&
+              method === "GET" &&
+              attempt?.reused === true &&
+              broken(error)
+            ) {
+              retried = true;
+              gone = true;
+              start(given);
+              return;
+            }
+
+            // A proxy's refusal comes as it was made, with its cause; what check() let
+            // through and undici still refuses, as it is sent, is a refusal like any other.
+            stop(
+              error instanceof Refused
+                ? error
+                : new Refused(answered && broken(error) ? "the response broke off" : error.message),
+            );
+          },
+        });
+        if (finished) {
+          sent.cancel(new Refused("aborted"));
+        } else if (!gone) {
+          attempt = sent;
+        }
+      };
+      // The key's turn: its connections reach the pinned address, through the proxy where
+      // there is one, TLS by the host's name, as the key says.
+      leave = this.pool.turn(
+        {
+          secure: https,
+          host,
+          address,
+          port: Number(url.port || (https ? 443 : 80)),
+          unverified: https && this.unverified(host),
+        },
+        (given) => {
+          leave = null;
+          turn = given;
+          if (finished) {
+            given.release();
+            return;
+          }
+
+          start(given);
+        },
+      );
     });
   }
 }
