@@ -17,14 +17,28 @@
 //   a request to an address more private than the SWF's own (addresses.ts)
 //   needs a policy from that address granting it, whatever its purpose,
 //   same origin or not. Each request resolves its host once and connects
-//   to that address, its policy file fetched from the same one, so DNS
+//   to that address, its policy file fetched from the same one, and the
+//   HTTP cache keeps each response for the address it came from, so DNS
 //   that changes its answer (rebinding) changes nothing.
 // - Requests are bounded: methods, headers, sizes, redirects, time, and
 //   how many run at once; and each movie's are aborted as the next opens.
+// - Connections are kept alive between requests (http-pool.ts), but only
+//   for exactly the request that would open the same one: the same scheme,
+//   name, pinned address, port, route and certificate checking. So a
+//   rebinding name, pinned elsewhere, gets a connection of its own, and the
+//   pin holds as without a pool. Each page's are closed as it goes.
 // - Through a proxy (--proxy, proxy.ts), each connection is a tunnel to
 //   the address its host was pinned to, judged as without one: the proxy
 //   is asked for that address, not the name, so a proxy's DNS that answers
 //   otherwise than this machine's reaches nothing the judgement did not.
+// - A GET's answer may come from the HTTP cache (http-cache.ts) in place of
+//   the server, or the server's 304 to its revalidation: only once the
+//   request has been judged as any other, so a policy that refuses it
+//   refuses it whatever is stored, and only from what that very address,
+//   by the same way (the proxy or none), answered for this movie's origin,
+//   the policy files that judged it included; never a private address's
+//   policy file, nor anything unverified under --ignore-certificate-errors.
+//   A POST answered with success forgets what its URL had.
 //
 // Its types and limits are network-types.ts, and the rules that need no
 // instance network-rules.ts.
@@ -34,10 +48,10 @@ import { lookup } from "node:dns/promises";
 import { type ClientRequest, request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { connect, isIP, type Socket } from "node:net";
-import type { Duplex } from "node:stream";
-import * as tls from "node:tls";
 import { type AddressClass, addressClass, RANK } from "./addresses.ts";
 import { DECODED, Decompressor } from "./decompress.ts";
+import { type CacheEntry, type CacheRequest, type HttpCache, servedHeaders } from "./http-cache.ts";
+import { ConnectionPool } from "./http-pool.ts";
 import {
   abortable,
   bare,
@@ -85,6 +99,61 @@ const FLASH_VERSION = "32,0,0,465";
 const USER_AGENT = "Mozilla/5.0 (compatible; swf2es) Shockwave Flash";
 const TOKEN = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/;
 
+interface SendOptions {
+  read: boolean;
+  /** Whether a response whose status is 400 or more is read too. */
+  errorBody?: boolean;
+  max: number;
+  referer: string | null;
+  timeout?: number;
+  deadline?: number;
+  /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
+  budget?: Budget;
+  /** Whose HTTP cache answers and keeps it (partitionOf); none, where absent. */
+  partition?: string;
+  /** A policy file's fetch: fresh only as long as its server says. */
+  policyFile?: boolean;
+}
+
+/**
+ * Whose cache a movie's requests use: its origin, as a browser partitions
+ * its cache by site, so that no movie reads or probes another origin's;
+ * the URL it was opened by until it has come. Local movies share one, and
+ * applications another.
+ */
+function partitionOf(session: Session): string {
+  const movie = session.movie;
+  switch (movie.kind) {
+    case "remote":
+      return session.origin?.url.origin ?? new URL(movie.url).origin;
+    case "local":
+      return "local";
+    case "application":
+      return "application";
+  }
+}
+
+/** The headers a request goes with: the SWF's own over what every request sends. */
+function outgoingHeaders(
+  headers: [string, string][],
+  referer: string | null,
+): Record<string, string> {
+  const outgoing: Record<string, string> = {
+    "User-Agent": USER_AGENT,
+    Accept: "*/*",
+    "x-flash-version": FLASH_VERSION,
+  };
+  if (referer) {
+    outgoing.Referer = referer;
+  }
+
+  for (const [name, value] of headers) {
+    outgoing[name] = value;
+  }
+
+  return outgoing;
+}
+
 export class Network {
   private readonly limits: Limits;
   private readonly resolveHost: (host: string) => Promise<string[]>;
@@ -93,7 +162,11 @@ export class Network {
   private readonly unverified: (host: string) => boolean;
   private readonly socketPolicyPort: number;
   private readonly proxy: ProxyConfig | null;
+  /** The keep-alive connections requests share (http-pool.ts), closed with each page. */
+  readonly pool: ConnectionPool;
   private session: Session | null = null;
+  /** What answers a GET in place of the network where it can; none by default, or when turned off. */
+  cache: HttpCache | null = null;
   private running = 0;
   private readonly waiting: (() => void)[] = [];
 
@@ -108,14 +181,17 @@ export class Network {
     this.unverified = options.unverified ?? (() => false);
     this.socketPolicyPort = options.socketPolicyPort ?? 843;
     this.proxy = options.proxy ?? null;
+    this.pool = new ConnectionPool({ ca: this.ca, proxy: this.proxy, limits: options.pool });
   }
 
   /**
    * Judge requests for `movie` from now on, or for none: what the last
-   * movie had under way is aborted, and its policy files forgotten.
+   * movie had under way is aborted, its policy files forgotten and its
+   * connections closed.
    */
   play(movie: Movie | null): void {
     this.session?.abort.abort();
+    this.pool.destroy();
     this.session = movie
       ? {
           movie,
@@ -128,6 +204,11 @@ export class Network {
           buffered: 0,
         }
       : null;
+  }
+
+  /** Every request aborted and every connection closed, as the app quits. */
+  close(): void {
+    this.play(null);
   }
 
   /** The movie's URL after its redirects, once it has come; null before, and for a local movie. */
@@ -462,11 +543,12 @@ export class Network {
         throw new Refused(`a redirect to ${url.href}, somewhere more private`);
       }
 
-      const response = await this.send(url, target.address, "GET", [], null, signal, {
+      const response = await this.exchange(url, target.address, "GET", [], null, signal, {
         read: true,
         max: this.limits.response,
         referer: null,
         budget,
+        partition: partitionOf(session),
       });
       const next = redirectOf(url, response);
       if (next) {
@@ -542,7 +624,7 @@ export class Network {
         }
       }
 
-      const response = await this.send(url, target.address, method, headers, body, signal, {
+      const response = await this.exchange(url, target.address, method, headers, body, signal, {
         // sendToURL's answer is no one's to read.
         read: request.purpose !== "send",
         // In AIR's application sandbox alone: Flash Player's fail such a load, with no data.
@@ -550,6 +632,7 @@ export class Network {
         max: this.limits.response,
         budget,
         referer: refererFor(session.origin?.url ?? null, url),
+        partition: partitionOf(session),
       });
       const next = redirectOf(url, response);
       if (!next) {
@@ -579,7 +662,7 @@ export class Network {
   private async policiesFor(session: Session, url: URL, address: string): Promise<UrlPolicy[]> {
     const get = (policyUrl: URL) =>
       cached(session.policies, `${policyUrl.href}|${address}`, () =>
-        this.urlPolicy(policyUrl, address, session.abort.signal),
+        this.urlPolicy(policyUrl, address, session.abort.signal, partitionOf(session)),
       );
     const master = await get(new URL("/crossdomain.xml", url.origin));
     const meta = urlMetaPolicy(master);
@@ -608,13 +691,16 @@ export class Network {
     url: URL,
     address: string,
     signal: AbortSignal,
+    partition: string,
   ): Promise<UrlPolicy | null> {
     let response: NetResponse;
     try {
-      response = await this.send(url, address, "GET", [], null, signal, {
+      response = await this.exchange(url, address, "GET", [], null, signal, {
         read: true,
         max: this.limits.policy,
         referer: null,
+        partition,
+        policyFile: true,
         timeout: this.limits.policyTimeout,
         deadline: this.limits.policyTimeout,
       });
@@ -734,33 +820,145 @@ export class Network {
   }
 
   /**
-   * A request's createConnection: a tunnel through `proxy` to `address`,
-   * with TLS over it where `secure` says how, as Node's callback form takes
-   * it. A proxy's failure is a refusal saying why, the ProxyError its cause.
+   * A request's answer from the cache where it can give one, a stored
+   * response fresh or revalidated with a 304, else from send(), what comes
+   * kept where it may be. Its body counts as send()'s would, against `max`
+   * and the movie's budget. Only what send() would read is asked of it: a
+   * GET whose body is read, for the address it was judged against and the
+   * movie's partition. Anything else that succeeds, a POST, forgets what
+   * its URL had (RFC 9111, 4.4).
    */
-  private tunnel(
-    proxy: ProxyConfig,
+  private async exchange(
+    url: URL,
     address: string,
-    port: number,
-    secure: tls.ConnectionOptions | false,
+    method: string,
+    headers: [string, string][],
+    body: Uint8Array | null,
     signal: AbortSignal,
-  ) {
-    return (_options: unknown, done: (error: Error | null, socket: Duplex) => void) => {
-      connectThrough(proxy, address, port, { signal }).then(
-        (tunnel) => done(null, secure ? tls.connect({ ...secure, socket: tunnel }) : tunnel),
-        (error: ProxyError) =>
-          done(new Refused(error.message, { cause: error }), undefined as unknown as Duplex),
-      );
-      return undefined;
+    options: SendOptions,
+  ): Promise<NetResponse> {
+    const cache = this.cache;
+    const partition = options.partition;
+    if (
+      !cache ||
+      partition === undefined ||
+      // Unverified, as --ignore-certificate-errors leaves it: whoever was on the way may have
+      // written it, and nothing so written outlives the run that allowed it.
+      (url.protocol === "https:" && this.unverified(bare(url.hostname))) ||
+      // A grant only one network's machines make, which on another the same address is not.
+      (options.policyFile && this.classify(address) !== "public")
+    ) {
+      return this.send(url, address, method, headers, body, signal, options);
+    }
+
+    if (method !== "GET") {
+      const response = await this.send(url, address, method, headers, body, signal, options);
+      cache.invalidate(url, response, partition);
+      return response;
+    }
+
+    const request: CacheRequest = {
+      method,
+      url: url.href,
+      headers: Object.entries(outgoingHeaders(headers, options.referer)),
+      address,
+      partition,
+      // An address is a machine only along one way to it: through a proxy, another may be.
+      route: this.pool.route,
+      policyFile: options.policyFile === true,
     };
+    if (!options.read || !cache.handles(request)) {
+      return this.send(url, address, method, headers, body, signal, options);
+    }
+
+    const found = cache.lookup(request);
+    if (found?.fresh) {
+      const bytes = await this.storedBody(cache, found, signal, options);
+      if (bytes) {
+        return { bytes, status: found.status, headers: servedHeaders(found), cache: "hit" };
+      }
+    }
+
+    const conditional = found && !found.fresh ? found.conditional : [];
+    const response = await this.send(
+      url,
+      address,
+      method,
+      [...headers, ...conditional],
+      body,
+      signal,
+      options,
+    );
+    if (found && conditional.length > 0 && response.status === 304) {
+      const refreshed = cache.revalidated(found, request, response);
+      const bytes = refreshed && (await this.storedBody(cache, refreshed, signal, options));
+      if (refreshed && bytes) {
+        return {
+          bytes,
+          status: refreshed.status,
+          headers: servedHeaders(refreshed),
+          cache: "revalidated",
+          ...(response.reused ? { reused: true } : {}),
+        };
+      }
+
+      // What the 304 was to confirm is gone, or does not match: asked again, whole.
+      const whole = await this.send(url, address, method, headers, body, signal, options);
+      void cache.store(request, whole);
+      return whole;
+    }
+
+    void cache.store(request, response);
+    return response;
+  }
+
+  /**
+   * A stored body, counted as a response's against `max` and the movie's
+   * budget; null where its file is not what was stored.
+   */
+  private async storedBody(
+    cache: HttpCache,
+    entry: CacheEntry,
+    signal: AbortSignal,
+    options: SendOptions,
+  ): Promise<Uint8Array | null> {
+    if (entry.size > options.max) {
+      throw new Refused(`its response is larger than ${options.max} bytes`);
+    }
+
+    const budget = options.budget;
+    if (budget) {
+      if (budget.session.buffered + entry.size > this.limits.buffered) {
+        throw new Refused("the SWF's responses under way hold too much at once");
+      }
+
+      budget.session.buffered += entry.size;
+      budget.taken += entry.size;
+    }
+
+    const bytes = await cache.body(entry);
+    if (!bytes && budget) {
+      budget.session.buffered -= entry.size;
+      budget.taken -= entry.size;
+    }
+
+    if (signal.aborted) {
+      throw new Refused("aborted");
+    }
+
+    return bytes;
   }
 
   /**
    * One HTTP exchange with `address`, the URL's host pinned to it: its
    * status and headers, and its body if `read` and the status is a
    * success, or an error whose body was asked for (`errorBody`), up to
-   * `max` bytes. No cookies, no credentials, no
-   * compression asked for, no connection kept.
+   * `max` bytes. No cookies, no credentials, no compression asked for.
+   * Its connection is the pool's (http-pool.ts): one kept idle for the
+   * same scheme, name, address, port, route and certificate checking,
+   * where there is one, and kept after only once its response has been
+   * read to the end. A GET whose kept connection the server closed as it
+   * was reused, before any answer, is sent once more, as browsers do.
    */
   private send(
     url: URL,
@@ -769,17 +967,7 @@ export class Network {
     headers: [string, string][],
     body: Uint8Array | null,
     signal: AbortSignal,
-    options: {
-      read: boolean;
-      /** Whether a response whose status is 400 or more is read too. */
-      errorBody?: boolean;
-      max: number;
-      referer: string | null;
-      timeout?: number;
-      deadline?: number;
-      /** Where the bytes read count against the movie's `buffered`; a policy file's do not. */
-      budget?: Budget;
-    },
+    options: SendOptions,
   ): Promise<NetResponse> {
     const timeout = options.timeout ?? this.limits.timeout;
     const deadline = options.deadline ?? this.limits.deadline;
@@ -790,61 +978,34 @@ export class Network {
       }
 
       const host = bare(url.hostname);
-      const outgoing: Record<string, string> = {
-        "User-Agent": USER_AGENT,
-        Accept: "*/*",
-        "x-flash-version": FLASH_VERSION,
-      };
-      if (options.referer) {
-        outgoing.Referer = options.referer;
-      }
-
-      for (const [name, value] of headers) {
-        outgoing[name] = value;
-      }
-
+      const outgoing = outgoingHeaders(headers, options.referer);
       if (body) {
         outgoing["Content-Length"] = String(body.length);
       }
 
       const https = url.protocol === "https:";
-      const family = isIP(address);
       const port = Number(url.port || (https ? 443 : 80));
-      const secure: tls.ConnectionOptions = {
-        servername: isIP(host) ? undefined : host,
-        ca: this.ca,
-        // Only where the user asked for this host: its certificate goes unchecked.
-        ...(this.unverified(host) ? { rejectUnauthorized: false } : {}),
-      };
-      let request: ClientRequest;
-      try {
-        request = (https ? httpsRequest : httpRequest)({
+      // The agent of this request's key: its connections reach the pinned address, through
+      // the proxy where there is one, TLS by the host's name, as the key says.
+      const agent = this.pool.agent({
+        secure: https,
+        host,
+        address,
+        port,
+        unverified: https && this.unverified(host),
+      });
+      const make = () =>
+        (https ? httpsRequest : httpRequest)({
           host,
           port,
           path: `${url.pathname}${url.search}`,
           method,
           headers: outgoing,
-          ...(this.proxy
-            ? // Through the proxy to the pinned address, TLS over the tunnel for https; the
-              // request's own timers and signal bound the proxy's part too. No agent: the
-              // connection is this one's.
-              { createConnection: this.tunnel(this.proxy, address, port, https && secure, signal) }
-            : {
-                agent: false,
-                // The address pinned for this request, whatever the resolver would say now.
-                lookup: (_name, opts, callback) => {
-                  if ((opts as { all?: boolean }).all) {
-                    (callback as (e: null, a: { address: string; family: number }[]) => void)(
-                      null,
-                      [{ address, family }],
-                    );
-                  } else {
-                    (callback as (e: null, a: string, f: number) => void)(null, address, family);
-                  }
-                },
-                ...(https ? secure : {}),
-              }),
+          agent,
         });
+      let request: ClientRequest;
+      try {
+        request = make();
       } catch (error) {
         // What check() let through and Node still refuses: a refusal like any other.
         fail(new Refused((error as Error).message));
@@ -853,6 +1014,7 @@ export class Network {
       let timer: NodeJS.Timeout;
       const overall = setTimeout(() => stop(new Refused("it took too long")), deadline);
       let finished = false;
+      let retried = false;
       /** What else a stop takes down: a decompressor. */
       const stopping: (() => void)[] = [];
       const stop = (error: Refused) => {
@@ -876,11 +1038,106 @@ export class Network {
       const abort = () => stop(new Refused("aborted"));
       signal.addEventListener("abort", abort, { once: true });
       arm();
-      // A proxy's refusal comes as it was made, with its cause.
-      request.on("error", (error) =>
-        stop(error instanceof Refused ? error : new Refused(error.message)),
-      );
-      request.on("response", (response: IncomingMessage) => {
+      /**
+       * The connection back to the pool once its response has been read to
+       * its end, which one no one reads is too where it is small, a
+       * redirect's or a 304's, so that the next request may have it; any
+       * other closed. The request's timers and abort hold until then: an
+       * abort while it drains refuses it as before.
+       */
+      let releasing = false;
+      const release = (response: IncomingMessage, then: () => void) => {
+        if (releasing) {
+          return;
+        }
+
+        releasing = true;
+        if (response.complete) {
+          then();
+          return;
+        }
+
+        if (Number(response.headers["content-length"]) > this.limits.drainBytes) {
+          request.destroy();
+          then();
+          return;
+        }
+
+        // Answered once it has been read, so that a redirect's next hop finds it free; a
+        // body chunked past the bound, or slow, closes it instead.
+        const draining = request;
+        let settled = false;
+        let drained = 0;
+        const settle = () => {
+          if (!settled) {
+            settled = true;
+            clearTimeout(late);
+            then();
+          }
+        };
+        const late = setTimeout(() => {
+          draining.destroy();
+          settle();
+        }, this.limits.drainTime);
+        response.on("data", (chunk: Buffer) => {
+          drained += chunk.length;
+          // What has come whole leaves the connection clean, however long.
+          if (drained > this.limits.drainBytes && !response.complete) {
+            draining.destroy();
+            settle();
+            return;
+          }
+
+          arm();
+        });
+        response.on("end", settle);
+        response.on("close", settle);
+        response.on("error", () => {});
+      };
+      let reused = false;
+      const wire = (current: ClientRequest) => {
+        let answered = false;
+        current.on("socket", (socket) => {
+          if (current === request) {
+            reused = this.pool.serves(socket);
+          }
+        });
+        current.on("error", (error) => {
+          if (current !== request) {
+            return;
+          }
+
+          if (
+            !answered &&
+            !retried &&
+            !finished &&
+            method === "GET" &&
+            reused &&
+            ((error as NodeJS.ErrnoException).code === "ECONNRESET" ||
+              (error as NodeJS.ErrnoException).code === "EPIPE")
+          ) {
+            retried = true;
+            try {
+              request = make();
+            } catch (again) {
+              stop(new Refused((again as Error).message));
+              return;
+            }
+
+            wire(request);
+            return;
+          }
+
+          // A proxy's refusal comes as it was made, with its cause.
+          stop(error instanceof Refused ? error : new Refused(error.message));
+        });
+        current.on("response", (response: IncomingMessage) => {
+          answered = true;
+          respond(response);
+        });
+        current.end(body ?? undefined);
+      };
+      const respond = (response: IncomingMessage) => {
         const status = response.statusCode ?? 0;
         const received: [string, string][] = [];
         const raw = response.rawHeaders;
@@ -894,12 +1151,15 @@ export class Network {
         const wanted = (status >= 200 && status < 300) || (!!options.errorBody && status >= 400);
         const end = (bytes: Uint8Array | null) => {
           if (!finished) {
-            finished = true;
-            clearTimeout(timer);
-            clearTimeout(overall);
-            signal.removeEventListener("abort", abort);
-            request.destroy();
-            answer({ bytes, status, headers: received });
+            release(response, () => {
+              if (!finished) {
+                finished = true;
+                clearTimeout(timer);
+                clearTimeout(overall);
+                signal.removeEventListener("abort", abort);
+                answer({ bytes, status, headers: received, ...(reused ? { reused: true } : {}) });
+              }
+            });
           }
         };
         if (!wanted || !options.read) {
@@ -1015,8 +1275,8 @@ export class Network {
 
         response.on("error", (error) => stop(new Refused(error.message)));
         response.on("aborted", () => stop(new Refused("the response broke off")));
-      });
-      request.end(body ?? undefined);
+      };
+      wire(request);
     });
   }
 }

@@ -298,6 +298,12 @@ function ask(
 }
 
 const text = (bytes: Uint8Array | null) => (bytes ? new TextDecoder().decode(bytes) : null);
+/** A response's bytes and status, without its headers or how its connection came. */
+const plain = ({ bytes, status }: { bytes: Uint8Array | null; status: number }) => ({
+  bytes,
+  status,
+  headers: [],
+});
 
 /** Its text, or the reason it was refused, "refused: ...". */
 async function outcome(promise: Promise<{ bytes: Uint8Array | null; status: number }>) {
@@ -344,10 +350,11 @@ test("a remote SWF loads itself, then reads its own origin", async () => {
   assert.ok(response.headers.some(([n, v]) => n.toLowerCase() === "x-seen" && v === "yes"));
   assert.ok(!response.headers.some(([n]) => n.toLowerCase() === "set-cookie"));
   // A failed load is its status and no bytes.
-  assert.deepEqual(
-    { ...(await ask(net, `${swf()}/missing`)), headers: [] },
-    { bytes: null, status: 404, headers: [] },
-  );
+  assert.deepEqual(plain(await ask(net, `${swf()}/missing`)), {
+    bytes: null,
+    status: 404,
+    headers: [],
+  });
 });
 
 test("an error response's body is read for an AIR application that asks, and for no SWF", async () => {
@@ -364,24 +371,18 @@ test("an error response's body is read for an AIR application that asks, and for
   });
   assert.deepEqual([text(posted.bytes), posted.status], ["gone", 404]);
   // Unasked, as its Loader and its Sound, which fail in AIR too.
-  assert.deepEqual(
-    { ...(await ask(application, `${swf()}/missing`, "content")), headers: [] },
-    gone,
-  );
+  assert.deepEqual(plain(await ask(application, `${swf()}/missing`, "content")), gone);
 
   // Flash Player's sandboxes fail such a load whatever the page asks.
   const remote = await playing();
-  assert.deepEqual(
-    { ...(await ask(remote, `${swf()}/missing`, "data", { errorBody: true })), headers: [] },
-    gone,
-  );
+  assert.deepEqual(plain(await ask(remote, `${swf()}/missing`, "data", { errorBody: true })), gone);
   const local = network();
   local.play({ kind: "local" });
   policies.set("swf/crossdomain.xml", xml('<allow-access-from domain="*"/>'));
   try {
     assert.equal(await outcome(ask(local, `${swf()}/data.txt`)), "swf/data.txt");
     assert.deepEqual(
-      { ...(await ask(local, `${swf()}/missing`, "data", { errorBody: true })), headers: [] },
+      plain(await ask(local, `${swf()}/missing`, "data", { errorBody: true })),
       gone,
     );
   } finally {
@@ -1192,10 +1193,12 @@ test("through a proxy, each request and socket policy goes to the address judged
       assert.equal(await net.socketAddress("swf.test", swfPort), PUBLIC);
       assert.ok(proxy.targets.includes(`${PUBLIC}:${masterPolicy}`), kind);
 
-      // A target the proxy refuses is a refusal saying so, as one no server took.
+      // A target the proxy refuses is a refusal saying so, as one no server took: asked of
+      // a page that has no tunnel to it kept from before.
       blocked = otherPort;
+      const refusing = await playing(`${swf()}/movie.swf`, options);
       assert.match(
-        await outcome(ask(net, `${other()}/image.png`, "content")),
+        await outcome(ask(refusing, `${other()}/image.png`, "content")),
         kind === "socks5"
           ? /^refused: the proxy socks5:\/\/127\.0\.0\.1:\d+ refused: not allowed by its rules/
           : /^refused: the proxy http:\/\/127\.0\.0\.1:\d+ refused: HTTP 403/,

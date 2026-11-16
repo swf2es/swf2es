@@ -34,7 +34,9 @@ export const PUBLIC_PACKAGES = [
 /**
  * The apps published to npm beside them, by their folders under apps/: the
  * desktop app, which holds no code from elsewhere and bundles no package,
- * so that its licence is the repository's alone.
+ * so that its licence is the repository's alone. Its LICENSE.third-party
+ * repeats the notices of the dependencies from elsewhere that its code
+ * loads (appNotices), which npm installs beside it with their own.
  */
 export const PUBLIC_APPS = ["desktop"];
 
@@ -295,6 +297,43 @@ https://www.w3.org/TR/SVG11/filters.html#feTurbulenceElement`),
   }
 }
 
+/** The dependencies from elsewhere that an app's code loads, beside Electron, which runs it. */
+export const APP_DEPENDENCIES: Record<string, string[]> = { desktop: ["http-cache-semantics"] };
+
+/** An app's notices: those of the dependencies from elsewhere it loads, which it does not hold. */
+function appNotices(name: string): Notice[] {
+  return (APP_DEPENDENCIES[name] ?? []).map((dependency) => {
+    const pkg = JSON.parse(read(`apps/${name}/node_modules/${dependency}/package.json`));
+    const home = String(pkg.repository?.url ?? pkg.repository ?? "")
+      .replace(/^git\+/, "")
+      .replace(/\.git$/, "");
+    return {
+      title: dependency,
+      spdx: [pkg.license],
+      text: `${dependency} ${pkg.version}, ${home},
+which npm installs beside the app, is under the ${pkg.license} licence:
+
+${read(`apps/${name}/node_modules/${dependency}/LICENSE`)}`,
+    };
+  });
+}
+
+/** An app's LICENSE.third-party, or null for one that loads nothing from elsewhere. */
+function appThirdParty(name: string): string | null {
+  const list = appNotices(name);
+  if (list.length === 0) {
+    return null;
+  }
+
+  const sections = list.map((n) => `${n.title}\n${"=".repeat(n.title.length)}\n\n${n.text}`);
+  return `What @swf2es/${name} loads from elsewhere, and its terms. The package's
+own code is under the Apache License 2.0 (LICENSE), and it holds no code
+from elsewhere: these are the dependencies its code loads.
+
+
+${sections.join("\n\n")}`;
+}
+
 /** What each package holds from elsewhere, by origin, for a test to hold against their headers. */
 export function origins(name: string): Origin[] {
   const titles: Record<string, Origin> = {
@@ -354,6 +393,10 @@ export function expected(): Map<string, string> {
 
   for (const name of PUBLIC_APPS) {
     files.set(`apps/${name}/LICENSE`, license);
+    const text = appThirdParty(name);
+    if (text !== null) {
+      files.set(`apps/${name}/LICENSE.third-party`, text);
+    }
   }
 
   return files;

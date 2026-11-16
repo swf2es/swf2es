@@ -1,7 +1,7 @@
 // The command line's switches for this run alone, and what they make:
 // --trace and the network's logs, --ignore-certificate-errors and --proxy,
 // the network judged through them and what opens an AIR application's
-// WebSockets. Each said on stderr as the app starts.
+// WebSockets, each said on stderr as the app starts; and --no-http-cache.
 import { Network } from "./network.ts";
 import { unverifiedHosts } from "./network-rules.ts";
 import { describeProxy, proxyArgument } from "./proxy.ts";
@@ -13,6 +13,15 @@ import {
   webSocketOpener,
 } from "./websocket-connections.ts";
 
+/** The app's own arguments: not an AIR application's, after "--". */
+const own = process.argv.includes("--")
+  ? process.argv.slice(0, process.argv.indexOf("--"))
+  : process.argv;
+/**
+ * --no-http-cache: nothing read from the HTTP cache nor kept in it, nor the
+ * cache opened, for this run, whatever the File menu says.
+ */
+export const httpCacheOff = own.includes("--no-http-cache");
 /** --trace: what the page logs, a SWF's trace() among it, goes to the terminal. */
 export const trace = process.argv.includes("--trace");
 // Each request and socket of the SWF's said on stderr: the page's DevTools show none of them.

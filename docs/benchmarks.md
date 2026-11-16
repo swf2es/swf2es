@@ -178,6 +178,19 @@ page's side.
         [--burst N]   the messages a server writes a turn, 40 by default
         [--busy MS]   the main process held MS ms of every 2 MS, as by its other work
 
+`tests/desktop/keepalive-bench.ts` has servers in a process of their own,
+http and https on loopback (the certificate made with openssl, https
+skipped without), answer 1 KB to each of 200 GETs, one after another and
+then all at once, made by `network.ts` in node as a SWF's URLLoaders make
+them, and counts the connections the servers took. Loopback has no round
+trip to speak of, so what a connection saves there is the main process's
+own work, TLS's handshake above all; over a real network each also saves
+its round trips.
+
+    node tests/desktop/keepalive-bench.ts [runs]                             this checkout
+    node tests/desktop/keepalive-bench.ts <checkout A> <checkout B> [runs]   two, interleaved
+        [--loads N]   the loads of each kind, 200 by default
+
 ## AVM1 startup and scene changes
 
 `pnpm bench:avm1 [--runs 5] [--frames 600]` measures what AVM1 content
@@ -563,6 +576,11 @@ points at:
   section), as they are dropped when a walk ends; the step's
   `enumerable` check is 18% more, and `startOrGoOn`, `takeSparse` and
   `sparseElement` 18% between them. avmplus walks its hashtable in place.
+  Keeping the indices between walks would save about 40%, but cannot be
+  kept exact cheaply: generated code stores an Array's elements in place
+  and fills a hole within the length unseen by the runtime, so a cache
+  could miss an index; a guard on that store, or a backing store that
+  is not a plain array, would cost other code (tried 2026-11-16).
 - **Untyped names through the runtime.** Every get, set and call on a
   value typed `*` is a call of `rt.getProperty` (17% of untyped's
   display), `setProperty` or `callProperty`, which looks the name up in
@@ -570,12 +588,14 @@ points at:
   the entry's kind: a getter by `e.get.call(o)`, a dynamic property by
   a Map's `get` and then `has`. The site keeps nothing of what it found,
   where Flash's JIT caches it at the call site.
-- **Domain memory by `rt.view`.** Crossbridge's loads and stores are
-  `rt.view.getInt32(address, true)` and the like, the DataView read
-  from the runtime at every access, as it changes when memory grows; the
-  four hottest functions of the C program are 50% of lz4's samples, and
-  on noise they do little else. Flash's JIT emits a bounds check and a
-  load.
+- **Domain memory by `rt.view`, ruled out.** Crossbridge's loads and
+  stores are `rt.view.getInt32(address, true)` and the like, the DataView
+  read from the runtime at every access. Holding the view in a local for
+  the method, read again only after what can change the memory, was tried
+  on 2026-11-16 and gained nothing (lz4's total 684–687 ms before, 682–687
+  after; prose-compress slower): V8 makes the read cheap. The noise
+  sections' gap looks like warm-up; the program's first run in node is
+  about four times its steady state.
 - **Typed calls.** The loops are compiled as they should be: `l1.$b4(l2)`
   calls the method's unchecked entry with no coercion when the argument
   is known to be a subclass, and an interface call is
@@ -798,6 +818,8 @@ The compiler and runtime:
   through an unchecked entry, interface and super calls bound, interface
   methods by an alias every implementer shares.
 - #797: script objects of thousands of slots kept fast in V8.
+- #1019: Array.NUMERIC sorts of numbers by the same quicksort on their
+  doubles, the comparison inline (native-collections' sorts 95 → 55 ms).
 - #908, #912, #891, #882: untyped keys and string names made cheaply.
 - #938, #941, #943: a String's length read in place, a primitive's
   methods kept from their first call.
@@ -828,6 +850,8 @@ The player:
   transparent one, 7.70 → 6.98 ms (opaque 8.77 → 8.27);
   getColorBoundsRect reading each row from both ends to its first and
   last match, 6.98 → 4.77 ms.
+- #1020: setVector on an opaque bitmap into a view of a run from the
+  Vector's start (pixels' setVector-opaque 38 → 27 ms).
 
 The desktop app:
 
@@ -843,6 +867,12 @@ The desktop app:
   1.98 and → 1.60; collections 9 → 5 (12.0 → 4.4 ms) and 5 → 5 (4.9 →
   2.9 ms). A cheaper read comes sooner and carries less: reads 7,564 →
   15,790 and 2,623 → 5,852.
+- #1023: keep-alive connections, a pool keyed by scheme, name, pinned address,
+  port, route and certificate checking (`tests/desktop/keepalive-bench.ts`,
+  200 loads of 1 KB from one loopback server, medians of 6): http one by
+  one 74.1 → 47.6 ms, all at once 43.6 → 25.1 ms; https one by one 334.3
+  → 39.6 ms, all at once 228.4 → 28.9 ms. Connections: 200 → 1 one by
+  one, 200 → 6 all at once, a key's limit.
 
 The renderer's are described in [renderer.md](renderer.md).
 

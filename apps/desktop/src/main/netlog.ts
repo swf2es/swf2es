@@ -20,16 +20,33 @@ function shown(url: string): string {
   return url.slice(0, 2048).replace(/[\u0000-\u001f\u007f]/g, "?");
 }
 
-/** A request answered: its method, URL, status, body's size and how long it took. */
+/**
+ * A request answered: its method, URL, status, body's size and how long it
+ * took, where the HTTP cache answered it, fresh or after a 304, and
+ * whether its connection was one kept from an earlier request.
+ */
 export function requestLine(
   method: string,
   url: string,
   status: number,
   bytes: number | null,
   ms: number,
+  cache?: "hit" | "revalidated",
+  reused?: boolean,
 ): string {
   const body = bytes === null ? "no body" : size(bytes);
-  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms`;
+  let from = "";
+  switch (cache) {
+    case "hit":
+      from = " from cache";
+      break;
+    case "revalidated":
+      from = " revalidated";
+      break;
+  }
+
+  const connection = reused ? " reused" : "";
+  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}${connection}`;
 }
 
 /** A request that got no answer: refused, failed or aborted, and why. */

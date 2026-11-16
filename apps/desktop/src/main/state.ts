@@ -1,9 +1,10 @@
 // What the main process's modules share: the window, its page, the
-// settings and the sandbox of what plays. main.ts alone changes the
-// window, the settings and whether the page listens, through the setters
-// here, since a module cannot assign another's bindings; the rest read
-// them as they are now.
+// settings, the HTTP cache and the sandbox of what plays. main.ts alone
+// changes the window, the settings, the cache and whether the page
+// listens, through the setters here, since a module cannot assign
+// another's bindings; the rest read them as they are now.
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from "electron";
+import type { HttpCache } from "./http-cache.ts";
 import { APP_ORIGIN } from "./protocol.ts";
 import { Sandbox } from "./sandbox.ts";
 import type { SettingsFile } from "./settings.ts";
@@ -13,6 +14,8 @@ export const TITLE = "swf2es";
 export const sandbox = new Sandbox();
 export let settings: SettingsFile;
 export let window: BrowserWindow | null = null;
+/** The HTTP cache, open whether or not the File menu uses it; none under --no-http-cache. */
+export let httpCache: HttpCache | null = null;
 /**
  * The page has asked to start and listens for what opens: until then, start() hands it the movie.
  */
@@ -24,6 +27,10 @@ export function setWindow(created: BrowserWindow | null): void {
 
 export function setSettings(read: SettingsFile): void {
   settings = read;
+}
+
+export function setHttpCache(opened: HttpCache | null): void {
+  httpCache = opened;
 }
 
 export function setListening(now: boolean): void {

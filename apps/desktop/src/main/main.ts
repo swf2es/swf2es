@@ -7,6 +7,7 @@
 //
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
+// --no-http-cache neither reads nor keeps the HTTP cache.
 //
 // The second runs an AIR application by its descriptor, as adl does.
 //
@@ -14,7 +15,7 @@
 // open.ts, what plays and opening it; permissions.ts, sockets and
 // WebSockets; dialogs.ts and menu.ts; air-bridge.ts, an AIR application's
 // reach. Here: start-up, the window and its page's messages.
-import { isAbsolute } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { app, BrowserWindow, dialog, ipcMain, session, shell, type WebContents } from "electron";
 import type { NetworkResponse, StartState } from "../shared/api.js";
@@ -22,6 +23,7 @@ import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { bridgeFiles } from "./files.ts";
+import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
 import { failureLine, requestLine } from "./netlog.ts";
 import { Refused } from "./network-types.ts";
@@ -41,7 +43,9 @@ import { proxyArgument, sameProxy } from "./proxy.ts";
 import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
 import {
+  httpCache,
   sandbox,
+  setHttpCache,
   setListening,
   setSettings,
   settings,
@@ -51,6 +55,7 @@ import {
   window,
 } from "./state.ts";
 import {
+  httpCacheOff,
   logSockets,
   netLog,
   network,
@@ -303,6 +308,27 @@ function listen(): void {
 }
 
 /**
+ * Where the system keeps what may be thrown away, apart from what is kept
+ * and backed up: the HTTP cache's place, under the app's name as its user
+ * data has it. Electron names none: its user data, where the settings are,
+ * is backed up, and roams with the user on Windows.
+ */
+function cacheDirectory(): string {
+  const home = app.getPath("home");
+  switch (process.platform) {
+    case "darwin":
+      return join(home, "Library", "Caches");
+    case "win32":
+      return process.env.LOCALAPPDATA || app.getPath("appData");
+    default: {
+      // As the XDG Base Directory specification has it: a relative path is to be ignored.
+      const xdg = process.env.XDG_CACHE_HOME;
+      return xdg && isAbsolute(xdg) ? xdg : join(home, ".cache");
+    }
+  }
+}
+
+/**
  * A request of the page's: the SWF's own, as the movie opened by its URL,
  * or what the SWF playing loads, only with the network, as network.ts
  * judges it. A refusal is said on stderr, and the page sees a failed
@@ -335,7 +361,9 @@ async function fetchForPage(
         response.status,
         response.bytes?.length ?? null,
         performance.now() - started,
-      ) + via,
+        response.cache,
+        response.reused,
+      ) + (response.cache === "hit" ? "" : via),
     );
     return response;
   } catch (error) {
@@ -418,6 +446,11 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("window-all-closed", () => app.quit());
+app.on("will-quit", () => {
+  // No connection a SWF's requests kept outlives the app.
+  network.close();
+  httpCache?.close();
+});
 
 // Not awaited at the top level: Electron makes the app ready only once the main module has run.
 void app.whenReady().then(() => {
@@ -433,6 +466,17 @@ void app.whenReady().then(() => {
     process.stderr.write(
       `swf2es: playing on the playerglobal chosen in File, ${chosen}, not the app's own\n`,
     );
+  }
+
+  if (!httpCacheOff) {
+    const root = userData ?? join(cacheDirectory(), app.getName());
+    try {
+      setHttpCache(new HttpCache(join(root, "HTTP Cache")));
+    } catch (error) {
+      warn(`no HTTP cache: ${error}`);
+    }
+
+    network.cache = settings.httpCache ? httpCache : null;
   }
 
   serve(session.defaultSession, sandbox, () => settings.libraries());

@@ -2,7 +2,8 @@
 import { app, Menu, type MenuItemConstructorOptions } from "electron";
 import { chooseLibrary, refuse, resetLibrary, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { closeMovie, current, openEntry } from "./open.ts";
-import { settings, window } from "./state.ts";
+import { httpCache, settings, window } from "./state.ts";
+import { network } from "./switches.ts";
 
 export function buildMenu(): void {
   const recent = settings.settings.recent;
@@ -42,6 +43,35 @@ export function buildMenu(): void {
           label: "Use the App's playerglobal",
           enabled: !!settings.settings.playerglobal,
           click: () => resetLibrary("playerglobal"),
+        },
+        { type: "separator" },
+        {
+          id: "http-cache",
+          label: "HTTP Cache",
+          type: "checkbox",
+          // Off for the run under --no-http-cache, which opened none.
+          enabled: !!httpCache,
+          checked: !!httpCache && settings.httpCache,
+          click: (item) => {
+            if (!settings.setHttpCache(item.checked)) {
+              refuse(
+                "The settings could not be saved.",
+                "The HTTP cache choice holds until you quit.",
+              );
+            }
+
+            network.cache = item.checked ? httpCache : null;
+          },
+        },
+        {
+          id: "clear-http-cache",
+          label: "Clear HTTP Cache",
+          enabled: !!httpCache,
+          click: () => {
+            void httpCache?.clear().catch((error) => {
+              refuse("The HTTP cache could not be cleared.", String(error));
+            });
+          },
         },
         { type: "separator" },
         { role: "quit" },

@@ -1,6 +1,6 @@
 // What the app remembers between runs, in settings.json under its user
-// data: a playerglobal.abc the user chose, the SWFs opened last, and
-// Stage3D turned off or on from the View menu.
+// data: a playerglobal.abc the user chose, the SWFs opened last, Stage3D
+// turned off or on from the View menu, and the HTTP cache from the File menu.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,6 +13,8 @@ export interface Settings {
    * change, so a stored `false` there does not tell a user's choice from the old default.
    */
   stage3DChoice?: boolean;
+  /** The HTTP cache as the File menu last set it; absent until it does, which is on. */
+  httpCache?: boolean;
   playerglobal?: string;
   /** Most recent first. */
   recent: string[];
@@ -64,6 +66,15 @@ export class SettingsFile {
     return this.update({ stage3DChoice: enabled });
   }
 
+  /** Whether the HTTP cache answers and keeps responses: on unless the user turned it off. */
+  get httpCache(): boolean {
+    return this.current.httpCache ?? true;
+  }
+
+  setHttpCache(enabled: boolean): boolean {
+    return this.update({ httpCache: enabled });
+  }
+
   /** `path` opened: first in the recent list. */
   opened(path: string): void {
     this.update({
@@ -96,6 +107,7 @@ export class SettingsFile {
       const text = (value: unknown) => (typeof value === "string" ? value : undefined);
       return {
         stage3DChoice: typeof read.stage3DChoice === "boolean" ? read.stage3DChoice : undefined,
+        httpCache: typeof read.httpCache === "boolean" ? read.httpCache : undefined,
         playerglobal: text(read.playerglobal),
         recent: strings(read.recent),
         sockets: Object.fromEntries(

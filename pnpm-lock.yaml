@@ -46,6 +46,9 @@ importers:
       electron:
         specifier: 44.10.2
         version: 44.10.2
+      http-cache-semantics:
+        specifier: 4.3.0
+        version: 4.3.0
 
   apps/site:
     dependencies:
