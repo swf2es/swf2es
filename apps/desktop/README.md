@@ -72,24 +72,18 @@ fetch-electron` does so ahead, for the tests.
 - **Without a GPU.** The player draws with WebGL 2. Where Chromium takes
   no GPU, because there is none or its blocklist refuses the one there is
   (a server, a CI runner, a virtual machine, Xvfb, whose only GL is Mesa's
-  llvmpipe), the app draws with SwiftShader, Chromium's GPU on the CPU,
-  and says so on stderr: `swf2es: no GPU Chromium takes here (none, or one
-  its blocklist refuses): drawing with SwiftShader, on the CPU`. Where
-  Chromium takes the GPU, the GPU draws, as it did without the fallback;
-  a GPU process that keeps crashing is Chromium's to recover from (see
-  [What draws](../../docs/architecture/desktop.md#what-draws)).
-  Chromium calls SwiftShader unsafe for untrusted content, as it compiles
-  code in the GPU process, which on Linux runs outside Chromium's sandbox,
-  as it does with a GPU. The page, where a SWF's code runs, is sandboxed:
-  do not play a SWF you do not trust with `--no-sandbox` (which running as
-  root needs, as in some Docker and CI setups). `--software-gl` draws with
-  SwiftShader even where Chromium takes the GPU, for a GPU that gives WebGL but not WebGL 2, or
-  draws wrong, and says so too. SwiftShader is slower than a GPU, more so
-  the larger the window. On a server with no display, run the app under
-  Xvfb: `xvfb-run -a swf2es-desktop movie.swf`. Where a Wayland session is
-  about (`WAYLAND_DISPLAY`, or `XDG_SESSION_TYPE=wayland`), Electron goes
-  to it rather than to Xvfb unless told otherwise: add
-  `--ozone-platform=x11`.
+  llvmpipe), there is no WebGL 2 and nothing draws, and the app says so on
+  stderr. `--software-gl` draws with SwiftShader, Chromium's GPU on the CPU,
+  there, and also where Chromium takes a GPU that gives WebGL but not WebGL 2
+  or draws wrong. It is a switch, not a fallback, because Chromium calls
+  SwiftShader unsafe for untrusted content: it compiles code in the GPU
+  process, which on Linux runs outside Chromium's sandbox (see
+  [What draws](../../docs/architecture/desktop.md#what-draws)). SwiftShader
+  is slower than a GPU, more so the larger the window. On a server with no
+  display: `xvfb-run -a swf2es-desktop --software-gl movie.swf`. Where a
+  Wayland session is about (`WAYLAND_DISPLAY`, or
+  `XDG_SESSION_TYPE=wayland`), Electron goes to it rather than to Xvfb
+  unless told otherwise: add `--ozone-platform=x11`.
 - **Network log.** `--log-network` prints each of the SWF's requests to
   stderr as it is answered (`swf2es: net GET https://… 200 12.3 kB 48 ms`),
   an aborted one too, and each socket and each WebSocket of an AIR

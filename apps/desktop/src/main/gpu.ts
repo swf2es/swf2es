@@ -1,37 +1,42 @@
-// What draws the player's WebGL 2: the GPU where Chromium takes it, and
-// SwiftShader, Chromium's GPU on the CPU, where it refuses the GPU or finds
-// none, as under Xvfb on a server or a CI runner, whose only GL is Mesa's
-// llvmpipe, which Chromium's blocklist refuses. Chromium no longer falls back
-// to SwiftShader for WebGL unless told to, and without WebGL 2 nothing plays.
+// What draws the player's WebGL 2: the GPU where Chromium takes it. Where it
+// refuses the GPU or finds none, as under Xvfb on a server or a CI runner,
+// whose only GL is Mesa's llvmpipe, which Chromium's blocklist refuses, there
+// is no WebGL 2 and nothing plays unless the user asks for SwiftShader,
+// Chromium's GPU on the CPU, with --software-gl. It is not a silent fallback:
+// Chromium calls SwiftShader unsafe for untrusted content, and on Linux the
+// GPU process it runs in has no sandbox (docs/architecture/desktop.md).
 import { app } from "electron";
 
 /**
  * Before the app is ready, as Chromium reads its GPU switches as it starts
- * the GPU process. `software` (--software-gl) draws with SwiftShader even
- * where Chromium would take the GPU: for one that gives WebGL but not
+ * the GPU process. `software` (--software-gl) draws with SwiftShader: where
+ * Chromium takes no GPU, and where it takes one that gives WebGL but not
  * WebGL 2, or draws wrong.
  */
 export function chooseGl(software: boolean): void {
-  // A fallback: where Chromium takes the GPU, the GPU draws. A GPU process that crashes again
-  // and again is Chromium's to recover from, by modes the switch may add SwiftShader to.
-  app.commandLine.appendSwitch("enable-unsafe-swiftshader");
   if (software) {
+    app.commandLine.appendSwitch("enable-unsafe-swiftshader");
     app.commandLine.appendSwitch("use-angle", "swiftshader");
     process.stderr.write("swf2es: --software-gl: drawing with SwiftShader, on the CPU\n");
+    return;
   }
 
-  // The GPU process's state comes after it starts, and again as it restarts or goes. Only the
-  // fallback is said: as the app quits, WebGL is "disabled" even where the GPU drew, and where
-  // nothing draws the page says so.
-  const sayFallback = () => {
-    // Chromium's word for WebGL on SwiftShader where the GPU was refused.
-    if (app.getGPUFeatureStatus().webgl === "unavailable_software") {
-      app.off("gpu-info-update", sayFallback);
+  // The GPU process's state comes after it starts, and again as it restarts or goes. Only a
+  // refusal is said, once. Electron 44 reports no "webgl2" status: WebGL's is "disabled_off"
+  // where the GPU was refused with no fallback, and as the app quits even where the GPU drew.
+  let quitting = false;
+  app.once("before-quit", () => {
+    quitting = true;
+  });
+  const sayRefused = () => {
+    const webgl = app.getGPUFeatureStatus().webgl ?? "";
+    if (!quitting && (webgl.startsWith("disabled") || webgl.startsWith("unavailable"))) {
+      app.off("gpu-info-update", sayRefused);
       process.stderr.write(
-        "swf2es: no GPU Chromium takes here (none, or one its blocklist refuses): " +
-          "drawing with SwiftShader, on the CPU\n",
+        "swf2es: no GPU Chromium takes here (none, or one its blocklist refuses), so no " +
+          "WebGL 2 and nothing draws; --software-gl draws with SwiftShader, on the CPU\n",
       );
     }
   };
-  app.on("gpu-info-update", sayFallback);
+  app.on("gpu-info-update", sayRefused);
 }

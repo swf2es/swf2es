@@ -1,9 +1,9 @@
 // The desktop app as a server or a CI runner runs it: in a window on an
 // Xvfb, whose only GL is Mesa's llvmpipe, which Chromium's blocklist
-// refuses, and with no switch of the test's for the GPU. The app falls back
-// to SwiftShader, says so, and the SWF plays and draws; --software-gl does
-// the same by choice, which a second start, handing its SWF to the first,
-// does not claim. Skipped, saying why, where Electron was not downloaded,
+// refuses, and with no switch of the test's for the GPU. Without
+// --software-gl the app takes no SwiftShader, has no WebGL 2 and says how to
+// draw; with it the SWF plays and draws on SwiftShader, which a second start,
+// handing its SWF to the first, does not claim. Skipped, saying why, where Electron was not downloaded,
 // there is no Xvfb, or the Xvfb has a GPU's GL after all.
 //
 //   node tests/desktop/xvfb.ts
@@ -118,16 +118,26 @@ try {
     { recent: [] },
     [movie],
     async (app) => {
-      const renderer = await plays(app);
-      if (!/SwiftShader/.test(renderer)) {
+      const renderer = await app.evaluate<string>(`(() => {
+        const gl = document.createElement("canvas").getContext("webgl2");
+        if (!gl) {
+          return "";
+        }
+        const info = gl.getExtension("WEBGL_debug_renderer_info");
+        return gl.getParameter(info ? info.UNMASKED_RENDERER_WEBGL : gl.RENDERER);
+      })()`);
+      if (renderer) {
+        assert.doesNotMatch(renderer, /SwiftShader/);
         hardware = renderer;
         return;
       }
 
-      await app.until("the fallback said", () =>
-        app.stderr().includes("drawing with SwiftShader, on the CPU"),
+      // SwiftShader only when asked for: its JIT runs in a GPU process with no sandbox.
+      await app.until("the refusal said", () =>
+        app.stderr().includes("--software-gl draws with SwiftShader"),
       );
-      assert.match(app.stderr(), /swf2es: no GPU Chromium takes here/);
+      assert.match(app.stderr(), /swf2es: no GPU Chromium takes here .* nothing draws/);
+      assert.doesNotMatch(app.stderr(), /drawing with SwiftShader/);
     },
     { plain: true },
   );

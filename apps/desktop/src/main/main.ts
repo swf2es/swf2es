@@ -8,7 +8,7 @@
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
-// --software-gl draws with SwiftShader, on the CPU, even where there is a GPU.
+// --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
 //
 // The second runs an AIR application by its descriptor, as adl does.
 //

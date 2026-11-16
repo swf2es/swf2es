@@ -379,7 +379,7 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
-| `--software-gl` | Draws with SwiftShader, on the CPU, even where there is a GPU, for one that gives WebGL but not WebGL 2. |
+| `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
 | `-- arguments...` | After an AIR application's descriptor: the application's own arguments. |
@@ -412,20 +412,17 @@ refuses plain http and sockets on other ports.
 
 The player draws with WebGL 2. Where Chromium takes no GPU, because there
 is none or its blocklist refuses the one there is, as on a server, a CI
-runner or a virtual machine, the app draws with SwiftShader, Chromium's GPU
-on the CPU, and says so on stderr; where it takes the GPU, the GPU draws,
-as it did without the fallback. Chromium calls SwiftShader unsafe for
-untrusted content, as it compiles code in the GPU process, which on Linux
-runs outside Chromium's sandbox, as it does with a GPU. The page, where a
-SWF's code runs, is sandboxed: do not play a SWF you do not trust with
-`--no-sandbox`, which running as root needs, as in some Docker and CI
-setups.
+runner or a virtual machine, nothing draws and the app says so on stderr.
+`--software-gl` draws with SwiftShader, Chromium's GPU on the CPU, instead.
+Chromium calls SwiftShader unsafe for untrusted content, as it compiles code
+in the GPU process, which on Linux runs outside Chromium's sandbox, so use it
+for SWFs you trust.
 
 On a server with no display, run the app under Xvfb, whose only GL Chromium
-refuses, so SwiftShader draws:
+refuses:
 
 ```sh
-xvfb-run -a npx @swf2es/desktop --trace movie.swf
+xvfb-run -a npx @swf2es/desktop --software-gl --trace movie.swf
 ```
 
 Where a Wayland session is about (`WAYLAND_DISPLAY`, or
