@@ -10,6 +10,7 @@
 //
 //   node tests/desktop/page-gone.ts
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server, type Socket } from "node:net";
 import { fileURLToPath } from "node:url";
@@ -31,8 +32,14 @@ if (why) {
   process.exit(0);
 }
 
-/** How soon a server must see its connection closed once the page's process is gone. */
-const CLOSED_WITHIN_MS = 5000;
+/**
+ * How soon a server must see its connection closed once render-process-gone
+ * has come: the app's part. The process itself goes only once the system has
+ * written its dump, a core dump or crashpad's, which takes a second here and
+ * may take far longer on a busy runner; GONE_WITHIN_MS bounds that.
+ */
+const CLOSED_WITHIN_MS = 2000;
+const GONE_WITHIN_MS = 60_000;
 /** How often the servers send to a connected SWF, unasked. */
 const TICK_MS = 20;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -47,7 +54,7 @@ const abcs = compileScripts(
   out,
 );
 
-/** A connection a server holds: when it closed, by performance.now(), once it has. */
+/** A connection a server holds: when it closed, by the clock, once it has. */
 interface Held {
   closedAt: number | null;
 }
@@ -70,7 +77,7 @@ function tickingServer(): { server: Server; held: Held[] } {
     });
     connection.on("error", () => {});
     connection.on("close", () => {
-      one.closedAt = performance.now();
+      one.closedAt = Date.now();
       if (timer) {
         clearInterval(timer);
       }
@@ -172,24 +179,114 @@ const pageLives = (main: App["main"]) =>
     return (await Promise.race([state, new Promise((r) => setTimeout(r, 500))])) === "complete";
   })()`);
 
-/** The window's renderer process crashed, as Chromium crashes one; when, by performance.now(). */
-async function crash(main: App["main"]): Promise<number> {
-  const at = performance.now();
-  await main(
-    `(${electron}.BrowserWindow.getAllWindows()[0].webContents.forcefullyCrashRenderer(), true)`,
-  );
-  return at;
+/**
+ * A crash the test made: when, by the clock, the renderer's pid, and how
+ * many render-process-gone had come before it.
+ */
+interface Crash {
+  at: number;
+  pid: number;
+  index: number;
 }
 
-/** Wait for `one` to close, failing if it takes longer than CLOSED_WITHIN_MS after `since`. */
-async function closedSoon(app: App, what: string, one: Held, since: number): Promise<void> {
-  await app.until(
-    what,
-    () => one.closedAt !== null || performance.now() - since > CLOSED_WITHIN_MS,
-  );
-  assert.ok(
-    one.closedAt !== null && one.closedAt - since < CLOSED_WITHIN_MS,
-    `${what}: still open ${CLOSED_WITHIN_MS} ms after the page's process went`,
+/** A render-process-gone, as the main process kept it. */
+interface Gone {
+  at: number;
+  reason: string;
+  exitCode: number;
+}
+
+/**
+ * The window's renderer process crashed, as Chromium crashes one. The main
+ * process keeps when each render-process-gone came, by the clock, for a
+ * failure to say.
+ */
+async function crash(main: App["main"]): Promise<Crash> {
+  const at = Date.now();
+  const { pid, index } = await main<{ pid: number; index: number }>(`(() => {
+    const page = ${electron}.BrowserWindow.getAllWindows()[0].webContents;
+    if (!globalThis.goneWatched) {
+      globalThis.goneWatched = true;
+      globalThis.gone = [];
+      page.on("render-process-gone", (_event, details) => {
+        globalThis.gone.push({ at: Date.now(), reason: details.reason, exitCode: details.exitCode });
+      });
+    }
+
+    const pid = page.getOSProcessId();
+    page.forcefullyCrashRenderer();
+    return { pid, index: globalThis.gone.length };
+  })()`);
+  return { at, pid, index };
+}
+
+/** What a failure to close says: the process's state, render-process-gone, and the app's stderr. */
+async function whyOpen(app: App, crashed: Crash): Promise<string> {
+  let status = "gone";
+  let tracer = "0";
+  try {
+    const lines = readFileSync(`/proc/${crashed.pid}/status`, "utf8").split("\n");
+    status = lines.filter((l) => /^(State|TracerPid|PPid):/.test(l)).join(", ");
+    tracer = /^TracerPid:\s*(\d+)/m.exec(lines.join("\n"))?.[1] ?? "0";
+  } catch {
+    // No such process: it has gone.
+  }
+
+  const processes = spawnSync("ps", ["-eo", "pid,ppid,stat,wchan:24,etimes,args"], {
+    encoding: "utf8",
+  })
+    .stdout.split("\n")
+    // The app's own alone: its processes name its user data, or are the renderer and its tracer.
+    .filter(
+      (l) => l.includes(app.userData) || new RegExp(`^\\s*(${crashed.pid}|${tracer})\\s`).test(l),
+    )
+    .map((l) => l.slice(0, 240));
+  const gone = await app
+    .main<Gone[]>("globalThis.gone")
+    .then((events) =>
+      events
+        .slice(crashed.index)
+        .map((e) => `${e.reason} (exit ${e.exitCode}) +${e.at - crashed.at} ms`),
+    )
+    .catch((error: Error) => [`unknown: ${error.message}`]);
+  return [
+    `renderer ${crashed.pid}: ${status}`,
+    `render-process-gone: ${gone.join("; ") || "none"}`,
+    `processes:\n${processes.join("\n")}`,
+    `stderr:\n${app.stderr().split("\n").slice(-40).join("\n")}`,
+  ].join("\n");
+}
+
+/**
+ * Wait for the page's process to go, then for `one` to close, failing,
+ * saying why, if either takes longer than it may.
+ */
+async function closedSoon(app: App, what: string, one: Held, crashed: Crash): Promise<void> {
+  let gone: Gone | undefined;
+  while (!gone) {
+    gone = (await app.main<Gone[]>("globalThis.gone"))[crashed.index];
+    if (!gone && Date.now() - crashed.at > GONE_WITHIN_MS) {
+      assert.fail(
+        `${what}: no render-process-gone ${GONE_WITHIN_MS} ms after the crash\n${await whyOpen(app, crashed)}`,
+      );
+    }
+
+    if (!gone) {
+      await sleep(50);
+    }
+  }
+
+  const goneAt = gone.at;
+  await app.until(what, () => one.closedAt !== null || Date.now() - goneAt > CLOSED_WITHIN_MS);
+  if (one.closedAt === null || one.closedAt - goneAt > CLOSED_WITHIN_MS) {
+    assert.fail(
+      `${what}: still open ${CLOSED_WITHIN_MS} ms after render-process-gone\n${await whyOpen(app, crashed)}`,
+    );
+  }
+
+  console.log(
+    `desktop page-gone test: ${what}: the process went ${goneAt - crashed.at} ms after the crash, ` +
+      `the connection closed ${one.closedAt - goneAt} ms after that`,
   );
 }
 
@@ -288,7 +385,7 @@ try {
         ws.held.push(one);
         const timer = setInterval(() => peer.send("tick"), TICK_MS);
         peer.request.socket.once("close", () => {
-          one.closedAt = performance.now();
+          one.closedAt = Date.now();
           clearInterval(timer);
         });
       }
