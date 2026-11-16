@@ -556,17 +556,44 @@ export interface WebSocketTransport {
   send(data: string | Uint8Array): void;
   /** A close frame with `code`, 1000 or 3000 to 4999, or with none. */
   close(code?: number): void;
+  /**
+   * A frame of `opcode` with `payload` as it is, where the host sends
+   * frames as AIR does, as the desktop app's does and a browser's cannot:
+   * text (1) with its bytes unchecked, binary (2), close (8) with the
+   * payload's code and reason, ping (9) and pong (10). Where there is one,
+   * the natives send those opcodes through it in place of send and close.
+   */
+  frame?(opcode: number, payload: Uint8Array): void;
 }
+
+/** How a connection failed, where the host can tell (WebSocketEvents.error). */
+export type WebSocketFailure = "handshake" | "subprotocol";
 
 /** What befalls the connection; the player delivers each to ActionScript on a frame. */
 export interface WebSocketEvents {
   /** The handshake is done; the subprotocol the server chose, or "". */
   open(protocol: string): void;
-  message(data: string | Uint8Array): void;
+  /**
+   * A text message as a string, or as its bytes, as AIR keeps them, with
+   * `text` true; a binary one as bytes.
+   */
+  message(data: string | Uint8Array, text?: boolean): void;
   /** The connection has closed: the close frame's code, 1005 for a frame without one, 1006 for none. */
   close(code: number): void;
-  /** The connection or its handshake failed; after open, a close follows. */
-  error(): void;
+  /**
+   * The connection or its handshake failed; after open, a close follows.
+   * `failure` says how where the host can tell: "handshake" for a server
+   * reached that refused the handshake, "subprotocol" for one that chose a
+   * subprotocol not offered; without it, no server was reached.
+   */
+  error(failure?: WebSocketFailure): void;
+  /**
+   * The server's certificate is self-signed, which AIR leaves the
+   * application to accept, by preventing the default of its
+   * certificateError: `proceed` is told whether it did, and the host goes
+   * on with the connection or fails it. A host that never asks fails it.
+   */
+  certificateError(proceed: (accepted: boolean) => void): void;
 }
 
 export interface WebSocketHost {

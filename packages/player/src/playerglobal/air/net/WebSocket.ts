@@ -2,7 +2,7 @@
 // What it throws and dispatches is what adl does (docs/architecture/services.md);
 // where a browser cannot do as AIR does, the nearest it can.
 import { avm2 } from "@swf2es/runtime";
-import type { WebSocketTransport } from "../../../hosts.js";
+import type { WebSocketFailure, WebSocketTransport } from "../../../hosts.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 
@@ -29,6 +29,8 @@ interface Connection {
 const TEXT = 1;
 const BINARY = 2;
 const CLOSE = 8;
+const PING = 9;
+const PONG = 10;
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder("utf-8", { ignoreBOM: true });
@@ -80,15 +82,20 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
     }
   };
 
+  /** A handshake broken: an IOErrorEvent with the URL, then a close, as adl dispatches. */
+  const broken = (o: AsObject, c: Connection) => {
+    c.transport = null;
+    c.state = "closed";
+    ioError(o, c.url);
+    dispatchEvent(s, o, s.event("close"));
+  };
+
   /** End a connection before its handshake is done, as AIR does when a frame goes out first. */
   const interrupt = (o: AsObject, c: Connection) => {
     c.transport?.close();
     c.transport = null;
     c.state = "closed";
-    s.loads.deferHostEvent(() => {
-      ioError(o, c.url);
-      dispatchEvent(s, o, s.event("close"));
-    });
+    s.loads.deferHostEvent(() => broken(o, c));
   };
 
   const send = (c: Connection, opcode: number, bytes: Uint8Array) => {
@@ -98,7 +105,28 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
     }
 
     // AIR writes the opcode's low four bits, whatever they are.
-    switch (opcode & 0x0f) {
+    const low = opcode & 0x0f;
+    if (transport.frame) {
+      // A host that sends frames as AIR does; it has no way to send a reserved opcode.
+      switch (low) {
+        case CLOSE:
+          c.state = "closing";
+          transport.frame(low, bytes);
+          break;
+        case TEXT:
+        case BINARY:
+        case PING:
+        case PONG:
+          transport.frame(low, bytes);
+          break;
+        default:
+          break;
+      }
+
+      return;
+    }
+
+    switch (low) {
       case TEXT:
         // A leading BOM is the SWF's bytes, as AIR sends them, not a mark to drop.
         transport.send(textDecoder.decode(bytes));
@@ -156,6 +184,27 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
         c.state = "failed";
         ioError(this, hostOf(text));
       };
+      // As adl: a server that refused the handshake gives the URL and a close; one that chose a
+      // subprotocol not offered the URL alone, the connection left failed.
+      const failed = (failure?: WebSocketFailure) => {
+        if (c.state !== "connecting") {
+          return;
+        }
+
+        switch (failure) {
+          case "handshake":
+            broken(this, c);
+            break;
+          case "subprotocol":
+            c.transport = null;
+            c.state = "failed";
+            ioError(this, text);
+            break;
+          default:
+            fail();
+            break;
+        }
+      };
       const host = s.webSocket;
       if (!host) {
         s.loads.deferHostEvent(fail);
@@ -178,7 +227,7 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
 
               dispatchEvent(s, this, s.event("connect"));
             }),
-          message: (data) =>
+          message: (data, isText) =>
             s.loads.deferHostEvent(() => {
               if (c.state !== "open" && c.state !== "closing") {
                 return;
@@ -188,7 +237,7 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
               const bytes = avm2.bytesOf(s.rt, array);
               bytes.write(typeof data === "string" ? textEncoder.encode(data) : data.slice());
               bytes.position = 0;
-              const format = typeof data === "string" ? TEXT : BINARY;
+              const format = typeof data === "string" || isText ? TEXT : BINARY;
               const cls = s.rt.classNamed("flash.events::WebSocketEvent");
               dispatchEvent(s, this, s.rt.construct(cls, "websocketData", format, array));
             }),
@@ -214,7 +263,27 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
                 dispatchEvent(s, this, s.event("close"));
               }
             }),
-          error: () => s.loads.deferHostEvent(fail),
+          error: (failure) => s.loads.deferHostEvent(() => failed(failure)),
+          certificateError: (proceed) =>
+            s.loads.deferHostEvent(() => {
+              if (c.state !== "connecting") {
+                proceed(false);
+                return;
+              }
+
+              // adl's words for a self-signed certificate; a listener that prevents the
+              // default accepts it, and the connection goes on.
+              const cls = s.rt.classNamed("flash.events::SecurityErrorEvent");
+              const event = s.rt.construct(
+                cls,
+                "certificateError",
+                false,
+                true,
+                "Certificate for socket server is self-signed",
+                0,
+              );
+              proceed(!dispatchEvent(s, this, event) && c.state === "connecting");
+            }),
         });
       } catch (e) {
         if ((e as { name?: unknown } | null)?.name === "SecurityError") {
@@ -271,7 +340,13 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
           const code = s.rt.toUint(reasonCode) & 0xffff;
           c.state = "closing";
           c.closedHere = true;
-          c.transport?.close(sendable(code) ? code : undefined);
+          const transport = c.transport;
+          if (transport?.frame) {
+            transport.frame(CLOSE, Uint8Array.of(code >> 8, code & 0xff));
+          } else {
+            transport?.close(sendable(code) ? code : undefined);
+          }
+
           break;
         }
         case "connecting":

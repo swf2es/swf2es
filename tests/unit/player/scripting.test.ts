@@ -1317,7 +1317,7 @@ test("destroy closes the open connections, aborts the fetches and closes the aud
     audio: { decode: () => Promise.reject(new Error("no device")), close: () => audioClosed++ },
   });
   const events = { open() {}, data() {}, close() {}, error() {} };
-  const wsEvents = { open() {}, message() {}, close() {}, error() {} };
+  const wsEvents = { open() {}, message() {}, close() {}, error() {}, certificateError() {} };
   assert.ok(scripting.socket && scripting.webSocket && scripting.fetch);
   scripting.socket.connect("open", 1, events);
   scripting.socket.connect("closed-here", 1, events).close();

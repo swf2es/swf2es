@@ -237,3 +237,105 @@ test("a connection the host refuses is a securityError or an ioError, without a 
     "done",
   ]);
 });
+
+test("over a host that sends frames as AIR does, the natives send and dispatch as adl", {
+  skip,
+}, async () => {
+  const sent: string[] = [];
+  const hex = (bytes: Uint8Array) => Buffer.from(bytes).toString("hex");
+  const later = (f: () => void) => setTimeout(f, 1);
+  const host: WebSocketHost = {
+    connect(url, _protocols, events) {
+      const path = new URL(url).pathname;
+      later(() => {
+        switch (path) {
+          case "/refused":
+            events.error("handshake");
+            events.close(1006);
+            break;
+          case "/unoffered":
+            events.error("subprotocol");
+            events.close(1006);
+            break;
+          case "/self":
+          case "/accepted":
+            events.certificateError((accepted) => {
+              sent.push(`${path} accepted ${accepted}`);
+              if (accepted) {
+                events.open("");
+              } else {
+                events.error();
+                events.close(1006);
+              }
+            });
+            break;
+          default:
+            events.open("");
+        }
+      });
+      const frame = (opcode: number, payload: Uint8Array) => {
+        sent.push(`${path} ${opcode} ${hex(payload)}`);
+        if (opcode === 1 && hex(payload) === hex(new TextEncoder().encode("go"))) {
+          later(() => {
+            events.message(new Uint8Array([0xef, 0xbb, 0xbf, 0x62, 0x6f, 0x6d]), true);
+            events.message(new Uint8Array([0x66, 0xff, 0x67]), true);
+            events.message(new Uint8Array([1, 2]));
+          });
+        } else if (opcode === 8) {
+          later(() => events.close(payload.length >= 2 ? (payload[0] << 8) | payload[1] : 1005));
+        }
+      };
+      return {
+        send: () => sent.push(`${path} send, not frame`),
+        close: () => sent.push(`${path} close, not frame`),
+        frame,
+      };
+    },
+  };
+
+  const event = (name: string, text: string, closeReason = -1) =>
+    `${name} [Event type="${text}" bubbles=false cancelable=false eventPhase=2] closeReason=${closeReason}`;
+  const data = (format: number, hex: string) =>
+    `frames [Event type="websocketData" bubbles=false cancelable=false eventPhase=2] format=${format} hex=${hex} closeReason=-1`;
+  const io = (name: string, where: string) =>
+    `${name} [IOErrorEvent type="ioError" bubbles=false cancelable=false eventPhase=2 text="Error #2031: Socket Error. URL: ${where}" errorID=2031] closeReason=-1`;
+  // adl's toString ends in errorID=0, which the player's ErrorEvents leave out for an id of 0.
+  const certificate = (name: string) =>
+    `${name} [SecurityErrorEvent type="certificateError" bubbles=false cancelable=true eventPhase=2 text="Certificate for socket server is self-signed"] closeReason=-1`;
+
+  const traced = await play(compile("HostFrames"), "HostFrames", { webSocket: host });
+  // What adl traced for the same steps against a server of a probe's own.
+  assert.deepEqual(traced, [
+    event("frames", "connect"),
+    // A text message's bytes as they came, its BOM and what is no UTF-8 kept.
+    data(1, "efbbbf626f6d"),
+    data(1, "66ff67"),
+    data(2, "0102"),
+    event("frames", "close", 4001),
+    // A refused handshake: the URL, then a close.
+    io("refused", "ws://host.test/refused"),
+    event("refused", "close"),
+    // A subprotocol not offered: the URL alone.
+    io("unoffered", "ws://host.test/unoffered"),
+    // A self-signed certificate: asked, then the host's failure.
+    certificate("self"),
+    io("self", "host.test"),
+    // Its default prevented: the connection goes on.
+    certificate("accepted"),
+    event("accepted", "connect"),
+    event("code", "connect"),
+    "code closeReason=-1",
+    "done",
+  ]);
+  // As adl sent them: pings, pongs and the close frame's reason, a reserved opcode not.
+  assert.deepEqual(sent, [
+    "/frames 9 6370696e67",
+    "/frames 10 63706f6e67",
+    "/frames 1 efbbbf626f6d",
+    "/frames 1 676f",
+    "/frames 8 0fa1627965",
+    "/self accepted false",
+    "/accepted accepted true",
+    "/code 8 03e9",
+  ]);
+});
