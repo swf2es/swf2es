@@ -285,9 +285,9 @@ test("WebSocket messages go gathered, each an event of its own", async () => {
   const events = batches.flat().map(([, e]) => e);
   assert.equal(events[0].type, "open");
   assert.equal(events.at(-1)?.type, "close");
-  const messages = events.flatMap((e) => (e.type === "message" ? [e.data] : []));
+  const messages = events.flatMap((e) => (e.type === "message" ? [e] : []));
   assert.deepEqual(
-    messages.map((m) => (typeof m === "string" ? m : `bytes ${text(m)}`)),
+    messages.map((m) => (m.text ? text(m.data) : `bytes ${text(m.data)}`)),
     Array.from({ length: 500 }, (_, i) => (i % 2 ? `text ${i}` : `bytes binary ${i}`)),
   );
   assert.ok(batches.length < messages.length, `${batches.length} batches for 500 messages`);

@@ -1,6 +1,6 @@
 // air.net.WebSocket's connections, made here for the page, which has no
 // network of its own, and carried over IPC as flash.net.Socket's are
-// (sockets.ts). Each page's connections (websocket-connections.ts) close
+// (sockets.ts), each frame the page sends as AIR sends it. Each page's connections (websocket-connections.ts) close
 // as it navigates, reloads or goes, and their events go to it gathered,
 // a message a millisecond at most (relay.ts), each message an event of its
 // own.
@@ -9,28 +9,25 @@ import type { WebSocketEvent } from "../shared/api.js";
 import { webSocketDataLine, webSocketLine } from "./netlog.ts";
 import { Relay } from "./relay.ts";
 import {
-  type Opener,
+  validOpcode,
   validProtocols,
   validWebSocketUrl,
   WebSocketConnections,
+  type WebSocketOptions,
 } from "./websocket-connections.ts";
 
-/** About what a message takes to send: a string's UTF-16 is two bytes a unit. */
-const messageSize = (data: string | Uint8Array): number =>
-  typeof data === "string" ? data.length * 2 : data.length;
-
 /**
- * Carry WebSocket messages from pages that `trusted` accepts, each
- * connection made only where `permit` allows its URL, with `open` if
- * given. `log`, where given, is told each connection asked for, opened,
- * refused, failed and closed (--log-network), and with `data` what each
- * sends and receives too (--log-sockets), the connections' lines ending
- * in `via`.
+ * Carry WebSocket frames from pages that `trusted` accepts, each
+ * connection made only where `permit` allows its URL, as `options` say
+ * (the proxy, the certificates). `log`, where given, is told each
+ * connection asked for, opened, refused, failed and closed
+ * (--log-network), and with `data` each frame sent and message received
+ * too (--log-sockets), the connections' lines ending in `via`.
  */
 export function bridgeWebSockets(
   trusted: (event: IpcMainEvent) => boolean,
   permit: (url: string) => boolean,
-  open: Opener | undefined,
+  options: WebSocketOptions,
   log: ((line: string) => void) | null = null,
   data = false,
   via = "",
@@ -56,7 +53,7 @@ export function bridgeWebSockets(
             break;
           case "message":
             if (data) {
-              log(webSocketDataLine(id, false, event.data));
+              log(webSocketDataLine(id, false, event.text ? 1 : 2, event.data));
             }
 
             break;
@@ -64,13 +61,16 @@ export function bridgeWebSockets(
             log(webSocketLine(id, `close ${event.code}`));
             break;
           case "error":
-            log(webSocketLine(id, "error"));
+            log(webSocketLine(id, event.failure ? `error: ${event.failure}` : "error"));
+            break;
+          case "certificate":
+            log(webSocketLine(id, "self-signed certificate, the application asked"));
             break;
         }
       }
 
-      relay.push(id, event, event.type === "message" ? messageSize(event.data) : 0);
-    }, open);
+      relay.push(id, event, event.type === "message" ? event.data.length : 0);
+    }, options);
     pages.set(contents, connections);
     contents.on("did-start-navigation", (details) => {
       if (details.isMainFrame && !details.isSameDocument) {
@@ -108,23 +108,25 @@ export function bridgeWebSockets(
     }
   });
 
-  ipcMain.on("websocket:send", (event, id: unknown, message: unknown) => {
+  ipcMain.on("websocket:frame", (event, id: unknown, opcode: unknown, payload: unknown) => {
     if (
       trusted(event) &&
       typeof id === "number" &&
-      (typeof message === "string" || message instanceof Uint8Array)
+      validOpcode(opcode) &&
+      payload instanceof Uint8Array
     ) {
       if (log && data) {
-        log(webSocketDataLine(id, true, message));
+        log(webSocketDataLine(id, true, opcode, payload));
       }
 
-      pages.get(event.sender)?.send(id, message);
+      pages.get(event.sender)?.frame(id, opcode, payload);
     }
   });
 
-  ipcMain.on("websocket:close", (event, id: unknown, code: unknown) => {
-    if (trusted(event) && typeof id === "number") {
-      pages.get(event.sender)?.close(id, code);
+  ipcMain.on("websocket:certificate", (event, id: unknown, accepted: unknown) => {
+    if (trusted(event) && typeof id === "number" && typeof accepted === "boolean") {
+      log?.(webSocketLine(id, accepted ? "certificate accepted" : "certificate refused"));
+      pages.get(event.sender)?.certificate(id, accepted);
     }
   });
 }

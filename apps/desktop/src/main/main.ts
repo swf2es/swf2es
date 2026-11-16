@@ -64,7 +64,7 @@ import {
   trace,
   via,
   warn,
-  webSocketOpen,
+  webSocketOptions,
 } from "./switches.ts";
 import { bridgeWebSockets } from "./websockets.ts";
 
@@ -273,7 +273,7 @@ function listen(): void {
     }
   });
   bridgeSockets(trusted, permitSocket, netLog, logSockets, { proxy, warn });
-  bridgeWebSockets(trusted, permitWebSocket, webSocketOpen, netLog, logSockets, via);
+  bridgeWebSockets(trusted, permitWebSocket, webSocketOptions, netLog, logSockets, via);
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");

@@ -3,8 +3,7 @@
 import { dialog } from "electron";
 import { allowedOnce, current, deniedOnce, networkMovie } from "./open.ts";
 import { sandbox, settings, window } from "./state.ts";
-import { network, proxiedWebSockets, proxy } from "./switches.ts";
-import { hasWebSocket } from "./websocket-connections.ts";
+import { network } from "./switches.ts";
 
 /** The prompts on screen, by "host:port": a second connection there waits on the first's answer. */
 const asking = new Map<string, Promise<boolean>>();
@@ -121,15 +120,12 @@ async function askForSocket(name: string, swf: string, endpoint: string): Promis
  * sockets do here. air.net.WebSocket is AIR's alone, so nothing else has one.
  */
 export function permitWebSocket(url: string): boolean {
-  if (sandbox.application && hasWebSocket() && (!proxy || proxiedWebSockets)) {
+  if (sandbox.application) {
     return true;
   }
 
-  const why = !sandbox.application
-    ? "only an AIR application has one"
-    : !hasWebSocket()
-      ? "this Electron has no WebSocket client"
-      : "this Electron's WebSocket cannot go through the proxy";
-  process.stderr.write(`swf2es: no WebSocket to ${url.slice(0, 2048)}: ${why}\n`);
+  process.stderr.write(
+    `swf2es: no WebSocket to ${url.slice(0, 2048)}: only an AIR application has one\n`,
+  );
   return false;
 }
