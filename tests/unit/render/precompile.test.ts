@@ -22,6 +22,7 @@ function fakeGl(parallel: boolean, delay = 1) {
   let next = 0;
   const programs = new Map<object, { name: string; asks: number; shaders: string[] }>();
   const shaders = new Map<object, string>();
+  const context = { lost: false, refuse: -1 };
   const gl = {
     VERTEX_SHADER: 1,
     FRAGMENT_SHADER: 2,
@@ -38,7 +39,9 @@ function fakeGl(parallel: boolean, delay = 1) {
     TEXTURE0: 100,
     getExtension: (name: string) =>
       parallel && name === "KHR_parallel_shader_compile" ? { COMPLETION_STATUS_KHR } : null,
-    createShader: () => ({ shader: next++ }),
+    isContextLost: () => context.lost,
+    // A lost context, or the `refuse`th shader asked for, gets none.
+    createShader: () => (context.lost || context.refuse-- === 0 ? null : { shader: next++ }),
     createProgram: () => ({ program: next++ }),
     shaderSource: (shader: object, source: string) => shaders.set(shader, source),
     compileShader: () => {},
@@ -90,7 +93,7 @@ function fakeGl(parallel: boolean, delay = 1) {
     deleteFramebuffer: () => {},
     drawArrays: () => log.push("draw"),
   };
-  return { gl: gl as unknown as Gl, log };
+  return { gl: gl as unknown as Gl, log, context };
 }
 
 /** A queue of programs "a", "b" and "c", what each was told it was made as, in order. */
@@ -189,4 +192,31 @@ test("destroyed, the programs begun and not finished are deleted", () => {
   queue.destroy();
   assert.deepEqual(log.slice(3), ["delete a", "delete b", "delete c"]);
   assert.equal(queue.busy, false);
+});
+
+test("a context lost mid-frame begins nothing and does not throw", () => {
+  const { gl, log, context } = fakeGl(true);
+  const { queue, made } = queued(gl);
+  queue.step();
+  context.lost = true;
+  queue.step();
+  assert.deepEqual(log, []);
+  assert.deepEqual(made, []);
+  assert.equal(queue.busy, true);
+});
+
+test("a program that cannot be begun leaves the ones begun before it begun once", () => {
+  const { gl, log, context } = fakeGl(true);
+  const { queue, made } = queued(gl);
+  queue.step();
+  // "b"'s vertex shader, after "a"'s two.
+  context.refuse = 2;
+  assert.throws(() => queue.step(), /cannot allocate shader/);
+  queue.step();
+  queue.step();
+  assert.deepEqual(
+    log.filter((l) => l.startsWith("link")),
+    ["link a", "link b", "link c"],
+  );
+  assert.deepEqual(made, ["a", "b", "c"]);
 });

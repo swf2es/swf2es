@@ -91,18 +91,21 @@ export class ProgramQueue {
    * first time.
    */
   step(): void {
-    if (!this.busy || this.frames++ === 0) {
+    // A context lost mid-frame makes no shaders; a restore makes a new queue.
+    if (!this.busy || this.frames++ === 0 || this.gl.isContextLost()) {
       return;
     }
 
     const gl = this.gl;
     if (this.parallel) {
-      for (const job of this.waiting) {
+      // Each moved as it is begun, so that a throw leaves none in both lists.
+      while (this.waiting.length > 0) {
+        const job = this.waiting[0];
         job.pending = beginProgram(gl, job.vertex, job.fragment);
+        this.waiting.shift();
         this.begun.push(job);
       }
 
-      this.waiting.length = 0;
       const status = this.parallel.COMPLETION_STATUS_KHR;
       for (let k = 0; k < this.begun.length; k++) {
         const job = this.begun[k];

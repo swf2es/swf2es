@@ -1139,8 +1139,14 @@ function firstUses(links: { step: number; ms: number }[]): {
       return original.apply(this, args);
     };
   };
-  // A link is timed from its shaders' compile to its status read, where Chrome waits.
-  let linking = 0;
+  // A link is timed from its shaders' compile to its status read, where Chrome waits, by
+  // program: programs begun together (at setup, or all at once where links run in parallel)
+  // each keep their own time rather than the first status read taking all of it.
+  const shaderTimes = new WeakMap<object, number>();
+  const programTimes = new WeakMap<object, number>();
+  const charge = (times: WeakMap<object, number>, key: unknown, ms: number) => {
+    times.set(key as object, (times.get(key as object) ?? 0) + ms);
+  };
   const timed = (method: string, after: (ms: number, args: unknown[]) => void) => {
     const original = target[method];
     target[method] = function (this: unknown, ...args: unknown[]) {
@@ -1148,18 +1154,25 @@ function firstUses(links: { step: number; ms: number }[]): {
       const out = original.apply(this, args);
       const ms = performance.now() - begun;
       add("shaderMs", ms);
-      linking += ms;
       after(ms, args);
       return out;
     };
   };
-  timed("compileShader", () => {});
-  timed("getShaderParameter", () => {});
-  timed("linkProgram", () => add("links"));
-  timed("getProgramParameter", (_ms, args) => {
+  timed("compileShader", (ms, args) => charge(shaderTimes, args[0], ms));
+  timed("getShaderParameter", (ms, args) => charge(shaderTimes, args[0], ms));
+  wrap(target, "attachShader", (args) => {
+    charge(programTimes, args[0], shaderTimes.get(args[1] as object) ?? 0);
+    shaderTimes.delete(args[1] as object);
+  });
+  timed("linkProgram", (ms, args) => {
+    add("links");
+    charge(programTimes, args[0], ms);
+  });
+  timed("getProgramParameter", (ms, args) => {
+    charge(programTimes, args[0], ms);
     if (args[1] === gl.LINK_STATUS) {
-      links.push({ step, ms: linking });
-      linking = 0;
+      links.push({ step, ms: programTimes.get(args[0] as object) ?? 0 });
+      programTimes.delete(args[0] as object);
     }
   });
   const used = new WeakSet<object>();
