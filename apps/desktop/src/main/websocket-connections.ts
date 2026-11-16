@@ -445,8 +445,10 @@ export class WebSocketConnections {
 
   /**
    * TLS over `socket`, its certificate checked against the URL's `host`,
-   * not the address it was reached at; a self-signed one left to the
-   * application, as AIR asks with a certificateError, `asking` told first.
+   * not the address it was reached at: unchecked where
+   * --ignore-certificate-errors names the host; a self-signed one left to
+   * the application, as AIR asks with a certificateError, `asking` told
+   * first; any other fault, or no answer in time, fails the connection.
    */
   private secure(
     id: number,
