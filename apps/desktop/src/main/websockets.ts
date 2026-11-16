@@ -2,11 +2,13 @@
 // network of its own, and carried over IPC as flash.net.Socket's are
 // (sockets.ts), each frame the page sends as AIR sends it. Each page's
 // connections (websocket-connections.ts) close as it navigates, reloads or
-// goes, and their events go to it gathered, a message a millisecond at most
-// (relay.ts), each message an event of its own.
+// goes, or its process does (page-end.ts), and their events go to it
+// gathered, a message a millisecond at most (relay.ts), each message an
+// event of its own.
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import type { WebSocketEvent } from "../shared/api.js";
 import { webSocketDataLine, webSocketLine } from "./netlog.ts";
+import { onPageEnd } from "./page-end.ts";
 import { Relay } from "./relay.ts";
 import {
   validOpcode,
@@ -44,7 +46,9 @@ export function bridgeWebSockets(
     }
 
     const relay = new Relay<WebSocketEvent>((batch) => {
-      if (!contents.isDestroyed()) {
+      // Never to a page whose process is gone, which its frame shows before render-process-gone
+      // comes: Electron would say so for each batch.
+      if (!contents.isDestroyed() && !contents.isCrashed()) {
         contents.send("websocket:events", batch);
       }
     });
@@ -75,16 +79,13 @@ export function bridgeWebSockets(
       relay.push(id, event, event.type === "message" ? event.data.length : 0);
     }, options);
     pages.set(contents, connections);
-    contents.on("did-start-navigation", (details) => {
-      if (details.isMainFrame && !details.isSameDocument) {
-        connections.closeAll();
-        relay.drop();
-      }
-    });
-    contents.once("destroyed", () => {
+    // A crashed page's too: its server would otherwise keep talking to no one, for hours.
+    onPageEnd(contents, (how) => {
       connections.closeAll();
       relay.drop();
-      pages.delete(contents);
+      if (how === "destroyed") {
+        pages.delete(contents);
+      }
     });
     return connections;
   };
