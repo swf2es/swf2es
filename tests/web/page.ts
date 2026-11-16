@@ -204,6 +204,17 @@ loading.catch(() => {});
 
 type Player = Swf2esPlayerElement;
 const players = () => [...document.querySelectorAll<Player>("swf2es-player")];
+
+/**
+ * A new element, made once the package has defined it. One made before is a plain element
+ * until then, whose `ready` is undefined: an await of it waits for nothing, and a check that
+ * starts then finds no SWF playing yet, its press heard by nothing.
+ */
+async function newPlayer(): Promise<Player> {
+  await loading;
+  return document.createElement("swf2es-player") as Player;
+}
+
 const frames = (n: number) =>
   new Promise<void>((done) => {
     const step = (left: number) =>
@@ -368,7 +379,7 @@ async function embedderFetch() {
       };
     },
   });
-  const player = document.createElement("swf2es-player") as Player;
+  const player = await newPlayer();
   document.body.append(player);
   let played = true;
   try {
@@ -409,7 +420,7 @@ async function airRun(fresh = false) {
   const { log, error } = console;
   console.log = (...args: unknown[]) => traces.push(args.join(" "));
   console.error = (...args: unknown[]) => errors.push(args.join(" "));
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   if (fresh) {
     // No network: the application's own files are none of it, and still load.
     p.setAttribute("allownetworking", "none");
@@ -450,7 +461,7 @@ async function airAloneRun() {
   const { log, error } = console;
   console.log = (...args: unknown[]) => traces.push(args.join(" "));
   console.error = (...args: unknown[]) => errors.push(args.join(" "));
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   let exit: number | null = null;
   p.addEventListener("airexit", (e) => {
     exit = (e as CustomEvent<{ code: number }>).detail.code;
@@ -523,7 +534,7 @@ const textScenes: WeakRef<object>[] = [];
 /** Make an element for the scripted SWF, play it a few frames, and take it away, `n` times. */
 async function churn(n: number, source = "embed.swf") {
   for (let i = 0; i < n; i++) {
-    const p = document.createElement("swf2es-player") as Player;
+    const p = await newPlayer();
     p.setAttribute("src", `/web-test/${source}`);
     p.setAttribute("allowscriptaccess", "always");
     p.id = `churn${i}`;
@@ -559,7 +570,7 @@ async function lazyChurn(n: number) {
   let enabled = 0;
   try {
     for (let i = 0; i < n; i++) {
-      const element = document.createElement("swf2es-player") as Player;
+      const element = await newPlayer();
       document.body.append(element);
       try {
         await element.load("/web-test/scripted.swf");
@@ -605,7 +616,7 @@ async function workerRun(
   console.log = (...args: unknown[]) => traces.push(args.join(" "));
   console.error = (...args: unknown[]) => errors.push(args.join(" "));
   const made = webWorkers.made;
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   for (const [name, value] of Object.entries(attributes)) {
     p.setAttribute(name, value);
   }
@@ -636,7 +647,7 @@ async function workerRun(
 async function avm1Churn(n: number) {
   let stopped = 0;
   for (let i = 0; i < n; i++) {
-    const p = document.createElement("swf2es-player") as Player;
+    const p = await newPlayer();
     p.setAttribute("src", "/web-test/avm1.swf");
     document.body.append(p);
     await p.ready;
@@ -661,7 +672,7 @@ async function avm1Churn(n: number) {
  */
 async function avm1External() {
   const play = async (access: string | null) => {
-    const p = document.createElement("swf2es-player") as Player;
+    const p = await newPlayer();
     p.setAttribute("src", "/web-test/avm1-external.swf");
     if (access !== null) {
       p.setAttribute("allowscriptaccess", access);
@@ -704,7 +715,7 @@ document.addEventListener("copy", (e) => {
 
 /** The clipboard SWF in an element of its own, and a textarea of the page's beside it: where each is. */
 async function clipboardPlayer() {
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "clip";
   p.setAttribute("src", "/web-test/clipboard.swf");
   p.setAttribute("allowscriptaccess", "always");
@@ -760,7 +771,7 @@ function clipDestroy() {
  * frame or two later.
  */
 async function imePlayer(src: string) {
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "ime";
   p.setAttribute("src", src);
   p.setAttribute("allowscriptaccess", "always");
@@ -802,7 +813,7 @@ async function touchPlayer() {
     touchDestroy();
   }
 
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "touch";
   p.setAttribute("src", "/web-test/touch.swf");
   p.setAttribute("allowscriptaccess", "always");
@@ -832,7 +843,7 @@ async function touchLog() {
  */
 async function marginsPlayer(salign: string, src = "/web-test/margins.swf") {
   document.getElementById("margins")?.remove();
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "margins";
   p.setAttribute("src", src);
   p.setAttribute("allowscriptaccess", "always");
@@ -851,7 +862,7 @@ async function marginsPlayer(salign: string, src = "/web-test/margins.swf") {
 /** A player of `src` at the page's top left, over the other elements; where it is. */
 async function scriptFreePlayer(src: string) {
   document.getElementById("script-free")?.remove();
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "script-free";
   p.setAttribute("src", src);
   p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
@@ -869,7 +880,7 @@ const pageLog = console.log;
 
 /** A player of `src` with `attributes`, at the page's top left, once it plays: where it is. */
 async function unmutePlayer(src: string, attributes: Record<string, string>) {
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "unmute";
   p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
   for (const [name, value] of Object.entries(attributes)) {
@@ -913,7 +924,7 @@ function unmuteState() {
 
 /** A player of the activation SWF, focused, and a textarea of the page's beside it. */
 async function activationPlayer() {
-  const p = document.createElement("swf2es-player") as Player;
+  const p = await newPlayer();
   p.id = "activation";
   p.setAttribute("src", "/web-test/activation.swf");
   p.setAttribute("allowscriptaccess", "always");
@@ -964,7 +975,7 @@ async function fillRun(mode: "default" | "blocked" | "csp") {
   let error: string | null = null;
   try {
     for (let i = 0; i < 3 && error === null; i++) {
-      const p = document.createElement("swf2es-player") as Player;
+      const p = await newPlayer();
       p.setAttribute("quality", "low");
       p.setAttribute("src", "/web-test/fills.swf");
       document.body.append(p);
@@ -1056,7 +1067,7 @@ async function bitmapRun(mode: string, vm: string) {
   let rect: [number, number, number, number] = [0, 0, 0, 0];
   try {
     for (let i = 0; i < 3; i++) {
-      const p = document.createElement("swf2es-player") as Player;
+      const p = await newPlayer();
       p.setAttribute("quality", "low");
       document.body.append(p);
       try {
