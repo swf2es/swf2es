@@ -10,10 +10,9 @@ import { type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
 const MAX_OPEN = 64;
 
 /**
- * The bytes a connection may hold unsent. A peer that stops reading would
- * otherwise have the main process buffer all a SWF writes: 100 writes of
- * 8 MB took it from 238 to 1038 MB. Past this the connection fails, as
- * Flash's did when a write could not go.
+ * The bytes a connection may hold unsent, so that a peer that stops reading
+ * cannot have the main process buffer all a SWF writes. Past it the
+ * connection fails, as Flash's did when a write could not go.
  */
 export const MAX_BUFFERED = 4 * 1024 * 1024;
 
@@ -69,12 +68,10 @@ export class Connections {
   generation = 0;
 
   /**
-   * Connect `id` to `host`:`port`, each checked, as the page asks, at `address` where the host's
-   * was pinned (a remote SWF's socket policy came from there); a refusal is an error, then a close.
-   * It sends at once (TCP_NODELAY) unless `noDelay` is false, as a SWF's tcpNoDelay set so asks:
-   * with Nagle's algorithm, node's default, the second of two small writes waits for the peer to
-   * acknowledge the first, which a peer that has nothing to send back delays (some 40 ms on Linux,
-   * up to 200 ms on Windows), and a chatty protocol's every exchange with it.
+   * Connect `id` to `host`:`port`, each checked, at `address` where the host was pinned (a remote
+   * SWF's socket policy came from there); a refusal is an error, then a close. TCP_NODELAY unless
+   * a SWF's tcpNoDelay sets `noDelay` false: Nagle's algorithm would hold a chatty protocol's
+   * writes for the peer's delayed acknowledgements (docs/architecture/desktop.md, "Sockets").
    */
   connect(id: number, host: unknown, port: unknown, address?: string, noDelay = true): void {
     if (
@@ -112,12 +109,11 @@ export class Connections {
   }
 
   /**
-   * Connect `id` through `proxy`, by the address where one was pinned, else
-   * by name for the proxy to resolve. Its peer is the target: the proxy's
-   * address is no business of the SWF's. A proxy that fails is a refusal,
-   * said with why. Nagle's algorithm is left on through the handshake,
-   * which never writes twice without an answer between, so nothing in it
-   * waits; it goes off as the tunnel opens, before the SWF's first byte.
+   * Connect `id` through `proxy`, by the pinned address, else by name for the
+   * proxy to resolve; its peer is the target, the proxy no business of the
+   * SWF's. Nagle's algorithm stays on through the handshake, which never
+   * writes twice without an answer between, and goes off before the SWF's
+   * first byte.
    */
   private connectThrough(
     proxy: ProxyConfig,

@@ -1,37 +1,13 @@
 // The desktop app's HTTP cache: a private cache, as RFC 9111 has one, of
 // the GET responses network.ts receives for a SWF, its policy files among
-// them. What may be stored, whether a stored response is fresh, what a
-// revalidation asks and what its 304 changes are http-cache-semantics'
-// (its CachePolicy, a private cache's); where they are kept is this file's.
-//
-// - Each response is kept for the address it came from, the way it went
-//   there and the movie that asked: its key is the hash of the playing
-//   movie's origin (its partition, as a browser partitions its cache by
-//   site), its route (the proxy it went through, or none), the address the
-//   request's host was pinned to, whether it was a policy file's fetch,
-//   its method, URL and the request headers its Vary names. So a response
-//   from one address never answers a request judged against another, the
-//   policy file that granted it included, as DNS that changes its answer
-//   would have it, nor one reached through a proxy one reached directly;
-//   and one movie neither reads nor probes what another origin's loaded.
-// - The index is SQLite (node:sqlite), metadata only, a row a response:
-//   its key, status, headers and policy; when it expires; its size and its
-//   charge against the budget, its body, its row and a disk block; when it
-//   was last served, by which the least recently served go first once the
-//   charges pass the budget or the rows their cap, both counted in memory.
-// - Every body is a file of its own in one flat directory, named by its
-//   key. A body is written to a temporary file, synced and renamed into
-//   place before its row is written; a row goes before its file. So a
-//   crash leaves at worst a file without a row, or a row whose file is
-//   gone or of another size: each serve checks the file against its row,
-//   dropping the row where they differ, and each start sweeps away what
-//   has no row.
-// - A cache that fails, its disk full, read only or gone, its index
-//   damaged, is left out where it fails, said once on stderr: a request
-//   never fails for it, but goes to the network.
-//
-// The cache only answers for the network: network.ts judges each request
-// by Flash's rules first, hit or miss.
+// them, answering only once network.ts has judged a request, hit or miss.
+// What is stored and when it is fresh is http-cache-semantics' CachePolicy;
+// where it is kept is this file's. Each response is keyed by the movie's
+// origin, its route and the address it came from, so that DNS that rebinds,
+// a proxy or another origin's movie reads nothing it should not; each body is
+// a file written before its row, so a crash leaves no row pointing at half a
+// file; and a cache that fails is left out, the request going to the network.
+// docs/architecture/desktop.md ("The HTTP cache") has the rest.
 //
 // Without Electron, so that node tests it (tests/desktop/http-cache.test.ts).
 import { createHash, randomUUID } from "node:crypto";
