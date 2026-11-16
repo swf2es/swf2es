@@ -30,44 +30,9 @@ if (!screen.xvfb) {
 }
 
 const out = fileURLToPath(new URL("out/xvfb/", import.meta.url));
-mkdirSync(out, { recursive: true });
 // An AVM1 SWF, so no compiler is needed: the stage red all over, and a trace.
 const text = "xvfb: started";
 const movie = `${out}red.swf`;
-writeFileSync(
-  movie,
-  w.swf({
-    version: 8,
-    width: 100,
-    height: 50,
-    frameCount: 1,
-    tags: [
-      w.backgroundColor(0xffffff),
-      w.shape({
-        id: 1,
-        bounds: [0, 2000, 0, 1000],
-        fills: [0xff0000],
-        paths: [
-          {
-            fill1: 1,
-            commands: [
-              { move: [0, 0] },
-              { line: [2000, 0] },
-              { line: [2000, 1000] },
-              { line: [0, 1000] },
-              { line: [0, 0] },
-            ],
-          },
-        ],
-      }),
-      w.place({ depth: 1, character: 1 }),
-      // ActionPush the string, ActionTrace, ActionEnd.
-      w.doAction([0x96, text.length + 2, 0, 0, ...Buffer.from(text), 0, 0x26, 0]),
-      w.showFrame(),
-      w.end(),
-    ],
-  }),
-);
 
 /** The SWF traced and its stage fills the window red; the renderer of WebGL 2 there. */
 async function plays({ stdout, until, evaluate, devtools }: App): Promise<string> {
@@ -107,10 +72,56 @@ function secondStart(userData: string, args: string[]): Promise<string> {
     stderr += chunk.toString();
   });
 
-  return new Promise((done) => child.on("exit", () => done(stderr)));
+  // One that takes the lock after all opens a window and stays: killed, and the test fails.
+  return new Promise((done, fail) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      fail(new Error(`a second start did not quit within 60 s: ${stderr}`));
+    }, 60_000);
+    child.on("exit", () => {
+      clearTimeout(timer);
+      done(stderr);
+    });
+  });
 }
 
 try {
+  mkdirSync(out, { recursive: true });
+  writeFileSync(
+    movie,
+    w.swf({
+      version: 8,
+      width: 100,
+      height: 50,
+      frameCount: 1,
+      tags: [
+        w.backgroundColor(0xffffff),
+        w.shape({
+          id: 1,
+          bounds: [0, 2000, 0, 1000],
+          fills: [0xff0000],
+          paths: [
+            {
+              fill1: 1,
+              commands: [
+                { move: [0, 0] },
+                { line: [2000, 0] },
+                { line: [2000, 1000] },
+                { line: [0, 1000] },
+                { line: [0, 0] },
+              ],
+            },
+          ],
+        }),
+        w.place({ depth: 1, character: 1 }),
+        // ActionPush the string, ActionTrace, ActionEnd.
+        w.doAction([0x96, text.length + 2, 0, 0, ...Buffer.from(text), 0, 0x26, 0]),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+
   /** A GPU's renderer, where this Xvfb has one: nothing here to test. */
   let hardware = "";
   await withApp(

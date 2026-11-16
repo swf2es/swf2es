@@ -21,22 +21,17 @@ export function chooseGl(software: boolean): void {
     return;
   }
 
-  // The GPU process's state comes after it starts, and again as it restarts or goes. Only a
-  // refusal is said, once. Electron 44 reports no "webgl2" status: WebGL's is "disabled_off"
-  // where the GPU was refused with no fallback, and as the app quits even where the GPU drew.
-  let quitting = false;
-  app.once("before-quit", () => {
-    quitting = true;
-  });
-  const sayRefused = () => {
-    const webgl = app.getGPUFeatureStatus().webgl ?? "";
-    if (!quitting && (webgl.startsWith("disabled") || webgl.startsWith("unavailable"))) {
-      app.off("gpu-info-update", sayRefused);
+  // Read once, from the GPU process's first report (about 200 ms in): before it WebGL reads
+  // "disabled_off" even where the GPU will draw, and later reports include the quit's, which
+  // reads disabled too. Electron 44 reports no "webgl2" status; WebGL's is "disabled_off" where
+  // the GPU was refused with no fallback ("unavailable_software" is SwiftShader's, which draws).
+  app.once("gpu-info-update", () => {
+    const webgl = app.getGPUFeatureStatus().webgl;
+    if (webgl === "disabled_off" || webgl === "unavailable_off") {
       process.stderr.write(
         "swf2es: no GPU Chromium takes here (none, or one its blocklist refuses), so no " +
           "WebGL 2 and nothing draws; --software-gl draws with SwiftShader, on the CPU\n",
       );
     }
-  };
-  app.on("gpu-info-update", sayRefused);
+  });
 }

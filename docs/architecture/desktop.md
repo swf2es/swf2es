@@ -610,8 +610,7 @@ with SwiftShader, compositing included, even where there is a GPU (for one
 Chromium takes for WebGL but not WebGL 2, or one that draws wrong). Both go
 in before the app is ready, as Chromium reads its GPU switches as it starts
 the GPU process, and only in the instance that holds the single-instance
-lock; a second start, which hands its SWF to the app already open, chooses
-nothing and says so.
+lock; a second start chooses nothing.
 
 It is a switch and not a fallback because it is unsafe by Chromium's own
 word: its
@@ -631,10 +630,16 @@ process is not: with Electron 44 on Linux it runs without seccomp (`Seccomp:
 0` in its `/proc` status, `sandboxed: false` in Chromium's GPU info), so
 what SwiftShader does under a SWF's draws runs with the user's rights.
 
-Where nothing draws, the app says so on stderr, once, and names
-`--software-gl`: Electron 44 reports no WebGL 2 status, so it goes by
-WebGL's, `disabled_off` where the GPU was refused (`gpu-info-update`), and
-not as the app quits, when it reads `disabled` even where the GPU drew.
+Where nothing draws, the app says so on stderr and names `--software-gl`.
+It reads WebGL's status once, at the GPU process's first report
+(`gpu-info-update`, about 200 ms in): before it, WebGL reads `disabled_off`
+even where the GPU will draw, and the reports after it include the quit's,
+which read disabled too. Electron 44 reports no WebGL 2 status, so a GPU that
+gives WebGL but not WebGL 2 gets no hint; `disabled_off` or `unavailable_off`
+is a GPU refused with no fallback, while `unavailable_software` is SwiftShader
+drawing (as with Chromium's own `--enable-unsafe-swiftshader`). A second start
+with `--software-gl`, which hands its SWF to the app already open, says that
+app keeps drawing as it started.
 
 ## Running and testing
 
