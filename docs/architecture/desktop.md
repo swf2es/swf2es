@@ -490,6 +490,26 @@ into the page would run beside the API. No embedding the command line
 names changes that ([The embedding](#the-embedding)), and the page never
 sets that attribute from one.
 
+### When the page's process goes
+
+A page ends for the main process as it navigates or reloads, as its
+WebContents is destroyed, and as its renderer process goes, crashed,
+killed or out of memory: the WebContents lives on then, white, and
+neither of the others comes, so a SWF kept connected overnight once kept
+its server talking to no one, every packet an error on stderr.
+`src/main/page-end.ts` names the three, and what is the page's goes at
+each: its sockets and WebSockets, what they had gathered for it, its
+requests under way, its file grants. Nothing is sent to a page whose
+process is gone. Unless it exited cleanly, stderr says so once, `swf2es:
+the page stopped: <reason> (exit <code>)`, with the directory a crash
+report would be in (`crashReporter`, started with nothing uploaded, so
+a crash leaves a minidump there for the user to look at or send), and
+a message box on the window offers Reload Movie, which opens the movie
+again as View › Reload Movie does, or Close. Nothing reloads unasked: a
+page out of memory would only go again. Reload Movie, or opening another
+movie, loads a gone page again, and the new page asks for the movie as
+any does; a page back by either closes the box.
+
 ## Files, settings and libraries
 
 The main process (`src/main/open.ts`) opens a SWF from File › Open, a
@@ -606,7 +626,8 @@ too. `tcpNoDelay` as `connect()` saw it goes with `socket:connect`. A
 socket through the proxy takes it once the tunnel is up, Nagle's
 algorithm staying on through the handshake, which never writes twice
 without an answer between, so nothing in it waits. A page's sockets
-close, silently, as it navigates or reloads, and with it. TLS
+close, silently, as it navigates or reloads, as its process goes, and
+with it. TLS
 (`SecureSocket`) waits for the player to have it.
 
 Each socket is read into a 64 KB buffer of its own (net's `onread`), and
@@ -735,7 +756,7 @@ coming that is larger than 32 MB fails the connection, ws closing it
 with 1009: adl took messages of 20 MB, which this leaves room above,
 while bounding what one connection holds as a message comes. Its events reach the page gathered, as its sockets' do
 ([Sockets](#sockets)). A page's WebSockets drop, silently, as it
-navigates or reloads, and with it, without a close frame, as AIR's go as
+navigates or reloads, as its process goes, and with it, without a close frame, as AIR's go as
 it exits; what is still being made, a lookup, a tunnel or a question
 about a certificate, goes with them. `--log-network` says each connection
 asked for, opened, refused, failed and closed, and each certificate
@@ -871,7 +892,14 @@ skips where there is no Xvfb, or where the Xvfb's GL is a GPU's.
 process's test-only inspector: Stage3D on for a fresh profile and for the
 opt-in's old settings, a stored off's fallback without fetching the backend,
 the choice remembered, two composed slots, live layout/DPR changes, browser context
-loss/restoration, repeated movie reloads and close. It shares the isolated
+loss/restoration, repeated movie reloads and close.
+`tests/desktop/page-gone.ts` crashes the page's renderer through that
+inspector while a SWF's socket, and an AIR application's socket and
+WebSocket, receive from servers that keep sending: each server sees its
+connection closed within five seconds, stderr says the page stopped once
+and nothing for each packet, the app stays up, and the offer, answered
+through the inspector, or View › Reload Movie brings the movie back, the
+offer closed reloading nothing. It shares the isolated
 display and process harness in `tests/desktop/app.ts` with the ordinary smoke
 test. `settings.test.ts` covers the default, the stored choice and its persistence.
 `embedding.test.ts` reads `--flashvars` and `--param` in both forms, refuses

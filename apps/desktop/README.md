@@ -37,7 +37,9 @@ fetch-electron` does so ahead, for the tests.
   open; File › Open Recent lists the last ten, files and URLs. The
   window takes the SWF's name. View › Reload Movie (Ctrl+R) starts it
   again, View › Toggle Full Screen (F11) fills the screen, and File ›
-  Close Movie (Ctrl+W) stops it. A SWF's own full screen
+  Close Movie (Ctrl+W) stops it. Should the page's process stop, crashed
+  or out of memory, its sockets close, stderr says why, and the window
+  offers to reload the movie, which it never does unasked. A SWF's own full screen
   (`Stage.displayState`) is the window's too: it needs no click, as in AIR
   and Flash's projector, draws its `fullScreenSourceRect` alone where it
   set one, and ends with Esc or F11, which the SWF hears of as a

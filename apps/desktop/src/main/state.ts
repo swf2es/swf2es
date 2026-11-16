@@ -1,7 +1,7 @@
 // What the main process's modules share: the window, its page, the
 // settings, the HTTP cache and the sandbox of what plays. main.ts alone
 // changes the window, the settings, the cache and whether the page
-// listens, through the setters here, since a module cannot assign
+// listens or is gone, through the setters here, since a module cannot assign
 // another's bindings; the rest read them as they are now.
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from "electron";
 import type { HttpCache } from "./http-cache.ts";
@@ -20,6 +20,11 @@ export let httpCache: HttpCache | null = null;
  * The page has asked to start and listens for what opens: until then, start() hands it the movie.
  */
 export let listening = false;
+/**
+ * The page's renderer process has gone and no page has started since: the window shows nothing
+ * until it is loaded again.
+ */
+export let pageGone = false;
 
 export function setWindow(created: BrowserWindow | null): void {
   window = created;
@@ -35,6 +40,10 @@ export function setHttpCache(opened: HttpCache | null): void {
 
 export function setListening(now: boolean): void {
   listening = now;
+}
+
+export function setPageGone(now: boolean): void {
+  pageGone = now;
 }
 
 /** Whether a message comes from the window's own page, on swf2es://app/. */

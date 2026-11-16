@@ -1,12 +1,13 @@
 // flash.net.Socket's TCP connections, made here for the page, which has
 // no network of its own beyond fetch, and carried over IPC. Each page's
-// connections (connections.ts) close as it navigates, reloads or goes, and
-// their events go to it gathered, a message a millisecond at most
-// (relay.ts).
+// connections (connections.ts) close as it navigates, reloads or goes, or
+// its process does (page-end.ts), and their events go to it gathered, a
+// message a millisecond at most (relay.ts).
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import type { SocketEvent } from "../shared/api.js";
 import { type ConnectionOptions, Connections, validEndpoint } from "./connections.ts";
 import { socketDataLine, socketLine } from "./netlog.ts";
+import { onPageEnd } from "./page-end.ts";
 import { Relay } from "./relay.ts";
 
 const dataEvent = (bytes: Uint8Array): SocketEvent => ({ type: "data", bytes });
@@ -34,8 +35,10 @@ export function bridgeSockets(
       return known;
     }
 
+    let gone = false;
     const relay = new Relay<SocketEvent>((batch) => {
-      if (!contents.isDestroyed()) {
+      // Never to a page whose process is gone: Electron would say so for each batch.
+      if (!gone && !contents.isDestroyed()) {
         contents.send("socket:events", batch);
       }
     });
@@ -53,16 +56,14 @@ export function bridgeSockets(
       }
     }, options);
     pages.set(contents, connections);
-    contents.on("did-start-navigation", (details) => {
-      if (details.isMainFrame && !details.isSameDocument) {
-        connections.closeAll();
-        relay.drop();
-      }
-    });
-    contents.once("destroyed", () => {
+    // A crashed page's too: its server would otherwise keep talking to no one, for hours.
+    onPageEnd(contents, (how) => {
       connections.closeAll();
       relay.drop();
-      pages.delete(contents);
+      gone = how !== "navigated";
+      if (how === "destroyed") {
+        pages.delete(contents);
+      }
     });
     return connections;
   };

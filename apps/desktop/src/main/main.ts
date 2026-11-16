@@ -20,7 +20,17 @@
 // reach. Here: start-up, the window and its page's messages.
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, session, shell, type WebContents } from "electron";
+import {
+  app,
+  BrowserWindow,
+  crashReporter,
+  dialog,
+  ipcMain,
+  type RenderProcessGoneDetails,
+  session,
+  shell,
+  type WebContents,
+} from "electron";
 import type { NetworkResponse, StartState } from "../shared/api.js";
 import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
@@ -40,8 +50,10 @@ import {
   openChosen,
   openEntry,
   openUrl,
+  reloadMovie,
   remoteUrl,
 } from "./open.ts";
+import { onPageEnd } from "./page-end.ts";
 import { permitSocket, permitWebSocket } from "./permissions.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { proxyArgument, sameProxy } from "./proxy.ts";
@@ -49,9 +61,11 @@ import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
 import {
   httpCache,
+  pageGone,
   sandbox,
   setHttpCache,
   setListening,
+  setPageGone,
   setSettings,
   settings,
   setWindow,
@@ -159,12 +173,21 @@ function guard(contents: WebContents): void {
     openExternal(url);
     return { action: "deny" };
   });
-  contents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) {
-      setListening(false);
-      // The page's requests go with it; the next page asks for the movie again.
-      network.play(networkMovie);
-      requests.clear();
+  onPageEnd(contents, (how, gone) => {
+    if (how === "destroyed") {
+      return;
+    }
+
+    setListening(false);
+    // The page's requests go with it; the next page asks for the movie again.
+    network.play(networkMovie);
+    requests.clear();
+    setPageGone(how === "gone");
+    if (how === "navigated") {
+      // The page is back, by the offer or otherwise: the offer has had its day.
+      reloadOffer?.abort();
+    } else if (gone && gone.reason !== "clean-exit") {
+      pageStopped(gone);
     }
   });
   if (trace) {
@@ -173,6 +196,51 @@ function guard(contents: WebContents): void {
       (level === "info" ? process.stdout : process.stderr).write(`${message}\n`);
     });
   }
+}
+
+/** Closes the offer to reload the page after its process went, while it is shown. */
+let reloadOffer: AbortController | null = null;
+
+/**
+ * The page's process went other than by a clean exit, crashed, killed or
+ * out of memory, and the window shows nothing: said once on stderr, and the
+ * user offered a reload, never made unasked, as a page out of memory would
+ * only go again. Minimized, the window shows the offer as it is restored.
+ */
+function pageStopped({ reason, exitCode }: RenderProcessGoneDetails): void {
+  process.stderr.write(
+    `swf2es: the page stopped: ${reason} (exit ${exitCode}); ` +
+      `a crash report, where one was written, is in ${app.getPath("crashDumps")}\n`,
+  );
+  if (!window || reloadOffer) {
+    return;
+  }
+
+  const offer = new AbortController();
+  reloadOffer = offer;
+  const name = current?.movie.name;
+  dialog
+    .showMessageBox(window, {
+      type: "warning",
+      message: name ? `${name} stopped.` : "The page stopped.",
+      detail: `The page's process ended (${reason}). Reloading starts the movie again from its beginning.`,
+      buttons: [name ? "Reload Movie" : "Reload", "Close"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      signal: offer.signal,
+    })
+    .then(({ response }) => {
+      if (response === 0 && !offer.signal.aborted) {
+        void reloadMovie();
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      if (reloadOffer === offer) {
+        reloadOffer = null;
+      }
+    });
 }
 
 function createWindow(): void {
@@ -292,7 +360,7 @@ function listen(): void {
     // Electron would print as one.
     const contents = event.sender;
     const deliver = (response: NetworkResponse) => {
-      if (!contents.isDestroyed()) {
+      if (!contents.isDestroyed() && !pageGone) {
         contents.send("net:response", id, response);
       }
     };
@@ -412,6 +480,9 @@ if (!first) {
 } else {
   // Still before ready: Chromium reads the GPU switches as it starts the GPU process.
   chooseGl(softwareGl);
+  // A crash leaves a minidump in app.getPath("crashDumps"), which the line on stderr names, for
+  // the user to look at or send; nothing is uploaded.
+  crashReporter.start({ uploadToServer: false });
 }
 
 app.on("second-instance", (_event, given, workingDirectory, data) => {

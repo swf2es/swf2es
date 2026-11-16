@@ -13,7 +13,8 @@ import { refuse } from "./dialogs.ts";
 import { type Embedding, embeddingArguments, embeddingFor } from "./embedding.ts";
 import { buildMenu } from "./menu.ts";
 import type { Movie } from "./network-types.ts";
-import { listening, sandbox, settings, TITLE, window } from "./state.ts";
+import { APP_ORIGIN } from "./protocol.ts";
+import { listening, pageGone, sandbox, settings, TITLE, window } from "./state.ts";
 import { network } from "./switches.ts";
 
 /** What the network judges the movie playing as; null for none, or one without networking. */
@@ -130,6 +131,27 @@ export function openEntry(entry: string, embedding: Embedding = {}): Promise<voi
 }
 
 /**
+ * Open what plays again, with the embedding it was opened with, as a page
+ * reloaded keeps its tag's: View › Reload Movie, and the offer after the
+ * page's process went, which this brings back.
+ */
+export async function reloadMovie(): Promise<void> {
+  if (current) {
+    await openEntry(current.path, current.embedding);
+  } else {
+    reloadGonePage();
+  }
+}
+
+/** A page whose process is gone hears nothing: a new one asks for the movie as it starts. */
+function reloadGonePage(): void {
+  if (pageGone && window) {
+    // A load that another overtakes rejects, which says nothing here.
+    window.loadURL(`${APP_ORIGIN}/`).catch(() => {});
+  }
+}
+
+/**
  * Run the AIR application `command` names, as adl does: its content SWF in
  * the window, at the descriptor's size, in AIR's application sandbox, with
  * its launch (shared/api.ts AirLaunch), from `cwd`.
@@ -212,6 +234,8 @@ function show(
     window.setTitle(movie.air ? movie.name : `${movie.name} — ${TITLE}`);
     if (listening) {
       window.webContents.send("desktop:open", movie);
+    } else {
+      reloadGonePage();
     }
   }
 }
