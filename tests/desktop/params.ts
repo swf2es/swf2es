@@ -4,7 +4,8 @@
 // stage's quality, scale mode and alignment, and base resolving its
 // relative URLs; a SWF URL's query is among its parameters, the FlashVars
 // over it, as in Flash. A second start hands the first its own, a reload
-// keeps them, and the next SWF opened without has none of the last's.
+// keeps them, and a SWF dropped on the window or opened without has none
+// of the last's; no parameter but the element's reaches it.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
@@ -96,11 +97,13 @@ try {
     "base=sub/",
     "--param",
     "allowScriptAccess=always",
+    "--param=workers=false",
     local,
     "--inspect=0",
   ];
   await withApp(screen.env, settings, args, async (app) => {
-    const { stdout, stderr, until, evaluate, again, main } = app;
+    const { stdout, stderr, until, evaluate, again, main, devtools } = app;
+    const cleared = `["flashvars", "quality", "scale", "salign", "base", "workers"].every((n) => !document.getElementById("player").hasAttribute(n))`;
     const count = (line: string) => stdout.filter((l) => l === line).length;
     const params = (n: number) => () =>
       stdout.filter((l) => l.startsWith("params: data ")).length >= n;
@@ -115,6 +118,27 @@ try {
       ),
       "never",
     );
+    assert.match(stderr(), /--param workers: no such parameter/);
+    assert.equal(
+      await evaluate<boolean>(`document.getElementById("player").hasAttribute("workers")`),
+      false,
+    );
+
+    // Dropped on the window, the same SWF has none of them.
+    for (const type of ["dragEnter", "dragOver", "drop"]) {
+      await devtools.send("Input.dispatchDragEvent", {
+        type,
+        x: 60,
+        y: 50,
+        data: { items: [], files: [local], dragOperationsMask: 1 },
+      });
+    }
+
+    await until("the dropped SWF", params(2));
+    assert.equal(count("params: "), 1);
+    assert.equal(count("params: quality HIGH scaleMode showAll align "), 1);
+    assert.equal(count("params: data beside"), 1);
+    assert.equal(await evaluate<boolean>(cleared), true);
 
     // A second start's own, the URL's query among them under its FlashVars.
     const avm1Url = `${origin}/avm1.swf?q=query&a=query`;
@@ -136,16 +160,11 @@ try {
 
     // Opened by its URL alone: its query, and none of the last SWF's.
     assert.equal(await again([`${origin}/params.swf?from=query`]), 0);
-    await until("the remote SWF", params(2));
+    await until("the remote SWF", params(3));
     assert.equal(count("params: from=query"), 1);
-    assert.equal(count("params: quality HIGH scaleMode showAll align "), 1);
+    assert.equal(count("params: quality HIGH scaleMode showAll align "), 2);
     assert.equal(count("params: data remote"), 1);
-    assert.equal(
-      await evaluate<boolean>(
-        `["flashvars", "quality", "scale", "salign", "base"].every((n) => !document.getElementById("player").hasAttribute(n))`,
-      ),
-      true,
-    );
+    assert.equal(await evaluate<boolean>(cleared), true);
 
     // The page reloaded, as a change of the Stage3D choice reloads it, plays what played as it was.
     await main(`(() => {
@@ -153,7 +172,7 @@ try {
       electron.BrowserWindow.getAllWindows()[0].webContents.reload();
       return true;
     })()`);
-    await until("the remote SWF reloaded", params(3));
+    await until("the remote SWF reloaded", params(4));
     assert.equal(count("params: from=query"), 2);
   });
   console.log("desktop params test: ok");

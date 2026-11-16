@@ -3,27 +3,21 @@
 // <swf2es-player> element takes (@swf2es/web), read here and handed to the
 // page with the movie, which sets them on its element.
 //
-//   --flashvars "a=1&b=2"  (or --flashvars=...)   repeatable, joined by "&"
-//   --param quality=low    (or --param=...)        repeatable, the last of a name winning
+//   --flashvars="a=1&b=2"  (or --flashvars "...")   repeatable, joined by "&"
+//   --param=quality=low    (or --param ...)          repeatable, the last of a name winning
+//
+// A value apart from its switch may not start with "-": other switches
+// (--proxy, --trace) read every argument, and would take it for theirs.
 //
 // A SWF URL's own query reaches loaderInfo.parameters and _root as Flash
 // merged it, with no switch: the player reads it, and FlashVars override it.
 
+import { EMBEDDING_PARAMS } from "../shared/embedding.ts";
+
 /** What a command line gives a SWF: the element's attributes by their lower-case names. */
 export type Embedding = Readonly<Record<string, string>>;
 
-/** The element's parameters that act in the desktop app. */
-const SUPPORTED = new Set([
-  "flashvars",
-  "quality",
-  "scale",
-  "salign",
-  "wmode",
-  "bgcolor",
-  "menu",
-  "base",
-  "allownetworking",
-]);
+const SUPPORTED = new Set(EMBEDDING_PARAMS);
 
 const FULL_SCREEN =
   "a SWF's full screen is the window's here, always allowed, as in Flash's projector";
@@ -83,10 +77,10 @@ export function embeddingArguments(argv: readonly string[]): EmbeddingArguments 
     let value: string;
     if (switched[2] === "=") {
       value = arg.slice(switched[0].length);
-    } else if (i + 1 < own.length) {
+    } else if (i + 1 < own.length && !own[i + 1].startsWith("-")) {
       value = own[++i];
     } else {
-      warnings.push(`--${name} needs a value`);
+      warnings.push(`--${name} needs a value (--${name}=... for one that starts with -)`);
       continue;
     }
 
@@ -112,18 +106,76 @@ export function embeddingArguments(argv: readonly string[]): EmbeddingArguments 
   return { params, rest: end < 0 ? rest : [...rest, ...argv.slice(end)], warnings };
 }
 
+/** A local SWF's URL as the page has it, to tell where a relative base comes to. */
+const LOCAL_DIRECTORY = "swf2es://file/directory/";
+
 /**
- * `params` for the SWF at `movieUrl`: `base` resolved against its URL, as a
- * page's against the page's, the SWF standing in for the page it has not;
- * one that comes to anything but http, https or the SWF's own files
- * (swf2es://file) is left out, with a word to `warn`. The relative loads
- * it resolves are judged as any other, by the SWF's sandbox.
+ * `params` for the SWF a command line names, `movie` (a path or an http or
+ * https URL; null for none), or for the AIR application it names instead,
+ * where `air`, which has no page and gets none; settled once, where the
+ * command line was read, with what it leaves out said in `warnings`. A
+ * `base` is an http or https URL, or relative, to be resolved against the
+ * SWF's URL as a page's against the page's: below a local SWF's own
+ * directory, as nothing outside it is the SWF's to read.
  */
-export function embeddingFor(
+export function settleEmbedding(
   params: Embedding,
-  movieUrl: string,
-  warn: (message: string) => void,
-): Embedding {
+  movie: string | null,
+  air: boolean,
+): { params: Embedding; warnings: string[] } {
+  if (air) {
+    const given = Object.keys(params).length > 0;
+    return {
+      params: {},
+      warnings: given
+        ? ["--flashvars and --param: ignored for an AIR application, which has no page"]
+        : [],
+    };
+  }
+
+  if (params.base === undefined || movie === null) {
+    return { params, warnings: [] };
+  }
+
+  const { base, ...others } = params;
+  const left = (why: string) => ({ params: others, warnings: [`--param base=${base}: ${why}`] });
+  let absolute: URL | null = null;
+  try {
+    absolute = new URL(base);
+  } catch {
+    // Relative.
+  }
+
+  if (absolute) {
+    return absolute.protocol === "http:" || absolute.protocol === "https:"
+      ? { params, warnings: [] }
+      : left("not an http, https or relative URL; left out");
+  }
+
+  if (/^https?:\/\//i.test(movie)) {
+    return { params, warnings: [] };
+  }
+
+  // A relative path's or a host's: a token for its directory stands for the directory.
+  let local: URL | null = null;
+  try {
+    local = new URL(base, `${LOCAL_DIRECTORY}movie.swf`);
+  } catch {
+    // Left out below.
+  }
+
+  return local?.href.startsWith(LOCAL_DIRECTORY)
+    ? { params, warnings: [] }
+    : left("outside the SWF's directory, where it reads nothing; left out");
+}
+
+/**
+ * `params`, as settleEmbedding left them, for the SWF at `movieUrl`: `base`
+ * resolved against its URL. One that comes to anything but http, https or
+ * the SWF's own files (swf2es://file) is left out. The relative loads it
+ * resolves are judged as any other, by the SWF's sandbox.
+ */
+export function embeddingFor(params: Embedding, movieUrl: string): Embedding {
   if (params.base === undefined) {
     return params;
   }
@@ -133,20 +185,22 @@ export function embeddingFor(
   try {
     resolved = new URL(base, movieUrl);
   } catch {
-    // Left out below.
-  }
-
-  if (
-    resolved === null ||
-    !(
-      resolved.protocol === "http:" ||
-      resolved.protocol === "https:" ||
-      (resolved.protocol === "swf2es:" && resolved.host === "file")
-    )
-  ) {
-    warn(`--param base=${base}: not an http, https or relative URL; left out`);
     return others;
   }
 
-  return { ...others, base: resolved.href };
+  const kept =
+    resolved.protocol === "http:" ||
+    resolved.protocol === "https:" ||
+    (resolved.protocol === "swf2es:" && resolved.host === "file");
+  return kept ? { ...others, base: resolved.href } : others;
+}
+
+/**
+ * The arguments a second start sent in the single-instance lock's data, as
+ * they were, else Electron's `given` for it, which may come reordered, a
+ * switch's value apart from the switch.
+ */
+export function exactArguments(data: unknown, given: string[]): string[] {
+  const argv = (data as { argv?: unknown } | null)?.argv;
+  return Array.isArray(argv) && argv.every((a) => typeof a === "string") ? argv : given;
 }

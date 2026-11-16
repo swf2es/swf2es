@@ -2,7 +2,7 @@
 // the files the user opens, the libraries they point at, and the page's
 // few requests (shared/api.ts), each checked to come from that page.
 //
-//   electron apps/desktop [--trace] [--flashvars vars] [--param name=value]...
+//   electron apps/desktop [--trace] [--flashvars=vars] [--param=name=value]...
 //                         [file.swf | http(s)://host/movie.swf]
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
@@ -24,7 +24,7 @@ import type { NetworkResponse, StartState } from "../shared/api.js";
 import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
-import { embeddingArguments } from "./embedding.ts";
+import { embeddingArguments, exactArguments, settleEmbedding } from "./embedding.ts";
 import { bridgeFiles } from "./files.ts";
 import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
@@ -401,14 +401,8 @@ if (!first) {
   app.quit();
 }
 
-/** The arguments a second start sent as they were, if it sent them. */
-function exactArguments(data: unknown): string[] | null {
-  const argv = (data as { argv?: unknown } | null)?.argv;
-  return Array.isArray(argv) && argv.every((a) => typeof a === "string") ? argv : null;
-}
-
 app.on("second-instance", (_event, given, workingDirectory, data) => {
-  const argv = exactArguments(data) ?? given;
+  const argv = exactArguments(data, given);
   // What it names would go through another proxy than this app's, or past it.
   const asked = proxyArgument(argv.slice(1));
   if (asked && !("proxy" in asked && sameProxy(asked.proxy, proxy))) {
@@ -432,10 +426,10 @@ app.on("second-instance", (_event, given, workingDirectory, data) => {
     return;
   }
 
-  // Its own embedding, its warnings said by the second start itself.
+  // Its own embedding, what it leaves out said by the second start itself, below.
   const entry = movieFromArguments(argv, workingDirectory);
   if (entry && settings) {
-    void openEntry(entry, embeddingArguments(argv).params);
+    void openEntry(entry, settleEmbedding(embeddingArguments(argv).params, entry, false).params);
   }
 });
 
@@ -444,6 +438,13 @@ let pending = movieFromArguments(process.argv);
 let pendingChosen = false;
 // An AIR application named adl's way, which the command line's SWF gives way to.
 const pendingAir = airCommand(process.argv.slice(process.defaultApp ? 2 : 1), process.cwd());
+// The command line's embedding for what it names, what it leaves out said once, here, by the
+// start it was given to, a second start's too, whose app already open plays it.
+const settled = settleEmbedding(embedding.params, pending, pendingAir !== null);
+for (const warning of settled.warnings) {
+  warn(warning);
+}
+
 // macOS hands a file opened from the Finder as an event, perhaps before the app is ready.
 app.on("open-file", (event, path) => {
   event.preventDefault();
@@ -514,12 +515,8 @@ void app.whenReady().then(() => {
   createWindow();
   buildMenu();
   if (pendingAir) {
-    if (Object.keys(embedding.params).length > 0) {
-      warn("--flashvars and --param: ignored for an AIR application, which has no page");
-    }
-
     void openAir(pendingAir, process.cwd());
   } else if (pending) {
-    void (pendingChosen ? openChosen(pending) : openEntry(pending, embedding.params));
+    void (pendingChosen ? openChosen(pending) : openEntry(pending, settled.params));
   }
 });

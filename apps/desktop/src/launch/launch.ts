@@ -3,7 +3,8 @@
 // swf2es-desktop command of the package npm installs, and a checkout's
 // `start`.
 //
-//   npx @swf2es/desktop [--trace] [--log-network] [file.swf | https://host/movie.swf]
+//   npx @swf2es/desktop [--trace] [--log-network] [--flashvars=vars] [--param=name=value]...
+//                       [file.swf | https://host/movie.swf]
 //   npx @swf2es/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //   pnpm --filter @swf2es/desktop start ...        the same, in a checkout
 //
@@ -11,7 +12,8 @@
 // in, which pnpm and npm name in INIT_CWD where they change it.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
+import { electronArguments } from "./arguments.ts";
 import { appRoot, electronBinary, electronPackage, missing } from "./electron.ts";
 
 // Electron's binary comes by its package's install script, which a package manager may not
@@ -38,18 +40,7 @@ if (why) {
 }
 
 const cwd = process.env.INIT_CWD ?? process.cwd();
-// Switches and URLs as they are, and the value after --flashvars or --param; a path from
-// where the command was run. What follows "--" is an AIR application's own arguments, as they are.
-const given = process.argv.slice(2);
-const end = given.indexOf("--");
-const own = end < 0 ? given : given.slice(0, end);
-const valued = (a: string | undefined) => /^--(flashvars|param)$/i.test(a ?? "");
-const args = [
-  ...own.map((a, i) =>
-    a.startsWith("-") || /^https?:\/\//i.test(a) || valued(own[i - 1]) ? a : resolve(cwd, a),
-  ),
-  ...(end < 0 ? [] : given.slice(end)),
-];
+const args = electronArguments(process.argv.slice(2), cwd);
 // What the context menu's About item names: a checkout's commit, else the package's version.
 let build = "";
 try {

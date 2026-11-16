@@ -5,7 +5,7 @@ their http or https URL, and AIR applications, with the `<swf2es-player>`
 element of `@swf2es/web`.
 
 ```sh
-npx @swf2es/desktop [options] [--flashvars vars] [--param name=value]... [file.swf | https://host/movie.swf]
+npx @swf2es/desktop [options] [--flashvars=vars] [--param=name=value]... [file.swf | https://host/movie.swf]
 npx @swf2es/desktop [options] app.xml [root-dir] [-- arguments...]
 ```
 
@@ -72,21 +72,25 @@ fetch-electron` does so ahead, for the tests.
   the `<swf2es-player>` element's attributes of those names:
 
   ```sh
-  swf2es-desktop --flashvars "user=guest&lang=en" --param quality=low movie.swf
-  swf2es-desktop --param scale=noScale --param salign=TL --param base=assets/ movie.swf
+  swf2es-desktop --flashvars="user=guest&lang=en" --param=quality=low movie.swf
+  swf2es-desktop --param=scale=noScale --param=salign=TL --param=base=assets/ movie.swf
   swf2es-desktop "https://example.com/movie.swf?user=guest"
   ```
 
-  `--flashvars "a=1&b=2"` (or `--flashvars=…`) is its FlashVars, URL-encoded
-  as a page's: `loaderInfo.parameters`, or an AVM1 SWF's `_root` variables;
-  given again, they are joined. `--param name=value` (or `--param=…`),
-  repeatable, is one of `quality`, `scale`, `salign`, `wmode`, `bgcolor`,
-  `menu`, `base` and `allowNetworking`, any case, the last of a name
-  winning (`--param flashvars=…` is `--flashvars`). `base` is resolved
-  against the SWF's own URL, as a page's against the page's, to an http or
-  https URL or below the SWF's directory; anything else is left out, with a
-  word. The loads it resolves are judged by the SWF's sandbox like any
-  other. A SWF URL's query is among its parameters, as Flash had it, the
+  `--flashvars="a=1&b=2"` is its FlashVars, URL-encoded as a page's:
+  `loaderInfo.parameters`, or an AVM1 SWF's `_root` variables; given again,
+  they are joined. `--param=name=value`, repeatable, is one of `quality`,
+  `scale`, `salign`, `wmode`, `bgcolor`, `menu`, `base` and
+  `allowNetworking`, any case, the last of a name winning
+  (`--param=flashvars=…` is `--flashvars`); any other name is left out,
+  with a word. Write them with `=`: the value may also follow as the next
+  argument (`--flashvars "a=1"`), but not one that starts with `-`, which
+  other switches, `--proxy` and `--trace` among them, would read as their
+  own. `base` is an http or https URL, or a relative one, resolved against
+  the SWF's own URL as a page's against the page's: for a local SWF, to its
+  directory or below, as it reads nothing outside it. Anything else is left
+  out, with a word as the app starts. The loads it resolves are judged by
+  the SWF's sandbox like any other. A SWF URL's query is among its parameters, as Flash had it, the
   FlashVars over it, with or without the switches. They are for the SWF the
   command line names, a second start's handed to the app already open too,
   and stay with it through View › Reload Movie and a reload of the page; a
@@ -94,8 +98,8 @@ fetch-electron` does so ahead, for the tests.
   recent list keeps none. `allowScriptAccess`, `allowFullScreen` and
   `allowFullScreenInteractive` change nothing, said on stderr:
   ExternalInterface stays off, and a SWF's full screen is always the
-  window's. An AIR application gets none, having no page; an HTML page
-  wrapping a SWF does not open.
+  window's. An AIR application gets none, having no page, and the app says
+  so; an HTML page wrapping a SWF does not open.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
 - **Network log.** `--log-network` prints each of the SWF's requests to

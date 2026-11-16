@@ -14,7 +14,7 @@ import { type Embedding, embeddingArguments, embeddingFor } from "./embedding.ts
 import { buildMenu } from "./menu.ts";
 import type { Movie } from "./network-types.ts";
 import { listening, sandbox, settings, TITLE, window } from "./state.ts";
-import { network, warn } from "./switches.ts";
+import { network } from "./switches.ts";
 
 /** What the network judges the movie playing as; null for none, or one without networking. */
 export let networkMovie: Movie | null = null;
@@ -196,7 +196,7 @@ function show(
   onNetwork: Movie | null,
   embedding: Embedding,
 ): void {
-  const params = embeddingFor(embedding, movie.url, warn);
+  const params = embeddingFor(embedding, movie.url);
   if (Object.keys(params).length > 0) {
     movie.params = params;
   }

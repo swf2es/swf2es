@@ -3,6 +3,7 @@
 // It reaches the shell only through window.swf2esDesktop (shared/api.ts).
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
 import type { AirLaunch, DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
+import { embeddingAttributes } from "../shared/embedding.js";
 import { airHosts, airPath } from "./air.js";
 import { shellFiles } from "./files.js";
 import { windowFullScreen } from "./full-screen.js";
@@ -63,19 +64,19 @@ let embedded: string[] = [];
 
 /**
  * The element's attributes as the shell's `params` give them, as a page's
- * tag would: FlashVars, quality, scale and the rest. Never
- * allowscriptaccess, which keeps ExternalInterface off here.
+ * tag would: FlashVars, quality, scale and the rest, and nothing but those
+ * (shared/embedding.ts), allowscriptaccess least of all, which keeps
+ * ExternalInterface off here.
  */
-function embed(params: OpenedMovie["params"] = {}): void {
+function embed(params: OpenedMovie["params"]): void {
   for (const name of embedded) {
     player.removeAttribute(name);
   }
 
-  embedded = Object.keys(params).filter(
-    (name) => name !== "allowscriptaccess" && name !== "id" && name !== "src",
-  );
-  for (const name of embedded) {
-    player.setAttribute(name, params[name]);
+  const attributes = embeddingAttributes(params);
+  embedded = attributes.map(([name]) => name);
+  for (const [name, value] of attributes) {
+    player.setAttribute(name, value);
   }
 }
 

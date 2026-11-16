@@ -146,6 +146,8 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
   const mounts = moduleMounts();
   const staticDir = join(appRoot, "static");
   const rendererDir = join(appRoot, "dist", "renderer");
+  // What the page shares with the main process (src/shared): the embedding's names.
+  const sharedDir = join(appRoot, "dist", "shared");
 
   /** `path` under `dir`, or null if it would leave it. */
   const under = (dir: string, path: string): string | null => {
@@ -178,6 +180,9 @@ export function serve(session: Session, sandbox: Sandbox, libraries: () => Libra
     switch (top) {
       case "renderer":
         file = under(rendererDir, rest.join("/"));
+        break;
+      case "shared":
+        file = under(sharedDir, rest.join("/"));
         break;
       case "modules": {
         const dir = mounts.get(rest[0]);

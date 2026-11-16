@@ -1,9 +1,18 @@
 // The desktop app's --flashvars and --param, read as a page's <object> or
-// <embed> gave them to Flash, and the base they name resolved against the SWF.
+// <embed> gave them to Flash, the base they name resolved against the SWF,
+// and only the element's own parameters reaching it; a second start's
+// arguments as it sent them, and the launcher keeping the switches' values.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { electronArguments } from "../../apps/desktop/src/launch/arguments.ts";
 import { airCommand } from "../../apps/desktop/src/main/air.ts";
-import { embeddingArguments, embeddingFor } from "../../apps/desktop/src/main/embedding.ts";
+import {
+  embeddingArguments,
+  embeddingFor,
+  exactArguments,
+  settleEmbedding,
+} from "../../apps/desktop/src/main/embedding.ts";
+import { embeddingAttributes } from "../../apps/desktop/src/shared/embedding.ts";
 
 test("FlashVars from both forms, joined in order", () => {
   const read = embeddingArguments([
@@ -82,7 +91,7 @@ test("what does nothing here, or is no parameter, is said and left out", () => {
     "--param loop: no such parameter",
     "--param noequals: not name=value",
     "--param =value: not name=value",
-    "--flashvars needs a value",
+    "--flashvars needs a value (--flashvars=... for one that starts with -)",
   ]);
 });
 
@@ -103,32 +112,165 @@ test("a switch's value is never the movie nor a descriptor", () => {
   );
 });
 
-test("base is resolved against the SWF, and only to http, https or its own files", () => {
-  const warnings: string[] = [];
-  const warn = (message: string) => warnings.push(message);
+test("a value apart from its switch never starts with -, which other switches would read", () => {
+  const read = embeddingArguments([
+    "--flashvars",
+    "--proxy=socks5://h:1",
+    "--param",
+    "--trace",
+    "m.swf",
+  ]);
+  assert.deepEqual(read.params, {});
+  assert.deepEqual(read.rest, ["--proxy=socks5://h:1", "--trace", "m.swf"]);
+  assert.deepEqual(read.warnings, [
+    "--flashvars needs a value (--flashvars=... for one that starts with -)",
+    "--param needs a value (--param=... for one that starts with -)",
+  ]);
+  assert.deepEqual(embeddingArguments(["--flashvars=-x=1"]).params, { flashvars: "-x=1" });
+});
+
+test("only the element's parameters reach it, whatever the page is sent", () => {
+  const read = embeddingArguments([
+    "--param=workers=true",
+    "--param=width=100%",
+    "--param=id=player",
+    "--param=unmutePrompt=false",
+    "--param=quality=low",
+  ]);
+  assert.deepEqual(read.params, { quality: "low" });
+  assert.deepEqual(read.warnings, [
+    "--param workers: no such parameter",
+    "--param width: no such parameter",
+    "--param id: no such parameter",
+    "--param unmuteprompt: no such parameter",
+  ]);
+  // The page's own filter, for whatever the main process sends.
+  assert.deepEqual(
+    embeddingAttributes({
+      allowscriptaccess: "always",
+      workers: "true",
+      width: "100%",
+      src: "other.swf",
+      id: "x",
+      toString: "x",
+      flashvars: "a=1",
+      menu: "false",
+    }),
+    [
+      ["flashvars", "a=1"],
+      ["menu", "false"],
+    ],
+  );
+  assert.deepEqual(embeddingAttributes(undefined), []);
+  assert.deepEqual(embeddingAttributes(Object.create({ quality: "low" })), []);
+});
+
+test("settled once: base an http or https URL, or below a local SWF's directory", () => {
+  const local = "/home/user/games/movie.swf";
+  const remote = "https://example.com/games/movie.swf?a=1";
+  const settle = (base: string, movie: string | null) =>
+    settleEmbedding({ base, menu: "false" }, movie, false);
+  for (const [base, movie] of [
+    ["assets/", local],
+    ["./sub/deeper/", local],
+    ["a/../b/", local],
+    ["http://cdn.test/x/", local],
+    ["https://cdn.test/x/", remote],
+    ["../shared/", remote],
+    ["/cdn/", remote],
+    ["//cdn.test/", remote],
+  ]) {
+    assert.deepEqual(settle(base, movie), { params: { base, menu: "false" }, warnings: [] }, base);
+  }
+
+  for (const [base, movie, why] of [
+    ["../", local, "outside the SWF's directory"],
+    ["sub/../../x/", local, "outside the SWF's directory"],
+    ["/etc/", local, "outside the SWF's directory"],
+    ["//other/", local, "outside the SWF's directory"],
+    ["file:///etc/", local, "not an http, https or relative URL"],
+    ["swf2es://app/", remote, "not an http, https or relative URL"],
+    ["swf2es://file/0123456789abcdef/", local, "not an http, https or relative URL"],
+    ["javascript:alert(1)", remote, "not an http, https or relative URL"],
+  ]) {
+    const settled = settle(base, movie);
+    assert.deepEqual(settled.params, { menu: "false" }, base);
+    assert.equal(settled.warnings.length, 1);
+    assert.match(settled.warnings[0], new RegExp(`^--param base=.*: ${why}[^;]*; left out$`), base);
+  }
+
+  // Nothing named to play: nothing to say yet.
+  assert.deepEqual(settle("../", null), { params: { base: "../", menu: "false" }, warnings: [] });
+  // An AIR application gets none, and is told so.
+  assert.deepEqual(settleEmbedding({ quality: "low" }, null, true), {
+    params: {},
+    warnings: ["--flashvars and --param: ignored for an AIR application, which has no page"],
+  });
+  assert.deepEqual(settleEmbedding({}, null, true), { params: {}, warnings: [] });
+});
+
+test("base resolved against the SWF's URL as it plays", () => {
   const local = "swf2es://file/0123456789abcdef/movie.swf";
   const remote = "https://example.com/games/movie.swf?a=1";
-  assert.deepEqual(embeddingFor({ quality: "low" }, local, warn), { quality: "low" });
-  assert.deepEqual(embeddingFor({ base: "assets/" }, local, warn), {
+  assert.deepEqual(embeddingFor({ quality: "low" }, local), { quality: "low" });
+  assert.deepEqual(embeddingFor({ base: "assets/" }, local), {
     base: "swf2es://file/0123456789abcdef/assets/",
   });
-  assert.deepEqual(embeddingFor({ base: "." }, remote, warn), {
-    base: "https://example.com/games/",
-  });
-  assert.deepEqual(embeddingFor({ base: "/cdn/" }, remote, warn), {
-    base: "https://example.com/cdn/",
-  });
-  assert.deepEqual(embeddingFor({ base: "http://cdn.test/x/", scale: "noScale" }, local, warn), {
+  assert.deepEqual(embeddingFor({ base: "." }, remote), { base: "https://example.com/games/" });
+  assert.deepEqual(embeddingFor({ base: "http://cdn.test/x/", scale: "noScale" }, local), {
     base: "http://cdn.test/x/",
     scale: "noScale",
   });
-  assert.deepEqual(warnings, []);
-
-  assert.deepEqual(embeddingFor({ base: "file:///etc/", menu: "false" }, local, warn), {
+  assert.deepEqual(embeddingFor({ base: "file:///etc/", menu: "false" }, local), {
     menu: "false",
   });
-  assert.deepEqual(embeddingFor({ base: "swf2es://app/" }, local, warn), {});
-  assert.deepEqual(embeddingFor({ base: "javascript:alert(1)" }, remote, warn), {});
-  assert.equal(warnings.length, 3);
-  assert.match(warnings[0], /^--param base=file:\/\/\/etc\/: not an http, https or relative URL/);
+});
+
+test("a second start's arguments as it sent them, else Electron's", () => {
+  const given = ["electron", "--param", "m.swf", "quality=low"];
+  const sent = ["electron", "--param", "quality=low", "m.swf"];
+  assert.deepEqual(exactArguments({ argv: sent }, given), sent);
+  assert.deepEqual(exactArguments(undefined, given), given);
+  assert.deepEqual(exactArguments(null, given), given);
+  assert.deepEqual(exactArguments({}, given), given);
+  assert.deepEqual(exactArguments({ argv: "m.swf" }, given), given);
+  assert.deepEqual(exactArguments({ argv: ["m.swf", 1] }, given), given);
+});
+
+test("the launcher keeps the switches' values, and resolves paths alone", () => {
+  assert.deepEqual(
+    electronArguments(
+      [
+        "--flashvars",
+        "a=1&b=2",
+        "--PARAM",
+        "base=assets/",
+        "--param=quality=low",
+        "--trace",
+        "movie.swf",
+        "https://example.com/m.swf",
+        "app.xml",
+        "--",
+        "arg",
+        "--flashvars",
+        "x",
+      ],
+      "/cwd",
+    ),
+    [
+      "--flashvars",
+      "a=1&b=2",
+      "--PARAM",
+      "base=assets/",
+      "--param=quality=low",
+      "--trace",
+      "/cwd/movie.swf",
+      "https://example.com/m.swf",
+      "/cwd/app.xml",
+      "--",
+      "arg",
+      "--flashvars",
+      "x",
+    ],
+  );
 });
