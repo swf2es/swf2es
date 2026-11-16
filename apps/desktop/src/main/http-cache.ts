@@ -242,9 +242,13 @@ export class HttpCache {
   /** The entries' charges all told, and how many, as the rows say: read once, then kept. */
   private total: number;
   private count: number;
-  /** Writes go one at a time, so that two of one key never cross between their renames and rows. */
-  private writing: Promise<void> = Promise.resolve();
-  /** The start's sweep, which runs beside the writes. */
+  /**
+   * Writes go one at a time, so that two of one key never cross between
+   * their renames and rows; the first after the start's sweep has listed
+   * the bodies.
+   */
+  private writing: Promise<void>;
+  /** The start's sweep, which runs beside the writes once it has listed the bodies. */
   private readonly sweeping: Promise<void>;
   /** The bytes waiting to be written, which a burst of responses may not grow without bound. */
   private pending = 0;
@@ -290,7 +294,14 @@ export class HttpCache {
     const usage = this.statements.usage.get() as { entries: number; charges: number };
     this.total = usage.charges;
     this.count = usage.entries;
-    this.sweeping = this.sweep().catch((error) => this.failed(error));
+    // Listed before any write begins, so that each temporary file the sweep finds is a crash's:
+    // one of this run's, listed mid-write, would be swept away under it and its response lost.
+    const names = readdir(this.bodies);
+    this.writing = names.then(
+      () => {},
+      () => {},
+    );
+    this.sweeping = this.sweep(names).catch((error) => this.failed(error));
   }
 
   private openIndex(path: string): [DatabaseSync, Statements] {
@@ -891,13 +902,14 @@ export class HttpCache {
 
   /**
    * What a crash or another version left: temporary files and files with
-   * no row removed, rows whose file is gone or of another size dropped. It
-   * runs beside the writes, a page of names or rows at a time, so it never
+   * no row removed, rows whose file is gone or of another size dropped,
+   * among the bodies `listing` lists, which no write has touched. It runs
+   * beside the writes, a page of names or rows at a time, so it never
    * holds the main process long: a file is removed only while no row names
    * it, and a row dropped only while it is as the sweep read it.
    */
-  private async sweep(): Promise<void> {
-    const names = await readdir(this.bodies);
+  private async sweep(listing: Promise<string[]>): Promise<void> {
+    const names = await listing;
     for (let at = 0; at < names.length; at++) {
       const name = names[at];
       if (TEMPORARY.test(name) || !this.statements.chargeFor.get(name)) {
