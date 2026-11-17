@@ -15,7 +15,7 @@ import {
 const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
-test("AIR capture permission follows the host and drops events after revocation", async () => {
+test("AIR capture permission follows the host and answers denial after revocation", async () => {
   let permission: CapturePermission = "unknown";
   let answer: (value: CapturePermission) => void = () => {};
   const host: CaptureHost = {
@@ -44,18 +44,9 @@ test("AIR capture permission follows the host and drops events after revocation"
       const klass = rt.classNamed(`flash.media::${name}`);
       const object = rt.construct(klass);
       const received: avm2.Value[] = [];
-      object.$listeners = new Map([
-        [
-          "permissionStatus",
-          [
-            {
-              fn: { $f: (e: avm2.AsObject) => received.push(get(e, "status")) },
-              capture: false,
-              priority: 0,
-            },
-          ],
-        ],
-      ]);
+      call(object, "addEventListener", "permissionStatus", {
+        $f: (event: avm2.AsObject) => received.push(get(event, "status")),
+      });
       assert.equal(rt.in("permissionStatus", klass), true);
       assert.equal(rt.in("requestPermission", object), true);
       assert.equal(get(klass, "permissionStatus"), "unknown");
@@ -73,29 +64,23 @@ test("AIR capture permission follows the host and drops events after revocation"
       assert.deepEqual(received, ["granted", "denied"]);
     }
     const camera = rt.construct(rt.classNamed("flash.media::Camera"));
-    let late = 0;
-    camera.$listeners = new Map([
-      [
-        "permissionStatus",
-        [
-          {
-            fn: {
-              $f: () => {
-                late++;
-              },
-            },
-            capture: false,
-            priority: 0,
-          },
-        ],
-      ],
-    ]);
+    const late: avm2.Value[] = [];
+    call(camera, "addEventListener", "permissionStatus", {
+      $f: (event: avm2.AsObject) => late.push(get(event, "status")),
+    });
     call(camera, "requestPermission");
     s.captureLifetime.abort();
     answer("granted");
     await Promise.resolve();
     s.loads.completeLoads();
-    assert.equal(late, 0);
+    assert.deepEqual(late, ["denied"]);
+    call(camera, "requestPermission");
+    s.loads.completeLoads();
+    assert.deepEqual(late, ["denied", "denied"]);
+    call(camera, "requestPermission");
+    s.destroy();
+    s.loads.completeLoads();
+    assert.deepEqual(late, ["denied", "denied"]);
   } finally {
     s.destroy();
   }

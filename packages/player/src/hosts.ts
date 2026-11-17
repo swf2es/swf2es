@@ -785,7 +785,8 @@ export interface CameraCapture {
 }
 
 export interface CameraEvents {
-  state(state: "granted" | "denied" | "ended"): void;
+  /** Unavailable is a device/transport failure; it must not change the consent decision. */
+  state(state: "granted" | "denied" | "ended" | "unavailable"): void;
   settings(width: number, height: number, fps: number, position: string): void;
   frame(picture: CameraPicture): void;
 }
@@ -822,7 +823,8 @@ export interface MicrophoneMode {
 }
 
 export interface MicrophoneEvents {
-  state(state: "granted" | "denied" | "ended"): void;
+  /** Unavailable is a device/transport failure; it must not change the consent decision. */
+  state(state: "granted" | "denied" | "ended" | "unavailable"): void;
   /** Mono PCM after gain, at the device's sample rate. Owned by the receiver. */
   samples(samples: Float32Array, rate: number): void;
 }

@@ -646,6 +646,14 @@ export class Swf2esPlayerElement extends ElementBase {
       workerHost,
       ...moduleCacheOptions(),
     });
+    if (
+      attribute(this, "allowcapture")?.toLowerCase() === "false" ||
+      configuration().allowCapture === false ||
+      configuration().capture === null
+    ) {
+      scripting.captureLifetime.abort();
+    }
+
     return scripting;
   }
 

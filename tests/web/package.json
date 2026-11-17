@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node cdn.ts && node run.ts && node capture.ts"
+    "test": "node cdn.ts && node run.ts && node capture.ts && node capture-devices.ts"
   },
   "dependencies": {
     "@swf2es/web": "workspace:*"

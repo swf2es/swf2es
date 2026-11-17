@@ -125,6 +125,18 @@ motion detector: the mean difference of consecutive frames, sampled small,
 against `motionLevel`, raising `ActivityEvent` after `motionTimeout`. The
 11.4 copies go through the CPU frame of section 3.
 
+Status events report the first consent result and subsequent changes. Reopening an
+already permitted device does not repeat `Unmuted`; Stop and attribute revocation
+report `Muted`. AIR permission requests after revocation answer `denied` while the
+player remains alive. Without a capture host, both static permission getters report
+`granted`, as measured in Linux adl; this does not imply that devices exist.
+
+Only browser permission/security failures count as denial. Stale device constraints
+are retried once with preferences; other opening failures report an error-level
+`Camera.Unavailable` or `Microphone.Unavailable` status without changing consent.
+These asynchronous device-error notifications are a host extension, not measured
+Flash behavior. An unavailable device can be retried by attaching again.
+
 The browser host enumerates before AS3 starts so synchronous `names` and
 `getCamera` can use the result without prompting. It opens capture only
 on attach, with ideal size/aspect-ratio/rate constraints, then reports

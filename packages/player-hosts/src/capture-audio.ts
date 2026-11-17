@@ -5,9 +5,15 @@ import type {
   MicrophoneMode,
 } from "@swf2es/player";
 
-function constraints(device: CaptureDevice, mode: MicrophoneMode): MediaTrackConstraints {
+import { denied, openMedia } from "./capture-access.js";
+
+function constraints(
+  device: CaptureDevice,
+  mode: MicrophoneMode,
+  strict = true,
+): MediaTrackConstraints {
   return {
-    deviceId: device.id ? { exact: device.id } : undefined,
+    deviceId: device.id ? (strict ? { exact: device.id } : { ideal: device.id }) : undefined,
     channelCount: 1,
     echoCancellation: mode.echoCancellation,
     noiseSuppression: mode.noiseSuppression,
@@ -26,6 +32,8 @@ export function openMicrophone(
   let mode = initial;
   let closed = false;
   let openSettled = false;
+  let acquired = false;
+  const opening = new AbortController();
   let resolveClosed: () => void = () => {};
   const closedPromise = new Promise<void>((resolve) => {
     resolveClosed = resolve;
@@ -46,6 +54,7 @@ export function openMicrophone(
     }
 
     closed = true;
+    opening.abort();
     signal.removeEventListener("abort", abort);
     globalThis.removeEventListener("pointerdown", resume, true);
     globalThis.removeEventListener("keydown", resume, true);
@@ -108,8 +117,12 @@ export function openMicrophone(
   }
 
   signal.addEventListener("abort", abort, { once: true });
-  void media
-    .getUserMedia({ audio: constraints(device, mode), video: false })
+  void openMedia(
+    media,
+    { audio: constraints(device, mode), video: false },
+    { audio: constraints(device, mode, false), video: false },
+    opening.signal,
+  )
     .then(async (opened) => {
       openSettled = true;
       if (closed) {
@@ -120,6 +133,7 @@ export function openMicrophone(
         return;
       }
 
+      acquired = true;
       stream = opened;
       const track = opened.getAudioTracks()[0];
       if (!track) {
@@ -160,14 +174,14 @@ export function openMicrophone(
       resume();
       await apply();
     })
-    .catch(() => {
+    .catch((error) => {
       openSettled = true;
       if (closed) {
         resolveClosed();
       }
       if (!closed) {
         finish(false);
-        events.state("denied");
+        events.state(!acquired && denied(error) ? "denied" : "unavailable");
       }
     });
   return capture;

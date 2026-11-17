@@ -29,7 +29,7 @@ const { value, exception } = await withPage(
   const camera = call(rt.classNamed('flash.media::Camera'), 'getCamera');
   const video = rt.construct(rt.classNamed('flash.media::Video'), 64, 48);
   const status = [];
-  camera.$listeners = new Map([['status', [{ fn: {$f: e => status.push(get(e, 'code'))}, capture: false, priority: 0 }]]]);
+  call(camera, 'addEventListener', 'status', {$f: e => status.push(get(e, 'code'))});
   const view = new RenderView({ width: 64, height: 48, preserveDrawingBuffer: true });
   const wait = async (condition, label) => {
     const until = performance.now() + 8000;
@@ -80,6 +80,54 @@ const { value, exception } = await withPage(
       new AbortController().signal);
     await wait(() => deniedStates.length > 0, 'denial'); handle.close();
     check(deniedStates.join(',') === 'denied', 'denial state wrong');
+
+    // Exercise the host's permission cache without a Permissions API masking its value.
+    const query = navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query = () => Promise.reject(new Error('no Permissions API'));
+    try {
+      for (const name of ['OverconstrainedError', 'NotFoundError', 'NotReadableError']) {
+        const unavailable = await browserCaptureHost();
+        let attempts = 0;
+        navigator.mediaDevices.getUserMedia = () => {
+          attempts++; return Promise.reject(new DOMException('device unavailable', name));
+        };
+        const states = [];
+        const capture = unavailable.openCamera(unavailable.cameras[0], {width:64,height:48,fps:10,favorArea:true},
+          {state: value => states.push(value), settings() {}, frame() { throw new Error('unavailable frame'); }},
+          new AbortController().signal);
+        await wait(() => states.length > 0, name);
+        await capture.closed;
+        check(states.join(',') === 'unavailable', name + ' reported denial');
+        check(attempts === (name === 'NotReadableError' ? 1 : 2), name + ' retry count');
+        check(unavailable.permissionStatus('camera') === 'unknown', name + ' poisoned permission');
+        check(await unavailable.requestPermission('camera', new AbortController().signal) === 'unknown', name + ' explicit permission denial');
+        navigator.mediaDevices.getUserMedia = original;
+        const recovered = [];
+        const retried = unavailable.openCamera(unavailable.cameras[0], {width:64,height:48,fps:10,favorArea:true},
+          {state: value => recovered.push(value), settings() {}, frame() {}}, new AbortController().signal);
+        await wait(() => recovered.length > 0, 'recovered ' + name);
+        check(recovered.join(',') === 'granted' && unavailable.permissionStatus('camera') === 'granted', 'retry failed after ' + name);
+        retried.close(); await retried.closed;
+      }
+      navigator.permissions.query = () => Promise.resolve({state: 'granted'});
+      const permitted = await browserCaptureHost();
+      navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('busy', 'NotReadableError'));
+      check(await permitted.requestPermission('camera', new AbortController().signal) === 'granted', 'busy camera lost existing browser permission');
+      check(permitted.permissionStatus('camera') === 'granted', 'busy permission disagrees with getter');
+    } finally { navigator.permissions.query = query; }
+
+    // Closing an opening capture cancels relaxed retries even while the player stays alive.
+    let refuse;
+    let abandonedOpens = 0;
+    navigator.mediaDevices.getUserMedia = () => {
+      abandonedOpens++; return new Promise((_resolve, reject) => { refuse = reject; });
+    };
+    const abandoned = host.openCamera(host.cameras[0], {width:64,height:48,fps:10,favorArea:true},
+      {state() { throw new Error('closed capture status'); }, settings() {}, frame() {}}, new AbortController().signal);
+    abandoned.close();
+    refuse(new DOMException('stale constraints', 'OverconstrainedError'));
+    await abandoned.closed;
+    check(abandonedOpens === 1, 'detached capture retried opening');
 
     // The browser can answer a prompt after the player that asked has gone away.
     let release;

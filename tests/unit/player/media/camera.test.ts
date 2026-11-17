@@ -59,8 +59,9 @@ async function setup() {
   const call = (o: avm2.AsObject, key: string, ...args: avm2.Value[]) =>
     rt.callProperty(o, rt.publicName(key), ...args);
   const listen = (o: avm2.AsObject, type: string, fn: (event: avm2.AsObject) => void) => {
-    o.$listeners ??= new Map();
-    o.$listeners.set(type, [{ fn: { $f: fn }, capture: false, priority: 0 }]);
+    const listener = { $f: fn };
+    call(o, "addEventListener", type, listener);
+    return () => call(o, "removeEventListener", type, listener);
   };
   const cameraClass = rt.classNamed("flash.media::Camera");
   const camera = call(cameraClass, "getCamera") as avm2.AsObject;
@@ -226,6 +227,41 @@ test("Camera coalesces activity while the player does not tick", async () => {
     }
     assert.equal(queued, 1);
     h.player.tick();
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("Camera consent survives reattachment, revocation notifies once and activity has no orphan false", async () => {
+  const h = await setup();
+  try {
+    const statuses: avm2.Value[] = [];
+    const activity: avm2.Value[] = [];
+    h.listen(h.camera, "status", (e) => statuses.push(h.get(e, "code")));
+    h.listen(h.camera, "activity", (e) => activity.push(h.get(e, "activating")));
+    h.call(h.video, "attachCamera", h.camera);
+    h.opens[0].events.state("granted");
+    h.player.tick();
+    h.call(h.video, "attachCamera", null);
+    h.call(h.video, "attachCamera", h.camera);
+    h.opens[1].events.state("granted");
+    h.call(h.camera, "setMotionLevel", 1, 0);
+    h.frame(0, 0);
+    h.frame(100, 255);
+    h.frame(200, 255);
+    h.player.tick();
+    assert.deepEqual(activity, []);
+    assert.deepEqual(statuses, ["Camera.Unmuted"]);
+    h.s.captureLifetime.abort();
+    h.player.tick();
+    assert.deepEqual(statuses, ["Camera.Unmuted", "Camera.Muted"]);
+    assert.equal(h.get(h.camera, "muted"), true);
+    h.call(h.video, "attachCamera", h.camera);
+    h.player.tick();
+    assert.equal(h.opens.length, 2);
+    assert.equal(statuses.length, 2);
     assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();

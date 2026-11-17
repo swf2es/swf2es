@@ -27,6 +27,7 @@ const source = `package {
     private var mic:Microphone;
     private var video:Video;
     private var heard:Boolean = false;
+    private var cameraGranted:Boolean = false;
     public function DesktopCapture() {
       camera = Camera.getCamera(); mic = Microphone.getMicrophone();
       trace("capture devices", camera != null, mic != null);
@@ -49,7 +50,15 @@ const source = `package {
       if (Object(e).status == "granted") startCamera();
     }
     private function startCamera():void { video.attachCamera(camera); }
-    private function status(e:StatusEvent):void { trace("capture status", e.code); }
+    private function status(e:StatusEvent):void {
+      trace("capture status", e.code);
+      trace("capture muted", e.code, e.target.muted);
+      if (e.code == "Camera.Unmuted") cameraGranted = true;
+      if (e.code == "Camera.Muted" && cameraGranted && "permissionStatus" in Camera) {
+        cameraGranted = false;
+        Object(camera).requestPermission();
+      }
+    }
     private function frame(e:Event):void {
       if (camera.width > 0) {
         var bitmap:BitmapData = new BitmapData(160,120,true,0);
@@ -173,6 +182,7 @@ try {
         })()`),
         true,
       );
+      const stoppedAt = app.stdout.length;
       await app.main(
         `(() => { const item=${electron}.Menu.getApplicationMenu().getMenuItemById('stop-capture'); if(!item.enabled) throw new Error('stop disabled'); item.click(); return true; })()`,
       );
@@ -186,13 +196,39 @@ try {
         false,
       );
 
+      await app.until("Stop status events", () => {
+        const output = app.stdout.slice(stoppedAt);
+        return (
+          output.includes("capture muted Camera.Muted true") &&
+          output.includes("capture muted Microphone.Muted true")
+        );
+      });
+
       // AIR requests explicit permission through the same dialog before attaching the camera.
       await boxes(app, 0);
+      const airAt = app.stdout.length;
       await open(app, true);
+      await app.until("AIR capture ready", () =>
+        app.stdout.slice(airAt).includes("capture status Camera.Unmuted"),
+      );
       await app.until("AIR permission event", () =>
         app.stdout.includes("permission event granted granted"),
       );
       assert.equal((await app.main<unknown[]>("captureBoxes")).length, 2);
+      await until(() =>
+        app.evaluate<boolean>("captureTracks.filter(t => t.readyState === 'live').length === 2"),
+      );
+      await app.main(
+        `(() => { ${electron}.Menu.getApplicationMenu().getMenuItemById('stop-capture').click(); return true; })()`,
+      );
+      await app.until("AIR permission after Stop", () =>
+        app.stdout.includes("permission event denied denied"),
+      );
+      await until(() =>
+        app.evaluate<boolean>("captureTracks.every(t => t.readyState === 'ended')"),
+      );
+      await boxes(app, 0);
+      await open(app, true);
       await until(() =>
         app.evaluate<boolean>("captureTracks.filter(t => t.readyState === 'live').length === 2"),
       );

@@ -4,6 +4,7 @@ import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import type { SoundMix, StreamingSound } from "./audio.js";
 import { CaptureResampler, microphoneRates } from "./capture-resampler.js";
+import { CaptureStatus } from "./capture-status.js";
 import { mixerMix, mixOf, outputMix } from "./sounds.js";
 
 export const microphoneStates = new WeakMap<avm2.AsObject, MicrophoneState>();
@@ -24,7 +25,12 @@ export class MicrophoneState {
   silenceLevel = 10;
   silenceTimeout = 2000;
   activityLevel = -1;
-  muted = true;
+  private readonly consent: CaptureStatus;
+
+  get muted(): boolean {
+    return this.consent.muted;
+  }
+
   loopback = false;
   mix: SoundMix = mixOf(null);
   private capture: MicrophoneCapture | null = null;
@@ -38,6 +44,7 @@ export class MicrophoneState {
   private time = 0;
   private lastSound = -1;
   private activating = false;
+  private reportedActivity = false;
   private activityEventGeneration = 0;
   private pending = false;
   private queued: { samples: Float32Array; position: number }[] = [];
@@ -49,7 +56,15 @@ export class MicrophoneState {
     readonly device: CaptureDevice,
     readonly index: number,
   ) {
-    s.captureLifetime.signal.addEventListener("abort", () => this.stop(), { once: true });
+    this.consent = new CaptureStatus(s, object, "Microphone");
+    s.captureLifetime.signal.addEventListener(
+      "abort",
+      () => {
+        this.stop();
+        this.consent.set(true);
+      },
+      { once: true },
+    );
   }
 
   private mode(): MicrophoneMode {
@@ -100,19 +115,19 @@ export class MicrophoneState {
     this.active = true;
     const generation = ++this.generation;
     const current = () => !this.s.destroyed && generation === this.generation;
-    const state = (value: "granted" | "denied" | "ended") => {
+    const state = (value: "granted" | "denied" | "ended" | "unavailable") => {
       if (!current()) {
         return;
       }
-      this.muted = value !== "granted";
-      if (this.muted) {
+      if (value !== "granted") {
         this.stop(false);
       }
-      this.s.loads.deferHostEvent(() => {
-        if (current()) {
-          this.status(value === "granted" ? "Microphone.Unmuted" : "Microphone.Muted");
-        }
-      });
+
+      if (value === "unavailable") {
+        this.consent.unavailable();
+      } else {
+        this.consent.set(value !== "granted");
+      }
     };
     try {
       const capture = host.openMicrophone(
@@ -134,33 +149,13 @@ export class MicrophoneState {
         capture.close();
       }
     } catch {
-      state("denied");
+      state("unavailable");
     }
   }
 
   unavailable(): void {
     this.stop();
-    this.muted = true;
-    this.s.loads.deferHostEvent(() => {
-      if (!this.s.destroyed) {
-        this.status("Microphone.Unavailable");
-      }
-    });
-  }
-
-  private status(code: string): void {
-    dispatchEvent(
-      this.s,
-      this.object,
-      this.s.rt.construct(
-        this.s.rt.classNamed("flash.events::StatusEvent"),
-        "status",
-        false,
-        false,
-        code,
-        "status",
-      ),
-    );
+    this.consent.unavailable();
   }
 
   private stop(invalidate = true): void {
@@ -217,8 +212,10 @@ export class MicrophoneState {
             !this.s.destroyed &&
             this.active &&
             generation === this.generation &&
-            this.silenceLevel < 100
+            this.silenceLevel < 100 &&
+            this.reportedActivity !== this.activating
           ) {
+            this.reportedActivity = this.activating;
             dispatchEvent(
               this.s,
               this.object,
