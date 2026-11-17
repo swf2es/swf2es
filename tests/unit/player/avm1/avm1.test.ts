@@ -9,6 +9,7 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1, type Avm1Options } from "../../../../packages/player/dist/avm1/avm1.js";
+import { platformCapabilities } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
 import { skippedExports, skippedExportsTrace } from "../../../avm1-exports.ts";
@@ -1069,10 +1070,17 @@ test("a host's fsCommand takes every command, quit too, and getURL's pages go to
     ["two", "args"],
     ["clip", "5"],
   ]);
+
+  // $version is enumerable, so sending the main timeline's variables includes it too.
+  const vars = [
+    ["v", "1"],
+    ["$version", platformCapabilities().version],
+  ];
+
   assert.deepEqual(pages, [
     ["http://a.example/", "_blank", null],
-    ["http://b.example/", "_self", { method: "POST", vars: [["v", "1"]] }],
-    ["http://c.example/", "_blank", { method: "GET", vars: [["v", "1"]] }],
+    ["http://b.example/", "_self", { method: "POST", vars }],
+    ["http://c.example/", "_blank", { method: "GET", vars }],
   ]);
 });
 
