@@ -41,14 +41,14 @@ const { value, exception } = await withPage(
   };
   try {
     check(get(camera, 'muted') === true, 'camera began unmuted');
-    call(camera, 'setMode', 64, 48, 10, true);
+    call(camera, 'setMode', 320, 240, 10, true);
     call(camera, 'setMotionLevel', 0, 100);
     check(tracks.length === 0, 'settings opened camera');
     call(video, 'attachCamera', camera);
     await wait(() => get(video, 'videoWidth') > 0 && get(camera, 'currentFPS') > 0, 'camera frames');
     check(status.includes('Camera.Unmuted'), 'missing permission status');
     check(get(camera, 'muted') === false, 'granted camera remains muted');
-    check(get(video, 'videoWidth') === 64 && get(video, 'videoHeight') === 48, 'setMode dimensions');
+    check(get(video, 'videoWidth') === 320 && get(video, 'videoHeight') === 240, 'setMode dimensions: ' + get(video, 'videoWidth') + 'x' + get(video, 'videoHeight'));
     await wait(() => get(camera, 'name').length > 0, 'device label');
     check(get(camera, 'activityLevel') >= 0, 'activity not measured');
     view.render(video.$display);
@@ -60,9 +60,9 @@ const { value, exception } = await withPage(
     view.gl.readPixels = () => { throw new Error('camera copy used GPU readback'); };
     try { call(bitmap, 'draw', video); } finally { view.gl.readPixels = read; }
     check(bitmap.$store.pixels.some(p => p !== 0 && p !== 0xffffffff), 'CPU snapshot empty');
-    call(camera, 'setMode', 80, 60, 15, true);
-    await wait(() => get(video, 'videoWidth') === 80 && get(video, 'videoHeight') === 60, 'mode change');
-    check(get(camera, 'width') === 80 && get(camera, 'height') === 60, 'camera settings stale');
+    call(camera, 'setMode', 640, 480, 15, true);
+    await wait(() => get(video, 'videoWidth') === 640 && get(video, 'videoHeight') === 480, 'mode change');
+    check(get(camera, 'width') === 640 && get(camera, 'height') === 480, 'camera settings stale');
     call(video, 'attachCamera', null);
     check(tracks.every(t => t.readyState === 'ended'), 'detach kept capture alive');
     call(video, 'attachCamera', camera);
