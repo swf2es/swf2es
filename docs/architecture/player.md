@@ -641,8 +641,14 @@ SWF go with its code. So `Code.link` links such a SWF into a child of
 that domain of its own, whose lookups go to the domain first and so find
 what they did, and `Code.codeDomain` gives the domain for the child, for
 `currentDomain`, `getDefinitionByName` and a load's default domain. The
-child is evicted once linked, as a loaded SWF's domain is, and goes with
-the SWF's code. A SWF only some of whose ABCs were loaded before still
+child is evicted once linked, as a loaded SWF's domain is, with no copy
+of its ABCs kept to revive it, as nothing loads into it or under it, and
+goes with the SWF's code; with lazy compilation, whose deferred bodies
+need their ABCs, it goes when it is collected. Loaded so five times a
+second, 80 small SWFs in turn, the compactions this asks for rebuilt the
+compiler's domain once every 15 seconds or so, about 40 ms each from an
+idle callback, as often as loads into new domains each have it rebuilt,
+whose rebuilds are shorter as fewer ABCs stay live. A SWF only some of whose ABCs were loaded before still
 links into the domain, as its new ones define names there, and as Flash
 gives the domain its new classes. (Two things Flash does differently
 are apart from this: the code of a SWF loaded from bytes finds no

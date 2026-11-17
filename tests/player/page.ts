@@ -1864,7 +1864,12 @@ let opened: {
 /** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
 let leakCache: ModuleCache | null = null;
 
-async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
+async function openSwf(
+  base64: string,
+  url: string | null,
+  cached = false,
+  lazyCompilation = false,
+): Promise<string | null> {
   opened = null;
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const trace: string[] = [];
@@ -1877,6 +1882,7 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
 
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
       moduleCache: cached ? leakCache : null,
+      lazyCompilation,
     });
     const player = new Player(bytes, scripting);
     await player.start();

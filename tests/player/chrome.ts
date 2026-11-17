@@ -825,9 +825,10 @@ export interface SteppedPage {
   /**
    * Start a SWF at `url` on the page, letting go of any opened before;
    * what stopped it, if anything. `cached` gives its player the page's
-   * IndexedDB module cache, which every such player shares.
+   * IndexedDB module cache, which every such player shares; `lazy`
+   * compiles its methods on first use (Scripting's lazyCompilation).
    */
-  open(swf: Uint8Array, url: string, cached?: boolean): Promise<string | null>;
+  open(swf: Uint8Array, url: string, cached?: boolean, lazy?: boolean): Promise<string | null>;
   /** Play the opened SWF until it has traced `lines` lines or played `frames` frames. */
   step(
     lines: number,
@@ -864,8 +865,8 @@ export function withSteppedPage<T>(
       };
       const base64 = (swf: Uint8Array) => JSON.stringify(Buffer.from(swf).toString("base64"));
       return run({
-        open: (swf, url, cached = false) =>
-          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached})`),
+        open: (swf, url, cached = false, lazy = false) =>
+          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached}, ${lazy})`),
         step: (lines, frames) => answer(`stepSwf(${lines}, ${frames})`),
         trace: () => answer("traceSwf()"),
         close: async () => {

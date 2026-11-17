@@ -10,6 +10,25 @@
 // - avm1: the same with AVM1 SWFs, each of frames of DoAction blocks; nor
 //   may the WebAssembly memories the page holds, codegen's, grow with them.
 //
+// And what an online game does with each player's gear, never unloading
+// it: KINDS gear SWFs, each a symbol of a class with shapes and a bitmap
+// on its timeline, a few on the stage at once, each kept some frames and
+// then let go of, a load each:
+//
+// - dropped: each in a Loader of its own, the Loader on the stage, then
+//   off it and forgotten, the Loader neither unloaded nor stopped;
+// - shared: all into one application domain by a few Loaders, each
+//   loading the next into itself, the domain's instance of the gear's
+//   class on the stage instead, so that the same SWFs load into it over
+//   and over: its first load's classes are the domain's, as in Flash, and
+//   those after must go once let go of;
+// - lazy: shared, with methods compiled on first use, whose domains the
+//   compiler keeps until they are collected: what its live ABCs hold is
+//   measured after a collection, and its memory's high-water mark, which
+//   follows the collector, is not held to the ceiling;
+// - churn: each gear loaded once into that domain and kept, instances of
+//   its class made and dropped every frame, each a load.
+//
 // And that what lives on still works once the rest is collected:
 //
 // - kept: a main SWF keeps a text field a child's code made in an
@@ -284,7 +303,7 @@ await withSteppedPage(
       );
     }
 
-    for (const mode of ["loader", "same", "fresh", "avm1", "dropped", "shared", "churn"]) {
+    for (const mode of ["loader", "same", "fresh", "avm1", "dropped", "shared", "lazy", "churn"]) {
       if (modes.length && !modes.includes(mode)) {
         continue;
       }
@@ -327,7 +346,12 @@ await withSteppedPage(
                 `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
                 cached,
               )
-            : await page.open(gearSwf, `/leak/gear.swf?mode=${mode}&kinds=${KINDS}`, cached);
+            : await page.open(
+                gearSwf,
+                `/leak/gear.swf?mode=${mode === "lazy" ? "shared" : mode}&kinds=${KINDS}`,
+                cached,
+                mode === "lazy",
+              );
         for (const n of [WARM, LOADS]) {
           if (error) {
             break;
@@ -336,8 +360,10 @@ await withSteppedPage(
           const stepped = await page.step(n, n * 20);
           error = stepped.error ?? (stepped.lines < n ? `only ${stepped.lines} loads` : null);
           codegen.push(stepped.codegen);
-          live.push(stepped.live);
           await measure(n);
+          // After the collection measure made, as what lazy compilation keeps
+          // goes only with its domain.
+          live.push((await page.step(0, 0)).live);
         }
 
         await page.close();
@@ -354,8 +380,13 @@ await withSteppedPage(
       const ms = (performance.now() - warmed) / loads;
       const ok = perLoad <= BOUND;
       const liveOk = live.length < 2 || (live[1] - live[0]) / loads <= BOUND;
+      // Lazy compilation keeps a domain's ABCs until the domain is collected,
+      // so how high codegen's memory goes follows the collector's timing.
       const codegenOk =
-        liveOk && (codegen.length < 2 || codegen[1] <= Math.max(codegen[0], CODEGEN_CEILING));
+        liveOk &&
+        (mode === "lazy" ||
+          codegen.length < 2 ||
+          codegen[1] <= Math.max(codegen[0], CODEGEN_CEILING));
       const memoriesOk = memories.length < 2 || memories[1] <= memories[0];
       failed ||= !ok || !codegenOk || !memoriesOk;
       console.log(

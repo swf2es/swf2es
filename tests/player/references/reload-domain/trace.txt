@@ -4,6 +4,7 @@ script: its domain has the class true
 script: its domain's class is the script's true
 script: found by name is the script's true
 script: made before 0
+script: its domain's names ReloadChild
 child: made 1
 child: its loaderInfo's domain has it true
 child: that domain's class is its own true
@@ -22,6 +23,7 @@ script: its domain has the class true
 script: its domain's class is the script's true
 script: found by name is the script's true
 script: made before 1
+script: its domain's names ReloadChild
 child: made 2
 child: its loaderInfo's domain has it true
 child: that domain's class is its own true
@@ -40,6 +42,7 @@ script: its domain has the class true
 script: its domain's class is the script's true
 script: found by name is the script's true
 script: made before 2
+script: its domain's names ReloadChild,ReloadExtra
 extra: its domain has the child true
 extra: its domain has itself true
 extra: the child made 2
@@ -57,6 +60,7 @@ script: its domain has the class true
 script: its domain's class is the script's true
 script: found by name is the script's true
 script: made before 2
+script: its domain's names 
 child: made 3
 child: its loaderInfo's domain has it true
 child: that domain's class is its own true

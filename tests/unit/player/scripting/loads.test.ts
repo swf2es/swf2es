@@ -1694,3 +1694,131 @@ test("a URL's bytes of no known type are told as any are, then #2124 with the UR
     "Error #2124: Loaded file is an unknown type. URL: https://example.test/data.txt",
   );
 });
+
+for (const lazyCompilation of [false, true]) {
+  const mode = lazyCompilation ? "lazy" : "eager";
+  test(`a SWF loaded again by URL into a domain of all its ABCs runs as the domain's (${mode})`, {
+    skip,
+  }, async (t) => {
+    // Its script, run again, finds the domain's names, loads a SWF into a
+    // child of the domain by default, and leaves a timer that runs after
+    // the SWF's own domain was evicted; and Code keeps no copy of its ABC.
+    const compile = compiler(out);
+    const gear = compile(
+      "DupGear",
+      `package {
+  import flash.display.Sprite;
+  public class DupGear extends Sprite {}
+}
+
+import flash.display.Loader;
+import flash.events.Event;
+import flash.net.URLRequest;
+import flash.system.ApplicationDomain;
+import flash.utils.setTimeout;
+
+(function():void {
+  var names:Function = function(d:ApplicationDomain):String {
+    return d.getQualifiedDefinitionNames().join(",");
+  };
+  trace("script: " + names(ApplicationDomain.currentDomain));
+  var probe:Loader = new Loader();
+  probe.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void {
+    trace("probe's parent: " + names(probe.contentLoaderInfo.applicationDomain.parentDomain));
+  });
+  probe.load(new URLRequest("probe.swf"));
+  setTimeout(function():void {
+    trace("timer: " + names(ApplicationDomain.currentDomain));
+  }, 100);
+})();
+`,
+    );
+    const main = compile(
+      "DupMain",
+      `package {
+  import flash.display.Loader;
+  import flash.display.Sprite;
+  import flash.events.Event;
+  import flash.net.URLRequest;
+  import flash.system.ApplicationDomain;
+  import flash.system.LoaderContext;
+  import flash.utils.setTimeout;
+  public class DupMain extends Sprite {
+    private var shared:ApplicationDomain = new ApplicationDomain(ApplicationDomain.currentDomain);
+    private var loads:int = 0;
+    private var keep:Array = [];
+    public function DupMain() { next(); }
+    private function next():void {
+      if (loads == 2) {
+        setTimeout(function():void { trace("done"); }, 300);
+        return;
+      }
+
+      loads++;
+      var loader:Loader = new Loader();
+      keep.push(loader);
+      loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void {
+        trace("loaded: " + (loader.content is (shared.getDefinition("DupGear") as Class)));
+        next();
+      });
+      loader.load(new URLRequest("gear.swf"), new LoaderContext(false, shared));
+    }
+  }
+}`,
+    );
+    const swfs: Record<string, Uint8Array> = {
+      "gear.swf": bare(gear, 1, "DupGear"),
+      "probe.swf": bare(
+        compile(
+          "DupProbe",
+          "package { import flash.display.Sprite; public class DupProbe extends Sprite {} }",
+        ),
+        1,
+        "DupProbe",
+      ),
+    };
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+      url: "http://example.test/main.swf",
+      lazyCompilation,
+      fetch: async ({ url }) => {
+        const bytes = swfs[url.slice(url.lastIndexOf("/") + 1)];
+        if (!bytes) {
+          throw new Error("404");
+        }
+
+        return { bytes, status: 200, headers: [] };
+      },
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(bare(main, 1, "DupMain"), scripting);
+    t.after(() => player.destroy());
+    await player.start();
+    for (let frame = 0; frame < 2000 && !lines.includes("done"); frame++) {
+      await scripting.settled();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      player.tick();
+    }
+
+    assert.deepEqual([...lines].sort(), [
+      "done",
+      "loaded: true",
+      "loaded: true",
+      "probe's parent: DupGear",
+      "probe's parent: DupGear",
+      "script: DupGear",
+      "script: DupGear",
+      "timer: DupGear",
+      "timer: DupGear",
+    ]);
+    // The domain's copy of the ABC alone, for a revival: none for the domain the second load linked into.
+    const evictable = (
+      scripting.code as unknown as { evictable: Map<number, Map<number, Uint8Array>> }
+    ).evictable;
+    const copies = [...evictable.values()].filter((abcs) =>
+      [...abcs.values()].some((bytes) => bytes.length === gear.length),
+    );
+    assert.equal(copies.length, 1);
+  });
+}

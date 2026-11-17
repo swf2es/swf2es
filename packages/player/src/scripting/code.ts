@@ -380,7 +380,11 @@ export class Code {
     this.journal(`add ${builtin} ${target}`);
 
     this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
-    this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
+    // Nothing loads into a domain that stands for another, nor under it, so
+    // it is never revived: it is evicted with no bytes to revive it with.
+    if (!this.stand.has(domain)) {
+      this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
+    }
     if (domain !== this.s.rt.root && this.libraryCount === null) {
       this.libraryCount = this.hashes.length;
     }

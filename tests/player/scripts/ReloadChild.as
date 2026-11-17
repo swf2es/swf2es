@@ -37,4 +37,5 @@ trace("script: its domain has the class", scriptDomain.hasDefinition("ReloadChil
 trace("script: its domain's class is the script's", scriptDomain.getDefinition("ReloadChild") == ReloadChild);
 trace("script: found by name is the script's", getDefinitionByName("ReloadChild") == ReloadChild);
 trace("script: made before", ReloadChild.made);
+trace("script: its domain's names", scriptDomain.getQualifiedDefinitionNames().join(",").split(",").sort().join(","));
 ReloadChild.scripts.push(scriptDomain);
