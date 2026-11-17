@@ -4559,6 +4559,7 @@ export interface As3_flash_media_Camera extends As3_flash_events_EventDispatcher
   readonly name: string | null;
   readonly position: string | null;
   readonly quality: number;
+  requestPermission(): void;
   setCursor(arg0: boolean): void;
   setKeyFrameInterval(keyFrameInterval: number): void;
   setLoopback(compress?: boolean): void;
@@ -4572,6 +4573,7 @@ export interface As3_flash_media_Camera$ {
   getCamera(name?: string | null): avm2.Ref<As3_flash_media_Camera> | null;
   readonly isSupported: boolean;
   readonly names: avm2.Ref<As3_Array> | null;
+  readonly permissionStatus: string | null;
 }
 
 export interface As3_flash_media_CameraPosition extends As3_Object {}
@@ -4688,6 +4690,7 @@ export interface As3_flash_media_Microphone extends As3_flash_events_EventDispat
   readonly name: string | null;
   noiseSuppressionLevel: number;
   rate: number;
+  requestPermission(): void;
   setLoopBack(isLooped?: boolean): void;
   setSilenceLevel(silenceLevel: number, timeout?: number): void;
   setUseEchoSuppression(isEchoSuppressed: boolean): void;
@@ -4702,6 +4705,7 @@ export interface As3_flash_media_Microphone$ {
   getMicrophone(index?: number): avm2.Ref<As3_flash_media_Microphone> | null;
   readonly isSupported: boolean;
   readonly names: avm2.Ref<As3_Array> | null;
+  readonly permissionStatus: string | null;
 }
 
 export interface As3_flash_media_MicrophoneEnhancedMode extends As3_Object {}

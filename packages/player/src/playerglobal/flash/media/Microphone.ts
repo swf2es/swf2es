@@ -6,6 +6,7 @@
 // Microphone once getEnhancedMicrophone has been called, whatever it returned.
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
+import { requestCapturePermission } from "../../../media/capture-permission.js";
 import { microphoneRates } from "../../../media/capture-resampler.js";
 import { MicrophoneState, microphoneStates } from "../../../media/microphone.js";
 import { mixOf } from "../../../media/sounds.js";
@@ -46,6 +47,13 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
   }
 
   class MicrophoneNatives {
+    static get permissionStatus(): string {
+      return s.capture?.permissionStatus?.("microphone") ?? "denied";
+    }
+    requestPermission(): void {
+      requestCapturePermission(s, this, "microphone");
+    }
+
     static get isSupported(): boolean {
       return true;
     }

@@ -1,10 +1,12 @@
 // The desktop app's page: one <swf2es-player> filling the window, and what
 // to do when nothing plays.
 // It reaches the shell only through window.swf2esDesktop (shared/api.ts).
+import type { CaptureHost } from "@swf2es/player";
 import { configure, type Swf2esPlayerElement } from "@swf2es/web";
 import type { AirLaunch, DesktopApi, LibraryState, OpenedMovie } from "../shared/api.js";
 import { embeddingAttributes } from "../shared/embedding.js";
 import { airHosts, airPath } from "./air.js";
+import { captureStopped, shellCapture } from "./capture.js";
 import { shellFiles } from "./files.js";
 import { windowFullScreen } from "./full-screen.js";
 import { shellFetch } from "./network.js";
@@ -43,6 +45,17 @@ const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) 
 const player = byId<Swf2esPlayerElement>("player");
 const welcome = byId<HTMLElement>("welcome");
 const failure = byId<HTMLElement>("failure");
+let captureEpoch = -1;
+const captureHosts = new Map<number, CaptureHost | null>();
+desktop.capture.onStop((epoch) => {
+  if (epoch === captureEpoch) {
+    player.setAttribute("allowcapture", "false");
+  }
+  void captureStopped(captureHosts.get(epoch)).then(() => {
+    captureHosts.delete(epoch);
+    desktop.capture.stopped(epoch);
+  });
+});
 
 /** A playerglobal.abc the user chose, which the shell serves, in place of swf2es's own. */
 function useLibraries(state: LibraryState): void {
@@ -80,10 +93,20 @@ function embed(params: OpenedMovie["params"]): void {
   }
 }
 
-function play(movie: OpenedMovie): void {
+async function play(movie: OpenedMovie): Promise<void> {
   const generation = ++loadGeneration;
+  player.destroy();
+  const epoch = desktop.capture.epoch();
+  captureEpoch = epoch;
+  const capture = await shellCapture(desktop.capture, epoch);
+  if (generation !== loadGeneration) {
+    return;
+  }
+  captureHosts.set(epoch, capture);
+  player.removeAttribute("allowcapture");
   airLaunch = movie.air ?? null;
   configure({
+    capture,
     sandboxType: movie.sandbox,
     air: movie.air ? airHosts(movie.air, desktop.air) : null,
   });

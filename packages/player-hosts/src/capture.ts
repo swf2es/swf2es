@@ -4,6 +4,8 @@ import type {
   CameraMode,
   CaptureDevice,
   CaptureHost,
+  CaptureKind,
+  CapturePermission,
 } from "@swf2es/player";
 
 import { openMicrophone } from "./capture-audio.js";
@@ -25,6 +27,11 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
     return null;
   }
 
+  const permissions: Record<CaptureKind, CapturePermission> = {
+    camera: "unknown",
+    microphone: "unknown",
+  };
+  const permissionHandles = new Map<CaptureKind, PermissionStatus>();
   let cameras: CaptureDevice[] = [];
   let microphones: CaptureDevice[] = [];
   const refresh = async () => {
@@ -45,7 +52,45 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
     return null;
   }
 
+  await Promise.all(
+    (["camera", "microphone"] as const).map(async (kind) => {
+      try {
+        const status = await navigator.permissions.query({ name: kind as PermissionName });
+        permissionHandles.set(kind, status);
+      } catch {
+        /* Some hosts expose capture without the Permissions API. */
+      }
+    }),
+  );
   return {
+    permissionStatus: (kind) => {
+      const status = permissionHandles.get(kind)?.state;
+      return status === "prompt" ? "unknown" : (status ?? permissions[kind]);
+    },
+    async requestPermission(kind, signal) {
+      if (signal.aborted) {
+        return "denied";
+      }
+      try {
+        const stream = await media.getUserMedia(
+          kind === "camera" ? { video: true } : { audio: true },
+        );
+        for (const track of stream.getTracks()) {
+          track.stop();
+        }
+        if (signal.aborted) {
+          return "denied";
+        }
+        permissions[kind] = "granted";
+        await refresh().catch(() => {});
+        return "granted";
+      } catch {
+        if (!signal.aborted) {
+          permissions[kind] = "denied";
+        }
+        return "denied";
+      }
+    },
     get cameras() {
       return cameras;
     },
@@ -53,14 +98,44 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
       return microphones;
     },
     openMicrophone(device, mode, events, signal) {
-      return openMicrophone(media, device, mode, events, signal, () => {
-        void refresh().catch(() => {});
-      });
+      return openMicrophone(
+        media,
+        device,
+        mode,
+        {
+          ...events,
+          state(value) {
+            if (value !== "ended") {
+              permissions.microphone = value;
+            }
+            events.state(value);
+          },
+        },
+        signal,
+        () => {
+          void refresh().catch(() => {});
+        },
+      );
     },
     openCamera(device, mode, events, signal) {
-      return openCamera(media, device, mode, events, signal, () => {
-        void refresh().catch(() => {});
-      });
+      return openCamera(
+        media,
+        device,
+        mode,
+        {
+          ...events,
+          state(value) {
+            if (value !== "ended") {
+              permissions.camera = value;
+            }
+            events.state(value);
+          },
+        },
+        signal,
+        () => {
+          void refresh().catch(() => {});
+        },
+      );
     },
   };
 }
@@ -79,6 +154,11 @@ function openCamera(
   let stream: MediaStream | null = null;
   let track: MediaStreamTrack | null = null;
   let closed = false;
+  let openSettled = false;
+  let resolveClosed: () => void = () => {};
+  const closedPromise = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
   let callback = 0;
   let mode = initial;
   let applying = false;
@@ -162,6 +242,9 @@ function openCamera(
     }
 
     stream = null;
+    if (openSettled) {
+      resolveClosed();
+    }
     track = null;
     if (notify) {
       events.state("ended");
@@ -191,6 +274,7 @@ function openCamera(
     }
   };
   const capture = {
+    closed: closedPromise,
     setMode(next: CameraMode) {
       mode = next;
       modeVersion++;
@@ -199,6 +283,7 @@ function openCamera(
     close: abort,
   };
   if (signal.aborted) {
+    openSettled = true;
     abort();
     return capture;
   }
@@ -207,11 +292,12 @@ function openCamera(
   void media
     .getUserMedia({ video: constraints(device, mode), audio: false })
     .then(async (opened) => {
+      openSettled = true;
       if (closed) {
         for (const live of opened.getTracks()) {
           live.stop();
         }
-
+        resolveClosed();
         return;
       }
 
@@ -239,6 +325,10 @@ function openCamera(
       }
     })
     .catch(() => {
+      openSettled = true;
+      if (closed) {
+        resolveClosed();
+      }
       if (!closed) {
         finish(false);
         events.state("denied");

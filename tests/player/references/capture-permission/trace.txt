@@ -1,0 +1,4 @@
+statuses unknown granted denied
+default denied false false
+copy true granted true true
+[PermissionEvent type="permissionStatus" bubbles=true cancelable=true status="granted"]

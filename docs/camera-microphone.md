@@ -1,12 +1,13 @@
 # Camera and microphone
 
-Status: draft plan, for review. Read against `dev` at 100d774c.
+Implementation notes for the four camera and microphone PRs, based on the
+original plan against `dev` at 100d774c.
 
 ## Why
 
-`flash.media.Camera` and `Microphone` behave today as Flash Player does on
+Without a capture host, `flash.media.Camera` and `Microphone` behave as Flash Player does on
 a machine with neither (`packages/player/src/playerglobal/flash/media/`):
-supported, no names, `getCamera()` and `getMicrophone()` null. `Video`
+supported, no names, `getCamera()` and `getMicrophone()` null. Without a source, `Video`
 draws an empty box (`packages/player/src/display/videoobject.ts`). Real
 content uses them: webcam toys and photo booths, voice recorders, games
 played by blowing into the microphone, video chat front ends. None of the
@@ -73,9 +74,10 @@ frame the renderer uploads its current picture as a texture
 textured quad with the `Video`'s transform, colour transform, filters and
 `smoothing`. A frame not yet changed is not uploaded again.
 
-`BitmapData.draw(video)` and the camera's copies read the frame on the
-CPU (`VideoFrame.copyTo`, or `drawImage` into an `OffscreenCanvas` and
-`getImageData`), never by a GPU readback, which stalls (docs/cpu-raster.md).
+Plain `BitmapData.draw(video)` and the camera's copies read the frame on
+the CPU (`drawImage` into an `OffscreenCanvas` and `getImageData`). Copies
+with effects use the renderer as explained below; GPU readback can stall
+(docs/cpu-raster.md).
 
 The renderer implementation uses a host-owned `VideoSource` published
 only when a new picture arrives. Each view uploads that source once per
@@ -190,19 +192,45 @@ A capture is never started without the user's yes.
 
 - In the browser, the browser's own prompt is it. The page must be a
   secure context; a page that embeds the player in an iframe must allow
-  `camera` and `microphone`. The `<swf2es-player>` element gets an
-  attribute, and `configure` an option, to refuse captures outright, as
-  `allowScriptAccess` restrains scripting.
-- In the desktop app, the session's permission handlers refuse everything
-  but full screen today (`apps/desktop/src/main/main.ts`). They would let
-  `media` through only after a dialog of the app's own that names the
-  SWF's origin and the device. On macOS the app asks the system first
+  `camera` and `microphone`. The `<swf2es-player>` element accepts
+  `allowcapture="false"`, and `configure` accepts `allowCapture: false`,
+  to refuse captures outright.
+- In the desktop app, the session's permission handlers allow full screen
+  and let `media` through only after a dialog of the app's own that names the
+  SWF's origin and the device. On macOS the app also asks the system
   (`systemPreferences.askForMediaAccess`). While a device is live the
   window's title says so and a menu item stops it; a page that ends
   (#1037's `onPageEnd`) stops its tracks. Remembered answers per site,
   as Flash's Settings Manager kept them, and a device menu can follow.
 - For an AIR application, `permissionStatus` and `requestPermission()`
   are answered by the same dialog, and `PermissionEvent` follows.
+
+The desktop implementation asks before forwarding a capture to Chromium,
+scoping its answer to the movie and page lifetime rather than the shared
+`swf2es://app` origin. Its dialog names the movie's source and camera or
+microphone; macOS also uses Electron's system-consent API. The request and
+check handlers reject capture without that decision and outside the app’s main
+frame. Answers are not saved
+across loads. AIR's static `permissionStatus`, instance `requestPermission`
+and `PermissionEvent` use this same host policy; the new members are hidden
+from browser API versions. The standalone permission classes live in the
+AIR library. Their constants, event defaults and cloning follow
+[Adobe’s permission API](https://airsdk.dev/reference/actionscript/3.0/flash/events/PermissionEvent.html)
+and are checked against adl without using a device.
+
+The title marker and Stop Camera and Microphone menu include initialization
+while a microphone worklet loads. Stop waits for confirmation that tracks
+have stopped, including streams returned after an aborted permission request.
+A renderer that cannot acknowledge within two seconds is terminated, releasing
+its devices; the existing page-loss UI then offers a reload. Movie replacement
+preserves this fallback for the old movie. Completed document navigation or
+process loss releases retired capture state. Stale permission and activity
+messages cannot authorize a replacement movie.
+
+The browser implementation also exposes explicit permission requests for AIR
+content running in a web embedding. It briefly opens and closes the requested
+device through the browser's normal consent, without attaching it to a Video
+or listening to its samples. Embedding refusal and lifetime abort still apply.
 
 ## 7. Not in scope
 

@@ -25,6 +25,11 @@ export function openMicrophone(
 ): MicrophoneCapture {
   let mode = initial;
   let closed = false;
+  let openSettled = false;
+  let resolveClosed: () => void = () => {};
+  const closedPromise = new Promise<void>((resolve) => {
+    resolveClosed = resolve;
+  });
   let stream: MediaStream | null = null;
   let context: AudioContext | null = null;
   let source: MediaStreamAudioSourceNode | null = null;
@@ -56,6 +61,9 @@ export function openMicrophone(
     }
     void context?.close().catch(() => {});
     stream = null;
+    if (openSettled) {
+      resolveClosed();
+    }
     if (notify) {
       events.state("ended");
     }
@@ -82,6 +90,7 @@ export function openMicrophone(
     }
   };
   const capture: MicrophoneCapture = {
+    closed: closedPromise,
     setMode(next) {
       mode = next;
       version++;
@@ -93,6 +102,7 @@ export function openMicrophone(
     close: abort,
   };
   if (signal.aborted) {
+    openSettled = true;
     abort();
     return capture;
   }
@@ -101,10 +111,12 @@ export function openMicrophone(
   void media
     .getUserMedia({ audio: constraints(device, mode), video: false })
     .then(async (opened) => {
+      openSettled = true;
       if (closed) {
         for (const track of opened.getTracks()) {
           track.stop();
         }
+        resolveClosed();
         return;
       }
 
@@ -149,6 +161,10 @@ export function openMicrophone(
       await apply();
     })
     .catch(() => {
+      openSettled = true;
+      if (closed) {
+        resolveClosed();
+      }
       if (!closed) {
         finish(false);
         events.state("denied");

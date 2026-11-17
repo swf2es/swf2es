@@ -14,7 +14,7 @@ import type { AirScreenState, AirWindowState } from "../shared/api.js";
 import { createDirectoryOf, listOf, moveOf, readOf, removeOf, statOf, writeOf } from "./air.ts";
 import { resolveCase } from "./case-paths.ts";
 import { air, encryptedItems } from "./open.ts";
-import { sandbox, trusted, window } from "./state.ts";
+import { sandbox, setWindowTitle, trusted, window } from "./state.ts";
 
 /** The window as an AIR application's NativeWindow reads it. */
 function windowState(w: BrowserWindow): AirWindowState {
@@ -145,7 +145,7 @@ export function listenForAir(): void {
   });
   ipcMain.on("air:set-title", (event, title: unknown) => {
     if (playing(event) && window && typeof title === "string") {
-      window.setTitle(title.slice(0, 1024));
+      setWindowTitle(title.slice(0, 1024));
     }
   });
   ipcMain.on("air:window-do", (event, what: unknown) => {

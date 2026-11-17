@@ -121,13 +121,18 @@ const { value, exception } = await withPage(
     let release;
     navigator.mediaDevices.getUserMedia = () => new Promise(resolve => { release = resolve; });
     const late = new AbortController();
-    host.openMicrophone(host.microphones[0], {gain:50,echoCancellation:false,noiseSuppression:false}, {
+    const pendingCapture = host.openMicrophone(host.microphones[0], {gain:50,echoCancellation:false,noiseSuppression:false}, {
       state() { throw new Error('late grant delivered'); }, samples() { throw new Error('late samples'); }
     }, late.signal);
     late.abort();
+    let fullyClosed = false;
+    pendingCapture.closed.then(() => { fullyClosed = true; });
+    await Promise.resolve();
+    check(!fullyClosed, 'microphone closed before pending getUserMedia settled');
     const stream = await original({audio:true}); release(stream);
     await wait(() => stream.getTracks().every(t => t.readyState === 'ended'), 'late permission cleanup');
-    check(true, 'late permission cleanup');
+    await pendingCapture.closed;
+    check(fullyClosed, 'late permission cleanup');
     return checks;
   } finally { s.destroy(); navigator.mediaDevices.getUserMedia = original; }
 })()`),

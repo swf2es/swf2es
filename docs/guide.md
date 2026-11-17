@@ -113,15 +113,15 @@ that would rather play on Flash Player's own playerglobal gives its URL.
 
 ## The element and its options
 
-Camera access uses the browser's permission prompt when a SWF attaches a
-camera to a Video. It requires a secure context (HTTPS or localhost); an
-embedding iframe must allow `camera`. Device names may be blank until the
+Capture uses the browser's permission prompt when a SWF attaches a camera
+to a Video, listens for microphone samples, or enables microphone loopback.
+It requires a secure context (HTTPS or localhost); an embedding iframe must
+allow `camera` and/or `microphone` for the devices it uses. Device names may be blank until the
 user grants permission. Set `allowcapture="false"` on an element, or
 `configure({ allowCapture: false })` for new loads, to refuse capture.
 Changing that attribute to false also stops the current capture; reload
 before enabling it again. Replacing or destroying the player stops its
 tracks, including a permission request that finishes later.
-
 
 The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
 and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
@@ -499,6 +499,14 @@ On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content
 made there finds its files whatever case it names them in. Where two names
 in a directory differ only in case, neither is taken.
+
+
+The desktop app asks before a movie uses your camera or microphone. The dialog
+names the movie's source and the requested device. Its title shows capture
+while active; View → Stop Camera and Microphone stops both until the movie is
+reloaded. Consent is cleared when the movie or page closes. If a movie freezes
+while stopping capture, the app terminates its renderer to release the devices
+and offers to reload it. On macOS, system permission is required as well.
 
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.

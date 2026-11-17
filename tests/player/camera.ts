@@ -86,12 +86,17 @@ const { value, exception } = await withPage(
     navigator.mediaDevices.getUserMedia = () => new Promise(resolve => { release = resolve; });
     const pending = new AbortController();
     const lateStates = [];
-    host.openCamera(host.cameras[0], {width:64,height:48,fps:10,favorArea:true},
+    const pendingCapture = host.openCamera(host.cameras[0], {width:64,height:48,fps:10,favorArea:true},
       { state: v => lateStates.push(v), settings() {}, frame() {} }, pending.signal);
     pending.abort();
+    let fullyClosed = false;
+    pendingCapture.closed.then(() => { fullyClosed = true; });
+    await Promise.resolve();
+    check(!fullyClosed, 'closed before pending getUserMedia settled');
     const late = await original({ video: true }); release(late);
     await wait(() => late.getTracks().every(t => t.readyState === 'ended'), 'late capture cleanup');
-    check(lateStates.length === 0, 'late grant delivered after abort');
+    await pendingCapture.closed;
+    check(fullyClosed && lateStates.length === 0, 'late grant delivered after abort');
     return checks;
   } finally { s.destroy(); view.destroy(); navigator.mediaDevices.getUserMedia = original; }
 })()`),

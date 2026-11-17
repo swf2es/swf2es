@@ -45,6 +45,11 @@ fetch-electron` does so ahead, for the tests.
   set one, and ends with Esc or F11, which the SWF hears of as a
   `FullScreenEvent`. Opening another SWF destroys the
   player before the next starts.
+- **Camera and microphone.** A dialog names the movie's source and requested
+  device before capture starts. Consent lasts for that movie; macOS also
+  requires system permission. The title marks live capture, and View › Stop
+  Camera and Microphone stops both until the movie reloads. If a frozen movie
+  cannot stop its tracks, the app terminates its renderer and offers a reload.
 - **Stage3D.** SWFs get a Context3D, as in Flash and AIR on a desktop. View ›
   Stage3D turns it off, after which a SWF's `requestContext3D`
   gets Error #3702 "Context3D not available", and on again; the app remembers
