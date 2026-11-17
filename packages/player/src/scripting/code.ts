@@ -120,6 +120,12 @@ export class Code {
    */
   private readonly evictable = new Map<number, Map<number, Uint8Array>>();
   private readonly revived = new Set<number>();
+  /**
+   * The domains a SWF was linked into in place of the one it was loaded
+   * into, as every ABC of it was loaded there before (see link): each its
+   * code's domain stands for that one.
+   */
+  private readonly stand = new WeakSet<avm2.Domain>();
   /** How many links are in progress in each domain or under it, which keep it live. */
   private readonly linking = new Map<number, number>();
   /** Modules loaded, each under a script name of its own for Runtime.codeDomain. */
@@ -273,12 +279,38 @@ export class Code {
       this.recorder?.drop();
     }
 
+    // A SWF whose every ABC the domain's chain has loaded already, as an
+    // online game loads the same gear into one domain over and over,
+    // defines nothing there: each of its names is defined before, and
+    // finds the first load's definition, its own code's included. Flash
+    // runs its scripts and lets it go with them; kept in the domain, its
+    // ABCs would stay in the compiler and here for as long as the domain
+    // lives. Linked into a child of its own, which its code's domain
+    // stands for (codeDomain), it finds the same and goes with its code.
+    // Not a SWF only some of whose ABCs were loaded: those that were not
+    // define names in the domain.
+    let hashes: (string | undefined)[] = [];
+    if (domain !== this.s.rt.root && !main && abcs.length) {
+      const loaded = new Set<string>();
+      for (let d: avm2.Domain | null = domain; d; d = d.parent) {
+        for (let i = 0; i < d.own.length; i++) {
+          loaded.add(d.own[i]);
+        }
+      }
+
+      hashes = await Promise.all(abcs.map(({ abc }) => sha256(abc)));
+      if (hashes.every((hash) => loaded.has(hash as string))) {
+        domain = this.s.rt.childDomain(domain);
+        this.stand.add(domain);
+      }
+    }
+
     const added: { index: number; lazy: boolean }[] = [];
     const runs: (() => void)[] = [];
     this.pin(domain, 1);
     try {
-      for (const { lazy, abc } of abcs) {
-        added.push({ index: await this.add(abc, false, domain), lazy });
+      for (const [k, { lazy, abc }] of abcs.entries()) {
+        added.push({ index: await this.add(abc, false, domain, hashes[k]), lazy });
       }
 
       // With a module cache, each module is read or compiled first, so
@@ -315,9 +347,15 @@ export class Code {
   /**
    * An ABC added to the compiler's domain, into the application domain of
    * the runtime's `domain`, linked against what that domain sees of those
-   * before it, with what it has found: its index among all added.
+   * before it, with what it has found: its index among all added. `hash`
+   * is its hash where it was taken already.
    */
-  private async add(abc: Uint8Array, builtin: boolean, domain: avm2.Domain): Promise<number> {
+  private async add(
+    abc: Uint8Array,
+    builtin: boolean,
+    domain: avm2.Domain,
+    hash?: string,
+  ): Promise<number> {
     const target = this.codegenDomainOf(domain);
     if (domain !== this.s.rt.root) {
       const told = this.reported.get(domain.id) ?? new Set<string>();
@@ -342,14 +380,18 @@ export class Code {
     this.journal(`add ${builtin} ${target}`);
 
     this.codegenAbcs.get(domain.id)?.push(this.hashes.length);
-    this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
+    // Nothing loads into a domain that stands for another, nor under it, so
+    // it is never revived: it is evicted with no bytes to revive it with.
+    if (!this.stand.has(domain)) {
+      this.evictable.get(domain.id)?.set(this.hashes.length, abc.slice());
+    }
     if (domain !== this.s.rt.root && this.libraryCount === null) {
       this.libraryCount = this.hashes.length;
     }
 
     this.builtins.push(builtin);
     this.sizes.push(abc.length);
-    this.hashes.push(await sha256(abc));
+    this.hashes.push(hash ?? (await sha256(abc)));
     return this.hashes.length - 1;
   }
 
@@ -776,7 +818,11 @@ export class Code {
    * when no SWF's code is on the stack, only the player's.
    */
   codeDomain(): avm2.Domain {
-    const domain = this.s.rt.codeDomain();
+    let domain = this.s.rt.codeDomain();
+    while (this.stand.has(domain) && domain.parent) {
+      domain = domain.parent;
+    }
+
     return domain === this.s.rt.root ? this.s.mainDomain : domain;
   }
 

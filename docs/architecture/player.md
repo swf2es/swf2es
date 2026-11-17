@@ -626,6 +626,36 @@ to 512 MB by 8000. Each module is given only the hashes of the ABCs it
 names as linked (`domainLinked`): joining every ABC's for each compile
 had grown it to 256 MB by 7500 loads on its own.
 
+A domain loaded into again stays, and so does every ABC in it, for as
+long as the domain lives. An online game that loads each player's gear
+into one domain for a whole session loads the same SWFs into it over and
+over, and each such load added its ABCs to the compiler, about 150 KB of
+its memory for a small gear SWF, and their bytes and hashes to `Code`.
+Yet a SWF whose every ABC the domain's chain has loaded already defines
+nothing there: each of its names is defined before. As measured in adl
+(the player case `reload-domain`), Flash runs its scripts again, static
+initializers and all, but its names, its own code's included, find the
+first load's classes, its content is of the first load's class, and its
+code's `currentDomain` is the domain it was loaded into; and it lets the
+SWF go with its code. So `Code.link` links such a SWF into a child of
+that domain of its own, whose lookups go to the domain first and so find
+what they did, and `Code.codeDomain` gives the domain for the child, for
+`currentDomain`, `getDefinitionByName` and a load's default domain. The
+child is evicted once linked, as a loaded SWF's domain is, with no copy
+of its ABCs kept to revive it, as nothing loads into it or under it, and
+goes with the SWF's code; with lazy compilation, whose deferred bodies
+need their ABCs, it goes when it is collected. Loaded so five times a
+second, 80 small SWFs in turn, the compactions this asks for rebuilt the
+compiler's domain once every 15 seconds or so, about 40 ms each from an
+idle callback, as often as loads into new domains each have it rebuilt,
+whose rebuilds are shorter as fewer ABCs stay live. A SWF only some of whose ABCs were loaded before still
+links into the domain, as its new ones define names there, and as Flash
+gives the domain its new classes. (Two things Flash does differently
+are apart from this: the code of a SWF loaded from bytes finds no
+`parentDomain` of its own domain in adl, where the main SWF's code
+finds it; and domain memory here is the runtime's one, not each
+domain's.)
+
 That a module's code keeps its Abc has a limit: emitted code reaches `A`
 only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even
@@ -640,6 +670,12 @@ kept for good, their libraries with them.
 
 `tests/player/leak.ts` loads SWFs over and over, by Loaders and in
 players made again, and checks that the heap stays bounded, that
-codegen's memory does not grow where one player loads them all, and that
-a text field kept from a SWF let go still takes a font registered after
-a collection.
+codegen's memory, and what its live ABCs hold of it, does not grow where
+one player loads them all, and that a text field kept from a SWF let go
+still takes a font registered after a collection. Its `dropped`,
+`shared` and `churn` modes do as an online game does with each player's
+gear, never unloading it: each SWF in a Loader of its own, taken off the
+stage and forgotten; the same SWFs loaded over and over into one
+application domain by Loaders each loads the next into, the domain's
+instances of their classes kept a while; and each loaded once, instances
+of its classes made and dropped every frame.
