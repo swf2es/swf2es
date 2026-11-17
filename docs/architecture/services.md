@@ -99,6 +99,20 @@ cannot be told from a call by name, and acts as the main SWF. A page that
 loads SWFs it does not trust beside ones it does should give none of them
 script access.
 
+## Certificate objects
+
+`flash.security.X509Certificate` and `X500DistinguishedName` expose a
+host's certificate metadata (`certificates.ts`). As measured with AIR's
+`SecureSocket` against a local TLS server, each Date, ByteArray and name
+getter returns a fresh object; the byte arrays start with their position
+at the end. A certificate is a snapshot, unaffected by edits to those
+values or to the host's input. Public constructors make empty objects:
+version 0 and null for every other getter, including a name's `toString()`.
+Decoding and trust validation belong to the transport host, not these
+value objects. The defaults have a Flash reference in the
+`certificate-defaults` player case; populated values and mutation isolation
+are covered by `X509Certificate.test.ts`.
+
 ## AIR's WebSocket
 
 AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are

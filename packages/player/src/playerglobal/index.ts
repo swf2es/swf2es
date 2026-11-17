@@ -88,6 +88,8 @@ import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { xmlSocketNatives } from "./flash/net/XMLSocket.js";
 import { printJobNatives } from "./flash/printing/PrintJob.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
+import { distinguishedNameNatives } from "./flash/security/X500DistinguishedName.js";
+import { certificateNatives } from "./flash/security/X509Certificate.js";
 import { accelerometerNatives } from "./flash/sensors/Accelerometer.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
@@ -174,6 +176,8 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...fileFilterNatives(s),
     ...socketNatives(s),
     ...secureSocketNatives(),
+    ...distinguishedNameNatives(),
+    ...certificateNatives(s),
     ...xmlSocketNatives(s),
     ...localConnectionNatives(s),
     ...webSocketNatives(s),
