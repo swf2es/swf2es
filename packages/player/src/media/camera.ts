@@ -255,6 +255,7 @@ export class CameraState {
     if (picture.time < this.latestTime) {
       this.frameCount = 0;
     }
+
     if (this.frameCount === this.frameTimes.length) {
       this.frameHead = (this.frameHead + 1) % this.frameTimes.length;
       this.frameCount--;
@@ -302,6 +303,7 @@ export class CameraState {
     if (!this.previous || this.previous.length !== sample.length) {
       this.previous = new Uint8Array(sample.length);
     }
+
     this.previous.set(sample);
     // Flash's detector is unpublished. This curve puts a 3.125% mean change at level 50.
     this.activityLevel = sample.length

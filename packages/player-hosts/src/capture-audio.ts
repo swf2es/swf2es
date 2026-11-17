@@ -134,6 +134,7 @@ export function openMicrophone(
         for (const track of opened.getTracks()) {
           track.stop();
         }
+
         resolveClosed();
         return;
       }
@@ -144,6 +145,7 @@ export function openMicrophone(
       if (!track) {
         throw new Error("No microphone track");
       }
+
       track.addEventListener("ended", () => finish(true), { once: true });
       context = new AudioContext();
       await context.audioWorklet.addModule(new URL("./capture-worklet.js", import.meta.url));
@@ -169,6 +171,7 @@ export function openMicrophone(
           }
         }
       };
+
       node.onprocessorerror = () => finish(true);
       source.connect(gain).connect(node).connect(context.destination);
       events.state("granted");

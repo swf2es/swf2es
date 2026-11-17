@@ -148,16 +148,19 @@ export class MicrophoneState {
     if (this.disabled || this.s.destroyed || this.s.captureLifetime.signal.aborted) {
       return;
     }
+
     if (!this.loopback) {
       this.output?.stop();
       this.output = null;
       this.loopResampler = null;
       this.submitted = 0;
     }
+
     if (!(this.loopback && this.s.audio?.stream) && !heard(this.object, "sampleData")) {
       this.stop();
       return;
     }
+
     const host = this.s.capture;
     if (this.active || !host?.openMicrophone) {
       return;
@@ -239,18 +242,21 @@ export class MicrophoneState {
     if (!(rate > 0) || !Number.isFinite(rate) || samples.length === 0) {
       return;
     }
+
     let energy = 0;
     for (let i = 0; i < samples.length; i++) {
       const value = Number.isFinite(samples[i]) ? Math.max(-1, Math.min(1, samples[i])) : 0;
       samples[i] = value;
       energy += value * value;
     }
+
     this.time += (samples.length * 1000) / rate;
     this.activityLevel = Math.min(100, Math.sqrt(energy / samples.length) * 100);
     const sound = this.silenceLevel < 100 && this.activityLevel >= this.silenceLevel;
     if (sound) {
       this.lastSound = this.time;
     }
+
     const activating =
       this.silenceLevel < 100 &&
       (sound || (this.lastSound >= 0 && this.time - this.lastSound < this.silenceTimeout));

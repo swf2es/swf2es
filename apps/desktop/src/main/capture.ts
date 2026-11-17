@@ -12,6 +12,8 @@ const asking = new Map<CaptureKind, Promise<CapturePermission>>();
 const live = new Set<string>();
 let lifetime = new AbortController();
 const stopTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const probes = new Map<number, { id: number; answered: boolean }>();
+let nextProbe = 0;
 
 const kindOf = (value: unknown): value is CaptureKind =>
   value === "camera" || value === "microphone";
@@ -21,19 +23,21 @@ const activeEpoch = (value: number) => [...live].some((id) => id.startsWith(`${v
 function indicator(): void {
   const camera = [...live].some((id) => id.includes(":camera:"));
   const microphone = [...live].some((id) => id.includes(":microphone:"));
-  setCaptureLabel(
-    camera && microphone
-      ? "Camera + microphone"
-      : camera
-        ? "Camera"
-        : microphone
-          ? "Microphone"
-          : "",
-  );
+  let label = "";
+  if (camera && microphone) {
+    label = "Camera + microphone";
+  } else if (camera) {
+    label = "Camera";
+  } else if (microphone) {
+    label = "Microphone";
+  }
+
+  setCaptureLabel(label);
   buildMenu();
 }
 
 function stopped(requested: number): void {
+  probes.delete(requested);
   const timer = stopTimers.get(requested);
   if (timer) {
     clearTimeout(timer);
@@ -47,27 +51,48 @@ function stopped(requested: number): void {
   indicator();
 }
 
-function stopEpoch(requested: number): void {
-  if (
-    window &&
+function pageAvailable(): boolean {
+  return (
+    !!window &&
     !pageGone &&
     !window.isDestroyed() &&
     !window.webContents.isDestroyed() &&
     !window.webContents.isCrashed()
-  ) {
-    window.webContents.send("capture:stop", requested);
+  );
+}
+
+function watchStop(requested: number): void {
+  const probe = { id: ++nextProbe, answered: false };
+  probes.set(requested, probe);
+  if (pageAvailable()) {
+    window?.webContents.send("capture:probe", requested, probe.id);
+  }
+  stopTimers.set(
+    requested,
+    setTimeout(() => {
+      stopTimers.delete(requested);
+      if (!activeEpoch(requested)) {
+        probes.delete(requested);
+        return;
+      }
+
+      if (probe.answered) {
+        // getUserMedia cannot be cancelled. A responsive page stops a late stream on arrival.
+        watchStop(requested);
+      } else if (pageAvailable()) {
+        window?.webContents.forcefullyCrashRenderer();
+      }
+    }, 2000),
+  );
+}
+
+function stopEpoch(requested: number): void {
+  if (pageAvailable()) {
+    window?.webContents.send("capture:stop", requested);
   }
   if (activeEpoch(requested) && !stopTimers.has(requested)) {
-    // This survives movie replacement: a busy old SWF still owns its device tracks.
-    stopTimers.set(
-      requested,
-      setTimeout(() => {
-        stopTimers.delete(requested);
-        if (activeEpoch(requested) && window && !window.isDestroyed()) {
-          window.webContents.forcefullyCrashRenderer();
-        }
-      }, 2000),
-    );
+    // This survives replacement and keeps checking if a previously responsive page freezes.
+    watchStop(requested);
   }
 }
 
@@ -90,6 +115,7 @@ export function resetCapture(pageEnded = false): void {
       clearTimeout(timer);
     }
     stopTimers.clear();
+    probes.clear();
     live.clear();
   } else {
     stopEpoch(epoch);
@@ -106,6 +132,14 @@ export function stopCapture(): void {
   decisions.set("microphone", "denied");
   asking.clear();
   stopEpoch(epoch);
+}
+
+function dialogText(value: string, limit: number): string {
+  return value
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, limit);
 }
 
 async function permission(kind: CaptureKind, requested: number): Promise<CapturePermission> {
@@ -128,8 +162,8 @@ async function permission(kind: CaptureKind, requested: number): Promise<Capture
       const origin = /^https?:/.test(playing.path) ? new URL(playing.path).origin : playing.path;
       const result = await dialog.showMessageBox(owner, {
         type: "question",
-        message: `${playing.movie.name} asks to use your ${kind}.`,
-        detail: `Source: ${origin}\nAllow access for this movie until it closes or reloads.`,
+        message: `${dialogText(playing.movie.name, 160)} asks to use your ${kind}.`,
+        detail: `Source: ${dialogText(origin, 1024)}\nAllow access for this movie until it closes or reloads.`,
         buttons: ["Allow", "Deny"],
         defaultId: 1,
         cancelId: 1,
@@ -194,6 +228,12 @@ export function capturePermissions(session: Session): void {
       (details.mediaType === "video" || details.mediaType === "audio") &&
       allowed(details.mediaType)
     );
+  });
+  ipcMain.on("capture:responsive", (event, requested: number, id: number) => {
+    const probe = probes.get(requested);
+    if (trusted(event) && probe?.id === id) {
+      probe.answered = true;
+    }
   });
   ipcMain.on("capture:stopped", (event, requested: number) => {
     if (trusted(event) && Number.isSafeInteger(requested) && requested <= epoch) {

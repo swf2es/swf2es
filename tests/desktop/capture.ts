@@ -31,6 +31,8 @@ const source = `package {
     public function DesktopCapture() {
       camera = Camera.getCamera(); mic = Microphone.getMicrophone();
       trace("capture devices", camera != null, mic != null);
+      trace("capture names before", Camera.names.join("") == "", Microphone.names.join("") == "");
+      addEventListener(Event.ENTER_FRAME, names);
       if (!camera || !mic) return;
       camera.addEventListener(StatusEvent.STATUS, status);
       mic.addEventListener(StatusEvent.STATUS, status);
@@ -44,6 +46,12 @@ const source = `package {
       } else { startCamera(); }
       mic.rate = 44; mic.setSilenceLevel(0);
       mic.addEventListener(SampleDataEvent.SAMPLE_DATA, samples);
+    }
+    private function names(e:Event):void {
+      if (Camera.names.join("") != "" && Microphone.names.join("") != "") {
+        trace("capture names after", true, true);
+        removeEventListener(Event.ENTER_FRAME, names);
+      }
     }
     private function permitted(e:Event):void {
       trace("permission event", Object(e).status, Object(e.clone()).status);
@@ -76,6 +84,18 @@ const source = `package {
 }`;
 const movie = `${out}capture.swf`;
 writeFileSync(movie, bare(compiler(out)("DesktopCapture", source), 1, "DesktopCapture"));
+const idle = `${out}idle.swf`;
+writeFileSync(
+  idle,
+  bare(
+    compiler(out)(
+      "Idle",
+      "package { import flash.display.Sprite; public class Idle extends Sprite {} }",
+    ),
+    1,
+    "Idle",
+  ),
+);
 const descriptor = `${out}app.xml`;
 writeFileSync(
   descriptor,
@@ -95,14 +115,14 @@ async function until(check: () => Promise<boolean>): Promise<void> {
   }
   assert.fail("capture state timed out");
 }
-async function boxes(app: App, answer: number | null): Promise<void> {
+async function boxes(app: App, answer: number | null, cameraOnly = false): Promise<void> {
   await app.main(`(() => {
     globalThis.captureBoxes = [];
     ${electron}.dialog.showMessageBox = (_window, options) => new Promise(resolve => {
       const box = { message:options.message, detail:options.detail, aborted:false };
       captureBoxes.push(box);
       options.signal?.addEventListener('abort', () => { box.aborted=true; resolve({response:1}); });
-      if (${answer} !== null) resolve({response:${answer}});
+      if (${answer} !== null) resolve({response:${cameraOnly} && options.message.includes("microphone") ? 1 : ${answer}});
     });
     return true;
   })()`);
@@ -145,6 +165,22 @@ try {
         await app.evaluate(`swf2esDesktop.capture.request(${oldEpoch}, 'camera')`),
         "denied",
       );
+      await app.main(`(async () => {
+        await ${opening}.openEntry(${JSON.stringify(idle)});
+        ${opening}.current.movie.name = 'Title\\n\\u202e' + 'x'.repeat(400);
+        return true;
+      })()`);
+      await boxes(app, 1);
+      assert.equal(
+        await app.evaluate(
+          "swf2esDesktop.capture.request(swf2esDesktop.capture.epoch(), 'camera')",
+        ),
+        "denied",
+      );
+      const bounded = await app.main<{ message: string }[]>("captureBoxes");
+      assert.equal(bounded.length, 1);
+      assert.ok(bounded[0].message.length < 200);
+      assert.ok(!/[\p{Cc}\p{Cf}]/u.test(bounded[0].message));
       await boxes(app, 1);
       await open(app);
       await app.until(
@@ -159,6 +195,14 @@ try {
       assert.ok(offered.some((box) => box.message.includes("camera")));
       assert.ok(offered.some((box) => box.message.includes("microphone")));
       assert.ok(offered.every((box) => box.detail.includes(movie)));
+      await boxes(app, 0, true);
+      await open(app);
+      await until(() => app.evaluate<boolean>("captureTracks.some(t => t.readyState === 'live')"));
+      assert.equal(
+        await app.evaluate(`navigator.mediaDevices.getUserMedia({video:true, audio:true})
+        .then(stream => { stream.getTracks().forEach(t => t.stop()); return false; }, () => true)`),
+        true,
+      );
       await boxes(app, 0);
       await open(app);
       await app.until(
@@ -182,6 +226,26 @@ try {
         })()`),
         true,
       );
+      assert.ok(app.stdout.includes("capture names before true true"));
+      await app.until("device labels after consent", () =>
+        app.stdout.includes("capture names after true true"),
+      );
+      await app.main(`(() => {
+        globalThis.statusReads = 0;
+        ${electron}.ipcMain.on('capture:status', () => statusReads++);
+        return true;
+      })()`);
+      assert.equal(
+        await app.evaluate(`(() => {
+        const capture = swf2esDesktop.capture, epoch = capture.epoch();
+        for (let i = 0; i < 1000; i++) {
+          if (capture.status(epoch, 'camera') !== 'granted' || capture.status(epoch, 'microphone') !== 'granted') return false;
+        }
+        return true;
+      })()`),
+        true,
+      );
+      assert.ok(await app.main<boolean>("statusReads <= 2"));
       const stoppedAt = app.stdout.length;
       await app.main(
         `(() => { const item=${electron}.Menu.getApplicationMenu().getMenuItemById('stop-capture'); if(!item.enabled) throw new Error('stop disabled'); item.click(); return true; })()`,
@@ -204,6 +268,10 @@ try {
         );
       });
 
+      assert.equal(
+        await app.evaluate(`swf2esDesktop.capture.status(swf2esDesktop.capture.epoch(), 'camera')`),
+        "denied",
+      );
       // AIR requests explicit permission through the same dialog before attaching the camera.
       await boxes(app, 0);
       const airAt = app.stdout.length;
@@ -227,6 +295,57 @@ try {
       await until(() =>
         app.evaluate<boolean>("captureTracks.every(t => t.readyState === 'ended')"),
       );
+      // The platform can resolve getUserMedia after Stop or replacement; keep a healthy page alive.
+      await app.evaluate(`(() => {
+        globalThis.captureDelayed = false; globalThis.captureRelease = [];
+        const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (...args) => {
+          const stream = await original(...args);
+          if (captureDelayed) await new Promise(resolve => captureRelease.push(resolve));
+          return stream;
+        };
+        return true;
+      })()`);
+      for (const replace of [false, true]) {
+        await boxes(app, 0);
+        await app.evaluate(
+          "(() => { captureDelayed = true; captureRelease = []; return true; })()",
+        );
+        await open(app, true);
+        await until(() => app.evaluate<boolean>("captureRelease.length === 2"));
+        const beforeStop = app.stdout.length;
+        if (replace) {
+          await boxes(app, 1);
+          await open(app);
+        } else {
+          await app.main(
+            `(() => { ${electron}.Menu.getApplicationMenu().getMenuItemById('stop-capture').click(); return true; })()`,
+          );
+        }
+        await new Promise((resolve) => setTimeout(resolve, 4500));
+        assert.equal(
+          await app.main(`${electron}.BrowserWindow.getAllWindows()[0].webContents.isCrashed()`),
+          false,
+        );
+        assert.equal(
+          await app.main(
+            `${electron}.BrowserWindow.getAllWindows()[0].getTitle().includes(' live]')`,
+          ),
+          true,
+        );
+        await app.evaluate(
+          "(() => { captureDelayed = false; captureRelease.forEach(resolve => resolve()); return true; })()",
+        );
+        await until(() =>
+          app.evaluate<boolean>("captureTracks.every(t => t.readyState === 'ended')"),
+        );
+        assert.ok(!app.stdout.slice(beforeStop).some((line) => line.includes("Unmuted")));
+        await until(() =>
+          app.main<boolean>(
+            `!${electron}.Menu.getApplicationMenu().getMenuItemById('stop-capture').enabled`,
+          ),
+        );
+      }
       await boxes(app, 0);
       await open(app, true);
       await until(() =>
