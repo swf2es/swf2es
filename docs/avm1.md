@@ -1017,7 +1017,7 @@ variable shadows it; there is no global function named `getVersion`.
 Child clips and AVM1 movies loaded by AS3 have no initial `$version`.
 These behaviours were checked in adl both with a SWF as the application's
 main content and through the usual AS3 Loader harness; the main-content
-traces are asserted in `tests/unit/player/avm1/version.test.ts`.
+traces are asserted in `tests/unit/player/avm1/avm1.test.ts`.
 
 What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
 `avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases), and
