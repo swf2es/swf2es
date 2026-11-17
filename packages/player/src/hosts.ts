@@ -796,6 +796,14 @@ export type CapturePermission = "unknown" | "granted" | "denied";
 
 /** Optional: without a host the player retains Flash's no-device behaviour. */
 export interface CaptureHost {
+  /**
+   * Reads what the members below report synchronously: the devices and the
+   * permission states. The player awaits it, once, before it runs the code
+   * of the first SWF that names Camera or Microphone, so one that never does
+   * pays nothing for it; false: no capture after all, as with no host. A
+   * host without it is ready as given.
+   */
+  prepare?(): Promise<boolean>;
   permissionStatus?(kind: CaptureKind): CapturePermission;
   requestPermission?(kind: CaptureKind, signal: AbortSignal): Promise<CapturePermission>;
   readonly cameras: readonly CaptureDevice[];

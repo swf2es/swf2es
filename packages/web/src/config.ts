@@ -17,7 +17,7 @@ import {
   type SocketHost,
   type WebSocketHost,
 } from "@swf2es/player";
-import { browserCaptureHost } from "@swf2es/player-hosts/capture";
+import { lazyBrowserCaptureHost } from "@swf2es/player-hosts/capture";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
@@ -284,12 +284,15 @@ export function moduleCacheOptions(): { moduleCache?: ModuleCache } {
   return { moduleCache };
 }
 
-/** Prepared before AS3 starts because Camera.names and getCamera are synchronous. */
-export async function captureHost(allowed: boolean): Promise<CaptureHost | null> {
+/**
+ * The capture host: the browser's by default, which reads the devices only
+ * once a SWF names Camera or Microphone (Scripting.prepareCapture).
+ */
+export function captureHost(allowed: boolean): CaptureHost | null {
   const config = configuration();
   if (!allowed || config.allowCapture === false) {
     return null;
   }
 
-  return config.capture === undefined ? browserCaptureHost() : config.capture;
+  return config.capture === undefined ? lazyBrowserCaptureHost() : config.capture;
 }

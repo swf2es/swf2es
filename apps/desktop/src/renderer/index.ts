@@ -93,15 +93,12 @@ function embed(params: OpenedMovie["params"]): void {
   }
 }
 
-async function play(movie: OpenedMovie): Promise<void> {
+function play(movie: OpenedMovie): void {
   const generation = ++loadGeneration;
   player.destroy();
   const epoch = desktop.capture.epoch();
   captureEpoch = epoch;
-  const capture = await shellCapture(desktop.capture, epoch);
-  if (generation !== loadGeneration) {
-    return;
-  }
+  const capture = shellCapture(desktop.capture, epoch);
   captureHosts.set(epoch, capture);
   player.removeAttribute("allowcapture");
   airLaunch = movie.air ?? null;

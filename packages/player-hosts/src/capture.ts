@@ -31,8 +31,23 @@ function constraints(
   };
 }
 
-/** Enumerating never prompts; capture starts only at openCamera and Chromium asks for consent. */
+/**
+ * The browser's capture host, its devices and permission states read
+ * already. Enumerating never prompts; capture starts only at openCamera
+ * and Chromium asks for consent. Null where the browser has no capture.
+ */
 export async function browserCaptureHost(): Promise<CaptureHost | null> {
+  const host = lazyBrowserCaptureHost();
+  return host && (await host.prepare?.()) ? host : null;
+}
+
+/**
+ * The browser's capture host, which reads the devices and permission
+ * states only at prepare: the player asks for it when a SWF names Camera
+ * or Microphone, as a browser's first enumeration is slow. Until then it
+ * reports no devices. Null where the browser has no capture.
+ */
+export function lazyBrowserCaptureHost(): CaptureHost | null {
   const media = globalThis.navigator?.mediaDevices;
   if (!media?.getUserMedia || !media.enumerateDevices) {
     return null;
@@ -57,28 +72,37 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
       .filter((d) => d.kind === "videoinput")
       .map((d) => ({ id: d.deviceId, name: d.label }));
   };
-  try {
-    await refresh();
-  } catch {
-    return null;
-  }
+  let prepared: Promise<boolean> | null = null;
+  const prepare = async (): Promise<boolean> => {
+    try {
+      await refresh();
+    } catch {
+      return false;
+    }
 
-  await Promise.all(
-    (["camera", "microphone"] as const).map(async (kind) => {
-      try {
-        const status = await navigator.permissions.query({ name: kind as PermissionName });
-        permissionHandles.set(kind, status);
-      } catch {
-        /* Some hosts expose capture without the Permissions API. */
-      }
-    }),
-  );
+    await Promise.all(
+      (["camera", "microphone"] as const).map(async (kind) => {
+        try {
+          const status = await navigator.permissions.query({ name: kind as PermissionName });
+          permissionHandles.set(kind, status);
+        } catch {
+          /* Some hosts expose capture without the Permissions API. */
+        }
+      }),
+    );
+
+    return true;
+  };
   const permissionStatus = (kind: CaptureKind): CapturePermission => {
     const status = permissionHandles.get(kind)?.state;
     return status === "prompt" ? "unknown" : (status ?? permissions[kind]);
   };
 
   return {
+    prepare() {
+      prepared ??= prepare();
+      return prepared;
+    },
     permissionStatus,
     async requestPermission(kind, signal) {
       if (signal.aborted) {

@@ -9,6 +9,7 @@ import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
 import type { CachedModule, ModuleCache } from "../hosts.js";
+import { namesCapture } from "../media/capture-names.js";
 import type { Scripting } from "../scripting.js";
 import { type Evaluated, evaluate, evaluateFunction, type Factory } from "./evaluate.js";
 import {
@@ -270,6 +271,14 @@ export class Code {
     ) {
       this.floatReady ??= this.loadLibraries([avm2.floatLibrary]);
       await this.floatReady;
+    }
+
+    // Camera.names and the rest answer at once, so the host reads the
+    // devices before the first SWF that names them runs, and not for one
+    // that never does: a browser's first enumeration costs a cold start
+    // more than a tenth of a second.
+    if (this.s.captureUnprepared && namesCapture(abcs.map(({ abc }) => abc))) {
+      await this.s.prepareCapture();
     }
 
     // Workers are handed what was compiled up to the main SWF's code, and
