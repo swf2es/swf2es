@@ -77,6 +77,32 @@ textured quad with the `Video`'s transform, colour transform, filters and
 CPU (`VideoFrame.copyTo`, or `drawImage` into an `OffscreenCanvas` and
 `getImageData`), never by a GPU readback, which stalls (docs/cpu-raster.md).
 
+The renderer implementation uses a host-owned `VideoSource` published
+only when a new picture arrives. Each view uploads that source once per
+published frame, shared by its attached Videos. The source keeps the
+current image valid until replaced, so it can be uploaded again after a
+lost context. Publishing also invalidates the Videos' ancestors, including
+cached filter outputs. A source can publish null when capture ends.
+
+The image uploads directly through WebGL's image overload; the renderer's
+core carries it as an opaque object and keeps its DOM-free boundary.
+CPU pixels are read synchronously from the source's `readPixels` callback
+and cached for that published frame. A browser host can implement that
+callback with an OffscreenCanvas; asynchronous `VideoFrame.copyTo` would
+need to finish before a synchronous AS3 copy. Direct
+`BitmapData.draw(video)` uses the CPU compositor, including its matrix,
+colour transform, clip and blend mode, even without a renderer. Drawing
+a container that contains a Video still uses the existing display-list
+renderer.
+
+`Video.clear()` hides the current picture until the source publishes
+another frame, without stopping the source. This follows
+[Adobe's Video documentation](https://airsdk.dev/reference/actionscript/3.0/flash/media/Video.html#clear()),
+not a device observation under adl. The generated-canvas test covers
+frame orientation, sharing, resizing, smoothing, colour transforms,
+cached filters, CPU copies and context restoration. Existing Flash cases
+continue to cover Video without a source.
+
 ## 4. Camera
 
 The natives keep today's surface and gain a device behind it: `names`
