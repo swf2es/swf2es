@@ -4,7 +4,7 @@ import type { CaptureKind, CapturePermission } from "../shared/api.js";
 import { buildMenu } from "./menu.ts";
 import { current } from "./open.ts";
 import { APP_ORIGIN } from "./protocol.ts";
-import { setCaptureLabel, trusted, window } from "./state.ts";
+import { pageGone, setCaptureLabel, trusted, window } from "./state.ts";
 
 let epoch = 0;
 const decisions = new Map<CaptureKind, CapturePermission>();
@@ -48,7 +48,13 @@ function stopped(requested: number): void {
 }
 
 function stopEpoch(requested: number): void {
-  if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) {
+  if (
+    window &&
+    !pageGone &&
+    !window.isDestroyed() &&
+    !window.webContents.isDestroyed() &&
+    !window.webContents.isCrashed()
+  ) {
     window.webContents.send("capture:stop", requested);
   }
   if (activeEpoch(requested) && !stopTimers.has(requested)) {
