@@ -12,6 +12,11 @@ import type {
 import { denied, openMedia } from "./capture-access.js";
 import { openMicrophone } from "./capture-audio.js";
 
+const positions = new Map([
+  ["user", "front"],
+  ["environment", "back"],
+]);
+
 function constraints(
   device: CaptureDevice,
   mode: CameraMode,
@@ -196,17 +201,11 @@ function openCamera(
   const settings = () => {
     const value = track?.getSettings();
     if (value && !closed) {
-      const position =
-        value.facingMode === "user"
-          ? "front"
-          : value.facingMode === "environment"
-            ? "back"
-            : "unknown";
       events.settings(
         value.width ?? mode.width,
         value.height ?? mode.height,
         value.frameRate ?? mode.fps,
-        position,
+        positions.get(value.facingMode ?? "") ?? "unknown",
       );
     }
   };
@@ -347,6 +346,7 @@ function openCamera(
         for (const live of opened.getTracks()) {
           live.stop();
         }
+
         resolveClosed();
         return;
       }
@@ -366,6 +366,7 @@ function openCamera(
       if (modeVersion > 0) {
         await apply();
       }
+
       if (closed) {
         return;
       }
@@ -383,11 +384,12 @@ function openCamera(
       openSettled = true;
       if (closed) {
         resolveClosed();
+        return;
       }
-      if (!closed) {
-        finish(false);
-        events.state(!acquired && denied(error) ? "denied" : "unavailable");
-      }
+
+      finish(false);
+      events.state(!acquired && denied(error) ? "denied" : "unavailable");
     });
+
   return capture;
 }

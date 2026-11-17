@@ -9,8 +9,6 @@ import { CaptureResampler, microphoneRates } from "./capture-resampler.js";
 import { CaptureStatus } from "./capture-status.js";
 import { mixerMix, mixOf, outputMix } from "./sounds.js";
 
-const nativeLittleEndian = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
-
 export const microphoneStates = new WeakMap<avm2.AsObject, MicrophoneState>();
 const captures = new WeakMap<Scripting, Set<WeakRef<MicrophoneState>>>();
 
@@ -65,9 +63,10 @@ export class MicrophoneState {
   private lastSound = -1;
   private activating = false;
   private reportedActivity = false;
-  private activityEventGeneration = 0;
+  private activityPending = false;
   private pending = false;
   private readonly queued = new Float32Array(16384);
+  private readonly queuedWords = new Uint32Array(this.queued.buffer);
   private queuedSamples = 0;
   private deliveryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -189,6 +188,7 @@ export class MicrophoneState {
       if (!current()) {
         return;
       }
+
       if (value !== "granted") {
         this.stop(false);
       }
@@ -199,6 +199,7 @@ export class MicrophoneState {
         this.consent.set(value !== "granted");
       }
     };
+
     try {
       const capture = host.openMicrophone(
         this.device,
@@ -213,6 +214,7 @@ export class MicrophoneState {
         },
         this.s.captureLifetime.signal,
       );
+
       if (current() && this.active) {
         this.capture = capture;
       } else {
@@ -236,6 +238,7 @@ export class MicrophoneState {
     if (invalidate) {
       this.generation++;
     }
+
     this.active = false;
     this.capture?.close();
     this.capture = null;
@@ -246,6 +249,7 @@ export class MicrophoneState {
     this.loopResampler = null;
     this.queuedSamples = 0;
     this.pending = false;
+    this.activityPending = false;
     if (this.deliveryTimer !== null) {
       clearTimeout(this.deliveryTimer);
       this.deliveryTimer = null;
@@ -284,19 +288,21 @@ export class MicrophoneState {
     if (!observing) {
       this.reportedActivity = false;
     }
+
     if (activating !== this.activating || (observing && activating !== this.reportedActivity)) {
       this.activating = activating;
-      const generation = this.generation;
-      if (observing && this.activityEventGeneration !== generation) {
-        this.activityEventGeneration = generation;
+      if (observing && !this.activityPending) {
+        const generation = this.generation;
+        this.activityPending = true;
         this.s.loads.deferHostEvent(() => {
-          if (this.activityEventGeneration === generation) {
-            this.activityEventGeneration = 0;
+          if (generation !== this.generation) {
+            return;
           }
+
+          this.activityPending = false;
           if (
             !this.s.destroyed &&
             this.active &&
-            generation === this.generation &&
             this.silenceLevel < 100 &&
             heard(this.object, "activity") &&
             this.reportedActivity !== this.activating
@@ -323,20 +329,26 @@ export class MicrophoneState {
       if (!this.loopResampler || this.loopResampler.inputRate !== rate) {
         this.loopResampler = new CaptureResampler(rate, 44100);
       }
-      loop = this.loopResampler.push(samples);
+
+      // The stream copies each block on append, so the resampler's buffer and the pair are reused.
+      loop = this.loopResampler.push(samples, true);
       this.output ??= this.s.audio.stream(outputMix(this.mix, mixerMix(this.s)), () => {
         this.output?.setMix(outputMix(this.mix, mixerMix(this.s)));
       });
       // Never queue more than 200 ms while autoplay holds the output device.
       const played = this.output.positionMs * 44.1;
       if (this.submitted - (Number.isFinite(played) ? played : 0) < 8820) {
-        this.output.append([loop, loop]);
+        this.loopChannels[0] = loop;
+        this.loopChannels[1] = loop;
+        this.output.append(this.loopChannels);
         this.submitted += loop.length;
       }
     }
+
     if (!heard(this.object, "sampleData")) {
       return;
     }
+
     const targetRate = microphoneRates.get(this.rate) ?? 8000;
     let data: Float32Array;
     if (loop && targetRate === 44100) {
@@ -353,9 +365,11 @@ export class MicrophoneState {
 
       data = this.resampler.push(samples, true);
     }
+
     if (data.length === 0) {
       return;
     }
+
     this.position += data.length;
     const kept = Math.min(data.length, this.queued.length);
     const discard = Math.max(0, this.queuedSamples + kept - this.queued.length);
@@ -364,7 +378,10 @@ export class MicrophoneState {
       this.queuedSamples -= discard;
     }
 
-    this.queued.set(data.subarray(data.length - kept), this.queuedSamples);
+    this.queued.set(
+      kept === data.length ? data : data.subarray(data.length - kept),
+      this.queuedSamples,
+    );
     this.queuedSamples += kept;
     if (!this.pending) {
       this.pending = true;
@@ -422,15 +439,12 @@ export class MicrophoneState {
     const object = this.s.rt.construct(this.s.rt.classNamed("flash.utils::ByteArray"));
     const bytes = avm2.bytesOf(this.s.rt, object);
     bytes.setLength(count * 4);
-    const floats = new Float32Array(bytes.buffer.buffer, bytes.buffer.byteOffset, count);
-    floats.set(this.queued.subarray(0, count));
-    if (bytes.littleEndian !== nativeLittleEndian) {
-      const words = new Uint32Array(bytes.buffer.buffer, bytes.buffer.byteOffset, count);
-      for (let i = 0; i < count; i++) {
-        const word = words[i];
-        words[i] =
-          (word >>> 24) | ((word >>> 8) & 0xff00) | ((word << 8) & 0xff0000) | (word << 24);
-      }
+    // The words go in in the ByteArray's order (big-endian by default), with no view per event.
+    const view = bytes.view;
+    const words = this.queuedWords;
+    const little = bytes.littleEndian;
+    for (let i = 0; i < count; i++) {
+      view.setUint32(i * 4, words[i], little);
     }
 
     dispatchEvent(

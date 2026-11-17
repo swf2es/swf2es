@@ -176,6 +176,9 @@ test("Microphone activity, denial, loopback mixing and teardown stay bounded", a
     }
     assert.equal(h.output[0].blocks.length, 2);
     assert.equal(h.output[0].blocks[0][0].length, 4410);
+    // The stream copies on append; each block reuses the same pair and resampled buffer.
+    assert.equal(h.output[0].blocks[1], h.output[0].blocks[0]);
+    assert.equal(h.output[0].blocks[0][1], h.output[0].blocks[0][0]);
     h.s.captureLifetime.abort();
     assert.equal(h.opens[1].closed, 1);
     assert.equal(h.output[0].stopped, true);

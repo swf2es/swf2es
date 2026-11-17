@@ -212,6 +212,7 @@ export class CameraState {
         this.consent.set(state !== "granted");
       }
     };
+
     try {
       const transport = this.s.capture.openCamera(
         this.device,
@@ -234,6 +235,7 @@ export class CameraState {
         },
         this.s.captureLifetime.signal,
       );
+
       if (current() && this.active) {
         this.transport = transport;
       } else {
@@ -285,6 +287,7 @@ export class CameraState {
       if (!heard(this.object, "activity")) {
         this.reportedActivity = false;
       }
+
       this.activityLevel = -1;
       this.lastMotion = -1;
       this.activating = false;

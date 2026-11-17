@@ -70,3 +70,15 @@ test("borrowed resampler output survives uneven input sizes without stale histor
   assert.equal(unity.push(input, true), input);
   assert.notEqual(unity.push(input), input);
 });
+
+test("borrowed output makes no new array for steady worklet blocks", () => {
+  const converter = new CaptureResampler(48000, 44100);
+  const block = new Float32Array(2048).fill(0.25);
+  const results = new Set<Float32Array>();
+  for (let i = 0; i < 100; i++) {
+    results.add(converter.push(block, true));
+  }
+
+  // 2048 samples at 48 kHz are 1881 or 1882 at 44.1 kHz: one view for each.
+  assert.equal(results.size, 2);
+});
