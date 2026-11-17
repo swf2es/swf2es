@@ -1,7 +1,6 @@
-// flash.media.Video: a box of its size on the display list, as Flash makes
-// it; no stream or camera plays in it, the player having neither.
 import { avm2 } from "@swf2es/runtime";
 import type { VideoObject } from "../../../display/display.js";
+import { attachCamera } from "../../../media/camera.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -12,7 +11,6 @@ export function videoNatives(s: Scripting): avm2.Natives {
   class VideoNatives {
     declare $display: VideoObject;
     declare $deblocking: number | undefined;
-    declare $smoothing: boolean | undefined;
 
     /** Ints, as the constructor takes them: a negative one is RangeError 2006, a 0 either way the default 320 by 240. */
     "flash.media:Video::ctor"(width: Value, height: Value): void {
@@ -29,11 +27,11 @@ export function videoNatives(s: Scripting): avm2.Natives {
     }
 
     get videoWidth(): number {
-      return 0;
+      return this.$display.source?.picture?.width ?? 0;
     }
 
     get videoHeight(): number {
-      return 0;
+      return this.$display.source?.picture?.height ?? 0;
     }
 
     get deblocking(): number {
@@ -45,18 +43,25 @@ export function videoNatives(s: Scripting): avm2.Natives {
     }
 
     get smoothing(): boolean {
-      return this.$smoothing ?? false;
+      return this.$display.smoothing;
     }
 
     set smoothing(v: Value) {
-      this.$smoothing = !!v;
+      this.$display.smoothing = !!v;
+      this.$display.pixelsChanged(false);
     }
 
-    attachNetStream(_stream: Value): void {}
+    attachNetStream(_stream: Value): void {
+      attachCamera(this.$display, null);
+    }
 
-    attachCamera(_camera: Value): void {}
+    attachCamera(camera: Value): void {
+      attachCamera(this.$display, camera);
+    }
 
-    clear(): void {}
+    clear(): void {
+      this.$display.clear();
+    }
   }
 
   avm2.registerNativeClass(natives, "flash.media::Video", VideoNatives);

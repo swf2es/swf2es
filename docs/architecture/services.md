@@ -478,16 +478,27 @@ as Flash does without it (the `system-natives` case). `Stage.stage3Ds` are Flash
 positions are kept within -8192 to 8191, ArgumentError 2006 beyond, and
 by default each request for a Context3D gets ErrorEvent #3702 in the next frame, as
 Flash without a GPU gives, so content can fall back to the display list.
-`stageVideos` is empty, and a `Video` is a box of the size it was made
-at, 320 by 240 where either is 0, RangeError 2006 for a negative one,
-which bounds, scales and hits as Flash's and shows nothing: no stream or
-camera plays in it, and a timeline's DefineVideoStream is not read yet.
-Camera and Microphone are Flash's on a machine with neither (the
-`camera-microphone` case): supported, but `names` empty and no camera or
-microphone to get; one made with `new` reads as zeros and nulls whatever
-is set, its copies and setters throwing only TypeError 2007 for a null.
-Once `getEnhancedMicrophone` is called, whatever it gives, every
-Microphone shares one MicrophoneEnhancedOptions, copied in and out.
+`stageVideos` is empty. A `Video` has its own display box (320 by 240 where
+an argument is 0, RangeError 2006 for a negative one) and can show a host-owned
+`VideoSource`. Camera pictures upload directly to WebGL; plain bitmap copies read
+CPU pixels, while copies with masks, filters or scrollRect use the display renderer.
+A timeline's DefineVideoStream and NetStream playback are not implemented.
+
+An optional `CaptureHost` provides Camera and Microphone devices, frames, mono PCM,
+and permission state. The browser host in `@swf2es/player-hosts` uses getUserMedia,
+a video element and AudioWorklet; the desktop wraps it with movie-scoped consent.
+Camera attach and microphone sample listeners or loopback open devices. Detach,
+listener removal, child unloadAndStop and player shutdown release the corresponding
+consumers. Motion detection is listener-driven; microphone delivery also runs
+between slow movie frames. [Camera and microphone](../camera-microphone.md) describes
+ownership, queue bounds, detector approximations and permission policy.
+
+Without a capture host, Camera and Microphone retain Flash's no-device behavior
+(the `camera-microphone` case): supported, empty names and null device getters.
+Direct construction keeps the no-device defaults, and AIR permission getters are
+`granted` as measured in device-free adl. Enhanced options are shared as before.
+AVM1 Camera.get and Video.attachVideo are unsupported.
+
 NetConnection has its local mode, `connect(null)`, with Flash's status
 events and its properties, ArgumentError 2126 for those of a connection
 it does not have; and Flash Remoting over an HTTP URI

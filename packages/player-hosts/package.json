@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/player-hosts",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Optional Node and WebSocket transports, worker threads, an IndexedDB module cache and precompiled modules for the swf2es player",
   "keywords": [
     "swf",
@@ -20,6 +20,10 @@
   "license": "Apache-2.0 AND (Apache-2.0 OR MIT) AND MPL-2.0 AND W3C-20150513 AND Zlib AND LicenseRef-LZMA-SDK-Public-Domain AND CC0-1.0 AND SGI-B-2.0 AND BSD-2-Clause AND MIT",
   "type": "module",
   "exports": {
+    "./capture": {
+      "types": "./dist/capture.d.ts",
+      "default": "./dist/capture.js"
+    },
     "./stage3d": {
       "types": "./dist/stage3d.d.ts",
       "default": "./dist/stage3d.js"

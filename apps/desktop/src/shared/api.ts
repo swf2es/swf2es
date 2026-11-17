@@ -248,6 +248,7 @@ export interface DesktopFullScreen {
 }
 
 export interface DesktopApi {
+  capture: DesktopCapture;
   files: DesktopFiles;
   fullScreen: DesktopFullScreen;
   /** The page has loaded and listens: what it is to show. */
@@ -268,4 +269,15 @@ export interface DesktopApi {
   webSockets: DesktopWebSockets;
   network: DesktopNetwork;
   air: DesktopAir;
+}
+
+export type CaptureKind = "camera" | "microphone";
+export type CapturePermission = "unknown" | "granted" | "denied";
+export interface DesktopCapture {
+  epoch(): number;
+  status(epoch: number, kind: CaptureKind): CapturePermission;
+  request(epoch: number, kind: CaptureKind): Promise<CapturePermission>;
+  live(epoch: number, kind: CaptureKind, id: number, active: boolean): void;
+  stopped(epoch: number): void;
+  onStop(listener: (epoch: number) => void): void;
 }

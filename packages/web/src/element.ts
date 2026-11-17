@@ -18,6 +18,7 @@ import { type AirFiles, airFiles } from "./air-files.js";
 import { type AirItems, airItems } from "./air-items.js";
 import { cssLength, parseColor, parseFlashVars, quality, scriptAccess } from "./attributes.js";
 import {
+  captureHost,
   codegenForPlayer,
   configuration,
   moduleCacheOptions,
@@ -149,6 +150,7 @@ export class Swf2esPlayerElement extends ElementBase {
     "quality",
     "menu",
     "unmuteprompt",
+    "allowcapture",
   ];
 
   #session: Session | null = null;
@@ -253,6 +255,10 @@ export class Swf2esPlayerElement extends ElementBase {
 
     if (name === "width" || name === "height") {
       this.#size();
+    }
+
+    if (name === "allowcapture" && value?.toLowerCase() === "false") {
+      this.#session?.scripting?.captureLifetime.abort();
     }
 
     if (name === "quality" && this.#session?.player) {
@@ -621,6 +627,7 @@ export class Swf2esPlayerElement extends ElementBase {
       encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : configuration().webSockets,
+      capture: captureHost(attribute(this, "allowcapture")?.toLowerCase() !== "false"),
       navigate: internal ? null : undefined,
       fileHost: configuration().fileHost,
       sendToUrl: !internal,
@@ -636,6 +643,14 @@ export class Swf2esPlayerElement extends ElementBase {
       workerHost,
       ...moduleCacheOptions(),
     });
+    if (
+      attribute(this, "allowcapture")?.toLowerCase() === "false" ||
+      configuration().allowCapture === false ||
+      configuration().capture === null
+    ) {
+      scripting.captureLifetime.abort();
+    }
+
     return scripting;
   }
 

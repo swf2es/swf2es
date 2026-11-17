@@ -6,6 +6,7 @@
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
 import type { DisplayObject } from "./display/display.js";
+import type { VideoPicture } from "./media/video.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
 
 const textDecoder = new TextDecoder();
@@ -369,7 +370,12 @@ export interface SocketEndpoints {
 export interface SocketEvents {
   /** Opened, with its ends where the host knows them: a relay's are not the script's to see. */
   open(endpoints?: SocketEndpoints): void;
-  data(bytes: Uint8Array): void;
+  /**
+   * Bytes that came. `owned`: they are the player's from now on, the host
+   * never writing to them again; otherwise the player copies them before
+   * it returns, so a host may read into one buffer over and over.
+   */
+  data(bytes: Uint8Array, owned?: boolean): void;
   close(): void;
   error(message: string): void;
 }
@@ -749,4 +755,91 @@ export interface WorkerHost {
   ): WorkerThread;
   /** The player that used it is gone: what the host keeps for its threads may go too. */
   release?(): void;
+}
+
+/** A capture device's stable host identifier and display name (possibly blank before consent). */
+export interface CaptureDevice {
+  id: string;
+  name: string;
+}
+
+export interface CameraMode {
+  width: number;
+  height: number;
+  fps: number;
+  favorArea: boolean;
+}
+
+export interface CameraPicture extends VideoPicture {
+  /** Monotonic milliseconds at capture, for activity and measured frame rate. */
+  time: number;
+  /** Small luminance image, with a stable size, for motion detection without full-size copies. */
+  motion(): Uint8Array;
+}
+
+export interface CameraCapture {
+  /** Resolves after close has also stopped any late permission result. */
+  readonly closed?: Promise<void>;
+  setMode(mode: CameraMode): void;
+  close(): void;
+}
+
+export interface CameraEvents {
+  /** Unavailable is a device/transport failure; it must not change the consent decision. */
+  state(state: "granted" | "denied" | "ended" | "unavailable"): void;
+  settings(width: number, height: number, fps: number, position: string): void;
+  frame(picture: CameraPicture): void;
+}
+
+export type CaptureKind = "camera" | "microphone";
+export type CapturePermission = "unknown" | "granted" | "denied";
+
+/** Optional: without a host the player retains Flash's no-device behaviour. */
+export interface CaptureHost {
+  /**
+   * Reads what the members below report synchronously: the devices and the
+   * permission states. The player awaits it, once, before it runs the code
+   * of the first SWF that names Camera or Microphone, so one that never does
+   * pays nothing for it; false: no capture after all, as with no host. A
+   * host without it is ready as given.
+   */
+  prepare?(): Promise<boolean>;
+  permissionStatus?(kind: CaptureKind): CapturePermission;
+  requestPermission?(kind: CaptureKind, signal: AbortSignal): Promise<CapturePermission>;
+  readonly cameras: readonly CaptureDevice[];
+  readonly microphones?: readonly CaptureDevice[];
+  openMicrophone?(
+    device: CaptureDevice,
+    mode: MicrophoneMode,
+    events: MicrophoneEvents,
+    signal: AbortSignal,
+  ): MicrophoneCapture;
+  /** Opening may prompt. Abort closes a live capture and any capture still awaiting permission. */
+  openCamera(
+    device: CaptureDevice,
+    mode: CameraMode,
+    events: CameraEvents,
+    signal: AbortSignal,
+  ): CameraCapture;
+}
+
+export interface MicrophoneMode {
+  /** Flash's gain knob: 50 is unity, 0 silent and 100 twice normal volume. */
+  gain: number;
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+}
+
+export interface MicrophoneEvents {
+  /** Unavailable is a device/transport failure; it must not change the consent decision. */
+  state(state: "granted" | "denied" | "ended" | "unavailable"): void;
+  /** Mono PCM after gain, at the device's sample rate. Borrowed for the duration of the call. */
+  samples(samples: Float32Array, rate: number): void;
+}
+
+export interface MicrophoneCapture {
+  /** Resolves after close has also stopped any late permission result. */
+  readonly closed?: Promise<void>;
+  setMode(mode: MicrophoneMode): void;
+  close(): void;
 }

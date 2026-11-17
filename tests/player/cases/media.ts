@@ -404,6 +404,16 @@ export const mediaCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "capture-permission",
+    swf: (abc) => bare(abc, 1, "CapturePermission"),
+    script: "CapturePermission",
+    air: true,
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "camera-microphone",
     swf: (abc) => bare(abc, 1, "CameraMicrophone"),
     script: "CameraMicrophone",

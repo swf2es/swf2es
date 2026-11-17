@@ -290,6 +290,10 @@ const NEWER = new Set([
 // application's code sees it. Not a later version: as for NEWER, a builtin's
 // highest mark is the VM's internal one, which would hide it and make 42 public.
 const AIR_NEWER = new Set([
+  "flash.media::Camera static getter permissionStatus",
+  "flash.media::Camera instance method requestPermission",
+  "flash.media::Microphone static getter permissionStatus",
+  "flash.media::Microphone instance method requestPermission",
   "flash.net::Socket instance getter tcpNoDelay",
   "flash.net::Socket instance setter tcpNoDelay",
 ]);

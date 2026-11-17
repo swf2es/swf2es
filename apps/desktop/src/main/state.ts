@@ -63,3 +63,16 @@ export function trusted(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
     frame.url.startsWith(`${APP_ORIGIN}/`)
   );
 }
+
+let windowTitle = TITLE;
+let captureLabel = "";
+export function setWindowTitle(title: string): void {
+  windowTitle = title;
+  if (window && !window.isDestroyed()) {
+    window.setTitle(captureLabel ? `${title} [${captureLabel} live]` : title);
+  }
+}
+export function setCaptureLabel(label: string): void {
+  captureLabel = label;
+  setWindowTitle(windowTitle);
+}

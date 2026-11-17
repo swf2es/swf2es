@@ -6,6 +6,13 @@ package flash.media
 
 	public final class Microphone extends EventDispatcher
 	{
+		// AIR-only additions use the last public AIR API mark (see tools/playerglobal.ts).
+		[API("701")]
+		public static native function get permissionStatus():String;
+
+		[API("701")]
+		public native function requestPermission():void;
+
 		public function Microphone()
 		{
 		}

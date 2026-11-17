@@ -6,6 +6,7 @@ import {
   type AirApplication,
   airLibrary,
   builtinLibrary,
+  type CaptureHost,
   type EncryptedStoreHost,
   type FetchRequest,
   type FetchResult,
@@ -16,6 +17,7 @@ import {
   type SocketHost,
   type WebSocketHost,
 } from "@swf2es/player";
+import { lazyBrowserCaptureHost } from "@swf2es/player-hosts/capture";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
@@ -59,6 +61,10 @@ export interface Configuration {
    * socketProxy's relays: a desktop app's, which reaches TCP itself.
    */
   sockets?: SocketHost;
+  /** Camera/microphone capture: browser consent by default, null disables it. */
+  capture?: CaptureHost | null;
+  /** Refuse all device capture even when a capture host was supplied. */
+  allowCapture?: boolean;
   /**
    * A host of the embedder's own for air.net.WebSocket, in place of the
    * page's WebSocket: a desktop app's, whose page has no network.
@@ -276,4 +282,17 @@ export function moduleCacheOptions(): { moduleCache?: ModuleCache } {
 
   moduleCache ??= indexedDbModuleCache();
   return { moduleCache };
+}
+
+/**
+ * The capture host: the browser's by default, which reads the devices only
+ * once a SWF names Camera or Microphone (Scripting.prepareCapture).
+ */
+export function captureHost(allowed: boolean): CaptureHost | null {
+  const config = configuration();
+  if (!allowed || config.allowCapture === false) {
+    return null;
+  }
+
+  return config.capture === undefined ? lazyBrowserCaptureHost() : config.capture;
 }

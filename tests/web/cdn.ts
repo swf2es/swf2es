@@ -142,6 +142,39 @@ writeFileSync(
   page(`${origin}/${VERSION}/dist/swf2es.js`, ["as3.swf", "avm1.swf"]),
 );
 writeFileSync(`${site}workers.html`, page(`${origin}/${VERSION}`, ["worker-mutex.swf"]));
+const captureAbc = compileScripts(
+  [
+    {
+      name: "CaptureCdn",
+      source: `package {
+  import flash.display.Sprite;
+  import flash.media.Microphone;
+  import flash.events.SampleDataEvent;
+  public class CaptureCdn extends Sprite {
+    private var mic:Microphone;
+    public function CaptureCdn() {
+      mic = Microphone.getMicrophone();
+      if (!mic) { trace("capture unavailable"); return; }
+      mic.rate = 44;
+      mic.setSilenceLevel(0);
+      mic.addEventListener(SampleDataEvent.SAMPLE_DATA, samples);
+    }
+    private function samples(event:SampleDataEvent):void {
+      var audible:Boolean = false;
+      while (event.data.bytesAvailable) { if (Math.abs(event.data.readFloat()) > 0.001) audible = true; }
+      if (audible) { mic.removeEventListener(SampleDataEvent.SAMPLE_DATA, samples); trace("capture from cdn"); }
+    }
+  }
+}`,
+    },
+  ],
+  out,
+).get("CaptureCdn");
+if (!captureAbc) {
+  throw new Error("missing capture ABC");
+}
+writeFileSync(`${site}capture.swf`, bare(captureAbc, 1, "CaptureCdn"));
+writeFileSync(`${site}capture.html`, page(`${origin}/${VERSION}`, ["capture.swf"]));
 
 /**
  * Load the page again, with the console and exceptions listened to from
@@ -245,6 +278,31 @@ await check("Flash Workers share memory, on an isolated page, from the package's
     },
     false,
     { page: "cdn-test/workers.html", mounts },
+  ),
+);
+
+await check("microphone worklet loads from the CDN under the documented CSP", () =>
+  withPage(
+    ready,
+    async (_evaluate, send, fresh, listen) => {
+      const { traces, errors } = await play(fresh, listen, send, (t) =>
+        t.includes("capture from cdn"),
+      );
+      assert.deepEqual(errors, []);
+      assert.deepEqual(traces, ["capture from cdn"]);
+      assert.ok(asked.includes(`/${VERSION}/dist/capture-worklet.js`), asked.join(" "));
+    },
+    false,
+    {
+      page: "cdn-test/capture.html",
+      mounts,
+      isolated: false,
+      args: [
+        "--use-fake-device-for-media-stream",
+        "--use-fake-ui-for-media-stream",
+        "--autoplay-policy=no-user-gesture-required",
+      ],
+    },
   ),
 );
 

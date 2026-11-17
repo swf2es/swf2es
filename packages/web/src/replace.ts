@@ -19,6 +19,7 @@ const CARRIED = [
   "base",
   "allowscriptaccess",
   "allownetworking",
+  "allowcapture",
   "allowfullscreen",
   "allowfullscreeninteractive",
   "quality",

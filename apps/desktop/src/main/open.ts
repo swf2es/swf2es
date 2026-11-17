@@ -9,12 +9,13 @@ import { fileAttributes } from "@swf2es/format";
 import { app, dialog, safeStorage } from "electron";
 import type { OpenedMovie } from "../shared/api.js";
 import { type AirCommand, airLaunch, EncryptedItems } from "./air.ts";
+import { resetCapture } from "./capture.ts";
 import { refuse } from "./dialogs.ts";
 import { type Embedding, embeddingArguments, embeddingFor } from "./embedding.ts";
 import { buildMenu } from "./menu.ts";
 import type { Movie } from "./network-types.ts";
 import { APP_ORIGIN } from "./protocol.ts";
-import { listening, pageGone, sandbox, settings, TITLE, window } from "./state.ts";
+import { listening, pageGone, sandbox, settings, setWindowTitle, TITLE, window } from "./state.ts";
 import { network } from "./switches.ts";
 
 /** What the network judges the movie playing as; null for none, or one without networking. */
@@ -237,6 +238,7 @@ function show(
     movie.params = params;
   }
 
+  resetCapture();
   current = { path: entry, movie, embedding };
   playOnNetwork(onNetwork);
   allowedOnce = new Set();
@@ -245,7 +247,7 @@ function show(
   buildMenu();
   if (window) {
     // An AIR application's window is its own: its title alone, as adl shows it.
-    window.setTitle(movie.air ? movie.name : `${movie.name} — ${TITLE}`);
+    setWindowTitle(movie.air ? movie.name : `${movie.name} — ${TITLE}`);
     if (listening) {
       window.webContents.send("desktop:open", movie);
     } else {
@@ -356,12 +358,13 @@ function playOnNetwork(movie: Movie | null): void {
 }
 
 export function closeMovie(): void {
+  resetCapture();
   current = null;
   air = null;
   sandbox.stop();
   playOnNetwork(null);
   buildMenu();
-  window?.setTitle(TITLE);
+  setWindowTitle(TITLE);
   if (listening) {
     window?.webContents.send("desktop:close");
   } else {

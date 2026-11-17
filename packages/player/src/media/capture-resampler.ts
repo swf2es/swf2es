@@ -1,0 +1,103 @@
+// Windowed-sinc low-pass conversion; history and fractional phase survive worklet blocks.
+// A causal 48-input-sample delay avoids looking into a block that has not arrived yet.
+const TAPS = 96;
+const PHASES = 256;
+
+export class CaptureResampler {
+  private readonly kernels = new Float64Array(TAPS * PHASES);
+  private readonly history = new Float32Array(TAPS);
+  private input = new Float32Array(0);
+  private result = new Float32Array(0);
+  /** Views of result by length: a worklet block gives one or two lengths, so a push makes none. */
+  private readonly views = new Map<number, Float32Array>();
+  private received = 0;
+  private produced = 0;
+
+  constructor(
+    readonly inputRate: number,
+    readonly outputRate: number,
+  ) {
+    const cutoff = 0.45 * Math.min(1, outputRate / inputRate);
+    for (let phase = 0; phase < PHASES; phase++) {
+      let sum = 0;
+      for (let tap = 0; tap < TAPS; tap++) {
+        const x = tap - 47 - phase / PHASES;
+        const sinc = x === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * x) / (Math.PI * x);
+        const window =
+          0.42 -
+          0.5 * Math.cos((2 * Math.PI * tap) / (TAPS - 1)) +
+          0.08 * Math.cos((4 * Math.PI * tap) / (TAPS - 1));
+        const weight = sinc * window;
+        this.kernels[phase * TAPS + tap] = weight;
+        sum += weight;
+      }
+
+      for (let tap = 0; tap < TAPS; tap++) {
+        this.kernels[phase * TAPS + tap] /= sum;
+      }
+    }
+  }
+
+  /** Reuse borrows the result until the next push, or borrows the input at equal rates. */
+  push(samples: Float32Array, reuse = false): Float32Array {
+    if (this.inputRate === this.outputRate) {
+      return reuse ? samples : samples.slice();
+    }
+
+    const end = this.received + samples.length;
+    const count = Math.ceil((end * this.outputRate) / this.inputRate) - this.produced;
+    if (reuse && this.result.length < count) {
+      this.result = new Float32Array(count);
+      this.views.clear();
+    }
+
+    if (this.input.length < TAPS + samples.length) {
+      this.input = new Float32Array(TAPS + samples.length);
+    }
+
+    const result = reuse ? this.view(count) : new Float32Array(count);
+    const input = this.input;
+    input.set(this.history);
+    input.set(samples, TAPS);
+    const base = this.received - TAPS;
+    for (let i = 0; i < count; i++) {
+      const at = ((this.produced + i) * this.inputRate) / this.outputRate;
+      const whole = Math.floor(at);
+      const phase = Math.min(PHASES - 1, Math.floor((at - whole) * PHASES));
+      const start = whole - 95 - base;
+      let value = 0;
+      for (let tap = 0; tap < TAPS; tap++) {
+        value += input[start + tap] * this.kernels[phase * TAPS + tap];
+      }
+      result[i] = Math.max(-1, Math.min(1, value));
+    }
+
+    this.history.set(input.subarray(samples.length, samples.length + TAPS));
+    this.received = end;
+    this.produced += count;
+    return result;
+  }
+
+  private view(count: number): Float32Array {
+    let view = this.views.get(count);
+    if (!view) {
+      if (this.views.size >= 4) {
+        this.views.clear();
+      }
+
+      view = this.result.subarray(0, count);
+      this.views.set(count, view);
+    }
+
+    return view;
+  }
+}
+
+export const microphoneRates = new Map([
+  [5, 5512.5],
+  [8, 8000],
+  [11, 11025],
+  [16, 16000],
+  [22, 22050],
+  [44, 44100],
+]);

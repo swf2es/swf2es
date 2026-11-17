@@ -36,6 +36,7 @@ import {
   type AirApplication,
   browserClipboard,
   browserNavigate,
+  type CaptureHost,
   type ClipboardHost,
   type Drawer,
   defaultStorage,
@@ -84,6 +85,7 @@ import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
 import { UncaughtErrors } from "./scripting/uncaught.js";
 import { type ParentLink, Workers } from "./scripting/workers.js";
+import { fetchWhile } from "./signals.js";
 import { type StageScaleMode, stageAlignment } from "./stage.js";
 
 // For index.ts, which reaches playerglobal only through here.
@@ -211,6 +213,11 @@ export class Scripting {
   /** air.net.WebSocket's client: the global WebSocket's by default, null for none. */
   readonly webSocket: WebSocketHost | null;
   readonly audio: AudioHost | null;
+  private captureHost: CaptureHost | null;
+  /** The capture host's prepare, once asked for (prepareCapture), and whether it ended. */
+  private captureReady: Promise<void> | null = null;
+  private captureSettled = false;
+  readonly captureLifetime = new AbortController();
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
   readonly fileHost: FileHost | null;
@@ -422,6 +429,7 @@ export class Scripting {
       /** How many touches the screen takes at once: by default the browser's navigator.maxTouchPoints, 0 without one. */
       maxTouchPoints?: number;
       externalInterface?: ExternalInterfaceHost;
+      capture?: CaptureHost | null;
       socket?: SocketHost;
       webSocket?: WebSocketHost | null;
       audio?: AudioHost | null;
@@ -517,6 +525,7 @@ export class Scripting {
         }
       : null;
     this.onUncaught = options.onUncaught ?? null;
+    this.captureHost = options.capture ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
@@ -537,7 +546,7 @@ export class Scripting {
     this.lazyCompilation = options.lazyCompilation ?? false;
     const fetch = options.fetch;
     this.fetch = fetch
-      ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
+      ? (request, signal) => fetchWhile(fetch, request, this.stopped.signal, signal)
       : null;
     this.url = options.url ?? this.url;
     this.air = options.air ?? false;
@@ -589,6 +598,49 @@ export class Scripting {
     return this.loads.holdsFrame();
   }
 
+  /** Camera's and Microphone's host, or none. */
+  get capture(): CaptureHost | null {
+    return this.captureHost;
+  }
+
+  /**
+   * Whether the capture host has yet to read its devices, which code that
+   * names them waits for: until its prepare ends, not only until it starts.
+   */
+  get captureUnprepared(): boolean {
+    return !this.captureSettled && !!this.captureHost?.prepare;
+  }
+
+  /**
+   * The capture host prepared, once: Camera.names and the rest answer at
+   * once, so the code of a SWF that names them runs only after (Code.link).
+   * With capture refused already, nothing is read. A prepare that fails,
+   * or throws before it returns a promise, leaves no host, as one that
+   * answers false: never a failed load, nor another try for each SWF.
+   */
+  prepareCapture(): Promise<void> {
+    if (!this.captureReady) {
+      const host = this.captureHost;
+      const settle = (ready: boolean) => {
+        if (!ready && this.captureHost === host) {
+          this.captureHost = null;
+        }
+
+        this.captureSettled = true;
+      };
+      if (!host?.prepare || this.captureLifetime.signal.aborted) {
+        settle(true);
+        this.captureReady = Promise.resolve();
+      } else {
+        this.captureReady = Promise.resolve()
+          .then(() => host.prepare?.() ?? true)
+          .then(settle, () => settle(false));
+      }
+    }
+
+    return this.captureReady;
+  }
+
   /**
    * Stop for good, as a page that takes its player away needs: the open
    * SharedObjects are written, as Flash wrote them as a SWF went, the sounds
@@ -607,6 +659,7 @@ export class Scripting {
     }
 
     this.destroyed = true;
+    this.captureLifetime.abort();
     this.loads.destroyAvm1();
     this.workers.stopAll();
     this.code.recorder?.drop();

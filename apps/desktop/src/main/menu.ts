@@ -1,5 +1,6 @@
 // The application menu, built again as what plays and the settings change.
 import { app, Menu, type MenuItemConstructorOptions } from "electron";
+import { capturing, stopCapture } from "./capture.ts";
 import { chooseLibrary, refuse, resetLibrary, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { closeMovie, current, openEntry, reloadMovie } from "./open.ts";
 import { httpCache, settings, window } from "./state.ts";
@@ -86,6 +87,12 @@ export function buildMenu(): void {
           accelerator: "CmdOrCtrl+R",
           enabled: !!current,
           click: () => void reloadMovie(),
+        },
+        {
+          id: "stop-capture",
+          label: "Stop Camera and Microphone",
+          enabled: capturing(),
+          click: stopCapture,
         },
         { role: "togglefullscreen", accelerator: "F11" },
         { type: "separator" },

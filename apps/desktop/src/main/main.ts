@@ -34,6 +34,7 @@ import {
 import type { NetworkResponse, StartState } from "../shared/api.js";
 import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
+import { capturePermissions, releaseRetiredCapture, resetCapture } from "./capture.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { embeddingArguments, exactArguments, settleEmbedding } from "./embedding.ts";
 import { bridgeFiles } from "./files.ts";
@@ -174,6 +175,7 @@ function guard(contents: WebContents): void {
     return { action: "deny" };
   });
   onPageEnd(contents, (how, gone) => {
+    resetCapture(how !== "navigated");
     if (how === "destroyed") {
       return;
     }
@@ -193,6 +195,10 @@ function guard(contents: WebContents): void {
   });
   // A page that did not load, and so never started, is no better than a gone one: Reload Movie,
   // or opening a movie, loads it.
+  // The new document committed and the old one went with its tracks: a reload that loads slowly
+  // must not be killed for a stop the old page never heard.
+  contents.on("did-navigate", releaseRetiredCapture);
+  contents.on("did-finish-load", releaseRetiredCapture);
   contents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
     // ERR_ABORTED: another load overtook it.
     if (isMainFrame && code !== -3 && !listening) {
@@ -612,13 +618,7 @@ void app.whenReady().then(() => {
       answer({ cancel: true });
     },
   );
-  // Only what the player needs that the page cannot simply have: full screen.
-  session.defaultSession.setPermissionRequestHandler((contents, permission, answer) =>
-    answer(permission === "fullscreen" && contents === window?.webContents),
-  );
-  session.defaultSession.setPermissionCheckHandler(
-    (contents, permission) => permission === "fullscreen" && contents === window?.webContents,
-  );
+  capturePermissions(session.defaultSession);
   listen();
   createWindow();
   buildMenu();

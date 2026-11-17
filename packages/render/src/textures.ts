@@ -16,6 +16,8 @@ export interface TextureData {
   height: number;
   pixels: Uint8Array | Float32Array | null;
   fill: number | null;
+  /** Host image, interpreted only by the backend; core has no DOM dependency. */
+  source?: object | null;
 }
 
 /**
@@ -119,6 +121,7 @@ export class Textures extends Registry {
       data.width = width;
       data.height = height;
       data.pixels = pixels;
+      data.source = null;
       data.fill = null;
       this.keep(id, pixels);
       this.changing[id] = true;
@@ -126,6 +129,29 @@ export class Textures extends Registry {
       if (idle !== undefined) {
         this.idleWithin(id, idle);
       }
+    }
+  }
+
+  /** A host image uploaded directly, without making a CPU copy for the renderer. */
+  addSource(width: number, height: number, source: object): TextureHandle {
+    const handle = this.hold(IDLE_FRAMES);
+    this.data[handle.id] = { width, height, source, pixels: null, fill: null };
+    this.keep(handle.id, null);
+    this.changing[handle.id] = false;
+    this.pending.push(handle.id);
+    return handle;
+  }
+
+  setSource(id: number, width: number, height: number, source: object): void {
+    const data = this.data[id];
+    if (data) {
+      data.width = width;
+      data.height = height;
+      data.source = source;
+      data.pixels = null;
+      data.fill = null;
+      this.keep(id, null);
+      this.pending.push(id);
     }
   }
 

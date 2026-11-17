@@ -2,6 +2,8 @@
 // each checked again by the main process. A sandboxed preload is a
 // CommonJS script that may require only Electron's renderer modules.
 import type {
+  CaptureKind,
+  CapturePermission,
   ConnectionEvents,
   DesktopApi,
   LibraryName,
@@ -22,7 +24,70 @@ ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) =
   responses.get(id)?.(response),
 );
 
+// One cache per movie lifetime; reads after the first never block on the main process.
+let captureEpoch = -1;
+let captureStopped = false;
+const captureStatus = new Map<CaptureKind, CapturePermission>();
+function captureLifetime(epoch: number): boolean {
+  if (epoch < captureEpoch) {
+    return false;
+  }
+
+  if (epoch > captureEpoch) {
+    captureEpoch = epoch;
+    captureStopped = false;
+    captureStatus.clear();
+  }
+
+  return !captureStopped;
+}
+ipcRenderer.on("capture:stop", (_event, epoch: number) => {
+  if (captureLifetime(epoch)) {
+    captureStopped = true;
+    captureStatus.clear();
+  }
+});
+ipcRenderer.on("capture:probe", (_event, epoch: number, probe: number) => {
+  ipcRenderer.send("capture:responsive", epoch, probe);
+});
+
 const api: DesktopApi = {
+  capture: {
+    epoch: () => ipcRenderer.sendSync("capture:epoch"),
+    status: (epoch, kind) => {
+      if (!captureLifetime(epoch)) {
+        return "denied";
+      }
+      let status = captureStatus.get(kind);
+      if (!status) {
+        status = ipcRenderer.sendSync("capture:status", epoch, kind) as CapturePermission;
+        captureStatus.set(kind, status);
+      }
+
+      return status;
+    },
+    request: async (epoch, kind) => {
+      if (!captureLifetime(epoch)) {
+        return "denied";
+      }
+      const result = (await ipcRenderer.invoke(
+        "capture:request",
+        epoch,
+        kind,
+      )) as CapturePermission;
+      if (epoch !== captureEpoch || captureStopped) {
+        return "denied";
+      }
+      captureStatus.set(kind, result);
+
+      return result;
+    },
+    live: (epoch, kind, id, active) => ipcRenderer.send("capture:live", epoch, kind, id, active),
+    stopped: (epoch) => ipcRenderer.send("capture:stopped", epoch),
+    onStop: (listener) => {
+      ipcRenderer.on("capture:stop", (_event, epoch: number) => listener(epoch));
+    },
+  },
   files: {
     browse: (filters, multiple) => ipcRenderer.invoke("files:browse", filters, multiple),
     save: (name) => ipcRenderer.invoke("files:save", name),

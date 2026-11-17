@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.26"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.27"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.26`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.27`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -112,6 +112,16 @@ other ABCs to load in place of the shipped ones, each optional: a page
 that would rather play on Flash Player's own playerglobal gives its URL.
 
 ## The element and its options
+
+Capture uses the browser's permission prompt when a SWF attaches a camera
+to a Video, listens for microphone samples, or enables microphone loopback.
+It requires a secure context (HTTPS or localhost); an embedding iframe must
+allow `camera` and/or `microphone` for the devices it uses. Device names may be blank until the
+user grants permission. Set `allowcapture="false"` on an element, or
+`configure({ allowCapture: false })` for new loads, to refuse capture.
+Changing that attribute to false also stops the current capture; reload
+before enabling it again. Replacing or destroying the player stops its
+tracks, including a permission request that finishes later.
 
 The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
 and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
@@ -489,6 +499,16 @@ On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content
 made there finds its files whatever case it names them in. Where two names
 in a directory differ only in case, neither is taken.
+
+The desktop app asks before a movie uses your camera or microphone. The dialog
+names the top-level movie's source and the requested kind, camera or microphone.
+A loaded child movie uses that same attribution. Device names may remain blank
+until consent. The window title shows capture while active; View → Stop Camera and Microphone stops both until the movie is
+reloaded. Consent is cleared when the movie or page closes. If a movie freezes
+while stopping capture, the app terminates its renderer to release the devices
+and offers to reload it. A responsive page awaiting a slow device is allowed to
+finish opening, then stops the late stream; the title stays marked until closure
+is confirmed. On macOS, system permission is required as well.
 
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.

@@ -9,6 +9,12 @@ needs itself; this package is for a host built on `@swf2es/player`.
 npm install @swf2es/player-hosts
 ```
 
+- `@swf2es/player-hosts/capture`: `await browserCaptureHost()`, device
+  enumeration without prompting and camera/microphone capture after browser consent.
+  Pass it as `new Scripting(codegen, { capture })`; omitting it preserves
+  the player's no-device behaviour. `lazyBrowserCaptureHost()` enumerates
+  only when a SWF names Camera or Microphone, sparing every other SWF the
+  browser's slow first enumeration at startup.
 - `@swf2es/player-hosts/indexeddb`: `indexedDbModuleCache()`, the compiled
   modules kept in IndexedDB for a page's next visit.
 - `@swf2es/player-hosts/precompiled`: `precompiledModules()` reads what the
@@ -37,6 +43,10 @@ const moduleCache = chainCaches(
 
 `dist/thread/` holds copies of the modules a Web Worker loads, which
 resolve without the page's import map.
+
+Microphone capture uses a separate `capture-worklet.js` module beside the host.
+Serve it with the other host files; the browser distribution includes it.
+Capture still requires a secure context and browser permission.
 
 The [guide](https://swf2es.github.io/swf2es/docs/) has more.
 

@@ -159,6 +159,65 @@ function currentDomain(compile: Compile): Uint8Array {
   });
 }
 
+// A SWF loaded again into a domain that defines all its classes already
+// (scripts/ReloadDomain.as.template): its script runs again, static
+// initializers and all, but its names, its own code's included, find the
+// first load's classes, its content is of the first load's class, and its
+// code's domain is the one it was loaded into (scripts/ReloadChild.as).
+// Then a SWF of that ABC and one new (scripts/ReloadExtra.as), whose class
+// the domain gains, and the first SWF into a child of the domain.
+function reloadDomain(compile: Compile): Uint8Array {
+  const child = compile("ReloadChild");
+  const inner = (tags: Uint8Array[], documentClass: string) =>
+    w.swf({
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        ...tags,
+        w.symbolClass([[0, documentClass]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const base64 = (swf: Uint8Array) => Buffer.from(swf).toString("base64");
+  const template = readFileSync(
+    new URL("../scripts/ReloadDomain.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "ReloadDomain",
+    template
+      .replaceAll("@@CHILD@@", base64(inner([w.doAbc(child, "ReloadChild")], "ReloadChild")))
+      .replaceAll(
+        "@@PARTIAL@@",
+        base64(
+          inner(
+            [w.doAbc(child, "ReloadChild"), w.doAbc(compile("ReloadExtra"), "ReloadExtra")],
+            "ReloadExtra",
+          ),
+        ),
+      ),
+  );
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: RELOAD_DOMAIN_FRAMES,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(abc, "ReloadDomain"),
+      w.symbolClass([[0, "Main"]]),
+      ...Array.from({ length: RELOAD_DOMAIN_FRAMES }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
+const RELOAD_DOMAIN_FRAMES = 12;
+
 // Children a clip places by class name (PlaceObject3's HasClassName, no
 // character), as a SWF of dialogs places buttons from a library SWF loaded
 // before it into the same domain (scripts/PlacedByClass.as.template). The
@@ -227,6 +286,39 @@ function placedByClass(compile: Compile): Uint8Array {
 
 /** Two loads, a frame or two each, then a frame drawn. */
 const PLACED_BY_CLASS_FRAMES = 8;
+
+// A second frame whose SymbolClass binds the document's id 0 and a sprite's
+// id again, to classes of its own frame's code, as a preloader's second
+// frame does with its program's (scripts/ReboundFirst.as, ReboundSecond.as).
+// The sprite is placed in frame 2, after that SymbolClass.
+function symbolClassRebound(compile: Compile): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(compile("ReboundFirst"), "ReboundFirst"),
+      w.symbolClass([
+        [0, "ReboundFirst"],
+        [2, "ReboundBoxA"],
+      ]),
+      w.showFrame(),
+      w.doAbc(compile("ReboundSecond"), "ReboundSecond"),
+      w.symbolClass([
+        [0, "ReboundSecond"],
+        [2, "ReboundBoxB"],
+      ]),
+      w.place({ depth: 1, character: 2 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
 
 // The same, unloading from INIT (scripts/LoadsInit.as.template). The inner
 // SWF has one frame: a clip taken off the display list plays on in Flash,
@@ -930,10 +1022,26 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "reload-domain",
+    build: reloadDomain,
+    frames: RELOAD_DOMAIN_FRAMES,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "placed-by-class",
     build: placedByClass,
     frames: PLACED_BY_CLASS_FRAMES,
     capture: [PLACED_BY_CLASS_FRAMES],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "symbol-class-rebound",
+    build: symbolClassRebound,
+    frames: 4,
+    capture: [4],
     tolerance: 0,
     maxOutliers: 0,
   },

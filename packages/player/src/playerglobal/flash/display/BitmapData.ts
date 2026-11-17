@@ -5,7 +5,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { BitmapStore } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
-import { drawDisplayObject } from "../../../bitmap/draw.js";
+import { drawDisplayObject, videoNeedsRenderer } from "../../../bitmap/draw.js";
 import {
   applyFilter,
   filterRefusal,
@@ -37,6 +37,7 @@ import { type PixelRect, pixelRect, spanRect } from "../../../bitmap/pixel-rect.
 import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
+import { VideoObject } from "../../../display/videoobject.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { colorOf } from "../geom/Transform.js";
@@ -169,7 +170,7 @@ function drawInto(
   const r = clip === null || clip === undefined ? null : rectOf(s, clip);
   if (data === null) {
     // Any other display object, through the renderer, then composited as a bitmap is.
-    if (!s.drawer) {
+    if (!s.drawer && !(o.$display instanceof VideoObject && !videoNeedsRenderer(o.$display))) {
       throw s.rt.unsupported("BitmapData#draw of a display object without a renderer");
     }
 

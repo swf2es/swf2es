@@ -6,10 +6,37 @@ import { bounds } from "../display/bounds.js";
 import { type DisplayObject, pickWork } from "../display/display.js";
 import { transformRect } from "../display/geometry.js";
 import { drawnAsStage } from "../display/perspective.js";
+import { VideoObject } from "../display/videoobject.js";
 import type { Drawer } from "../hosts.js";
 import { BitmapStore } from "./bitmap.js";
 import { type Affine, type ColorTransformValues, drawBitmap } from "./composite.js";
 import type { PixelRect } from "./pixel-rect.js";
+
+/** Effects keep the existing display-list compositor, including its mask placement. */
+export function videoNeedsRenderer(video: VideoObject): boolean {
+  return video.filters.length > 0 || video.mask !== null || video.scroll !== null;
+}
+
+/** A plain Video copies its host's CPU frame without rendering or reading back a texture. */
+export function drawVideo(
+  store: BitmapStore,
+  video: VideoObject,
+  m: Affine,
+  c: ColorTransformValues | null,
+  blend: string,
+  r: PixelRect | null,
+  smoothing: boolean,
+): void {
+  const frame = video.picture ? video.source?.bitmap() : null;
+  if (!frame) {
+    return;
+  }
+
+  const sx = video.boxWidth / frame.width;
+  const sy = video.boxHeight / frame.height;
+  const placed = { ...m, a: m.a * sx, b: m.b * sx, c: m.c * sy, d: m.d * sy };
+  drawBitmap(store, frame, placed, c, blend, r, smoothing, false, "bitmap");
+}
 
 /** `d` drawn into `store` through `m`, as drawInto draws a display object. */
 function drawObject(
@@ -64,7 +91,7 @@ function drawObject(
  * AS3 BitmapData's draw, and an AVM1 one's.
  */
 export function drawDisplayObject(
-  drawer: Drawer,
+  drawer: Drawer | null,
   store: BitmapStore,
   d: DisplayObject,
   m: Affine,
@@ -73,6 +100,15 @@ export function drawDisplayObject(
   r: PixelRect | null,
   samples: number,
 ): void {
+  if (d instanceof VideoObject && !videoNeedsRenderer(d)) {
+    drawVideo(store, d, m, c, blend, r, d.smoothing);
+    return;
+  }
+
+  if (!drawer) {
+    throw new Error("A renderer is required for this display-object copy");
+  }
+
   // What is in 3D in an object on no stage projects as on a stage the bitmap's size.
   let top: DisplayObject = d;
   while (top.parent) {

@@ -124,7 +124,7 @@ export class GpuTextures {
     for (const id of textures.pending) {
       const data = textures.get(id);
       const fill = data?.pixels ? null : (data?.fill ?? null);
-      if (!data || (!data.pixels && fill === null)) {
+      if (!data || (!data.pixels && !data.source && fill === null)) {
         continue;
       }
 
@@ -137,6 +137,45 @@ export class GpuTextures {
 
       this.state.bindTexture(TEXTURE_UNIT, texture);
       this.state.activeTexture(TEXTURE_UNIT);
+      if (data.source) {
+        gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+        try {
+          if (this.sizes[id * 2] === data.width && this.sizes[id * 2 + 1] === data.height) {
+            gl.texSubImage2D(
+              gl.TEXTURE_2D,
+              0,
+              0,
+              0,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              data.source as TexImageSource,
+            );
+          } else {
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA8,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              data.source as TexImageSource,
+            );
+          }
+          this.sizes[id * 2] = data.width;
+          this.sizes[id * 2 + 1] = data.height;
+        } catch {
+          // A closed or tainted host picture must not strand all subsequent texture updates.
+          if (this.sizes[id * 2] < 0) {
+            this.state.dropTexture(texture);
+            gl.deleteTexture(texture);
+            this.textures[id] = null;
+          }
+        } finally {
+          data.source = null;
+          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+        }
+        continue;
+      }
+
       // Floats, a kernel's image, make the texture again each time, as bytes may follow them.
       if (data.pixels instanceof Float32Array) {
         this.sizes[id * 2] = -1;

@@ -3,6 +3,7 @@
 // object's parent chain. The player broadcasts its frame and activation
 // events through it.
 import { avm2 } from "@swf2es/runtime";
+import { microphoneStates } from "../../../media/microphone.js";
 import { dispatchEvent, displayOf, type Listener } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 
@@ -72,6 +73,10 @@ export function addListener(
     s.activationTargets(key).add(o);
   }
 
+  if (key === "sampleData") {
+    microphoneStates.get(o)?.sync();
+  }
+
   return true;
 }
 
@@ -92,6 +97,9 @@ export function removeListener(
       s.broadcastTargets(key).delete(o);
     } else if (list.length === 0 && ACTIVATION.has(key)) {
       s.activationTargets(key).delete(o);
+    }
+    if (key === "sampleData") {
+      microphoneStates.get(o)?.sync();
     }
   }
 }

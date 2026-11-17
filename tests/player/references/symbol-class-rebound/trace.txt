@@ -1,0 +1,9 @@
+ReboundFirst 1
+tick 1 2 ReboundFirst true
+ReboundBoxA 1
+tick 2 1 ReboundFirst true
+ReboundBoxA 1
+ReboundBoxB 1
+new 1 1
+tick 3 2 ReboundFirst true
+ReboundBoxA 1

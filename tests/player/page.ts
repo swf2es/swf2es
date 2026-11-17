@@ -22,6 +22,7 @@ import { createCodegen } from "@swf2es/codegen";
 import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   Avm1,
+  airLibrary,
   Container,
   type DisplayObject,
   type FetchRequest,
@@ -161,7 +162,7 @@ async function scriptingFor(
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
   });
-  const libraries = await Promise.all(
+  const libraries: Uint8Array[] = await Promise.all(
     LIBRARIES.map(async (n) => {
       // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.
       const response = await fetch(`/libraries/${n}.abc`);
@@ -172,6 +173,9 @@ async function scriptingFor(
       return new Uint8Array(await response.arrayBuffer());
     }),
   );
+  if (air) {
+    libraries.push(airLibrary);
+  }
   await scripting.loadLibraries(libraries);
   return scripting;
 }
@@ -1864,7 +1868,12 @@ let opened: {
 /** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
 let leakCache: ModuleCache | null = null;
 
-async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
+async function openSwf(
+  base64: string,
+  url: string | null,
+  cached = false,
+  lazyCompilation = false,
+): Promise<string | null> {
   opened = null;
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const trace: string[] = [];
@@ -1877,6 +1886,7 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
 
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
       moduleCache: cached ? leakCache : null,
+      lazyCompilation,
     });
     const player = new Player(bytes, scripting);
     await player.start();
@@ -1890,14 +1900,14 @@ async function openSwf(base64: string, url: string | null, cached = false): Prom
 /**
  * Play the opened SWF's frames until it has traced `lines` lines, or for
  * `frames` frames at most: the lines it has traced, the size of its
- * codegen's memory, and what stopped it.
+ * codegen's memory and what its live ABCs hold of it, and what stopped it.
  */
 async function stepSwf(
   lines: number,
   frames: number,
-): Promise<{ lines: number; codegen: number; error: string | null }> {
+): Promise<{ lines: number; codegen: number; live: number; error: string | null }> {
   if (!opened) {
-    return { lines: 0, codegen: 0, error: "no SWF is open" };
+    return { lines: 0, codegen: 0, live: 0, error: "no SWF is open" };
   }
 
   const { player, scripting, trace, uncaught } = opened;
@@ -1910,9 +1920,14 @@ async function stepSwf(
       }
     }
 
-    return { lines: trace.length, codegen: codegenMemory?.buffer.byteLength ?? 0, error: null };
+    return {
+      lines: trace.length,
+      codegen: codegenMemory?.buffer.byteLength ?? 0,
+      live: scripting?.codegen.usage().live ?? 0,
+      error: null,
+    };
   } catch (e) {
-    return { lines: trace.length, codegen: 0, error: describe(e, scripting) };
+    return { lines: trace.length, codegen: 0, live: 0, error: describe(e, scripting) };
   }
 }
 

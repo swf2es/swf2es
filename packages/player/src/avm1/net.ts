@@ -13,6 +13,7 @@ import type {
   SocketTransport,
 } from "../hosts.js";
 import { resolve } from "../scripting/loads.js";
+import { fetchWhile } from "../signals.js";
 
 export type Fetch = (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
 
@@ -110,12 +111,7 @@ export class Avm1Net {
 
     const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose };
     return (
-      fetch
-        ? fetch(
-            outgoing,
-            signal ? AbortSignal.any([signal, this.stopped.signal]) : this.stopped.signal,
-          )
-        : Promise.reject()
+      fetch ? fetchWhile(fetch, outgoing, this.stopped.signal, signal) : Promise.reject()
     ).then(
       (result) => result,
       () => FAILED,
@@ -145,10 +141,16 @@ export class Avm1Net {
       return false;
     }
 
-    this.fetchHost?.(
-      { ...request, url: this.resolve(request.url), purpose: "send" },
-      this.stopped.signal,
-    ).catch(() => {});
+    const fetch = this.fetchHost;
+    if (fetch) {
+      // Not the player's own signal: a host that listens to it would keep a listener a send.
+      fetchWhile(
+        fetch,
+        { ...request, url: this.resolve(request.url), purpose: "send" },
+        this.stopped.signal,
+      ).catch(() => {});
+    }
+
     return true;
   }
 
@@ -197,9 +199,9 @@ export class Avm1Net {
           stopTimer();
           this.defer(() => events.open(endpoints));
         },
-        data: (bytes) => {
-          const copy = bytes.slice();
-          this.defer(() => events.data(copy));
+        data: (bytes, owned) => {
+          const copy = owned ? bytes : bytes.slice();
+          this.defer(() => events.data(copy, true));
         },
         close: () => {
           end();
