@@ -74,7 +74,7 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   const sent: Uint8Array[] = [];
   const closeCalls: number[] = [];
   let opened: ((endpoints?: SocketEndpoints) => void) | undefined;
-  let received: ((bytes: Uint8Array) => void) | undefined;
+  let received: ((bytes: Uint8Array, owned?: boolean) => void) | undefined;
   let remoteClose: (() => void) | undefined;
   let failed: ((message: string) => void) | undefined;
   const scripting = new Scripting(await createCodegen(wasm), {
@@ -147,6 +147,20 @@ test("Socket uses a host connection and delivers data on player frames", { skip 
   assert.equal(get("bytesAvailable"), 2);
   assert.equal(call("readUnsignedByte"), 0x41);
   assert.equal(call("readUnsignedByte"), 0x42);
+
+  // A host that reads into one buffer again before the frame comes: copied as they came.
+  const reused = Uint8Array.from([0x43, 0x44]);
+  received?.(reused);
+  reused.fill(0);
+  player.tick();
+  assert.equal(call("readUnsignedByte"), 0x43);
+  assert.equal(call("readUnsignedByte"), 0x44);
+  // Bytes a host hands over are taken as they are.
+  received?.(Uint8Array.from([0x45]), true);
+  player.tick();
+  assert.equal(call("readUnsignedByte"), 0x45);
+  assert.deepEqual(events, ["connect", "socketData", "socketData", "socketData"]);
+  events.length = 2;
 
   call("close");
   assert.equal(get("connected"), false);

@@ -235,7 +235,7 @@ export function webSocketNatives(s: Scripting): avm2.Natives {
 
               const array = s.rt.construct(byteArray());
               const bytes = avm2.bytesOf(s.rt, array);
-              bytes.write(typeof data === "string" ? textEncoder.encode(data) : data.slice());
+              bytes.write(typeof data === "string" ? textEncoder.encode(data) : data);
               bytes.position = 0;
               const format = typeof data === "string" || isText ? TEXT : BINARY;
               const cls = s.rt.classNamed("flash.events::WebSocketEvent");

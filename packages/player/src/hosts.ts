@@ -369,7 +369,12 @@ export interface SocketEndpoints {
 export interface SocketEvents {
   /** Opened, with its ends where the host knows them: a relay's are not the script's to see. */
   open(endpoints?: SocketEndpoints): void;
-  data(bytes: Uint8Array): void;
+  /**
+   * Bytes that came. `owned`: they are the player's from now on, the host
+   * never writing to them again; otherwise the player copies them before
+   * it returns, so a host may read into one buffer over and over.
+   */
+  data(bytes: Uint8Array, owned?: boolean): void;
   close(): void;
   error(message: string): void;
 }

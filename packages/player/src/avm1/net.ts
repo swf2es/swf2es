@@ -197,9 +197,9 @@ export class Avm1Net {
           stopTimer();
           this.defer(() => events.open(endpoints));
         },
-        data: (bytes) => {
-          const copy = bytes.slice();
-          this.defer(() => events.data(copy));
+        data: (bytes, owned) => {
+          const copy = owned ? bytes : bytes.slice();
+          this.defer(() => events.data(copy, true));
         },
         close: () => {
           end();

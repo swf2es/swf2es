@@ -22,7 +22,8 @@ export function shellSocketHost(sockets: DesktopSockets): SocketHost {
             events.open(event);
             break;
           case "data":
-            events.data(event.bytes);
+            // A fresh array each, as IPC copies it.
+            events.data(event.bytes, true);
             break;
           case "error":
             events.error(event.message);

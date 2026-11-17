@@ -137,8 +137,9 @@ export function socketNatives(s: Scripting): avm2.Natives {
                 c.endpoints = endpoints ? { ...endpoints } : UNKNOWN;
                 event(this, "connect");
               }),
-            data: (bytes) => {
-              const copy = bytes.slice();
+            data: (bytes, owned) => {
+              // Delivered on a later turn: a host's reused buffer would have changed by then.
+              const copy = owned ? bytes : bytes.slice();
               s.loads.deferHostEvent(() => {
                 if (!current() || !c.connected) {
                   return;

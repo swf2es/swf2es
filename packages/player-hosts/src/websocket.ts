@@ -13,7 +13,7 @@ export function webSocketSocketHost(
       socket.addEventListener("open", () => events.open());
       socket.addEventListener("message", ({ data }) => {
         if (data instanceof ArrayBuffer) {
-          events.data(new Uint8Array(data));
+          events.data(new Uint8Array(data), true);
         } else {
           events.error("Socket bridge sent a non-binary WebSocket message.");
           socket.close();
