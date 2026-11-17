@@ -1,5 +1,6 @@
 import { avm2 } from "@swf2es/runtime";
 import type { VideoObject } from "../../../display/display.js";
+import { attachCamera } from "../../../media/camera.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -50,9 +51,13 @@ export function videoNatives(s: Scripting): avm2.Natives {
       this.$display.pixelsChanged(false);
     }
 
-    attachNetStream(_stream: Value): void {}
+    attachNetStream(_stream: Value): void {
+      attachCamera(this.$display, null);
+    }
 
-    attachCamera(_camera: Value): void {}
+    attachCamera(camera: Value): void {
+      attachCamera(this.$display, camera);
+    }
 
     clear(): void {
       this.$display.clear();

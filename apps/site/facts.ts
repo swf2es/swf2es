@@ -101,6 +101,7 @@ export const importMap = {
       "@swf2es/player": "modules/player/index.js",
       "@swf2es/player/context3d": "modules/player/playerglobal/context3d.js",
       "@swf2es/player/scene": "modules/player/scene/view.js",
+      "@swf2es/player-hosts/capture": "modules/player-hosts/capture.js",
       "@swf2es/player-hosts/indexeddb": "modules/player-hosts/indexeddb.js",
       "@swf2es/player-hosts/precompiled": "modules/player-hosts/precompiled.js",
       "@swf2es/player-hosts/stage3d": "modules/player-hosts/stage3d.js",

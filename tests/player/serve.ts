@@ -50,6 +50,7 @@ export const importMap = {
     "@swf2es/player": "/player/index.js",
     "@swf2es/player/context3d": "/player/playerglobal/context3d.js",
     "@swf2es/player/scene": "/player/scene/view.js",
+    "@swf2es/player-hosts/capture": "/player-hosts/capture.js",
     "@swf2es/player-hosts/stage3d": "/player-hosts/stage3d.js",
     "@swf2es/player/worker": "/player/workers/thread.js",
     "@swf2es/player-hosts/indexeddb": "/player-hosts/indexeddb.js",

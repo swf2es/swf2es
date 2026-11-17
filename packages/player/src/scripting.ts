@@ -36,6 +36,7 @@ import {
   type AirApplication,
   browserClipboard,
   browserNavigate,
+  type CaptureHost,
   type ClipboardHost,
   type Drawer,
   defaultStorage,
@@ -212,6 +213,8 @@ export class Scripting {
   /** air.net.WebSocket's client: the global WebSocket's by default, null for none. */
   readonly webSocket: WebSocketHost | null;
   readonly audio: AudioHost | null;
+  readonly capture: CaptureHost | null;
+  readonly captureLifetime = new AbortController();
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
   readonly fileHost: FileHost | null;
@@ -423,6 +426,7 @@ export class Scripting {
       /** How many touches the screen takes at once: by default the browser's navigator.maxTouchPoints, 0 without one. */
       maxTouchPoints?: number;
       externalInterface?: ExternalInterfaceHost;
+      capture?: CaptureHost | null;
       socket?: SocketHost;
       webSocket?: WebSocketHost | null;
       audio?: AudioHost | null;
@@ -518,6 +522,7 @@ export class Scripting {
         }
       : null;
     this.onUncaught = options.onUncaught ?? null;
+    this.capture = options.capture ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
@@ -608,6 +613,7 @@ export class Scripting {
     }
 
     this.destroyed = true;
+    this.captureLifetime.abort();
     this.loads.destroyAvm1();
     this.workers.stopAll();
     this.code.recorder?.drop();
