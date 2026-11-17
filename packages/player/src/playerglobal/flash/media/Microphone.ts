@@ -1,5 +1,8 @@
 // Device capture follows Adobe's documented API; without a capture host,
 // the existing device-free defaults measured in adl remain unchanged.
+// The devices are read before a SWF that names the class runs (Code.link);
+// one that reached it unseen starts the reading at its first call, and
+// finds the devices at a later one.
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { capturePermission, requestCapturePermission } from "../../../media/capture-permission.js";
@@ -18,6 +21,7 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
   let enhancedDevice: MicrophoneState | null = null;
   const state = (object: object) => microphoneStates.get(object);
   const getMicrophone = (value: Value): Value => {
+    void s.prepareCapture();
     const index = value === undefined || Number(value) === -1 ? 0 : s.rt.toInt(value);
     const device = s.capture?.microphones?.[index];
     if (!device || !s.capture?.openMicrophone || s.destroyed) {
@@ -51,11 +55,13 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
     }
 
     static get isSupported(): boolean {
+      void s.prepareCapture();
       return true;
     }
 
     /** A new array each time, as Flash's. */
     static get names(): Value {
+      void s.prepareCapture();
       return s.rt.array((s.capture?.microphones ?? []).map((device) => device.name));
     }
 

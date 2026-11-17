@@ -5,7 +5,6 @@ import { definesInput, definesSound, isAs3, readActions, readSwf, tags } from "@
 import {
   type AirApplication,
   Avm1,
-  type CaptureHost,
   type ExternalInterfaceHost,
   type FileSystemHost,
   type FullScreenHost,
@@ -421,11 +420,10 @@ export class Swf2esPlayerElement extends ElementBase {
           swf.tags.some((t) => t.code === tags.DoABC || t.code === tags.DoABC2));
       if (scripted) {
         const stage3D = configuration().stage3D;
-        const [codegen, abcs, stage3DModule, capture] = await Promise.all([
+        const [codegen, abcs, stage3DModule] = await Promise.all([
           codegenForPlayer(),
           playerLibraries(session.air !== null || !!configuration().air),
           stage3D ? import("./stage3d.js") : null,
-          captureHost(attribute(this, "allowcapture")?.toLowerCase() !== "false"),
         ]);
         if (!current()) {
           return;
@@ -438,7 +436,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         session.workers = host;
-        session.scripting = this.#scripting(session, codegen, url, pageUrl, host, capture);
+        session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
             this.#box,
@@ -612,7 +610,6 @@ export class Swf2esPlayerElement extends ElementBase {
     url: string,
     pageUrl: string,
     workerHost: WorkerHost | null,
-    capture: CaptureHost | null,
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const base = attribute(this, "base");
@@ -630,7 +627,7 @@ export class Swf2esPlayerElement extends ElementBase {
       encryptedStore: session.air?.items ?? configuration().air?.encryptedStore,
       socket: offline ? undefined : socketHost(),
       webSocket: offline ? null : configuration().webSockets,
-      capture: attribute(this, "allowcapture")?.toLowerCase() === "false" ? null : capture,
+      capture: captureHost(attribute(this, "allowcapture")?.toLowerCase() !== "false"),
       navigate: internal ? null : undefined,
       fileHost: configuration().fileHost,
       sendToUrl: !internal,

@@ -1,5 +1,5 @@
 import type { CameraCapture, CaptureHost, MicrophoneCapture } from "@swf2es/player";
-import { browserCaptureHost } from "@swf2es/player-hosts/capture";
+import { lazyBrowserCaptureHost } from "@swf2es/player-hosts/capture";
 import type { CaptureKind, DesktopCapture } from "../shared/api.js";
 
 const closing = new WeakMap<CaptureHost, Set<Promise<void>>>();
@@ -7,12 +7,12 @@ export async function captureStopped(host: CaptureHost | null | undefined): Prom
   await Promise.all(host ? [...(closing.get(host) ?? [])] : []);
 }
 
-/** Ask the shell before Chromium gets a request; late consent cannot start an old movie. */
-export async function shellCapture(
-  api: DesktopCapture,
-  epoch: number,
-): Promise<CaptureHost | null> {
-  const browser = await browserCaptureHost();
+/**
+ * Ask the shell before Chromium gets a request; late consent cannot start an
+ * old movie. The devices are read only when a SWF names Camera or Microphone.
+ */
+export function shellCapture(api: DesktopCapture, epoch: number): CaptureHost | null {
+  const browser = lazyBrowserCaptureHost();
   if (!browser) {
     return null;
   }
@@ -88,6 +88,7 @@ export async function shellCapture(
     return { handle: () => handle, close };
   }
   const host: CaptureHost = {
+    prepare: () => browser.prepare?.() ?? Promise.resolve(true),
     get cameras() {
       return browser.cameras;
     },

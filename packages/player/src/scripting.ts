@@ -213,7 +213,10 @@ export class Scripting {
   /** air.net.WebSocket's client: the global WebSocket's by default, null for none. */
   readonly webSocket: WebSocketHost | null;
   readonly audio: AudioHost | null;
-  readonly capture: CaptureHost | null;
+  private captureHost: CaptureHost | null;
+  /** The capture host's prepare, once asked for (prepareCapture), and whether it ended. */
+  private captureReady: Promise<void> | null = null;
+  private captureSettled = false;
   readonly captureLifetime = new AbortController();
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
@@ -522,7 +525,7 @@ export class Scripting {
         }
       : null;
     this.onUncaught = options.onUncaught ?? null;
-    this.capture = options.capture ?? null;
+    this.captureHost = options.capture ?? null;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
@@ -593,6 +596,49 @@ export class Scripting {
   /** Whether the next frame waits for a load from bytes still compiling (Loads.holdsFrame). */
   holdsFrame(): boolean {
     return this.loads.holdsFrame();
+  }
+
+  /** Camera's and Microphone's host, or none. */
+  get capture(): CaptureHost | null {
+    return this.captureHost;
+  }
+
+  /**
+   * Whether the capture host has yet to read its devices, which code that
+   * names them waits for: until its prepare ends, not only until it starts.
+   */
+  get captureUnprepared(): boolean {
+    return !this.captureSettled && !!this.captureHost?.prepare;
+  }
+
+  /**
+   * The capture host prepared, once: Camera.names and the rest answer at
+   * once, so the code of a SWF that names them runs only after (Code.link).
+   * With capture refused already, nothing is read. A prepare that fails,
+   * or throws before it returns a promise, leaves no host, as one that
+   * answers false: never a failed load, nor another try for each SWF.
+   */
+  prepareCapture(): Promise<void> {
+    if (!this.captureReady) {
+      const host = this.captureHost;
+      const settle = (ready: boolean) => {
+        if (!ready && this.captureHost === host) {
+          this.captureHost = null;
+        }
+
+        this.captureSettled = true;
+      };
+      if (!host?.prepare || this.captureLifetime.signal.aborted) {
+        settle(true);
+        this.captureReady = Promise.resolve();
+      } else {
+        this.captureReady = Promise.resolve()
+          .then(() => host.prepare?.() ?? true)
+          .then(settle, () => settle(false));
+      }
+    }
+
+    return this.captureReady;
   }
 
   /**

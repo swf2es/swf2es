@@ -9,6 +9,7 @@ import { avm2 } from "@swf2es/runtime";
 import { decodeImages } from "../bitmap/images.js";
 import type { Library } from "../display/timeline.js";
 import type { CachedModule, ModuleCache } from "../hosts.js";
+import { namesCapture } from "../media/capture-names.js";
 import type { Scripting } from "../scripting.js";
 import { type Evaluated, evaluate, evaluateFunction, type Factory } from "./evaluate.js";
 import {
@@ -262,6 +263,15 @@ export class Code {
     const abcs = swf.tags
       .filter((tag) => tag.code === tags.DoABC || tag.code === tags.DoABC2)
       .map((tag) => readDoAbc(swf.bytes, tag));
+    // Camera.names and the rest answer at once, so the host reads the
+    // devices before the first SWF that names them runs, and not for one
+    // that never does: a browser's first enumeration costs a cold start
+    // more than a tenth of a second. Started here, it reads while the SWF
+    // compiles and links, which runs none of its code; awaited at the end.
+    const capture =
+      this.s.captureUnprepared && namesCapture(abcs.map(({ abc }) => abc))
+        ? this.s.prepareCapture()
+        : null;
     if (
       abcs.some(({ abc }) => {
         const version = this.s.codegen.abcVersion(abc);
@@ -335,6 +345,10 @@ export class Code {
     } finally {
       this.pin(domain, -1);
       this.evict(domain);
+    }
+
+    if (capture) {
+      await capture;
     }
 
     return () => {

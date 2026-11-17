@@ -157,8 +157,18 @@ documents `Microphone.Unavailable` for the other microphones, which stop providi
 audio, but no level; it is sent at level `"status"`, as every other capture code,
 and only to microphones that were capturing. An unavailable device can be retried by attaching again.
 
-The browser host enumerates before AS3 starts so synchronous `names` and
-`getCamera` can use the result without prompting. It opens capture only
+The browser host enumerates, and reads the permission states, before the
+code of the first SWF that names `flash.media.Camera` or `Microphone` runs
+(its ABCs' constant pools, or the full name as a string, as
+`getDefinitionByName` takes it), so synchronous `names` and `getCamera`
+can use the result without prompting. A SWF loaded later that names them
+waits for it the same way. A SWF that never names them pays nothing: a
+browser's first enumeration added about 140 ms to a cold start. The
+reading overlaps the SWF's compiling and linking, which run none of its
+code. A SWF that reaches the classes only by a name built at run time is
+not seen: its first call to `names`, `getCamera`, `getMicrophone` or
+`isSupported` finds no devices but starts the reading, and later calls
+find them. It opens capture only
 on attach, with ideal size/aspect-ratio/rate constraints, then reports
 actual track settings. `favorArea` prioritizes the requested size by
 capping frame rate; Chromium's native-mode selection cannot reproduce
