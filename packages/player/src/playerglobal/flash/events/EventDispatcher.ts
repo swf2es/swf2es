@@ -104,28 +104,6 @@ export function removeListener(
   }
 }
 
-/** Each of `o`'s listeners that `drop` picks taken, as removeEventListener takes it; whether any was. */
-export function removeListenersWhere(
-  s: Scripting,
-  o: AsObject,
-  drop: (fn: Value) => boolean,
-): boolean {
-  const picked: [string, Listener][] = [];
-  for (const [type, list] of o.$listeners ?? []) {
-    for (const listener of list) {
-      if (drop(listener.fn)) {
-        picked.push([type, listener]);
-      }
-    }
-  }
-
-  for (const [type, listener] of picked) {
-    removeListener(s, o, type, listener.fn, listener.capture);
-  }
-
-  return picked.length > 0;
-}
-
 export function eventDispatcherNatives(s: Scripting): avm2.Natives {
   const natives: avm2.Natives = {};
   const typeOf = (type: Value) => eventType(s, type);

@@ -1,8 +1,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { Library } from "../display/timeline.js";
 import type { CaptureDevice, MicrophoneCapture, MicrophoneMode } from "../hosts.js";
-import { removeListenersWhere } from "../playerglobal/flash/events/EventDispatcher.js";
-import { dispatchEvent, heard } from "../scripting/events.js";
+import { dispatchEvent, heard, removeListenersWhere } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import type { SoundMix, StreamingSound } from "./audio.js";
 import { CaptureResampler, microphoneRates } from "./capture-resampler.js";
