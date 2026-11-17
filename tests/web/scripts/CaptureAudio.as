@@ -3,6 +3,7 @@ package {
   import flash.events.ActivityEvent;
   import flash.events.Event;
   import flash.events.SampleDataEvent;
+  import flash.events.StatusEvent;
   import flash.external.ExternalInterface;
   import flash.media.Microphone;
   import flash.utils.getTimer;
@@ -20,8 +21,13 @@ package {
     private var activeAt:int = 0;
     private var activityCount:int = 0;
     private var activityTimeout:int = 0;
+    private var points:Array = [];
+    private var order:Array = [];
 
     public function CaptureAudio() {
+      ExternalInterface.addCallback("audioOrder", function():void {
+        addEventListener(Event.ENTER_FRAME, orderStart);
+      });
       ExternalInterface.addCallback("audioBegin", begin);
       ExternalInterface.addCallback("audioActivity", activity);
       ExternalInterface.addCallback("audioActivityEnd", activityEnd);
@@ -29,11 +35,39 @@ package {
       trace("audio: ready", mic.activityLevel);
     }
 
+    // Right after a frame, so the next one, which tells of the grant, is seconds away.
+    private function orderStart(event:Event):void {
+      removeEventListener(Event.ENTER_FRAME, orderStart);
+      stage.frameRate = 0.4;
+      mic.addEventListener(StatusEvent.STATUS, orderStatus);
+      mic.addEventListener(SampleDataEvent.SAMPLE_DATA, orderSamples);
+    }
+
+    private function orderStatus(event:StatusEvent):void {
+      order.push(event.code);
+      orderDone();
+    }
+
+    private function orderSamples(event:SampleDataEvent):void {
+      if (order.indexOf("samples") < 0) {
+        order.push("samples");
+      }
+      orderDone();
+    }
+
+    private function orderDone():void {
+      if (order.length < 2) { return; }
+      mic.removeEventListener(StatusEvent.STATUS, orderStatus);
+      mic.removeEventListener(SampleDataEvent.SAMPLE_DATA, orderSamples);
+      stage.frameRate = 24;
+      trace("audio: order", order.join(","));
+    }
+
     public function begin(rate:int, pause:Boolean, slow:Boolean):void {
       stage.frameRate = slow ? 1 : 24;
       mic.rate = rate;
       mic.gain = 50;
-      first = -1; last = total = 0; next = 0;
+      first = -1; last = total = 0; next = 0; points = [];
       continuous = endian = true; busy = pause; blocked = false;
       mic.addEventListener(SampleDataEvent.SAMPLE_DATA, samples);
       addEventListener(Event.ENTER_FRAME, frame);
@@ -46,6 +80,7 @@ package {
       endian = endian && event.data.endian == "bigEndian";
       next = event.position + count;
       last = getTimer();
+      points.push(last + ":" + next);
       if (first < 0) { first = last; } else { total += count; }
     }
 
@@ -53,13 +88,14 @@ package {
       if (first < 0) { return; }
       mic.gain = 50;
       if (busy && !blocked && getTimer() - first > 400) {
+        // Longer than a worklet block or two: one credit would lose about a tenth of the window.
         blocked = true;
         ExternalInterface.call("captureBusy");
       }
       if (getTimer() - first < 2000) { return; }
       mic.removeEventListener(SampleDataEvent.SAMPLE_DATA, samples);
       removeEventListener(Event.ENTER_FRAME, frame);
-      trace("audio: count", mic.rate, total, last - first, continuous, endian, blocked);
+      trace("audio: count", mic.rate, total, last - first, continuous, endian, blocked, points.join(","));
     }
 
     public function activity(timeout:int):void {

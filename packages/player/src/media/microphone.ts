@@ -1,14 +1,12 @@
 import { avm2 } from "@swf2es/runtime";
 import type { Library } from "../display/timeline.js";
 import type { CaptureDevice, MicrophoneCapture, MicrophoneMode } from "../hosts.js";
-import { dispatchEvent, heard } from "../scripting/events.js";
+import { dispatchEvent, heard, removeListenersWhere } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import type { SoundMix, StreamingSound } from "./audio.js";
 import { CaptureResampler, microphoneRates } from "./capture-resampler.js";
 import { CaptureStatus } from "./capture-status.js";
 import { mixerMix, mixOf, outputMix } from "./sounds.js";
-
-const nativeLittleEndian = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 
 export const microphoneStates = new WeakMap<avm2.AsObject, MicrophoneState>();
 const captures = new WeakMap<Scripting, Set<WeakRef<MicrophoneState>>>();
@@ -47,7 +45,10 @@ export class MicrophoneState {
   }
 
   loopback = false;
-  private loopOwner: WeakRef<Library> | null = null;
+  /** Every SWF that turned loopback on; it stays on while one is loaded, or once player code did. */
+  private loopOwners: WeakRef<Library>[] = [];
+  private loopUnowned = false;
+  private readonly loopChannels: Float32Array[] = [];
   mix: SoundMix = mixOf(null);
   private capture: MicrophoneCapture | null = null;
   private active = false;
@@ -61,9 +62,10 @@ export class MicrophoneState {
   private lastSound = -1;
   private activating = false;
   private reportedActivity = false;
-  private activityEventGeneration = 0;
+  private activityPending = false;
   private pending = false;
   private readonly queued = new Float32Array(16384);
+  private readonly queuedWords = new Uint32Array(this.queued.buffer);
   private queuedSamples = 0;
   private deliveryTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -84,8 +86,9 @@ export class MicrophoneState {
     s.captureLifetime.signal.addEventListener(
       "abort",
       () => {
+        const opened = this.active;
         this.stop();
-        this.consent.set(true);
+        this.consent.revoke(opened);
       },
       { once: true },
     );
@@ -93,27 +96,42 @@ export class MicrophoneState {
 
   setLoopback(enabled: boolean): void {
     this.loopback = enabled;
-    const library = enabled ? this.s.code.codeLibrary() : null;
-    this.loopOwner = library ? new WeakRef(library) : null;
+    if (!enabled) {
+      this.loopOwners = [];
+      this.loopUnowned = false;
+    } else {
+      const library = this.s.code.runningLibrary();
+      if (!library) {
+        this.loopUnowned = true;
+      } else if (!this.loopOwners.some((owner) => owner.deref() === library)) {
+        this.loopOwners.push(new WeakRef(library));
+      }
+    }
+
     this.sync();
   }
 
   stopForLibrary(library: Library): void {
     let changed = false;
-    for (const list of this.object.$listeners?.values() ?? []) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        if (this.s.code.calledLibrary(list[i].fn, null) === library) {
-          list.splice(i, 1);
-          changed = true;
-        }
+    // Collected owners go too, so the list stays bounded across loads.
+    const owners = this.loopOwners.filter((owner) => {
+      const loaded = owner.deref();
+      return loaded !== undefined && loaded !== library;
+    });
+    if (owners.length !== this.loopOwners.length) {
+      this.loopOwners = owners;
+      if (owners.length === 0 && !this.loopUnowned) {
+        this.loopback = false;
+        changed = true;
       }
     }
-    if (this.loopOwner?.deref() === library) {
-      this.loopback = false;
-      this.loopOwner = null;
-      changed = true;
-    }
 
+    // Taking a sampleData listener resyncs the device itself.
+    removeListenersWhere(
+      this.s,
+      this.object,
+      (fn) => this.s.code.calledLibrary(fn, null) === library,
+    );
     if (changed && this.active) {
       this.sync();
     }
@@ -173,6 +191,7 @@ export class MicrophoneState {
       if (!current()) {
         return;
       }
+
       if (value !== "granted") {
         this.stop(false);
       }
@@ -183,6 +202,7 @@ export class MicrophoneState {
         this.consent.set(value !== "granted");
       }
     };
+
     try {
       const capture = host.openMicrophone(
         this.device,
@@ -197,6 +217,7 @@ export class MicrophoneState {
         },
         this.s.captureLifetime.signal,
       );
+
       if (current() && this.active) {
         this.capture = capture;
       } else {
@@ -207,15 +228,20 @@ export class MicrophoneState {
     }
   }
 
+  /** Adobe: the other microphones stop providing audio and are told; idle ones have nothing to stop. */
   unavailable(): void {
+    const opened = this.active;
     this.stop();
-    this.consent.unavailable();
+    if (opened) {
+      this.consent.unavailable();
+    }
   }
 
   private stop(invalidate = true): void {
     if (invalidate) {
       this.generation++;
     }
+
     this.active = false;
     this.capture?.close();
     this.capture = null;
@@ -226,6 +252,7 @@ export class MicrophoneState {
     this.loopResampler = null;
     this.queuedSamples = 0;
     this.pending = false;
+    this.activityPending = false;
     if (this.deliveryTimer !== null) {
       clearTimeout(this.deliveryTimer);
       this.deliveryTimer = null;
@@ -264,19 +291,21 @@ export class MicrophoneState {
     if (!observing) {
       this.reportedActivity = false;
     }
+
     if (activating !== this.activating || (observing && activating !== this.reportedActivity)) {
       this.activating = activating;
-      const generation = this.generation;
-      if (observing && this.activityEventGeneration !== generation) {
-        this.activityEventGeneration = generation;
+      if (observing && !this.activityPending) {
+        const generation = this.generation;
+        this.activityPending = true;
         this.s.loads.deferHostEvent(() => {
-          if (this.activityEventGeneration === generation) {
-            this.activityEventGeneration = 0;
+          if (generation !== this.generation) {
+            return;
           }
+
+          this.activityPending = false;
           if (
             !this.s.destroyed &&
             this.active &&
-            generation === this.generation &&
             this.silenceLevel < 100 &&
             heard(this.object, "activity") &&
             this.reportedActivity !== this.activating
@@ -303,20 +332,26 @@ export class MicrophoneState {
       if (!this.loopResampler || this.loopResampler.inputRate !== rate) {
         this.loopResampler = new CaptureResampler(rate, 44100);
       }
-      loop = this.loopResampler.push(samples);
+
+      // The stream copies each block on append, so the resampler's buffer and the pair are reused.
+      loop = this.loopResampler.push(samples, true);
       this.output ??= this.s.audio.stream(outputMix(this.mix, mixerMix(this.s)), () => {
         this.output?.setMix(outputMix(this.mix, mixerMix(this.s)));
       });
       // Never queue more than 200 ms while autoplay holds the output device.
       const played = this.output.positionMs * 44.1;
       if (this.submitted - (Number.isFinite(played) ? played : 0) < 8820) {
-        this.output.append([loop, loop]);
+        this.loopChannels[0] = loop;
+        this.loopChannels[1] = loop;
+        this.output.append(this.loopChannels);
         this.submitted += loop.length;
       }
     }
+
     if (!heard(this.object, "sampleData")) {
       return;
     }
+
     const targetRate = microphoneRates.get(this.rate) ?? 8000;
     let data: Float32Array;
     if (loop && targetRate === 44100) {
@@ -333,9 +368,11 @@ export class MicrophoneState {
 
       data = this.resampler.push(samples, true);
     }
+
     if (data.length === 0) {
       return;
     }
+
     this.position += data.length;
     const kept = Math.min(data.length, this.queued.length);
     const discard = Math.max(0, this.queuedSamples + kept - this.queued.length);
@@ -344,7 +381,10 @@ export class MicrophoneState {
       this.queuedSamples -= discard;
     }
 
-    this.queued.set(data.subarray(data.length - kept), this.queuedSamples);
+    this.queued.set(
+      kept === data.length ? data : data.subarray(data.length - kept),
+      this.queuedSamples,
+    );
     this.queuedSamples += kept;
     if (!this.pending) {
       this.pending = true;
@@ -388,6 +428,11 @@ export class MicrophoneState {
       this.deliveryTimer = null;
     }
 
+    // Samples wait, bounded by the queue, until the script has heard Microphone.Unmuted.
+    if (!this.consent.unmutedReported) {
+      return;
+    }
+
     const count = this.queuedSamples;
     this.queuedSamples = 0;
     if (!this.active || this.s.destroyed || !heard(this.object, "sampleData") || count === 0) {
@@ -397,15 +442,12 @@ export class MicrophoneState {
     const object = this.s.rt.construct(this.s.rt.classNamed("flash.utils::ByteArray"));
     const bytes = avm2.bytesOf(this.s.rt, object);
     bytes.setLength(count * 4);
-    const floats = new Float32Array(bytes.buffer.buffer, bytes.buffer.byteOffset, count);
-    floats.set(this.queued.subarray(0, count));
-    if (bytes.littleEndian !== nativeLittleEndian) {
-      const words = new Uint32Array(bytes.buffer.buffer, bytes.buffer.byteOffset, count);
-      for (let i = 0; i < count; i++) {
-        const word = words[i];
-        words[i] =
-          (word >>> 24) | ((word >>> 8) & 0xff00) | ((word << 8) & 0xff0000) | (word << 24);
-      }
+    // The words go in in the ByteArray's order (big-endian by default), with no view per event.
+    const view = bytes.view;
+    const words = this.queuedWords;
+    const little = bytes.littleEndian;
+    for (let i = 0; i < count; i++) {
+      view.setUint32(i * 4, words[i], little);
     }
 
     dispatchEvent(

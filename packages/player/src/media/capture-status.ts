@@ -14,6 +14,11 @@ export class CaptureStatus {
     private readonly kind: "Camera" | "Microphone",
   ) {}
 
+  /** Whether the script has been told of the grant, which its device's data must not precede. */
+  get unmutedReported(): boolean {
+    return this.reported === false;
+  }
+
   set(muted: boolean): void {
     this.muted = muted;
     if (this.pending || this.s.destroyed || this.reported === muted) {
@@ -32,10 +37,21 @@ export class CaptureStatus {
     });
   }
 
+  /** Revocation is news only to a script whose device was opened or told of a decision. */
+  revoke(opened: boolean): void {
+    if (!opened && this.reported === null && !this.pending) {
+      this.muted = true;
+      return;
+    }
+
+    this.set(true);
+  }
+
+  /** Adobe documents the code, not its level; "status" is the level of every other capture code. */
   unavailable(): void {
     this.s.loads.deferHostEvent(() => {
       if (!this.s.destroyed) {
-        this.dispatch(`${this.kind}.Unavailable`, "error");
+        this.dispatch(`${this.kind}.Unavailable`, "status");
       }
     });
   }

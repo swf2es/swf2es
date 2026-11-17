@@ -236,6 +236,30 @@ export function dispatchEvent(s: Scripting, target: AsObject, event: AsObject): 
  * ACTIVATE or DEACTIVATE keeps no object alive, nor its timeline playing.
  * One collected drops out as it goes.
  */
+/**
+ * Each of `o`'s listeners that `drop` picks taken through AS3's removeEventListener, so that its
+ * bookkeeping (activation targets, a microphone's resync) runs as for a script's own removal.
+ */
+export function removeListenersWhere(
+  s: Scripting,
+  o: AsObject,
+  drop: (fn: Value) => boolean,
+): void {
+  const picked: [string, Listener][] = [];
+  for (const [type, list] of (o.$listeners as Map<string, Listener[]> | undefined) ?? []) {
+    for (const listener of list) {
+      if (drop(listener.fn)) {
+        picked.push([type, listener]);
+      }
+    }
+  }
+
+  const remove = s.rt.publicName("removeEventListener");
+  for (const [type, listener] of picked) {
+    s.rt.callProperty(o, remove, type, listener.fn, listener.capture);
+  }
+}
+
 export class WeakTargets {
   private readonly refs = new Set<WeakRef<AsObject>>();
   private readonly byObject = new WeakMap<AsObject, WeakRef<AsObject>>();

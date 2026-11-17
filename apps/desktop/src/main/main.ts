@@ -195,6 +195,9 @@ function guard(contents: WebContents): void {
   });
   // A page that did not load, and so never started, is no better than a gone one: Reload Movie,
   // or opening a movie, loads it.
+  // The new document committed and the old one went with its tracks: a reload that loads slowly
+  // must not be killed for a stop the old page never heard.
+  contents.on("did-navigate", releaseRetiredCapture);
   contents.on("did-finish-load", releaseRetiredCapture);
   contents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
     // ERR_ABORTED: another load overtook it.

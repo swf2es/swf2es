@@ -2,7 +2,7 @@ import type { avm2 } from "@swf2es/runtime";
 import type { Library } from "../display/timeline.js";
 import type { VideoObject } from "../display/videoobject.js";
 import type { CameraCapture, CameraMode, CameraPicture, CaptureDevice } from "../hosts.js";
-import { dispatchEvent, heard } from "../scripting/events.js";
+import { dispatchEvent, heard, removeListenersWhere } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { CaptureStatus } from "./capture-status.js";
 import { VideoSource } from "./video.js";
@@ -96,8 +96,9 @@ export class CameraState {
     s.captureLifetime.signal.addEventListener(
       "abort",
       () => {
+        const opened = this.active;
         this.detach();
-        this.consent.set(true);
+        this.consent.revoke(opened);
       },
       { once: true },
     );
@@ -114,7 +115,7 @@ export class CameraState {
       attached.delete(old);
     }
 
-    const library = this.s.code.codeLibrary();
+    const library = this.s.code.runningLibrary();
     this.owner = library ? new WeakRef(library) : null;
     this.video = new WeakRef(video);
     attached.set(video, this);
@@ -123,13 +124,11 @@ export class CameraState {
   }
 
   stopForLibrary(library: Library): void {
-    for (const list of this.object.$listeners?.values() ?? []) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        if (this.s.code.calledLibrary(list[i].fn, null) === library) {
-          list.splice(i, 1);
-        }
-      }
-    }
+    removeListenersWhere(
+      this.s,
+      this.object,
+      (fn) => this.s.code.calledLibrary(fn, null) === library,
+    );
 
     if (this.owner?.deref() === library) {
       this.detach();
@@ -212,6 +211,7 @@ export class CameraState {
         this.consent.set(state !== "granted");
       }
     };
+
     try {
       const transport = this.s.capture.openCamera(
         this.device,
@@ -234,6 +234,7 @@ export class CameraState {
         },
         this.s.captureLifetime.signal,
       );
+
       if (current() && this.active) {
         this.transport = transport;
       } else {
@@ -285,6 +286,7 @@ export class CameraState {
       if (!heard(this.object, "activity")) {
         this.reportedActivity = false;
       }
+
       this.activityLevel = -1;
       this.lastMotion = -1;
       this.activating = false;

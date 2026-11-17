@@ -43,11 +43,13 @@ function stopped(requested: number): void {
     clearTimeout(timer);
     stopTimers.delete(requested);
   }
+
   for (const id of live) {
     if (id.startsWith(`${requested}:`)) {
       live.delete(id);
     }
   }
+
   indicator();
 }
 
@@ -67,6 +69,7 @@ function watchStop(requested: number): void {
   if (pageAvailable()) {
     window?.webContents.send("capture:probe", requested, probe.id);
   }
+
   stopTimers.set(
     requested,
     setTimeout(() => {
@@ -96,7 +99,10 @@ function stopEpoch(requested: number): void {
   }
 }
 
-/** A completed document navigation confirms that the old page and its tracks are gone. */
+/**
+ * A committed document navigation confirms that the old page and its tracks are gone: at commit,
+ * not at the load's end, so the watchdog of a stop the old page never heard cannot outlast it.
+ */
 export function releaseRetiredCapture(): void {
   for (const id of [...live]) {
     const owner = Number(id.slice(0, id.indexOf(":")));
@@ -135,11 +141,13 @@ export function stopCapture(): void {
 }
 
 function dialogText(value: string, limit: number): string {
-  return value
+  const text = value
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
     .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, limit);
+    .trim();
+
+  // Whole code points: a cut pair would leave a lone surrogate in the dialog.
+  return [...text].slice(0, limit).join("");
 }
 
 async function permission(kind: CaptureKind, requested: number): Promise<CapturePermission> {
@@ -148,14 +156,17 @@ async function permission(kind: CaptureKind, requested: number): Promise<Capture
   if (!playing || !owner || requested !== epoch) {
     return "denied";
   }
+
   const known = decisions.get(kind);
   if (known) {
     return known;
   }
+
   const existing = asking.get(kind);
   if (existing) {
     return existing;
   }
+
   const signal = lifetime.signal;
   const answer = (async (): Promise<CapturePermission> => {
     try {

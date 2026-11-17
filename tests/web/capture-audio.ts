@@ -52,7 +52,7 @@ const result = await withPage(
   navigator.mediaDevices.getUserMedia = async (...args) => {
     const stream = await original(...args); tracks.push(...stream.getTracks()); return stream;
   };
-  globalThis.captureBusy = () => { const end = performance.now() + 100; while(performance.now() < end) {} };
+  globalThis.captureBusy = () => { const end = performance.now() + 250; while(performance.now() < end) {} };
   const p = document.createElement('swf2es-player');
   p.setAttribute('allowscriptaccess', 'always'); document.body.append(p);
   const wait = async (condition, why) => {
@@ -65,6 +65,10 @@ const result = await withPage(
   try {
     await p.load(Uint8Array.from(${JSON.stringify(swf)}));
     await wait(() => traces.includes('audio: ready -1'), 'initial activity');
+    // First, on a microphone that has told the script nothing yet.
+    p.audioOrder();
+    await wait(() => traces.some(t => t.startsWith('audio: order')), 'status and samples');
+    await wait(() => tracks.every(t => t.readyState === 'ended'), 'order stop');
     for (const busy of [false, true]) {
       for (const rate of [5, 8, 11, 16, 22, 44]) {
         const at = traces.length;
@@ -112,23 +116,47 @@ const rates = new Map([
   [22, 22050],
   [44, 44100],
 ]);
+assert.ok(lines.includes("audio: order Microphone.Unmuted,samples"), lines.join("\n"));
 const counts = lines.filter((line) => line.startsWith("audio: count"));
+let largest = 0;
 assert.equal(counts.length, 13);
 for (const line of counts) {
-  const [, , rate, count, elapsed, continuous, endian] = line.split(" ");
-  const expected = ((rates.get(Number(rate)) as number) * Number(elapsed)) / 1000;
-  assert.ok(Math.abs(Number(count) - expected) / expected < 0.05, line);
+  const [, , rate, count, elapsed, continuous, endian, , list] = line.split(" ");
+  const hz = rates.get(Number(rate)) as number;
+  const expected = (hz * Number(elapsed)) / 1000;
+  // A sanity bound only: delivery times jitter by up to a block and a frame at each end.
+  assert.ok(Math.abs(Number(count) - expected) / expected < 0.15, line);
   assert.equal(continuous, "true", line);
   assert.equal(endian, "true", line);
+  // How late each event's last sample arrives, against the samples' own clock. Its least value
+  // early and late in the window stays put unless samples are lost (or the rate is wrong): a lost
+  // block of about 43 ms, or a 250 ms stall with one credit, moves it by that much.
+  const points = list.split(",").map((point) => point.split(":").map(Number));
+  const late = (from: number, to: number) => {
+    const window = points.filter(([time]) => time >= from && time <= to);
+    assert.ok(window.length > 0, `${line.slice(0, 60)}: no events from ${from} to ${to}`);
+    return Math.min(...window.map(([time, end]) => time - (end * 1000) / hz));
+  };
+  const start = points[0][0];
+  const end = (points.at(-1) as number[])[0];
+  const drift = late(end - 600, end) - late(start, start + 600);
+  assert.ok(Math.abs(drift) < 100, `${line.slice(0, 60)} drift ${drift}`);
+  largest = Math.max(largest, Math.abs(drift));
 }
 for (const line of lines.filter((line) => line.startsWith("audio: silence"))) {
   const [, , timeout, _elapsed, events, wall] = line.split(" ");
-  assert.ok(Math.abs(Number(wall) - Number(timeout)) < 200, line);
+  // Activity is told on frames and audio comes in blocks: early by those, late by the audio
+  // already on its way when the gain fell. Still far from the other timeout.
+  const off = Number(wall) - Number(timeout);
+  assert.ok(off > -150 && off < 450, line);
   assert.equal(events, "2", line);
 }
 assert.equal(lines.filter((line) => line === "audio: activity true true true").length, 2);
 assert.equal(lines.filter((line) => line === "audio: activity false true true").length, 2);
-console.log("AS3 microphone: six rates, busy frame, one-fps delivery, activity and silence passed");
+console.log(`AS3 microphone: largest delivery drift ${largest.toFixed(1)} ms`);
+console.log(
+  "AS3 microphone: status first, six rates, busy frame, one-fps delivery, activity and silence passed",
+);
 
 // Chrome permits autoplay while capturing (developer.chrome.com/blog/web-audio-autoplay).
 // Exercise loopback with a real audio host after a trusted input, without inventing a second gate.

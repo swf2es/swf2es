@@ -63,16 +63,19 @@ export function openMicrophone(
       node.port.close();
       node.disconnect();
     }
+
     source?.disconnect();
     gain?.disconnect();
     for (const track of stream?.getTracks() ?? []) {
       track.stop();
     }
+
     void context?.close().catch(() => {});
     stream = null;
     if (openSettled) {
       resolveClosed();
     }
+
     if (notify) {
       events.state("ended");
     }
@@ -108,6 +111,7 @@ export function openMicrophone(
       if (gain) {
         gain.gain.value = mode.gain / 50;
       }
+
       if (changed) {
         version++;
         void apply();
@@ -178,10 +182,12 @@ export function openMicrophone(
       if (closed) {
         return;
       }
+
       refresh();
       globalThis.addEventListener("pointerdown", resume, true);
       globalThis.addEventListener("keydown", resume, true);
       resume();
+
       if (version > 0) {
         await apply();
       }
@@ -190,11 +196,12 @@ export function openMicrophone(
       openSettled = true;
       if (closed) {
         resolveClosed();
+        return;
       }
-      if (!closed) {
-        finish(false);
-        events.state(!acquired && denied(error) ? "denied" : "unavailable");
-      }
+
+      finish(false);
+      events.state(!acquired && denied(error) ? "denied" : "unavailable");
     });
+
   return capture;
 }

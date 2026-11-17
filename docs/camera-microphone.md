@@ -141,15 +141,21 @@ against `motionLevel`, raising activity on motion and ending it after
 
 Status events report the first consent result and subsequent changes. Reopening an
 already permitted device does not repeat `Unmuted`; Stop and attribute revocation
-report `Muted`. AIR permission requests after revocation answer `denied` while the
+report `Muted` to devices that were opened or told of a decision, and nothing to
+devices the movie never opened. `sampleData` never precedes `Microphone.Unmuted`:
+samples captured before the frame that reports the grant wait, bounded by the queue. AIR permission requests after revocation answer `denied` while the
 player remains alive. Without a capture host, both static permission getters report
 `granted`, as measured in Linux adl; this does not imply that devices exist.
 
 Only browser permission/security failures count as denial. Stale device constraints
-are retried once with preferences; other opening failures report an error-level
-`Camera.Unavailable` or `Microphone.Unavailable` status without changing consent.
-These asynchronous device-error notifications are a host extension, not measured
-Flash behavior. An unavailable device can be retried by attaching again.
+are retried once with preferences; other opening failures (in the desktop shell too)
+report a `Camera.Unavailable` or `Microphone.Unavailable` status without changing
+consent. These asynchronous device-error notifications are a host extension, not
+measured Flash behavior. Adobe's
+[getEnhancedMicrophone](https://airsdk.dev/reference/actionscript/3.0/flash/media/Microphone.html#getEnhancedMicrophone())
+documents `Microphone.Unavailable` for the other microphones, which stop providing
+audio, but no level; it is sent at level `"status"`, as every other capture code,
+and only to microphones that were capturing. An unavailable device can be retried by attaching again.
 
 The browser host enumerates before AS3 starts so synchronous `names` and
 `getCamera` can use the result without prompting. It opens capture only
@@ -197,7 +203,8 @@ gate ([Chrome's policy](https://developer.chrome.com/blog/web-audio-autoplay)).
 The implementation starts capture when a `sampleData` listener or loopback
 needs it, and closes capture when neither remains. Loopback without an output
 host does not open a microphone. `Loader.unloadAndStop` releases the loaded movie's
-capture consumers while other movies' listeners remain. Device defaults, status
+capture consumers while other movies' listeners remain; loopback stays on while any
+movie that turned it on is still loaded. Device defaults, status
 codes and enhanced-device exclusivity follow [Adobe's Microphone reference](https://airsdk.dev/reference/actionscript/3.0/flash/media/Microphone.html),
 not device observations under adl. Without a host the existing defaults
 and null getters are unchanged.
@@ -272,8 +279,9 @@ which cannot be cancelled; when the stream arrives, the host stops it before
 publishing frames or samples. The title marker remains until physical closure is
 confirmed. A renderer that fails to answer a probe is terminated, releasing its
 devices; the existing page-loss UI then offers a reload. Movie replacement
-preserves this watchdog for the old movie. Completed document navigation or
-process loss releases retired capture state. Stale permission and activity
+preserves this watchdog for the old movie. A committed document navigation or process
+loss releases retired capture state, so a reload that loads slowly is never killed for
+the old page's tracks. Stale permission and activity
 messages cannot authorize a replacement movie.
 
 Before consent, Chromium may expose only an unnamed default device. The desktop
