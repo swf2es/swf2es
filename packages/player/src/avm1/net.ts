@@ -141,10 +141,16 @@ export class Avm1Net {
       return false;
     }
 
-    this.fetchHost?.(
-      { ...request, url: this.resolve(request.url), purpose: "send" },
-      this.stopped.signal,
-    ).catch(() => {});
+    const fetch = this.fetchHost;
+    if (fetch) {
+      // Not the player's own signal: a host that listens to it would keep a listener a send.
+      fetchWhile(
+        fetch,
+        { ...request, url: this.resolve(request.url), purpose: "send" },
+        this.stopped.signal,
+      ).catch(() => {});
+    }
+
     return true;
   }
 

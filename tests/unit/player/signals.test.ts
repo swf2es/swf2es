@@ -93,3 +93,23 @@ test("a fetch's signal is the player's to abort only until the fetch settles", a
     [false, false],
   );
 });
+
+test("a request's own signal keeps no listener once the fetch settles, nor one aborted at the start", async () => {
+  const lifetime = counted();
+  const request = counted();
+  await fetchWhile(
+    async (_request: string, _signal) => "ok",
+    "a",
+    lifetime.controller.signal,
+    request.controller.signal,
+  );
+  assert.equal(request.listeners(), 0);
+  assert.equal(lifetime.listeners(), 0);
+
+  request.controller.abort("cancelled");
+  const early = linkedSignal(lifetime.controller.signal, request.controller.signal);
+  assert.equal(early.signal.aborted, true);
+  assert.equal(early.signal.reason, "cancelled");
+  assert.equal(request.listeners(), 0);
+  assert.equal(lifetime.listeners(), 0);
+});
