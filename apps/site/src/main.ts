@@ -177,6 +177,17 @@ let current: {
   air: AirApp | null;
 } | null = null;
 let loadGeneration = 0;
+let inputGeneration = 0;
+let downloadAbort: AbortController | null = null;
+
+/** A new input or Close also interrupts a fetch waiting for headers or its next chunk. */
+function cancelInput(): number {
+  downloadAbort?.abort();
+  downloadAbort = null;
+
+  return ++inputGeneration;
+}
+
 const stats = new Stats(
   byId("fps"),
   byId("frame-time"),
@@ -261,6 +272,7 @@ async function play(
   base: string | null,
   air: AirApp | null = null,
 ) {
+  const input = cancelInput();
   let f: SwfFacts;
   try {
     f = describe(bytes, origin);
@@ -311,20 +323,24 @@ async function play(
       return;
     }
 
-    hideLoading();
     stats.watch(player.player, f.frameRate, player.gl);
-    showStatus(`Playing ${name}.`);
-    player.focus();
+    if (input === inputGeneration) {
+      hideLoading();
+      showStatus(`Playing ${name}.`);
+      player.focus();
+    }
   } catch (error) {
     if (generation !== loadGeneration) {
       return;
     }
 
-    hideLoading();
     const message = error instanceof Error ? error.message : String(error);
     // The errors go into the report, which never names a local file.
     write("error", `${origin === LOCAL ? "The SWF" : name} did not play: ${message}`);
-    showStatus(`${name} did not play: ${message}`, true);
+    if (input === inputGeneration) {
+      hideLoading();
+      showStatus(`${name} did not play: ${message}`, true);
+    }
   }
 
   reload.disabled = false;
@@ -332,13 +348,19 @@ async function play(
 }
 
 async function playFile(file: File): Promise<void> {
+  const generation = cancelInput();
+  hideLoading();
   history.replaceState(null, "", location.pathname);
   urlInput.value = "";
   // Read whole only once its first bytes say it's a SWF or an AIR package: where the picker
   // takes any file (iOS), it may be a video of gigabytes.
   const head = new Uint8Array(await file.slice(0, 8).arrayBuffer());
+  if (generation !== inputGeneration) {
+    return;
+  }
+
   if (isZip(head)) {
-    await playAirFile(file);
+    await playAirFile(file, generation);
     return;
   }
 
@@ -357,7 +379,10 @@ async function playFile(file: File): Promise<void> {
   // its own and not every local file's; nothing is there to load from it.
   const base = new URL(`local/${encodeURIComponent(file.name)}`, SITE).href;
   localNames.add(file.name).add(encodeURIComponent(file.name)).add(base);
-  await play(new Uint8Array(await file.arrayBuffer()), file.name, LOCAL, base);
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (generation === inputGeneration) {
+    await play(bytes, file.name, LOCAL, base);
+  }
 }
 
 /** Whether `head`, a file's first bytes, starts a ZIP archive, as an AIR package is. */
@@ -366,11 +391,20 @@ function isZip(head: Uint8Array): boolean {
 }
 
 /** Play the AIR application in `file`, an AIR package (.air) or a ZIP of its folder. */
-async function playAirFile(file: File): Promise<void> {
+async function playAirFile(file: File, generation: number): Promise<void> {
   let app: AirApp;
   try {
-    app = openAirApp(new Uint8Array(await file.arrayBuffer()));
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (generation !== inputGeneration) {
+      return;
+    }
+
+    app = openAirApp(bytes);
   } catch (error) {
+    if (generation !== inputGeneration) {
+      return;
+    }
+
     showStatus(
       `${file.name} is not an AIR application: ${error instanceof Error ? error.message : error}`,
       true,
@@ -420,14 +454,11 @@ const size = (bytes: number) =>
     ? `${Math.round(bytes / 1024)} KB`
     : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 
-/**
- * The body of `response`, its progress shown as it arrives; no longer
- * `current()`, the rest is not read, and what came is moot.
- */
+/** The response body, with progress as it arrives; aborting its fetch interrupts the read. */
 async function download(
   response: Response,
   name: string,
-  current: () => boolean,
+  signal: AbortSignal,
 ): Promise<Uint8Array> {
   const reader = response.body?.getReader();
   if (!reader) {
@@ -439,11 +470,7 @@ async function download(
   const chunks: Uint8Array[] = [];
   let received = 0;
   for (let read = await reader.read(); !read.done; read = await reader.read()) {
-    if (!current()) {
-      void reader.cancel();
-      break;
-    }
-
+    signal.throwIfAborted();
     chunks.push(read.value);
     received += read.value.length;
     if (total > 0) {
@@ -471,16 +498,20 @@ async function playUrl(url: string, origin?: string): Promise<void> {
   }
 
   const name = fileName(absolute);
-  // Another load, or Close, while this one downloads, makes it moot.
-  const generation = ++loadGeneration;
-  const current = () => generation === loadGeneration;
+  // Downloading a replacement must not discard an existing player's startup completion.
+  const generation = cancelInput();
+  const current = () => generation === inputGeneration;
+  const controller = new AbortController();
+  downloadAbort = controller;
+  close.disabled = false;
   showStatus(`Fetching ${absolute.href}…`);
   showLoading(`Loading ${name}…`);
   let bytes: Uint8Array;
   let finalUrl = absolute.href;
   try {
-    const response = await fetch(absolute.href);
+    const response = await fetch(absolute.href, { signal: controller.signal });
     if (!response.ok) {
+      controller.abort();
       if (current()) {
         hideLoading();
         showStatus(`${absolute.href}: the server answered ${response.status}.`, true);
@@ -488,7 +519,7 @@ async function playUrl(url: string, origin?: string): Promise<void> {
       return;
     }
 
-    bytes = await download(response, name, current);
+    bytes = await download(response, name, controller.signal);
     finalUrl = response.url || finalUrl;
   } catch {
     if (!current()) {
@@ -503,6 +534,11 @@ async function playUrl(url: string, origin?: string): Promise<void> {
     write("error", `Could not fetch ${absolute.href}. ${why}`);
     showStatus(`Could not fetch ${absolute.href}. ${why}`, true);
     return;
+  } finally {
+    if (downloadAbort === controller) {
+      downloadAbort = null;
+      close.disabled = !!player.hidden;
+    }
   }
 
   if (current()) {
@@ -590,6 +626,7 @@ reload.addEventListener("click", () => {
 });
 
 close.addEventListener("click", () => {
+  cancelInput();
   loadGeneration++;
   hideLoading();
   player.destroy();

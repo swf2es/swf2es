@@ -13,6 +13,7 @@
 //
 //   node tests/site/run.ts            build the site, then check it
 //   node tests/site/run.ts --serve    build it and serve it to look at, until ^C
+
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,6 +26,7 @@ import { serve } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
 import { zip } from "../zip-writer.ts";
 import { fullscreenChecks } from "./fullscreen.ts";
+import { loadingChecks } from "./loading.ts";
 import { stage3DChecks } from "./stage3d.ts";
 
 /** A SWF's URL, sandbox and the shared object it saves its file name in, by what was there before. */
@@ -173,8 +175,19 @@ async function check(): Promise<void> {
       const playing = (name: string) =>
         `document.getElementById('status').textContent === ${JSON.stringify(`Playing ${name}.`)}`;
       const navigate = async (path: string) => {
+        const previous = await value<number>("performance.timeOrigin");
         await send("Page.navigate", { url: `${base}${path}` });
-        await until("document.readyState === 'complete' && !!customElements.get('swf2es-player')");
+        for (const start = Date.now(); ; ) {
+          const ready = await evaluate<boolean>(
+            `performance.timeOrigin !== ${previous} && document.readyState === 'complete' && !!customElements.get('swf2es-player')`,
+          ).catch(() => null);
+          if (ready?.value) {
+            return;
+          }
+
+          assert.ok(Date.now() - start < 60_000, `${path} did not load a new document`);
+          await new Promise((done) => setTimeout(done, 100));
+        }
       };
       /**
        * Until the page that `path`'s navigation sends on to is at
@@ -209,33 +222,49 @@ async function check(): Promise<void> {
           "its service worker makes the page cross-origin isolated, as Pages sends no headers",
           async () => {
             // Until the page is isolated, through the reloads that make it so.
-            const isolation = async (ms: number) => {
+            const isolation = async (step: string, previous: number | null = null) => {
               const start = Date.now();
-              for (let isolated = false; !isolated; ) {
-                assert.ok(Date.now() - start < ms, "the page is not cross-origin isolated");
-                await new Promise((done) => setTimeout(done, 100));
-                // A document the page leaves while it is asked answers nothing.
-                isolated = await evaluate<boolean>(
-                  "crossOriginIsolated && !!navigator.serviceWorker.controller",
-                ).then(
-                  (r) => r.value === true,
-                  () => false,
+              for (;;) {
+                // A reload is acknowledged before it replaces the old, already isolated document.
+                const state = await evaluate<{
+                  isolated: boolean;
+                  controlled: boolean;
+                  timeOrigin: number;
+                  ready: string;
+                }>(`({ isolated: crossOriginIsolated, controlled: !!navigator.serviceWorker.controller,
+                  timeOrigin: performance.timeOrigin, ready: document.readyState })`).catch(
+                  () => null,
                 );
+                if (
+                  state?.value?.isolated &&
+                  state.value.controlled &&
+                  state.value.timeOrigin !== previous
+                ) {
+                  return;
+                }
+
+                assert.ok(
+                  Date.now() - start < 60_000,
+                  `${step}: the new page is not cross-origin isolated: ${JSON.stringify(state)}`,
+                );
+                await new Promise((done) => setTimeout(done, 100));
               }
+            };
+            const bypass = async (step: string) => {
+              const previous = await value<number>("performance.timeOrigin");
+              await send("Page.reload", { ignoreCache: true });
+              await isolation(step, previous);
             };
             // As a busy machine runs it, which CI's is: the reloads' timing is what this tests.
             await send("Emulation.setCPUThrottlingRate", { rate: 6 });
             try {
-              // The first visit loads the page again once the worker serves it.
-              await isolation(30_000);
-              // A reload that bypasses the worker, as Shift-reload does, loads it again too:
-              // at once, while the isolated page still loads, and once it has loaded.
-              await send("Page.reload", { ignoreCache: true });
-              await isolation(20_000);
-              await navigate("play/");
-              assert.equal(await value<boolean>("crossOriginIsolated"), true);
-              await send("Page.reload", { ignoreCache: true });
-              await isolation(20_000);
+              await isolation("first visit");
+              await bypass("bypass while loading");
+              // Wait for this document, not an earlier navigation still being replaced.
+              await until(
+                "document.readyState === 'complete' && !!customElements.get('swf2es-player')",
+              );
+              await bypass("bypass after loading");
             } finally {
               await send("Emulation.setCPUThrottlingRate", { rate: 1 });
             }
@@ -321,6 +350,7 @@ async function check(): Promise<void> {
             );
           },
         ],
+        ...loadingChecks({ value, send, until, navigate, site }),
         [
           "?swf= plays a demo, which traces and draws",
           async () => {
