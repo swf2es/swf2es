@@ -787,11 +787,14 @@ test("an AVM1 SWF from a URL comes as an AS3 one's content does, its INIT and CO
 });
 
 for (const bytes of [false, true]) {
-  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions`, {
+  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions without a main timeline's $version`, {
     skip,
   }, async () => {
     const lines: string[] = [];
-    const actions = script(`trace(Stage.width + " " + Stage.height);`, 8)(flashAssembler());
+    const actions = script(
+      `trace(Stage.width + " " + Stage.height); trace(typeof $version); trace(typeof getVersion());`,
+      8,
+    )(flashAssembler());
     const inner = avm1Swf([w.doAction([...actions.end().bytes()])]);
     const { scripting, player, loader } = await avm1Loading({
       print: (line) => lines.push(line),
@@ -810,7 +813,7 @@ for (const bytes of [false, true]) {
       player.tick();
     }
 
-    assert.deepEqual(lines, [`${player.width} ${player.height}`]);
+    assert.deepEqual(lines, [`${player.width} ${player.height}`, "undefined", "undefined"]);
     assert.notDeepEqual([player.width, player.height], [30, 20]);
     player.destroy();
   });

@@ -50,6 +50,7 @@ import {
   type FetchRequest,
   type FetchResult,
   type Navigate,
+  platformCapabilities,
   type SharedObjectStorage,
   type SocketHost,
 } from "../hosts.js";
@@ -501,7 +502,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /**
    * Take the SWF's timelines, before the root enters its first frame: their
-   * clips are made and play through this from now on.
+   * clips are made and play through this from now on. An AS3 Loader passes
+   * false for `standalone`: its AVM1Movie has no main timeline's `$version`.
    */
   attach(
     swf: Swf,
@@ -513,6 +515,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       stageWidth: Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
       stageHeight: Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
     },
+    standalone = true,
   ): void {
     this.movieRoot = root;
     this.swfVersion = swf.header.version;
@@ -608,9 +611,14 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
     this.made(root);
-    // Its parameters, as Flash defines them on the root before the first frame's actions run.
     const face = root.avm1;
     if (face !== null) {
+      // Flash defines this only on the main timeline, not an AVM1Movie loaded by AS3.
+      if (standalone) {
+        face.define("$version", platformCapabilities().version, 0);
+      }
+
+      // Its parameters, as Flash defines them before the first frame's actions run.
       const parameters = new Map(queryVariables(this.url));
       for (const [name, value] of Object.entries(this.parameters)) {
         parameters.set(name, String(value));

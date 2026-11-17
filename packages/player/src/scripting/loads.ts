@@ -996,7 +996,7 @@ export class Loads {
         localConnections: s.localConnections,
         realTime: s.timers.realTime,
       });
-      vm.attach(swf, library, root, load.bytes.length, s.frameRate, s);
+      vm.attach(swf, library, root, load.bytes.length, s.frameRate, s, false);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
       s.avm1Input ??= new LoadedAvm1Input(s);
       s.avm1Input.add(root, vm);
