@@ -159,6 +159,65 @@ function currentDomain(compile: Compile): Uint8Array {
   });
 }
 
+// A SWF loaded again into a domain that defines all its classes already
+// (scripts/ReloadDomain.as.template): its script runs again, static
+// initializers and all, but its names, its own code's included, find the
+// first load's classes, its content is of the first load's class, and its
+// code's domain is the one it was loaded into (scripts/ReloadChild.as).
+// Then a SWF of that ABC and one new (scripts/ReloadExtra.as), whose class
+// the domain gains, and the first SWF into a child of the domain.
+function reloadDomain(compile: Compile): Uint8Array {
+  const child = compile("ReloadChild");
+  const inner = (tags: Uint8Array[], documentClass: string) =>
+    w.swf({
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.fileAttributes(true),
+        ...tags,
+        w.symbolClass([[0, documentClass]]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const base64 = (swf: Uint8Array) => Buffer.from(swf).toString("base64");
+  const template = readFileSync(
+    new URL("../scripts/ReloadDomain.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "ReloadDomain",
+    template
+      .replaceAll("@@CHILD@@", base64(inner([w.doAbc(child, "ReloadChild")], "ReloadChild")))
+      .replaceAll(
+        "@@PARTIAL@@",
+        base64(
+          inner(
+            [w.doAbc(child, "ReloadChild"), w.doAbc(compile("ReloadExtra"), "ReloadExtra")],
+            "ReloadExtra",
+          ),
+        ),
+      ),
+  );
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: RELOAD_DOMAIN_FRAMES,
+    tags: [
+      w.fileAttributes(true),
+      w.doAbc(abc, "ReloadDomain"),
+      w.symbolClass([[0, "Main"]]),
+      ...Array.from({ length: RELOAD_DOMAIN_FRAMES }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
+const RELOAD_DOMAIN_FRAMES = 12;
+
 // Children a clip places by class name (PlaceObject3's HasClassName, no
 // character), as a SWF of dialogs places buttons from a library SWF loaded
 // before it into the same domain (scripts/PlacedByClass.as.template). The
@@ -958,6 +1017,14 @@ export const scriptingCases: PlayerCase[] = [
     name: "current-domain",
     build: currentDomain,
     frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "reload-domain",
+    build: reloadDomain,
+    frames: RELOAD_DOMAIN_FRAMES,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

@@ -1,0 +1,96 @@
+package
+{
+	import flash.display.Loader;
+	import flash.display.MovieClip;
+	import flash.events.Event;
+	import flash.system.ApplicationDomain;
+	import flash.system.LoaderContext;
+	import flash.utils.ByteArray;
+
+	public class Main extends MovieClip
+	{
+		private static const CHILD:String = "@@CHILD@@";
+		private static const PARTIAL:String = "@@PARTIAL@@";
+
+		private var _shared:ApplicationDomain = new ApplicationDomain(ApplicationDomain.currentDomain);
+		private var _steps:Array;
+		private var _loaders:Array = [];
+
+		public function Main()
+		{
+			_steps = [
+				["first load", CHILD, _shared],
+				["same SWF again", CHILD, _shared],
+				["one ABC again, one new", PARTIAL, _shared],
+				["same SWF into a child", CHILD, new ApplicationDomain(_shared)]];
+			next();
+		}
+
+		private function next():void
+		{
+			if (_steps.length == 0)
+			{
+				trace("main: shared has the extra", _shared.hasDefinition("ReloadExtra"));
+				trace("main: own domain has the child", ApplicationDomain.currentDomain.hasDefinition("ReloadChild"));
+				return;
+			}
+
+			var step:Array = _steps.shift();
+			trace("main:", step[0]);
+			var loader:Loader = new Loader();
+			_loaders.push(loader);
+			var context:LoaderContext = new LoaderContext(false, step[2]);
+			context.allowCodeImport = true;
+			loader.contentLoaderInfo.addEventListener(Event.COMPLETE, function(e:Event):void
+				{
+					var cls:Class = _shared.getDefinition("ReloadChild") as Class;
+					var info:ApplicationDomain = loader.contentLoaderInfo.applicationDomain;
+					trace("main: content is the shared class", loader.content is cls);
+					trace("main: its loaderInfo's domain's class is the shared one", info.getDefinition("ReloadChild") == cls);
+					trace("main: its loaderInfo's domain's parent", describe(info.parentDomain));
+					trace("main: made", Object(cls).made);
+					var scripts:Array = Object(cls).scripts;
+					var last:ApplicationDomain = scripts[scripts.length - 1];
+					trace("main: scripts run", scripts.length);
+					trace("main: the script's domain's class is the shared one", last.getDefinition("ReloadChild") == cls);
+					trace("main: the script's domain's parent", describe(last.parentDomain));
+					trace("main: the script's domain has the extra", last.hasDefinition("ReloadExtra"));
+					next();
+				});
+			loader.loadBytes(decode(step[1]), context);
+		}
+
+		// Which domain: whether it defines the child's class and the main SWF's.
+		private static function describe(d:ApplicationDomain):String
+		{
+			return d == null ? "null" : "child " + d.hasDefinition("ReloadChild") + ", main " + d.hasDefinition("Main");
+		}
+
+		private static function decode(text:String):ByteArray
+		{
+			const alphabet:String = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+			var out:ByteArray = new ByteArray();
+			var bits:int = 0;
+			var have:int = 0;
+			for (var i:int = 0; i < text.length; i++)
+			{
+				var c:String = text.charAt(i);
+				if (c == "=")
+				{
+					break;
+				}
+
+				bits = ((bits << 6) | alphabet.indexOf(c)) & 0xffff;
+				have += 6;
+				if (have >= 8)
+				{
+					have -= 8;
+					out.writeByte((bits >> have) & 0xff);
+				}
+			}
+
+			out.position = 0;
+			return out;
+		}
+	}
+}
