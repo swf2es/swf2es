@@ -96,7 +96,9 @@ the pages, with Pagefind's index for the search, into
   reaches the unisolated player instead of a reload loop. A temporary
   `__swf2es_isolation` query parameter carries the retry count across the
   browser's isolation boundary; success or fallback removes it, preserving
-  the caller's other parameters and fragment.
+  the caller's other parameters and fragment. Bypass reloads reuse the site's
+  active registration, avoiding registration jobs that can stall under CPU
+  throttling.
 - **The console** shows what the element sends to the browser's console,
   trace on `console.log` and uncaught errors on `console.error`, which
   the page wraps. **The stats** count the frames the player's `advance`

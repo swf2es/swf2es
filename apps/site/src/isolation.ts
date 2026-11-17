@@ -83,9 +83,16 @@ export async function isolate(): Promise<boolean> {
     });
     // At the site's root, above app/, serving every page of the site.
     const site = new URL("../", import.meta.url);
-    const registration = await container.register(new URL("service-worker.js", site), {
-      scope: site.href,
-    });
+    const script = new URL("service-worker.js", site);
+    const existing = await container.getRegistration(site.href);
+
+    // Reuse our active worker after a bypass reload: registration jobs can stall under
+    // CPU throttling. Scope and script identify the site's worker.
+    if (existing?.scope === site.href && existing.active?.scriptURL === script.href) {
+      return !reloadOnce();
+    }
+
+    const registration = await container.register(script, { scope: site.href });
     // Active already, but not serving this page, as after a reload that
     // bypassed it (Shift-reload): it claims no client again, but serves
     // the page loaded again.
