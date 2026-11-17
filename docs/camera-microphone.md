@@ -36,7 +36,7 @@ confirmed where a machine with Flash and a camera allows.
   `height`, `fps`, `currentFPS`, `index`, `name`. Flash Player 11.4 added
   `copyToByteArray`, `copyToVector` and `drawToBitmapData`.
 - `Microphone` the same way (`"Microphone.Unmuted"`, `"Microphone.Muted"`):
-  `rate` of 5, 8, 11, 22 or 44 kHz (8 by default), `gain` 0–100,
+  `rate` of 5, 8, 11, 16, 22 or 44 kHz (8 by default), `gain` 0–100,
   `setSilenceLevel(level, timeout)` (10 and 2000 ms) with `activityLevel`,
   `setLoopBack`, `setUseEchoSuppression`, and from 10.1 the
   `sampleData` event: a `SampleDataEvent` whose `data` holds the captured
@@ -158,6 +158,32 @@ Flash's 0–100 scale against `silenceLevel` and its timeout; `gain` is a
 gain node before the worklet; `setLoopBack` routes the input to the
 player's own output, behind the same unmute rule as its sounds.
 
+The implementation starts capture when a `sampleData` listener or loopback
+needs it, and closes capture when neither remains. Device defaults, status
+codes and enhanced-device exclusivity follow [Adobe's Microphone reference](https://airsdk.dev/reference/actionscript/3.0/flash/media/Microphone.html),
+not device observations under adl. Without a host the existing defaults
+and null getters are unchanged.
+
+The worklet mixes to mono and sends 2048-sample blocks after gain (50 is
+unity). An acknowledgement limits it to one outstanding message. The player
+uses a 96-tap windowed-sinc low-pass converter with continuous phase and
+history, including 48 kHz devices and the 16 kHz rate. The 5/11/22/44 modes
+use the 44.1 kHz family (5512.5/11025/22050/44100 Hz); 8/16 use 8000/16000 Hz.
+Activity uses clipped PCM RMS, an approximation to Flash's unpublished
+meter. Audio and activity events are bounded while SWF frames are paused.
+A rate change discards pending old-rate data rather than mixing rates in
+one event. Sample positions count produced samples, including discarded
+ones. Loopback is bounded to about 200 ms of pending audio and goes through
+the existing output host, SoundTransform and unmute rule.
+
+Enhanced capture requests Chromium's native echo cancellation and noise
+suppression; those are best effort, not Flash's proprietary DSP. Codec and
+encoder knobs retain their values without implementing network encoding.
+Chrome fake-tone tests cover all six rates, permission denial and cleanup;
+unit tests also check attenuation above Nyquist, block boundaries, gain
+settings, activity, rate changes, and loopback limits. A CDN test loads the
+worklet through the bundled distribution under its documented CSP.
+
 ## 6. Permission
 
 A capture is never started without the user's yes.
@@ -207,7 +233,7 @@ answered through the test inspector as #1037's test answers its box.
 - Camera identity and the empty Video while waiting for consent follow
   Adobe's documentation (section 4); hardware-backed Flash confirmation
   remains unavailable here.
-- Microphone activity before capture and its timing remain to be implemented;
-  Adobe also documents Camera activity -1 before attachment (section 4).
+- Camera and Microphone activity before monitoring are -1, following Adobe;
+  the detectors are documented approximations (sections 4 and 5).
 - The web element requests capture on attach, as described in section 4;
   the browser remains responsible for consent.

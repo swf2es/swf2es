@@ -46,3 +46,7 @@ The [guide](https://swf2es.github.io/swf2es/docs/) has more.
 
 Apache-2.0 ([LICENSE](LICENSE)); the code from elsewhere in its copies of
 the other packages, and its terms, in [LICENSE.third-party](LICENSE.third-party).
+
+Microphone capture uses a separate `capture-worklet.js` module beside the host.
+Serve it with the other host files; the browser distribution includes it.
+Capture still requires a secure context and browser permission.

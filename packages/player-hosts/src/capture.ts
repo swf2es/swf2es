@@ -6,6 +6,8 @@ import type {
   CaptureHost,
 } from "@swf2es/player";
 
+import { openMicrophone } from "./capture-audio.js";
+
 function constraints(device: CaptureDevice, mode: CameraMode): MediaTrackConstraints {
   return {
     deviceId: device.id ? { exact: device.id } : undefined,
@@ -24,8 +26,15 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
   }
 
   let cameras: CaptureDevice[] = [];
+  let microphones: CaptureDevice[] = [];
   const refresh = async () => {
     const devices = await media.enumerateDevices();
+    microphones =
+      typeof AudioWorkletNode === "function"
+        ? devices
+            .filter((d) => d.kind === "audioinput")
+            .map((d) => ({ id: d.deviceId, name: d.label }))
+        : [];
     cameras = devices
       .filter((d) => d.kind === "videoinput")
       .map((d) => ({ id: d.deviceId, name: d.label }));
@@ -39,6 +48,14 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
   return {
     get cameras() {
       return cameras;
+    },
+    get microphones() {
+      return microphones;
+    },
+    openMicrophone(device, mode, events, signal) {
+      return openMicrophone(media, device, mode, events, signal, () => {
+        void refresh().catch(() => {});
+      });
     },
     openCamera(device, mode, events, signal) {
       return openCamera(media, device, mode, events, signal, () => {

@@ -791,6 +791,13 @@ export interface CameraEvents {
 /** Optional: without a host the player retains Flash's no-device behaviour. */
 export interface CaptureHost {
   readonly cameras: readonly CaptureDevice[];
+  readonly microphones?: readonly CaptureDevice[];
+  openMicrophone?(
+    device: CaptureDevice,
+    mode: MicrophoneMode,
+    events: MicrophoneEvents,
+    signal: AbortSignal,
+  ): MicrophoneCapture;
   /** Opening may prompt. Abort closes a live capture and any capture still awaiting permission. */
   openCamera(
     device: CaptureDevice,
@@ -798,4 +805,22 @@ export interface CaptureHost {
     events: CameraEvents,
     signal: AbortSignal,
   ): CameraCapture;
+}
+
+export interface MicrophoneMode {
+  /** Flash's gain knob: 50 is unity, 0 silent and 100 twice normal volume. */
+  gain: number;
+  echoCancellation: boolean;
+  noiseSuppression: boolean;
+}
+
+export interface MicrophoneEvents {
+  state(state: "granted" | "denied" | "ended"): void;
+  /** Mono PCM after gain, at the device's sample rate. Owned by the receiver. */
+  samples(samples: Float32Array, rate: number): void;
+}
+
+export interface MicrophoneCapture {
+  setMode(mode: MicrophoneMode): void;
+  close(): void;
 }
