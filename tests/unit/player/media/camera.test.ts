@@ -348,3 +348,22 @@ test("AS3 video copies use Video.smoothing, independent of draw's smoothing argu
     h.s.destroy();
   }
 });
+
+test("Stop tells only a camera that was opened or told of a decision", async () => {
+  const h = await setup();
+  try {
+    const statuses: avm2.Value[] = [];
+    h.listen(h.camera, "status", (e) => statuses.push(h.get(e, "code")));
+    h.s.captureLifetime.abort();
+    for (let i = 0; i < 3; i++) {
+      h.player.tick();
+    }
+
+    assert.deepEqual(statuses, []);
+    assert.equal(h.get(h.camera, "muted"), true);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});

@@ -96,8 +96,9 @@ export class CameraState {
     s.captureLifetime.signal.addEventListener(
       "abort",
       () => {
+        const opened = this.active;
         this.detach();
-        this.consent.set(true);
+        this.consent.revoke(opened);
       },
       { once: true },
     );

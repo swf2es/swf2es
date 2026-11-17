@@ -227,11 +227,16 @@ test("enhanced capture applies echo settings and excludes other microphones", as
   try {
     const devices = h.s.capture?.microphones as { id: string; name: string }[];
     devices.push({ id: "second", name: "Second microphone" });
+    devices.push({ id: "third", name: "Idle microphone" });
     const second = h.call(h.klass, "getMicrophone", 1) as avm2.AsObject;
+    const idle = h.call(h.klass, "getMicrophone", 2) as avm2.AsObject;
     h.call(second, "setLoopBack", true);
     h.opens[0].events.state("granted");
     const statuses: avm2.Value[] = [];
-    h.listen(second, "status", (e) => statuses.push(h.get(e, "code")));
+    const idleStatuses: avm2.Value[] = [];
+    h.listen(second, "status", (e) => statuses.push(`${h.get(e, "code")} ${h.get(e, "level")}`));
+    h.listen(idle, "status", (e) => idleStatuses.push(h.get(e, "code")));
+    assert.equal(h.call(h.klass, "getEnhancedMicrophone"), h.mic);
     assert.equal(h.call(h.klass, "getEnhancedMicrophone"), h.mic);
     assert.equal(h.opens[0].closed, 1);
     h.call(second, "setLoopBack", true);
@@ -243,7 +248,8 @@ test("enhanced capture applies echo settings and excludes other microphones", as
       noiseSuppression: true,
     });
     h.player.tick();
-    assert.deepEqual(statuses, ["Microphone.Unmuted", "Microphone.Unavailable"]);
+    assert.deepEqual(statuses, ["Microphone.Unmuted status", "Microphone.Unavailable status"]);
+    assert.deepEqual(idleStatuses, []);
     assert.equal(h.get(second, "muted"), false);
     const options = h.rt.construct(h.rt.classNamed("flash.media::MicrophoneEnhancedOptions"));
     h.set(options, "mode", "off");
@@ -301,13 +307,16 @@ test("loopback without an audio host opens no device", async () => {
   }
 });
 
-test("real-time sample delivery survives stalled frames and borrowed input buffers", async () => {
+test("real-time sample delivery waits for Unmuted, then survives stalled frames", async () => {
   const h = await setup(true, () => performance.now());
   try {
     const positions: number[] = [];
+    const order: string[] = [];
     let count = 0;
     h.set(h.mic, "rate", 44);
+    h.listen(h.mic, "status", (event) => order.push(String(h.get(event, "code"))));
     h.listen(h.mic, "sampleData", (event) => {
+      order.push("samples");
       positions.push(Number(h.get(event, "position")));
       assert.equal(positions.at(-1), count);
       const bytes = avm2.bytesOf(h.rt, h.get(event, "data") as avm2.AsObject);
@@ -316,12 +325,23 @@ test("real-time sample delivery survives stalled frames and borrowed input buffe
     });
     h.opens[0].events.state("granted");
     const buffer = new Float32Array(2048).fill(0.25);
+    for (let i = 0; i < 5; i++) {
+      h.opens[0].events.samples(buffer, 48000);
+    }
+
+    // The frame that tells the script of the grant has not come: no samples may come before it.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.deepEqual(order, []);
+    h.player.tick();
+    assert.equal(order[0], "Microphone.Unmuted");
+    assert.equal(count, Math.ceil((5 * 2048 * 44100) / 48000));
     for (let i = 0; i < 30; i++) {
       h.opens[0].events.samples(buffer, 48000);
     }
+
     await new Promise((resolve) => setTimeout(resolve, 150));
-    assert.equal(count, Math.ceil((30 * 2048 * 44100) / 48000));
-    assert.ok(positions.length > 1);
+    assert.equal(count, Math.ceil((35 * 2048 * 44100) / 48000));
+    assert.ok(positions.length > 2);
     assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();
@@ -336,6 +356,32 @@ test("unloading an unrelated movie never reopens a denied parent microphone", as
     h.opens[0].events.state("denied");
     stopMicrophones(h.s, {} as NonNullable<typeof h.s.library>);
     assert.equal(h.opens.length, 1);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("Stop tells only microphones that were opened or told of a decision", async () => {
+  const h = await setup();
+  try {
+    const devices = h.s.capture?.microphones as { id: string; name: string }[];
+    devices.push({ id: "second", name: "Opening microphone" });
+    const opening = h.call(h.klass, "getMicrophone", 1) as avm2.AsObject;
+    const idle: avm2.Value[] = [];
+    const asked: avm2.Value[] = [];
+    h.listen(h.mic, "status", (e) => idle.push(h.get(e, "code")));
+    h.listen(opening, "status", (e) => asked.push(h.get(e, "code")));
+    h.listen(opening, "sampleData", () => {});
+    h.s.captureLifetime.abort();
+    for (let i = 0; i < 3; i++) {
+      h.player.tick();
+    }
+
+    assert.deepEqual(idle, []);
+    assert.deepEqual(asked, ["Microphone.Muted"]);
+    assert.equal(h.get(h.mic, "muted"), true);
+    assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();
     h.s.destroy();

@@ -141,15 +141,21 @@ against `motionLevel`, raising activity on motion and ending it after
 
 Status events report the first consent result and subsequent changes. Reopening an
 already permitted device does not repeat `Unmuted`; Stop and attribute revocation
-report `Muted`. AIR permission requests after revocation answer `denied` while the
+report `Muted` to devices that were opened or told of a decision, and nothing to
+devices the movie never opened. `sampleData` never precedes `Microphone.Unmuted`:
+samples captured before the frame that reports the grant wait, bounded by the queue. AIR permission requests after revocation answer `denied` while the
 player remains alive. Without a capture host, both static permission getters report
 `granted`, as measured in Linux adl; this does not imply that devices exist.
 
 Only browser permission/security failures count as denial. Stale device constraints
-are retried once with preferences; other opening failures report an error-level
-`Camera.Unavailable` or `Microphone.Unavailable` status without changing consent.
-These asynchronous device-error notifications are a host extension, not measured
-Flash behavior. An unavailable device can be retried by attaching again.
+are retried once with preferences; other opening failures (in the desktop shell too)
+report a `Camera.Unavailable` or `Microphone.Unavailable` status without changing
+consent. These asynchronous device-error notifications are a host extension, not
+measured Flash behavior. Adobe's
+[getEnhancedMicrophone](https://airsdk.dev/reference/actionscript/3.0/flash/media/Microphone.html#getEnhancedMicrophone())
+documents `Microphone.Unavailable` for the other microphones, which stop providing
+audio, but no level; it is sent at level `"status"`, as every other capture code,
+and only to microphones that were capturing. An unavailable device can be retried by attaching again.
 
 The browser host enumerates before AS3 starts so synchronous `names` and
 `getCamera` can use the result without prompting. It opens capture only

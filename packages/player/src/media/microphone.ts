@@ -84,8 +84,9 @@ export class MicrophoneState {
     s.captureLifetime.signal.addEventListener(
       "abort",
       () => {
+        const opened = this.active;
         this.stop();
-        this.consent.set(true);
+        this.consent.revoke(opened);
       },
       { once: true },
     );
@@ -207,9 +208,13 @@ export class MicrophoneState {
     }
   }
 
+  /** Adobe: the other microphones stop providing audio and are told; idle ones have nothing to stop. */
   unavailable(): void {
+    const opened = this.active;
     this.stop();
-    this.consent.unavailable();
+    if (opened) {
+      this.consent.unavailable();
+    }
   }
 
   private stop(invalidate = true): void {
@@ -386,6 +391,11 @@ export class MicrophoneState {
     if (this.deliveryTimer !== null) {
       clearTimeout(this.deliveryTimer);
       this.deliveryTimer = null;
+    }
+
+    // Samples wait, bounded by the queue, until the script has heard Microphone.Unmuted.
+    if (!this.consent.unmutedReported) {
+      return;
     }
 
     const count = this.queuedSamples;
