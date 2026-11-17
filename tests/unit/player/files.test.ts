@@ -90,6 +90,26 @@ test("selection and load cross the frame boundary; cancellation drops stale resu
   assert.equal(h.events.length, 4);
 });
 
+test("a finished operation's signal is no longer the player's to abort", async () => {
+  const h = harness();
+  const signals: AbortSignal[] = [];
+  const host = h.services.host;
+  assert.ok(host);
+  host.browse = async (_filters, _multiple, signal) => {
+    signals.push(signal);
+    return [selected];
+  };
+  h.reference.browse([]);
+  await h.frame();
+  h.reference.browse([]);
+  await h.frame();
+  h.lifetime.abort();
+  assert.deepEqual(
+    signals.map((s) => s.aborted),
+    [false, false],
+  );
+});
+
 test("save snapshots bytes and downloads fetch only after a destination was selected", async () => {
   const h = harness();
   h.reference.save("a.bin", Uint8Array.of(1, 2));
