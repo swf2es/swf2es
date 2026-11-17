@@ -2,6 +2,8 @@ package
 {
 	import flash.display.Sprite;
 	import flash.events.Event;
+	import flash.media.Camera;
+	import flash.media.Microphone;
 	import flash.utils.getDefinitionByName;
 
 	public class CapturePermission extends Sprite
@@ -10,6 +12,7 @@ package
 		{
 			var PermissionEvent:Class = getDefinitionByName("flash.events.PermissionEvent") as Class;
 			var PermissionStatus:Class = getDefinitionByName("flash.permissions.PermissionStatus") as Class;
+			trace("no devices", Object(Camera).permissionStatus, Object(Microphone).permissionStatus, PermissionStatus.ONLY_WHEN_IN_USE);
 			trace("statuses", PermissionStatus.UNKNOWN, PermissionStatus.GRANTED, PermissionStatus.DENIED);
 			var event:Event = new PermissionEvent("permissionStatus");
 			trace("default", Object(event).status, event.bubbles, event.cancelable);

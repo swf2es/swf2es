@@ -1,3 +1,4 @@
+no devices granted granted onlyWhenInUse
 statuses unknown granted denied
 default denied false false
 copy true granted true true

@@ -241,13 +241,44 @@ test("enhanced capture applies echo settings and excludes other microphones", as
       noiseSuppression: true,
     });
     h.player.tick();
-    assert.deepEqual(statuses, ["Microphone.Unavailable"]);
+    assert.deepEqual(statuses, ["Microphone.Unmuted", "Microphone.Unavailable"]);
+    assert.equal(h.get(second, "muted"), false);
     const options = h.rt.construct(h.rt.classNamed("flash.media::MicrophoneEnhancedOptions"));
     h.set(options, "mode", "off");
     h.set(h.mic, "enhancedOptions", options);
     assert.equal(h.opens[1].modes.at(-1)?.echoCancellation, false);
     h.set(h.mic, "codec", "Speex");
     assert.equal(h.get(h.mic, "rate"), 16);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("Microphone reopening does not repeat consent and revoke reports Muted", async () => {
+  const h = await setup();
+  try {
+    const statuses: avm2.Value[] = [];
+    const activity: avm2.Value[] = [];
+    h.listen(h.mic, "status", (e) => statuses.push(h.get(e, "code")));
+    h.listen(h.mic, "activity", (e) => activity.push(h.get(e, "activating")));
+    const remove = h.listen(h.mic, "sampleData", () => {});
+    h.opens[0].events.state("granted");
+    h.player.tick();
+    remove();
+    h.listen(h.mic, "sampleData", () => {});
+    h.opens[1].events.state("granted");
+    h.call(h.mic, "setSilenceLevel", 10, 0);
+    h.opens[1].events.samples(new Float32Array(480).fill(0.5), 48000);
+    h.opens[1].events.samples(new Float32Array(480), 48000);
+    h.player.tick();
+    assert.deepEqual(activity, []);
+    assert.deepEqual(statuses, ["Microphone.Unmuted"]);
+    h.s.captureLifetime.abort();
+    h.player.tick();
+    assert.deepEqual(statuses, ["Microphone.Unmuted", "Microphone.Muted"]);
+    assert.equal(h.get(h.mic, "muted"), true);
     assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();

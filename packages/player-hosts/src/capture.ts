@@ -8,15 +8,20 @@ import type {
   CapturePermission,
 } from "@swf2es/player";
 
+import { denied, openMedia } from "./capture-access.js";
 import { openMicrophone } from "./capture-audio.js";
 
-function constraints(device: CaptureDevice, mode: CameraMode): MediaTrackConstraints {
+function constraints(
+  device: CaptureDevice,
+  mode: CameraMode,
+  strict = true,
+): MediaTrackConstraints {
   return {
-    deviceId: device.id ? { exact: device.id } : undefined,
+    deviceId: device.id ? (strict ? { exact: device.id } : { ideal: device.id }) : undefined,
     width: { ideal: mode.width },
     height: { ideal: mode.height },
     aspectRatio: { ideal: mode.width / mode.height },
-    frameRate: mode.favorArea ? { ideal: mode.fps, max: mode.fps } : { ideal: mode.fps },
+    frameRate: strict && mode.favorArea ? { ideal: mode.fps, max: mode.fps } : { ideal: mode.fps },
   };
 }
 
@@ -62,11 +67,12 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
       }
     }),
   );
+  const permissionStatus = (kind: CaptureKind): CapturePermission => {
+    const status = permissionHandles.get(kind)?.state;
+    return status === "prompt" ? "unknown" : (status ?? permissions[kind]);
+  };
   return {
-    permissionStatus: (kind) => {
-      const status = permissionHandles.get(kind)?.state;
-      return status === "prompt" ? "unknown" : (status ?? permissions[kind]);
-    },
+    permissionStatus,
     async requestPermission(kind, signal) {
       if (signal.aborted) {
         return "denied";
@@ -84,11 +90,17 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
         permissions[kind] = "granted";
         await refresh().catch(() => {});
         return "granted";
-      } catch {
-        if (!signal.aborted) {
-          permissions[kind] = "denied";
+      } catch (error) {
+        if (signal.aborted) {
+          return "denied";
         }
-        return "denied";
+
+        if (denied(error)) {
+          permissions[kind] = "denied";
+          return "denied";
+        }
+
+        return permissionStatus(kind);
       }
     },
     get cameras() {
@@ -105,7 +117,7 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
         {
           ...events,
           state(value) {
-            if (value !== "ended") {
+            if (value === "granted" || value === "denied") {
               permissions.microphone = value;
             }
             events.state(value);
@@ -125,7 +137,7 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
         {
           ...events,
           state(value) {
-            if (value !== "ended") {
+            if (value === "granted" || value === "denied") {
               permissions.camera = value;
             }
             events.state(value);
@@ -155,6 +167,8 @@ function openCamera(
   let track: MediaStreamTrack | null = null;
   let closed = false;
   let openSettled = false;
+  let acquired = false;
+  const opening = new AbortController();
   let resolveClosed: () => void = () => {};
   const closedPromise = new Promise<void>((resolve) => {
     resolveClosed = resolve;
@@ -233,6 +247,7 @@ function openCamera(
     }
 
     closed = true;
+    opening.abort();
     signal.removeEventListener("abort", abort);
     video.cancelVideoFrameCallback(callback);
     video.pause();
@@ -289,8 +304,12 @@ function openCamera(
   }
 
   signal.addEventListener("abort", abort, { once: true });
-  void media
-    .getUserMedia({ video: constraints(device, mode), audio: false })
+  void openMedia(
+    media,
+    { video: constraints(device, mode), audio: false },
+    { video: constraints(device, mode, false), audio: false },
+    opening.signal,
+  )
     .then(async (opened) => {
       openSettled = true;
       if (closed) {
@@ -301,37 +320,42 @@ function openCamera(
         return;
       }
 
+      acquired = true;
       stream = opened;
       track = opened.getVideoTracks()[0] ?? null;
       if (!track) {
         finish(false);
-        events.state("denied");
+        events.state("unavailable");
         return;
       }
 
       track.addEventListener("ended", () => finish(true), { once: true });
       video.srcObject = opened;
-      events.state("granted");
       settings();
-      refresh();
-      await apply();
+      if (modeVersion > 0) {
+        await apply();
+      }
       if (closed) {
         return;
       }
 
       await video.play();
       if (!closed) {
-        callback = video.requestVideoFrameCallback(frame);
+        events.state("granted");
+        refresh();
+        if (!closed) {
+          callback = video.requestVideoFrameCallback(frame);
+        }
       }
     })
-    .catch(() => {
+    .catch((error) => {
       openSettled = true;
       if (closed) {
         resolveClosed();
       }
       if (!closed) {
         finish(false);
-        events.state("denied");
+        events.state(!acquired && denied(error) ? "denied" : "unavailable");
       }
     });
   return capture;

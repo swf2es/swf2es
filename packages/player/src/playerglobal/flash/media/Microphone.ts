@@ -1,12 +1,8 @@
-// flash.media.Microphone as Flash Player has it on a machine without a
-// microphone: supported, but no names and no microphone to get. A
-// Microphone made with `new` reads as zeros and nulls, and its settings
-// change nothing, as in Flash; only the null checks of its setters remain.
-// The enhanced options are the exception: Flash keeps one set for every
-// Microphone once getEnhancedMicrophone has been called, whatever it returned.
+// Device capture follows Adobe's documented API; without a capture host,
+// the existing device-free defaults measured in adl remain unchanged.
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
-import { requestCapturePermission } from "../../../media/capture-permission.js";
+import { capturePermission, requestCapturePermission } from "../../../media/capture-permission.js";
 import { microphoneRates } from "../../../media/capture-resampler.js";
 import { MicrophoneState, microphoneStates } from "../../../media/microphone.js";
 import { mixOf } from "../../../media/sounds.js";
@@ -48,7 +44,7 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
 
   class MicrophoneNatives {
     static get permissionStatus(): string {
-      return s.capture?.permissionStatus?.("microphone") ?? "denied";
+      return capturePermission(s, "microphone");
     }
     requestPermission(): void {
       requestCapturePermission(s, this, "microphone");

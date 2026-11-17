@@ -3,6 +3,7 @@ import type { VideoObject } from "../display/videoobject.js";
 import type { CameraCapture, CameraMode, CameraPicture, CaptureDevice } from "../hosts.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
+import { CaptureStatus } from "./capture-status.js";
 import { VideoSource } from "./video.js";
 
 export const cameraStates = new WeakMap<avm2.AsObject, CameraState>();
@@ -16,7 +17,12 @@ export class CameraState {
   height = 120;
   fps = 15;
   currentFPS = 0;
-  muted = true;
+  private readonly consent: CaptureStatus;
+
+  get muted(): boolean {
+    return this.consent.muted;
+  }
+
   position = "unknown";
   bandwidth = 16384;
   quality = 0;
@@ -33,6 +39,7 @@ export class CameraState {
   private previousTime = -1;
   private lastMotion = -1;
   private activating = false;
+  private reportedActivity = false;
   private activityEventGeneration = 0;
   private frameEventGeneration = 0;
 
@@ -42,7 +49,15 @@ export class CameraState {
     readonly device: CaptureDevice,
     readonly index: number,
   ) {
-    s.captureLifetime.signal.addEventListener("abort", () => this.detach(), { once: true });
+    this.consent = new CaptureStatus(s, object, "Camera");
+    s.captureLifetime.signal.addEventListener(
+      "abort",
+      () => {
+        this.detach();
+        this.consent.set(true);
+      },
+      { once: true },
+    );
   }
 
   attach(video: VideoObject): void {
@@ -111,13 +126,12 @@ export class CameraState {
     this.activating = false;
     const generation = ++this.generation;
     const current = () => generation === this.generation && !this.s.destroyed;
-    const state = (state: "granted" | "denied" | "ended") => {
+    const state = (state: "granted" | "denied" | "ended" | "unavailable") => {
       if (!current()) {
         return;
       }
 
-      this.muted = state !== "granted";
-      if (this.muted) {
+      if (state !== "granted") {
         this.active = false;
         this.transport?.close();
         this.transport = null;
@@ -126,22 +140,11 @@ export class CameraState {
         this.activityLevel = -1;
       }
 
-      this.s.loads.deferHostEvent(() => {
-        if (current()) {
-          dispatchEvent(
-            this.s,
-            this.object,
-            this.s.rt.construct(
-              this.s.rt.classNamed("flash.events::StatusEvent"),
-              "status",
-              false,
-              false,
-              state === "granted" ? "Camera.Unmuted" : "Camera.Muted",
-              "status",
-            ),
-          );
-        }
-      });
+      if (state === "unavailable") {
+        this.consent.unavailable();
+      } else {
+        this.consent.set(state !== "granted");
+      }
     };
     try {
       const transport = this.s.capture.openCamera(
@@ -171,11 +174,16 @@ export class CameraState {
         transport.close();
       }
     } catch {
-      state("denied");
+      state("unavailable");
     }
   }
 
   private frame(picture: CameraPicture): void {
+    if (!this.video?.deref()) {
+      this.detach();
+      return;
+    }
+
     this.width = picture.width;
     this.height = picture.height;
     if (this.previousTime >= 0 && picture.time > this.previousTime) {
@@ -235,8 +243,10 @@ export class CameraState {
             !this.s.destroyed &&
             this.active &&
             generation === this.generation &&
-            this.motionLevel !== 100
+            this.motionLevel !== 100 &&
+            this.reportedActivity !== this.activating
           ) {
+            this.reportedActivity = this.activating;
             dispatchEvent(
               this.s,
               this.object,

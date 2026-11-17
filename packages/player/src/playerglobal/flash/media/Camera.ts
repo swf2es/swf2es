@@ -4,7 +4,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { pixelRect } from "../../../bitmap/pixel-rect.js";
 import { CameraState, cameraStates } from "../../../media/camera.js";
-import { requestCapturePermission } from "../../../media/capture-permission.js";
+import { capturePermission, requestCapturePermission } from "../../../media/capture-permission.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "../display/BitmapData.js";
 
@@ -33,7 +33,7 @@ export function cameraNatives(s: Scripting): avm2.Natives {
 
   class CameraNatives {
     static get permissionStatus(): string {
-      return s.capture?.permissionStatus?.("camera") ?? "denied";
+      return capturePermission(s, "camera");
     }
     requestPermission(): void {
       requestCapturePermission(s, this, "camera");
@@ -154,7 +154,7 @@ export function cameraNatives(s: Scripting): avm2.Natives {
           width: Math.max(1, s.rt.toInt(width)),
           height: Math.max(1, s.rt.toInt(height)),
           fps: Number.isFinite(rate) ? Math.max(1, Math.min(1000, rate)) : 15,
-          favorArea: !!favorArea,
+          favorArea: favorArea === undefined || !!favorArea,
         });
       }
     }
@@ -163,7 +163,7 @@ export function cameraNatives(s: Scripting): avm2.Natives {
       const camera = state(this);
       if (camera) {
         camera.motionLevel = Math.max(0, Math.min(100, s.rt.toInt(level)));
-        camera.motionTimeout = Math.max(0, s.rt.toInt(timeout));
+        camera.motionTimeout = timeout === undefined ? 2000 : Math.max(0, s.rt.toInt(timeout));
       }
     }
 
