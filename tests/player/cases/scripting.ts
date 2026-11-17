@@ -228,6 +228,39 @@ function placedByClass(compile: Compile): Uint8Array {
 /** Two loads, a frame or two each, then a frame drawn. */
 const PLACED_BY_CLASS_FRAMES = 8;
 
+// A second frame whose SymbolClass binds the document's id 0 and a sprite's
+// id again, to classes of its own frame's code, as a preloader's second
+// frame does with its program's (scripts/ReboundFirst.as, ReboundSecond.as).
+// The sprite is placed in frame 2, after that SymbolClass.
+function symbolClassRebound(compile: Compile): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.sprite(2, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.doAbc(compile("ReboundFirst"), "ReboundFirst"),
+      w.symbolClass([
+        [0, "ReboundFirst"],
+        [2, "ReboundBoxA"],
+      ]),
+      w.showFrame(),
+      w.doAbc(compile("ReboundSecond"), "ReboundSecond"),
+      w.symbolClass([
+        [0, "ReboundSecond"],
+        [2, "ReboundBoxB"],
+      ]),
+      w.place({ depth: 1, character: 2 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // The same, unloading from INIT (scripts/LoadsInit.as.template). The inner
 // SWF has one frame: a clip taken off the display list plays on in Flash,
 // which is not this case's.
@@ -934,6 +967,14 @@ export const scriptingCases: PlayerCase[] = [
     build: placedByClass,
     frames: PLACED_BY_CLASS_FRAMES,
     capture: [PLACED_BY_CLASS_FRAMES],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "symbol-class-rebound",
+    build: symbolClassRebound,
+    frames: 4,
+    capture: [4],
     tolerance: 0,
     maxOutliers: 0,
   },
