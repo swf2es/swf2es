@@ -269,8 +269,7 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
     setLoopBack(isLooped: Value): void {
       const live = state(this);
       if (live) {
-        live.loopback = isLooped === undefined || !!isLooped;
-        live.sync();
+        live.setLoopback(isLooped === undefined || !!isLooped);
       }
     }
 

@@ -29,7 +29,7 @@ const app = zip([
   { name: "CaptureDevices.swf", data: swf },
 ]);
 
-for (const scenario of ["lifecycle", "revoke", "denied"]) {
+for (const scenario of ["lifecycle", "revoke", "denied", "filter", "cached"]) {
   const result = await withPage(
     "runSwf",
     async (evaluate, send) => {
@@ -72,6 +72,8 @@ for (const scenario of ["lifecycle", "revoke", "denied"]) {
           await wait(() => count('capture: idle') === 1, 'idle frames');
           check(opens === 0 && count('capture: status') === 0, 'settings requested capture');
           check(traces.includes('capture: initial true true true true 2000 2000'), 'ABC defaults');
+          if (scenario === 'filter' || scenario === 'cached') command(scenario);
+          if (scenario === 'lifecycle') command('motion');
           command('camera');
           check(requests[0].video.frameRate.max === 15, 'setMode favorArea default');
           if (scenario === 'denied') {
@@ -85,8 +87,13 @@ for (const scenario of ["lifecycle", "revoke", "denied"]) {
             for (const text of ['small 2015', 'null 2007', 'null vector 2007']) {
               check(traces.includes('capture: ' + text), text);
             }
-            if (scenario === 'lifecycle') {
+            if (scenario === 'lifecycle' || scenario === 'filter' || scenario === 'cached') {
               await new Promise(resolve => { globalThis.captureSnapshotReady = resolve; });
+            }
+            if (scenario === 'lifecycle') {
+              await wait(() => traces.includes('capture: motion true true true'), 'camera activity');
+              command('motion default');
+              await wait(() => count('capture: default motion') === 1, 'default motion measurement');
             }
             command('microphone');
             await wait(() => count('capture: samples') === 1, 'microphone samples');
@@ -101,7 +108,11 @@ for (const scenario of ["lifecycle", "revoke", "denied"]) {
               check(traces.includes('capture: permission camera denied true') && traces.includes('capture: permission microphone denied true'), 'permission denial');
             } else {
               command('detach'); command('unsample');
+              check(traces.includes('capture: retained true 320 240'), 'detached last frame');
               await wait(() => tracks.every(t => t.readyState === 'ended'), 'detach tracks');
+              await new Promise(resolve => setTimeout(resolve, 200));
+              command('retained');
+              check(traces.includes('capture: still true'), 'detached image changed');
               command('camera'); command('microphone');
               await wait(() => count('capture: picture') === 2 && count('capture: samples') === 2, 'reopen');
               check(opens === 4, 'reopen count');
@@ -126,7 +137,7 @@ for (const scenario of ["lifecycle", "revoke", "denied"]) {
           navigator.mediaDevices.getUserMedia = original;
         }
       })()`);
-      if (scenario === "lifecycle") {
+      if (["lifecycle", "filter", "cached"].includes(scenario)) {
         let ready = false;
         for (let i = 0; i < 400 && !ready; i++) {
           await new Promise((resolve) => setTimeout(resolve, 25));
@@ -166,6 +177,10 @@ for (const scenario of ["lifecycle", "revoke", "denied"]) {
   assert.equal(result.exception, null, result.exception ?? "browser exception");
   assert.ok(result.value?.length);
   console.log(`AS3 capture: ${scenario} passed`);
+  const motion = result.value?.find((line) => line.startsWith("capture: default motion"));
+  if (motion) {
+    console.log(motion);
+  }
 }
 
 const refusal = zip([
@@ -239,3 +254,114 @@ const refused = await withPage("runSwf", (evaluate) =>
 assert.equal(refused.exception, null, refused.exception ?? "browser exception");
 assert.equal(refused.value?.length, 9);
 console.log("AS3 capture: initial embedding refusal passed");
+
+const childAbc = compile(
+  "CaptureChild",
+  `package {
+  import flash.display.Sprite;
+  import flash.media.Camera;
+  import flash.media.Microphone;
+  import flash.media.Video;
+  import flash.events.SampleDataEvent;
+  import flash.events.Event;
+  public class CaptureChild extends Sprite {
+    private var cam:Camera = Camera.getCamera();
+    private var mic:Microphone = Microphone.getMicrophone();
+    public function CaptureChild() {
+      cam.addEventListener("status", cameraEvent);
+      cam.addEventListener("videoFrame", cameraEvent);
+      var video:Video = new Video(); addChild(video); video.attachCamera(cam);
+      mic.addEventListener(SampleDataEvent.SAMPLE_DATA, sample);
+    }
+    private function cameraEvent(event:Event):void { trace("child: camera", event.type); }
+    private function sample(event:SampleDataEvent):void { trace("child: samples"); }
+  }
+}`,
+);
+const child = bare(childAbc, 1, "CaptureChild");
+const parentAbc = compile(
+  "CaptureParent",
+  `package {
+  import flash.display.Sprite;
+  import flash.display.Loader;
+  import flash.external.ExternalInterface;
+  import flash.utils.ByteArray;
+  import flash.media.Camera;
+  import flash.media.Microphone;
+  import flash.media.Video;
+  import flash.events.Event;
+  import flash.events.SampleDataEvent;
+  public class CaptureParent extends Sprite {
+    private var loader:Loader = new Loader();
+    public function CaptureParent() {
+      addChild(loader);
+      if (loaderInfo.parameters.parent == "yes") {
+        Microphone.getMicrophone().addEventListener(SampleDataEvent.SAMPLE_DATA, sample);
+      }
+      ExternalInterface.addCallback("resumeCamera", function():void {
+        var video:Video = new Video(); addChild(video);
+        Camera.getCamera().addEventListener("videoFrame", frame);
+        video.attachCamera(Camera.getCamera());
+      });
+      ExternalInterface.addCallback("unloadCapture", function():void { loader.unloadAndStop(); trace("child: stopped"); });
+      var bytes:ByteArray = new ByteArray();
+      for each(var value:int in [${[...child].join(",")}]) { bytes.writeByte(value); }
+      bytes.position = 0; loader.loadBytes(bytes);
+    }
+    private function sample(event:SampleDataEvent):void { trace("parent: samples"); }
+    private function frame(event:Event):void {
+      trace("parent: video"); Camera.getCamera().removeEventListener("videoFrame", frame);
+    }
+  }
+}`,
+);
+const parent = [...bare(parentAbc, 1, "CaptureParent")];
+for (const keepParent of [false, true]) {
+  const unloaded = await withPage(
+    "runSwf",
+    (evaluate) =>
+      evaluate<boolean>(`(async () => {
+  await import('@swf2es/web');
+  const tracks = [], traces = [], errors = [];
+  const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+  navigator.mediaDevices.getUserMedia = async (...args) => {
+    const stream = await original(...args); tracks.push(...stream.getTracks()); return stream;
+  };
+  const { log, error } = console;
+  console.log = (...args) => traces.push(args.join(' '));
+  console.error = (...args) => errors.push(args.join(' '));
+  const p = document.createElement('swf2es-player');
+  p.setAttribute('allowscriptaccess', 'always'); document.body.append(p);
+  p.setAttribute('flashvars', 'parent=' + (${keepParent} ? 'yes' : 'no'));
+  const wait = async (condition, label) => {
+    const end = performance.now() + 10000;
+    while (!condition()) {
+      if (performance.now() > end) throw new Error(label + ': ' + traces.join('; ') + ' / ' + errors.join('; '));
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+  };
+  try {
+    await p.load(Uint8Array.from(${JSON.stringify(parent)}));
+    await wait(() => tracks.length === 2 && traces.includes('child: samples'), 'child capture');
+    p.unloadCapture();
+    await wait(() => tracks.filter(t => t.readyState === 'live').length === (${keepParent} ? 1 : 0), 'child tracks after unloadAndStop');
+    const before = traces.length;
+    p.resumeCamera();
+    await wait(() => traces.slice(before).includes('parent: video'), 'parent camera');
+    await new Promise(resolve => setTimeout(resolve, 250));
+    if (traces.slice(before).some(t => t.startsWith('child:'))) throw new Error('unloaded child still hears capture events');
+    if (${keepParent} && !traces.slice(before).includes('parent: samples')) throw new Error('child unload stopped parent microphone');
+    if (errors.length) throw new Error(errors.join('; '));
+    return true;
+  } finally { p.destroy(); p.remove(); console.log = log; console.error = error; }
+})()`),
+    false,
+    {
+      args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
+      timeout: 30000,
+    },
+  );
+  assert.equal(unloaded.exception, null, unloaded.exception ?? "browser exception");
+  assert.equal(unloaded.value, true);
+  console.log(`AS3 capture: child unloadAndStop with parent capture ${keepParent} passed`);
+}

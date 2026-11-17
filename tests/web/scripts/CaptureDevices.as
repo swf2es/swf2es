@@ -1,7 +1,10 @@
 package {
   import flash.display.BitmapData;
   import flash.display.MovieClip;
+  import flash.display.Sprite;
+  import flash.events.ActivityEvent;
   import flash.events.Event;
+  import flash.filters.BlurFilter;
   import flash.events.SampleDataEvent;
   import flash.events.StatusEvent;
   import flash.external.ExternalInterface;
@@ -92,14 +95,53 @@ package {
       small.dispose();
     }
 
+    private var retained:BitmapData;
+
     public function command(action:String):void {
       switch (action) {
+        case "filter":
+          video.filters = [new BlurFilter(4, 4, 1)];
+          break;
+        case "cached":
+          var cache:Sprite = new Sprite();
+          addChild(cache);
+          cache.addChild(video);
+          cache.cacheAsBitmap = true;
+          break;
+        case "motion":
+          camera.setMotionLevel(1, 500);
+          camera.addEventListener(ActivityEvent.ACTIVITY, function(event:ActivityEvent):void {
+            trace("capture: motion", event.activating, event is ActivityEvent, event.target == camera);
+          });
+          break;
+        case "motion default":
+          camera.setMotionLevel(50);
+          var observed:int = 0;
+          var maximum:Number = 0;
+          var measure:Function = function(event:Event):void {
+            maximum = Math.max(maximum, camera.activityLevel);
+            if (++observed == 15) {
+              camera.removeEventListener("videoFrame", measure);
+              trace("capture: default motion", maximum);
+            }
+          };
+          camera.addEventListener("videoFrame", measure);
+          break;
         case "camera":
           camera.addEventListener("videoFrame", picture);
           video.attachCamera(camera);
           break;
         case "detach":
           video.attachCamera(null);
+          retained = new BitmapData(320, 240, true, 0);
+          retained.draw(video);
+          trace("capture: retained", retained.getPixel32(100, 100) != 0, video.videoWidth, video.videoHeight);
+          break;
+        case "retained":
+          var after:BitmapData = new BitmapData(320, 240, true, 0);
+          after.draw(video);
+          trace("capture: still", retained.compare(after) == 0);
+          retained.dispose(); retained = null; after.dispose();
           break;
         case "microphone":
           samples = false;
@@ -114,11 +156,11 @@ package {
           addChild(video);
           video.attachCamera(camera);
           trace("capture: transfer", previous.videoWidth);
-          removeChild(previous);
+          previous.parent.removeChild(previous);
           break;
         case "drop":
           camera.removeEventListener("videoFrame", picture);
-          removeChild(video);
+          video.parent.removeChild(video);
           video = null;
           break;
         case "denied":

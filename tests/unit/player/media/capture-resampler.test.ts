@@ -50,3 +50,23 @@ test("full-scale edges stay inside the captured PCM range after low-pass ringing
   const output = new CaptureResampler(48000, 8000).push(input);
   assert.ok(output.every((value) => Number.isFinite(value) && value >= -1 && value <= 1));
 });
+
+test("borrowed resampler output survives uneven input sizes without stale history", () => {
+  const input = wave(48000, 440);
+  const converter = new CaptureResampler(48000, 11025);
+  const reference = new CaptureResampler(48000, 11025).push(input);
+  const result = new Float32Array(reference.length);
+  let at = 0;
+  let output = 0;
+  for (const count of [4096, 7, 2048, 16384, 1, 25464]) {
+    const block = converter.push(input.subarray(at, at + count), true);
+    result.set(block, output);
+    at += count;
+    output += block.length;
+  }
+  assert.equal(at, input.length);
+  assert.deepEqual(result, reference);
+  const unity = new CaptureResampler(8000, 8000);
+  assert.equal(unity.push(input, true), input);
+  assert.notEqual(unity.push(input), input);
+});

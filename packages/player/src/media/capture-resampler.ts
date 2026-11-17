@@ -5,7 +5,9 @@ const PHASES = 256;
 
 export class CaptureResampler {
   private readonly kernels = new Float64Array(TAPS * PHASES);
-  private history = new Float32Array(TAPS);
+  private readonly history = new Float32Array(TAPS);
+  private input = new Float32Array(0);
+  private result = new Float32Array(0);
   private received = 0;
   private produced = 0;
 
@@ -33,15 +35,23 @@ export class CaptureResampler {
     }
   }
 
-  push(samples: Float32Array): Float32Array {
+  /** Reuse borrows the result until the next push, or borrows the input at equal rates. */
+  push(samples: Float32Array, reuse = false): Float32Array {
     if (this.inputRate === this.outputRate) {
-      return samples.slice();
+      return reuse ? samples : samples.slice();
     }
 
     const end = this.received + samples.length;
     const count = Math.ceil((end * this.outputRate) / this.inputRate) - this.produced;
-    const result = new Float32Array(count);
-    const input = new Float32Array(TAPS + samples.length);
+    if (reuse && this.result.length < count) {
+      this.result = new Float32Array(count);
+    }
+    if (this.input.length < TAPS + samples.length) {
+      this.input = new Float32Array(TAPS + samples.length);
+    }
+
+    const result = reuse ? this.result.subarray(0, count) : new Float32Array(count);
+    const input = this.input;
     input.set(this.history);
     input.set(samples, TAPS);
     const base = this.received - TAPS;
@@ -56,7 +66,7 @@ export class CaptureResampler {
       }
       result[i] = Math.max(-1, Math.min(1, value));
     }
-    this.history = input.slice(-TAPS);
+    this.history.set(input.subarray(samples.length, samples.length + TAPS));
     this.received = end;
     this.produced += count;
     return result;

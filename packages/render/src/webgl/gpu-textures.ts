@@ -140,18 +140,37 @@ export class GpuTextures {
       if (data.source) {
         gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
         try {
-          gl.texImage2D(
-            gl.TEXTURE_2D,
-            0,
-            gl.RGBA8,
-            gl.RGBA,
-            gl.UNSIGNED_BYTE,
-            data.source as TexImageSource,
-          );
+          if (this.sizes[id * 2] === data.width && this.sizes[id * 2 + 1] === data.height) {
+            gl.texSubImage2D(
+              gl.TEXTURE_2D,
+              0,
+              0,
+              0,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              data.source as TexImageSource,
+            );
+          } else {
+            gl.texImage2D(
+              gl.TEXTURE_2D,
+              0,
+              gl.RGBA8,
+              gl.RGBA,
+              gl.UNSIGNED_BYTE,
+              data.source as TexImageSource,
+            );
+          }
           this.sizes[id * 2] = data.width;
           this.sizes[id * 2 + 1] = data.height;
-          data.source = null;
+        } catch {
+          // A closed or tainted host picture must not strand all subsequent texture updates.
+          if (this.sizes[id * 2] < 0) {
+            this.state.dropTexture(texture);
+            gl.deleteTexture(texture);
+            this.textures[id] = null;
+          }
         } finally {
+          data.source = null;
           gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
         }
         continue;

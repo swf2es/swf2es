@@ -825,7 +825,7 @@ export interface MicrophoneMode {
 export interface MicrophoneEvents {
   /** Unavailable is a device/transport failure; it must not change the consent decision. */
   state(state: "granted" | "denied" | "ended" | "unavailable"): void;
-  /** Mono PCM after gain, at the device's sample rate. Owned by the receiver. */
+  /** Mono PCM after gain, at the device's sample rate. Borrowed for the duration of the call. */
   samples(samples: Float32Array, rate: number): void;
 }
 

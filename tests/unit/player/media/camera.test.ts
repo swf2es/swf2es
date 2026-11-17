@@ -21,7 +21,7 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-async function setup() {
+async function setup(realTime: (() => number) | null = null) {
   const opens: {
     events: CameraEvents;
     modes: CameraMode[];
@@ -44,6 +44,7 @@ async function setup() {
   const errors: unknown[] = [];
   const s = new Scripting(await createCodegen(wasm), {
     capture: host,
+    realTime,
     audio: null,
     onUncaught: (e) => errors.push(e),
   });
@@ -74,6 +75,12 @@ async function setup() {
       image: {} as CameraPicture["image"],
       readPixels: () => new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]),
       motion: () => new Uint8Array([gray, gray]),
+      retain: () => ({
+        width: 2,
+        height: 1,
+        image: {} as CameraPicture["image"],
+        readPixels: () => new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]),
+      }),
     };
     opens.at(-1)?.events.frame(picture);
   };
@@ -144,7 +151,8 @@ test("Camera starts on attach, delivers status and motion on frames, and stops o
       readPixels: () => new Uint8Array(4),
       motion: () => new Uint8Array(1),
     });
-    assert.equal(second.$display.picture, null);
+    assert.equal(second.$display.picture?.width, 2);
+    assert.deepEqual([...second.$display.source.bitmap().pixels], [0xffff0000, 0xff0000ff]);
     h.call(h.video, "attachCamera", h.camera);
     h.s.captureLifetime.abort();
     h.call(h.video, "attachCamera", h.camera);
@@ -201,7 +209,8 @@ test("Camera denial and ending are muted, and CPU copies use the captured frame"
     h.opens[1].events.state("ended");
     h.player.tick();
     assert.deepEqual(statuses, ["Camera.Muted", "Camera.Unmuted", "Camera.Muted"]);
-    assert.equal(h.video.$display.picture, null);
+    assert.equal(h.video.$display.picture?.width, 2);
+    assert.deepEqual([...h.video.$display.source.bitmap().pixels], [0xffff0000, 0xff0000ff]);
     assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();
@@ -216,6 +225,7 @@ test("Camera coalesces activity while the player does not tick", async () => {
     h.opens[0].events.state("granted");
     h.player.tick();
     h.call(h.camera, "setMotionLevel", 10, 0);
+    h.listen(h.camera, "activity", () => {});
     const defer = h.s.loads.deferHostEvent.bind(h.s.loads);
     let queued = 0;
     h.s.loads.deferHostEvent = (event) => {
@@ -263,6 +273,76 @@ test("Camera consent survives reattachment, revocation notifies once and activit
     assert.equal(h.opens.length, 2);
     assert.equal(statuses.length, 2);
     assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("camera motion readback needs a listener and FPS averages then decays", async () => {
+  let clock = 0;
+  const h = await setup(() => clock);
+  try {
+    h.call(h.video, "attachCamera", h.camera);
+    const events = h.opens[0].events;
+    events.state("granted");
+    let reads = 0;
+    const picture: CameraPicture = {
+      time: 0,
+      width: 2,
+      height: 1,
+      image: {} as CameraPicture["image"],
+      readPixels: () => new Uint8Array(8),
+      motion: () => {
+        reads++;
+        return new Uint8Array([reads & 1 ? 0 : 8]);
+      },
+    };
+    for (let i = 0; i < 20; i++) {
+      clock = picture.time = i * 100;
+      events.frame(picture);
+    }
+    assert.equal(reads, 0);
+    assert.equal(h.get(h.camera, "activityLevel"), -1);
+    assert.equal(h.get(h.camera, "currentFPS"), 10);
+    const remove = h.listen(h.camera, "activity", () => {});
+    clock = picture.time = 2000;
+    events.frame(picture);
+    clock = picture.time = 2100;
+    events.frame(picture);
+    assert.ok(Number(h.get(h.camera, "activityLevel")) >= 50);
+    assert.equal(reads, 2);
+    h.call(h.camera, "setMotionLevel", 100);
+    events.frame(picture);
+    assert.equal(reads, 2);
+    h.call(h.camera, "setMotionLevel", 50);
+    remove();
+    events.frame(picture);
+    assert.equal(reads, 2);
+    clock += 1500;
+    assert.equal(h.get(h.camera, "currentFPS"), 0);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("AS3 video copies use Video.smoothing, independent of draw's smoothing argument", async () => {
+  const h = await setup();
+  try {
+    h.call(h.video, "attachCamera", h.camera);
+    h.opens[0].events.state("granted");
+    h.frame(0, 0);
+    const matrix = h.rt.construct(h.rt.classNamed("flash.geom::Matrix"), 2.5, 0, 0, 1);
+    const pixels = (videoSmooth: boolean, drawSmooth: boolean) => {
+      h.rt.setProperty(h.video, h.rt.publicName("smoothing"), videoSmooth);
+      const bitmap = h.rt.construct(h.rt.classNamed("flash.display::BitmapData"), 5, 1, true, 0);
+      h.call(bitmap, "draw", h.video, matrix, null, null, null, drawSmooth);
+      return [...bitmap.$store.pixels];
+    };
+    assert.deepEqual(pixels(false, false), pixels(false, true));
+    assert.deepEqual(pixels(true, false), pixels(true, true));
+    assert.notDeepEqual(pixels(false, false), pixels(true, false));
   } finally {
     h.player.destroy();
     h.s.destroy();

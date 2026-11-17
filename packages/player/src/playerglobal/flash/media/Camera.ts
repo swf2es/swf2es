@@ -218,10 +218,7 @@ export function cameraNatives(s: Scripting): avm2.Natives {
         const values = frame.getVector(area(rect));
         const vector = destination as avm2.AsObject;
         s.rt.setProperty(vector, s.rt.publicName("length"), values.length);
-        const target = vector.$a as number[];
-        for (let i = 0; i < values.length; i++) {
-          target[i] = values[i];
-        }
+        vector.$a = values;
       }
     }
   }

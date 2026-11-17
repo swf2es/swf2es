@@ -101,12 +101,17 @@ export function openMicrophone(
   const capture: MicrophoneCapture = {
     closed: closedPromise,
     setMode(next) {
+      const changed =
+        next.echoCancellation !== mode.echoCancellation ||
+        next.noiseSuppression !== mode.noiseSuppression;
       mode = next;
-      version++;
       if (gain) {
         gain.gain.value = mode.gain / 50;
       }
-      void apply();
+      if (changed) {
+        version++;
+        void apply();
+      }
     },
     close: abort,
   };
@@ -153,12 +158,14 @@ export function openMicrophone(
         channelCount: 1,
         channelCountMode: "explicit",
       });
-      node.port.onmessage = ({ data }: MessageEvent<{ samples: Float32Array; rate: number }>) => {
+      node.port.onmessage = ({
+        data,
+      }: MessageEvent<{ samples: Float32Array<ArrayBuffer>; rate: number }>) => {
         if (!closed) {
           try {
             events.samples(data.samples, data.rate);
           } finally {
-            node?.port.postMessage(null);
+            node?.port.postMessage(data.samples, [data.samples.buffer]);
           }
         }
       };
@@ -172,7 +179,9 @@ export function openMicrophone(
       globalThis.addEventListener("pointerdown", resume, true);
       globalThis.addEventListener("keydown", resume, true);
       resume();
-      await apply();
+      if (version > 0) {
+        await apply();
+      }
     })
     .catch((error) => {
       openSettled = true;

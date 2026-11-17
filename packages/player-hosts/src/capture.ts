@@ -2,6 +2,7 @@ import type {
   CameraCapture,
   CameraEvents,
   CameraMode,
+  CameraPicture,
   CaptureDevice,
   CaptureHost,
   CaptureKind,
@@ -201,40 +202,58 @@ function openCamera(
       );
     }
   };
+  const luminance = new Uint8Array(32 * 24);
+  const picture: CameraPicture = {
+    width: 0,
+    height: 0,
+    time: 0,
+    image: video,
+    opaque: true,
+    readPixels() {
+      if (cpu.width !== picture.width || cpu.height !== picture.height) {
+        cpu.width = picture.width;
+        cpu.height = picture.height;
+      }
+
+      cpuContext.drawImage(video, 0, 0, picture.width, picture.height);
+      return cpuContext.getImageData(0, 0, picture.width, picture.height).data;
+    },
+    retain() {
+      const still = new OffscreenCanvas(picture.width, picture.height);
+      const context = still.getContext("2d", { willReadFrequently: true });
+      if (!context) {
+        throw new Error("Camera snapshot requires a 2D canvas");
+      }
+      context.drawImage(video, 0, 0);
+      return {
+        width: picture.width,
+        height: picture.height,
+        image: still,
+        opaque: true,
+        readPixels: () => context.getImageData(0, 0, still.width, still.height).data,
+      };
+    },
+    motion() {
+      smallContext.drawImage(video, 0, 0, 32, 24);
+      const rgba = smallContext.getImageData(0, 0, 32, 24).data;
+      for (let i = 0; i < luminance.length; i++) {
+        const at = i * 4;
+        luminance[i] = (rgba[at] * 77 + rgba[at + 1] * 150 + rgba[at + 2] * 29) >>> 8;
+      }
+
+      return luminance;
+    },
+  };
   const frame = (_now: number, metadata: VideoFrameCallbackMetadata) => {
     if (closed) {
       return;
     }
 
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-    if (width > 0 && height > 0) {
-      events.frame({
-        width,
-        height,
-        image: video,
-        time: metadata.mediaTime * 1000,
-        readPixels() {
-          if (cpu.width !== width || cpu.height !== height) {
-            cpu.width = width;
-            cpu.height = height;
-          }
-
-          cpuContext.drawImage(video, 0, 0, width, height);
-          return cpuContext.getImageData(0, 0, width, height).data;
-        },
-        motion() {
-          smallContext.drawImage(video, 0, 0, 32, 24);
-          const rgba = smallContext.getImageData(0, 0, 32, 24).data;
-          const luminance = new Uint8Array(32 * 24);
-          for (let i = 0; i < luminance.length; i++) {
-            const at = i * 4;
-            luminance[i] = (rgba[at] * 77 + rgba[at + 1] * 150 + rgba[at + 2] * 29) >>> 8;
-          }
-
-          return luminance;
-        },
-      });
+    picture.width = video.videoWidth;
+    picture.height = video.videoHeight;
+    picture.time = metadata.mediaTime * 1000;
+    if (picture.width > 0 && picture.height > 0) {
+      events.frame(picture);
     }
 
     if (!closed) {
@@ -250,19 +269,22 @@ function openCamera(
     opening.abort();
     signal.removeEventListener("abort", abort);
     video.cancelVideoFrameCallback(callback);
-    video.pause();
-    video.srcObject = null;
-    for (const live of stream?.getTracks() ?? []) {
-      live.stop();
-    }
+    try {
+      if (notify) {
+        events.state("ended");
+      }
+    } finally {
+      video.pause();
+      video.srcObject = null;
+      for (const live of stream?.getTracks() ?? []) {
+        live.stop();
+      }
 
-    stream = null;
-    if (openSettled) {
-      resolveClosed();
-    }
-    track = null;
-    if (notify) {
-      events.state("ended");
+      stream = null;
+      if (openSettled) {
+        resolveClosed();
+      }
+      track = null;
     }
   };
   const abort = () => finish(false);

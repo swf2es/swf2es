@@ -1,4 +1,5 @@
 import type { avm2 } from "@swf2es/runtime";
+import type { Library } from "../display/timeline.js";
 import type { VideoObject } from "../display/videoobject.js";
 import type { CameraCapture, CameraMode, CameraPicture, CaptureDevice } from "../hosts.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
@@ -8,6 +9,18 @@ import { VideoSource } from "./video.js";
 
 export const cameraStates = new WeakMap<avm2.AsObject, CameraState>();
 const attached = new WeakMap<VideoObject, CameraState>();
+const captures = new WeakMap<Scripting, Set<WeakRef<CameraState>>>();
+
+export function stopCameras(s: Scripting, library: Library): void {
+  for (const ref of captures.get(s) ?? []) {
+    const camera = ref.deref();
+    if (!camera) {
+      captures.get(s)?.delete(ref);
+    } else {
+      camera.stopForLibrary(library);
+    }
+  }
+}
 
 /** Device behaviour follows Adobe's Camera documentation; adl here has no devices. */
 export class CameraState {
@@ -16,7 +29,30 @@ export class CameraState {
   width = 160;
   height = 120;
   fps = 15;
-  currentFPS = 0;
+  private readonly frameTimes = new Float64Array(1024);
+  private frameHead = 0;
+  private frameCount = 0;
+  private lastArrival = 0;
+  private latestTime = 0;
+
+  get currentFPS(): number {
+    const sinceArrival = this.s.timers.realTime
+      ? Math.max(0, this.s.timers.realTime() - this.lastArrival)
+      : 0;
+    const now = this.latestTime + sinceArrival;
+    while (this.frameCount && now - this.frameTimes[this.frameHead] > 1000) {
+      this.frameHead = (this.frameHead + 1) % this.frameTimes.length;
+      this.frameCount--;
+    }
+
+    if (this.frameCount < 2) {
+      return 0;
+    }
+
+    const span = now - this.frameTimes[this.frameHead];
+    return Math.min(this.fps, span > 0 ? ((this.frameCount - 1) * 1000) / span : 0);
+  }
+
   private readonly consent: CaptureStatus;
 
   get muted(): boolean {
@@ -35,13 +71,13 @@ export class CameraState {
   private generation = 0;
   private transport: CameraCapture | null = null;
   private video: WeakRef<VideoObject> | null = null;
+  private owner: WeakRef<Library> | null = null;
   private previous: Uint8Array | null = null;
-  private previousTime = -1;
   private lastMotion = -1;
   private activating = false;
   private reportedActivity = false;
-  private activityEventGeneration = 0;
-  private frameEventGeneration = 0;
+  private activityPending = false;
+  private framePending = false;
 
   constructor(
     private readonly s: Scripting,
@@ -50,6 +86,13 @@ export class CameraState {
     readonly index: number,
   ) {
     this.consent = new CaptureStatus(s, object, "Camera");
+    let states = captures.get(s);
+    if (!states) {
+      states = new Set();
+      captures.set(s, states);
+    }
+
+    states.add(new WeakRef(this));
     s.captureLifetime.signal.addEventListener(
       "abort",
       () => {
@@ -71,29 +114,56 @@ export class CameraState {
       attached.delete(old);
     }
 
+    const library = this.s.code.codeLibrary();
+    this.owner = library ? new WeakRef(library) : null;
     this.video = new WeakRef(video);
     attached.set(video, this);
     video.source = this.source;
     this.start();
   }
 
+  stopForLibrary(library: Library): void {
+    for (const list of this.object.$listeners?.values() ?? []) {
+      for (let i = list.length - 1; i >= 0; i--) {
+        if (this.s.code.calledLibrary(list[i].fn, null) === library) {
+          list.splice(i, 1);
+        }
+      }
+    }
+
+    if (this.owner?.deref() === library) {
+      this.detach();
+    }
+  }
+
   detach(): void {
-    this.active = false;
-    this.generation++;
-    this.transport?.close();
-    this.transport = null;
     const video = this.video?.deref();
     if (video) {
-      video.source = null;
+      try {
+        const cleared = video.picture === null;
+        video.source = this.s.destroyed ? null : this.source.snapshot();
+        if (cleared) {
+          video.clear();
+        }
+      } catch {
+        // A host that lost its last image must still close its device.
+        video.source = null;
+      }
       attached.delete(video);
     }
 
+    this.active = false;
+    this.generation++;
+    this.activityPending = false;
+    this.framePending = false;
+    this.transport?.close();
+    this.transport = null;
     this.video = null;
+    this.owner = null;
     this.source.publish(null);
     this.previous = null;
-    this.previousTime = -1;
     this.lastMotion = -1;
-    this.currentFPS = 0;
+    this.frameCount = 0;
     this.activityLevel = -1;
     this.activating = false;
   }
@@ -121,10 +191,11 @@ export class CameraState {
 
     this.active = true;
     this.previous = null;
-    this.previousTime = -1;
     this.lastMotion = -1;
     this.activating = false;
     const generation = ++this.generation;
+    this.activityPending = false;
+    this.framePending = false;
     const current = () => generation === this.generation && !this.s.destroyed;
     const state = (state: "granted" | "denied" | "ended" | "unavailable") => {
       if (!current()) {
@@ -132,12 +203,7 @@ export class CameraState {
       }
 
       if (state !== "granted") {
-        this.active = false;
-        this.transport?.close();
-        this.transport = null;
-        this.source.publish(null);
-        this.currentFPS = 0;
-        this.activityLevel = -1;
+        this.detach();
       }
 
       if (state === "unavailable") {
@@ -186,24 +252,42 @@ export class CameraState {
 
     this.width = picture.width;
     this.height = picture.height;
-    if (this.previousTime >= 0 && picture.time > this.previousTime) {
-      this.currentFPS = 1000 / (picture.time - this.previousTime);
+    if (picture.time < this.latestTime) {
+      this.frameCount = 0;
+    }
+    if (this.frameCount === this.frameTimes.length) {
+      this.frameHead = (this.frameHead + 1) % this.frameTimes.length;
+      this.frameCount--;
     }
 
-    this.previousTime = picture.time;
+    this.frameTimes[(this.frameHead + this.frameCount++) % this.frameTimes.length] = picture.time;
+    this.latestTime = picture.time;
+    this.lastArrival = this.s.timers.realTime?.() ?? 0;
     this.source.publish(picture);
-    if (heard(this.object, "videoFrame") && this.frameEventGeneration !== this.generation) {
+    if (heard(this.object, "videoFrame") && !this.framePending) {
       const generation = this.generation;
-      this.frameEventGeneration = generation;
+      this.framePending = true;
       this.s.loads.deferHostEvent(() => {
-        if (this.frameEventGeneration === generation) {
-          this.frameEventGeneration = 0;
+        if (generation !== this.generation) {
+          return;
         }
 
-        if (!this.s.destroyed && this.active && generation === this.generation) {
+        this.framePending = false;
+        if (!this.s.destroyed && this.active) {
           dispatchEvent(this.s, this.object, this.s.event("videoFrame"));
         }
       });
+    }
+
+    if (!heard(this.object, "activity") || this.motionLevel === 100) {
+      this.previous = null;
+      if (!heard(this.object, "activity")) {
+        this.reportedActivity = false;
+      }
+      this.activityLevel = -1;
+      this.lastMotion = -1;
+      this.activating = false;
+      return;
     }
 
     const sample = picture.motion();
@@ -215,13 +299,14 @@ export class CameraState {
       }
     }
 
-    this.previous = sample.slice();
-    this.activityLevel = sample.length ? (difference * 100) / (sample.length * 255) : 0;
-    if (this.motionLevel === 100) {
-      this.lastMotion = -1;
-      this.activating = false;
-      return;
+    if (!this.previous || this.previous.length !== sample.length) {
+      this.previous = new Uint8Array(sample.length);
     }
+    this.previous.set(sample);
+    // Flash's detector is unpublished. This curve puts a 3.125% mean change at level 50.
+    this.activityLevel = sample.length
+      ? Math.min(100, 100 * Math.sqrt((8 * difference) / (sample.length * 255)))
+      : 0;
 
     if (this.activityLevel >= this.motionLevel) {
       this.lastMotion = picture.time;
@@ -233,16 +318,17 @@ export class CameraState {
     if (activating !== this.activating) {
       this.activating = activating;
       const generation = this.generation;
-      if (this.activityEventGeneration !== generation) {
-        this.activityEventGeneration = generation;
+      if (!this.activityPending) {
+        this.activityPending = true;
         this.s.loads.deferHostEvent(() => {
-          if (this.activityEventGeneration === generation) {
-            this.activityEventGeneration = 0;
+          if (generation !== this.generation) {
+            return;
           }
+
+          this.activityPending = false;
           if (
             !this.s.destroyed &&
             this.active &&
-            generation === this.generation &&
             this.motionLevel !== 100 &&
             this.reportedActivity !== this.activating
           ) {
@@ -274,7 +360,5 @@ export function attachCamera(video: VideoObject, camera: avm2.Value): void {
 
   if (state) {
     state.attach(video);
-  } else {
-    video.source = null;
   }
 }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { BitmapStore } from "../../../../packages/player/dist/bitmap/bitmap.js";
 import { drawVideo } from "../../../../packages/player/dist/bitmap/draw.js";
 import { Container } from "../../../../packages/player/dist/display/container.js";
-import { CLEAN } from "../../../../packages/player/dist/display/displayobject.js";
+import { CLEAN, PIXELS } from "../../../../packages/player/dist/display/displayobject.js";
 import { VideoObject } from "../../../../packages/player/dist/display/videoobject.js";
 import { type VideoPicture, VideoSource } from "../../../../packages/player/dist/media/video.js";
 import { Videos } from "../../../../packages/player/dist/scene/videos.js";
@@ -64,7 +64,8 @@ test("video frames invalidate ancestors, share uploads, and read pixels only on 
   assert.equal(a.picture, first.frame);
   videos.texture(source);
   assert.equal(textures.pending.length, 1);
-  assert.notEqual(source.bitmap(), cpu);
+  assert.equal(source.bitmap(), cpu);
+  assert.equal(source.bitmap()?.pixels, cpu.pixels);
   assert.equal(first.reads(), 2);
 
   textures.lost();
@@ -138,4 +139,49 @@ test("CPU video copies apply the supplied colour transform, blend and reflected 
   const reflected = new BitmapStore(2, 1, true, 0);
   drawVideo(reflected, video, { ...matrix, a: -1, tx: 2 }, null, "normal", null, false);
   assert.deepEqual([...reflected.pixels], [0x80008000, 0xffff0000]);
+});
+
+test("video snapshots reuse storage and hidden video does not dirty its ancestors", () => {
+  const source = new VideoSource();
+  const parent = new Container();
+  const video = new VideoObject();
+  parent.addChildAt(video, 0);
+  video.source = source;
+  video.visible = false;
+  parent.descendantsDirty = false;
+  video.dirty = CLEAN;
+  const frame = picture().frame;
+  source.publish(frame);
+  assert.equal(parent.descendantsDirty, false);
+  assert.equal(video.dirty, PIXELS);
+  const first = source.bitmap();
+  assert.ok(first);
+  const pixels = first.pixels;
+  source.publish({
+    ...frame,
+    opaque: true,
+    readPixels: () => new Uint8Array([0, 0, 255, 255, 255, 0, 0, 255]),
+  });
+  assert.equal(source.bitmap(), first);
+  assert.equal(first.pixels, pixels);
+  assert.deepEqual([...pixels], [0xff0000ff, 0xffff0000]);
+  const root = new Container();
+  root.addChildAt(parent, 0);
+  video.visible = true;
+  parent.visible = false;
+  parent.descendantsDirty = false;
+  root.descendantsDirty = false;
+  source.publish(frame);
+  assert.equal(parent.descendantsDirty, true);
+  assert.equal(root.descendantsDirty, false);
+
+  video.maskOf = new VideoObject();
+  source.publish(frame);
+  assert.equal(parent.descendantsDirty, true, "an invisible mask still needs updates");
+});
+
+test("a host without image retention clears on detach instead of keeping a volatile GPU image", () => {
+  const source = new VideoSource();
+  source.publish(picture().frame);
+  assert.equal(source.snapshot(), null);
 });
