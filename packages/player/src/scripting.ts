@@ -511,10 +511,16 @@ export class Scripting {
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     const socket = options.socket;
+    const secure = socket?.secure;
     this.socket = socket
       ? {
           connect: (host, port, events, connectOptions) =>
             this.track(events, (tracked) => socket.connect(host, port, tracked, connectOptions)),
+          secure: secure && {
+            isCertificate: (bytes) => secure.isCertificate(bytes),
+            connect: (host, port, events, connectOptions) =>
+              this.track(events, (tracked) => secure.connect(host, port, tracked, connectOptions)),
+          },
         }
       : null;
     const webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;

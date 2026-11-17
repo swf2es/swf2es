@@ -6,8 +6,6 @@
       "flash.accessibility::AccessibilityImplementation#get_selectionActiveIndex",
       "flash.accessibility::AccessibilityImplementation#get_selectionAnchorIndex",
       "flash.display::DisplayObjectContainer#get:textSnapshot",
-      "flash.net::SecureSocket#addBinaryChainBuildingCertificate",
-      "flash.net::SecureSocket#connect",
       "flash.printing::PrintJob#addPage",
       "flash.printing::PrintJob#get:orientation",
       "flash.printing::PrintJob#get:pageHeight",

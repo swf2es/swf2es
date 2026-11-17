@@ -1,5 +1,5 @@
 import { avm2 } from "@swf2es/runtime";
-import type { Certificate } from "../../../certificates.js";
+import { type Certificate, copyCertificate } from "../../../certificates.js";
 import type { Scripting } from "../../../scripting.js";
 import { distinguishedName } from "./X500DistinguishedName.js";
 
@@ -8,13 +8,7 @@ const certificates = new WeakMap<avm2.AsObject, Certificate>();
 /** A snapshot: neither the host nor the SWF can change a certificate already handed out. */
 export function certificate(s: Scripting, data: Certificate): avm2.AsObject {
   const object = s.rt.construct(s.rt.classNamed("flash.security::X509Certificate"));
-  certificates.set(object, {
-    ...data,
-    issuer: { ...data.issuer },
-    subject: { ...data.subject },
-    signatureAlgorithmParams: new Uint8Array(data.signatureAlgorithmParams),
-    encoded: new Uint8Array(data.encoded),
-  });
+  certificates.set(object, copyCertificate(data));
 
   return object;
 }
