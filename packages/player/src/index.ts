@@ -14,6 +14,7 @@ export {
   instantiate,
   MovieClip,
   ShapeObject,
+  VideoObject,
 } from "./display/display.js";
 export { type Path, type ShapeLayer, shapeLayers } from "./display/shapes.js";
 export { type Character, type Library, readLibrary, type Timeline } from "./display/timeline.js";
@@ -66,6 +67,7 @@ export type { Pointer, PointerState } from "./input/pointer.js";
 export { bindTextInput, type TextInput } from "./input/text-input.js";
 export { LocalConnections } from "./localconnection.js";
 export type { AudioHost } from "./media/audio.js";
+export { type VideoPicture, VideoSource } from "./media/video.js";
 export { Player } from "./player.js";
 export type { FillTessellator } from "./scene/fills.js";
 export { airLibrary, builtinLibrary, playerglobalLibrary, Scripting } from "./scripting.js";

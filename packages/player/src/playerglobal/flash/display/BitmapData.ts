@@ -5,7 +5,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { BitmapStore } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
-import { drawDisplayObject } from "../../../bitmap/draw.js";
+import { drawDisplayObject, drawVideo, videoNeedsRenderer } from "../../../bitmap/draw.js";
 import {
   applyFilter,
   filterRefusal,
@@ -37,6 +37,7 @@ import { type PixelRect, pixelRect, spanRect } from "../../../bitmap/pixel-rect.
 import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
 import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
+import { VideoObject } from "../../../display/videoobject.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
 import { colorOf } from "../geom/Transform.js";
@@ -167,6 +168,11 @@ function drawInto(
   const c = ct === null || ct === undefined ? null : colorOf(s, ct as AsObject);
   const blend = mode === null || mode === undefined ? "normal" : s.rt.toString(mode);
   const r = clip === null || clip === undefined ? null : rectOf(s, clip);
+  if (o.$display instanceof VideoObject && !videoNeedsRenderer(o.$display)) {
+    drawVideo(store, o.$display, m, c, blend, r, !!smoothing);
+    return;
+  }
+
   if (data === null) {
     // Any other display object, through the renderer, then composited as a bitmap is.
     if (!s.drawer) {

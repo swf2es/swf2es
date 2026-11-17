@@ -42,6 +42,7 @@ import { cached, ShapeObject } from "../display/shapeobject.js";
 import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, settleFits, TextObject } from "../display/textobjects.js";
+import { VideoObject } from "../display/videoobject.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
 import type { Player } from "../player.js";
@@ -67,6 +68,7 @@ import { unsupported } from "./shapes.js";
 import { StaleShapes } from "./stale-shapes.js";
 import { deviceTextResolution, fieldItems, staticItems, type TextOmissions } from "./text.js";
 import { placedRow, TextItems } from "./text-items.js";
+import { Videos } from "./videos.js";
 
 export interface RenderViewOptions {
   /** The stage's size in pixels, and the canvas' pixels a stage pixel. */
@@ -148,6 +150,7 @@ export class RenderView implements Drawer {
   private rows = new Rows();
   private readonly geometries = new Geometries();
   private readonly textures = new Textures();
+  private readonly videos = new Videos(this.textures);
   private commands = new Commands();
   private filters = new Filters();
   private readonly lineCache: LineCache;
@@ -1006,6 +1009,26 @@ export class RenderView implements Drawer {
         if (clip && k === omitted.clipTo - 1) {
           this.masks.popMask(this.scene);
         }
+      }
+    }
+
+    if (o instanceof VideoObject && !hidden && o.picture && o.source) {
+      const picture = o.picture;
+      const texture = this.videos.texture(o.source);
+      if (texture && o.boxWidth > 0 && o.boxHeight > 0) {
+        const quad = this.parts.quad(picture.width, picture.height);
+        const sx = o.boxWidth / picture.width;
+        const sy = o.boxHeight / picture.height;
+        const videoRow = this.rows.add(a * sx, b * sx, c * sy, d * sy, tx, ty, color);
+
+        this.geometries.use(quad.id);
+        this.scene.draw(
+          quad.id,
+          videoRow,
+          NORMAL,
+          texture.id,
+          (o.smoothing && this.smoothing ? SMOOTH : 0) | CLAMP,
+        );
       }
     }
 
