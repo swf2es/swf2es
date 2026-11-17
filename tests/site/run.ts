@@ -26,6 +26,7 @@ import { serve } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
 import { zip } from "../zip-writer.ts";
 import { fullscreenChecks } from "./fullscreen.ts";
+import { isolationChecks } from "./isolation.ts";
 import { loadingChecks } from "./loading.ts";
 import { stage3DChecks } from "./stage3d.ts";
 
@@ -232,7 +233,9 @@ async function check(): Promise<void> {
                   timeOrigin: number;
                   ready: string;
                 }>(`({ isolated: crossOriginIsolated, controlled: !!navigator.serviceWorker.controller,
-                  timeOrigin: performance.timeOrigin, ready: document.readyState })`).catch(
+                  timeOrigin: performance.timeOrigin, ready: document.readyState,
+                  navigation: performance.getEntriesByType('navigation')[0]?.type,
+                  retry: new URL(location.href).searchParams.get('__swf2es_isolation') })`).catch(
                   () => null,
                 );
                 if (
@@ -274,6 +277,7 @@ async function check(): Promise<void> {
             );
           },
         ],
+        ...isolationChecks({ value, send, navigate }),
         [
           "a cold visit loads the player in a few files, its loading shown until the first frame",
           async () => {

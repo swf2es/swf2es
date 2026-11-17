@@ -91,7 +91,12 @@ the pages, with Pagefind's index for the search, into
   service worker at the site's root (`src/service-worker.ts`, registered by
   `isolation.ts`) adds COOP and COEP to the site's own responses, for
   every page, and the player's first visit loads it again once it serves
-  it ([workers.md](../workers.md)).
+  it ([workers.md](../workers.md)). At most two automatic replacements
+  allow one interrupted bootstrap to recover. Persistent worker bypass
+  reaches the unisolated player instead of a reload loop. A temporary
+  `__swf2es_isolation` query parameter carries the retry count across the
+  browser's isolation boundary; success or fallback removes it, preserving
+  the caller's other parameters and fragment.
 - **The console** shows what the element sends to the browser's console,
   trace on `console.log` and uncaught errors on `console.error`, which
   the page wraps. **The stats** count the frames the player's `advance`
