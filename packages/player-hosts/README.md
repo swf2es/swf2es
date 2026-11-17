@@ -10,7 +10,7 @@ npm install @swf2es/player-hosts
 ```
 
 - `@swf2es/player-hosts/capture`: `await browserCaptureHost()`, device
-  enumeration without prompting and camera capture after browser consent.
+  enumeration without prompting and camera/microphone capture after browser consent.
   Pass it as `new Scripting(codegen, { capture })`; omitting it preserves
   the player's no-device behaviour.
 - `@swf2es/player-hosts/indexeddb`: `indexedDbModuleCache()`, the compiled
@@ -42,11 +42,11 @@ const moduleCache = chainCaches(
 `dist/thread/` holds copies of the modules a Web Worker loads, which
 resolve without the page's import map.
 
+Microphone capture uses a separate `capture-worklet.js` module beside the host.
+Serve it with the other host files; the browser distribution includes it.
+Capture still requires a secure context and browser permission.
+
 The [guide](https://swf2es.github.io/swf2es/docs/) has more.
 
 Apache-2.0 ([LICENSE](LICENSE)); the code from elsewhere in its copies of
 the other packages, and its terms, in [LICENSE.third-party](LICENSE.third-party).
-
-Microphone capture uses a separate `capture-worklet.js` module beside the host.
-Serve it with the other host files; the browser distribution includes it.
-Capture still requires a secure context and browser permission.

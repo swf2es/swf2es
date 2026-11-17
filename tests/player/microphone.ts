@@ -74,7 +74,8 @@ const { value, exception } = await withPage(
       const data = get(e, 'data');
       while (get(data, 'bytesAvailable')) { check(call(data, 'readFloat') === 0, 'zero gain captured sound'); silent++; }
     });
-    await wait(() => silent > 1000, 'silent gain');
+    // The fake input begins with silence; observe beyond that startup interval.
+    await wait(() => silent >= 88200, 'silent gain');
     s.destroy();
     check(tracks.every(t => t.readyState === 'ended'), 'destroy kept microphone');
     remove();
