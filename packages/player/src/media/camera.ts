@@ -33,6 +33,7 @@ export class CameraState {
   private previousTime = -1;
   private lastMotion = -1;
   private activating = false;
+  private activityEventGeneration = 0;
   private frameEventGeneration = 0;
 
   constructor(
@@ -224,26 +225,32 @@ export class CameraState {
     if (activating !== this.activating) {
       this.activating = activating;
       const generation = this.generation;
-      this.s.loads.deferHostEvent(() => {
-        if (
-          !this.s.destroyed &&
-          this.active &&
-          generation === this.generation &&
-          this.motionLevel !== 100
-        ) {
-          dispatchEvent(
-            this.s,
-            this.object,
-            this.s.rt.construct(
-              this.s.rt.classNamed("flash.events::ActivityEvent"),
-              "activity",
-              false,
-              false,
-              activating,
-            ),
-          );
-        }
-      });
+      if (this.activityEventGeneration !== generation) {
+        this.activityEventGeneration = generation;
+        this.s.loads.deferHostEvent(() => {
+          if (this.activityEventGeneration === generation) {
+            this.activityEventGeneration = 0;
+          }
+          if (
+            !this.s.destroyed &&
+            this.active &&
+            generation === this.generation &&
+            this.motionLevel !== 100
+          ) {
+            dispatchEvent(
+              this.s,
+              this.object,
+              this.s.rt.construct(
+                this.s.rt.classNamed("flash.events::ActivityEvent"),
+                "activity",
+                false,
+                false,
+                this.activating,
+              ),
+            );
+          }
+        });
+      }
     }
   }
 }

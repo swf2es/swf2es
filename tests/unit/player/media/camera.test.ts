@@ -207,3 +207,28 @@ test("Camera denial and ending are muted, and CPU copies use the captured frame"
     h.s.destroy();
   }
 });
+
+test("Camera coalesces activity while the player does not tick", async () => {
+  const h = await setup();
+  try {
+    h.call(h.video, "attachCamera", h.camera);
+    h.opens[0].events.state("granted");
+    h.player.tick();
+    h.call(h.camera, "setMotionLevel", 10, 0);
+    const defer = h.s.loads.deferHostEvent.bind(h.s.loads);
+    let queued = 0;
+    h.s.loads.deferHostEvent = (event) => {
+      queued++;
+      defer(event);
+    };
+    for (let i = 0; i < 1000; i++) {
+      h.frame(i * 100, Math.floor(i / 2) % 2 ? 255 : 0);
+    }
+    assert.equal(queued, 1);
+    h.player.tick();
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
