@@ -5,9 +5,9 @@ original plan against `dev` at 100d774c.
 
 ## Why
 
-`flash.media.Camera` and `Microphone` behave today as Flash Player does on
+Without a capture host, `flash.media.Camera` and `Microphone` behave as Flash Player does on
 a machine with neither (`packages/player/src/playerglobal/flash/media/`):
-supported, no names, `getCamera()` and `getMicrophone()` null. `Video`
+supported, no names, `getCamera()` and `getMicrophone()` null. Without a source, `Video`
 draws an empty box (`packages/player/src/display/videoobject.ts`). Real
 content uses them: webcam toys and photo booths, voice recorders, games
 played by blowing into the microphone, video chat front ends. None of the
@@ -74,9 +74,10 @@ frame the renderer uploads its current picture as a texture
 textured quad with the `Video`'s transform, colour transform, filters and
 `smoothing`. A frame not yet changed is not uploaded again.
 
-`BitmapData.draw(video)` and the camera's copies read the frame on the
-CPU (`VideoFrame.copyTo`, or `drawImage` into an `OffscreenCanvas` and
-`getImageData`), never by a GPU readback, which stalls (docs/cpu-raster.md).
+Plain `BitmapData.draw(video)` and the camera's copies read the frame on
+the CPU (`drawImage` into an `OffscreenCanvas` and `getImageData`). Copies
+with effects use the renderer as explained below; GPU readback can stall
+(docs/cpu-raster.md).
 
 The renderer implementation uses a host-owned `VideoSource` published
 only when a new picture arrives. Each view uploads that source once per
@@ -191,13 +192,12 @@ A capture is never started without the user's yes.
 
 - In the browser, the browser's own prompt is it. The page must be a
   secure context; a page that embeds the player in an iframe must allow
-  `camera` and `microphone`. The `<swf2es-player>` element gets an
-  attribute, and `configure` an option, to refuse captures outright, as
-  `allowScriptAccess` restrains scripting.
-- In the desktop app, the session's permission handlers refuse everything
-  but full screen today (`apps/desktop/src/main/main.ts`). They would let
-  `media` through only after a dialog of the app's own that names the
-  SWF's origin and the device. On macOS the app asks the system first
+  `camera` and `microphone`. The `<swf2es-player>` element accepts
+  `allowcapture="false"`, and `configure` accepts `allowCapture: false`,
+  to refuse captures outright.
+- In the desktop app, the session's permission handlers allow full screen
+  and let `media` through only after a dialog of the app's own that names the
+  SWF's origin and the device. On macOS the app also asks the system
   (`systemPreferences.askForMediaAccess`). While a device is live the
   window's title says so and a menu item stops it; a page that ends
   (#1037's `onPageEnd`) stops its tracks. Remembered answers per site,

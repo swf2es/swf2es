@@ -113,15 +113,15 @@ that would rather play on Flash Player's own playerglobal gives its URL.
 
 ## The element and its options
 
-Camera access uses the browser's permission prompt when a SWF attaches a
-camera to a Video. It requires a secure context (HTTPS or localhost); an
-embedding iframe must allow `camera`. Device names may be blank until the
+Capture uses the browser's permission prompt when a SWF attaches a camera
+to a Video, listens for microphone samples, or enables microphone loopback.
+It requires a secure context (HTTPS or localhost); an embedding iframe must
+allow `camera` and/or `microphone` for the devices it uses. Device names may be blank until the
 user grants permission. Set `allowcapture="false"` on an element, or
 `configure({ allowCapture: false })` for new loads, to refuse capture.
 Changing that attribute to false also stops the current capture; reload
 before enabling it again. Replacing or destroying the player stops its
 tracks, including a permission request that finishes later.
-
 
 The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
 and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
