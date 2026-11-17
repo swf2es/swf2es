@@ -19,7 +19,8 @@ export function nodeSocketHost(): SocketHost {
           remotePort: socket.remotePort ?? 0,
         }),
       );
-      socket.on("data", (bytes) => events.data(bytes));
+      // Each chunk a buffer of its own, never written again.
+      socket.on("data", (bytes) => events.data(bytes, true));
       socket.on("close", () => events.close());
       socket.on("error", () => events.error("Error #2031: Socket Error."));
 
