@@ -90,7 +90,14 @@ export class Symbols {
       if (t.code === tags.SymbolClass) {
         for (const [id, name] of readSymbolClass(swf.bytes, t)) {
           const qualified = qualify(name);
-          library.classes.set(id, qualified);
+          // A character keeps the class first bound to it, as in Flash: a later
+          // frame's SymbolClass that binds the id again, as a preloader's second
+          // frame binding its program's own document class to 0, changes neither
+          // the root's class nor what places of it make (the symbol-class-rebound
+          // case). The class is still bound to the character, for a script's new.
+          if (!library.classes.has(id)) {
+            library.classes.set(id, qualified);
+          }
           const character = library.characters.get(id);
           if (character) {
             const abc = this.s.rt.definingAbc(qualified, domain);
