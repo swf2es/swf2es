@@ -203,7 +203,8 @@ gate ([Chrome's policy](https://developer.chrome.com/blog/web-audio-autoplay)).
 The implementation starts capture when a `sampleData` listener or loopback
 needs it, and closes capture when neither remains. Loopback without an output
 host does not open a microphone. `Loader.unloadAndStop` releases the loaded movie's
-capture consumers while other movies' listeners remain. Device defaults, status
+capture consumers while other movies' listeners remain; loopback stays on while any
+movie that turned it on is still loaded. Device defaults, status
 codes and enhanced-device exclusivity follow [Adobe's Microphone reference](https://airsdk.dev/reference/actionscript/3.0/flash/media/Microphone.html),
 not device observations under adl. Without a host the existing defaults
 and null getters are unchanged.

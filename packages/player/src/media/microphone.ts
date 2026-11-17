@@ -1,6 +1,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { Library } from "../display/timeline.js";
 import type { CaptureDevice, MicrophoneCapture, MicrophoneMode } from "../hosts.js";
+import { removeListenersWhere } from "../playerglobal/flash/events/EventDispatcher.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import type { SoundMix, StreamingSound } from "./audio.js";
@@ -47,7 +48,10 @@ export class MicrophoneState {
   }
 
   loopback = false;
-  private loopOwner: WeakRef<Library> | null = null;
+  /** Every SWF that turned loopback on; it stays on while one is loaded, or once player code did. */
+  private loopOwners: WeakRef<Library>[] = [];
+  private loopUnowned = false;
+  private readonly loopChannels: Float32Array[] = [];
   mix: SoundMix = mixOf(null);
   private capture: MicrophoneCapture | null = null;
   private active = false;
@@ -94,27 +98,38 @@ export class MicrophoneState {
 
   setLoopback(enabled: boolean): void {
     this.loopback = enabled;
-    const library = enabled ? this.s.code.codeLibrary() : null;
-    this.loopOwner = library ? new WeakRef(library) : null;
+    if (!enabled) {
+      this.loopOwners = [];
+      this.loopUnowned = false;
+    } else {
+      const library = this.s.code.runningLibrary();
+      if (!library) {
+        this.loopUnowned = true;
+      } else if (!this.loopOwners.some((owner) => owner.deref() === library)) {
+        this.loopOwners.push(new WeakRef(library));
+      }
+    }
+
     this.sync();
   }
 
   stopForLibrary(library: Library): void {
     let changed = false;
-    for (const list of this.object.$listeners?.values() ?? []) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        if (this.s.code.calledLibrary(list[i].fn, null) === library) {
-          list.splice(i, 1);
-          changed = true;
-        }
+    const owners = this.loopOwners.filter((owner) => owner.deref() !== library);
+    if (owners.length !== this.loopOwners.length) {
+      this.loopOwners = owners;
+      if (owners.length === 0 && !this.loopUnowned) {
+        this.loopback = false;
+        changed = true;
       }
     }
-    if (this.loopOwner?.deref() === library) {
-      this.loopback = false;
-      this.loopOwner = null;
-      changed = true;
-    }
 
+    // Taking a sampleData listener resyncs the device itself.
+    removeListenersWhere(
+      this.s,
+      this.object,
+      (fn) => this.s.code.calledLibrary(fn, null) === library,
+    );
     if (changed && this.active) {
       this.sync();
     }

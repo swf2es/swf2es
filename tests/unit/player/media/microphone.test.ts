@@ -10,7 +10,10 @@ import type {
   MicrophoneMode,
 } from "../../../../packages/player/dist/hosts.js";
 import type { AudioHost, SoundMix } from "../../../../packages/player/dist/media/audio.js";
-import { stopMicrophones } from "../../../../packages/player/dist/media/microphone.js";
+import {
+  microphoneStates,
+  stopMicrophones,
+} from "../../../../packages/player/dist/media/microphone.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { bare } from "../../../player/cases.ts";
@@ -381,6 +384,37 @@ test("Stop tells only microphones that were opened or told of a decision", async
     assert.deepEqual(idle, []);
     assert.deepEqual(asked, ["Microphone.Muted"]);
     assert.equal(h.get(h.mic, "muted"), true);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("a child's loopback and listeners go with it; the parent's loopback stays", async () => {
+  const h = await setup();
+  try {
+    type Library = NonNullable<typeof h.s.library>;
+    const parent = {} as Library;
+    const child = {} as Library;
+    let running: Library | null = parent;
+    h.s.code.runningLibrary = () => running;
+    h.call(h.mic, "setLoopBack", true);
+    running = child;
+    h.call(h.mic, "setLoopBack", true);
+    const childListener = { $f: () => {} };
+    h.call(h.mic, "addEventListener", "activate", childListener);
+    h.s.code.calledLibrary = (fn) => (fn === childListener ? child : null);
+    assert.equal(h.opens.length, 1);
+    h.opens[0].events.state("granted");
+    stopMicrophones(h.s, child);
+    assert.equal(microphoneStates.get(h.mic)?.loopback, true);
+    assert.equal(h.opens[0].closed, 0);
+    assert.equal(h.call(h.mic, "hasEventListener", "activate"), false);
+    assert.ok(!h.s.activationTargets("activate").live().includes(h.mic));
+    stopMicrophones(h.s, parent);
+    assert.equal(microphoneStates.get(h.mic)?.loopback, false);
+    assert.equal(h.opens[0].closed, 1);
     assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();

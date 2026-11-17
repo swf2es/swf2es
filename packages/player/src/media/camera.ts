@@ -2,6 +2,7 @@ import type { avm2 } from "@swf2es/runtime";
 import type { Library } from "../display/timeline.js";
 import type { VideoObject } from "../display/videoobject.js";
 import type { CameraCapture, CameraMode, CameraPicture, CaptureDevice } from "../hosts.js";
+import { removeListenersWhere } from "../playerglobal/flash/events/EventDispatcher.js";
 import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { CaptureStatus } from "./capture-status.js";
@@ -115,7 +116,7 @@ export class CameraState {
       attached.delete(old);
     }
 
-    const library = this.s.code.codeLibrary();
+    const library = this.s.code.runningLibrary();
     this.owner = library ? new WeakRef(library) : null;
     this.video = new WeakRef(video);
     attached.set(video, this);
@@ -124,13 +125,11 @@ export class CameraState {
   }
 
   stopForLibrary(library: Library): void {
-    for (const list of this.object.$listeners?.values() ?? []) {
-      for (let i = list.length - 1; i >= 0; i--) {
-        if (this.s.code.calledLibrary(list[i].fn, null) === library) {
-          list.splice(i, 1);
-        }
-      }
-    }
+    removeListenersWhere(
+      this.s,
+      this.object,
+      (fn) => this.s.code.calledLibrary(fn, null) === library,
+    );
 
     if (this.owner?.deref() === library) {
       this.detach();

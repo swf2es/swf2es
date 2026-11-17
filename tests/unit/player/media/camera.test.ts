@@ -10,6 +10,7 @@ import type {
   CameraPicture,
   CaptureHost,
 } from "../../../../packages/player/dist/hosts.js";
+import { stopCameras } from "../../../../packages/player/dist/media/camera.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { bare } from "../../../player/cases.ts";
@@ -361,6 +362,30 @@ test("Stop tells only a camera that was opened or told of a decision", async () 
 
     assert.deepEqual(statuses, []);
     assert.equal(h.get(h.camera, "muted"), true);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("a child's camera listeners go through removal; the parent's capture stays", async () => {
+  const h = await setup();
+  try {
+    type Library = NonNullable<typeof h.s.library>;
+    const parent = {} as Library;
+    const child = {} as Library;
+    h.s.code.runningLibrary = () => parent;
+    h.call(h.video, "attachCamera", h.camera);
+    const childListener = { $f: () => {} };
+    h.call(h.camera, "addEventListener", "activate", childListener);
+    h.s.code.calledLibrary = (fn) => (fn === childListener ? child : null);
+    stopCameras(h.s, child);
+    assert.equal(h.opens[0].closed, 0);
+    assert.equal(h.call(h.camera, "hasEventListener", "activate"), false);
+    assert.ok(!h.s.activationTargets("activate").live().includes(h.camera));
+    stopCameras(h.s, parent);
+    assert.equal(h.opens[0].closed, 1);
     assert.deepEqual(h.errors, []);
   } finally {
     h.player.destroy();
