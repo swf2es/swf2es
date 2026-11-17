@@ -15,6 +15,11 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     const gl = view.gl;
     let checks = 0, uploads = 0, reads = 0;
     const check = (ok, why) => { if (!ok) throw new Error(why); checks++; };
+    const contextEvent = (name, action) => new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(name + ' timeout')), 5000);
+      view.canvas.addEventListener(name, () => { clearTimeout(timer); resolve(); }, { once: true });
+      action();
+    });
     const source = new VideoSource();
     const canvas = new OffscreenCanvas(4, 4);
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
@@ -106,12 +111,8 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       const beforeLoss = pixels(view, root);
       const loss = gl.getExtension('WEBGL_lose_context');
       check(!!loss, 'context-loss extension unavailable');
-      await new Promise(resolve => {
-        view.canvas.addEventListener('webglcontextlost', resolve, { once: true }); loss.loseContext();
-      });
-      await new Promise(resolve => {
-        view.canvas.addEventListener('webglcontextrestored', resolve, { once: true }); loss.restoreContext();
-      });
+      await contextEvent('webglcontextlost', () => loss.loseContext());
+      await contextEvent('webglcontextrestored', () => setTimeout(() => loss.restoreContext(), 0));
       const restored = pixels(view, root);
       check(restored.every((p, i) => p === beforeLoss[i]), 'context restore changed video');
       check(uploads === 4, 'context restore did not upload source again');
@@ -123,10 +124,48 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       video.source = source; other.source = source; equalReference();
       source.publish(null);
       check(pixels(view, root).every(p => p === 255), 'ended source left a frame visible');
+
+      // Flash's direct Video copies apply these effects (generated FLV adl probe).
+      publish('#ff0000');
+      const effects = bitmapDataNatives({ rt, drawer: view });
+      const copy = () => {
+        const store = new BitmapStore(24, 24, true, 0);
+        effects['flash.display::BitmapData#draw'](rt).call({ $store: store },
+          { $display: video }, null, null, null, null, false);
+        return store.pixels;
+      };
+      video.colorTransform = null;
+      video.smoothing = false;
+      video.matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+      video.scroll = { xMin: 4, yMin: 0, xMax: 8, yMax: 16 };
+      let copied = copy();
+      check(copied[0] === 0xffff0000 && copied[4] === 0 && copied[12 * 24] === 0xff0000ff,
+        'direct copy ignored or misplaced scrollRect');
+      video.scroll = null;
+      video.filters = [{ ...filterDefaults('colorMatrix'),
+        matrix: [0,0,0,0,0, 0,0,0,0,255, 0,0,0,0,0, 0,0,0,1,0] }];
+      copied = copy();
+      check(copied[4 * 24 + 4] === 0xff00ff00, 'direct copy ignored own filter');
+      video.filters = [];
+      const { ShapeObject } = await import('/player/display/display.js');
+      const { Drawing } = await import('/player/display/drawing.js');
+      const mask = new ShapeObject(null); mask.drawing = new Drawing();
+      mask.drawing.beginFill({ type: 'solid', color: 0xff000000 });
+      mask.drawing.drawRect(0, 0, 8, 16); mask.drawing.endFill();
+      root.addChildAt(mask, root.children.length); video.setMask(mask);
+      copied = copy();
+      check(copied[4 * 24 + 4] === 0xffff0000 && copied[4 * 24 + 12] === 0,
+        'direct copy ignored own mask');
+      video.scroll = { xMin: 0, yMin: 0, xMax: 16, yMax: 8 };
+      video.filters = [{ ...filterDefaults('colorMatrix'),
+        matrix: [0,0,0,0,0, 0,0,0,0,255, 0,0,0,0,0, 0,0,0,1,0] }];
+      copied = copy();
+      check(copied[4 * 24 + 4] === 0xff00ff00 && copied[4 * 24 + 12] === 0 &&
+        copied[12 * 24 + 4] === 0, 'direct copy changed combined effects');
       return checks;
     } finally { view.destroy(); reference.destroy(); }
   })()`),
 );
 assert.equal(exception, null, exception ?? "browser exception");
-assert.ok(value !== null && value > 30);
+assert.ok(typeof value === "number" && value > 30);
 console.log(`live video: ${value} checks passed`);

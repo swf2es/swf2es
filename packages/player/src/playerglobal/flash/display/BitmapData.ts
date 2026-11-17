@@ -5,7 +5,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { BitmapStore } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
-import { drawDisplayObject, drawVideo } from "../../../bitmap/draw.js";
+import { drawDisplayObject, drawVideo, videoNeedsRenderer } from "../../../bitmap/draw.js";
 import {
   applyFilter,
   filterRefusal,
@@ -168,7 +168,7 @@ function drawInto(
   const c = ct === null || ct === undefined ? null : colorOf(s, ct as AsObject);
   const blend = mode === null || mode === undefined ? "normal" : s.rt.toString(mode);
   const r = clip === null || clip === undefined ? null : rectOf(s, clip);
-  if (o.$display instanceof VideoObject) {
+  if (o.$display instanceof VideoObject && !videoNeedsRenderer(o.$display)) {
     drawVideo(store, o.$display, m, c, blend, r, !!smoothing);
     return;
   }

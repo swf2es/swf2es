@@ -89,11 +89,21 @@ core carries it as an opaque object and keeps its DOM-free boundary.
 CPU pixels are read synchronously from the source's `readPixels` callback
 and cached for that published frame. A browser host can implement that
 callback with an OffscreenCanvas; asynchronous `VideoFrame.copyTo` would
-need to finish before a synchronous AS3 copy. Direct
+need to finish before a synchronous AS3 copy. Plain
 `BitmapData.draw(video)` uses the CPU compositor, including its matrix,
 colour transform, clip and blend mode, even without a renderer. Drawing
 a container that contains a Video still uses the existing display-list
-renderer.
+renderer. A direct Video copy with filters, a mask or a scroll rectangle
+also uses that renderer to preserve their order and coordinate spaces;
+its final composited pixels may be read back. This is an explicit exception
+to the initial no-readback goal, agreed during implementation: plain copies
+avoid that cost, while copies with effects have the same synchronization
+cost as other display-object copies. The source image itself is uploaded
+directly, without reading back the camera texture.
+
+An adl probe using a generated Sorenson FLV through `NetStream.appendBytes`
+confirmed that direct Video copies apply their own scroll rectangle,
+colour-matrix filter and mask. This observation needs no capture device.
 
 `Video.clear()` hides the current picture until the source publishes
 another frame, without stopping the source. This follows

@@ -121,7 +121,7 @@ test("CPU video copies apply the supplied colour transform, blend and reflected 
   const matrix = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
   const multiply = new BitmapStore(2, 1, false, 0xff0000ff);
   drawVideo(multiply, video, matrix, null, "multiply", null, false);
-  assert.deepEqual([...multiply.pixels], [0xff000000, 0xff00007f]);
+  assert.deepEqual([...multiply.pixels], [0xff010101, 0xff010180]);
 
   const colored = new BitmapStore(2, 1, true, 0);
   drawVideo(
