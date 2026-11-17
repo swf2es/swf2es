@@ -121,6 +121,7 @@ test("Camera starts on attach, delivers status and motion on frames, and stops o
     assert.deepEqual(activity, [true, false, true]);
     h.call(h.camera, "setMotionLevel", 100, 200);
     h.frame(600, 255);
+    h.frame(900, 255);
     h.player.tick();
     assert.deepEqual(activity, [true, false, true]);
     h.call(h.camera, "setMode", 320, 240, 30, true);
