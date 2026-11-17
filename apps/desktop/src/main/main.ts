@@ -2,12 +2,15 @@
 // the files the user opens, the libraries they point at, and the page's
 // few requests (shared/api.ts), each checked to come from that page.
 //
-//   electron apps/desktop [--trace] [file.swf | http(s)://host/movie.swf]
+//   electron apps/desktop [--trace] [--flashvars=vars] [--param=name=value]...
+//                         [file.swf | http(s)://host/movie.swf]
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
+// --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
+// --flashvars and --param give the SWF what a page's <object> or <embed> would (embedding.ts).
 //
 // The second runs an AIR application by its descriptor, as adl does.
 //
@@ -17,12 +20,24 @@
 // reach. Here: start-up, the window and its page's messages.
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { app, BrowserWindow, dialog, ipcMain, session, shell, type WebContents } from "electron";
+import {
+  app,
+  BrowserWindow,
+  crashReporter,
+  dialog,
+  ipcMain,
+  type RenderProcessGoneDetails,
+  session,
+  shell,
+  type WebContents,
+} from "electron";
 import type { NetworkResponse, StartState } from "../shared/api.js";
 import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
+import { embeddingArguments, exactArguments, settleEmbedding } from "./embedding.ts";
 import { bridgeFiles } from "./files.ts";
+import { chooseGl } from "./gpu.ts";
 import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
 import { failureLine, requestLine } from "./netlog.ts";
@@ -35,8 +50,10 @@ import {
   openChosen,
   openEntry,
   openUrl,
+  reloadMovie,
   remoteUrl,
 } from "./open.ts";
+import { onPageEnd } from "./page-end.ts";
 import { permitSocket, permitWebSocket } from "./permissions.ts";
 import { APP_ORIGIN, registerScheme, serve } from "./protocol.ts";
 import { proxyArgument, sameProxy } from "./proxy.ts";
@@ -44,9 +61,11 @@ import { SettingsFile } from "./settings.ts";
 import { bridgeSockets } from "./sockets.ts";
 import {
   httpCache,
+  listening,
   sandbox,
   setHttpCache,
   setListening,
+  setPageGone,
   setSettings,
   settings,
   setWindow,
@@ -55,16 +74,18 @@ import {
   window,
 } from "./state.ts";
 import {
+  embedding,
   httpCacheOff,
   logSockets,
   netLog,
   network,
   proxied,
   proxy,
+  softwareGl,
   trace,
   via,
   warn,
-  webSocketOpen,
+  webSocketOptions,
 } from "./switches.ts";
 import { bridgeWebSockets } from "./websockets.ts";
 
@@ -152,12 +173,30 @@ function guard(contents: WebContents): void {
     openExternal(url);
     return { action: "deny" };
   });
-  contents.on("did-start-navigation", (details) => {
-    if (details.isMainFrame && !details.isSameDocument) {
-      setListening(false);
-      // The page's requests go with it; the next page asks for the movie again.
-      network.play(networkMovie);
-      requests.clear();
+  onPageEnd(contents, (how, gone) => {
+    if (how === "destroyed") {
+      return;
+    }
+
+    setListening(false);
+    // The page's requests go with it; the next page asks for the movie again.
+    network.play(networkMovie);
+    requests.clear();
+    setPageGone(how === "gone");
+    if (how === "navigated") {
+      // The page is back, by the offer or otherwise: the offer has had its day.
+      reloadOffer?.abort();
+      reloadOffer = null;
+    } else if (gone && gone.reason !== "clean-exit" && !quitting) {
+      pageStopped(gone);
+    }
+  });
+  // A page that did not load, and so never started, is no better than a gone one: Reload Movie,
+  // or opening a movie, loads it.
+  contents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
+    // ERR_ABORTED: another load overtook it.
+    if (isMainFrame && code !== -3 && !listening) {
+      setPageGone(true);
     }
   });
   if (trace) {
@@ -166,6 +205,58 @@ function guard(contents: WebContents): void {
       (level === "info" ? process.stdout : process.stderr).write(`${message}\n`);
     });
   }
+}
+
+/** Closes the offer to reload the page after its process went, while it is shown. */
+let reloadOffer: AbortController | null = null;
+/** The app is quitting: a page that goes with it has not stopped. */
+let quitting = false;
+
+/**
+ * The page's process went other than by a clean exit, crashed, killed or
+ * out of memory, and the window shows nothing: said once on stderr, and the
+ * user offered a reload, never made unasked, as a page out of memory would
+ * only go again. Minimized, the window shows the offer as it is restored.
+ */
+function pageStopped({ reason, exitCode }: RenderProcessGoneDetails): void {
+  process.stderr.write(
+    `swf2es: the page stopped: ${reason} (exit ${exitCode}); ` +
+      `a crash report, where one was written, is in ${app.getPath("crashDumps")}\n`,
+  );
+  if (!window || reloadOffer) {
+    return;
+  }
+
+  // An AIR application may have hidden its window: the offer is to be seen.
+  if (!window.isVisible()) {
+    window.show();
+  }
+
+  const offer = new AbortController();
+  reloadOffer = offer;
+  const name = current?.movie.name;
+  dialog
+    .showMessageBox(window, {
+      type: "warning",
+      message: name ? `${name} stopped.` : "The page stopped.",
+      detail: `The page's process ended (${reason}). Reloading starts the movie again from its beginning.`,
+      buttons: [name ? "Reload Movie" : "Reload", "Close"],
+      defaultId: 0,
+      cancelId: 1,
+      noLink: true,
+      signal: offer.signal,
+    })
+    .then(({ response }) => {
+      if (response === 0 && !offer.signal.aborted) {
+        void reloadMovie();
+      }
+    })
+    .catch(() => {})
+    .finally(() => {
+      if (reloadOffer === offer) {
+        reloadOffer = null;
+      }
+    });
 }
 
 function createWindow(): void {
@@ -195,8 +286,13 @@ function createWindow(): void {
     setWindow(null);
   });
   // The page hears of full screen however it came, a SWF's Stage.displayState or the menu's F11.
-  window.on("enter-full-screen", () => window?.webContents.send("desktop:full-screen", true));
-  window.on("leave-full-screen", () => window?.webContents.send("desktop:full-screen", false));
+  const fullScreen = (now: boolean) => {
+    if (window && !window.webContents.isCrashed()) {
+      window.webContents.send("desktop:full-screen", now);
+    }
+  };
+  window.on("enter-full-screen", () => fullScreen(true));
+  window.on("leave-full-screen", () => fullScreen(false));
   guard(window.webContents);
   void window.loadURL(`${APP_ORIGIN}/`);
 }
@@ -273,7 +369,7 @@ function listen(): void {
     }
   });
   bridgeSockets(trusted, permitSocket, netLog, logSockets, { proxy, warn });
-  bridgeWebSockets(trusted, permitWebSocket, webSocketOpen, netLog, logSockets, via);
+  bridgeWebSockets(trusted, permitWebSocket, webSocketOptions, netLog, logSockets, via);
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");
@@ -285,7 +381,7 @@ function listen(): void {
     // Electron would print as one.
     const contents = event.sender;
     const deliver = (response: NetworkResponse) => {
-      if (!contents.isDestroyed()) {
+      if (!contents.isDestroyed() && !contents.isCrashed()) {
         contents.send("net:response", id, response);
       }
     };
@@ -383,8 +479,10 @@ async function fetchForPage(
   }
 }
 
-// One app to a user data directory: a second start hands its SWF to the first and quits.
-const first = app.requestSingleInstanceLock();
+// One app to a user data directory: a second start hands its SWF to the first and quits,
+// with its arguments as they were: Electron's argv for it may come reordered, a switch's
+// value apart from the switch.
+const first = app.requestSingleInstanceLock({ argv: process.argv });
 if (!first) {
   if (proxied) {
     process.stderr.write(
@@ -392,10 +490,24 @@ if (!first) {
     );
   }
 
+  if (softwareGl) {
+    process.stderr.write(
+      "swf2es: handed to the app already open, which draws as it started: " +
+        "--software-gl counts only for the first start\n",
+    );
+  }
+
   app.quit();
+} else {
+  // Still before ready: Chromium reads the GPU switches as it starts the GPU process.
+  chooseGl(softwareGl);
+  // A crash leaves a minidump in app.getPath("crashDumps"), which the line on stderr names, for
+  // the user to look at or send; nothing is uploaded.
+  crashReporter.start({ uploadToServer: false });
 }
 
-app.on("second-instance", (_event, argv, workingDirectory) => {
+app.on("second-instance", (_event, given, workingDirectory, data) => {
+  const argv = exactArguments(data, given);
   // What it names would go through another proxy than this app's, or past it.
   const asked = proxyArgument(argv.slice(1));
   if (asked && !("proxy" in asked && sameProxy(asked.proxy, proxy))) {
@@ -419,9 +531,10 @@ app.on("second-instance", (_event, argv, workingDirectory) => {
     return;
   }
 
+  // Its own embedding, what it leaves out said by the second start itself, below.
   const entry = movieFromArguments(argv, workingDirectory);
   if (entry && settings) {
-    void openEntry(entry);
+    void openEntry(entry, settleEmbedding(embeddingArguments(argv).params, entry, false).params);
   }
 });
 
@@ -430,6 +543,13 @@ let pending = movieFromArguments(process.argv);
 let pendingChosen = false;
 // An AIR application named adl's way, which the command line's SWF gives way to.
 const pendingAir = airCommand(process.argv.slice(process.defaultApp ? 2 : 1), process.cwd());
+// The command line's embedding for what it names, what it leaves out said once, here, by the
+// start it was given to, a second start's too, whose app already open plays it.
+const settled = settleEmbedding(embedding.params, pending, pendingAir !== null);
+for (const warning of settled.warnings) {
+  warn(warning);
+}
+
 // macOS hands a file opened from the Finder as an event, perhaps before the app is ready.
 app.on("open-file", (event, path) => {
   event.preventDefault();
@@ -446,6 +566,9 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("window-all-closed", () => app.quit());
+app.on("before-quit", () => {
+  quitting = true;
+});
 app.on("will-quit", () => {
   // No connection a SWF's requests kept outlives the app.
   network.close();
@@ -502,6 +625,6 @@ void app.whenReady().then(() => {
   if (pendingAir) {
     void openAir(pendingAir, process.cwd());
   } else if (pending) {
-    void (pendingChosen ? openChosen(pending) : openEntry(pending));
+    void (pendingChosen ? openChosen(pending) : openEntry(pending, settled.params));
   }
 });

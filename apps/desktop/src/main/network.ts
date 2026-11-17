@@ -1,47 +1,11 @@
-// The network a SWF reaches through the desktop app: every http and https
-// request it makes, sent by the main process rather than the page, and
-// judged as Flash Player judged it, by its sandbox and the policy files
-// of the sites it reaches, not by CORS; and the socket policies a remote
-// SWF's sockets need. So a SWF reaches http: and servers that never heard
-// of CORS, as it did in Flash, and nothing it should not.
-//
-// - A remote SWF's own origin is open to it. Another origin's data it
-//   reads as that origin's policy files grant its domain; content (a
-//   Loader's, a Sound's) and what sendToURL sends go anywhere. A
-//   local-with-networking SWF has no domain: only a policy granting "*"
-//   lets it read data.
-// - Nothing is sent with the user's credentials: no cookies, no
-//   authentication, no client certificate. So all a SWF gains by asking
-//   from here rather than its own server is this machine's place on the
-//   network, and that is the one thing guarded beyond Flash's rules:
-//   a request to an address more private than the SWF's own (addresses.ts)
-//   needs a policy from that address granting it, whatever its purpose,
-//   same origin or not. Each request resolves its host once and connects
-//   to that address, its policy file fetched from the same one, and the
-//   HTTP cache keeps each response for the address it came from, so DNS
-//   that changes its answer (rebinding) changes nothing.
-// - Requests are bounded: methods, headers, sizes, redirects, time, and
-//   how many run at once; and each movie's are aborted as the next opens.
-// - Connections are kept alive between requests (http-pool.ts), but only
-//   for exactly the request that would open the same one: the same scheme,
-//   name, pinned address, port, route and certificate checking. So a
-//   rebinding name, pinned elsewhere, gets a connection of its own, and the
-//   pin holds as without a pool. Each page's are closed as it goes.
-// - Through a proxy (--proxy, proxy.ts), each connection is a tunnel to
-//   the address its host was pinned to, judged as without one: the proxy
-//   is asked for that address, not the name, so a proxy's DNS that answers
-//   otherwise than this machine's reaches nothing the judgement did not.
-// - A GET's answer may come from the HTTP cache (http-cache.ts) in place of
-//   the server, or the server's 304 to its revalidation: only once the
-//   request has been judged as any other, so a policy that refuses it
-//   refuses it whatever is stored, and only from what that very address,
-//   by the same way (the proxy or none), answered for this movie's origin,
-//   the policy files that judged it included; never a private address's
-//   policy file, nor anything unverified under --ignore-certificate-errors.
-//   A POST answered with success forgets what its URL had.
-//
-// Its types and limits are network-types.ts, and the rules that need no
-// instance network-rules.ts.
+// The network a SWF reaches through the desktop app: its http and https
+// requests, sent by the main process and judged as Flash Player judged
+// them, by its sandbox and the sites' policy files rather than CORS; with
+// none of the user's credentials, and nothing more private than the SWF
+// reached without that address's grant. The rules, the pool, the cache and
+// the proxy are in docs/architecture/desktop.md ("The network"); the types
+// and limits in network-types.ts, the rules that need no instance in
+// network-rules.ts.
 //
 // Without Electron, so that node tests it (tests/desktop/network.test.ts).
 import { lookup } from "node:dns/promises";
@@ -820,12 +784,9 @@ export class Network {
   }
 
   /**
-   * A request's answer from the cache where it can give one, a stored
-   * response fresh or revalidated with a 304, else from send(), what comes
-   * kept where it may be. Its body counts as send()'s would, against `max`
-   * and the movie's budget. Only what send() would read is asked of it: a
-   * GET whose body is read, for the address it was judged against and the
-   * movie's partition. Anything else that succeeds, a POST, forgets what
+   * A hop's answer from the cache where it may give one (fresh, or
+   * confirmed by a 304), else from send(), kept where it may be. Only a GET
+   * whose body is read is asked of it; a POST that succeeds forgets what
    * its URL had (RFC 9111, 4.4).
    */
   private async exchange(
@@ -950,15 +911,12 @@ export class Network {
   }
 
   /**
-   * One HTTP exchange with `address`, the URL's host pinned to it: its
-   * status and headers, and its body if `read` and the status is a
-   * success, or an error whose body was asked for (`errorBody`), up to
-   * `max` bytes. No cookies, no credentials, no compression asked for.
-   * Its connection is the pool's (http-pool.ts): one kept idle for the
-   * same scheme, name, address, port, route and certificate checking,
-   * where there is one, and kept after only once its response has been
-   * read to the end. A GET whose kept connection the server closed as it
-   * was reused, before any answer, is sent once more, as browsers do.
+   * One HTTP exchange with `address`, the URL's host pinned to it, over the
+   * pool's connections (http-pool.ts); the body read only where `read` and
+   * the status is a success, or an error with `errorBody`. No cookies, no
+   * credentials, no compression asked for. A GET whose kept connection the
+   * server closed as it was reused, before any answer, is sent once more,
+   * as browsers do.
    */
   private send(
     url: URL,
@@ -985,8 +943,6 @@ export class Network {
 
       const https = url.protocol === "https:";
       const port = Number(url.port || (https ? 443 : 80));
-      // The agent of this request's key: its connections reach the pinned address, through
-      // the proxy where there is one, TLS by the host's name, as the key says.
       const agent = this.pool.agent({
         secure: https,
         host,
@@ -1039,11 +995,9 @@ export class Network {
       signal.addEventListener("abort", abort, { once: true });
       arm();
       /**
-       * The connection back to the pool once its response has been read to
-       * its end, which one no one reads is too where it is small, a
-       * redirect's or a 304's, so that the next request may have it; any
-       * other closed. The request's timers and abort hold until then: an
-       * abort while it drains refuses it as before.
+       * The connection back to the pool once its response is read to the
+       * end, an unread one drained where small so that a redirect's next hop
+       * may reuse it; any other closed. Timers and abort hold until then.
        */
       let releasing = false;
       const release = (response: IncomingMessage, then: () => void) => {
@@ -1063,8 +1017,7 @@ export class Network {
           return;
         }
 
-        // Answered once it has been read, so that a redirect's next hop finds it free; a
-        // body chunked past the bound, or slow, closes it instead.
+        // A chunked body past the bound, or a slow one, closes it instead.
         const draining = request;
         let settled = false;
         let drained = 0;
@@ -1192,11 +1145,9 @@ export class Network {
           received.splice(0, received.length, ...received.filter(([n]) => !named(n)));
         }
 
-        // The body, copied as it comes into one array that doubles as it
-        // fills: never a list of the chunks, which for a body sent a byte at
-        // a time would hold hundreds of times its size. It starts at the
-        // declared length, where that is believable, and so needs no copy at
-        // the end.
+        // One array that doubles as it fills: a list of chunks would hold
+        // hundreds of times the size of a body sent a byte at a time. Sized at
+        // a believable declared length, it needs no copy at the end.
         const budget = options.budget;
         const exact = !coded && Number.isSafeInteger(declared) && declared >= 0;
         let body = new Uint8Array(0);
@@ -1246,9 +1197,8 @@ export class Network {
           length += chunk.length;
           arm();
         };
-        // Bytes of their own, not a view of a larger array, whose rest IPC
-        // would carry to the page with them; the larger array let go of at
-        // once, so that it may be collected before IPC copies the rest.
+        // Bytes of their own, since IPC would carry a view's whole array; the
+        // larger one let go so it may be collected before IPC copies.
         const done = () => {
           const bytes = length === body.length ? body : body.slice(0, length);
           body = new Uint8Array(0);

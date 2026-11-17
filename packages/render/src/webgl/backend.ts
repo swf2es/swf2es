@@ -38,6 +38,7 @@ import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
 import { KernelPrograms } from "./kernels.js";
+import { ProgramQueue } from "./precompile.js";
 import { LAYER_UNIT, TEXTURE_UNIT } from "./programs.js";
 import { Stage } from "./stage.js";
 import { type Layer, type Open, objectOf, type Target, TargetPool } from "./targets.js";
@@ -122,8 +123,10 @@ export class WebGLBackend {
   private readonly holds: HeldLayers;
   /** Pixel Bender kernels' programs, which the filters, the compositor and the draws share. */
   private readonly kernels: KernelPrograms;
-  /** The filters' passes, their programs made as first run. */
+  /** The filters' passes, their programs linked ahead (programs). */
   private filters!: FilterRunner<Layer>;
+  /** Programs linked and warmed over the frames after the first, ahead of their first use. */
+  private programs!: ProgramQueue;
   /** The layers drawn into now, innermost last. */
   private layers: Open[] = [];
   /** The frame's filters being drawn, whose chains blend shaders' modes name (KERNEL). */
@@ -139,7 +142,7 @@ export class WebGLBackend {
   private readonly rect = { x: 0, y: 0, width: 0, height: 0 };
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
-  /** The program `compositeOver` draws with, linked as first used; null till then and after a lost context. */
+  /** The program `compositeOver` draws with, linked ahead (programs); null till then and after a lost context. */
   private overProgram: OverProgram | null = null;
   /** Framebuffers onto registry textures, drawn into or read, by texture id, with the texture they were made for. */
   private textureFramebuffers: ({ texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null)[] =
@@ -214,6 +217,12 @@ export class WebGLBackend {
     const textureMost = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
     this.draws.setUp(textureMost);
     this.compositor.setUp();
+    // A lost context's programs went with it: all queued again.
+    this.programs = new ProgramQueue(gl, this.state);
+    this.overProgram = null;
+    this.programs.add("over", OVER_VERTEX, OVER_FRAGMENT, [TEXTURE_UNIT, LAYER_UNIT], (program) =>
+      this.overMade(program),
+    );
     this.filters = new FilterRunner(
       gl,
       this.state,
@@ -224,6 +233,7 @@ export class WebGLBackend {
         sampler: (bits) => this.gpu.sampler(bits),
       },
       this.kernels,
+      this.programs,
     );
     this.holds.setUp(this.filters, textureMost);
     this.pool.setUp();
@@ -233,7 +243,6 @@ export class WebGLBackend {
     this.gpu.setUp();
     // The context's own, gone with it.
     this.textureFramebuffers = [];
-    this.overProgram = null;
   }
 
   /**
@@ -484,6 +493,8 @@ export class WebGLBackend {
       // The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of.
       this.stage.dropIdleLayer();
       this.pool.endFrame();
+      // Once the first frame is drawn, the programs not drawn with yet are made, a frame's share.
+      this.programs.step();
     }
   }
 
@@ -626,15 +637,20 @@ export class WebGLBackend {
     this.pool.giveLayer(below);
   }
 
-  /** compositeOver's program, linked as first asked for. */
+  /** compositeOver's program: linked ahead, its link finished now if not yet, or linked now. */
   private overProgramMade(): OverProgram {
-    if (this.overProgram) {
-      return this.overProgram;
+    if (!this.overProgram && !this.programs.take("over")) {
+      const program = linkProgram(this.gl, OVER_VERTEX, OVER_FRAGMENT);
+      this.state.useProgram(program);
+      this.overMade(program);
     }
 
+    return this.overProgram as OverProgram;
+  }
+
+  /** compositeOver's program of `program`, linked and in use, its samplers told their units. */
+  private overMade(program: WebGLProgram): void {
     const gl = this.gl;
-    const program = linkProgram(gl, OVER_VERTEX, OVER_FRAGMENT);
-    this.state.useProgram(program);
     gl.uniform1i(gl.getUniformLocation(program, "uSource"), TEXTURE_UNIT);
     gl.uniform1i(gl.getUniformLocation(program, "uBelow"), LAYER_UNIT);
     this.overProgram = {
@@ -642,7 +658,6 @@ export class WebGLBackend {
       at: gl.getUniformLocation(program, "uAt"),
       opaque: gl.getUniformLocation(program, "uOpaque"),
     };
-    return this.overProgram;
   }
 
   /**
@@ -912,6 +927,7 @@ export class WebGLBackend {
     this.atlas.destroy();
     this.compositor.destroy();
     this.filters.destroy();
+    this.programs.destroy();
     this.kernels.clear();
     for (const open of this.layers) {
       if (open.layer) {

@@ -5,7 +5,7 @@ their http or https URL, and AIR applications, with the `<swf2es-player>`
 element of `@swf2es/web`.
 
 ```sh
-npx @swf2es/desktop [options] [file.swf | https://host/movie.swf]
+npx @swf2es/desktop [options] [--flashvars=vars] [--param=name=value]... [file.swf | https://host/movie.swf]
 npx @swf2es/desktop [options] app.xml [root-dir] [-- arguments...]
 ```
 
@@ -37,7 +37,9 @@ fetch-electron` does so ahead, for the tests.
   open; File › Open Recent lists the last ten, files and URLs. The
   window takes the SWF's name. View › Reload Movie (Ctrl+R) starts it
   again, View › Toggle Full Screen (F11) fills the screen, and File ›
-  Close Movie (Ctrl+W) stops it. A SWF's own full screen
+  Close Movie (Ctrl+W) stops it. Should the page's process stop, crashed
+  or out of memory, its sockets close, stderr says why, and the window
+  offers to reload the movie, which it never does unasked. A SWF's own full screen
   (`Stage.displayState`) is the window's too: it needs no click, as in AIR
   and Flash's projector, draws its `fullScreenSourceRect` alone where it
   set one, and ends with Esc or F11, which the SWF hears of as a
@@ -67,8 +69,56 @@ fetch-electron` does so ahead, for the tests.
   `settings.json` in Electron's user data directory, across updates of the
   app, and says so on stderr at each start. File › Use the App's
   playerglobal goes back to the app's own.
+- **FlashVars and parameters.** A SWF made for a page reads what its
+  `<object>` or `<embed>` gave it; the command line gives it the same, as
+  the `<swf2es-player>` element's attributes of those names:
+
+  ```sh
+  swf2es-desktop --flashvars="user=guest&lang=en" --param=quality=low movie.swf
+  swf2es-desktop --param=scale=noScale --param=salign=TL --param=base=assets/ movie.swf
+  swf2es-desktop "https://example.com/movie.swf?user=guest"
+  ```
+
+  `--flashvars="a=1&b=2"` is its FlashVars, URL-encoded as a page's:
+  `loaderInfo.parameters`, or an AVM1 SWF's `_root` variables; given again,
+  they are joined. `--param=name=value`, repeatable, is one of `quality`,
+  `scale`, `salign`, `wmode`, `bgcolor`, `menu`, `base` and
+  `allowNetworking`, any case, the last of a name winning
+  (`--param=flashvars=…` is `--flashvars`); any other name is left out,
+  with a word. Write them with `=`: the value may also follow as the next
+  argument (`--flashvars "a=1"`), but not one that starts with `-`, which
+  other switches, `--proxy` and `--trace` among them, would read as their
+  own. `base` is an http or https URL, or a relative one, resolved against
+  the SWF's own URL as a page's against the page's: for a local SWF, to its
+  directory or below, as it reads nothing outside it. Anything else is left
+  out, with a word as the app starts. The loads it resolves are judged by
+  the SWF's sandbox like any other. A SWF URL's query is among its parameters, as Flash had it, the
+  FlashVars over it, with or without the switches. They are for the SWF the
+  command line names, a second start's handed to the app already open too,
+  and stay with it through View › Reload Movie and a reload of the page; a
+  SWF opened from the menus, the recent list or a drop gets none, and the
+  recent list keeps none. `allowScriptAccess`, `allowFullScreen` and
+  `allowFullScreenInteractive` change nothing, said on stderr:
+  ExternalInterface stays off, and a SWF's full screen is always the
+  window's. An AIR application gets none, having no page, and the app says
+  so; an HTML page wrapping a SWF does not open.
 - **Trace.** `--trace` prints what the page logs, a SWF's `trace()` among
   it, to the terminal: trace lines to stdout, warnings and errors to stderr.
+- **Without a GPU.** The player draws with WebGL 2. Where Chromium takes
+  no GPU, because there is none or its blocklist refuses the one there is
+  (a server, a CI runner, a virtual machine, Xvfb, whose only GL is Mesa's
+  llvmpipe), there is no WebGL 2 and nothing draws, and the app says so on
+  stderr. `--software-gl` draws with SwiftShader, Chromium's GPU on the CPU,
+  there, and also where Chromium takes a GPU that gives WebGL but not WebGL 2
+  or draws wrong. It is a switch, not a fallback, because Chromium calls
+  SwiftShader unsafe for untrusted content: it compiles code in the GPU
+  process, which on Linux runs outside Chromium's sandbox (see
+  [What draws](../../docs/architecture/desktop.md#what-draws)). SwiftShader
+  is slower than a GPU, more so the larger the window. On a server with no
+  display: `xvfb-run -a swf2es-desktop --software-gl movie.swf`. Where a
+  Wayland session is about (`WAYLAND_DISPLAY`, or
+  `XDG_SESSION_TYPE=wayland`), Electron goes to it rather than to Xvfb
+  unless told otherwise: add `--ozone-platform=x11`.
 - **Network log.** `--log-network` prints each of the SWF's requests to
   stderr as it is answered (`swf2es: net GET https://… 200 12.3 kB 48 ms`),
   an aborted one too, and each socket and each WebSocket of an AIR

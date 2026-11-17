@@ -1,4 +1,4 @@
-import { type GlState, linkProgram } from "@swf2es/context3d/device";
+import { beginProgram, endProgram, type GlState, linkProgram } from "@swf2es/context3d/device";
 import { type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import { FILL_SHADER, type Filters } from "../filters.js";
 import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
@@ -218,8 +218,14 @@ export class Draws {
   setUp(textureMost: number): void {
     const gl = this.gl;
     this.multi = gl.getExtension("WEBGL_multi_draw") as MultiDraw | null;
+    // All begun before any is asked after, so that a driver that compiles on threads of its own
+    // (KHR_parallel_shader_compile) compiles them at once.
+    const fill = beginProgram(gl, fillVertex(this.multi !== null, true), fillFragment);
+    const blend = beginProgram(gl, fillVertex(false), blendFillFragment);
+    const mesh = beginProgram(gl, meshVertex, meshFragment);
+    const glyphs = beginProgram(gl, glyphsVertex, glyphsFragment);
     try {
-      this.program = linkProgram(gl, fillVertex(this.multi !== null, true), fillFragment);
+      this.program = endProgram(gl, fill);
     } catch (e) {
       if (!this.multi) {
         throw e;
@@ -253,7 +259,7 @@ export class Draws {
     }
 
     this.fillUnitLocation = gl.getUniformLocation(this.program, "uUnit");
-    this.blendProgram = linkProgram(gl, fillVertex(false), blendFillFragment);
+    this.blendProgram = endProgram(gl, blend);
     this.blendRowLocation = gl.getUniformLocation(this.blendProgram, "uRow");
     this.blendViewLocation = gl.getUniformLocation(this.blendProgram, "uView");
     this.blendUnitLocation = gl.getUniformLocation(this.blendProgram, "uUnit");
@@ -267,7 +273,7 @@ export class Draws {
       gl.getUniformLocation(this.blendProgram, "uTextures"),
       Array.from({ length: FILL_TEXTURES }, (_, k) => FILL_UNIT + k),
     );
-    this.mesh = linkProgram(gl, meshVertex, meshFragment);
+    this.mesh = endProgram(gl, mesh);
     this.meshRowLocation = gl.getUniformLocation(this.mesh, "uRow");
     this.meshViewLocation = gl.getUniformLocation(this.mesh, "uView");
     this.meshFragLocation = gl.getUniformLocation(this.mesh, "uFrag");
@@ -278,7 +284,7 @@ export class Draws {
     this.meshStale = true;
     this.meshRow = -1;
     this.meshMode = -1;
-    this.glyphProgram = linkProgram(gl, glyphsVertex, glyphsFragment);
+    this.glyphProgram = endProgram(gl, glyphs);
     this.glyphRowLocation = gl.getUniformLocation(this.glyphProgram, "uRow");
     this.glyphViewLocation = gl.getUniformLocation(this.glyphProgram, "uView");
     this.glyphUnitLocation = gl.getUniformLocation(this.glyphProgram, "uUnit");
@@ -534,7 +540,6 @@ export class Draws {
     const gl = this.gl;
     const state = this.state;
     state.useProgram(this.blendProgram);
-    state.bindVertexArray(this.atlas.vertexArray);
     state.bindTexture(0, this.gpu.rowsTexture);
     gl.uniform4fv(this.blendViewLocation, this.view);
     gl.uniform1f(this.blendUnitLocation, this.unit);
@@ -547,6 +552,7 @@ export class Draws {
       return;
     }
 
+    state.bindVertexArray(this.atlas.pages[this.runPlaces[0].page].vertexArray);
     for (let k = 0; k < FILL_TEXTURES; k++) {
       if (this.runUnits & (1 << k)) {
         state.bindTexture(FILL_UNIT + k, this.gpu.textures[this.unitIds[k]] as WebGLTexture);
@@ -685,7 +691,8 @@ export class Draws {
         continue;
       }
 
-      state.bindVertexArray(this.atlas.vertexArray);
+      // A run's geometries all in the page of its first.
+      state.bindVertexArray(this.atlas.pages[place.page].vertexArray);
       if (!this.multi) {
         // A run not merged: a call a fill, its row told as it changes.
         const rows = this.prepared ? this.tableRows : this.runRows;
@@ -908,7 +915,7 @@ export class Draws {
     const state = this.state;
     state.useProgram(this.mesh);
     // The atlas' vertices, which a glyph draw before may have left bound for its own.
-    state.bindVertexArray(this.atlas.vertexArray);
+    state.bindVertexArray(this.atlas.pages[place.page].vertexArray);
     if (this.meshStale) {
       gl.uniform4fv(this.meshViewLocation, this.view);
       gl.uniform4fv(this.meshFragLocation, this.frag);
@@ -963,7 +970,7 @@ export class Draws {
     }
 
     const gl = this.gl;
-    this.state.bindVertexArray(this.atlas.vertexArray);
+    this.state.bindVertexArray(this.atlas.pages[place.page].vertexArray);
     gl.uniform4fv(kernel.at("uView"), this.view);
     gl.uniform4fv(kernel.at("uFrag"), this.frag);
     gl.uniform1i(kernel.at("uRow"), scene.row[i]);

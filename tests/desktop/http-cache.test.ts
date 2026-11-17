@@ -17,8 +17,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import fsPromises from "node:fs/promises";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { createServer as createHttpsServer } from "node:https";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -618,6 +620,63 @@ test("a crash mid-write leaves no row pointing at a partial file", async () => {
   assert.equal(store.lookup(fresh), null);
   assert.deepEqual(readdirSync(bodies), [entry.key]);
   store.close();
+});
+
+test("a write begun as the cache starts is not swept away as a crash's", async () => {
+  offset = 0;
+  const at = directory();
+  const request = ask("http://example.test/early");
+  const response = {
+    status: 200,
+    headers: [["Cache-Control", "max-age=600"]] as [string, string][],
+    bytes: new Uint8Array(100),
+  };
+  // A busy machine's start: the sweep lists the bodies late, once a write's temporary file
+  // is there if the write began without waiting for the listing.
+  const { readdir, open } = fsPromises;
+  let list = () => {};
+  const listed = new Promise<void>((done) => {
+    list = done;
+  });
+  let store: HttpCache | null = null;
+  let early = false;
+  fsPromises.readdir = (async (...args: Parameters<typeof readdir>) => {
+    await listed;
+    return readdir(...args);
+  }) as typeof readdir;
+  fsPromises.open = (async (...args: Parameters<typeof open>) => {
+    const handle = await open(...args);
+    if (String(args[0]).endsWith(".tmp") && !early) {
+      early = true;
+      list();
+      await (store as unknown as { sweeping: Promise<void> }).sweeping;
+    }
+
+    return handle;
+  }) as typeof open;
+  syncBuiltinESMExports();
+  try {
+    store = cache(at);
+    fsPromises.readdir = readdir;
+    syncBuiltinESMExports();
+    const warned = warnings.length;
+    const stored = store.store(request, response);
+    // A write that waits for the listing has not opened its file by now.
+    await new Promise((go) => setImmediate(go));
+    list();
+    await stored;
+    await store.settled();
+    assert.equal(store.usage().entries, 1);
+    const entry = store.lookup(request);
+    assert.equal((entry && (await store.body(entry)))?.length, 100);
+    assert.deepEqual(readdirSync(join(at, "bodies")), [entry?.key]);
+    assert.equal(warnings.length, warned);
+  } finally {
+    fsPromises.readdir = readdir;
+    fsPromises.open = open;
+    syncBuiltinESMExports();
+    store?.close();
+  }
 });
 
 test("Flash's policy still judges a request the cache could answer", async () => {

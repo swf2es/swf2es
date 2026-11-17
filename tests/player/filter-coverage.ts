@@ -67,7 +67,21 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       const width = gl.drawingBufferWidth;
       const height = gl.drawingBufferHeight;
       const pixels = new Uint8Array(width * height * 4);
+      // The canvas, as presented: the renderer may leave its multisampled stage bound for reading,
+      // which readPixels refuses, reading nothing. Bound back after, so its state cache holds.
+      const bound = gl.getParameter(gl.READ_FRAMEBUFFER_BINDING);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
       gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      const error = gl.getError();
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, bound);
+      if (error !== gl.NO_ERROR || gl.isContextLost()) {
+        throw new Error("readPixels failed: GL error " + error);
+      }
+
+      if (!pixels.some((value) => value !== 0)) {
+        throw new Error("Nothing drawn: every pixel read is 0");
+      }
+
       return (x, y) => pixels[((height - 1 - y) * width + x) * 4 + 3];
     };
     try {
@@ -125,8 +139,11 @@ if (exception) {
 
 const bad: string[] = [];
 for (const r of value as Result[]) {
-  // Two levels for the passes' truncation and the samples' own placing.
-  if (Math.abs(r.thin - r.plain) > (r.most ?? 4)) {
+  // A fill read where nothing was drawn compares nothing: each probe lies on the filter's output.
+  if (r.most === undefined && r.plain === 0) {
+    bad.push(`${r.case}: nothing drawn where read`);
+  } else if (Math.abs(r.thin - r.plain) > (r.most ?? 4)) {
+    // Two levels for the passes' truncation and the samples' own placing.
     bad.push(`${r.case}: ${r.thin}, as a fill ${r.plain}`);
   }
 }

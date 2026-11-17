@@ -10,14 +10,17 @@ import { app, dialog, safeStorage } from "electron";
 import type { OpenedMovie } from "../shared/api.js";
 import { type AirCommand, airLaunch, EncryptedItems } from "./air.ts";
 import { refuse } from "./dialogs.ts";
+import { type Embedding, embeddingArguments, embeddingFor } from "./embedding.ts";
 import { buildMenu } from "./menu.ts";
 import type { Movie } from "./network-types.ts";
-import { listening, sandbox, settings, TITLE, window } from "./state.ts";
+import { APP_ORIGIN } from "./protocol.ts";
+import { listening, pageGone, sandbox, settings, TITLE, window } from "./state.ts";
 import { network } from "./switches.ts";
 
 /** What the network judges the movie playing as; null for none, or one without networking. */
 export let networkMovie: Movie | null = null;
-export let current: { path: string; movie: OpenedMovie } | null = null;
+/** What plays: what the user opened, how the page plays it, and the embedding it was opened with. */
+export let current: { path: string; movie: OpenedMovie; embedding: Embedding } | null = null;
 /** The servers the SWF playing was allowed, or denied, a socket to until it closes: "host:port". */
 export let allowedOnce = new Set<string>();
 export let deniedOnce = new Set<string>();
@@ -61,11 +64,12 @@ export function remoteUrl(text: string): URL | null {
  * The SWF named on a command line, from `cwd`: the last argument after the
  * app's own that is an http or https URL or names a .swf file there is.
  * Chromium's and Electron's switches may take values of their own
- * (`--switch value`), so the first argument that is not a switch could be one.
+ * (`--switch value`), so the first argument that is not a switch could be one;
+ * the values of the app's own (embedding.ts) are never one.
  */
 export function movieFromArguments(argv: string[], cwd = process.cwd()): string | null {
-  const named = argv
-    .slice(process.defaultApp ? 2 : 1)
+  const named = embeddingArguments(argv)
+    .rest.slice(process.defaultApp ? 2 : 1)
     .filter((a) => !a.startsWith("-"))
     .map((a) => remoteUrl(a)?.href ?? (/\.swf$/i.test(a) ? resolve(cwd, a) : null))
     .filter((a) => a !== null);
@@ -105,10 +109,14 @@ export async function readStart(
   }
 }
 
-/** Open what the recent list, the command line or a reload names: a URL, a SWF's path or a descriptor's. */
-export function openEntry(entry: string): Promise<void> {
+/**
+ * Open what the recent list, the command line or a reload names: a URL, a
+ * SWF's path or a descriptor's; a SWF given `embedding`, which the command
+ * line names.
+ */
+export function openEntry(entry: string, embedding: Embedding = {}): Promise<void> {
   if (remoteUrl(entry)) {
-    return openUrl(entry);
+    return openUrl(entry, embedding);
   }
 
   // A descriptor reopened from the recent list or a reload, with the arguments it was run with.
@@ -119,7 +127,42 @@ export function openEntry(entry: string): Promise<void> {
     );
   }
 
-  return open(entry);
+  return open(entry, embedding);
+}
+
+/**
+ * Open what plays again, with the embedding it was opened with, as a page
+ * reloaded keeps its tag's: View › Reload Movie, and the offer after the
+ * page's process went, which this brings back.
+ */
+export async function reloadMovie(): Promise<void> {
+  if (current) {
+    await openEntry(current.path, current.embedding);
+  }
+
+  // Still gone where nothing played, or it would not open again: the page comes back all the same.
+  reloadGonePage();
+}
+
+/** Whether a load of the page reloadGonePage made is under way. */
+let reloading = false;
+
+/**
+ * A page whose process is gone hears nothing: a new one asks for the movie as it starts. Once the
+ * load is over, made or failed, another may be tried (main.ts counts a failed one as gone).
+ */
+function reloadGonePage(): void {
+  if (!pageGone || !window || reloading) {
+    return;
+  }
+
+  reloading = true;
+  window
+    .loadURL(`${APP_ORIGIN}/`)
+    .catch(() => {})
+    .finally(() => {
+      reloading = false;
+    });
 }
 
 /**
@@ -175,12 +218,26 @@ export async function openAir(command: AirCommand, cwd: string): Promise<void> {
     command.descriptor,
     { url, name: opened.title, sandbox: "application", air: opened.launch },
     { kind: "application" },
+    {},
   );
 }
 
-/** Play `movie` in the window, in place of what plays: what the user opened, as `entry`. */
-function show(entry: string, movie: OpenedMovie, onNetwork: Movie | null): void {
-  current = { path: entry, movie };
+/**
+ * Play `movie` in the window, in place of what plays: what the user opened,
+ * as `entry`, given `embedding`.
+ */
+function show(
+  entry: string,
+  movie: OpenedMovie,
+  onNetwork: Movie | null,
+  embedding: Embedding,
+): void {
+  const params = embeddingFor(embedding, movie.url);
+  if (Object.keys(params).length > 0) {
+    movie.params = params;
+  }
+
+  current = { path: entry, movie, embedding };
   playOnNetwork(onNetwork);
   allowedOnce = new Set();
   deniedOnce = new Set();
@@ -191,6 +248,8 @@ function show(entry: string, movie: OpenedMovie, onNetwork: Movie | null): void 
     window.setTitle(movie.air ? movie.name : `${movie.name} — ${TITLE}`);
     if (listening) {
       window.webContents.send("desktop:open", movie);
+    } else {
+      reloadGonePage();
     }
   }
 }
@@ -198,9 +257,10 @@ function show(entry: string, movie: OpenedMovie, onNetwork: Movie | null): void 
 /**
  * Play the SWF at `text`, an http or https URL, in Flash's remote sandbox:
  * no local file, and the network as its origin's (network.ts). The page
- * fetches it through the main process like anything it loads.
+ * fetches it through the main process like anything it loads. Its query is
+ * its loaderInfo.parameters, as Flash had it, `embedding`'s FlashVars over it.
  */
-export async function openUrl(text: string): Promise<void> {
+export async function openUrl(text: string, embedding: Embedding = {}): Promise<void> {
   const url = remoteUrl(text);
   if (!url) {
     refuse("Only an http or https URL opens.", text.slice(0, 200));
@@ -217,7 +277,12 @@ export async function openUrl(text: string): Promise<void> {
 
   air = null;
   sandbox.playRemote(url.href);
-  show(url.href, { url: url.href, name, sandbox: "remote" }, { kind: "remote", url: url.href });
+  show(
+    url.href,
+    { url: url.href, name, sandbox: "remote" },
+    { kind: "remote", url: url.href },
+    embedding,
+  );
 }
 
 /**
@@ -251,8 +316,8 @@ export async function openChosen(path: string): Promise<void> {
   return openAir({ descriptor: path, root: null, arguments: [] }, dirname(path));
 }
 
-/** Play the SWF at `path` in the window, in place of what plays, in its sandbox. */
-async function open(path: string): Promise<void> {
+/** Play the SWF at `path` in the window, in place of what plays, in its sandbox, given `embedding`. */
+async function open(path: string, embedding: Embedding = {}): Promise<void> {
   const name = basename(path);
   // Its start alone: the main process never decompresses a SWF whole, whose
   // header may name 4 GB. FileAttributes, the first tag, lies in it.
@@ -280,6 +345,7 @@ async function open(path: string): Promise<void> {
     path,
     { url, name, sandbox: useNetwork ? "localWithNetwork" : "localWithFile" },
     useNetwork ? { kind: "local" } : null,
+    embedding,
   );
 }
 
@@ -298,5 +364,7 @@ export function closeMovie(): void {
   window?.setTitle(TITLE);
   if (listening) {
     window?.webContents.send("desktop:close");
+  } else {
+    reloadGonePage();
   }
 }

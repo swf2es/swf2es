@@ -1,7 +1,9 @@
 // A WebSocket server small enough to read, for the desktop tests: node has
 // a client and no server. The HTTP upgrade with its SHA-1 accept key, the
 // client's masked frames unmasked, its own sent unmasked; whole messages
-// only, no fragments and no extensions, which is all the tests send.
+// only, no fragments and no extensions, which is all the tests send. It
+// keeps every frame a client sent as it came, so that a test sees the
+// bytes of a text message, a ping and a close frame's reason.
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import { createServer as createSecureServer } from "node:https";
@@ -21,8 +23,12 @@ export interface Peer {
   readonly request: IncomingMessage;
   /** The close frame's code once it sent one: 1005 for a frame without a code. */
   closeCode: number | null;
+  /** Each frame it sent, as its opcode and payload, the close frame's included. */
+  readonly frames: [opcode: number, payload: Uint8Array][];
   /** A text message for a string, a binary one for bytes. */
   send(data: string | Uint8Array): void;
+  /** A frame of `opcode` with `payload` as it is: text that is no UTF-8, a ping, a pong. */
+  sendFrame(opcode: number, payload: Uint8Array): void;
   /** A close frame, with `code` if given; the connection ends once the client's own has come. */
   close(code?: number): void;
   /** Drop the connection with no close frame. */
@@ -32,7 +38,9 @@ export interface Peer {
 }
 
 export interface Handlers {
-  /** The subprotocol to answer with, of those offered; none by default. */
+  /** A status to refuse the handshake with, as an HTTP response, in place of answering it. */
+  refuse?(request: IncomingMessage): number | undefined;
+  /** The subprotocol to answer with, of those offered or not; none by default. */
   protocol?(offered: string[]): string | undefined;
   open?(peer: Peer): void;
   message?(peer: Peer, data: string | Uint8Array): void;
@@ -63,6 +71,13 @@ function frame(opcode: number, payload: Uint8Array): Buffer {
 }
 
 function serve(socket: Duplex, request: IncomingMessage, handlers: Handlers): void {
+  const status = handlers.refuse?.(request);
+  if (status !== undefined) {
+    socket.on("error", () => {});
+    socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Length: 0\r\nConnection: close\r\n\r\n`);
+    return;
+  }
+
   const offered = String(request.headers["sec-websocket-protocol"] ?? "")
     .split(",")
     .map((p) => p.trim())
@@ -85,10 +100,14 @@ function serve(socket: Duplex, request: IncomingMessage, handlers: Handlers): vo
     offered,
     request,
     closeCode: null,
+    frames: [],
     send(data) {
       socket.write(
         typeof data === "string" ? frame(TEXT, Buffer.from(data, "utf8")) : frame(BINARY, data),
       );
+    },
+    sendFrame(opcode, payload) {
+      socket.write(frame(opcode, payload));
     },
     close(code) {
       if (sentClose) {
@@ -150,6 +169,7 @@ function serve(socket: Duplex, request: IncomingMessage, handlers: Handlers): vo
 
       const opcode = pending[0] & 0x0f;
       pending = pending.subarray(at + 4 + length);
+      peer.frames.push([opcode, new Uint8Array(payload)]);
       switch (opcode) {
         case TEXT:
           handlers.message?.(peer, payload.toString("utf8"));
@@ -183,13 +203,15 @@ function serve(socket: Duplex, request: IncomingMessage, handlers: Handlers): vo
 }
 
 /**
- * A server on a port of 127.0.0.1's that the system picks, with TLS if
- * `tls` is given; a plain request is answered 426. Its connections end
- * with `server.closeAllConnections()` and the sockets `sockets` holds.
+ * A server on a port of `host`'s, 127.0.0.1 by default, that the system
+ * picks unless `port` is given, with TLS if `tls` is given; a plain
+ * request is answered 426. Its connections end with
+ * `server.closeAllConnections()` and the sockets `sockets` holds.
  */
 export async function webSocketServer(
   handlers: Handlers,
   tls?: { key: string | Buffer; cert: string | Buffer },
+  { host = "127.0.0.1", port = 0 }: { host?: string; port?: number } = {},
 ): Promise<{ server: Server; port: number; close(): Promise<void> }> {
   const server = tls ? createSecureServer(tls) : createServer();
   const sockets = new Set<Duplex>();
@@ -201,7 +223,7 @@ export async function webSocketServer(
     socket.on("close", () => sockets.delete(socket));
     serve(socket, request, handlers);
   });
-  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  await new Promise<void>((done) => server.listen(port, host, done));
   return {
     server,
     port: (server.address() as { port: number }).port,

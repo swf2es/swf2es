@@ -671,6 +671,90 @@ export function benchPlayer(
   );
 }
 
+/** What page.ts's playSwf measured: see there. */
+export interface PlayResult {
+  steps: {
+    at: number;
+    begun: number;
+    frames: number;
+    played: number;
+    advance: number;
+    draw: number;
+    gl: number;
+    work: Record<string, number>;
+  }[];
+  first: number;
+  renderer: number;
+  frameRate: number;
+  frameCount: number;
+  samples: number;
+  startup: Record<string, number>;
+  links: { step: number; ms: number }[];
+  gpu: string;
+  parallel: boolean;
+  error: string | null;
+}
+
+/**
+ * Play `swf` in real time for `frames` of its frames (0: all) in Chrome, as
+ * the web element does, at `resolution` canvas pixels a stage pixel (page.ts's
+ * playSwf). Its sound plays with no gesture asked for, as after a user's click.
+ */
+export function playPlayer(
+  swf: Uint8Array,
+  frames: number,
+  options: {
+    gpu?: boolean;
+    resolution?: number;
+    mounts?: [string, string][];
+    /** Sample the whole play in Chrome's profiler, written here. */
+    cpuProfilePath?: string;
+  } = {},
+): Promise<PlayResult> {
+  const { gpu = false, resolution = 1, mounts, cpuProfilePath } = options;
+  return withPage(
+    "playSwf",
+    async (evaluate, send, _fresh, listen) => {
+      let written: Promise<void> | null = null;
+      if (cpuProfilePath) {
+        await send("Profiler.enable");
+        await send("Profiler.setSamplingInterval", { interval: 250 });
+        written = new Promise((done) =>
+          listen("Profiler.consoleProfileFinished", (params) => {
+            writeFileSync(cpuProfilePath, JSON.stringify(params.profile));
+            done();
+          }),
+        );
+      }
+
+      const { value, exception } = await evaluate<PlayResult>(
+        `playSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${resolution}, ${!!cpuProfilePath})`,
+      );
+      if (value && !value.error && written) {
+        await written;
+      }
+
+      return (
+        value ?? {
+          steps: [],
+          first: 0,
+          renderer: 0,
+          frameRate: 0,
+          frameCount: 0,
+          samples: 0,
+          startup: {},
+          links: [],
+          gpu: "",
+          parallel: false,
+          error: exception ?? "no result",
+        }
+      );
+    },
+    gpu,
+    { mounts, args: ["--autoplay-policy=no-user-gesture-required"] },
+  );
+}
+
 /** What page.ts's moduleCacheSwf found of the IndexedDB module cache. */
 export interface CacheCheck {
   loads: { trace: string[]; compiled: number; error: string | null }[];

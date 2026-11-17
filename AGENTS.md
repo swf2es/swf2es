@@ -148,6 +148,11 @@ node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--
                               # mix, see docs/renderer.md; --blends: shapes alone in blend modes);
                               # keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
+node tests/player/bench.ts --swf file.swf [--frames N] [--resolution R] [--gpu] [--cpu-profile F]
+                              # a SWF of one's own played in real time as the web element plays
+                              # it: frame times and the frames that overran one of its frames,
+                              # each with what the renderer did then (links, first draws, uploads,
+                              # filter passes, morphs) and, profiled, where its time went
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh
                               # ratios, --allocs samples allocation, --counts counts native calls

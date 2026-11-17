@@ -1,5 +1,6 @@
 import type { GlState } from "@swf2es/context3d/device";
 import { type Geometries, type GeometryData, GLYPH_FLOATS } from "../geometry.js";
+import { FreeRanges } from "./free-ranges.js";
 import { GlyphTables } from "./glyph-tables.js";
 import {
   COLOR_AT,
@@ -23,8 +24,6 @@ const GLYPH_BYTES = GLYPH_FLOATS * 4;
 const GLYPHS_LEAST = 1024;
 /** The fewest vertices the atlas holds room for, and its indices thrice that. */
 const LEAST = 1 << 16;
-/** Holes past which, and past the live vertices, the atlas is packed again. */
-const SLACK = 1 << 16;
 /**
  * The vertices, and the indices, staged before an upload: geometries placed
  * one after another go to the GPU in one call for each buffer, not two a
@@ -69,10 +68,27 @@ function interleave(
 }
 
 /**
- * Where a geometry lies in the atlas, or the glyph atlas with its text's
- * mode and table, and their slot in the glyph tables (-1 past their room).
+ * A vertex and an index buffer of the atlas, its vertex array reading
+ * them, the room of each and the vertices live in it.
+ */
+export interface Page {
+  /** Its index in the atlas' pages, which places name it by. */
+  index: number;
+  vertexArray: WebGLVertexArrayObject;
+  vertexBuffer: WebGLBuffer;
+  indexBuffer: WebGLBuffer;
+  vertices: FreeRanges;
+  indices: FreeRanges;
+  live: number;
+}
+
+/**
+ * Where a geometry lies in the atlas, its page and its ranges there, or in
+ * the glyph atlas with its text's mode and table, and their slot in the
+ * glyph tables (-1 past their room).
  */
 export interface Place {
+  page: number;
   vertexStart: number;
   vertices: number;
   indexStart: number;
@@ -85,31 +101,31 @@ export interface Place {
 }
 
 /**
- * The geometry atlas: every geometry copied once into a vertex and an index
- * buffer, and advanced text's glyph quads into an atlas of their own, where
- * the draws find them by their places. A geometry let go of leaves a hole,
- * and each atlas is packed again from the geometries' own arrays once the
- * holes outweigh what is live.
+ * The geometry atlas: every geometry copied once into a page's vertex and
+ * index buffers, and advanced text's glyph quads into an atlas of their
+ * own, where the draws find them by their places. A geometry let go of
+ * leaves holes in its page, which later geometries are placed in once the
+ * top is full; a page is packed again from the geometries' own arrays only
+ * when what is added finds no room. Repacking every geometry for its holes
+ * alone made frames that copied and uploaded the whole atlas again, tens of
+ * megabytes, every few seconds of a busy SWF. The glyph atlas is packed
+ * again once its holes outweigh what is live, which also frees the texts'
+ * tables' slots.
  */
 export class GeometryAtlas {
   frame = 0;
   private readonly gl: WebGL2RenderingContext;
   private readonly state: GlState;
-  vertexArray!: WebGLVertexArrayObject;
-  private vertexBuffer!: WebGLBuffer;
-  private indexBuffer!: WebGLBuffer;
-  private vertexCapacity = 0;
-  private indexCapacity = 0;
-  private vertexTop = 0;
-  private indexTop = 0;
-  private live = 0;
-  private holes = 0;
-  /** Vertices staged for the atlas from vertex `stagedVertexAt`, as floats and as words. */
+  /** The pages, one for now, which places name by index. */
+  pages: Page[] = [];
+  /** The page the staging is for. */
+  private stagedPage: Page | null = null;
+  /** Vertices staged for `stagedPage` from vertex `stagedVertexAt`, as floats and as words. */
   private readonly stagedFloats = new Float32Array(STAGED_VERTICES * (VERTEX_BYTES / 4));
   private readonly stagedWords = new Uint32Array(this.stagedFloats.buffer);
   private stagedVertexAt = 0;
   private stagedVertices = 0;
-  /** Indices staged for the atlas from index `stagedIndexAt`. */
+  /** Indices staged for `stagedPage` from index `stagedIndexAt`. */
   private readonly stagedIndices = new Uint32Array(STAGED_INDICES);
   private stagedIndexAt = 0;
   private stagedIndexCount = 0;
@@ -138,21 +154,7 @@ export class GeometryAtlas {
   /** The buffers and vertex arrays made, both atlases empty, as the context comes or comes back. */
   setUp(): void {
     const gl = this.gl;
-    this.vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
-    this.vertexBuffer = gl.createBuffer() as WebGLBuffer;
-    this.indexBuffer = gl.createBuffer() as WebGLBuffer;
-    this.state.bindVertexArray(this.vertexArray);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
-    gl.enableVertexAttribArray(POSITION_AT);
-    gl.vertexAttribPointer(POSITION_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 0);
-    gl.enableVertexAttribArray(TEXEL_AT);
-    gl.vertexAttribPointer(TEXEL_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 8);
-    gl.enableVertexAttribArray(COLOR_AT);
-    gl.vertexAttribPointer(COLOR_AT, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 16);
-    // The same bytes as a mesh's depth, which the mesh program reads in place of the colour.
-    gl.enableVertexAttribArray(DEPTH_AT);
-    gl.vertexAttribPointer(DEPTH_AT, 1, gl.FLOAT, false, VERTEX_BYTES, 16);
+    this.pages = [this.makePage(0)];
     this.glyphArray = gl.createVertexArray() as WebGLVertexArrayObject;
     this.glyphBuffer = gl.createBuffer() as WebGLBuffer;
     this.glyphIndexBuffer = gl.createBuffer() as WebGLBuffer;
@@ -179,40 +181,79 @@ export class GeometryAtlas {
       live: 0,
       holes: 0,
     });
-    this.vertexCapacity = 0;
-    this.indexCapacity = 0;
+    this.stagedPage = null;
     this.stagedVertices = 0;
     this.stagedIndexCount = 0;
     this.places = [];
     this.tables.setUp();
   }
 
+  /** A page's buffers and vertex array made, with no room till it is packed. */
+  private makePage(index: number): Page {
+    const gl = this.gl;
+    const page: Page = {
+      index,
+      vertexArray: gl.createVertexArray() as WebGLVertexArrayObject,
+      vertexBuffer: gl.createBuffer() as WebGLBuffer,
+      indexBuffer: gl.createBuffer() as WebGLBuffer,
+      vertices: new FreeRanges(),
+      indices: new FreeRanges(),
+      live: 0,
+    };
+    this.state.bindVertexArray(page.vertexArray);
+    gl.bindBuffer(gl.ARRAY_BUFFER, page.vertexBuffer);
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, page.indexBuffer);
+    gl.enableVertexAttribArray(POSITION_AT);
+    gl.vertexAttribPointer(POSITION_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 0);
+    gl.enableVertexAttribArray(TEXEL_AT);
+    gl.vertexAttribPointer(TEXEL_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 8);
+    gl.enableVertexAttribArray(COLOR_AT);
+    gl.vertexAttribPointer(COLOR_AT, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 16);
+    // The same bytes as a mesh's depth, which the mesh program reads in place of the colour.
+    gl.enableVertexAttribArray(DEPTH_AT);
+    gl.vertexAttribPointer(DEPTH_AT, 1, gl.FLOAT, false, VERTEX_BYTES, 16);
+    return page;
+  }
+
+  /** Geometry `id`'s place, if it has one, let go of: a shape's ranges free in its page. */
+  private letGo(id: number): void {
+    const place = this.places[id];
+    if (!place) {
+      return;
+    }
+
+    this.places[id] = null;
+    if (place.glyphs) {
+      this.glyphs.live -= place.vertices;
+      this.glyphs.holes += place.vertices;
+    } else {
+      const page = this.pages[place.page];
+      page.vertices.give(place.vertexStart, place.vertices);
+      page.indices.give(place.indexStart, place.indices);
+      page.live -= place.vertices;
+    }
+  }
+
   /**
    * The geometries removed since the last frame let go of, and those added
-   * copied in: at the top while they fit, else into an atlas packed again,
-   * grown to twice what is live.
+   * copied in: the shapes together at their page's top or in a hole that
+   * holds them all, else each in the first hole that holds it, else into a
+   * page packed again with room for twice what is live; a text at the
+   * glyph atlas' top, else into one packed again.
    */
   place(geometries: Geometries): void {
     this.frame++;
     for (const id of geometries.removed) {
-      const place = this.places[id];
-      if (place?.glyphs) {
-        this.places[id] = null;
-        this.glyphs.live -= place.vertices;
-        this.glyphs.holes += place.vertices;
-      } else if (place) {
-        this.places[id] = null;
-        this.live -= place.vertices;
-        this.holes += place.vertices;
-      }
+      this.letGo(id);
     }
 
     geometries.removed.length = 0;
     // Nothing left in it: filled again from its start, in the buffers it has.
-    if (this.live === 0) {
-      this.vertexTop = 0;
-      this.indexTop = 0;
-      this.holes = 0;
+    for (const page of this.pages) {
+      if (page.live === 0) {
+        page.vertices.reset(page.vertices.capacity);
+        page.indices.reset(page.indices.capacity);
+      }
     }
 
     // Changed in place: copied again where they lie, else as added.
@@ -220,18 +261,10 @@ export class GeometryAtlas {
       const place = this.places[id];
       const data = geometries.get(id);
       if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
-        this.copyVertices(data, place.vertexStart);
+        this.copyVertices(this.pages[place.page], data, place.vertexStart);
         place.batch = this.batch(data);
       } else if (place && data) {
-        this.places[id] = null;
-        if (place.glyphs) {
-          this.glyphs.live -= place.vertices;
-          this.glyphs.holes += place.vertices;
-        } else {
-          this.live -= place.vertices;
-          this.holes += place.vertices;
-        }
-
+        this.letGo(id);
         geometries.added.push(id);
       }
     }
@@ -253,12 +286,11 @@ export class GeometryAtlas {
     }
 
     // Each atlas packed again on its own, so that texts' quads made again often never repack
-    // the shapes', nor shapes the texts'.
+    // the shapes', nor shapes the texts'. The shapes' page only when what is added outweighs its
+    // room, or below, when holes too small for one of them leave it none.
     const g = this.glyphs;
-    const shapes =
-      this.vertexTop + vertices > this.vertexCapacity ||
-      this.indexTop + indices > this.indexCapacity ||
-      (this.holes > SLACK && this.holes > this.live);
+    const page = this.pages[0];
+    let shapes = vertices > page.vertices.room() || indices > page.indices.room();
     const texts =
       g.top + glyphVertices > g.capacity ||
       g.indexTop + glyphIndices > g.indexCapacity ||
@@ -272,10 +304,51 @@ export class GeometryAtlas {
       this.repackGlyphs(geometries);
     }
 
+    // The shapes added together in one range where one holds them all, at the top or in a
+    // hole, so that they go up in one upload each for vertices and indices; else each in the
+    // first that holds it, which a churning atlas would leave to a call or two a geometry.
+    let vertexAt = -1;
+    let indexAt = -1;
+    if (!shapes && vertices > 0) {
+      vertexAt = page.vertices.take(vertices);
+      indexAt = vertexAt < 0 ? -1 : page.indices.take(indices);
+      if (vertexAt >= 0 && indexAt < 0) {
+        page.vertices.give(vertexAt, vertices);
+        vertexAt = -1;
+      }
+    }
+
     for (const id of geometries.added) {
       const data = geometries.get(id);
-      if (data && !(data.glyphs ? texts : shapes)) {
-        this.copyIn(id, data);
+      if (!data) {
+        continue;
+      }
+
+      // Added twice in a frame, as an id let go of and taken again can be: its first copy's
+      // room given back, which only packing would otherwise find again. A packed atlas holds
+      // its geometries already.
+      if (data.glyphs) {
+        if (!texts) {
+          this.letGo(id);
+          this.copyGlyphs(id, data);
+        }
+
+        continue;
+      }
+
+      if (shapes) {
+        continue;
+      }
+
+      this.letGo(id);
+      if (vertexAt >= 0) {
+        this.copyAt(page, id, data, vertexAt, indexAt);
+        vertexAt += data.positions.length / 2;
+        indexAt += data.indices.length;
+      } else if (!this.copyIn(page, id, data)) {
+        // Packing copies every live shape, those added after this one too.
+        shapes = true;
+        this.repack(geometries);
       }
     }
 
@@ -284,7 +357,7 @@ export class GeometryAtlas {
     this.tables.upload();
   }
 
-  /** Every live shape's geometry copied into new buffers, with room for twice what is live. */
+  /** Every live shape copied into its page's buffers made anew, with room for twice them. */
   repack(geometries: Geometries): void {
     const gl = this.gl;
     const ids = geometries.live();
@@ -298,23 +371,22 @@ export class GeometryAtlas {
       }
     }
 
-    this.vertexCapacity = Math.max(LEAST, vertices * 2);
-    this.indexCapacity = Math.max(LEAST * 3, indices * 2);
-    this.state.bindVertexArray(this.vertexArray);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.vertexCapacity * VERTEX_BYTES, gl.STATIC_DRAW);
-    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, this.indexCapacity * 4, gl.STATIC_DRAW);
+    const page = this.pages[0];
+    page.vertices.reset(Math.max(LEAST, vertices * 2));
+    page.indices.reset(Math.max(LEAST * 3, indices * 2));
+    page.live = 0;
+    this.state.bindVertexArray(page.vertexArray);
+    gl.bindBuffer(gl.ARRAY_BUFFER, page.vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, page.vertices.capacity * VERTEX_BYTES, gl.STATIC_DRAW);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, page.indices.capacity * 4, gl.STATIC_DRAW);
     // What was staged for the buffers replaced is copied again below.
     this.stagedVertices = 0;
     this.stagedIndexCount = 0;
-    this.vertexTop = 0;
-    this.indexTop = 0;
-    this.live = 0;
-    this.holes = 0;
+    // Each at the top, which holds twice them all.
     for (const id of ids) {
       const data = geometries.get(id) as GeometryData;
       if (!data.glyphs) {
-        this.copyIn(id, data);
+        this.copyIn(page, id, data);
       }
     }
 
@@ -358,18 +430,40 @@ export class GeometryAtlas {
     this.tables.upload();
   }
 
-  /** `data` copied in at the top of the atlas, its indices made absolute. */
-  private copyIn(id: number, data: GeometryData): void {
-    if (data.glyphs) {
-      this.copyGlyphs(id, data);
-      return;
+  /**
+   * A shape's `data` copied into `page`, at its top or in a hole, its
+   * indices made absolute from where its vertices went; false where the
+   * page has no room for it.
+   */
+  private copyIn(page: Page, id: number, data: GeometryData): boolean {
+    const count = data.positions.length / 2;
+    const base = page.vertices.take(count);
+    if (base < 0) {
+      return false;
     }
 
+    const indexStart = page.indices.take(data.indices.length);
+    if (indexStart < 0) {
+      page.vertices.give(base, count);
+      return false;
+    }
+
+    this.copyAt(page, id, data, base, indexStart);
+    return true;
+  }
+
+  /** A shape's `data` copied into `page`'s room taken for it, from vertex `base` and index `indexStart`. */
+  private copyAt(
+    page: Page,
+    id: number,
+    data: GeometryData,
+    base: number,
+    indexStart: number,
+  ): void {
     const count = data.positions.length / 2;
-    const base = this.vertexTop;
-    this.copyVertices(data, base);
     const source = data.indices;
     const length = source.length;
+    this.copyVertices(page, data, base);
     if (length > STAGED_INDICES) {
       const indices = new Uint32Array(length);
       for (let i = 0; i < length; i++) {
@@ -377,15 +471,16 @@ export class GeometryAtlas {
       }
 
       this.flushIndices();
-      this.state.bindVertexArray(this.vertexArray);
-      this.gl.bufferSubData(this.gl.ELEMENT_ARRAY_BUFFER, this.indexTop * 4, indices);
+      this.state.bindVertexArray(page.vertexArray);
+      this.gl.bufferSubData(this.gl.ELEMENT_ARRAY_BUFFER, indexStart * 4, indices);
     } else {
+      this.stagePage(page);
       if (
         this.stagedIndexCount + length > STAGED_INDICES ||
-        this.stagedIndexAt + this.stagedIndexCount !== this.indexTop
+        this.stagedIndexAt + this.stagedIndexCount !== indexStart
       ) {
         this.flushIndices();
-        this.stagedIndexAt = this.indexTop;
+        this.stagedIndexAt = indexStart;
       }
 
       const staged = this.stagedIndices;
@@ -398,31 +493,31 @@ export class GeometryAtlas {
     }
 
     this.places[id] = {
+      page: page.index,
       vertexStart: base,
       vertices: count,
-      indexStart: this.indexTop,
+      indexStart,
       indices: length,
       glyphs: null,
       flat: data.flat === true,
       batch: this.batch(data),
     };
-    this.vertexTop += count;
-    this.indexTop += length;
-    this.live += count;
+    page.live += count;
   }
 
-  /** `data`'s vertices interleaved for the atlas from vertex `base`: staged, or uploaded if too many. */
-  private copyVertices(data: GeometryData, base: number): void {
+  /** `data`'s vertices interleaved for `page` from vertex `base`: staged, or uploaded if too many. */
+  private copyVertices(page: Page, data: GeometryData, base: number): void {
     const count = data.positions.length / 2;
     if (count > STAGED_VERTICES) {
       const floats = new Float32Array(count * (VERTEX_BYTES / 4));
       interleave(data, count, floats, new Uint32Array(floats.buffer), 0);
       this.flushVertices();
-      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.vertexBuffer);
+      this.gl.bindBuffer(this.gl.ARRAY_BUFFER, page.vertexBuffer);
       this.gl.bufferSubData(this.gl.ARRAY_BUFFER, base * VERTEX_BYTES, floats);
       return;
     }
 
+    this.stagePage(page);
     if (
       this.stagedVertices + count > STAGED_VERTICES ||
       this.stagedVertexAt + this.stagedVertices !== base
@@ -441,10 +536,18 @@ export class GeometryAtlas {
     this.flushIndices();
   }
 
+  /** The staging made `page`'s, what it held for another uploaded first. */
+  private stagePage(page: Page): void {
+    if (this.stagedPage !== page) {
+      this.flush();
+      this.stagedPage = page;
+    }
+  }
+
   private flushVertices(): void {
     if (this.stagedVertices > 0) {
       const gl = this.gl;
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+      gl.bindBuffer(gl.ARRAY_BUFFER, (this.stagedPage as Page).vertexBuffer);
       gl.bufferSubData(
         gl.ARRAY_BUFFER,
         this.stagedVertexAt * VERTEX_BYTES,
@@ -459,7 +562,7 @@ export class GeometryAtlas {
   private flushIndices(): void {
     if (this.stagedIndexCount > 0) {
       const gl = this.gl;
-      this.state.bindVertexArray(this.vertexArray);
+      this.state.bindVertexArray((this.stagedPage as Page).vertexArray);
       gl.bufferSubData(
         gl.ELEMENT_ARRAY_BUFFER,
         this.stagedIndexAt * 4,
@@ -493,6 +596,7 @@ export class GeometryAtlas {
     gl.bufferSubData(gl.ARRAY_BUFFER, g.top * GLYPH_BYTES, glyphs.vertices);
     gl.bufferSubData(gl.ELEMENT_ARRAY_BUFFER, g.indexTop * 4, indices);
     this.places[id] = {
+      page: 0,
       vertexStart: g.top,
       vertices: count,
       indexStart: g.indexTop,
@@ -513,9 +617,12 @@ export class GeometryAtlas {
   /** The buffers and vertex arrays made on the context, deleted. */
   destroy(): void {
     const gl = this.gl;
-    gl.deleteVertexArray(this.vertexArray);
-    gl.deleteBuffer(this.vertexBuffer);
-    gl.deleteBuffer(this.indexBuffer);
+    for (const page of this.pages) {
+      gl.deleteVertexArray(page.vertexArray);
+      gl.deleteBuffer(page.vertexBuffer);
+      gl.deleteBuffer(page.indexBuffer);
+    }
+
     gl.deleteVertexArray(this.glyphArray);
     gl.deleteBuffer(this.glyphBuffer);
     gl.deleteBuffer(this.glyphIndexBuffer);

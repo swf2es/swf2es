@@ -456,11 +456,9 @@ export function connectThrough(
 }
 
 /**
- * As connectThrough, the tunnel's bytes read by `onread` (net.connect's
- * option) rather than its stream: the socket comes paused, with the bytes
- * that came with the proxy's reply, for its reader to take before it
- * resumes the socket, so that nothing is read before whoever reads is
- * ready. The handshake reads through `onread`'s buffer too.
+ * As connectThrough, the tunnel read by `onread` (net.connect's option),
+ * the handshake included: the socket comes paused, with the bytes that came
+ * with the proxy's reply, so that nothing is read before its reader is ready.
  */
 export function tunnelThrough(
   proxy: ProxyConfig,

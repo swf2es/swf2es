@@ -1,7 +1,7 @@
 // The application menu, built again as what plays and the settings change.
 import { app, Menu, type MenuItemConstructorOptions } from "electron";
 import { chooseLibrary, refuse, resetLibrary, showOpenDialog, showUrlDialog } from "./dialogs.ts";
-import { closeMovie, current, openEntry } from "./open.ts";
+import { closeMovie, current, openEntry, reloadMovie } from "./open.ts";
 import { httpCache, settings, window } from "./state.ts";
 import { network } from "./switches.ts";
 
@@ -85,7 +85,7 @@ export function buildMenu(): void {
           label: "&Reload Movie",
           accelerator: "CmdOrCtrl+R",
           enabled: !!current,
-          click: () => current && void openEntry(current.path),
+          click: () => void reloadMovie(),
         },
         { role: "togglefullscreen", accelerator: "F11" },
         { type: "separator" },

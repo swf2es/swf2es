@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test addresses.test.ts air.test.ts case-paths.test.ts connections.test.ts files.test.ts files-main.test.ts http-cache.test.ts http-pool.test.ts netlog.test.ts network.test.ts policy.test.ts proxy.test.ts relay.test.ts sandbox.test.ts settings.test.ts websocket-connections.test.ts && node smoke.ts && node stage3d.ts"
+    "test": "node --test addresses.test.ts air.test.ts case-paths.test.ts connections.test.ts embedding.test.ts files.test.ts files-main.test.ts http-cache.test.ts http-pool.test.ts netlog.test.ts network.test.ts policy.test.ts proxy.test.ts relay.test.ts sandbox.test.ts settings.test.ts websocket-connections.test.ts && node smoke.ts && node page-gone.ts && node params.ts && node stage3d.ts && node xvfb.ts"
   },
   "dependencies": {
     "@swf2es/desktop": "workspace:*"

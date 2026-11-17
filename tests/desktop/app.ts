@@ -20,7 +20,12 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  * an Xvfb where there is one, and draws there; elsewhere it leaves the
  * user's display out, which GTK still finds through XDG_RUNTIME_DIR.
  */
-export async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void }> {
+export async function display(): Promise<{
+  env: NodeJS.ProcessEnv;
+  /** Whether the display is an Xvfb of the test's own. */
+  xvfb: boolean;
+  stop(): void;
+}> {
   const base = Object.fromEntries(
     Object.entries(process.env).filter(
       ([name]) => name !== "DISPLAY" && name !== "WAYLAND_DISPLAY",
@@ -28,7 +33,7 @@ export async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void 
   );
   const xvfb = spawnSync("sh", ["-c", "command -v Xvfb"], { encoding: "utf8" }).stdout.trim();
   if (!xvfb) {
-    return { env: base, stop() {} };
+    return { env: base, xvfb: false, stop() {} };
   }
 
   // Xvfb writes the display it chose to the descriptor -displayfd names.
@@ -47,6 +52,7 @@ export async function display(): Promise<{ env: NodeJS.ProcessEnv; stop(): void 
   });
   return {
     env: { ...base, DISPLAY: `:${number}`, GDK_BACKEND: "x11", XDG_SESSION_TYPE: "x11" },
+    xvfb: true,
     stop: () => x.kill(),
   };
 }
@@ -69,11 +75,19 @@ export interface App {
   userData: string;
 }
 
+/**
+ * `plain` runs the app as a user does: a window on the display, with no
+ * switch of the test's choosing for the GPU, so the app picks what draws.
+ * `coreDumps: false` has the system write no core dump of a process of
+ * the app's that crashes, where prlimit is (Linux): the process is gone
+ * only once its dump is written, which has taken a runner over a minute.
+ */
 export async function withApp(
   env: NodeJS.ProcessEnv,
   settings: object,
   args: string[],
   run: (app: App) => Promise<void>,
+  { plain = false, coreDumps = true }: { plain?: boolean; coreDumps?: boolean } = {},
 ): Promise<void> {
   const userData = mkdtempSync(join(tmpdir(), "swf2es-desktop-"));
   writeFileSync(join(userData, "settings.json"), JSON.stringify(settings));
@@ -84,19 +98,23 @@ export async function withApp(
   let socket: WebSocket | null = null;
   /** The other pages' DevTools connections. */
   const sockets: WebSocket[] = [];
+  // A limit of one byte: the kernel writes no dump to a file below it, nor to a pipe at all.
+  const noCore =
+    !coreDumps && spawnSync("prlimit", ["--version"]).status === 0 ? ["--core=1:1", "--"] : null;
   const start = (more: string[]) =>
     spawn(
-      electronBinary() as string,
+      noCore ? "prlimit" : (electronBinary() as string),
       [
+        ...(noCore ? [...noCore, electronBinary() as string] : []),
         appDir,
         // Chromium's headless mode, which Electron keeps (its build has no
         // headless Ozone), on the test's own display (display()), and a GPU
-        // of software: it draws alike anywhere.
-        "--headless",
+        // of software: it draws alike anywhere. A plain run has neither: a
+        // window, and what draws is the app's choice.
+        ...(plain ? [] : ["--headless"]),
         // Electron can still find Wayland through XDG_RUNTIME_DIR while Xvfb owns DISPLAY.
         ...(env.GDK_BACKEND === "x11" ? ["--ozone-platform=x11"] : []),
-        "--use-angle=swiftshader",
-        "--enable-unsafe-swiftshader",
+        ...(plain ? [] : ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"]),
         ...more,
       ],
       {
