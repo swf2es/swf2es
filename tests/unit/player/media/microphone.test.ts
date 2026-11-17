@@ -10,6 +10,7 @@ import type {
   MicrophoneMode,
 } from "../../../../packages/player/dist/hosts.js";
 import type { AudioHost, SoundMix } from "../../../../packages/player/dist/media/audio.js";
+import { stopMicrophones } from "../../../../packages/player/dist/media/microphone.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
 import { bare } from "../../../player/cases.ts";
@@ -20,7 +21,7 @@ const out = fileURLToPath(new URL("../../out/microphone/", import.meta.url));
 const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
-async function setup() {
+async function setup(audioEnabled = true, realTime: (() => number) | null = null) {
   const opens: {
     events: MicrophoneEvents;
     modes: MicrophoneMode[];
@@ -70,7 +71,8 @@ async function setup() {
   const errors: unknown[] = [];
   const s = new Scripting(await createCodegen(wasm), {
     capture: host,
-    audio,
+    audio: audioEnabled ? audio : null,
+    realTime,
     onUncaught: (e) => errors.push(e),
   });
   await s.loadLibraries(libraryAbcs(`${out}libraries/`));
@@ -210,7 +212,7 @@ test("rate changes discard pending old-rate PCM and delayed frames keep bounded 
     for (let i = 0; i < 1000; i++) {
       h.opens[0].events.samples(new Float32Array(128).fill(i % 2 ? 0.5 : 0), 48000);
     }
-    assert.equal(queued, 2);
+    assert.equal(queued, 1);
     h.player.tick();
     assert.ok(sizes[1] <= 16384);
     assert.deepEqual(h.errors, []);
@@ -280,6 +282,60 @@ test("Microphone reopening does not repeat consent and revoke reports Muted", as
     assert.deepEqual(statuses, ["Microphone.Unmuted", "Microphone.Muted"]);
     assert.equal(h.get(h.mic, "muted"), true);
     assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("loopback without an audio host opens no device", async () => {
+  const h = await setup(false);
+  try {
+    h.call(h.mic, "setLoopBack", true);
+    assert.equal(h.opens.length, 0);
+    h.listen(h.mic, "sampleData", () => {});
+    assert.equal(h.opens.length, 1);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("real-time sample delivery survives stalled frames and borrowed input buffers", async () => {
+  const h = await setup(true, () => performance.now());
+  try {
+    const positions: number[] = [];
+    let count = 0;
+    h.set(h.mic, "rate", 44);
+    h.listen(h.mic, "sampleData", (event) => {
+      positions.push(Number(h.get(event, "position")));
+      assert.equal(positions.at(-1), count);
+      const bytes = avm2.bytesOf(h.rt, h.get(event, "data") as avm2.AsObject);
+      assert.equal(bytes.littleEndian, false);
+      count += bytes.length / 4;
+    });
+    h.opens[0].events.state("granted");
+    const buffer = new Float32Array(2048).fill(0.25);
+    for (let i = 0; i < 30; i++) {
+      h.opens[0].events.samples(buffer, 48000);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    assert.equal(count, Math.ceil((30 * 2048 * 44100) / 48000));
+    assert.ok(positions.length > 1);
+    assert.deepEqual(h.errors, []);
+  } finally {
+    h.player.destroy();
+    h.s.destroy();
+  }
+});
+
+test("unloading an unrelated movie never reopens a denied parent microphone", async () => {
+  const h = await setup();
+  try {
+    h.listen(h.mic, "sampleData", () => {});
+    h.opens[0].events.state("denied");
+    stopMicrophones(h.s, {} as NonNullable<typeof h.s.library>);
+    assert.equal(h.opens.length, 1);
   } finally {
     h.player.destroy();
     h.s.destroy();

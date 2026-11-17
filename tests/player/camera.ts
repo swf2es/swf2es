@@ -43,6 +43,7 @@ const { value, exception } = await withPage(
     check(get(camera, 'muted') === true, 'camera began unmuted');
     call(camera, 'setMode', 320, 240, 10, true);
     call(camera, 'setMotionLevel', 0, 100);
+    call(camera, 'addEventListener', 'activity', {$f: () => {}});
     check(tracks.length === 0, 'settings opened camera');
     call(video, 'attachCamera', camera);
     await wait(() => get(video, 'videoWidth') > 0 && get(camera, 'currentFPS') > 0, 'camera frames');

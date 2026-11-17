@@ -107,6 +107,18 @@ An adl probe using a generated Sorenson FLV through `NetStream.appendBytes`
 confirmed that direct Video copies apply their own scroll rectangle,
 colour-matrix filter and mask. This observation needs no capture device.
 
+A second generated-FLV probe found that direct copies use `Video.smoothing`,
+ignoring `BitmapData.draw`'s smoothing argument, and that `NetStream.close()` keeps
+the last image. Camera detach likewise keeps an independent still image until
+`Video.clear()` or another attachment; this camera behavior is inferred, since adl
+has no camera. The browser snapshots once on detach, and does not keep the device
+open to retain the picture. Custom live-image hosts provide `VideoPicture.retain`
+to keep an independent GPU image as well as CPU pixels; without it, detach clears
+the Video. An unreferenced Video ends capture without a snapshot.
+CPU copies reuse their pixel store at unchanged dimensions and skip premultiplication
+for opaque camera frames. WebGL similarly reuses same-size texture storage and drops
+an invalid host picture without blocking other uploads.
+
 `Video.clear()` hides the current picture until the source publishes
 another frame, without stopping the source. This follows
 [Adobe's Video documentation](https://airsdk.dev/reference/actionscript/3.0/flash/media/Video.html#clear()),
@@ -154,7 +166,12 @@ Camera to another Video transfers the attachment. Capture starts on
 attach with browser consent; no extra gesture gate is added. Until the
 first permitted frame the Video is empty. These device rules are
 documented, not measured with adl. Activity uses mean luminance change
-on 32×24 samples, an approximation to Flash's unpublished detector.
+on 32×24 samples, only while an activity listener is present and motionLevel is
+below 100. Buffers are reused. The scale is `min(100, 100 * sqrt(8 * meanChange / 255))`,
+so a mean change of 3.125% reaches level 50. This is a documented approximation to
+Flash's unpublished detector, not a measured device curve. `currentFPS` averages
+about one second of frame timestamps, caps bursts at the negotiated rate, and falls
+to zero when frames stop.
 
 `allowcapture="false"` and `configure({ allowCapture: false })` refuse
 capture. Revoking the attribute aborts captures for that load; enabling
@@ -167,24 +184,32 @@ An AudioWorklet on a `MediaStreamSource` hands blocks of samples to the
 player, which resamples them from the device's rate down to `rate` (new:
 `Sound.extract` only holds a sound's samples up to 44.1 kHz,
 `packages/player/src/media/extract.ts`) and dispatches `sampleData` on
-the frame, as Flash did between frames. `activityLevel` is the block's RMS on
+movie frames or between them, at most about 100 ms apart while the host runs.
+Worklet-message delivery also drains the queue when hidden-page timers are throttled;
+a hand-stepped host without a real clock keeps frame-driven delivery. `activityLevel` is the block's RMS on
 Flash's 0–100 scale against `silenceLevel` and its timeout; `gain` is a
 gain node before the worklet; `setLoopBack` routes the input to the
 player's own output, behind the same unmute rule as its sounds.
 
 The implementation starts capture when a `sampleData` listener or loopback
-needs it, and closes capture when neither remains. Device defaults, status
+needs it, and closes capture when neither remains. Loopback without an output
+host does not open a microphone. `Loader.unloadAndStop` releases the loaded movie's
+capture consumers while other movies' listeners remain. Device defaults, status
 codes and enhanced-device exclusivity follow [Adobe's Microphone reference](https://airsdk.dev/reference/actionscript/3.0/flash/media/Microphone.html),
 not device observations under adl. Without a host the existing defaults
 and null getters are unchanged.
 
 The worklet mixes to mono and sends 2048-sample blocks after gain (50 is
-unity). An acknowledgement limits it to one outstanding message. The player
+unity). Eight reusable transfer buffers allow about 340 ms of outstanding audio at 48 kHz,
+plus the block being filled; a longer main-thread suspension drops blocks to keep
+memory bounded. The player
 uses a 96-tap windowed-sinc low-pass converter with continuous phase and
 history, including 48 kHz devices and the 16 kHz rate. The 5/11/22/44 modes
 use the 44.1 kHz family (5512.5/11025/22050/44100 Hz); 8/16 use 8000/16000 Hz.
 Activity uses clipped PCM RMS, an approximation to Flash's unpublished
 meter. Audio and activity events are bounded while SWF frames are paused.
+The resampler reuses its input/history and lends output to the fixed 16384-sample
+queue; script-owned ByteArrays and output-host-owned loopback blocks remain independent.
 A rate change discards pending old-rate data rather than mixing rates in
 one event. Sample positions count produced samples, including discarded
 ones. Loopback is bounded to about 200 ms of pending audio and goes through

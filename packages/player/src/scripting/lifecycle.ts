@@ -11,6 +11,8 @@ import {
   MovieClip,
   scriptWork,
 } from "../display/display.js";
+import { stopCameras } from "../media/camera.js";
+import { stopMicrophones } from "../media/microphone.js";
 import { stopTimelineSoundsUnder } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent, heard } from "./events.js";
@@ -285,6 +287,11 @@ export class Lifecycle {
       }
 
       if (o instanceof Container) {
+        if (o.library && (o === display || o.loaderInfo)) {
+          stopCameras(this.s, o.library);
+          stopMicrophones(this.s, o.library);
+        }
+
         for (const child of o.children) {
           stop(child);
         }

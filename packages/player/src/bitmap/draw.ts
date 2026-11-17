@@ -91,7 +91,7 @@ function drawObject(
  * AS3 BitmapData's draw, and an AVM1 one's.
  */
 export function drawDisplayObject(
-  drawer: Drawer,
+  drawer: Drawer | null,
   store: BitmapStore,
   d: DisplayObject,
   m: Affine,
@@ -103,6 +103,10 @@ export function drawDisplayObject(
   if (d instanceof VideoObject && !videoNeedsRenderer(d)) {
     drawVideo(store, d, m, c, blend, r, d.smoothing);
     return;
+  }
+
+  if (!drawer) {
+    throw new Error("A renderer is required for this display-object copy");
   }
 
   // What is in 3D in an object on no stage projects as on a stage the bitmap's size.

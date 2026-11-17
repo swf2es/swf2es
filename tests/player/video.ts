@@ -9,7 +9,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     const { BitmapStore } = await import('/player/bitmap/bitmap.js');
     const { bitmapDataNatives } = await import('/player/playerglobal/flash/display/BitmapData.js');
     const { filterDefaults } = await import('/player/display/filters.js');
-    const { CONTENT } = await import('/player/display/displayobject.js');
+    const { CONTENT, TRANSFORM } = await import('/player/display/displayobject.js');
     const view = new RenderView({ width: 48, height: 40, preserveDrawingBuffer: true });
     const reference = new RenderView({ width: 48, height: 40, preserveDrawingBuffer: true });
     const gl = view.gl;
@@ -32,6 +32,8 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     };
     const image = gl.texImage2D.bind(gl);
     gl.texImage2D = (...args) => { if (args.at(-1) === canvas) uploads++; return image(...args); };
+    const update = gl.texSubImage2D.bind(gl);
+    gl.texSubImage2D = (...args) => { if (args.at(-1) === canvas) uploads++; return update(...args); };
     const pixels = (v, root) => {
       v.render(root);
       const data = new Uint8Array(48 * 40 * 4);
@@ -124,6 +126,18 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       video.source = source; other.source = source; equalReference();
       source.publish(null);
       check(pixels(view, root).every(p => p === 255), 'ended source left a frame visible');
+
+      // No render between hide and show: visibility alone cannot refresh a cached layer.
+      for (const hidden of [video, parent]) {
+        video.filters = [{ ...filterDefaults('blur'), blurX: 2, blurY: 2, quality: 1 }];
+        video.invalidate(CONTENT);
+        publish('#ff0000'); equalReference();
+        hidden.visible = false; hidden.invalidate(TRANSFORM);
+        publish('#00ff00');
+        hidden.visible = true; hidden.invalidate(TRANSFORM);
+        equalReference();
+      }
+      video.filters = []; video.invalidate(CONTENT);
 
       // Flash's direct Video copies apply these effects (generated FLV adl probe).
       publish('#ff0000');

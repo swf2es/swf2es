@@ -1,4 +1,4 @@
-import { argbOf, BitmapStore, premultiply } from "../bitmap/bitmap.js";
+import { BitmapStore, premultiply } from "../bitmap/bitmap.js";
 
 /** A host-owned frame, valid until the next publish, including after a lost GL context. */
 export interface VideoPicture {
@@ -6,6 +6,10 @@ export interface VideoPicture {
   height: number;
   /** A canvas, video element or VideoFrame; ImageBitmaps must already be premultiplied. */
   image: TexImageSource;
+  /** Camera frames are opaque; other sources must preserve alpha. */
+  opaque?: boolean;
+  /** Keep an independent image for detach; without this hook, detach clears the Video. */
+  retain?(): VideoPicture;
   /** Straight RGBA, top row first, read on the CPU without a WebGL readback. */
   readPixels(): Uint8Array | Uint8ClampedArray;
 }
@@ -19,6 +23,7 @@ export class VideoSource {
   private current: VideoPicture | null = null;
   private serial = 0;
   private cpu: BitmapStore | null = null;
+  private cpuVersion = -1;
   readonly views = new Set<WeakRef<VideoView>>();
 
   get picture(): VideoPicture | null {
@@ -43,7 +48,9 @@ export class VideoSource {
 
     this.current = picture;
     this.serial++;
-    this.cpu = null;
+    if (!picture) {
+      this.cpu = null;
+    }
     for (const ref of this.views) {
       const view = ref.deref();
       if (view) {
@@ -54,10 +61,30 @@ export class VideoSource {
     }
   }
 
+  /** A detached Video owns a still image while its former source can be reused. */
+  snapshot(): VideoSource | null {
+    const picture = this.current;
+    if (!picture) {
+      return null;
+    }
+
+    if (!picture.retain) {
+      return null;
+    }
+
+    const source = new VideoSource();
+    source.publish(picture.retain());
+
+    return source;
+  }
+
   /** Read at most once per published frame, only when a script asks for pixels. */
   bitmap(): BitmapStore | null {
     const picture = this.current;
-    if (!picture || this.cpu) {
+    if (!picture) {
+      return null;
+    }
+    if (this.cpuVersion === this.serial) {
       return this.cpu;
     }
 
@@ -66,14 +93,21 @@ export class VideoSource {
       throw new RangeError("Invalid video frame pixels");
     }
 
-    const store = new BitmapStore(picture.width, picture.height, true, 0);
-    const pixels = argbOf(bytes);
-    for (let i = 0; i < pixels.length; i++) {
-      pixels[i] = premultiply(pixels[i]);
+    if (!this.cpu || this.cpu.width !== picture.width || this.cpu.height !== picture.height) {
+      this.cpu = new BitmapStore(picture.width, picture.height, true, 0);
     }
 
-    store.pixels = pixels;
-    this.cpu = store;
+    const store = this.cpu;
+    const pixels = store.pixels;
+    for (let i = 0; i < pixels.length; i++) {
+      const at = i * 4;
+      const pixel =
+        (bytes[at + 3] << 24) | (bytes[at] << 16) | (bytes[at + 1] << 8) | bytes[at + 2];
+      pixels[i] = picture.opaque ? pixel : premultiply(pixel);
+    }
+
+    store.changed();
+    this.cpuVersion = this.serial;
     return store;
   }
 }

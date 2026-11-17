@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-test("capture worklet keeps only one unacknowledged block while the page is stalled", async () => {
-  const messages: { samples: Float32Array; rate: number }[] = [];
+test("capture worklet absorbs delayed acknowledgements and bounds suspended-page storage", async () => {
+  type Block = { samples: Float32Array<ArrayBuffer>; rate: number };
   class Processor {
+    messages: Block[] = [];
     port = {
-      onmessage: null as (() => void) | null,
-      postMessage(data: { samples: Float32Array; rate: number }) {
-        messages.push({ samples: data.samples.slice(), rate: data.rate });
+      onmessage: null as ((event: { data: Float32Array<ArrayBuffer> }) => void) | null,
+      postMessage: (data: Block, transfer: ArrayBuffer[]) => {
+        this.messages.push(structuredClone(data, { transfer }));
       },
     };
   }
@@ -29,20 +30,42 @@ test("capture worklet keeps only one unacknowledged block while the page is stal
     const Worklet = registered as unknown as new () => Processor & {
       process(inputs: Float32Array[][]): boolean;
     };
-    assert.ok(Worklet);
-    const processor = new Worklet();
     const input = [[new Float32Array(128).fill(0.25)]];
-    for (let i = 0; i < 10000; i++) {
-      assert.equal(processor.process(input), true);
+    for (const delay of [0, 1, 3, 7]) {
+      const processor = new Worklet();
+      let delivered = 0;
+      for (let block = 0; block < 10000; block++) {
+        for (let quantum = 0; quantum < 16; quantum++) {
+          assert.equal(processor.process(input), true);
+        }
+        while (processor.messages.length > delay) {
+          const message = processor.messages.shift() as Block;
+          assert.equal(message.rate, 48000);
+          assert.equal(message.samples.length, 2048);
+          assert.ok(message.samples.every((value) => value === 0.25));
+          const data = structuredClone(message.samples, { transfer: [message.samples.buffer] });
+          processor.port.onmessage?.({ data });
+          delivered++;
+        }
+      }
+      assert.equal(delivered + processor.messages.length, 10000, `lost blocks at delay ${delay}`);
     }
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].rate, 48000);
-    assert.deepEqual(messages[0].samples, new Float32Array(2048).fill(0.25));
-    processor.port.onmessage?.();
-    for (let i = 0; i < 16; i++) {
-      processor.process(input);
+
+    const suspended = new Worklet();
+    for (let block = 0; block < 10000; block++) {
+      for (let quantum = 0; quantum < 16; quantum++) {
+        suspended.process(input);
+      }
     }
-    assert.equal(messages.length, 2);
+    assert.equal(suspended.messages.length, 8);
+    const message = suspended.messages.shift() as Block;
+    suspended.port.onmessage?.({
+      data: structuredClone(message.samples, { transfer: [message.samples.buffer] }),
+    });
+    for (let quantum = 0; quantum < 16; quantum++) {
+      suspended.process(input);
+    }
+    assert.equal(suspended.messages.length, 8, "capture resumes when a buffer returns");
   } finally {
     delete globals.AudioWorkletProcessor;
     delete globals.sampleRate;
