@@ -640,6 +640,12 @@ kept for good, their libraries with them.
 
 `tests/player/leak.ts` loads SWFs over and over, by Loaders and in
 players made again, and checks that the heap stays bounded, that
-codegen's memory does not grow where one player loads them all, and that
-a text field kept from a SWF let go still takes a font registered after
-a collection.
+codegen's memory, and what its live ABCs hold of it, does not grow where
+one player loads them all, and that a text field kept from a SWF let go
+still takes a font registered after a collection. Its `dropped`,
+`shared` and `churn` modes do as an online game does with each player's
+gear, never unloading it: each SWF in a Loader of its own, taken off the
+stage and forgotten; the same SWFs loaded over and over into one
+application domain by Loaders each loads the next into, the domain's
+instances of their classes kept a while; and each loaded once, instances
+of its classes made and dropped every frame.
