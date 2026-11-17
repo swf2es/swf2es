@@ -21,7 +21,7 @@ export async function shellCapture(
   function open<T extends CameraCapture | MicrophoneCapture>(
     kind: CaptureKind,
     signal: AbortSignal,
-    denied: () => void,
+    refused: (why: "denied" | "unavailable") => void,
     connect: (live: (active: boolean) => void) => T,
   ): { handle: () => T | null; close: () => void } {
     const id = ++nextId;
@@ -65,9 +65,10 @@ export async function shellCapture(
         }
         if (result !== "granted") {
           close();
-          denied();
+          refused("denied");
           return;
         }
+
         // Include initialization: a microphone track can be live while its worklet loads.
         live(true);
         const opened = connect(live);
@@ -78,9 +79,10 @@ export async function shellCapture(
         }
       })
       .catch(() => {
+        // A failed device or a lost shell is no refusal, as the browser host reports it.
         if (!closed) {
           close();
-          denied();
+          refused("unavailable");
         }
       });
     return { handle: () => handle, close };
@@ -102,7 +104,7 @@ export async function shellCapture(
       const opened = open(
         "camera",
         signal,
-        () => events.state("denied"),
+        (why) => events.state(why),
         (live) =>
           browser.openCamera(
             device,
@@ -130,7 +132,7 @@ export async function shellCapture(
       const opened = open(
         "microphone",
         signal,
-        () => events.state("denied"),
+        (why) => events.state(why),
         (live) => {
           if (!browser.openMicrophone) {
             throw new Error("Microphone capture unavailable");

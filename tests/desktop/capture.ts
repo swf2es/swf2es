@@ -181,6 +181,21 @@ try {
       assert.equal(bounded.length, 1);
       assert.ok(bounded[0].message.length < 200);
       assert.ok(!/[\p{Cc}\p{Cf}]/u.test(bounded[0].message));
+      // The bound counts code points: a cut pair would leave a lone surrogate.
+      await app.main(
+        `(() => { ${opening}.current.movie.name = 'T' + '\\u{1F600}'.repeat(200); return true; })()`,
+      );
+      await boxes(app, 1);
+      assert.equal(
+        await app.evaluate(
+          "swf2esDesktop.capture.request(swf2esDesktop.capture.epoch(), 'microphone')",
+        ),
+        "denied",
+      );
+      const emoji = await app.main<{ message: string }[]>("captureBoxes");
+      assert.equal(emoji.length, 1);
+      assert.ok(emoji[0].message.startsWith(`T${"\u{1F600}".repeat(159)} `), emoji[0].message);
+      assert.ok(!/\p{Cs}/u.test(emoji[0].message), "dialog cut a surrogate pair");
       await boxes(app, 1);
       await open(app);
       await app.until(
@@ -346,6 +361,75 @@ try {
           ),
         );
       }
+      // A device that fails to open after consent is unavailable, not refused.
+      await app.evaluate(`(() => {
+        globalThis.captureCreate = document.createElement;
+        document.createElement = function(name, ...rest) {
+          if (name === 'video') throw new Error('no video element');
+          return captureCreate.call(this, name, ...rest);
+        };
+        return true;
+      })()`);
+      await boxes(app, 0);
+      const failedAt = app.stdout.length;
+      await open(app);
+      await app.until("camera unavailable", () =>
+        app.stdout.slice(failedAt).includes("capture status Camera.Unavailable"),
+      );
+      await app.evaluate("(() => { document.createElement = captureCreate; return true; })()");
+      assert.ok(!app.stdout.slice(failedAt).includes("capture status Camera.Muted"));
+      assert.equal(
+        await app.evaluate(`swf2esDesktop.capture.status(swf2esDesktop.capture.epoch(), 'camera')`),
+        "granted",
+      );
+      // A reload while capturing: the old page may never hear the stop (it is unloading), and the
+      // new one may take longer than the probe to load. The new page must not be killed for the
+      // old page's tracks.
+      await boxes(app, 0);
+      await open(app, true);
+      await until(() =>
+        app.evaluate<boolean>("captureTracks.filter(t => t.readyState === 'live').length === 2"),
+      );
+      await boxes(app, 1);
+      await app.main(`(() => {
+        const contents = ${electron}.BrowserWindow.getAllWindows()[0].webContents;
+        const send = contents.send;
+        contents.send = function(channel, ...args) {
+          return channel.startsWith('capture:') ? undefined : send.call(this, channel, ...args);
+        };
+        const finished = contents.listeners('did-finish-load');
+        contents.removeAllListeners('did-finish-load');
+        const late = (...args) => setTimeout(() => finished.forEach(f => f(...args)), 3000);
+        contents.on('did-finish-load', late);
+        globalThis.restoreReload = () => {
+          contents.send = send;
+          contents.removeListener('did-finish-load', late);
+          finished.forEach(f => contents.on('did-finish-load', f));
+        };
+        contents.reload();
+        return true;
+      })()`);
+      await new Promise((resolve) => setTimeout(resolve, 4500));
+      assert.equal(
+        await app.main(`${electron}.BrowserWindow.getAllWindows()[0].webContents.isCrashed()`),
+        false,
+      );
+      await app.main("(() => { restoreReload(); return true; })()");
+      assert.equal(
+        await app.main(
+          `${electron}.BrowserWindow.getAllWindows()[0].getTitle().includes(' live]')`,
+        ),
+        false,
+      );
+      await until(() =>
+        app.evaluate<boolean>("typeof swf2esDesktop === 'object'").catch(() => false),
+      );
+      await app.evaluate(`(() => {
+        globalThis.captureTracks = [];
+        const original = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (...args) => { const stream = await original(...args); captureTracks.push(...stream.getTracks()); return stream; };
+        return true;
+      })()`);
       await boxes(app, 0);
       await open(app, true);
       await until(() =>

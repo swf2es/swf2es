@@ -34,7 +34,12 @@ import {
 import type { NetworkResponse, StartState } from "../shared/api.js";
 import { airCommand } from "./air.ts";
 import { listenForAir } from "./air-bridge.ts";
-import { capturePermissions, releaseRetiredCapture, resetCapture } from "./capture.ts";
+import {
+  capturePermissions,
+  documentReplaced,
+  releaseRetiredCapture,
+  resetCapture,
+} from "./capture.ts";
 import { chooseLibrary, fromPrompt, prompt, showOpenDialog, showUrlDialog } from "./dialogs.ts";
 import { embeddingArguments, exactArguments, settleEmbedding } from "./embedding.ts";
 import { bridgeFiles } from "./files.ts";
@@ -196,10 +201,16 @@ function guard(contents: WebContents): void {
   // A page that did not load, and so never started, is no better than a gone one: Reload Movie,
   // or opening a movie, loads it.
   contents.on("did-finish-load", releaseRetiredCapture);
+  // A committed document, or error page, replaced the old one and its tracks: a probe sent to that
+  // page must not kill this one.
+  contents.on("did-navigate", documentReplaced);
   contents.on("did-fail-load", (_event, code, _description, _url, isMainFrame) => {
     // ERR_ABORTED: another load overtook it.
-    if (isMainFrame && code !== -3 && !listening) {
-      setPageGone(true);
+    if (isMainFrame && code !== -3) {
+      documentReplaced();
+      if (!listening) {
+        setPageGone(true);
+      }
     }
   });
   if (trace) {

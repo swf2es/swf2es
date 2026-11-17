@@ -279,8 +279,9 @@ which cannot be cancelled; when the stream arrives, the host stops it before
 publishing frames or samples. The title marker remains until physical closure is
 confirmed. A renderer that fails to answer a probe is terminated, releasing its
 devices; the existing page-loss UI then offers a reload. Movie replacement
-preserves this watchdog for the old movie. Completed document navigation or
-process loss releases retired capture state. Stale permission and activity
+preserves this watchdog for the old movie. A committed document navigation (or error
+page) or process loss releases retired capture state, and a probe never kills a
+document other than the one it was sent to, so a reload that loads slowly is safe. Stale permission and activity
 messages cannot authorize a replacement movie.
 
 Before consent, Chromium may expose only an unnamed default device. The desktop

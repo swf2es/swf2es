@@ -14,6 +14,8 @@ let lifetime = new AbortController();
 const stopTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const probes = new Map<number, { id: number; answered: boolean }>();
 let nextProbe = 0;
+/** Counts the window's committed documents, so that a probe never outlives the one it asked. */
+let documents = 0;
 
 const kindOf = (value: unknown): value is CaptureKind =>
   value === "camera" || value === "microphone";
@@ -43,11 +45,13 @@ function stopped(requested: number): void {
     clearTimeout(timer);
     stopTimers.delete(requested);
   }
+
   for (const id of live) {
     if (id.startsWith(`${requested}:`)) {
       live.delete(id);
     }
   }
+
   indicator();
 }
 
@@ -63,16 +67,24 @@ function pageAvailable(): boolean {
 
 function watchStop(requested: number): void {
   const probe = { id: ++nextProbe, answered: false };
+  const document = documents;
   probes.set(requested, probe);
   if (pageAvailable()) {
     window?.webContents.send("capture:probe", requested, probe.id);
   }
+
   stopTimers.set(
     requested,
     setTimeout(() => {
       stopTimers.delete(requested);
       if (!activeEpoch(requested)) {
         probes.delete(requested);
+        return;
+      }
+
+      // The page that held these tracks is gone with its document; the one shown now never had them.
+      if (document !== documents) {
+        stopped(requested);
         return;
       }
 
@@ -94,6 +106,12 @@ function stopEpoch(requested: number): void {
     // This survives replacement and keeps checking if a previously responsive page freezes.
     watchStop(requested);
   }
+}
+
+/** A committed document replaced the page, and its tracks went with the old one. */
+export function documentReplaced(): void {
+  documents++;
+  releaseRetiredCapture();
 }
 
 /** A completed document navigation confirms that the old page and its tracks are gone. */
@@ -135,11 +153,13 @@ export function stopCapture(): void {
 }
 
 function dialogText(value: string, limit: number): string {
-  return value
+  const text = value
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
     .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, limit);
+    .trim();
+
+  // Whole code points: a cut pair would leave a lone surrogate in the dialog.
+  return [...text].slice(0, limit).join("");
 }
 
 async function permission(kind: CaptureKind, requested: number): Promise<CapturePermission> {
@@ -148,14 +168,17 @@ async function permission(kind: CaptureKind, requested: number): Promise<Capture
   if (!playing || !owner || requested !== epoch) {
     return "denied";
   }
+
   const known = decisions.get(kind);
   if (known) {
     return known;
   }
+
   const existing = asking.get(kind);
   if (existing) {
     return existing;
   }
+
   const signal = lifetime.signal;
   const answer = (async (): Promise<CapturePermission> => {
     try {

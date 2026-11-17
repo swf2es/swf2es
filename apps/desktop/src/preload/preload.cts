@@ -32,6 +32,7 @@ function captureLifetime(epoch: number): boolean {
   if (epoch < captureEpoch) {
     return false;
   }
+
   if (epoch > captureEpoch) {
     captureEpoch = epoch;
     captureStopped = false;
