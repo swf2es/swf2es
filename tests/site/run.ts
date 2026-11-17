@@ -235,9 +235,10 @@ async function check(): Promise<void> {
                 }>(`({ isolated: crossOriginIsolated, controlled: !!navigator.serviceWorker.controller,
                   timeOrigin: performance.timeOrigin, ready: document.readyState,
                   navigation: performance.getEntriesByType('navigation')[0]?.type,
-                  retry: new URL(location.href).searchParams.get('__swf2es_isolation') })`).catch(
-                  () => null,
-                );
+                  retry: new URL(location.href).searchParams.get('__swf2es_isolation'),
+                  loading: document.getElementById('loading')?.hidden,
+                  status: document.getElementById('status')?.textContent,
+                  element: !!customElements.get('swf2es-player') })`).catch(() => null);
                 if (
                   state?.value?.isolated &&
                   state.value.controlled &&
