@@ -399,7 +399,11 @@ try {
         };
         const finished = contents.listeners('did-finish-load');
         contents.removeAllListeners('did-finish-load');
-        const late = (...args) => setTimeout(() => finished.forEach(f => f(...args)), 3000);
+        globalThis.reloadFinished = false;
+        const late = (...args) => setTimeout(() => {
+          finished.forEach(f => f(...args));
+          reloadFinished = true;
+        }, 3000);
         contents.on('did-finish-load', late);
         globalThis.restoreReload = () => {
           contents.send = send;
@@ -409,7 +413,9 @@ try {
         contents.reload();
         return true;
       })()`);
-      await new Promise((resolve) => setTimeout(resolve, 4500));
+      // Past the two-second watchdog, and until the delayed load ends, the new page must live.
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+      await until(() => app.main<boolean>("reloadFinished"));
       assert.equal(
         await app.main(`${electron}.BrowserWindow.getAllWindows()[0].webContents.isCrashed()`),
         false,

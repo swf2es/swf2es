@@ -114,7 +114,11 @@ export class MicrophoneState {
 
   stopForLibrary(library: Library): void {
     let changed = false;
-    const owners = this.loopOwners.filter((owner) => owner.deref() !== library);
+    // Collected owners go too, so the list stays bounded across loads.
+    const owners = this.loopOwners.filter((owner) => {
+      const loaded = owner.deref();
+      return loaded !== undefined && loaded !== library;
+    });
     if (owners.length !== this.loopOwners.length) {
       this.loopOwners = owners;
       if (owners.length === 0 && !this.loopUnowned) {

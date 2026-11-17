@@ -132,12 +132,11 @@ for (const line of counts) {
   // early and late in the window stays put unless samples are lost (or the rate is wrong): a lost
   // block of about 43 ms, or a 250 ms stall with one credit, moves it by that much.
   const points = list.split(",").map((point) => point.split(":").map(Number));
-  const late = (from: number, to: number) =>
-    Math.min(
-      ...points
-        .filter(([time]) => time >= from && time <= to)
-        .map(([time, end]) => time - (end * 1000) / hz),
-    );
+  const late = (from: number, to: number) => {
+    const window = points.filter(([time]) => time >= from && time <= to);
+    assert.ok(window.length > 0, `${line.slice(0, 60)}: no events from ${from} to ${to}`);
+    return Math.min(...window.map(([time, end]) => time - (end * 1000) / hz));
+  };
   const start = points[0][0];
   const end = (points.at(-1) as number[])[0];
   const drift = late(end - 600, end) - late(start, start + 600);

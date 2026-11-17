@@ -14,8 +14,6 @@ let lifetime = new AbortController();
 const stopTimers = new Map<number, ReturnType<typeof setTimeout>>();
 const probes = new Map<number, { id: number; answered: boolean }>();
 let nextProbe = 0;
-/** Counts the window's committed documents, so that a probe never outlives the one it asked. */
-let documents = 0;
 
 const kindOf = (value: unknown): value is CaptureKind =>
   value === "camera" || value === "microphone";
@@ -67,7 +65,6 @@ function pageAvailable(): boolean {
 
 function watchStop(requested: number): void {
   const probe = { id: ++nextProbe, answered: false };
-  const document = documents;
   probes.set(requested, probe);
   if (pageAvailable()) {
     window?.webContents.send("capture:probe", requested, probe.id);
@@ -79,12 +76,6 @@ function watchStop(requested: number): void {
       stopTimers.delete(requested);
       if (!activeEpoch(requested)) {
         probes.delete(requested);
-        return;
-      }
-
-      // The page that held these tracks is gone with its document; the one shown now never had them.
-      if (document !== documents) {
-        stopped(requested);
         return;
       }
 
@@ -108,13 +99,10 @@ function stopEpoch(requested: number): void {
   }
 }
 
-/** A committed document replaced the page, and its tracks went with the old one. */
-export function documentReplaced(): void {
-  documents++;
-  releaseRetiredCapture();
-}
-
-/** A completed document navigation confirms that the old page and its tracks are gone. */
+/**
+ * A committed document navigation confirms that the old page and its tracks are gone: at commit,
+ * not at the load's end, so the watchdog of a stop the old page never heard cannot outlast it.
+ */
 export function releaseRetiredCapture(): void {
   for (const id of [...live]) {
     const owner = Number(id.slice(0, id.indexOf(":")));

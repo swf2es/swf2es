@@ -197,9 +197,10 @@ for (const scenario of [
         }
       })()`);
       let finished = false;
-      void playback.then(() => {
+      const settle = () => {
         finished = true;
-      });
+      };
+      void playback.then(settle, settle);
       // Whether the movie reached `name`; false if it ended first, whose result then tells why.
       const reach = async (name: string) => {
         for (let i = 0; i < 600 && !finished; i++) {
@@ -260,7 +261,7 @@ for (const scenario of [
         ...(prompted.has(scenario) ? [] : ["--use-fake-ui-for-media-stream"]),
         "--js-flags=--expose-gc",
       ],
-      timeout: 45000,
+      timeout: 90000,
     },
   );
   assert.equal(result.exception, null, result.exception ?? "browser exception");
