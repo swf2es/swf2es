@@ -23,6 +23,16 @@ ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) =
 );
 
 const api: DesktopApi = {
+  capture: {
+    epoch: () => ipcRenderer.sendSync("capture:epoch"),
+    status: (epoch, kind) => ipcRenderer.sendSync("capture:status", epoch, kind),
+    request: (epoch, kind) => ipcRenderer.invoke("capture:request", epoch, kind),
+    live: (epoch, kind, id, active) => ipcRenderer.send("capture:live", epoch, kind, id, active),
+    stopped: (epoch) => ipcRenderer.send("capture:stopped", epoch),
+    onStop: (listener) => {
+      ipcRenderer.on("capture:stop", (_event, epoch: number) => listener(epoch));
+    },
+  },
   files: {
     browse: (filters, multiple) => ipcRenderer.invoke("files:browse", filters, multiple),
     save: (name) => ipcRenderer.invoke("files:save", name),

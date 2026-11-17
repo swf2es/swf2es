@@ -37,6 +37,8 @@ export type {
   CameraPicture,
   CaptureDevice,
   CaptureHost,
+  CaptureKind,
+  CapturePermission,
   ClipboardHost,
   ClipboardText,
   Drawer,

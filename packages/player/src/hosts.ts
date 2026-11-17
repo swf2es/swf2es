@@ -778,6 +778,8 @@ export interface CameraPicture extends VideoPicture {
 }
 
 export interface CameraCapture {
+  /** Resolves after close has also stopped any late permission result. */
+  readonly closed?: Promise<void>;
   setMode(mode: CameraMode): void;
   close(): void;
 }
@@ -788,8 +790,13 @@ export interface CameraEvents {
   frame(picture: CameraPicture): void;
 }
 
+export type CaptureKind = "camera" | "microphone";
+export type CapturePermission = "unknown" | "granted" | "denied";
+
 /** Optional: without a host the player retains Flash's no-device behaviour. */
 export interface CaptureHost {
+  permissionStatus?(kind: CaptureKind): CapturePermission;
+  requestPermission?(kind: CaptureKind, signal: AbortSignal): Promise<CapturePermission>;
   readonly cameras: readonly CaptureDevice[];
   readonly microphones?: readonly CaptureDevice[];
   openMicrophone?(
@@ -821,6 +828,8 @@ export interface MicrophoneEvents {
 }
 
 export interface MicrophoneCapture {
+  /** Resolves after close has also stopped any late permission result. */
+  readonly closed?: Promise<void>;
   setMode(mode: MicrophoneMode): void;
   close(): void;
 }

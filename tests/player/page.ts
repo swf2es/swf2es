@@ -22,6 +22,7 @@ import { createCodegen } from "@swf2es/codegen";
 import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   Avm1,
+  airLibrary,
   Container,
   type DisplayObject,
   type FetchRequest,
@@ -161,7 +162,7 @@ async function scriptingFor(
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
   });
-  const libraries = await Promise.all(
+  const libraries: Uint8Array[] = await Promise.all(
     LIBRARIES.map(async (n) => {
       // A missing library would reach codegen as an empty ABC, rejected as #1107 as if the SWF's.
       const response = await fetch(`/libraries/${n}.abc`);
@@ -172,6 +173,9 @@ async function scriptingFor(
       return new Uint8Array(await response.arrayBuffer());
     }),
   );
+  if (air) {
+    libraries.push(airLibrary);
+  }
   await scripting.loadLibraries(libraries);
   return scripting;
 }

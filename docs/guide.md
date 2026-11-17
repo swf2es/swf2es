@@ -500,6 +500,14 @@ as named is found as Windows and macOS find it, ignoring case, so content
 made there finds its files whatever case it names them in. Where two names
 in a directory differ only in case, neither is taken.
 
+
+The desktop app asks before a movie uses your camera or microphone. The dialog
+names the movie's source and the requested device. Its title shows capture
+while active; View → Stop Camera and Microphone stops both until the movie is
+reloaded. Consent is cleared when the movie or page closes. If a movie freezes
+while stopping capture, the app terminates its renderer to release the devices
+and offers to reload it. On macOS, system permission is required as well.
+
 [apps/desktop/README.md](../apps/desktop/README.md) has the rest: the menus,
 the sandboxes in full, sockets, files and AIR applications.
 

@@ -4,6 +4,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { pixelRect } from "../../../bitmap/pixel-rect.js";
 import { CameraState, cameraStates } from "../../../media/camera.js";
+import { requestCapturePermission } from "../../../media/capture-permission.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "../display/BitmapData.js";
 
@@ -31,6 +32,13 @@ export function cameraNatives(s: Scripting): avm2.Natives {
   }
 
   class CameraNatives {
+    static get permissionStatus(): string {
+      return s.capture?.permissionStatus?.("camera") ?? "denied";
+    }
+    requestPermission(): void {
+      requestCapturePermission(s, this, "camera");
+    }
+
     static get isSupported(): boolean {
       return true;
     }

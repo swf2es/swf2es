@@ -1,6 +1,7 @@
 # Camera and microphone
 
-Status: draft plan, for review. Read against `dev` at 100d774c.
+Implementation notes for the four camera and microphone PRs, based on the
+original plan against `dev` at 100d774c.
 
 ## Why
 
@@ -203,6 +204,33 @@ A capture is never started without the user's yes.
   as Flash's Settings Manager kept them, and a device menu can follow.
 - For an AIR application, `permissionStatus` and `requestPermission()`
   are answered by the same dialog, and `PermissionEvent` follows.
+
+The desktop implementation asks before forwarding a capture to Chromium,
+scoping its answer to the movie and page lifetime rather than the shared
+`swf2es://app` origin. Its dialog names the movie's source and camera or
+microphone; macOS also uses Electron's system-consent API. The request and
+check handlers reject capture without that decision and outside the app’s main
+frame. Answers are not saved
+across loads. AIR's static `permissionStatus`, instance `requestPermission`
+and `PermissionEvent` use this same host policy; the new members are hidden
+from browser API versions. The standalone permission classes live in the
+AIR library. Their constants, event defaults and cloning follow
+[Adobe’s permission API](https://airsdk.dev/reference/actionscript/3.0/flash/events/PermissionEvent.html)
+and are checked against adl without using a device.
+
+The title marker and Stop Camera and Microphone menu include initialization
+while a microphone worklet loads. Stop waits for confirmation that tracks
+have stopped, including streams returned after an aborted permission request.
+A renderer that cannot acknowledge within two seconds is terminated, releasing
+its devices; the existing page-loss UI then offers a reload. Movie replacement
+preserves this fallback for the old movie. Completed document navigation or
+process loss releases retired capture state. Stale permission and activity
+messages cannot authorize a replacement movie.
+
+The browser implementation also exposes explicit permission requests for AIR
+content running in a web embedding. It briefly opens and closes the requested
+device through the browser's normal consent, without attaching it to a Video
+or listening to its samples. Embedding refusal and lifetime abort still apply.
 
 ## 7. Not in scope
 

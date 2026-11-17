@@ -6,6 +6,7 @@
 import type { avm2 } from "@swf2es/runtime";
 import type { PlayerglobalClasses } from "./playerglobal-types.generated.js";
 
+type As3_Object = avm2.BuiltinClasses["Object"];
 type As3___AS3___vec_Vector$object = avm2.BuiltinClasses["__AS3__.vec::Vector$object"];
 type As3_flash_events_Event = PlayerglobalClasses["flash.events::Event"];
 type As3_flash_events_EventDispatcher = PlayerglobalClasses["flash.events::EventDispatcher"];
@@ -15,13 +16,17 @@ type As3_flash_utils_ByteArray = avm2.BuiltinClasses["flash.utils::ByteArray"];
 /** Each class's instances' public members, by the class's qualified name. */
 export interface AirClasses {
   "air.net::WebSocket": As3_air_net_WebSocket;
+  "flash.events::PermissionEvent": As3_flash_events_PermissionEvent;
   "flash.events::WebSocketEvent": As3_flash_events_WebSocketEvent;
+  "flash.permissions::PermissionStatus": As3_flash_permissions_PermissionStatus;
 }
 
 /** Each class object's public members, its static ones, by the class's qualified name. */
 export interface AirStatics {
   "air.net::WebSocket": As3_air_net_WebSocket$;
+  "flash.events::PermissionEvent": As3_flash_events_PermissionEvent$;
   "flash.events::WebSocketEvent": As3_flash_events_WebSocketEvent$;
+  "flash.permissions::PermissionStatus": As3_flash_permissions_PermissionStatus$;
 }
 
 export interface As3_air_net_WebSocket extends As3_flash_events_EventDispatcher {
@@ -41,6 +46,14 @@ export interface As3_air_net_WebSocket$ {
   readonly fmtTEXT: number;
 }
 
+export interface As3_flash_events_PermissionEvent extends As3_flash_events_Event {
+  readonly status: string | null;
+}
+
+export interface As3_flash_events_PermissionEvent$ {
+  readonly PERMISSION_STATUS: string | null;
+}
+
 export interface As3_flash_events_WebSocketEvent extends As3_flash_events_Event {
   readonly data: avm2.Ref<As3_flash_utils_ByteArray> | null;
   readonly format: number;
@@ -49,4 +62,13 @@ export interface As3_flash_events_WebSocketEvent extends As3_flash_events_Event 
 
 export interface As3_flash_events_WebSocketEvent$ {
   readonly DATA: string | null;
+}
+
+export interface As3_flash_permissions_PermissionStatus extends As3_Object {}
+
+export interface As3_flash_permissions_PermissionStatus$ {
+  readonly DENIED: string | null;
+  readonly GRANTED: string | null;
+  readonly ONLY_WHEN_IN_USE: string | null;
+  readonly UNKNOWN: string | null;
 }
