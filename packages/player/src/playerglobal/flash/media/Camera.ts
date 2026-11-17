@@ -35,6 +35,7 @@ export function cameraNatives(s: Scripting): avm2.Natives {
     static get permissionStatus(): string {
       return capturePermission(s, "camera");
     }
+
     requestPermission(): void {
       requestCapturePermission(s, this, "camera");
     }

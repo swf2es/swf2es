@@ -76,6 +76,7 @@ export function addListener(
   if (key === "sampleData") {
     microphoneStates.get(o)?.sync();
   }
+
   return true;
 }
 

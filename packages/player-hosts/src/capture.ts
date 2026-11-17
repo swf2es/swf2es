@@ -72,24 +72,30 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
     const status = permissionHandles.get(kind)?.state;
     return status === "prompt" ? "unknown" : (status ?? permissions[kind]);
   };
+
   return {
     permissionStatus,
     async requestPermission(kind, signal) {
       if (signal.aborted) {
         return "denied";
       }
+
       try {
         const stream = await media.getUserMedia(
           kind === "camera" ? { video: true } : { audio: true },
         );
+
         for (const track of stream.getTracks()) {
           track.stop();
         }
+
         if (signal.aborted) {
           return "denied";
         }
+
         permissions[kind] = "granted";
         await refresh().catch(() => {});
+
         return "granted";
       } catch (error) {
         if (signal.aborted) {
@@ -174,6 +180,7 @@ function openCamera(
   const closedPromise = new Promise<void>((resolve) => {
     resolveClosed = resolve;
   });
+
   let callback = 0;
   let mode = initial;
   let applying = false;
@@ -185,6 +192,7 @@ function openCamera(
   if (!cpuContext || !smallContext) {
     throw new Error("Camera capture requires a 2D canvas");
   }
+
   const settings = () => {
     const value = track?.getSettings();
     if (value && !closed) {
@@ -269,6 +277,7 @@ function openCamera(
     opening.abort();
     signal.removeEventListener("abort", abort);
     video.cancelVideoFrameCallback(callback);
+
     try {
       if (notify) {
         events.state("ended");

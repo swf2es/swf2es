@@ -2,7 +2,6 @@
 // application by its descriptor, from the command line, the menu, a
 // dialog or a drop; and closing it. Only this module changes what plays;
 // the others read it.
-
 import { statSync } from "node:fs";
 import { open as openFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";

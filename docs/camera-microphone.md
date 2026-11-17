@@ -1,9 +1,10 @@
 # Camera and microphone
 
-Implementation notes for the four camera and microphone PRs, based on the
-original plan against `dev` at 100d774c.
+The player supports AS3 camera capture, live Video rendering, microphone samples
+and loopback through an optional capture host. Browser and desktop hosts use
+Chromium media APIs; node and hand-stepped tests can omit or substitute the host.
 
-## Why
+## Scope
 
 Without a capture host, `flash.media.Camera` and `Microphone` behave as Flash Player does on
 a machine with neither (`packages/player/src/playerglobal/flash/media/`):
@@ -13,9 +14,9 @@ content uses them: webcam toys and photo booths, voice recorders, games
 played by blowing into the microphone, video chat front ends. None of the
 corpus does, so this is for content, not for the score.
 
-Every piece is a browser API Chromium has: `getUserMedia`,
+The hosts use browser APIs available in Chromium: `getUserMedia`,
 `enumerateDevices`, AudioWorklet, and WebGL texture uploads from a video
-element or a `VideoFrame`. No native package and no codec is needed: the
+element. No native package and no codec is needed: the
 codecs Flash had for these (Nellymoser, Speex, Sorenson, H.264 encoding)
 only served publishing over RTMP, which is out of scope (section 7).
 
@@ -52,11 +53,11 @@ confirmed where a machine with Flash and a camera allows.
 
 A host interface in `packages/player/src/hosts.ts`, as the socket host
 is: devices listed, a capture opened with constraints, its frames and its
-samples delivered, its state (granted, denied, ended) told, and stopped.
+samples delivered, its state (granted, denied, ended or unavailable) reported, and stopped.
 The player never calls a browser API itself, so node and the tests can
-leave it out (today's behaviour) or fake it.
+leave it out or supply deterministic test devices.
 
-The browser implementation goes in `@swf2es/player-hosts`:
+The browser implementation lives in `@swf2es/player-hosts`:
 `getUserMedia({ video })` or `({ audio })` with the constraints
 `setMode` and `getEnhancedMicrophone` ask for (`width`, `height`,
 `frameRate`, `echoCancellation`, `noiseSuppression`), and
@@ -66,13 +67,13 @@ differs only in who answers the permission (section 6).
 
 ## 3. Live video in the renderer
 
-The largest part, and the one NetStream's playback needs too, so it is
-built once for both. A `Video` gets a source; while one is attached, each
-frame the renderer uploads its current picture as a texture
-(`texImage2D` of a video element, or of a `VideoFrame` from
-`MediaStreamTrackProcessor` where that is cheaper) and draws the box as a
-textured quad with the `Video`'s transform, colour transform, filters and
-`smoothing`. A frame not yet changed is not uploaded again.
+A `VideoSource` carries the current host picture. The browser camera publishes a
+video element from `requestVideoFrameCallback`; it does not use
+`MediaStreamTrackProcessor`. The renderer uploads a changed image with `texImage2D`
+or, at unchanged dimensions, `texSubImage2D`, and draws the Video's box as a
+textured quad with its transform, colour transform, filters and smoothing.
+Unchanged frames are not uploaded again. The source interface can also carry a
+host-owned canvas or VideoFrame; NetStream playback remains unimplemented.
 
 Plain `BitmapData.draw(video)` and the camera's copies read the frame on
 the CPU (`drawImage` into an `OffscreenCanvas` and `getImageData`). Copies
@@ -129,12 +130,13 @@ continue to cover Video without a source.
 
 ## 4. Camera
 
-The natives keep today's surface and gain a device behind it: `names`
+The AS3 natives expose devices behind the existing surface: `names`
 from the host, `getCamera` a `Camera` bound to one device, `muted` until
-the host says granted, the status events as Flash sends them,
+the host says granted, status changes,
 `width`/`height`/`fps`/`currentFPS` from the track's settings, and the
 motion detector: the mean difference of consecutive frames, sampled small,
-against `motionLevel`, raising `ActivityEvent` after `motionTimeout`. The
+against `motionLevel`, raising activity on motion and ending it after
+`motionTimeout` without motion. The
 11.4 copies go through the CPU frame of section 3.
 
 Status events report the first consent result and subsequent changes. Reopening an
@@ -181,15 +183,16 @@ when permission resolves after the player has already been destroyed.
 ## 5. Microphone
 
 An AudioWorklet on a `MediaStreamSource` hands blocks of samples to the
-player, which resamples them from the device's rate down to `rate` (new:
-`Sound.extract` only holds a sound's samples up to 44.1 kHz,
-`packages/player/src/media/extract.ts`) and dispatches `sampleData` on
+player, which resamples them from the device's rate down to `rate` and
+dispatches `sampleData` on
 movie frames or between them, at most about 100 ms apart while the host runs.
 Worklet-message delivery also drains the queue when hidden-page timers are throttled;
 a hand-stepped host without a real clock keeps frame-driven delivery. `activityLevel` is the block's RMS on
 Flash's 0–100 scale against `silenceLevel` and its timeout; `gain` is a
 gain node before the worklet; `setLoopBack` routes the input to the
-player's own output, behind the same unmute rule as its sounds.
+player's own output. Chromium's autoplay policy applies: active capture itself
+can permit Web Audio playback, so loopback does not impose an additional gesture
+gate ([Chrome's policy](https://developer.chrome.com/blog/web-audio-autoplay)).
 
 The implementation starts capture when a `sampleData` listener or loopback
 needs it, and closes capture when neither remains. Loopback without an output
@@ -213,7 +216,7 @@ queue; script-owned ByteArrays and output-host-owned loopback blocks remain inde
 A rate change discards pending old-rate data rather than mixing rates in
 one event. Sample positions count produced samples, including discarded
 ones. Loopback is bounded to about 200 ms of pending audio and goes through
-the existing output host, SoundTransform and unmute rule.
+the existing output host and SoundTransform, subject to browser autoplay policy.
 
 Enhanced capture requests Chromium's native echo cancellation and noise
 suppression; those are best effort, not Flash's proprietary DSP. Codec and
@@ -234,21 +237,26 @@ A capture is never started without the user's yes.
   to refuse captures outright.
 - In the desktop app, the session's permission handlers allow full screen
   and let `media` through only after a dialog of the app's own that names the
-  SWF's origin and the device. On macOS the app also asks the system
+  top-level movie's source and the device kind (camera or microphone). On macOS
+  the app also asks the system
   (`systemPreferences.askForMediaAccess`). While a device is live the
   window's title says so and a menu item stops it; a page that ends
-  (#1037's `onPageEnd`) stops its tracks. Remembered answers per site,
-  as Flash's Settings Manager kept them, and a device menu can follow.
+  stops its tracks. Answers are scoped to the current movie load.
 - For an AIR application, `permissionStatus` and `requestPermission()`
   are answered by the same dialog, and `PermissionEvent` follows.
 
 The desktop implementation asks before forwarding a capture to Chromium,
 scoping its answer to the movie and page lifetime rather than the shared
 `swf2es://app` origin. Its dialog names the movie's source and camera or
-microphone; macOS also uses Electron's system-consent API. The request and
+microphone, not a physical device label. Requests from loaded child SWFs are
+attributed to that top-level movie. Movie names and source text are sanitized and
+bounded for the dialog. macOS also uses Electron's system-consent API. The request and
 check handlers reject capture without that decision and outside the app’s main
-frame. Answers are not saved
-across loads. AIR's static `permissionStatus`, instance `requestPermission`
+frame. Mixed camera/microphone requests need both decisions. Answers are not saved
+across loads. Permission-status reads are cached in the preload per movie epoch,
+updated by permission results and Stop; polling does not perform synchronous IPC
+after the first read for each kind. AIR's static `permissionStatus`, instance
+`requestPermission`
 and `PermissionEvent` use this same host policy; the new members are hidden
 from browser API versions. The standalone permission classes live in the
 AIR library. Their constants, event defaults and cloning follow
@@ -258,11 +266,22 @@ and are checked against adl without using a device.
 The title marker and Stop Camera and Microphone menu include initialization
 while a microphone worklet loads. Stop waits for confirmation that tracks
 have stopped, including streams returned after an aborted permission request.
-A renderer that cannot acknowledge within two seconds is terminated, releasing
-its devices; the existing page-loss UI then offers a reload. Movie replacement
-preserves this fallback for the old movie. Completed document navigation or
+The shell probes renderer responsiveness every two seconds while closure is
+pending. A responsive page may still be awaiting a slow `getUserMedia` promise,
+which cannot be cancelled; when the stream arrives, the host stops it before
+publishing frames or samples. The title marker remains until physical closure is
+confirmed. A renderer that fails to answer a probe is terminated, releasing its
+devices; the existing page-loss UI then offers a reload. Movie replacement
+preserves this watchdog for the old movie. Completed document navigation or
 process loss releases retired capture state. Stale permission and activity
 messages cannot authorize a replacement movie.
+
+Before consent, Chromium may expose only an unnamed default device. The desktop
+keeps this restriction: Electron's [permission check API](https://www.electronjs.org/docs/latest/api/session#sessetpermissioncheckhandlerhandler)
+has no separate enumeration-only permission. Allowing `media` at that check also
+answers permission checks used by capture APIs. `Camera.names` and
+`Microphone.names` therefore gain labels and additional devices after consent;
+this differs from Flash's pre-consent device list.
 
 The browser implementation also exposes explicit permission requests for AIR
 content running in a web embedding. It briefly opens and closes the requested
@@ -271,34 +290,28 @@ or listening to its samples. Embedding refusal and lifetime abort still apply.
 
 ## 7. Not in scope
 
+AVM1 `Camera.get` and `Video.attachVideo` are not supported. Embedded SWF video
+streams and NetStream playback are also not implemented.
+
 `NetStream.attachCamera` and `attachAudio` publish to a media server over
 RTMP; without RTMP they go nowhere, as today, until a separate project
 says otherwise. `CameraUI` and `CameraRoll` are AIR mobile's.
 
-## 8. Tests
+## Tests and reference limits
 
-Chrome's `--use-fake-device-for-media-stream` gives a moving test pattern
-and a tone, and `--use-fake-ui-for-media-stream` answers the prompt, in
-Chrome and in Electron alike, so CI can check: names, the muted and
-unmuted events for a yes and a no, frames reaching a `Video` and
-`BitmapData.draw`, `setMode` changing the size, `activityLevel` moving
-with the pattern, `sampleData` at each `rate`, and the desktop dialog
-answered through the test inspector as #1037's test answers its box.
+`tests/web/capture-devices.ts` compiles AS3 movies and runs them in the web
+component with Chrome's fake camera: no prompt before use, consent and revocation,
+copies, retained pictures, motion, stopped timelines, cached filters and child
+unload. `tests/web/capture-audio.ts` uses a generated continuous PCM tone to check
+all six rates, a 100 ms busy frame, one-fps delivery, activity timeouts and real
+loopback. The worklet unit test delays acknowledgements over 10,000 blocks and
+checks bounded storage. New regressions are checked by deliberately breaking the
+implementation and observing failure.
 
-## 9. Order and effort
-
-1. Live video in the renderer, with a test source (section 3): 3–4 days.
-2. The capture host and Camera (sections 2 and 4): 2–3 days.
-3. Microphone (section 5): 3–5 days.
-4. The desktop's dialog and macOS consent: half a day; remembered answers,
-   indicator and menu: a day.
-
-## Open questions
-
-- Camera identity and the empty Video while waiting for consent follow
-  Adobe's documentation (section 4); hardware-backed Flash confirmation
-  remains unavailable here.
-- Camera and Microphone activity before monitoring are -1, following Adobe;
-  the detectors are documented approximations (sections 4 and 5).
-- The web element requests capture on attach, as described in section 4;
-  the browser remains responsible for consent.
+`tests/player/video.ts` compares generated live pictures with bitmap rendering,
+including filters, hidden-cache changes, CPU copies and context restoration.
+`tests/desktop/capture.ts` uses fake devices and the test-only main inspector for
+permission dialogs, mixed requests, device labels, Stop, slow opens and frozen
+renderers. The no-device player case has Flash/adl references. Device behavior
+and activity scales remain documented or inferred where Linux adl cannot measure
+them; generated FLV probes establish the device-independent Video copy rules.
