@@ -214,8 +214,9 @@ export class Scripting {
   readonly webSocket: WebSocketHost | null;
   readonly audio: AudioHost | null;
   private captureHost: CaptureHost | null;
-  /** The capture host's prepare, once asked for (prepareCapture). */
+  /** The capture host's prepare, once asked for (prepareCapture), and whether it ended. */
   private captureReady: Promise<void> | null = null;
+  private captureSettled = false;
   readonly captureLifetime = new AbortController();
   /** Opens the pages navigateToURL asks for: the browser's window by default, null for none. */
   readonly navigate: Navigate | null;
@@ -602,32 +603,39 @@ export class Scripting {
     return this.captureHost;
   }
 
-  /** Whether the capture host has yet to read its devices, which code that names them waits for. */
+  /**
+   * Whether the capture host has yet to read its devices, which code that
+   * names them waits for: until its prepare ends, not only until it starts.
+   */
   get captureUnprepared(): boolean {
-    return this.captureReady === null && !!this.captureHost?.prepare;
+    return !this.captureSettled && !!this.captureHost?.prepare;
   }
 
   /**
    * The capture host prepared, once: Camera.names and the rest answer at
    * once, so the code of a SWF that names them runs only after (Code.link).
-   * With capture refused already, nothing is read.
+   * With capture refused already, nothing is read. A prepare that fails,
+   * or throws before it returns a promise, leaves no host, as one that
+   * answers false: never a failed load, nor another try for each SWF.
    */
   prepareCapture(): Promise<void> {
     if (!this.captureReady) {
       const host = this.captureHost;
-      this.captureReady =
-        !host?.prepare || this.captureLifetime.signal.aborted
-          ? Promise.resolve()
-          : host.prepare().then(
-              (ready) => {
-                if (!ready) {
-                  this.captureHost = null;
-                }
-              },
-              () => {
-                this.captureHost = null;
-              },
-            );
+      const settle = (ready: boolean) => {
+        if (!ready && this.captureHost === host) {
+          this.captureHost = null;
+        }
+
+        this.captureSettled = true;
+      };
+      if (!host?.prepare || this.captureLifetime.signal.aborted) {
+        settle(true);
+        this.captureReady = Promise.resolve();
+      } else {
+        this.captureReady = Promise.resolve()
+          .then(() => host.prepare?.() ?? true)
+          .then(settle, () => settle(false));
+      }
     }
 
     return this.captureReady;

@@ -263,6 +263,15 @@ export class Code {
     const abcs = swf.tags
       .filter((tag) => tag.code === tags.DoABC || tag.code === tags.DoABC2)
       .map((tag) => readDoAbc(swf.bytes, tag));
+    // Camera.names and the rest answer at once, so the host reads the
+    // devices before the first SWF that names them runs, and not for one
+    // that never does: a browser's first enumeration costs a cold start
+    // more than a tenth of a second. Started here, it reads while the SWF
+    // compiles and links, which runs none of its code; awaited at the end.
+    const capture =
+      this.s.captureUnprepared && namesCapture(abcs.map(({ abc }) => abc))
+        ? this.s.prepareCapture()
+        : null;
     if (
       abcs.some(({ abc }) => {
         const version = this.s.codegen.abcVersion(abc);
@@ -271,14 +280,6 @@ export class Code {
     ) {
       this.floatReady ??= this.loadLibraries([avm2.floatLibrary]);
       await this.floatReady;
-    }
-
-    // Camera.names and the rest answer at once, so the host reads the
-    // devices before the first SWF that names them runs, and not for one
-    // that never does: a browser's first enumeration costs a cold start
-    // more than a tenth of a second.
-    if (this.s.captureUnprepared && namesCapture(abcs.map(({ abc }) => abc))) {
-      await this.s.prepareCapture();
     }
 
     // Workers are handed what was compiled up to the main SWF's code, and
@@ -344,6 +345,10 @@ export class Code {
     } finally {
       this.pin(domain, -1);
       this.evict(domain);
+    }
+
+    if (capture) {
+      await capture;
     }
 
     return () => {

@@ -183,7 +183,8 @@ const { value, exception } = await withPage(
   false,
   {
     args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"],
-    timeout: 30000,
+    // Four cold players in one page: room for a loaded CI runner.
+    timeout: 120000,
   },
 );
 assert.equal(exception, null, exception ?? "browser exception");

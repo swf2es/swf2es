@@ -163,8 +163,12 @@ code of the first SWF that names `flash.media.Camera` or `Microphone` runs
 `getDefinitionByName` takes it), so synchronous `names` and `getCamera`
 can use the result without prompting. A SWF loaded later that names them
 waits for it the same way. A SWF that never names them pays nothing: a
-browser's first enumeration added about 140 ms to a cold start. A name
-built at run time alone is not seen, and finds no devices. It opens capture only
+browser's first enumeration added about 140 ms to a cold start. The
+reading overlaps the SWF's compiling and linking, which run none of its
+code. A SWF that reaches the classes only by a name built at run time is
+not seen: its first call to `names`, `getCamera`, `getMicrophone` or
+`isSupported` finds no devices but starts the reading, and later calls
+find them. It opens capture only
 on attach, with ideal size/aspect-ratio/rate constraints, then reports
 actual track settings. `favorArea` prioritizes the requested size by
 capping frame rate; Chromium's native-mode selection cannot reproduce
