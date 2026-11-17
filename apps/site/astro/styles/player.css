@@ -171,6 +171,70 @@ body.dragging .player-app .stage {
   display: none;
 }
 
+/* Over the player, which draws nothing until its first frame. */
+.player-app .loading {
+  --track: var(--sl-color-gray-5);
+  background: var(--stage);
+}
+
+.player-app .loading p {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.player-app .loading progress {
+  width: min(16rem, 60vw);
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: var(--track);
+  accent-color: var(--accent);
+  overflow: hidden;
+}
+
+.player-app .loading progress::-webkit-progress-bar {
+  background: var(--track);
+}
+
+.player-app .loading progress::-webkit-progress-value {
+  background: var(--accent);
+}
+
+.player-app .loading progress::-moz-progress-bar {
+  background: var(--accent);
+}
+
+/* No size to go by: a band that sweeps across. */
+.player-app .loading progress:indeterminate,
+.player-app .loading progress:indeterminate::-webkit-progress-bar {
+  background: linear-gradient(90deg, transparent 35%, var(--accent) 50%, transparent 65%)
+    var(--track);
+  background-size: 300% 100%;
+  animation: player-loading 1.4s linear infinite;
+}
+
+.player-app .loading progress:indeterminate::-moz-progress-bar {
+  background: transparent;
+}
+
+@keyframes player-loading {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-app .loading progress:indeterminate,
+  .player-app .loading progress:indeterminate::-webkit-progress-bar {
+    animation: none;
+    background-position: 50% 0;
+  }
+}
+
 .player-app .status {
   min-height: 1.45em;
   margin: 8px 0;

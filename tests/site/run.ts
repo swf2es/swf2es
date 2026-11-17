@@ -1,7 +1,8 @@
 // The demo site (apps/site) in headless Chrome, built as GitHub Pages gets
 // it and served under /swf2es/ as Pages serves it, without the headers its
-// service worker adds to isolate it, which it is then: a demo by ?swf= plays
-// and traces, a SWF's workers share a Mutex and memory, a key's uncaught
+// service worker adds to isolate it, which it is then: a first visit loads the
+// browser build in a few files and shows its loading until the first frame, a
+// demo by ?swf= plays and traces, a SWF's workers share a Mutex and memory, a key's uncaught
 // error reaches the console, a file opened with the picker and a URL
 // load play, a URL the browser may not fetch
 // says why, the report link carries the SWF's facts and the errors, the
@@ -245,24 +246,92 @@ async function check(): Promise<void> {
           },
         ],
         [
+          "a cold visit loads the player in a few files, its loading shown until the first frame",
+          async () => {
+            // What the stage's loading state showed, in each document, as it changed.
+            const { identifier } = await send<{ identifier: string }>(
+              "Page.addScriptToEvaluateOnNewDocument",
+              {
+                source: `globalThis.loadingSeen = [];
+                  new MutationObserver(() => {
+                    const box = document.getElementById("loading");
+                    const label = document.getElementById("loading-label");
+                    const seen = box && label ? (box.hidden ? "hidden" : label.textContent) : null;
+                    if (seen !== null && loadingSeen.at(-1) !== seen) {
+                      loadingSeen.push(seen);
+                    }
+                  }).observe(document, { subtree: true, childList: true, characterData: true, attributes: true });`,
+              },
+            );
+            const urls = new Set<string>();
+            listen("Network.requestWillBeSent", (params) => {
+              const { url } = params.request as { url: string };
+              if (/^https?:/.test(url)) {
+                urls.add(url);
+              }
+            });
+            await send("Network.enable");
+            // As a first visit: no service worker, cached file or module kept from before.
+            await send("Storage.clearDataForOrigin", {
+              origin: new URL(base).origin,
+              storageTypes: "all",
+            });
+            await send("Network.clearBrowserCache");
+            try {
+              await send("Page.navigate", { url: `${base}play/?swf=demos%2Fbounce.swf` });
+              // Through the reload that isolates it; asked while the page goes, it may not answer.
+              const start = Date.now();
+              for (let done = false; !done; ) {
+                assert.ok(Date.now() - start < 60_000, "the demo did not play isolated");
+                await new Promise((wait) => setTimeout(wait, 100));
+                done = await evaluate<boolean>(
+                  `crossOriginIsolated && ${playing("bounce.swf")}`,
+                ).then(
+                  (r) => r.value === true,
+                  () => false,
+                );
+              }
+            } finally {
+              await send("Network.disable");
+              listen("Network.requestWillBeSent", () => {});
+              await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+            }
+
+            // The browser build's few files, where the packages' own modules were some 900.
+            assert.ok(urls.size <= 30, `${urls.size} files:\n${[...urls].join("\n")}`);
+            assert.ok(
+              [...urls].some((u) => u.endsWith("/swf2es/player/swf2es.js")),
+              "the page did not load the browser build",
+            );
+            assert.ok(
+              ![...urls].some((u) => u.includes("/swf2es/modules/")),
+              "the page loaded the packages' modules",
+            );
+            const seen = await value<string[]>("loadingSeen");
+            assert.equal(seen[0], "Loading player…", seen.join(" | "));
+            assert.ok(
+              seen.includes("Starting bounce.swf…"),
+              `no start of the SWF shown: ${seen.join(" | ")}`,
+            );
+            assert.equal(seen.at(-1), "hidden", seen.join(" | "));
+            assert.equal(await value<boolean>("document.getElementById('loading').hidden"), true);
+            assert.equal(
+              await value<string>("document.getElementById('player').hidden ? 'hidden' : 'shown'"),
+              "shown",
+            );
+          },
+        ],
+        [
           "?swf= plays a demo, which traces and draws",
           async () => {
             await navigate("play/?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
             await until(logHas("Hello from ActionScript 3"));
+            // The render module's own instance: its bitmap kernels are in the same binary.
             assert.equal(
               await value<boolean>("globalThis.nativeFillInstances > 0"),
               true,
               "playback did not use the native tessellator",
-            );
-            // Native bitmap kernels are on by default too. The page loads more modules
-            // than resource timing keeps, so the frame's resources tell.
-            const { frameTree } = await send<{ frameTree: { resources: { url: string }[] } }>(
-              "Page.getResourceTree",
-            );
-            assert.ok(
-              frameTree.resources.some((r) => r.url.endsWith("/modules/native/render/index.js")),
-              "playback did not load the render module",
             );
             const facts = await value<string>("document.getElementById('facts').innerText");
             assert.match(facts, /3 \(AVM2\)/);
@@ -823,7 +892,7 @@ async function check(): Promise<void> {
           "the licences are there",
           async () => {
             const found = await value<number[]>(
-              `Promise.all(['notices/', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'licenses/jxrlib-BSD-2-Clause.txt', 'modules/native/render/index.js', 'modules/runtime/avm2/builtin-library.js'].map((u) => fetch(${JSON.stringify(base)} + u).then((r) => r.status)))`,
+              `Promise.all(['notices/', 'licenses/MPL-2.0.txt', 'licenses/ruffle-MIT.txt', 'licenses/libtess2-SGI.txt', 'licenses/jxrlib-BSD-2-Clause.txt', 'player/swf2es.js', 'player/worker.js'].map((u) => fetch(${JSON.stringify(base)} + u).then((r) => r.status)))`,
             );
             assert.deepEqual(found, [200, 200, 200, 200, 200, 200, 200]);
             const notices = await value<string>(`fetch("${base}notices/").then((r) => r.text())`);

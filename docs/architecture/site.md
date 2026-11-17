@@ -10,11 +10,20 @@ it needs. Its pages, under the base path:
   guide. A link with `?swf=`, which the player took when it was the home
   page, goes on to `play/` with its query.
 - `/play/` — the player: one `<swf2es-player>`, the panels a person trying
-  a SWF wants around it, and three demos. It is the web embedding with
-  nothing in between: its scripts (`src/`) are served as `tsc` writes them,
-  in `app/`, under an import map of the packages as `tsc` wrote them, in
-  `modules/`. The import map's URLs are absolute under the base path, and
-  it is the head's first script, before any module of Starlight's.
+  a SWF wants around it, and the demos. It plays from the browser build,
+  `packages/swf2es/dist/` as a CDN serves it, copied to `player/`: the page
+  imports `@swf2es/web`'s API from `player/swf2es.js`, which finds its
+  chunks, `codegen.wasm` and `worker.js` beside itself. Its own scripts
+  (`src/`) are bundled by Rspack (`bundle.ts`) from what `tsc` wrote into
+  `app/main.js`, `@swf2es/web` left out for that URL, with Stage3D's backend
+  in `app/stage3d.js`, loaded once Stage3D is ticked. A first visit loads
+  some 17 files, two levels deep, where the packages' own modules under an
+  import map were over 900, ten levels deep, in waves of round trips that
+  Pages' CDN also answered with 429 when they came too fast. The page
+  preloads `player/swf2es.js` beside `app/main.js`. Until the SWF's first
+  frame a loading state covers the stage: the player's code, then the
+  SWF's download, with its percentage where the server gives its length,
+  then its start, while the status line says each step.
 - `/docs/` — the guide, made from `docs/guide.md` as it builds, so the
   repository keeps one copy: `guide.ts` is a content loader that makes
   each `##` section a page, the guide's introduction at the top of the
@@ -54,15 +63,15 @@ it needs. Its pages, under the base path:
 
 The base path is `SITE_BASE`, by default `/swf2es/`, as Pages serves it.
 `facts.ts` reads it once, with what the pages show of the build (its
-commit, the avmplus commit, the import map, the files under each licence),
+commit, the avmplus commit, the files under each licence),
 and the pages take them, and the compatibility page's figures, through
 virtual modules (`astro/site.ts`), as Astro bundles them away from
 `facts.ts`'s own URL.
 
 `build.ts` stages what the player loads in Astro's public directory
-(`dist/public/`): the packages (builtin.abc and playerglobal inside the
-runtime's and the player's), `codegen.wasm`, the demos, the licence texts
-and the service worker. Then it runs Astro, which writes
+(`dist/public/`): the browser build (builtin.abc and playerglobal inside
+it), the page's bundled script, the demos, the licence texts and the
+service worker. Then it runs Astro, which writes
 the pages, with Pagefind's index for the search, into
 `apps/site/dist/site/`, the folder Pages publishes.
 

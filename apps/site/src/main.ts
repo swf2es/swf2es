@@ -39,6 +39,9 @@ const askFile = byId<HTMLElement>("ask-file");
 const askHost = byId<HTMLElement>("ask-host");
 const askPlay = byId<HTMLButtonElement>("ask-play");
 const status = byId<HTMLElement>("status");
+const loading = byId<HTMLElement>("loading");
+const loadingLabel = byId<HTMLElement>("loading-label");
+const loadingProgress = byId<HTMLProgressElement>("loading-progress");
 const fileInput = byId<HTMLInputElement>("file");
 // iOS's and iPadOS's pickers grey out every file of a type they don't know, .swf among them,
 // when the input names any: there it takes any file, and playFile says when one is no SWF.
@@ -187,6 +190,26 @@ function showStatus(message: string, isError = false): void {
   status.classList.toggle("error", isError);
 }
 
+/**
+ * The stage's loading state, over the player until its first frame: what
+ * loads, and how much of it has, from 0 to 1, where that is known. The
+ * status line says the same to a screen reader, once a step, not each
+ * percent.
+ */
+function showLoading(label: string, fraction: number | null = null): void {
+  loading.hidden = false;
+  loadingLabel.textContent = label;
+  if (fraction === null) {
+    loadingProgress.removeAttribute("value");
+  } else {
+    loadingProgress.value = fraction;
+  }
+}
+
+function hideLoading(): void {
+  loading.hidden = true;
+}
+
 function describe(bytes: Uint8Array, origin: string): SwfFacts {
   const header = readSwfHeader(bytes);
   const swf = readSwf(bytes);
@@ -242,6 +265,7 @@ async function play(
   try {
     f = describe(bytes, origin);
   } catch (error) {
+    hideLoading();
     showStatus(`${name} is not a SWF: ${error instanceof Error ? error.message : error}`, true);
     return;
   }
@@ -270,8 +294,13 @@ async function play(
     `Loading ${name} (${air ? `AIR application ${air.descriptor.id}, ` : ""}${f.avm}, SWF ${f.version})`,
   );
   showStatus(`Loading ${name}…`);
+  // What is left before the first frame: the compiler and renderer the first SWF loads, and
+  // the SWF's own code compiled.
+  showLoading(`Starting ${name}…`);
   try {
-    const factory = enabled ? (await import("./stage3d.js")).createStage3D : null;
+    const factory = enabled
+      ? (await import(/* webpackChunkName: "stage3d" */ "./stage3d.js")).createStage3D
+      : null;
     if (generation !== loadGeneration) {
       return;
     }
@@ -282,6 +311,7 @@ async function play(
       return;
     }
 
+    hideLoading();
     stats.watch(player.player, f.frameRate, player.gl);
     showStatus(`Playing ${name}.`);
     player.focus();
@@ -290,6 +320,7 @@ async function play(
       return;
     }
 
+    hideLoading();
     const message = error instanceof Error ? error.message : String(error);
     // The errors go into the report, which never names a local file.
     write("error", `${origin === LOCAL ? "The SWF" : name} did not play: ${message}`);
@@ -383,6 +414,56 @@ function fileName(url: URL): string {
   }
 }
 
+/** A size in bytes as the loading state gives it. */
+const size = (bytes: number) =>
+  bytes < 1024 * 1024
+    ? `${Math.round(bytes / 1024)} KB`
+    : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+
+/**
+ * The body of `response`, its progress shown as it arrives; no longer
+ * `current()`, the rest is not read, and what came is moot.
+ */
+async function download(
+  response: Response,
+  name: string,
+  current: () => boolean,
+): Promise<Uint8Array> {
+  const reader = response.body?.getReader();
+  if (!reader) {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  // The length of what was sent, which a compressed body's bytes as read outgrow.
+  const total = Number(response.headers.get("content-length")) || 0;
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  for (let read = await reader.read(); !read.done; read = await reader.read()) {
+    if (!current()) {
+      void reader.cancel();
+      break;
+    }
+
+    chunks.push(read.value);
+    received += read.value.length;
+    if (total > 0) {
+      const fraction = Math.min(received / total, 0.99);
+      showLoading(`Loading ${name}… ${Math.floor(fraction * 100)}%`, fraction);
+    } else {
+      showLoading(`Loading ${name}… ${size(received)}`);
+    }
+  }
+
+  const bytes = new Uint8Array(received);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+
+  return bytes;
+}
+
 async function playUrl(url: string, origin?: string): Promise<void> {
   const absolute = swfUrl(url);
   if (!absolute) {
@@ -390,19 +471,31 @@ async function playUrl(url: string, origin?: string): Promise<void> {
   }
 
   const name = fileName(absolute);
+  // Another load, or Close, while this one downloads, makes it moot.
+  const generation = ++loadGeneration;
+  const current = () => generation === loadGeneration;
   showStatus(`Fetching ${absolute.href}…`);
+  showLoading(`Loading ${name}…`);
   let bytes: Uint8Array;
   let finalUrl = absolute.href;
   try {
     const response = await fetch(absolute.href);
     if (!response.ok) {
-      showStatus(`${absolute.href}: the server answered ${response.status}.`, true);
+      if (current()) {
+        hideLoading();
+        showStatus(`${absolute.href}: the server answered ${response.status}.`, true);
+      }
       return;
     }
 
-    bytes = new Uint8Array(await response.arrayBuffer());
+    bytes = await download(response, name, current);
     finalUrl = response.url || finalUrl;
   } catch {
+    if (!current()) {
+      return;
+    }
+
+    hideLoading();
     const crossOrigin = absolute.origin !== location.origin;
     const why = crossOrigin
       ? "Its server may not allow other sites to load it (CORS), or it may be unreachable."
@@ -412,7 +505,9 @@ async function playUrl(url: string, origin?: string): Promise<void> {
     return;
   }
 
-  await play(bytes, name, origin ?? absolute.href, finalUrl);
+  if (current()) {
+    await play(bytes, name, origin ?? absolute.href, finalUrl);
+  }
 }
 
 fileInput.addEventListener("change", () => {
@@ -496,6 +591,7 @@ reload.addEventListener("click", () => {
 
 close.addEventListener("click", () => {
   loadGeneration++;
+  hideLoading();
   player.destroy();
   stats.watch(null, 0);
   player.hidden = true;
@@ -588,6 +684,10 @@ async function listDemos(): Promise<void> {
 }
 
 void listDemos();
+// The player's code is here: until a SWF loads, the stage asks for one.
+hideLoading();
+empty.hidden = false;
+showStatus("");
 const asked = new URLSearchParams(location.search).get("swf");
 if (asked) {
   const demo = /^demos\/[\w-]+\.swf$/.test(asked);

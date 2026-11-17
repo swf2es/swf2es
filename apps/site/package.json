@@ -11,10 +11,10 @@
   "dependencies": {
     "@swf2es/context3d": "workspace:*",
     "@swf2es/format": "workspace:*",
-    "@swf2es/render": "workspace:*",
     "@swf2es/web": "workspace:*"
   },
   "devDependencies": {
+    "@rspack/core": "2.3.1",
     "@astrojs/starlight": "^0.42.7",
     "astro": "^7.4.7"
   }

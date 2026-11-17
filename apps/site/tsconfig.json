@@ -1,6 +1,7 @@
 {
-  // The player page's scripts, served as tsc writes them. build.ts, demos.ts, facts.ts,
-  // guide.ts and astro.config.ts are node's, checked by the root tsconfig; astro/ is Astro's.
+  // The player page's scripts, which bundle.ts bundles from what tsc writes. build.ts,
+  // bundle.ts, demos.ts, facts.ts, guide.ts and astro.config.ts are node's, checked by the
+  // root tsconfig; astro/ is Astro's.
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "src",

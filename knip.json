@@ -15,8 +15,7 @@
       "ignoreDependencies": ["@swf2es/codegen", "@swf2es/player-hosts"]
     },
     "apps/site": {
-      "entry": ["src/main.ts", "src/service-worker.ts"],
-      "ignoreDependencies": ["@swf2es/render"]
+      "entry": ["src/main.ts", "src/service-worker.ts"]
     },
     "packages/swf2es": {
       "entry": ["src/swf2es.ts", "src/worker.ts"]
