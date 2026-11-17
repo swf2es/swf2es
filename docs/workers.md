@@ -195,12 +195,13 @@ element awaits them, ten seconds at most, before the SWF's first frame;
 other SWFs start none until they ask. The page's workers started ahead go ten seconds
 after its last player that used them does.
 
-The demo site and the desktop app take the default, both cross-origin
-isolated, the site through its service worker, which serves the worker
-scripts too, and the app through its protocol, which serves them under
-`/modules/player-hosts/thread/`; their import maps name
-`@swf2es/player-hosts/workers`, which the element imports only when a
-SWF has workers, and without which its SWFs play without them. On a
+The demo site and the desktop app are both cross-origin isolated, the
+site through its service worker, which serves the worker script too, and
+the app through its protocol. The site plays from the browser build,
+whose `worker.js` is the workers' script; the app takes the default, its
+protocol serving it under `/modules/player-hosts/thread/`, and its import
+map names `@swf2es/player-hosts/workers`, which the element imports only
+when a SWF has workers, and without which its SWFs play without them. On a
 page that is not isolated, workers pass messages, and sharing a
 shareable ByteArray, a Mutex or a Condition throws the error that says it
 needs isolation (see [Shared memory](#shared-memory)).

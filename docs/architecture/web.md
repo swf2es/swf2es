@@ -178,8 +178,8 @@ A Web Worker sees no import map, so the worker script is
 `web-worker.js` and every module it imports, from player-hosts and the
 packages under it, with each bare specifier made a relative path inside
 the tree. The tree resolves wherever the package is served, under a
-page's import map, from a CDN or from the demo site and the desktop app
-as they serve the packages, at the cost of its 3.9 MB loaded again by
+page's import map, from a CDN or from the desktop app as it serves the
+packages, at the cost of its 3.9 MB loaded again by
 the workers; `webWorkerHost` finds it beside its own module.
 `workerUrl` names another script, a bundler's. A browser starts a
 worker only on a script of the page's origin, and throws SecurityError

@@ -8,46 +8,43 @@
 /** How long the first visit waits for the service worker before it plays without it. */
 const WAIT = 4000;
 
-/** When the tab last loaded the page again for isolation. */
-const RELOADING = "swf2es-isolation-reload";
+/** One interrupted bootstrap can recover, but persistent worker bypass must stop. */
+const RETRIES = 2;
+const RETRY = "__swf2es_isolation";
+const stored = Number(new URL(location.href).searchParams.get(RETRY));
+// Keep this document's count after cleanup, including if it returns from the back/forward cache.
+const attempts = Number.isInteger(stored) && stored >= 0 && stored <= RETRIES ? stored : 0;
+let replacing = false;
 
-function session(): Storage | null {
-  try {
-    return sessionStorage;
-  } catch {
-    return null;
+/** Leave only the caller's URL before the player reads it or reaches its fallback. */
+function clearRetry(): void {
+  const url = new URL(location.href);
+  if (url.searchParams.has(RETRY)) {
+    url.searchParams.delete(RETRY);
+    history.replaceState(history.state, "", url);
   }
 }
 
-/** How soon after a reload for isolation a page counts as the one it loaded. */
-const HOLD = 10_000;
-
-/**
- * Load the page again, isolated, unless this page is what such a reload
- * just loaded, which it did not isolate: then false, and the page plays
- * as it is. A reload the user asked for, even at once, may try again.
- */
 function reloadOnce(): boolean {
-  const storage = session();
-  if (!storage) {
+  if (replacing) {
+    return true;
+  }
+
+  if (attempts === RETRIES) {
+    clearRetry();
     return false;
   }
 
-  const last = Number(storage.getItem(RELOADING) ?? Number.NaN);
-  const entry = performance.getEntriesByType("navigation")[0] as
-    | PerformanceNavigationTiming
-    | undefined;
-  const since = performance.timeOrigin - last;
-  if (entry?.type === "navigate" && since >= 0 && since < HOLD) {
-    return false;
-  }
-
-  storage.setItem(RELOADING, String(Date.now()));
+  // Session storage can return stale state across the browser's isolation boundary.
+  // The URL carries the budget with the navigation it belongs to.
+  const url = new URL(location.href);
+  url.searchParams.set(RETRY, String(attempts + 1));
+  replacing = true;
   // A navigation, not a reload: a reload into the isolated page's group of
   // browsing contexts leaves this page in the back/forward cache, and
   // Chrome gives it back, unisolated, for a later reload that bypasses the
   // worker. Replacing it leaves nothing to give back.
-  location.replace(location.href);
+  location.replace(url.href);
   return true;
 }
 
@@ -55,6 +52,7 @@ function reloadOnce(): boolean {
 // long past its own reload, is loaded again.
 addEventListener("pageshow", (e) => {
   if (e.persisted && !crossOriginIsolated && isSecureContext && navigator.serviceWorker) {
+    replacing = false;
     reloadOnce();
   }
 });
@@ -63,15 +61,18 @@ addEventListener("pageshow", (e) => {
 export async function isolate(): Promise<boolean> {
   const container = navigator.serviceWorker;
   if (crossOriginIsolated) {
+    clearRetry();
     return true;
   }
 
   if (!isSecureContext || !container) {
+    clearRetry();
     return true;
   }
 
   // Served by the worker already, and still not isolated: this browser cannot be.
   if (container.controller) {
+    clearRetry();
     return true;
   }
 
@@ -99,5 +100,6 @@ export async function isolate(): Promise<boolean> {
     // No service worker here, as in a private window that refuses one.
   }
 
+  clearRetry();
   return true;
 }
