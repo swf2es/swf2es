@@ -1,5 +1,6 @@
 // FileReference's host boundary. Paths stay with the host; scripts see metadata and bytes only.
 import type { FetchRequest, FetchResult } from "./hosts.js";
+import { linkedSignal } from "./signals.js";
 
 const textDecoder = new TextDecoder();
 
@@ -216,7 +217,7 @@ export interface FileServices {
   responseStatus?: boolean;
 }
 
-type Operation = { generation: number; signal: AbortSignal; abort(): void };
+type Operation = { generation: number; signal: AbortSignal; abort(): void; release(): void };
 
 /** An "httpResponseStatus" has its request's URL as `text`, and the `response`. */
 export type FileEvent = (
@@ -245,16 +246,23 @@ export class FileReference {
     this.operation = null;
   }
 
+  /** The operation done: none in progress, and its signal no longer the player's to abort. */
+  private finish(operation: Operation): void {
+    this.operation = null;
+    operation.release();
+  }
+
   private begin(): Operation {
     if (this.operation) {
       this.services.error(2174);
     }
 
-    const abort = new AbortController();
+    const linked = linkedSignal(this.services.signal);
     const operation = {
       generation: ++this.generation,
-      signal: AbortSignal.any([abort.signal, this.services.signal]),
-      abort: () => abort.abort(),
+      signal: linked.signal,
+      abort: linked.abort,
+      release: linked.release,
     };
     this.operation = operation;
     return operation;
@@ -330,7 +338,7 @@ export class FileReference {
     const operation = this.begin();
     const task = this.services.host?.browse(filters, multiple, operation.signal) ?? [];
     this.after(operation, task, (files) => {
-      this.operation = null;
+      this.finish(operation);
       if (files.length) {
         this.file = files[0];
         this.data = null;
@@ -350,7 +358,7 @@ export class FileReference {
         this.emit(operation, "open") &&
         this.emit(operation, "progress", bytes.length, bytes.length)
       ) {
-        this.operation = null;
+        this.finish(operation);
         this.emit(operation, "complete");
       }
     });
@@ -361,7 +369,7 @@ export class FileReference {
     const task = this.services.host?.save(name, operation.signal) ?? null;
     this.after(operation, task, (destination) => {
       if (!destination) {
-        this.operation = null;
+        this.finish(operation);
         this.emit(operation, "cancel");
         return;
       }
@@ -398,7 +406,7 @@ export class FileReference {
         }
 
         if (this.emit(operation, "progress", bytes.length, bytes.length)) {
-          this.operation = null;
+          this.finish(operation);
           this.emit(operation, "complete");
         }
       });
@@ -451,7 +459,7 @@ export class FileReference {
         return;
       }
 
-      this.operation = null;
+      this.finish(operation);
       if (this.emit(operation, "complete")) {
         this.emit(
           operation,

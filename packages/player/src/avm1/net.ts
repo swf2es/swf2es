@@ -13,6 +13,7 @@ import type {
   SocketTransport,
 } from "../hosts.js";
 import { resolve } from "../scripting/loads.js";
+import { fetchWhile } from "../signals.js";
 
 export type Fetch = (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
 
@@ -110,12 +111,7 @@ export class Avm1Net {
 
     const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose };
     return (
-      fetch
-        ? fetch(
-            outgoing,
-            signal ? AbortSignal.any([signal, this.stopped.signal]) : this.stopped.signal,
-          )
-        : Promise.reject()
+      fetch ? fetchWhile(fetch, outgoing, this.stopped.signal, signal) : Promise.reject()
     ).then(
       (result) => result,
       () => FAILED,

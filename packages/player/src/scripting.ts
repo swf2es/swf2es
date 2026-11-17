@@ -84,6 +84,7 @@ import { Symbols } from "./scripting/symbols.js";
 import { Timers } from "./scripting/timers.js";
 import { UncaughtErrors } from "./scripting/uncaught.js";
 import { type ParentLink, Workers } from "./scripting/workers.js";
+import { fetchWhile } from "./signals.js";
 import { type StageScaleMode, stageAlignment } from "./stage.js";
 
 // For index.ts, which reaches playerglobal only through here.
@@ -537,7 +538,7 @@ export class Scripting {
     this.lazyCompilation = options.lazyCompilation ?? false;
     const fetch = options.fetch;
     this.fetch = fetch
-      ? (request, signal) => fetch(request, AbortSignal.any([signal, this.stopped.signal]))
+      ? (request, signal) => fetchWhile(fetch, request, this.stopped.signal, signal)
       : null;
     this.url = options.url ?? this.url;
     this.air = options.air ?? false;
