@@ -1,0 +1,73 @@
+main: first load
+child: static init
+script: its domain has the class true
+script: its domain's class is the script's true
+script: found by name is the script's true
+script: made before 0
+child: made 1
+child: its loaderInfo's domain has it true
+child: that domain's class is its own true
+child: its domain's class is its own true
+main: content is the shared class true
+main: its loaderInfo's domain's class is the shared one true
+main: its loaderInfo's domain's parent child false, main true
+main: made 1
+main: scripts run 1
+main: the script's domain's class is the shared one true
+main: the script's domain's parent child false, main true
+main: the script's domain has the extra false
+main: same SWF again
+child: static init
+script: its domain has the class true
+script: its domain's class is the script's true
+script: found by name is the script's true
+script: made before 1
+child: made 2
+child: its loaderInfo's domain has it true
+child: that domain's class is its own true
+child: its domain's class is its own true
+main: content is the shared class true
+main: its loaderInfo's domain's class is the shared one true
+main: its loaderInfo's domain's parent child false, main true
+main: made 2
+main: scripts run 2
+main: the script's domain's class is the shared one true
+main: the script's domain's parent child false, main true
+main: the script's domain has the extra false
+main: one ABC again, one new
+child: static init
+script: its domain has the class true
+script: its domain's class is the script's true
+script: found by name is the script's true
+script: made before 2
+extra: its domain has the child true
+extra: its domain has itself true
+extra: the child made 2
+main: content is the shared class false
+main: its loaderInfo's domain's class is the shared one true
+main: its loaderInfo's domain's parent child false, main true
+main: made 2
+main: scripts run 3
+main: the script's domain's class is the shared one true
+main: the script's domain's parent child false, main true
+main: the script's domain has the extra true
+main: same SWF into a child
+child: static init
+script: its domain has the class true
+script: its domain's class is the script's true
+script: found by name is the script's true
+script: made before 2
+child: made 3
+child: its loaderInfo's domain has it true
+child: that domain's class is its own true
+child: its domain's class is its own true
+main: content is the shared class true
+main: its loaderInfo's domain's class is the shared one true
+main: its loaderInfo's domain's parent child true, main true
+main: made 3
+main: scripts run 4
+main: the script's domain's class is the shared one true
+main: the script's domain's parent child true, main true
+main: the script's domain has the extra true
+main: shared has the extra true
+main: own domain has the child false
