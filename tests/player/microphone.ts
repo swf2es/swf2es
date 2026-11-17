@@ -23,7 +23,8 @@ const { value, exception } = await withPage(
   host.openMicrophone = (device, mode, events, signal) => open(device, mode, {
     ...events, samples(samples, rate) { inputCount += samples.length; inputRate = rate; events.samples(samples, rate); }
   }, signal);
-  const s = new Scripting(await createCodegen(await WebAssembly.compileStreaming(fetch('/codegen/codegen.wasm'))), { capture: host, audio: null });
+  const errors = [];
+  const s = new Scripting(await createCodegen(await WebAssembly.compileStreaming(fetch('/codegen/codegen.wasm'))), { capture: host, audio: null, onUncaught: error => errors.push(String(error)) });
   await s.loadLibraries([builtinLibrary, playerglobalLibrary]);
   const rt = s.rt;
   const get = (o, key) => rt.getProperty(o, rt.publicName(key));
@@ -36,10 +37,12 @@ const { value, exception } = await withPage(
   const wait = async (condition, label) => {
     const until = performance.now() + 8000;
     while (!condition()) {
+      if (errors.length) throw new Error(errors.join('; '));
       if (performance.now() > until) throw new Error(label + ' timed out');
       await new Promise(r => setTimeout(r, 15)); s.loads.completeLoads();
     }
     s.loads.completeLoads();
+    if (errors.length) throw new Error(errors.join('; '));
   };
   try {
     for (const [rate, hz] of [[5,5512.5],[8,8000],[11,11025],[16,16000],[22,22050],[44,44100]]) {

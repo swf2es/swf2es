@@ -41,3 +41,12 @@ test("downsampling rejects frequencies above the destination Nyquist frequency",
   const unity = new CaptureResampler(48000, 5512.5).push(new Float32Array(48000).fill(0.25));
   assert.ok(Math.abs(unity[unity.length - 1] - 0.25) < 1e-6);
 });
+
+test("full-scale edges stay inside the captured PCM range after low-pass ringing", () => {
+  const input = new Float32Array(48000);
+  for (let i = 0; i < input.length; i++) {
+    input[i] = i % 480 < 240 ? 1 : -1;
+  }
+  const output = new CaptureResampler(48000, 8000).push(input);
+  assert.ok(output.every((value) => Number.isFinite(value) && value >= -1 && value <= 1));
+});

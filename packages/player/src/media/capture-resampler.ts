@@ -54,7 +54,7 @@ export class CaptureResampler {
       for (let tap = 0; tap < TAPS; tap++) {
         value += input[start + tap] * this.kernels[phase * TAPS + tap];
       }
-      result[i] = value;
+      result[i] = Math.max(-1, Math.min(1, value));
     }
     this.history = input.slice(-TAPS);
     this.received = end;
