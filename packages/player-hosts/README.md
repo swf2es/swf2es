@@ -9,6 +9,10 @@ needs itself; this package is for a host built on `@swf2es/player`.
 npm install @swf2es/player-hosts
 ```
 
+- `@swf2es/player-hosts/capture`: `await browserCaptureHost()`, device
+  enumeration without prompting and camera capture after browser consent.
+  Pass it as `new Scripting(codegen, { capture })`; omitting it preserves
+  the player's no-device behaviour.
 - `@swf2es/player-hosts/indexeddb`: `indexedDbModuleCache()`, the compiled
   modules kept in IndexedDB for a page's next visit.
 - `@swf2es/player-hosts/precompiled`: `precompiledModules()` reads what the

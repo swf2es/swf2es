@@ -6,6 +6,7 @@
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
 import type { DisplayObject } from "./display/display.js";
+import type { VideoPicture } from "./media/video.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
 
 const textDecoder = new TextDecoder();
@@ -754,4 +755,47 @@ export interface WorkerHost {
   ): WorkerThread;
   /** The player that used it is gone: what the host keeps for its threads may go too. */
   release?(): void;
+}
+
+/** A capture device's stable host identifier and display name (possibly blank before consent). */
+export interface CaptureDevice {
+  id: string;
+  name: string;
+}
+
+export interface CameraMode {
+  width: number;
+  height: number;
+  fps: number;
+  favorArea: boolean;
+}
+
+export interface CameraPicture extends VideoPicture {
+  /** Monotonic milliseconds at capture, for activity and measured frame rate. */
+  time: number;
+  /** Small luminance image, with a stable size, for motion detection without full-size copies. */
+  motion(): Uint8Array;
+}
+
+export interface CameraCapture {
+  setMode(mode: CameraMode): void;
+  close(): void;
+}
+
+export interface CameraEvents {
+  state(state: "granted" | "denied" | "ended"): void;
+  settings(width: number, height: number, fps: number, position: string): void;
+  frame(picture: CameraPicture): void;
+}
+
+/** Optional: without a host the player retains Flash's no-device behaviour. */
+export interface CaptureHost {
+  readonly cameras: readonly CaptureDevice[];
+  /** Opening may prompt. Abort closes a live capture and any capture still awaiting permission. */
+  openCamera(
+    device: CaptureDevice,
+    mode: CameraMode,
+    events: CameraEvents,
+    signal: AbortSignal,
+  ): CameraCapture;
 }

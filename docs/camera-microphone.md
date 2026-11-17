@@ -123,6 +123,30 @@ motion detector: the mean difference of consecutive frames, sampled small,
 against `motionLevel`, raising `ActivityEvent` after `motionTimeout`. The
 11.4 copies go through the CPU frame of section 3.
 
+The browser host enumerates before AS3 starts so synchronous `names` and
+`getCamera` can use the result without prompting. It opens capture only
+on attach, with ideal size/aspect-ratio/rate constraints, then reports
+actual track settings. `favorArea` prioritizes the requested size by
+capping frame rate; Chromium's native-mode selection cannot reproduce
+Flash's device-driver selection exactly. `setQuality`, keyframes and
+loopback keep settings but do not encode local video, since publishing
+and compression are out of scope.
+
+Camera identity and activity defaults follow
+[Adobe's Camera reference](https://airsdk.dev/reference/actionscript/3.0/flash/media/Camera.html):
+repeated requests for an index share one Camera, and an unattached
+camera has activity -1. As the Video reference specifies, attaching that
+Camera to another Video transfers the attachment. Capture starts on
+attach with browser consent; no extra gesture gate is added. Until the
+first permitted frame the Video is empty. These device rules are
+documented, not measured with adl. Activity uses mean luminance change
+on 32×24 samples, an approximation to Flash's unpublished detector.
+
+`allowcapture="false"` and `configure({ allowCapture: false })` refuse
+capture. Revoking the attribute aborts captures for that load; enabling
+it again requires reloading. The capture host's signal also closes tracks
+when permission resolves after the player has already been destroyed.
+
 ## 5. Microphone
 
 An AudioWorklet on a `MediaStreamSource` hands blocks of samples to the
@@ -180,11 +204,10 @@ answered through the test inspector as #1037's test answers its box.
 
 ## Open questions
 
-- Where a camera is attached to a `Video` before the user answers, does
-  Flash show the box empty or its first frame once allowed, and do two
-  `getCamera()` calls return the same `Camera`? To confirm in Flash on a
-  machine with a camera.
-- `activityLevel` before any capture: Adobe documents -1 for an inactive
-  microphone; the camera's, and when each goes from -1, to confirm.
-- Whether the web element should prompt on attach, as Flash did, or only
-  after the user's first gesture on the player, as browsers prefer.
+- Camera identity and the empty Video while waiting for consent follow
+  Adobe's documentation (section 4); hardware-backed Flash confirmation
+  remains unavailable here.
+- Microphone activity before capture and its timing remain to be implemented;
+  Adobe also documents Camera activity -1 before attachment (section 4).
+- The web element requests capture on attach, as described in section 4;
+  the browser remains responsible for consent.
