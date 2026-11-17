@@ -1,9 +1,9 @@
 // Assembles the site into apps/site/dist/site/, a static directory GitHub Pages serves as it is,
 // at /swf2es/: Astro builds the pages (astro/: the home page, the player, the guide from
-// docs/guide.md and the licences) around what this stages in dist/public/ first: the built
-// packages as tsc wrote them, under the player's import map (builtin.abc and playerglobal
-// among them), codegen.wasm, the demo SWFs, the licence texts and the service worker. Run
-// after `pnpm build`:
+// docs/guide.md and the licences) around what this stages in dist/public/ first: the browser
+// build (packages/swf2es/dist/, builtin.abc and playerglobal inside it) in player/, the player
+// page's script bundled in app/ (bundle.ts), the demo SWFs, the licence texts and the service
+// worker. Run after `pnpm build`:
 //
 //   pnpm --filter @swf2es/site build      (or node apps/site/build.ts)
 //
@@ -23,8 +23,9 @@ import {
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build as astro } from "astro";
+import { bundleApp } from "./bundle.ts";
 import { buildDemos } from "./demos.ts";
-import { build, PACKAGES, root, sourceUrl } from "./facts.ts";
+import { BASE, build, root, sourceUrl } from "./facts.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = join(here, "dist/site/");
@@ -51,10 +52,9 @@ function sizeOf(path: string): number {
   return readdirSync(path).reduce((n, name) => n + sizeOf(join(path, name)), 0);
 }
 
-for (const name of PACKAGES) {
-  if (!existsSync(join(root, `packages/${name}/dist`))) {
-    throw new Error(`packages/${name} is not built: run pnpm build first`);
-  }
+const player = join(root, "packages/swf2es/dist/");
+if (!existsSync(join(player, "swf2es.js"))) {
+  throw new Error("packages/swf2es is not built: run pnpm build first");
 }
 
 if (!existsSync(join(here, "dist/js/main.js"))) {
@@ -64,22 +64,11 @@ if (!existsSync(join(here, "dist/js/main.js"))) {
 rmSync(pub, { recursive: true, force: true });
 mkdirSync(pub, { recursive: true });
 
-// The packages as tsc wrote them, without their types and maps.
-for (const name of PACKAGES) {
-  copyTree(join(root, `packages/${name}/dist`), join(pub, `modules/${name}`), (file) =>
-    file.endsWith(".js"),
-  );
-}
+// The browser build as a CDN serves it, without its source maps: a few files that find one
+// another by relative URL, where the packages' own modules were hundreds, each a round trip.
+copyTree(player, join(pub, "player"), (file) => !file.endsWith(".map"));
+await bundleApp(here, join(pub, "app"), `${BASE}player/swf2es.js`);
 
-copyFileSync(
-  join(root, "packages/codegen/dist/codegen.wasm"),
-  join(pub, "modules/codegen/codegen.wasm"),
-);
-copyTree(
-  join(here, "dist/js"),
-  join(pub, "app"),
-  (file) => file.endsWith(".js") && file !== "service-worker.js",
-);
 // At the root, the scope it serves: Pages sends no Service-Worker-Allowed for a wider one. A
 // classic script, which every browser registers, without the export that makes tsc's a module.
 writeFileSync(
@@ -194,7 +183,7 @@ await astro({ root: here, logLevel: "warn" });
 
 const kb = (n: number) => `${(n / 1024).toFixed(0)} KB`;
 console.log(`site: ${relative(process.cwd(), out) || "."}, ${kb(sizeOf(out))} at ${build}`);
-for (const part of ["modules", "app", "demos", "licenses", "docs", "_astro", "pagefind"]) {
+for (const part of ["player", "app", "demos", "licenses", "docs", "_astro", "pagefind"]) {
   if (existsSync(join(out, part))) {
     console.log(`  ${part}/ ${kb(sizeOf(join(out, part)))}`);
   }

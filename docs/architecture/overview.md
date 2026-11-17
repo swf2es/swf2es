@@ -219,8 +219,8 @@ The demo site also offers Stage3D as an option, unchecked by default. It loads
 the backend only when selected and uses the same resource limits as the desktop,
 Flash Player's own: lower budgets refused scenes that play in Flash, with Error
 #3691 on every frame. Changing the option restarts the current SWF; closing
-during the backend import invalidates that load. The site's build includes the
-optional modules and their import-map entries under the GitHub Pages subpath.
+during the backend import invalidates that load. The site's build bundles the
+backend into a chunk of the page's script, loaded only then.
 Its fullscreen button fits the composed Stage3D player to the screen with a
 CSS transform, preserving the SWF viewport and back-buffer sizes. The 2D overlay
 and input use the same presentation scale. Leaving fullscreen restores responsive

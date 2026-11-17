@@ -139,14 +139,14 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   {
     name: "Video and streaming media",
     status: "missing",
-    note: `NetStream, StageVideo, RTMFP and DRM: ${natives("media")} natives not supported yet.`,
+    note: `A Video shows a camera; NetStream, StageVideo, RTMFP and DRM: ${natives("media")} natives not supported yet.`,
     href: source("docs/roadmap.md"),
   },
   {
     name: "Camera and microphone",
-    status: "missing",
-    note: "The API is there, as on a machine with neither.",
-    href: source("docs/architecture/services.md"),
+    status: "partial",
+    note: "Camera and Microphone in ActionScript 3, asked for as a SWF attaches them: through the browser's prompt, and in the desktop app through its own. AVM1's Camera.get and publishing to a media server are not supported.",
+    href: source("docs/camera-microphone.md"),
   },
   {
     name: "Printing",
@@ -171,7 +171,7 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   {
     name: "AIR's API",
     status: "partial",
-    note: "AIR's WebSocket client; the rest of AIR's API is outside a browser.",
+    note: "AIR's WebSocket client and capture permissions; the rest of AIR's API is outside a browser.",
     href: source("docs/architecture/services.md"),
   },
 ];

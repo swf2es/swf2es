@@ -18,7 +18,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
   const logHas = (text: string) =>
     `document.getElementById('log').innerText.includes(${JSON.stringify(text)})`;
   const backendRequests =
-    "performance.getEntriesByType('resource').filter(e => /\\/app\\/stage3d.js|\\/modules\\/context3d\\/webgl\\//.test(e.name)).length";
+    "performance.getEntriesByType('resource').filter(e => /\\/app\\/stage3d\\.js$/.test(e.name)).length";
   const clear = () => value("document.getElementById('log').replaceChildren()");
   const click = (id: string) => value(`document.getElementById('${id}').click()`);
   const ready = () => until(logHas("site-stage3d ready"));
@@ -74,7 +74,7 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         writeFileSync(
           path,
           `
-          export { createStage3D } from "./stage3d-original.js";
+          export * from "./stage3d-original.js";
           await new Promise(resolve => { globalThis.releaseSiteStage3D = resolve; });
         `,
         );

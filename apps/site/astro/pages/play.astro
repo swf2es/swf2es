@@ -1,13 +1,14 @@
 ---
 // The player: the page's <swf2es-player> and what a person trying a SWF wants
-// around it, run by src/main.ts (dist/js/, staged in app/). Its ids are what
+// around it, run by src/main.ts (bundled by bundle.ts into app/), which
+// imports the element from the browser build in player/. Its ids are what
 // main.ts and tests/site/run.ts look for.
 
 import StarlightPage from "@astrojs/starlight/components/StarlightPage.astro";
 import { base, facts } from "../site.ts";
 import "../styles/player.css";
 
-const { build, importMap } = facts;
+const { build } = facts;
 ---
 
 <StarlightPage
@@ -18,8 +19,8 @@ const { build, importMap } = facts;
     template: "splash",
     tableOfContents: false,
     head: [
-      // Before any module script: the player's bare imports resolve through it.
-      { tag: "script", attrs: { type: "importmap" }, content: JSON.stringify(importMap) },
+      // Fetched beside the page's script rather than once it has arrived and named it.
+      { tag: "link", attrs: { rel: "modulepreload", href: `${base}player/swf2es.js` } },
       { tag: "script", attrs: { type: "module", src: `${base}app/main.js` } },
     ],
   }}
@@ -40,7 +41,7 @@ const { build, importMap } = facts;
     </p>
 
     <div id="stage" class="stage">
-      <div id="empty" class="empty">
+      <div id="empty" class="empty" hidden>
         <p><strong>Drop a SWF here</strong>, open one, or try a demo below.</p>
       </div>
       <div id="ask" class="empty ask" hidden>
@@ -52,9 +53,16 @@ const { build, importMap } = facts;
         </div>
       </div>
       <swf2es-player id="player" width="100%" height="100%" scale="showAll" allowscriptaccess="never" hidden></swf2es-player>
+      <!-- Over the player until its first frame: the player's code, then a SWF's download and start. -->
+      <div id="loading" class="empty loading">
+        <div>
+          <p id="loading-label">Loading player…</p>
+          <progress id="loading-progress" max="1" aria-labelledby="loading-label"></progress>
+        </div>
+      </div>
     </div>
 
-    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <p id="status" class="status" role="status" aria-live="polite">Loading player…</p>
 
     <section class="controls" aria-label="Player controls">
       <label>Quality
@@ -113,9 +121,9 @@ const { build, importMap } = facts;
     <section class="panel about" aria-labelledby="about-title">
       <h2 id="about-title">What to expect</h2>
       <ul>
-        <li><strong>ActionScript 3</strong> (AVM2) runs, compiled to JavaScript as the SWF loads. Video is not implemented.</li>
+        <li><strong>ActionScript 3</strong> (AVM2) runs, compiled to JavaScript as the SWF loads. A camera plays in a Video; video streams (NetStream) are not implemented.</li>
         <li><strong>Stage3D is off until you tick it.</strong> Tick Stage3D in the player controls before opening a Stage3D SWF; changing it restarts the current SWF. It needs WebGL 2.</li>
-        <li><strong>ActionScript 1 and 2</strong> (AVM1) run too, compiled to JavaScript, including clips and their events, buttons, mouse and keyboard input, drawing, editable text fields and CSS, sound, filters and blend modes, <code>BitmapData</code>, <code>SharedObject</code>, and loading with <code>loadMovie</code>, <code>MovieClipLoader</code>, <code>LoadVars</code> and <code>XML</code>. File dialogs and transfers through <code>FileReference</code>, browser scripting through <code>ExternalInterface</code>, HTTP remoting through <code>NetConnection</code>, and <code>LocalConnection</code> messaging between SWFs within one player (including AVM1 and AVM2) are supported. Compatibility is still incomplete: video and printing are not implemented, and some SWFs have rendering or interaction differences.</li>
+        <li><strong>ActionScript 1 and 2</strong> (AVM1) run too, compiled to JavaScript, including clips and their events, buttons, mouse and keyboard input, drawing, editable text fields and CSS, sound, filters and blend modes, <code>BitmapData</code>, <code>SharedObject</code>, and loading with <code>loadMovie</code>, <code>MovieClipLoader</code>, <code>LoadVars</code> and <code>XML</code>. File dialogs and transfers through <code>FileReference</code>, browser scripting through <code>ExternalInterface</code>, HTTP remoting through <code>NetConnection</code>, and <code>LocalConnection</code> messaging between SWFs within one player (including AVM1 and AVM2) are supported. Compatibility is still incomplete: video streams and printing are not implemented, and some SWFs have rendering or interaction differences.</li>
         <li><strong>No sockets.</strong> A browser cannot open TCP connections and this static site runs no relay, so <code>Socket</code> and <code>XMLSocket</code> fail as refused.</li>
         <li><strong>Cross-origin loads.</strong> A SWF by URL, and whatever it loads from another site, arrive only where that server allows it (CORS headers).</li>
         <li><strong>Files you open</strong> play as if from this site's <code>local/</code> folder, by their names: what one loads by a relative URL is not there, and each name keeps its own saved data (SharedObjects) in this browser.</li>
