@@ -2,8 +2,8 @@
 // --param on the command line has them as a page's <object> or <embed>
 // gave them, its loaderInfo.parameters or an AVM1 root's variables, its
 // stage's quality, scale mode and alignment, and base resolving its
-// relative URLs; a SWF URL's query is among its parameters, the FlashVars
-// over it, as in Flash. A second start hands the first its own, a reload
+// relative URLs, an AVM1 SWF's against its own URL without one; a SWF
+// URL's query is among its parameters, the FlashVars over it, as in Flash. A second start hands the first its own, a reload
 // keeps them, and a SWF dropped on the window or opened without has none
 // of the last's; no parameter but the element's reaches it.
 // Skipped, saying why, where Electron was not downloaded
@@ -51,15 +51,28 @@ const avm1 = w.swf({
   tags: [
     w.fileAttributes(false),
     w.backgroundColor(0xffffff),
-    as1('trace("avm1: a " + a + " q " + q + " b " + _root.b + " quality " + _quality);', 8),
+    as1(
+      'trace("avm1: a " + a + " q " + q + " b " + _root.b + " quality " + _quality); createEmptyMovieClip("child", 1).loadMovie("avm1-child.swf");',
+      8,
+    ),
     w.showFrame(),
     w.end(),
   ],
+});
+// What it loads by a relative URL comes from beside it, as Flash's projector had it, not from
+// the app's page.
+const avm1Child = w.swf({
+  version: 8,
+  width: 10,
+  height: 10,
+  frameCount: 1,
+  tags: [w.fileAttributes(false), as1('trace("avm1 child: " + _url);', 8), w.showFrame(), w.end()],
 });
 
 const files: Record<string, [string, string | Uint8Array]> = {
   "/params.swf": ["application/x-shockwave-flash", as3],
   "/avm1.swf": ["application/x-shockwave-flash", avm1],
+  "/avm1-child.swf": ["application/x-shockwave-flash", avm1Child],
   "/data.txt": ["text/plain", "remote"],
   "/sub/data.txt": ["text/plain", "remote below"],
 };
@@ -148,6 +161,7 @@ try {
     );
     const avm1Line = "avm1: a flash q query b root quality MEDIUM";
     await until("the AVM1 SWF", () => count(avm1Line) === 1);
+    await until("the AVM1 SWF's child", () => count(`avm1 child: ${origin}/avm1-child.swf`) === 1);
 
     // Played again by View › Reload Movie: with them again.
     await main(`(() => {

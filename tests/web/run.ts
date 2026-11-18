@@ -69,6 +69,10 @@ const abcs = compileScripts(
     { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
     { name: "AirAloneTest", source: readFileSync(`${here}scripts/AirAloneTest.as`, "utf8") },
     { name: "UnmuteTest", source: readFileSync(`${here}scripts/UnmuteTest.as`, "utf8") },
+    {
+      name: "RelativeUrlsTest",
+      source: readFileSync(`${here}scripts/RelativeUrlsTest.as`, "utf8"),
+    },
   ],
   out,
 );
@@ -322,6 +326,40 @@ writeFileSync(
     ],
   }),
 );
+// An AS2 SWF in sub/ that loads a child by a relative URL, which reports its _url and loads its
+// sibling from the directory _url names, as old clients find their files.
+const avm1Swf = (source: string) =>
+  w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+const report = `flash.external.ExternalInterface.call("report", _url);`;
+mkdirSync(`${site}sub`, { recursive: true });
+writeFileSync(
+  `${site}sub/avm1-urls.swf`,
+  avm1Swf(`createEmptyMovieClip("child", 1).loadMovie("avm1-url-child.swf");`),
+);
+writeFileSync(
+  `${site}sub/as3-urls.swf`,
+  bare(abcs.get("RelativeUrlsTest") as Uint8Array, 1, "RelativeUrlsTest", 20, 20),
+);
+for (const dir of ["", "sub/", "assets/"]) {
+  mkdirSync(`${site}${dir}`, { recursive: true });
+  writeFileSync(`${site}${dir}relative-url-data.txt`, `/web-test/${dir}`);
+  writeFileSync(
+    `${site}${dir}avm1-url-child.swf`,
+    avm1Swf(`${report}
+createEmptyMovieClip("sibling", 1).loadMovie(_url.substring(0, _url.lastIndexOf("/") + 1) + "avm1-url-sibling.swf");`),
+  );
+  writeFileSync(`${site}${dir}avm1-url-sibling.swf`, avm1Swf(report));
+}
 // An AS2 input field, as the clipboard SWF's for AS3, which the page focuses and reads.
 const avm1Field = `_root.createTextField("field", 1, 0, 0, 140, 20);
 field.type = "input";
@@ -936,6 +974,51 @@ check(
     const left = await call<{ players: number; codegens: number }>(evaluate, "survivors()");
     assert.equal(left.players, 0, "a destroyed AVM1 player is still alive");
     assert.equal(left.codegens, 2);
+  },
+);
+
+// After the checks that count the compilers left: an AVM1 movie that loaded others kept its
+// compiler alive through the churn check's collection when this came before it, on dev too.
+check(
+  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
+  async (evaluate) => {
+    const loads = async (
+      src: string,
+      attributes: Record<string, string>,
+      n: number,
+      page?: string,
+      suffix?: string,
+    ) =>
+      (
+        await call<string[]>(
+          evaluate,
+          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
+        )
+      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
+    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
+    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
+    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
+    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
+    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
+    // it came from, which its sibling's load follows.
+    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
+    assert.deepEqual(await avm1({}), pair("/web-test/"));
+    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
+    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
+    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
+    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
+    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
+    // A page URL's query and fragment are no directory.
+    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
+    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
+    // The page's choice for elements that make none, which the attribute overrides.
+    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
   },
 );
 

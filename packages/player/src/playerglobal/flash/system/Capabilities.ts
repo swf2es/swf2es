@@ -3,6 +3,7 @@
 // the host's system (hosts.ts's platformCapabilities), which a host may
 // set apart.
 import { avm2 } from "@swf2es/runtime";
+import { serverString } from "../../../hosts.js";
 import type { Scripting } from "../../../scripting.js";
 
 export function capabilitiesNatives(s: Scripting): avm2.Natives {
@@ -72,7 +73,7 @@ export function capabilitiesNatives(s: Scripting): avm2.Natives {
     }
 
     static get serverString(): string {
-      return serverString(s);
+      return serverString(s.platform, s.screenCapabilities, s.rt.debugger);
     }
 
     // Flash Player 32 and AIR 51 both.
@@ -161,44 +162,4 @@ export function capabilitiesNatives(s: Scripting): avm2.Natives {
 
   avm2.registerNativeClass(natives, "flash.system::Capabilities", CapabilitiesNatives);
   return natives;
-}
-
-/** The capabilities as Flash sends them to a server: its fields' codes, URL-encoded, in its order. */
-function serverString(s: Scripting): string {
-  const p = s.platform;
-  const yes = (b: boolean) => (b ? "t" : "f");
-  const sc = s.screenCapabilities;
-  const fields: [string, string][] = [
-    ["A", "t"],
-    ["SA", "t"],
-    ["SV", "t"],
-    ["EV", "t"],
-    ["MP3", "t"],
-    ["AE", "t"],
-    ["VE", "t"],
-    ["ACC", "t"],
-    ["PR", "t"],
-    ["SP", "f"],
-    ["SB", "f"],
-    ["DEB", yes(s.rt.debugger)],
-    ["V", p.version],
-    ["M", p.manufacturer],
-    ["R", `${sc.screenResolutionX}x${sc.screenResolutionY}`],
-    ["COL", "color"],
-    ["AR", String(sc.pixelAspectRatio)],
-    ["OS", p.os],
-    ["ARCH", "x86"],
-    ["L", p.language],
-    ["IME", "t"],
-    ["PR32", "t"],
-    ["PR64", "t"],
-    ["PT", p.playerType],
-    ["AVD", "f"],
-    ["LFD", "t"],
-    ["WD", "f"],
-    ["TLS", "t"],
-    ["ML", "5.1"],
-    ["DP", String(sc.screenDPI)],
-  ];
-  return fields.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
 }

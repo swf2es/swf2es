@@ -74,6 +74,8 @@ const SITE = new URL("../", import.meta.url).href;
 configure({
   cache: true,
   build: build === "unknown" ? undefined : build,
+  // A SWF from elsewhere, not this page's: its relative URLs against its own.
+  relativeUrls: "movie",
 });
 
 // --- The console panel --------------------------------------------------

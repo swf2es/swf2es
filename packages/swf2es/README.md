@@ -31,6 +31,17 @@ Players already in the markup start as the module loads, before any
 script that imports it runs, so a page that configures its players adds
 them from that script, after `configure`.
 
+## Relative URLs
+
+A SWF's relative URLs resolve as Flash Player's plug-in resolved them:
+against the page, or against the element's `base`, where `base="."` is
+the SWF's directory and any other value is relative to the page. A page
+that plays SWFs from elsewhere sets `relativeurls="movie"` on the
+element, or `configure({ relativeUrls: "movie" })` for all of them, to
+resolve them against each SWF's own URL. Like `base`, the attribute is
+read when a movie loads; `replaceFlash` carries `base` from a Flash tag
+but not `relativeurls`, which only `configure` sets for those players.
+
 ## Versions
 
 Name a version in the URL. Until 1.0, a minor release (0.2) may change

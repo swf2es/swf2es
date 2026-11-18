@@ -589,8 +589,8 @@ test("a base resolves every relative URL a SWF asks for, as a page's base parame
   load("https://other.test/absolute.bin");
   assert.deepEqual(requests, [
     "http://cdn.example.test/assets/data/level.bin",
-    // Dot segments are left for the fetch to fold.
-    "http://cdn.example.test/assets/../root.xml",
+    // Dot segments fold, as a browser folds them.
+    "http://cdn.example.test/root.xml",
     "https://other.test/absolute.bin",
   ]);
   // The SWF's own URL is still its LoaderInfo's.
@@ -787,18 +787,22 @@ test("an AVM1 SWF from a URL comes as an AS3 one's content does, its INIT and CO
 });
 
 for (const bytes of [false, true]) {
-  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions without a main timeline's $version`, {
+  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions and capabilities without a main timeline's $version`, {
     skip,
   }, async () => {
     const lines: string[] = [];
     const actions = script(
-      `trace(Stage.width + " " + Stage.height); trace(typeof $version); trace(typeof getVersion());`,
+      `trace(Stage.width + " " + Stage.height); trace(typeof $version); trace(typeof getVersion());
+var c = System.capabilities;
+trace(c.version + "|" + c.os + "|" + c.screenResolutionX + "|" + c.isDebugger);`,
       8,
     )(flashAssembler());
     const inner = avm1Swf([w.doAction([...actions.end().bytes()])]);
     const { scripting, player, loader } = await avm1Loading({
       print: (line) => lines.push(line),
       fetch: async () => ({ bytes: inner, status: 200, headers: [] }),
+      platform: { version: "WIN 9,0,115,0", os: "Windows XP" },
+      screenCapabilities: { screenResolutionX: 1024 },
     });
     if (bytes) {
       scripting.loads.requestLoad(loader, inner);
@@ -813,11 +817,53 @@ for (const bytes of [false, true]) {
       player.tick();
     }
 
-    assert.deepEqual(lines, [`${player.width} ${player.height}`, "undefined", "undefined"]);
+    // The outer player's platform, screen and debugger, as AS3's Capabilities reports them.
+    assert.deepEqual(lines, [
+      `${player.width} ${player.height}`,
+      "undefined",
+      "undefined",
+      `WIN 9,0,115,0|Windows XP|1024|${scripting.rt.debugger}`,
+    ]);
     assert.notDeepEqual([player.width, player.height], [30, 20]);
     player.destroy();
   });
 }
+
+test("an AVM1 SWF AS3 loads resolves its loads and getURL's windows against the page's base, as Flash's plug-in did", {
+  skip,
+}, async () => {
+  const asked: string[] = [];
+  const opened: string[] = [];
+  const actions = script(
+    `createEmptyMovieClip("g", 1).loadMovie("grandchild.swf"); this.getURL("next.html", "_blank");`,
+    8,
+  )(flashAssembler());
+  const inner = avm1Swf([w.doAction([...actions.end().bytes()])]);
+  const { scripting, player, loader } = await avm1Loading({
+    base: "http://example.test/page/index.html?id=1",
+    fetch: async (request) => {
+      asked.push(request.url);
+      return request.url.endsWith("child.swf")
+        ? { bytes: inner, status: 200, headers: [] }
+        : { bytes: null, status: 404, headers: [] };
+    },
+    navigate: (request) => opened.push(request.url),
+  });
+  scripting.loads.requestLoadUrl(loader, "sub/child.swf");
+  await scripting.settled();
+  for (let i = 0; i < 3; i++) {
+    player.tick();
+    await scripting.settled();
+  }
+
+  // Each time its frame's actions ran.
+  assert.deepEqual(
+    [...new Set(asked)],
+    ["http://example.test/page/sub/child.swf", "http://example.test/page/grandchild.swf"],
+  );
+  assert.deepEqual([...new Set(opened)], ["http://example.test/page/next.html"]);
+  player.destroy();
+});
 
 test("an AVM1 SWF from bytes comes at the end of the frame, its context's parameters on it", {
   skip,

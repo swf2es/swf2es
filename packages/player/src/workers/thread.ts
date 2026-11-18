@@ -83,6 +83,7 @@ export function runWorkerThread(port: ThreadPort): void {
     const s = new Scripting(await createCodegen(codegen), {
       handedModules: init.modules,
       url: init.url,
+      base: init.base ?? undefined,
       sandboxType: init.sandboxType,
       air: init.air,
       print: (line) => port.post({ type: "trace", line }),

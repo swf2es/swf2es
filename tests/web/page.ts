@@ -692,6 +692,50 @@ async function avm1External() {
   return { calls: calls.avm1, triple, never };
 }
 
+/**
+ * What a SWF in a directory of its own, sub/, reports of what it loaded by
+ * relative URLs, with the element's `attributes` (base, relativeurls) and
+ * the page's configure({ relativeUrls: `configured` }), the page's URL
+ * given the query and fragment `suffix` meanwhile, once `n` reports came
+ * or a while passed.
+ */
+async function relativeLoads(
+  src: string,
+  attributes: Record<string, string>,
+  n: number,
+  configured?: "page" | "movie",
+  suffix?: string,
+) {
+  const { web } = await loading;
+  const before = web.configuration().relativeUrls;
+  const address = location.href;
+  web.configure({ relativeUrls: configured });
+  if (suffix) {
+    history.replaceState(history.state, "", suffix);
+  }
+
+  calls.reports.length = 0;
+  const p = await newPlayer();
+  p.setAttribute("src", src);
+  for (const [name, value] of Object.entries(attributes)) {
+    p.setAttribute(name, value);
+  }
+
+  try {
+    document.body.append(p);
+    await p.ready;
+    for (let i = 0; i < 300 && calls.reports.length < n; i++) {
+      await frames(1);
+    }
+  } finally {
+    p.remove();
+    web.configure({ relativeUrls: before });
+    history.replaceState(history.state, "", address);
+  }
+
+  return calls.reports.splice(0);
+}
+
 /** What a collection left: players made and destroyed still alive, and codegen instances. */
 function survivors() {
   return {
@@ -1189,6 +1233,7 @@ Object.assign(globalThis, {
   lazyChurn,
   avm1Churn,
   avm1External,
+  relativeLoads,
   survivors,
   workerRun,
   webWorkers: () => ({ ...webWorkers }),

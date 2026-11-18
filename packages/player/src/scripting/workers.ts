@@ -271,6 +271,7 @@ export class Workers {
           id,
           swf,
           url: this.s.url,
+          base: this.s.base,
           sandboxType: this.s.sandboxType,
           air: this.s.air,
           libraries: this.libraries,
