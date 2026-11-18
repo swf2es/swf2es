@@ -848,7 +848,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       }
 
       this.clips = clips.filter((clip) => !this.removed(clip));
-      // A load's onLoadInit after the frame's actions of what it loaded, as Ruffle queues it.
+      // A load's onLoadInit after the frame's actions of what it loaded and those their gotos
+      // queued, as adl runs them: a first frame that sends a clip to a frame that stops it has
+      // stopped it before onLoadInit can send it on (Ruffle queues onLoadInit before those).
+      this.queue.run();
       this.loads.loadsInitialized();
       this.queue.run();
       // onSoundComplete runs with the frame's actions, and what it queues runs with them too.
