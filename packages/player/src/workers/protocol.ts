@@ -44,6 +44,8 @@ export interface WorkerInit {
   swf: Uint8Array<ArrayBuffer>;
   /** The URL its LoaderInfo reports: the primordial's SWF's. */
   url: string;
+  /** Where its relative URLs resolve, the primordial's base; null for each SWF's own. */
+  base: string | null;
   /** Security.sandboxType, the primordial's. */
   sandboxType: string;
   /** Whether it sees AIR's API, as the primordial does. */

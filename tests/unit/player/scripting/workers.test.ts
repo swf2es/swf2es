@@ -122,7 +122,7 @@ async function play(
   name: string,
   primordial: string,
   background: string,
-  options: { frames?: number; workerHost?: WorkerHost; blocking?: boolean } = {},
+  options: { frames?: number; workerHost?: WorkerHost; blocking?: boolean; base?: string } = {},
 ): Promise<{ lines: string[]; uncaught: string[]; scripting: Scripting }> {
   const lines: string[] = [];
   const uncaught: string[] = [];
@@ -133,6 +133,7 @@ async function play(
     onUncaught: (error) =>
       uncaught.push(error instanceof Error ? error.message : scripting.rt.toString(error as never)),
     workerHost: options.workerHost ?? nodeWorkerHost({ codegen: wasm }),
+    base: options.base,
   });
   try {
     await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
@@ -304,6 +305,34 @@ test("a host that cannot start a thread fails start with 3807, and the worker is
     "again flash.errors::IllegalOperationError 1511",
   ]);
   assert.equal(held(scripting), 0);
+});
+
+test("a background worker is given the primordial's base, where its relative URLs resolve", {
+  skip,
+}, async () => {
+  const bases: (string | null)[] = [];
+  const { uncaught } = await play(
+    "WorkerBase",
+    `      w = WorkerDomain.current.createWorker(loaderInfo.bytes);
+      try {
+        w.start();
+      } catch (e:Error) {
+      }`,
+    "",
+    {
+      frames: 2,
+      base: "http://example.test/page/index.html",
+      workerHost: {
+        start(init) {
+          bases.push(init.base);
+          throw new Error("only its init was wanted");
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(uncaught, []);
+  assert.deepEqual(bases, ["http://example.test/page/index.html"]);
 });
 
 test("a terminated worker is let go, its channels' undelivered messages with it", {
