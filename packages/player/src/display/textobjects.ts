@@ -287,6 +287,8 @@ export class TextObject extends DisplayObject {
   }
 }
 
+const NO_OFFSET: readonly [number, number] = [0, 0];
+
 /**
  * Where a text field's x and y are from its origin, in twips: its box's
  * corner, its DefineEditText bounds' corner scaled, as Flash and Ruffle
@@ -295,9 +297,10 @@ export class TextObject extends DisplayObject {
  * whole twips, cut toward zero as Ruffle's is, and none for a NaN scale;
  * none for any other display object.
  */
-export function fieldOffset(d: DisplayObject): [number, number] {
+export function fieldOffset(d: DisplayObject): readonly [number, number] {
+  // Shared: every clip's _x and _y ask, the AVM1 hot path.
   if (!(d instanceof TextObject)) {
-    return [0, 0];
+    return NO_OFFSET;
   }
 
   const twips = (v: number) => Math.trunc(v) || 0;
