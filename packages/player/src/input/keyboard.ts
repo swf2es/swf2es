@@ -113,6 +113,11 @@ export function setFocus(s: Scripting, next: DisplayObject | null): void {
     }
   }
 
+  // A field given the focus scrolls to its caret, as adl's does.
+  if (next instanceof TextObject && next !== previous) {
+    next.scrollTo(next.caret);
+  }
+
   if (previous) {
     focusEvent(s, "focusOut", previous, next, false);
   }

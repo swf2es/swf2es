@@ -7,7 +7,7 @@
 // other object given them reads undefined.
 import { avm1 } from "@swf2es/runtime";
 import { CONTENT, type DisplayObject, TextObject } from "../../display/display.js";
-import { maxScrollV, shownLines } from "../../text/layout.js";
+import { maxScrollH, maxScrollV, shownLines } from "../../text/layout.js";
 import { applied, emptyFormat, type PartialFormat } from "../../text/text.js";
 import { type FilterFaces, filtersProperty } from "./filters.js";
 import { DEPTH_BIAS } from "./MovieClip.js";
@@ -226,7 +226,8 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     const [begin, end] = state.selected ? field.selection : [0, 0];
     state.selected = true;
     field.model.replace(begin, end, text);
-    field.select(begin + text.length, begin + text.length);
+    // Scrolled to where it went in, not to the caret after it (Flash Player).
+    field.select(begin + text.length, begin + text.length, begin);
     changed(field);
     host.textChanged(field);
     return undefined;
@@ -466,15 +467,22 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       host.variableChanged(field);
     },
   );
+  // In twips for a field of embedded fonts, pixels for one of device fonts, as Flash Player gives them.
   property(
     "hscroll",
-    (field) => field.scrollH,
+    (field) => (field.embedFonts ? Math.round(field.scrollH * 20) : Math.trunc(field.scrollH)),
     (field, value, version) => {
-      field.scrollH = Math.max(0, avm1.toNumber(value, version) | 0);
+      const units = field.embedFonts ? 20 : 1;
+      const max = maxScrollH(field) / (20 / units);
+      field.scrollH = Math.max(0, Math.min(avm1.toNumber(value, version) | 0, max)) / units;
       field.invalidate(CONTENT);
     },
   );
-  property("maxhscroll", (field) => maxHScroll(field), null);
+  property(
+    "maxhscroll",
+    (field) => (field.embedFonts ? maxScrollH(field) : Math.trunc(maxScrollH(field) / 20)),
+    null,
+  );
   // None is null.
   property(
     "maxChars",
@@ -598,14 +606,4 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     () => host.filterFaces,
   );
   return { constr, proto };
-}
-
-/** How far the text scrolls sideways: its width past the field's, in whole pixels. */
-function maxHScroll(field: TextObject): number {
-  if (field.wordWrap) {
-    return 0;
-  }
-
-  const over = field.layout.width / 20 + 4 - field.width;
-  return over > 0 ? Math.trunc(over) : 0;
 }

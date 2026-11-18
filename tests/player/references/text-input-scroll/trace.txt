@@ -1,0 +1,74 @@
+text h 0 153 v 1 1 1 sel 0 0 0
+focused h 0 153 v 1 1 1 sel 0 0 0
+end h 140 153 v 1 1 1 sel 20 20 20
+19 h 140 153 v 1 1 1 sel 19 19 19
+10 h 84 153 v 1 1 1 sel 10 10 10
+start h 0 153 v 1 1 1 sel 0 1 0
+8 h 28 153 v 1 1 1 sel 8 8 8
+6 h 28 153 v 1 1 1 sel 6 6 6
+9 h 42 153 v 1 1 1 sel 9 9 9
+12 h 70 153 v 1 1 1 sel 12 12 12
+3 h 28 153 v 1 1 1 sel 3 3 3
+0 to 20 h 140 153 v 1 1 1 sel 0 20 20
+20 to 0 h 0 153 v 1 1 1 sel 0 20 0
+5 to 15 h 98 153 v 1 1 1 sel 5 15 15
+5 to 15 again h 0 153 v 1 1 1 sel 5 15 15
+scrollH 1000 h 153 153 v 1 1 1 sel 5 15 15
+scrollH -15 h 15 153 v 1 1 1 sel 5 15 15
+scrollH 30 h 30 153 v 1 1 1 sel 5 15 15
+15 after scrollH h 100 153 v 1 1 1 sel 15 15 15
+replaced at end h 142 166 v 1 1 1 sel 21 21 21
+replaced at start h 2 193 v 1 1 1 sel 3 3 3
+appended h 2 217 v 1 1 1 sel 3 3 3
+to the end h 212 217 v 1 1 1 sel 27 27 27
+appended at the end h 212 240 v 1 1 1 sel 27 27 27
+replaceText h 0 217 v 1 1 1 sel 27 27 27
+replaceText at the end h 210 225 v 1 1 1 sel 29 29 29
+text h 162 162 v 1 1 1
+text shorter h 26 26 v 1 1 1
+text again h 138 153 v 1 1 1 sel 19 19 19
+lines start h 0 69 v 1 6 2 sel 0 1 0
+lines end h 0 69 v 6 6 7 sel 23 23 23
+lines start again h 0 69 v 1 6 2 sel 0 1 0
+lines 3 h 0 69 v 2 6 3 sel 4 4 4
+lines 4 h 0 69 v 3 6 4 sel 6 6 6
+lines 4 end h 56 69 v 3 6 4 sel 17 17 17
+lines 2 h 0 69 v 2 6 3 sel 2 2 2
+lines 5 h 0 69 v 4 6 5 sel 18 18 18
+wrapped start h 0 0 v 1 7 2 sel 0 1 0
+wrapped end h 0 0 v 7 7 8 sel 40 40 40
+wrapped 7 h 0 0 v 2 7 3 sel 7 7 7
+wrapped 17 h 0 0 v 3 7 4 sel 17 17 17
+other end h 140 153 v 1 1 1 sel 20 20 20
+line 15 h 139 153 v 1 1 1 sel 15 15 15
+line focused again h 139 153 v 1 1 1 sel 15 15 15
+dynamic h 140 139 v 1 1 1
+line end h 153 153 v 1 1 1 sel 20 20 20
+leftMargin h 0 163 v 1 1 1
+leftMargin end h 154 163 v 1 1 1 sel 20 20 20
+leftMargin start h 0 163 v 1 1 1 sel 0 1 0
+leftMargin dynamic h 0 149 v 1 1 1
+rightMargin h 0 153 v 1 1 1
+indent h 0 163 v 1 1 1
+blockIndent h 0 163 v 1 1 1
+short h 0 0 v 1 1 1
+centred short h 0 5 v 1 1 1
+centred short dynamic h 0 0 v 1 1 1
+centred long h 0 153 v 1 1 1
+right short h 0 13 v 1 1 1
+right long h 0 153 v 1 1 1
+autoSize 8 25.45 23.5 19.5 3 0
+autoSize 10 30.65 28.25 24.25 4 0
+autoSize 13 38.65 35.5 31.5 5 0
+autoSize 20 57.6 52.75 48.75 8 0
+autoSize 40 111.25 101.5 97.5 17 0
+autoSize 72 197.3 179.75 175.75 30 0
+autoSize end 57.6 0 8 5
+autoSize typed 67.35 0 10 6
+autoSize appended end 96.6 0 18 9
+autoSize by the default size 106.35 97.5
+frame 1 h 153 153 v 1 1 1 sel 20 20 20
+3 h 27 153 v 1 1 1 sel 3 3 3
+frame 2 h 27 153 v 1 1 1 sel 3 3 3
+end h 153 153 v 1 1 1 sel 20 20 20
+frame 3 h 153 153 v 1 1 1 sel 20 20 20

@@ -1501,9 +1501,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return this.focusTracker.focusedObject;
   }
 
-  /** Focus `d`, or none, telling those it concerns at once (focus.ts). */
-  focus(d: DisplayObject | null): void {
-    this.focusTracker.focus(d);
+  /** Focus `d`, or none, telling those it concerns at once (focus.ts); a press's focus scrolls no field. */
+  focus(d: DisplayObject | null, byPointer = false): void {
+    this.focusTracker.focus(d, byPointer);
   }
 
   /** Whether a script may focus `d` (focus.ts). */
