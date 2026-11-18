@@ -19,7 +19,7 @@ import type { PixelRect } from "../bitmap/pixel-rect.js";
 import { type Region as Area, radialPixels, ramp } from "../display/gradients.js";
 import type { GradientFill } from "../display/shapes.js";
 import { makeRoom, moveLast, same } from "../display/value-lists.js";
-import { type BitmapSampling, type Part, radialTexels } from "./shapes.js";
+import { type BitmapSampling, type PartPaint, radialTexels } from "./shapes.js";
 
 /**
  * How many frames a gradient's texture may go undrawn: a morph tweening a
@@ -110,7 +110,7 @@ export class Paints {
    * The texture a part's paint or mesh samples: its bitmap's, else null till
    * it is decoded, or its gradient's.
    */
-  paintTexture(part: Part): TextureHandle | null {
+  paintTexture(part: PartPaint): TextureHandle | null {
     if (part.mesh) {
       const store = part.mesh.image;
       return store.disposed ? null : this.storeTexture(store);
@@ -358,7 +358,7 @@ export class Paints {
  * clamped. A linear gradient's ramp: texel by texel, spread as it wraps; a
  * radial one's, smoothed.
  */
-export function paintSampler(part: Part, smoothing: boolean): number {
+export function paintSampler(part: PartPaint, smoothing: boolean): number {
   const mesh = part.mesh;
   if (mesh) {
     return MESH | (mesh.smooth && smoothing ? SMOOTH : 0) | (mesh.repeat ? REPEAT : CLAMP);

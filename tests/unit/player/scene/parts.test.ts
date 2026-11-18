@@ -47,7 +47,9 @@ test("unchanged cached parts need no repeated handle validation, including after
     assert.equal(checks, 0);
 
     // An unrelated removal revalidates once, without rebuilding these parts.
-    const other = geometries.add(first[0].part.geometry);
+    const geometry = geometries.get(first[0].handle.id);
+    assert.ok(geometry);
+    const other = geometries.add(geometry);
     geometries.remove(other.id);
     assert.equal(parts.partsOf(d.layers[0], d.version), first);
     assert.equal(checks, first.length);
@@ -63,8 +65,10 @@ test("a removal and id reuse in the same frame cannot revive cached parts", () =
   try {
     const first = parts.partsOf(d.layers[0], d.version);
     const old = first[0].handle;
+    const geometry = geometries.get(old.id);
+    assert.ok(geometry);
     geometries.remove(old.id);
-    const replacement = geometries.add(first[0].part.geometry);
+    const replacement = geometries.add(geometry);
     assert.equal(replacement.id, old.id);
     assert.notEqual(replacement.generation, old.generation);
     const next = parts.partsOf(d.layers[0], d.version);

@@ -136,18 +136,18 @@ export class Masks {
     let row = -1;
     if (layers) {
       for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.parts.partsOf(layers[i], version, o.drawing !== null)) {
+        for (const part of this.parts.partsOf(layers[i], version, o.drawing !== null)) {
           // A mesh of a bitmap disposed of draws nothing, as it is drawn, and so masks nothing.
           if (part.mesh?.image.disposed) {
             continue;
           }
 
-          this.geometries.use(handle.id);
+          this.geometries.use(part.handle.id);
           if (row < 0) {
             row = rows.add(a, b, c, d, tx, ty, null);
           }
 
-          scene.draw(handle.id, row, NORMAL);
+          scene.draw(part.handle.id, row, NORMAL);
         }
       }
     }
