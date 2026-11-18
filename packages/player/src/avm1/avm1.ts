@@ -62,6 +62,7 @@ import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
   type SoundHost,
+  stopSoundsUnder,
   stopTimelineSounds,
   timelineSoundsOf,
 } from "../media/sounds.js";
@@ -693,7 +694,38 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       keeps: (display) => this.keeps(display),
     };
     library.removing = (display) => this.removing(display);
-    library.sounds = timelineSoundsOf(this.sounds);
+    const sounds = timelineSoundsOf(this.sounds);
+    library.sounds = {
+      ...sounds,
+      removed: (display) => {
+        sounds.removed(display);
+        this.unloadSounds(display);
+      },
+    };
+  }
+
+  /**
+   * The sounds of the loaded movies that go with `d`, removed or emptied
+   * of what it shows: those of a movie's own library playing on a clip of
+   * that movie at or under `d`, which adl stops, none completing. A sound
+   * of another movie plays on, as the parent's Sound on the clip a load
+   * fills does in adl, and so does one on a clip a movie removes from itself.
+   */
+  private unloadSounds(d: DisplayObject): void {
+    stopSoundsUnder(this.sounds, d, (owner, character) => {
+      for (let o: DisplayObject | null = owner; o !== null; o = o.parent) {
+        const library = o instanceof MovieClip ? this.contents.get(o)?.library : undefined;
+        if (library?.characters.get(character.id) === character) {
+          return true;
+        }
+
+        if (o === d) {
+          return false;
+        }
+      }
+
+      return false;
+    });
   }
 
   /**
@@ -1415,6 +1447,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * the next frame plays; one without a library shows nothing.
    */
   fill(target: MovieClip, swf: Avm1Swf, frames = EMPTY_TIMELINE): void {
+    // What it showed goes: a loaded movie's sounds with it. An arrival fills the clip twice,
+    // empty first, and the empty movie, or a clip never loaded into, has no sounds of its own.
+    if (this.contents.get(target)?.library) {
+      this.unloadSounds(target);
+    }
+
     for (const child of target.children) {
       this.markPaths(child);
       target.library.sounds?.removed(child);
