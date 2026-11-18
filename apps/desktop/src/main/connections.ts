@@ -2,14 +2,9 @@
 // the proxy (--proxy, proxy.ts): what the socket bridge (sockets.ts) holds
 // for each page, apart from Electron so that node runs it in the tests
 // (tests/desktop/connections.test.ts).
-import { connect, type OnReadOpts, Socket } from "node:net";
-import type { SecureSocketEvents, SecureSocketOptions, SocketEndpoints } from "@swf2es/player";
-import {
-  type TlsTransport,
-  tlsConnect,
-  tlsSocket,
-  validCertificate,
-} from "@swf2es/player-hosts/node";
+import { connect, type OnReadOpts, type Socket } from "node:net";
+import type { SecureSocketOptions, SocketEndpoints } from "@swf2es/player";
+import { type TlsTransport, tlsSocket, validCertificate } from "@swf2es/player-hosts/node";
 import type { SocketEvent } from "../shared/api.js";
 import { connectThrough, type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
 
@@ -162,15 +157,8 @@ export class Connections {
     }
 
     if (secure) {
-      this.attachSecure(
-        id,
-        {
-          address: target,
-          port: port as number,
-        },
-        host,
-        { ...secure, noDelay },
-      );
+      const socket = connect({ host: target, port: port as number, noDelay });
+      this.attachSecure(id, socket, host, secure);
       return;
     }
 
@@ -265,7 +253,7 @@ export class Connections {
 
   private attachSecure(
     id: number,
-    target: Socket | { address: string; port: number },
+    raw: Socket,
     host: string,
     options: SecureSocketOptions,
     remote?: Pick<SocketEndpoints, "remoteAddress" | "remotePort">,
@@ -274,57 +262,56 @@ export class Connections {
     const generation = this.generation;
     const current = () => this.generation === generation && this.secure.get(id) === transport;
     try {
-      const events = {
-        open: (endpoints) => {
-          if (current() && endpoints) {
-            this.sockets.set(id, transport.socket);
-            this.tell(id, { type: "open", ...endpoints });
-          }
-        },
-        data: (bytes) => {
-          if (current()) {
-            this.tell(id, { type: "data", bytes });
-          }
-        },
-        certificate: (status, certificate) => {
-          if (current()) {
-            this.tell(id, { type: "certificate", status, certificate });
-          }
-        },
-        certificateError: (proceed) => {
-          if (!current()) {
-            proceed(false);
-            return;
-          }
+      transport = tlsSocket(
+        raw,
+        host,
+        {
+          open: (endpoints) => {
+            if (current() && endpoints) {
+              this.sockets.set(id, transport.socket);
+              this.tell(id, { type: "open", ...endpoints });
+            }
+          },
+          data: (bytes) => {
+            if (current()) {
+              this.tell(id, { type: "data", bytes });
+            }
+          },
+          certificate: (status, certificate) => {
+            if (current()) {
+              this.tell(id, { type: "certificate", status, certificate });
+            }
+          },
+          certificateError: (proceed) => {
+            if (!current()) {
+              proceed(false);
+              return;
+            }
 
-          this.decisions.set(id, proceed);
-          this.tell(id, { type: "certificateError" });
+            this.decisions.set(id, proceed);
+            this.tell(id, { type: "certificateError" });
+          },
+          error: (message) => {
+            if (current()) {
+              this.tell(id, { type: "error", message });
+            }
+          },
+          close: () => {
+            if (current()) {
+              this.secure.delete(id);
+              this.sockets.delete(id);
+              this.decisions.delete(id);
+              this.tell(id, { type: "close" });
+            }
+          },
         },
-        error: (message) => {
-          if (current()) {
-            this.tell(id, { type: "error", message });
-          }
-        },
-        close: () => {
-          if (current()) {
-            this.secure.delete(id);
-            this.sockets.delete(id);
-            this.decisions.delete(id);
-            this.tell(id, { type: "close" });
-          }
-        },
-      } satisfies SecureSocketEvents;
-      transport =
-        target instanceof Socket
-          ? tlsSocket(target, host, events, options, remote)
-          : tlsConnect(host, target.port, events, options, target.address);
+        options,
+        remote,
+      );
       this.secure.set(id, transport);
       this.sockets.set(id, transport.socket);
     } catch {
-      if (target instanceof Socket) {
-        target.destroy();
-      }
-
+      raw.destroy();
       this.refuse(id);
     }
   }

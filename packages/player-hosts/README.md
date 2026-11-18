@@ -26,11 +26,8 @@ npm install @swf2es/player-hosts
   node's TCP and flash.net.SecureSocket over TLS, and `nodeWorkerHost()`,
   flash.system.Worker on worker threads. TLS uses node's default and system
   trust stores, plus certificates the SWF adds to that socket. The node
-  entry also exports `tlsConnect()` for direct TLS with an optional pinned
-  address, and `tlsSocket()` for hosts that provide an existing TCP connection
-  or proxy tunnel. Direct TLS reuses a 64 KB read buffer; each delivered read
-  owns its bytes so receivers may queue them. Routing and permission checks
-  belong to the embedding host.
+  entry also exports `tlsSocket()` for hosts that provide their own TCP
+  routing and permission checks.
 - `@swf2es/player-hosts/workers`: `webWorkerHost()`, flash.system.Worker
   on Web Workers, which run `@swf2es/player-hosts/web-worker`
   (`node-worker` is node's).
