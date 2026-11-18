@@ -56,6 +56,21 @@ test("contours choose the first unused edge at a shared junction, preserving cur
   );
 });
 
+test("ordered edges that return to the start twice remain two contours", () => {
+  assert.deepEqual(
+    joined([
+      [0, 0, 20, 0],
+      [20, 0, 0, 0],
+      [0, 0, 0, 20],
+      [0, 20, 0, 0],
+    ]),
+    [
+      [1, 0, 0, 2, 1, 0, 2, 0, 0],
+      [1, 0, 0, 2, 0, 1, 2, 0, 0],
+    ],
+  );
+});
+
 test("an open endpoint never joins an edge that starts at a different coordinate", () => {
   assert.deepEqual(
     joined([
