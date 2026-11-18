@@ -283,23 +283,22 @@ fn runY(plane: []u8, pending: []u8, w: usize, h: usize, box: Box, sums: []i32) v
     @memcpy(tail[pending.len - split ..], pending[0..split]);
 }
 
-/// Source row y can last contribute at y + full + 1, through the fractional tap.
-fn queuedRows(h: usize, blur_y: f64, quality: u32) usize {
-    if (quality == 0) return 0;
-    const b = Box.of(blur_y) orelse return 0;
-    return @min(b.full + 2, h);
-}
-
 /// The blur's runs over `plane` (w × h): each quality's along x, then along y.
-fn blur(gpa: std.mem.Allocator, plane: []u8, pending: []u8, w: usize, h: usize, blur_x: f64, blur_y: f64, quality: u32) Error!void {
+fn blur(gpa: std.mem.Allocator, plane: []u8, w: usize, h: usize, blur_x: f64, blur_y: f64, quality: u32) Error!void {
     const bx = Box.of(blur_x);
     const by = Box.of(blur_y);
     if (quality == 0 or w == 0 or h == 0 or (bx == null and by == null)) return;
 
-    const line = try gpa.alloc(i32, if (bx) |b| w + 2 * (b.full + 1) + 1 else 0);
-    defer gpa.free(line);
-    const sums = try gpa.alloc(i32, if (by != null) w else 0);
-    defer gpa.free(sums);
+    const columns = if (bx) |b| w + 2 * (b.full + 1) + 1 else 0;
+    const sums_end = columns + (if (by != null) w else 0);
+    // Source row y can last contribute at y + full + 1, through the fractional tap.
+    const bytes = if (by) |b| w * @min(b.full + 2, h) else 0;
+    // One allocation lets the bump arena reclaim this read's scratch even at odd widths.
+    const scratch = try gpa.alloc(i32, sums_end + (bytes + 3) / 4);
+    defer gpa.free(scratch);
+    const line = scratch[0..columns];
+    const sums = scratch[columns..sums_end];
+    const pending = std.mem.sliceAsBytes(scratch[sums_end..])[0..bytes];
 
     for (0..quality) |_| {
         if (bx) |b| runX(plane, w, h, b, line);
@@ -313,12 +312,10 @@ pub fn blurPixels(gpa: std.mem.Allocator, pixels: []u32, p: *const BlurParams) E
 
     const plane = try gpa.alloc(u8, pixels.len);
     defer gpa.free(plane);
-    const pending = try gpa.alloc(u8, p.w * queuedRows(p.h, p.blur_y, p.quality));
-    defer gpa.free(pending);
 
     inline for (.{ 24, 16, 8, 0 }) |shift| {
         for (plane, pixels) |*v, px| v.* = @truncate(px >> shift);
-        try blur(gpa, plane, pending, p.w, p.h, p.blur_x, p.blur_y, p.quality);
+        try blur(gpa, plane, p.w, p.h, p.blur_x, p.blur_y, p.quality);
         const mask: u32 = ~(@as(u32, 0xff) << shift);
         for (pixels, plane) |*px, v| px.* = (px.* & mask) | (@as(u32, v) << shift);
     }
@@ -584,9 +581,7 @@ pub fn layer(gpa: std.mem.Allocator, pixels: []u32, reads: []const []u8, p: *con
         }
 
         const r = p.read[k];
-        const pending = try gpa.alloc(u8, r.rw * queuedRows(r.rh, p.blur_y, p.quality));
-        defer gpa.free(pending);
-        try blur(gpa, plane, pending, r.rw, r.rh, p.blur_x, p.blur_y, p.quality);
+        try blur(gpa, plane, r.rw, r.rh, p.blur_x, p.blur_y, p.quality);
     }
 
     var moved: [2][]u8 = .{ &.{}, &.{} };
