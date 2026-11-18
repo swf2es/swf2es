@@ -13,7 +13,7 @@ import {
   secureOptions,
   validEndpoint,
 } from "./connections.ts";
-import { socketDataLine, socketLine } from "./netlog.ts";
+import { POLICY_IGNORED, socketDataLine, socketLine } from "./netlog.ts";
 import { onPageEnd } from "./page-end.ts";
 import { Relay } from "./relay.ts";
 
@@ -29,7 +29,10 @@ const dataEvent = (bytes: Uint8Array): SocketEvent => ({ type: "data", bytes });
  */
 export function bridgeSockets(
   trusted: (event: IpcMainEvent) => boolean,
-  permit: (host: string, port: number) => Promise<{ address?: string } | null>,
+  permit: (
+    host: string,
+    port: number,
+  ) => Promise<{ address?: string; policyIgnored?: boolean } | null>,
   log: ((line: string) => void) | null = null,
   data = false,
   options: ConnectionOptions = {},
@@ -110,7 +113,13 @@ export function bridgeSockets(
           }
 
           const via = allowed && options.proxy ? " via proxy" : "";
-          log?.(socketLine(id, `${allowed ? "connecting to" : "refused"} ${host}:${port}${via}`));
+          const ignored = allowed?.policyIgnored ? ` ${POLICY_IGNORED}` : "";
+          log?.(
+            socketLine(
+              id,
+              `${allowed ? "connecting to" : "refused"} ${host}:${port}${ignored}${via}`,
+            ),
+          );
           if (allowed) {
             connections.connect(id, host, port, allowed.address, noDelay, secure);
           } else {

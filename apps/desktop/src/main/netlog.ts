@@ -22,8 +22,9 @@ function shown(url: string): string {
 
 /**
  * A request answered: its method, URL, status, body's size and how long it
- * took, where the HTTP cache answered it, fresh or after a 304, and
- * whether its connection was one kept from an earlier request.
+ * took, where the HTTP cache answered it, fresh or after a 304, whether
+ * its connection was one kept from an earlier request, and whether
+ * --ignore-policy-files let it through where a policy file was to.
  */
 export function requestLine(
   method: string,
@@ -33,6 +34,7 @@ export function requestLine(
   ms: number,
   cache?: "hit" | "revalidated",
   reused?: boolean,
+  policyIgnored?: boolean,
 ): string {
   const body = bytes === null ? "no body" : size(bytes);
   let from = "";
@@ -46,8 +48,12 @@ export function requestLine(
   }
 
   const connection = reused ? " reused" : "";
-  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}${connection}`;
+  const allowed = policyIgnored ? ` ${POLICY_IGNORED}` : "";
+  return `swf2es: net ${method} ${shown(url)} ${status} ${body} ${Math.round(ms)} ms${from}${connection}${allowed}`;
 }
+
+/** What a line ends in where --ignore-policy-files let it through in place of a policy file. */
+export const POLICY_IGNORED = "allowed by --ignore-policy-files";
 
 /** A request that got no answer: refused, failed or aborted, and why. */
 export function failureLine(method: string, url: string, why: string, ms: number): string {
