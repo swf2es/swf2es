@@ -139,7 +139,11 @@ function room(count: number): boolean {
 
 /**
  * A glyph's outline cut into segments, its curves into chords that stray
- * from them by `tolerance` at most, as x0 y0 x1 y1 each.
+ * from them by `tolerance` at most, as x0 y0 x1 y1 each. Segments of no
+ * length are left out: the shader would take one as the edge nearest the
+ * pixels round its point, with no way across it, and cover them half, a
+ * speck outside the corner where a font's contour starts with an empty
+ * line, as many do.
  */
 export function chordsOf(glyph: Glyph, tolerance: number): number[] {
   const shape = {
@@ -153,6 +157,11 @@ export function chordsOf(glyph: Glyph, tolerance: number): number[] {
   };
   const layers = shapeLayers(shape);
   const points: number[] = [];
+  const push = (x0: number, y0: number, x1: number, y1: number) => {
+    if (x0 !== x1 || y0 !== y1) {
+      points.push(x0, y0, x1, y1);
+    }
+  };
   const contours = layers.length > 0 ? layers[0].fills.flatMap((f) => f.contours) : [];
   for (const path of contours) {
     let x = 0;
@@ -162,16 +171,13 @@ export function chordsOf(glyph: Glyph, tolerance: number): number[] {
     for (let i = 0; i < path.length; ) {
       switch (path[i]) {
         case MOVE:
-          if (x !== startX || y !== startY) {
-            points.push(x, y, startX, startY);
-          }
-
+          push(x, y, startX, startY);
           x = startX = path[i + 1];
           y = startY = path[i + 2];
           i += 3;
           break;
         case LINE:
-          points.push(x, y, path[i + 1], path[i + 2]);
+          push(x, y, path[i + 1], path[i + 2]);
           x = path[i + 1];
           y = path[i + 2];
           i += 3;
@@ -191,7 +197,7 @@ export function chordsOf(glyph: Glyph, tolerance: number): number[] {
             const u = 1 - t;
             const qx = u * u * x + 2 * u * t * cx + t * t * ax;
             const qy = u * u * y + 2 * u * t * cy + t * t * ay;
-            points.push(px, py, qx, qy);
+            push(px, py, qx, qy);
             px = qx;
             py = qy;
           }
@@ -207,9 +213,7 @@ export function chordsOf(glyph: Glyph, tolerance: number): number[] {
       }
     }
 
-    if (x !== startX || y !== startY) {
-      points.push(x, y, startX, startY);
-    }
+    push(x, y, startX, startY);
   }
 
   return points;

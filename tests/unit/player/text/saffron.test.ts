@@ -66,6 +66,34 @@ test("a glyph of boxes is its edges, a curve its chords, fewer as the tolerance 
   assert.equal(coarse, Math.ceil(Math.sqrt(bend / (4 * 0.5))));
 });
 
+test("an edge of no length is no segment", () => {
+  // A box from its bottom right corner, its first and last edge of no length, as many fonts'.
+  const at: [number, number] = [400, 0];
+  const [cornered] = glyphs([
+    {
+      char: "l",
+      advance: 500,
+      boxes: [],
+      contours: [[at, at, [0, 0], [0, -700], [400, -700], at]],
+    },
+  ]);
+  const lines = cornered.records.filter((r) => r.type === "line");
+  assert.equal(lines.filter((r) => r.dx === 0 && r.dy === 0).length, 2);
+
+  const points = chordsOf(cornered, 1);
+  assert.equal(points.length / 4, 4);
+  for (let i = 0; i < points.length; i += 4) {
+    assert.ok(points[i] !== points[i + 2] || points[i + 1] !== points[i + 3], `segment ${i / 4}`);
+  }
+
+  // A curve whose ends and control point are one point is none either.
+  const records: Glyph["records"] = [
+    ...cornered.records,
+    { type: "curve", cx: 0, cy: 0, ax: 0, ay: 0 },
+  ];
+  assert.equal(chordsOf({ ...cornered, records }, 1).length / 4, 4);
+});
+
 test("a glyph of more segments than the shader may go through is drawn as normal text", () => {
   resetSegments();
   // A zigzag of more edges than that, closed.

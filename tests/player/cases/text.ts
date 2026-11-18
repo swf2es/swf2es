@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import * as w from "../../swf-writer.ts";
 import type { Compile } from "../scripts.ts";
-import { bare, type PlayerCase, probeFont, stemFont } from "./common.ts";
+import { bare, cornerFont, type PlayerCase, probeFont, stemFont } from "./common.ts";
 
 function loadedFont(compile: Compile): Uint8Array {
   const inner = w.swf({
@@ -552,6 +552,25 @@ function textAdvancedMirrored(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Corner drawn with advanced anti-aliasing (scripts/TextAdvancedEmptyEdges.as).
+function textAdvancedEmptyEdges(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 200,
+    height: 70,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      cornerFont(1),
+      w.doAbc(abc, "TextAdvancedEmptyEdges"),
+      w.symbolClass([[0, "TextAdvancedEmptyEdges"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Text drawn in Probe (scripts/TextDraw.as).
 function textDraw(abc: Uint8Array): Uint8Array {
   return w.swf({
@@ -914,6 +933,18 @@ export const textCases: PlayerCase[] = [
     capture: [1],
     // Its table set with TextRenderer stays in adl for the jobs after it.
     alone: true,
+    tolerance: 8,
+    maxOutliers: 0,
+  },
+  // Fonts converted for Flash often start and end each contour with an
+  // empty line. Saffron's outline took it as the edge nearest the pixels
+  // past that corner, half covered them: a speck by each glyph.
+  {
+    name: "text-advanced-empty-edges",
+    swf: textAdvancedEmptyEdges,
+    script: "TextAdvancedEmptyEdges",
+    frames: 1,
+    capture: [1],
     tolerance: 8,
     maxOutliers: 0,
   },

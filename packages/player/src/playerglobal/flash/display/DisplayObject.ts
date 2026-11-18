@@ -15,6 +15,7 @@ import {
   ButtonObject,
   CONTENT,
   type DisplayObject,
+  fieldOffset,
   MovieClip,
   markScriptsDue,
   rootOf,
@@ -100,22 +101,6 @@ function rectangle(s: Scripting, r: Rect): Value {
     twips(r.xMax - r.xMin),
     twips(r.yMax - r.yMin),
   );
-}
-
-/**
- * A text field's x and y are its box's corner, not its origin: its
- * DefineEditText bounds' corner, scaled, added to where it is placed, as
- * Flash and Ruffle read and set them. A box authored inset from its origin
- * so moves to where a script puts it. The offset is whole twips, cut
- * toward zero as Ruffle's is, and none for a NaN scale.
- */
-function fieldOffset(d: DisplayObject): [number, number] {
-  if (!(d instanceof TextObject)) {
-    return [0, 0];
-  }
-
-  const twips = (v: number) => Math.trunc(v) || 0;
-  return [twips(d.scaleX * d.left * 20), twips(d.scaleY * d.top * 20)];
 }
 
 /**
