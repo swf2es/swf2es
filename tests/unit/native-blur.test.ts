@@ -197,15 +197,17 @@ const glow = {
 
 test("an odd-width layer read releases its blur scratch before the output is placed", () => {
   const area = { x: 0, y: 0, width: 512, height: 512 };
-  const vertical = { ...glow, quality: 1, blurX: 0, blurY: 255 };
-  const capacity = (width: number) => {
+  const capacity = (width: number, height: number, blurY: number) => {
     const kernel = new BitmapKernel();
-    assert.ok(kernel.layer(large(width, 256), area, vertical, [[0, 0]]));
+    const vertical = { ...glow, quality: 1, blurX: 0, blurY };
+    assert.ok(kernel.layer(large(width, height), area, vertical, [[0, 0]]));
     return kernel.capacity;
   };
 
-  // Both read 512 alpha rows. A 511-wide queue ends between arena alignments.
-  assert.ok(capacity(511) <= capacity(512));
+  // Both read 512 alpha rows. The moved output is larger than the blur's temporary queue.
+  for (const width of [511, 512]) {
+    assert.ok(capacity(width, 256, 255) <= capacity(width, 512, 0), `width ${width}`);
+  }
 });
 
 test("a glow over a million pixels every frame keeps its instance", () => {
