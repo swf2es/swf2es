@@ -210,6 +210,8 @@ function showStatus(message: string, isError = false): void {
 function showLoading(label: string, fraction: number | null = null): void {
   loading.hidden = false;
   loadingLabel.textContent = label;
+  // Hidden by the page's failure message (play.astro), where an early error preceded the start.
+  loadingProgress.hidden = false;
   if (fraction === null) {
     loadingProgress.removeAttribute("value");
   } else {

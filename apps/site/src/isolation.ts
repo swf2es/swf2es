@@ -1,14 +1,19 @@
 // Cross-origin isolation for the page on GitHub Pages: on the first visit
 // the service worker (service-worker.ts) is registered and the page loaded
-// again once it serves it, now with the headers that isolate it. A browser
-// that has the worker and is still not isolated, as Safari without
+// again once it serves it, now with the headers that isolate it, twice at
+// most, so that one load the worker missed is tried again. A browser that
+// has the worker and is still not isolated, as Safari without
 // credentialless, is not reloaded again: its workers pass messages, and
 // sharing memory says why it cannot.
 
 /** How long the first visit waits for the service worker before it plays without it. */
 const WAIT = 4000;
 
-/** One interrupted bootstrap can recover, but persistent worker bypass must stop. */
+/**
+ * How many times the page is loaded again for isolation, and the query
+ * parameter that counts them: one load the worker missed recovers, one it
+ * always misses plays unisolated rather than load forever.
+ */
 const RETRIES = 2;
 const RETRY = "__swf2es_isolation";
 const stored = Number(new URL(location.href).searchParams.get(RETRY));
@@ -25,7 +30,8 @@ function clearRetry(): void {
   }
 }
 
-function reloadOnce(): boolean {
+/** Load the page again for isolation, unless it has been RETRIES times: then false. */
+function replaceForIsolation(): boolean {
   if (replacing) {
     return true;
   }
@@ -53,7 +59,7 @@ function reloadOnce(): boolean {
 addEventListener("pageshow", (e) => {
   if (e.persisted && !crossOriginIsolated && isSecureContext && navigator.serviceWorker) {
     replacing = false;
-    reloadOnce();
+    replaceForIsolation();
   }
 });
 
@@ -90,11 +96,11 @@ export async function isolate(): Promise<boolean> {
     // bypassed it (Shift-reload): it claims no client again, but serves
     // the page loaded again.
     if (registration.active && !container.controller) {
-      return !reloadOnce();
+      return !replaceForIsolation();
     }
 
     if (await served) {
-      return !reloadOnce();
+      return !replaceForIsolation();
     }
   } catch {
     // No service worker here, as in a private window that refuses one.

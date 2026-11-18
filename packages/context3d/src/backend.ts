@@ -192,8 +192,6 @@ export const isScissorBoundsError = (error: unknown): error is ScissorBoundsErro
   context3DErrorKind(error) === "scissorBounds";
 export const isSamplerBiasError = (error: unknown): error is SamplerBiasError =>
   context3DErrorKind(error) === "samplerBias";
-export const isTextureBindingError = (error: unknown): error is TextureBindingError =>
-  context3DErrorKind(error) === "textureBinding";
 
 export class TextureBindingError extends Error {
   readonly reason:
@@ -220,6 +218,9 @@ export class TextureBindingError extends Error {
 }
 
 brand(TextureBindingError, "textureBinding");
+
+export const isTextureBindingError = (error: unknown): error is TextureBindingError =>
+  context3DErrorKind(error) === "textureBinding";
 
 // No AS objects, renderer objects or browser globals cross this boundary.
 export interface Buffer3D {

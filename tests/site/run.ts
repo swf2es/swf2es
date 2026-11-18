@@ -277,7 +277,7 @@ async function check(): Promise<void> {
             );
           },
         ],
-        ...isolationChecks({ value, send, navigate }),
+        ...isolationChecks({ value, send, navigate, listen }),
         [
           "a player that fails to load says so in place of its loading state",
           async () => {
@@ -307,6 +307,89 @@ async function check(): Promise<void> {
               await send("Network.setBlockedURLs", { urls: [] });
               await send("Network.disable");
             }
+
+            // A page script that throws as it runs, which the window hears as an ErrorEvent.
+            listen("Fetch.requestPaused", (params) => {
+              void send("Fetch.fulfillRequest", {
+                requestId: params.requestId,
+                responseCode: 200,
+                responseHeaders: [{ name: "Content-Type", value: "text/javascript" }],
+                body: Buffer.from('throw new Error("broken on purpose");').toString("base64"),
+              });
+            });
+            await send("Fetch.enable", { patterns: [{ urlPattern: "*/swf2es/app/main.js" }] });
+            try {
+              await send("Page.navigate", { url: `${base}play/` });
+              await until(
+                "document.getElementById('status')?.textContent === 'The player did not load. Reload the page to try again.'",
+              );
+            } finally {
+              await send("Fetch.disable");
+              listen("Fetch.requestPaused", () => {});
+            }
+          },
+        ],
+        [
+          "the failure message hears only this site's player scripts, and only until it runs",
+          async () => {
+            // Before the page's module runs: as the document turns interactive, its deferred
+            // scripts not yet run. An error elsewhere is not the player's; a chunk's is.
+            const { identifier } = await send<{ identifier: string }>(
+              "Page.addScriptToEvaluateOnNewDocument",
+              {
+                source: `document.addEventListener("readystatechange", () => {
+                  if (document.readyState !== "interactive") return;
+                  const status = () => document.getElementById("status").textContent;
+                  const fail = (filename) => dispatchEvent(new ErrorEvent("error", { filename }));
+                  fail("https://elsewhere.example/swf2es/app/main.js");
+                  fail(location.origin + "/elsewhere/app/main.js");
+                  fail(location.origin + "/swf2es/app/deeper/main.js");
+                  globalThis.foreignStatus = status();
+                  fail(location.origin + "/swf2es/player/chunks/0123456789abcdef.js");
+                  globalThis.chunkStatus = status();
+                  globalThis.chunkProgressHidden = document.getElementById("loading-progress").hidden;
+                });`,
+              },
+            );
+            try {
+              await send("Page.navigate", { url: `${base}play/` });
+              // Through the reload that isolates it; asked while the page goes, it may not answer.
+              for (const start = Date.now(); ; ) {
+                const ready = await evaluate<boolean>("globalThis.swf2esPlayerReady === true").then(
+                  (r) => r.value === true,
+                  () => false,
+                );
+                if (ready) {
+                  break;
+                }
+
+                assert.ok(Date.now() - start < 60_000, "the player did not start");
+                await new Promise((wait) => setTimeout(wait, 100));
+              }
+            } finally {
+              await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+            }
+
+            assert.equal(await value<string>("foreignStatus"), "Loading player…");
+            assert.equal(
+              await value<string>("chunkStatus"),
+              "The player did not load. Reload the page to try again.",
+            );
+            assert.equal(await value<boolean>("chunkProgressHidden"), true);
+            // Running, the player cleared it; an error of its own script now is a SWF's or a
+            // bug, which the console shows, not a player that did not load.
+            assert.equal(await value<string>("document.getElementById('status').textContent"), "");
+            await value(
+              `(dispatchEvent(new ErrorEvent("error", { filename: new URL("../app/main.js", location.href).href })), true)`,
+            );
+            assert.equal(await value<string>("document.getElementById('status').textContent"), "");
+            // A SWF loading after that shows its progress, which the failure had hidden.
+            await value("document.querySelector('#demos button').click()");
+            await until("document.getElementById('status').textContent.startsWith('Playing ')");
+            assert.equal(
+              await value<boolean>("document.getElementById('loading-progress').hidden"),
+              false,
+            );
           },
         ],
         [

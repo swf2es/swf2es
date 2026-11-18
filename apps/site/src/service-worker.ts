@@ -45,8 +45,8 @@ scope.addEventListener("activate", (e) => {
  * The chunks are named by their content, and keep for as long as the cache does.
  */
 function fresh(request: Request): boolean {
-  // A request that names its own cache mode keeps it.
-  if (request.cache !== "default") {
+  // A request that names its own cache mode keeps it; one with a body is not asked twice.
+  if (request.cache !== "default" || request.method !== "GET") {
     return false;
   }
 
@@ -69,23 +69,26 @@ scope.addEventListener("fetch", (e) => {
     return;
   }
 
+  // Offline, or where the server does not answer, what the browser's cache has is better
+  // than nothing, as it was before the revalidation.
+  const fetched = fresh(request)
+    ? fetch(new Request(request, { cache: "no-cache" })).catch(() => fetch(request))
+    : fetch(request);
   e.respondWith(
-    fetch(fresh(request) ? new Request(request, { cache: "no-cache" }) : request).then(
-      (response) => {
-        // An opaque or error response has no headers to add to.
-        if (response.status === 0) {
-          return response;
-        }
+    fetched.then((response) => {
+      // An opaque or error response has no headers to add to.
+      if (response.status === 0) {
+        return response;
+      }
 
-        const headers = new Headers(response.headers);
-        headers.set("Cross-Origin-Opener-Policy", "same-origin");
-        headers.set("Cross-Origin-Embedder-Policy", "credentialless");
-        return new Response(response.body, {
-          status: response.status,
-          statusText: response.statusText,
-          headers,
-        });
-      },
-    ),
+      const headers = new Headers(response.headers);
+      headers.set("Cross-Origin-Opener-Policy", "same-origin");
+      headers.set("Cross-Origin-Embedder-Policy", "credentialless");
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }),
   );
 });

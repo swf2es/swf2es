@@ -91,3 +91,22 @@ test("an error of another copy of the backend's package is Flash's error too, by
 
   assert.deepEqual(thrown, [["Error", 3691]]);
 });
+
+test("a backend error of a reason this player does not know stays the backend's own", () => {
+  // As a newer copy of the backend's package might throw, branded but not in ERROR_IDS.
+  const unknown = Object.assign(new Context3DError("limit", "from the future"), {
+    reason: "fromTheFuture",
+  });
+  const s = { rt: { error: () => new Error("translated") } } as unknown as Scripting;
+  const natives = {
+    "flash.display3D::Context3D#present": () => () => {
+      throw unknown;
+    },
+  } as unknown as avm2.Natives;
+  translateErrors(natives, s);
+  const call = natives["flash.display3D::Context3D#present"]({} as avm2.Runtime) as () => void;
+  assert.throws(
+    () => call.call(null),
+    (error) => error === unknown,
+  );
+});

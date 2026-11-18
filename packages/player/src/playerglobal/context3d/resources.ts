@@ -500,11 +500,12 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
         id = entry.disposed ? id : applyAtf(object, value, copy, readAtfHeader(copy, 0));
       } catch (error) {
         // The backend's own failure, which a synchronous upload throws translated, as an event.
-        if (!isContext3DError(error)) {
+        const flash = isContext3DError(error) ? flashError(error) : null;
+        if (!flash) {
           throw error;
         }
 
-        id = flashError(error).id;
+        id = flash.id;
       }
 
       const event = id
