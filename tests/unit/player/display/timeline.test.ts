@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { readShape, readSwf } from "@swf2es/format";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
@@ -105,6 +108,32 @@ test("a SWF read again shares its shapes with the first, and only the shapes ali
 
   // Another colour is another shape.
   assert.notEqual(shapeIn(movie(0x00ff00)), first);
+});
+
+test("a shared shape can build its layers after its first SWF is collected", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc: () => void = runInNewContext("gc");
+
+  function reload(tag: Uint8Array, source: Uint8Array) {
+    source.set(tag);
+    const first = shapeIn(source);
+    const shared = shapeIn(tag);
+    assert.ok(shared?.type === "shape");
+    assert.equal(shared, first);
+
+    return { source: new WeakRef(source.buffer), shared };
+  }
+
+  const one = movie(0x345678);
+  const two = movie(0x765432);
+  const shapes = [reload(one, new Uint8Array(one.length)), reload(two, Buffer.alloc(two.length))];
+
+  await setImmediate();
+  gc();
+  for (const { source, shared } of shapes) {
+    assert.equal(source.deref(), undefined);
+    assert.equal(shared.layers[0].fills.length, 1);
+  }
 });
 
 test("a shape filled with a bitmap keeps to its SWF", () => {

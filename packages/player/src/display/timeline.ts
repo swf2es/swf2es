@@ -465,7 +465,7 @@ function shapeOf(
   // Its bitmap fills' bitmaps, its lines' too, as the SWF has them now, which defines them before
   // the shapes that use them; a shape with any is the SWF's own, not shared.
   // The parse is not kept: no function made here refers to it, so its records go.
-  const bitmaps = new Map<number, BitmapCharacter | null>();
+  let bitmaps: Map<number, BitmapCharacter | null> | undefined;
   const styles = [shape.fills, shape.lines.map((l) => l.fill)];
   for (const r of shape.records) {
     if (r.type === "style" && r.styles) {
@@ -478,12 +478,17 @@ function shapeOf(
 
   for (const fills of styles) {
     for (const fill of fills) {
-      if (fill?.type === "bitmap" && !bitmaps.has(fill.bitmap)) {
+      if (fill?.type === "bitmap" && !bitmaps?.has(fill.bitmap)) {
+        bitmaps ??= new Map();
         bitmaps.set(fill.bitmap, bitmap(fill.bitmap));
       }
     }
   }
 
+  // Another library can keep a shared shape alive after this SWF is unloaded.
+  const source = bitmaps ? bytes : new Uint8Array(tag);
+  const offset = bitmaps ? t.offset : 0;
+  const { code, length } = t;
   let layers: ShapeLayer[] | null = null;
   const character: ShapeCharacter = {
     type: "shape",
@@ -493,18 +498,17 @@ function shapeOf(
     // application's SWFs define are never shown, and their layers were most of its memory.
     get layers() {
       layers ??= shapeLayers(
-        readShape(bytes, t.code, t.offset, t.length, version),
-        (id) => bitmaps.get(id) ?? null,
+        readShape(source, code, offset, length, version),
+        (id) => bitmaps?.get(id) ?? null,
       );
       return layers;
     },
   };
-  if (bitmaps.size === 0) {
-    const own = tag.slice();
+  if (!bitmaps) {
     const list = sharedShapes.get(hash) ?? [];
-    list.push({ tag: own, shape: new WeakRef(character) });
+    list.push({ tag: source, shape: new WeakRef(character) });
     sharedShapes.set(hash, list);
-    sharedGone.register(character, { hash, tag: own });
+    sharedGone.register(character, { hash, tag: source });
   }
 
   return character;
