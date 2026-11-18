@@ -53,7 +53,7 @@ export interface Decoded {
    * otherwise only the `offset` bytes, so that what a bomb inflated is
    * never copied out of the module only to be dropped.
    */
-  bytes: Uint8Array;
+  bytes: Uint8Array<ArrayBuffer>;
   /** How many bytes of the input it read. */
   used: number;
   /** zlib's account of corrupt data, if it gave one. */
@@ -89,9 +89,9 @@ function input(x: Exports, data: Uint8Array): number {
 }
 
 /** The result, copied out after `offset` bytes; null if the page cannot have that much. */
-function output(x: Exports, offset: number): Uint8Array | null {
+function output(x: Exports, offset: number): Uint8Array<ArrayBuffer> | null {
   const n = x.resultSize();
-  let bytes: Uint8Array;
+  let bytes: Uint8Array<ArrayBuffer>;
   try {
     bytes = new Uint8Array(offset + n);
   } catch (e) {
@@ -158,7 +158,7 @@ export function inflate(
 }
 
 /** `data` deflated at `level` (0 to 9) with zlib's default memory and window, as a zlib stream or, `raw`, a raw one. */
-export function deflate(data: Uint8Array, level: number, raw: boolean): Uint8Array {
+export function deflate(data: Uint8Array, level: number, raw: boolean): Uint8Array<ArrayBuffer> {
   return call((x) => {
     const at = input(x, data);
     const bytes =
@@ -288,7 +288,7 @@ export function lzmaDecode(
  * length in 8 bytes, little-endian, and the stream, at level 9 with a 1 MB
  * dictionary, or a smaller one for less data, and no end marker.
  */
-export function lzmaEncode(data: Uint8Array): Uint8Array {
+export function lzmaEncode(data: Uint8Array): Uint8Array<ArrayBuffer> {
   return call((x) => {
     const at = input(x, data);
     const bytes = at === 0 || x.lzmaEncode(at, data.length) !== DONE ? null : output(x, 0);
