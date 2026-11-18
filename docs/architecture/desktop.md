@@ -640,9 +640,9 @@ with it. A socket reserved while its permission dialog is open counts toward
 the limit; closing it or ending the page invalidates that reservation, so a
 late answer cannot open it.
 
-`flash.net.SecureSocket` uses those same checks and routes. `player-hosts/node`
-opens direct TLS connections or wraps an established proxy tunnel, validating
-the original hostname and retaining the policy's pinned address for routing. It
+`flash.net.SecureSocket` uses those same checks and routes. Once TCP or the
+proxy tunnel connects, `player-hosts/node` wraps it in TLS and validates the
+original hostname, retaining the policy's pinned address for routing. It
 reports a certificate snapshot before the connect or error event over IPC.
 Certificate getters stay in the renderer; only adding a DER certificate
 needs synchronous validation in the main process. Additions are bounded by
@@ -651,8 +651,7 @@ is sent to AIR-mode ActionScript as AIR 51's `certificateError`; closing or endi
 page discards any later answer. The app's global certificate-error switch
 does not disable SecureSocket's validation.
 
-Each plain socket and direct TLS socket is read into a 64 KB buffer of its own
-(Node's `onread`), and
+Each plain socket is read into a 64 KB buffer of its own (net's `onread`), and
 each read copied out at its length, where Node's stream would make a
 Buffer of the read besides: Electron's IPC sends a typed array's whole
 store, so a view of the buffer would not do. A socket's reads that go to
@@ -663,14 +662,8 @@ more than the copy. A socket through the proxy is read the same way from
 its start, its handshake included; it is paused once the tunnel is made,
 the bytes that came with the proxy's reply are its first data, and it
 reads on once the page is told it is open. Its reads never pause it, as
-its stream never paused before. Direct TLS pauses after the handshake while
-certificate consent is pending, retaining any plaintext already in flight until
-acceptance. Refusal, timeout or close discards it. TLS over a proxy tunnel keeps
-Node's stream reads: Node ignores `onread` when wrapping an existing socket.
-Both TLS routes pass owned plaintext into the same IPC batches after validation.
-`node tests/desktop/tls-bench.ts [rounds]` compares the two read paths with
-interleaved runs, including batching and serialization but excluding connection
-setup; the server runs in a separate process.
+its stream never paused before. TLS uses Node's TLS stream and copies its
+plaintext into the same IPC batches after validation.
 
 The page is sent its sockets' events, and its WebSockets', gathered
 (`src/main/relay.ts`): one IPC message, `socket:events` or
