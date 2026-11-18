@@ -1158,22 +1158,68 @@ function originOf(url: string): string {
 }
 
 /**
- * `url` against `base`, as Flash resolves a load's URL, AVM1's too, and
- * enough for a SWF's relative paths: one with a scheme is itself, one from
- * the root keeps the base's origin, and any other replaces the last
- * segment of the base's path, its query and fragment left out (a page's
- * `play.php?file=/games/a.swf` or `#/game/5` is no directory).
+ * `url` against `base`, as Flash resolves a load's URL, AVM1's too, as a
+ * browser resolves a relative reference but leaving its characters as they
+ * are: one with a scheme is itself; `//host/...` takes the base's scheme;
+ * `/...` its origin; `?query` its path and `#fragment` all but its
+ * fragment; any other replaces the last segment of the base's path, its
+ * query and fragment left out (a page's `play.php?file=/games/a.swf` or
+ * `#/game/5` is no directory); and `.` and `..` segments go.
  */
 export function resolve(base: string, url: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) {
     return url;
   }
 
-  const path = base.replace(/[?#].*$/s, "");
-  const origin = path.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i)?.[0] ?? "";
-  if (url.startsWith("/")) {
-    return origin + url;
+  const whole = base.replace(/#.*$/s, "");
+  if (url.startsWith("#")) {
+    return whole + url;
   }
 
-  return path.slice(0, path.lastIndexOf("/") + 1) + url;
+  const path = whole.replace(/\?.*$/s, "");
+  if (url.startsWith("?")) {
+    return path + url;
+  }
+
+  if (url.startsWith("//")) {
+    return (path.match(/^[a-z][a-z0-9+.-]*:/i)?.[0] ?? "") + url;
+  }
+
+  const origin = path.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i)?.[0] ?? "";
+  const slash = path.lastIndexOf("/");
+  // A base that is an origin alone, http://host, has the root as its directory.
+  const directory = origin && slash < origin.length ? "/" : path.slice(origin.length, slash + 1);
+  return origin + withoutDots(url.startsWith("/") ? url : directory + url);
+}
+
+/** `path`'s `.` and `..` segments taken out, as a URL's are; its query and fragment as they are. */
+function withoutDots(path: string): string {
+  const at = path.search(/[?#]/);
+  const head = at < 0 ? path : path.slice(0, at);
+  if (!/(^|\/)\.\.?(\/|$)/.test(head)) {
+    return path;
+  }
+
+  const kept: string[] = [];
+  const segments = head.split("/");
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i];
+    const last = i === segments.length - 1;
+    if (segment === "." || segment === "..") {
+      // The first segment, "" before a leading slash or a scheme, stays.
+      if (segment === ".." && kept.length > 1) {
+        kept.pop();
+      }
+
+      if (last) {
+        kept.push("");
+      }
+
+      continue;
+    }
+
+    kept.push(segment);
+  }
+
+  return kept.join("/") + (at < 0 ? "" : path.slice(at));
 }

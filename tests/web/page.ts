@@ -695,18 +695,25 @@ async function avm1External() {
 /**
  * What a SWF in a directory of its own, sub/, reports of what it loaded by
  * relative URLs, with the element's `attributes` (base, relativeurls) and
- * the page's configure({ relativeUrls: `configured` }), once `n` reports
- * came or a while passed.
+ * the page's configure({ relativeUrls: `configured` }), the page's URL
+ * given the query and fragment `suffix` meanwhile, once `n` reports came
+ * or a while passed.
  */
 async function relativeLoads(
   src: string,
   attributes: Record<string, string>,
   n: number,
   configured?: "page" | "movie",
+  suffix?: string,
 ) {
   const { web } = await loading;
   const before = web.configuration().relativeUrls;
+  const address = location.href;
   web.configure({ relativeUrls: configured });
+  if (suffix) {
+    history.replaceState(history.state, "", suffix);
+  }
+
   calls.reports.length = 0;
   const p = await newPlayer();
   p.setAttribute("src", src);
@@ -723,6 +730,7 @@ async function relativeLoads(
   } finally {
     p.remove();
     web.configure({ relativeUrls: before });
+    history.replaceState(history.state, "", address);
   }
 
   return calls.reports.splice(0);

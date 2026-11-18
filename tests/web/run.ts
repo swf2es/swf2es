@@ -987,17 +987,18 @@ check(
       attributes: Record<string, string>,
       n: number,
       page?: string,
+      suffix?: string,
     ) =>
       (
         await call<string[]>(
           evaluate,
-          `relativeLoads(${JSON.stringify(src)}, ${JSON.stringify(attributes)}, ${n}, ${JSON.stringify(page)})`,
+          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
         )
       ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
-    const avm1 = (attributes: Record<string, string>, page?: string) =>
-      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page);
-    const as3 = (attributes: Record<string, string>, page?: string) =>
-      loads("/web-test/sub/as3-urls.swf", attributes, 1, page);
+    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
+    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
     // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
     // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
     // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
@@ -1011,6 +1012,9 @@ check(
     assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
     assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
     assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
+    // A page URL's query and fragment are no directory.
+    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
+    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
     // The page's choice for elements that make none, which the attribute overrides.
     assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
     assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);

@@ -299,6 +299,29 @@ test("a base's query and fragment are no directory: a relative URL replaces its 
   assert.equal(resolve("file:///test.swf", "sub/child.swf"), "file:///sub/child.swf");
 });
 
+test("a relative URL resolves as a browser resolves it, its characters as they are", () => {
+  const base = "http://h.test/p/q/play.php?a=1#top";
+  // As new URL(url, base) has them, which getURL's windows take.
+  for (const [url, resolved] of [
+    ["../c.swf", "http://h.test/p/c.swf"],
+    ["../../../c.swf", "http://h.test/c.swf"],
+    ["./x/./c.swf", "http://h.test/p/q/x/c.swf"],
+    ["x/..", "http://h.test/p/q/"],
+    ["//cdn.test/c.swf", "http://cdn.test/c.swf"],
+    ["?q=1", "http://h.test/p/q/play.php?q=1"],
+    ["#h", "http://h.test/p/q/play.php?a=1#h"],
+    ["/r/../c.swf?x=../y", "http://h.test/c.swf?x=../y"],
+  ]) {
+    assert.equal(resolve(base, url), new URL(url, base).href, url);
+    assert.equal(resolve(base, url), resolved, url);
+  }
+
+  assert.equal(resolve("http://h.test", "c.swf"), "http://h.test/c.swf");
+  assert.equal(resolve("app:/sub/main.swf", "../c.swf"), "app:/c.swf");
+  // Its characters left as they are, as before, for the fetch to encode.
+  assert.equal(resolve("http://h.test/p/", "a b.swf"), "http://h.test/p/a b.swf");
+});
+
 test("getURL opens what the movie's base names, as its loads load it", async () => {
   const g = globalThis as { open?: unknown; document?: unknown };
   const opened: string[] = [];

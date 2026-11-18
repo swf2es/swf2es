@@ -589,8 +589,8 @@ test("a base resolves every relative URL a SWF asks for, as a page's base parame
   load("https://other.test/absolute.bin");
   assert.deepEqual(requests, [
     "http://cdn.example.test/assets/data/level.bin",
-    // Dot segments are left for the fetch to fold.
-    "http://cdn.example.test/assets/../root.xml",
+    // Dot segments fold, as a browser folds them.
+    "http://cdn.example.test/root.xml",
     "https://other.test/absolute.bin",
   ]);
   // The SWF's own URL is still its LoaderInfo's.
