@@ -129,7 +129,8 @@ ByteArray without changing its position. Each `serverCertificate` read
 constructs a fresh snapshot. As measured in AIR, closing clears the peer
 certificate but retains `serverCertificateStatus`; a failed handshake can
 retain its peer certificate for inspection. Null or malformed certificate
-input throws ArgumentError #2004. The AS3-driven tests exercise these with
+input throws ArgumentError #2004. The player also throws #2004 before copying
+an addition exceeding 256 KiB per certificate, 64 entries or 4 MiB per socket. The AS3-driven tests exercise these with
 local certificates, including the ByteArrays' positions and mutation isolation.
 
 `player-hosts/node` implements the capability through `tlsSocket()`, reusable

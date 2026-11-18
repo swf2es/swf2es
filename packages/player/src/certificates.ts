@@ -1,3 +1,8 @@
+/** Shared limits for player admission and host validation of socket certificates. */
+export const MAX_CERTIFICATE_BYTES = 256 * 1024;
+export const MAX_SOCKET_CERTIFICATES = 64;
+export const MAX_SOCKET_CERTIFICATE_BYTES = 4 * 1024 * 1024;
+
 /** A host's decoded X.509 name, including its original order and repeated attributes. */
 export interface CertificateName {
   text: string;

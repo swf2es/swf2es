@@ -192,6 +192,56 @@ test("SecureSocket shares Socket I/O, snapshots certificates and rejects stale c
   }
 });
 
+test("SecureSocket checks certificate budgets before host validation and keeps accepted additions", async () => {
+  let checked = 0;
+  const sizes: number[][] = [];
+  const { s, player } = await setup({
+    connect() {
+      throw new Error("plaintext used");
+    },
+    secure: {
+      isCertificate: () => {
+        checked++;
+        return true;
+      },
+      connect: (_host, _port, _events, options) => {
+        sizes.push(options.certificates.map(({ encoded }) => encoded.length));
+        return { send() {}, close() {} };
+      },
+    },
+  });
+  try {
+    const rt = s.rt;
+    const input = rt.construct(rt.classNamed("flash.utils::ByteArray"));
+    const bytes = avm2.bytesOf(rt, input);
+    for (const [size, count] of [
+      [1, 64],
+      [256 * 1024, 16],
+    ]) {
+      const socket = rt.construct(rt.classNamed("flash.net::SecureSocket"));
+      const add = () =>
+        rt.callProperty(socket, rt.publicName("addBinaryChainBuildingCertificate"), input, true);
+      const before = checked;
+      bytes.setLength(256 * 1024 + 1);
+      assert.throws(add);
+      assert.equal(checked, before);
+
+      bytes.setLength(size);
+      for (let i = 0; i < count; i++) {
+        add();
+      }
+
+      bytes.setLength(1);
+      assert.throws(add);
+      assert.equal(checked, before + count);
+      rt.callProperty(socket, rt.publicName("connect"), "localhost", 1234);
+      assert.deepEqual(sizes.at(-1), Array(count).fill(size));
+    }
+  } finally {
+    player.destroy();
+  }
+});
+
 test("AS3 SecureSocket traces success, validation failure and explicit self-signed consent", {
   timeout: 30000,
 }, async () => {
