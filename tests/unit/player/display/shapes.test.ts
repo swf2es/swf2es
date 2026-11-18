@@ -114,6 +114,101 @@ test("completed zero-length contours are not reused by later open contours", () 
   );
 });
 
+type Edges = Parameters<typeof joined>[0];
+
+/** mulberry32, so that a failing case repeats from its seed. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Whether `edges` follow one contour in record order, back at the start only after the last. */
+function chained(edges: Edges): boolean {
+  const [startX, startY] = edges[0];
+  let x = startX;
+  let y = startY;
+  for (let i = 0; i < edges.length; i++) {
+    const [x0, y0, x1, y1] = edges[i];
+    if (x0 !== x || y0 !== y || (i > 0 && x === startX && y === startY)) {
+      return false;
+    }
+
+    x = x1;
+    y = y1;
+  }
+
+  return true;
+}
+
+test("contours built in record order match the indexed walk on random edges", () => {
+  const seed = 0x5eed;
+  const random = mulberry32(seed);
+  const pick = <T>(items: readonly T[]): T => items[Math.floor(random() * items.length)];
+  // Few values, so that junctions collide: -0 meets 0, and fractions take the string keys.
+  const values = [0, -0, 20, 0.5, -7.25, 40];
+  // An edge that meets no other is a contour of its own, and makes the rest take the indexed walk.
+  const detached: Edges[number] = [1e4, 1e4, 1e4 + 20, 1e4];
+  const cases = 5000;
+  let ordered = 0;
+  for (let n = 0; n < cases; n++) {
+    const points: (readonly [number, number])[] = [];
+    for (let i = 2 + Math.floor(random() * 3); i > 0; i--) {
+      points.push([pick(values), pick(values)]);
+    }
+
+    // Half the cases try to close one loop, coming back to its start only at the end.
+    const loop = random() < 0.5;
+    const start = pick(points);
+    const count = 1 + Math.floor(random() * 8);
+    const edges: Edges = [];
+    let at = start;
+    for (let i = 0; i < count; i++) {
+      if (random() < 0.1) {
+        at = pick(points);
+      }
+
+      let to = pick(points);
+      if (loop && i === count - 1 && random() < 0.8) {
+        to = start;
+      }
+
+      for (let tries = 0; loop && i < count - 1 && to === start && tries < 4; tries++) {
+        to = pick(points);
+      }
+
+      edges.push(
+        random() < 0.5
+          ? [at[0], at[1], to[0], to[1]]
+          : [at[0], at[1], to[0], to[1], pick(values), pick(values)],
+      );
+      at = to;
+    }
+
+    if (count > 1 && random() < 0.2) {
+      const i = Math.floor(random() * count);
+      const j = Math.floor(random() * count);
+      [edges[i], edges[j]] = [edges[j], edges[i]];
+    }
+
+    if (chained(edges)) {
+      ordered++;
+    }
+
+    const [alone, ...indexed] = joined([detached, ...edges]);
+    assert.deepEqual(alone, [1, 500, 500, 2, 501, 500]);
+    assert.deepEqual(joined(edges), indexed, `seed ${seed}, case ${n}`);
+  }
+
+  // Enough of the cases take the path built in record order for it to be what is tested.
+  assert.ok(ordered > cases / 4, `${ordered} of ${cases} in record order`);
+});
+
 test("a bitmap fill takes its bitmap, its matrix from twips to pixels; one the SWF lacks stays its own", () => {
   const square = (fill: w.BitmapFill) =>
     w.shape({
