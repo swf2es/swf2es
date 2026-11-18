@@ -286,3 +286,20 @@ export class TextObject extends DisplayObject {
     this.invalidate(CONTENT);
   }
 }
+
+/**
+ * Where a text field's x and y are from its origin, in twips: its box's
+ * corner, its DefineEditText bounds' corner scaled, as Flash and Ruffle
+ * read and set a field's position, in AS3 and AVM1 alike. A box authored
+ * inset from its origin so moves to where a script puts it. The offset is
+ * whole twips, cut toward zero as Ruffle's is, and none for a NaN scale;
+ * none for any other display object.
+ */
+export function fieldOffset(d: DisplayObject): [number, number] {
+  if (!(d instanceof TextObject)) {
+    return [0, 0];
+  }
+
+  const twips = (v: number) => Math.trunc(v) || 0;
+  return [twips(d.scaleX * d.left * 20), twips(d.scaleY * d.top * 20)];
+}

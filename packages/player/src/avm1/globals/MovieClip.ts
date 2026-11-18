@@ -15,6 +15,7 @@ import { bounds, hitsObject, hitsPoint, toStage } from "../../display/bounds.js"
 import {
   ButtonObject,
   type DisplayObject,
+  fieldOffset,
   MovieClip,
   TextObject,
   TRANSFORM,
@@ -157,6 +158,11 @@ function moveTo(d: DisplayObject, x: number | null, y: number | null): void {
   d.invalidate(TRANSFORM);
 }
 
+/** `at` in pixels moved by `offset` in twips, summed in twips as Flash keeps positions. */
+function withOffset(at: number, offset: number): number {
+  return offset === 0 ? at : (at * 20 + offset) / 20;
+}
+
 /** A property: its getter, and its setter, null for a read-only one. */
 interface DisplayProperty {
   get(face: ClipNative, version: number): Value;
@@ -174,14 +180,15 @@ function alphaOf(percent: number): number {
  * is 0, `_ymouse` 21.
  */
 const PROPERTIES: [string, DisplayProperty][] = [
+  // A text field's are its box's corner (fieldOffset), as adl reads and sets them.
   [
     "_x",
     {
-      get: (f) => f.target.matrix.tx,
+      get: (f) => withOffset(f.target.matrix.tx, fieldOffset(f.target)[0]),
       set(f, value, version) {
         const n = numberOf(value, version);
         if (n !== null) {
-          moveTo(f.target, twips(n) / 20, null);
+          moveTo(f.target, (twips(n) - fieldOffset(f.target)[0]) / 20, null);
         }
       },
     },
@@ -189,11 +196,11 @@ const PROPERTIES: [string, DisplayProperty][] = [
   [
     "_y",
     {
-      get: (f) => f.target.matrix.ty,
+      get: (f) => withOffset(f.target.matrix.ty, fieldOffset(f.target)[1]),
       set(f, value, version) {
         const n = numberOf(value, version);
         if (n !== null) {
-          moveTo(f.target, null, twips(n) / 20);
+          moveTo(f.target, null, (twips(n) - fieldOffset(f.target)[1]) / 20);
         }
       },
     },
