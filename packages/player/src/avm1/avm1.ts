@@ -62,6 +62,7 @@ import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
   type SoundHost,
+  stopSoundsUnder,
   stopTimelineSounds,
   timelineSoundsOf,
 } from "../media/sounds.js";
@@ -693,7 +694,37 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       keeps: (display) => this.keeps(display),
     };
     library.removing = (display) => this.removing(display);
-    library.sounds = timelineSoundsOf(this.sounds);
+    const sounds = timelineSoundsOf(this.sounds);
+    library.sounds = {
+      ...sounds,
+      removed: (display) => {
+        sounds.removed(display);
+        this.unloadSounds(display, false);
+      },
+    };
+  }
+
+  /**
+   * The sounds of the movies `d` takes away as it goes, or, `emptied`, as
+   * it is emptied of what it shows: those a Sound or the timeline plays on
+   * a clip of a loaded movie under it, as adl stops them when a loaded
+   * movie is removed, unloaded or replaced. One playing on a clip removed
+   * from its own movie plays on, as in adl, and the global Sound's too.
+   */
+  private unloadSounds(d: DisplayObject, emptied: boolean): void {
+    stopSoundsUnder(this.sounds, d, (owner) => {
+      for (let o: DisplayObject | null = owner; o !== null; o = o.parent) {
+        if (o instanceof MovieClip && this.contents.has(o)) {
+          return true;
+        }
+
+        if (o === d) {
+          return emptied;
+        }
+      }
+
+      return false;
+    });
   }
 
   /**
@@ -1412,6 +1443,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * the next frame plays; one without a library shows nothing.
    */
   fill(target: MovieClip, swf: Avm1Swf, frames = EMPTY_TIMELINE): void {
+    if (this.contents.has(target)) {
+      this.unloadSounds(target, true);
+    }
+
     for (const child of target.children) {
       this.markPaths(child);
       target.library.sounds?.removed(child);

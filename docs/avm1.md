@@ -1321,7 +1321,12 @@ given, a clip or a path, and finds the clip again each time it is used.
 A Sound's transform is its clip's, which every sound under the clip
 plays by, or with no target the global one; the sounds it starts are the
 timeline's kind, held to the same 32 and stopped with them, StopSounds
-included, and `onSoundComplete` runs after the frame's actions. A Color
+included, and `onSoundComplete` runs after the frame's actions. A loaded
+movie's sounds stop as the movie goes, removed, unloaded or replaced by
+another load: a Sound's on a clip of it, which never completes (adl),
+and the event sounds its timeline started there, which AVM1 cannot
+observe but go with the movie too. A Sound's on a clip a movie removes
+from itself plays on and completes (adl), as does the global Sound's. A Color
 keeps the clip's colour transform as a clip keeps one, the multipliers
 in 8.8 fixed point and the offsets whole, 16 bits each, wrapped. A
 `SharedObject` keeps its data in the host's storage as the .sol file
