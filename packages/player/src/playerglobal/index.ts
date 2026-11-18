@@ -82,12 +82,15 @@ import { navigateNatives } from "./flash/net/navigateToURL.js";
 import { secureSocketNatives } from "./flash/net/SecureSocket.js";
 import { sharedObjectNatives } from "./flash/net/SharedObject.js";
 import { socketNatives } from "./flash/net/Socket.js";
+import { SocketConnections } from "./flash/net/socket-connections.js";
 import { urlRequestHooks, urlRequestNatives } from "./flash/net/URLRequest.js";
 import { urlRequestDefaultsNatives } from "./flash/net/URLRequestDefaults.js";
 import { urlStreamNatives } from "./flash/net/URLStream.js";
 import { xmlSocketNatives } from "./flash/net/XMLSocket.js";
 import { printJobNatives } from "./flash/printing/PrintJob.js";
 import { telemetryNatives } from "./flash/profiler/Telemetry.js";
+import { distinguishedNameNatives } from "./flash/security/X500DistinguishedName.js";
+import { certificateNatives } from "./flash/security/X509Certificate.js";
 import { accelerometerNatives } from "./flash/sensors/Accelerometer.js";
 import { applicationDomainNatives } from "./flash/system/ApplicationDomain.js";
 import { capabilitiesNatives } from "./flash/system/Capabilities.js";
@@ -117,6 +120,7 @@ import { toplevelNatives } from "./toplevel.js";
 export { airLibrary, builtinLibrary, playerglobalLibrary } from "./libraries.js";
 
 export function playerNatives(s: Scripting): avm2.Natives {
+  const sockets = new SocketConnections(s);
   return {
     ...accessibilityNatives(s),
     ...toplevelNatives(s),
@@ -172,8 +176,10 @@ export function playerNatives(s: Scripting): avm2.Natives {
     ...telemetryNatives(),
     ...interactiveObjectNatives(s),
     ...fileFilterNatives(s),
-    ...socketNatives(s),
-    ...secureSocketNatives(),
+    ...socketNatives(s, sockets),
+    ...secureSocketNatives(s, sockets),
+    ...distinguishedNameNatives(),
+    ...certificateNatives(s),
     ...xmlSocketNatives(s),
     ...localConnectionNatives(s),
     ...webSocketNatives(s),

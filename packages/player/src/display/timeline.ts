@@ -521,6 +521,8 @@ function timelineOf(
   version: number,
 ): Timeline {
   const avm1 = actions !== null;
+  const ended = list.at(-1)?.code === tags.End;
+  const last = list.length - (ended ? 2 : 1);
   const frames: FrameCommand[][] = [[]];
   const tagged: FrameName[] = [];
   const frameLabels = new Map<number, string>();
@@ -529,11 +531,16 @@ function timelineOf(
   const blocks: SoundStreamBlock[] = [];
   const byFrame = new Map<number, number>();
   let scenes: SceneData | null = null;
-  for (const t of list) {
+
+  for (let index = 0; index < list.length; index++) {
+    const t = list[index];
     const frame = frames[frames.length - 1];
     switch (t.code) {
       case tags.ShowFrame:
-        frames.push([]);
+        // The last ShowFrame closes the current frame with no further commands to collect.
+        if (index !== last) {
+          frames.push([]);
+        }
         break;
       case tags.PlaceObject:
       case tags.PlaceObject2:
@@ -766,19 +773,19 @@ function timelineOf(
   // the clip stops there, where it does not (`tail`): a timeline of one
   // frame, or without an End tag (adl, and the corpus's `looping_child_*`).
   // An AS3 one has as many as its header says.
-  const loops = !avm1 || list.at(-1)?.code === tags.End;
+  const loops = !avm1 || ended;
   let tail: FrameCommand[] = [];
-  if (avm1) {
+  if (!avm1) {
+    frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
+    while (frames.length < (frameCount || 1)) {
+      frames.push([]);
+    }
+  } else if (list[last]?.code !== tags.ShowFrame) {
     tail = frames.length > 1 ? frames[frames.length - 1].filter((c) => c.type === "actions") : [];
     frames.length = Math.max(1, frames.length - 1);
     if (loops && frames.length > 1) {
       frames[frames.length - 1].push(...tail);
       tail = [];
-    }
-  } else {
-    frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
-    while (frames.length < (frameCount || 1)) {
-      frames.push([]);
     }
   }
 

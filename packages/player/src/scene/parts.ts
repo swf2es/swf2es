@@ -9,7 +9,7 @@ import type { DisplayObject } from "../display/displayobject.js";
 import { type ShapeLayer, shapeLayers } from "../display/shapes.js";
 import type { FillTessellator } from "./fills.js";
 import type { LineCache } from "./lines.js";
-import { bitmapQuad, layerParts, type Part } from "./shapes.js";
+import { bitmapQuad, layerParts, type PartPaint } from "./shapes.js";
 import { glyphShape } from "./text.js";
 
 /** Quads made, past which those let go of are looked for and forgotten. */
@@ -17,7 +17,7 @@ const QUAD_KEYS = 512;
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 export interface Made {
-  parts: { part: Part; handle: GeometryHandle }[];
+  parts: (PartPaint & { handle: GeometryHandle })[];
   version: number;
   checkedAt: number;
 }
@@ -137,10 +137,15 @@ export class Parts {
       }
     }
 
-    const parts = layerParts(layer, this.tessellator, masking).map((part) => ({
-      part,
-      handle: this.geometries.add(part.geometry),
-    }));
+    // The layer can outlive its handle. Let the registry release the tessellated buffers on expiry.
+    const parts = layerParts(layer, this.tessellator, masking).map(
+      ({ geometry, paint, region, mesh }) => ({
+        handle: this.geometries.add(geometry),
+        paint,
+        region,
+        mesh,
+      }),
+    );
     cache.set(layer, { parts, version, checkedAt: this.geometries.removalVersion });
     return parts;
   }

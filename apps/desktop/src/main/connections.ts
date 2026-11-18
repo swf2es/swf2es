@@ -1,10 +1,13 @@
-// One page's flash.net.Socket connections, made with node:net, or through
+// One page's Socket and SecureSocket connections, direct or through
 // the proxy (--proxy, proxy.ts): what the socket bridge (sockets.ts) holds
 // for each page, apart from Electron so that node runs it in the tests
 // (tests/desktop/connections.test.ts).
 import { connect, type OnReadOpts, type Socket } from "node:net";
+import type { SecureSocketOptions, SocketEndpoints } from "@swf2es/player";
+import { MAX_SOCKET_CERTIFICATE_BYTES, MAX_SOCKET_CERTIFICATES } from "@swf2es/player/certificates";
+import { type TlsTransport, tlsSocket, validCertificate } from "@swf2es/player-hosts/node";
 import type { SocketEvent } from "../shared/api.js";
-import { type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
+import { connectThrough, type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
 
 /** As many as a page may hold open at once; past it a connection is refused. */
 const MAX_OPEN = 64;
@@ -38,6 +41,42 @@ export function validEndpoint(host: unknown, port: unknown): host is string {
   );
 }
 
+/** IPC input is untrusted even when it came from the application's page. */
+export function secureOptions(value: unknown): SecureSocketOptions | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const options = value as Partial<SecureSocketOptions>;
+  if (
+    !Number.isInteger(options.timeout) ||
+    (options.timeout ?? 0) < 1 ||
+    (options.timeout ?? 0) > 0xffffffff ||
+    !Array.isArray(options.certificates) ||
+    options.certificates.length > MAX_SOCKET_CERTIFICATES
+  ) {
+    return null;
+  }
+
+  let total = 0;
+  for (const certificate of options.certificates) {
+    if (
+      !certificate ||
+      !(certificate.encoded instanceof Uint8Array) ||
+      typeof certificate.trusted !== "boolean"
+    ) {
+      return null;
+    }
+
+    total += certificate.encoded.length;
+    if (total > MAX_SOCKET_CERTIFICATE_BYTES || !validCertificate(certificate.encoded)) {
+      return null;
+    }
+  }
+
+  return options as SecureSocketOptions;
+}
+
 export interface ConnectionOptions {
   /** What every connection goes through; none by default. */
   proxy?: ProxyConfig | null;
@@ -47,7 +86,9 @@ export interface ConnectionOptions {
 
 export class Connections {
   private readonly sockets = new Map<number, Socket>();
-  /** Connections still being made through the proxy, each stopped by its controller. */
+  private readonly secure = new Map<number, TlsTransport>();
+  private readonly decisions = new Map<number, (accepted: boolean) => void>();
+  /** Pending permission requests and proxy tunnels, each cancelled by its controller. */
   private readonly opening = new Map<number, AbortController>();
   private readonly tell: (id: number, event: SocketEvent) => void;
   private readonly proxy: ProxyConfig | null;
@@ -67,13 +108,39 @@ export class Connections {
   /** Counts closeAll's: a connection decided on before one belongs to a page that is gone. */
   generation = 0;
 
+  /** Reserve a pending permission request so close() and page end can cancel it. */
+  reserve(id: number): (() => boolean) | null {
+    if (this.sockets.has(id) || this.opening.has(id) || this.size >= MAX_OPEN) {
+      this.refuse(id);
+      return null;
+    }
+
+    const waiting = new AbortController();
+    this.opening.set(id, waiting);
+    return () => {
+      if (this.opening.get(id) !== waiting) {
+        return false;
+      }
+
+      this.opening.delete(id);
+      return true;
+    };
+  }
+
   /**
    * Connect `id` to `host`:`port`, each checked, at `address` where the host was pinned (a remote
    * SWF's socket policy came from there); a refusal is an error, then a close. TCP_NODELAY unless
    * a SWF's tcpNoDelay sets `noDelay` false: Nagle's algorithm would hold a chatty protocol's
    * writes for the peer's delayed acknowledgements (docs/architecture/desktop.md, "Sockets").
    */
-  connect(id: number, host: unknown, port: unknown, address?: string, noDelay = true): void {
+  connect(
+    id: number,
+    host: unknown,
+    port: unknown,
+    address?: string,
+    noDelay = true,
+    secure?: SecureSocketOptions,
+  ): void {
     if (
       !validEndpoint(host, port) ||
       this.sockets.has(id) ||
@@ -86,7 +153,13 @@ export class Connections {
 
     const target = address ?? host;
     if (this.proxy) {
-      this.connectThrough(this.proxy, id, target, port as number, noDelay);
+      this.connectThrough(this.proxy, id, host, target, port as number, noDelay, secure);
+      return;
+    }
+
+    if (secure) {
+      const socket = connect({ host: target, port: port as number, noDelay });
+      this.attachSecure(id, socket, host, secure);
       return;
     }
 
@@ -118,13 +191,22 @@ export class Connections {
   private connectThrough(
     proxy: ProxyConfig,
     id: number,
+    host: string,
     target: string,
     port: number,
     noDelay: boolean,
+    secure?: SecureSocketOptions,
   ): void {
     const opening = new AbortController();
     this.opening.set(id, opening);
-    tunnelThrough(proxy, target, port, { signal: opening.signal, onread: this.reader(id) }).then(
+    const started = Date.now();
+    const tunnel = secure
+      ? connectThrough(proxy, target, port, {
+          signal: opening.signal,
+          timeout: Math.min(secure.timeout, 0x7fffffff),
+        }).then((socket) => ({ socket, rest: new Uint8Array() }))
+      : tunnelThrough(proxy, target, port, { signal: opening.signal, onread: this.reader(id) });
+    tunnel.then(
       ({ socket, rest }) => {
         if (this.opening.get(id) !== opening) {
           socket.destroy();
@@ -133,6 +215,16 @@ export class Connections {
 
         this.opening.delete(id);
         socket.setNoDelay(noDelay);
+        if (secure) {
+          this.attachSecure(
+            id,
+            socket,
+            host,
+            { ...secure, timeout: Math.max(1, secure.timeout - (Date.now() - started)) },
+            { remoteAddress: target, remotePort: port },
+          );
+          return;
+        }
         this.attach(id, socket);
         this.tell(id, {
           type: "open",
@@ -158,6 +250,77 @@ export class Connections {
         this.refuse(id);
       },
     );
+  }
+
+  private attachSecure(
+    id: number,
+    raw: Socket,
+    host: string,
+    options: SecureSocketOptions,
+    remote?: Pick<SocketEndpoints, "remoteAddress" | "remotePort">,
+  ): void {
+    let transport: TlsTransport;
+    const generation = this.generation;
+    const current = () => this.generation === generation && this.secure.get(id) === transport;
+    try {
+      transport = tlsSocket(
+        raw,
+        host,
+        {
+          open: (endpoints) => {
+            if (current() && endpoints) {
+              this.sockets.set(id, transport.socket);
+              this.tell(id, { type: "open", ...endpoints });
+            }
+          },
+          data: (bytes) => {
+            if (current()) {
+              this.tell(id, { type: "data", bytes });
+            }
+          },
+          certificate: (status, certificate) => {
+            if (current()) {
+              this.tell(id, { type: "certificate", status, certificate });
+            }
+          },
+          certificateError: (proceed) => {
+            if (!current()) {
+              proceed(false);
+              return;
+            }
+
+            this.decisions.set(id, proceed);
+            this.tell(id, { type: "certificateError" });
+          },
+          error: (message) => {
+            if (current()) {
+              this.tell(id, { type: "error", message });
+            }
+          },
+          close: () => {
+            if (current()) {
+              this.secure.delete(id);
+              this.sockets.delete(id);
+              this.decisions.delete(id);
+              this.tell(id, { type: "close" });
+            }
+          },
+        },
+        options,
+        remote,
+      );
+      this.secure.set(id, transport);
+      this.sockets.set(id, transport.socket);
+    } catch {
+      raw.destroy();
+      this.refuse(id);
+    }
+  }
+
+  certificate(id: number, accepted: boolean): void {
+    const proceed = this.decisions.get(id);
+    this.decisions.delete(id);
+    proceed?.(accepted);
   }
 
   /**
@@ -204,7 +367,12 @@ export class Connections {
       return;
     }
 
-    socket.write(bytes);
+    const secure = this.secure.get(id);
+    if (secure) {
+      secure.send(bytes);
+    } else {
+      socket.write(bytes);
+    }
   }
 
   /** Refuse `id`, as a server that took no connection: an error, then a close. */
@@ -214,6 +382,13 @@ export class Connections {
   }
 
   close(id: number): void {
+    const secure = this.secure.get(id);
+    if (secure) {
+      this.decisions.delete(id);
+      secure.close();
+      return;
+    }
+
     const opening = this.opening.get(id);
     if (opening) {
       // Closed before the proxy made it: closed, as a socket destroyed before it connects.
@@ -231,6 +406,10 @@ export class Connections {
    * its own from 1.
    */
   closeAll(): void {
+    for (const secure of this.secure.values()) {
+      secure.close();
+    }
+
     for (const socket of this.sockets.values()) {
       socket.removeAllListeners();
       socket.on("error", () => {});
@@ -242,6 +421,8 @@ export class Connections {
     }
 
     this.sockets.clear();
+    this.secure.clear();
+    this.decisions.clear();
     this.opening.clear();
     this.generation++;
   }

@@ -80,7 +80,8 @@ a.swapDepths(c);
 trace("swapped: " + a.getDepth() + " " + c.getDepth());
 a.swapDepths(-16380);
 trace("swapped: " + a.getDepth());
-for (var k in this) { trace("root key " + k); }
+// The main timeline has $version; the AS3 Loader oracle's AVM1Movie does not.
+for (var k in this) { if (k != "$version") { trace("root key " + k); } }
 var p = {x: 5, y: 5};
 a.localToGlobal(p);
 trace("local to global: " + p.x + " " + p.y);

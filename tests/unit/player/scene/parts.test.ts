@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setImmediate } from "node:timers/promises";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { Tessellator } from "@swf2es/native/render";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
@@ -44,7 +47,9 @@ test("unchanged cached parts need no repeated handle validation, including after
     assert.equal(checks, 0);
 
     // An unrelated removal revalidates once, without rebuilding these parts.
-    const other = geometries.add(first[0].part.geometry);
+    const geometry = geometries.get(first[0].handle.id);
+    assert.ok(geometry);
+    const other = geometries.add(geometry);
     geometries.remove(other.id);
     assert.equal(parts.partsOf(d.layers[0], d.version), first);
     assert.equal(checks, first.length);
@@ -60,8 +65,10 @@ test("a removal and id reuse in the same frame cannot revive cached parts", () =
   try {
     const first = parts.partsOf(d.layers[0], d.version);
     const old = first[0].handle;
+    const geometry = geometries.get(old.id);
+    assert.ok(geometry);
     geometries.remove(old.id);
-    const replacement = geometries.add(first[0].part.geometry);
+    const replacement = geometries.add(geometry);
     assert.equal(replacement.id, old.id);
     assert.notEqual(replacement.generation, old.generation);
     const next = parts.partsOf(d.layers[0], d.version);
@@ -99,6 +106,41 @@ test("expiry, context loss, drawing versions and masks still invalidate independ
     assert.notEqual(next, regular);
     assert.ok(regular.every((p) => !geometries.alive(p.handle)));
     assert.ok(next.every((p) => geometries.alive(p.handle)));
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("idle shape layers release their geometry buffers between visits", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const { tessellator, geometries, parts, d } = fixture();
+  const layer = d.layers[0];
+  try {
+    const draw = (masking: boolean) => {
+      const [{ handle }] = parts.partsOf(layer, d.version, masking);
+      const geometry = geometries.get(handle.id);
+      assert.ok(geometry && geometry.positions.byteLength > 0);
+      return new WeakRef(geometry.positions.buffer);
+    };
+    const buffers: WeakRef<ArrayBufferLike>[] = [];
+    const retained: number[] = [];
+
+    for (let visit = 0; visit < 3; visit++) {
+      buffers.push(draw(false), draw(true));
+
+      for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+        geometries.endFrame();
+      }
+
+      assert.deepEqual(geometries.live(), []);
+      // WeakRef keeps its target through this turn. Collect before revisiting the same layer.
+      await setImmediate();
+      gc();
+      retained.push(buffers.filter((buffer) => buffer.deref() !== undefined).length);
+    }
+
+    assert.deepEqual(retained, [0, 0, 0], "expired geometry buffers retained after each visit");
   } finally {
     tessellator.dispose();
   }

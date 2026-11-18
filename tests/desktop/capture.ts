@@ -197,13 +197,16 @@ try {
       assert.ok(emoji[0].message.startsWith(`T${"\u{1F600}".repeat(159)} `), emoji[0].message);
       assert.ok(!/\p{Cs}/u.test(emoji[0].message), "dialog cut a surrogate pair");
       await boxes(app, 1);
+      const deniedAt = app.stdout.length;
       await open(app);
-      await app.until(
-        "denied capture",
-        () =>
-          app.stdout.includes("capture status Camera.Muted") &&
-          app.stdout.includes("capture status Microphone.Muted"),
-      );
+      await app.until("denied capture", () => {
+        // Earlier movies also reported Muted; wait for this load's answers.
+        const output = app.stdout.slice(deniedAt);
+        return (
+          output.includes("capture status Camera.Muted") &&
+          output.includes("capture status Microphone.Muted")
+        );
+      });
       assert.equal(await app.evaluate("captureTracks.length"), 0);
       const offered = await app.main<{ message: string; detail: string }[]>("captureBoxes");
       assert.equal(offered.length, 2);

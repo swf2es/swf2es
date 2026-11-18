@@ -114,12 +114,14 @@ const api: DesktopApi = {
   openDropped: (file) => ipcRenderer.send("desktop:open-path", webUtils.getPathForFile(file)),
   chooseLibrary: (name: LibraryName) => ipcRenderer.send("desktop:choose-library", name),
   sockets: {
-    connect: (host, port, noDelay) => {
+    connect: (host, port, noDelay, secure) => {
       const id = nextSocket++;
       const asked = typeof noDelay === "boolean" ? noDelay : undefined;
-      ipcRenderer.send("socket:connect", id, String(host), Number(port), asked);
+      ipcRenderer.send("socket:connect", id, String(host), Number(port), asked, secure);
       return id;
     },
+    isCertificate: (bytes) => ipcRenderer.sendSync("socket:is-certificate", bytes) === true,
+    certificate: (id, accepted) => ipcRenderer.send("socket:certificate", id, accepted),
     send: (id, bytes) => ipcRenderer.send("socket:send", id, bytes),
     close: (id) => ipcRenderer.send("socket:close", id),
     onEvents: (listener) => {

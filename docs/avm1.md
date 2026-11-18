@@ -1009,6 +1009,16 @@ N.` to the log, as Flash's does.
 
 ### Clips and paths
 
+The main timeline starts with an ordinary, enumerable `$version`
+property, writable and deletable, using the same platform and player
+version as AS3's `Capabilities.version`. `getVersion()` compiles to
+GetVariable of `/:$version`, so it reads that property even when a local
+variable shadows it; there is no global function named `getVersion`.
+Child clips and AVM1 movies loaded by AS3 have no initial `$version`.
+These behaviours were checked in adl both with a SWF as the application's
+main content and through the usual AS3 Loader harness; the main-content
+traces are asserted in `tests/unit/player/avm1/avm1.test.ts`.
+
 What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
 `avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases), and
 the corpus, where it is not what Ruffle does:
@@ -1715,8 +1725,7 @@ AVM1, so nothing is expected from it.
   `_global`s a SWF of one version sees of another (`global_swf6_7_8`);
   ImportAssets; `onLoadProgress` while a SWF streams in, and
   "LoadNeverCompleted", which a fetch of all or nothing never gives;
-  `System.useCodepage`'s guess of a file's encoding; and `$version`,
-  which Flash defines on `_level0`.
+  `System.useCodepage`'s guess of a file's encoding.
 - **Classes and natives.** No `System`, `Video`, `NetStream`, `Camera`,
   `Microphone`, `ContextMenu` or `Accessibility`; ASnative's display,
   text, sound and I/O tables give functions that do nothing, and

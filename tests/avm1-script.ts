@@ -24,7 +24,7 @@
 // objects, function expressions, `new`, `typeof`, `delete`, `instanceof`.
 // `trace(e)` is the Trace action; the timeline's functions (`gotoAndStop`,
 // `play`, `nextFrame`, `setProperty`, `getProperty`, `eval`,
-// `targetPath`, `call`, `getTimer`, `set`, `duplicateMovieClip`,
+// `targetPath`, `call`, `getTimer`, `getVersion`, `set`, `duplicateMovieClip`,
 // `removeMovieClip`...), `tellTarget` and `ifFrameLoaded` are their
 // actions, a constant frame or target as an operand; `with` is With. A call of `__op("Name", ...values)`
 // pushes the values and writes the action of that name, for the actions
@@ -1023,6 +1023,14 @@ class Parser {
           key(a);
           a.op("GetMember");
         };
+        continue;
+      }
+
+      if (this.is("(") && place?.kind === "var" && place.name === "getVersion") {
+        this.expect("(");
+        this.expect(")");
+        e = (a) => a.push("/:$version").op("GetVariable");
+        place = null;
         continue;
       }
 
