@@ -117,8 +117,11 @@ are covered by `X509Certificate.test.ts`.
 
 `flash.net.SecureSocket` shares Socket's buffers, reads, writes and connection
 generations (`playerglobal/flash/net/socket-connections.ts`). Its host is
-`SocketHost.secure`: absent that capability, `isSupported` is false and a
-connect fails without trying a plain socket. A secure host validates DER
+`SocketHost.secure`: absent that capability, `isSupported` is false and the
+constructor throws IllegalOperationError, as Adobe documents for a runtime
+without secure sockets. adl supports them, so it cannot show Flash's error
+number; the player uses #2014, "Feature is not available at this time". A
+connect never falls back to a plain socket. A secure host validates DER
 certificates, connects with the Socket's timeout and certificate additions,
 and reports certificate metadata before opening or failing the connection.
 The player queues those notifications in order with other host events.
