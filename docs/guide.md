@@ -124,7 +124,10 @@ before enabling it again. Replacing or destroying the player stops its
 tracks, including a permission request that finishes later.
 
 The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
-and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
+and `allownetworking`. As in Flash's plug-in, `base` is relative to the
+SWF's URL, and an AVM1 SWF's relative URLs resolve against it, or
+against the page without one; `configure({ relativeTo: "movie" })` has
+them resolve against the SWF's URL instead. It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`

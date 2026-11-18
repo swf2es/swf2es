@@ -368,6 +368,8 @@ export class Swf2esPlayerElement extends ElementBase {
       const base = attribute(this, "base");
       let bytes: Uint8Array;
       let url: string;
+      // Flash resolves the page's `base` against the SWF's URL, where it has one.
+      let baseUrl = base ? new URL(base, pageUrl).href : null;
       if (session.air) {
         // The content SWF, by the app: URL adl names it with.
         const content = session.air.app.descriptor.content;
@@ -377,10 +379,11 @@ export class Swf2esPlayerElement extends ElementBase {
         throw new Error("swf2es: nothing to play");
       } else if (typeof source === "string" || source instanceof URL) {
         ({ bytes, url } = await fetchMovie(new URL(source, pageUrl).href, session.abort.signal));
+        baseUrl = base ? new URL(base, url).href : null;
       } else {
         // A copy: the page may reuse its buffer.
         bytes = new Uint8Array(source instanceof Uint8Array ? source : new Uint8Array(source));
-        url = base ? new URL(base, pageUrl).href : pageUrl;
+        url = baseUrl ?? pageUrl;
       }
 
       if (!current()) {
@@ -436,7 +439,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         session.workers = host;
-        session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
+        session.scripting = this.#scripting(session, codegen, url, baseUrl, pageUrl, host);
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
             this.#box,
@@ -468,11 +471,11 @@ export class Swf2esPlayerElement extends ElementBase {
         // SWF's do: "quit" goes to the page, as a plug-in's did, and stops
         // nothing.
         const { internal, offline, allows, objectID } = this.#access(pageUrl);
-        const base = attribute(this, "base");
         avm1 = new Avm1(codegen, {
           url,
           parameters: parseFlashVars(attribute(this, "flashvars")),
-          base: base ? new URL(base, pageUrl).href : undefined,
+          // Its relative URLs, its children's too, against `base`, else the page's, as a plug-in has them.
+          base: baseUrl ?? (configuration().relativeTo === "movie" ? url : pageUrl),
           // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
           fetch: fetchFor(session, offline),
           socket: offline ? undefined : socketHost(),
@@ -608,14 +611,14 @@ export class Swf2esPlayerElement extends ElementBase {
     session: Session,
     codegen: Awaited<ReturnType<typeof codegenForPlayer>>,
     url: string,
+    base: string | null,
     pageUrl: string,
     workerHost: WorkerHost | null,
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
-    const base = attribute(this, "base");
     const scripting = new Scripting(codegen, {
       url,
-      base: base ? new URL(base, pageUrl).href : undefined,
+      base: base ?? undefined,
       parameters: parseFlashVars(attribute(this, "flashvars")),
       fetch: fetchFor(session, offline),
       loadPolicyFile: configuration().loadPolicyFile,

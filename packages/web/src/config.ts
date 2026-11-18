@@ -83,6 +83,13 @@ export interface Configuration {
   /** Security.sandboxType of the SWFs the element plays next: "remote" by default. */
   sandboxType?: string;
   /**
+   * What an AVM1 SWF's relative URLs resolve against where the element has
+   * no `base`: "page", the page's URL, as Flash Player's plug-in resolved
+   * them (the default), or "movie", the main SWF's, as its projector did,
+   * for an embedder, such as a desktop app, whose page is not the SWF's.
+   */
+  relativeTo?: "page" | "movie";
+  /**
    * Whether the modules the compiler writes are kept in IndexedDB for the
    * page's next visit, which then links them without compiling: off by
    * default, as a first visit is some 9% slower for the writes.

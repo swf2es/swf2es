@@ -105,6 +105,8 @@ function play(movie: OpenedMovie): void {
   configure({
     capture,
     sandboxType: movie.sandbox,
+    // No page here: an AVM1 SWF's relative URLs resolve against its own, as Flash's projector did.
+    relativeTo: "movie",
     air: movie.air ? airHosts(movie.air, desktop.air) : null,
   });
   showFailure(null);

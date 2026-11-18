@@ -322,6 +322,34 @@ writeFileSync(
     ],
   }),
 );
+// An AS2 SWF in sub/ that loads a child by a relative URL, which reports its _url and loads its
+// sibling from the directory _url names, as old clients find their files.
+const avm1Swf = (source: string) =>
+  w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+const report = `flash.external.ExternalInterface.call("report", _url);`;
+mkdirSync(`${site}sub`, { recursive: true });
+writeFileSync(
+  `${site}sub/avm1-urls.swf`,
+  avm1Swf(`createEmptyMovieClip("child", 1).loadMovie("avm1-url-child.swf");`),
+);
+for (const dir of ["", "sub/"]) {
+  writeFileSync(
+    `${site}${dir}avm1-url-child.swf`,
+    avm1Swf(`${report}
+createEmptyMovieClip("sibling", 1).loadMovie(_url.substring(0, _url.lastIndexOf("/") + 1) + "avm1-url-sibling.swf");`),
+  );
+  writeFileSync(`${site}${dir}avm1-url-sibling.swf`, avm1Swf(report));
+}
 // An AS2 input field, as the clipboard SWF's for AS3, which the page focuses and reads.
 const avm1Field = `_root.createTextField("field", 1, 0, 0, 140, 20);
 field.type = "input";
@@ -936,6 +964,28 @@ check(
     const left = await call<{ players: number; codegens: number }>(evaluate, "survivors()");
     assert.equal(left.players, 0, "a destroyed AVM1 player is still alive");
     assert.equal(left.codegens, 2);
+  },
+);
+
+// After the checks that count the compilers left: an AVM1 movie that loaded others kept its
+// compiler alive through the churn check's collection when this came before it, on dev too.
+check(
+  "an AVM1 SWF's relative loads resolve against the page, or its base against the SWF's URL",
+  async (evaluate) => {
+    const urls = async (base: string | null) =>
+      (await call<string[]>(evaluate, `avm1Urls(${JSON.stringify(base)})`)).map(
+        (url) => new URL(url).pathname,
+      );
+    // The page is /web-test/index.html and the SWF /web-test/sub/avm1-urls.swf, as Flash's plug-in
+    // resolved them; each child's _url is where it came from, which its sibling's load follows.
+    assert.deepEqual(await urls(null), [
+      "/web-test/avm1-url-child.swf",
+      "/web-test/avm1-url-sibling.swf",
+    ]);
+    assert.deepEqual(await urls("."), [
+      "/web-test/sub/avm1-url-child.swf",
+      "/web-test/sub/avm1-url-sibling.swf",
+    ]);
   },
 );
 

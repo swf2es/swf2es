@@ -44,6 +44,18 @@ count leaves it. A press or key anywhere else on the element is a gesture
 too, and resumes a suspended device in a capturing listener, before the
 host has told it as held as well as after, the SWF hearing it as ever.
 
+`base` resolves against the SWF's URL, as Flash's plug-in resolved it
+(base="." is the SWF's directory), or against the page's for a SWF given
+as bytes. An AVM1 SWF's relative URLs, its loads', its children's and
+its network's, all resolve against that base, or without one against
+the page's URL, not the SWF's: a page at /page/ playing /swf/main.swf
+has `loadMovie("child.swf")` load /page/child.swf, and the child's
+`_url` is the URL it came from, as the plug-in (PepperFlash 32) had
+them. An embedder whose page is not the SWF's,
+such as the desktop app, sets `relativeTo: "movie"` for the SWF's URL,
+as Flash's projector resolved them. AS3's resolve against the SWF that
+asks, as before.
+
 ## Showing a player
 
 `playback.ts` shows a player in the element: a `RenderView` whose
@@ -142,7 +154,8 @@ an embedder's fetch in place of the browser's for what the SWFs load and
 for the SWF the element plays (purpose `movie`; `fetching.ts`), with
 `loadPolicyFile`
 and `sandboxType` for the player, as the desktop app judges requests by
-Flash's sandboxes and policy files rather than CORS; and
+Flash's sandboxes and policy files rather than CORS; `relativeTo`, which
+the desktop app sets to `"movie"` (below); and
 `cache`. The page fetches and compiles codegen.wasm once and the
 libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting

@@ -692,6 +692,29 @@ async function avm1External() {
   return { calls: calls.avm1, triple, never };
 }
 
+/**
+ * The URLs an AVM1 SWF in a directory of its own, sub/, loaded a child
+ * from, and the child its sibling from, under `base`, or none: each
+ * reports its `_url`.
+ */
+async function avm1Urls(base: string | null) {
+  calls.reports.length = 0;
+  const p = await newPlayer();
+  p.setAttribute("src", "/web-test/sub/avm1-urls.swf");
+  if (base !== null) {
+    p.setAttribute("base", base);
+  }
+
+  document.body.append(p);
+  await p.ready;
+  for (let i = 0; i < 300 && calls.reports.length < 2; i++) {
+    await frames(1);
+  }
+
+  p.remove();
+  return calls.reports.splice(0);
+}
+
 /** What a collection left: players made and destroyed still alive, and codegen instances. */
 function survivors() {
   return {
@@ -1189,6 +1212,7 @@ Object.assign(globalThis, {
   lazyChurn,
   avm1Churn,
   avm1External,
+  avm1Urls,
   survivors,
   workerRun,
   webWorkers: () => ({ ...webWorkers }),

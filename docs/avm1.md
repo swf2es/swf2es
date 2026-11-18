@@ -1510,8 +1510,9 @@ children.
 ### The network: XML, LoadVars, loadVariables and XMLSocket
 
 Requests go through the host fetch AS3's `URLLoader` uses, resolved
-against `base` (the SWF's URL by default) and marked "data" for a host
-that judges requests as Flash did; `XMLSocket` connects through the
+against `base` (the page's in the web element, else the SWF's URL) and
+marked "data" for a host that judges requests as Flash did; `XMLSocket`
+connects through the
 `SocketHost` AS3's sockets use. Without either, a load fails as a
 missing file does (`onHTTPStatus(0)`, `onData(undefined)`) and a connect
 with `onConnect(false)`, never an error. Answers are delivered between
@@ -1572,10 +1573,11 @@ SWF 7, folded up to SWF 6, and looked up by the SWF of the clip.
 A load goes through the host's fetch, as AS3's Loader's does ("content",
 which allowNetworking "internal" allows and "none" refuses), the clip's
 variables sent where a method is given. Its URL resolves against the
-movie's base, whichever SWF asks, as Flash's plug-in resolves it, where
-AIR's adl takes the asking SWF's; that URL, or the one a redirect took
-it to, is the loaded movie's `_url`, its query included, and the one
-its access is checked by.
+movie's base, whichever SWF asks, as Flash's plug-in resolves every
+relative URL against the page's `base` or the page (the embedder's
+choice, [web.md](architecture/web.md)), where AIR's adl takes the asking
+SWF's; that URL, or the one a redirect took it to, is the loaded movie's
+`_url`, its query included, and the one its access is checked by.
 It arrives between frames, its images decoded and its code compiled.
 Loads into one clip, or by one MovieClipLoader, arrive in the order
 asked, as Ruffle's test runner has them, one slow to answer holding the
