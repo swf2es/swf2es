@@ -328,12 +328,17 @@ test("direct TLS keeps queued reads owned and exact across buffer reuse", {
     };
   });
   const transport = tlsConnect("localhost", peer.port, seen.events, options(), "127.0.0.1");
+  // TLS can deliver plaintext already in flight after pause. Admit that first
+  // read deterministically; onread's false return must stop subsequent reads.
+  const pause = transport.socket.pause;
+  transport.socket.pause = () => transport.socket;
   transport.socket.on("data", () => streamReads++);
   try {
     const proceed = await decision;
     await new Promise((resolve) => setTimeout(resolve, 50));
     assert.equal(length, 0);
     assert.equal(seen.log.includes("open"), false);
+    transport.socket.pause = pause;
     proceed(true);
     await Promise.race([
       received,
@@ -355,6 +360,7 @@ test("direct TLS keeps queued reads owned and exact across buffer reuse", {
     assert.equal(streamReads, 0);
   } finally {
     clearTimeout(timer);
+    transport.socket.pause = pause;
     transport.close();
     await peer.close();
   }
@@ -383,6 +389,9 @@ test("direct TLS discards early plaintext after refusal, timeout or close", {
         },
         "127.0.0.1",
       );
+      // Exercise the same in-flight read race when consent never succeeds.
+      const pause = transport.socket.pause;
+      transport.socket.pause = () => transport.socket;
       try {
         const proceed = await decision;
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -404,6 +413,7 @@ test("direct TLS discards early plaintext after refusal, timeout or close", {
         );
         assert.equal(transport.socket.destroyed, true);
       } finally {
+        transport.socket.pause = pause;
         transport.close();
       }
     }
