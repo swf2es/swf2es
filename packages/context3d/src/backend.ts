@@ -1,5 +1,6 @@
 import type { ProgramType } from "./agal.js";
 import type { DxtEncoder } from "./dxt.js";
+import { brand, context3DErrorKind } from "./errors.js";
 
 /**
  * The widest and tallest back buffer configure() takes: Flash Player 32's and AIR 51's
@@ -180,6 +181,18 @@ export class ScissorBoundsError extends Error {}
 
 export class SamplerBiasError extends Error {}
 
+brand(VertexOffsetError, "vertexOffset");
+brand(ScissorBoundsError, "scissorBounds");
+brand(SamplerBiasError, "samplerBias");
+
+// Told by their brands (errors.ts), as the player takes a backend from any copy of the package.
+export const isVertexOffsetError = (error: unknown): error is VertexOffsetError =>
+  context3DErrorKind(error) === "vertexOffset";
+export const isScissorBoundsError = (error: unknown): error is ScissorBoundsError =>
+  context3DErrorKind(error) === "scissorBounds";
+export const isSamplerBiasError = (error: unknown): error is SamplerBiasError =>
+  context3DErrorKind(error) === "samplerBias";
+
 export class TextureBindingError extends Error {
   readonly reason:
     | "unused"
@@ -203,6 +216,11 @@ export class TextureBindingError extends Error {
     this.sampler = sampler;
   }
 }
+
+brand(TextureBindingError, "textureBinding");
+
+export const isTextureBindingError = (error: unknown): error is TextureBindingError =>
+  context3DErrorKind(error) === "textureBinding";
 
 // No AS objects, renderer objects or browser globals cross this boundary.
 export interface Buffer3D {

@@ -182,6 +182,46 @@ domain. Addresses no server has (0.0.0.0/8, ::, multicast, 240/4) are
 never reached, nor the ports the Fetch standard blocks (SMTP's, SSH's
 and the rest), as Flash in a browser never reached them either.
 
+`--ignore-policy-files` stands in for policy files' answers, for a user
+who chooses to let a SWF read across domains where its sites serve none,
+or no longer serve the one Flash wanted. Every policy a SWF would ask goes through one decision
+(`policyIgnored` in `network-rules.ts`), taken where the policy would be
+fetched: a URL policy's access, for another origin's data and for an
+address more private than the SWF; its `allow-http-request-headers-from`,
+for headers to another origin; and a remote SWF's socket policy. Where it
+grants, no policy file is fetched at all, and `--log-network`'s line ends
+in `allowed by --ignore-policy-files`. With the switch alone it grants
+every host at a public address, whatever SWF asks, a local one with
+networking (which only `domain="*"` would grant) included; it never
+grants an address on this machine or a private network, which still
+needs its own policy where the SWF is less private than it, and a
+refusal there says so. `--ignore-policy-files=host,...` grants the hosts
+named alone, wherever they are, `localhost` or `192.168.1.5` included:
+by the URL's or the socket's host exactly, as `--ignore-certificate-errors`
+matches (no subdomains, and a name is not its address), lower case, an
+IPv6 address without its brackets, an address in the form a URL writes it
+(`hostOf`). A socket's host is resolved in that form too, so the switch
+judges the very name resolved; one that is not a host alone
+(`listed.example/.elsewhere`, `user@listed.example`), which a URL's parser
+would cut down to a listed host while a resolver might take it whole, is
+resolved as given and never granted by the switch. A command line's entry
+with a port names every port of its host, one written another way is the
+host it stands for, a wildcard matches nothing and an entry that is not a
+host is left out, each said on stderr. Both forms may be given, and count
+together; what follows an AIR application's `--` is its own. Everything
+else stands: the sandbox (a local-with-filesystem SWF reaches no network,
+`allowNetworking`, `navigateToURL`'s rules), the user's word for each
+socket, no credentials, the pinned address and the ranks it is judged
+by, the ports no request reaches, Flash's forbidden headers, and the HTTP
+cache, keyed as before. It is unsafe in the way policy files exist to
+prevent: a SWF reads, as this machine, whatever this machine reaches of
+the hosts it grants (an intranet's public names, a service that trusts
+this machine's address), and sends that wherever it likes. No cookie or
+credential goes with it, so a site's data for the user stays out of
+reach. It holds for the run alone, every SWF the app opens in it, is
+never kept, and the app says on stderr, as it starts, what it grants; a
+second start with it says only that it counts for the first start alone.
+
 Addresses are placed by their ranges alone, as a browser's Private
 Network Access places them: the app does not know which public addresses
 are this machine's own or its network's. So this machine's own public
@@ -558,7 +598,8 @@ or as the next argument, read from the app's arguments before an AIR
 application's `--`, and set aside before the movie or a descriptor is
 looked for among the rest, so that a value ending in `.swf` or `.xml` is
 neither. A value as the next argument may not start with `-`: the other
-switches (`--proxy`, `--trace`, `--ignore-certificate-errors`) look at
+switches (`--proxy`, `--trace`, `--ignore-certificate-errors`,
+`--ignore-policy-files`) look at
 every argument, and would take it for theirs too; the docs write the `=`
 form. The parameters are the element's, by the same names and with the
 same meaning, since the page plays the SWF with the element: nine of them,
@@ -621,7 +662,9 @@ itself; a policy grants the SWF's domain the ports its `to-ports` lists,
 one from a port of 1024 or above only ports of 1024 and above. The
 policy is asked only after the user allows the server, so no SWF makes
 the app speak to a server the user did not allow, and the socket then
-connects to the address the policy came from. A local SWF with
+connects to the address the policy came from, or, where
+`--ignore-policy-files` stands in for it ([The network](#the-network)),
+to the address the host was pinned to. A local SWF with
 networking needs no socket policy, as before. A refused socket fails
 with #2031, as one no server took. A page holds at most 64 at once, and
 one with more than 4 MB its peer has not read fails, so a peer that
@@ -898,8 +941,9 @@ port: same-origin and cross-origin loads with and without policies,
 meta-policies and named policy files, redirects, this machine reached by
 address, by name, by redirect and by a name whose DNS turns to it, HTTPS
 with a certificate it makes with openssl (skipped without), socket
-policies on a stand-in for port 843 and on the port itself, and the
-limits; `http-pool.test.ts` the kept connections against servers that
+policies on a stand-in for port 843 and on the port itself,
+`--ignore-policy-files` in place of URL and socket policies, public
+hosts alone or those named, and the limits; `http-pool.test.ts` the kept connections against servers that
 count the connections they take: one for two requests, one of its own for
 a name pinned to another address (127.0.0.2, then 127.0.0.3), for a host
 whose certificate goes unchecked and for a tunnel to another target, the

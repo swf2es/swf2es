@@ -2,6 +2,7 @@ import {
   type Buffer3D,
   type Context3D,
   Context3DError,
+  isContext3DError,
   MOST_BACK_BUFFER,
   type Profile,
   type Program3D,
@@ -361,7 +362,7 @@ export function createBindings(s: Scripting, host: Stage3DHost) {
         });
       } catch (error) {
         generations.delete(slot);
-        if (error instanceof Context3DError) {
+        if (isContext3DError(error)) {
           host.remove(index);
           unavailable(slot);
           return;

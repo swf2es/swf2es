@@ -181,6 +181,13 @@ and AGAL validation/linkage. Every profile is served; the software render mode
 reports an asynchronous ErrorEvent #3702 so content can retry. Concurrent requests
 coalesce; requesting again after creation retires the preceding context and
 creates a new one. Broader unchecked-error precedence remains experimental.
+The adapter tells the core's errors by a brand under
+`Symbol.for("swf2es.context3d.error")`, not by `instanceof`, so a backend from
+another copy of this package, as a page beside the browser build bundles, has
+its errors mapped too: test them with `isContext3DError`, `isVertexOffsetError`,
+`isScissorBoundsError`, `isSamplerBiasError`, `isTextureBindingError` or
+`context3DErrorKind`. A backend's errors must come from a version of this
+package that brands them (any after 0.1.27); an older copy's escape unmapped.
 The constructor rejects antialiased host contexts before allocating GPU handles:
 its explicit resolve/present path requires `antialias: false`.
 
