@@ -241,7 +241,13 @@ export class TextObject extends DisplayObject {
     const layout = this.layout;
     const height = (layout.height + 2 * GUTTER) / 20;
     if (!this.wordWrap) {
-      const width = (layout.width + 2 * GUTTER) / 20;
+      // An input field is a little wider, by its default size, so that a caret
+      // at its text's end is in view (adl: 97 twips at 20 points).
+      const room =
+        this.type === "input"
+          ? Math.trunc((Math.max(0, this.model.defaultFormat.size) * TWIPS * 250) / 1024)
+          : 0;
+      const width = (layout.width + 2 * GUTTER + room) / 20;
       const moved =
         this.autoSize === "center"
           ? (this.width - width) / 2
@@ -340,6 +346,8 @@ export class TextObject extends DisplayObject {
    * room's right edge is out of it.
    */
   scrollTo(index: number): void {
+    // By the size a pending fit gives it, as Flash scrolls an autoSize field.
+    this.settle();
     const lines = this.layout.lines;
     if (lines.length === 0) {
       return;

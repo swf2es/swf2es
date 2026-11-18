@@ -1212,6 +1212,18 @@ Object.assign(globalThis, {
   imeBlur,
   imeState: () => ({ log: element("ime").takeLog(), text: element("ime").text() }),
   imeScroll: () => element("ime").scrollState(),
+  imeFill: (text: string, scroll: number) => {
+    element("ime").fill(text, scroll);
+    return true;
+  },
+  imeBox: () => {
+    const box = element("ime").getBoundingClientRect();
+    return [box.left, box.top];
+  },
+  imeFrames: async () => {
+    await frames(2);
+    return true;
+  },
   imeDestroy: () => {
     element("ime").destroy();
     element("ime").remove();

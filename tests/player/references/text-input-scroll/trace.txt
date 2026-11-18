@@ -44,6 +44,29 @@ line 15 h 139 153 v 1 1 1 sel 15 15 15
 line focused again h 139 153 v 1 1 1 sel 15 15 15
 dynamic h 140 139 v 1 1 1
 line end h 153 153 v 1 1 1 sel 20 20 20
+leftMargin h 0 163 v 1 1 1
+leftMargin end h 154 163 v 1 1 1 sel 20 20 20
+leftMargin start h 0 163 v 1 1 1 sel 0 1 0
+leftMargin dynamic h 0 149 v 1 1 1
+rightMargin h 0 153 v 1 1 1
+indent h 0 163 v 1 1 1
+blockIndent h 0 163 v 1 1 1
+short h 0 0 v 1 1 1
+centred short h 0 5 v 1 1 1
+centred short dynamic h 0 0 v 1 1 1
+centred long h 0 153 v 1 1 1
+right short h 0 13 v 1 1 1
+right long h 0 153 v 1 1 1
+autoSize 8 25.45 23.5 19.5 3 0
+autoSize 10 30.65 28.25 24.25 4 0
+autoSize 13 38.65 35.5 31.5 5 0
+autoSize 20 57.6 52.75 48.75 8 0
+autoSize 40 111.25 101.5 97.5 17 0
+autoSize 72 197.3 179.75 175.75 30 0
+autoSize end 57.6 0 8 5
+autoSize typed 67.35 0 10 6
+autoSize appended end 96.6 0 18 9
+autoSize by the default size 106.35 97.5
 frame 1 h 153 153 v 1 1 1 sel 20 20 20
 3 h 27 153 v 1 1 1 sel 3 3 3
 frame 2 h 27 153 v 1 1 1 sel 3 3 3

@@ -79,6 +79,11 @@ package
 				{
 					return field.text;
 				});
+			ExternalInterface.addCallback("fill", function(text:String, scroll:int):void
+				{
+					field.text = text;
+					field.scrollH = scroll;
+				});
 			ExternalInterface.addCallback("scrollState", function():String
 				{
 					return field.scrollH + " " + field.maxScrollH + " " + field.caretIndex;

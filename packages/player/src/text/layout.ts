@@ -510,10 +510,11 @@ export function roomH(field: { width: number }): number {
 }
 
 /**
- * How far a field's text scrolls sideways, in twips: its widest line past
- * the room inside the gutters, and an input field's a quarter of the room
- * further, the step its caret scrolls it by (adl; the corpus's
- * `edittext_max_scroll_h_basic`). None for a field that wraps.
+ * How far a field's text scrolls sideways, in twips: the furthest a line
+ * reaches past the room inside the gutters, its margin, block indent,
+ * indent and alignment in but not the right margin, and an input field's
+ * a quarter of the room further, the step its caret scrolls it by (adl;
+ * the corpus's `edittext_max_scroll_h_basic`). None for a field that wraps.
  */
 export function maxScrollH(field: {
   layout: TextLayout;
@@ -525,8 +526,13 @@ export function maxScrollH(field: {
     return 0;
   }
 
+  let reach = 0;
+  for (const line of field.layout.lines) {
+    reach = Math.max(reach, Math.max(0, line.x - GUTTER) + line.width);
+  }
+
   const room = roomH(field);
-  const over = field.layout.width - room + (field.type === "input" ? Math.floor(room / 4) : 0);
+  const over = reach - room + (field.type === "input" ? Math.floor(room / 4) : 0);
   return Math.max(0, over);
 }
 

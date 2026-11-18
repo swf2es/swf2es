@@ -370,6 +370,7 @@ var EI = flash.external.ExternalInterface;
 EI.addCallback("focusField", null, function() { Selection.setFocus(field); });
 EI.addCallback("blurField", null, function() { Selection.setFocus(null); });
 EI.addCallback("text", null, function() { return field.text; });
+EI.addCallback("fill", null, function(text, scroll) { field.text = text; field.hscroll = scroll; });
 EI.addCallback("scrollState", null, function() { return field.hscroll + " " + field.maxhscroll + " " + Selection.getCaretIndex(); });
 EI.addCallback("takeLog", null, function() { var taken = log; log = []; return taken; });
 stop();`;
@@ -1209,6 +1210,62 @@ for (const [vm, src] of [
         assert.deepEqual(await scroll(), [0, typed[1], 0]);
         await press("End", "End", 35);
         atEnd(await scroll());
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `a click in a scrolled ${vm} input field puts the caret under it and keeps the scroll`,
+    async (evaluate, send) => {
+      // [scrollH, maxScrollH, caretIndex]
+      const scroll = async () =>
+        (await call<string>(evaluate, "imeScroll()")).split(" ").map(Number) as [
+          number,
+          number,
+          number,
+        ];
+      const click = async (x: number, y: number) => {
+        const [left, top] = await call<[number, number]>(evaluate, "imeBox()");
+        for (const type of ["mousePressed", "mouseReleased"]) {
+          await send("Input.dispatchMouseEvent", {
+            type,
+            x: left + x,
+            y: top + y,
+            button: "left",
+            buttons: type === "mousePressed" ? 1 : 0,
+            clickCount: 1,
+          });
+        }
+
+        await call(evaluate, "imeFrames()");
+      };
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Far wider than the field's 140 pixels, scrolled 40 by script, and without the focus.
+        await call(evaluate, `imeFill(${JSON.stringify("a".repeat(60))}, 40)`);
+        await call(evaluate, "imeBlur()");
+        const [h, max] = await scroll();
+        assert.ok(max > 40 && h === 40, `scrolled by script: scrollH ${h} of ${max}`);
+
+        // A press focuses the field, its caret where it was pressed in the text as scrolled.
+        await click(30, 10);
+        const [pressedH, , pressed] = await scroll();
+        assert.equal(pressedH, 40);
+        assert.ok(pressed > 0 && pressed < 60, `the caret under the press: ${pressed}`);
+
+        // Pressed again further along, focused: the scroll stays, the caret moves with it.
+        await click(100, 10);
+        const [againH, , again] = await scroll();
+        assert.equal(againH, 40);
+        assert.ok(again > pressed && again < 60, `the caret under the second press: ${again}`);
       } finally {
         await call(evaluate, "imeDestroy()");
       }

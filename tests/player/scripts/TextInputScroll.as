@@ -190,9 +190,89 @@ package
 			scrolls("dynamic", other);
 			line.setSelection(20, 20);
 			show("line end", line);
+			margins();
+			autoSized();
+
 			// The frames are drawn without the focus, as adl's caret blinks.
 			stage.focus = null;
 			addEventListener(Event.ENTER_FRAME, step);
+		}
+
+		// Fields below the stage, not drawn.
+		private function below(format:TextFormat, text:String, type:String = "input"):TextField
+		{
+			var t:TextField = field(10, 200, 60, 30, false, false);
+			t.type = type;
+			t.defaultTextFormat = format;
+			t.text = text;
+			return t;
+		}
+
+		// maxScrollH reaches as far as a line does: its margin, block indent,
+		// indent and alignment in, but not the right margin.
+		private function margins():void
+		{
+			var s:String = "aaaaaaaaaaaaaaaaaaaa";
+			var left:TextFormat = new TextFormat("Probe", 20);
+			left.leftMargin = 10;
+			var t:TextField = below(left, s);
+			scrolls("leftMargin", t);
+			stage.focus = t;
+			t.setSelection(20, 20);
+			show("leftMargin end", t);
+			t.setSelection(1, 0);
+			show("leftMargin start", t);
+			scrolls("leftMargin dynamic", below(left, s, TextFieldType.DYNAMIC));
+			var right:TextFormat = new TextFormat("Probe", 20);
+			right.rightMargin = 10;
+			scrolls("rightMargin", below(right, s));
+			var indent:TextFormat = new TextFormat("Probe", 20);
+			indent.indent = 10;
+			scrolls("indent", below(indent, s));
+			var block:TextFormat = new TextFormat("Probe", 20);
+			block.blockIndent = 10;
+			scrolls("blockIndent", below(block, s));
+			scrolls("short", below(new TextFormat("Probe", 20), "aaaa"));
+			var centre:TextFormat = new TextFormat("Probe", 20);
+			centre.align = "center";
+			scrolls("centred short", below(centre, "aaaa"));
+			scrolls("centred short dynamic", below(centre, "aaaa", TextFieldType.DYNAMIC));
+			scrolls("centred long", below(centre, s));
+			var r:TextFormat = new TextFormat("Probe", 20);
+			r.align = "right";
+			scrolls("right short", below(r, "aaaa"));
+			scrolls("right long", below(r, s));
+		}
+
+		// An input field that fits itself to its text is wider than its text by
+		// a little, which its default size sets, so that a caret at the end of
+		// what it holds needs no scroll.
+		private function autoSized():void
+		{
+			var sizes:Array = [8, 10, 13, 20, 40, 72];
+			for (var i:int = 0; i < sizes.length; i++)
+			{
+				var t:TextField = below(new TextFormat("Probe", sizes[i]), "aaaaa");
+				t.autoSize = "left";
+				var d:TextField = below(new TextFormat("Probe", sizes[i]), "aaaaa", TextFieldType.DYNAMIC);
+				d.autoSize = "left";
+				trace("autoSize", sizes[i], t.width, d.width, t.textWidth, t.maxScrollH, d.maxScrollH);
+			}
+
+			var a:TextField = below(new TextFormat("Probe", 20), "aaaaa");
+			a.autoSize = "left";
+			stage.focus = a;
+			a.setSelection(5, 5);
+			trace("autoSize end", a.width, a.scrollH, a.maxScrollH, a.caretIndex);
+			a.replaceSelectedText("a");
+			trace("autoSize typed", a.width, a.scrollH, a.maxScrollH, a.caretIndex);
+			a.appendText("aaa");
+			a.setSelection(9, 9);
+			trace("autoSize appended end", a.width, a.scrollH, a.maxScrollH, a.caretIndex);
+			var big:TextField = below(new TextFormat("Probe", 20), "aaaaa");
+			big.setTextFormat(new TextFormat("Probe", 40));
+			big.autoSize = "left";
+			trace("autoSize by the default size", big.width, big.textWidth);
 		}
 
 		private function step(e:Event):void

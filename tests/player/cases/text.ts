@@ -1132,8 +1132,10 @@ export const textCases: PlayerCase[] = [
     script: "TextInputScroll",
     frames: 4,
     capture: [2, 3, 4],
+    // A glyph's edge between Flash's 4 by 4 samples, and 12 channels of the
+    // borders' corners; a field scrolled a step off moves hundreds.
     tolerance: 64,
-    maxOutliers: 40,
+    maxOutliers: 12,
   },
   // The same in AVM1: hscroll and scroll after the focus.
   {
@@ -1143,7 +1145,7 @@ export const textCases: PlayerCase[] = [
     frames: 4,
     capture: [2, 3, 4],
     tolerance: 64,
-    maxOutliers: 40,
+    maxOutliers: 12,
   },
   {
     name: "text-natives",
