@@ -79,6 +79,10 @@ package
 				{
 					return field.text;
 				});
+			ExternalInterface.addCallback("scrollState", function():String
+				{
+					return field.scrollH + " " + field.maxScrollH + " " + field.caretIndex;
+				});
 			ExternalInterface.addCallback("takeLog", function():Array
 				{
 					var taken:Array = log;

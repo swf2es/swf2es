@@ -1211,6 +1211,7 @@ Object.assign(globalThis, {
   imePlayer,
   imeBlur,
   imeState: () => ({ log: element("ime").takeLog(), text: element("ime").text() }),
+  imeScroll: () => element("ime").scrollState(),
   imeDestroy: () => {
     element("ime").destroy();
     element("ime").remove();

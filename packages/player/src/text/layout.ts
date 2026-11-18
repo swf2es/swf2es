@@ -7,7 +7,7 @@ import { type Font, type Glyph, glyphOf } from "@swf2es/format";
 import { deviceMetrics, type FontSet } from "./fonts.js";
 import type { CharFormat } from "./text.js";
 
-const TWIPS = 20;
+export const TWIPS = 20;
 /** The gutter: 2 pixels between the field's edge and its text, each side. */
 export const GUTTER = 2 * TWIPS;
 const BULLET = 36 * TWIPS;
@@ -502,6 +502,32 @@ export function shownLines(field: { layout: TextLayout; height: number }, first:
   }
 
   return Math.max(1, n);
+}
+
+/** The room for text across a field, inside its gutters, in twips; none where it is narrower. */
+export function roomH(field: { width: number }): number {
+  return Math.max(0, Math.round(field.width * TWIPS) - 2 * GUTTER);
+}
+
+/**
+ * How far a field's text scrolls sideways, in twips: its widest line past
+ * the room inside the gutters, and an input field's a quarter of the room
+ * further, the step its caret scrolls it by (adl; the corpus's
+ * `edittext_max_scroll_h_basic`). None for a field that wraps.
+ */
+export function maxScrollH(field: {
+  layout: TextLayout;
+  width: number;
+  wordWrap: boolean;
+  type: string;
+}): number {
+  if (field.wordWrap) {
+    return 0;
+  }
+
+  const room = roomH(field);
+  const over = field.layout.width - room + (field.type === "input" ? Math.floor(room / 4) : 0);
+  return Math.max(0, over);
 }
 
 /** The last first line a scroll can show: the lines after it fit the field's height. */

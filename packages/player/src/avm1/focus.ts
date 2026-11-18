@@ -211,6 +211,8 @@ export class FocusTracker implements TabHost {
     if (d instanceof TextObject) {
       stateOf(d).selected = true;
       d.select(0, d.model.text.length);
+      // Scrolled to the caret even where all was selected already, as Flash Player's.
+      d.scrollTo(d.caret);
     }
   }
 

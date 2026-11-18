@@ -3,7 +3,7 @@
 import { readFileSync } from "node:fs";
 import * as w from "../../swf-writer.ts";
 import type { Compile } from "../scripts.ts";
-import { bare, cornerFont, type PlayerCase, probeFont, stemFont } from "./common.ts";
+import { as1, bare, cornerFont, type PlayerCase, probeFont, stemFont } from "./common.ts";
 
 function loadedFont(compile: Compile): Uint8Array {
   const inner = w.swf({
@@ -484,6 +484,113 @@ function textLayout(abc: Uint8Array): Uint8Array {
       probeFont(1),
       w.doAbc(abc, "TextLayout"),
       w.symbolClass([[0, "TextLayout"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// Input fields in Probe scrolled by their carets (scripts/TextInputScroll.as).
+function textInputScroll(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 220,
+    height: 110,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      w.doAbc(abc, "TextInputScroll"),
+      w.symbolClass([[0, "TextInputScroll"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// AVM1 input fields in Probe scrolled to their carets by the focus, which
+// selects all their text, as TextInputScroll's: hscroll and maxhscroll in
+// twips, as Flash gives them for a field of embedded fonts. adl's AVM1
+// moves no caret for Selection.setSelection or replaceSel, though Flash
+// Player 32's does, so those are left to the web test's typing.
+function avm1TextInputScroll(): Uint8Array {
+  return w.swf({
+    version: 8,
+    width: 220,
+    height: 110,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      as1(
+        `function field(name, depth, x, y, w, h, multiline, wrap) {
+  createTextField(name, depth, x, y, w, h);
+  var t = _root[name];
+  t.type = "input";
+  t.embedFonts = true;
+  t.multiline = multiline;
+  t.wordWrap = wrap;
+  t.border = true;
+  t.setNewTextFormat(new TextFormat("Probe", 20));
+  return t;
+}
+function show(label, t) {
+  trace(label + " h " + t.hscroll + " " + t.maxhscroll + " v " + t.scroll + " " + t.maxscroll + " " + t.bottomScroll);
+}
+var line = field("line", 1, 10, 10, 60, 30, false, false);
+var lines = field("lines", 2, 80, 10, 60, 50, true, false);
+var wrapped = field("wrapped", 3, 150, 10, 60, 50, true, true);
+var dynamic = field("dynamic", 4, 10, 70, 60, 30, false, false);
+var s = "aaaaaaaaaaaaaaaaaaaa";
+line.text = s;
+show("text", line);
+line.hscroll = 1000;
+show("hscroll 1000", line);
+line.hscroll = 100000;
+show("hscroll 100000", line);
+line.hscroll = -5;
+show("hscroll -5", line);
+Selection.setFocus(line);
+show("focused", line);
+line.hscroll = 30;
+show("hscroll 30", line);
+lines.text = "a\rb\rc\rabcabcabcab\ra\rb\rc";
+show("lines", lines);
+Selection.setFocus(lines);
+show("lines focused", lines);
+wrapped.text = s + s;
+Selection.setFocus(wrapped);
+show("wrapped focused", wrapped);
+Selection.setFocus(line);
+show("line focused again", line);
+dynamic.text = s;
+dynamic.type = "dynamic";
+show("dynamic", dynamic);
+dynamic.hscroll = 100000;
+show("dynamic hscroll 100000", dynamic);
+// The frames are drawn without the focus, whose selection adl's hidden window does not draw.
+Selection.setFocus(null);
+show("unfocused", line);
+var frame = 0;
+onEnterFrame = function () {
+  frame++;
+  show("frame " + frame, line);
+  if (frame == 1) {
+    line.text = s + "aaaa";
+    show("longer", line);
+  } else if (frame == 2) {
+    line.text = "aaaaaaa";
+    show("shorter", line);
+  } else if (frame == 3) {
+    delete onEnterFrame;
+  }
+};
+`,
+        8,
+      ),
       w.showFrame(),
       w.end(),
     ],
@@ -1016,6 +1123,27 @@ export const textCases: PlayerCase[] = [
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
+  },
+  // An input field's scroll as a script moves its caret or changes its text:
+  // scrollH and scrollV follow the caret, and the text is drawn scrolled.
+  {
+    name: "text-input-scroll",
+    swf: textInputScroll,
+    script: "TextInputScroll",
+    frames: 4,
+    capture: [2, 3, 4],
+    tolerance: 64,
+    maxOutliers: 40,
+  },
+  // The same in AVM1: hscroll and scroll after the focus.
+  {
+    name: "avm1-text-input-scroll",
+    swf: avm1TextInputScroll(),
+    traced: true,
+    frames: 4,
+    capture: [2, 3, 4],
+    tolerance: 64,
+    maxOutliers: 40,
   },
   {
     name: "text-natives",

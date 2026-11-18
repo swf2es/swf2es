@@ -370,6 +370,7 @@ var EI = flash.external.ExternalInterface;
 EI.addCallback("focusField", null, function() { Selection.setFocus(field); });
 EI.addCallback("blurField", null, function() { Selection.setFocus(null); });
 EI.addCallback("text", null, function() { return field.text; });
+EI.addCallback("scrollState", null, function() { return field.hscroll + " " + field.maxhscroll + " " + Selection.getCaretIndex(); });
 EI.addCallback("takeLog", null, function() { var taken = log; log = []; return taken; });
 stop();`;
 writeFileSync(
@@ -1148,6 +1149,66 @@ for (const [vm, src] of [
         assert.equal(await call(evaluate, "imeBlur()"), "HOST");
         await send("Input.insertText", { text: "x" });
         assert.deepEqual(await state(), { log: [], text: "日本語仮名a" });
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `typing past an ${vm} input field's right edge scrolls it to keep the caret in view`,
+    async (evaluate, send) => {
+      // [scrollH, maxScrollH, caretIndex], given as a string.
+      const scroll = async () =>
+        (await call<string>(evaluate, "imeScroll()")).split(" ").map(Number) as [
+          number,
+          number,
+          number,
+        ];
+      const press = async (key: string, code: string, keyCode: number, text?: string) => {
+        await send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key,
+          code,
+          windowsVirtualKeyCode: keyCode,
+          ...(text ? { text } : {}),
+        });
+        await send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key,
+          code,
+          windowsVirtualKeyCode: keyCode,
+        });
+      };
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Far more than the field's 140 pixels: the newest characters and the caret at its right edge.
+        for (let i = 0; i < 60; i++) {
+          await press("a", "KeyA", 65, "a");
+        }
+
+        // The caret at the text's end is in view where the scroll is within a quarter of the
+        // room, 34 of the field's 136 pixels inside its gutters, of an input field's maxScrollH,
+        // which is that quarter past the text's end.
+        const atEnd = ([h, max, caret]: [number, number, number]) => {
+          assert.equal(caret, 60);
+          assert.ok(max > 34, `the text overflows the field: maxScrollH ${max}`);
+          assert.ok(h > max - 34 && h <= max, `the caret is in view: scrollH ${h} of ${max}`);
+        };
+        const typed = await scroll();
+        atEnd(typed);
+
+        // Home shows the text's start, End its end again.
+        await press("Home", "Home", 36);
+        assert.deepEqual(await scroll(), [0, typed[1], 0]);
+        await press("End", "End", 35);
+        atEnd(await scroll());
       } finally {
         await call(evaluate, "imeDestroy()");
       }

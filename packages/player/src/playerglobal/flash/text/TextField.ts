@@ -4,7 +4,7 @@
 import { avm2 } from "@swf2es/runtime";
 import { CONTENT, type TextObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
-import { lineOf, maxScrollV, shownLines } from "../../../text/layout.js";
+import { lineOf, maxScrollH, maxScrollV, shownLines } from "../../../text/layout.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text/text.js";
 import { embeddedFonts } from "./Font.js";
 import { useSheet } from "./StyleSheet.js";
@@ -267,7 +267,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       }
 
       if (moves) {
-        field.select(0, 0);
+        field.select(0, 0, null);
       }
 
       changed(this);
@@ -329,9 +329,12 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       const e = Math.max(b, Math.min(model.text.length, s.rt.toInt(end)));
       const text = s.rt.toString(v);
       model.replace(b, e, text);
-      // An input field keeps its selection; another's caret follows what came in.
+      // An input field keeps its selection; another's caret follows what came
+      // in. Either is scrolled to where it went in (adl).
       if (this.$display.type !== "input") {
-        this.$display.select(b + text.length, b + text.length);
+        this.$display.select(b + text.length, b + text.length, b);
+      } else if (this.$display.focused) {
+        this.$display.scrollTo(b);
       }
 
       changed(this);
@@ -625,14 +628,16 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       return field.scrollV + shownLines(field, field.scrollV - 1) - 1;
     }
     get scrollH(): number {
-      return this.$display.scrollH;
+      return Math.trunc(this.$display.scrollH);
     }
     set scrollH(v: Value) {
-      this.$display.scrollH = Math.max(0, s.rt.toInt(v));
-      this.$display.invalidate(CONTENT);
+      const field = this.$display;
+      // A negative scroll is taken as its size (adl; the corpus's `edittext_scrollh`).
+      field.scrollH = Math.min(Math.abs(s.rt.toInt(v)), Math.trunc(maxScrollH(field) / 20));
+      field.invalidate(CONTENT);
     }
     get maxScrollH(): number {
-      return 0;
+      return Math.trunc(maxScrollH(this.$display) / 20);
     }
     get selectionBeginIndex(): number {
       return this.$display.selection[0];
@@ -660,7 +665,8 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       const [begin, end] = field.selection;
       const text = s.rt.toString(v);
       field.model.replace(begin, end, text);
-      field.select(begin + text.length, begin + text.length);
+      // Scrolled to where it went in, not to the caret after it (adl).
+      field.select(begin + text.length, begin + text.length, begin);
       changed(this);
     }
     /** The runs of [begin, end) in one format each, as TextRuns. */
@@ -765,7 +771,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
 
   const caretAtEnd = (field: TextObject): void => {
     const end = field.model.text.length;
-    field.select(end, end);
+    field.select(end, end, null);
   };
 
   /**
