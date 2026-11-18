@@ -29,7 +29,12 @@ import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:
 import { addressClass } from "../../apps/desktop/src/main/addresses.ts";
 import { GZIP_HEADER_MAX, GzipHeader } from "../../apps/desktop/src/main/decompress.ts";
 import { Network } from "../../apps/desktop/src/main/network.ts";
-import { refererFor, unverifiedHosts } from "../../apps/desktop/src/main/network-rules.ts";
+import {
+  policyIgnored,
+  policyIgnoredHosts,
+  refererFor,
+  unverifiedHosts,
+} from "../../apps/desktop/src/main/network-rules.ts";
 import {
   type Limits,
   type NetworkOptions,
@@ -1412,4 +1417,235 @@ test("through a proxy, each request and socket policy goes to the address judged
   } finally {
     await picky.close();
   }
+});
+
+test("--ignore-policy-files names every host, or those it lists, up to an application's own arguments", () => {
+  assert.equal(policyIgnoredHosts(["movie.swf", "--ignore-certificate-errors"]), null);
+  assert.deepEqual(policyIgnoredHosts(["--ignore-policy-files", "movie.swf"]), {
+    all: true,
+    hosts: [],
+  });
+  // As a URL's host: lower case, an IPv6 address bare and short, an address in its usual form.
+  assert.deepEqual(
+    policyIgnoredHosts([
+      "--ignore-policy-files=Data.Example, localhost,[::1],0:0:0:0:0:0:0:2,192.168.001.5",
+      "movie.swf",
+    ]),
+    { all: false, hosts: ["data.example", "localhost", "::1", "::2", "192.168.1.5"] },
+  );
+  // Both forms, both counted; named with nothing, no host rather than every one.
+  assert.deepEqual(
+    policyIgnoredHosts(["--ignore-policy-files", "--ignore-policy-files=localhost"]),
+    { all: true, hosts: ["localhost"] },
+  );
+  assert.deepEqual(policyIgnoredHosts(["--ignore-policy-files="]), { all: false, hosts: [] });
+  // An AIR application's own arguments are not the app's.
+  assert.equal(policyIgnoredHosts(["app.xml", "--", "--ignore-policy-files"]), null);
+  assert.equal(policyIgnoredHosts(["app.xml", "--", "--ignore-policy-files=a.test"]), null);
+
+  // The one decision: by name wherever it is; alone, public addresses only.
+  const all = { all: true, hosts: ["localhost"] };
+  assert.equal(policyIgnored(all, "Other.Test", "public"), true);
+  assert.equal(policyIgnored(all, "inside.test", "loopback"), false);
+  assert.equal(policyIgnored(all, "router.test", "private"), false);
+  assert.equal(policyIgnored(all, "LOCALHOST", "loopback"), true);
+  const named = { all: false, hosts: ["::1", "192.168.1.5"] };
+  assert.equal(policyIgnored(named, "[0::1]", "loopback"), true);
+  assert.equal(policyIgnored(named, "192.168.1.5", "private"), true);
+  assert.equal(policyIgnored(named, "other.test", "public"), false);
+  assert.equal(policyIgnored(null, "other.test", "public"), false);
+});
+
+test("--ignore-policy-files: what it says on stderr as the app starts, from the app's own arguments", () => {
+  const switches = join(import.meta.dirname, "../../apps/desktop/src/main/switches.ts");
+  const run = (...args: string[]) => {
+    const result = spawnSync(process.execPath, [switches, ...args], {
+      encoding: "utf8",
+      timeout: 30_000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stderr
+      .split("\n")
+      .filter((line) => line.includes("--ignore-policy-files"))
+      .join("\n");
+  };
+
+  assert.equal(
+    run("--ignore-policy-files", "movie.swf"),
+    "swf2es: --ignore-policy-files: every public host taken to grant the SWF what a policy " +
+      "file could; an address on this machine or a private network still needs its own policy " +
+      "file unless named",
+  );
+  assert.equal(
+    run("--ignore-policy-files=Data.Example,192.168.1.5", "movie.swf"),
+    "swf2es: --ignore-policy-files: data.example, 192.168.1.5 taken to grant the SWF what a " +
+      "policy file could; any other host still needs its own policy file",
+  );
+  assert.equal(
+    run("--ignore-policy-files", "--ignore-policy-files=localhost"),
+    "swf2es: --ignore-policy-files: every public host and localhost taken to grant the SWF " +
+      "what a policy file could; an address on this machine or a private network still needs " +
+      "its own policy file unless named",
+  );
+  assert.equal(run("movie.swf"), "");
+  assert.equal(run("app.xml", "--", "--ignore-policy-files"), "");
+});
+
+test("--ignore-policy-files: another public origin's data and headers without its policy", async () => {
+  policies.clear();
+  const post = {
+    method: "POST",
+    headers: [["X-Custom", "yes"]] as [string, string][],
+    body: new TextEncoder().encode("hi"),
+  };
+
+  // Without it, refused, as before.
+  let net = await playing();
+  assert.match(await outcome(ask(net, `${other()}/data.txt`)), /refused: no policy file/);
+
+  // With it alone: read, and said so for --log-network; a policy that names someone else
+  // changes nothing, and content and sends, which ask none, are not marked.
+  policies.set("other/crossdomain.xml", xml('<allow-access-from domain="someone.else"/>'));
+  const everyHost = { ignorePolicy: { all: true, hosts: [] } };
+  net = await playing(`${swf()}/movie.swf`, everyHost);
+  const data = await ask(net, `${other()}/data.txt`);
+  assert.deepEqual([text(data.bytes), data.policyIgnored], ["other/data.txt", true]);
+  const content = await ask(net, `${other()}/image.png`, "content");
+  assert.deepEqual([text(content.bytes), content.policyIgnored], ["other/image.png", undefined]);
+  const own = await ask(net, `${swf()}/data.txt`);
+  assert.deepEqual([text(own.bytes), own.policyIgnored], ["swf/data.txt", undefined]);
+
+  // Headers no policy lists, to a data load and a send; Flash's forbidden ones still not.
+  const echo = JSON.parse((await outcome(ask(net, `${other()}/echo`, "data", post))) as string);
+  assert.deepEqual([echo.method, echo.headers["x-custom"], echo.body], ["POST", "yes", "hi"]);
+  assert.equal(await outcome(ask(net, `${other()}/echo`, "send", post)), "status 200");
+  assert.match(
+    await outcome(ask(net, `${other()}/echo`, "data", { headers: [["Cookie", "a=b"]] })),
+    /may not send the header Cookie/,
+  );
+  // Without it, the same headers are refused.
+  net = await playing();
+  assert.match(await outcome(ask(net, `${other()}/echo`, "send", post)), /lets it send X-Custom/);
+
+  // A list: the hosts it names, exactly, and no other; the same site by its address is another.
+  const listed = { ignorePolicy: { all: false, hosts: ["other.test"] } };
+  net = await playing(`${swf()}/movie.swf`, listed);
+  assert.equal(await outcome(ask(net, `${other()}/data.txt`)), "other/data.txt");
+  assert.match(
+    await outcome(ask(net, `http://${PUBLIC}:${otherPort}/data.txt`)),
+    /refused: no policy file on http:\/\/127\.0\.0\.2:\d+ grants swf\.test/,
+  );
+  net = await playing(`${swf()}/movie.swf`, { ignorePolicy: { all: false, hosts: ["x.test"] } });
+  assert.match(await outcome(ask(net, `${other()}/data.txt`)), /refused: no policy file/);
+
+  // A local SWF with networking, which no policy but domain="*" grants, is granted too.
+  net = network(everyHost);
+  net.play({ kind: "local" });
+  assert.equal(await outcome(ask(net, `${other()}/data.txt`)), "other/data.txt");
+  net = network();
+  net.play({ kind: "local" });
+  assert.match(await outcome(ask(net, `${other()}/data.txt`)), /refused: .* a local SWF/);
+  policies.clear();
+});
+
+test("--ignore-policy-files alone reaches no address more private than the SWF; named, it does", async () => {
+  policies.clear();
+  const everyHost = { ignorePolicy: { all: true, hosts: [] } };
+  let net = await playing(`${swf()}/movie.swf`, everyHost);
+  for (const url of [
+    `${inside()}/secret`,
+    `http://127.0.0.1:${insidePort}/secret`,
+    `http://localhost:${insidePort}/secret`,
+    `${other()}/redirect?to=${encodeURIComponent(`${inside()}/secret`)}`,
+  ]) {
+    assert.match(
+      await outcome(ask(net, url, "content")),
+      /refused: .*more private than the SWF, and no policy file there grants swf\.test \(--ignore-policy-files reaches it only by name\)/,
+      url,
+    );
+  }
+
+  // A local SWF stands for the internet: the same.
+  net = network(everyHost);
+  net.play({ kind: "local" });
+  assert.match(await outcome(ask(net, `${inside()}/image.png`, "content")), /more private/);
+
+  // Named: that host, by the name it is named by, and no other name for it.
+  net = await playing(`${swf()}/movie.swf`, {
+    ignorePolicy: { all: true, hosts: ["inside.test"] },
+  });
+  const named = await ask(net, `${inside()}/secret`);
+  assert.deepEqual([text(named.bytes), named.policyIgnored], ["inside-inside/secret", true]);
+  assert.match(await outcome(ask(net, `http://localhost:${insidePort}/x`)), /more private/);
+  net = await playing(`${swf()}/movie.swf`, {
+    ignorePolicy: { all: false, hosts: ["127.0.0.1"] },
+  });
+  assert.equal(
+    await outcome(ask(net, `http://127.0.0.1:${insidePort}/secret`)),
+    "inside-inside/secret",
+  );
+  assert.match(await outcome(ask(net, `${inside()}/secret`)), /more private/);
+});
+
+test("--ignore-policy-files stands in for a socket policy, public hosts alone unless named", async () => {
+  const masterPort = await socketServer(() => null);
+  const targetPort = await socketServer(() => null);
+  const silent = createTcpServer((connection) => connection.on("error", () => {}).end());
+  const loopbackPort = (await listen(silent, LOOPBACK)) as number;
+  const grant = async (options: Partial<NetworkOptions>, host: string, port: number) => {
+    const net = await playing(`${swf()}/movie.swf`, { socketPolicyPort: masterPort, ...options });
+    try {
+      return await net.socketGrant(host, port);
+    } catch (error) {
+      assert.ok(error instanceof Refused);
+      return `refused: ${error.message}`;
+    }
+  };
+
+  // No policy anywhere: refused without it, connected with it.
+  assert.match(String(await grant({}, "swf.test", targetPort)), /refused: no socket policy/);
+  assert.deepEqual(
+    await grant({ ignorePolicy: { all: true, hosts: [] } }, "swf.test", targetPort),
+    {
+      address: PUBLIC,
+      policyIgnored: true,
+    },
+  );
+  assert.deepEqual(
+    await grant({ ignorePolicy: { all: false, hosts: ["swf.test"] } }, "swf.test", targetPort),
+    { address: PUBLIC, policyIgnored: true },
+  );
+  assert.match(
+    String(
+      await grant({ ignorePolicy: { all: false, hosts: ["other.test"] } }, "swf.test", targetPort),
+    ),
+    /refused: no socket policy/,
+  );
+
+  // This machine: its own policy still, unless named.
+  assert.match(
+    String(await grant({ ignorePolicy: { all: true, hosts: [] } }, "inside.test", loopbackPort)),
+    /refused: no socket policy on inside\.test/,
+  );
+  assert.deepEqual(
+    await grant(
+      { ignorePolicy: { all: true, hosts: ["inside.test"] } },
+      "inside.test",
+      loopbackPort,
+    ),
+    { address: LOOPBACK, policyIgnored: true },
+  );
+
+  // A policy that grants it is still the policy's, not the switch's.
+  const granting = await socketServer(() =>
+    xml('<allow-access-from domain="swf.test" to-ports="*"/>'),
+  );
+  assert.deepEqual(
+    await grant(
+      { socketPolicyPort: granting, ignorePolicy: { all: false, hosts: [] } },
+      "swf.test",
+      targetPort,
+    ),
+    { address: PUBLIC, policyIgnored: false },
+  );
 });

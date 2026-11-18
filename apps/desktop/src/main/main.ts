@@ -7,6 +7,8 @@
 //   electron apps/desktop [--trace] app.xml [root-dir] [-- arguments...]
 //
 // --ignore-certificate-errors[=host,...] leaves HTTPS and WSS certificates unchecked.
+// --ignore-policy-files[=host,...] takes every public host's, or those hosts', cross-domain
+//   policy files to grant the SWF; this machine and private networks only when named.
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
 // --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
@@ -77,6 +79,7 @@ import {
 import {
   embedding,
   httpCacheOff,
+  ignorePolicy,
   logSockets,
   netLog,
   network,
@@ -465,6 +468,7 @@ async function fetchForPage(
         performance.now() - started,
         response.cache,
         response.reused,
+        response.policyIgnored,
       ) + (response.cache === "hit" ? "" : via),
     );
     return response;
@@ -493,6 +497,13 @@ if (!first) {
   if (proxied) {
     process.stderr.write(
       "swf2es: handed to the app already open, which opens it only if started with the same --proxy\n",
+    );
+  }
+
+  if (ignorePolicy) {
+    process.stderr.write(
+      "swf2es: handed to the app already open, which judges the network as it started: " +
+        "--ignore-policy-files counts only for the first start\n",
     );
   }
 

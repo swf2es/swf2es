@@ -168,6 +168,24 @@ fetch-electron` does so ahead, for the tests.
   stderr, each time it starts with it, which hosts go unverified. The page
   itself has no network (the main process makes a SWF's requests and
   connections), so nothing but those is affected.
+- **Policy files.** `--ignore-policy-files` lets the SWF read every
+  public host's data, send it headers and open sockets to it (as you
+  allow each server) as if its cross-domain policy files allowed it, for
+  this run: for a SWF you trust whose servers no longer serve the files
+  Flash asked for. `--ignore-policy-files=data.example,localhost` does so
+  for those hosts alone, matched exactly (not their subdomains, and a
+  name is not its address). It is unsafe in the way policy files exist to
+  prevent: the SWF reads, as this machine, whatever this machine reaches
+  of those hosts (no cookies or credentials go, but a site that trusts
+  your address answers it) and may send it anywhere. The bare switch
+  never reaches this machine or your local network: a SWF from the
+  internet still needs a policy file there unless you name the host
+  (`--ignore-policy-files=localhost,192.168.1.5`). The sandbox stays as
+  it is: a local SWF without the network reaches none. `--log-network`'s
+  line for a request it let through ends in
+  `allowed by --ignore-policy-files`. It is never kept in the settings,
+  and the app says on stderr, each time it starts with it, what it
+  covers.
 - **Proxy.** `--proxy=socks5://host:1080` sends everything the SWF does
   on the network through a SOCKS5 proxy (RFC 1928; `socks5h://` is the
   same), and `--proxy=http://host:3128` through an HTTP proxy, by a

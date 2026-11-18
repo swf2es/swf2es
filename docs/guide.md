@@ -390,6 +390,8 @@ the builtin.abc and playerglobal the player ships.
 | `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
+| `--ignore-policy-files` | Lets the SWF read every public host's data, send it headers and open sockets to it as if its cross-domain policy files allowed it, for this run. This machine and private networks still need their own policy file. |
+| `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
@@ -432,6 +434,22 @@ it signed itself. Whoever sits between you and such a host can then read and
 change what the SWF loads from it, so name the hosts you mean, and leave the
 switch off otherwise. It is never remembered: the app says so on stderr each
 time it starts with it.
+
+`--ignore-policy-files` is for a SWF you trust whose servers no longer
+serve the policy files Flash asked for. It takes away what those files
+guarded: the SWF reads, as your machine, whatever your machine reaches of
+the hosts it covers, and may send it anywhere. No cookies or passwords go
+with its requests, so your accounts on those sites stay out of its reach,
+but what is open to your network position is not (a site that trusts your
+address, say). Bare, it covers public hosts alone: a SWF from the internet
+still reaches your machine and your local network only where a policy file
+there grants it, unless you name the host (`--ignore-policy-files=localhost`,
+`=192.168.1.5`). A name matches as written, not its subdomains nor its
+address. Flash's other rules stay: a local SWF without UseNetwork reaches
+no network, sockets still ask you first, and `--log-network` ends the line
+of each request the switch let through in `allowed by --ignore-policy-files`.
+It is never remembered, and the app says on stderr what it covers each time
+it starts with it.
 
 `--proxy` is never remembered either, and the app says on stderr which
 proxy it uses (its credentials, which come from the command line alone,

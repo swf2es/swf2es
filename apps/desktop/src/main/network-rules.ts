@@ -1,9 +1,9 @@
 // The rules network.ts applies that need none of its state: Referers,
-// redirects, ports, the certificate switch, and the small helpers its
-// requests share. Without Electron, as network.ts is.
-import { isIPv4 } from "node:net";
+// redirects, ports, the certificate and policy switches, and the small
+// helpers its requests share. Without Electron, as network.ts is.
+import { isIPv4, isIPv6 } from "node:net";
 import * as tls from "node:tls";
-import { addressClass, badPort } from "./addresses.ts";
+import { type AddressClass, addressClass, badPort } from "./addresses.ts";
 import { type NetResponse, Refused } from "./network-types.ts";
 import type { Requester } from "./policy.ts";
 import { ProxyError } from "./proxy.ts";
@@ -24,34 +24,93 @@ export function defaultCa(): string[] | undefined {
   }
 }
 
+/** The hosts a switch such as --ignore-certificate-errors names: every one, or those listed. */
+export interface HostList {
+  all: boolean;
+  /** As a URL's host has them: lower case, an IPv6 address without its brackets. */
+  hosts: string[];
+}
+
 /**
- * The hosts --ignore-certificate-errors names, of the app's arguments up to
- * an AIR application's own after "--": null without the switch; with it
- * alone, every host; with `=a.test,b.test`, those, whatever their case.
- * A host is a name or an address, with no port: every port of it.
+ * A host as a URL's hostname has it, for comparing a host named on the
+ * command line, or a socket's, with a URL's: lower case, an IPv6 address
+ * without its brackets and in its shortest form, an international name in
+ * its ASCII form. One that is no host stays as written, matching none.
  */
-export function unverifiedHosts(argv: string[]): { all: boolean; hosts: string[] } | null {
+function hostOf(text: string): string {
+  const host = bare(text.trim());
+  try {
+    return bare(new URL(`http://${isIPv6(host) ? `[${host}]` : host}/`).hostname);
+  } catch {
+    return host.toLowerCase();
+  }
+}
+
+/**
+ * The hosts the switch `name` names, of the app's arguments up to an AIR
+ * application's own after "--": null without the switch; with it alone,
+ * every host; with `=a.test,b.test`, those, whatever their case. A host is
+ * a name or an address, with no port: every port of it.
+ */
+function hostSwitch(argv: string[], name: string): HostList | null {
   const end = argv.indexOf("--");
   const own = end < 0 ? argv : argv.slice(0, end);
   let named = false;
   let all = false;
   const hosts: string[] = [];
   for (const arg of own) {
-    if (arg === "--ignore-certificate-errors") {
+    if (arg === name) {
       named = true;
       all = true;
-    } else if (arg.startsWith("--ignore-certificate-errors=")) {
+    } else if (arg.startsWith(`${name}=`)) {
       // The switch with nothing named ignores nothing, rather than everything by a slip.
       named = true;
-      for (const host of arg.slice(arg.indexOf("=") + 1).split(",")) {
+      for (const host of arg.slice(name.length + 1).split(",")) {
         if (host.trim() !== "") {
-          hosts.push(host.trim().toLowerCase());
+          hosts.push(hostOf(host));
         }
       }
     }
   }
 
   return named ? { all, hosts } : null;
+}
+
+/** The hosts --ignore-certificate-errors names, whose HTTPS certificates go unchecked. */
+export function unverifiedHosts(argv: string[]): HostList | null {
+  return hostSwitch(argv, "--ignore-certificate-errors");
+}
+
+/**
+ * The hosts --ignore-policy-files names, whose policy files are taken to
+ * grant the SWF whatever one could (policyIgnored).
+ */
+export function policyIgnoredHosts(argv: string[]): HostList | null {
+  return hostSwitch(argv, "--ignore-policy-files");
+}
+
+/**
+ * Whether --ignore-policy-files stands in for the policy files of `host`,
+ * reached at an address of `place`: a host it names, wherever it is; with
+ * the switch alone, every host at a public address, and none on this
+ * machine or a private network, whose own policy is still asked where the
+ * SWF is less private than it. The one decision for every policy a SWF
+ * would ask: a URL policy's access and headers, and a socket policy.
+ */
+export function policyIgnored(list: HostList | null, host: string, place: AddressClass): boolean {
+  return !!list && (list.hosts.includes(hostOf(host)) || (list.all && place === "public"));
+}
+
+/** What the app says on stderr as it starts with --ignore-policy-files. */
+export function policyIgnoredNotice(list: HostList): string {
+  const named = list.hosts.join(", ");
+  return list.all
+    ? "swf2es: --ignore-policy-files: every public host" +
+        (named ? ` and ${named}` : "") +
+        " taken to grant the SWF what a policy file could; an address on this machine" +
+        " or a private network still needs its own policy file unless named"
+    : `swf2es: --ignore-policy-files: ${named || "no host"} taken to grant the SWF what a` +
+        " policy file could; any other host still needs its own policy file";
 }
 
 /**
