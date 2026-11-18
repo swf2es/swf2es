@@ -337,7 +337,7 @@ export class MovieClip extends Container {
   /** The frame's sounds, where it has any and something plays them. */
   private frameSounds(frame: number): void {
     const timeline = this.timeline;
-    if ((timeline.stream || timeline.sounds.size > 0) && this.library.sounds) {
+    if (this.library.sounds && (timeline.stream || timeline.sounds.size > 0)) {
       this.library.sounds.frame(this, frame);
     }
   }

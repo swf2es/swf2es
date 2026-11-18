@@ -106,6 +106,68 @@ export interface Timeline {
   length?: number;
 }
 
+// An empty public map materializes as a normal property on its first read.
+// Remember the owner so a proxy or an inheriting object sees the same map.
+const OWNER = Symbol("timeline owner");
+type ParsedTimeline = Timeline & { [OWNER]: Timeline };
+
+function lazyMap<K extends "frameLabels" | "sounds">(key: K): PropertyDescriptor {
+  const sealed = new WeakMap<Timeline, Timeline[K]>();
+
+  function write(target: Timeline, value: Timeline[K]): void {
+    Object.defineProperty(target, key, {
+      value,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  }
+
+  return {
+    enumerable: true,
+    configurable: true,
+    get: function read(this: ParsedTimeline): Timeline[K] {
+      const owner = this[OWNER];
+      const descriptor = Object.getOwnPropertyDescriptor(owner, key);
+      if (descriptor?.get !== read) {
+        return owner[key];
+      }
+
+      if (descriptor.configurable) {
+        const value = new Map();
+        write(owner, value);
+        return value;
+      }
+
+      // A sealed timeline still has a mutable map, but its getter cannot be replaced.
+      let value = sealed.get(owner);
+      if (!value) {
+        value = new Map();
+        sealed.set(owner, value);
+      }
+
+      return value;
+    },
+    set(this: ParsedTimeline, value: Timeline[K]) {
+      const own = Object.getOwnPropertyDescriptor(this, key);
+      if (!own && Object.isFrozen(this[OWNER])) {
+        throw new TypeError(`Cannot assign to frozen timeline property ${key}`);
+      }
+
+      if (own?.configurable !== false) {
+        write(this, value);
+      } else if (Object.isFrozen(this)) {
+        throw new TypeError(`Cannot assign to frozen timeline property ${key}`);
+      } else {
+        sealed.set(this[OWNER], value);
+      }
+    },
+  };
+}
+
+const labelMap = lazyMap("frameLabels");
+const soundMap = lazyMap("sounds");
+
 /**
  * What an AVM1 movie's timelines tell its AVM1, as Flash's clips do in
  * tag order: a display object placed and made, before its first frame
@@ -523,11 +585,9 @@ function timelineOf(
   const avm1 = actions !== null;
   const frames: FrameCommand[][] = [[]];
   const tagged: FrameName[] = [];
-  const frameLabels = new Map<number, string>();
-  const sounds = new Map<number, StartSound[]>();
-  let head: SoundStreamHead | null = null;
-  const blocks: SoundStreamBlock[] = [];
-  const byFrame = new Map<number, number>();
+  let frameLabels: Map<number, string> | null = null;
+  let sounds: Map<number, StartSound[]> | null = null;
+  let stream: SoundStream | null = null;
   let scenes: SceneData | null = null;
   for (const t of list) {
     const frame = frames[frames.length - 1];
@@ -554,6 +614,7 @@ function timelineOf(
         const name = readFrameLabel(bytes, t);
         tagged.push({ name, frame: frames.length });
         // A frame may have aliases: gotos find every name, currentFrameLabel the first.
+        frameLabels ??= new Map();
         if (!frameLabels.has(frames.length)) {
           frameLabels.set(frames.length, name);
         }
@@ -561,6 +622,7 @@ function timelineOf(
       }
       case tags.StartSound:
       case tags.StartSound2: {
+        sounds ??= new Map();
         const list = sounds.get(frames.length) ?? [];
         list.push(readStartSound(bytes, t));
         sounds.set(frames.length, list);
@@ -568,13 +630,13 @@ function timelineOf(
       }
       case tags.SoundStreamHead:
       case tags.SoundStreamHead2:
-        head ??= readSoundStreamHead(bytes, t);
+        stream ??= { head: readSoundStreamHead(bytes, t), blocks: [], byFrame: new Map() };
         break;
       case tags.SoundStreamBlock:
         // A block before the head, or a second on a frame, has no place in the stream.
-        if (head && !byFrame.has(frames.length)) {
-          byFrame.set(frames.length, blocks.length);
-          blocks.push(readSoundStreamBlock(bytes, t, head.format));
+        if (stream && !stream.byFrame.has(frames.length)) {
+          stream.byFrame.set(frames.length, stream.blocks.length);
+          stream.blocks.push(readSoundStreamBlock(bytes, t, stream.head.format));
         }
         break;
       case tags.DefineSceneAndFrameLabelData:
@@ -610,13 +672,20 @@ function timelineOf(
       }
       case tags.DefineSprite: {
         const sprite = readSprite(bytes, t);
+        const timeline = timelineOf(
+          bytes,
+          sprite.tags,
+          sprite.frameCount,
+          library,
+          jpeg,
+          actions,
+          version,
+        );
+        timeline.length = t.length - 4;
         library.set(sprite.id, {
           type: "sprite",
           id: sprite.id,
-          timeline: {
-            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, actions, version),
-            length: t.length - 4,
-          },
+          timeline,
           grid: null,
         });
         break;
@@ -791,17 +860,29 @@ function timelineOf(
   const labels = data ? named(data.labels).sort((a, b) => a.frame - b.frame) : tagged;
   const sceneList = data ? named(data.scenes) : [{ name: "", frame: 1 }];
   sceneList[0].frame = 1;
-  return {
+  const timeline = {
     frames,
     labels,
     gotoLabels: labels.length > 0 ? labels : tagged,
-    frameLabels,
     scenes: sceneList,
-    sounds,
-    stream: head && blocks.length > 0 ? { head, blocks, byFrame } : null,
+    stream: stream?.blocks.length ? stream : null,
     loops,
     tail,
-  };
+  } as Timeline;
+
+  Object.defineProperty(timeline, OWNER, { value: timeline });
+  if (frameLabels) {
+    timeline.frameLabels = frameLabels;
+  } else {
+    Object.defineProperty(timeline, "frameLabels", labelMap);
+  }
+  if (sounds) {
+    timeline.sounds = sounds;
+  } else {
+    Object.defineProperty(timeline, "sounds", soundMap);
+  }
+
+  return timeline;
 }
 
 /** The characters a SWF defines, and its root timeline. */
