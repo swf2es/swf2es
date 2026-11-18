@@ -208,6 +208,12 @@ function testFetch(
       return pageFetch({ ...request, url: local }, signal);
     }
 
+    // What an AVM1 SWF asks of the disk's root, where Flash played it, is served beside it.
+    if (swfUrl && served.protocol === "file:") {
+      const local = new URL(served.pathname.slice(1) + served.search, swfUrl).href;
+      return pageFetch({ ...request, url: local }, signal);
+    }
+
     return pageFetch(request, signal);
   };
 }
@@ -356,8 +362,8 @@ async function avm1For(
   avm1Codegen ??= WebAssembly.compileStreaming(fetch("/codegen/codegen.wasm")).then(createCodegen);
   // Timers and getTimer go by the frames, as the tests step them.
   // Its files are served, but Flash played it from disk: its URL is a file's, its host
-  // localhost, at the disk's root as the corpus's outputs show it (`file:///test.swf`), and
-  // what it loads beside it.
+  // localhost, at the disk's root as the corpus's outputs show it (`file:///test.swf`), its
+  // relative URLs against it and what it loads, the fetch serving them from beside it.
   const swfUrl = url ? new URL(url, location.href).href : undefined;
   const fileName = swfUrl ? new URL(swfUrl).pathname.split("/").pop() : undefined;
   return new Avm1(await avm1Codegen, {
@@ -365,7 +371,6 @@ async function avm1For(
     onUncaught: (error) => uncaught.push(error),
     realTime: null,
     url: fileName === undefined ? undefined : `file:///${fileName}`,
-    base: swfUrl,
     fetch: testFetch(swfUrl, trace, logFetch),
     socket: scriptedSockets(socket, trace, logFetch, uncaught),
     // A page is never opened: a test that logs fetches traces it as Ruffle's navigator logs it.
@@ -392,7 +397,9 @@ function logRequest(request: FetchRequest, swfUrl: string | undefined, trace: st
   const url =
     directory && request.url.startsWith(directory)
       ? request.url.slice(directory.length)
-      : request.url;
+      : request.url.startsWith("file:///")
+        ? request.url.slice("file:///".length)
+        : request.url;
   trace.push("Navigator::fetch:", `  URL: ${url}`, `  Method: ${request.method}`);
   const type = request.headers.find(([name]) => name.toLowerCase() === "content-type")?.[1];
   const others = request.headers.filter(([name]) => name.toLowerCase() !== "content-type");

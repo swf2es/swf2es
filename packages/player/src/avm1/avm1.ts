@@ -314,6 +314,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** What names the next object without a name of its own: instance1, instance2... */
   private instances = 0;
   private movieRoot: MovieClip | null = null;
+  /** Whether this plays the main movie, not an AVM1Movie an AS3 Loader loaded, which has no `$version`. */
+  private standalone = true;
   private swfVersion = 0;
   private swfLength = 0;
   private rate = 24;
@@ -518,6 +520,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     standalone = true,
   ): void {
     this.movieRoot = root;
+    this.standalone = standalone;
     this.swfVersion = swf.header.version;
     this.swfLength = swf.header.fileLength;
     this.rate = frameRate;
@@ -613,11 +616,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.made(root);
     const face = root.avm1;
     if (face !== null) {
-      // Flash defines this only on the main timeline, not an AVM1Movie loaded by AS3.
-      if (standalone) {
-        face.define("$version", platformCapabilities().version, 0);
-      }
-
+      this.defineVersion(face);
       // Its parameters, as Flash defines them before the first frame's actions run.
       const parameters = new Map(queryVariables(this.url));
       for (const [name, value] of Object.entries(this.parameters)) {
@@ -627,6 +626,17 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       for (const [name, value] of parameters) {
         face.define(name, textFor(value, this.swfVersion), 0);
       }
+    }
+  }
+
+  /**
+   * `$version` on a level's root, as Flash defines it on the main timeline
+   * and on each SWF a load puts in a level, before its first frame's
+   * actions; not on an AVM1Movie loaded by AS3.
+   */
+  defineVersion(face: avm1.Avm1Object): void {
+    if (this.standalone) {
+      face.define("$version", platformCapabilities().version, 0);
     }
   }
 

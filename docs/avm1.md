@@ -1014,10 +1014,15 @@ property, writable and deletable, using the same platform and player
 version as AS3's `Capabilities.version`. `getVersion()` compiles to
 GetVariable of `/:$version`, so it reads that property even when a local
 variable shadows it; there is no global function named `getVersion`.
-Child clips and AVM1 movies loaded by AS3 have no initial `$version`.
+Each SWF a load puts in a level has its own afresh, level 0's
+replacement too, whatever the old one's was, so `getVersion()` in a
+level reads its own level's; child clips, SWFs loaded into them and
+AVM1 movies loaded by AS3 have no initial `$version`, and a SWF loaded
+into a clip with `_lockroot` reads none through `getVersion()`.
 These behaviours were checked in adl both with a SWF as the application's
-main content and through the usual AS3 Loader harness; the main-content
-traces are asserted in `tests/unit/player/avm1/avm1.test.ts`.
+main content and through the usual AS3 Loader harness, and the levels'
+in Flash's plug-in (PepperFlash 32); the main-content traces are asserted
+in `tests/unit/player/avm1/avm1.test.ts`, the levels' in `loads.test.ts`.
 
 What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
 `avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases), and
@@ -1560,8 +1565,11 @@ SWF 7, folded up to SWF 6, and looked up by the SWF of the clip.
 
 A load goes through the host's fetch, as AS3's Loader's does ("content",
 which allowNetworking "internal" allows and "none" refuses), the clip's
-variables sent where a method is given, and the URL a redirect took it
-to is the loaded movie's `_url` and the one its access is checked by.
+variables sent where a method is given. Its URL resolves against the
+movie's base, whichever SWF asks, as Flash's plug-in resolves it, where
+AIR's adl takes the asking SWF's; that URL, or the one a redirect took
+it to, is the loaded movie's `_url`, its query included, and the one
+its access is checked by.
 It arrives between frames, its images decoded and its code compiled.
 Loads into one clip, or by one MovieClipLoader, arrive in the order
 asked, as Ruffle's test runner has them, one slow to answer holding the
