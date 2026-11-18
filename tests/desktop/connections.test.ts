@@ -375,7 +375,7 @@ test("closing a TLS certificate question or ending the page prevents late accept
   const port = (server.address() as { port: number }).port;
   try {
     for (const pageEnd of [false, true]) {
-      const { connections, events, next } = recorded();
+      const { connections, events, next } = recorded({ application: () => true });
       connections.connect(1, "localhost", port, "127.0.0.1", true, {
         certificates: [],
         timeout: 500,
@@ -398,6 +398,133 @@ test("closing a TLS certificate question or ending the page prevents late accept
       peer.destroy();
     }
     await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("a self-signed server is refused in the main process unless an AIR application plays", {
+  timeout: 10000,
+}, async () => {
+  const server = tlsServer({ key: certificates.selfKey, cert: certificates.self }, (peer) => {
+    peer.on("error", () => {});
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    for (const application of [false, true]) {
+      // The page asks either way: its word is not taken for whether AIR plays.
+      const { connections, events, next } = recorded({ application: () => application });
+      connections.connect(1, "localhost", port, "127.0.0.1", true, {
+        certificates: [],
+        timeout: 2000,
+      });
+      if (application) {
+        await next("certificateError");
+        connections.certificate(1, true);
+        await next("open");
+      } else {
+        await next("close");
+      }
+
+      assert.deepEqual(
+        events.filter((event) => event.type !== "data").map((event) => event.type),
+        application
+          ? ["certificateError", "certificate", "open"]
+          : ["certificate", "error", "close"],
+      );
+      const certificate = events.find((event) => event.type === "certificate");
+      assert.equal(
+        certificate?.type === "certificate" && certificate.status,
+        application ? "trusted" : "untrustedSigners",
+      );
+      connections.closeAll();
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("fails a TLS connection whose peer stops reading, past what it may buffer", {
+  timeout: 30_000,
+}, async () => {
+  const peers = new Set<TLSSocket>();
+  const server = tlsServer({ key: certificates.key, cert: certificates.leaf }, (peer) => {
+    peers.add(peer);
+    peer.on("error", () => {});
+    peer.pause();
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  const { connections, events, next } = recorded();
+  try {
+    connections.connect(1, "localhost", port, "127.0.0.1", true, {
+      certificates: [{ encoded: certificates.ca, trusted: true }],
+      timeout: 2000,
+    });
+    await next("open");
+    // Each write under the limit: only what TLS holds unsent can add up past it.
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    for (; sent < 256 && !events.some((e) => e.type === "error"); sent++) {
+      connections.send(1, chunk);
+      await new Promise((done) => setImmediate(done));
+    }
+
+    assert.ok(
+      events.some((e) => e.type === "error"),
+      "the connection never failed",
+    );
+    assert.ok(sent * chunk.length > MAX_BUFFERED, `failed after ${sent} MB`);
+    await next("close");
+    assert.equal(connections.size, 0);
+  } finally {
+    connections.closeAll();
+    for (const peer of peers) {
+      peer.destroy();
+    }
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("a TLS connection through a proxy has what the tunnel left of its timeout", {
+  timeout: 10000,
+}, async () => {
+  // Answers CONNECT after a while, then says nothing: TLS's handshake never ends.
+  const delay = 400;
+  const held = new Set<Socket>();
+  const [proxy, port] = await listen((socket) => {
+    held.add(socket);
+    socket.on("error", () => {});
+    socket.once("data", () =>
+      setTimeout(() => socket.write("HTTP/1.1 200 Connection Established\r\n\r\n"), delay),
+    );
+  });
+  const { connections, events, next } = recorded({
+    proxy: parseProxy(`http://127.0.0.1:${port}`),
+  });
+  try {
+    const started = performance.now();
+    connections.connect(1, "localhost", 443, "127.0.0.1", true, {
+      certificates: [],
+      timeout: 700,
+    });
+    await next("error");
+    const elapsed = performance.now() - started;
+    // The whole timeout from the tunnel on would fail at 1100 ms.
+    assert.ok(elapsed >= 650 && elapsed < 1000, `failed after ${elapsed.toFixed(0)} ms`);
+    assert.equal(
+      events.some((event) => event.type === "open"),
+      false,
+    );
+  } finally {
+    connections.closeAll();
+    for (const socket of held) {
+      socket.destroy();
+    }
+    proxy.close();
   }
 });
 

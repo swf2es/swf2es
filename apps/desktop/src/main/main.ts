@@ -374,7 +374,11 @@ function listen(): void {
       void chooseLibrary(name);
     }
   });
-  bridgeSockets(trusted, permitSocket, netLog, logSockets, { proxy, warn });
+  bridgeSockets(trusted, permitSocket, netLog, logSockets, {
+    proxy,
+    warn,
+    application: () => sandbox.application,
+  });
   bridgeWebSockets(trusted, permitWebSocket, webSocketOptions, netLog, logSockets, via);
   ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
