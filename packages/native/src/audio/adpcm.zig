@@ -22,7 +22,7 @@ const steps = [_]i32{
 /// Bits read most significant first.
 const Reader = struct {
     data: []const u8,
-    bit: usize = 0,
+    bit: usize,
 
     /// The next `n` bits, at most 16: the three bytes they lie in, those past the end zeros.
     fn read(self: *Reader, n: u5) u32 {
@@ -38,63 +38,65 @@ const Reader = struct {
     }
 };
 
-/// The most samples `length` bytes of `channels` decode to: what `out` must hold.
-pub fn capacity(length: usize, channels: u32) u64 {
-    // The fewest bits a sample takes, 2, and a header's sample per channel besides.
-    return (@as(u64, length) * 8 + 1) / 2 + channels;
+fn codeSize(first: u8) u5 {
+    return @as(u5, @intCast(first >> 6)) + 2;
+}
+
+/// An upper bound in interleaved samples: each code consumes its declared width,
+/// and even a packet header consumes 22 bits for the one sample it contributes per channel.
+pub fn capacity(data: []const u8) u64 {
+    if (data.len == 0) return 0;
+    return (@as(u64, data.len) * 8 - 2) / codeSize(data[0]);
 }
 
 /// `data` decoded into `out`, which holds capacity(); how many samples.
 pub fn decode(data: []const u8, channels: u32, out: []i16) usize {
-    const total = data.len * 8;
-    if (total < 2 or channels < 1 or channels > 2) {
+    if (data.len == 0 or channels < 1 or channels > 2) {
         return 0;
     }
 
-    var r = Reader{ .data = data };
-    const bits: u5 = @intCast(r.read(2) + 2);
+    var r = Reader{ .data = data, .bit = 2 };
+    const bits = codeSize(data[0]);
     const sign: u32 = @as(u32, 1) << (bits - 1);
     const index = indices[bits - 2];
-    var sample = [2]i32{ 0, 0 };
-    var step = [2]i32{ 0, 0 };
     var n: usize = 0;
-    var k: u32 = 0;
-    while (true) : (k = (k + 1) % 4096) {
-        if (k == 0) {
-            if (r.bit + 22 * channels > total) {
-                break;
-            }
-
-            for (0..channels) |c| {
-                sample[c] = @as(i16, @bitCast(@as(u16, @intCast(r.read(16)))));
-                step[c] = @intCast(r.read(6));
-                out[n] = @intCast(sample[c]);
-                n += 1;
-            }
-
-            continue;
-        }
-
-        if (r.bit + bits * channels > total) {
-            break;
-        }
-
+    while (true) {
+        const remaining = @as(u64, r.data.len) * 8 - r.bit;
+        const header = 22 * channels;
+        if (remaining < header) break;
+        var sample: [2]i32 = undefined;
+        var step: [2]i32 = undefined;
         for (0..channels) |c| {
-            const value = r.read(bits);
-            const magnitude = value & (sign - 1);
-            const size = steps[@intCast(step[c])];
-            var delta = size >> (bits - 1);
-            for (0..bits - 1) |b| {
-                if (magnitude & (@as(u32, 1) << @intCast(b)) != 0) {
-                    delta += size >> @intCast(bits - 2 - b);
-                }
-            }
-
-            sample[c] = if (value & sign != 0) @max(-32768, sample[c] - delta) else @min(32767, sample[c] + delta);
-            step[c] = std.math.clamp(step[c] + index[magnitude], 0, @as(i32, steps.len - 1));
+            sample[c] = @as(i16, @bitCast(@as(u16, @intCast(r.read(16)))));
+            step[c] = @intCast(r.read(6));
             out[n] = @intCast(sample[c]);
             n += 1;
         }
+
+        const frames: usize = @intCast(@min(4095, (remaining - header) / (bits * channels)));
+        for (0..frames) |_| {
+            for (0..channels) |c| {
+                const value = r.read(bits);
+                const magnitude = value & (sign - 1);
+                const size = steps[@intCast(step[c])];
+                var delta = size >> (bits - 1);
+                for (0..bits - 1) |b| {
+                    if (magnitude & (@as(u32, 1) << @intCast(b)) != 0) {
+                        delta += size >> @intCast(bits - 2 - b);
+                    }
+                }
+
+                sample[c] = if (value & sign != 0) @max(-32768, sample[c] - delta) else @min(32767, sample[c] + delta);
+                step[c] = std.math.clamp(step[c] + index[magnitude], 0, @as(i32, steps.len - 1));
+                out[n] = @intCast(sample[c]);
+                n += 1;
+            }
+        }
+
+        if (frames < 4095) break;
+        // Keep the bit cursor local to a packet, including a header that starts mid-byte.
+        r.data = r.data[r.bit >> 3 ..];
+        r.bit &= 7;
     }
 
     return n;
@@ -110,6 +112,33 @@ test "a mono packet: its header's sample, then each code's" {
 
     var out: [16]i16 = undefined;
     const n = decode(&bytes, 1, &out);
-    try std.testing.expect(n <= capacity(bytes.len, 1));
+    try std.testing.expect(n <= capacity(&bytes));
     try std.testing.expectEqualSlices(i16, &.{ 0, 10, -3, 2, -3 }, out[0..n]);
+}
+
+test "the ADPCM output reservation follows the code width" {
+    var data: [1024]u8 = @splat(0);
+    var out: [4096]i16 = undefined;
+    for (2..6) |width| {
+        data[0] = @intCast((width - 2) << 6);
+        const bound = capacity(&data);
+        try std.testing.expect(bound <= (data.len * 8 - 2) / width);
+        for (1..3) |channels| {
+            const samples = decode(&data, @intCast(channels), out[0..@intCast(bound)]);
+            const frames = 1 + (data.len * 8 - 2 - 22 * channels) / (width * channels);
+            try std.testing.expectEqual(frames * channels, samples);
+        }
+    }
+}
+
+test "a packet header starting mid-byte contributes a sample only when complete" {
+    const next = 2 + 22 + 4095 * 3;
+    var data: [(next + 22 + 7) / 8]u8 = @splat(0);
+    data[0] = 0x40; // Three-bit codes, mono.
+    for (next..next + 16) |bit| data[bit >> 3] |= @as(u8, 0x80) >> @intCast(bit & 7);
+
+    var out: [(data.len * 8 - 2) / 3]i16 = undefined;
+    try std.testing.expectEqual(@as(usize, 4096), decode(data[0 .. data.len - 1], 1, &out));
+    try std.testing.expectEqual(@as(usize, 4098), decode(&data, 1, &out));
+    try std.testing.expectEqual(@as(i16, -1), out[4096]);
 }
