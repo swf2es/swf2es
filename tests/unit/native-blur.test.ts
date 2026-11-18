@@ -175,6 +175,42 @@ test("a filter over a large bitmap is filtered whole, in tiles, as the reference
   }
 });
 
+const glow = {
+  kind: "glow" as const,
+  inner: false,
+  knockout: false,
+  hideObject: false,
+  type: "full",
+  invert: false,
+  quality: 2,
+  blurX: 8,
+  blurY: 8,
+  strength: 2,
+  alpha: 1,
+  highlightAlpha: 0,
+  shadowAlpha: 0,
+  color: 0xff0000,
+  highlightColor: 0,
+  shadowColor: 0,
+  table: null,
+};
+
+test("an odd-width layer read releases its blur scratch before the output is placed", () => {
+  const area = { x: 0, y: 0, width: 512, height: 512 };
+  const capacity = (width: number, height: number, blurY: number) => {
+    const kernel = new BitmapKernel();
+    const vertical = { ...glow, quality: 1, blurX: 0, blurY };
+    assert.ok(kernel.layer(large(width, height), area, vertical, [[0, 0]]));
+    assert.ok(kernel.capacity > 0);
+    return kernel.capacity;
+  };
+
+  // Both read 512 alpha rows. The moved output is larger than the blur's temporary queue.
+  for (const width of [511, 512]) {
+    assert.ok(capacity(width, 256, 255) <= capacity(width, 512, 0), `width ${width}`);
+  }
+});
+
 test("a glow over a million pixels every frame keeps its instance", () => {
   const wasm = globalThis.WebAssembly as unknown as {
     Instance: new (module: WebAssembly.Module, imports?: object) => WebAssembly.Instance;
@@ -191,25 +227,6 @@ test("a glow over a million pixels every frame keeps its instance", () => {
     const kernel = new BitmapKernel();
     const source = large(1024, 1024);
     const area = { x: -8, y: -8, width: 1040, height: 1040 };
-    const glow = {
-      kind: "glow" as const,
-      inner: false,
-      knockout: false,
-      hideObject: false,
-      type: "full",
-      invert: false,
-      quality: 2,
-      blurX: 8,
-      blurY: 8,
-      strength: 2,
-      alpha: 1,
-      highlightAlpha: 0,
-      shadowAlpha: 0,
-      color: 0xff0000,
-      highlightColor: 0,
-      shadowColor: 0,
-      table: null,
-    };
     const capacities: number[] = [];
     for (let frame = 0; frame < 5; frame++) {
       assert.ok(kernel.layer(source, area, glow, [[0, 0]]));
