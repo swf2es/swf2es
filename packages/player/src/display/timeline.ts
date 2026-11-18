@@ -486,8 +486,9 @@ function shapeOf(
   }
 
   // Another library can keep a shared shape alive after this SWF is unloaded.
-  const source = bitmaps ? tag : new Uint8Array(tag);
-  const code = t.code;
+  const source = bitmaps ? bytes : new Uint8Array(tag);
+  const offset = bitmaps ? t.offset : 0;
+  const { code, length } = t;
   let layers: ShapeLayer[] | null = null;
   const character: ShapeCharacter = {
     type: "shape",
@@ -497,7 +498,7 @@ function shapeOf(
     // application's SWFs define are never shown, and their layers were most of its memory.
     get layers() {
       layers ??= shapeLayers(
-        readShape(source, code, 0, source.length, version),
+        readShape(source, code, offset, length, version),
         (id) => bitmaps?.get(id) ?? null,
       );
       return layers;
