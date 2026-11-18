@@ -4,9 +4,9 @@ import { connect } from "node:net";
 import { Worker } from "node:worker_threads";
 import type { SocketHost, WorkerHost } from "@swf2es/player";
 import type { ThreadStart } from "@swf2es/player/worker";
-import { tlsSocket, validCertificate } from "./tls.js";
+import { tlsConnect, validCertificate } from "./tls.js";
 
-export { type TlsTransport, tlsSocket, validCertificate } from "./tls.js";
+export { type TlsTransport, tlsConnect, tlsSocket, validCertificate } from "./tls.js";
 
 /** A host that connects ActionScript sockets to TCP or TLS directly from Node. */
 export function nodeSocketHost(): SocketHost {
@@ -14,8 +14,7 @@ export function nodeSocketHost(): SocketHost {
     secure: {
       isCertificate: validCertificate,
       connect(host, port, events, options) {
-        const raw = connect({ host, port, noDelay: options.noDelay ?? true });
-        return tlsSocket(raw, host, events, options);
+        return tlsConnect(host, port, events, options);
       },
     },
     connect(host, port, events, options) {
