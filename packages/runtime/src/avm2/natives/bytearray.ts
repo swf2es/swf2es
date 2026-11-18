@@ -76,8 +76,8 @@ function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma"
   throw rt.error("flash.errors::IOError", 2058);
 }
 
-/** A ByteArray's bytes, all of them, replaced by a copy of `bytes`, its position `position`; the domain memory told, if it is. */
-function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
+/** Replace a ByteArray's contents with the codec's owned buffer and notify the domain memory. */
+function replaceBytes(b: Bytes, bytes: Uint8Array<ArrayBuffer>, position: number): void {
   if (b.shared !== null) {
     // In place, for every worker, as avmplus swaps the shared Buffer's array.
     const previous = b.length;
@@ -93,7 +93,7 @@ function replaceBytes(b: Bytes, bytes: Uint8Array, position: number): void {
     return;
   }
 
-  b.setBuffer(new Uint8Array(bytes));
+  b.setBuffer(bytes);
   b.length = bytes.length;
   b.position = position >>> 0;
   b.notify();
@@ -501,7 +501,7 @@ export function byteArrayNatives(rt: Runtime): Natives {
       }
 
       const data = b.buffer.subarray(0, b.length);
-      let out: Uint8Array;
+      let out: Uint8Array<ArrayBuffer>;
       if (kind === "lzma") {
         // As UncompressViaLzma: too short for its header is left as it is, and
         // a length past 32 bits a MemoryError before anything is read.
