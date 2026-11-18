@@ -371,4 +371,59 @@ export const stemFont = (id: number, name = "Stem"): Uint8Array =>
     kerning: [["a", "l", -77]],
   });
 
+/**
+ * "Corner", whose contours each start and end with an edge of no length,
+ * as many fonts converted for Flash have them: "l" a bar from its bottom
+ * right corner, "h" a stem, a shoulder and a leg from its bottom left. At
+ * 32 pixels its corners and advances are whole pixels.
+ */
+export const cornerFont = (id: number): Uint8Array => {
+  const contour = (points: [number, number][]): [number, number][] => [
+    points[0],
+    ...points,
+    points[0],
+  ];
+  return w.font3({
+    id,
+    name: "Corner",
+    ascent: 896,
+    descent: 256,
+    glyphs: [
+      { char: " ", advance: 256, boxes: [] },
+      {
+        char: "l",
+        advance: 256,
+        boxes: [],
+        contours: [
+          contour([
+            [160, 0],
+            [64, 0],
+            [64, -704],
+            [160, -704],
+          ]),
+        ],
+      },
+      {
+        char: "h",
+        advance: 544,
+        boxes: [],
+        contours: [
+          contour([
+            [64, 0],
+            [64, -704],
+            [160, -704],
+            [160, -448],
+            [448, -448],
+            [448, 0],
+            [352, 0],
+            [352, -352],
+            [160, -352],
+            [160, 0],
+          ]),
+        ],
+      },
+    ],
+  });
+};
+
 export const moved = { frames: 2, capture: [1, 2], tolerance: 32, maxOutliers: 500 };
