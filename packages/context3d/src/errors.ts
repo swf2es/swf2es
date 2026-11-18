@@ -84,6 +84,36 @@ export type Context3DErrorReason =
   | "agalSamplerMip"
   | "agalSamplerFilter";
 
+/** Which of the backend's errors an error is, under its brand. */
+export type Context3DErrorKind =
+  | "context3d"
+  | "vertexOffset"
+  | "scissorBounds"
+  | "samplerBias"
+  | "textureBinding";
+
+/**
+ * The backend's errors are told by a brand under a symbol of the global
+ * registry, not by instanceof: a page may give the player a backend from
+ * its own copy of this package, as the site's bundle and a page beside the
+ * browser build do, whose classes are not the player's.
+ */
+const BRAND = Symbol.for("swf2es.context3d.error");
+
+/** Mark `type`'s errors as `kind`'s, on its prototype. */
+export function brand(type: abstract new (...args: never[]) => Error, kind: Context3DErrorKind) {
+  Object.defineProperty(type.prototype, BRAND, { value: kind });
+}
+
+/** The kind of the backend's error `error` is, of any copy of this package, or null. */
+export function context3DErrorKind(error: unknown): Context3DErrorKind | null {
+  if (typeof error !== "object" || error === null) {
+    return null;
+  }
+
+  return (error as { [BRAND]?: Context3DErrorKind })[BRAND] ?? null;
+}
+
 export class Context3DError extends Error {
   readonly reason: Context3DErrorReason;
 
@@ -92,3 +122,8 @@ export class Context3DError extends Error {
     this.reason = reason;
   }
 }
+
+brand(Context3DError, "context3d");
+
+export const isContext3DError = (error: unknown): error is Context3DError =>
+  context3DErrorKind(error) === "context3d";

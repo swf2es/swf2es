@@ -1,10 +1,10 @@
 import {
   blockBytes,
-  Context3DError,
   compressedFormat,
+  isContext3DError,
+  isSamplerBiasError,
   MOST_CUBE,
   profileLimits,
-  SamplerBiasError,
   TEXEL_BYTES,
   type Texture3D,
 } from "@swf2es/context3d";
@@ -266,7 +266,7 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
       try {
         program(this as unknown as AsObject).upload(bytes(vertex), bytes(fragment));
       } catch (error) {
-        if (error instanceof SamplerBiasError) {
+        if (isSamplerBiasError(error)) {
           throw s.rt.error("Error", 3696);
         }
 
@@ -500,7 +500,7 @@ export function registerResources(natives: avm2.Natives, s: Scripting, bindings:
         id = entry.disposed ? id : applyAtf(object, value, copy, readAtfHeader(copy, 0));
       } catch (error) {
         // The backend's own failure, which a synchronous upload throws translated, as an event.
-        if (!(error instanceof Context3DError)) {
+        if (!isContext3DError(error)) {
           throw error;
         }
 

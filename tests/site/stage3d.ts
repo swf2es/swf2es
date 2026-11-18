@@ -106,6 +106,9 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         await click("stage3d");
         await ready();
         assert.ok((await value<number>(backendRequests)) > 0);
+        // The backend is the page's own copy of @swf2es/context3d, not the player's: its errors
+        // are still Flash's, a program too short for AGAL #3615 to the SWF's catch.
+        assert.equal(await value<boolean>(logHas("site-stage3d caught 3615")), true);
         assert.equal(
           await value(
             "document.getElementById('player').shadowRoot.querySelectorAll('canvas').length",

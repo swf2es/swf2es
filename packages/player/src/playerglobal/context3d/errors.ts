@@ -1,4 +1,8 @@
-import { Context3DError, type Context3DErrorReason } from "@swf2es/context3d";
+import {
+  type Context3DError,
+  type Context3DErrorReason,
+  isContext3DError,
+} from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../scripting.js";
 
@@ -124,7 +128,7 @@ export function translateErrors(natives: avm2.Natives, s: Scripting): void {
       try {
         return native.call(this, a, b, c, d, e, f, g, h);
       } catch (error) {
-        if (error instanceof Context3DError) {
+        if (isContext3DError(error)) {
           const { id, kind } = flashError(error);
           const said = `${key}: ${error.message} (Error #${id})`;
           if (!told.has(said)) {
