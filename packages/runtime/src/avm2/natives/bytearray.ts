@@ -76,8 +76,13 @@ function algorithmOf(rt: Runtime, algorithm: Value): "zlib" | "deflate" | "lzma"
   throw rt.error("flash.errors::IOError", 2058);
 }
 
-/** Replace a ByteArray's contents with the codec's owned buffer and notify the domain memory. */
-function replaceBytes(b: Bytes, bytes: Uint8Array<ArrayBuffer>, position: number): void {
+/**
+ * A ByteArray's bytes, all of them, replaced by `bytes`, its position
+ * `position`; the domain memory told, if it is. A codec's own whole buffer
+ * is taken as it is; a view of part of one is copied, as the ByteArray's
+ * DataView and the domain memory's read its buffer from offset 0.
+ */
+export function replaceBytes(b: Bytes, bytes: Uint8Array<ArrayBuffer>, position: number): void {
   if (b.shared !== null) {
     // In place, for every worker, as avmplus swaps the shared Buffer's array.
     const previous = b.length;
@@ -93,7 +98,8 @@ function replaceBytes(b: Bytes, bytes: Uint8Array<ArrayBuffer>, position: number
     return;
   }
 
-  b.setBuffer(bytes);
+  const whole = bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength;
+  b.setBuffer(whole ? bytes : new Uint8Array(bytes));
   b.length = bytes.length;
   b.position = position >>> 0;
   b.notify();
