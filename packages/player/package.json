@@ -28,6 +28,10 @@
       "types": "./dist/as3/types.d.ts",
       "default": "./dist/as3/types.js"
     },
+    "./certificates": {
+      "types": "./dist/certificates.d.ts",
+      "default": "./dist/certificates.js"
+    },
     "./context3d": {
       "types": "./dist/playerglobal/context3d.d.ts",
       "default": "./dist/playerglobal/context3d.js"

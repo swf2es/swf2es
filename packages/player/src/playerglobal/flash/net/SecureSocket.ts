@@ -1,6 +1,12 @@
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
-import { type Certificate, copyCertificate } from "../../../certificates.js";
+import {
+  type Certificate,
+  copyCertificate,
+  MAX_CERTIFICATE_BYTES,
+  MAX_SOCKET_CERTIFICATE_BYTES,
+  MAX_SOCKET_CERTIFICATES,
+} from "../../../certificates.js";
 import type { CertificateStatus, SocketCertificate } from "../../../hosts.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
@@ -9,6 +15,7 @@ import type { SocketConnections } from "./socket-connections.js";
 
 interface State {
   certificates: SocketCertificate[];
+  certificateBytes: number;
   status: CertificateStatus;
   certificate: Certificate | null;
 }
@@ -19,7 +26,7 @@ export function secureSocketNatives(s: Scripting, sockets: SocketConnections): a
   const state = (object: avm2.AsObject): State => {
     let known = states.get(object);
     if (!known) {
-      known = { certificates: [], status: "unknown", certificate: null };
+      known = { certificates: [], certificateBytes: 0, status: "unknown", certificate: null };
       states.set(object, known);
     }
 
@@ -47,7 +54,19 @@ export function secureSocketNatives(s: Scripting, sockets: SocketConnections): a
       }
 
       const bytes = avm2.bytesOf(s.rt, value);
-      const encoded = new Uint8Array(bytes.buffer.subarray(0, bytes.length));
+      // Another worker can change a shareable ByteArray's length between reads.
+      const length = bytes.length;
+      const kept = state(this);
+      if (
+        length === 0 ||
+        length > MAX_CERTIFICATE_BYTES ||
+        kept.certificates.length >= MAX_SOCKET_CERTIFICATES ||
+        length > MAX_SOCKET_CERTIFICATE_BYTES - kept.certificateBytes
+      ) {
+        throw s.rt.error("ArgumentError", 2004);
+      }
+
+      const encoded = new Uint8Array(bytes.buffer.subarray(0, length));
       let valid = false;
       try {
         valid = host.isCertificate(encoded);
@@ -59,7 +78,8 @@ export function secureSocketNatives(s: Scripting, sockets: SocketConnections): a
         throw s.rt.error("ArgumentError", 2004);
       }
 
-      state(this).certificates.push({ encoded, trusted: Boolean(trusted) });
+      kept.certificates.push({ encoded, trusted: Boolean(trusted) });
+      kept.certificateBytes += encoded.byteLength;
     }
 
     connect(host: avm2.Value, port: avm2.Value): void {

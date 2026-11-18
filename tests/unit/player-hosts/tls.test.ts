@@ -19,13 +19,17 @@ const host = nodeSocketHost().secure;
 assert.ok(host);
 after(certificates.dispose);
 
-async function server(cert = certificates.leaf, key = certificates.key) {
+async function server(cert = certificates.leaf, key = certificates.key, greeting?: Uint8Array) {
   const peers = new Set<Socket>();
   const server = createServer({ cert, key }, (peer) => {
     peers.add(peer);
     peer.on("error", () => {});
     peer.on("close", () => peers.delete(peer));
     peer.on("data", (bytes) => peer.write(bytes));
+
+    if (greeting) {
+      peer.write(greeting);
+    }
   });
   server.on("connection", (peer) => {
     peers.add(peer);
@@ -233,6 +237,67 @@ test("expiry and hostname checks cannot be accepted through the self-signed exce
   }
 });
 
+test("a self-signed leaf must still be valid when consent arrives", {
+  timeout: 10000,
+}, async (t) => {
+  const peer = await server(certificates.self, certificates.selfKey);
+  const seen = recorded();
+  const decision = new Promise<(accepted: boolean) => void>((resolve) => {
+    seen.events.certificateError = resolve;
+  });
+  const transport = tlsSocket(
+    tcpConnect(peer.port, "127.0.0.1"),
+    "localhost",
+    seen.events,
+    options(),
+  );
+  try {
+    const proceed = await decision;
+    const expires = new X509Certificate(certificates.self).validToDate.getTime();
+    t.mock.method(Date, "now", () => expires + 1);
+    proceed(true);
+    assert.deepEqual(seen.log, ["certificate:expired", "error"]);
+    assert.equal(transport.socket.destroyed, true);
+    proceed(true);
+    assert.deepEqual(seen.log, ["certificate:expired", "error"]);
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
+test("a throwing receive callback reports failure and closes the TLS socket", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server();
+  const seen = recorded();
+  seen.events.data = () => {
+    throw new Error("receiver failed");
+  };
+  const closed = new Promise<void>((resolve) => {
+    seen.events.close = () => {
+      seen.log.push("close");
+      resolve();
+    };
+  });
+  const transport = tlsSocket(
+    tcpConnect(peer.port, "127.0.0.1"),
+    "localhost",
+    seen.events,
+    options(),
+  );
+  try {
+    await seen.done;
+    transport.send(Uint8Array.of(42));
+    await closed;
+    assert.deepEqual(seen.log, ["certificate:trusted", "open", "error", "close"]);
+    assert.equal(transport.socket.destroyed, true);
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
 test("a self-signed leaf requires explicit acceptance, with the status reported before open", {
   timeout: 10000,
 }, async () => {
@@ -289,6 +354,124 @@ test("self-signed consent cannot bypass the target hostname", { timeout: 10000 }
     assert.equal(seen.log.includes("open"), false);
   } finally {
     transport.close();
+    await peer.close();
+  }
+});
+
+async function plaintextBuffered(socket: Socket): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (socket.readableLength === 0 && !socket.destroyed && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.ok(
+    socket.readableLength > 0,
+    "plaintext must be buffered before the certificate decision",
+  );
+}
+
+test("TLS retains paused plaintext until consent and keeps delivered chunks owned", {
+  timeout: 10000,
+}, async () => {
+  const payload = Buffer.alloc(1024 * 1024 + 37);
+  for (let i = 0; i < payload.length; i++) {
+    payload[i] = (i * 31 + Math.floor(i / 256)) & 255;
+  }
+
+  const peer = await server(certificates.self, certificates.selfKey, payload);
+  const seen = recorded();
+  const decision = new Promise<(accepted: boolean) => void>((resolve) => {
+    seen.events.certificateError = resolve;
+  });
+  const chunks: Uint8Array[] = [];
+  const ownership: (boolean | undefined)[] = [];
+  let length = 0;
+  let earlyData = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const received = new Promise<void>((resolve) => {
+    seen.events.data = (bytes, owned) => {
+      ownership.push(owned);
+      earlyData ||= !seen.log.includes("open");
+      chunks.push(bytes);
+      length += bytes.length;
+      if (length === payload.length) {
+        resolve();
+      }
+    };
+  });
+  const transport = tlsSocket(
+    tcpConnect(peer.port, "127.0.0.1"),
+    "localhost",
+    seen.events,
+    options(),
+  );
+  try {
+    const proceed = await decision;
+    await plaintextBuffered(transport.socket);
+    assert.equal(length, 0);
+    assert.equal(seen.log.includes("open"), false);
+    proceed(true);
+    await Promise.race([
+      received,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error("TLS lost queued plaintext")), 3000);
+      }),
+    ]);
+    assert.ok(chunks.length > 1);
+    assert.equal(earlyData, false);
+    assert.ok(ownership.every((owned) => owned === true));
+
+    // Retain the actual arrays as an IPC batch or the player's receive queue does.
+    assert.ok(Buffer.concat(chunks).equals(payload), "retained plaintext changed");
+  } finally {
+    clearTimeout(timer);
+    transport.close();
+    await peer.close();
+  }
+});
+
+test("TLS discards paused plaintext after refusal, timeout or close", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server(certificates.self, certificates.selfKey, Buffer.alloc(1024 * 1024, 42));
+  try {
+    for (const action of ["refuse", "timeout", "close"] as const) {
+      const seen = recorded();
+      const decision = new Promise<(accepted: boolean) => void>((resolve) => {
+        seen.events.certificateError = resolve;
+      });
+      const closed = new Promise<void>((resolve) => {
+        seen.events.close = resolve;
+      });
+      const transport = tlsSocket(tcpConnect(peer.port, "127.0.0.1"), "localhost", seen.events, {
+        ...options(),
+        timeout: action === "timeout" ? 250 : 2000,
+      });
+      try {
+        const proceed = await decision;
+        await plaintextBuffered(transport.socket);
+        switch (action) {
+          case "refuse":
+            proceed(false);
+            break;
+          case "close":
+            transport.close();
+            break;
+        }
+
+        await closed;
+        proceed(true);
+        assert.equal(seen.log.includes("open"), false);
+        assert.equal(
+          seen.log.some((event) => event.startsWith("data:")),
+          false,
+        );
+        assert.equal(transport.socket.destroyed, true);
+      } finally {
+        transport.close();
+      }
+    }
+  } finally {
     await peer.close();
   }
 });
