@@ -123,13 +123,16 @@ Changing that attribute to false also stops the current capture; reload
 before enabling it again. Replacing or destroying the player stops its
 tracks, including a permission request that finishes later.
 
-The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
-and `allownetworking`. As in Flash's plug-in, relative URLs resolve
-against the page, or against `base`, where `base="."` is the SWF's
-directory and any other value is relative to the page. A player page
+The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`,
+`allownetworking` and `relativeurls`. As in Flash's plug-in, relative
+URLs resolve against the page, or against `base`, where `base="."` is
+the SWF's directory and any other value is relative to the page. A player page
 that shows SWFs from elsewhere sets `relativeurls="movie"` on the
 element, or `configure({ relativeUrls: "movie" })` for all of them, to
-resolve them against each SWF's own URL instead. It has `load(url | bytes)` and `destroy()`, which
+resolve them against each SWF's own URL instead. Like `base`, the
+attribute is read when a movie loads, not watched while it plays; Flash
+tags have no such parameter, so for players `replaceFlash` makes only
+`configure` sets it. It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`

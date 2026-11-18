@@ -64,7 +64,12 @@ takes their own URLs instead, as Flash's projector did: AS3's each
 against the SWF that asks, AVM1's against the main SWF. The element's
 `relativeurls` attribute chooses, `page` or `movie`, else the page's
 `configure({ relativeUrls })`, else `page`; the site's player and the
-desktop app configure `movie`, the split chosen in #1085.
+desktop app configure `movie`, the split chosen in #1085. The element
+reads `relativeurls`, as it reads `base`, when a movie loads; a change
+while it plays waits for the next load. `replaceFlash` carries a Flash
+tag's `base`, which Flash had, but no `relativeurls`, which it had not:
+`configure` sets that for such players. A Flash Worker gets the
+player's base with its other settings.
 
 ## Showing a player
 
