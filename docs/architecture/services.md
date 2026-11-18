@@ -139,7 +139,7 @@ local certificates, including the ByteArrays' positions and mutation isolation.
 `player-hosts/node` implements the capability through `tlsSocket()`, reusable
 with a host's own connected or connecting TCP socket. Node's crypto validates
 X.509 input; a DER reader extracts the fields its API does not expose, in time
-linear in the certificate's size (at most 256 KiB, read in some 20 ms at
+linear in the certificate's size (at most 256 KiB, read in some 20–35 ms at
 worst): it walks only the fixed structure of a certificate and its names,
 never arbitrary nesting, and refuses a name of over 256 attributes and an OID
 over 128 bytes or with an arc over 20 bytes (a UUID's arc fits). OpenSSL

@@ -493,7 +493,7 @@ test("a TLS connection through a proxy has what the tunnel left of its timeout",
   timeout: 10000,
 }, async () => {
   // Answers CONNECT after a while, then says nothing: TLS's handshake never ends.
-  const delay = 400;
+  const delay = 800;
   const held = new Set<Socket>();
   const [proxy, port] = await listen((socket) => {
     held.add(socket);
@@ -509,12 +509,12 @@ test("a TLS connection through a proxy has what the tunnel left of its timeout",
     const started = performance.now();
     connections.connect(1, "localhost", 443, "127.0.0.1", true, {
       certificates: [],
-      timeout: 700,
+      timeout: 1400,
     });
     await next("error");
     const elapsed = performance.now() - started;
-    // The whole timeout from the tunnel on would fail at 1100 ms.
-    assert.ok(elapsed >= 650 && elapsed < 1000, `failed after ${elapsed.toFixed(0)} ms`);
+    // The whole timeout from the tunnel on would fail at 2200 ms.
+    assert.ok(elapsed >= 1350 && elapsed < 1900, `failed after ${elapsed.toFixed(0)} ms`);
     assert.equal(
       events.some((event) => event.type === "open"),
       false,
