@@ -1790,6 +1790,20 @@ test("--ignore-policy-files judges a socket's host as resolved, never a host it 
     assert.deepEqual(asked, resolved, raw);
   }
 
+  // Other spellings of the listed name are resolved as that name, never as typed: a resolver
+  // that answered the typed form could send it elsewhere.
+  for (const raw of [
+    "data\u3002example",
+    "data\uff0eexample",
+    "\uff44ata.example",
+    "da\u00adta.example",
+    "[data.example]",
+    "DATA.EXAMPLE",
+  ]) {
+    assert.deepEqual(await grant(listed, raw), { address: PUBLIC, policyIgnored: true }, raw);
+    assert.deepEqual(asked, ["data.example"], raw);
+  }
+
   // Alone, the switch reaches none of this machine's spellings.
   const everyHost = { all: true, hosts: [] };
   for (const raw of ["LOCALHOST", "127.1", "::ffff:127.0.0.1", "[::ffff:7f00:1]"]) {

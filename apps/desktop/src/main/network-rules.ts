@@ -170,8 +170,9 @@ export function policyIgnored(list: HostList | null, host: string, place: Addres
     return false;
   }
 
+  // Never for a host that is not a host alone, by name or as public: it may resolve otherwise.
   const name = hostOf(host);
-  return (name !== null && list.hosts.includes(name)) || (list.all && place === "public");
+  return name !== null && (list.hosts.includes(name) || (list.all && place === "public"));
 }
 
 /** What the app says on stderr as it starts with --ignore-policy-files. */
