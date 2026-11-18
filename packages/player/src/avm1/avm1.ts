@@ -699,27 +699,28 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       ...sounds,
       removed: (display) => {
         sounds.removed(display);
-        this.unloadSounds(display, false);
+        this.unloadSounds(display);
       },
     };
   }
 
   /**
-   * The sounds of the movies `d` takes away as it goes, or, `emptied`, as
-   * it is emptied of what it shows: those a Sound or the timeline plays on
-   * a clip of a loaded movie under it, as adl stops them when a loaded
-   * movie is removed, unloaded or replaced. One playing on a clip removed
-   * from its own movie plays on, as in adl, and the global Sound's too.
+   * The sounds of the loaded movies that go with `d`, removed or emptied
+   * of what it shows: those of a movie's own library playing on a clip of
+   * that movie at or under `d`, which adl stops, none completing. A sound
+   * of another movie plays on, as the parent's Sound on the clip a load
+   * fills does in adl, and so does one on a clip a movie removes from itself.
    */
-  private unloadSounds(d: DisplayObject, emptied: boolean): void {
-    stopSoundsUnder(this.sounds, d, (owner) => {
+  private unloadSounds(d: DisplayObject): void {
+    stopSoundsUnder(this.sounds, d, (owner, character) => {
       for (let o: DisplayObject | null = owner; o !== null; o = o.parent) {
-        if (o instanceof MovieClip && this.contents.has(o)) {
+        const library = o instanceof MovieClip ? this.contents.get(o)?.library : undefined;
+        if (library?.characters.get(character.id) === character) {
           return true;
         }
 
         if (o === d) {
-          return emptied;
+          return false;
         }
       }
 
@@ -1443,8 +1444,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * the next frame plays; one without a library shows nothing.
    */
   fill(target: MovieClip, swf: Avm1Swf, frames = EMPTY_TIMELINE): void {
-    if (this.contents.has(target)) {
-      this.unloadSounds(target, true);
+    // What it showed goes: a loaded movie's sounds with it. An arrival fills the clip twice,
+    // empty first, and the empty movie, or a clip never loaded into, has no sounds of its own.
+    if (this.contents.get(target)?.library) {
+      this.unloadSounds(target);
     }
 
     for (const child of target.children) {
