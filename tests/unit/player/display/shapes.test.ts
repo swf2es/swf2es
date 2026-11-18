@@ -86,14 +86,14 @@ test("an open endpoint never joins an edge that starts at a different coordinate
 
 test("contour joining retains fractional coordinates and very large coordinate spans", () => {
   for (const size of [0.25, 20, 1e9, Number.MAX_SAFE_INTEGER]) {
-    assert.deepEqual(
-      joined([
-        [0, 0, size, 0],
-        [size, 0, size, size],
-        [size, size, 0, 0],
-      ]),
-      [[1, 0, 0, 2, size / 20, 0, 2, size / 20, size / 20, 2, 0, 0]],
-    );
+    const edges: [number, number, number, number][] = [
+      [0, 0, size, 0],
+      [size, 0, size, size],
+      [size, size, 0, 0],
+    ];
+    const expected = [[1, 0, 0, 2, size / 20, 0, 2, size / 20, size / 20, 2, 0, 0]];
+    assert.deepEqual(joined(edges), expected);
+    assert.deepEqual(joined([edges[0], edges[2], edges[1]]), expected);
   }
 });
 
