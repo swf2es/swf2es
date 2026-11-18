@@ -1602,7 +1602,11 @@ way, which is neither read nor told of. As it arrives, as Ruffle has it:
 
 Each load that loaded has its loader's onLoadInit queued after the next
 frame's clips have played, after the loaded movie's first frame's
-actions, the latest load's first. A clip removed before its load arrives
+actions, the latest load's first: the frame's queue runs out first, so
+the frames its gotos entered have run their actions too (adl: a first
+frame that sends a clip to a frame that stops it, then an onLoadInit
+that sends it back to play, leaves it playing; Ruffle queues onLoadInit
+before those frames, which stop it again). A clip removed before its load arrives
 takes nothing; one unloaded meanwhile tells onLoadStart as it arrives,
 and no more (adl's `load_cancel_*`, which Ruffle fails); one whose
 listener removes or unloads it is told no more after that listener.

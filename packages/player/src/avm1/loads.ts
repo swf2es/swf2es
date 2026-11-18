@@ -385,8 +385,9 @@ export class MovieLoads {
 
   /**
    * Each load that has arrived done with: one that loaded has its
-   * loader's onLoadInit queued, after the frame's actions of what it
-   * loaded, the latest load's first (Ruffle's movie_clip_on_load).
+   * loader's onLoadInit queued, once the frame's actions of what it
+   * loaded have run, with those their gotos queued, the latest load's
+   * first (Ruffle's movie_clip_on_load).
    */
   loadsInitialized(): void {
     for (let i = this.movieLoads.length - 1; i >= 0; i--) {
