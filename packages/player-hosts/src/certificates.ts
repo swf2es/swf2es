@@ -1,8 +1,8 @@
 // X.509 metadata for the Node TLS host. OpenSSL parses and validates certificates;
 // this reader exposes DER fields its public Node API does not describe.
-import { X509Certificate } from "node:crypto";
+import { createHash, X509Certificate } from "node:crypto";
 import type { Certificate, CertificateName } from "@swf2es/player";
-import { MAX_CERTIFICATE_BYTES } from "@swf2es/player/certificates";
+import { MAX_CERTIFICATE_BYTES, MAX_SOCKET_CERTIFICATES } from "@swf2es/player/certificates";
 
 interface Field {
   tag: number;
@@ -58,30 +58,59 @@ function sequence(field: Field | undefined): Field[] {
   return fields(content(field, 48));
 }
 
-function oid(field: Field | undefined): string {
-  const bytes = content(field, 6);
-  const parts: bigint[] = [];
-  let value = 0n;
-  for (let i = 0; i < bytes.length; i++) {
-    value = value * 128n + BigInt(bytes[i] & 127);
-    if (!(bytes[i] & 128)) {
-      if (parts.length === 0) {
-        let first = 2n;
-        if (value < 40n) {
-          first = 0n;
-        } else if (value < 80n) {
-          first = 1n;
-        }
-        parts.push(first, value - first * 40n);
-      } else {
-        parts.push(value);
-      }
-      value = 0n;
-    }
+/**
+ * Longer than any registered OID. OpenSSL keeps an OID's bytes as they came, so a
+ * certificate it accepts can hold one of any length; decoding a long arc as one
+ * number grew with the square of its length (a second for 100 KB).
+ */
+const MAX_OID_BYTES = 128;
+
+/** 140 bits: room for a UUID's arc (2.25.x, 128 bits); plain numbers up to 7 bytes. */
+const MAX_ARC_BYTES = 20;
+
+function arc(bytes: Uint8Array, start: number, end: number): number | bigint {
+  if (end - start > MAX_ARC_BYTES) {
+    throw new Error("Invalid certificate OID");
   }
 
-  if (parts.length === 0 || bytes[bytes.length - 1] & 128) {
+  if (end - start <= 7) {
+    let value = 0;
+    for (let i = start; i < end; i++) {
+      value = value * 128 + (bytes[i] & 127);
+    }
+    return value;
+  }
+
+  let value = 0n;
+  for (let i = start; i < end; i++) {
+    value = value * 128n + BigInt(bytes[i] & 127);
+  }
+
+  return value;
+}
+
+function oid(field: Field | undefined): string {
+  const bytes = content(field, 6);
+  if (bytes.length === 0 || bytes.length > MAX_OID_BYTES || bytes[bytes.length - 1] & 128) {
     throw new Error("Invalid certificate OID");
+  }
+
+  const parts: string[] = [];
+  let start = 0;
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] & 128) {
+      continue;
+    }
+
+    const value = arc(bytes, start, i + 1);
+    if (parts.length === 0) {
+      const first = value < 40 ? 0 : value < 80 ? 1 : 2;
+      const rest = typeof value === "bigint" ? value - BigInt(first * 40) : value - first * 40;
+      parts.push(String(first), String(rest));
+    } else {
+      parts.push(String(value));
+    }
+    start = i + 1;
   }
 
   return parts.join(".");
@@ -105,51 +134,81 @@ const attributes: Record<string, [string, (keyof CertificateName)?]> = {
   "0.9.2342.19200300.100.1.1": ["UID"],
 };
 
+function view(bytes: Uint8Array): Buffer {
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+}
+
+/** Code units or points to String.fromCharCode or fromCodePoint at once, under engines' limits. */
+const CHUNK = 8192;
+
 function nameString(field: Field): string {
+  const bytes = field.bytes;
   switch (field.tag) {
     case 12:
-      return Buffer.from(field.bytes).toString("utf8");
-    case 30: {
-      let text = "";
-      for (let i = 0; i + 1 < field.bytes.length; i += 2) {
-        text += String.fromCharCode(field.bytes[i] * 256 + field.bytes[i + 1]);
-      }
-      return text;
-    }
+      return view(bytes).toString("utf8");
+    case 30:
     case 28: {
-      let text = "";
-      for (let i = 0; i + 3 < field.bytes.length; i += 4) {
-        const point =
-          field.bytes[i] * 16777216 +
-          field.bytes[i + 1] * 65536 +
-          field.bytes[i + 2] * 256 +
-          field.bytes[i + 3];
-        text += String.fromCodePoint(point);
+      const size = field.tag === 30 ? 2 : 4;
+      const parts: string[] = [];
+      const units: number[] = [];
+      for (let i = 0; i + size - 1 < bytes.length; i += size) {
+        units.push(
+          size === 2
+            ? bytes[i] * 256 + bytes[i + 1]
+            : bytes[i] * 16777216 + bytes[i + 1] * 65536 + bytes[i + 2] * 256 + bytes[i + 3],
+        );
+        if (units.length === CHUNK) {
+          parts.push(size === 2 ? String.fromCharCode(...units) : String.fromCodePoint(...units));
+          units.length = 0;
+        }
       }
-      return text;
+      parts.push(size === 2 ? String.fromCharCode(...units) : String.fromCodePoint(...units));
+      return parts.join("");
     }
     default:
-      return Buffer.from(field.bytes).toString("latin1");
+      return view(bytes).toString("latin1");
   }
 }
 
-function escaped(text: string): string {
-  let result = "";
+/** OpenSSL's escape for each byte of a name's UTF-8, or null for itself. */
+const escapes: (string | null)[] = [];
+for (let byte = 0; byte < 256; byte++) {
+  if (byte < 32 || byte > 126) {
+    escapes.push(`\\x${byte.toString(16).toUpperCase().padStart(2, "0")}`);
+  } else if (byte === 47 || byte === 43) {
+    escapes.push(`\\${String.fromCharCode(byte)}`);
+  } else {
+    escapes.push(null);
+  }
+}
+
+/** `text` as OpenSSL's one-line form writes a name's value, added to `parts`. */
+function escaped(text: string, parts: string[]): void {
   const bytes = Buffer.from(text, "utf8");
+  let start = 0;
   for (let i = 0; i < bytes.length; i++) {
-    const byte = bytes[i];
-    if (byte < 32 || byte > 126) {
-      result += `\\x${byte.toString(16).toUpperCase().padStart(2, "0")}`;
-    } else {
-      if (byte === 47 || byte === 43) {
-        result += "\\";
+    const written = escapes[bytes[i]];
+    if (written !== null) {
+      if (start < i) {
+        parts.push(bytes.toString("latin1", start, i));
       }
-      result += String.fromCharCode(byte);
+      parts.push(written);
+      start = i + 1;
     }
   }
 
-  return result;
+  if (start === 0) {
+    parts.push(text);
+  } else if (start < bytes.length) {
+    parts.push(bytes.toString("latin1", start));
+  }
 }
+
+/**
+ * Far more attributes than any real name has. OpenSSL takes any number, each costing it and
+ * this reader time; a certificate past it is refused before either reads all of them.
+ */
+const MAX_NAME_ATTRIBUTES = 256;
 
 function name(field: Field | undefined): CertificateName {
   const result: CertificateName = {
@@ -161,21 +220,30 @@ function name(field: Field | undefined): CertificateName {
     organizationalUnitName: null,
     stateOrProvinceName: null,
   };
+  const text: string[] = [];
   const sets = sequence(field);
+  let count = 0;
   for (const set of sets) {
     const entries = fields(content(set, 49));
+    count += entries.length;
+    if (count > MAX_NAME_ATTRIBUTES) {
+      throw new Error("Too many certificate name attributes");
+    }
+
     for (let i = 0; i < entries.length; i++) {
       const entry = sequence(entries[i]);
       const id = oid(entry[0]);
       const [short, key] = attributes[id] ?? [id];
-      const text = nameString(entry[1]);
+      const value = nameString(entry[1]);
       if (key && result[key] === null) {
-        result[key] = text;
+        result[key] = value;
       }
-      result.text += `/${short}=${escaped(text)}`;
+      text.push(`/${short}=`);
+      escaped(value, text);
     }
   }
 
+  result.text = text.join("");
   return result;
 }
 
@@ -194,7 +262,6 @@ export function readCertificate(bytes: Uint8Array): Certificate {
     throw new Error("Trailing certificate data");
   }
 
-  const decoded = new X509Certificate(bytes);
   const certificate = sequence(top[0]);
   const tbs = sequence(certificate[0]);
   let at = 0;
@@ -227,6 +294,8 @@ export function readCertificate(bytes: Uint8Array): Certificate {
     }
   }
 
+  // OpenSSL last, once the walk above has refused what would cost it time.
+  const decoded = new X509Certificate(bytes);
   return {
     version,
     serialNumber: decoded.serialNumber.toLowerCase(),
@@ -244,11 +313,36 @@ export function readCertificate(bytes: Uint8Array): Certificate {
   };
 }
 
+/** As many answers as a socket may hold certificates: enough for one SWF's additions. */
+const MAX_CHECKED = MAX_SOCKET_CERTIFICATES;
+const checked = new Map<string, boolean>();
+
+/**
+ * Whether `bytes` is one DER certificate. A SWF's addition is checked as it is added and again
+ * as each connection takes it, so the answer is kept, by digest, for the latest few.
+ */
 export function validCertificate(bytes: Uint8Array): boolean {
-  try {
-    readCertificate(bytes);
-    return true;
-  } catch {
+  if (bytes.length === 0 || bytes.length > MAX_CERTIFICATE_BYTES) {
     return false;
   }
+
+  const key = createHash("sha256").update(bytes).digest("base64");
+  let valid = checked.get(key);
+  if (valid === undefined) {
+    try {
+      readCertificate(bytes);
+      valid = true;
+    } catch {
+      valid = false;
+    }
+  }
+
+  // Most recently used last, the oldest first to go.
+  checked.delete(key);
+  checked.set(key, valid);
+  if (checked.size > MAX_CHECKED) {
+    checked.delete(checked.keys().next().value as string);
+  }
+
+  return valid;
 }
