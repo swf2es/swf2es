@@ -82,6 +82,11 @@ export interface ConnectionOptions {
   proxy?: ProxyConfig | null;
   /** Told why a connection through the proxy did not come about, for stderr. */
   warn?: (message: string) => void;
+  /**
+   * Whether an AIR application plays: only it may accept a self-signed server certificate
+   * (AIR 51's certificateError). The page asks, but its word is not taken for it.
+   */
+  application?: () => boolean;
 }
 
 export class Connections {
@@ -93,12 +98,14 @@ export class Connections {
   private readonly tell: (id: number, event: SocketEvent) => void;
   private readonly proxy: ProxyConfig | null;
   private readonly warn: (message: string) => void;
+  private readonly application: () => boolean;
 
   /** `tell` carries each connection's events to its page. */
   constructor(tell: (id: number, event: SocketEvent) => void, options: ConnectionOptions = {}) {
     this.tell = tell;
     this.proxy = options.proxy ?? null;
     this.warn = options.warn ?? (() => {});
+    this.application = options.application ?? (() => false);
   }
 
   get size(): number {
@@ -284,7 +291,7 @@ export class Connections {
             }
           },
           certificateError: (proceed) => {
-            if (!current()) {
+            if (!current() || !this.application()) {
               proceed(false);
               return;
             }

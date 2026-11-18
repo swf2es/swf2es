@@ -36,15 +36,20 @@ try {
     "cancel",
     "socks5",
     "http",
+    "chain",
+    "chain-untrusted",
   ] as const) {
     const self = scenario.startsWith("self-");
+    // Through an intermediate the SWF adds untrusted: Electron's BoringSSL completes the chain
+    // to the root only where the SWF trusts that root.
+    const chain = scenario.startsWith("chain");
     const air = self && scenario !== "self-flash";
     const peers = new Set<TLSSocket>();
     let connections = 0;
     const server = createServer(
       {
         key: self ? certificates.selfKey : certificates.key,
-        cert: self ? certificates.self : certificates.leaf,
+        cert: self ? certificates.self : chain ? certificates.chain : certificates.leaf,
       },
       (peer) => {
         peers.add(peer);
@@ -67,6 +72,12 @@ try {
         ...(self
           ? { accept: scenario === "self-deny" ? "no" : "yes" }
           : { ca: certificates.ca.toString("hex") }),
+        ...(chain
+          ? {
+              intermediate: certificates.intermediate.toString("hex"),
+              trusted: String(scenario === "chain"),
+            }
+          : {}),
       };
       const abc = compile(
         "SecureSockets",
@@ -164,6 +175,11 @@ try {
           if (scenario === "deny" || scenario === "cancel") {
             assert.equal(connections, 0);
             assert.ok(app.stdout.includes("error 2031 unknown false"), app.stdout.join("\n"));
+          } else if (scenario === "chain-untrusted") {
+            assert.ok(
+              app.stdout.includes("error 2031 untrustedSigners true"),
+              app.stdout.join("\n"),
+            );
           } else if (scenario === "self-deny" || scenario === "self-flash") {
             assert.equal(
               app.stdout.includes("certificateError true unknown"),

@@ -73,7 +73,7 @@ test("SecureSocket is not supported, and one has no certificate", async () => {
   assert.equal(get("#get:serverCertificate", {}), null);
 });
 
-test("a plain SocketHost cannot silently supply a SecureSocket connection", async () => {
+test("without secure sockets, a SecureSocket cannot be made, even over a plain SocketHost", async () => {
   let connects = 0;
   const { s, player } = await setup({
     connect: () => {
@@ -82,12 +82,17 @@ test("a plain SocketHost cannot silently supply a SecureSocket connection", asyn
     },
   });
   try {
-    const object = s.rt.construct(s.rt.classNamed("flash.net::SecureSocket"));
-    object.$listeners = new Map([["ioError", [{ fn: { $f() {} }, capture: false, priority: 0 }]]]);
-    s.rt.callProperty(object, s.rt.publicName("connect"), "localhost", 1234);
+    // Adobe documents IllegalOperationError where SecureSocket.isSupported is false. Its name
+    // is Error's, as flash.errors' classes leave it.
+    assert.throws(
+      () => s.rt.construct(s.rt.classNamed("flash.net::SecureSocket")),
+      (e) =>
+        s.rt.isTypeLate(e as avm2.Value, s.rt.classNamed("flash.errors::IllegalOperationError")) &&
+        s.rt.toString(e as avm2.Value) ===
+          "Error: Error #2014: Feature is not available at this time.",
+    );
     player.tick();
     assert.equal(connects, 0);
-    assert.equal(s.rt.getProperty(object, s.rt.publicName("connected")), false);
   } finally {
     player.destroy();
   }

@@ -2,6 +2,7 @@
 
 package flash.net
 {
+	import flash.errors.IllegalOperationError;
 	import flash.security.X509Certificate;
 	import flash.utils.ByteArray;
 
@@ -9,6 +10,11 @@ package flash.net
 	{
 		public function SecureSocket()
 		{
+			// As Adobe documents it: where secure sockets are not supported, no SecureSocket.
+			if (!isSupported)
+			{
+				Error.throwError(IllegalOperationError, 2014);
+			}
 		}
 
 		[API("674", "668")]

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { X509Certificate } from "node:crypto";
 import { once } from "node:events";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { type Socket, connect as tcpConnect, createServer as tcpServer } from "node:net";
 import { after, test } from "node:test";
 import { createServer } from "node:tls";
@@ -12,6 +13,7 @@ import type {
   SecureSocketOptions,
 } from "../../../packages/player/dist/index.js";
 import { readCertificate } from "../../../packages/player-hosts/dist/certificates.js";
+import { statusOf } from "../../../packages/player-hosts/dist/tls.js";
 import { tlsCertificates } from "../../tls-certificates.ts";
 
 const certificates = tlsCertificates();
@@ -134,6 +136,192 @@ test("DER validation refuses PEM, truncation, extra bytes and corrupt lengths", 
     Uint8Array.of(48, 132, 255, 255, 255, 255),
   ]) {
     assert.equal(validCertificate(bytes), false);
+  }
+});
+
+function derLength(length: number): number[] {
+  if (length < 128) {
+    return [length];
+  }
+
+  const bytes: number[] = [];
+  for (let rest = length; rest > 0; rest = Math.floor(rest / 256)) {
+    bytes.unshift(rest & 255);
+  }
+  return [128 | bytes.length, ...bytes];
+}
+
+function der(tag: number, ...body: Uint8Array[]): Uint8Array {
+  const content = Buffer.concat(body);
+  return Buffer.concat([Uint8Array.of(tag, ...derLength(content.length)), content]);
+}
+
+/** A DER element's children, each whole. */
+function children(bytes: Uint8Array): Uint8Array[] {
+  const result: Uint8Array[] = [];
+  let at = bytes[1] & 128 ? 2 + (bytes[1] & 127) : 2;
+  while (at < bytes.length) {
+    const start = at++;
+    let length = bytes[at++];
+    if (length & 128) {
+      const count = length & 127;
+      length = 0;
+      for (let i = 0; i < count; i++) {
+        length = length * 256 + bytes[at++];
+      }
+    }
+    at += length;
+    result.push(bytes.subarray(start, at));
+  }
+
+  return result;
+}
+
+/** The test root with `issuer` as its issuer: OpenSSL still reads it, its signature unchecked. */
+function withIssuer(issuer: Uint8Array): Uint8Array {
+  const [tbs, algorithm, signature] = children(certificates.ca);
+  const fields = children(tbs);
+  fields[3] = issuer;
+  return der(48, der(48, ...fields), algorithm, signature);
+}
+
+/** A name of one attribute per `[oid, value]`, each its own RDN. */
+function nameOf(attributes: [Uint8Array, Uint8Array][]): Uint8Array {
+  return der(48, ...attributes.map(([id, value]) => der(49, der(48, der(6, id), value))));
+}
+
+const commonName = Uint8Array.of(85, 4, 3);
+const utf8 = (text: string) => der(12, Buffer.from(text));
+
+function timed<T>(run: () => T): [T, number] {
+  const start = performance.now();
+  const result = run();
+  return [result, performance.now() - start];
+}
+
+test("DER validation takes time linear in a certificate, whatever its OIDs and names hold", () => {
+  // One arc 100 KB long: OpenSSL reads it in a millisecond; decoding it as one
+  // number took over a second, 31 s at 250 KB.
+  const long = new Uint8Array(100_000).fill(255);
+  long[long.length - 1] = 127;
+  const longArc = withIssuer(nameOf([[long, utf8("x")]]));
+  assert.doesNotThrow(() => new X509Certificate(longArc));
+  // Many short arcs, past any registered OID's length.
+  const manyArcs = withIssuer(nameOf([[new Uint8Array(200).fill(1), utf8("x")]]));
+  // As many RDNs as 256 KiB holds, past the 256 any name may have; the most it may; and
+  // one long BMPString.
+  const rdns = (count: number) =>
+    withIssuer(nameOf(new Array<[Uint8Array, Uint8Array]>(count).fill([commonName, utf8("x")])));
+  const many = rdns(20_000);
+  const most = rdns(256);
+  const wide = withIssuer(nameOf([[commonName, der(30, new Uint8Array(200_000).fill(0x41))]]));
+  for (const [bytes, valid] of [
+    [longArc, false],
+    [manyArcs, false],
+    [many, false],
+    [most, true],
+    [wide, true],
+  ] as const) {
+    assert.ok(bytes.length <= 256 * 1024);
+    // The first read warms the code up; the answer is then kept, so time the reader itself.
+    readCertificate(certificates.ca);
+    const [read, ms] = timed(() => {
+      try {
+        return readCertificate(bytes);
+      } catch {
+        return null;
+      }
+    });
+    assert.equal(read !== null, valid);
+    // Accepted ones take some 20-35 ms on an idle machine, tests running beside them more;
+    // the long arc alone took the old decoder over a second.
+    assert.ok(ms < 300, `${bytes.length} bytes read in ${ms.toFixed(1)} ms`);
+    assert.equal(validCertificate(bytes), valid);
+    assert.equal(validCertificate(bytes), valid);
+  }
+
+  assert.equal(readCertificate(most).issuer.text, "/CN=x".repeat(256));
+  assert.equal(validCertificate(rdns(257)), false);
+  assert.equal(readCertificate(wide).issuer.commonName, "\u4141".repeat(100_000));
+});
+
+test("OIDs decode exactly, a UUID's 128-bit arc included", () => {
+  // 2.25.329800735698586629295641978511506172918, the UUID example of ITU-T X.667.
+  const uuid = 329800735698586629295641978511506172918n;
+  const arc: number[] = [];
+  for (let rest = uuid; rest > 0n; rest >>= 7n) {
+    arc.unshift(Number(rest & 127n) | (arc.length ? 128 : 0));
+  }
+  const name = nameOf([
+    [Uint8Array.of(105, ...arc), utf8("u")],
+    [Uint8Array.of(0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x09, 0x01), utf8("e")],
+    // An arc of 8 bytes, past plain numbers' 7.
+    [Uint8Array.of(0x88, 0x37, 0x81, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00), utf8("b")],
+  ]);
+  assert.equal(
+    readCertificate(withIssuer(name)).issuer.text,
+    `/2.25.${uuid}=u/emailAddress=e/2.999.${2n ** 49n}=b`,
+  );
+});
+
+test("OpenSSL's verification errors map to AIR's certificate statuses", () => {
+  for (const [error, status] of [
+    ["CERT_HAS_EXPIRED", "expired"],
+    ["CERT_NOT_YET_VALID", "notYetValid"],
+    ["CERT_REVOKED", "revoked"],
+    ["ERR_TLS_CERT_ALTNAME_INVALID", "principalMismatch"],
+    ["DEPTH_ZERO_SELF_SIGNED_CERT", "untrustedSigners"],
+    ["UNABLE_TO_GET_ISSUER_CERT_LOCALLY", "untrustedSigners"],
+    ["INVALID_CA", "invalidChain"],
+    ["PATH_LENGTH_EXCEEDED", "invalidChain"],
+    ["CERT_SIGNATURE_FAILURE", "invalidChain"],
+    ["KEYUSAGE_NO_CERTSIGN", "invalidChain"],
+    ["CERT_CHAIN_TOO_LONG", "invalid"],
+    ["", "invalid"],
+  ] as const) {
+    assert.equal(statusOf(error), status, error);
+  }
+});
+
+test("sockets that add no CA share one context of the roots, not one parsed for each", {
+  timeout: 10000,
+}, async () => {
+  // Each context parses every root again, some 10 ms.
+  const tls = createRequire(import.meta.url)("node:tls") as typeof import("node:tls");
+  const original = tls.createSecureContext;
+  let made = 0;
+  tls.createSecureContext = (...args) => {
+    made++;
+    return original(...args);
+  };
+  syncBuiltinESMExports();
+  const peer = await server();
+  try {
+    const counted = async (config: SecureSocketOptions, status = "untrustedSigners") => {
+      const before = made;
+      for (let i = 0; i < 3; i++) {
+        const seen = recorded();
+        const transport = host.connect("localhost", peer.port, seen.events, config);
+        try {
+          await seen.done;
+          assert.equal(seen.status(), status);
+        } finally {
+          transport.close();
+        }
+      }
+      return made - before;
+    };
+    const plain: SecureSocketOptions = { certificates: [], timeout: 2000 };
+    await counted(plain);
+    assert.equal(await counted(plain), 0);
+    // An untrusted root adds nothing, so it shares the roots' context too.
+    assert.equal(await counted(options(false)), 0);
+    assert.equal(await counted(options(), "trusted"), 3);
+    assert.equal(await counted(plain), 0);
+  } finally {
+    tls.createSecureContext = original;
+    syncBuiltinESMExports();
+    await peer.close();
   }
 });
 

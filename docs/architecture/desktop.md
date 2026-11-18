@@ -647,7 +647,9 @@ reports a certificate snapshot before the connect or error event over IPC.
 Certificate getters stay in the renderer; only adding a DER certificate
 needs synchronous validation in the main process. Additions are bounded by
 64 certificates and 4 MB per connection. A pending self-signed-leaf exception
-is sent to AIR-mode ActionScript as AIR 51's `certificateError`; closing or ending the
+is sent to AIR-mode ActionScript as AIR 51's `certificateError` only while an
+AIR application plays, which the main process checks itself rather than take
+the page's word; otherwise it is refused there. Closing or ending the
 page discards any later answer. The app's global certificate-error switch
 does not disable SecureSocket's validation.
 

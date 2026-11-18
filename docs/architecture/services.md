@@ -117,8 +117,11 @@ are covered by `X509Certificate.test.ts`.
 
 `flash.net.SecureSocket` shares Socket's buffers, reads, writes and connection
 generations (`playerglobal/flash/net/socket-connections.ts`). Its host is
-`SocketHost.secure`: absent that capability, `isSupported` is false and a
-connect fails without trying a plain socket. A secure host validates DER
+`SocketHost.secure`: absent that capability, `isSupported` is false and the
+constructor throws IllegalOperationError, as Adobe documents for a runtime
+without secure sockets. adl supports them, so it cannot show Flash's error
+number; the player uses #2014, "Feature is not available at this time". A
+connect never falls back to a plain socket. A secure host validates DER
 certificates, connects with the Socket's timeout and certificate additions,
 and reports certificate metadata before opening or failing the connection.
 The player queues those notifications in order with other host events.
@@ -135,12 +138,21 @@ local certificates, including the ByteArrays' positions and mutation isolation.
 
 `player-hosts/node` implements the capability through `tlsSocket()`, reusable
 with a host's own connected or connecting TCP socket. Node's crypto validates
-X.509 input; a bounded DER reader extracts the fields its API does not expose.
-TLS uses Node's default and system roots and the Socket's additions. An
+X.509 input; a DER reader extracts the fields its API does not expose, in time
+linear in the certificate's size (at most 256 KiB, read in some 20–35 ms at
+worst): it walks only the fixed structure of a certificate and its names,
+never arbitrary nesting, and refuses a name of over 256 attributes and an OID
+over 128 bytes or with an arc over 20 bytes (a UUID's arc fits). OpenSSL
+accepts all of these, and an arc 100 KB long took a naive decoder a second.
+The reader runs first, so OpenSSL never reads what it refuses. Its answer is
+kept by digest for the latest 64 certificates, as a SWF's addition is checked
+when added and again by each connection. TLS uses Node's default and system
+roots, read once a run into one context that every socket adding no CA shares,
+and the Socket's additions, which give a socket a context of its own. An
 untrusted self-issued root is never added as an anchor; other untrusted CAs
-can complete a chain to a trusted root. Partial-chain trust stays disabled,
-as observed in AIR on Linux: adding a non-self-signed intermediate alone does
-not trust its chain. Neither additions nor exceptions affect another socket.
+can complete a chain to a trusted root. Partial-chain trust stays disabled, as
+observed in AIR on Linux: adding a non-self-signed intermediate alone does not
+trust its chain. Neither additions nor exceptions affect another socket.
 
 TLS uses Node's protocol and cipher defaults. It validates the certificate
 chain, dates and original hostname before exposing an open event or application

@@ -2,7 +2,14 @@
 // checks and proxy tunnelling stay with the embedding host.
 import { X509Certificate } from "node:crypto";
 import { isIP, type Socket } from "node:net";
-import { checkServerIdentity, connect, getCACertificates, type TLSSocket } from "node:tls";
+import {
+  checkServerIdentity,
+  connect,
+  createSecureContext,
+  getCACertificates,
+  type SecureContext,
+  type TLSSocket,
+} from "node:tls";
 import type {
   Certificate,
   CertificateStatus,
@@ -20,11 +27,18 @@ export interface TlsTransport extends SocketTransport {
   readonly socket: Socket;
 }
 
-let defaults: string[] | undefined;
+let roots: string[] | undefined;
+let shared: SecureContext | undefined;
 
+/** Node's default and the system's roots, read once a run. */
+function rootCertificates(): string[] {
+  roots ??= [...new Set([...getCACertificates("default"), ...getCACertificates("system")])];
+  return roots;
+}
+
+/** What a socket's additions bring to its CA store, as PEM. */
 function authorities(options: SecureSocketOptions): string[] {
-  defaults ??= [...new Set([...getCACertificates("default"), ...getCACertificates("system")])];
-  const result = [...defaults];
+  const result: string[] = [];
   if (options.certificates.length > MAX_SOCKET_CERTIFICATES) {
     throw new Error("Too many socket certificates");
   }
@@ -50,6 +64,20 @@ function authorities(options: SecureSocketOptions): string[] {
   return result;
 }
 
+/**
+ * The context `options` connects with. Parsing the roots into a store costs some 10 ms, so
+ * every socket that adds no CA shares one, never changed; one that does gets its own.
+ */
+function secureContext(options: SecureSocketOptions): SecureContext {
+  const added = authorities(options);
+  if (added.length === 0) {
+    shared ??= createSecureContext({ ca: rootCertificates() });
+    return shared;
+  }
+
+  return createSecureContext({ ca: [...rootCertificates(), ...added] });
+}
+
 function validityError(certificate: Certificate): CertificateStatus | null {
   const now = Date.now();
   if (certificate.validNotAfter < now) {
@@ -62,7 +90,8 @@ function validityError(certificate: Certificate): CertificateStatus | null {
   return null;
 }
 
-function statusOf(error: string): CertificateStatus {
+/** The CertificateStatus for OpenSSL's or Node's verification error. */
+export function statusOf(error: string): CertificateStatus {
   switch (error) {
     case "CERT_HAS_EXPIRED":
       return "expired";
@@ -99,9 +128,9 @@ export function tlsSocket(
   options: SecureSocketOptions,
   remote?: Pick<SocketEndpoints, "remoteAddress" | "remotePort">,
 ): TlsTransport {
-  let ca: string[];
+  let context: SecureContext;
   try {
-    ca = authorities(options);
+    context = secureContext(options);
   } catch (error) {
     raw.destroy();
     throw error;
@@ -220,7 +249,7 @@ export function tlsSocket(
         socket: raw,
         host,
         servername: isIP(host) ? undefined : host,
-        ca,
+        secureContext: context,
         rejectUnauthorized: false,
       });
       socket = tls;
