@@ -24,6 +24,8 @@ interface ServiceWorkerScopeLike {
 }
 
 const scope = self as unknown as ServiceWorkerScopeLike;
+/** The site's root, where this script lies. */
+const ROOT = new URL(".", scope.location.href).pathname;
 
 scope.addEventListener("install", () => {
   void scope.skipWaiting();
@@ -33,6 +35,28 @@ scope.addEventListener("install", () => {
 scope.addEventListener("activate", (e) => {
   e.waitUntil(scope.clients.claim());
 });
+
+/**
+ * The page and the files of the player's that keep their names from one
+ * deploy to the next: asked of the server each time, which answers 304
+ * where they have not changed, rather than taken from the browser's cache
+ * for Pages' ten minutes, where an old swf2es.js would ask for a chunk the
+ * deploy removed, or play with another deploy's codegen.wasm or worker.js.
+ * The chunks are named by their content, and keep for as long as the cache does.
+ */
+function fresh(request: Request): boolean {
+  // A request that names its own cache mode keeps it; one with a body is not asked twice.
+  if (request.cache !== "default" || request.method !== "GET") {
+    return false;
+  }
+
+  if (request.mode === "navigate") {
+    return true;
+  }
+
+  const path = new URL(request.url).pathname;
+  return path.startsWith(ROOT) && /^(app|player)\/[^/]+$/.test(path.slice(ROOT.length));
+}
 
 scope.addEventListener("fetch", (e) => {
   const request = e.request;
@@ -45,8 +69,13 @@ scope.addEventListener("fetch", (e) => {
     return;
   }
 
+  // Offline, or where the server does not answer, what the browser's cache has is better
+  // than nothing, as it was before the revalidation.
+  const fetched = fresh(request)
+    ? fetch(new Request(request, { cache: "no-cache" })).catch(() => fetch(request))
+    : fetch(request);
   e.respondWith(
-    fetch(request).then((response) => {
+    fetched.then((response) => {
       // An opaque or error response has no headers to add to.
       if (response.status === 0) {
         return response;

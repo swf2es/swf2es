@@ -7,6 +7,7 @@ package
 	import flash.system.MessageChannel;
 	import flash.system.Worker;
 	import flash.system.WorkerDomain;
+	import flash.utils.ByteArray;
 
 	public class SiteStage3D extends Sprite
 	{
@@ -35,6 +36,20 @@ package
 					context.configureBackBuffer(32, 32, 0, false);
 					context.clear(0, 1, 0, 1);
 					context.present();
+					// Refused by the backend, whose error the SWF gets as Flash's.
+					var bad:ByteArray = new ByteArray();
+					bad.writeUnsignedInt(0);
+					bad.writeUnsignedInt(0);
+					try
+					{
+						context.createProgram().upload(bad, bad);
+						trace("site-stage3d uploaded a bad program");
+					}
+					catch (error:Error)
+					{
+						trace("site-stage3d caught " + error.errorID);
+					}
+
 					drew = true;
 					checkReady();
 				});

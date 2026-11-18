@@ -220,7 +220,11 @@ the backend only when selected and uses the same resource limits as the desktop,
 Flash Player's own: lower budgets refused scenes that play in Flash, with Error
 #3691 on every frame. Changing the option restarts the current SWF; closing
 during the backend import invalidates that load. The site's build bundles the
-backend into a chunk of the page's script, loaded only then.
+backend into a chunk of the page's script, loaded only then. That chunk has its
+own copy of `@swf2es/context3d`, as a page beside the browser build has, so the
+player tells the backend's errors by a brand under `Symbol.for("swf2es.context3d.error")`
+(`isContext3DError` and the others), never by `instanceof`, and they reach the
+SWF as Flash's errors whichever copy threw them.
 Its fullscreen button fits the composed Stage3D player to the screen with a
 CSS transform, preserving the SWF viewport and back-buffer sizes. The 2D overlay
 and input use the same presentation scale. Leaving fullscreen restores responsive
