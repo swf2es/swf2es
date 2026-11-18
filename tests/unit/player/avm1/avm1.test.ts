@@ -123,6 +123,42 @@ for (const version of [4, 5, 6, 7, 8]) {
   });
 }
 
+for (const version of [6, 7, 8]) {
+  test(`SWF ${version}'s System has the capabilities AS3's has, as plain values, and security's functions`, async () => {
+    const played = await playNet(
+      `trace(System.capabilities.version == getVersion());
+trace(System.capabilities.os + "|" + System.capabilities.playerType + "|" + System.capabilities.language);
+trace(System.capabilities.serverString.indexOf("V=" + escape(getVersion())) > 0);
+trace(typeof System.capabilities.screenResolutionX + " " + System.capabilities.hasAudio);
+var keys = [];
+for (var k in System) { keys.push(k); }
+trace(keys.join(","));
+var n = 0;
+for (var k in System.capabilities) { n++; }
+trace(n);
+System.capabilities.version = "x";
+trace(System.capabilities.version);
+trace(System.security.allowDomain("*") + " " + typeof System.security.allowInsecureDomain + " " + System.security.sandboxType);
+trace(System.useCodepage + " " + System.exactSettings);`,
+      {},
+      version,
+    );
+    const platform = platformCapabilities();
+    assert.deepEqual(take(played), [
+      "true",
+      `${platform.os}|${platform.playerType}|${platform.language}`,
+      "true",
+      "number true",
+      "security,useCodepage,exactSettings,capabilities",
+      "34",
+      "x",
+      `true ${version >= 7 ? "function" : "undefined"} remote`,
+      `false ${version >= 7}`,
+    ]);
+    played.player.destroy();
+  });
+}
+
 test("child clips have no own $version, while getVersion reads the main timeline", async () => {
   const played = await playNet(`
 var child = createEmptyMovieClip("child", 1);

@@ -209,6 +209,59 @@ export function platformCapabilities(): PlatformCapabilities {
   };
 }
 
+/** The screen as the host's browser reports it, `given` taking the place of what it gives. */
+export function screenCapabilities(given: Partial<ScreenCapabilities> = {}): ScreenCapabilities {
+  return {
+    screenResolutionX:
+      given.screenResolutionX ?? (typeof screen === "undefined" ? 0 : screen.width),
+    screenResolutionY:
+      given.screenResolutionY ?? (typeof screen === "undefined" ? 0 : screen.height),
+    pixelAspectRatio: given.pixelAspectRatio ?? 1,
+    screenDPI: given.screenDPI ?? 72,
+  };
+}
+
+/** The capabilities as Flash sends them to a server: its fields' codes, URL-encoded, in its order. */
+export function serverString(
+  p: PlatformCapabilities,
+  sc: ScreenCapabilities,
+  debug: boolean,
+): string {
+  const fields: [string, string][] = [
+    ["A", "t"],
+    ["SA", "t"],
+    ["SV", "t"],
+    ["EV", "t"],
+    ["MP3", "t"],
+    ["AE", "t"],
+    ["VE", "t"],
+    ["ACC", "t"],
+    ["PR", "t"],
+    ["SP", "f"],
+    ["SB", "f"],
+    ["DEB", debug ? "t" : "f"],
+    ["V", p.version],
+    ["M", p.manufacturer],
+    ["R", `${sc.screenResolutionX}x${sc.screenResolutionY}`],
+    ["COL", "color"],
+    ["AR", String(sc.pixelAspectRatio)],
+    ["OS", p.os],
+    ["ARCH", "x86"],
+    ["L", p.language],
+    ["IME", "t"],
+    ["PR32", "t"],
+    ["PR64", "t"],
+    ["PT", p.playerType],
+    ["AVD", "f"],
+    ["LFD", "t"],
+    ["WD", "f"],
+    ["TLS", "t"],
+    ["ML", "5.1"],
+    ["DP", String(sc.screenDPI)],
+  ];
+  return fields.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
 /** How many touches the browser's screen takes at once, as Multitouch.maxTouchPoints reports; 0 without a browser. */
 export function hostTouchPoints(): number {
   const navigator = (globalThis as { navigator?: { maxTouchPoints?: number } }).navigator;

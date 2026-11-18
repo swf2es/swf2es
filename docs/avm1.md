@@ -1024,6 +1024,12 @@ main content and through the usual AS3 Loader harness, and the levels'
 in Flash's plug-in (PepperFlash 32); the main-content traces are asserted
 in `tests/unit/player/avm1/avm1.test.ts`, the levels' in `loads.test.ts`.
 
+`System` has `capabilities`, the values AS3's `Capabilities` reports, as
+plain, enumerable, writable values; `security`, whose `allowDomain`
+and, from SWF 7, `allowInsecureDomain` return true and grant nothing
+more, `loadPolicyFile` doing nothing, and `sandboxType` "remote";
+`useCodepage` false; and from SWF 6 `exactSettings`, true from SWF 7.
+
 What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
 `avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases), and
 the corpus, where it is not what Ruffle does:
@@ -1734,7 +1740,9 @@ AVM1, so nothing is expected from it.
   ImportAssets; `onLoadProgress` while a SWF streams in, and
   "LoadNeverCompleted", which a fetch of all or nothing never gives;
   `System.useCodepage`'s guess of a file's encoding.
-- **Classes and natives.** No `System`, `Video`, `NetStream`, `Camera`,
+- **Classes and natives.** `System` has no `IME`, `setClipboard`,
+  `showSettings` or `Product`, and `useCodepage` changes nothing; no
+  `Video`, `NetStream`, `Camera`,
   `Microphone`, `ContextMenu` or `Accessibility`; ASnative's display,
   text, sound and I/O tables give functions that do nothing, and
   `ASconstructor` is left out. Button's prototype has only `enabled`,

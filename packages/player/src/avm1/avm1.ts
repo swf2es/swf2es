@@ -53,6 +53,7 @@ import {
   platformCapabilities,
   type SharedObjectStorage,
   type SocketHost,
+  screenCapabilities,
 } from "../hosts.js";
 import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
@@ -94,6 +95,7 @@ import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
 import { type StageSize, stageObject } from "./globals/Stage.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
+import { systemObject } from "./globals/System.js";
 import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
 import { textSnapshotClass } from "./globals/TextSnapshot.js";
@@ -610,6 +612,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       avm1.DONT_ENUM,
     );
     realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
+    realm.global.define(
+      "System",
+      systemObject(realm, platformCapabilities(), screenCapabilities(), this.swfVersion),
+      avm1.DONT_ENUM,
+    );
     // Last, as Flash defines it: _global's names are enumerated from the last defined.
     realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
