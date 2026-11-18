@@ -305,9 +305,9 @@ async function play(
     "info",
     `Loading ${name} (${air ? `AIR application ${air.descriptor.id}, ` : ""}${f.avm}, SWF ${f.version})`,
   );
-  showStatus(`Loading ${name}…`);
   // What is left before the first frame: the compiler and renderer the first SWF loads, and
   // the SWF's own code compiled.
+  showStatus(`Starting ${name}…`);
   showLoading(`Starting ${name}…`);
   try {
     const factory = enabled
@@ -504,7 +504,7 @@ async function playUrl(url: string, origin?: string): Promise<void> {
   const controller = new AbortController();
   downloadAbort = controller;
   close.disabled = false;
-  showStatus(`Fetching ${absolute.href}…`);
+  showStatus(`Loading ${absolute.href}…`);
   showLoading(`Loading ${name}…`);
   let bytes: Uint8Array;
   let finalUrl = absolute.href;
@@ -721,7 +721,9 @@ async function listDemos(): Promise<void> {
 }
 
 void listDemos();
-// The player's code is here: until a SWF loads, the stage asks for one.
+// The player's code is here: until a SWF loads, the stage asks for one. The page's watch for
+// its failure to load (play.astro) is over.
+(globalThis as { swf2esPlayerReady?: boolean }).swf2esPlayerReady = true;
 hideLoading();
 empty.hidden = false;
 showStatus("");

@@ -279,7 +279,38 @@ async function check(): Promise<void> {
         ],
         ...isolationChecks({ value, send, navigate }),
         [
-          "a cold visit loads the player in a few files, its loading shown until the first frame",
+          "a player that fails to load says so in place of its loading state",
+          async () => {
+            // A first visit, as no service worker then asks for the files where the page's
+            // blocked URLs would not reach it.
+            await send("Storage.clearDataForOrigin", {
+              origin: new URL(base).origin,
+              storageTypes: "all",
+            });
+            await send("Network.clearBrowserCache");
+            await send("Network.enable");
+            await send("Network.setBlockedURLs", { urls: ["*/swf2es/player/swf2es.js"] });
+            try {
+              await send("Page.navigate", { url: `${base}play/` });
+              await until(
+                "document.getElementById('status')?.textContent === 'The player did not load. Reload the page to try again.'",
+              );
+              assert.equal(
+                await value<string>("document.getElementById('loading-label').textContent"),
+                "The player did not load. Reload the page to try again.",
+              );
+              assert.equal(
+                await value<boolean>("document.getElementById('loading').hidden"),
+                false,
+              );
+            } finally {
+              await send("Network.setBlockedURLs", { urls: [] });
+              await send("Network.disable");
+            }
+          },
+        ],
+        [
+          "a cold visit fetches the player as a few files, its loading shown until the first frame",
           async () => {
             // What the stage's loading state showed, in each document, as it changed.
             const { identifier } = await send<{ identifier: string }>(
@@ -297,10 +328,12 @@ async function check(): Promise<void> {
               },
             );
             const urls = new Set<string>();
+            let requests = 0;
             listen("Network.requestWillBeSent", (params) => {
               const { url } = params.request as { url: string };
               if (/^https?:/.test(url)) {
                 urls.add(url);
+                requests++;
               }
             });
             await send("Network.enable");
@@ -330,8 +363,10 @@ async function check(): Promise<void> {
               await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
             }
 
-            // The browser build's few files, where the packages' own modules were some 900.
+            // The browser build's few files, where the packages' own modules were some 900, and
+            // the requests for them, each asked again by the reload that isolates the page.
             assert.ok(urls.size <= 30, `${urls.size} files:\n${[...urls].join("\n")}`);
+            assert.ok(requests <= 60, `${requests} requests for ${urls.size} files`);
             assert.ok(
               [...urls].some((u) => u.endsWith("/swf2es/player/swf2es.js")),
               "the page did not load the browser build",
@@ -340,7 +375,8 @@ async function check(): Promise<void> {
               ![...urls].some((u) => u.includes("/swf2es/modules/")),
               "the page loaded the packages' modules",
             );
-            const seen = await value<string[]>("loadingSeen");
+            // A label caught before its text is parsed is empty.
+            const seen = (await value<string[]>("loadingSeen")).filter((label) => label !== "");
             assert.equal(seen[0], "Loading player…", seen.join(" | "));
             assert.ok(
               seen.includes("Starting bounce.swf…"),
