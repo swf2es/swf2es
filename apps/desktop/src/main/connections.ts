@@ -4,6 +4,7 @@
 // (tests/desktop/connections.test.ts).
 import { connect, type OnReadOpts, type Socket } from "node:net";
 import type { SecureSocketOptions, SocketEndpoints } from "@swf2es/player";
+import { MAX_SOCKET_CERTIFICATE_BYTES, MAX_SOCKET_CERTIFICATES } from "@swf2es/player/certificates";
 import { type TlsTransport, tlsSocket, validCertificate } from "@swf2es/player-hosts/node";
 import type { SocketEvent } from "../shared/api.js";
 import { connectThrough, type ProxyConfig, type ProxyError, tunnelThrough } from "./proxy.ts";
@@ -52,7 +53,7 @@ export function secureOptions(value: unknown): SecureSocketOptions | null {
     (options.timeout ?? 0) < 1 ||
     (options.timeout ?? 0) > 0xffffffff ||
     !Array.isArray(options.certificates) ||
-    options.certificates.length > 64
+    options.certificates.length > MAX_SOCKET_CERTIFICATES
   ) {
     return null;
   }
@@ -68,7 +69,7 @@ export function secureOptions(value: unknown): SecureSocketOptions | null {
     }
 
     total += certificate.encoded.length;
-    if (total > MAX_BUFFERED || !validCertificate(certificate.encoded)) {
+    if (total > MAX_SOCKET_CERTIFICATE_BYTES || !validCertificate(certificate.encoded)) {
       return null;
     }
   }

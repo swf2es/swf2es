@@ -2,8 +2,7 @@
 // this reader exposes DER fields its public Node API does not describe.
 import { X509Certificate } from "node:crypto";
 import type { Certificate, CertificateName } from "@swf2es/player";
-
-export const MAX_CERTIFICATE_BYTES = 256 * 1024;
+import { MAX_CERTIFICATE_BYTES } from "@swf2es/player/certificates";
 
 interface Field {
   tag: number;

@@ -237,6 +237,67 @@ test("expiry and hostname checks cannot be accepted through the self-signed exce
   }
 });
 
+test("a self-signed leaf must still be valid when consent arrives", {
+  timeout: 10000,
+}, async (t) => {
+  const peer = await server(certificates.self, certificates.selfKey);
+  const seen = recorded();
+  const decision = new Promise<(accepted: boolean) => void>((resolve) => {
+    seen.events.certificateError = resolve;
+  });
+  const transport = tlsSocket(
+    tcpConnect(peer.port, "127.0.0.1"),
+    "localhost",
+    seen.events,
+    options(),
+  );
+  try {
+    const proceed = await decision;
+    const expires = new X509Certificate(certificates.self).validToDate.getTime();
+    t.mock.method(Date, "now", () => expires + 1);
+    proceed(true);
+    assert.deepEqual(seen.log, ["certificate:expired", "error"]);
+    assert.equal(transport.socket.destroyed, true);
+    proceed(true);
+    assert.deepEqual(seen.log, ["certificate:expired", "error"]);
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
+test("a throwing receive callback reports failure and closes the TLS socket", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server();
+  const seen = recorded();
+  seen.events.data = () => {
+    throw new Error("receiver failed");
+  };
+  const closed = new Promise<void>((resolve) => {
+    seen.events.close = () => {
+      seen.log.push("close");
+      resolve();
+    };
+  });
+  const transport = tlsSocket(
+    tcpConnect(peer.port, "127.0.0.1"),
+    "localhost",
+    seen.events,
+    options(),
+  );
+  try {
+    await seen.done;
+    transport.send(Uint8Array.of(42));
+    await closed;
+    assert.deepEqual(seen.log, ["certificate:trusted", "open", "error", "close"]);
+    assert.equal(transport.socket.destroyed, true);
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
 test("a self-signed leaf requires explicit acceptance, with the status reported before open", {
   timeout: 10000,
 }, async () => {

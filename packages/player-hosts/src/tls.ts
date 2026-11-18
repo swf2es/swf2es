@@ -4,12 +4,14 @@ import { X509Certificate } from "node:crypto";
 import { isIP, type Socket } from "node:net";
 import { checkServerIdentity, connect, getCACertificates, type TLSSocket } from "node:tls";
 import type {
+  Certificate,
   CertificateStatus,
   SecureSocketEvents,
   SecureSocketOptions,
   SocketEndpoints,
   SocketTransport,
 } from "@swf2es/player";
+import { MAX_SOCKET_CERTIFICATE_BYTES, MAX_SOCKET_CERTIFICATES } from "@swf2es/player/certificates";
 import { readCertificate, validCertificate } from "./certificates.js";
 
 export { validCertificate } from "./certificates.js";
@@ -23,14 +25,14 @@ let defaults: string[] | undefined;
 function authorities(options: SecureSocketOptions): string[] {
   defaults ??= [...new Set([...getCACertificates("default"), ...getCACertificates("system")])];
   const result = [...defaults];
-  if (options.certificates.length > 64) {
+  if (options.certificates.length > MAX_SOCKET_CERTIFICATES) {
     throw new Error("Too many socket certificates");
   }
 
   let total = 0;
   for (const { encoded, trusted } of options.certificates) {
     total += encoded.length;
-    if (total > 4 * 1024 * 1024 || !validCertificate(encoded)) {
+    if (total > MAX_SOCKET_CERTIFICATE_BYTES || !validCertificate(encoded)) {
       throw new Error("Invalid socket certificate");
     }
 
@@ -46,6 +48,18 @@ function authorities(options: SecureSocketOptions): string[] {
   }
 
   return result;
+}
+
+function validityError(certificate: Certificate): CertificateStatus | null {
+  const now = Date.now();
+  if (certificate.validNotAfter < now) {
+    return "expired";
+  }
+  if (certificate.validNotBefore > now) {
+    return "notYetValid";
+  }
+
+  return null;
 }
 
 function statusOf(error: string): CertificateStatus {
@@ -135,17 +149,15 @@ export function tlsSocket(
       const certificate = readCertificate(peer.raw);
       const error = String(tls.authorizationError ?? "");
       let status: CertificateStatus = tls.authorized ? "trusted" : statusOf(error);
-      const now = Date.now();
-      if (certificate.validNotAfter < now) {
-        status = "expired";
-      } else if (certificate.validNotBefore > now) {
-        status = "notYetValid";
+      const invalidDate = validityError(certificate);
+      if (invalidDate) {
+        status = invalidDate;
       } else if (checkServerIdentity(host, peer)) {
         status = "principalMismatch";
       }
 
       let decided = false;
-      const finish = (accepted: boolean) => {
+      const finish = (result: CertificateStatus) => {
         if (stopped || failed || decided) {
           return;
         }
@@ -153,12 +165,12 @@ export function tlsSocket(
         decided = true;
         // Consent may arrive after validate returns, and host callbacks can re-enter it.
         try {
-          events.certificate(accepted ? "trusted" : status, certificate);
+          events.certificate(result, certificate);
           if (stopped || failed) {
             return;
           }
 
-          if (!accepted) {
+          if (result !== "trusted") {
             fail();
             return;
           }
@@ -185,9 +197,11 @@ export function tlsSocket(
       ) {
         // AIR 51 offers this exception for a self-signed leaf, not an expired,
         // wrong-name or broken-chain certificate. No listener means refusal.
-        events.certificateError(finish);
+        events.certificateError((accepted) =>
+          finish(accepted ? (validityError(certificate) ?? "trusted") : status),
+        );
       } else {
-        finish(status === "trusted");
+        finish(status);
       }
     } catch {
       fail();
@@ -215,7 +229,11 @@ export function tlsSocket(
       tls.once("close", close);
       tls.on("data", (bytes: Buffer) => {
         if (opened && !stopped && !failed) {
-          events.data(bytes, true);
+          try {
+            events.data(bytes, true);
+          } catch {
+            fail();
+          }
         }
       });
       tls.once("secureConnect", () => validate(tls));
