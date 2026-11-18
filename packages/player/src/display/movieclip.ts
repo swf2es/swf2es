@@ -676,14 +676,12 @@ export class MovieClip extends Container {
       // order, a place's child its first frame, the actions queued (adl); a
       // frame past the last queues none (Ruffle's run_goto).
       const avm1 = this.library.avm1;
-      const made = new Set<DisplayObject>();
-      const make = (display: DisplayObject, character: DisplayCharacter) => {
-        made.add(display);
-        construct(display, character, this.library);
-      };
+      const pending = new Map<DisplayObject, DisplayCharacter>();
       for (const { display, character } of placed) {
         if (display.placeFrame < target) {
-          make(display, character);
+          construct(display, character, this.library);
+        } else {
+          pending.set(display, character);
         }
       }
 
@@ -694,18 +692,17 @@ export class MovieClip extends Container {
             avm1.actions(this, command.tag);
           } else if (command.type === "place") {
             const child = this.depths.get(command.place.depth);
-            const at = placed.find((p) => p.display === child);
-            if (at && !made.has(at.display)) {
-              make(at.display, at.character);
+            const character = child && pending.get(child);
+            if (child && character) {
+              pending.delete(child);
+              construct(child, character, this.library);
             }
           }
         }
       }
 
-      for (const { display, character } of placed) {
-        if (!made.has(display)) {
-          make(display, character);
-        }
+      for (const [display, character] of pending) {
+        construct(display, character, this.library);
       }
     } else {
       for (const { display, character } of placed) {
