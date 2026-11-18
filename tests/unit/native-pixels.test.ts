@@ -210,6 +210,10 @@ test("noise draws the reference's sequence, across bands too", () => {
 });
 
 test("perlinNoise draws the reference's noise, stitched or not, across bands too", () => {
+  const kernel = bitmapKernel();
+  assert.ok(kernel);
+  kernel.dispose();
+  let smallestCapacity = 0;
   const r = random(17);
   for (const [w, h] of [
     [1, 1],
@@ -238,7 +242,16 @@ test("perlinNoise draws the reference's noise, stitched or not, across bands too
       perlinNoiseReference(b, base, offsets, seed, stitch, fractal, channels, gray);
       assert.deepEqual(a.pixels, b.pixels, `${w}x${h} case ${k}`);
     }
+
+    if (w === 1) {
+      smallestCapacity = kernel.capacity;
+    }
   }
+
+  assert.ok(
+    smallestCapacity > 0 && smallestCapacity < kernel.capacity,
+    "small bitmaps need less scratch than a full band",
+  );
 });
 
 test("a band that traps is made again in a new instance, the bands before it not twice", () => {
