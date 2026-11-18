@@ -183,9 +183,21 @@ fetch-electron` does so ahead, for the tests.
   (`--ignore-policy-files=localhost,192.168.1.5`). The sandbox stays as
   it is: a local SWF without the network reaches none. `--log-network`'s
   line for a request it let through ends in
-  `allowed by --ignore-policy-files`. It is never kept in the settings,
-  and the app says on stderr, each time it starts with it, what it
-  covers.
+  `allowed by --ignore-policy-files`. It holds for every SWF the running
+  app opens, one double-clicked into it later included; a second start
+  with the switch hands its SWF to the app already open, which plays it
+  as it started. It is never kept in the settings, and the app says on
+  stderr, each time it starts with it, what it covers.
+- **Naming hosts.** `--ignore-certificate-errors=` and
+  `--ignore-policy-files=` take host names and addresses, each matched
+  exactly as a URL writes it: case does not count, an IPv6 address goes
+  with or without its brackets, and an address written another way
+  (`127.1`, `0x7f.0.0.1`, `192.168.010.5`) is the address it stands for,
+  which the app says. A port (`dev.test:8443`) is taken as every port of
+  the host, which the app says too. A wildcard (`*`, `*.dev.test`)
+  matches nothing: the switch alone covers every host it can. An entry
+  that is not a host alone (`https://dev.test`, `user@dev.test`,
+  `dev.test/x`) is left out, with a word on stderr.
 - **Proxy.** `--proxy=socks5://host:1080` sends everything the SWF does
   on the network through a SOCKS5 proxy (RFC 1928; `socks5h://` is the
   same), and `--proxy=http://host:3128` through an HTTP proxy, by a

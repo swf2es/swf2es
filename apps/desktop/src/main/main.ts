@@ -77,6 +77,7 @@ import {
   window,
 } from "./state.ts";
 import {
+  announcePolicySwitch,
   embedding,
   httpCacheOff,
   ignorePolicy,
@@ -516,6 +517,7 @@ if (!first) {
 
   app.quit();
 } else {
+  announcePolicySwitch();
   // Still before ready: Chromium reads the GPU switches as it starts the GPU process.
   chooseGl(softwareGl);
   // A crash leaves a minidump in app.getPath("crashDumps"), which the line on stderr names, for

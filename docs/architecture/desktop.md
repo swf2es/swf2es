@@ -199,7 +199,15 @@ refusal there says so. `--ignore-policy-files=host,...` grants the hosts
 named alone, wherever they are, `localhost` or `192.168.1.5` included:
 by the URL's or the socket's host exactly, as `--ignore-certificate-errors`
 matches (no subdomains, and a name is not its address), lower case, an
-IPv6 address without its brackets. Both forms may be given, and count
+IPv6 address without its brackets, an address in the form a URL writes it
+(`hostOf`). A socket's host is resolved in that form too, so the switch
+judges the very name resolved; one that is not a host alone
+(`listed.example/.elsewhere`, `user@listed.example`), which a URL's parser
+would cut down to a listed host while a resolver might take it whole, is
+resolved as given and never granted by the switch. A command line's entry
+with a port names every port of its host, one written another way is the
+host it stands for, a wildcard matches nothing and an entry that is not a
+host is left out, each said on stderr. Both forms may be given, and count
 together; what follows an AIR application's `--` is its own. Everything
 else stands: the sandbox (a local-with-filesystem SWF reaches no network,
 `allowNetworking`, `navigateToURL`'s rules), the user's word for each
@@ -212,7 +220,7 @@ this machine's address), and sends that wherever it likes. No cookie or
 credential goes with it, so a site's data for the user stays out of
 reach. It holds for the run alone, every SWF the app opens in it, is
 never kept, and the app says on stderr, as it starts, what it grants; a
-second start with it says it counts only for the first.
+second start with it says only that it counts for the first start alone.
 
 Addresses are placed by their ranges alone, as a browser's Private
 Network Access places them: the app does not know which public addresses

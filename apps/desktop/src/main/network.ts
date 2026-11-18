@@ -25,6 +25,7 @@ import {
   defaultCa,
   describe,
   type HostList,
+  hostOf,
   policyIgnored,
   proxyFault,
   redirectOf,
@@ -307,8 +308,11 @@ export class Network {
     port: number,
     deadline: AbortSignal,
   ): Promise<{ address: string; policyIgnored: boolean }> {
-    const target = await this.pin(host, deadline);
-    if (policyIgnored(this.ignorePolicy, host, target.place)) {
+    // The host as a URL would have it, resolved as such, so that the switch judges the very
+    // name resolved; one that is no host alone is resolved as given, and never granted by it.
+    const name = hostOf(host);
+    const target = await this.pin(name ?? host, deadline);
+    if (name !== null && policyIgnored(this.ignorePolicy, name, target.place)) {
       return { address: target.address, policyIgnored: true };
     }
 

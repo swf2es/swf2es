@@ -41,7 +41,9 @@ export const netLog = logNetwork ? (line: string) => process.stderr.write(`${lin
  * run alone, never kept, and said aloud: anyone on the way to such a host
  * can read and change what the SWF loads from it.
  */
-const unverified = unverifiedHosts(process.argv.slice(1));
+const unverified = unverifiedHosts(process.argv.slice(1), (line) =>
+  process.stderr.write(`${line}\n`),
+);
 if (unverified) {
   process.stderr.write(
     unverified.all
@@ -60,9 +62,24 @@ const unverifiedHost = (host: string) =>
  * address; named, those, wherever they are. For this run alone, never
  * kept, and said aloud: the SWF reads what this machine reaches of them.
  */
-export const ignorePolicy = policyIgnoredHosts(process.argv.slice(1));
-if (ignorePolicy) {
-  process.stderr.write(`${policyIgnoredNotice(ignorePolicy)}\n`);
+const policyWarnings: string[] = [];
+export const ignorePolicy = policyIgnoredHosts(process.argv.slice(1), (line) =>
+  policyWarnings.push(line),
+);
+
+/**
+ * Say on stderr what --ignore-policy-files covers, and what its list does
+ * not mean as written: by the start that plays, not by a second one that
+ * hands its SWF to the app already open, which plays it as it started.
+ */
+export function announcePolicySwitch(): void {
+  for (const line of policyWarnings) {
+    process.stderr.write(`${line}\n`);
+  }
+
+  if (ignorePolicy) {
+    process.stderr.write(`${policyIgnoredNotice(ignorePolicy)}\n`);
+  }
 }
 
 /**

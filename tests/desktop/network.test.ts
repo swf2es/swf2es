@@ -11,7 +11,7 @@
 // a name the test resolves to either reaches one or the other.
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import {
   createServer as createHttpServer,
   type IncomingMessage,
@@ -23,6 +23,7 @@ import { createServer as createTcpServer, type Server as TcpServer } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
+import { pathToFileURL } from "node:url";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { brotliCompressSync, deflateRawSync, deflateSync, gzipSync } from "node:zlib";
@@ -1425,14 +1426,6 @@ test("--ignore-policy-files names every host, or those it lists, up to an applic
     all: true,
     hosts: [],
   });
-  // As a URL's host: lower case, an IPv6 address bare and short, an address in its usual form.
-  assert.deepEqual(
-    policyIgnoredHosts([
-      "--ignore-policy-files=Data.Example, localhost,[::1],0:0:0:0:0:0:0:2,192.168.001.5",
-      "movie.swf",
-    ]),
-    { all: false, hosts: ["data.example", "localhost", "::1", "::2", "192.168.1.5"] },
-  );
   // Both forms, both counted; named with nothing, no host rather than every one.
   assert.deepEqual(
     policyIgnoredHosts(["--ignore-policy-files", "--ignore-policy-files=localhost"]),
@@ -1449,17 +1442,103 @@ test("--ignore-policy-files names every host, or those it lists, up to an applic
   assert.equal(policyIgnored(all, "inside.test", "loopback"), false);
   assert.equal(policyIgnored(all, "router.test", "private"), false);
   assert.equal(policyIgnored(all, "LOCALHOST", "loopback"), true);
-  const named = { all: false, hosts: ["::1", "192.168.1.5"] };
+  const named = { all: false, hosts: ["::1", "192.168.1.5", "data.example"] };
   assert.equal(policyIgnored(named, "[0::1]", "loopback"), true);
   assert.equal(policyIgnored(named, "192.168.1.5", "private"), true);
   assert.equal(policyIgnored(named, "other.test", "public"), false);
   assert.equal(policyIgnored(null, "other.test", "public"), false);
+  // A host alone, or nothing: what a URL's parser would drop matches no listed host.
+  for (const raw of [
+    "data.example/.evil.test",
+    "data.example?.evil.test",
+    "data.example#.evil.test",
+    "data.example\\.evil.test",
+    "u@data.example",
+    "data.example:80",
+    "data%2eexample",
+    "data.example ",
+    "http://data.example",
+  ]) {
+    assert.equal(policyIgnored(named, raw, "loopback"), false, raw);
+  }
+});
+
+test("both host switches read their entries as a URL's host, and say what they do not mean as written", () => {
+  for (const [name, parse] of [
+    ["--ignore-policy-files", policyIgnoredHosts],
+    ["--ignore-certificate-errors", unverifiedHosts],
+  ] as const) {
+    const said: string[] = [];
+    const list = parse(
+      [
+        `${name}=Data.Example, localhost,[::1],0:0:0:0:0:0:0:2,localhost.,dev.test:8443,` +
+          "[::1]:8080,bücher.example,2130706433,0x7f.1,0177.0.0.2,192.168.010.5,127.1," +
+          "::ffff:127.0.0.1,https://a.test,u@b.test,c.test/x,d.test?e,*,*.e.test",
+        "movie.swf",
+      ],
+      (line) => said.push(line),
+    );
+    assert.deepEqual(
+      list,
+      {
+        all: false,
+        hosts: [
+          "data.example",
+          "localhost",
+          "::1",
+          "::2",
+          "localhost.",
+          "dev.test",
+          "::1",
+          "xn--bcher-kva.example",
+          "127.0.0.1",
+          "127.0.0.1",
+          "127.0.0.2",
+          "192.168.8.5",
+          "127.0.0.1",
+          "::ffff:7f00:1",
+        ],
+      },
+      name,
+    );
+    const prefix = `swf2es: ${name}: `;
+    assert.deepEqual(
+      said,
+      [
+        "0:0:0:0:0:0:0:2 is taken as ::2",
+        "dev.test:8443 names a port: every port of dev.test is taken",
+        "[::1]:8080 names a port: every port of ::1 is taken",
+        "bücher.example is taken as xn--bcher-kva.example",
+        "2130706433 is taken as 127.0.0.1",
+        "0x7f.1 is taken as 127.0.0.1",
+        "0177.0.0.2 is taken as 127.0.0.2",
+        "192.168.010.5 is taken as 192.168.8.5",
+        "127.1 is taken as 127.0.0.1",
+        "::ffff:127.0.0.1 is taken as ::ffff:7f00:1",
+        "https://a.test is not a host name or address, and is left out",
+        "u@b.test is not a host name or address, and is left out",
+        "c.test/x is not a host name or address, and is left out",
+        "d.test?e is not a host name or address, and is left out",
+        "* matches no host: hosts are matched exactly, without wildcards",
+        "*.e.test matches no host: hosts are matched exactly, without wildcards",
+      ].map((message) => prefix + message),
+      name,
+    );
+  }
 });
 
 test("--ignore-policy-files: what it says on stderr as the app starts, from the app's own arguments", () => {
   const switches = join(import.meta.dirname, "../../apps/desktop/src/main/switches.ts");
-  const run = (...args: string[]) => {
-    const result = spawnSync(process.execPath, [switches, ...args], {
+  // As the first start says it, and a second start, which hands its SWF over, does not.
+  const scratch = mkdtempSync(join(tmpdir(), "swf2es-switches-"));
+  const first = join(scratch, "first.mjs");
+  writeFileSync(
+    first,
+    `import { announcePolicySwitch } from ${JSON.stringify(pathToFileURL(switches).href)};\n` +
+      "announcePolicySwitch();\n",
+  );
+  const run = (script: string, ...args: string[]) => {
+    const result = spawnSync(process.execPath, [script, ...args], {
       encoding: "utf8",
       timeout: 30_000,
     });
@@ -1470,25 +1549,33 @@ test("--ignore-policy-files: what it says on stderr as the app starts, from the 
       .join("\n");
   };
 
-  assert.equal(
-    run("--ignore-policy-files", "movie.swf"),
-    "swf2es: --ignore-policy-files: every public host taken to grant the SWF what a policy " +
-      "file could; an address on this machine or a private network still needs its own policy " +
-      "file unless named",
-  );
-  assert.equal(
-    run("--ignore-policy-files=Data.Example,192.168.1.5", "movie.swf"),
-    "swf2es: --ignore-policy-files: data.example, 192.168.1.5 taken to grant the SWF what a " +
-      "policy file could; any other host still needs its own policy file",
-  );
-  assert.equal(
-    run("--ignore-policy-files", "--ignore-policy-files=localhost"),
-    "swf2es: --ignore-policy-files: every public host and localhost taken to grant the SWF " +
-      "what a policy file could; an address on this machine or a private network still needs " +
-      "its own policy file unless named",
-  );
-  assert.equal(run("movie.swf"), "");
-  assert.equal(run("app.xml", "--", "--ignore-policy-files"), "");
+  try {
+    assert.equal(
+      run(first, "--ignore-policy-files", "movie.swf"),
+      "swf2es: --ignore-policy-files: every public host taken to grant the SWF what a policy " +
+        "file could; an address on this machine or a private network still needs its own " +
+        "policy file unless named",
+    );
+    assert.equal(
+      run(first, "--ignore-policy-files=Data.Example,192.168.1.5", "movie.swf"),
+      "swf2es: --ignore-policy-files: data.example, 192.168.1.5 taken to grant the SWF what a " +
+        "policy file could; any other host still needs its own policy file",
+    );
+    assert.equal(
+      run(first, "--ignore-policy-files", "--ignore-policy-files=localhost,*,127.1"),
+      "swf2es: --ignore-policy-files: * matches no host: hosts are matched exactly, without " +
+        "wildcards\n" +
+        "swf2es: --ignore-policy-files: 127.1 is taken as 127.0.0.1\n" +
+        "swf2es: --ignore-policy-files: every public host and localhost, 127.0.0.1 taken to " +
+        "grant the SWF what a policy file could; an address on this machine or a private " +
+        "network still needs its own policy file unless named",
+    );
+    assert.equal(run(first, "movie.swf"), "");
+    assert.equal(run(first, "app.xml", "--", "--ignore-policy-files"), "");
+    assert.equal(run(switches, "--ignore-policy-files=localhost,*", "movie.swf"), "");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 });
 
 test("--ignore-policy-files: another public origin's data and headers without its policy", async () => {
@@ -1648,4 +1735,95 @@ test("--ignore-policy-files stands in for a socket policy, public hosts alone un
     ),
     { address: PUBLIC, policyIgnored: false },
   );
+});
+
+test("--ignore-policy-files judges a socket's host as resolved, never a host it would read otherwise", async () => {
+  const masterPort = await socketServer(() => null);
+  const silent = createTcpServer((connection) => connection.on("error", () => {}).end());
+  const loopbackPort = (await listen(silent, LOOPBACK)) as number;
+  const asked: string[] = [];
+  // A resolver that answers whatever it is asked: the listed name is public, anything that
+  // merely contains it this machine, as a wildcard zone could make it.
+  const lenient = async (host: string) => {
+    asked.push(host);
+    if (host === "data.example") {
+      return [PUBLIC];
+    }
+
+    return host.includes("data.example") ? [LOOPBACK] : resolve(host);
+  };
+  const grant = async (ignorePolicy: { all: boolean; hosts: string[] }, host: string) => {
+    const net = await playing(`${swf()}/movie.swf`, {
+      socketPolicyPort: masterPort,
+      resolve: lenient,
+      ignorePolicy,
+    });
+    asked.length = 0;
+    try {
+      return await net.socketGrant(host, loopbackPort);
+    } catch (error) {
+      assert.ok(error instanceof Refused);
+      return `refused: ${error.message}`;
+    }
+  };
+
+  const listed = { all: false, hosts: ["data.example", "localhost", "127.0.0.1"] };
+  for (const raw of [
+    "data.example/.evil.test",
+    "data.example?.evil.test",
+    "data.example#.evil.test",
+    "data.example\\.evil.test",
+    "u@data.example",
+  ]) {
+    assert.match(String(await grant(listed, raw)), /refused: no socket policy/, raw);
+    // Resolved as given, as before: the switch only declines to stand in for its policy.
+    assert.deepEqual(asked, [raw], raw);
+  }
+
+  // A host in another form is resolved as the form a URL has, which the switch judges.
+  for (const [raw, resolved] of [
+    ["LOCALHOST", ["localhost"]],
+    ["127.1", []],
+    ["0x7f.0.0.1", []],
+  ] as const) {
+    assert.deepEqual(await grant(listed, raw), { address: LOOPBACK, policyIgnored: true }, raw);
+    assert.deepEqual(asked, resolved, raw);
+  }
+
+  // Alone, the switch reaches none of this machine's spellings.
+  const everyHost = { all: true, hosts: [] };
+  for (const raw of ["LOCALHOST", "127.1", "::ffff:127.0.0.1", "[::ffff:7f00:1]"]) {
+    assert.match(String(await grant(everyHost, raw)), /refused: no socket policy/, raw);
+  }
+});
+
+test("--ignore-policy-files alone follows a name whose DNS turns to this machine, request by request", async () => {
+  policies.clear();
+  const masterPort = await socketServer(() => null);
+  const targetPort = await socketServer(() => null);
+  const everyHost = { ignorePolicy: { all: true, hosts: [] }, socketPolicyPort: masterPort };
+  const host = `http://rebind.test:${otherPort}`;
+
+  // Public at first: granted. Then this machine: its own policy, which there is none of.
+  rebinds = 0;
+  let net = await playing(`${swf()}/movie.swf`, everyHost);
+  assert.equal(await outcome(ask(net, `${host}/data.txt`)), "other/data.txt");
+  assert.match(
+    await outcome(ask(net, `${host}/data.txt`)),
+    /refused: rebind\.test:\d+ is at 127\.0\.0\.1, more private than the SWF/,
+  );
+  // Nor by a redirect from a host the switch grants.
+  assert.match(
+    await outcome(ask(net, `${other()}/redirect?to=${encodeURIComponent(`${host}/data.txt`)}`)),
+    /more private than the SWF/,
+  );
+
+  // A socket the same.
+  rebinds = 0;
+  net = await playing(`${swf()}/movie.swf`, everyHost);
+  assert.deepEqual(await net.socketGrant("rebind.test", targetPort), {
+    address: PUBLIC,
+    policyIgnored: true,
+  });
+  await assert.rejects(net.socketGrant("rebind.test", targetPort), /no socket policy/);
 });

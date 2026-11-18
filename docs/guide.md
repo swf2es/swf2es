@@ -448,8 +448,19 @@ there grants it, unless you name the host (`--ignore-policy-files=localhost`,
 address. Flash's other rules stay: a local SWF without UseNetwork reaches
 no network, sockets still ask you first, and `--log-network` ends the line
 of each request the switch let through in `allowed by --ignore-policy-files`.
-It is never remembered, and the app says on stderr what it covers each time
-it starts with it.
+It covers every SWF the running app opens, one you double-click into it
+later included; a second start with the switch hands its SWF to the app
+already open, which keeps what it started with. It is never remembered,
+and the app says on stderr what it covers each time it starts with it.
+
+Both `--ignore-certificate-errors=` and `--ignore-policy-files=` take host
+names and addresses, matched exactly as a URL writes them, whatever their
+case, an IPv6 address with or without brackets. An address written another
+way (`127.1`, `192.168.010.5`) is the address it stands for, a port
+(`dev.test:8443`) is taken as every port of the host, a wildcard (`*`,
+`*.dev.test`) matches nothing, and an entry that is not a host alone
+(`https://dev.test`, `dev.test/x`) is left out; the app says each of these
+on stderr.
 
 `--proxy` is never remembered either, and the app says on stderr which
 proxy it uses (its credentials, which come from the command line alone,
