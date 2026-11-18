@@ -104,8 +104,11 @@ export function tlsSocket(
 
     failed = true;
     clearTimeout(timer);
-    events.error(`Error #2031: Socket Error. URL: ${host}`);
-    socket.destroy();
+    try {
+      events.error(`Error #2031: Socket Error. URL: ${host}`);
+    } finally {
+      socket.destroy();
+    }
   };
   // setTimeout's signed range is smaller than AIR's uint timeout.
   const timer = setTimeout(fail, Math.max(1, Math.min(options.timeout, 0x7fffffff)));
@@ -141,30 +144,39 @@ export function tlsSocket(
         status = "principalMismatch";
       }
 
+      let decided = false;
       const finish = (accepted: boolean) => {
-        if (stopped || failed || opened) {
+        if (stopped || failed || decided) {
           return;
         }
 
-        events.certificate(accepted ? "trusted" : status, certificate);
-        if (stopped || failed) {
-          return;
-        }
+        decided = true;
+        // Consent may arrive after validate returns, and host callbacks can re-enter it.
+        try {
+          events.certificate(accepted ? "trusted" : status, certificate);
+          if (stopped || failed) {
+            return;
+          }
 
-        if (!accepted) {
+          if (!accepted) {
+            fail();
+            return;
+          }
+
+          opened = true;
+          clearTimeout(timer);
+          events.open({
+            localAddress: socket.localAddress ?? "",
+            localPort: socket.localPort ?? 0,
+            remoteAddress: remote?.remoteAddress ?? socket.remoteAddress ?? "",
+            remotePort: remote?.remotePort ?? socket.remotePort ?? 0,
+          });
+          if (!stopped && !failed) {
+            socket.resume();
+          }
+        } catch {
           fail();
-          return;
         }
-
-        opened = true;
-        clearTimeout(timer);
-        events.open({
-          localAddress: socket.localAddress ?? "",
-          localPort: socket.localPort ?? 0,
-          remoteAddress: remote?.remoteAddress ?? socket.remoteAddress ?? "",
-          remotePort: remote?.remotePort ?? socket.remotePort ?? 0,
-        });
-        socket.resume();
       };
       if (
         status === "untrustedSigners" &&
