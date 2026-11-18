@@ -132,8 +132,12 @@ retain its peer certificate for inspection. Null or malformed certificate
 input throws ArgumentError #2004. The AS3-driven tests exercise these with
 local certificates, including the ByteArrays' positions and mutation isolation.
 
-`player-hosts/node` implements the capability through `tlsSocket()`, reusable
-with a host's own connected or connecting TCP socket. Node's crypto validates
+`player-hosts/node` implements the capability through `tlsConnect()` for direct
+connections and `tlsSocket()` for a host's connected or connecting TCP socket.
+`tlsConnect()` accepts a pinned routing address separately from the hostname
+validated by TLS. It reuses a 64 KB plaintext read buffer and hands receivers
+owned copies of each read. Existing sockets, including proxy tunnels, keep
+Node's stream reads because Node ignores `onread` for them. Node's crypto validates
 X.509 input; a bounded DER reader extracts the fields its API does not expose.
 TLS uses Node's default and system roots and the Socket's additions. An
 untrusted self-issued root is never added as an anchor; other untrusted CAs
