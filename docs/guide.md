@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.27"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.28"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.27`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.28`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -123,8 +123,16 @@ Changing that attribute to false also stops the current capture; reload
 before enabling it again. Replacing or destroying the player stops its
 tracks, including a permission request that finishes later.
 
-The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`
-and `allownetworking`. It has `load(url | bytes)` and `destroy()`, which
+The element also takes `salign`, `wmode`, `bgcolor`, `base`, `quality`,
+`allownetworking` and `relativeurls`. As in Flash's plug-in, relative
+URLs resolve against the page, or against `base`, where `base="."` is
+the SWF's directory and any other value is relative to the page. A player page
+that shows SWFs from elsewhere sets `relativeurls="movie"` on the
+element, or `configure({ relativeUrls: "movie" })` for all of them, to
+resolve them against each SWF's own URL instead. Like `base`, the
+attribute is read when a movie loads, not watched while it plays; Flash
+tags have no such parameter, so for players `replaceFlash` makes only
+`configure` sets it. It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
@@ -390,6 +398,8 @@ the builtin.abc and playerglobal the player ships.
 | `--log-sockets` | `--log-network`, and what each socket and WebSocket sends and receives: its size and first 512 bytes, as text or in hex. It prints whatever the SWF sends, a login among it. |
 | `--ignore-certificate-errors` | Does not verify any HTTPS or WSS server's certificate, for this run. |
 | `--ignore-certificate-errors=dev.test,localhost` | The same for the hosts named alone, on any port. |
+| `--ignore-policy-files` | Lets the SWF read every public host's data, send it headers and open sockets to it as if its cross-domain policy files allowed it, for this run. This machine and private networks still need their own policy file. |
+| `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
@@ -432,6 +442,33 @@ it signed itself. Whoever sits between you and such a host can then read and
 change what the SWF loads from it, so name the hosts you mean, and leave the
 switch off otherwise. It is never remembered: the app says so on stderr each
 time it starts with it.
+
+`--ignore-policy-files` is for a SWF you trust whose servers no longer
+serve the policy files Flash asked for. It takes away what those files
+guarded: the SWF reads, as your machine, whatever your machine reaches of
+the hosts it covers, and may send it anywhere. No cookies or passwords go
+with its requests, so your accounts on those sites stay out of its reach,
+but what is open to your network position is not (a site that trusts your
+address, say). Bare, it covers public hosts alone: a SWF from the internet
+still reaches your machine and your local network only where a policy file
+there grants it, unless you name the host (`--ignore-policy-files=localhost`,
+`=192.168.1.5`). A name matches as written, not its subdomains nor its
+address. Flash's other rules stay: a local SWF without UseNetwork reaches
+no network, sockets still ask you first, and `--log-network` ends the line
+of each request the switch let through in `allowed by --ignore-policy-files`.
+It covers every SWF the running app opens, one you double-click into it
+later included; a second start with the switch hands its SWF to the app
+already open, which keeps what it started with. It is never remembered,
+and the app says on stderr what it covers each time it starts with it.
+
+Both `--ignore-certificate-errors=` and `--ignore-policy-files=` take host
+names and addresses, matched exactly as a URL writes them, whatever their
+case, an IPv6 address with or without brackets. An address written another
+way (`127.1`, `192.168.010.5`) is the address it stands for, a port
+(`dev.test:8443`) is taken as every port of the host, a wildcard (`*`,
+`*.dev.test`) matches nothing, and an entry that is not a host alone
+(`https://dev.test`, `dev.test/x`) is left out; the app says each of these
+on stderr.
 
 `--proxy` is never remembered either, and the app says on stderr which
 proxy it uses (its credentials, which come from the command line alone,
@@ -601,6 +638,20 @@ at once, without Nagle's algorithm, unless an AIR SWF set `tcpNoDelay`
 to false before it connected. An embedder with a transport of its own
 gives it as `configure({ sockets })`; its `connect(host, port, events,
 options)` gets `options.noDelay` where the SWF set `tcpNoDelay`.
+
+`flash.net.SecureSocket` works in node and the desktop app. The desktop
+asks for the same host-and-port permission as a plain socket, then checks
+the TLS certificate against the original hostname, including through a
+proxy. It exposes the peer's `X509Certificate` and distinguished names.
+A SWF can add DER certificates with `addBinaryChainBuildingCertificate`;
+they apply only to that Socket. In AIR mode, a self-signed leaf requires the application to
+accept AIR 51's cancelable `certificateError` event explicitly; Flash Player mode refuses it. Expired,
+wrong-name and broken-chain certificates are refused.
+
+The browser relay does not provide SecureSocket: TLS to a WebSocket relay
+alone cannot supply the target server's certificate or TLS session. A
+custom `SocketHost` may implement its optional `secure` capability; without
+one, `SecureSocket.isSupported` is false.
 
 An AIR application's `air.net.WebSocket` uses the page's own `WebSocket`.
 An embedder whose page may not connect, as the desktop app's, whose main

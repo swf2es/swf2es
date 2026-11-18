@@ -465,7 +465,7 @@ function shapeOf(
   // Its bitmap fills' bitmaps, its lines' too, as the SWF has them now, which defines them before
   // the shapes that use them; a shape with any is the SWF's own, not shared.
   // The parse is not kept: no function made here refers to it, so its records go.
-  const bitmaps = new Map<number, BitmapCharacter | null>();
+  let bitmaps: Map<number, BitmapCharacter | null> | undefined;
   const styles = [shape.fills, shape.lines.map((l) => l.fill)];
   for (const r of shape.records) {
     if (r.type === "style" && r.styles) {
@@ -478,12 +478,17 @@ function shapeOf(
 
   for (const fills of styles) {
     for (const fill of fills) {
-      if (fill?.type === "bitmap" && !bitmaps.has(fill.bitmap)) {
+      if (fill?.type === "bitmap" && !bitmaps?.has(fill.bitmap)) {
+        bitmaps ??= new Map();
         bitmaps.set(fill.bitmap, bitmap(fill.bitmap));
       }
     }
   }
 
+  // Another library can keep a shared shape alive after this SWF is unloaded.
+  const source = bitmaps ? bytes : new Uint8Array(tag);
+  const offset = bitmaps ? t.offset : 0;
+  const { code, length } = t;
   let layers: ShapeLayer[] | null = null;
   const character: ShapeCharacter = {
     type: "shape",
@@ -493,18 +498,17 @@ function shapeOf(
     // application's SWFs define are never shown, and their layers were most of its memory.
     get layers() {
       layers ??= shapeLayers(
-        readShape(bytes, t.code, t.offset, t.length, version),
-        (id) => bitmaps.get(id) ?? null,
+        readShape(source, code, offset, length, version),
+        (id) => bitmaps?.get(id) ?? null,
       );
       return layers;
     },
   };
-  if (bitmaps.size === 0) {
-    const own = tag.slice();
+  if (!bitmaps) {
     const list = sharedShapes.get(hash) ?? [];
-    list.push({ tag: own, shape: new WeakRef(character) });
+    list.push({ tag: source, shape: new WeakRef(character) });
     sharedShapes.set(hash, list);
-    sharedGone.register(character, { hash, tag: own });
+    sharedGone.register(character, { hash, tag: source });
   }
 
   return character;
@@ -521,6 +525,8 @@ function timelineOf(
   version: number,
 ): Timeline {
   const avm1 = actions !== null;
+  const ended = list.at(-1)?.code === tags.End;
+  const last = list.length - (ended ? 2 : 1);
   const frames: FrameCommand[][] = [[]];
   const tagged: FrameName[] = [];
   const frameLabels = new Map<number, string>();
@@ -529,11 +535,16 @@ function timelineOf(
   const blocks: SoundStreamBlock[] = [];
   const byFrame = new Map<number, number>();
   let scenes: SceneData | null = null;
-  for (const t of list) {
+
+  for (let index = 0; index < list.length; index++) {
+    const t = list[index];
     const frame = frames[frames.length - 1];
     switch (t.code) {
       case tags.ShowFrame:
-        frames.push([]);
+        // The last ShowFrame closes the current frame with no further commands to collect.
+        if (index !== last) {
+          frames.push([]);
+        }
         break;
       case tags.PlaceObject:
       case tags.PlaceObject2:
@@ -766,19 +777,19 @@ function timelineOf(
   // the clip stops there, where it does not (`tail`): a timeline of one
   // frame, or without an End tag (adl, and the corpus's `looping_child_*`).
   // An AS3 one has as many as its header says.
-  const loops = !avm1 || list.at(-1)?.code === tags.End;
+  const loops = !avm1 || ended;
   let tail: FrameCommand[] = [];
-  if (avm1) {
+  if (!avm1) {
+    frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
+    while (frames.length < (frameCount || 1)) {
+      frames.push([]);
+    }
+  } else if (list[last]?.code !== tags.ShowFrame) {
     tail = frames.length > 1 ? frames[frames.length - 1].filter((c) => c.type === "actions") : [];
     frames.length = Math.max(1, frames.length - 1);
     if (loops && frames.length > 1) {
       frames[frames.length - 1].push(...tail);
       tail = [];
-    }
-  } else {
-    frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
-    while (frames.length < (frameCount || 1)) {
-      frames.push([]);
     }
   }
 

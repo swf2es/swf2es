@@ -260,3 +260,27 @@ test("ByteArray's LZMA holds its length, which must be what the stream holds", (
   wrong[5] ^= 1;
   assert.throws(() => lzmaByteArrayUncompress(wrong), CompressedDataError);
 });
+
+test("ByteArray codecs give each result its own, exactly sized buffer", () => {
+  const input = body.subarray(1);
+  for (const [compress, uncompress] of [
+    [zlibCompress, zlibUncompress],
+    [deflateCompress, (data: Uint8Array) => zlibUncompress(data, true)],
+    [lzmaByteArrayCompress, lzmaByteArrayUncompress],
+  ] as const) {
+    const first = compress(input);
+    const second = compress(input);
+    const plain = uncompress(first);
+    const again = uncompress(first);
+    const buffers = [first, second, plain, again].map((view) => {
+      assert.ok(view.buffer instanceof ArrayBuffer);
+      assert.equal(view.byteLength, view.buffer.byteLength);
+      return view.buffer;
+    });
+
+    assert.equal(new Set([input.buffer, ...buffers]).size, 5);
+    assert.deepEqual(first, second);
+    assert.deepEqual(plain, input);
+    assert.deepEqual(again, input);
+  }
+});

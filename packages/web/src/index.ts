@@ -10,7 +10,7 @@ import { defineElement } from "./element.js";
 // SWFs out for.
 export { filtersGreyOutFiles } from "@swf2es/player";
 export { AirApp, type AirAppFile, openAirApp } from "./air.js";
-export { parseColor, parseFlashVars, scriptAccess } from "./attributes.js";
+export { parseColor, parseFlashVars, type RelativeUrls, scriptAccess } from "./attributes.js";
 export {
   type Configuration,
   configuration,

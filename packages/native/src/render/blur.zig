@@ -217,9 +217,8 @@ fn widen(bytes: [lanes]u8) V {
     return @intCast(v);
 }
 
-/// One run along y from `from` into `to` (w × h), rows past the ends
-/// zeros, the sums running down whole rows `lanes` columns at a time.
-fn runY(from: []const u8, to: []u8, w: usize, h: usize, box: Box, sums: []i32) void {
+/// Once the window has moved past a source row, replace it with its queued result.
+fn runY(plane: []u8, pending: []u8, w: usize, h: usize, box: Box, sums: []i32) void {
     const full = box.full;
     const zero: [lanes]u8 = @splat(0);
     @memset(sums, 0);
@@ -239,7 +238,7 @@ fn runY(from: []const u8, to: []u8, w: usize, h: usize, box: Box, sums: []i32) v
             return r.from[@as(usize, @intCast(y)) * r.w + x];
         }
     };
-    const rows = Rows{ .from = from, .w = w, .h = h };
+    const rows = Rows{ .from = plane, .w = w, .h = h };
     const f: isize = @intCast(full);
     var j: isize = -f;
     while (j <= f) : (j += 1) {
@@ -249,9 +248,15 @@ fn runY(from: []const u8, to: []u8, w: usize, h: usize, box: Box, sums: []i32) v
     const part: F = @splat(box.part);
     const scale: F = @splat(box.scale);
     const hair: F = @splat(1e-7);
+    const delay = pending.len / w;
+    var slot: usize = 0;
     for (0..h) |yu| {
         const y: isize = @intCast(yu);
-        const out = to[yu * w ..][0..w];
+        const out = pending[slot * w ..][0..w];
+        if (yu >= delay) @memcpy(plane[(yu - delay) * w ..][0..w], out);
+        slot += 1;
+        if (slot == delay) slot = 0;
+
         var x: usize = 0;
         while (x + lanes <= w) : (x += lanes) {
             const lo = widen(rows.at(y - f - 1, x));
@@ -271,38 +276,46 @@ fn runY(from: []const u8, to: []u8, w: usize, h: usize, box: Box, sums: []i32) v
             sums[x] += hi - rows.one(y - f, x);
         }
     }
+
+    const tail = plane[(h - delay) * w ..];
+    const split = slot * w;
+    @memcpy(tail[0 .. pending.len - split], pending[split..]);
+    @memcpy(tail[pending.len - split ..], pending[0..split]);
 }
 
-/// The blur's runs over `plane` (w × h): each quality's along x, then along
-/// y, the result in `plane`; `temp` is as big.
-pub fn blur(gpa: std.mem.Allocator, plane: []u8, temp: []u8, w: usize, h: usize, blur_x: f64, blur_y: f64, quality: u32) Error!void {
+/// The blur's runs over `plane` (w × h): each quality's along x, then along y.
+fn blur(gpa: std.mem.Allocator, plane: []u8, w: usize, h: usize, blur_x: f64, blur_y: f64, quality: u32) Error!void {
     const bx = Box.of(blur_x);
     const by = Box.of(blur_y);
     if (quality == 0 or w == 0 or h == 0 or (bx == null and by == null)) return;
 
-    const line = try gpa.alloc(i32, if (bx) |b| w + 2 * (b.full + 1) + 1 else 0);
-    defer gpa.free(line);
-    const sums = try gpa.alloc(i32, if (by != null) w else 0);
-    defer gpa.free(sums);
+    const columns = if (bx) |b| w + 2 * (b.full + 1) + 1 else 0;
+    const sums_end = columns + (if (by != null) w else 0);
+    // Source row y can last contribute at y + full + 1, through the fractional tap.
+    const bytes = if (by) |b| w * @min(b.full + 2, h) else 0;
+    // One allocation lets the bump arena reclaim this read's scratch even at odd widths.
+    const scratch = try gpa.alloc(i32, sums_end + (bytes + 3) / 4);
+    defer gpa.free(scratch);
+    const line = scratch[0..columns];
+    const sums = scratch[columns..sums_end];
+    const pending = std.mem.sliceAsBytes(scratch[sums_end..])[0..bytes];
+
     for (0..quality) |_| {
         if (bx) |b| runX(plane, w, h, b, line);
-        if (by) |b| {
-            runY(plane, temp, w, h, b, sums);
-            @memcpy(plane, temp);
-        }
+        if (by) |b| runY(plane, pending, w, h, b, sums);
     }
 }
 
 /// The blur filter over `pixels` (w × h), in place: each channel blurred apart.
 pub fn blurPixels(gpa: std.mem.Allocator, pixels: []u32, p: *const BlurParams) Error!void {
-    const n = pixels.len;
-    const plane = try gpa.alloc(u8, n);
+    if (p.quality == 0 or (Box.of(p.blur_x) == null and Box.of(p.blur_y) == null)) return;
+
+    const plane = try gpa.alloc(u8, pixels.len);
     defer gpa.free(plane);
-    const temp = try gpa.alloc(u8, n);
-    defer gpa.free(temp);
+
     inline for (.{ 24, 16, 8, 0 }) |shift| {
         for (plane, pixels) |*v, px| v.* = @truncate(px >> shift);
-        try blur(gpa, plane, temp, p.w, p.h, p.blur_x, p.blur_y, p.quality);
+        try blur(gpa, plane, p.w, p.h, p.blur_x, p.blur_y, p.quality);
         const mask: u32 = ~(@as(u32, 0xff) << shift);
         for (pixels, plane) |*px, v| px.* = (px.* & mask) | (@as(u32, v) << shift);
     }
@@ -567,9 +580,8 @@ pub fn layer(gpa: std.mem.Allocator, pixels: []u32, reads: []const []u8, p: *con
             for (plane) |*v| v.* = 255 - v.*;
         }
 
-        const temp = try gpa.alloc(u8, plane.len);
-        defer gpa.free(temp);
-        try blur(gpa, plane, temp, p.read[k].rw, p.read[k].rh, p.blur_x, p.blur_y, p.quality);
+        const r = p.read[k];
+        try blur(gpa, plane, r.rw, r.rh, p.blur_x, p.blur_y, p.quality);
     }
 
     var moved: [2][]u8 = .{ &.{}, &.{} };
@@ -603,12 +615,21 @@ test "runs along y give what runs along x give the plane turned" {
         rows[y * 5 + x] = @truncate(x * 37 + y * 91);
         turned[x * 7 + y] = rows[y * 5 + x];
     };
-    var out: [5 * 7]u8 = undefined;
+    var pending: [5 * 3]u8 = undefined;
     var sums: [5]i32 = undefined;
-    runY(&rows, &out, 5, 7, Box.of(3.5).?, &sums);
+    runY(&rows, &pending, 5, 7, Box.of(3.5).?, &sums);
     var line: [7 + 2 * 2 + 1]i32 = undefined;
     runX(&turned, 7, 5, Box.of(3.5).?, &line);
-    for (0..7) |y| for (0..5) |x| try std.testing.expectEqual(out[y * 5 + x], turned[x * 7 + y]);
+    for (0..7) |y| for (0..5) |x| try std.testing.expectEqual(rows[y * 5 + x], turned[x * 7 + y]);
+}
+
+test "a bitmap blur needs one channel plane and a few rows of scratch" {
+    var pixels: [64 * 128]u32 = @splat(0xff224488);
+    const params: BlurParams = .{ .w = 64, .h = 128, .quality = 3, .pixels = 0, .blur_x = 4, .blur_y = 8 };
+    var space: [pixels.len + 2048]u8 = undefined;
+    var buffer = std.heap.FixedBufferAllocator.init(&space);
+    try blurPixels(buffer.allocator(), &pixels, &params);
+    try std.testing.expectEqual(@as(u32, 0xff224488), pixels[64 * 64 + 32]);
 }
 
 test "a pixel moved by whole pixels is read as it is, past the plane its outside" {

@@ -143,9 +143,10 @@ export class FocusTracker implements TabHost {
    * Focus `d`, or none: where it changes, the one that had it hears
    * onKillFocus(new), `d` onSetFocus(old), then Selection's listeners
    * onSetFocus(old, new), at once, not queued (Ruffle's FocusTracker). The
-   * highlight shows where `d` may show it.
+   * highlight shows where `d` may show it. A press's focus selects all
+   * without scrolling, as the press then puts the caret where it was.
    */
-  focus(d: DisplayObject | null): void {
+  focus(d: DisplayObject | null, byPointer = false): void {
     const old = this.focusedObject;
     this.focusedObject = d;
     this.highlight =
@@ -155,7 +156,7 @@ export class FocusTracker implements TabHost {
           ? "visible"
           : "hidden";
     if (d === old) {
-      this.selectFocused();
+      this.selectFocused(byPointer);
       return;
     }
 
@@ -198,7 +199,7 @@ export class FocusTracker implements TabHost {
       this.movie.timers.end();
     }
 
-    this.selectFocused();
+    this.selectFocused(byPointer);
   }
 
   /**
@@ -206,11 +207,19 @@ export class FocusTracker implements TabHost {
    * the focus's events, which see none (Ruffle's update_edittext_selection;
    * the corpus's `selection` and `edittext_programmatic_focus`).
    */
-  private selectFocused(): void {
+  private selectFocused(byPointer: boolean): void {
     const d = this.focusedObject;
     if (d instanceof TextObject) {
       stateOf(d).selected = true;
+      // A click puts the caret where it was, scrolling nowhere (Flash Player).
+      if (byPointer) {
+        d.select(0, d.model.text.length, null);
+        return;
+      }
+
       d.select(0, d.model.text.length);
+      // Scrolled to the caret even where all was selected already, as Flash Player's.
+      d.scrollTo(d.caret);
     }
   }
 

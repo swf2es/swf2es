@@ -2,7 +2,8 @@
  * Compression as SWF files and ByteArray use it, synchronously and with no
  * platform API, through @swf2es/native/compress: zlib itself for zlib and raw
  * deflate, the LZMA SDK's encoder for LZMA, and an LZMA decoder after the
- * SDK's specification.
+ * SDK's specification. The ByteArray codecs return a fresh, whole ArrayBuffer
+ * for the caller to own.
  */
 import {
   CORRUPT,
@@ -31,12 +32,12 @@ export class CompressedDataTooLargeError extends CompressedDataError {}
 export type ZlibLevel = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9;
 
 /** `data` as a zlib stream, as zlib's deflate writes it at `level`, 9 by default, as avmplus' ByteArray. */
-export function zlibCompress(data: Uint8Array, level: ZlibLevel = 9): Uint8Array {
+export function zlibCompress(data: Uint8Array, level: ZlibLevel = 9): Uint8Array<ArrayBuffer> {
   return deflate(data, level, false);
 }
 
 /** `data` as a raw deflate stream, with no zlib header or checksum. */
-export function deflateCompress(data: Uint8Array): Uint8Array {
+export function deflateCompress(data: Uint8Array): Uint8Array<ArrayBuffer> {
   return deflate(data, 9, true);
 }
 
@@ -62,7 +63,7 @@ function failure(result: Decoded): CompressedDataError {
  * end: anything after is left, as zlib's inflate leaves it. The header is
  * checked here, so that every way it can be wrong reads as avmplus' does.
  */
-export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array {
+export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array<ArrayBuffer> {
   if (!raw) {
     if (data.length < 2) {
       throw new CompressedDataError("truncated");
@@ -91,7 +92,7 @@ export function zlibUncompress(data: Uint8Array, raw = false): Uint8Array {
 export const LZMA_HEADER = 13;
 
 /** `data` as ByteArray's LZMA: the 5 property bytes, its length in 8 bytes, little-endian, and the stream. */
-export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array {
+export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array<ArrayBuffer> {
   return lzmaEncode(data);
 }
 
@@ -100,7 +101,7 @@ export function lzmaByteArrayCompress(data: Uint8Array): Uint8Array {
  * be what the stream holds. A length past 32 bits is not read here; the
  * caller checks it first, as avmplus fails it before trying.
  */
-export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array {
+export function lzmaByteArrayUncompress(data: Uint8Array): Uint8Array<ArrayBuffer> {
   const length = (data[5] | (data[6] << 8) | (data[7] << 16) | (data[8] << 24)) >>> 0;
   if (length > MAX_LZMA_RATIO * (data.length - LZMA_HEADER) + 4096) {
     throw new CompressedDataError(`${length} bytes in a stream of ${data.length}`);

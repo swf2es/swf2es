@@ -29,6 +29,7 @@ import {
   block,
   body,
   code,
+  cornerFont,
   label,
   op,
   type PlayerCase,
@@ -3269,6 +3270,55 @@ function avm1BitmapSmoothing(version: number, smoothed: 0x41 | 0x43 = 0x41): Uin
 }
 
 export const avm1Cases: PlayerCase[] = [
+  // A text field's _x and _y are its box's corner, as AS3's x and y: a
+  // DefineEditText's bounds start left of and above its origin, and a
+  // script that centres a field by them put it that far left.
+  {
+    name: "avm1-field-position",
+    swf: () =>
+      avm1Swf(
+        8,
+        [
+          cornerFont(1),
+          w.editText(2, "hlh", 1600, 900, 0, {
+            at: [-179, -40],
+            font: 1,
+            fontHeight: 640,
+            color: 0xff000000,
+            readOnly: true,
+            useOutlines: true,
+          }),
+        ],
+        [
+          [
+            w.place({ depth: 1, character: 2, name: "t", matrix: { tx: 400, ty: 300, d: 1.0025 } }),
+            as1(
+              `trace("placed " + t._x + " " + t._y + " " + t._width + " " + t._height);
+var r = _root.getBounds(_root);
+trace("box " + r.xMin + " " + r.yMin);
+t._x = 30;
+t._y = 40;
+r = _root.getBounds(_root);
+trace("moved " + t._x + " " + t._y + " box " + r.xMin + " " + r.yMin);
+t._xscale = 150;
+r = _root.getBounds(_root);
+trace("scaled " + t._x + " " + t._y + " box " + r.xMin + " " + r.yMin);
+t._xscale = 100;
+t._x = 30;
+trace("again " + t._x + " " + t._y);`,
+              8,
+            ),
+          ],
+        ],
+      ),
+    traced: true,
+    // Drawn as moved: AVM1 in adl's Loader shows a frame's work a frame on.
+    frames: 2,
+    capture: [2],
+    tolerance: 64,
+    maxOutliers: 40,
+  },
+
   ...[7, 8].map(
     (version): PlayerCase => ({
       name: `avm1-bitmap-smoothing-swf${version}`,

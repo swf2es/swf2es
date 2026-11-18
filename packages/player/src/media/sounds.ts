@@ -621,11 +621,34 @@ function within(inner: DisplayObject | null, outer: DisplayObject): boolean {
 
 /** unloadAndStop: the sounds of the timelines under `display` stop, its event sounds too. */
 export function stopTimelineSoundsUnder(s: Scripting, display: DisplayObject): void {
-  const h = soundHostOf(s);
-  for (const sound of [...(timelineSounds.get(h) ?? [])]) {
-    if (within(sound.owner, display)) {
-      stopTimelineSound(h, sound);
+  stopSoundsUnder(soundHostOf(s), display, () => true);
+}
+
+/**
+ * The sounds playing under `display` that `stops` names, by the clip they
+ * play on and their sound, stop, none completing: the timeline's, a
+ * button's and AVM1 Sound's, not the global Sound's.
+ */
+export function stopSoundsUnder(
+  h: SoundHost,
+  display: DisplayObject,
+  stops: (owner: DisplayObject, character: SoundCharacter) => boolean,
+): void {
+  // Run on every removal: nothing is copied unless something stops.
+  let stopping: TimelineSound[] | null = null;
+  for (const sound of timelineSounds.get(h) ?? []) {
+    if (
+      sound.owner !== null &&
+      within(sound.owner, display) &&
+      stops(sound.owner, sound.character)
+    ) {
+      stopping ??= [];
+      stopping.push(sound);
     }
+  }
+
+  for (const sound of stopping ?? []) {
+    stopTimelineSound(h, sound);
   }
 }
 

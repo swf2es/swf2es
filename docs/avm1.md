@@ -1009,6 +1009,27 @@ N.` to the log, as Flash's does.
 
 ### Clips and paths
 
+The main timeline starts with an ordinary, enumerable `$version`
+property, writable and deletable, using the same platform and player
+version as AS3's `Capabilities.version`. `getVersion()` compiles to
+GetVariable of `/:$version`, so it reads that property even when a local
+variable shadows it; there is no global function named `getVersion`.
+Each SWF a load puts in a level has its own afresh, level 0's
+replacement too, whatever the old one's was, so `getVersion()` in a
+level reads its own level's; child clips, SWFs loaded into them and
+AVM1 movies loaded by AS3 have no initial `$version`, and a SWF loaded
+into a clip with `_lockroot` reads none through `getVersion()`.
+These behaviours were checked in adl both with a SWF as the application's
+main content and through the usual AS3 Loader harness, and the levels'
+in Flash's plug-in (PepperFlash 32); the main-content traces are asserted
+in `tests/unit/player/avm1/avm1.test.ts`, the levels' in `loads.test.ts`.
+
+`System` has `capabilities`, the values AS3's `Capabilities` reports, as
+plain, enumerable, writable values; `security`, whose `allowDomain`
+and, from SWF 7, `allowInsecureDomain` return true and grant nothing
+more, `loadPolicyFile` doing nothing, and `sandboxType` "remote";
+`useCodepage` false; and from SWF 6 `exactSettings`, true from SWF 7.
+
 What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,
 `avm1-gotos-swf*`, `avm1-paths-swf*` and `avm1-scopes-swf*` cases), and
 the corpus, where it is not what Ruffle does:
@@ -1300,7 +1321,15 @@ given, a clip or a path, and finds the clip again each time it is used.
 A Sound's transform is its clip's, which every sound under the clip
 plays by, or with no target the global one; the sounds it starts are the
 timeline's kind, held to the same 32 and stopped with them, StopSounds
-included, and `onSoundComplete` runs after the frame's actions. A Color
+included, and `onSoundComplete` runs after the frame's actions. A loaded
+movie's own sounds stop as the movie goes, removed, unloaded or replaced
+by another load, a movie it loaded going with it: a sound of its library
+a Sound plays on a clip of it never completes (adl), and the event sounds
+its timeline started there, which AVM1 cannot observe, go too. Other
+sounds play on and complete (adl): the parent's Sound on the clip a load
+fills, through the load, a failed one, the unload and the clip's removal;
+one on a clip of a movie's own that it removes, or that unloadMovie
+emptied though nothing was loaded into it; and the global Sound's. A Color
 keeps the clip's colour transform as a clip keeps one, the multipliers
 in 8.8 fixed point and the offsets whole, 16 bits each, wrapped. A
 `SharedObject` keeps its data in the host's storage as the .sol file
@@ -1489,8 +1518,10 @@ children.
 ### The network: XML, LoadVars, loadVariables and XMLSocket
 
 Requests go through the host fetch AS3's `URLLoader` uses, resolved
-against `base` (the SWF's URL by default) and marked "data" for a host
-that judges requests as Flash did; `XMLSocket` connects through the
+against the movie's base (in the web element the page's or its `base`,
+[web.md](architecture/web.md); else the SWF's URL), as getURL's windows
+are, and marked "data" for a host that judges requests as Flash did; `XMLSocket`
+connects through the
 `SocketHost` AS3's sockets use. Without either, a load fails as a
 missing file does (`onHTTPStatus(0)`, `onData(undefined)`) and a connect
 with `onConnect(false)`, never an error. Answers are delivered between
@@ -1550,8 +1581,12 @@ SWF 7, folded up to SWF 6, and looked up by the SWF of the clip.
 
 A load goes through the host's fetch, as AS3's Loader's does ("content",
 which allowNetworking "internal" allows and "none" refuses), the clip's
-variables sent where a method is given, and the URL a redirect took it
-to is the loaded movie's `_url` and the one its access is checked by.
+variables sent where a method is given. Its URL resolves against the
+movie's base, whichever SWF asks, as Flash's plug-in resolves every
+relative URL against the page's `base` or the page (the embedder's
+choice, [web.md](architecture/web.md)), where AIR's adl takes the asking
+SWF's; that URL, or the one a redirect took it to, is the loaded movie's
+`_url`, its query included, and the one its access is checked by.
 It arrives between frames, its images decoded and its code compiled.
 Loads into one clip, or by one MovieClipLoader, arrive in the order
 asked, as Ruffle's test runner has them, one slow to answer holding the
@@ -1575,7 +1610,11 @@ way, which is neither read nor told of. As it arrives, as Ruffle has it:
 
 Each load that loaded has its loader's onLoadInit queued after the next
 frame's clips have played, after the loaded movie's first frame's
-actions, the latest load's first. A clip removed before its load arrives
+actions, the latest load's first: the frame's queue runs out first, so
+the frames its gotos entered have run their actions too (adl: a first
+frame that sends a clip to a frame that stops it, then an onLoadInit
+that sends it back to play, leaves it playing; Ruffle queues onLoadInit
+before those frames, which stop it again). A clip removed before its load arrives
 takes nothing; one unloaded meanwhile tells onLoadStart as it arrives,
 and no more (adl's `load_cancel_*`, which Ruffle fails); one whose
 listener removes or unloads it is told no more after that listener.
@@ -1715,9 +1754,10 @@ AVM1, so nothing is expected from it.
   `_global`s a SWF of one version sees of another (`global_swf6_7_8`);
   ImportAssets; `onLoadProgress` while a SWF streams in, and
   "LoadNeverCompleted", which a fetch of all or nothing never gives;
-  `System.useCodepage`'s guess of a file's encoding; and `$version`,
-  which Flash defines on `_level0`.
-- **Classes and natives.** No `System`, `Video`, `NetStream`, `Camera`,
+  `System.useCodepage`'s guess of a file's encoding.
+- **Classes and natives.** `System` has no `IME`, `setClipboard`,
+  `showSettings` or `Product`, and `useCodepage` changes nothing; no
+  `Video`, `NetStream`, `Camera`,
   `Microphone`, `ContextMenu` or `Accessibility`; ASnative's display,
   text, sound and I/O tables give functions that do nothing, and
   `ASconstructor` is left out. Button's prototype has only `enabled`,

@@ -1,13 +1,23 @@
-// Node's TCP transport for flash.net.Socket, and its threads for
+// Node's TCP and TLS transports for Socket and SecureSocket, and threads for
 // flash.system.Worker; imported only by hosts that opt in.
 import { connect } from "node:net";
 import { Worker } from "node:worker_threads";
 import type { SocketHost, WorkerHost } from "@swf2es/player";
 import type { ThreadStart } from "@swf2es/player/worker";
+import { tlsSocket, validCertificate } from "./tls.js";
 
-/** A host that connects ActionScript sockets to TCP directly from Node. */
+export { type TlsTransport, tlsSocket, validCertificate } from "./tls.js";
+
+/** A host that connects ActionScript sockets to TCP or TLS directly from Node. */
 export function nodeSocketHost(): SocketHost {
   return {
+    secure: {
+      isCertificate: validCertificate,
+      connect(host, port, events, options) {
+        const raw = connect({ host, port, noDelay: options.noDelay ?? true });
+        return tlsSocket(raw, host, events, options);
+      },
+    },
     connect(host, port, events, options) {
       // At once unless the SWF set tcpNoDelay to false, as the desktop's sockets.
       const socket = connect({ host, port, noDelay: options?.noDelay ?? true });

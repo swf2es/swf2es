@@ -42,6 +42,15 @@ element shows a "Click to unmute" button over the SWF and fires
 `audioblocked`, then `audiounblocked` once the sound plays;
 `unmuteprompt="false"` leaves the button to the page.
 
+A SWF's relative URLs resolve as Flash Player's plug-in resolved them:
+against the page, or against the element's `base`, where `base="."` is
+the SWF's directory and any other value is relative to the page. A page
+that plays SWFs from elsewhere sets `relativeurls="movie"` on the
+element, or `configure({ relativeUrls: "movie" })` for all of them, to
+resolve them against each SWF's own URL. Like `base`, the attribute is
+read when a movie loads; `replaceFlash` carries `base` from a Flash tag
+but not `relativeurls`, which only `configure` sets for those players.
+
 The [guide](https://swf2es.github.io/swf2es/docs/) covers the element's
 attributes and options, workers, sockets, files, ExternalInterface and
 precompiled modules.

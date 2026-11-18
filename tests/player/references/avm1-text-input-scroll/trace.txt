@@ -1,0 +1,18 @@
+text h 0 3060 v 1 1 1
+hscroll 1000 h 1000 3060 v 1 1 1
+hscroll 100000 h 3060 3060 v 1 1 1
+hscroll -5 h 0 3060 v 1 1 1
+focused h 2800 3060 v 1 1 1
+hscroll 30 h 30 3060 v 1 1 1
+lines h 0 1383 v 1 6 2
+lines focused h 0 1383 v 6 6 7
+wrapped focused h 0 0 v 7 7 8
+line focused again h 2830 3060 v 1 1 1
+dynamic h 0 2780 v 1 1 1
+dynamic hscroll 100000 h 2780 2780 v 1 1 1
+unfocused h 2830 3060 v 1 1 1
+frame 1 h 2830 3060 v 1 1 1
+longer h 2830 3840 v 1 1 1
+frame 2 h 2830 3840 v 1 1 1
+shorter h 525 525 v 1 1 1
+frame 3 h 525 525 v 1 1 1

@@ -1,64 +1,22 @@
 // flash.net.Socket: DataInput/DataOutput over a host-provided TCP transport.
 import { avm2 } from "@swf2es/runtime";
 import type { As3, As3Classes } from "../../../as3/types.js";
-import type { SocketEndpoints, SocketTransport } from "../../../hosts.js";
-import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
+import type { SocketConnections } from "./socket-connections.js";
 
 type AsObject = avm2.AsObject;
 type Value = avm2.Value;
 type ByteArray = As3<"flash.utils::ByteArray">;
 type ByteArrayMethod = avm2.MethodName<As3Classes["flash.utils::ByteArray"]>;
 
-interface Connection {
-  input: AsObject;
-  output: AsObject;
-  transport: SocketTransport | null;
-  generation: number;
-  connected: boolean;
-  connecting: boolean;
-  failed: boolean;
-  /** Null before a connection and after close(); UNKNOWN while one opens, or open where the host does not know them. */
-  endpoints: SocketEndpoints | null;
-  /** AIR's tcpNoDelay as the script set it; null until it does, for the host's default. */
-  noDelay: boolean | null;
-}
-
-const UNKNOWN: SocketEndpoints = {
-  localAddress: "",
-  localPort: 0,
-  remoteAddress: "",
-  remotePort: 0,
-};
-
-export function socketNatives(s: Scripting): avm2.Natives {
+export function socketNatives(s: Scripting, sockets: SocketConnections): avm2.Natives {
   const natives: avm2.Natives = {};
-  const connections = new WeakMap<AsObject, Connection>();
-  const byteArray = () => s.rt.classNamed("flash.utils::ByteArray");
-  const connection = (o: AsObject): Connection => {
-    let c = connections.get(o);
-    if (!c) {
-      c = {
-        input: s.rt.construct(byteArray()),
-        output: s.rt.construct(byteArray()),
-        transport: null,
-        generation: 0,
-        connected: false,
-        connecting: false,
-        failed: false,
-        endpoints: null,
-        noDelay: null,
-      };
-      connections.set(o, c);
-    }
-
-    return c;
-  };
+  const connection = (o: AsObject) => sockets.get(o);
   // The runtime's message, which is the debugger player's text or the release player's number alone.
   const invalid = (): never => {
     throw s.rt.error("flash.errors::IOError", 2002);
   };
-  const active = (o: AsObject): Connection => {
+  const active = (o: AsObject) => {
     const c = connection(o);
     if (!c.connected) {
       invalid();
@@ -71,129 +29,21 @@ export function socketNatives(s: Scripting): avm2.Natives {
     s.rt.callProp(active(o).input as ByteArray, method, ...(args as never));
   const output = (o: AsObject, method: ByteArrayMethod, ...args: Value[]): Value =>
     s.rt.callProp(active(o).output as ByteArray, method, ...(args as never));
-  const event = (o: AsObject, type: string): void => {
-    dispatchEvent(s, o, s.event(type));
-  };
-
   class SocketNatives {
     "flash.net:Socket::internalGetSecurityErrorMessage"(host: Value, port: Value): string {
       return `Error #2048: Security sandbox violation: ${String(host)}:${Number(port)}`;
     }
 
     "flash.net:Socket::internalConnect"(host: Value, port: Value): void {
-      const c = connection(this);
-      c.transport?.close();
-      c.generation++;
-      c.transport = null;
-      c.connected = false;
-      c.connecting = true;
-      c.failed = false;
-      c.endpoints = UNKNOWN;
-      avm2.bytesOf(s.rt, c.input).clear();
-      avm2.bytesOf(s.rt, c.output).clear();
-      const generation = c.generation;
-      const current = () => c.generation === generation;
-      const fail = (message: string) => {
-        if (!current()) {
-          return;
-        }
-
-        c.generation++;
-        c.connecting = false;
-        c.connected = false;
-        c.transport?.close();
-        c.transport = null;
-        c.failed = true;
-        dispatchEvent(
-          s,
-          this,
-          s.rt.construct(
-            s.rt.classNamed("flash.events::IOErrorEvent"),
-            "ioError",
-            false,
-            false,
-            message,
-          ),
-        );
-      };
-      if (!s.socket) {
-        s.loads.deferHostEvent(() => fail("Error #2031: Socket Error."));
-        return;
-      }
-
-      try {
-        c.transport = s.socket.connect(
-          host === null ? "localhost" : s.rt.toString(host),
-          s.rt.toInt(port),
-          {
-            open: (endpoints) =>
-              s.loads.deferHostEvent(() => {
-                if (!current()) {
-                  return;
-                }
-
-                c.connecting = false;
-                c.connected = true;
-                c.endpoints = endpoints ? { ...endpoints } : UNKNOWN;
-                event(this, "connect");
-              }),
-            data: (bytes, owned) => {
-              // Delivered on a later turn: a host's reused buffer would have changed by then.
-              const copy = owned ? bytes : bytes.slice();
-              s.loads.deferHostEvent(() => {
-                if (!current() || !c.connected) {
-                  return;
-                }
-
-                const buffer = avm2.bytesOf(s.rt, c.input);
-                if (buffer.position >= 65536 && buffer.position * 2 >= buffer.length) {
-                  const unread = buffer.available;
-                  buffer.buffer.copyWithin(0, buffer.position, buffer.length);
-                  buffer.setLength(unread);
-                  buffer.position = 0;
-                }
-
-                const position = buffer.position;
-                buffer.position = buffer.length;
-                buffer.write(copy);
-                buffer.position = position;
-                dispatchEvent(
-                  s,
-                  this,
-                  s.rt.construct(
-                    s.rt.classNamed("flash.events::ProgressEvent"),
-                    "socketData",
-                    false,
-                    false,
-                    copy.length,
-                    0,
-                  ),
-                );
-              });
-            },
-            close: () =>
-              s.loads.deferHostEvent(() => {
-                if (!current()) {
-                  return;
-                }
-
-                if (c.connecting) {
-                  fail("Error #2031: Socket Error.");
-                  return;
-                }
-
-                c.connected = false;
-                c.connecting = false;
-                c.transport = null;
-                event(this, "close");
-              }),
-            error: (message) => s.loads.deferHostEvent(() => fail(message)),
-          },
-          c.noDelay === null ? undefined : { noDelay: c.noDelay },
-        );
-      } catch (e) {
-        s.loads.deferHostEvent(() => fail(String(e)));
-      }
+      const hostname = host === null ? "localhost" : s.rt.toString(host);
+      const targetPort = s.rt.toInt(port);
+      const transport = s.socket;
+      sockets.connect(
+        this,
+        transport
+          ? (events, options) => transport.connect(hostname, targetPort, events, options)
+          : undefined,
+      );
     }
 
     "flash.net:Socket::didFailureOccur"(): boolean {
@@ -212,6 +62,7 @@ export function socketNatives(s: Scripting): avm2.Natives {
       c.connected = false;
       c.connecting = false;
       c.endpoints = null;
+      c.closed?.();
     }
 
     "flash.net:Socket::OnError"(): void {}

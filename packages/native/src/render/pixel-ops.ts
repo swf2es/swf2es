@@ -366,7 +366,7 @@ export function perlinRows(
 ): boolean {
   const height = pixels.length / width;
   const octaves = setup.offsets.length;
-  const band = Math.max(1, Math.floor(BAND_BYTES / (width * 4)));
+  const band = Math.min(height, Math.max(1, Math.floor(BAND_BYTES / (width * 4))));
   // The tables once, and a band's block, which each band uses again.
   const at = wasm.resetArena(HEAD + 2056 + 8 + 32896 + octaves * 16 + band * width * 4);
   if (!at) {

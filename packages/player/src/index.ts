@@ -7,6 +7,7 @@
 
 export { AIR_DEFINITIONS } from "./air-definitions.js";
 export { Avm1, type Avm1Options } from "./avm1/avm1.js";
+export type { Certificate, CertificateName } from "./certificates.js";
 export {
   Container,
   DisplayObject,
@@ -39,6 +40,7 @@ export type {
   CaptureHost,
   CaptureKind,
   CapturePermission,
+  CertificateStatus,
   ClipboardHost,
   ClipboardText,
   Drawer,
@@ -56,7 +58,11 @@ export type {
   Navigate,
   PlatformCapabilities,
   ScreenCapabilities,
+  SecureSocketEvents,
+  SecureSocketHost,
+  SecureSocketOptions,
   SharedObjectStorage,
+  SocketCertificate,
   SocketEndpoints,
   SocketEvents,
   SocketHost,

@@ -239,12 +239,13 @@ export class Avm1Pointer implements Pointer {
     if (left && type === "down") {
       this.selection = null;
       const field = this.hover instanceof TextObject ? this.hover : null;
+      // Where the press is in the text, as the field was scrolled before it.
+      const position = field ? this.textPosition(field, p.x, p.y) : 0;
       if (field || this.avm1.focused instanceof TextObject) {
-        this.avm1.focus(field);
+        this.avm1.focus(field, true);
       }
 
       if (field) {
-        const position = this.textPosition(field, p.x, p.y);
         stateOf(field).selected = true;
         field.select(position, position);
         this.selection = { field, anchor: position };

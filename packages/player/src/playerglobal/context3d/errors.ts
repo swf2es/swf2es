@@ -1,4 +1,8 @@
-import { Context3DError, type Context3DErrorReason } from "@swf2es/context3d";
+import {
+  type Context3DError,
+  type Context3DErrorReason,
+  isContext3DError,
+} from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../../scripting.js";
 
@@ -95,8 +99,15 @@ const ERROR_CLASSES: Partial<Record<Context3DErrorReason, string>> = {
   compressedSize: "ArgumentError",
 };
 
-/** A backend failure's Flash error: its ID and class. */
-export function flashError(error: Context3DError): { id: number; kind: string } {
+/**
+ * A backend failure's Flash error: its ID and class. Null for a reason this
+ * player does not know, which a newer copy of the backend's package may give.
+ */
+export function flashError(error: Context3DError): { id: number; kind: string } | null {
+  if (!Object.hasOwn(ERROR_IDS, error.reason)) {
+    return null;
+  }
+
   return { id: ERROR_IDS[error.reason], kind: ERROR_CLASSES[error.reason] ?? "Error" };
 }
 
@@ -124,9 +135,10 @@ export function translateErrors(natives: avm2.Natives, s: Scripting): void {
       try {
         return native.call(this, a, b, c, d, e, f, g, h);
       } catch (error) {
-        if (error instanceof Context3DError) {
-          const { id, kind } = flashError(error);
-          const said = `${key}: ${error.message} (Error #${id})`;
+        const flash = isContext3DError(error) ? flashError(error) : null;
+        if (flash) {
+          const { id, kind } = flash;
+          const said = `${key}: ${(error as Error).message} (Error #${id})`;
           if (!told.has(said)) {
             told.add(said);
             console.warn(`swf2es: ${said}`);

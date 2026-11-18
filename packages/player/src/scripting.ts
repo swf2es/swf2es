@@ -56,6 +56,7 @@ import {
   type ScreenCapabilities,
   type SharedObjectStorage,
   type SocketHost,
+  screenCapabilities,
   type WebSocketHost,
   type WorkerHost,
 } from "./hosts.js";
@@ -495,26 +496,23 @@ export class Scripting {
     } = {},
   ) {
     this.localConnections = options.localConnections ?? new LocalConnections();
-    this.screenCapabilities = {
-      screenResolutionX:
-        options.screenCapabilities?.screenResolutionX ??
-        (typeof screen === "undefined" ? 0 : screen.width),
-      screenResolutionY:
-        options.screenCapabilities?.screenResolutionY ??
-        (typeof screen === "undefined" ? 0 : screen.height),
-      pixelAspectRatio: options.screenCapabilities?.pixelAspectRatio ?? 1,
-      screenDPI: options.screenCapabilities?.screenDPI ?? 72,
-    };
+    this.screenCapabilities = screenCapabilities(options.screenCapabilities);
     this.fullScreen = new FullScreen(this, options.fullScreen ?? null);
     this.trimTrailingHtmlBreak = options.trimTrailingHtmlBreak ?? false;
     this.timers = new Timers(this, options);
     this.decodeImage = options.decodeImage === undefined ? decodeInBrowser : options.decodeImage;
     this.externalInterface = options.externalInterface ?? null;
     const socket = options.socket;
+    const secure = socket?.secure;
     this.socket = socket
       ? {
           connect: (host, port, events, connectOptions) =>
             this.track(events, (tracked) => socket.connect(host, port, tracked, connectOptions)),
+          secure: secure && {
+            isCertificate: (bytes) => secure.isCertificate(bytes),
+            connect: (host, port, events, connectOptions) =>
+              this.track(events, (tracked) => secure.connect(host, port, tracked, connectOptions)),
+          },
         }
       : null;
     const webSocket = options.webSocket === undefined ? globalWebSocketHost() : options.webSocket;

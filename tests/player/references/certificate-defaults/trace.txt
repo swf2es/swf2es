@@ -1,0 +1,20 @@
+name commonName true
+name countryName true
+name localityName true
+name organizationName true
+name organizationalUnitName true
+name stateOrProvinceName true
+name toString true
+version 0
+certificate serialNumber true
+certificate signatureAlgorithmOID true
+certificate signatureAlgorithmParams true
+certificate issuer true
+certificate validNotBefore true
+certificate validNotAfter true
+certificate subject true
+certificate subjectPublicKeyAlgorithmOID true
+certificate subjectPublicKey true
+certificate issuerUniqueID true
+certificate subjectUniqueID true
+certificate encoded true

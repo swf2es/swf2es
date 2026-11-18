@@ -2,7 +2,15 @@
 // TextField's model, rectangle, layout and selection.
 import type { avm2 } from "@swf2es/runtime";
 import type { FontSet } from "../text/fonts.js";
-import { GUTTER, layoutText, type TextLayout } from "../text/layout.js";
+import {
+  GUTTER,
+  layoutText,
+  maxScrollH,
+  roomH,
+  shownLines,
+  type TextLayout,
+  TWIPS,
+} from "../text/layout.js";
 import { type PlacedGlyph, placeGlyphs } from "../text/static.js";
 import { TextModel } from "../text/text.js";
 import { CONTENT, DisplayObject, TRANSFORM } from "./displayobject.js";
@@ -95,7 +103,14 @@ export class TextObject extends DisplayObject {
   mouseWheelEnabled = true;
   alwaysShowSelection = false;
   useRichTextClipboard = false;
-  scrollH = 0;
+  /**
+   * How far the text is scrolled sideways, in twips: as a script or the
+   * caret left it, and no further than new text scrolls, though a change of
+   * type or size leaves it (adl).
+   */
+  private scrollX = 0;
+  /** The text's revision the scroll was last kept within. */
+  private scrolledRevision = -1;
   scrollV = 1;
   /** The selection, from the end it was started at to the caret, as text indices; empty, a caret alone. */
   private anchorAt = 0;
@@ -191,7 +206,26 @@ export class TextObject extends DisplayObject {
       };
     }
 
+    this.keepScroll();
     return this.laid.layout;
+  }
+
+  /** The scroll kept within new text's maxScrollH, as Flash keeps it as the text changes. */
+  private keepScroll(): void {
+    if (this.scrolledRevision !== this.model.revision) {
+      this.scrolledRevision = this.model.revision;
+      this.scrollX = Math.min(this.scrollX, maxScrollH(this));
+    }
+  }
+
+  /** How far the text is scrolled sideways, in pixels to the twip. */
+  get scrollH(): number {
+    this.keepScroll();
+    return this.scrollX / TWIPS;
+  }
+
+  set scrollH(pixels: number) {
+    this.scrollX = Math.max(0, Math.round(pixels * TWIPS));
   }
 
   /**
@@ -207,7 +241,13 @@ export class TextObject extends DisplayObject {
     const layout = this.layout;
     const height = (layout.height + 2 * GUTTER) / 20;
     if (!this.wordWrap) {
-      const width = (layout.width + 2 * GUTTER) / 20;
+      // An input field is a little wider, by its default size, so that a caret
+      // at its text's end is in view (adl: 97 twips at 20 points).
+      const room =
+        this.type === "input"
+          ? Math.trunc((Math.max(0, this.model.defaultFormat.size) * TWIPS * 250) / 1024)
+          : 0;
+      const width = (layout.width + 2 * GUTTER + room) / 20;
       const moved =
         this.autoSize === "center"
           ? (this.width - width) / 2
@@ -272,17 +312,116 @@ export class TextObject extends DisplayObject {
     return anchor <= caret ? [anchor, caret] : [caret, anchor];
   }
 
-  /** Select from `anchor` to `caret`, each kept within the text; a focused field shows its caret there. */
-  select(anchor: number, caret: number): void {
+  /**
+   * Select from `anchor` to `caret`, each kept within the text; a focused
+   * field shows its caret there, and scrolls to show `shown`, the caret
+   * unless told otherwise, or nothing for null: as Flash Player's does for
+   * setSelection and the caret's moves, but not for a script's text, nor
+   * in a field without the focus (adl scrolls that too), which scrolls to
+   * its caret as it takes the focus.
+   */
+  select(anchor: number, caret: number, shown: number | null = caret): void {
     const length = this.model.text.length;
     const [a, c] = [Math.max(0, Math.min(length, anchor)), Math.max(0, Math.min(length, caret))];
-    // A drag selects on every move, mostly what it had: redraw only for a change.
+    // A drag selects on every move, mostly what it had: redraw only for a
+    // change. The same selection again scrolls nowhere either (adl).
     if (a === this.anchor && c === this.caret) {
       return;
     }
 
     this.anchorAt = a;
     this.caretAt = c;
+    if (shown !== null && this.focused) {
+      this.scrollTo(shown);
+    }
+
     this.invalidate(CONTENT);
   }
+
+  /**
+   * Scroll so that the place before character `index` is in view, as Flash
+   * scrolls to its caret (adl): down or up by the fewest lines, and
+   * sideways by steps of a quarter of the room inside the gutters, from
+   * where the field was scrolled, as few as bring it in: a caret at the
+   * room's right edge is out of it.
+   */
+  scrollTo(index: number): void {
+    // By the size a pending fit gives it, as Flash scrolls an autoSize field.
+    this.settle();
+    const lines = this.layout.lines;
+    if (lines.length === 0) {
+      return;
+    }
+
+    const i = Math.max(0, Math.min(this.model.text.length, index));
+    let at = lines.length - 1;
+    for (let l = 0; l < lines.length; l++) {
+      if (i < lines[l].end) {
+        at = l;
+        break;
+      }
+    }
+
+    let first = Math.max(0, Math.min(this.scrollV - 1, lines.length - 1));
+    if (at < first) {
+      first = at;
+    } else {
+      while (first < at && first + shownLines(this, first) - 1 < at) {
+        first++;
+      }
+    }
+
+    const line = lines[at];
+    let x = line.x;
+    const c = line.chars[i - line.start];
+    if (c) {
+      x = c.x;
+    } else {
+      for (let k = line.chars.length - 1; k >= 0; k--) {
+        if (line.chars[k].shown) {
+          x = line.chars[k].x + line.chars[k].advance;
+          break;
+        }
+      }
+    }
+
+    // In twips, from the text's left edge inside the gutter.
+    const place = x - GUTTER;
+    const room = roomH(this);
+    const step = Math.floor(room / 4);
+    let scroll = this.scrollX;
+    if (place < scroll) {
+      scroll = step > 0 ? scroll - Math.ceil((scroll - place) / step) * step : place;
+    } else if (place >= scroll + room) {
+      scroll =
+        step > 0 ? scroll + (Math.floor((place - scroll - room) / step) + 1) * step : place - room;
+    }
+
+    scroll = Math.max(0, Math.min(scroll, maxScrollH(this)));
+    if (first + 1 !== this.scrollV || scroll !== this.scrollX) {
+      this.scrollV = first + 1;
+      this.scrollX = scroll;
+      this.invalidate(CONTENT);
+    }
+  }
+}
+
+const NO_OFFSET: readonly [number, number] = [0, 0];
+
+/**
+ * Where a text field's x and y are from its origin, in twips: its box's
+ * corner, its DefineEditText bounds' corner scaled, as Flash and Ruffle
+ * read and set a field's position, in AS3 and AVM1 alike. A box authored
+ * inset from its origin so moves to where a script puts it. The offset is
+ * whole twips, cut toward zero as Ruffle's is, and none for a NaN scale;
+ * none for any other display object.
+ */
+export function fieldOffset(d: DisplayObject): readonly [number, number] {
+  // Shared: every clip's _x and _y ask, the AVM1 hot path.
+  if (!(d instanceof TextObject)) {
+    return NO_OFFSET;
+  }
+
+  const twips = (v: number) => Math.trunc(v) || 0;
+  return [twips(d.scaleX * d.left * 20), twips(d.scaleY * d.top * 20)];
 }

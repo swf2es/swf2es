@@ -9,18 +9,18 @@ modules that loads from a CDN, with nothing to install or build. A page
 that has a bundler installs `@swf2es/web` instead.
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.27"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.28"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
 
-jsDelivr serves it too, at `https://cdn.jsdelivr.net/npm/swf2es@0.1.27`.
+jsDelivr serves it too, at `https://cdn.jsdelivr.net/npm/swf2es@0.1.28`.
 The module exports what `@swf2es/web` does. To call it, import it from the
 same URL, so that the page has one copy:
 
 ```html
 <script type="module">
-  import { configure, watchFlash } from "https://unpkg.com/swf2es@0.1.27";
+  import { configure, watchFlash } from "https://unpkg.com/swf2es@0.1.28";
 
   configure({ cache: true }); // keep compiled modules in IndexedDB
   watchFlash(); // the page's Flash <object> and <embed> tags become players
@@ -31,13 +31,24 @@ Players already in the markup start as the module loads, before any
 script that imports it runs, so a page that configures its players adds
 them from that script, after `configure`.
 
+## Relative URLs
+
+A SWF's relative URLs resolve as Flash Player's plug-in resolved them:
+against the page, or against the element's `base`, where `base="."` is
+the SWF's directory and any other value is relative to the page. A page
+that plays SWFs from elsewhere sets `relativeurls="movie"` on the
+element, or `configure({ relativeUrls: "movie" })` for all of them, to
+resolve them against each SWF's own URL. Like `base`, the attribute is
+read when a movie loads; `replaceFlash` carries `base` from a Flash tag
+but not `relativeurls`, which only `configure` sets for those players.
+
 ## Versions
 
 Name a version in the URL. Until 1.0, a minor release (0.2) may change
 what a page sees, so pin at least the minor version: unpkg's
 `swf2es@0.1` takes 0.1's fixes as they are released, and redirects to the
 exact version, whose files the page then loads together. On jsDelivr, pin
-the exact version (`swf2es@0.1.27`): it serves a range without
+the exact version (`swf2es@0.1.28`): it serves a range without
 redirecting, so the files the main one loads later would come from
 whatever version the range names by then.
 

@@ -16,7 +16,15 @@ import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
 import { type AirFiles, airFiles } from "./air-files.js";
 import { type AirItems, airItems } from "./air-items.js";
-import { cssLength, parseColor, parseFlashVars, quality, scriptAccess } from "./attributes.js";
+import {
+  cssLength,
+  parseColor,
+  parseFlashVars,
+  quality,
+  relativeBase,
+  relativeUrls,
+  scriptAccess,
+} from "./attributes.js";
 import {
   captureHost,
   codegenForPlayer,
@@ -368,6 +376,8 @@ export class Swf2esPlayerElement extends ElementBase {
       const base = attribute(this, "base");
       let bytes: Uint8Array;
       let url: string;
+      // From the URL it came from, where it came from one.
+      let fetched: string | null = null;
       if (session.air) {
         // The content SWF, by the app: URL adl names it with.
         const content = session.air.app.descriptor.content;
@@ -377,10 +387,11 @@ export class Swf2esPlayerElement extends ElementBase {
         throw new Error("swf2es: nothing to play");
       } else if (typeof source === "string" || source instanceof URL) {
         ({ bytes, url } = await fetchMovie(new URL(source, pageUrl).href, session.abort.signal));
+        fetched = url;
       } else {
-        // A copy: the page may reuse its buffer.
+        // A copy: the page may reuse its buffer; its URL is `base`'s, else the page's.
         bytes = new Uint8Array(source instanceof Uint8Array ? source : new Uint8Array(source));
-        url = base ? new URL(base, pageUrl).href : pageUrl;
+        url = relativeBase(base, null, pageUrl, "movie") ?? pageUrl;
       }
 
       if (!current()) {
@@ -395,6 +406,16 @@ export class Swf2esPlayerElement extends ElementBase {
         this.#playAsAir(session, app, [], true);
         url = `app:/${encodeURIComponent(app.descriptor.content)}`;
       }
+
+      // Where every SWF's relative URLs resolve: an AIR application's each its own.
+      const baseUrl = session.air
+        ? null
+        : relativeBase(
+            base,
+            fetched,
+            pageUrl,
+            relativeUrls(attribute(this, "relativeurls"), configuration().relativeUrls),
+          );
 
       // What the application wrote and kept when it last played, before it plays.
       if (session.air) {
@@ -436,7 +457,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         session.workers = host;
-        session.scripting = this.#scripting(session, codegen, url, pageUrl, host);
+        session.scripting = this.#scripting(session, codegen, url, baseUrl, pageUrl, host);
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
             this.#box,
@@ -468,11 +489,11 @@ export class Swf2esPlayerElement extends ElementBase {
         // SWF's do: "quit" goes to the page, as a plug-in's did, and stops
         // nothing.
         const { internal, offline, allows, objectID } = this.#access(pageUrl);
-        const base = attribute(this, "base");
         avm1 = new Avm1(codegen, {
           url,
           parameters: parseFlashVars(attribute(this, "flashvars")),
-          base: base ? new URL(base, pageUrl).href : undefined,
+          // Without a base of the page's, its own URL.
+          base: baseUrl ?? undefined,
           // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
           fetch: fetchFor(session, offline),
           socket: offline ? undefined : socketHost(),
@@ -608,14 +629,14 @@ export class Swf2esPlayerElement extends ElementBase {
     session: Session,
     codegen: Awaited<ReturnType<typeof codegenForPlayer>>,
     url: string,
+    base: string | null,
     pageUrl: string,
     workerHost: WorkerHost | null,
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
-    const base = attribute(this, "base");
     const scripting = new Scripting(codegen, {
       url,
-      base: base ? new URL(base, pageUrl).href : undefined,
+      base: base ?? undefined,
       parameters: parseFlashVars(attribute(this, "flashvars")),
       fetch: fetchFor(session, offline),
       loadPolicyFile: configuration().loadPolicyFile,

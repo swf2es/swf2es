@@ -68,14 +68,14 @@ export fn resultPointer() usize {
 /// The `length` bytes of ADPCM at `input` in `channels`, 1 or 2, as 16-bit
 /// samples, channels interleaved: how many; -1 when memory runs out.
 export fn decodeAdpcm(input: usize, length: usize, channels: u32) i32 {
-    const capacity = adpcm.capacity(length, channels);
+    const data = @as([*]const u8, @ptrFromInt(input))[0..length];
+    const capacity = adpcm.capacity(data);
     const out = allocArray(capacity, 2);
     if (out == 0) {
         return -1;
     }
 
     result = out;
-    const data = @as([*]const u8, @ptrFromInt(input))[0..length];
     const samples = @as([*]i16, @ptrFromInt(out))[0..@intCast(capacity)];
     return @intCast(adpcm.decode(data, channels, samples));
 }

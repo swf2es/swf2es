@@ -79,7 +79,7 @@ export class Avm1Net {
     private readonly fetchHost: Fetch | null,
     private readonly socketHost: SocketHost | null,
     /** Where relative URLs resolve: the page's base where it gives one, else the SWF's URL. */
-    private readonly base: string,
+    readonly base: string,
     /** Whether a send without a window goes, as allowNetworking "internal" or "none" has it not. */
     private readonly sends = true,
   ) {}

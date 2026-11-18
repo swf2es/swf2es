@@ -428,8 +428,51 @@ function reversed(e: Edge): Edge {
   return { x0: e.x1, y0: e.y1, cx: e.cx, cy: e.cy, x1: e.x0, y1: e.y0 };
 }
 
+// If the edges already follow the contour, the next unused edge is always
+// the next one in record order. Its path needs no endpoint index.
+function orderedContour(edges: Edge[]): Path | null {
+  const start = edges[0];
+  let x = start.x0;
+  let y = start.y0;
+  let length = 3;
+  for (let i = 0; i < edges.length; i++) {
+    const e = edges[i];
+    if (e.x0 !== x || e.y0 !== y || (i > 0 && x === start.x0 && y === start.y0)) {
+      return null;
+    }
+
+    length += Number.isNaN(e.cx) ? 3 : 5;
+    x = e.x1;
+    y = e.y1;
+  }
+
+  const path = new Array<number>(length);
+  path[0] = MOVE;
+  path[1] = start.x0 / TWIPS;
+  path[2] = start.y0 / TWIPS;
+  let i = 3;
+  for (const e of edges) {
+    if (Number.isNaN(e.cx)) {
+      path[i++] = LINE;
+    } else {
+      path[i++] = CURVE;
+      path[i++] = e.cx / TWIPS;
+      path[i++] = e.cy / TWIPS;
+    }
+    path[i++] = e.x1 / TWIPS;
+    path[i++] = e.y1 / TWIPS;
+  }
+
+  return path;
+}
+
 /** Each fill's edges joined into contours: from an edge, the next one that starts where it ends. */
 function contours(edges: Edge[]): Path[] {
+  const ordered = orderedContour(edges);
+  if (ordered) {
+    return [ordered];
+  }
+
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;

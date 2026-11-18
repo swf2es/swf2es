@@ -221,6 +221,9 @@ export class TextEditor {
   /** [from, to) of the field's text as `text`, the caret after it, and the change notification. */
   replace(field: TextObject, from: number, to: number, text: string): void {
     field.model.replace(from, to, text);
+    // Fitted at once to what was typed, so that the caret's scroll is by the new size.
+    field.settle();
+    field.fit();
     field.select(from + text.length, from + text.length);
     field.invalidate(CONTENT);
     this.changed(field);

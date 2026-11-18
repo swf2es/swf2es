@@ -105,7 +105,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `render`  | the renderer ([renderer.md](../renderer.md)): scene list, planner and WebGL 2 backend | context3d |
 | `player`  | display list, timeline, playerglobal, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, player (its libraries alone, `@swf2es/player/libraries`), runtime |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
+| `player-hosts` | optional hosts for the player: Node TCP and TLS, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 | `swf2es`  | the browser build: `web` and what it loads bundled by Rspack into ES modules, for a page's `<script>` tag from a CDN; it installs with no dependencies | codegen, player-hosts, web (at build time) |
 
@@ -220,7 +220,11 @@ the backend only when selected and uses the same resource limits as the desktop,
 Flash Player's own: lower budgets refused scenes that play in Flash, with Error
 #3691 on every frame. Changing the option restarts the current SWF; closing
 during the backend import invalidates that load. The site's build bundles the
-backend into a chunk of the page's script, loaded only then.
+backend into a chunk of the page's script, loaded only then. That chunk has its
+own copy of `@swf2es/context3d`, as a page beside the browser build has, so the
+player tells the backend's errors by a brand under `Symbol.for("swf2es.context3d.error")`
+(`isContext3DError` and the others), never by `instanceof`, and they reach the
+SWF as Flash's errors whichever copy threw them.
 Its fullscreen button fits the composed Stage3D player to the screen with a
 CSS transform, preserving the SWF viewport and back-buffer sizes. The 2D overlay
 and input use the same presentation scale. Leaving fullscreen restores responsive

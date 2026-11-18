@@ -885,6 +885,15 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    name: "certificate-defaults",
+    swf: (abc) => bare(abc, 1, "CertificateDefaults"),
+    script: "CertificateDefaults",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "mouse-visibility",
     swf: (abc) => bare(abc, 1, "MouseVisibility"),
     script: "MouseVisibility",

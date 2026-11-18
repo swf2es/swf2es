@@ -69,6 +69,10 @@ const abcs = compileScripts(
     { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
     { name: "AirAloneTest", source: readFileSync(`${here}scripts/AirAloneTest.as`, "utf8") },
     { name: "UnmuteTest", source: readFileSync(`${here}scripts/UnmuteTest.as`, "utf8") },
+    {
+      name: "RelativeUrlsTest",
+      source: readFileSync(`${here}scripts/RelativeUrlsTest.as`, "utf8"),
+    },
   ],
   out,
 );
@@ -322,6 +326,40 @@ writeFileSync(
     ],
   }),
 );
+// An AS2 SWF in sub/ that loads a child by a relative URL, which reports its _url and loads its
+// sibling from the directory _url names, as old clients find their files.
+const avm1Swf = (source: string) =>
+  w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+const report = `flash.external.ExternalInterface.call("report", _url);`;
+mkdirSync(`${site}sub`, { recursive: true });
+writeFileSync(
+  `${site}sub/avm1-urls.swf`,
+  avm1Swf(`createEmptyMovieClip("child", 1).loadMovie("avm1-url-child.swf");`),
+);
+writeFileSync(
+  `${site}sub/as3-urls.swf`,
+  bare(abcs.get("RelativeUrlsTest") as Uint8Array, 1, "RelativeUrlsTest", 20, 20),
+);
+for (const dir of ["", "sub/", "assets/"]) {
+  mkdirSync(`${site}${dir}`, { recursive: true });
+  writeFileSync(`${site}${dir}relative-url-data.txt`, `/web-test/${dir}`);
+  writeFileSync(
+    `${site}${dir}avm1-url-child.swf`,
+    avm1Swf(`${report}
+createEmptyMovieClip("sibling", 1).loadMovie(_url.substring(0, _url.lastIndexOf("/") + 1) + "avm1-url-sibling.swf");`),
+  );
+  writeFileSync(`${site}${dir}avm1-url-sibling.swf`, avm1Swf(report));
+}
 // An AS2 input field, as the clipboard SWF's for AS3, which the page focuses and reads.
 const avm1Field = `_root.createTextField("field", 1, 0, 0, 140, 20);
 field.type = "input";
@@ -332,6 +370,8 @@ var EI = flash.external.ExternalInterface;
 EI.addCallback("focusField", null, function() { Selection.setFocus(field); });
 EI.addCallback("blurField", null, function() { Selection.setFocus(null); });
 EI.addCallback("text", null, function() { return field.text; });
+EI.addCallback("fill", null, function(text, scroll) { field.text = text; field.hscroll = scroll; });
+EI.addCallback("scrollState", null, function() { return field.hscroll + " " + field.maxhscroll + " " + Selection.getCaretIndex(); });
 EI.addCallback("takeLog", null, function() { var taken = log; log = []; return taken; });
 stop();`;
 writeFileSync(
@@ -939,6 +979,51 @@ check(
   },
 );
 
+// After the checks that count the compilers left: an AVM1 movie that loaded others kept its
+// compiler alive through the churn check's collection when this came before it, on dev too.
+check(
+  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
+  async (evaluate) => {
+    const loads = async (
+      src: string,
+      attributes: Record<string, string>,
+      n: number,
+      page?: string,
+      suffix?: string,
+    ) =>
+      (
+        await call<string[]>(
+          evaluate,
+          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
+        )
+      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
+    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
+    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
+    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
+    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
+    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
+    // it came from, which its sibling's load follows.
+    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
+    assert.deepEqual(await avm1({}), pair("/web-test/"));
+    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
+    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
+    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
+    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
+    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
+    // A page URL's query and fragment are no directory.
+    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
+    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
+    // The page's choice for elements that make none, which the attribute overrides.
+    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
+  },
+);
+
 /** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
 async function ctrl(send: Send, letter: string, command?: string) {
   const key = {
@@ -1065,6 +1150,122 @@ for (const [vm, src] of [
         assert.equal(await call(evaluate, "imeBlur()"), "HOST");
         await send("Input.insertText", { text: "x" });
         assert.deepEqual(await state(), { log: [], text: "日本語仮名a" });
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `typing past an ${vm} input field's right edge scrolls it to keep the caret in view`,
+    async (evaluate, send) => {
+      // [scrollH, maxScrollH, caretIndex], given as a string.
+      const scroll = async () =>
+        (await call<string>(evaluate, "imeScroll()")).split(" ").map(Number) as [
+          number,
+          number,
+          number,
+        ];
+      const press = async (key: string, code: string, keyCode: number, text?: string) => {
+        await send("Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key,
+          code,
+          windowsVirtualKeyCode: keyCode,
+          ...(text ? { text } : {}),
+        });
+        await send("Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key,
+          code,
+          windowsVirtualKeyCode: keyCode,
+        });
+      };
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Far more than the field's 140 pixels: the newest characters and the caret at its right edge.
+        for (let i = 0; i < 60; i++) {
+          await press("a", "KeyA", 65, "a");
+        }
+
+        // The caret at the text's end is in view where the scroll is within a quarter of the
+        // room, 34 of the field's 136 pixels inside its gutters, of an input field's maxScrollH,
+        // which is that quarter past the text's end.
+        const atEnd = ([h, max, caret]: [number, number, number]) => {
+          assert.equal(caret, 60);
+          assert.ok(max > 34, `the text overflows the field: maxScrollH ${max}`);
+          assert.ok(h > max - 34 && h <= max, `the caret is in view: scrollH ${h} of ${max}`);
+        };
+        const typed = await scroll();
+        atEnd(typed);
+
+        // Home shows the text's start, End its end again.
+        await press("Home", "Home", 36);
+        assert.deepEqual(await scroll(), [0, typed[1], 0]);
+        await press("End", "End", 35);
+        atEnd(await scroll());
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `a click in a scrolled ${vm} input field puts the caret under it and keeps the scroll`,
+    async (evaluate, send) => {
+      // [scrollH, maxScrollH, caretIndex]
+      const scroll = async () =>
+        (await call<string>(evaluate, "imeScroll()")).split(" ").map(Number) as [
+          number,
+          number,
+          number,
+        ];
+      const click = async (x: number, y: number) => {
+        const [left, top] = await call<[number, number]>(evaluate, "imeBox()");
+        for (const type of ["mousePressed", "mouseReleased"]) {
+          await send("Input.dispatchMouseEvent", {
+            type,
+            x: left + x,
+            y: top + y,
+            button: "left",
+            buttons: type === "mousePressed" ? 1 : 0,
+            clickCount: 1,
+          });
+        }
+
+        await call(evaluate, "imeFrames()");
+      };
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Far wider than the field's 140 pixels, scrolled 40 by script, and without the focus.
+        await call(evaluate, `imeFill(${JSON.stringify("a".repeat(60))}, 40)`);
+        await call(evaluate, "imeBlur()");
+        const [h, max] = await scroll();
+        assert.ok(max > 40 && h === 40, `scrolled by script: scrollH ${h} of ${max}`);
+
+        // A press focuses the field, its caret where it was pressed in the text as scrolled.
+        await click(30, 10);
+        const [pressedH, , pressed] = await scroll();
+        assert.equal(pressedH, 40);
+        assert.ok(pressed > 0 && pressed < 60, `the caret under the press: ${pressed}`);
+
+        // Pressed again further along, focused: the scroll stays, the caret moves with it.
+        await click(100, 10);
+        const [againH, , again] = await scroll();
+        assert.equal(againH, 40);
+        assert.ok(again > pressed && again < 60, `the caret under the second press: ${again}`);
       } finally {
         await call(evaluate, "imeDestroy()");
       }

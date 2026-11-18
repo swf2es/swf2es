@@ -26,7 +26,6 @@ import {
 } from "../display/timeline.js";
 import type { FetchResult } from "../hosts.js";
 import { warmAudioFor } from "../media/sounds.js";
-import { resolve } from "../scripting/loads.js";
 import type { Avm1 } from "./avm1.js";
 import { formRequest } from "./globals/LoadVars.js";
 import { textFor } from "./net.js";
@@ -100,9 +99,10 @@ interface MovieLoad {
   /** The MovieClipLoader whose listeners hear of it; null for loadMovie's. */
   loader: avm1.Avm1Object | null;
   /**
-   * Its URL against the SWF's, then where a redirect took it once it
-   * arrives, as AS3's loads and Ruffle's take it: what it loaded's `_url`,
-   * its query variables and the URL every access check asks about.
+   * Its URL as the request goes, against the page's `base`, then where a
+   * redirect took it once it arrives, as Flash's plug-in has it: what it
+   * loaded's `_url`, its query variables and the URL every access check
+   * asks about.
    */
   url: string;
   /**
@@ -212,7 +212,7 @@ export class MovieLoads {
     const load: MovieLoad = {
       target,
       loader,
-      url: resolve(this.movie.url, url),
+      url: this.movie.net.resolve(url),
       status: "pending",
     };
     this.movieLoads.push(load);
@@ -340,8 +340,13 @@ export class MovieLoads {
         this.movie.adopt(swf);
         readRootFrames(file, swf);
         this.movie.fill(target, swf);
-        // The URL's query as the root's variables, as a movie's parameters.
+        // A level's new root has the player's version, as the main timeline has, then the URL's
+        // query as its variables, as a movie's parameters.
         if (face !== undefined) {
+          if (this.movie.levelOf(target) !== null) {
+            this.movie.defineVersion(face);
+          }
+
           for (const [name, value] of queryVariables(load.url)) {
             face.define(name, textFor(value, swf.version), 0);
           }
@@ -380,8 +385,9 @@ export class MovieLoads {
 
   /**
    * Each load that has arrived done with: one that loaded has its
-   * loader's onLoadInit queued, after the frame's actions of what it
-   * loaded, the latest load's first (Ruffle's movie_clip_on_load).
+   * loader's onLoadInit queued, once the frame's actions of what it
+   * loaded have run, with those their gotos queued, the latest load's
+   * first (Ruffle's movie_clip_on_load).
    */
   loadsInitialized(): void {
     for (let i = this.movieLoads.length - 1; i >= 0; i--) {

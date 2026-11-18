@@ -52,6 +52,17 @@ test("a line says where its connection was kept from an earlier request", () => 
   );
 });
 
+test("a line says where --ignore-policy-files let it through in place of a policy file", () => {
+  assert.equal(
+    requestLine("GET", "http://h/data", 200, 4, 2, undefined, true, true),
+    "swf2es: net GET http://h/data 200 4 B 2 ms reused allowed by --ignore-policy-files",
+  );
+  assert.equal(
+    requestLine("GET", "http://h/data", 200, 4, 2, undefined, false, false),
+    "swf2es: net GET http://h/data 200 4 B 2 ms",
+  );
+});
+
 test("a line carries no control characters, and no more than 2048 of a URL", () => {
   const line = requestLine("GET", `http://h/\u001b[31m\n${"a".repeat(5000)}`, 200, 1, 1);
   assert.ok([...line].every((c) => c.charCodeAt(0) >= 32));

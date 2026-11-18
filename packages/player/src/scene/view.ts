@@ -750,9 +750,9 @@ export class RenderView implements Drawer {
       // Read once for the object, not for each textured part.
       const smoothing = this.smoothing;
       for (let i = 0; i < layers.length; i++) {
-        for (const { part, handle } of this.parts.partsOf(layers[i], version)) {
+        for (const part of this.parts.partsOf(layers[i], version)) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
-          this.geometries.use(handle.id);
+          this.geometries.use(part.handle.id);
           // A shader fill's draw names its kernel's chain of the frame's filters.
           if (part.paint?.type === "shader") {
             if (row < 0) {
@@ -760,7 +760,7 @@ export class RenderView implements Drawer {
             }
 
             const chain = this.filterLayers.kernelChain(part.paint.use, this.filters, FILL_SHADER);
-            this.scene.draw(handle.id, row, NORMAL, chain, SHADED);
+            this.scene.draw(part.handle.id, row, NORMAL, chain, SHADED);
             continue;
           }
 
@@ -779,7 +779,7 @@ export class RenderView implements Drawer {
           }
 
           this.scene.draw(
-            handle.id,
+            part.handle.id,
             row,
             NORMAL,
             texture?.id ?? -1,

@@ -3,17 +3,24 @@
 // peer that stops reading cannot make the main process buffer without end,
 // and that each sends at once unless the SWF's tcpNoDelay said otherwise.
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { createServer, type Server, type Socket } from "node:net";
-import { test } from "node:test";
+import { after, test } from "node:test";
+import { type TLSSocket, createServer as tlsServer } from "node:tls";
 import {
   type ConnectionOptions,
   Connections,
   MAX_BUFFERED,
+  secureOptions,
 } from "../../apps/desktop/src/main/connections.ts";
 import { parseProxy } from "../../apps/desktop/src/main/proxy.ts";
 import type { SocketEvent } from "../../apps/desktop/src/shared/api.ts";
 import { noDelayOf, socketsOpenedBy } from "../tcp-nodelay.ts";
+import { tlsCertificates } from "../tls-certificates.ts";
 import { testProxy } from "./proxy-server.ts";
+
+const certificates = tlsCertificates();
+after(certificates.dispose);
 
 async function listen(onConnection: (socket: Socket) => void): Promise<[Server, number]> {
   const server = createServer(onConnection);
@@ -281,4 +288,282 @@ test("sends at once unless the SWF set tcpNoDelay to false, directly and through
   }
 
   server.close();
+});
+
+test("secure sockets keep the original hostname through pinned direct and proxy routes", {
+  timeout: 15000,
+}, async () => {
+  const peers = new Set<TLSSocket>();
+  const server = tlsServer({ key: certificates.key, cert: certificates.leaf }, (peer) => {
+    peers.add(peer);
+    peer.on("error", () => {});
+    peer.on("close", () => peers.delete(peer));
+    peer.on("data", (bytes) => peer.write(bytes));
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  // AIR accepts a uint timeout; Node timers cannot take the upper half of that range.
+  const options = {
+    certificates: [{ encoded: certificates.ca, trusted: true }],
+    timeout: 0xffffffff,
+  };
+  try {
+    for (const kind of [null, "socks5", "http"] as const) {
+      const proxy = kind ? await testProxy(kind) : null;
+      const { connections, events, next } = recorded({
+        proxy: proxy ? parseProxy(proxy.url()) : null,
+      });
+      try {
+        connections.connect(1, "localhost", port, "127.0.0.1", true, options);
+        await next("open");
+        assert.equal(events[0].type, "certificate");
+        assert.equal(events[0].type === "certificate" && events[0].status, "trusted");
+        connections.send(1, Uint8Array.of(0, 255, 42));
+        await next("data");
+        const data = events.find((event) => event.type === "data");
+        assert.ok(data?.type === "data");
+        assert.deepEqual(new Uint8Array(data.bytes), Uint8Array.of(0, 255, 42));
+        if (proxy) {
+          assert.deepEqual(proxy.targets, [`127.0.0.1:${port}`]);
+        }
+        connections.send(1, new Uint8Array(MAX_BUFFERED + 1));
+        await next("error");
+        await next("close");
+        assert.equal(connections.size, 0);
+      } finally {
+        connections.closeAll();
+        await proxy?.close();
+      }
+    }
+
+    const wrong = recorded();
+    wrong.connections.connect(1, "wrong.invalid", port, "127.0.0.1", true, options);
+    await wrong.next("close");
+    assert.equal(
+      wrong.events.some((event) => event.type === "open"),
+      false,
+    );
+    assert.equal(
+      wrong.events.some(
+        (event) => event.type === "certificate" && event.status === "principalMismatch",
+      ),
+      true,
+    );
+    wrong.connections.closeAll();
+  } finally {
+    for (const peer of peers) {
+      peer.destroy();
+    }
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("closing a TLS certificate question or ending the page prevents late acceptance", {
+  timeout: 10000,
+}, async () => {
+  const peers = new Set<TLSSocket>();
+  const server = tlsServer({ key: certificates.selfKey, cert: certificates.self }, (peer) => {
+    peers.add(peer);
+    peer.on("error", () => {});
+    peer.on("close", () => peers.delete(peer));
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    for (const pageEnd of [false, true]) {
+      const { connections, events, next } = recorded({ application: () => true });
+      connections.connect(1, "localhost", port, "127.0.0.1", true, {
+        certificates: [],
+        timeout: 500,
+      });
+      await next("certificateError");
+      if (pageEnd) {
+        connections.closeAll();
+      } else {
+        connections.close(1);
+        await next("close");
+      }
+      const before = events.length;
+      connections.certificate(1, true);
+      await new Promise((resolve) => setTimeout(resolve, 550));
+      assert.equal(events.length, before);
+      assert.equal(connections.size, 0);
+    }
+  } finally {
+    for (const peer of peers) {
+      peer.destroy();
+    }
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("a self-signed server is refused in the main process unless an AIR application plays", {
+  timeout: 10000,
+}, async () => {
+  const server = tlsServer({ key: certificates.selfKey, cert: certificates.self }, (peer) => {
+    peer.on("error", () => {});
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    for (const application of [false, true]) {
+      // The page asks either way: its word is not taken for whether AIR plays.
+      const { connections, events, next } = recorded({ application: () => application });
+      connections.connect(1, "localhost", port, "127.0.0.1", true, {
+        certificates: [],
+        timeout: 2000,
+      });
+      if (application) {
+        await next("certificateError");
+        connections.certificate(1, true);
+        await next("open");
+      } else {
+        await next("close");
+      }
+
+      assert.deepEqual(
+        events.filter((event) => event.type !== "data").map((event) => event.type),
+        application
+          ? ["certificateError", "certificate", "open"]
+          : ["certificate", "error", "close"],
+      );
+      const certificate = events.find((event) => event.type === "certificate");
+      assert.equal(
+        certificate?.type === "certificate" && certificate.status,
+        application ? "trusted" : "untrustedSigners",
+      );
+      connections.closeAll();
+    }
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("fails a TLS connection whose peer stops reading, past what it may buffer", {
+  timeout: 30_000,
+}, async () => {
+  const peers = new Set<TLSSocket>();
+  const server = tlsServer({ key: certificates.key, cert: certificates.leaf }, (peer) => {
+    peers.add(peer);
+    peer.on("error", () => {});
+    peer.pause();
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  const { connections, events, next } = recorded();
+  try {
+    connections.connect(1, "localhost", port, "127.0.0.1", true, {
+      certificates: [{ encoded: certificates.ca, trusted: true }],
+      timeout: 2000,
+    });
+    await next("open");
+    // Each write under the limit: only what TLS holds unsent can add up past it.
+    const chunk = new Uint8Array(1024 * 1024);
+    let sent = 0;
+    for (; sent < 256 && !events.some((e) => e.type === "error"); sent++) {
+      connections.send(1, chunk);
+      await new Promise((done) => setImmediate(done));
+    }
+
+    assert.ok(
+      events.some((e) => e.type === "error"),
+      "the connection never failed",
+    );
+    assert.ok(sent * chunk.length > MAX_BUFFERED, `failed after ${sent} MB`);
+    await next("close");
+    assert.equal(connections.size, 0);
+  } finally {
+    connections.closeAll();
+    for (const peer of peers) {
+      peer.destroy();
+    }
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("a TLS connection through a proxy has what the tunnel left of its timeout", {
+  timeout: 10000,
+}, async () => {
+  // Answers CONNECT after a while, then says nothing: TLS's handshake never ends.
+  const delay = 800;
+  const held = new Set<Socket>();
+  const [proxy, port] = await listen((socket) => {
+    held.add(socket);
+    socket.on("error", () => {});
+    socket.once("data", () =>
+      setTimeout(() => socket.write("HTTP/1.1 200 Connection Established\r\n\r\n"), delay),
+    );
+  });
+  const { connections, events, next } = recorded({
+    proxy: parseProxy(`http://127.0.0.1:${port}`),
+  });
+  try {
+    const started = performance.now();
+    connections.connect(1, "localhost", 443, "127.0.0.1", true, {
+      certificates: [],
+      timeout: 1400,
+    });
+    await next("error");
+    const elapsed = performance.now() - started;
+    // The whole timeout from the tunnel on would fail at 2200 ms.
+    assert.ok(elapsed >= 1350 && elapsed < 1900, `failed after ${elapsed.toFixed(0)} ms`);
+    assert.equal(
+      events.some((event) => event.type === "open"),
+      false,
+    );
+  } finally {
+    connections.closeAll();
+    for (const socket of held) {
+      socket.destroy();
+    }
+    proxy.close();
+  }
+});
+
+test("permission reservations are cancelled by close and page end", () => {
+  const { connections } = recorded();
+  const closed = connections.reserve(1);
+  assert.ok(closed);
+  assert.equal(connections.size, 1);
+  connections.close(1);
+  assert.equal(closed(), false);
+  const gone = connections.reserve(1);
+  assert.ok(gone);
+  connections.closeAll();
+  assert.equal(gone(), false);
+  const allowed = connections.reserve(1);
+  assert.ok(allowed);
+  assert.equal(allowed(), true);
+  assert.equal(allowed(), false);
+  assert.equal(connections.size, 0);
+});
+
+test("TLS IPC options reject malformed certificates and bounded-input violations", () => {
+  assert.ok(
+    secureOptions({ certificates: [{ encoded: certificates.ca, trusted: true }], timeout: 2000 }),
+  );
+  for (const value of [
+    null,
+    {},
+    { certificates: [], timeout: NaN },
+    { certificates: [], timeout: -1 },
+    { certificates: [], timeout: 2 ** 32 },
+    { certificates: [{ encoded: [48], trusted: true }], timeout: 2000 },
+    { certificates: [{ encoded: new Uint8Array(), trusted: true }], timeout: 2000 },
+    { certificates: [{ encoded: certificates.ca, trusted: "true" }], timeout: 2000 },
+    {
+      certificates: new Array(65).fill({ encoded: certificates.ca, trusted: true }),
+      timeout: 2000,
+    },
+  ]) {
+    assert.equal(secureOptions(value), null);
+  }
 });

@@ -5,6 +5,7 @@
 // renderer's draws, fetches, sockets and the threads workers run on.
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
+import type { Certificate } from "./certificates.js";
 import type { DisplayObject } from "./display/display.js";
 import type { VideoPicture } from "./media/video.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
@@ -208,6 +209,59 @@ export function platformCapabilities(): PlatformCapabilities {
   };
 }
 
+/** The screen as the host's browser reports it, `given` taking the place of what it gives. */
+export function screenCapabilities(given: Partial<ScreenCapabilities> = {}): ScreenCapabilities {
+  return {
+    screenResolutionX:
+      given.screenResolutionX ?? (typeof screen === "undefined" ? 0 : screen.width),
+    screenResolutionY:
+      given.screenResolutionY ?? (typeof screen === "undefined" ? 0 : screen.height),
+    pixelAspectRatio: given.pixelAspectRatio ?? 1,
+    screenDPI: given.screenDPI ?? 72,
+  };
+}
+
+/** The capabilities as Flash sends them to a server: its fields' codes, URL-encoded, in its order. */
+export function serverString(
+  p: PlatformCapabilities,
+  sc: ScreenCapabilities,
+  debug: boolean,
+): string {
+  const fields: [string, string][] = [
+    ["A", "t"],
+    ["SA", "t"],
+    ["SV", "t"],
+    ["EV", "t"],
+    ["MP3", "t"],
+    ["AE", "t"],
+    ["VE", "t"],
+    ["ACC", "t"],
+    ["PR", "t"],
+    ["SP", "f"],
+    ["SB", "f"],
+    ["DEB", debug ? "t" : "f"],
+    ["V", p.version],
+    ["M", p.manufacturer],
+    ["R", `${sc.screenResolutionX}x${sc.screenResolutionY}`],
+    ["COL", "color"],
+    ["AR", String(sc.pixelAspectRatio)],
+    ["OS", p.os],
+    ["ARCH", "x86"],
+    ["L", p.language],
+    ["IME", "t"],
+    ["PR32", "t"],
+    ["PR64", "t"],
+    ["PT", p.playerType],
+    ["AVD", "f"],
+    ["LFD", "t"],
+    ["WD", "f"],
+    ["TLS", "t"],
+    ["ML", "5.1"],
+    ["DP", String(sc.screenDPI)],
+  ];
+  return fields.map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join("&");
+}
+
 /** How many touches the browser's screen takes at once, as Multitouch.maxTouchPoints reports; 0 without a browser. */
 export function hostTouchPoints(): number {
   const navigator = (globalThis as { navigator?: { maxTouchPoints?: number } }).navigator;
@@ -391,11 +445,53 @@ export interface SocketOptions {
 }
 
 export interface SocketHost {
+  /** Absent on browser TCP relays: they cannot establish or validate TLS themselves. */
+  secure?: SecureSocketHost;
   connect(
     host: string,
     port: number,
     events: SocketEvents,
     options?: SocketOptions,
+  ): SocketTransport;
+}
+
+export type CertificateStatus =
+  | "unknown"
+  | "trusted"
+  | "untrustedSigners"
+  | "principalMismatch"
+  | "expired"
+  | "notYetValid"
+  | "revoked"
+  | "invalidChain"
+  | "invalid";
+
+export interface SocketCertificate {
+  encoded: Uint8Array;
+  trusted: boolean;
+}
+
+export interface SecureSocketOptions extends SocketOptions {
+  /** Per socket, never a change to the process or operating system's trust store. */
+  certificates: readonly SocketCertificate[];
+  timeout: number;
+}
+
+export interface SecureSocketEvents extends SocketEvents {
+  /** The validation result, before open or error; an unsuccessful handshake may have no certificate. */
+  certificate(status: CertificateStatus, certificate: Certificate | null): void;
+  /** AIR 51's self-signed leaf exception. Refuse unless the application explicitly accepts it. */
+  certificateError?(proceed: (accepted: boolean) => void): void;
+}
+
+export interface SecureSocketHost {
+  /** Synchronous DER validation for addBinaryChainBuildingCertificate's ArgumentError. */
+  isCertificate(bytes: Uint8Array): boolean;
+  connect(
+    host: string,
+    port: number,
+    events: SecureSocketEvents,
+    options: SecureSocketOptions,
   ): SocketTransport;
 }
 

@@ -4,7 +4,8 @@
 // an ActionScript 3 SWF plays with none of its code.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { FetchRequest } from "../../../../packages/player/dist/hosts.js";
+import { type FetchRequest, platformCapabilities } from "../../../../packages/player/dist/hosts.js";
+import { resolve } from "../../../../packages/player/dist/scripting/loads.js";
 import { files, movie, play, take } from "./network.ts";
 
 test("the main SWF's URL query and flashvars are its root's variables before its first frame, the flashvars' names winning", async () => {
@@ -194,4 +195,147 @@ createEmptyMovieClip("b", 2).loadMovie("fast.swf");`,
   played.avm1.network();
   played.player.tick();
   assert.deepEqual(take(played), ["fast ran"]);
+});
+
+test("a SWF loaded into a level has the player's version, level 0's replacement afresh, as Flash's plug-in defines it", async () => {
+  const played = await play(
+    `$version = "changed";
+var mcl = new MovieClipLoader();
+mcl.loadClip("level.swf", 1);
+createEmptyMovieClip("clip", 1).loadMovie("clip.swf");
+var frames = 0;
+this.onEnterFrame = function () {
+  frames++;
+  if (frames == 2) { _level0.loadMovie("replacement.swf"); }
+};`,
+    {
+      fetch: files({
+        "level.swf": movie(`trace("level " + $version + " " + getVersion());`),
+        "clip.swf": movie(`trace("clip " + $version + " " + getVersion());`),
+        "replacement.swf": movie(`trace("replacement " + $version + " " + getVersion());`),
+      }),
+    },
+  );
+
+  for (let i = 0; i < 4; i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  const version = platformCapabilities().version;
+  assert.deepEqual(take(played).sort(), [
+    "clip undefined changed",
+    `level ${version} ${version}`,
+    `replacement ${version} ${version}`,
+  ]);
+});
+
+test("relative loads resolve against base, the children's too, and what loads has as its _url the URL it came from", async () => {
+  const asked: string[] = [];
+  const child = (name: string) =>
+    movie(`trace("${name} " + _url);
+createEmptyMovieClip("g", 1).loadMovie("grandchild.swf");
+createEmptyMovieClip("s", 2).loadMovie(_url.substring(0, _url.lastIndexOf("/") + 1) + "sibling.swf");`);
+  const bytes: Record<string, Uint8Array> = {
+    "/page/child.swf": child("child"),
+    "/page/sub/child.swf": child("sub child"),
+    "/page/grandchild.swf": movie(`trace("grandchild " + _url);`),
+    "/page/sibling.swf": movie(`trace("sibling " + _url);`),
+    "/page/sub/sibling.swf": movie(`trace("sub sibling " + _url);`),
+  };
+  const played = await play(
+    `createEmptyMovieClip("a", 1).loadMovie("child.swf?q=1");
+createEmptyMovieClip("b", 2).loadMovie("sub/child.swf");`,
+    {
+      url: "http://example.test/swf/main.swf",
+      base: "http://example.test/page/index.html",
+      fetch: async (request) => {
+        const url = new URL(request.url);
+        asked.push(url.pathname + url.search);
+        const found = bytes[url.pathname];
+        return found
+          ? { bytes: found, status: 0, headers: [] }
+          : { bytes: null, status: 404, headers: [] };
+      },
+    },
+  );
+
+  for (let i = 0; i < 4; i++) {
+    await played.deliver();
+    played.player.tick();
+  }
+
+  assert.deepEqual(take(played).sort(), [
+    "child http://example.test/page/child.swf?q=1",
+    "grandchild http://example.test/page/grandchild.swf",
+    "grandchild http://example.test/page/grandchild.swf",
+    "sibling http://example.test/page/sibling.swf",
+    "sub child http://example.test/page/sub/child.swf",
+    "sub sibling http://example.test/page/sub/sibling.swf",
+  ]);
+  assert.deepEqual(asked.sort(), [
+    "/page/child.swf?q=1",
+    "/page/grandchild.swf",
+    "/page/grandchild.swf",
+    "/page/sibling.swf",
+    "/page/sub/child.swf",
+    "/page/sub/sibling.swf",
+  ]);
+});
+
+test("a base's query and fragment are no directory: a relative URL replaces its path's last segment", () => {
+  assert.equal(
+    resolve("https://site.test/play.php?file=/games/a.swf", "child.swf"),
+    "https://site.test/child.swf",
+  );
+  assert.equal(
+    resolve("https://site.test/app/#/game/5", "child.swf"),
+    "https://site.test/app/child.swf",
+  );
+  assert.equal(
+    resolve("https://site.test/app/?a=1#b/c", "/root.swf"),
+    "https://site.test/root.swf",
+  );
+  assert.equal(resolve("file:///test.swf", "sub/child.swf"), "file:///sub/child.swf");
+});
+
+test("a relative URL resolves as a browser resolves it, its characters as they are", () => {
+  const base = "http://h.test/p/q/play.php?a=1#top";
+  // As new URL(url, base) has them, which getURL's windows take.
+  for (const [url, resolved] of [
+    ["../c.swf", "http://h.test/p/c.swf"],
+    ["../../../c.swf", "http://h.test/c.swf"],
+    ["./x/./c.swf", "http://h.test/p/q/x/c.swf"],
+    ["x/..", "http://h.test/p/q/"],
+    ["//cdn.test/c.swf", "http://cdn.test/c.swf"],
+    ["?q=1", "http://h.test/p/q/play.php?q=1"],
+    ["#h", "http://h.test/p/q/play.php?a=1#h"],
+    ["/r/../c.swf?x=../y", "http://h.test/c.swf?x=../y"],
+  ]) {
+    assert.equal(resolve(base, url), new URL(url, base).href, url);
+    assert.equal(resolve(base, url), resolved, url);
+  }
+
+  assert.equal(resolve("http://h.test", "c.swf"), "http://h.test/c.swf");
+  assert.equal(resolve("app:/sub/main.swf", "../c.swf"), "app:/c.swf");
+  // Its characters left as they are, as before, for the fetch to encode.
+  assert.equal(resolve("http://h.test/p/", "a b.swf"), "http://h.test/p/a b.swf");
+});
+
+test("getURL opens what the movie's base names, as its loads load it", async () => {
+  const g = globalThis as { open?: unknown; document?: unknown };
+  const opened: string[] = [];
+  g.open = (url: string) => opened.push(url);
+  g.document = {};
+  try {
+    const played = await play(`this.getURL("next.html?a=1", "_blank");`, {
+      url: "http://example.test/swf/main.swf",
+      base: "http://example.test/page/index.php?id=2#top",
+    });
+    played.player.tick();
+    assert.deepEqual(opened, ["http://example.test/page/next.html?a=1"]);
+  } finally {
+    delete g.open;
+    delete g.document;
+  }
 });

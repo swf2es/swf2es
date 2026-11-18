@@ -1,6 +1,7 @@
 // What the shell gives the page, and all it gives: the preload puts it on
 // window.swf2esDesktop. The renderer knows the shell only through it, so
 // another shell (Tauri, later) plays the same page by giving the same API.
+import type { Certificate, CertificateStatus, SecureSocketOptions } from "@swf2es/player";
 
 /** Flash's sandboxes, as Security.sandboxType names them, and AIR's application sandbox. */
 export type SandboxType = "localWithFile" | "localWithNetwork" | "remote" | "application";
@@ -138,6 +139,8 @@ export type SocketEvent =
       remotePort: number;
     }
   | { type: "data"; bytes: Uint8Array }
+  | { type: "certificate"; status: CertificateStatus; certificate: Certificate | null }
+  | { type: "certificateError" }
   | { type: "close" }
   | { type: "error"; message: string };
 
@@ -153,7 +156,9 @@ export interface DesktopSockets {
    * A connection's id; its events follow, an "error" one if the shell refuses it. `noDelay` is
    * tcpNoDelay as the SWF set it, absent where it did not: the shell then sends at once.
    */
-  connect(host: string, port: number, noDelay?: boolean): number;
+  connect(host: string, port: number, noDelay?: boolean, secure?: SecureSocketOptions): number;
+  isCertificate(bytes: Uint8Array): boolean;
+  certificate(id: number, accepted: boolean): void;
   send(id: number, bytes: Uint8Array): void;
   close(id: number): void;
   onEvents(listener: (events: ConnectionEvents<SocketEvent>) => void): void;

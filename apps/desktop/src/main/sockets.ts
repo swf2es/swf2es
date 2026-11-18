@@ -1,12 +1,19 @@
-// flash.net.Socket's TCP connections, made here for the page, which has
+// Socket's TCP and SecureSocket's TLS connections, made here for the page, which has
 // no network of its own beyond fetch, and carried over IPC. Each page's
 // connections (connections.ts) close as it navigates, reloads or goes, or
 // its process does (page-end.ts), and their events go to it gathered, a
 // message a millisecond at most (relay.ts).
+
+import { validCertificate } from "@swf2es/player-hosts/node";
 import { type IpcMainEvent, ipcMain, type WebContents } from "electron";
 import type { SocketEvent } from "../shared/api.js";
-import { type ConnectionOptions, Connections, validEndpoint } from "./connections.ts";
-import { socketDataLine, socketLine } from "./netlog.ts";
+import {
+  type ConnectionOptions,
+  Connections,
+  secureOptions,
+  validEndpoint,
+} from "./connections.ts";
+import { POLICY_IGNORED, socketDataLine, socketLine } from "./netlog.ts";
 import { onPageEnd } from "./page-end.ts";
 import { Relay } from "./relay.ts";
 
@@ -22,7 +29,10 @@ const dataEvent = (bytes: Uint8Array): SocketEvent => ({ type: "data", bytes });
  */
 export function bridgeSockets(
   trusted: (event: IpcMainEvent) => boolean,
-  permit: (host: string, port: number) => Promise<{ address?: string } | null>,
+  permit: (
+    host: string,
+    port: number,
+  ) => Promise<{ address?: string; policyIgnored?: boolean } | null>,
   log: ((line: string) => void) | null = null,
   data = false,
   options: ConnectionOptions = {},
@@ -69,7 +79,7 @@ export function bridgeSockets(
 
   ipcMain.on(
     "socket:connect",
-    (event, id: unknown, host: unknown, port: unknown, asked: unknown) => {
+    (event, id: unknown, host: unknown, port: unknown, asked: unknown, tls: unknown) => {
       if (!trusted(event) || typeof id !== "number") {
         return;
       }
@@ -82,25 +92,52 @@ export function bridgeSockets(
         return;
       }
 
+      const secure = tls === undefined ? undefined : secureOptions(tls);
+      if (secure === null) {
+        connections.refuse(id);
+        return;
+      }
+
+      const reserved = connections.reserve(id);
+      if (!reserved) {
+        return;
+      }
+
       const generation = connections.generation;
       void permit(host, port as number)
         .catch(() => null)
         .then((allowed) => {
           // The page that asked may have gone while the user was asked.
-          if (connections.generation !== generation) {
+          if (connections.generation !== generation || !reserved()) {
             return;
           }
 
           const via = allowed && options.proxy ? " via proxy" : "";
-          log?.(socketLine(id, `${allowed ? "connecting to" : "refused"} ${host}:${port}${via}`));
+          const ignored = allowed?.policyIgnored ? ` ${POLICY_IGNORED}` : "";
+          log?.(
+            socketLine(
+              id,
+              `${allowed ? "connecting to" : "refused"} ${host}:${port}${ignored}${via}`,
+            ),
+          );
           if (allowed) {
-            connections.connect(id, host, port, allowed.address, noDelay);
+            connections.connect(id, host, port, allowed.address, noDelay, secure);
           } else {
             connections.refuse(id);
           }
         });
     },
   );
+
+  ipcMain.on("socket:is-certificate", (event, bytes: unknown) => {
+    event.returnValue = trusted(event) && bytes instanceof Uint8Array && validCertificate(bytes);
+  });
+
+  ipcMain.on("socket:certificate", (event, id: unknown, accepted: unknown) => {
+    if (trusted(event) && typeof id === "number") {
+      pages.get(event.sender)?.certificate(id, accepted === true);
+    }
+  });
 
   ipcMain.on("socket:send", (event, id: unknown, bytes: unknown) => {
     if (trusted(event) && typeof id === "number" && bytes instanceof Uint8Array) {

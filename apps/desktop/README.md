@@ -168,6 +168,36 @@ fetch-electron` does so ahead, for the tests.
   stderr, each time it starts with it, which hosts go unverified. The page
   itself has no network (the main process makes a SWF's requests and
   connections), so nothing but those is affected.
+- **Policy files.** `--ignore-policy-files` lets the SWF read every
+  public host's data, send it headers and open sockets to it (as you
+  allow each server) as if its cross-domain policy files allowed it, for
+  this run: for a SWF you trust whose servers no longer serve the files
+  Flash asked for. `--ignore-policy-files=data.example,localhost` does so
+  for those hosts alone, matched exactly (not their subdomains, and a
+  name is not its address). It is unsafe in the way policy files exist to
+  prevent: the SWF reads, as this machine, whatever this machine reaches
+  of those hosts (no cookies or credentials go, but a site that trusts
+  your address answers it) and may send it anywhere. The bare switch
+  never reaches this machine or your local network: a SWF from the
+  internet still needs a policy file there unless you name the host
+  (`--ignore-policy-files=localhost,192.168.1.5`). The sandbox stays as
+  it is: a local SWF without the network reaches none. `--log-network`'s
+  line for a request it let through ends in
+  `allowed by --ignore-policy-files`. It holds for every SWF the running
+  app opens, one double-clicked into it later included; a second start
+  with the switch hands its SWF to the app already open, which plays it
+  as it started. It is never kept in the settings, and the app says on
+  stderr, each time it starts with it, what it covers.
+- **Naming hosts.** `--ignore-certificate-errors=` and
+  `--ignore-policy-files=` take host names and addresses, each matched
+  exactly as a URL writes it: case does not count, an IPv6 address goes
+  with or without its brackets, and an address written another way
+  (`127.1`, `0x7f.0.0.1`, `192.168.010.5`) is the address it stands for,
+  which the app says. A port (`dev.test:8443`) is taken as every port of
+  the host, which the app says too. A wildcard (`*`, `*.dev.test`)
+  matches nothing: the switch alone covers every host it can. An entry
+  that is not a host alone (`https://dev.test`, `user@dev.test`,
+  `dev.test/x`) is left out, with a word on stderr.
 - **Proxy.** `--proxy=socks5://host:1080` sends everything the SWF does
   on the network through a SOCKS5 proxy (RFC 1928; `socks5h://` is the
   same), and `--proxy=http://host:3128` through an HTTP proxy, by a

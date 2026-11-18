@@ -99,6 +99,78 @@ cannot be told from a call by name, and acts as the main SWF. A page that
 loads SWFs it does not trust beside ones it does should give none of them
 script access.
 
+## Certificate objects
+
+`flash.security.X509Certificate` and `X500DistinguishedName` expose a
+host's certificate metadata (`certificates.ts`). As measured with AIR's
+`SecureSocket` against a local TLS server, each Date, ByteArray and name
+getter returns a fresh object; the byte arrays start with their position
+at the end. A certificate is a snapshot, unaffected by edits to those
+values or to the host's input. Public constructors make empty objects:
+version 0 and null for every other getter, including a name's `toString()`.
+Decoding and trust validation belong to the transport host, not these
+value objects. The defaults have a Flash reference in the
+`certificate-defaults` player case; populated values and mutation isolation
+are covered by `X509Certificate.test.ts`.
+
+## Secure sockets
+
+`flash.net.SecureSocket` shares Socket's buffers, reads, writes and connection
+generations (`playerglobal/flash/net/socket-connections.ts`). Its host is
+`SocketHost.secure`: absent that capability, `isSupported` is false and the
+constructor throws IllegalOperationError, as Adobe documents for a runtime
+without secure sockets. adl supports them, so it cannot show Flash's error
+number; the player uses #2014, "Feature is not available at this time". A
+connect never falls back to a plain socket. A secure host validates DER
+certificates, connects with the Socket's timeout and certificate additions,
+and reports certificate metadata before opening or failing the connection.
+The player queues those notifications in order with other host events.
+Closing, reconnecting or destroying the player invalidates old callbacks.
+
+The Socket keeps its own certificate additions, copied from the complete
+ByteArray without changing its position. Each `serverCertificate` read
+constructs a fresh snapshot. As measured in AIR, closing clears the peer
+certificate but retains `serverCertificateStatus`; a failed handshake can
+retain its peer certificate for inspection. Null or malformed certificate
+input throws ArgumentError #2004. The player also throws #2004 before copying
+an addition exceeding 256 KiB per certificate, 64 entries or 4 MiB per socket. The AS3-driven tests exercise these with
+local certificates, including the ByteArrays' positions and mutation isolation.
+
+`player-hosts/node` implements the capability through `tlsSocket()`, reusable
+with a host's own connected or connecting TCP socket. Node's crypto validates
+X.509 input; a DER reader extracts the fields its API does not expose, in time
+linear in the certificate's size (at most 256 KiB, read in some 20–35 ms at
+worst): it walks only the fixed structure of a certificate and its names,
+never arbitrary nesting, and refuses a name of over 256 attributes and an OID
+over 128 bytes or with an arc over 20 bytes (a UUID's arc fits). OpenSSL
+accepts all of these, and an arc 100 KB long took a naive decoder a second.
+The reader runs first, so OpenSSL never reads what it refuses. Its answer is
+kept by digest for the latest 64 certificates, as a SWF's addition is checked
+when added and again by each connection. TLS uses Node's default and system
+roots, read once a run into one context that every socket adding no CA shares,
+and the Socket's additions, which give a socket a context of its own. An
+untrusted self-issued root is never added as an anchor; other untrusted CAs
+can complete a chain to a trusted root. Partial-chain trust stays disabled, as
+observed in AIR on Linux: adding a non-self-signed intermediate alone does not
+trust its chain. Neither additions nor exceptions affect another socket.
+
+TLS uses Node's protocol and cipher defaults. It validates the certificate
+chain, dates and original hostname before exposing an open event or application
+data. AIR 51's self-signed-leaf exception dispatches a cancelable
+`certificateError` in AIR mode; only `preventDefault()` accepts it. Flash
+Player mode refuses self-signed leaves without that exception. An expired, not-yet-valid,
+wrong-name or broken-chain certificate cannot take that path. Pending TCP, TLS
+and certificate consent share a timeout; close cancels them. There is no
+automatic OCSP or CRL retrieval. The Node host maps verification errors to the
+documented CertificateStatus categories; AIR on Linux reported
+`principalMismatch` even for our untrusted-chain probes, so that platform's
+coarser error classification is not reproduced.
+
+The desktop uses this host through IPC with its existing socket permission,
+policy, pinned-address, proxy and lifetime rules ([Sockets](desktop.md#sockets)).
+A browser WebSocket relay does not implement this capability: a secure relay
+connection alone is not TLS to the requested peer.
+
 ## AIR's WebSocket
 
 AIR 51's `air.net.WebSocket` and `flash.events.WebSocketEvent` are

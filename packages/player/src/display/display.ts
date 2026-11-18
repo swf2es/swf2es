@@ -26,6 +26,6 @@ export {
 export { construct, displayFor, instantiate } from "./instantiate.js";
 export { EMPTY_TIMELINE, MovieClip } from "./movieclip.js";
 export { ShapeObject } from "./shapeobject.js";
-export { StaticTextObject, TextObject } from "./textobjects.js";
+export { fieldOffset, StaticTextObject, TextObject } from "./textobjects.js";
 export { VideoObject } from "./videoobject.js";
 export { Clips, scriptChildren, walkList } from "./walk.js";

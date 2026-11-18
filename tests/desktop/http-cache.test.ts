@@ -706,6 +706,36 @@ test("Flash's policy still judges a request the cache could answer", async () =>
   store.close();
 });
 
+test("a response kept under --ignore-policy-files serves no network without it", async () => {
+  offset = 0;
+  policy = null;
+  resources.set("unguarded", { headers: { "cache-control": "max-age=600" } });
+  const store = cache();
+  const ignoring = { ignorePolicy: { all: true, hosts: [] } };
+  const policiesBefore = policyRequests.length;
+  const net = await playing(store, {}, swf(), ignoring);
+  const first = await get(net, `${other()}/r/unguarded`, "data");
+  await store.settled();
+  assert.deepEqual([first.cache, first.policyIgnored], [undefined, true]);
+  assert.equal(seen.get("unguarded")?.length, 1);
+  // No policy file was asked for, so none is kept either.
+  assert.equal(policyRequests.length, policiesBefore);
+
+  // Without the switch, sharing the cache: refused before the cache is asked.
+  const plain = await playing(store);
+  await assert.rejects(get(plain, `${other()}/r/unguarded`, "data"), (error) => {
+    assert.ok(error instanceof Refused);
+    assert.match(error.message, /no policy file on http:\/\/other\.test:\d+ grants swf\.test/);
+    return true;
+  });
+  // With it again, kept as any response is.
+  const again = await playing(store, {}, swf(), ignoring);
+  const hit = await get(again, `${other()}/r/unguarded`, "data");
+  assert.deepEqual([hit.cache, hit.policyIgnored], ["hit", true]);
+  assert.equal(seen.get("unguarded")?.length, 1);
+  store.close();
+});
+
 test("a stored body counts as a fetched one, against the largest response and the budget", async () => {
   offset = 0;
   resources.set("large", { headers: { "cache-control": "max-age=600" }, body: "x".repeat(3000) });

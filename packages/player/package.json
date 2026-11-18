@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/player",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "description": "Browser SWF player: display list, timeline, playerglobal and renderer adapters",
   "keywords": [
     "swf",
@@ -27,6 +27,10 @@
     "./as3-types": {
       "types": "./dist/as3/types.d.ts",
       "default": "./dist/as3/types.js"
+    },
+    "./certificates": {
+      "types": "./dist/certificates.d.ts",
+      "default": "./dist/certificates.js"
     },
     "./context3d": {
       "types": "./dist/playerglobal/context3d.d.ts",

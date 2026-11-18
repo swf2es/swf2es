@@ -23,7 +23,16 @@ it needs. Its pages, under the base path:
   preloads `player/swf2es.js` beside `app/main.js`. Until the SWF's first
   frame a loading state covers the stage: the player's code, then the
   SWF's download, with its percentage where the server gives its length,
-  then its start, while the status line says each step.
+  then its start, while the status line says each step. A page script or
+  browser build that fails to load or run says so there instead
+  (`play.astro`'s classic script, which listens until `main.ts` says it
+  runs, and only to the site's own `app/`, `player/` and `player/chunks/`
+  scripts); without JavaScript, the stage and the status line say the
+  player needs it. The service worker asks the server again for the page
+  and every file that keeps its name across deploys (`app/`, `player/`, but
+  not `player/chunks/`, named by content), where Pages answers 304, so one
+  deploy's `swf2es.js` never asks for a chunk another removed; offline, it
+  falls back on what the browser's cache has.
 - `/docs/` — the guide, made from `docs/guide.md` as it builds, so the
   repository keeps one copy: `guide.ts` is a content loader that makes
   each `##` section a page, the guide's introduction at the top of the

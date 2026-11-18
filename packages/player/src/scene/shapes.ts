@@ -56,13 +56,16 @@ function samplesAlike(a: BitmapSampling, b: BitmapSampling): boolean {
   return a.image === b.image && a.smooth === b.smooth && a.repeat === b.repeat;
 }
 
-export interface Part {
-  geometry: GeometryData;
+export interface PartPaint {
   /** A shader fill's part has its kernel's coordinates for texels, and a depth of 1 for each vertex (MESH's). */
   paint: BitmapSampling | GradientFill | ShaderPaint | null;
   /** A radial gradient's region, the texels its texture covers. */
   region: Area | null;
   mesh: TriangleMesh | null;
+}
+
+export interface Part extends PartPaint {
+  geometry: GeometryData;
 }
 
 const WHITE = 0xffffffff;

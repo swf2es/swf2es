@@ -9,12 +9,13 @@ import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1, type Avm1Options } from "../../../../packages/player/dist/avm1/avm1.js";
+import { platformCapabilities } from "../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Avm1Assembler, constant, type PushValue, register } from "../../../avm1-assembler.ts";
 import { skippedExports, skippedExportsTrace } from "../../../avm1-exports.ts";
 import { flashAssembler, script } from "../../../avm1-script.ts";
 import * as w from "../../../swf-writer.ts";
-import { files, movie as movieNet, play as playNet } from "./network.ts";
+import { files, movie as movieNet, play as playNet, take } from "./network.ts";
 
 const codegen = await createCodegen(
   await WebAssembly.compile(
@@ -64,6 +65,135 @@ async function play(swf: Uint8Array, frames: number, options: Avm1Options = {}) 
 
   return { lines, errors, player, avm1 };
 }
+
+// The main-content traces come from direct adl: its AS3 Loader harness has no $version.
+const versionSource = `
+var original = $version;
+trace("type " + typeof original);
+trace("root " + (_root.$version == original));
+trace("absolute " + (getVersion() == original));
+trace("global " + typeof _global.$version);
+trace("function " + typeof getVersion);
+trace("prototype " + typeof MovieClip.prototype.$version);
+trace("case " + ($VERSION == original));
+var seen = false;
+for (var k in this) { if (k == "$version") { seen = true; } }
+trace("enumerated " + seen);
+function localVersion() {
+  var $version = "local";
+  trace("local " + $version);
+  trace("absolute in function " + (getVersion() == original));
+}
+localVersion();
+$version = "changed";
+trace("write " + getVersion());
+trace("delete " + delete $version);
+trace("after " + typeof $version);
+trace("absolute after " + typeof getVersion());
+`;
+
+for (const version of [5, 6, 7, 8]) {
+  test(`SWF ${version} reads, shadows, writes and deletes the main timeline's $version`, async () => {
+    const played = await playNet(versionSource, {}, version);
+    assert.deepEqual(take(played), [
+      "type string",
+      "root true",
+      "absolute true",
+      "global undefined",
+      "function undefined",
+      "prototype undefined",
+      `case ${version <= 6}`,
+      "enumerated true",
+      "local local",
+      "absolute in function true",
+      "write changed",
+      "delete true",
+      "after undefined",
+      "absolute after undefined",
+    ]);
+    played.player.destroy();
+  });
+}
+
+for (const version of [4, 5, 6, 7, 8]) {
+  test(`SWF ${version} reports the same platform and player version as AS3`, async () => {
+    const played = await playNet(`trace($version); trace(getVersion());`, {}, version);
+    assert.deepEqual(take(played), Array(2).fill(platformCapabilities().version));
+    played.player.destroy();
+  });
+}
+
+for (const version of [6, 7, 8]) {
+  test(`SWF ${version}'s System has the capabilities AS3's has, as plain values, and security's functions`, async () => {
+    const played = await playNet(
+      `trace(System.capabilities.version == getVersion());
+trace(System.capabilities.os + "|" + System.capabilities.playerType + "|" + System.capabilities.language);
+trace(System.capabilities.serverString.indexOf("V=" + escape(getVersion())) > 0);
+trace(typeof System.capabilities.screenResolutionX + " " + System.capabilities.hasAudio);
+var keys = [];
+for (var k in System) { keys.push(k); }
+trace(keys.join(","));
+var n = 0;
+for (var k in System.capabilities) { n++; }
+trace(n);
+System.capabilities.version = "x";
+trace(System.capabilities.version);
+trace(System.security.allowDomain("*") + " " + typeof System.security.allowInsecureDomain + " " + System.security.sandboxType);
+trace(System.useCodepage + " " + System.exactSettings);`,
+      {},
+      version,
+    );
+    const platform = platformCapabilities();
+    assert.deepEqual(take(played), [
+      "true",
+      `${platform.os}|${platform.playerType}|${platform.language}`,
+      "true",
+      "number true",
+      "security,useCodepage,exactSettings,capabilities",
+      "34",
+      "x",
+      `true ${version >= 7 ? "function" : "undefined"} remote`,
+      `false ${version >= 7}`,
+    ]);
+    played.player.destroy();
+  });
+}
+
+test("$version and System report the platform, screen and debugger the movie is given", async () => {
+  const played = await playNet(
+    `trace($version + "|" + getVersion() + "|" + System.capabilities.version);
+trace(System.capabilities.os + "|" + System.capabilities.screenResolutionY);
+trace(System.capabilities.isDebugger + " " + (System.capabilities.serverString.indexOf("DEB=t") > 0));`,
+    {
+      platform: { version: "MAC 10,0,0,1", os: "Mac OS 10.5" },
+      screenCapabilities: { screenResolutionY: 600 },
+      debugger: true,
+    },
+  );
+  assert.deepEqual(take(played), [
+    "MAC 10,0,0,1|MAC 10,0,0,1|MAC 10,0,0,1",
+    "Mac OS 10.5|600",
+    "true true",
+  ]);
+  played.player.destroy();
+});
+
+test("child clips have no own $version, while getVersion reads the main timeline", async () => {
+  const played = await playNet(`
+var child = createEmptyMovieClip("child", 1);
+trace(typeof child.$version);
+trace(this.hasOwnProperty("$version"));
+trace(child.hasOwnProperty("$version"));
+child.$version = "child";
+tellTarget("child") {
+  trace($version);
+  trace(getVersion() == _level0.$version);
+}
+trace($version != child.$version);
+`);
+  assert.deepEqual(take(played), ["undefined", "true", "false", "child", "true", "true"]);
+  played.player.destroy();
+});
 
 test("each frame's blocks run in order as the root enters it, and the root loops", async () => {
   const swf = movie(6, [[traced("1a"), traced("1b")], [], [traced("3")]]);
@@ -1069,10 +1199,17 @@ test("a host's fsCommand takes every command, quit too, and getURL's pages go to
     ["two", "args"],
     ["clip", "5"],
   ]);
+
+  // $version is enumerable, so sending the main timeline's variables includes it too.
+  const vars = [
+    ["v", "1"],
+    ["$version", platformCapabilities().version],
+  ];
+
   assert.deepEqual(pages, [
     ["http://a.example/", "_blank", null],
-    ["http://b.example/", "_self", { method: "POST", vars: [["v", "1"]] }],
-    ["http://c.example/", "_blank", { method: "GET", vars: [["v", "1"]] }],
+    ["http://b.example/", "_self", { method: "POST", vars }],
+    ["http://c.example/", "_blank", { method: "GET", vars }],
   ]);
 });
 

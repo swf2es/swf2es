@@ -460,8 +460,30 @@ focus, the host keeps from the browser; any other, a game's arrows say,
 still reaches the page too, which may scroll by it. A focused selectable
 field that takes no typing moves its caret and selection with the same
 keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
-this is recorded against Flash; there is no IME, and no scrolling to
-keep the caret in view.
+this is recorded against Flash; there is no IME.
+
+A field scrolls to keep its caret in view (`TextObject.scrollTo`) as
+`setSelection`, a key, a press or a drag moves the caret, and as a field
+takes the focus, as adl's does from a script (`text-input-scroll`): up or
+down by the fewest lines, and sideways by steps of a quarter of the room
+inside the gutters, from where it was scrolled, as few as bring the caret
+in, a caret on the room's right edge being out of it; the same selection
+set again scrolls nowhere, and a press puts the caret where it was in
+the text as scrolled, scrolling nowhere, though AVM1's focus selects all
+first. A field's `maxScrollH` is the furthest a line reaches past the
+room, its margin, block indent, indent and alignment in but not the right
+margin, and an input field's that quarter more (the corpus's
+`edittext_max_scroll_h_basic`), so that the last step fits; a field
+fitted to its text by `autoSize` is fitted first.
+`replaceSelectedText`, `replaceText` and AVM1's `replaceSel` scroll to
+where the text went in, not to the caret after it; `text` and
+`appendText` do not scroll, and new text keeps the scroll within its own
+`maxScrollH`, which a change of type does not. AS3's `scrollH` takes a
+negative number as its size; AVM1's `hscroll` and `maxhscroll` count
+twips in a field of embedded fonts and pixels in one of device fonts, as
+Flash Player 32 gives them. adl's AVM1 moves no caret for
+`Selection.setSelection`, so its case (`avm1-text-input-scroll`) has the
+focus's select-all move it, and the web test types past the edge.
 
 A key's release goes elsewhere when the page or the window loses focus
 while it is held, and never reaches the player. The host tells the

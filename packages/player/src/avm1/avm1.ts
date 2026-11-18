@@ -50,14 +50,19 @@ import {
   type FetchRequest,
   type FetchResult,
   type Navigate,
+  type PlatformCapabilities,
+  platformCapabilities,
+  type ScreenCapabilities,
   type SharedObjectStorage,
   type SocketHost,
+  screenCapabilities,
 } from "../hosts.js";
 import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
   type SoundHost,
+  stopSoundsUnder,
   stopTimelineSounds,
   timelineSoundsOf,
 } from "../media/sounds.js";
@@ -93,6 +98,7 @@ import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
 import { type StageSize, stageObject } from "./globals/Stage.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
+import { systemObject } from "./globals/System.js";
 import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
 import { textSnapshotClass } from "./globals/TextSnapshot.js";
@@ -190,6 +196,12 @@ export interface Avm1Options {
   socket?: SocketHost;
   /** Where relative URLs resolve, as a page's `base` parameter has it: the SWF's URL by default. */
   base?: string;
+  /** System.capabilities' and `$version`'s platform, AS3's Capabilities' where AS3 loaded the SWF. */
+  platform?: Partial<PlatformCapabilities>;
+  /** System.capabilities' screen, AS3's where AS3 loaded the SWF. */
+  screenCapabilities?: Partial<ScreenCapabilities>;
+  /** System.capabilities.isDebugger: AS3's runtime's where AS3 loaded the SWF, else false. */
+  debugger?: boolean;
   /**
    * Whether XML.send, which sends without a window, sends: true by
    * default; false refuses it, as allowNetworking "internal" refuses AS3's
@@ -313,6 +325,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** What names the next object without a name of its own: instance1, instance2... */
   private instances = 0;
   private movieRoot: MovieClip | null = null;
+  /** Whether this plays the main movie, not an AVM1Movie an AS3 Loader loaded, which has no `$version`. */
+  private standalone = true;
   private swfVersion = 0;
   private swfLength = 0;
   private rate = 24;
@@ -357,6 +371,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The focus, what Tab moves it through and Selection's listeners. */
   readonly focusTracker = new FocusTracker(this);
   readonly url: string;
+  /** What System.capabilities and `$version` report. */
+  private readonly platform: PlatformCapabilities;
+  private readonly screen: ScreenCapabilities;
+  private readonly debugger: boolean;
   /** The page's flashvars for the main SWF's root. */
   private readonly parameters: Readonly<Record<string, string>>;
   readonly storage: SharedObjectStorage;
@@ -385,6 +403,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.url = options.url ?? "";
+    this.platform = { ...platformCapabilities(), ...options.platform };
+    this.screen = screenCapabilities(options.screenCapabilities);
+    this.debugger = options.debugger ?? false;
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
     this.storage = options.storage ?? defaultStorage();
@@ -471,7 +492,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       },
       navigate:
         (options.navigate === undefined
-          ? getUrlNavigate(browserNavigate(), this.url)
+          ? // A page's window opens what the movie's base names, as its loads load it (Flash's plug-in).
+            getUrlNavigate(browserNavigate(), this.net.base)
           : options.navigate) ?? undefined,
     };
   }
@@ -501,7 +523,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /**
    * Take the SWF's timelines, before the root enters its first frame: their
-   * clips are made and play through this from now on.
+   * clips are made and play through this from now on. An AS3 Loader passes
+   * false for `standalone`: its AVM1Movie has no main timeline's `$version`.
    */
   attach(
     swf: Swf,
@@ -513,8 +536,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       stageWidth: Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
       stageHeight: Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
     },
+    standalone = true,
   ): void {
     this.movieRoot = root;
+    this.standalone = standalone;
     this.swfVersion = swf.header.version;
     this.swfLength = swf.header.fileLength;
     this.rate = frameRate;
@@ -604,13 +629,19 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       avm1.DONT_ENUM,
     );
     realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
+    realm.global.define(
+      "System",
+      systemObject(realm, this.platform, this.screen, this.debugger, this.swfVersion),
+      avm1.DONT_ENUM,
+    );
     // Last, as Flash defines it: _global's names are enumerated from the last defined.
     realm.global.define("TextSnapshot", textSnapshotClass(realm), avm1.DONT_ENUM);
     this.adopt(main);
     this.made(root);
-    // Its parameters, as Flash defines them on the root before the first frame's actions run.
     const face = root.avm1;
     if (face !== null) {
+      this.defineVersion(face);
+      // Its parameters, as Flash defines them before the first frame's actions run.
       const parameters = new Map(queryVariables(this.url));
       for (const [name, value] of Object.entries(this.parameters)) {
         parameters.set(name, String(value));
@@ -619,6 +650,17 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       for (const [name, value] of parameters) {
         face.define(name, textFor(value, this.swfVersion), 0);
       }
+    }
+  }
+
+  /**
+   * `$version` on a level's root, as Flash defines it on the main timeline
+   * and on each SWF a load puts in a level, before its first frame's
+   * actions; not on an AVM1Movie loaded by AS3.
+   */
+  defineVersion(face: avm1.Avm1Object): void {
+    if (this.standalone) {
+      face.define("$version", this.platform.version, 0);
     }
   }
 
@@ -652,7 +694,38 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       keeps: (display) => this.keeps(display),
     };
     library.removing = (display) => this.removing(display);
-    library.sounds = timelineSoundsOf(this.sounds);
+    const sounds = timelineSoundsOf(this.sounds);
+    library.sounds = {
+      ...sounds,
+      removed: (display) => {
+        sounds.removed(display);
+        this.unloadSounds(display);
+      },
+    };
+  }
+
+  /**
+   * The sounds of the loaded movies that go with `d`, removed or emptied
+   * of what it shows: those of a movie's own library playing on a clip of
+   * that movie at or under `d`, which adl stops, none completing. A sound
+   * of another movie plays on, as the parent's Sound on the clip a load
+   * fills does in adl, and so does one on a clip a movie removes from itself.
+   */
+  private unloadSounds(d: DisplayObject): void {
+    stopSoundsUnder(this.sounds, d, (owner, character) => {
+      for (let o: DisplayObject | null = owner; o !== null; o = o.parent) {
+        const library = o instanceof MovieClip ? this.contents.get(o)?.library : undefined;
+        if (library?.characters.get(character.id) === character) {
+          return true;
+        }
+
+        if (o === d) {
+          return false;
+        }
+      }
+
+      return false;
+    });
   }
 
   /**
@@ -807,7 +880,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       }
 
       this.clips = clips.filter((clip) => !this.removed(clip));
-      // A load's onLoadInit after the frame's actions of what it loaded, as Ruffle queues it.
+      // A load's onLoadInit after the frame's actions of what it loaded and those their gotos
+      // queued, as adl runs them: a first frame that sends a clip to a frame that stops it has
+      // stopped it before onLoadInit can send it on (Ruffle queues onLoadInit before those).
+      this.queue.run();
       this.loads.loadsInitialized();
       this.queue.run();
       // onSoundComplete runs with the frame's actions, and what it queues runs with them too.
@@ -1371,6 +1447,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * the next frame plays; one without a library shows nothing.
    */
   fill(target: MovieClip, swf: Avm1Swf, frames = EMPTY_TIMELINE): void {
+    // What it showed goes: a loaded movie's sounds with it. An arrival fills the clip twice,
+    // empty first, and the empty movie, or a clip never loaded into, has no sounds of its own.
+    if (this.contents.get(target)?.library) {
+      this.unloadSounds(target);
+    }
+
     for (const child of target.children) {
       this.markPaths(child);
       target.library.sounds?.removed(child);
@@ -1457,9 +1539,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return this.focusTracker.focusedObject;
   }
 
-  /** Focus `d`, or none, telling those it concerns at once (focus.ts). */
-  focus(d: DisplayObject | null): void {
-    this.focusTracker.focus(d);
+  /** Focus `d`, or none, telling those it concerns at once (focus.ts); a press's focus scrolls no field. */
+  focus(d: DisplayObject | null, byPointer = false): void {
+    this.focusTracker.focus(d, byPointer);
   }
 
   /** Whether a script may focus `d` (focus.ts). */

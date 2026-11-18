@@ -105,6 +105,8 @@ function play(movie: OpenedMovie): void {
   configure({
     capture,
     sandboxType: movie.sandbox,
+    // No page here: the SWFs' relative URLs resolve against their own, as Flash's projector did.
+    relativeUrls: "movie",
     air: movie.air ? airHosts(movie.air, desktop.air) : null,
   });
   showFailure(null);
