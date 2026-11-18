@@ -602,6 +602,20 @@ to false before it connected. An embedder with a transport of its own
 gives it as `configure({ sockets })`; its `connect(host, port, events,
 options)` gets `options.noDelay` where the SWF set `tcpNoDelay`.
 
+`flash.net.SecureSocket` works in node and the desktop app. The desktop
+asks for the same host-and-port permission as a plain socket, then checks
+the TLS certificate against the original hostname, including through a
+proxy. It exposes the peer's `X509Certificate` and distinguished names.
+A SWF can add DER certificates with `addBinaryChainBuildingCertificate`;
+they apply only to that Socket. In AIR mode, a self-signed leaf requires the application to
+accept AIR 51's cancelable `certificateError` event explicitly; Flash Player mode refuses it. Expired,
+wrong-name and broken-chain certificates are refused.
+
+The browser relay does not provide SecureSocket: TLS to a WebSocket relay
+alone cannot supply the target server's certificate or TLS session. A
+custom `SocketHost` may implement its optional `secure` capability; without
+one, `SecureSocket.isSupported` is false.
+
 An AIR application's `air.net.WebSocket` uses the page's own `WebSocket`.
 An embedder whose page may not connect, as the desktop app's, whose main
 process holds the connections, gives a `WebSocketHost` of its own as

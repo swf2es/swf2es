@@ -105,7 +105,7 @@ over the builtins, then each conformance case (also compiled with asc's
 | `render`  | the renderer ([renderer.md](../renderer.md)): scene list, planner and WebGL 2 backend | context3d |
 | `player`  | display list, timeline, playerglobal, and the view that drives `render` | format, codegen, context3d, native, render, runtime |
 | `cli`     | the `swf2es` command: a SWF's modules ahead of time, ABCs run as avmshell runs them | format, codegen, player (its libraries alone, `@swf2es/player/libraries`), runtime |
-| `player-hosts` | optional hosts for the player: Node TCP, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
+| `player-hosts` | optional hosts for the player: Node TCP and TLS, a WebSocket relay, an IndexedDB module cache, modules compiled ahead of time, Stage3D canvas layers, Web Worker and node threads for `flash.system.Worker` | player |
 | `web`     | the `<swf2es-player>` element, `replaceFlash`, the page's configuration | codegen, format, player, player-hosts |
 | `swf2es`  | the browser build: `web` and what it loads bundled by Rspack into ES modules, for a page's `<script>` tag from a CDN; it installs with no dependencies | codegen, player-hosts, web (at build time) |
 

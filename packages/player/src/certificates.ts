@@ -25,3 +25,13 @@ export interface Certificate {
   subjectUniqueID: string | null;
   encoded: Uint8Array;
 }
+
+export function copyCertificate(data: Certificate): Certificate {
+  return {
+    ...data,
+    issuer: { ...data.issuer },
+    subject: { ...data.subject },
+    signatureAlgorithmParams: new Uint8Array(data.signatureAlgorithmParams),
+    encoded: new Uint8Array(data.encoded),
+  };
+}

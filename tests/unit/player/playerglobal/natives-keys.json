@@ -1555,6 +1555,8 @@
     "flash.net::NetConnection.get:defaultObjectEncoding",
     "flash.net::NetConnection.set:defaultObjectEncoding",
     "flash.net::Responder#flash.net:Responder::ctor",
+    "flash.net::SecureSocket#addBinaryChainBuildingCertificate",
+    "flash.net::SecureSocket#connect",
     "flash.net::SecureSocket#get:serverCertificate",
     "flash.net::SecureSocket#get:serverCertificateStatus",
     "flash.net::SecureSocket.get:isSupported",

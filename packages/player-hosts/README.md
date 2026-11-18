@@ -23,7 +23,11 @@ npm install @swf2es/player-hosts
 - `@swf2es/player-hosts/websocket`: `webSocketSocketHost()`, flash.net.Socket
   over a WebSocket relay.
 - `@swf2es/player-hosts/node`: `nodeSocketHost()`, flash.net.Socket over
-  node's TCP, and `nodeWorkerHost()`, flash.system.Worker on worker threads.
+  node's TCP and flash.net.SecureSocket over TLS, and `nodeWorkerHost()`,
+  flash.system.Worker on worker threads. TLS uses node's default and system
+  trust stores, plus certificates the SWF adds to that socket. The node
+  entry also exports `tlsSocket()` for hosts that provide their own TCP
+  routing and permission checks.
 - `@swf2es/player-hosts/workers`: `webWorkerHost()`, flash.system.Worker
   on Web Workers, which run `@swf2es/player-hosts/web-worker`
   (`node-worker` is node's).

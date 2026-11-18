@@ -1,0 +1,332 @@
+import assert from "node:assert/strict";
+import { X509Certificate } from "node:crypto";
+import { once } from "node:events";
+import { type Socket, connect as tcpConnect, createServer as tcpServer } from "node:net";
+import { after, test } from "node:test";
+import { createServer } from "node:tls";
+import { nodeSocketHost, tlsSocket, validCertificate } from "@swf2es/player-hosts/node";
+import type {
+  Certificate,
+  CertificateStatus,
+  SecureSocketEvents,
+  SecureSocketOptions,
+} from "../../../packages/player/dist/index.js";
+import { readCertificate } from "../../../packages/player-hosts/dist/certificates.js";
+import { tlsCertificates } from "../../tls-certificates.ts";
+
+const certificates = tlsCertificates();
+const host = nodeSocketHost().secure;
+assert.ok(host);
+after(certificates.dispose);
+
+async function server(cert = certificates.leaf, key = certificates.key) {
+  const peers = new Set<Socket>();
+  const server = createServer({ cert, key }, (peer) => {
+    peers.add(peer);
+    peer.on("error", () => {});
+    peer.on("close", () => peers.delete(peer));
+    peer.on("data", (bytes) => peer.write(bytes));
+  });
+  server.on("connection", (peer) => {
+    peers.add(peer);
+    peer.on("close", () => peers.delete(peer));
+  });
+  server.on("tlsClientError", () => {});
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  return {
+    port,
+    close: async () => {
+      for (const peer of peers) {
+        peer.destroy();
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
+}
+
+function recorded(accept?: boolean) {
+  const log: string[] = [];
+  let certificate: Certificate | null = null;
+  let status: CertificateStatus = "unknown";
+  let resolve!: () => void;
+  const done = new Promise<void>((r) => {
+    resolve = r;
+  });
+  const events: SecureSocketEvents = {
+    open: () => {
+      log.push("open");
+      resolve();
+    },
+    data: (bytes) => log.push(`data:${Buffer.from(bytes).toString()}`),
+    error: () => {
+      log.push("error");
+      resolve();
+    },
+    close: () => log.push("close"),
+    certificate: (result, data) => {
+      status = result;
+      certificate = data;
+      log.push(`certificate:${result}`);
+    },
+    certificateError: (proceed) => {
+      log.push("certificateError");
+      proceed(accept === true);
+    },
+  };
+  return { log, events, done, status: () => status, certificate: () => certificate };
+}
+
+const options = (trusted = true): SecureSocketOptions => ({
+  certificates: [{ encoded: certificates.ca, trusted }],
+  timeout: 2000,
+});
+
+test("DER metadata matches AIR for RSA, EC, repeated names and UTF-8", () => {
+  const rsa = readCertificate(certificates.leafDer);
+  assert.equal(rsa.version, 2);
+  assert.equal(rsa.serialNumber, "80ab12");
+  assert.equal(rsa.signatureAlgorithmOID, "OID.1.2.840.113549.1.1.11");
+  assert.equal(rsa.subjectPublicKeyAlgorithmOID, "OID.1.2.840.113549.1.1.1");
+  assert.equal(
+    rsa.subjectPublicKey,
+    new X509Certificate(certificates.leaf).publicKey
+      .export({ format: "der", type: "pkcs1" })
+      .toString("hex"),
+  );
+  assert.equal(rsa.subject.organizationalUnitName, "First");
+  assert.equal(
+    rsa.subject.text,
+    "/C=FI/ST=Uusimaa/L=Helsinki/O=swf2es Test/OU=First/OU=Second/CN=localhost",
+  );
+  assert.equal(rsa.issuer.text, "/CN=swf2es test root");
+  assert.equal(rsa.issuer.countryName, null);
+  assert.equal(rsa.signatureAlgorithmParams.length, 0);
+  assert.equal(rsa.issuerUniqueID, null);
+  assert.equal(rsa.subjectUniqueID, null);
+  assert.deepEqual(rsa.encoded, new Uint8Array(certificates.leafDer));
+  const ec = readCertificate(certificates.selfDer);
+  assert.equal(ec.signatureAlgorithmOID, "OID.1.2.840.10045.4.3.2");
+  assert.equal(ec.subjectPublicKeyAlgorithmOID, "OID.1.2.840.10045.2.1");
+  assert.equal(ec.subjectPublicKey.length, 130);
+  assert.equal(ec.subject.organizationName, "Café");
+  assert.equal(ec.subject.commonName, "localhost");
+  assert.equal(
+    ec.subject.text,
+    "/C=FI/O=Caf\\xC3\\xA9/OU=A/CN=localhost/CN=Second/emailAddress=test@example.invalid",
+  );
+  assert.equal(ec.signatureAlgorithmParams.length, 0);
+});
+
+test("DER validation refuses PEM, truncation, extra bytes and corrupt lengths", () => {
+  assert.equal(validCertificate(certificates.ca), true);
+  for (const bytes of [
+    new Uint8Array(),
+    certificates.leaf,
+    certificates.ca.subarray(0, 10),
+    Buffer.concat([certificates.ca, Buffer.from([0])]),
+    Uint8Array.of(48, 128, 0, 0),
+    Uint8Array.of(48, 132, 255, 255, 255, 255),
+  ]) {
+    assert.equal(validCertificate(bytes), false);
+  }
+});
+
+test("TLS opens only after trust validation, then exchanges binary data", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server();
+  const seen = recorded();
+  const transport = host.connect("localhost", peer.port, seen.events, options());
+  try {
+    transport.send(Buffer.from("too soon"));
+    await seen.done;
+    assert.deepEqual(seen.log, ["certificate:trusted", "open"]);
+    assert.equal(seen.certificate()?.serialNumber, "80ab12");
+    const received = new Promise<void>((resolve) => {
+      seen.events.data = (bytes) => {
+        assert.deepEqual(new Uint8Array(bytes), Uint8Array.of(0, 1, 255, 128));
+        resolve();
+      };
+    });
+    // The host retains the event object, so this also checks real TLS delivery.
+    transport.send(Uint8Array.of(0, 1, 255, 128));
+    await received;
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
+test("untrusted roots never become anchors and trust does not leak between connections", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server();
+  try {
+    for (const trusted of [false, true, false]) {
+      const seen = recorded();
+      const transport = host.connect("localhost", peer.port, seen.events, options(trusted));
+      try {
+        await seen.done;
+        assert.equal(seen.log.includes("open"), trusted);
+        assert.equal(seen.status(), trusted ? "trusted" : "untrustedSigners");
+        assert.ok(seen.certificate());
+      } finally {
+        transport.close();
+      }
+    }
+  } finally {
+    await peer.close();
+  }
+});
+
+test("an untrusted intermediate completes a chain only to a trusted root", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server(certificates.chain);
+  try {
+    for (const [rootTrusted, intermediateTrusted] of [
+      [true, false],
+      [false, false],
+      [false, true],
+    ]) {
+      const seen = recorded();
+      const config = options(rootTrusted);
+      config.certificates = [
+        ...config.certificates,
+        { encoded: certificates.intermediate, trusted: intermediateTrusted },
+      ];
+      const transport = host.connect("localhost", peer.port, seen.events, config);
+      try {
+        await seen.done;
+        assert.equal(seen.log.includes("open"), rootTrusted);
+      } finally {
+        transport.close();
+      }
+    }
+  } finally {
+    await peer.close();
+  }
+});
+
+test("expiry and hostname checks cannot be accepted through the self-signed exception", {
+  timeout: 10000,
+}, async () => {
+  for (const [cert, hostname, status] of [
+    [certificates.expired, "localhost", "expired"],
+    [certificates.future, "localhost", "notYetValid"],
+    [certificates.leaf, "127.0.0.1", "principalMismatch"],
+  ] as const) {
+    const peer = await server(cert);
+    const seen = recorded(true);
+    const transport = host.connect(hostname, peer.port, seen.events, options());
+    try {
+      await seen.done;
+      assert.equal(seen.status(), status);
+      assert.equal(seen.log.includes("open"), false);
+      assert.equal(seen.log.includes("certificateError"), false);
+    } finally {
+      transport.close();
+      await peer.close();
+    }
+  }
+});
+
+test("a self-signed leaf requires explicit acceptance, with the status reported before open", {
+  timeout: 10000,
+}, async () => {
+  const peer = await server(certificates.self, certificates.selfKey);
+  try {
+    for (const accept of [false, true]) {
+      const seen = recorded(accept);
+      const transport = host.connect("localhost", peer.port, seen.events, {
+        certificates: [],
+        timeout: 2000,
+      });
+      try {
+        await seen.done;
+        assert.equal(seen.log[0], "certificateError");
+        assert.equal(seen.log.includes("open"), accept);
+      } finally {
+        transport.close();
+      }
+    }
+  } finally {
+    await peer.close();
+  }
+});
+
+test("closing from a certificate notification prevents open", { timeout: 10000 }, async () => {
+  const peer = await server();
+  const seen = recorded();
+  const transport = host.connect("localhost", peer.port, seen.events, options());
+  const certificate = seen.events.certificate;
+  const closed = new Promise<void>((resolve) => {
+    seen.events.close = () => resolve();
+  });
+  seen.events.certificate = (status, data) => {
+    certificate(status, data);
+    transport.close();
+  };
+  try {
+    await closed;
+    assert.deepEqual(seen.log, ["certificate:trusted"]);
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
+test("self-signed consent cannot bypass the target hostname", { timeout: 10000 }, async () => {
+  const peer = await server(certificates.self, certificates.selfKey);
+  const seen = recorded(true);
+  const transport = host.connect("127.0.0.1", peer.port, seen.events, options());
+  try {
+    await seen.done;
+    assert.equal(seen.status(), "principalMismatch");
+    assert.equal(seen.log.includes("certificateError"), false);
+    assert.equal(seen.log.includes("open"), false);
+  } finally {
+    transport.close();
+    await peer.close();
+  }
+});
+
+test("a stalled handshake times out and closing it cancels callbacks", {
+  timeout: 10000,
+}, async () => {
+  const peers = new Set<import("node:net").Socket>();
+  const server = tcpServer((peer) => {
+    peers.add(peer);
+    peer.on("error", () => {});
+    peer.on("close", () => peers.delete(peer));
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const port = (server.address() as { port: number }).port;
+  try {
+    const seen = recorded();
+    const transport = tlsSocket(tcpConnect(port, "127.0.0.1"), "localhost", seen.events, {
+      certificates: [],
+      timeout: 250,
+    });
+    await seen.done;
+    assert.equal(seen.log.includes("error"), true);
+    assert.equal(seen.log.includes("open"), false);
+    transport.close();
+    const closed = recorded();
+    const other = tlsSocket(tcpConnect(port, "127.0.0.1"), "localhost", closed.events, {
+      certificates: [],
+      timeout: 250,
+    });
+    other.close();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.deepEqual(closed.log, ["close"]);
+  } finally {
+    for (const peer of peers) {
+      peer.destroy();
+    }
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});

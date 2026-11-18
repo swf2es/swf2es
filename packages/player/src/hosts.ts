@@ -5,6 +5,7 @@
 // renderer's draws, fetches, sockets and the threads workers run on.
 import type { avm2 } from "@swf2es/runtime";
 import type { BitmapStore } from "./bitmap/bitmap.js";
+import type { Certificate } from "./certificates.js";
 import type { DisplayObject } from "./display/display.js";
 import type { VideoPicture } from "./media/video.js";
 import type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";
@@ -391,11 +392,53 @@ export interface SocketOptions {
 }
 
 export interface SocketHost {
+  /** Absent on browser TCP relays: they cannot establish or validate TLS themselves. */
+  secure?: SecureSocketHost;
   connect(
     host: string,
     port: number,
     events: SocketEvents,
     options?: SocketOptions,
+  ): SocketTransport;
+}
+
+export type CertificateStatus =
+  | "unknown"
+  | "trusted"
+  | "untrustedSigners"
+  | "principalMismatch"
+  | "expired"
+  | "notYetValid"
+  | "revoked"
+  | "invalidChain"
+  | "invalid";
+
+export interface SocketCertificate {
+  encoded: Uint8Array;
+  trusted: boolean;
+}
+
+export interface SecureSocketOptions extends SocketOptions {
+  /** Per socket, never a change to the process or operating system's trust store. */
+  certificates: readonly SocketCertificate[];
+  timeout: number;
+}
+
+export interface SecureSocketEvents extends SocketEvents {
+  /** The validation result, before open or error; an unsuccessful handshake may have no certificate. */
+  certificate(status: CertificateStatus, certificate: Certificate | null): void;
+  /** AIR 51's self-signed leaf exception. Refuse unless the application explicitly accepts it. */
+  certificateError?(proceed: (accepted: boolean) => void): void;
+}
+
+export interface SecureSocketHost {
+  /** Synchronous DER validation for addBinaryChainBuildingCertificate's ArgumentError. */
+  isCertificate(bytes: Uint8Array): boolean;
+  connect(
+    host: string,
+    port: number,
+    events: SecureSocketEvents,
+    options: SecureSocketOptions,
   ): SocketTransport;
 }
 

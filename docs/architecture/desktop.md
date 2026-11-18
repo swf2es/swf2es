@@ -636,10 +636,22 @@ socket through the proxy takes it once the tunnel is up, Nagle's
 algorithm staying on through the handshake, which never writes twice
 without an answer between, so nothing in it waits. A page's sockets
 close, silently, as it navigates or reloads, as its process goes, and
-with it. TLS
-(`SecureSocket`) waits for the player to have it.
+with it. A socket reserved while its permission dialog is open counts toward
+the limit; closing it or ending the page invalidates that reservation, so a
+late answer cannot open it.
 
-Each socket is read into a 64 KB buffer of its own (net's `onread`), and
+`flash.net.SecureSocket` uses those same checks and routes. Once TCP or the
+proxy tunnel connects, `player-hosts/node` wraps it in TLS and validates the
+original hostname, retaining the policy's pinned address for routing. It
+reports a certificate snapshot before the connect or error event over IPC.
+Certificate getters stay in the renderer; only adding a DER certificate
+needs synchronous validation in the main process. Additions are bounded by
+64 certificates and 4 MB per connection. A pending self-signed-leaf exception
+is sent to AIR-mode ActionScript as AIR 51's `certificateError`; closing or ending the
+page discards any later answer. The app's global certificate-error switch
+does not disable SecureSocket's validation.
+
+Each plain socket is read into a 64 KB buffer of its own (net's `onread`), and
 each read copied out at its length, where Node's stream would make a
 Buffer of the read besides: Electron's IPC sends a typed array's whole
 store, so a view of the buffer would not do. A socket's reads that go to
@@ -650,7 +662,8 @@ more than the copy. A socket through the proxy is read the same way from
 its start, its handshake included; it is paused once the tunnel is made,
 the bytes that came with the proxy's reply are its first data, and it
 reads on once the page is told it is open. Its reads never pause it, as
-its stream never paused before.
+its stream never paused before. TLS uses Node's TLS stream and copies its
+plaintext into the same IPC batches after validation.
 
 The page is sent its sockets' events, and its WebSockets', gathered
 (`src/main/relay.ts`): one IPC message, `socket:events` or
@@ -930,7 +943,7 @@ by its URL alone, with its query and none of the last's, again as the
 page reloads. CI's `desktop`
 workflow fetches Electron and runs them.
 
-Not done yet: packaging and installers, `SecureSocket`, Flash's Settings
+Not done yet: packaging and installers, Flash's Settings
 Manager for trusting a SWF or directory (localTrusted), each loaded SWF
 in a sandbox of its own rather than its loader's, a POST from
 navigateToURL (the system's browser gets its URL alone), reading
