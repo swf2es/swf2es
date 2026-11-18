@@ -201,6 +201,7 @@ test("an odd-width layer read releases its blur scratch before the output is pla
     const kernel = new BitmapKernel();
     const vertical = { ...glow, quality: 1, blurX: 0, blurY };
     assert.ok(kernel.layer(large(width, height), area, vertical, [[0, 0]]));
+    assert.ok(kernel.capacity > 0);
     return kernel.capacity;
   };
 
