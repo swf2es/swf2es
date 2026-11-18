@@ -1154,20 +1154,22 @@ function originOf(url: string): string {
 }
 
 /**
- * `url` against `base`, enough for a SWF's relative paths: one with a
- * scheme is itself, one from the root keeps the base's origin, and any
- * other replaces the base's last segment.
+ * `url` against `base`, as Flash resolves a load's URL, AVM1's too, and
+ * enough for a SWF's relative paths: one with a scheme is itself, one from
+ * the root keeps the base's origin, and any other replaces the last
+ * segment of the base's path, its query and fragment left out (a page's
+ * `play.php?file=/games/a.swf` or `#/game/5` is no directory).
  */
-/** `url` against `base`, as Flash resolves a load's URL: AVM1's loads resolve by it too. */
 export function resolve(base: string, url: string): string {
   if (/^[a-z][a-z0-9+.-]*:/i.test(url)) {
     return url;
   }
 
-  const origin = base.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i)?.[0] ?? "";
+  const path = base.replace(/[?#].*$/s, "");
+  const origin = path.match(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i)?.[0] ?? "";
   if (url.startsWith("/")) {
     return origin + url;
   }
 
-  return base.slice(0, base.lastIndexOf("/") + 1) + url;
+  return path.slice(0, path.lastIndexOf("/") + 1) + url;
 }

@@ -5,6 +5,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type FetchRequest, platformCapabilities } from "../../../../packages/player/dist/hosts.js";
+import { resolve } from "../../../../packages/player/dist/scripting/loads.js";
 import { files, movie, play, take } from "./network.ts";
 
 test("the main SWF's URL query and flashvars are its root's variables before its first frame, the flashvars' names winning", async () => {
@@ -280,4 +281,20 @@ createEmptyMovieClip("b", 2).loadMovie("sub/child.swf");`,
     "/page/sub/child.swf",
     "/page/sub/sibling.swf",
   ]);
+});
+
+test("a base's query and fragment are no directory: a relative URL replaces its path's last segment", () => {
+  assert.equal(
+    resolve("https://site.test/play.php?file=/games/a.swf", "child.swf"),
+    "https://site.test/child.swf",
+  );
+  assert.equal(
+    resolve("https://site.test/app/#/game/5", "child.swf"),
+    "https://site.test/app/child.swf",
+  );
+  assert.equal(
+    resolve("https://site.test/app/?a=1#b/c", "/root.swf"),
+    "https://site.test/root.swf",
+  );
+  assert.equal(resolve("file:///test.swf", "sub/child.swf"), "file:///sub/child.swf");
 });
