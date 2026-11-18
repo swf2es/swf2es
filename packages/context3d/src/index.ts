@@ -13,6 +13,10 @@ export {
   type CullFace,
   compressedFormat,
   FRAGMENT_CONSTANTS,
+  isSamplerBiasError,
+  isScissorBoundsError,
+  isTextureBindingError,
+  isVertexOffsetError,
   MOST_BACK_BUFFER,
   MOST_CUBE,
   PROFILES,
@@ -45,4 +49,10 @@ export {
   VertexOffsetError,
 } from "./backend.js";
 export { blockBytes, type DxtEncoder, decodeDxt, encodeDxt } from "./dxt.js";
-export { Context3DError, type Context3DErrorReason } from "./errors.js";
+export {
+  Context3DError,
+  type Context3DErrorKind,
+  type Context3DErrorReason,
+  context3DErrorKind,
+  isContext3DError,
+} from "./errors.js";

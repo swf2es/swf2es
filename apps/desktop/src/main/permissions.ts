@@ -12,13 +12,14 @@ const asking = new Map<string, Promise<boolean>>();
  * Whether the SWF playing may connect a socket to `host`:`port`, and where
  * to: only with the network, and only as the user allows, once or always
  * for that SWF, when it first asks for that server; and for a remote SWF,
- * as that server's socket policy allows, at the address it came from.
+ * as that server's socket policy allows, at the address it came from, or
+ * --ignore-policy-files in its place.
  * Denied where no one can be asked.
  */
 export async function permitSocket(
   host: string,
   port: number,
-): Promise<{ address?: string } | null> {
+): Promise<{ address?: string; policyIgnored?: boolean } | null> {
   // AIR's application sandbox connects where it likes, unasked, with no socket policy.
   if (sandbox.application) {
     return {};
@@ -41,7 +42,7 @@ export async function permitSocket(
   }
 
   try {
-    return { address: await network.socketAddress(host, port) };
+    return await network.socketGrant(host, port);
   } catch (error) {
     process.stderr.write(`swf2es: no socket to ${endpoint}: ${(error as Error).message}\n`);
     return null;

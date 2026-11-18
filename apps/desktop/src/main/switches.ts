@@ -1,11 +1,12 @@
 // The command line's switches for this run alone, and what they make:
-// --trace and the network's logs, --ignore-certificate-errors and --proxy,
-// the network judged through them and what opens an AIR application's
-// WebSockets, each said on stderr as the app starts; --no-http-cache;
+// --trace and the network's logs, --ignore-certificate-errors,
+// --ignore-policy-files and --proxy, the network judged through them and
+// what opens an AIR application's WebSockets, each said on stderr as the
+// app starts; --no-http-cache;
 // --flashvars and --param, the SWF's embedding (embedding.ts); and --software-gl.
 import { embeddingArguments } from "./embedding.ts";
 import { Network } from "./network.ts";
-import { unverifiedHosts } from "./network-rules.ts";
+import { policyIgnoredHosts, policyIgnoredNotice, unverifiedHosts } from "./network-rules.ts";
 import { describeProxy, proxyArgument } from "./proxy.ts";
 import type { WebSocketOptions } from "./websocket-connections.ts";
 
@@ -40,7 +41,9 @@ export const netLog = logNetwork ? (line: string) => process.stderr.write(`${lin
  * run alone, never kept, and said aloud: anyone on the way to such a host
  * can read and change what the SWF loads from it.
  */
-const unverified = unverifiedHosts(process.argv.slice(1));
+const unverified = unverifiedHosts(process.argv.slice(1), (line) =>
+  process.stderr.write(`${line}\n`),
+);
 if (unverified) {
   process.stderr.write(
     unverified.all
@@ -51,6 +54,33 @@ if (unverified) {
 
 const unverifiedHost = (host: string) =>
   !!unverified && (unverified.all || unverified.hosts.includes(host.toLowerCase()));
+
+/**
+ * --ignore-policy-files[=host,...]: hosts whose cross-domain policy files
+ * are taken to grant the SWF whatever one could, for a user who chooses to
+ * let it read their data: with the switch alone, every host at a public
+ * address; named, those, wherever they are. For this run alone, never
+ * kept, and said aloud: the SWF reads what this machine reaches of them.
+ */
+const policyWarnings: string[] = [];
+export const ignorePolicy = policyIgnoredHosts(process.argv.slice(1), (line) =>
+  policyWarnings.push(line),
+);
+
+/**
+ * Say on stderr what --ignore-policy-files covers, and what its list does
+ * not mean as written: by the start that plays, not by a second one that
+ * hands its SWF to the app already open, which plays it as it started.
+ */
+export function announcePolicySwitch(): void {
+  for (const line of policyWarnings) {
+    process.stderr.write(`${line}\n`);
+  }
+
+  if (ignorePolicy) {
+    process.stderr.write(`${policyIgnoredNotice(ignorePolicy)}\n`);
+  }
+}
 
 /**
  * --proxy=<url>: what the SWF's requests, sockets and WebSockets go
@@ -74,7 +104,7 @@ if (proxy) {
 /** What --log-network adds to a line of a connection that went through the proxy. */
 export const via = proxy ? " via proxy" : "";
 export const warn = (message: string) => process.stderr.write(`swf2es: ${message}\n`);
-export const network = new Network({ unverified: unverifiedHost, proxy });
+export const network = new Network({ unverified: unverifiedHost, ignorePolicy, proxy });
 /**
  * How an AIR application's WebSockets connect: through the proxy where
  * there is one, a wss: server's certificate unchecked where

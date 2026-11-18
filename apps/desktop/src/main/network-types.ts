@@ -3,6 +3,7 @@
 // limits, and the state one movie's requests share.
 import type { AddressClass } from "./addresses.ts";
 import type { PoolLimits } from "./http-pool.ts";
+import type { HostList } from "./network-rules.ts";
 import type { Requester, SocketPolicy, UrlPolicy } from "./policy.ts";
 import type { ProxyConfig } from "./proxy.ts";
 
@@ -32,6 +33,11 @@ export interface NetResponse {
   cache?: "hit" | "revalidated";
   /** Whether it came over a connection kept from an earlier request, for --log-network. */
   reused?: true;
+  /**
+   * Whether --ignore-policy-files let it through where a policy file would
+   * have been asked, for --log-network.
+   */
+  policyIgnored?: true;
 }
 
 /** A request refused, with why, for the terminal; the SWF sees a failed load. */
@@ -123,6 +129,12 @@ export interface NetworkOptions {
    */
   unverified?: (host: string) => boolean;
   limits?: Partial<Limits>;
+  /**
+   * The hosts whose policy files are taken to grant the SWF, URL and socket
+   * policies alike (--ignore-policy-files, network-rules.ts' policyIgnored).
+   * None by default.
+   */
+  ignorePolicy?: HostList | null;
   /** Where a socket server keeps its master policy: 843. */
   socketPolicyPort?: number;
   /** What every connection goes through (--proxy); none by default. */
@@ -141,6 +153,7 @@ export interface Origin {
 
 export interface Pinned {
   address: string;
+  place: AddressClass;
   rank: number;
 }
 

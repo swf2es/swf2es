@@ -39,6 +39,7 @@ export async function bundleApp(here: string, out: string, player: string): Prom
     compiler.run((error, result) => (error || !result ? fail(error) : done(result))),
   );
   await new Promise((done) => compiler.close(done));
+
   if (stats.hasErrors()) {
     throw new Error(stats.toString({ colors: false, all: false, errors: true }));
   }

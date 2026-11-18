@@ -278,9 +278,123 @@ async function check(): Promise<void> {
             );
           },
         ],
-        ...isolationChecks({ value, send, navigate }),
+        ...isolationChecks({ value, send, navigate, listen }),
         [
-          "a cold visit loads the player in a few files, its loading shown until the first frame",
+          "a player that fails to load says so in place of its loading state",
+          async () => {
+            // A first visit, as no service worker then asks for the files where the page's
+            // blocked URLs would not reach it.
+            await send("Storage.clearDataForOrigin", {
+              origin: new URL(base).origin,
+              storageTypes: "all",
+            });
+            await send("Network.clearBrowserCache");
+            await send("Network.enable");
+            await send("Network.setBlockedURLs", { urls: ["*/swf2es/player/swf2es.js"] });
+            try {
+              await send("Page.navigate", { url: `${base}play/` });
+              await until(
+                "document.getElementById('status')?.textContent === 'The player did not load. Reload the page to try again.'",
+              );
+              assert.equal(
+                await value<string>("document.getElementById('loading-label').textContent"),
+                "The player did not load. Reload the page to try again.",
+              );
+              assert.equal(
+                await value<boolean>("document.getElementById('loading').hidden"),
+                false,
+              );
+            } finally {
+              await send("Network.setBlockedURLs", { urls: [] });
+              await send("Network.disable");
+            }
+
+            // A page script that throws as it runs, which the window hears as an ErrorEvent.
+            listen("Fetch.requestPaused", (params) => {
+              void send("Fetch.fulfillRequest", {
+                requestId: params.requestId,
+                responseCode: 200,
+                responseHeaders: [{ name: "Content-Type", value: "text/javascript" }],
+                body: Buffer.from('throw new Error("broken on purpose");').toString("base64"),
+              });
+            });
+            await send("Fetch.enable", { patterns: [{ urlPattern: "*/swf2es/app/main.js" }] });
+            try {
+              await send("Page.navigate", { url: `${base}play/` });
+              await until(
+                "document.getElementById('status')?.textContent === 'The player did not load. Reload the page to try again.'",
+              );
+            } finally {
+              await send("Fetch.disable");
+              listen("Fetch.requestPaused", () => {});
+            }
+          },
+        ],
+        [
+          "the failure message hears only this site's player scripts, and only until it runs",
+          async () => {
+            // Before the page's module runs: as the document turns interactive, its deferred
+            // scripts not yet run. An error elsewhere is not the player's; a chunk's is.
+            const { identifier } = await send<{ identifier: string }>(
+              "Page.addScriptToEvaluateOnNewDocument",
+              {
+                source: `document.addEventListener("readystatechange", () => {
+                  if (document.readyState !== "interactive") return;
+                  const status = () => document.getElementById("status").textContent;
+                  const fail = (filename) => dispatchEvent(new ErrorEvent("error", { filename }));
+                  fail("https://elsewhere.example/swf2es/app/main.js");
+                  fail(location.origin + "/elsewhere/app/main.js");
+                  fail(location.origin + "/swf2es/app/deeper/main.js");
+                  globalThis.foreignStatus = status();
+                  fail(location.origin + "/swf2es/player/chunks/0123456789abcdef.js");
+                  globalThis.chunkStatus = status();
+                  globalThis.chunkProgressHidden = document.getElementById("loading-progress").hidden;
+                });`,
+              },
+            );
+            try {
+              await send("Page.navigate", { url: `${base}play/` });
+              // Through the reload that isolates it; asked while the page goes, it may not answer.
+              for (const start = Date.now(); ; ) {
+                const ready = await evaluate<boolean>("globalThis.swf2esPlayerReady === true").then(
+                  (r) => r.value === true,
+                  () => false,
+                );
+                if (ready) {
+                  break;
+                }
+
+                assert.ok(Date.now() - start < 60_000, "the player did not start");
+                await new Promise((wait) => setTimeout(wait, 100));
+              }
+            } finally {
+              await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+            }
+
+            assert.equal(await value<string>("foreignStatus"), "Loading player…");
+            assert.equal(
+              await value<string>("chunkStatus"),
+              "The player did not load. Reload the page to try again.",
+            );
+            assert.equal(await value<boolean>("chunkProgressHidden"), true);
+            // Running, the player cleared it; an error of its own script now is a SWF's or a
+            // bug, which the console shows, not a player that did not load.
+            assert.equal(await value<string>("document.getElementById('status').textContent"), "");
+            await value(
+              `(dispatchEvent(new ErrorEvent("error", { filename: new URL("../app/main.js", location.href).href })), true)`,
+            );
+            assert.equal(await value<string>("document.getElementById('status').textContent"), "");
+            // A SWF loading after that shows its progress, which the failure had hidden.
+            await value("document.querySelector('#demos button').click()");
+            await until("document.getElementById('status').textContent.startsWith('Playing ')");
+            assert.equal(
+              await value<boolean>("document.getElementById('loading-progress').hidden"),
+              false,
+            );
+          },
+        ],
+        [
+          "a cold visit fetches the player as a few files, its loading shown until the first frame",
           async () => {
             // What the stage's loading state showed, in each document, as it changed.
             const { identifier } = await send<{ identifier: string }>(
@@ -298,10 +412,12 @@ async function check(): Promise<void> {
               },
             );
             const urls = new Set<string>();
+            let requests = 0;
             listen("Network.requestWillBeSent", (params) => {
               const { url } = params.request as { url: string };
               if (/^https?:/.test(url)) {
                 urls.add(url);
+                requests++;
               }
             });
             await send("Network.enable");
@@ -331,8 +447,10 @@ async function check(): Promise<void> {
               await send("Page.removeScriptToEvaluateOnNewDocument", { identifier });
             }
 
-            // The browser build's few files, where the packages' own modules were some 900.
+            // The browser build's few files, where the packages' own modules were some 900, and
+            // the requests for them, each asked again by the reload that isolates the page.
             assert.ok(urls.size <= 30, `${urls.size} files:\n${[...urls].join("\n")}`);
+            assert.ok(requests <= 60, `${requests} requests for ${urls.size} files`);
             assert.ok(
               [...urls].some((u) => u.endsWith("/swf2es/player/swf2es.js")),
               "the page did not load the browser build",
@@ -341,7 +459,8 @@ async function check(): Promise<void> {
               ![...urls].some((u) => u.includes("/swf2es/modules/")),
               "the page loaded the packages' modules",
             );
-            const seen = await value<string[]>("loadingSeen");
+            // A label caught before its text is parsed is empty.
+            const seen = (await value<string[]>("loadingSeen")).filter((label) => label !== "");
             assert.equal(seen[0], "Loading player…", seen.join(" | "));
             assert.ok(
               seen.includes("Starting bounce.swf…"),

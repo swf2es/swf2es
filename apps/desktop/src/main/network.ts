@@ -2,10 +2,11 @@
 // requests, sent by the main process and judged as Flash Player judged
 // them, by its sandbox and the sites' policy files rather than CORS; with
 // none of the user's credentials, and nothing more private than the SWF
-// reached without that address's grant. The rules, the pool, the cache and
-// the proxy are in docs/architecture/desktop.md ("The network"); the types
-// and limits in network-types.ts, the rules that need no instance in
-// network-rules.ts.
+// reached without that address's grant. --ignore-policy-files stands in
+// for policy files' answers (network-rules.ts' policyIgnored), never for
+// the rest. The rules, the pool, the cache and the proxy are in
+// docs/architecture/desktop.md ("The network"); the types and limits in
+// network-types.ts, the rules that need no instance in network-rules.ts.
 //
 // Without Electron, so that node tests it (tests/desktop/network.test.ts).
 import { lookup } from "node:dns/promises";
@@ -23,6 +24,9 @@ import {
   checkPort,
   defaultCa,
   describe,
+  type HostList,
+  hostOf,
+  policyIgnored,
   proxyFault,
   redirectOf,
   refererFor,
@@ -124,6 +128,7 @@ export class Network {
   private readonly classify: (address: string) => AddressClass | null;
   private readonly ca: string | string[] | undefined;
   private readonly unverified: (host: string) => boolean;
+  private readonly ignorePolicy: HostList | null;
   private readonly socketPolicyPort: number;
   private readonly proxy: ProxyConfig | null;
   /** The keep-alive connections requests share (http-pool.ts), closed with each page. */
@@ -143,6 +148,7 @@ export class Network {
     this.classify = options.classify ?? addressClass;
     this.ca = options.ca ?? defaultCa();
     this.unverified = options.unverified ?? (() => false);
+    this.ignorePolicy = options.ignorePolicy ?? null;
     this.socketPolicyPort = options.socketPolicyPort ?? 843;
     this.proxy = options.proxy ?? null;
     this.pool = new ConnectionPool({ ca: this.ca, proxy: this.proxy, limits: options.pool });
@@ -268,6 +274,17 @@ export class Network {
    * fetched from the address the socket then connects to.
    */
   async socketAddress(host: string, port: number): Promise<string> {
+    return (await this.socketGrant(host, port)).address;
+  }
+
+  /**
+   * socketAddress's address, and whether --ignore-policy-files let the
+   * socket through in place of a socket policy, for --log-network.
+   */
+  async socketGrant(
+    host: string,
+    port: number,
+  ): Promise<{ address: string; policyIgnored: boolean }> {
     const session = this.session;
     const origin = session?.origin;
     if (!session || !origin) {
@@ -290,8 +307,15 @@ export class Network {
     host: string,
     port: number,
     deadline: AbortSignal,
-  ): Promise<string> {
-    const target = await this.pin(host, deadline);
+  ): Promise<{ address: string; policyIgnored: boolean }> {
+    // The host as a URL would have it, resolved as such, so that the switch judges the very
+    // name resolved; one that is no host alone is resolved as given, and never granted by it.
+    const name = hostOf(host);
+    const target = await this.pin(name ?? host, deadline);
+    if (name !== null && policyIgnored(this.ignorePolicy, name, target.place)) {
+      return { address: target.address, policyIgnored: true };
+    }
+
     const policy = (at: number, timeout: number) =>
       abortable(
         cached(session.socketPolicies, `${target.address}|${at}`, () =>
@@ -301,7 +325,7 @@ export class Network {
       );
     const master = await policy(this.socketPolicyPort, this.limits.masterSocketTimeout);
     if (allowsSocket(master, [], origin.requester, port)) {
-      return target.address;
+      return { address: target.address, policyIgnored: false };
     }
 
     if (socketMetaPolicy(master) === "all") {
@@ -318,7 +342,7 @@ export class Network {
 
         const other = await policy(at, this.limits.policyTimeout);
         if (other && allowsSocket(master, [other], origin.requester, port)) {
-          return target.address;
+          return { address: target.address, policyIgnored: false };
         }
       }
     }
@@ -482,7 +506,7 @@ export class Network {
       throw new Refused(`${name} is at ${address}, which no request reaches`);
     }
 
-    return { address, rank: RANK[place] };
+    return { address, place, rank: RANK[place] };
   }
 
   /** The movie's SWF, from wherever the user asked; no redirect takes it somewhere more private. */
@@ -564,6 +588,8 @@ export class Network {
 
     let { method, headers, body } = request;
     let url = request.target;
+    // Whether --ignore-policy-files stood in for a policy on the way.
+    let ignored = false;
     for (let hop = 0; hop <= this.limits.redirects; hop++) {
       checkPort(url);
       const target = await this.pin(url.hostname, signal);
@@ -572,13 +598,18 @@ export class Network {
       const custom = headers.map(([n]) => n).filter((n) => n.toLowerCase() !== "content-type");
       const needsAccess = !application && (morePrivate || (!same && request.purpose === "data"));
       const needsHeaders = !application && !same && custom.length > 0;
-      if (needsAccess || needsHeaders) {
+      const needsPolicy = needsAccess || needsHeaders;
+      if (needsPolicy && policyIgnored(this.ignorePolicy, url.hostname, target.place)) {
+        ignored = true;
+      } else if (needsPolicy) {
         const policies = await abortable(this.policiesFor(session, url, target.address), signal);
         if (needsAccess && !allowsAccess(policies, requester, url)) {
           throw new Refused(
             morePrivate
               ? `${url.host} is at ${target.address}, more private than the SWF, ` +
-                  `and no policy file there grants ${describe(requester)}`
+                  `and no policy file there grants ${describe(requester)}` +
+                  // The switch alone never reaches it: said, so that the user knows to name it.
+                  (this.ignorePolicy ? " (--ignore-policy-files reaches it only by name)" : "")
               : `no policy file on ${url.origin} grants ${describe(requester)}`,
           );
         }
@@ -600,7 +631,11 @@ export class Network {
       });
       const next = redirectOf(url, response);
       if (!next) {
-        return { ...response, ...(url.href === request.url ? {} : { url: url.href }) };
+        return {
+          ...response,
+          ...(url.href === request.url ? {} : { url: url.href }),
+          ...(ignored ? { policyIgnored: true } : {}),
+        };
       }
 
       // As browsers do: a 303, and a 301 or 302 after a POST, go on as a GET without the body.

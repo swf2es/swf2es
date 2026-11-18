@@ -3,10 +3,13 @@ import {
   type BlendFactor,
   COMPARE_MODES,
   type CompareMode,
-  Context3DError,
   CULL_FACES,
   type CullFace,
   compressedFormat,
+  isContext3DError,
+  isScissorBoundsError,
+  isTextureBindingError,
+  isVertexOffsetError,
   MOST_BACK_BUFFER,
   type ProgramType,
   profileLimits,
@@ -17,15 +20,12 @@ import {
   type SamplerFilter,
   type SamplerMip,
   type SamplerWrap,
-  ScissorBoundsError,
   STENCIL_ACTIONS,
   type StencilAction,
   screenPixels,
-  TextureBindingError,
   VERTEX_FORMATS,
   VERTEX_SLOTS,
   type VertexFormat,
-  VertexOffsetError,
 } from "@swf2es/context3d";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../as3/types.js";
@@ -72,7 +72,7 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
       entry.backend.configure(width, height, entry.depth, entry.aa, scale);
     } catch (error) {
       // What the GPU cannot give at the new size, it keeps at the old.
-      if (!(error instanceof Context3DError)) {
+      if (!isContext3DError(error)) {
         throw error;
       }
 
@@ -605,13 +605,13 @@ export function registerContext(natives: avm2.Natives, s: Scripting, bindings: B
 
         entry.backend.draw(buffer(object), first, count);
       } catch (error) {
-        if (error instanceof VertexOffsetError) {
+        if (isVertexOffsetError(error)) {
           throw s.rt.error("RangeError", 3610);
         }
-        if (error instanceof ScissorBoundsError) {
+        if (isScissorBoundsError(error)) {
           throw s.rt.error("Error", 3706);
         }
-        if (error instanceof TextureBindingError) {
+        if (isTextureBindingError(error)) {
           switch (error.reason) {
             case "feedback":
               throw s.rt.error("Error", 3604);

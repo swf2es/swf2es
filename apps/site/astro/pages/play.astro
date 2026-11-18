@@ -9,6 +9,39 @@ import { base, facts } from "../site.ts";
 import "../styles/player.css";
 
 const { build } = facts;
+
+/**
+ * Until the page's script says it is running, a failure to fetch or run it,
+ * or the browser build it imports, says so in place of "Loading player…",
+ * which would otherwise stay. A classic script, ahead of the module, so it
+ * hears both: a module or its imports that fail to load fire error at its
+ * script element, which the window hears only as it captures; one that
+ * throws as it runs, the window's error event.
+ */
+const failure = `(() => {
+  const root = new URL(${JSON.stringify(base)}, location.href);
+  // The page's script, the browser build and its chunks, on this site; not, say, an extension's.
+  const ours = (url) => {
+    if (typeof url !== "string" || url === "") return false;
+    const { origin, pathname } = new URL(url, location.href);
+    if (origin !== root.origin || !pathname.startsWith(root.pathname)) return false;
+    return /^(app|player|player\\/chunks)\\/[^/]+$/.test(pathname.slice(root.pathname.length));
+  };
+  addEventListener("error", (e) => {
+    if (globalThis.swf2esPlayerReady) return;
+    const script = e.target instanceof HTMLScriptElement && ours(e.target.src);
+    if (!script && !(e instanceof ErrorEvent && ours(e.filename))) return;
+    const label = document.getElementById("loading-label");
+    const progress = document.getElementById("loading-progress");
+    const status = document.getElementById("status");
+    if (!label || !progress || !status) return;
+    const message = "The player did not load. Reload the page to try again.";
+    label.textContent = message;
+    progress.hidden = true;
+    status.textContent = message;
+    status.classList.add("error");
+  }, true);
+})();`;
 ---
 
 <StarlightPage
@@ -19,6 +52,9 @@ const { build } = facts;
     template: "splash",
     tableOfContents: false,
     head: [
+      { tag: "script", content: failure },
+      // Without JavaScript, the status line below gives way to one that says so.
+      { tag: "noscript", content: "<style>#status { display: none; }</style>" },
       // Fetched beside the page's script rather than once it has arrived and named it.
       { tag: "link", attrs: { rel: "modulepreload", href: `${base}player/swf2es.js` } },
       { tag: "script", attrs: { type: "module", src: `${base}app/main.js` } },
@@ -60,9 +96,13 @@ const { build } = facts;
           <progress id="loading-progress" max="1" aria-labelledby="loading-label"></progress>
         </div>
       </div>
+      <noscript>
+        <div class="empty loading"><p>The player needs JavaScript, which this browser has turned off.</p></div>
+      </noscript>
     </div>
 
     <p id="status" class="status" role="status" aria-live="polite">Loading player…</p>
+    <noscript><p class="status error">The player needs JavaScript, which this browser has turned off.</p></noscript>
 
     <section class="controls" aria-label="Player controls">
       <label>Quality
