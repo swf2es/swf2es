@@ -87,6 +87,15 @@ const options = (trusted = true): SecureSocketOptions => ({
   timeout: 2000,
 });
 
+async function plaintextRead(socket: Socket): Promise<void> {
+  const deadline = Date.now() + 2000;
+  while (socket.bytesRead === 0 && !socket.destroyed && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+
+  assert.ok(socket.bytesRead > 0, "the greeting must reach TLS before the certificate decision");
+}
+
 test("DER metadata matches AIR for RSA, EC, repeated names and UTF-8", () => {
   const rsa = readCertificate(certificates.leafDer);
   assert.equal(rsa.version, 2);
@@ -307,8 +316,12 @@ test("direct TLS keeps queued reads owned and exact across buffer reuse", {
 
   const peer = await server(certificates.self, certificates.selfKey, payload);
   const seen = recorded();
+  let handshakeBytes = -1;
   const decision = new Promise<(accepted: boolean) => void>((resolve) => {
-    seen.events.certificateError = resolve;
+    seen.events.certificateError = (proceed) => {
+      handshakeBytes = transport.socket.bytesRead;
+      resolve(proceed);
+    };
   });
   const chunks: Uint8Array[] = [];
   const ownership: (boolean | undefined)[] = [];
@@ -335,7 +348,8 @@ test("direct TLS keeps queued reads owned and exact across buffer reuse", {
   transport.socket.on("data", () => streamReads++);
   try {
     const proceed = await decision;
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(handshakeBytes, 0);
+    await plaintextRead(transport.socket);
     assert.equal(length, 0);
     assert.equal(seen.log.includes("open"), false);
     transport.socket.pause = pause;
@@ -373,8 +387,12 @@ test("direct TLS discards early plaintext after refusal, timeout or close", {
   try {
     for (const action of ["refuse", "timeout", "close"] as const) {
       const seen = recorded();
+      let handshakeBytes = -1;
       const decision = new Promise<(accepted: boolean) => void>((resolve) => {
-        seen.events.certificateError = resolve;
+        seen.events.certificateError = (proceed) => {
+          handshakeBytes = transport.socket.bytesRead;
+          resolve(proceed);
+        };
       });
       const closed = new Promise<void>((resolve) => {
         seen.events.close = resolve;
@@ -394,7 +412,8 @@ test("direct TLS discards early plaintext after refusal, timeout or close", {
       transport.socket.pause = () => transport.socket;
       try {
         const proceed = await decision;
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        assert.equal(handshakeBytes, 0);
+        await plaintextRead(transport.socket);
         switch (action) {
           case "refuse":
             proceed(false);
