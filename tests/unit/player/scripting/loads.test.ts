@@ -787,18 +787,22 @@ test("an AVM1 SWF from a URL comes as an AS3 one's content does, its INIT and CO
 });
 
 for (const bytes of [false, true]) {
-  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions without a main timeline's $version`, {
+  test(`an AVM1 SWF loaded from ${bytes ? "bytes" : "a URL"} reads the outer player's Stage dimensions and capabilities without a main timeline's $version`, {
     skip,
   }, async () => {
     const lines: string[] = [];
     const actions = script(
-      `trace(Stage.width + " " + Stage.height); trace(typeof $version); trace(typeof getVersion());`,
+      `trace(Stage.width + " " + Stage.height); trace(typeof $version); trace(typeof getVersion());
+var c = System.capabilities;
+trace(c.version + "|" + c.os + "|" + c.screenResolutionX + "|" + c.isDebugger);`,
       8,
     )(flashAssembler());
     const inner = avm1Swf([w.doAction([...actions.end().bytes()])]);
     const { scripting, player, loader } = await avm1Loading({
       print: (line) => lines.push(line),
       fetch: async () => ({ bytes: inner, status: 200, headers: [] }),
+      platform: { version: "WIN 9,0,115,0", os: "Windows XP" },
+      screenCapabilities: { screenResolutionX: 1024 },
     });
     if (bytes) {
       scripting.loads.requestLoad(loader, inner);
@@ -813,7 +817,13 @@ for (const bytes of [false, true]) {
       player.tick();
     }
 
-    assert.deepEqual(lines, [`${player.width} ${player.height}`, "undefined", "undefined"]);
+    // The outer player's platform, screen and debugger, as AS3's Capabilities reports them.
+    assert.deepEqual(lines, [
+      `${player.width} ${player.height}`,
+      "undefined",
+      "undefined",
+      `WIN 9,0,115,0|Windows XP|1024|${scripting.rt.debugger}`,
+    ]);
     assert.notDeepEqual([player.width, player.height], [30, 20]);
     player.destroy();
   });

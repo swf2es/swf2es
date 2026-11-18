@@ -50,7 +50,9 @@ import {
   type FetchRequest,
   type FetchResult,
   type Navigate,
+  type PlatformCapabilities,
   platformCapabilities,
+  type ScreenCapabilities,
   type SharedObjectStorage,
   type SocketHost,
   screenCapabilities,
@@ -193,6 +195,12 @@ export interface Avm1Options {
   socket?: SocketHost;
   /** Where relative URLs resolve, as a page's `base` parameter has it: the SWF's URL by default. */
   base?: string;
+  /** System.capabilities' and `$version`'s platform, AS3's Capabilities' where AS3 loaded the SWF. */
+  platform?: Partial<PlatformCapabilities>;
+  /** System.capabilities' screen, AS3's where AS3 loaded the SWF. */
+  screenCapabilities?: Partial<ScreenCapabilities>;
+  /** System.capabilities.isDebugger: AS3's runtime's where AS3 loaded the SWF, else false. */
+  debugger?: boolean;
   /**
    * Whether XML.send, which sends without a window, sends: true by
    * default; false refuses it, as allowNetworking "internal" refuses AS3's
@@ -362,6 +370,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The focus, what Tab moves it through and Selection's listeners. */
   readonly focusTracker = new FocusTracker(this);
   readonly url: string;
+  /** What System.capabilities and `$version` report. */
+  private readonly platform: PlatformCapabilities;
+  private readonly screen: ScreenCapabilities;
+  private readonly debugger: boolean;
   /** The page's flashvars for the main SWF's root. */
   private readonly parameters: Readonly<Record<string, string>>;
   readonly storage: SharedObjectStorage;
@@ -390,6 +402,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.onUncaught = options.onUncaught ?? ((error) => console.error(error));
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.url = options.url ?? "";
+    this.platform = { ...platformCapabilities(), ...options.platform };
+    this.screen = screenCapabilities(options.screenCapabilities);
+    this.debugger = options.debugger ?? false;
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
     this.storage = options.storage ?? defaultStorage();
@@ -614,7 +629,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
     realm.global.define(
       "System",
-      systemObject(realm, platformCapabilities(), screenCapabilities(), this.swfVersion),
+      systemObject(realm, this.platform, this.screen, this.debugger, this.swfVersion),
       avm1.DONT_ENUM,
     );
     // Last, as Flash defines it: _global's names are enumerated from the last defined.
@@ -643,7 +658,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    */
   defineVersion(face: avm1.Avm1Object): void {
     if (this.standalone) {
-      face.define("$version", platformCapabilities().version, 0);
+      face.define("$version", this.platform.version, 0);
     }
   }
 

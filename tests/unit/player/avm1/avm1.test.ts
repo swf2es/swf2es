@@ -159,6 +159,25 @@ trace(System.useCodepage + " " + System.exactSettings);`,
   });
 }
 
+test("$version and System report the platform, screen and debugger the movie is given", async () => {
+  const played = await playNet(
+    `trace($version + "|" + getVersion() + "|" + System.capabilities.version);
+trace(System.capabilities.os + "|" + System.capabilities.screenResolutionY);
+trace(System.capabilities.isDebugger + " " + (System.capabilities.serverString.indexOf("DEB=t") > 0));`,
+    {
+      platform: { version: "MAC 10,0,0,1", os: "Mac OS 10.5" },
+      screenCapabilities: { screenResolutionY: 600 },
+      debugger: true,
+    },
+  );
+  assert.deepEqual(take(played), [
+    "MAC 10,0,0,1|MAC 10,0,0,1|MAC 10,0,0,1",
+    "Mac OS 10.5|600",
+    "true true",
+  ]);
+  played.player.destroy();
+});
+
 test("child clips have no own $version, while getVersion reads the main timeline", async () => {
   const played = await playNet(`
 var child = createEmptyMovieClip("child", 1);

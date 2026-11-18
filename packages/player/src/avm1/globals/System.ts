@@ -7,15 +7,16 @@
 import { avm1 } from "@swf2es/runtime";
 import { type PlatformCapabilities, type ScreenCapabilities, serverString } from "../../hosts.js";
 
-/** `_global.System` for a movie whose main SWF is of `version`. */
+/** `_global.System` for a movie whose main SWF is of `version`, in a debugger player where `debug`. */
 export function systemObject(
   realm: avm1.Realm,
   platform: PlatformCapabilities,
   screen: ScreenCapabilities,
+  debug: boolean,
   version: number,
 ): avm1.Avm1Object {
   const system = new avm1.Avm1Object(realm.objectProto);
-  system.define("capabilities", capabilitiesObject(realm, platform, screen), 0);
+  system.define("capabilities", capabilitiesObject(realm, platform, screen, debug), 0);
   // Flash's default: settings stored by exact domain from SWF 7 on.
   system.define("exactSettings", version >= 7, avm1.VERSION_6);
   system.define("useCodepage", false, 0);
@@ -29,6 +30,7 @@ function capabilitiesObject(
   realm: avm1.Realm,
   p: PlatformCapabilities,
   sc: ScreenCapabilities,
+  debug: boolean,
 ): avm1.Avm1Object {
   const values: [string, avm1.Value][] = [
     ["hasAccessibility", true],
@@ -42,7 +44,7 @@ function capabilitiesObject(
     ["hasAudioEncoder", true],
     ["hasMP3", true],
     ["hasAudio", true],
-    ["serverString", serverString(p, sc, false)],
+    ["serverString", serverString(p, sc, debug)],
     ["version", p.version],
     ["hasStreamingAudio", true],
     ["hasStreamingVideo", true],
@@ -50,7 +52,7 @@ function capabilitiesObject(
     ["hasPrinting", true],
     ["hasScreenPlayback", false],
     ["hasScreenBroadcast", false],
-    ["isDebugger", false],
+    ["isDebugger", debug],
     ["playerType", p.playerType],
     ["avHardwareDisable", false],
     ["localFileReadDisable", true],

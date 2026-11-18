@@ -995,6 +995,9 @@ export class Loads {
         sendToUrl: s.sendToUrl,
         localConnections: s.localConnections,
         realTime: s.timers.realTime,
+        platform: s.platform,
+        screenCapabilities: s.screenCapabilities,
+        debugger: s.rt.debugger,
       });
       vm.attach(swf, library, root, load.bytes.length, s.frameRate, s, false);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
