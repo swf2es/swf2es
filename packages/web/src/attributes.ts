@@ -57,3 +57,63 @@ export function quality(value: string | null): string {
 
   return ["LOW", "MEDIUM", "HIGH", "BEST"].includes(named) ? named : "HIGH";
 }
+
+/**
+ * What the SWFs' relative URLs resolve against without a `base`: "page",
+ * the page's URL, as Flash Player's plug-in had them, for a page that
+ * embeds its own SWFs; or "movie", each SWF's own (AVM1's the main SWF's),
+ * as its projector had them, for a player that re-hosts SWFs from
+ * elsewhere. The element's `relativeurls` attribute, else the page's
+ * configure({ relativeUrls }), else "page".
+ */
+export type RelativeUrls = "page" | "movie";
+
+/** `value`, the attribute's, as a choice; `fallback` for none or another word. */
+export function relativeUrls(
+  value: string | null,
+  fallback: RelativeUrls | undefined,
+): RelativeUrls {
+  switch (value?.trim().toLowerCase()) {
+    case "page":
+      return "page";
+    case "movie":
+      return "movie";
+    default:
+      return fallback ?? "page";
+  }
+}
+
+/** Whether `url` has a path a relative URL can go under (http:, file:, app:), not blob:, data: or about:. */
+export function hierarchical(url: string): boolean {
+  return /^[a-z][a-z0-9+.-]*:\//i.test(url);
+}
+
+/**
+ * Where every SWF's relative URLs resolve, AS3's and AVM1's, the children's
+ * and getURL's too, as Flash's plug-in resolved them from the page's
+ * `base` (PepperFlash 32): "." is the SWF's directory, any other value is
+ * against the page's URL; without one, or one no URL with a path comes of,
+ * the page's URL for "page", and null for "movie" or a page with no path
+ * (blob:, data:): each SWF its own.
+ */
+export function relativeBase(
+  base: string | null,
+  swfUrl: string | null,
+  pageUrl: string,
+  choice: RelativeUrls,
+): string | null {
+  const given = base?.trim() ?? "";
+  if (given !== "") {
+    try {
+      const against = given === "." && swfUrl !== null && hierarchical(swfUrl) ? swfUrl : pageUrl;
+      const url = new URL(given, against).href;
+      if (hierarchical(url)) {
+        return url;
+      }
+    } catch {
+      // Against a page with no path: as though there were none.
+    }
+  }
+
+  return choice === "page" && hierarchical(pageUrl) ? pageUrl : null;
+}

@@ -298,3 +298,21 @@ test("a base's query and fragment are no directory: a relative URL replaces its 
   );
   assert.equal(resolve("file:///test.swf", "sub/child.swf"), "file:///sub/child.swf");
 });
+
+test("getURL opens what the movie's base names, as its loads load it", async () => {
+  const g = globalThis as { open?: unknown; document?: unknown };
+  const opened: string[] = [];
+  g.open = (url: string) => opened.push(url);
+  g.document = {};
+  try {
+    const played = await play(`this.getURL("next.html?a=1", "_blank");`, {
+      url: "http://example.test/swf/main.swf",
+      base: "http://example.test/page/index.php?id=2#top",
+    });
+    played.player.tick();
+    assert.deepEqual(opened, ["http://example.test/page/next.html?a=1"]);
+  } finally {
+    delete g.open;
+    delete g.document;
+  }
+});

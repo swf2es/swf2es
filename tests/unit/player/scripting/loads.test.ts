@@ -829,6 +829,42 @@ trace(c.version + "|" + c.os + "|" + c.screenResolutionX + "|" + c.isDebugger);`
   });
 }
 
+test("an AVM1 SWF AS3 loads resolves its loads and getURL's windows against the page's base, as Flash's plug-in did", {
+  skip,
+}, async () => {
+  const asked: string[] = [];
+  const opened: string[] = [];
+  const actions = script(
+    `createEmptyMovieClip("g", 1).loadMovie("grandchild.swf"); this.getURL("next.html", "_blank");`,
+    8,
+  )(flashAssembler());
+  const inner = avm1Swf([w.doAction([...actions.end().bytes()])]);
+  const { scripting, player, loader } = await avm1Loading({
+    base: "http://example.test/page/index.html?id=1",
+    fetch: async (request) => {
+      asked.push(request.url);
+      return request.url.endsWith("child.swf")
+        ? { bytes: inner, status: 200, headers: [] }
+        : { bytes: null, status: 404, headers: [] };
+    },
+    navigate: (request) => opened.push(request.url),
+  });
+  scripting.loads.requestLoadUrl(loader, "sub/child.swf");
+  await scripting.settled();
+  for (let i = 0; i < 3; i++) {
+    player.tick();
+    await scripting.settled();
+  }
+
+  // Each time its frame's actions ran.
+  assert.deepEqual(
+    [...new Set(asked)],
+    ["http://example.test/page/sub/child.swf", "http://example.test/page/grandchild.swf"],
+  );
+  assert.deepEqual([...new Set(opened)], ["http://example.test/page/next.html"]);
+  player.destroy();
+});
+
 test("an AVM1 SWF from bytes comes at the end of the frame, its context's parameters on it", {
   skip,
 }, async () => {

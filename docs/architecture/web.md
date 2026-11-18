@@ -11,7 +11,7 @@ Flash read them in `attributes.ts`: `src`,
 `width` and `height` (a number is pixels, as an `<embed>`'s, anything
 else a CSS length), `flashvars`, `scale`, `salign`, `wmode`, `bgcolor`,
 `base`, `allowscriptaccess`, `allownetworking` and `quality`, and
-`workers` and `unmuteprompt` of its own ([Workers in the page](#workers-in-the-page)). Its
+`workers`, `unmuteprompt` and `relativeurls` of its own ([Workers in the page](#workers-in-the-page)). Its
 JavaScript side is `load(url | ArrayBuffer | Uint8Array)`, which plays a SWF in place of the
 one playing; `ready`, which resolves once the SWF loading plays and
 rejects with what kept it from playing; `destroy()`; and the events
@@ -44,17 +44,27 @@ count leaves it. A press or key anywhere else on the element is a gesture
 too, and resumes a suspended device in a capturing listener, before the
 host has told it as held as well as after, the SWF hearing it as ever.
 
-`base` resolves against the SWF's URL, as Flash's plug-in resolved it
-(base="." is the SWF's directory), or against the page's for a SWF given
-as bytes. An AVM1 SWF's relative URLs, its loads', its children's and
-its network's, all resolve against that base, or without one against
-the page's URL, not the SWF's: a page at /page/ playing /swf/main.swf
-has `loadMovie("child.swf")` load /page/child.swf, and the child's
-`_url` is the URL it came from, as the plug-in (PepperFlash 32) had
-them. An embedder whose page is not the SWF's,
-such as the desktop app, sets `relativeTo: "movie"` for the SWF's URL,
-as Flash's projector resolved them. AS3's resolve against the SWF that
-asks, as before.
+Relative URLs resolve as Flash Player's plug-in (PepperFlash 32)
+resolved them, one base for the whole player: AS3's and AVM1's, the
+loaded SWFs' as the main one's, their loads, network requests and
+getURL's windows alike (`attributes.ts`'s `relativeBase`). Without
+`base` it is the page's URL, not the SWF's: a page at /page/ playing
+/swf/main.swf has `loadMovie("child.swf")` and `new
+URLRequest("child.swf")` load /page/child.swf. `base="."` is the SWF's
+directory, and any other `base` resolves against the page's URL
+(`base="assets/"` is /page/assets/). A loaded AVM1 movie's `_url` is
+the URL it came from. A base's query and fragment are no directory
+(`play.php?file=/games/a.swf`, `#/game/5`), and a page with no path, a
+blob: or data: one, gives no base: each SWF's own URL then.
+
+That is the default, for a page that embeds its own SWFs, its own
+`<swf2es-player>` or Flash tags `replaceFlash` and `watchFlash` swap. A
+player that re-hosts SWFs from elsewhere, whose page is not theirs,
+takes their own URLs instead, as Flash's projector did: AS3's each
+against the SWF that asks, AVM1's against the main SWF. The element's
+`relativeurls` attribute chooses, `page` or `movie`, else the page's
+`configure({ relativeUrls })`, else `page`; the site's player and the
+desktop app configure `movie`, the split chosen in #1085.
 
 ## Showing a player
 
@@ -154,8 +164,8 @@ an embedder's fetch in place of the browser's for what the SWFs load and
 for the SWF the element plays (purpose `movie`; `fetching.ts`), with
 `loadPolicyFile`
 and `sandboxType` for the player, as the desktop app judges requests by
-Flash's sandboxes and policy files rather than CORS; `relativeTo`, which
-the desktop app sets to `"movie"` (below); and
+Flash's sandboxes and policy files rather than CORS; `relativeUrls`,
+which the desktop app and the site's player set to `"movie"` (above); and
 `cache`. The page fetches and compiles codegen.wasm once and the
 libraries once, and each player instantiates the compiled module
 and reads the same bytes. A player has a Codegen of its own: Scripting

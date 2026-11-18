@@ -69,6 +69,10 @@ const abcs = compileScripts(
     { name: "AirWebTest", source: readFileSync(`${here}scripts/AirWebTest.as`, "utf8") },
     { name: "AirAloneTest", source: readFileSync(`${here}scripts/AirAloneTest.as`, "utf8") },
     { name: "UnmuteTest", source: readFileSync(`${here}scripts/UnmuteTest.as`, "utf8") },
+    {
+      name: "RelativeUrlsTest",
+      source: readFileSync(`${here}scripts/RelativeUrlsTest.as`, "utf8"),
+    },
   ],
   out,
 );
@@ -342,7 +346,13 @@ writeFileSync(
   `${site}sub/avm1-urls.swf`,
   avm1Swf(`createEmptyMovieClip("child", 1).loadMovie("avm1-url-child.swf");`),
 );
-for (const dir of ["", "sub/"]) {
+writeFileSync(
+  `${site}sub/as3-urls.swf`,
+  bare(abcs.get("RelativeUrlsTest") as Uint8Array, 1, "RelativeUrlsTest", 20, 20),
+);
+for (const dir of ["", "sub/", "assets/"]) {
+  mkdirSync(`${site}${dir}`, { recursive: true });
+  writeFileSync(`${site}${dir}relative-url-data.txt`, `/web-test/${dir}`);
   writeFileSync(
     `${site}${dir}avm1-url-child.swf`,
     avm1Swf(`${report}
@@ -970,22 +980,41 @@ check(
 // After the checks that count the compilers left: an AVM1 movie that loaded others kept its
 // compiler alive through the churn check's collection when this came before it, on dev too.
 check(
-  "an AVM1 SWF's relative loads resolve against the page, or its base against the SWF's URL",
+  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
   async (evaluate) => {
-    const urls = async (base: string | null) =>
-      (await call<string[]>(evaluate, `avm1Urls(${JSON.stringify(base)})`)).map(
-        (url) => new URL(url).pathname,
-      );
-    // The page is /web-test/index.html and the SWF /web-test/sub/avm1-urls.swf, as Flash's plug-in
-    // resolved them; each child's _url is where it came from, which its sibling's load follows.
-    assert.deepEqual(await urls(null), [
-      "/web-test/avm1-url-child.swf",
-      "/web-test/avm1-url-sibling.swf",
-    ]);
-    assert.deepEqual(await urls("."), [
-      "/web-test/sub/avm1-url-child.swf",
-      "/web-test/sub/avm1-url-sibling.swf",
-    ]);
+    const loads = async (
+      src: string,
+      attributes: Record<string, string>,
+      n: number,
+      page?: string,
+    ) =>
+      (
+        await call<string[]>(
+          evaluate,
+          `relativeLoads(${JSON.stringify(src)}, ${JSON.stringify(attributes)}, ${n}, ${JSON.stringify(page)})`,
+        )
+      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
+    const avm1 = (attributes: Record<string, string>, page?: string) =>
+      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page);
+    const as3 = (attributes: Record<string, string>, page?: string) =>
+      loads("/web-test/sub/as3-urls.swf", attributes, 1, page);
+    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
+    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
+    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
+    // it came from, which its sibling's load follows.
+    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
+    assert.deepEqual(await avm1({}), pair("/web-test/"));
+    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
+    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
+    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
+    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
+    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
+    // The page's choice for elements that make none, which the attribute overrides.
+    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
   },
 );
 

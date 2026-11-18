@@ -1510,8 +1510,9 @@ children.
 ### The network: XML, LoadVars, loadVariables and XMLSocket
 
 Requests go through the host fetch AS3's `URLLoader` uses, resolved
-against `base` (the page's in the web element, else the SWF's URL) and
-marked "data" for a host that judges requests as Flash did; `XMLSocket`
+against the movie's base (in the web element the page's or its `base`,
+[web.md](architecture/web.md); else the SWF's URL), as getURL's windows
+are, and marked "data" for a host that judges requests as Flash did; `XMLSocket`
 connects through the
 `SocketHost` AS3's sockets use. Without either, a load fails as a
 missing file does (`onHTTPStatus(0)`, `onData(undefined)`) and a connect

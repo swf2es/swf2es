@@ -491,7 +491,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       },
       navigate:
         (options.navigate === undefined
-          ? getUrlNavigate(browserNavigate(), this.url)
+          ? // A page's window opens what the movie's base names, as its loads load it (Flash's plug-in).
+            getUrlNavigate(browserNavigate(), this.net.base)
           : options.navigate) ?? undefined,
     };
   }

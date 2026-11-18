@@ -16,7 +16,15 @@ import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
 import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "./air.js";
 import { type AirFiles, airFiles } from "./air-files.js";
 import { type AirItems, airItems } from "./air-items.js";
-import { cssLength, parseColor, parseFlashVars, quality, scriptAccess } from "./attributes.js";
+import {
+  cssLength,
+  parseColor,
+  parseFlashVars,
+  quality,
+  relativeBase,
+  relativeUrls,
+  scriptAccess,
+} from "./attributes.js";
 import {
   captureHost,
   codegenForPlayer,
@@ -368,8 +376,8 @@ export class Swf2esPlayerElement extends ElementBase {
       const base = attribute(this, "base");
       let bytes: Uint8Array;
       let url: string;
-      // Flash resolves the page's `base` against the SWF's URL, where it has one.
-      let baseUrl = base ? new URL(base, pageUrl).href : null;
+      // From the URL it came from, where it came from one.
+      let fetched: string | null = null;
       if (session.air) {
         // The content SWF, by the app: URL adl names it with.
         const content = session.air.app.descriptor.content;
@@ -379,11 +387,11 @@ export class Swf2esPlayerElement extends ElementBase {
         throw new Error("swf2es: nothing to play");
       } else if (typeof source === "string" || source instanceof URL) {
         ({ bytes, url } = await fetchMovie(new URL(source, pageUrl).href, session.abort.signal));
-        baseUrl = base ? new URL(base, url).href : null;
+        fetched = url;
       } else {
-        // A copy: the page may reuse its buffer.
+        // A copy: the page may reuse its buffer; its URL is `base`'s, else the page's.
         bytes = new Uint8Array(source instanceof Uint8Array ? source : new Uint8Array(source));
-        url = baseUrl ?? pageUrl;
+        url = relativeBase(base, null, pageUrl, "movie") ?? pageUrl;
       }
 
       if (!current()) {
@@ -398,6 +406,16 @@ export class Swf2esPlayerElement extends ElementBase {
         this.#playAsAir(session, app, [], true);
         url = `app:/${encodeURIComponent(app.descriptor.content)}`;
       }
+
+      // Where every SWF's relative URLs resolve: an AIR application's each its own.
+      const baseUrl = session.air
+        ? null
+        : relativeBase(
+            base,
+            fetched,
+            pageUrl,
+            relativeUrls(attribute(this, "relativeurls"), configuration().relativeUrls),
+          );
 
       // What the application wrote and kept when it last played, before it plays.
       if (session.air) {
@@ -474,8 +492,8 @@ export class Swf2esPlayerElement extends ElementBase {
         avm1 = new Avm1(codegen, {
           url,
           parameters: parseFlashVars(attribute(this, "flashvars")),
-          // Its relative URLs, its children's too, against `base`, else the page's, as a plug-in has them.
-          base: baseUrl ?? (configuration().relativeTo === "movie" ? url : pageUrl),
+          // Without a base of the page's, its own URL.
+          base: baseUrl ?? undefined,
           // XML, LoadVars and XMLSocket reach the network as an AS3 SWF's loads and sockets do.
           fetch: fetchFor(session, offline),
           socket: offline ? undefined : socketHost(),

@@ -693,25 +693,38 @@ async function avm1External() {
 }
 
 /**
- * The URLs an AVM1 SWF in a directory of its own, sub/, loaded a child
- * from, and the child its sibling from, under `base`, or none: each
- * reports its `_url`.
+ * What a SWF in a directory of its own, sub/, reports of what it loaded by
+ * relative URLs, with the element's `attributes` (base, relativeurls) and
+ * the page's configure({ relativeUrls: `configured` }), once `n` reports
+ * came or a while passed.
  */
-async function avm1Urls(base: string | null) {
+async function relativeLoads(
+  src: string,
+  attributes: Record<string, string>,
+  n: number,
+  configured?: "page" | "movie",
+) {
+  const { web } = await loading;
+  const before = web.configuration().relativeUrls;
+  web.configure({ relativeUrls: configured });
   calls.reports.length = 0;
   const p = await newPlayer();
-  p.setAttribute("src", "/web-test/sub/avm1-urls.swf");
-  if (base !== null) {
-    p.setAttribute("base", base);
+  p.setAttribute("src", src);
+  for (const [name, value] of Object.entries(attributes)) {
+    p.setAttribute(name, value);
   }
 
-  document.body.append(p);
-  await p.ready;
-  for (let i = 0; i < 300 && calls.reports.length < 2; i++) {
-    await frames(1);
+  try {
+    document.body.append(p);
+    await p.ready;
+    for (let i = 0; i < 300 && calls.reports.length < n; i++) {
+      await frames(1);
+    }
+  } finally {
+    p.remove();
+    web.configure({ relativeUrls: before });
   }
 
-  p.remove();
   return calls.reports.splice(0);
 }
 
@@ -1212,7 +1225,7 @@ Object.assign(globalThis, {
   lazyChurn,
   avm1Churn,
   avm1External,
-  avm1Urls,
+  relativeLoads,
   survivors,
   workerRun,
   webWorkers: () => ({ ...webWorkers }),

@@ -990,7 +990,8 @@ export class Loads {
         fileHost: s.fileHost,
         decodeImage: s.decodeImage,
         externalInterface: s.externalInterface ?? undefined,
-        navigate: getUrlNavigate(s.navigate, load.url ?? s.url),
+        // The page's base, as its loads take it, else its own URL.
+        navigate: getUrlNavigate(s.navigate, s.base ?? load.url ?? s.url),
         fsCommand: s.fsCommand ?? undefined,
         sendToUrl: s.sendToUrl,
         localConnections: s.localConnections,

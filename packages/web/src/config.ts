@@ -21,6 +21,7 @@ import { lazyBrowserCaptureHost } from "@swf2es/player-hosts/capture";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { webSocketSocketHost } from "@swf2es/player-hosts/websocket";
 import type { WebWorkerHost } from "@swf2es/player-hosts/workers";
+import type { RelativeUrls } from "./attributes.js";
 import type { Stage3DSurfaceFactory, Stage3DSurfaceLoader } from "./stage3d.js";
 
 /** A flash.net.Socket's host and port, and the WebSocket relay that reaches it, as Ruffle's socketProxy lists them. */
@@ -83,12 +84,14 @@ export interface Configuration {
   /** Security.sandboxType of the SWFs the element plays next: "remote" by default. */
   sandboxType?: string;
   /**
-   * What an AVM1 SWF's relative URLs resolve against where the element has
-   * no `base`: "page", the page's URL, as Flash Player's plug-in resolved
-   * them (the default), or "movie", the main SWF's, as its projector did,
-   * for an embedder, such as a desktop app, whose page is not the SWF's.
+   * What the SWFs' relative URLs resolve against where an element has no
+   * `base` and no `relativeurls` attribute: "page", the page's URL, as
+   * Flash Player's plug-in resolved them (the default, for a page that
+   * embeds its own SWFs), or "movie", each SWF's own, as its projector
+   * did, for a player that re-hosts SWFs from elsewhere, such as the site's
+   * or the desktop app's.
    */
-  relativeTo?: "page" | "movie";
+  relativeUrls?: RelativeUrls;
   /**
    * Whether the modules the compiler writes are kept in IndexedDB for the
    * page's next visit, which then links them without compiling: off by
