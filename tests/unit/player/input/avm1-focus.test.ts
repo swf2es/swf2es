@@ -117,7 +117,7 @@ async function play(m1: Movie = {}, m2: Movie = {}, movies = 2) {
     await scripting.settled();
     player.tick();
   };
-  return { player, lines, click, press, type, control };
+  return { player, scripting, lines, click, press, type, control };
 }
 
 // Where the projector's pointer pressed: the movies' fields, the AS3 field and sprite, nothing.
@@ -741,6 +741,145 @@ test("a movie unloaded with the focus tells its field and every movie's Selectio
       "as3:unload:1 focus null selection 0,0",
       "m2:getFocus null begin -1 end -1 caret -1",
       "m2:getFocus null begin -1 end -1 caret -1",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a listener that takes the focus as AS3's moves from one object to another leaves the first a focusOut too", {
+  skip,
+}, async () => {
+  const p = await play(KEEP, M2_SELECTION);
+  try {
+    const lines = await run(p, [
+      ["control", "focus:as3field"],
+      ["key", "F2"],
+      ["control", "focus:as3btn"],
+      ["key", "F3"],
+      ["key", "F6"],
+      ["control", "state"],
+      ["type", "x"],
+      ["key", "F3"],
+    ]);
+    assert.deepEqual(lines, [
+      "m1:Selection.onSetFocus null null",
+      "m2:Selection.onSetFocus null null",
+      "as3:focusIn as3field related null focus as3field",
+      "as3:focus:as3field focus as3field selection 0,0",
+      "m1:keepOn",
+      "m1:Selection.onSetFocus null null",
+      "m1:keep",
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "as3:focusOut as3btn related null focus null",
+      "m2:Selection.onSetFocus null null",
+      "as3:focusOut as3field related null focus null",
+      "as3:focus:as3btn focus null selection 0,0",
+      "m1:getFocus f begin 0 end 6 caret 6",
+      "m2:getFocus f begin 0 end 6 caret 6",
+      "as3:text mnopqr",
+      "as3:state focus null selection 0,0",
+      "m1:changed f=x",
+      "m1:getFocus f begin 1 end 1 caret 1",
+    ]);
+    // The field the focus left draws no caret, and keeps no hook to give it up by.
+    const field = (p.player.root as unknown as { children: { name: string }[] }).children.find(
+      (c) => c.name === "as3field",
+    ) as unknown as { focused: boolean; focusDrop: unknown };
+    assert.equal(p.scripting.focus, null);
+    assert.equal(field.focused, false);
+    assert.equal(field.focusDrop, null);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+/** m1, whose f's onKillFocus focuses `to`. */
+const killTo = (to: string): Movie => ({
+  start: `f.onKillFocus = function(n) { log("f.onKillFocus " + nameOf(n)); Selection.setFocus(${to}); };`,
+  keys: { 114: "selection();" },
+});
+
+test("a field's onKillFocus that moves the focus elsewhere hears it once, and the move under way goes on", {
+  skip,
+}, async () => {
+  // Flash Player 32 kills f again at each move, till its AVM1 stack overflows; then a press on
+  // the AS3 field leaves it the focus, as here, and one on g leaves nothing focused.
+  const p = await play(killTo("g"), M2_SELECTION);
+  try {
+    const lines = await run(p, [
+      ["click", ...M1F],
+      ["click", ...AS3FIELD],
+      ["key", "F3"],
+      ["type", "x"],
+      ["control", "state"],
+    ]);
+    assert.deepEqual(lines, [
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "m1:f.onKillFocus null",
+      "m1:Selection.onSetFocus f null",
+      "m2:Selection.onSetFocus f null",
+      "as3:focusIn as3field related null focus as3field",
+      "m1:getFocus as3field begin 6 end 6 caret 6",
+      "as3:text mnopqrx",
+      "as3:state focus as3field selection 7,7",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+
+  const q = await play(killTo("null"), M2_SELECTION);
+  try {
+    const lines = await run(q, [
+      ["click", ...M1F],
+      ["click", ...M1G],
+      ["key", "F3"],
+    ]);
+    assert.deepEqual(lines, [
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "m1:f.onKillFocus g",
+      "m1:g.onSetFocus f",
+      "m1:Selection.onSetFocus f g",
+      "m2:Selection.onSetFocus f g",
+      "m1:getFocus g begin 6 end 6 caret 6",
+    ]);
+  } finally {
+    q.player.destroy();
+  }
+});
+
+test("a movie unloaded with the focus takes none back as its listeners hear it go", {
+  skip,
+}, async () => {
+  const p = await play({ ...KEEP, keys: { 113: 'keepOn = true; log("keepOn");' } }, M2_SELECTION);
+  try {
+    const lines = await run(p, [
+      ["click", ...M1F],
+      ["key", "F2"],
+      ["control", "unload:1"],
+      ["key", "F6"],
+      ["control", "state"],
+    ]);
+    // Flash Player 32 tells them once unload() has returned, and finds no f to focus.
+    assert.deepEqual(lines, [
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "m1:keepOn",
+      "m1:f.onKillFocus null",
+      "m1:Selection.onSetFocus f null",
+      "m1:keep",
+      "m2:Selection.onSetFocus f null",
+      "as3:unload:1 focus null selection 0,0",
+      "m2:getFocus null begin -1 end -1 caret -1",
+      "as3:text mnopqr",
+      "as3:state focus null selection 0,0",
     ]);
   } finally {
     p.player.destroy();

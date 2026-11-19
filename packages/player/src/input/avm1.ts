@@ -22,6 +22,10 @@ export class LoadedAvm1Input implements FocusHost {
   private over: Avm1Pointer | null = null;
   /** Whether a movie's move of the focus is taking it from AS3, which tells the movies nothing more. */
   private moving = false;
+  /** The object hearing onKillFocus, which no move inside it kills again. */
+  private killing: DisplayObject | null = null;
+  /** The movie being unloaded, which nothing focuses. */
+  private dying: Avm1 | null = null;
   /** The movie that had the focus as the press being handled came. */
   private pressHolder: Avm1 | null = null;
 
@@ -43,12 +47,20 @@ export class LoadedAvm1Input implements FocusHost {
   /**
    * A movie about to be unloaded: what it has focused loses the focus, its
    * onKillFocus and every movie's Selection listeners told, as Flash Player
-   * 32 tells them, though there after the unload call returned.
+   * 32 tells them, though there after the unload call returned; nothing
+   * focuses one of its objects again then.
    */
   unloading(root: MovieClip): void {
     const movie = this.keyboards.get(root);
     if (movie && movie.vm.focused !== null) {
-      movie.vm.focus(null);
+      // Nothing of its own takes the focus back as it goes: its fields are gone to Flash's
+      // listeners by then.
+      this.dying = movie.vm;
+      try {
+        movie.vm.focus(null);
+      } finally {
+        this.dying = null;
+      }
     }
   }
 
@@ -92,7 +104,7 @@ export class LoadedAvm1Input implements FocusHost {
    */
   move(movie: Avm1, d: DisplayObject | null, byPointer: boolean): void {
     const holder = this.holder();
-    if (d === null && holder !== movie) {
+    if ((d === null && holder !== movie) || (d !== null && movie === this.dying)) {
       return;
     }
 
@@ -105,11 +117,24 @@ export class LoadedAvm1Input implements FocusHost {
     }
 
     // What had the focus keeps it as it hears onKillFocus: its Selection.setFocus of itself
-    // there moves nothing, and the move goes on (Flash Player 32). A move elsewhere there wins.
+    // there moves nothing, and the move goes on (Flash Player 32). Any other move there would
+    // kill it again: Flash Player 32 does, over and over till its AVM1 stack overflows, and then
+    // leaves the focus where the move was going, or nowhere; the player kills it once, and the
+    // move under way wins.
+    if (old !== null && old === this.killing) {
+      return;
+    }
+
     const oldFace = old?.avm1 ?? null;
     const newFace = d?.avm1 ?? null;
     if (holder !== null && old !== null) {
-      holder.focusTracker.killed(old, newFace);
+      this.killing = old;
+      try {
+        holder.focusTracker.killed(old, newFace);
+      } finally {
+        this.killing = null;
+      }
+
       if (this.current !== old) {
         return;
       }

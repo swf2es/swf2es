@@ -105,16 +105,8 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
       if (s.focus !== previous || s.avm1Input?.focused()) {
         return;
       }
-    } else {
-      // The focus is `next`'s as they hear it, as in Flash Player 32: a listener's
-      // Selection.setFocus takes it from `next`, which then hears a focusOut and no focusIn.
-      s.focus = next;
-      s.avm1Input.hostMoved();
-      if (s.focus !== next) {
-        return;
-      }
-
-      s.focus = previous;
+    } else if (hostMoved(s, previous, next)) {
+      return;
     }
   }
 
@@ -150,6 +142,46 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
   if (next && s.focus === next) {
     focusEvent(s, "focusIn", next, previous, false);
   }
+}
+
+/**
+ * The movies' Selection listeners told of AS3's move from `previous` to
+ * `next`, as they hear it with the focus `next`'s, as in Flash Player 32.
+ * Whether one of them took the focus to a movie's field: `next` then hears
+ * a focusOut and no focusIn, and `previous`, once the rest heard the move,
+ * a focusOut naming nothing.
+ */
+function hostMoved(
+  s: Scripting,
+  previous: DisplayObject | null,
+  next: DisplayObject | null,
+): boolean {
+  s.focus = next;
+  let moved = true;
+  try {
+    s.avm1Input?.hostMoved();
+  } finally {
+    moved = s.focus !== next;
+    if (!moved) {
+      s.focus = previous;
+    }
+  }
+
+  if (!moved) {
+    return false;
+  }
+
+  if (previous && previous !== next) {
+    previous.focusDrop = null;
+    if (previous instanceof TextObject) {
+      previous.focused = false;
+      previous.invalidate(CONTENT);
+    }
+
+    focusEvent(s, "focusOut", previous, null, false);
+  }
+
+  return true;
 }
 
 /** What the focus's rectangle is drawn around: what has the focus, where it shows (setFocus). */

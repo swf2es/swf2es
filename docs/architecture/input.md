@@ -532,13 +532,19 @@ the root as `_level0`, its indices read AS3's focused field too,
 wherever it is. A listener that moves the focus again does not stop the
 rest hearing the move it interrupted, as in Flash; one that takes it to a
 movie's field as AS3's object takes it leaves that object a `focusOut`
-and no `focusIn`, and the field the focus, where Flash, naming the field
-to `getFocus` and nothing to `stage.focus` too, types into AS3's object
-and reads its indices. A field's `onKillFocus` runs while the field still
-has the focus, so focusing it again there moves nothing and the move goes
-on. A movie unloaded with the focus tells its field and every movie's
-listeners, as Flash does once `unload()` has returned. Tab moves through one order of AS3's objects and the
-movies' (each in its movie's own terms, `avm1/focus.ts`), by tabIndex
+and no `focusIn`, and then the object AS3 had before a `focusOut` too, and
+the field the focus, where Flash, after a move from nothing, naming the
+field to `getFocus` and nothing to `stage.focus` too, types into AS3's
+object and reads its indices. A field's `onKillFocus` runs while the
+field still has the focus: focusing it again there moves nothing and the
+move goes on, and a
+move anywhere else there kills it once, the move under way going on,
+where Flash kills it again at each move till its AVM1 stack overflows,
+then leaves the focus where the move was going or nowhere. A movie
+unloaded with the focus tells its field and every movie's listeners, as
+Flash does once `unload()` has returned, and nothing of its focuses
+again then. Tab moves through one order of AS3's objects and the movies'
+(each in its movie's own terms, `avm1/focus.ts`), by tabIndex
 where any object of either has one, the two kinds sorted as numbers
 together, equal ones as the display list has them and -1 none in either,
 and the rest left out; else by place, one object of each place as AS3
