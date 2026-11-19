@@ -170,6 +170,24 @@ the click. A page that makes the element full screen itself
 `configure({ fullScreen })` takes a full screen of the embedder's own
 instead, as the desktop app's window, which needs no click.
 
+A page can measure the player, as the site's performance meter does, by
+setting `element.frameListener` to a function. After each animation frame
+the player calls it with a `FrameStats` object: `time`, the frame's time
+by `performance.now()`; `frames`, the SWF's frames it played, often 0
+where the display runs faster than the SWF; `frameRate`, the SWF's rate
+then; `play`, the ms those frames took (scripts, events, timeline and
+sound); `draw`, the ms drawing the stage took on the CPU, 0 where nothing
+changed; and `shown`, false for the frames a timer plays while the page
+gets no animation frames, which draw nothing. The same object comes each
+time, overwritten by the next frame, so copy what you keep. The listener
+holds across loads until set to `null`; without one the player measures
+nothing, and the listener's own time is not counted as the player's, so
+it does not change how frames are paced. `element.wasmMemory` gives the
+bytes of the WebAssembly memories behind the player: `codegen`, its
+compiler's, and `native`, the bitmap kernels', tessellators' and
+decoders', which every player on the page shares. `element.gl` is the
+WebGL context it draws with, for counting draw calls.
+
 With Stage3D on, a back buffer may be from 32 to 16384 pixels a side in
 every profile, as Flash Player 32 and AIR 51 take one on a desktop GPU,
 so a SWF that sizes its back buffer to its stage plays on a 2K or 4K

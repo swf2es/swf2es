@@ -31,7 +31,45 @@ export interface Look {
   bgcolor: number | null;
 }
 
+/**
+ * What the player did in one call of its loop, as a frame listener hears it
+ * (`Swf2esPlayerElement.frameListener`): a call each animation frame, or
+ * from the timer that plays a hidden page's frames.
+ */
+export interface FrameStats {
+  /** The call's time, by performance.now()'s clock: the animation frame's, or the timer's. */
+  time: number;
+  /** The SWF's frames it played: none where the display's frame fell between two of the SWF's. */
+  frames: number;
+  /** The SWF's frame rate as it played them, which a script may change. */
+  frameRate: number;
+  /** The ms the frames took: their scripts, events, timeline and sound, the SWF's own work. */
+  play: number;
+  /** The ms drawing the stage took on the CPU, the GPU's own work aside; 0 where nothing was drawn. */
+  draw: number;
+  /** Whether it was an animation frame, which draws, rather than the timer, which never does. */
+  shown: boolean;
+}
+
+/** Hears what the player did in each call of its loop, given the same object each time. */
+export type FrameListener = (stats: FrameStats) => void;
+
 export class Playback {
+  /**
+   * Told after every call of the loop, while set; unset, the loop measures
+   * nothing for it. Its time is not the player's: the frames' pacing counts
+   * only the frames' own.
+   */
+  onFrame: FrameListener | null = null;
+  /** What onFrame hears, filled anew for each call. */
+  private readonly stats: FrameStats = {
+    time: 0,
+    frames: 0,
+    frameRate: 0,
+    play: 0,
+    draw: 0,
+    shown: false,
+  };
   private frame = 0;
   private last: number | null = null;
   /**
@@ -204,8 +242,9 @@ export class Playback {
     }
 
     const start = performance.now();
+    let played = 0;
     try {
-      this.player.advance(dt, this.busy);
+      played = this.player.advance(dt, this.busy);
     } catch (error) {
       this.report(error);
     }
@@ -218,8 +257,39 @@ export class Playback {
       this.requality();
     }
 
+    let drew = false;
     if (show && (this.player.changes !== this.drawn || this.dirty)) {
       this.draw();
+      drew = true;
+    }
+
+    if (this.onFrame) {
+      this.told(this.onFrame, now, played, start, drew, show);
+    }
+  }
+
+  /** Tell `listener` of the call that began at `start`, its frames' part `this.busy`. */
+  private told(
+    listener: FrameListener,
+    now: number,
+    frames: number,
+    start: number,
+    drew: boolean,
+    shown: boolean,
+  ): void {
+    const end = performance.now();
+    const stats = this.stats;
+    stats.time = now;
+    stats.frames = frames;
+    stats.frameRate = this.player.frameRate;
+    stats.play = this.busy;
+    stats.draw = drew ? end - start - this.busy : 0;
+    stats.shown = shown;
+    // A listener that throws is the page's error, not the loop's: the loop goes on.
+    try {
+      listener(stats);
+    } catch (error) {
+      reportError(error);
     }
   }
 
