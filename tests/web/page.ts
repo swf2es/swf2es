@@ -161,11 +161,13 @@ const calls: {
   reports: unknown[];
   captured: unknown[];
   avm1: unknown[][];
+  loaded: unknown[][];
 } = {
   hello: [],
   reports: [],
   captured: [],
   avm1: [],
+  loaded: [],
 };
 const page = globalThis as unknown as Record<string, unknown>;
 page.pageHello = (...args: unknown[]) => {
@@ -175,6 +177,10 @@ page.pageHello = (...args: unknown[]) => {
 page.avm1Hello = (...args: unknown[]) => {
   calls.avm1.push(args);
   return { got: args };
+};
+page.loadedCall = (...args: unknown[]) => {
+  calls.loaded.push(args);
+  return `page saw ${args[0]}`;
 };
 page.pageCapture = (value: unknown) => {
   calls.captured.push(value);
@@ -779,6 +785,44 @@ async function avm1External() {
 }
 
 /**
+ * An AS3 host and the AS2 movie its Loader holds, each calling the page by
+ * ExternalInterface and fscommand: what the page was given, by loadedCall,
+ * its `<id>_DoFSCommand` and the element's fscommand events, and what each
+ * one's callback gives back; then the element taken away.
+ */
+async function loadedExternal() {
+  const p = await newPlayer();
+  p.id = "loadedExternal";
+  p.setAttribute("src", "/web-test/loaded-external.swf");
+  p.setAttribute("allowscriptaccess", "always");
+  const commands: unknown[][] = [];
+  const events: unknown[] = [];
+  page.loadedExternal_DoFSCommand = (command: unknown, args: unknown) => {
+    commands.push([command, args]);
+  };
+  p.addEventListener("fscommand", (e) => events.push((e as CustomEvent).detail));
+  document.body.append(p);
+  await p.ready;
+  // The movie's callback is there once the host's Loader has loaded it.
+  for (let i = 0; i < 200 && typeof element("loadedExternal").childTriple !== "function"; i++) {
+    await frames(1);
+  }
+
+  await frames(2);
+  const movie = element("loadedExternal");
+  const result = {
+    calls: calls.loaded.splice(0),
+    commands,
+    events,
+    double: movie.hostDouble(4),
+    triple: movie.childTriple(5),
+  };
+  p.remove();
+  delete page.loadedExternal_DoFSCommand;
+  return result;
+}
+
+/**
  * What a SWF in a directory of its own, sub/, reports of what it loaded by
  * relative URLs, with the element's `attributes` (base, relativeurls) and
  * the page's configure({ relativeUrls: `configured` }), the page's URL
@@ -1370,6 +1414,7 @@ Object.assign(globalThis, {
   lazyChurn,
   avm1Churn,
   avm1External,
+  loadedExternal,
   relativeLoads,
   survivors,
   workerRun,

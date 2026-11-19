@@ -53,6 +53,10 @@ const abcs = compileScripts(
       name: "LoadedAvm1Field",
       source: readFileSync(`${here}scripts/LoadedAvm1Field.as`, "utf8"),
     },
+    {
+      name: "LoadedAvm1External",
+      source: readFileSync(`${here}scripts/LoadedAvm1External.as`, "utf8"),
+    },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
     { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
@@ -629,6 +633,20 @@ writeFileSync(
 writeFileSync(
   `${site}loaded-avm1-field.swf`,
   bare(abcs.get("LoadedAvm1Field") as Uint8Array, 1, "LoadedAvm1Field", 160, 120),
+);
+// An AS3 host and the AS2 movie it loads, each calling the page through ExternalInterface and
+// fscommand and each adding a callback (scripts/LoadedAvm1External.as).
+writeFileSync(
+  `${site}loaded-external.swf`,
+  bare(abcs.get("LoadedAvm1External") as Uint8Array, 1, "LoadedAvm1External", 20, 20),
+);
+writeFileSync(
+  `${site}loaded-external-child.swf`,
+  avm1Swf(`var EI = flash.external.ExternalInterface;
+EI.call("loadedCall", "child", EI.call("loadedCall", "child first", [1, {k: "v"}]));
+EI.addCallback("childTriple", null, function(n) { return {n: n * 3, of: _url.substring(_url.lastIndexOf("/") + 1)}; });
+fscommand("childCommand", "child args");
+stop();`),
 );
 writeFileSync(
   `${site}embed.swf`,
@@ -1328,6 +1346,37 @@ check("an AVM1 SWF's ExternalInterface calls the page and takes its calls", asyn
   assert.deepEqual(ei.triple, { n: 15, s: "a<b" });
   assert.equal(ei.never, false);
 });
+
+check(
+  "an AVM1 movie an AS3 host loads reaches the page by ExternalInterface and fscommand, as the host does",
+  async (evaluate) => {
+    const got = await call<{
+      calls: unknown[][];
+      commands: unknown[][];
+      events: unknown[];
+      double: unknown;
+      triple: unknown;
+    }>(evaluate, "loadedExternal()");
+    // Each VM's calls in its own order, the host's first: its constructor runs before the load.
+    assert.deepEqual(got.calls, [
+      ["host first"],
+      ["host", "page saw host first"],
+      ["child first", [1, { k: "v" }]],
+      ["child", "page saw child first"],
+    ]);
+    // Both reach the page's <id>_DoFSCommand and the element's events; AS3 hears none of them.
+    assert.deepEqual(got.commands, [
+      ["hostCommand", "host args"],
+      ["childCommand", "child args"],
+    ]);
+    assert.deepEqual(got.events, [
+      { command: "hostCommand", args: "host args" },
+      { command: "childCommand", args: "child args" },
+    ]);
+    assert.equal(got.double, 8);
+    assert.deepEqual(got.triple, { n: 15, of: "loaded-external-child.swf" });
+  },
+);
 
 check(
   "an AVM1 SWF's actions run, and its players and compilers go with them",

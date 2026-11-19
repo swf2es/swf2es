@@ -1657,31 +1657,59 @@ its timeline plays, and none of its code runs.
 An AVM1 SWF loaded by AS3 runs its actions in an AVM1 realm of its own,
 its compiler, host services and LocalConnection broker the parent
 player's; the pointer reaches its buttons and clips by AVM1's rules
-(`input/avm1.ts`). It has no levels, as Flash Player 32's projector
+(`input/avm1.ts`). Its `fscommand` and `ExternalInterface` reach the page
+through the parent's bridge, beside the host's own calls and callbacks,
+as the plug-in passed every movie's on; AS3 hears none of its
+fscommands, as in Flash. It has no levels, as Flash Player 32's projector
 traced it (`tests/unit/player/scripting/loads.test.ts`): its root is
 `_root`, which is what it converts to and `targetPath` gives, its clips
 `_root.a.b` and `_target` `/a/b`; `_level0` and every `_levelN` are
-undefined, and the root has no `_parent`; `loadMovieNum`, and a load into
-the root itself, load nothing, while `MovieClipLoader` and a clip's
-`loadMovie` load into its clips. Not yet followed: Flash gives the AS3
-display list to the SWFs loaded into such a movie's clips, whose
-`_level0` is the host's root, a MovieClip to them, with its children by
-name (the corpus's `avm2/avm1_root`), and the path of a clip a
-MovieClipLoader loaded into runs through it, `_level0.loader.movie.clip`,
-the root's own `_parent` then becoming its Loader.
+undefined, and the root has no `_parent`. Nothing loads into a level or
+the root itself, or unloads it: `loadMovieNum`, `loadVariablesNum`,
+`unloadMovieNum`, the root's `loadMovie`, `loadVariables` and
+`unloadMovie` do nothing, and `MovieClipLoader.loadClip` into a level
+gives false; `MovieClipLoader`, a clip's `loadMovie` and `loadVariables`,
+and `LoadVars` load into its clips and objects. A `loadClip` into the
+root gives true in the projector, which then traced nothing more, the
+host's frames included; the player loads it. Not yet followed: Flash
+gives the AS3 display list to the SWFs loaded into such a movie's clips,
+whose `_level0` is the host's root, a MovieClip to them, with its
+children by name (the corpus's `avm2/avm1_root`), and the path of a clip
+a MovieClipLoader loaded into runs through it,
+`_level0.loader.movie.clip`, the root's own `_parent` then becoming its
+Loader.
 
 `LocalConnection` carries messages from AVM1 to AVM1 and between AVM1
 and AVM2 within a player. Names are case-insensitive; a leading
 underscore opts out of the domain prefix. `send` copies its arguments
-into AMF0, keeping references and cycles, and queues the delivery on the
-sender's host-event queue; arguments over 40 KiB give false. AS3 sends
-AMF3, which the broker turns into AMF0 only for an AVM1 receiver, so
-AS3-only types survive between AS3 peers. The receiver's methods,
-`allowDomain`, `allowInsecureDomain` and `onStatus` run in the
-receiver's or the sender's own activation; the status says whether a
-listener was found, even where its domain callback refuses the call.
-Unloading a child AS3 loaded closes its names and cancels its queued
-callbacks. Connections are not shared with other tabs or applications.
+into AMF0, keeping references and cycles, and queues the delivery;
+arguments over 40 KiB give false. Under an AS3 host, AS3's and its
+movies' deliveries share one queue, which delivers up to 16 a frame, so
+that a message a handler sends arrives in the same frame unless a chain
+keeps sending (`Loads.deferLocal`): Flash delivers as it polls, in real
+time, which adl shows as a median of 10 to 25 a frame at 30 fps and
+Flash Player 32's projector as 2 to 4, so the tests trace no frame
+numbers for it. A standalone AVM1 player delivers on its network's
+queue, the next frame. AS3 sends AMF3, which the broker turns into AMF0
+only for an AVM1 receiver, so AS3-only types survive between AS3 peers.
+The receiver's methods, `allowDomain`, `allowInsecureDomain` and
+`onStatus` run in the receiver's or the sender's own activation, and the
+actions they queue run after them, as the frame script of a
+`gotoAndStop` in a handler runs at once in adl and the projector; the
+status says whether a listener was found, even where its domain callback
+refuses the call, which is asked of the sender's domain whether it is
+the receiver's or not. A method the receiver lacks, or a property that
+is no function, is passed over in silence; in AS3, what the method
+throws, or a sealed client's #1069, is an AsyncErrorEvent. A movie an
+AS3 Loader unloads keeps its connections, as Flash Player 32 and adl
+keep them even after `unloadAndStop`, a removal and a collection: it
+plays no more, but takes messages and answers them, its sends' onStatus
+comes, and its names stay taken until it closes them or the player ends;
+a send still to be delivered keeps it too, as a movie unloaded by the
+first of its two messages still delivers the second
+(`Avm1.unloadFromLoader`; the `avm1-local-connection` case). Then, or
+once it stops for good, it is destroyed, its code let go of. Connections
+are not shared with other tabs or applications.
 
 ### PrintJob
 
