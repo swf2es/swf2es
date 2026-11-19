@@ -21,44 +21,49 @@ let nextWebSocket = 1;
 let nextRequest = 1;
 /** The requests waiting for their response, by number. */
 const responses = new Map<number, (response: NetworkResponse) => void>();
-/** Those told of as they come: who hears of it, and the pieces of its body so far. */
-const streams = new Map<number, { progress: NetworkProgress; chunks: Uint8Array[] }>();
+/**
+ * Those told of as they come: who hears of it, and its body so far, in one
+ * buffer that grows as it fills, sized at the length told.
+ */
+const streams = new Map<number, { progress: NetworkProgress; bytes: Uint8Array; length: number }>();
 ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) => {
   const stream = streams.get(id);
   streams.delete(id);
   if (response.streamed && stream) {
     const { streamed: _, ...rest } = response;
-    responses.get(id)?.({ ...rest, bytes: joined(stream.chunks) });
+    const { bytes, length } = stream;
+    responses.get(id)?.({
+      ...rest,
+      bytes: length === bytes.length ? bytes : bytes.slice(0, length),
+    });
     return;
   }
 
   responses.get(id)?.(response);
 });
-ipcRenderer.on("net:open", (_event, id: number, head: Omit<NetworkResponse, "bytes">, total) =>
-  streams.get(id)?.progress.open(head, Number(total)),
-);
-ipcRenderer.on("net:data", (_event, id: number, chunk: Uint8Array) => {
+ipcRenderer.on("net:open", (_event, id: number, head: Omit<NetworkResponse, "bytes">, total) => {
   const stream = streams.get(id);
   if (stream) {
-    stream.chunks.push(chunk);
-    stream.progress.data(chunk);
+    stream.bytes = new Uint8Array(Math.min(Number(total) || 0, 1 << 24) || 65536);
+    stream.progress.open(head, Number(total));
   }
 });
-
-function joined(chunks: Uint8Array[]): Uint8Array {
-  if (chunks.length === 1) {
-    return chunks[0];
+ipcRenderer.on("net:data", (_event, id: number, chunk: Uint8Array) => {
+  const stream = streams.get(id);
+  if (!stream) {
+    return;
   }
 
-  const bytes = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.length, 0));
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.length;
+  if (stream.length + chunk.length > stream.bytes.length) {
+    const grown = new Uint8Array(Math.max(stream.length + chunk.length, stream.bytes.length * 2));
+    grown.set(stream.bytes.subarray(0, stream.length));
+    stream.bytes = grown;
   }
 
-  return bytes;
-}
+  stream.bytes.set(chunk, stream.length);
+  stream.length += chunk.length;
+  stream.progress.data(chunk);
+});
 
 // One cache per movie lifetime; reads after the first never block on the main process.
 let captureEpoch = -1;
@@ -185,7 +190,7 @@ const api: DesktopApi = {
       const id = nextRequest++;
       cancel(() => ipcRenderer.send("net:abort", id));
       if (progress) {
-        streams.set(id, { progress, chunks: [] });
+        streams.set(id, { progress, bytes: new Uint8Array(0), length: 0 });
       }
 
       // The response comes as a message of its own, before the answer that says it went.

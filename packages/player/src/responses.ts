@@ -17,39 +17,39 @@ export async function responseBytes(
     return new Uint8Array(await response.arrayBuffer());
   }
 
-  progress.open(head, declaredLength(response));
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
+  const declared = declaredLength(response);
+  progress.open(head, declared);
+  // One buffer that grows as it fills, sized at the length told, up to a bound a lying header
+  // cannot push it past: no list of the pieces beside it.
+  let bytes = new Uint8Array(Math.min(declared, 1 << 24) || 65536);
   let length = 0;
+  const reader = body.getReader();
   for (;;) {
     const { done, value } = await reader.read();
     if (done) {
       break;
     }
 
-    chunks.push(value);
+    if (length + value.length > bytes.length) {
+      const grown = new Uint8Array(Math.max(length + value.length, bytes.length * 2));
+      grown.set(bytes.subarray(0, length));
+      bytes = grown;
+    }
+
+    bytes.set(value, length);
     length += value.length;
     progress.data(value);
   }
 
-  if (chunks.length === 1) {
-    return chunks[0];
-  }
-
-  const bytes = new Uint8Array(length);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.length;
-  }
-
-  return bytes;
+  return length === bytes.length ? bytes : bytes.slice(0, length);
 }
 
 /**
  * The length a response's headers tell, as Flash's bytesTotal: 0 where
  * they tell none, or where its body was encoded, which the browser
- * decodes to another length.
+ * decodes to another length. Across origins the encoding may be hidden
+ * from the page while the length is not: the loads then count the total
+ * as unknown once more has come than it told (piecesOf).
  */
 function declaredLength(response: Response): number {
   const coding = response.headers.get("content-encoding");
