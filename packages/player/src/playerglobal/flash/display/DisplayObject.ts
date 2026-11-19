@@ -415,13 +415,16 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     }
 
     /** The LoaderInfo of the SWF this is in; null off the display list. */
-    // The stage's is the main SWF's, as Flash's.
+    // The stage's, and that of what is on the stage itself, tells the main SWF's but is an
+    // object of its own (Loads.stageLoaderInfo; adl's `stage-hits` case).
     get loaderInfo(): Value {
-      if (this.$display === s.stage) {
-        return s.root?.loaderInfo ?? null;
+      const root = rootOf(this.$display);
+      if (root === s.stage) {
+        const main = s.root?.loaderInfo;
+        return main ? s.loads.stageLoaderInfo(main) : null;
       }
 
-      return rootOf(this.$display)?.loaderInfo ?? null;
+      return root?.loaderInfo ?? null;
     }
 
     get mouseX(): number {

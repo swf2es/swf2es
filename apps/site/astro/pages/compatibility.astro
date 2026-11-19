@@ -113,16 +113,16 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     href: source("docs/architecture/input.md"),
   },
   {
-    name: "AS3 and AVM1 together",
-    status: "partial",
-    note: "AVM1 movies an AS3 SWF loads play inside it. Focus, keys, Tab and Selection are one across both, as in Flash Player 32; the other bridges between the two (the mouse, LocalConnection, sound, unloading) are still being checked against Flash.",
-    href: source("docs/architecture/input.md"),
-  },
-  {
     name: "ExternalInterface",
     status: "supported",
     note: "Calls between the SWF and the page.",
     href: url("docs/externalinterface/"),
+  },
+  {
+    name: "AS3 and AVM1 together",
+    status: "partial",
+    note: "AVM1 movies an AS3 Loader holds play in an AVM1 of their own: keys, Tab, focus and Selection one across both, as in Flash Player 32; LocalConnection both ways, an unloaded movie's connections kept as Flash keeps them; ExternalInterface and fscommand to the page beside the host's. AVM1Movie's call and addCallback throw, as in Flash Player. Mouse picking into the movies and the wheel are still being matched to Flash.",
+    href: source("docs/avm1.md"),
   },
   {
     name: "Sockets",
