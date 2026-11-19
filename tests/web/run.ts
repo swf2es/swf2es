@@ -22,6 +22,7 @@
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
 import { flashAssembler, script } from "../avm1-script.ts";
 import { rectPath } from "../player/cases/common.ts";
@@ -83,6 +84,7 @@ const abcs = compileScripts(
       name: "RelativeUrlsTest",
       source: readFileSync(`${here}scripts/RelativeUrlsTest.as`, "utf8"),
     },
+    { name: "ProgressTest", source: readFileSync(`${here}scripts/ProgressTest.as`, "utf8") },
   ],
   out,
 );
@@ -779,6 +781,123 @@ function colours(image: Image, [x, y, w, h]: number[], scale: number): Map<numbe
 
   return found;
 }
+
+// A server of another origin, as data often came from, sending each body a piece every 60 ms: a
+// SWF of 48 KB, 8 KB a piece, padded with a tag of no kind; 16 KB of data, 4 KB a piece, its
+// length told or not; an MP3 of a tone's frames, 4 KB a piece.
+/** `head`, a SWF, made 48 KB long by a tag of no kind before its End. */
+const padded48 = (head: Uint8Array) => {
+  const padded = new Uint8Array(48 * 1024);
+  const at = head.length - 2;
+  padded.set(head.subarray(0, at));
+  const view = new DataView(padded.buffer);
+  view.setUint16(at, (0x3ff << 6) | 0x3f, true);
+  view.setUint32(at + 2, padded.length - at - 8, true);
+  view.setUint32(4, padded.length, true);
+  return padded;
+};
+const pieceSwf = padded48(
+  w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  }),
+);
+const pieceAvm1 = padded48(
+  w.swf({ version: 8, width: 20, height: 20, frameCount: 1, tags: [w.showFrame(), w.end()] }),
+);
+const tone = readFileSync(`${here}../player/sounds/tone.mp3`);
+const pieceBodies: Record<string, [Uint8Array, number]> = {
+  "/swf": [pieceSwf, 8192],
+  "/avm1": [pieceAvm1, 8192],
+  "/bin": [new Uint8Array(16 * 1024).fill(65), 4096],
+  "/mp3": [new Uint8Array(Buffer.concat(Array.from({ length: 5 }, () => tone))), 4096],
+};
+const pieces = createServer((request, response) => {
+  const url = new URL(request.url ?? "/", "http://x");
+  const found = pieceBodies[url.pathname];
+  if (!found) {
+    response.writeHead(404).end();
+    return;
+  }
+
+  const [body, size] = found;
+  response.writeHead(200, {
+    "access-control-allow-origin": "*",
+    ...(url.searchParams.has("unsized") ? {} : { "content-length": body.length }),
+  });
+  let at = 0;
+  const next = () => {
+    response.write(body.subarray(at, at + size));
+    at += size;
+    if (at < body.length) {
+      setTimeout(next, 60);
+    } else {
+      response.end();
+    }
+  };
+  next();
+});
+await new Promise<void>((done) => pieces.listen(0, "127.0.0.1", done));
+const piecesBase = `http://127.0.0.1:${(pieces.address() as { port: number }).port}`;
+writeFileSync(
+  `${site}progress.swf`,
+  bare(abcs.get("ProgressTest") as Uint8Array, 1, "ProgressTest"),
+);
+// The same in AS2: a MovieClipLoader's load, its target's bytes read as it comes, then a
+// LoadVars' polled every 10 ms.
+writeFileSync(
+  `${site}progress-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.doAction([
+        ...script(
+          `
+    var mcl = new MovieClipLoader();
+    var l = {};
+    l.onLoadStart = function(t) { trace("progress: mcl start"); };
+    l.onLoadProgress = function(t, a, b) {
+      trace("progress: mcl progress " + a + " " + b + " " + t.getBytesLoaded() + " " + t.getBytesTotal());
+    };
+    l.onLoadComplete = function(t) { trace("progress: mcl complete"); };
+    l.onLoadInit = function(t) { trace("progress: mcl init"); vars(); };
+    mcl.addListener(l);
+    createEmptyMovieClip("c", 1);
+    mcl.loadClip(base + "/avm1", c);
+    function vars() {
+      var v = new LoadVars();
+      var last = -1;
+      var id = setInterval(function() {
+        var n = v.getBytesLoaded();
+        if (n != last) {
+          last = n;
+          trace("progress: vars progress " + n + " " + v.getBytesTotal());
+        }
+      }, 10);
+      v.onData = function(s) {
+        clearInterval(id);
+        trace("progress: vars complete " + v.getBytesLoaded() + " " + v.getBytesTotal());
+        trace("progress: done");
+      };
+      v.load(base + "/bin");
+    }
+    stop();
+  `,
+          8,
+        )(flashAssembler())
+          .end()
+          .bytes(),
+      ]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 
 const checks: [string, (evaluate: Evaluate, send: Send) => Promise<void>][] = [];
 const boundTextureWarnings: string[] = [];
@@ -3386,6 +3505,78 @@ check(
   },
 );
 
+// After the churn's count of audio contexts: a Sound's load opens one.
+check("loads tell their progress a piece at a time as their bytes come", async (evaluate) => {
+  const r = await call<WorkerRun>(
+    evaluate,
+    `workerRun("/web-test/progress.swf", { flashvars: "base=${encodeURIComponent(piecesBase)}" }, {}, "progress: done")`,
+  );
+  assert.deepEqual(r.errors, []);
+  const lines = r.traces.filter((t) => t.startsWith("progress: ")).map((t) => t.slice(10));
+  assert.equal(lines.at(-1), "done");
+  // Each load's PROGRESS, after any of none: growing, more than one before COMPLETE, the last all
+  // of it; the total the length the server told, 0 where it told none; a URLStream's bytes
+  // readable as they come.
+  const expected: [string, number, number][] = [
+    ["loader", pieceSwf.length, pieceSwf.length],
+    ["urlloader", 16384, 16384],
+    ["urlstream", 16384, 16384],
+    ["unsized", 16384, 0],
+    ["sound", pieceBodies["/mp3"][0].length, pieceBodies["/mp3"][0].length],
+  ];
+  const grows = (lines: string[], kind: string) => {
+    const own = lines.filter((l) => l.startsWith(`${kind} progress `));
+    const told = own.map((l) => l.split(" ").slice(2).map(Number)).filter(([loaded]) => loaded > 0);
+    assert.ok(told.length >= 3, `${kind}: ${told.length} progress events with bytes`);
+    assert.ok(
+      told.every(([loaded], i) => i === 0 || loaded > told[i - 1][0]),
+      `${kind}: bytesLoaded grows`,
+    );
+    return told;
+  };
+  for (const [kind, size, total] of expected) {
+    const own = lines.filter((l) => l.startsWith(`${kind} `));
+    assert.equal(own.at(-1), `${kind} complete`, kind);
+    const told = grows(own, kind);
+    assert.equal(told.at(-1)?.[0], size, kind);
+    assert.ok(
+      told.every(([, t]) => t === total),
+      `${kind}: bytesTotal ${total}`,
+    );
+    if (kind === "urlstream" || kind === "unsized") {
+      assert.ok(
+        told.every(([loaded, , available]) => available === loaded),
+        `${kind}: bytesAvailable is what came`,
+      );
+    }
+  }
+
+  // AS2: onLoadStart, then onLoadProgress a piece at a time, the SWF's length its total and the
+  // target's bytes those told; onLoadComplete and onLoadInit after the last. A LoadVars' bytes
+  // grow as they come, its total the length the server told.
+  const avm1 = await call<WorkerRun>(
+    evaluate,
+    `workerRun("/web-test/progress-avm1.swf", { flashvars: "base=${encodeURIComponent(piecesBase)}" }, {}, "progress: done")`,
+  );
+  assert.deepEqual(avm1.errors, []);
+  const avm1Lines = avm1.traces.filter((t) => t.startsWith("progress: ")).map((t) => t.slice(10));
+  const mcl = avm1Lines.filter((l) => l.startsWith("mcl "));
+  assert.equal(mcl[0], "mcl start");
+  assert.deepEqual(mcl.slice(-2), ["mcl complete", "mcl init"]);
+  const clip = grows(mcl, "mcl");
+  assert.ok(
+    clip.every(([a, b, loaded, total]) => b === pieceAvm1.length && loaded === a && total === b),
+    "mcl: the target's bytes are those told, of the SWF's length",
+  );
+  assert.equal(clip.at(-1)?.[0], pieceAvm1.length);
+  const vars = grows(avm1Lines, "vars");
+  assert.ok(
+    vars.every(([, total]) => total === 16384),
+    "vars: getBytesTotal the length told",
+  );
+  assert.equal(avm1Lines.at(-2), "vars complete 16384 16384");
+});
+
 const failures = await withPage(
   "survivors",
   async (evaluate, send, fresh, listen) => {
@@ -3458,6 +3649,9 @@ const failures = await withPage(
     ],
   },
 );
+
+pieces.close();
+pieces.closeAllConnections();
 
 // On a page that is not cross-origin isolated, workers pass messages as on
 // one that is, and sharing memory with one says it needs isolation; the
