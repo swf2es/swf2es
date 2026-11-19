@@ -485,6 +485,29 @@ Flash Player 32 gives them. adl's AVM1 moves no caret for
 `Selection.setSelection`, so its case (`avm1-text-input-scroll`) has the
 focus's select-all move it, and the web test types past the edge.
 
+A TextField's hit tests take its scroll as adl does (`text-scroll-hits`,
+`text-hit-edges`). `getLineIndexAtPoint` and `getCharIndexAtPoint` find
+the lines as scrolled, and `getCharIndexAtPoint` the characters scrolled
+sideways too; a point counts inside the gutters alone, both ends in,
+taken a pixel right of where it is, and a field placed from a
+DefineEditText tag another two pixels right and one down whatever its
+bounds; below the last line it is on the last. A character is hit from
+past its left edge to its right edge, and a line's own left edge hits its
+first character, an empty line's newline or an empty field's end. NaN
+hits nothing. `getCharBoundaries` gives the text where it lies
+unscrolled, from a placed field's origin and two pixels on, and none for
+a line above the first shown or past the one after the last shown whole.
+New text keeps `scrollV` within its `maxScrollV`, as it keeps `scrollH`;
+a change of size does not. `maxScrollV` is the first line whose top is
+within the room of the text's bottom, `textHeight` down, so the empty
+line a dynamic field's final newline leaves, which counts nothing in
+`textHeight`, is scrolled to only where no line fits. Flash Player 32
+differed from adl in two of these, and the player follows adl in all
+SWFs: its `getCharIndexAtPoint` left `scrollH` out (AIR's issue 2315,
+which Harman fixed), and its `getCharBoundaries` gave y as scrolled. Ruffle's
+expectations come from Flash Player 32, so the corpus's
+`edittext_getcharboundaries_scroll` stays partial on purpose.
+
 A key's release goes elsewhere when the page or the window loses focus
 while it is held, and never reaches the player. The host tells the
 player its focus (`Player.setActive`, bound by `bindActivation`,

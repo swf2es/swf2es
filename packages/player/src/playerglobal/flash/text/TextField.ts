@@ -4,7 +4,7 @@
 import { avm2 } from "@swf2es/runtime";
 import { CONTENT, type TextObject } from "../../../display/display.js";
 import type { Scripting } from "../../../scripting.js";
-import { lineOf, maxScrollH, maxScrollV, shownLines } from "../../../text/layout.js";
+import { GUTTER, lineOf, maxScrollH, maxScrollV, shownLines, TWIPS } from "../../../text/layout.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text/text.js";
 import { embeddedFonts } from "./Font.js";
 import { useSheet } from "./StyleSheet.js";
@@ -25,20 +25,41 @@ function rounded(v: number): number {
   return r - v === 0.5 && r % 2 !== 0 ? r - 1 : r;
 }
 
-/** The line a point in the field is on, by the lines' tops and heights: -1 for none. */
+/**
+ * Where adl takes a point given to a field's hit tests, in twips in the
+ * field's box: a pixel right of where it is, and a field placed from a
+ * DefineEditText tag another two right and one down, wherever its bounds
+ * start.
+ */
+function hitPoint(field: TextObject, x: number, y: number): [number, number] {
+  return field.definition ? [x + 3 * TWIPS, y + TWIPS] : [x + TWIPS, y];
+}
+
+/**
+ * The line a point in the field is on, the point as hitPoint takes it, as
+ * adl finds it: inside the gutters, both ends in, among the lines as
+ * scrolled, below the last one the last; -1 outside, or for NaN.
+ */
 function lineAtPoint(field: TextObject, x: number, y: number): number {
-  const layout = field.layout;
-  if (x < 0 || x > field.width * 20) {
+  const lines = field.layout.lines;
+  const [fx, fy] = hitPoint(field, x, y);
+  if (
+    lines.length === 0 ||
+    !(fx >= GUTTER && fx <= field.width * TWIPS - GUTTER) ||
+    !(fy >= GUTTER && fy <= field.height * TWIPS - GUTTER)
+  ) {
     return -1;
   }
 
-  for (const [i, line] of layout.lines.entries()) {
-    if (y >= line.y && y < line.y + line.ascent + line.descent + line.leading) {
-      return i;
-    }
+  const first = Math.min(Math.max(0, field.scrollV - 1), lines.length - 1);
+  // Where it is in the text unscrolled.
+  const at = fy + lines[first].y - GUTTER;
+  let i = first;
+  while (i + 1 < lines.length && lines[i + 1].y <= at) {
+    i++;
   }
 
-  return -1;
+  return i;
 }
 
 /** The start and length of the paragraph `i` is in, as Flash gives them (Ruffle's edit_text.rs); [-1, -1] outside the text. */
@@ -571,7 +592,12 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
 
       return lineOf(field.layout, i);
     }
-    /** Where a character is, in the field: null for one past the text, a newline, or one its font lacks. */
+    /**
+     * Where a character is in the field, its text unscrolled, as adl gives it
+     * however the field is scrolled: null for one past the text, a newline,
+     * one its font lacks, or one on a line above the first shown or past the
+     * one after the last shown whole.
+     */
     getCharBoundaries(charIndex: Value): Value {
       const i = s.rt.toInt(charIndex);
       const field = this.$display;
@@ -579,33 +605,56 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
         return null;
       }
 
-      const line = field.layout.lines[lineOf(field.layout, i)];
+      const at = lineOf(field.layout, i);
+      const bottom = field.scrollV + shownLines(field, field.scrollV - 1) - 1;
+      if (at < field.scrollV - 1 || at > bottom) {
+        return null;
+      }
+
+      const line = field.layout.lines[at];
       const c = line.chars[i - line.start];
       if (!c?.shown) {
         return null;
       }
 
+      // A field placed from a DefineEditText tag gives them from its origin and two pixels on (adl).
+      const dx = field.definition ? field.left + 2 : 0;
+      const dy = field.definition ? field.top + 2 : 0;
       return s.rt.construct(
         s.rt.classNamed("flash.geom::Rectangle"),
-        c.x / 20,
-        line.y / 20,
-        c.advance / 20,
-        (line.ascent + line.descent) / 20,
+        c.x / TWIPS + dx,
+        line.y / TWIPS + dy,
+        c.advance / TWIPS,
+        (line.ascent + line.descent) / TWIPS,
       );
     }
     getLineIndexAtPoint(x: Value, y: Value): number {
-      return lineAtPoint(this.$display, s.rt.toNumber(x) * 20, s.rt.toNumber(y) * 20);
+      return lineAtPoint(this.$display, s.rt.toNumber(x) * TWIPS, s.rt.toNumber(y) * TWIPS);
     }
+    /**
+     * The character at a point, as hitPoint takes it, on its line
+     * (lineAtPoint) and scrolled sideways too, as adl finds it (Flash Player
+     * 32 did not scroll it sideways): one whose left edge is before the
+     * point and whose right edge is not; at the line's own left edge, the
+     * line's first, even an empty line's newline or an empty field's end.
+     */
     getCharIndexAtPoint(x: Value, y: Value): number {
       const field = this.$display;
-      const px = s.rt.toNumber(x) * 20;
-      const i = lineAtPoint(field, px, s.rt.toNumber(y) * 20);
+      const px = s.rt.toNumber(x) * TWIPS;
+      const py = s.rt.toNumber(y) * TWIPS;
+      const i = lineAtPoint(field, px, py);
       if (i < 0) {
         return -1;
       }
 
-      for (const c of field.layout.lines[i].chars) {
-        if (c.shown && px >= c.x && px < c.x + c.advance) {
+      const line = field.layout.lines[i];
+      const at = hitPoint(field, px, py)[0] + field.scrollH * TWIPS;
+      if (at === line.x) {
+        return line.start;
+      }
+
+      for (const c of line.chars) {
+        if (c.shown && c.x < at && at <= c.x + c.advance) {
           return c.index;
         }
       }
