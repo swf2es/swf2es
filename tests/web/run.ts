@@ -3536,7 +3536,13 @@ check("loads tell their progress a piece at a time as their bytes come", async (
     const told = own.map((l) => l.split(" ").slice(2).map(Number)).filter(([loaded]) => loaded > 0);
     assert.ok(told.length >= 3, `${kind}: ${told.length} progress events with bytes`);
     assert.ok(
-      told.every(([loaded], i) => i === 0 || loaded > told[i - 1][0]),
+      // The last may repeat the bytes, telling all of all once all has come.
+      told.every(
+        ([loaded], i) =>
+          i === 0 ||
+          loaded > told[i - 1][0] ||
+          (i === told.length - 1 && loaded === told[i - 1][0]),
+      ),
       `${kind}: bytesLoaded grows`,
     );
     return told;
