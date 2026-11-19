@@ -19,10 +19,7 @@ export async function responseBytes(
 
   const declared = declaredLength(response);
   progress.open(head, declared);
-  // One buffer that grows as it fills, sized at the length told, up to a bound a lying header
-  // cannot push it past: no list of the pieces beside it.
-  let bytes = new Uint8Array(Math.min(declared, 1 << 24) || 65536);
-  let length = 0;
+  const gathered = new Gathered(declared);
   const reader = body.getReader();
   for (;;) {
     const { done, value } = await reader.read();
@@ -30,18 +27,76 @@ export async function responseBytes(
       break;
     }
 
-    if (length + value.length > bytes.length) {
-      const grown = new Uint8Array(Math.max(length + value.length, bytes.length * 2));
-      grown.set(bytes.subarray(0, length));
-      bytes = grown;
-    }
-
-    bytes.set(value, length);
-    length += value.length;
+    gathered.add(value);
     progress.data(value);
   }
 
-  return length === bytes.length ? bytes : bytes.slice(0, length);
+  return gathered.whole();
+}
+
+/** Above this, a buffer for the length told grows to it only as the bytes come. */
+const CAP = 1 << 24;
+
+/**
+ * A body's bytes as they come, held at twice their size at most: in one
+ * buffer of the length told (up to CAP until more comes), or as a list of
+ * the pieces joined once at the end where no length was told or more came.
+ */
+class Gathered {
+  private buffer: Uint8Array | null;
+  private pieces: Uint8Array[] | null = null;
+  private length = 0;
+
+  constructor(private readonly declared: number) {
+    this.buffer = declared > 0 ? new Uint8Array(Math.min(declared, CAP)) : null;
+    if (this.buffer === null) {
+      this.pieces = [];
+    }
+  }
+
+  add(chunk: Uint8Array): void {
+    const end = this.length + chunk.length;
+    const buffer = this.buffer;
+    if (buffer !== null && end > buffer.length) {
+      if (end <= this.declared) {
+        const grown = new Uint8Array(this.declared);
+        grown.set(buffer.subarray(0, this.length));
+        this.buffer = grown;
+      } else {
+        // More than told: the rest as pieces, after what came.
+        this.pieces = [buffer.subarray(0, this.length)];
+        this.buffer = null;
+      }
+    }
+
+    if (this.buffer !== null) {
+      this.buffer.set(chunk, this.length);
+    } else {
+      this.pieces?.push(chunk);
+    }
+
+    this.length = end;
+  }
+
+  whole(): Uint8Array {
+    if (this.buffer !== null) {
+      return this.length === this.buffer.length ? this.buffer : this.buffer.slice(0, this.length);
+    }
+
+    const pieces = this.pieces ?? [];
+    if (pieces.length === 1) {
+      return pieces[0];
+    }
+
+    const bytes = new Uint8Array(this.length);
+    let at = 0;
+    for (const piece of pieces) {
+      bytes.set(piece, at);
+      at += piece.length;
+    }
+
+    return bytes;
+  }
 }
 
 /**
