@@ -34,8 +34,8 @@ const wasm = await WebAssembly.compile(
 const actions = (source: string) =>
   w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]);
 
-/** Ten seconds of silence at 25 fps, either on the root or a nested clip. */
-function movie(nested = false, abc?: Uint8Array, event = false): Uint8Array {
+/** Ten seconds of silence at 25 fps, either on the root or a nested clip, whose End tag `ended` keeps. */
+function movie(nested = false, abc?: Uint8Array, event = false, ended = true): Uint8Array {
   const frames: Uint8Array[] = [];
   if (!event) {
     frames.push(w.soundStreamHead({ rate: 1, samplesPerBlock: 441 }));
@@ -66,7 +66,7 @@ function movie(nested = false, abc?: Uint8Array, event = false): Uint8Array {
   }
 
   if (nested) {
-    tags.push(w.sprite(10, 250, [...frames, w.end()]));
+    tags.push(w.sprite(10, 250, ended ? [...frames, w.end()] : frames));
     tags.push(w.place({ depth: 1, character: 10, name: "streamer" }));
     for (let i = 0; i < 250; i++) {
       tags.push(w.showFrame());
@@ -359,7 +359,7 @@ test("an MP3 stream's gap is silence, and its next block starts it again from it
   player.destroy();
 });
 
-async function as3(nested = false, loaded = false, lazyCompilation = false) {
+async function as3(nested = false, loaded = false, lazyCompilation = false, ended = true) {
   const clock = device();
   const compile = compiler(out);
   const abc = compile(
@@ -385,7 +385,7 @@ async function as3(nested = false, loaded = false, lazyCompilation = false) {
   );
   const scripting = new Scripting(await createCodegen(wasm), { ...clock, lazyCompilation });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-  const bytes = loaded ? bare(abc, 1, "StreamRoot", 20, 20) : movie(nested, abc);
+  const bytes = loaded ? bare(abc, 1, "StreamRoot", 20, 20) : movie(nested, abc, false, ended);
   const player = new Player(bytes, scripting);
   player.frameRate = scripting.frameRate = 25;
   await player.start();
@@ -516,6 +516,21 @@ test("AS3 stream time follows changes to the stage frame rate", { skip }, async 
 
   assert.ok(clip.currentFrame >= 120 && clip.currentFrame <= 122, `${clip.currentFrame}`);
   assert.equal(clock.plays.length, 1);
+  player.destroy();
+});
+
+// A clip without an End tag stays on its last frame, still playing, as adl
+// has it; its stream stops there, as a stopped clip's does (unmeasured).
+test("an AS3 clip that stays on its last frame stops its stream", { skip }, async () => {
+  const { clock, player, clip } = await as3(true, false, false, false);
+  for (let i = 0; i < 260; i++) {
+    clock.pass(40);
+    player.advance(40);
+  }
+
+  assert.equal(clip.currentFrame, 250);
+  assert.ok(clip.playing);
+  assert.equal(clip.stream, null);
   player.destroy();
 });
 

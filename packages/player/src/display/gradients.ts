@@ -8,6 +8,11 @@
 // point to the circle for a radial one, the last stop at a focal point
 // off the centre itself. Pad clamps t, repeat wraps it, and reflect mirrors it, as a
 // texture's clamp, repeat and mirrored repeat do with a ramp of 256 texels.
+// A gradient whose matrix collapses the plane, which has no inverse, is
+// drawn whole in the colour at its square's centre: the ramp's middle for a
+// linear one, its first entry for a radial one, and for a focal one the
+// centre's place seen from the focus. Flash's fixed point drifts a few
+// entries from there across the stage; that drift is not followed.
 import type { GradientStop } from "@swf2es/format";
 
 /** A ramp's stops in order of use: Flash fills the ramp from each stop to the next, skipping any that go back. */
@@ -114,8 +119,9 @@ export function radialPixels(
 ): Uint32Array {
   const out = new Uint32Array(columns * rows);
   const f = Math.max(-1, Math.min(1, focal));
-  // The inverse, from the shape to the unit circle (the square is 819.2 a half side).
-  const det = m.a * m.d - m.b * m.c;
+  // The inverse, from the shape to the unit circle (the square is 819.2 a half side); a matrix
+  // that collapses the plane, its determinant taken as infinite, takes every point to the centre.
+  const det = m.a * m.d - m.b * m.c || Number.POSITIVE_INFINITY;
   const ia = m.d / det / 819.2;
   const ib = -m.b / det / 819.2;
   const ic = -m.c / det / 819.2;

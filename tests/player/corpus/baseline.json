@@ -1975,7 +1975,7 @@
   "timeline/frame_script_cleanup_goto": {"matched":30,"lines":30,"traced":30,"error":null},
   "timeline/frame_script_cleanup_goto2": {"matched":34,"lines":34,"traced":34,"error":null},
   "timeline/frame_script_construct": {"matched":25,"lines":25,"traced":25,"error":null},
-  "timeline/missing_frame_scripts": {"matched":13,"lines":22,"traced":27,"error":null},
+  "timeline/missing_frame_scripts": {"matched":22,"lines":22,"traced":22,"error":null},
   "timeline/scene_count_oom": {"matched":1,"lines":1,"traced":1,"error":null},
   "timeline/swf_9_event_goto_frame_script": {"matched":5,"lines":5,"traced":5,"error":null},
   "timeline/swf_9_frame_script_button_order": {"matched":15,"lines":15,"traced":15,"error":null},

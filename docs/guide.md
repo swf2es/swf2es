@@ -170,6 +170,30 @@ the click. A page that makes the element full screen itself
 `configure({ fullScreen })` takes a full screen of the embedder's own
 instead, as the desktop app's window, which needs no click.
 
+A page can measure the player, as the site's performance meter does, by
+setting `element.frameListener` to a function. After each animation frame
+the player calls it with a `FrameStats` object: `time`, the frame's time
+by `performance.now()`; `frames`, the SWF's frames it played, often 0
+where the display runs faster than the SWF; `frameRate`, the SWF's rate
+then; `play`, the ms those frames took (scripts, events, timeline and
+sound); `drew`, whether it drew the stage; `draw`, the ms drawing took on
+the CPU, with the little work just before it (keeping the text input's
+focus, choosing samples again after a quality change), and 0 where it did
+not draw; and `shown`, false for the frames a timer plays while the page
+gets no animation frames, which draw nothing. Tell a drawn frame by
+`drew`, not by `draw`: a browser with a coarse clock (Safari's, or
+Firefox's on a page that is not cross-origin isolated) may time a short
+drawing as 0 ms. The same object comes each time, overwritten by the next
+frame, so copy what you keep. There is one listener: setting it replaces
+the one before. It holds across loads until set to `null`; without one
+the player measures nothing, and the listener's own time is not counted
+as the player's, so it does not change how frames are paced.
+`element.wasmMemory` gives the bytes of the WebAssembly memories behind
+the player: `codegen`, its compiler's, and `native`, the bitmap kernels',
+tessellators' and decoders' on the page, which every player on it shares.
+A Flash Worker's thread holds its own, which are not counted.
+`element.gl` is the WebGL context it draws with, for counting draw calls.
+
 With Stage3D on, a back buffer may be from 32 to 16384 pixels a side in
 every profile, as Flash Player 32 and AIR 51 take one on a desktop GPU,
 so a SWF that sizes its back buffer to its stage plays on a 2K or 4K

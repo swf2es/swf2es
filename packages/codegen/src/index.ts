@@ -241,6 +241,8 @@ export interface Codegen {
    * and the size of codegen's memory, which never shrinks.
    */
   usage(): { live: number; dead: number; memory: number };
+  /** The size of codegen's memory in bytes, which never shrinks: cheap, for a host that shows it often. */
+  memoryBytes(): number;
   /**
    * Evict application domain `appDomain` and its descendants while the host
    * has no use for them, as once their ABCs are compiled: as dropped, but
@@ -543,6 +545,9 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     usage() {
       const [live, dead, memory] = collected(wasm.domainUsage()).split(" ").map(Number);
       return { live, dead, memory };
+    },
+    memoryBytes() {
+      return wasm.memory.buffer.byteLength;
     },
     compact() {
       // A rebuild makes new tables while the old are live: what earlier

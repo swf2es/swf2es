@@ -93,10 +93,16 @@ export interface Timeline {
   /** Its SoundStreamHead's stream, if it has one with blocks. */
   stream: SoundStream | null;
   /**
-   * Whether it plays on from its last frame to its first: an AVM1
-   * timeline without an End tag stays on its last, as Flash's does.
+   * Whether it plays on from its last frame to its first: a timeline
+   * without an End tag stays on its last, as Flash's does.
    */
   loops: boolean;
+  /**
+   * The frame it plays to before it loops or stays: the last its ShowFrame
+   * tags end, which an AS3 timeline's header may say is not its last; all
+   * its frames where not given.
+   */
+  played?: number;
   /**
    * An AVM1 timeline's DoAction tags after its last ShowFrame, which Flash
    * runs once, as the clip stays on its last frame.
@@ -776,11 +782,16 @@ function timelineOf(
   // run with the last frame where the timeline loops, and once after it, as
   // the clip stops there, where it does not (`tail`): a timeline of one
   // frame, or without an End tag (adl, and the corpus's `looping_child_*`).
-  // An AS3 one has as many as its header says.
-  const loops = !avm1 || ended;
+  // An AS3 one has as many as its header says, but plays only as far as
+  // its ShowFrame tags end, and loops from there only with an End tag, as
+  // the root does too (adl, and the corpus's `missing_frame_scripts`).
+  const loops = ended;
+  // The frames ShowFrame tags end: what follows the last opens one more.
+  let played = list[last]?.code === tags.ShowFrame ? frames.length : frames.length - 1;
   let tail: FrameCommand[] = [];
   if (!avm1) {
     frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
+    played = Math.max(1, Math.min(played, frames.length));
     while (frames.length < (frameCount || 1)) {
       frames.push([]);
     }
@@ -811,6 +822,7 @@ function timelineOf(
     sounds,
     stream: head && blocks.length > 0 ? { head, blocks, byFrame } : null,
     loops,
+    played: avm1 ? frames.length : played,
     tail,
   };
 }

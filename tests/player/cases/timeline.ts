@@ -106,6 +106,33 @@ function lateScripts(abc: Uint8Array): Uint8Array {
   });
 }
 
+// A root without an End tag holding sprites with and without one, and
+// with headers that say more frames than their ShowFrame tags end, bound
+// to scripts/EndTags.as.
+function endTags(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(1, 2, [w.showFrame(), w.showFrame()]),
+      w.sprite(2, 3, [w.showFrame(), w.showFrame(), w.end()]),
+      w.sprite(3, 3, [w.showFrame(), w.end()]),
+      w.sprite(4, 2, [w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(abc, "EndTags"),
+      w.symbolClass([[0, "Main"]]),
+      w.place({ depth: 1, character: 1, name: "s1" }),
+      w.place({ depth: 2, character: 2, name: "s2" }),
+      w.place({ depth: 3, character: 3, name: "s3" }),
+      w.place({ depth: 4, character: 4, name: "s4" }),
+      w.showFrame(),
+      w.showFrame(),
+    ],
+  });
+}
+
 // Clips p, a and q of four frames, the fourth placing a Kid, on a root
 // whose second frame places a Clip d and third a Clip r, bound to
 // scripts/LateScripts9.as, in a SWF of version 9.
@@ -1680,6 +1707,15 @@ export const timelineCases: PlayerCase[] = [
     swf: lateQueue(9),
     script: "LateQueue",
     frames: 8,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "end-tags",
+    swf: endTags,
+    script: "EndTags",
+    frames: 7,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

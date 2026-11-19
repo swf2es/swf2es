@@ -129,6 +129,15 @@ test("the wrapper evicts an application domain and revives it given its ABCs", a
   assert.throws(() => codegen.reviveDomain(child, new Map()), /not evicted/);
 });
 
+test("memoryBytes is the size of codegen's memory, as usage tells it", async () => {
+  const codegen = await createCodegen(module);
+  codegen.reset();
+  assert.equal(codegen.add(script([0x47])), 0);
+  codegen.compileModule(["a"]);
+  assert.ok(codegen.memoryBytes() > 0);
+  assert.equal(codegen.memoryBytes(), codegen.usage().memory);
+});
+
 test("a drop of a domain reset since is ignored", async () => {
   const codegen = await createCodegen(module);
   codegen.reset();

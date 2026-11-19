@@ -776,7 +776,8 @@ export class MovieClip extends Container {
 
   /**
    * Whether advance() would do anything now, read from it case by case:
-   * sit out, an AVM1 clip's tail, a stopped one's stream, a frame or a loop.
+   * sit out, an AVM1 clip's tail, the stream of a stopped one or one that
+   * stays on its last frame, a frame or a loop.
    * What it reads changes through the setters that mark the clip
    * (markAdvanceDue) as it may come to be so, and a new timeline.
    */
@@ -786,20 +787,26 @@ export class MovieClip extends Container {
     }
 
     const timeline = this.timeline;
-    const total = timeline.frames.length;
+    const last = this.lastPlayed;
     if (!this.running) {
       return !!this.playingStream;
     }
 
-    if (this.frame >= total && this.library.avm1 && !(timeline.loops && total > 1)) {
+    if (this.frame >= last && this.library.avm1 && !(timeline.loops && last > 1)) {
       return true;
     }
 
-    if (total <= 1) {
+    if (last <= 1) {
       return !!this.playingStream;
     }
 
-    return this.frame < total || timeline.loops;
+    return this.frame < last || timeline.loops || !!this.playingStream;
+  }
+
+  /** The frame it plays to before it loops or stays (Timeline.played). */
+  private get lastPlayed(): number {
+    const total = this.timeline.frames.length;
+    return Math.min(this.timeline.played ?? total, total);
   }
 
   /**
@@ -817,12 +824,8 @@ export class MovieClip extends Container {
     // frame or without an End tag, stops there, and the DoAction tags
     // after its last ShowFrame run, once (Ruffle's determine_next_frame).
     const avm1 = this.library.avm1;
-    if (
-      avm1 &&
-      this.playing &&
-      this.currentFrame >= this.totalFrames &&
-      !(this.timeline.loops && this.totalFrames > 1)
-    ) {
+    const last = this.lastPlayed;
+    if (avm1 && this.playing && this.currentFrame >= last && !(this.timeline.loops && last > 1)) {
       this.playing = false;
       for (const command of this.tailed ? [] : (this.timeline.tail ?? [])) {
         if (command.type === "actions") {
@@ -834,7 +837,7 @@ export class MovieClip extends Container {
       return;
     }
 
-    if (!this.playing || this.totalFrames <= 1) {
+    if (!this.playing || last <= 1) {
       // A clip of one frame plays its stream for that frame only, as Ruffle stops it.
       if (this.stream) {
         this.library.sounds?.stopStream(this);
@@ -843,9 +846,16 @@ export class MovieClip extends Container {
       return;
     }
 
-    if (this.currentFrame >= this.totalFrames) {
+    // From the last frame its ShowFrame tags end, even with frames after it
+    // by its header (Timeline.played).
+    if (this.currentFrame >= last) {
       if (this.timeline.loops) {
         this.gotoFrame(1, true);
+      } else if (this.stream) {
+        // One that stays still plays, as adl's isPlaying has it, but its
+        // stream stops, as a stopped clip's does (unmeasured: adl's harness
+        // has no sound).
+        this.library.sounds?.stopStream(this);
       }
 
       return;
