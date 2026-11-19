@@ -942,10 +942,9 @@ check(
       r.heard.some((s) => s.drew),
       "no call drew",
     );
-    // Unset, nothing is told, and the loop reads the clock once less a frame: no measuring.
+    // Unset, nothing is told, and the loop reads the clock once less a call: no measuring.
     assert.equal(r.after, 0);
-    // The SWF's own reads of the clock vary a little with how many of its frames fall in each.
-    assert.ok(Math.abs(r.on - r.off - 1) < 0.5, `${r.off} clock reads a frame unset, ${r.on} set`);
+    assert.ok(Math.abs(r.on - r.off - 1) < 0.5, `${r.off} clock reads a call unset, ${r.on} set`);
     assert.ok(r.memory.codegen > 0 && r.memory.native > 0, JSON.stringify(r.memory));
   },
 );
@@ -1877,7 +1876,7 @@ check(
         assert.equal(live(fps), metered, `${label}: the meter shows ${fps}`);
       }
     }
-    // Hidden, the meter's hook is gone from the loop: one read of the clock a frame less.
+    // Hidden, the meter's hook is gone from the loop: one read of the clock a call less.
     const [unheard, metered, unheardAgain] = r.reads;
     assert.ok(
       Math.abs(metered - unheard - 1) < 0.5,

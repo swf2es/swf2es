@@ -343,9 +343,50 @@ async function playsUnframed() {
 }
 
 /**
+ * The clock's reads a call of `movie`'s loop over `n` animation frames,
+ * counted outside its player's advance: within it, the SWF's own reads
+ * follow how many of its frames fall in each call, which the page's pacing
+ * sways; around it, the loop reads the clock a fixed few times a call, and
+ * once more while anything hears its frames.
+ */
+async function readsOutsideAdvance(movie: Player, n = 30): Promise<number> {
+  const player = movie.player as unknown as {
+    advance(dt: number, busy?: number): number;
+  } & Record<string, unknown>;
+  const now = performance.now;
+  const advance = player.advance;
+  let reads = 0;
+  let inside = 0;
+  let calls = 0;
+  performance.now = () => {
+    reads++;
+    return now.call(performance);
+  };
+  player.advance = function (this: unknown, dt: number, busy?: number) {
+    calls++;
+    const before = reads;
+    try {
+      return advance.call(this, dt, busy);
+    } finally {
+      inside += reads - before;
+    }
+  };
+  try {
+    await frames(1);
+    reads = inside = calls = 0;
+    await frames(n);
+    return (reads - inside) / Math.max(1, calls);
+  } finally {
+    performance.now = now;
+    // Its own property gone, the prototype's method answers again.
+    Reflect.deleteProperty(player, "advance");
+  }
+}
+
+/**
  * The scripted SWF's frame listener: what it heard over a second, each call
  * copied, and whether every call gave the same object; then, unset, the
- * calls it heard after; and the clock's reads an animation frame, with no
+ * calls it heard after; and the clock's reads a call of the loop, with no
  * listener and with one, which measuring adds one to.
  */
 async function frameStats() {
@@ -364,28 +405,15 @@ async function frameStats() {
   await frames(5);
   const after = heard.length - told;
 
-  // The clock's reads over as many animation frames, without a listener and with one.
-  const now = performance.now;
-  let reads = 0;
-  performance.now = () => {
-    reads++;
-    return now.call(performance);
-  };
-  const readsOver = async (n: number) => {
-    await frames(1);
-    reads = 0;
-    await frames(n);
-    return reads / n;
-  };
+  // The clock's reads a call, without a listener and with one.
   let off = 0;
   let on = 0;
   try {
-    off = await readsOver(30);
+    off = await readsOutsideAdvance(movie);
     movie.frameListener = () => {};
-    on = await readsOver(30);
+    on = await readsOutsideAdvance(movie);
   } finally {
     movie.frameListener = null;
-    performance.now = now;
   }
 
   return {
@@ -403,7 +431,7 @@ async function frameStats() {
  * The scripted SWF's frame listener and its performance meter, one set and
  * unset with the other on, both ways round: for each step, the calls the
  * listener heard in it and the meter's fps after it; then the clock's reads
- * an animation frame with neither, with the meter, and with neither again,
+ * a call of the loop with neither, with the meter, and with neither again,
  * as a listener costs the loop one read.
  */
 async function meterWithListener() {
@@ -424,22 +452,6 @@ async function meterWithListener() {
     await new Promise((done) => setTimeout(done, 1300));
     steps.push([label, heard - before, fps()]);
   };
-  const now = performance.now;
-  let reads = 0;
-  const readsPerFrame = async () => {
-    performance.now = () => {
-      reads++;
-      return now.call(performance);
-    };
-    try {
-      await frames(1);
-      reads = 0;
-      await frames(30);
-      return reads / 30;
-    } finally {
-      performance.now = now;
-    }
-  };
   try {
     movie.frameListener = listener;
     await step("listener");
@@ -453,11 +465,11 @@ async function meterWithListener() {
     await step("listener again");
     movie.frameListener = null;
 
-    const unheard = await readsPerFrame();
+    const unheard = await readsOutsideAdvance(movie);
     movie.performanceMeter = true;
-    const metered = await readsPerFrame();
+    const metered = await readsOutsideAdvance(movie);
     movie.performanceMeter = false;
-    const unheardAgain = await readsPerFrame();
+    const unheardAgain = await readsOutsideAdvance(movie);
     return { steps, reads: [unheard, metered, unheardAgain] };
   } finally {
     movie.destroy();
