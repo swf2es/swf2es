@@ -21,6 +21,8 @@ const crossCutting: Record<string, string> = {
     "stream cursors and catch-up across the player, audio hosts, AVM1 and AS3 loaders",
   "playerglobal/natives-coverage.test.ts":
     "the natives the player's libraries declare against the runtime's and playerglobal's",
+  "input/avm1-keys.test.ts":
+    "keys and focus between an AS3 host and the AVM1 movies it loads: keyboard.ts, avm1.ts and AVM1's focus",
   "playerglobal/air-only.test.ts":
     "AIR's classes on the web and in AIR: playerglobal's marks, codegen's series, lookups by name",
 };
