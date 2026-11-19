@@ -112,7 +112,8 @@ export class TextObject extends DisplayObject {
   private scrollX = 0;
   /** The text's revision the scroll was last kept within. */
   private scrolledRevision = -1;
-  scrollV = 1;
+  /** The first line shown, from 1: as a script, the wheel or the caret left it, and no further than new text scrolls. */
+  private lineScroll = 1;
   /** The selection, from the end it was started at to the caret, as text indices; empty, a caret alone. */
   private anchorAt = 0;
   private caretAt = 0;
@@ -211,12 +212,27 @@ export class TextObject extends DisplayObject {
     return this.laid.layout;
   }
 
-  /** The scroll kept within new text's maxScrollH, as Flash keeps it as the text changes. */
+  /**
+   * The scroll kept within new text's maxScrollH and maxScrollV, as Flash
+   * keeps it as the text changes, but not as the field's size does (adl).
+   */
   private keepScroll(): void {
     if (this.scrolledRevision !== this.model.revision) {
       this.scrolledRevision = this.model.revision;
       this.scrollX = Math.min(this.scrollX, maxScrollH(this));
+      this.lineScroll = Math.min(this.lineScroll, maxScrollV(this));
     }
+  }
+
+  /** The first line shown, from 1. */
+  get scrollV(): number {
+    this.keepScroll();
+    return this.lineScroll;
+  }
+
+  set scrollV(line: number) {
+    this.keepScroll();
+    this.lineScroll = line;
   }
 
   /** How far the text is scrolled sideways, in pixels to the twip. */
