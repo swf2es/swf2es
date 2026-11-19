@@ -119,7 +119,7 @@ export function pointerTarget(
   // hitsOwnPoint); the masks over an object are asked of it in the stage's
   // space, the object's own drawing of it in its own, which the pick
   // carries down the list from parent to child, making no matrix per object.
-  const probe: Probe = { x: x - 0.5, y, root: stage };
+  const probe: Probe = { x: x - 0.5, y, root: stage, pointer: true };
   const picks = pickWork.picks++;
   // Off for the checked build's pick again in full.
   let pruned = true;
@@ -204,7 +204,7 @@ export function pointerTarget(
     }
 
     const area = hitAreas.get(d);
-    const areaHit = area && area !== d ? () => hitsPoint(area, x, y, true, stage) : null;
+    const areaHit = area && area !== d ? () => hitsPoint(area, x, y, true, stage, true) : null;
     if (areaHit && d.object?.$mouseChildren === false) {
       return areaHit() ? own(d) : null;
     }

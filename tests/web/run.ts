@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { flashAssembler, script } from "../avm1-script.ts";
+import { rectPath } from "../player/cases/common.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { compareImages, decodePng, type Image } from "../player/image.ts";
@@ -56,6 +57,10 @@ const abcs = compileScripts(
     { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
     { name: "FocusRectTest", source: readFileSync(`${here}scripts/FocusRectTest.as`, "utf8") },
+    {
+      name: "TweenHoverTest",
+      source: readFileSync(`${here}scripts/TweenHoverTest.as`, "utf8"),
+    },
     {
       name: "ActivationTest",
       source: readFileSync(`${here}scripts/ActivationTest.as`, "utf8"),
@@ -240,6 +245,73 @@ writeFileSync(
       w.place({ depth: 4, character: 13, name: "btn", matrix: { tx: 2000, ty: 1400 } }),
       w.place({ depth: 5, character: 3, matrix: { tx: 200, ty: 500 } }),
       w.doAction([...script(focusAvm1, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+// A shape tween pulsing every frame between a 100 by 75 box at (50, 37.5) and a 150 by 110 one
+// at (25, 20), (100, 75) always in it: in AS3 a Sprite in button mode (scripts/TweenHoverTest.as),
+// in AVM1 a clip with onRollOver and onRollOut, each logging what the pointer gives it.
+const pulse = [0, 16384, 32768, 49152, 65535, 49152, 32768, 16384];
+const tweenTags = [
+  w.morphShape({
+    id: 1,
+    startBounds: [1000, 3000, 750, 2250],
+    endBounds: [500, 3500, 400, 2600],
+    fills: [{ start: 0xff3366cc, end: 0xffcc6633 }],
+    start: [{ fill0: 1, commands: rectPath(50, 37.5, 100, 75) }],
+    end: [rectPath(25, 20, 150, 110)],
+  }),
+  w.sprite(10, pulse.length, [
+    ...pulse.flatMap((ratio, i) => [
+      i === 0
+        ? w.place({ depth: 1, character: 1, ratio })
+        : w.place({ depth: 1, move: true, ratio }),
+      w.showFrame(),
+    ]),
+    w.end(),
+  ]),
+];
+writeFileSync(
+  `${site}tween-hover-as3.swf`,
+  w.swf({
+    version: 10,
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      ...tweenTags,
+      w.doAbc(abcs.get("TweenHoverTest") as Uint8Array, "TweenHoverTest"),
+      w.symbolClass([[0, "TweenHoverTest"]]),
+      w.place({ depth: 1, character: 10, name: "btn" }),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+const tweenHoverAvm1 = `var log = [];
+btn.onRollOver = function() { log.push("rollOver"); };
+btn.onRollOut = function() { log.push("rollOut"); };
+flash.external.ExternalInterface.addCallback("hoverLog", null, function() { return log.join(" "); });
+stop();`;
+writeFileSync(
+  `${site}tween-hover-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      ...tweenTags,
+      w.place({ depth: 1, character: 10, name: "btn" }),
+      w.doAction([...script(tweenHoverAvm1, 8)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
     ],
@@ -476,6 +548,79 @@ writeFileSync(
     frameCount: 1,
     tags: [
       w.doAction([...script(avm1Field, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+// AS2 buttons whose press's own onMouseDown changes what is under the pointer: "shown", hidden
+// at (10, 20), is shown by it, and "gone", at (60, 20), hidden by it, as is "goneClip", a clip in
+// button mode at (110, 20); "remade", a clip at (160, 20), goes by it to a frame that places its
+// button again in its place, a new instance, which logs its transitions from its own actions.
+const pressChanges = `var log = [];
+shown._visible = false;
+function watch(b, name) {
+  var events = ["onPress", "onRelease", "onRollOver", "onRollOut", "onDragOver", "onDragOut"];
+  for (var i = 0; i < events.length; i++) {
+    b[events[i]] = (function (e) { return function () { log.push(name + " " + e); }; })(events[i]);
+  }
+}
+watch(shown, "shown");
+watch(gone, "gone");
+watch(goneClip, "goneClip");
+Mouse.addListener({ onMouseDown: function () {
+  var x = _root._xmouse;
+  if (x < 50) { shown._visible = true; } else if (x < 100) { gone._visible = false; } else if (x < 150) { goneClip._visible = false; } else { remade.gotoAndStop(3); }
+} });
+flash.external.ExternalInterface.addCallback("takeLog", null, function () { var taken = log; log = []; return taken; });
+stop();`;
+writeFileSync(
+  `${site}avm1-press-changes.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 60,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.button2(2, 1),
+      w.sprite(3, 1, [w.place({ character: 1, depth: 1 }), w.showFrame(), w.end()]),
+      w.button2(
+        4,
+        1,
+        (
+          [
+            [1 << 0, "onRollOver"],
+            [1 << 1, "onRollOut"],
+            [1 << 2, "onPress"],
+            [1 << 3, "onRelease"],
+            [1 << 4, "onDragOut"],
+            [1 << 5, "onDragOver"],
+          ] as const
+        ).map(([conditions, name]) => ({
+          conditions,
+          actions: [
+            ...script(`_root.log.push(_name + " ${name}");`, 8)(flashAssembler()).end().bytes(),
+          ],
+        })),
+      ),
+      w.sprite(5, 3, [
+        w.place({ character: 4, depth: 1 }),
+        w.doAction([...script("stop();", 8)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.remove(1),
+        w.showFrame(),
+        w.place({ character: 4, depth: 1 }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.place({ character: 2, depth: 1, name: "shown", matrix: { tx: 200, ty: 400 } }),
+      w.place({ character: 2, depth: 2, name: "gone", matrix: { tx: 1200, ty: 400 } }),
+      w.place({ character: 3, depth: 3, name: "goneClip", matrix: { tx: 2200, ty: 400 } }),
+      w.place({ character: 5, depth: 4, name: "remade", matrix: { tx: 3200, ty: 400 } }),
+      w.doAction([...script(pressChanges, 8)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
     ],
@@ -1719,6 +1864,49 @@ check("a stage holding nothing shows its background colour, not black", async (e
   }
 });
 
+// Flash Player 32's projector under a real mouse: a pointer resting or moving over a shape tween
+// that pulses every frame, in a Sprite in button mode or an AVM1 clip with onRollOver, gets one
+// rollOver, keeps the hand, and gets one rollOut when it leaves. The pointer meets the tween's
+// last blend while a frame's place has given it a ratio not yet drawn, where a script's shape
+// test meets nothing of it (ShapeObject.blending).
+check("a pointer over a pulsing shape tween rolls over it once", async (evaluate, send) => {
+  const mouse = (x: number, y: number) =>
+    send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
+  const frames = (n: number) => call(evaluate, `frames(${n}).then(() => true)`);
+  const log = () => call<string>(evaluate, `focusCall("hoverLog")`);
+  const cursor = () => call<string>(evaluate, "focusCursor()");
+  for (const vm of ["as3", "avm1"]) {
+    const over = vm === "as3" ? "rollOver mouseOver" : "rollOver";
+    const out = vm === "as3" ? "mouseOut rollOut" : "rollOut";
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `focusPlayer("/web-test/tween-hover-${vm}.swf")`,
+    );
+    try {
+      await mouse(left + 195, top + 145);
+      await frames(3);
+      await mouse(left + 100, top + 75);
+      await frames(24);
+      assert.equal(await log(), over, `${vm}: resting`);
+      assert.equal(await cursor(), "pointer", `${vm}: the hand, resting`);
+
+      for (let i = 0; i < 24; i++) {
+        await mouse(left + 90 + (i % 6) * 4, top + 70 + (i % 4) * 3);
+        await frames(1);
+      }
+
+      assert.equal(await log(), over, `${vm}: moving`);
+      assert.equal(await cursor(), "pointer", `${vm}: the hand, moving`);
+
+      await mouse(left + 195, top + 145);
+      await frames(3);
+      assert.equal(await log(), `${over} ${out}`, `${vm}: left`);
+    } finally {
+      await call(evaluate, "focusDestroy()");
+    }
+  }
+});
+
 // Flash Player 32's projector, driven by real keys (adl takes none): the focus's rectangle is
 // opaque yellow, three screen pixels wide inside its object's bounds on the stage, over what
 // is above the object; a button's hit area's. Two device pixels a stage pixel here, so its
@@ -1995,6 +2183,54 @@ check("a SWF with no code has buttons the pointer reaches", async (evaluate, sen
     await call(evaluate, "scriptFreeDestroy()");
   }
 });
+
+check(
+  "an AS2 press reaches only what was under the pointer before its onMouseDown and still is",
+  async (evaluate, send) => {
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `scriptFreePlayer("/web-test/avm1-press-changes.swf")`,
+    );
+    const mouse = async (types: string[], x: number, y: number) => {
+      for (const type of types) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: type === "mouseMoved" ? "none" : "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount: type === "mouseMoved" ? 0 : 1,
+        });
+      }
+
+      await call(evaluate, "frames(2).then(() => true)");
+      return call<string[]>(evaluate, `scriptFreeCall("takeLog")`);
+    };
+    const click = ["mousePressed", "mouseReleased"];
+
+    try {
+      // Flash Player 32 under real clicks: the button the press shows takes no press, nor its
+      // release, only the roll over the release gives it; then it is pressed as any other.
+      assert.deepEqual(await mouse(["mouseMoved"], 20, 30), []);
+      assert.deepEqual(await mouse(click, 20, 30), ["shown onRollOver"]);
+      assert.deepEqual(await mouse(click, 20, 30), ["shown onPress", "shown onRelease"]);
+
+      // The one it hides rolls out, as with the button up, and takes no press either.
+      assert.deepEqual(await mouse(["mouseMoved"], 70, 30), ["shown onRollOut", "gone onRollOver"]);
+      assert.deepEqual(await mouse(click, 70, 30), ["gone onRollOut"]);
+
+      // A clip hidden so gets its roll out too, as Flash sends a hidden clip's roll and drag outs.
+      assert.deepEqual(await mouse(["mouseMoved"], 120, 30), ["goneClip onRollOver"]);
+      assert.deepEqual(await mouse(click, 120, 30), ["goneClip onRollOut"]);
+
+      // A button a goto makes again in its place is still the one pressed, as in Flash.
+      assert.deepEqual(await mouse(["mouseMoved"], 170, 30), ["remade onRollOver"]);
+      assert.deepEqual(await mouse(click, 170, 30), ["remade onPress", "remade onRelease"]);
+    } finally {
+      await call(evaluate, "scriptFreeDestroy()");
+    }
+  },
+);
 
 check(
   "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",

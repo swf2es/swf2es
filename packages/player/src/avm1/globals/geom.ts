@@ -10,7 +10,7 @@
 // has then, a script's own among them, in doubles where Ruffle works in
 // floats and twips.
 import { avm1 } from "@swf2es/runtime";
-import { bounds, toStage } from "../../display/bounds.js";
+import { reportedBounds, toStage } from "../../display/bounds.js";
 import { type DisplayObject, TRANSFORM } from "../../display/display.js";
 
 type Value = avm1.Value;
@@ -821,7 +821,7 @@ function transformClass(host: GeomHost): Obj {
         return undefined;
       }
 
-      const r = bounds(d, true);
+      const r = reportedBounds(d, true);
       const m = toStage(d, host.stageOf(d));
       if (r === null) {
         return makeGeom(realm, "Rectangle", [0, 0, 0, 0], v);

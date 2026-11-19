@@ -143,6 +143,11 @@ export function runWorkerThread(port: ThreadPort): void {
       const now = performance.now();
       const played = playing.advance(now - last);
       last = now;
+      // A worker draws nothing: its frames settle what a draw would (Player.undrawn).
+      if (played > 0) {
+        playing.undrawn();
+      }
+
       if (stopIfTerminated()) {
         return;
       }

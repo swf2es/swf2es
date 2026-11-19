@@ -349,7 +349,18 @@ export class PointerInput implements Pointer {
     s.mouseStageY = p.y;
     this.last = p;
     this.updateDrag();
-    s.avm1Input?.broadcast(type, p);
+    try {
+      s.avm1Input?.broadcast(type, p);
+      this.dispatch(type, p, moved);
+    } finally {
+      // A press broadcast to AVM1 movies and never handed on, a handler having thrown.
+      s.avm1Input?.forgetPress();
+    }
+  }
+
+  /** A press, a release or a move, broadcast to any AVM1 movies, to what is under it. */
+  private dispatch(type: "move" | "down" | "up", p: PointerState, moved: boolean): void {
+    const s = this.scripting;
     this.picked = pickWork.changes;
     const found = this.pick(p);
     this.found = found;

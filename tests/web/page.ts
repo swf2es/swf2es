@@ -1303,6 +1303,7 @@ Object.assign(globalThis, {
     return true;
   },
   scriptFreePlayer,
+  scriptFreeCall: (name: string) => element("script-free")[name](),
   scriptFreeDestroy: () => {
     element("script-free").destroy();
     element("script-free").remove();
@@ -1310,6 +1311,9 @@ Object.assign(globalThis, {
   },
   focusPlayer,
   focusCall: (name: string, ...args: unknown[]) => element("focus-rect")[name](...args),
+  focusCursor: () =>
+    (element("focus-rect").shadowRoot?.querySelector("canvas") as HTMLCanvasElement | null)?.style
+      .cursor ?? "",
   focusDestroy: () => {
     element("focus-rect").destroy();
     element("focus-rect").remove();

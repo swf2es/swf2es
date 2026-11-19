@@ -274,6 +274,11 @@ export class Playback {
       drew = true;
     }
 
+    // A frame played and not drawn still settles what a draw would for its scripts.
+    if (!drew && played > 0) {
+      this.player.undrawn();
+    }
+
     // A frame's script may have destroyed the player: there is nothing left to tell of.
     if (this.onFrame && !this.destroyed) {
       this.told(this.onFrame, now, played, start, drew, show);
