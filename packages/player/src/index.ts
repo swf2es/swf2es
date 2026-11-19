@@ -5,6 +5,7 @@
  * module cache, those the swf2es command compiled ahead of time included.
  */
 
+export { nativeMemory } from "@swf2es/native/memory";
 export { AIR_DEFINITIONS } from "./air-definitions.js";
 export { Avm1, type Avm1Options } from "./avm1/avm1.js";
 export type { Certificate, CertificateName } from "./certificates.js";

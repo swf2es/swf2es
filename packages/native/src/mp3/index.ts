@@ -1,5 +1,6 @@
 // The compiled module is shared; each extraction has its own small decoder state.
 import { decodeBase64 } from "../base64.js";
+import { track } from "../memory.js";
 import { binary } from "./binary.js";
 
 interface Exports {
@@ -47,6 +48,7 @@ export class Mp3Decoder {
     }
 
     this.wasm = new WebAssembly.Instance(compiled).exports as unknown as Exports;
+    track(this.wasm.memory);
     this.input = new Uint8Array(this.wasm.memory.buffer, this.wasm.input(), 4096);
     this.pcm = new Float32Array(this.wasm.memory.buffer, this.wasm.output(), 2304);
   }
