@@ -86,6 +86,11 @@ async function play(m1: Movie = {}, m2: Movie = {}, movies = 2) {
     player.pointer?.handle("down", { x, y });
     player.pointer?.handle("up", { x, y });
   };
+  /** A press and a release with no move to them first, as Ruffle's recorded input has them. */
+  const press = (x: number, y: number) => {
+    player.pointer?.handle("down", { x, y });
+    player.pointer?.handle("up", { x, y });
+  };
   /** Keys pressed, by name; "Shift+Tab" holds Shift down over Tab. */
   const type = (...keys: string[]) => {
     for (const key of keys) {
@@ -112,7 +117,7 @@ async function play(m1: Movie = {}, m2: Movie = {}, movies = 2) {
     await scripting.settled();
     player.tick();
   };
-  return { player, lines, click, type, control };
+  return { player, lines, click, press, type, control };
 }
 
 // Where the projector's pointer pressed: the movies' fields, the AS3 field and sprite, nothing.
@@ -131,6 +136,9 @@ async function run(p: Awaited<ReturnType<typeof play>>, steps: Step[]): Promise<
     switch (op) {
       case "click":
         p.click(a as number, b as number);
+        break;
+      case "press":
+        p.press(a as number, b as number);
         break;
       case "key":
         p.type(a as string);
@@ -221,6 +229,36 @@ test("every movie's Selection listeners hear each move of the one focus, AS3's a
       "m1:g.onSetFocus f",
       "m1:Selection.onSetFocus f g",
       "m2:Selection.onSetFocus f g",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a press with no move first takes the focus to a movie's field as one after a move does", {
+  skip,
+}, async () => {
+  const p = await play();
+  try {
+    const lines = await run(p, [
+      ["press", ...AS3FIELD],
+      ["press", ...M1F],
+      ["press", ...M2F],
+    ]);
+    assert.deepEqual(lines, [
+      "as3:mouseFocusChange stage related as3field focus null",
+      "m1:Selection.onSetFocus null null",
+      "m2:Selection.onSetFocus null null",
+      "as3:focusIn as3field related null focus as3field",
+      "as3:mouseFocusChange as3field related null focus as3field",
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "as3:focusOut as3field related null focus null",
+      "m1:f.onKillFocus f",
+      "m2:f.onSetFocus f",
+      "m1:Selection.onSetFocus f f",
+      "m2:Selection.onSetFocus f f",
     ]);
   } finally {
     p.player.destroy();
