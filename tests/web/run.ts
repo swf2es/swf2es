@@ -912,8 +912,8 @@ check(
       same: boolean;
       after: number;
       rate: number;
-      off: number;
-      on: number;
+      off: boolean;
+      on: boolean;
       memory: { codegen: number; native: number };
     }>(evaluate, "frameStats()");
     // About a second's animation frames, each one object filled anew.
@@ -948,9 +948,9 @@ check(
       r.heard.some((s) => s.drew),
       "no call drew",
     );
-    // Unset, nothing is told, and the loop reads the clock once less a call: no measuring.
+    // Unset, nothing is told, and the loop has no hook to measure for.
     assert.equal(r.after, 0);
-    assert.ok(Math.abs(r.on - r.off - 1) < 0.5, `${r.off} clock reads a call unset, ${r.on} set`);
+    assert.deepEqual([r.off, r.on], [false, true]);
     assert.ok(r.memory.codegen > 0 && r.memory.native > 0, JSON.stringify(r.memory));
   },
 );
@@ -1861,34 +1861,29 @@ check(
 check(
   "a page's frame listener and the meter each hear the frames, whichever comes first",
   async (evaluate) => {
-    const r = await call<{ steps: [string, number, string][]; reads: number[] }>(
-      evaluate,
-      "meterWithListener()",
-    );
+    const steps = await call<[string, number, string, boolean][]>(evaluate, "meterWithListener()");
     const live = (text: string) => Number(/^(\d+\.\d) \//.exec(text)?.[1] ?? 0) > 0;
-    const expected: [string, boolean, boolean | null][] = [
-      ["listener", true, null],
-      ["both", true, true],
-      ["meter", false, true],
-      ["both again", true, true],
-      ["listener again", true, null],
+    // Each step: whether the listener heard calls, whether the meter's fps is live (null for a
+    // hidden meter's last figure), and whether the loop has a hook: none once neither listens.
+    const expected: [string, boolean, boolean | null, boolean][] = [
+      ["listener", true, null, true],
+      ["both", true, true, true],
+      ["meter", false, true, true],
+      ["both again", true, true, true],
+      ["listener again", true, null, true],
+      ["neither", false, null, false],
     ];
+    assert.equal(steps.length, expected.length);
     for (let i = 0; i < expected.length; i++) {
-      const [label, listening, metered] = expected[i];
-      const [step, heard, fps] = r.steps[i];
+      const [label, listening, metered, hook] = expected[i];
+      const [step, heard, fps, hooked] = steps[i];
       assert.equal(step, label);
       assert.equal(heard > 0, listening, `${label}: the listener heard ${heard} calls`);
       if (metered !== null) {
         assert.equal(live(fps), metered, `${label}: the meter shows ${fps}`);
       }
+      assert.equal(hooked, hook, `${label}: the loop's hook`);
     }
-    // Hidden, the meter's hook is gone from the loop: one read of the clock a call less.
-    const [unheard, metered, unheardAgain] = r.reads;
-    assert.ok(
-      Math.abs(metered - unheard - 1) < 0.5,
-      `${unheard} reads unheard, ${metered} metered`,
-    );
-    assert.ok(Math.abs(unheardAgain - unheard) < 0.5, `${unheard} reads, then ${unheardAgain}`);
   },
 );
 

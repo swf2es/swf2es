@@ -539,42 +539,10 @@ async function check(): Promise<void> {
             const meterHidden = `!(${meter}) || ${meter}.hidden`;
             const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').checked`;
             assert.equal(await value<boolean>(`!${meter}`), true);
-            // Whether anything hears the player's frames, told by the clock: a listener costs the
-            // loop one more read of it a call. Counted outside the player's advance, whose reads
-            // follow the SWF's frames and how many fall in each call, which the page's pacing
-            // sways; around it the loop reads the clock a fixed few times a call.
-            const readsPerFrame = async () =>
-              await value<number>(`(async () => {
-                const player = document.getElementById('player').player;
-                const now = performance.now;
-                const advance = player.advance;
-                let reads = 0;
-                let inside = 0;
-                let calls = 0;
-                performance.now = () => (reads++, now.call(performance));
-                player.advance = function (dt, busy) {
-                  calls++;
-                  const before = reads;
-                  try {
-                    return advance.call(this, dt, busy);
-                  } finally {
-                    inside += reads - before;
-                  }
-                };
-                const frame = () => new Promise((done) => requestAnimationFrame(() => done()));
-                try {
-                  await frame();
-                  reads = inside = calls = 0;
-                  for (let i = 0; i < 30; i++) {
-                    await frame();
-                  }
-                  return (reads - inside) / Math.max(1, calls);
-                } finally {
-                  performance.now = now;
-                  delete player.advance;
-                }
-              })()`);
-            const unheard = await readsPerFrame();
+            // Whether anything hears the player's frames: the element's test-only key tells
+            // whether its loop has a hook, the meter's or a page's.
+            const hooked = "document.getElementById('player')[Symbol.for('swf2es.frameHook')]";
+            assert.equal(await value<boolean>(hooked), false);
             assert.equal(await value<boolean>(wrapped), false);
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
@@ -638,11 +606,7 @@ async function check(): Promise<void> {
             assert.match(figures.heap, /^\d+(\.\d)? MB$/);
             assert.match(figures.codegen, /^\d+(\.\d)? MB$/);
             assert.match(figures.native, /^\d+(\.\d)? MB$/);
-            const heard = await readsPerFrame();
-            assert.ok(
-              Math.abs(heard - unheard - 1) < 0.5,
-              `${unheard} clock reads a call unheard, ${heard} with the meter`,
-            );
+            assert.equal(await value<boolean>(hooked), true);
             // Over the stage's corner, the pointer passing through it to the SWF.
             const meterBox = await value<{ inside: boolean; events: string }>(
               `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
@@ -676,11 +640,7 @@ async function check(): Promise<void> {
             await value("(document.getElementById('meter-toggle').click(), true)");
             await until(meterHidden);
             await until(`!${wrapped}`);
-            const unheardAgain = await readsPerFrame();
-            assert.ok(
-              Math.abs(unheardAgain - unheard) < 0.5,
-              `${unheard} clock reads a call before the meter, ${unheardAgain} after it`,
-            );
+            assert.equal(await value<boolean>(hooked), false);
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
               null,

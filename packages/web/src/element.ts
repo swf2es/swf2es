@@ -178,6 +178,16 @@ export class Swf2esPlayerElement extends ElementBase {
     "allowcapture",
   ];
 
+  // For the tests alone, under a key no page types: whether anything hears the loop's frames,
+  // the page's frame listener or the meter, which the loop then measures for.
+  static {
+    Object.defineProperty(Swf2esPlayerElement.prototype, Symbol.for("swf2es.frameHook"), {
+      get(this: Swf2esPlayerElement): boolean {
+        return !!this.#session?.playback?.onFrame;
+      },
+    });
+  }
+
   #session: Session | null = null;
   #readiness = deferred();
   /** The source the element last loaded, to tell a new src from the one playing. */
