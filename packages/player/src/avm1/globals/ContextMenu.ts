@@ -153,29 +153,49 @@ export interface Avm1Menu {
 }
 
 /**
- * Flash's own entries, which a custom caption may not begin: one that is
- * the start of any, "" among them, is left out of the menu.
+ * The entries Flash keeps for itself, which a custom caption may not
+ * begin, case aside, "" among those that do; and the names a caption may
+ * not hold anywhere. Flash Player 32's debug projector dropped each such
+ * caption from a menu and showed "High", "Medium", "Low", "Global" and
+ * "Hi"; a release player may keep "Show Redraw Regions" and "Debugger" for
+ * itself or not, which no probe measured.
  */
 const RESERVED = [
-  "Zoom In",
-  "Zoom Out",
+  "zoom in",
+  "zoom out",
   "100%",
-  "Show All",
-  "Quality",
-  "High",
-  "Medium",
-  "Low",
-  "Play",
-  "Loop",
-  "Rewind",
-  "Forward",
-  "Back",
-  "Print...",
-  "Settings...",
-  "About Adobe Flash Player",
-  "Show Redraw Regions",
-  "Debugger",
+  "show all",
+  "quality",
+  "play",
+  "loop",
+  "rewind",
+  "forward",
+  "back",
+  "print...",
+  "settings...",
+  "about adobe flash player",
+  "show redraw regions",
+  "debugger",
+  "save",
+  "undo",
+  "cut",
+  "copy link",
+  "paste",
+  "delete",
+  "select all",
+  "open",
+  "movie not loaded",
 ];
+const NAMES = ["adobe", "macromedia", "flash player", "settings"];
+
+/** Whether a menu may show `caption`, as Flash Player 32 kept its own entries. */
+function allowed(caption: string): boolean {
+  const lower = caption.toLowerCase();
+  return (
+    !RESERVED.some((entry) => entry.startsWith(lower)) &&
+    !NAMES.some((name) => lower.includes(name))
+  );
+}
 
 /**
  * The menu a right click on `d` shows, from `d` up through its parents to
@@ -183,8 +203,8 @@ const RESERVED = [
  * its onSelect called first with that object and the menu, as Flash
  * Player 32 calls it as the menu opens, through `call`; then its custom
  * items as the projector showed them: each object whose onSelect is a
- * function, a ContextMenuItem or not, but one whose caption begins none of
- * Flash's entries and is no earlier one's, the first 15 of those, the
+ * function, a ContextMenuItem or not, but one whose caption Flash allows
+ * and is no earlier one's, the first 15 of those, the
  * hidden among them, and of those the visible. Null where none has a menu.
  */
 export function menuAt(
@@ -227,7 +247,7 @@ export function menuAt(
       }
 
       const caption = avm1.stringOf(avm1.get(item, "caption", version), version);
-      if (captions.has(caption) || RESERVED.some((entry) => entry.startsWith(caption))) {
+      if (captions.has(caption) || !allowed(caption)) {
         continue;
       }
 

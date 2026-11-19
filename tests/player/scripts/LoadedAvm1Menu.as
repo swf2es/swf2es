@@ -1,6 +1,6 @@
 // The AS3 host of an AVM1 movie with menus of its own: a root whose menu
 // hides the built-in items and has one item of its own, and a Loader at
-// the origin loading m.swf.
+// the origin loading m.swf, which `unload` unloads.
 package
 {
 	import flash.display.Loader;
@@ -32,6 +32,12 @@ package
 			ldr.name = "ldr";
 			ldr.load(new URLRequest("m.swf"));
 			addChild(ldr);
+		}
+
+		/** The test's unload of the movie, its menu open. */
+		public function unload():void
+		{
+			ldr.unload();
 		}
 	}
 }

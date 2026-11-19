@@ -114,14 +114,15 @@ c.menu = cm2;
 trace("avm1:ready " + typeof ContextMenu);
 `;
 
-function menuMovie(): Uint8Array {
+function menuMovie(extra = ""): Uint8Array {
+  const source = MENU_MOVIE + extra;
   return w.swf({
     version: 8,
     width: 300,
     height: 200,
     frameCount: 1,
     tags: [
-      w.doAction([...script(MENU_MOVIE, 8)(flashAssembler()).end().bytes()]),
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
     ],
@@ -141,7 +142,8 @@ test("a loaded AVM1 movie's own menus show over its drawing, AS3's elsewhere", {
     realTime: null,
     url: "http://example.test/main.swf",
     fetch: async () => ({
-      bytes: menuMovie(),
+      // A LocalConnection of its own keeps the movie's VM past an unload, as in Flash.
+      bytes: menuMovie('var lc = new LocalConnection(); lc.connect("_menuTest");'),
       status: 200,
       headers: [],
     }),
@@ -178,8 +180,14 @@ test("a loaded AVM1 movie's own menus show over its drawing, AS3's elsewhere", {
       "as3:menuSelect owner [object LoadedAvm1Menu] target [object LoadedAvm1Menu]",
       "as3:item owner [object LoadedAvm1Menu] target [object LoadedAvm1Menu]",
     ]);
-    // A menu open as the player goes calls nothing.
-    const late = player.contextMenu({ x: 50, y: 50 });
+    // A menu open as its movie is unloaded calls nothing.
+    const unloaded = player.contextMenu({ x: 50, y: 50 });
+    lines.length = 0;
+    s.rt.callProperty(player.root.object, s.rt.publicName("unload"));
+    unloaded[0].select();
+    assert.deepEqual(lines, []);
+    // Nor one open as the player goes.
+    const late = player.contextMenu({ x: 250, y: 150 });
     lines.length = 0;
     player.destroy();
     late[0].select();
@@ -303,6 +311,24 @@ cm.customItems.push(new ContextMenuItem("Sep", f, true));`,
 for (var i = 0; i < c.length; i++) { cm.customItems.push(new ContextMenuItem(c[i], f)); }`,
     ["Global"],
   ],
+  [
+    "Flash keeps its own entries",
+    `var c = ["High", "Medium", "Low", "Forward", "Back", "Show Redraw Regions", "Debugger", "Save", "Undo", "Cut", "Copy", "Paste", "Delete", "Z1"];
+for (var i = 0; i < c.length; i++) { cm.customItems.push(new ContextMenuItem(c[i], f)); }`,
+    ["High", "Medium", "Low", "Z1"],
+  ],
+  [
+    "and names",
+    `var c = ["Select All", "Open", "Copy link", "Movie not loaded", "My Adobe", "Macromedia x", "Flash Player x", "x Settings", "Settings", "Zoom Out", "Show All", "Print", "Loop", "Z2"];
+for (var i = 0; i < c.length; i++) { cm.customItems.push(new ContextMenuItem(c[i], f)); }`,
+    ["Z2"],
+  ],
+  [
+    "case aside",
+    `var c = ["Rewind", "Play", "Quality", "100%", "Adobe", "adobe", "high", "zoom", "Print...", "Settings...", "About", "Hi", "x Adobe x", "Z3"];
+for (var i = 0; i < c.length; i++) { cm.customItems.push(new ContextMenuItem(c[i], f)); }`,
+    ["high", "Hi", "Z3"],
+  ],
 ];
 
 for (const [name, items, captions] of MENUS) {
@@ -363,6 +389,25 @@ trace("level " + this);`),
     lines.length = 0;
     player.destroy();
     late[0].select();
+    assert.deepEqual(lines, []);
+  } finally {
+    player.destroy();
+  }
+});
+
+// A clip of a clip's named menu is its menu, as the projector showed it: its parent's clip
+// named "menu" stops the walk, a menu of no onSelect and no items of its own, Flash's entries
+// kept, not the root's ContextMenu.
+test("a child clip named menu is its parent's menu, as in Flash", async () => {
+  const { player, lines } = await alone(`${ART}
+cm.customItems.push(new ContextMenuItem("Root item", f));
+_root.menu = cm;
+var child = art.createEmptyMovieClip("menu", 1);
+child.beginFill(0x22aa77); child.moveTo(0, 0); child.lineTo(50, 0); child.lineTo(50, 50); child.lineTo(0, 50); child.endFill();`);
+  try {
+    const menu = player.contextMenu({ x: 20, y: 10 });
+    assert.ok(menu.length > 0);
+    assert.ok(menu.every((item) => item.caption.startsWith("Quality")));
     assert.deepEqual(lines, []);
   } finally {
     player.destroy();

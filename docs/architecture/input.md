@@ -688,20 +688,24 @@ copies one by one with each item's `copy`; an item's caption and
 made booleans; their methods SWF 7's. A right click on an AVM1 movie,
 played alone or loaded by AS3, shows the menu of the nearest of the clip
 whose own drawing is under it and that clip's parents whose `menu` is an
-object, a ContextMenu or not; a clip of another level with none, and the
+object, a ContextMenu or not, a child clip named `menu` too, which shows
+Flash's entries alone; a clip of another level with none, and the
 empty stage of a movie alone, have level 0's. Its `onSelect` is called
 with that clip and the menu first; then its custom items show as Flash
 Player 32's projector showed them: each object whose `onSelect` is a
-function, a ContextMenuItem or not, whose caption begins none of Flash's
-own entries ("" and "Zoom", "Prin" or "Abo" among those that do) and is
-no earlier one's, the first 15 such, the hidden among them, and of those
+function, a ContextMenuItem or not, whose caption begins none of the
+entries Flash keeps, case aside ("" and "zoom", "Prin", "Copy" or "Abo"
+among those that do; "High" and "Global" not), holds none of "Adobe",
+"Macromedia", "Flash Player" and "Settings", and is no earlier one's, the first 15 such, the hidden among them, and of those
 the visible; the quality entries unless `builtInItems.quality` is false.
 A choice calls the item's `onSelect` with the clip and the item, and
 nothing once the movie is unloaded or the player gone. Off a loaded
 movie AS3's menu shows, as the projector showed all this
 (`tests/unit/player/input/context-menu.test.ts`); over one none of whose
-clips has a menu, AS3's too, which no probe measured. A button's or a
-text field's own `menu` is not read yet.
+clips has a menu, AS3's too, which no probe measured. The projector is
+Flash's debug player, whose "Show Redraw Regions" and "Debugger" a
+caption may not begin either; a release player's rule for them is not
+measured. A button's or a text field's own `menu` is not read yet.
 
 `NativeMenu`, `NativeMenuItem` and `ContextMenu`'s menu members are AS3
 (as3/playerglobal), held to adl by the `native-menu-natives` player case:
