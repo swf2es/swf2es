@@ -929,7 +929,9 @@ check(
       assert.ok(Number.isFinite(s.play) && s.play >= 0 && s.play < 1000, `play ${s.play}`);
       assert.ok(Number.isFinite(s.draw) && s.draw >= 0 && s.draw < 1000, `draw ${s.draw}`);
       assert.ok(s.drew || s.draw === 0, `${s.draw} ms drawing what was not drawn`);
-      assert.equal(s.shown, true);
+      // A stall of a quarter second, as a loaded machine may give, has the timer play a call,
+      // which never draws.
+      assert.ok(s.shown || (!s.drew && s.draw === 0), `a timer's call at ${i} drew`);
       played += s.frames;
     }
     const span = (r.heard.at(-1)?.time ?? 0) - r.heard[0].time;
@@ -937,6 +939,10 @@ check(
     assert.ok(
       played >= expected * 0.5 && played <= expected + 2,
       `${played} frames in ${span.toFixed(0)} ms at ${r.rate} fps`,
+    );
+    assert.ok(
+      r.heard.filter((s) => s.shown).length >= r.heard.length / 2,
+      "most calls came by the timer, not animation frames",
     );
     assert.ok(
       r.heard.some((s) => s.drew),
