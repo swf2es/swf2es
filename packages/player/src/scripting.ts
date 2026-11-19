@@ -787,6 +787,24 @@ export class Scripting {
         this.placing.splice(this.placing.indexOf(goto), 1);
       }
     };
+    // Flash names what a timeline places as it places it, before any
+    // constructor runs, a field's initializer's among them, and what a
+    // clip's first frame places, depth first: instance1, instance2, ... in
+    // that order, the named ones taking none: a clip has its own first
+    // frame placed then, as Flash Player 32 numbered them.
+    library.placed = (display) => {
+      if (display.name === "") {
+        display.name = `instance${++this.instances}`;
+      }
+
+      if (display instanceof MovieClip) {
+        display.timelineChild = true;
+        display.placeFirstFrame();
+      }
+    };
+    library.passedOver = (count) => {
+      this.instances += count;
+    };
     library.removing = (display, byTimeline) => this.lifecycle.removing(display, byTimeline);
     library.placedSymbol = (className) =>
       this.symbols.placedSymbol(className, library.domain ?? this.mainDomain);
@@ -805,8 +823,13 @@ export class Scripting {
     display.metaData = null;
     const metaData = bytes === null ? null : this.readMetaData(bytes);
 
-    // Its first frame's children are there before its constructor runs, made alive in its super().
+    // Its first frame's children are there before its constructor runs, made alive in its
+    // super(), and named after it, as what a button's states hold is (library.placed).
     if (display instanceof MovieClip) {
+      if (display.name === "") {
+        display.name = `instance${++this.instances}`;
+      }
+
       display.timelineChild = true;
       display.placeFirstFrame();
     }

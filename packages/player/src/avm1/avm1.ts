@@ -58,6 +58,7 @@ import {
   type SocketHost,
   screenCapabilities,
 } from "../hosts.js";
+import type { MenuItem } from "../input/context-menu.js";
 import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
@@ -76,6 +77,7 @@ import { type FocusHost, FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
+import { contextMenuClasses, menuAt } from "./globals/ContextMenu.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { fileReferenceClasses } from "./globals/FileReference.js";
 import { type FilterFaces, filtersPackage } from "./globals/filters.js";
@@ -334,6 +336,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private movieRoot: MovieClip | null = null;
   /** Whether this plays the main movie, not an AVM1Movie an AS3 Loader loaded, which has no `$version`. */
   private standalone = true;
+  /** Whether destroy has run: a menu still open calls nothing. */
+  private destroyed = false;
   private swfVersion = 0;
   private swfLength = 0;
   private rate = 24;
@@ -465,7 +469,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
         this.halted = true;
       },
       root: (base) => face(this.rootOf(base as DisplayObject)),
-      level: (level) => face(this.levels.get(level)),
+      level: (level) => face(this.namedLevel(level) ?? undefined),
       parent: (object) => {
         const d = display(object);
         return d === undefined || this.levelNumbers.has(d) ? undefined : face(d.parent);
@@ -642,6 +646,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       avm1.DONT_ENUM,
     );
     realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
+    const menus = contextMenuClasses(realm);
+    realm.global.define("ContextMenu", menus.ContextMenu, avm1.DONT_ENUM);
+    realm.global.define("ContextMenuItem", menus.ContextMenuItem, avm1.DONT_ENUM);
     realm.global.define(
       "System",
       systemObject(realm, this.platform, this.screen, this.debugger, this.swfVersion),
@@ -998,7 +1005,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   atPath(path: string): DisplayObject | null {
-    return atPath(path, (n) => this.levels.get(n) ?? null, this.swfVersion > 6);
+    return atPath(path, (n) => this.levels.get(n) ?? null, this.swfVersion > 6, !this.standalone);
   }
 
   /** The level `d` is, null for a display object that is none. */
@@ -1303,6 +1310,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(closeAudio = true): void {
+    this.destroyed = true;
     for (const bytes of this.codeLive) {
       this.codegen.releaseActions(bytes);
     }
@@ -1366,6 +1374,57 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
     }
+  }
+
+  /**
+   * The menu a right click on `d` shows, from it up through its parents
+   * (globals/ContextMenu.ts): its onSelect run now, and each item's as it
+   * is chosen, as a callback runs, what they queue after them; null where
+   * none has a menu.
+   */
+  menu(d: DisplayObject | null): { items: MenuItem[]; quality: boolean } | null {
+    if (this.halted || !this.loaded) {
+      return null;
+    }
+
+    const run = <T>(body: () => T): T => {
+      this.timers.begin();
+      try {
+        const result = body();
+        this.queue.run();
+        return result;
+      } finally {
+        this.timers.end();
+      }
+    };
+    const call = (o: avm1.Avm1Object, name: string, args: Value[]) => this.callback(o, name, args);
+    // A clip in another level with no menu has level 0's, as Flash Player 32 shows it alone.
+    const menu = run(
+      () =>
+        menuAt(d, this.swfVersion, call) ??
+        (this.standalone && d !== this.root ? menuAt(this.root, this.swfVersion, call) : null),
+    );
+    if (menu === null) {
+      return null;
+    }
+
+    let chosen = false;
+    return {
+      quality: menu.quality,
+      items: menu.items.map(({ caption, enabled, separatorBefore, item }) => ({
+        caption,
+        enabled,
+        separatorBefore,
+        select: () => {
+          if (!enabled || chosen || this.stopped || this.destroyed) {
+            return;
+          }
+
+          chosen = true;
+          run(() => this.callback(item, "onSelect", [menu.owner, item]));
+        },
+      })),
+    };
   }
 
   /** Stopped for good, or to be once its frame has run (fscommand's "quit"). */
@@ -1468,6 +1527,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * as Windows-1252, a later one as UTF-8.
    */
   loadVariables(into: DisplayObject, url: string, form: avm1.UrlForm | null): void {
+    // Nothing loads into the root of a movie an AS3 Loader holds (Flash Player 32).
+    if (this.hosted && into === this.root) {
+      return;
+    }
+
     const request =
       form === null
         ? { url, method: "GET" as const, headers: [], body: null }
@@ -1511,12 +1575,28 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** unloadMovie: what `d` shows unloaded and it left empty (loads.ts). */
   unloadMovie(d: DisplayObject): void {
-    this.loads.unloadMovie(d);
+    // A movie an AS3 Loader holds keeps its root, as Flash Player 32 keeps it.
+    if (!(this.hosted && d === this.root)) {
+      this.loads.unloadMovie(d);
+    }
   }
 
   /** Level `n`'s clip, null where there is none. */
   level(n: number): MovieClip | null {
     return this.levels.get(n) ?? null;
+  }
+
+  /** Whether an AS3 Loader holds this movie, which then has no levels of its own but its root. */
+  get hosted(): boolean {
+    return !this.standalone;
+  }
+
+  /**
+   * The clip `_levelN` names: none in a movie an AS3 Loader holds, whose
+   * root is `_root` alone, as Flash Player 32 has `_level0` undefined there.
+   */
+  namedLevel(n: number): MovieClip | null {
+    return this.standalone ? this.level(n) : null;
   }
 
   /** Level `n`'s clip, an empty one made where there is none. */
@@ -1657,7 +1737,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   pathOf(d: DisplayObject): string {
-    return pathOf(d, (o) => this.levelOf(o));
+    return pathOf(d, (o) => this.levelOf(o), !this.standalone);
   }
 
   /** What has the focus Selection reads: the host's one focus, where an AS3 host loaded the movie. */
@@ -1690,7 +1770,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const mark = (o: DisplayObject) => {
       const native = o.avm1?.display;
       if (native instanceof ClipNative && native.removedAt === null) {
-        native.removedAt = pathOf(o, (p) => this.levelOf(p));
+        native.removedAt = this.pathOf(o);
       }
 
       if (o instanceof MovieClip || o instanceof ButtonObject) {

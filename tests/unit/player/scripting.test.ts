@@ -20,6 +20,7 @@ import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
+import { framesSwf, timelineSwf } from "./scripting/name-order.ts";
 
 // This package's own out directory: the player's tests run at the same time and use theirs.
 const out = fileURLToPath(new URL("../out/player/", import.meta.url));
@@ -1790,3 +1791,92 @@ test("an event dispatched again whose clone is null is a TypeError #2007", { ski
 
   assert.deepEqual(lines, ["cloned", "2007"]);
 });
+
+// Flash Player 32's projector, and adl, name what a timeline places as it
+// places it, a placed clip's first frame then too, depth first, before the
+// document class's field initializers run (scripting/name-order.ts).
+test("a timeline names what it places, its clips' first frames depth first, before field initializers", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(timelineSwf(compiler(out)), scripting);
+  try {
+    await player.start();
+    assert.deepEqual(lines, [
+      "early instance10",
+      "child 0 instance1 [instance2 [instance3] [instance4]] [instance5]",
+      "child 1 instance6",
+      "child 2 named [instance7] [instance8]",
+      "child 3 instance9",
+      "new instance11",
+    ]);
+  } finally {
+    player.destroy();
+  }
+});
+
+// Flash Player 32's projector names what a frame places before its
+// ENTER_FRAME, a placed clip's first frame too, and a place a frame removes
+// at once takes its names; a button's states are named as it is made. A
+// goto names each place its frames replay, in their order, the ones it
+// keeps no child of too: past a clip placed and removed between, and on a
+// rewind, a timeline's own loop among them, past the frames' places of the
+// children it kept. adl numbers
+// them all the same, two higher, its harness's Loader and root first.
+const FRAMES: Record<number, string[]> = {
+  "1": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance14 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "enter 2 new instance22 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 null null]",
+    "exit 2 new instance23 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21]",
+    "enter 3 new instance27 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21 null]",
+    "exit 3 new instance28 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21 instance24[instance25 instance26]]",
+  ],
+  "3": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance14 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance28 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "enter 2 new instance22 rewound | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance29 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+  ],
+  "4": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 3 new instance24 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance14[instance15 instance16] instance20 instance21[instance22 instance23]]",
+    "after goto new instance25 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance14[instance15 instance16] instance20 instance21[instance22 instance23]]",
+  ],
+  "5": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance14 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "enter 2 new instance22 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 null null]",
+    "exit 2 new instance23 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21]",
+    "enter 3 new instance27 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21 null]",
+    "exit 3 new instance28 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21 instance24[instance25 instance26]]",
+    "enter 1 new instance34 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance35 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+  ],
+};
+
+for (const variant of [1, 3, 4, 5]) {
+  test(`a frame's places and a goto's are named before the frame's scripts, as Flash names them (${variant})`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(framesSwf(compiler(out), variant), scripting);
+    try {
+      await player.start();
+      for (let i = 0; i < 5; i++) {
+        player.tick();
+      }
+
+      assert.deepEqual(lines, FRAMES[variant]);
+    } finally {
+      player.destroy();
+    }
+  });
+}

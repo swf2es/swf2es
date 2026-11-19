@@ -378,12 +378,37 @@ after the handlers for a press too, and has that double click. In an
 AS3 host, the AVM1 movie's own pick before its broadcast is kept for
 its press in the same way, pickable or not as the move that brought the
 pointer there left the movie, since the host's own pick for the press
-comes after the broadcast; no probe has measured that case. Flash sent
-no `dragOver` or `dragOut` to a button the press did not reach, pressed
-on another or on nothing, where the player still sends them to any
-button as to a menu's items, Ruffle's rule: a button shown under the
-press so gets a `dragOut` and a `dragOver` when the pointer, still down,
-leaves it and comes back, which Flash did not send.
+comes after the broadcast; no probe has measured that case. A press on
+a button or a clip with handlers is its own: Flash sends no `dragOver`
+or `dragOut` to another, and its release elsewhere is its
+`releaseOutside`. A press on nothing, none of an AS3 host's objects
+either, or on one that tracks as a menu's (`trackAsMenu`, a script's, or
+else a button's flag from its tag, which a script reads as undefined and
+a script's false overrides), tracks as a menu's: each other item that
+tracks as one hears `dragOver` and `dragOut` as the pointer crosses it,
+the one let go over its `release`, and the pressed one no
+`releaseOutside`, as the projector traced dragsMovie
+(`tests/unit/player/avm1/pointer.test.ts`, and over an AS3 host
+`tests/unit/player/input/avm1.test.ts`) and the corpus's
+`drag_over_from_outside` has it.
+
+In an AS3 host, the projector traced the same probe's movie under a
+Loader beside an AS3 sprite in buttonMode
+(`tests/unit/player/input/avm1.test.ts`): what has the pointer
+over a movie's button, or a clip with a button's handlers, is the
+movie's alone, its `rollOver` and `rollOut`, `press`, `release` and the
+rest, and AS3 hears nothing of it, not even the Loader's `rollOver`; a
+clip with handlers takes the pointer for its children with theirs, as
+AVM1 has it, and a disabled one still keeps it from AS3. The movie's
+drawing elsewhere is the Loader's, which then gets AS3's events, its
+`relatedObject` null when the pointer came from the movie's button. The
+hand shows over the movie's buttons and clips with handlers unless their
+`useHandCursor` or `enabled` is false, the arrow over its drawing. A
+movie's button pressed and let go over an AS3 object or nothing calls
+`onReleaseOutside` before AS3 hears that `mouseUp`, and AS3 hears no
+`click`; one AS3 pressed and let go over a movie's button hears no
+`mouseUp`. Every movie's Mouse listeners hear each press and release
+first, as in a movie alone.
 
 ## Touch
 
@@ -704,9 +729,35 @@ The first implementation supports AVM2 custom items, separators,
 visibility, disabled items, quality actions and an About entry.
 `ContextMenu.isSupported` is true. `Stage.showDefaultContextMenu`,
 the web element's `menu="false"`, and `hideBuiltInItems` control
-built-in quality entries while keeping custom entries. AVM1 custom
-menus and the other Flash built-in actions remain unimplemented. The
-model is renderer-independent so those can reuse the presentation.
+built-in quality entries while keeping custom entries. Flash's other
+built-in actions remain unimplemented. The model is renderer-independent.
+
+AVM1's `ContextMenu` and `ContextMenuItem` (`avm1/globals/ContextMenu.ts`)
+are adl's: a menu's `onSelect`, its `builtInItems`, which `hideBuiltInItems`
+turns all false and a copy shares, and its `customItems`, which a copy
+copies one by one with each item's `copy`; an item's caption and
+`onSelect` kept as given, its `separatorBefore`, `enabled` and `visible`
+made booleans; their methods SWF 7's. A right click on an AVM1 movie,
+played alone or loaded by AS3, shows the menu of the nearest of the clip
+whose own drawing is under it and that clip's parents whose `menu` is an
+object, a ContextMenu or not, a child clip named `menu` too, which shows
+Flash's entries alone; a clip of another level with none, and the
+empty stage of a movie alone, have level 0's. Its `onSelect` is called
+with that clip and the menu first; then its custom items show as Flash
+Player 32's projector showed them: each object whose `onSelect` is a
+function, a ContextMenuItem or not, whose caption begins none of the
+entries Flash keeps, case aside ("" and "zoom", "Prin", "Copy" or "Abo"
+among those that do; "High" and "Global" not), holds none of "Adobe",
+"Macromedia", "Flash Player" and "Settings", and is no earlier one's, the first 15 such, the hidden among them, and of those
+the visible; the quality entries unless `builtInItems.quality` is false.
+A choice calls the item's `onSelect` with the clip and the item, and
+nothing once the movie is unloaded or the player gone. Off a loaded
+movie AS3's menu shows, as the projector showed all this
+(`tests/unit/player/input/context-menu.test.ts`); over one none of whose
+clips has a menu, AS3's too, which no probe measured. The projector is
+Flash's debug player, whose "Show Redraw Regions" and "Debugger" a
+caption may not begin either; a release player's rule for them is not
+measured. A button's or a text field's own `menu` is not read yet.
 
 `NativeMenu`, `NativeMenuItem` and `ContextMenu`'s menu members are AS3
 (as3/playerglobal), held to adl by the `native-menu-natives` player case:
