@@ -23,13 +23,12 @@ import {
   liveSounds,
   MAX_SOUNDS,
   mixerMix,
-  mixerMixes,
   mixOf,
   outputMix,
   positionOf,
   type SoundState,
+  setMixerMix,
   stopChannel,
-  updateTimelineMixes,
 } from "../../../media/sounds.js";
 import { dispatchEvent } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
@@ -123,14 +122,7 @@ export function setMixerTransform(s: Scripting, transform: Value): void {
     throw s.rt.error("TypeError", 2007, "sndTransform");
   }
 
-  const global = channelMix(mixOf(transform as AsObject));
-  mixerMixes.set(s, global);
-  for (const channel of channels.get(s) ?? []) {
-    const state = channel.$channel as ChannelState;
-    state.playing?.setMix(outputMix(state.mix, global));
-  }
-
-  updateTimelineMixes(s);
+  setMixerMix(s, channelMix(mixOf(transform as AsObject)));
 }
 
 export function transformOf(s: Scripting, mix: SoundMix): AsObject {

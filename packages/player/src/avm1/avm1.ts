@@ -62,6 +62,7 @@ import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
+  type SharedMixer,
   type SoundHost,
   stopSoundsUnder,
   stopTimelineSounds,
@@ -172,6 +173,8 @@ export interface Avm1Options {
   storage?: SharedObjectStorage;
   /** What plays the timeline's sounds and Sound's: the browser's Web Audio by default; null for none. */
   audio?: AudioHost | null;
+  /** The mixer of the AS3 player that loaded the movie, which its sounds play under; its own without one. */
+  mixer?: SharedMixer;
   /**
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
@@ -422,7 +425,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       options.decodeImage === undefined ? decodeInBrowser : options.decodeImage,
     );
     this.external = new ExternalCalls(this, options.externalInterface ?? null);
-    this.media = new Avm1Sounds(this, this.audio);
+    this.media = new Avm1Sounds(this, this.audio, options.mixer ?? null);
     this.sounds = this.media.sounds;
     this.timers = new Timers(
       this,
@@ -480,7 +483,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
         this.startDrag(target as DisplayObject, lockCenter, bounds),
       stopDrag: () => this.stopDrag(),
       returned: () => this.queue.returned(),
-      stopSounds: () => stopTimelineSounds(this.sounds),
+      stopSounds: () => this.media.stopAll(),
       loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
       loadMovie: (into, url, form) =>
         this.loadMovie(typeof into === "number" ? into : (into as DisplayObject), url, form),

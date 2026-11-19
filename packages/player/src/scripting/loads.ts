@@ -13,7 +13,7 @@ import { type Container, MovieClip, rootOf, unloads } from "../display/display.j
 import { type BitmapPixels, type Library, readLibrary } from "../display/timeline.js";
 import type { FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import { LoadedAvm1Input } from "../input/avm1.js";
-import { streamFrames, warmAudioFor } from "../media/sounds.js";
+import { type SoundHost, sharedMixerOf, streamFrames, warmAudioFor } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
@@ -65,6 +65,8 @@ interface Avm1Load {
   failed: boolean;
 }
 
+const NO_SOUND_HOSTS: SoundHost[] = [];
+
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
   private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
@@ -109,6 +111,15 @@ export class Loads {
         movie.vm.tick(this.s.frameRate);
       }
     }
+  }
+
+  /** The loaded movies' sounds, which play under this player's mixer. */
+  avm1SoundHosts(): SoundHost[] {
+    if (this.avm1Movies.size === 0) {
+      return NO_SOUND_HOSTS;
+    }
+
+    return [...this.avm1Movies.values()].map((movie) => movie.vm.sounds);
   }
 
   streamFrames(): number {
@@ -986,6 +997,7 @@ export class Loads {
         fetch: s.fetch ?? undefined,
         socket: s.socket ?? undefined,
         audio: s.audio,
+        mixer: sharedMixerOf(s),
         storage: s.storage,
         fileHost: s.fileHost,
         decodeImage: s.decodeImage,

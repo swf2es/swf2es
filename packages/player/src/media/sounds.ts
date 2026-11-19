@@ -162,6 +162,11 @@ export function soundHostOf(s: Scripting): SoundHost {
           }
         }
 
+        // The AVM1 movies it loaded hold channels of the same 32.
+        for (const h of s.loads.avm1SoundHosts()) {
+          n += ownSounds(h);
+        }
+
         return n;
       },
     };
@@ -196,6 +201,49 @@ export function stopAllSounds(s: Scripting): void {
 
   active?.clear();
   stopTimelineSounds(soundHostOf(s));
+  for (const h of s.loads.avm1SoundHosts()) {
+    stopTimelineSounds(h);
+  }
+}
+
+/**
+ * What an AVM1 movie an AS3 Loader loaded plays under: the one mixer of
+ * the player, as Flash Player 32 has it (measured in adl). Its global
+ * Sound's transform is SoundMixer.soundTransform, its global stop is
+ * SoundMixer.stopAll, and its sounds share the 32 channels with AS3's
+ * and the other movies'.
+ */
+export interface SharedMixer {
+  /** The global transform, in the hundredths SoundMixer keeps. */
+  mix: SoundMix;
+  /** Every sound stops: AS3's channels, the timeline's and each movie's. */
+  stopAll(): void;
+  /** The sounds holding a channel outside `h`. */
+  otherSounds(h: SoundHost): number;
+}
+
+export function sharedMixerOf(s: Scripting): SharedMixer {
+  return {
+    get mix() {
+      return mixerMix(s);
+    },
+    set mix(mix: SoundMix) {
+      setMixerMix(s, mix);
+    },
+    stopAll: () => stopAllSounds(s),
+    otherSounds: (h) => liveSounds(s) - ownSounds(h),
+  };
+}
+
+/** SoundMixer's transform set, for every channel and sound playing and those to come. */
+export function setMixerMix(s: Scripting, mix: SoundMix): void {
+  mixerMixes.set(s, mix);
+  for (const channel of channels.get(s) ?? []) {
+    const state = channel.$channel as ChannelState;
+    state.playing?.setMix(outputMix(state.mix, mix));
+  }
+
+  updateTimelineMixes(s);
 }
 
 /** Every sound the timeline, or AVM1's Sound, started stops, none completing. */
@@ -270,7 +318,12 @@ export function liveSounds(s: Scripting): number {
 }
 
 function liveSoundsOf(h: SoundHost): number {
-  let n = h.scriptSounds();
+  return h.scriptSounds() + ownSounds(h);
+}
+
+/** The timeline's sounds, and AVM1 Sound's, that `h` has on the device. */
+function ownSounds(h: SoundHost): number {
+  let n = 0;
   for (const sound of timelineSounds.get(h) ?? []) {
     if (onDevice(sound)) {
       n++;
@@ -304,6 +357,9 @@ function timelineMix(h: SoundHost, owner: DisplayObject | null): SoundMix {
 /** A sprite's transform or the mixer's changed: every timeline sound's mix follows. */
 export function updateTimelineMixes(s: Scripting): void {
   updateMixes(soundHostOf(s));
+  for (const h of s.loads.avm1SoundHosts()) {
+    updateMixes(h);
+  }
 }
 
 export function updateMixes(h: SoundHost): void {
