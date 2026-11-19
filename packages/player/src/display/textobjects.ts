@@ -60,16 +60,16 @@ export function settleFits(): void {
   pendingFits.clear();
 }
 
-/**
- * A TextField: placed by DefineEditText, or made by a script. Its text and
- * formats are a TextModel; a timeline's starts with its tag's text, read
- * as HTML if the tag says so, in the format the tag gives.
- */
 /** Whether two scrollState()s differ. */
 export function scrollMoved(a: readonly number[], b: readonly number[]): boolean {
   return a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2] || a[3] !== b[3];
 }
 
+/**
+ * A TextField: placed by DefineEditText, or made by a script. Its text and
+ * formats are a TextModel; a timeline's starts with its tag's text, read
+ * as HTML if the tag says so, in the format the tag gives.
+ */
 export class TextObject extends DisplayObject {
   readonly model = new TextModel();
   /** The embedded fonts its text may be in: its SWF's. */
