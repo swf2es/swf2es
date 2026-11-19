@@ -9,13 +9,16 @@ import { stateOf } from "./TextField.js";
 
 /** What Selection reads and changes of the player's focus. */
 export interface FocusState {
-  readonly focused: DisplayObject | null;
+  /** What has the focus: in a movie an AS3 host loaded, the host's one focus, which may be the host's or another movie's. */
+  readonly current: DisplayObject | null;
   /** Focus `d`, or none, telling those it concerns at once. */
   focus(d: DisplayObject | null): void;
+  /** No focus: in a movie an AS3 host loaded, none anywhere. */
+  clearFocus(): void;
   /** Whether a script may focus `d`. */
   focusable(d: DisplayObject): boolean;
-  /** `d`'s target path, `_level0.a.b`. */
-  pathOf(d: DisplayObject): string;
+  /** The path getFocus gives `d`, `_level0.a.b`; null for none. */
+  focusPathOf(d: DisplayObject): string | null;
   /** What `value`, an object or a path from the code's target, names; null for nothing. */
   resolve(value: avm1.Value, version: number): DisplayObject | null;
 }
@@ -42,7 +45,7 @@ export function selectionObject(
 
       const value = args[0];
       if (value === undefined || value === null) {
-        focus.focus(null);
+        focus.clearFocus();
         return true;
       }
 
@@ -58,14 +61,15 @@ export function selectionObject(
   );
   selection.define(
     "getFocus",
-    realm.method(() => (focus.focused ? focus.pathOf(focus.focused) : null)),
+    realm.method(() => (focus.current ? focus.focusPathOf(focus.current) : null)),
     FIXED,
   );
-  // The focused field's selection, -1 without one.
-  const field = () => (focus.focused instanceof TextObject ? focus.focused : null);
+  // The focused field's selection, -1 without one: an AS3 field's too, which an AS3 host focused
+  // (Flash Player 32).
+  const field = () => (focus.current instanceof TextObject ? focus.current : null);
   const selected = () => {
     const f = field();
-    return f !== null && stateOf(f).selected ? f : null;
+    return f !== null && (f.avm1 === null || stateOf(f).selected) ? f : null;
   };
   const indices: [string, (f: TextObject) => number][] = [
     ["getBeginIndex", (f) => f.selection[0]],
@@ -91,7 +95,10 @@ export function selectionObject(
       if (f !== null && args.length > 0) {
         const begin = Math.max(0, avm1.toNumber(args[0], v) | 0);
         const end = args.length > 1 ? Math.max(0, avm1.toNumber(args[1], v) | 0) : 0x7fffffff;
-        stateOf(f).selected = true;
+        if (f.avm1 !== null) {
+          stateOf(f).selected = true;
+        }
+
         f.select(begin, end);
       }
 

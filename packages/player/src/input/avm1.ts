@@ -5,19 +5,23 @@
 // key goes to each movie's Key listeners and clip events; the movie with
 // the focus alone types or presses with it, and Tab moves through one order
 // of the host's objects and the movies' (input/keyboard.ts).
+import type { avm1 } from "@swf2es/runtime";
 import type { Avm1 } from "../avm1/avm1.js";
-import type { Tabbed } from "../avm1/focus.js";
+import type { FocusHost, Tabbed } from "../avm1/focus.js";
 import { Avm1Keyboard } from "../avm1/keyboard.js";
+import { pathOf } from "../avm1/paths.js";
 import { Avm1Pointer } from "../avm1/pointer.js";
 import type { DisplayObject, MovieClip } from "../display/display.js";
 import type { Scripting } from "../scripting.js";
 import { type KeyState, setFocus } from "./keyboard.js";
 import type { Cursor, PointerState } from "./pointer.js";
 
-export class LoadedAvm1Input {
+export class LoadedAvm1Input implements FocusHost {
   private readonly movies = new Map<MovieClip, Avm1Pointer>();
   private readonly keyboards = new Map<MovieClip, { vm: Avm1; keyboard: Avm1Keyboard }>();
   private over: Avm1Pointer | null = null;
+  /** Whether a movie's move of the focus is taking it from AS3, which tells the movies nothing more. */
+  private moving = false;
 
   constructor(private readonly s: Scripting) {}
 
@@ -31,19 +35,7 @@ export class LoadedAvm1Input {
     pointer.onCursor = () => this.s.pointer?.updateCursor();
     this.movies.set(root, pointer);
     this.keyboards.set(root, { vm, keyboard: new Avm1Keyboard(vm) });
-    vm.onFocus = (d) => {
-      if (d === null) {
-        return;
-      }
-
-      for (const [other, movie] of this.keyboards) {
-        if (other !== root && movie.vm.focused !== null) {
-          movie.vm.focus(null);
-        }
-      }
-
-      setFocus(this.s, null);
-    };
+    vm.focusHost = this;
   }
 
   remove(root: MovieClip): boolean {
@@ -54,12 +46,120 @@ export class LoadedAvm1Input {
 
     const movie = this.keyboards.get(root);
     if (movie) {
-      movie.vm.onFocus = null;
+      movie.vm.focusHost = null;
     }
 
     this.movies.delete(root);
     this.keyboards.delete(root);
     return this.movies.size === 0;
+  }
+
+  /** The movie whose focus is on something, which no object of the host's has then. */
+  private holder(): Avm1 | null {
+    for (const { vm } of this.keyboards.values()) {
+      if (vm.focused !== null) {
+        return vm;
+      }
+    }
+
+    return null;
+  }
+
+  get current(): DisplayObject | null {
+    return this.holder()?.focused ?? this.s.focus;
+  }
+
+  /**
+   * A movie's move of the one focus, as Flash Player 32 tells it: what had
+   * it hears onKillFocus naming what takes it, in whichever movie, then
+   * that onSetFocus naming what had it, then every movie's Selection
+   * listeners, in the order the movies came; an object of AS3's is null to
+   * them, and loses the focus last, with a focusOut naming nothing.
+   */
+  move(movie: Avm1, d: DisplayObject | null, byPointer: boolean): void {
+    const holder = this.holder();
+    if (d === null && holder !== movie) {
+      return;
+    }
+
+    const tracker = movie.focusTracker;
+    const old = holder?.focused ?? null;
+    if (holder === movie && old === d) {
+      tracker.assign(d);
+      tracker.selectFocused(byPointer);
+      return;
+    }
+
+    holder?.focusTracker.assign(null);
+    tracker.assign(d);
+    const oldFace = old?.avm1 ?? null;
+    const newFace = d?.avm1 ?? null;
+    if (holder !== null && old !== null) {
+      holder.focusTracker.killed(old, newFace);
+    }
+
+    if (d !== null) {
+      tracker.given(d, oldFace);
+    }
+
+    // A handler that moved the focus on told the movies of that move itself.
+    if (movie.focused !== d) {
+      return;
+    }
+
+    this.selectionMoved(oldFace, newFace);
+    tracker.selectFocused(byPointer);
+
+    if (d !== null && this.s.focus !== null) {
+      this.moving = true;
+      try {
+        setFocus(this.s, null);
+      } finally {
+        this.moving = false;
+      }
+    }
+  }
+
+  /** Every movie's Selection listeners hear onSetFocus(old, new), in the order the movies came. */
+  private selectionMoved(old: avm1.Avm1Object | null, next: avm1.Avm1Object | null): void {
+    for (const { vm } of [...this.keyboards.values()]) {
+      vm.focusTracker.moved(old, next);
+    }
+  }
+
+  /**
+   * AS3's focus moving from one of its objects, or none, to another, or
+   * none: every movie's Selection listeners hear onSetFocus(null, null)
+   * first, as Flash Player 32 tells them, unless a movie's move of the
+   * focus took it.
+   */
+  hostMoved(): void {
+    if (!this.moving) {
+      this.selectionMoved(null, null);
+    }
+  }
+
+  clear(): void {
+    const holder = this.holder();
+    if (holder !== null) {
+      holder.focus(null);
+      return;
+    }
+
+    setFocus(this.s, null);
+  }
+
+  pathOf(d: DisplayObject): string | null {
+    for (let p: DisplayObject | null = d; p !== null; p = p.parent) {
+      const movie = this.keyboards.get(p as MovieClip);
+      if (movie) {
+        return movie.vm.pathOf(d);
+      }
+    }
+
+    // An object of AS3's, from the root as level 0 (Flash Player 32's `_level0.as3field`).
+    const { root, stage } = this.s;
+    return pathOf(d, (o) => (o === root || o === stage ? 0 : null));
   }
 
   /** The keyboard of the movie whose focus is on something, which no object of the host's has then. */
@@ -97,11 +197,7 @@ export class LoadedAvm1Input {
 
   /** An object of the host's took the focus: no movie keeps it. */
   blur(): void {
-    for (const { vm } of [...this.keyboards.values()]) {
-      if (vm.focused !== null) {
-        vm.focus(null);
-      }
-    }
+    this.holder()?.focus(null);
   }
 
   /**
@@ -176,7 +272,14 @@ export class LoadedAvm1Input {
     // A press over any movie's button, as its handlers left what is under the pointer, moves no
     // movie's focus (Flash Player 32), whether or not the press reaches the button.
     const keep = type === "down" && (this.over?.pressable(p.x, p.y) ?? false);
-    for (const pointer of this.movies.values()) {
+    // The movie pressed first: a field it focuses takes the focus from another movie's, which
+    // hears onKillFocus naming it (Flash Player 32), before the press elsewhere drops it.
+    const pointers = [...this.movies.values()];
+    if (this.over !== null) {
+      pointers.sort((a, b) => (a === this.over ? -1 : b === this.over ? 1 : 0));
+    }
+
+    for (const pointer of pointers) {
       const before = pointer.redraws;
       pointer.keepFocus = keep;
       pointer.handle(type, p, false);

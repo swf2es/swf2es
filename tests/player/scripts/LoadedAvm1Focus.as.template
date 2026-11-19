@@ -1,0 +1,126 @@
+// An AS3 host of AVM1 movies (tests/avm1-input.ts's focusMovie),
+// m1.swf at (0, 0) and m2.swf at (200, 0), loaded in turn, with an input field, as3field, and
+// a sprite in button mode, as3btn, of its own below them: what AS3 hears of
+// the one focus they share. The schedule is "ms command|ms command...", the
+// commands the Flash probe's timers ran, which a test calls by control().
+package
+{
+	import flash.display.InteractiveObject;
+	import flash.display.Loader;
+	import flash.display.Sprite;
+	import flash.events.Event;
+	import flash.events.EventPhase;
+	import flash.events.FocusEvent;
+	import flash.net.URLRequest;
+	import flash.text.TextField;
+	import flash.text.TextFieldType;
+	import flash.utils.setTimeout;
+
+	public class LoadedAvm1Focus extends Sprite
+	{
+		private var _field:TextField = new TextField();
+		private var _button:Sprite = new Sprite();
+
+		public function LoadedAvm1Focus()
+		{
+			load(1);
+
+			_field.name = "as3field";
+			_field.type = TextFieldType.INPUT;
+			_field.border = true;
+			_field.text = "mnopqr";
+			_field.x = 10;
+			_field.y = 110;
+			_field.width = 150;
+			_field.height = 25;
+			addChild(_field);
+			_button.name = "as3btn";
+			_button.graphics.beginFill(0x3366cc);
+			_button.graphics.drawRect(0, 0, 60, 30);
+			_button.graphics.endFill();
+			_button.buttonMode = true;
+			_button.x = 220;
+			_button.y = 110;
+			addChild(_button);
+			var types:Array = ["focusIn", "focusOut", "keyFocusChange", "mouseFocusChange"];
+			for (var j:int = 0; j < types.length; j++)
+			{
+				stage.addEventListener(types[j], heard, true);
+				stage.addEventListener(types[j], atStage);
+			}
+
+			var schedule:String = "@@SCHEDULE@@";
+			if (schedule != "")
+			{
+				var steps:Array = schedule.split("|");
+				for (var k:int = 0; k < steps.length; k++)
+				{
+					var step:Array = String(steps[k]).split(" ");
+					setTimeout(control, int(step[0]), step[1]);
+				}
+			}
+		}
+
+		/** The movies one after the other, so that their scripts start in order. */
+		private function load(n:int):void
+		{
+			if (n > @@MOVIES@@)
+			{
+				return;
+			}
+
+			var loader:Loader = new Loader();
+			loader.name = "loader" + n;
+			loader.x = 200 * (n - 1);
+			addChildAt(loader, n - 1);
+			loader.contentLoaderInfo.addEventListener(Event.INIT, function(e:Event):void
+				{
+					load(n + 1);
+				});
+			loader.load(new URLRequest("m" + n + ".swf"));
+		}
+
+		/** What a test does to the host between keys and clicks, as the Flash probe's timers did. */
+		public function control(command:String):void
+		{
+			var parts:Array = command.split(":");
+			switch (parts[0])
+			{
+				case "focus":
+					stage.focus = parts[1] == "null" ? null : InteractiveObject(getChildByName(parts[1]));
+					break;
+				case "tabIndex":
+					InteractiveObject(getChildByName(parts[1])).tabIndex = int(parts[2]);
+					break;
+				case "select":
+					_field.setSelection(int(parts[1]), int(parts[2]));
+					break;
+			}
+
+			trace("as3:" + command + " focus " + nameOf(stage.focus) + " selection " + _field.selectionBeginIndex + "," + _field.selectionEndIndex);
+		}
+
+		private function nameOf(o:Object):String
+		{
+			if (o == null)
+			{
+				return "null";
+			}
+
+			return o == stage ? "stage" : o.name;
+		}
+
+		private function atStage(e:Event):void
+		{
+			if (e.eventPhase == EventPhase.AT_TARGET)
+			{
+				heard(e);
+			}
+		}
+
+		private function heard(e:Event):void
+		{
+			trace("as3:" + e.type + " " + nameOf(e.target) + " related " + nameOf(FocusEvent(e).relatedObject) + " focus " + nameOf(stage.focus));
+		}
+	}
+}

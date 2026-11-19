@@ -138,3 +138,60 @@ log("ready");`;
     ],
   });
 }
+
+/**
+ * An authored AVM1 movie for focus across an AS3 host and the movies it
+ * loads: two bordered input fields, f over g, 150 by 25 pixels at (10, 10)
+ * and (10, 50). It logs, as `id`, its fields' onSetFocus and onKillFocus
+ * and Selection's listener, each object named by its `_name`, `start`
+ * runs as it starts, and each of `keys` runs as its key code goes down.
+ */
+export function focusMovie(
+  options: { id?: string; start?: string; keys?: Record<number, string> } = {},
+): Uint8Array {
+  const id = options.id ?? "avm1";
+  const keys = Object.entries(options.keys ?? {})
+    .map(([code, source]) => `if (Key.getCode() == ${code}) { ${source} }`)
+    .join("\n");
+  const source = `
+function log(s) { trace("${id}:" + s); }
+function nameOf(o) { if (o === null) { return "null"; } if (o === undefined) { return "undefined"; } return o._name; }
+function selection() {
+  var p = Selection.getFocus();
+  log("getFocus " + (p == null ? p : p.substr(p.lastIndexOf(".") + 1)) + " begin " + Selection.getBeginIndex() + " end " + Selection.getEndIndex() + " caret " + Selection.getCaretIndex());
+}
+f.border = true;
+g.border = true;
+f.text = "abcdef";
+g.text = "ghijkl";
+f.onSetFocus = function(o) { log("f.onSetFocus " + nameOf(o)); };
+f.onKillFocus = function(o) { log("f.onKillFocus " + nameOf(o)); };
+g.onSetFocus = function(o) { log("g.onSetFocus " + nameOf(o)); };
+g.onKillFocus = function(o) { log("g.onKillFocus " + nameOf(o)); };
+var sel = {};
+sel.onSetFocus = function(o, n) { log("Selection.onSetFocus " + nameOf(o) + " " + nameOf(n)); };
+Selection.addListener(sel);
+var k = {};
+k.onKeyDown = function() {
+${keys}
+};
+Key.addListener(k);
+${options.start ?? ""}
+stop();
+log("ready");`;
+  return w.swf({
+    version: 8,
+    width: 200,
+    height: 100,
+    frameCount: 1,
+    tags: [
+      w.editText(1, "", 3000, 500, 0, { at: [200, 200] }),
+      w.editText(2, "", 3000, 500, 0, { at: [200, 1000] }),
+      w.place({ depth: 1, character: 1, name: "f" }),
+      w.place({ depth: 2, character: 2, name: "g" }),
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
