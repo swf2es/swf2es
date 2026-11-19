@@ -25,12 +25,15 @@ type GL = WebGLRenderingContext | WebGL2RenderingContext;
 export const METER_STYLE =
   " .meter { position: absolute; top: 6px; left: 6px; z-index: 3; display: grid;" +
   " grid-template-columns: max-content max-content; gap: 0 8px; box-sizing: border-box;" +
-  " max-width: calc(100% - 12px); overflow: hidden; margin: 0; padding: 3px 7px;" +
+  " max-width: calc(100% - 12px); max-height: calc(100% - 12px); overflow: hidden;" +
+  " margin: 0; padding: 3px 7px;" +
   " font: var(--swf2es-meter-font, 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);" +
   " font-variant-numeric: tabular-nums; color-scheme: light dark;" +
   " color: var(--swf2es-meter-color, CanvasText); background: var(--swf2es-meter-background, Canvas);" +
   " border: 1px solid var(--swf2es-meter-border, GrayText); border-radius: 4px;" +
   " pointer-events: none; user-select: none }" +
+  " .meter[data-corner$=right] { left: auto; right: 6px }" +
+  " .meter[data-corner^=bottom] { top: auto; bottom: 6px }" +
   " .meter[hidden], .meter > div[hidden] { display: none }" +
   " .meter > div { display: contents }" +
   " .meter dt { color: var(--swf2es-meter-muted, GrayText) }" +
@@ -72,6 +75,43 @@ const EVERY = 500;
 const MB = 1024 * 1024;
 /** Where the viewer's choice is kept for every element of the origin, "1" for on. */
 const STORED = "swf2es.performanceMeter";
+/** Where the viewer's choice of corner is kept, likewise. */
+const STORED_CORNER = "swf2es.performanceMeterCorner";
+
+/** The stage's corners the meter may sit in, in the order the context menu moves it through. */
+export const METER_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
+export type MeterCorner = (typeof METER_CORNERS)[number];
+
+export function isMeterCorner(value: unknown): value is MeterCorner {
+  return METER_CORNERS.includes(value as MeterCorner);
+}
+
+/** The corner after `corner`, the first after the last. */
+export function nextCorner(corner: MeterCorner): MeterCorner {
+  return METER_CORNERS[(METER_CORNERS.indexOf(corner) + 1) % METER_CORNERS.length];
+}
+
+/** The viewer's corner as last kept: top-left where none is, or storage is refused. */
+export function storedCorner(): MeterCorner {
+  try {
+    const corner = localStorage.getItem(STORED_CORNER);
+    return isMeterCorner(corner) ? corner : "top-left";
+  } catch {
+    return "top-left";
+  }
+}
+
+export function storeCorner(corner: MeterCorner): void {
+  try {
+    if (corner === "top-left") {
+      localStorage.removeItem(STORED_CORNER);
+    } else {
+      localStorage.setItem(STORED_CORNER, corner);
+    }
+  } catch {
+    // Kept for this page alone.
+  }
+}
 
 /** The viewer's choice as last kept: off where none is, or storage is refused. */
 export function storedMeter(): boolean {
@@ -261,6 +301,7 @@ export class PerformanceMeter {
   ) {
     this.root = document.createElement("dl");
     this.root.className = "meter";
+    this.root.dataset.corner = "top-left";
     this.root.hidden = true;
     this.root.setAttribute("aria-label", "Performance");
     for (const [name, label] of FIGURES) {
@@ -276,6 +317,11 @@ export class PerformanceMeter {
     }
 
     parent.appendChild(this.root);
+  }
+
+  /** Put the meter in `corner` of the stage. */
+  place(corner: MeterCorner): void {
+    this.root.dataset.corner = corner;
   }
 
   /** Show the meter and measure, or hide it and stop. */

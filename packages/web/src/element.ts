@@ -9,6 +9,7 @@ import {
   type ExternalInterfaceHost,
   type FileSystemHost,
   type FullScreenHost,
+  type MenuItem,
   nativeMemory,
   Player,
   Scripting,
@@ -38,7 +39,17 @@ import {
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
 import { fetchFor, fetchMovie } from "./fetching.js";
 import { scaleMode } from "./layout.js";
-import { METER_STYLE, PerformanceMeter, storedMeter, storeMeter } from "./meter.js";
+import {
+  isMeterCorner,
+  METER_STYLE,
+  type MeterCorner,
+  nextCorner,
+  PerformanceMeter,
+  storeCorner,
+  storedCorner,
+  storedMeter,
+  storeMeter,
+} from "./meter.js";
 import { type FrameListener, type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
 import { UncaughtReports } from "./uncaught.js";
@@ -183,6 +194,10 @@ export class Swf2esPlayerElement extends ElementBase {
   #meterShown = false;
   /** Whether the meter shows by the viewer's choice, the menu's or the one kept, not a script's. */
   #meterChosen = false;
+  /** The stage's corner the meter sits in. */
+  #meterCorner: MeterCorner = "top-left";
+  /** Whether a script put the meter in its corner, which the viewer's kept corner then leaves. */
+  #cornerSet = false;
   /** The page's frame listener and the meter's together, made once both listen. */
   #bothListeners: FrameListener | null = null;
 
@@ -271,12 +286,53 @@ export class Swf2esPlayerElement extends ElementBase {
   }
 
   /**
+   * The stage's corner the meter sits in: "top-left", the default,
+   * "top-right", "bottom-left" or "bottom-right"; another value is ignored.
+   * The context menu's "Move performance meter" moves it to the next and
+   * keeps the viewer's choice; setting this moves it for the page alone,
+   * keeping nothing, and fires `performancemeterchange`.
+   */
+  get performanceMeterCorner(): MeterCorner {
+    return this.#meterCorner;
+  }
+
+  set performanceMeterCorner(corner: MeterCorner) {
+    if (isMeterCorner(corner)) {
+      this.#cornerSet = true;
+      this.#placeMeter(corner);
+    }
+  }
+
+  #placeMeter(corner: MeterCorner): void {
+    if (corner === this.#meterCorner) {
+      return;
+    }
+
+    this.#meterCorner = corner;
+    this.#meter?.place(corner);
+    this.#changedMeter();
+  }
+
+  #changedMeter(): void {
+    dispatch(
+      this,
+      new CustomEvent("performancemeterchange", {
+        detail: { shown: this.#meterShown, corner: this.#meterCorner },
+      }),
+    );
+  }
+
+  /**
    * The viewer's kept choice applied where the menu offers the meter, as a
    * SWF starts and as the offer changes: read then, not as the element is
    * connected, so that a page's configure() after its markup holds. Not
    * offered, a meter the viewer's choice showed goes; a script's stays.
    */
   #applyChoice(): void {
+    if (!this.#cornerSet) {
+      this.#placeMeter(this.#meterOffered() ? storedCorner() : "top-left");
+    }
+
     if (this.#meterOffered()) {
       if (!this.#meterShown && storedMeter()) {
         this.#meterChosen = true;
@@ -298,13 +354,53 @@ export class Swf2esPlayerElement extends ElementBase {
     this.#meterShown = on;
     if (on) {
       this.#meter ??= new PerformanceMeter(parent, () => this.wasmMemory);
+      this.#meter.place(this.#meterCorner);
       const playback = this.#session?.playback;
       this.#meter.attach(playback?.gl ?? null, !!playback);
     }
 
     this.#meter?.show(on);
     this.#listen();
-    dispatch(this, new CustomEvent("performancemeterchange", { detail: { shown: on } }));
+    this.#changedMeter();
+  }
+
+  /**
+   * The context menu's items for the meter, where it offers them: one to
+   * show or hide it and, while it shows, one to move it to the next corner.
+   * Flash's menus had no submenus, nor has this one. Each is the viewer's own
+   * choice, kept for the next time.
+   */
+  #meterMenu(): MenuItem[] {
+    if (!this.#meterOffered()) {
+      return [];
+    }
+
+    const items: MenuItem[] = [
+      {
+        caption: this.#meterShown ? "Hide performance" : "Show performance",
+        enabled: true,
+        select: () => {
+          const on = !this.#meterShown;
+          storeMeter(on);
+          this.#meterChosen = on;
+          this.#showMeter(on);
+        },
+      },
+    ];
+    if (this.#meterShown) {
+      items.push({
+        caption: "Move performance meter",
+        enabled: true,
+        select: () => {
+          const corner = nextCorner(this.#meterCorner);
+          storeCorner(corner);
+          this.#cornerSet = false;
+          this.#placeMeter(corner);
+        },
+      });
+    }
+
+    return items;
   }
 
   /** Whether the context menu offers the meter, by the element's attribute or the page's configuration. */
@@ -675,22 +771,7 @@ export class Swf2esPlayerElement extends ElementBase {
       session.player.quality = quality(attribute(this, "quality"));
       session.player.showDefaultContextMenu = attribute(this, "menu")?.toLowerCase() !== "false";
       session.player.build = configuration().build ?? null;
-      session.player.hostMenu = () =>
-        this.#meterOffered()
-          ? [
-              {
-                caption: this.#meterShown ? "Hide performance" : "Show performance",
-                enabled: true,
-                select: () => {
-                  // The viewer's own choice, kept for the next time.
-                  const on = !this.#meterShown;
-                  storeMeter(on);
-                  this.#meterChosen = on;
-                  this.#showMeter(on);
-                },
-              },
-            ]
-          : [];
+      session.player.hostMenu = () => this.#meterMenu();
       const playback = await Playback.create(
         this.#box,
         session.player,

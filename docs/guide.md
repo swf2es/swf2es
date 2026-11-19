@@ -184,8 +184,17 @@ showed; removing the attribute applies the choice again. A script can
 show or hide the meter with `element.performanceMeter = true` or `false`
 whatever the item, for the page alone: it keeps nothing, so a page that
 wants its own control remembered (the play page's Performance box)
-writes the same key, `swf2es.performanceMeter` set to `"1"`. The element
-fires `performancemeterchange` (`event.detail.shown`) either way. While hidden
+writes the same key, `swf2es.performanceMeter` set to `"1"`. While the
+meter shows, the menu also has "Move performance meter", which moves it
+to the stage's next corner, from top left to top right, bottom left and
+bottom right; Flash's menus have no submenus, nor has this one. The
+meter never takes the pointer, in whichever corner. The corner is kept
+like the choice to show it, under `swf2es.performanceMeterCorner` (none
+for top left), and the opt-outs leave the item out too. A script moves
+it with `element.performanceMeterCorner = "top-left"`, `"top-right"`,
+`"bottom-left"` or `"bottom-right"`, for the page alone. The element
+fires `performancemeterchange` (`event.detail.shown` and
+`event.detail.corner`) as the meter shows, hides or moves. While hidden
 it costs nothing: it hears no frames, runs no timer and leaves the WebGL
 context alone. While shown, it counts draw calls by wrapping the
 context's draw functions. A page can style it with the custom properties
