@@ -9,6 +9,7 @@ import {
 } from "../../../../packages/player/dist/display/display.js";
 import type { ClipboardText } from "../../../../packages/player/dist/hosts.js";
 import {
+  highlighted,
   KeyboardInput,
   restrictText,
   setFocus,
@@ -52,6 +53,8 @@ function setUp(...names: string[]) {
   });
   const scripting = {
     focus: null,
+    focusHighlight: false,
+    stageFocusRect: true,
     clipboard,
     // No script here changes Stage.displayState.
     fullScreen: { asked: 0 },
@@ -74,6 +77,7 @@ function setUp(...names: string[]) {
       }),
       call: (fn: { $f: (self: unknown, event: unknown) => void }, self: unknown, event: unknown) =>
         fn.$f(self, event),
+      toBoolean: (v: unknown) => !!v,
     },
   } as unknown as Scripting;
   const keyboard = new KeyboardInput(stage, scripting);
@@ -368,6 +372,50 @@ test("tab moves by tabIndex where any has one, else by place, after a keyFocusCh
   });
   tab();
   equal(scripting.focus, a);
+});
+
+test("Tab and a script show the focus's rectangle; a press, a field and focusRect false do not", () => {
+  const { stage, fields, scripting, keyboard } = setUp("field");
+  const [field] = fields;
+  const sprite = (index: number, focusRect: boolean | null) => {
+    const d = new Container();
+    d.object = { $display: d, $buttonMode: true, $tabIndex: index, $focusRect: focusRect } as never;
+    stage.addChildAt(d, stage.children.length);
+    return d;
+  };
+  const a = sprite(1, null);
+  const off = sprite(2, false);
+  (field.object as { $tabIndex?: number }).$tabIndex = 3;
+  const tab = () => keyboard.handle("down", { keyCode: 9, charCode: 9 });
+  const shows = (d: DisplayObject | null) => highlighted(scripting) === d;
+
+  assert.equal(shows(null), true);
+  tab();
+  assert.equal(shows(a), true);
+  tab();
+  assert.equal(scripting.focus === off && shows(null), true);
+  tab();
+  assert.equal(scripting.focus === field && shows(null), true);
+
+  // A press hides it, the focus kept; a script's focus shows it again.
+  setFocus(scripting, a, true);
+  assert.equal(shows(a), true);
+  keyboard.pressed(a, 0, 0);
+  assert.equal(scripting.focus === a && shows(null), true);
+  setFocus(scripting, null);
+  setFocus(scripting, a, true);
+  assert.equal(shows(a), true);
+
+  // Decided as the focus moves: a focusRect set later leaves it shown.
+  (a.object as { $focusRect?: boolean }).$focusRect = false;
+  assert.equal(shows(a), true);
+
+  // The stage's stageFocusRect stands for a focusRect of null.
+  (a.object as { $focusRect?: boolean | null }).$focusRect = null;
+  scripting.stageFocusRect = false;
+  setFocus(scripting, null);
+  setFocus(scripting, a, true);
+  assert.equal(scripting.focus === a && shows(null), true);
 });
 
 test("a click focuses a field after a mouseFocusChange, and the stage's click takes it away", () => {

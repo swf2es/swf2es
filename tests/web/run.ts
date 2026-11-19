@@ -51,6 +51,7 @@ const abcs = compileScripts(
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
     { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
+    { name: "FocusRectTest", source: readFileSync(`${here}scripts/FocusRectTest.as`, "utf8") },
     {
       name: "ActivationTest",
       source: readFileSync(`${here}scripts/ActivationTest.as`, "utf8"),
@@ -171,6 +172,73 @@ writeFileSync(`${site}data/hello.txt`, "hello from beside it");
 writeFileSync(
   `${site}context-menu.swf`,
   bare(abcs.get("ContextMenuTest") as Uint8Array, 1, "ContextMenuTest", 200, 120),
+);
+writeFileSync(
+  `${site}focus-as3.swf`,
+  bare(abcs.get("FocusRectTest") as Uint8Array, 1, "FocusRectTest", 200, 120),
+);
+// The same in AS2, SWF 8: Tab goes to "clip" under its green square, to "kid" in "holder",
+// to "off", whose _focusrect is false, and to "btn", a button whose hit area is its up state.
+const focusBox = (id: number, color: number, size: [number, number]) =>
+  w.shape({
+    id,
+    bounds: [0, size[0] * 20, 0, size[1] * 20],
+    fills: [color],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [size[0] * 20, 0] },
+          { line: [size[0] * 20, size[1] * 20] },
+          { line: [0, size[1] * 20] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+const focusAvm1 = `clip.onRelease = function() {};
+holder.kid.onRelease = function() {};
+off.onRelease = function() {};
+off._focusrect = false;
+var EI = flash.external.ExternalInterface;
+EI.addCallback("focusName", null, function() { return String(Selection.getFocus()); });
+EI.addCallback("focusOn", null, function(name) { Selection.setFocus(eval(name)); });
+EI.addCallback("stageFocusRect", null, function(on) { _root._focusrect = on; });
+stop();`;
+writeFileSync(
+  `${site}focus-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 120,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      focusBox(1, 0x0000ff, [40, 30]),
+      focusBox(2, 0x0000ff, [10, 10]),
+      focusBox(3, 0x00ff00, [20, 20]),
+      focusBox(4, 0xff0000, [40, 20]),
+      w.sprite(10, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(11, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(12, 1, [w.place({ depth: 1, character: 11, name: "kid" }), w.showFrame(), w.end()]),
+      w.button2Records(13, [{ states: 15, character: 4 }]),
+      w.place({ depth: 1, character: 10, name: "clip", matrix: { tx: 400, ty: 400 } }),
+      w.place({
+        depth: 2,
+        character: 12,
+        name: "holder",
+        matrix: { a: 2, d: 2, tx: 2000, ty: 400 },
+      }),
+      w.place({ depth: 3, character: 10, name: "off", matrix: { tx: 400, ty: 1400 } }),
+      w.place({ depth: 4, character: 13, name: "btn", matrix: { tx: 2000, ty: 1400 } }),
+      w.place({ depth: 5, character: 3, matrix: { tx: 200, ty: 500 } }),
+      w.doAction([...script(focusAvm1, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
 );
 writeFileSync(
   `${site}full-screen.swf`,
@@ -1590,6 +1658,168 @@ check("a stage holding nothing shows its background colour, not black", async (e
     const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
     assert.deepEqual([...colours(image, [left, top, 100, 60], 2).keys()], [0x3366cc], vm);
     await call(evaluate, "scriptFreeDestroy()");
+  }
+});
+
+// Flash Player 32's projector, driven by real keys (adl takes none): the focus's rectangle is
+// opaque yellow, three screen pixels wide inside its object's bounds on the stage, over what
+// is above the object; a button's hit area's. Two device pixels a stage pixel here, so its
+// bars are three device pixels. Tab and a script show it; a press hides it, in AVM1 below SWF 9
+// a move too; an object's focusRect or _focusrect, or the stage's, as the focus moves, keeps
+// it off, as does a text field.
+check("the focus's yellow rectangle shows as Flash draws it", async (evaluate, send) => {
+  const YELLOW = 0xffff00;
+  const settle = () => call(evaluate, "frames(3).then(() => true)");
+  const tab = async () => {
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", {
+        type,
+        key: "Tab",
+        code: "Tab",
+        windowsVirtualKeyCode: 9,
+      });
+    }
+    await settle();
+  };
+  const mouse = async (types: string[], x: number, y: number) => {
+    for (const type of types) {
+      await send("Input.dispatchMouseEvent", {
+        type,
+        x,
+        y,
+        button: type === "mouseMoved" ? "none" : "left",
+        buttons: type === "mousePressed" ? 1 : 0,
+        clickCount: type === "mouseMoved" ? 0 : 1,
+      });
+    }
+    await settle();
+  };
+  const focusCall = <R>(name: string, ...args: unknown[]) =>
+    call<R>(
+      evaluate,
+      `focusCall(${[name, ...args].map((a) => JSON.stringify(a)).join(", ")}) ?? true`,
+    );
+  // The device pixels' colours at the given points, and how many are yellow in the stage.
+  const look = async (points: [number, number][]) => {
+    const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+    const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
+    const at = (x: number, y: number) => {
+      const i = (y * image.width + x) * 4;
+      return (image.data[i] << 16) | (image.data[i + 1] << 8) | image.data[i + 2];
+    };
+    let yellow = 0;
+    for (let y = 0; y < 240; y++) {
+      for (let x = 0; x < 400; x++) {
+        yellow += at(x, y) === YELLOW ? 1 : 0;
+      }
+    }
+
+    return { yellow, colours: points.map(([x, y]) => at(x, y)) };
+  };
+  // A frame of 3 device pixels inside w by h device pixels: its pixel count.
+  const frame = (w: number, h: number) => w * h - (w - 6) * (h - 6);
+  // The clip's frame, at (40, 40) to (120, 100) in device pixels: each bar's outer and inner
+  // pixels yellow, the pixels on either side not. The green square covers its left edge.
+  const clipPoints: [number, number][] = [
+    [39, 70],
+    [40, 70],
+    [42, 70],
+    [43, 70],
+    [80, 39],
+    [80, 40],
+    [80, 42],
+    [80, 43],
+    [120, 70],
+    [119, 70],
+    [117, 70],
+    [116, 70],
+    [80, 100],
+    [80, 99],
+    [80, 97],
+    [80, 96],
+  ];
+  const G = 0x00ff00;
+  const B = 0x0000ff;
+  const W = 0xffffff;
+  const Y = YELLOW;
+  const clipColours = [G, Y, Y, G, W, Y, Y, B, W, Y, Y, B, W, Y, Y, B];
+
+  for (const vm of ["as3", "avm1"]) {
+    const name = (n: string) => (vm === "as3" ? n.replace(/^.*\./, "") : `_level0.${n}`);
+    const [left, top] = await call<number[]>(evaluate, `focusPlayer("/web-test/focus-${vm}.swf")`);
+    assert.deepEqual([left, top], [0, 0], vm);
+    try {
+      assert.equal((await look([])).yellow, 0, `${vm}: a rectangle before Tab`);
+
+      await tab();
+      assert.equal(await focusCall("focusName"), name("clip"), vm);
+      let seen = await look(clipPoints);
+      assert.equal(seen.yellow, frame(80, 60), `${vm}: the clip's rectangle`);
+      assert.deepEqual(seen.colours, clipColours, `${vm}: the clip's rectangle's edges`);
+
+      // Three screen pixels in a holder scaled twice, not six.
+      await tab();
+      assert.equal(await focusCall("focusName"), name("holder.kid"), vm);
+      seen = await look([
+        [200, 60],
+        [202, 60],
+        [203, 60],
+      ]);
+      assert.equal(seen.yellow, frame(40, 40), `${vm}: the scaled kid's rectangle`);
+      assert.deepEqual(seen.colours, [Y, Y, B], `${vm}: the scaled kid's rectangle's edge`);
+
+      // Its own focusRect false: none.
+      await tab();
+      assert.equal(await focusCall("focusName"), name("off"), vm);
+      assert.equal((await look([])).yellow, 0, `${vm}: off's rectangle`);
+
+      // A text field, AS3's, shows none; a button, AS2's, its hit area's.
+      await tab();
+      if (vm === "as3") {
+        assert.equal(await focusCall("focusName"), "field", vm);
+        assert.equal((await look([])).yellow, 0, "as3: the field's rectangle");
+      } else {
+        assert.equal(await focusCall("focusName"), name("btn"), vm);
+        seen = await look([
+          [200, 160],
+          [202, 160],
+          [203, 160],
+          [279, 160],
+          [280, 160],
+        ]);
+        assert.equal(seen.yellow, frame(80, 40), "avm1: the button's rectangle");
+        assert.deepEqual(seen.colours, [Y, Y, 0xff0000, Y, W], "avm1: the button's edges");
+      }
+
+      // Round to the clip, then a press on it hides the rectangle, the focus kept.
+      await tab();
+      assert.equal((await look([])).yellow, frame(80, 60), `${vm}: the clip's again`);
+      await mouse(["mouseMoved", "mousePressed", "mouseReleased"], left + 50, top + 35);
+      assert.equal(await focusCall("focusName"), name("clip"), vm);
+      assert.equal((await look([])).yellow, 0, `${vm}: a rectangle after a press`);
+
+      // Tab shows it again; below SWF 9 a move hides it, as a press does.
+      await tab();
+      assert.equal((await look([])).yellow, frame(40, 40), `${vm}: the kid's after a press`);
+      await mouse(["mouseMoved"], left + 190, top + 110);
+      assert.equal((await look([])).yellow, vm === "avm1" ? 0 : frame(40, 40), `${vm}: a move`);
+
+      // The stage's off: none on the clip, whose own is not set.
+      await focusCall("stageFocusRect", false);
+      for (let i = 0; i < 3; i++) {
+        await tab();
+      }
+      assert.equal(await focusCall("focusName"), name("clip"), vm);
+      assert.equal((await look([])).yellow, 0, `${vm}: the stage's focus rectangle off`);
+      await focusCall("stageFocusRect", true);
+
+      // A script's focus shows it, as Tab does.
+      await focusCall("focusOn", vm === "as3" ? "kid" : "holder.kid");
+      await settle();
+      assert.equal((await look([])).yellow, frame(40, 40), `${vm}: a script's focus`);
+    } finally {
+      await call(evaluate, "focusDestroy()");
+    }
   }
 });
 

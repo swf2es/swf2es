@@ -10,12 +10,13 @@ import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import { drawKernelFrame, drawKernelLetGo, drawKernelUsed } from "./bitmap/kernel.js";
 import { AdvanceWalk, walkChecks } from "./display/advance.js";
-import { Container, MovieClip, unloads } from "./display/display.js";
+import { Container, type DisplayObject, MovieClip, unloads } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
 import { settleFits } from "./display/textobjects.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { customContextMenu, type MenuItem } from "./input/context-menu.js";
-import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
+import { type FocusHighlight, highlightOf } from "./input/focus-highlight.js";
+import { highlighted, type Keyboard, KeyboardInput } from "./input/keyboard.js";
 import { type Pointer, PointerInput, type PointerState } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
 import type { AudioHost } from "./media/audio.js";
@@ -412,6 +413,29 @@ export class Player {
       (this.scripting?.hostCalls ?? 0) +
       this.activations
     );
+  }
+
+  /**
+   * The focus's yellow rectangle as a view draws it (RenderView.highlight),
+   * or null: around what Tab, or a script, focused, until a press or the
+   * focus moves on, as Flash draws it; for an AVM1 movie as its focus
+   * tracker shows it. Cheap where none shows, as a host asks every frame.
+   */
+  focusHighlight(): FocusHighlight | null {
+    const s = this.scripting;
+    let d: DisplayObject | null = null;
+    if (s) {
+      d = highlighted(s);
+    } else if (this.avm1) {
+      const tracker = this.avm1.focusTracker;
+      d = tracker.highlight === "visible" ? tracker.focusedObject : null;
+    }
+
+    if (d === null) {
+      return null;
+    }
+
+    return highlightOf(d, this.stage);
   }
 
   /**

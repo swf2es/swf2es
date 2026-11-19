@@ -80,6 +80,7 @@ export type {
 export { AMF3_KEY, browserClipboard, globalWebSocketHost } from "./hosts.js";
 export { bindActivation } from "./input/activation.js";
 export type { MenuItem } from "./input/context-menu.js";
+export type { FocusHighlight } from "./input/focus-highlight.js";
 export { bindKeyboard, type Keyboard, type KeyState } from "./input/keyboard.js";
 export type { Pointer, PointerState } from "./input/pointer.js";
 export { bindTextInput, type TextInput } from "./input/text-input.js";

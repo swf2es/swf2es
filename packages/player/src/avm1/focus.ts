@@ -12,16 +12,15 @@
 // a place is kept, as Ruffle keeps it.
 import { ClipEvent } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
-import { boundsIn } from "../display/bounds.js";
 import {
   ButtonObject,
   CONTENT,
   Container,
   type DisplayObject,
   MovieClip,
-  parentage,
   TextObject,
 } from "../display/display.js";
+import { focusBounds } from "../input/focus-highlight.js";
 import type { Avm1 } from "./avm1.js";
 import { nativeOf } from "./globals/MovieClip.js";
 import { stateOf } from "./globals/TextField.js";
@@ -102,22 +101,8 @@ function tabbable(d: DisplayObject, host: TabHost): boolean {
 
 /** 6 × y + x of `d`'s top left corner on the stage, in twips: a button's hit area's. */
 function placeKey(d: DisplayObject, stage: Container): number {
-  const area = d instanceof ButtonObject ? d.hitTestState : null;
-  const parent = area?.parent ?? null;
-  if (area) {
-    area.parent = d as ButtonObject;
-    parentage.changes++;
-  }
-
-  try {
-    const r = boundsIn(area ?? d, stage, stage, true);
-    return 6 * Math.round(r.yMin * 20) + Math.round(r.xMin * 20);
-  } finally {
-    if (area) {
-      area.parent = parent;
-      parentage.changes++;
-    }
-  }
+  const r = focusBounds(d, stage, stage);
+  return 6 * Math.round(r.yMin * 20) + Math.round(r.xMin * 20);
 }
 
 /** The movie's focus: the object that has it, its highlight, and Tab's and Enter's moves of it. */
@@ -253,22 +238,8 @@ export class FocusTracker implements TabHost {
     }
 
     // A button's by its hit area, which it is tested by whatever it shows.
-    const area = d instanceof ButtonObject ? d.hitTestState : null;
-    const parent = area?.parent ?? null;
-    if (area) {
-      area.parent = d as ButtonObject;
-      parentage.changes++;
-    }
-
-    try {
-      const r = boundsIn(area ?? d, d.parent, null, true);
-      return r.xMax > r.xMin || r.yMax > r.yMin;
-    } finally {
-      if (area) {
-        area.parent = parent;
-        parentage.changes++;
-      }
-    }
+    const r = focusBounds(d, d.parent, null);
+    return r.xMax > r.xMin || r.yMax > r.yMin;
   }
 
   tabEnabled(d: DisplayObject): boolean | undefined {

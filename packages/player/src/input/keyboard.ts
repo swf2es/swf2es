@@ -85,10 +85,12 @@ const focusableByMouse = (d: DisplayObject): boolean => d instanceof TextObject 
  * Move focus to `next`: focusOut on the one that had it, then focusIn on
  * it, each naming the other, unless a focusOut listener moved it on; a
  * field gains or loses its caret, and the object a hook to give it up by
- * when it is taken off the list or hidden.
+ * when it is taken off the list or hidden. `highlight`, as Tab and a
+ * script move it, shows its rectangle; a press's move does not.
  */
-export function setFocus(s: Scripting, next: DisplayObject | null): void {
+export function setFocus(s: Scripting, next: DisplayObject | null, highlight = false): void {
   const previous = s.focus;
+  s.focusHighlight = highlight && next !== null && highlightable(s, next);
   if (previous === next) {
     return;
   }
@@ -125,6 +127,25 @@ export function setFocus(s: Scripting, next: DisplayObject | null): void {
   if (next && s.focus === next) {
     focusEvent(s, "focusIn", next, previous, false);
   }
+}
+
+/** What the focus's rectangle is drawn around: what has the focus, where it shows (setFocus). */
+export const highlighted = (s: Scripting): DisplayObject | null =>
+  s.focusHighlight ? s.focus : null;
+
+/**
+ * Whether the focus's rectangle shows on `d` as the focus moves to it: not
+ * on a text field, which shows its caret instead, nor where its focusRect
+ * is false, or null and the stage's stageFocusRect is. A change of either
+ * later leaves it as it is, as in Flash Player 32's projector.
+ */
+function highlightable(s: Scripting, d: DisplayObject): boolean {
+  if (d instanceof TextObject) {
+    return false;
+  }
+
+  const own = (d.object as { $focusRect?: unknown } | null)?.$focusRect;
+  return own === null || own === undefined ? s.stageFocusRect : s.rt.toBoolean(own);
 }
 
 /** A FocusEvent on `target`, naming `related`: whether a listener cancelled it. */
@@ -446,6 +467,7 @@ export class KeyboardInput implements Keyboard {
    */
   pressed(target: DisplayObject | null, localX: number, localY: number, clicks = 1): void {
     const s = this.scripting;
+    s.focusHighlight = false;
     const pressed = target === this.stage ? null : target;
     this.press = null;
     if (pressed instanceof TextObject && pressed.selectable) {
@@ -542,7 +564,7 @@ export class KeyboardInput implements Keyboard {
     const n = order.length;
     const next = order[at < 0 ? (back ? n - 1 : 0) : (at + (back ? -1 : 1) + n) % n];
     if (!focusEvent(s, "keyFocusChange", s.focus ?? this.stage, next, true, TAB)) {
-      setFocus(s, next);
+      setFocus(s, next, true);
     }
 
     return true;
