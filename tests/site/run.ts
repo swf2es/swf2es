@@ -685,13 +685,45 @@ async function check(): Promise<void> {
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
               null,
             );
-            // Kept on, it is on as the page loads again.
+            // Kept on, it is on as the page loads again, in the corner the shortcut moved it to.
+            const corner = `${meter}.dataset.corner`;
+            const storedCorner = "localStorage.getItem('swf2es.performanceMeterCorner')";
             await shortcut();
             await until(meterShown);
+            assert.equal(await value<string>(corner), "top-left");
+            await shortcut();
+            assert.equal(await value<string>(corner), "top-right");
+            assert.equal(await value<string | null>(storedCorner), "top-right");
             await navigate("play/?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
             await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
             await until(`/ fps$/.test(${figure("fps")}.textContent)`);
+            // On through the other corners, then off, then on at the top left again; each corner
+            // inside the stage, the pointer passing through.
+            for (const next of ["bottom-left", "bottom-right"]) {
+              await shortcut();
+              assert.equal(await value<string>(corner), next);
+              assert.deepEqual(
+                await value<{ inside: boolean; events: string }>(
+                  `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
+                ),
+                { inside: true, events: "none" },
+              );
+            }
+            await shortcut();
+            await until(meterHidden);
+            assert.equal(await value<string | null>(storedCorner), null);
+            assert.equal(
+              await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
+              null,
+            );
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-left");
+            await shortcut();
+            await shortcut();
+            await shortcut();
             await shortcut();
             await until(meterHidden);
 
@@ -1305,7 +1337,7 @@ async function check(): Promise<void> {
           // Each check starts without the performance meter, which a failed one may have left on,
           // kept for the next page too, over the stage's corner where others read pixels.
           await evaluate(
-            "(localStorage.removeItem('swf2es.performanceMeter'), document.getElementById('player') && (document.getElementById('player').performanceMeter = false), true)",
+            "(localStorage.removeItem('swf2es.performanceMeter'), localStorage.removeItem('swf2es.performanceMeterCorner'), document.getElementById('player') && Object.assign(document.getElementById('player'), { performanceMeter: false, performanceMeterCorner: 'top-left' }), true)",
           ).catch(() => null);
         }
       }

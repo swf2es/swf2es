@@ -126,6 +126,29 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         });
         const pixel = decodePng(Buffer.from(shot.data, "base64"));
         assert.deepEqual([...pixel.data], [0, 255, 0, 255]);
+        // The performance meter shows above Stage3D's layer in every corner: inside its border,
+        // the screen is the meter's own background.
+        for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
+          const at = await value<{ x: number; y: number; background: string }>(`(() => {
+            const player = document.getElementById('player');
+            player.performanceMeterCorner = ${JSON.stringify(corner)};
+            player.performanceMeter = true;
+            const meter = player.shadowRoot.querySelector('.meter');
+            const rect = meter.getBoundingClientRect();
+            return { x: rect.x + 3, y: rect.y + 3, background: getComputedStyle(meter).backgroundColor };
+          })()`);
+          await new Promise((done) => setTimeout(done, 100));
+          const under = await send<{ data: string }>("Page.captureScreenshot", {
+            format: "png",
+            clip: { x: at.x, y: at.y, width: 1, height: 1, scale: 1 },
+          });
+          const seen = [...decodePng(Buffer.from(under.data, "base64")).data].slice(0, 3);
+          const background = (at.background.match(/\d+/g) ?? []).slice(0, 3).map(Number);
+          assert.deepEqual(seen, background, `the meter at the ${corner} is not on top`);
+        }
+        await value(
+          "(Object.assign(document.getElementById('player'), { performanceMeter: false, performanceMeterCorner: 'top-left' }), true)",
+        );
         const report = new URL(
           await value<string>(`(() => {
             const link = document.getElementById('report');
