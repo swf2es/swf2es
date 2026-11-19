@@ -54,7 +54,7 @@ export function localConnectionNatives(s: Scripting): avm2.Natives {
           allowed.has(sender.domain)
         );
       },
-      defer: (deliver) => s.loads.deferHostEvent(deliver),
+      defer: (deliver) => s.loads.deferLocal(deliver),
       status: (success) => {
         if (!heard(self, "status")) {
           return;

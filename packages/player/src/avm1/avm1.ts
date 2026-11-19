@@ -146,6 +146,12 @@ export interface Avm1Options {
   /** The LocalConnection registry shared with other VMs of this player. */
   localConnections?: LocalConnections;
   /**
+   * Where its LocalConnection deliveries wait: an AS3 host's queue for a
+   * movie its Loader holds (Loads.deferLocal); its network's, for the next
+   * frame, by default.
+   */
+  deferLocal?: (deliver: () => void) => void;
+  /**
    * Where trace's text goes, as it is, the console's log by default: a
    * "\r" in it breaks Flash's log's line as a "\n" does.
    */
@@ -391,15 +397,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly localConnections: LocalConnections;
   readonly fileHost: FileHost | null;
   readonly fileLifetime = new AbortController();
-  /**
-   * Unloaded from its Loader (`unloadFromLoader`): it plays no more, but its
-   * LocalConnections stay connected, as Flash keeps them, and their
-   * messages come through `localReady`, the network being gone.
-   */
-  unloaded = false;
   /** Destroyed: nothing of it is left, its LocalConnections closed. */
   closed = false;
-  private localReady: (() => void)[] = [];
+  /** Its LocalConnection sends not yet delivered: an unloaded movie is kept for them. */
+  localPending = 0;
+  private readonly deferLocalTo: ((deliver: () => void) => void) | null;
 
   get frameRate(): number {
     return this.rate;
@@ -418,6 +420,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.debugger = options.debugger ?? false;
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
+    this.deferLocalTo = options.deferLocal ?? null;
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
       options.fetch ?? null,
@@ -1305,7 +1308,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
     this.codeLive.clear();
     this.closed = true;
-    this.localReady = [];
     this.localConnections.destroy(this);
     this.stop();
     if (closeAudio) {
@@ -1321,7 +1323,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * unloadAndStop and a collection: the name cannot be connected to again.
    */
   unloadFromLoader(): void {
-    this.unloaded = true;
     this.stop();
   }
 
@@ -1332,16 +1333,24 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     stopTimelineSounds(this.sounds);
   }
 
-  /** A LocalConnection's delivery, for the next frame: by the network's queue, or once unloaded its own. */
+  /**
+   * A LocalConnection's delivery, on the host's queue or else the
+   * network's, counted until it is made.
+   */
   deferLocal(deliver: () => void): void {
     if (this.closed) {
       return;
     }
 
-    if (this.unloaded) {
-      this.localReady.push(deliver);
+    this.localPending++;
+    const counted = () => {
+      this.localPending--;
+      deliver();
+    };
+    if (this.deferLocalTo) {
+      this.deferLocalTo(counted);
     } else {
-      this.net.defer(deliver);
+      this.net.defer(counted);
     }
   }
 
@@ -1414,26 +1423,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /** An unloaded movie's LocalConnection messages since the last frame delivered: whether any are left to come. */
-  localNetwork(): boolean {
-    if (this.closed || this.halted) {
-      return false;
-    }
-
-    const ready = this.localReady;
-    this.localReady = [];
-    this.timers.begin();
-    try {
-      if (this.delivered(ready)) {
-        this.queue.run();
-      }
-    } finally {
-      this.timers.end();
-    }
-
-    return this.localReady.length > 0;
-  }
-
   /**
    * The network's answers since the last frame delivered, each in the
    * root's activation as a callback runs, so that a setter or watcher it
@@ -1442,10 +1431,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * whether there were any.
    */
   private netDelivered(): boolean {
-    return this.delivered(this.net.take());
-  }
-
-  private delivered(ready: (() => void)[]): boolean {
+    const ready = this.net.take();
     const cx = this.movieRoot === null ? null : this.activationOf(this.movieRoot);
     for (const deliver of ready) {
       if (this.halted || cx === null) {

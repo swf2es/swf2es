@@ -65,11 +65,16 @@ interface Avm1Load {
   failed: boolean;
 }
 
+/** The rounds of LocalConnection deliveries a frame makes at most (Loads.deferLocal). */
+const LOCAL_PASSES = 1000;
+
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
   private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
-  /** Movies unloaded whose LocalConnections are still connected (Avm1.unloadFromLoader). */
+  /** Movies unloaded whose LocalConnections still listen or send (Avm1.unloadFromLoader). */
   private readonly unloadedAvm1 = new Set<Avm1>();
+  /** LocalConnection's deliveries, AS3's and the loaded AVM1 movies' (deferLocal). */
+  private readonly localReady: (() => void)[] = [];
 
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
@@ -98,7 +103,7 @@ export class Loads {
 
   tickAvm1(): void {
     for (const vm of this.unloadedAvm1) {
-      if (!vm.localNetwork() && !this.s.localConnections.listening(vm)) {
+      if (!this.keeps(vm)) {
         this.unloadedAvm1.delete(vm);
         vm.destroy(false);
       }
@@ -138,6 +143,18 @@ export class Loads {
     for (const movie of this.avm1Movies.values()) {
       movie.vm.saveSharedObjects();
     }
+
+    for (const vm of this.unloadedAvm1) {
+      vm.saveSharedObjects();
+    }
+  }
+
+  /**
+   * Whether an unloaded movie is kept: while it listens or has a send to
+   * deliver, as Flash keeps it; never once its script stopped it for good.
+   */
+  private keeps(vm: Avm1): boolean {
+    return !vm.halted && (vm.localPending > 0 || this.s.localConnections.listening(vm));
   }
 
   destroyAvm1(): void {
@@ -166,6 +183,18 @@ export class Loads {
   /** Cross a host callback into the next player frame, where scripts may run. */
   deferHostEvent(deliver: () => void): void {
     this.readyBytes.push(deliver);
+  }
+
+  /**
+   * A LocalConnection delivery, for the next frame's host events. Those a
+   * delivery sends are delivered in the same frame, as Flash delivers a
+   * chain of sends from AS3's handlers and an AVM1 movie's answer before
+   * the next ENTER_FRAME (the `avm1-local-connection` case), up to
+   * LOCAL_PASSES rounds, so that two receivers answering each other for
+   * ever leave the rest to the next frame.
+   */
+  deferLocal(deliver: () => void): void {
+    this.localReady.push(deliver);
   }
 
   /**
@@ -817,7 +846,7 @@ export class Loads {
       const movie = this.avm1Movies.get(content.$display);
       if (movie) {
         // Its LocalConnections outlive it, as in Flash, until it closes them.
-        if (this.s.localConnections.listening(movie.vm)) {
+        if (this.keeps(movie.vm)) {
           movie.vm.unloadFromLoader();
           this.unloadedAvm1.add(movie.vm);
         } else {
@@ -873,6 +902,16 @@ export class Loads {
     const ends: (() => void)[] = [];
     if (this.readyBytes.length !== 0) {
       for (const deliver of this.readyBytes.splice(0)) {
+        try {
+          deliver();
+        } catch (error) {
+          this.s.reportUncaught(error);
+        }
+      }
+    }
+
+    for (let pass = 0; pass < LOCAL_PASSES && this.localReady.length !== 0; pass++) {
+      for (const deliver of this.localReady.splice(0)) {
         try {
           deliver();
         } catch (error) {
@@ -1016,6 +1055,7 @@ export class Loads {
         fsCommand: s.fsCommand ?? undefined,
         sendToUrl: s.sendToUrl,
         localConnections: s.localConnections,
+        deferLocal: (deliver) => this.deferLocal(deliver),
         realTime: s.timers.realTime,
         platform: s.platform,
         screenCapabilities: s.screenCapabilities,
