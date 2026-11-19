@@ -1899,6 +1899,7 @@ check(
       evaluate,
       `(async () => {
     localStorage.removeItem("swf2es.performanceMeter");
+    localStorage.removeItem("swf2es.performanceMeterCorner");
     window.meterPlayer = document.createElement("swf2es-player");
     meterPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
     window.meterChanges = [];
@@ -2173,6 +2174,71 @@ check(
       })()`,
         ),
         "true bottom-left bottom-left",
+      );
+
+      // A corner a script set holds against another kept, through the next load.
+      assert.equal(
+        await call(
+          evaluate,
+          `(async () => {
+        localStorage.setItem("swf2es.performanceMeterCorner", "top-right");
+        await cornerPlayer.load("/web-test/context-menu.swf");
+        return cornerPlayer.performanceMeterCorner;
+      })()`,
+        ),
+        "bottom-right",
+      );
+
+      // Restored as a SWF starts, the kept choice is told once, and only if the meter shows.
+      assert.deepEqual(
+        await call(
+          evaluate,
+          `(async () => {
+        const told = async (on) => {
+          if (on) {
+            localStorage.setItem("swf2es.performanceMeter", "1");
+          } else {
+            localStorage.removeItem("swf2es.performanceMeter");
+          }
+          const p = document.createElement("swf2es-player");
+          p.style.cssText = "position:fixed;left:420px;top:200px";
+          const events = [];
+          p.addEventListener("performancemeterchange", (e) => events.push(e.detail.shown + " " + e.detail.corner));
+          document.body.append(p);
+          await p.load("/web-test/context-menu.swf");
+          await new Promise((done) => requestAnimationFrame(() => done()));
+          const corner = p.performanceMeterCorner;
+          p.destroy();
+          p.remove();
+          return [corner, events];
+        };
+        localStorage.setItem("swf2es.performanceMeterCorner", "bottom-right");
+        return [await told(false), await told(true)];
+      })()`,
+        ),
+        [
+          ["bottom-right", []],
+          ["bottom-right", ["true bottom-right"]],
+        ],
+      );
+
+      // Left out, a kept corner is ignored where no script set one.
+      assert.equal(
+        await call(
+          evaluate,
+          `(async () => {
+        localStorage.setItem("swf2es.performanceMeterCorner", "bottom-left");
+        const p = document.createElement("swf2es-player");
+        p.setAttribute("performancemeter", "false");
+        document.body.append(p);
+        await p.load("/web-test/context-menu.swf");
+        const corner = p.performanceMeterCorner;
+        p.destroy();
+        p.remove();
+        return corner;
+      })()`,
+        ),
+        "top-left",
       );
 
       // Left out, neither item is there, though the meter shows.

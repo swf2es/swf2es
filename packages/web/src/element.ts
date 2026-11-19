@@ -194,7 +194,7 @@ export class Swf2esPlayerElement extends ElementBase {
   #meterShown = false;
   /** Whether the meter shows by the viewer's choice, the menu's or the one kept, not a script's. */
   #meterChosen = false;
-  /** The stage's corner the meter sits in. */
+  /** The element's corner the meter sits in. */
   #meterCorner: MeterCorner = "top-left";
   /** Whether a script put the meter in its corner, which the viewer's kept corner then leaves. */
   #cornerSet = false;
@@ -286,8 +286,10 @@ export class Swf2esPlayerElement extends ElementBase {
   }
 
   /**
-   * The stage's corner the meter sits in: "top-left", the default,
-   * "top-right", "bottom-left" or "bottom-right"; another value is ignored.
+   * The corner of the player element the meter sits in, which in a
+   * letterboxed or noScale player may be in the bars beside the stage:
+   * "top-left", the default, "top-right", "bottom-left" or "bottom-right";
+   * another value is ignored.
    * The context menu's "Move performance meter" moves it to the next and
    * keeps the viewer's choice; setting this moves it for the page alone,
    * keeping nothing, and fires `performancemeterchange`.
@@ -303,14 +305,17 @@ export class Swf2esPlayerElement extends ElementBase {
     }
   }
 
-  #placeMeter(corner: MeterCorner): void {
+  /** The meter moved to `corner`, the page told where `tell` and it moved. */
+  #placeMeter(corner: MeterCorner, tell = true): void {
     if (corner === this.#meterCorner) {
       return;
     }
 
     this.#meterCorner = corner;
     this.#meter?.place(corner);
-    this.#changedMeter();
+    if (tell) {
+      this.#changedMeter();
+    }
   }
 
   #changedMeter(): void {
@@ -329,23 +334,30 @@ export class Swf2esPlayerElement extends ElementBase {
    * offered, a meter the viewer's choice showed goes; a script's stays.
    */
   #applyChoice(): void {
+    const shown = this.#meterShown;
+    const corner = this.#meterCorner;
     if (!this.#cornerSet) {
-      this.#placeMeter(this.#meterOffered() ? storedCorner() : "top-left");
+      this.#placeMeter(this.#meterOffered() ? storedCorner() : "top-left", false);
     }
 
     if (this.#meterOffered()) {
       if (!this.#meterShown && storedMeter()) {
         this.#meterChosen = true;
-        this.#showMeter(true);
+        this.#showMeter(true, false);
       }
     } else if (this.#meterChosen && this.#meterShown) {
       this.#meterChosen = false;
-      this.#showMeter(false);
+      this.#showMeter(false, false);
+    }
+
+    // Told once, and only of what shows differently: not of a hidden meter's corner.
+    if (this.#meterShown !== shown || (this.#meterShown && this.#meterCorner !== corner)) {
+      this.#changedMeter();
     }
   }
 
-  /** The meter shown or hidden. */
-  #showMeter(on: boolean): void {
+  /** The meter shown or hidden, the page told where `tell`. */
+  #showMeter(on: boolean, tell = true): void {
     const parent = this.#box.parentNode;
     if (on === this.#meterShown || !parent) {
       return;
@@ -361,7 +373,9 @@ export class Swf2esPlayerElement extends ElementBase {
 
     this.#meter?.show(on);
     this.#listen();
-    this.#changedMeter();
+    if (tell) {
+      this.#changedMeter();
+    }
   }
 
   /**

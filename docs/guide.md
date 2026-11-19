@@ -171,7 +171,7 @@ the click. A page that makes the element full screen itself
 instead, as the desktop app's window, which needs no click.
 
 The player's context menu has a "Show performance" item, just above
-"About swf2es", that shows a small meter over the stage's top left
+"About swf2es", that shows a small meter in the player's top left
 corner. It shows the SWF's frames a second against its frame rate, the
 player's ms in a frame (median and worst over the last second), draw
 calls, the JS heap where the browser reports it, and the WebAssembly
@@ -186,8 +186,9 @@ whatever the item, for the page alone: it keeps nothing, so a page that
 wants its own control remembered (the play page's Performance box)
 writes the same key, `swf2es.performanceMeter` set to `"1"`. While the
 meter shows, the menu also has "Move performance meter", which moves it
-to the stage's next corner, from top left to top right, bottom left and
-bottom right; Flash's menus have no submenus, nor has this one. The
+to the player element's next corner, from top left to top right, bottom
+left and bottom right (in a letterboxed or noScale player, a corner may
+be in the bars beside the stage); Flash's menus have no submenus, nor has this one. The
 meter never takes the pointer, in whichever corner. The corner is kept
 like the choice to show it, under `swf2es.performanceMeterCorner` (none
 for top left), and the opt-outs leave the item out too. A script moves

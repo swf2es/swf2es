@@ -78,7 +78,7 @@ const STORED = "swf2es.performanceMeter";
 /** Where the viewer's choice of corner is kept, likewise. */
 const STORED_CORNER = "swf2es.performanceMeterCorner";
 
-/** The stage's corners the meter may sit in, in the order the context menu moves it through. */
+/** The element's corners the meter may sit in, in the order the context menu moves it through. */
 export const METER_CORNERS = ["top-left", "top-right", "bottom-left", "bottom-right"] as const;
 export type MeterCorner = (typeof METER_CORNERS)[number];
 
@@ -319,7 +319,7 @@ export class PerformanceMeter {
     parent.appendChild(this.root);
   }
 
-  /** Put the meter in `corner` of the stage. */
+  /** Put the meter in `corner` of the element. */
   place(corner: MeterCorner): void {
     this.root.dataset.corner = corner;
   }
