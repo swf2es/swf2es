@@ -126,6 +126,12 @@ body.dragging .player-app .stage {
   display: block;
   position: absolute;
   inset: 0;
+  /* Its performance meter in the page's theme (@swf2es/web's meter.ts). */
+  --swf2es-meter-font: 0.75rem / 1.35 var(--mono);
+  --swf2es-meter-color: var(--fg);
+  --swf2es-meter-background: var(--panel);
+  --swf2es-meter-border: var(--border);
+  --swf2es-meter-muted: var(--muted);
 }
 
 .player-app swf2es-player[hidden] {
@@ -259,58 +265,6 @@ body.dragging .player-app .stage {
   gap: 6px;
   align-items: center;
   font-size: 0.9rem;
-}
-
-/* The performance meter, over the stage's top left corner: opaque, so that no SWF shows through
-   its figures, and the pointer goes through it to the SWF. A row each figure, its label and
-   value in two columns. */
-.player-app .meter {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 2;
-  display: grid;
-  grid-template-columns: max-content max-content;
-  gap: 0 8px;
-  margin: 0;
-  padding: 4px 8px;
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  line-height: 1.35;
-  font-variant-numeric: tabular-nums;
-  color: var(--fg);
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  pointer-events: none;
-  user-select: none;
-}
-
-.player-app .meter[hidden],
-.player-app .meter > div[hidden] {
-  display: none;
-}
-
-.player-app .meter > div {
-  display: contents;
-}
-
-.player-app .meter dt {
-  color: var(--muted);
-}
-
-.player-app .meter dd {
-  margin: 0;
-  text-align: right;
-}
-
-@media (max-width: 480px) {
-  .player-app .meter {
-    top: 4px;
-    left: 4px;
-    padding: 2px 6px;
-    font-size: 0.6875rem;
-  }
 }
 
 .player-app .panels {
