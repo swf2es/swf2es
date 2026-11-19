@@ -82,11 +82,13 @@ export class Loads {
    * Movies unloaded and not yet let go of, which Flash Player 32 lets go
    * of at the frame's end, their LocalConnections' names and their sounds'
    * channels held until then. One unloaded before the frame's AVM1 has
-   * played plays it ("play"), its unload handlers never run, unless an
-   * interval or a timeout of its is to come, which unloadAndStop clears
-   * first; one unloaded after ("unload"), or between frames, runs its
-   * clips' unload handlers as it goes, at the frame's end, or as the next
-   * frame starts. (Flash keeps the intervals and Key and Mouse listeners of
+   * played (in ENTER_FRAME, or a timer due at the frame) plays it
+   * ("play"), its unload handlers never run; one unloaded after
+   * ("unload"), or between frames (a mouse event, a timer shorter than a
+   * frame), runs its clips' unload handlers as it goes, at the frame's end,
+   * or as the next frame starts. One with an interval or a timeout to come,
+   * which unloadAndStop clears first, does neither, wherever it is
+   * unloaded. (Flash keeps the intervals and Key and Mouse listeners of
    * a movie unload() left without an unload handler running on, its frames
    * stopped, until it collects the movie; these stop them with the rest.)
    */
@@ -155,11 +157,17 @@ export class Loads {
   /** The frame over: the movies unloaded in it go. */
   releaseUnloadedAvm1(): void {
     for (const movie of this.unloadedAvm1.splice(0)) {
-      if (movie.state === "unload") {
-        movie.vm.unloadFromLoader();
+      // A handler that throws still lets the movie, and those after it, go.
+      try {
+        if (movie.state === "unload") {
+          movie.vm.unloadFromLoader();
+        }
+      } catch (error) {
+        // As the movie's own errors go: AVM1 has no event for them.
+        this.s.tellHost(error);
+      } finally {
+        movie.vm.destroy(false);
       }
-
-      movie.vm.destroy(false);
     }
   }
 

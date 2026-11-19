@@ -195,6 +195,42 @@ test("a movie unload takes before its frame with an interval to come plays no mo
   }
 });
 
+test("a movie unload takes before its frame plays it, its sounds' channels held to the frame's end", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(false));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.later("enterFrame", "unload;play");
+    await p.tick();
+    p.control("play");
+    await p.tick();
+    assert.deepEqual(p.lines, ["as3:unload", "as3:play null", "avm1:ef 4", "as3:play channel"]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie unloaded after its frame with an interval to come runs no unload handler", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(true));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.later("exitFrame", "unload");
+    await p.tick();
+    await p.tick();
+    assert.deepEqual(framed(p.lines), ["avm1:ef 4", "as3:unload"]);
+    assert.equal(p.lines.lastIndexOf("avm1:interval") < p.lines.indexOf("as3:unload"), true);
+  } finally {
+    p.player.destroy();
+  }
+});
+
 test("a movie unloaded after its frame runs its unload handlers at the frame's end", {
   skip,
 }, async () => {
