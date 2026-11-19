@@ -85,7 +85,7 @@ export class ProgramQueue {
   }
 
   /**
-   * A frame's share, after its draws, from the second frame: every program
+   * A frame's share, before its draws, from the second frame: every program
    * begun where the driver compiles in parallel, else one linked; those
    * whose links completed told to their owners; and one drawn with for the
    * first time.

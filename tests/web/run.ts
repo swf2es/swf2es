@@ -258,6 +258,21 @@ const scriptFreeButton = (as3: boolean) =>
       w.end(),
     ],
   });
+// A stage with nothing on it, only its SetBackgroundColor, which Flash shows in that colour.
+const emptyStage = (as3: boolean) =>
+  w.swf({
+    version: as3 ? 10 : 8,
+    width: 100,
+    height: 60,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0x3366cc),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
 /**
  * A streamed tone on the root's frames, ten seconds of 440 Hz at 22 kHz in 8-bit PCM, a block a
  * frame: with no code at all, AVM1 or AS3, or the unmute SWF's.
@@ -302,6 +317,8 @@ writeFileSync(`${site}tone-as3-bare.swf`, streamedTone(true, false));
 writeFileSync(`${site}tone-as3.swf`, streamedTone(true, true));
 writeFileSync(`${site}button-as3.swf`, scriptFreeButton(true));
 writeFileSync(`${site}button-avm1.swf`, scriptFreeButton(false));
+writeFileSync(`${site}empty-as3.swf`, emptyStage(true));
+writeFileSync(`${site}empty-avm1.swf`, emptyStage(false));
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 // An AS2 SWF that calls the page, tells it what came back, and takes its calls.
@@ -1484,6 +1501,21 @@ check(
     await call(evaluate, "marginsDestroy()");
   },
 );
+
+check("a stage holding nothing shows its background colour, not black", async (evaluate, send) => {
+  for (const vm of ["as3", "avm1"]) {
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `scriptFreePlayer("/web-test/empty-${vm}.swf")`,
+    );
+    // Past the frames that draw, and those after that draw nothing: the canvas shows what it drew.
+    await call(evaluate, "frames(10).then(() => true)");
+    const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+    const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
+    assert.deepEqual([...colours(image, [left, top, 100, 60], 2).keys()], [0x3366cc], vm);
+    await call(evaluate, "scriptFreeDestroy()");
+  }
+});
 
 check("a SWF with no code has buttons the pointer reaches", async (evaluate, send) => {
   // The GL clears of the player's canvas from now, which every frame it draws makes.
