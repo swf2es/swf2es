@@ -62,20 +62,23 @@ export function startLoad(
   setHidden(target, "_bytesTotal", undefined, version);
   setHidden(target, "loaded", false, version);
   // As the answer comes, its length as its headers tell it, then the bytes so far (adl: a
-  // LoadVars polled each frame has its bytes grow a piece at a time); a load asked since takes
-  // the place of this one's.
+  // LoadVars polled each frame has its bytes grow a piece at a time), the total as AS3's loads
+  // have it (piecesOf): 0 once more came than told, all that came at the end; none until then
+  // where the headers told none. A load asked since takes the place of this one's.
   const load = (loadsOf.get(target) ?? 0) + 1;
   loadsOf.set(target, load);
+  let sized = false;
   const pieces: Pieces = {
     open: (_head, total) => {
-      if (loadsOf.get(target) === load && total > 0) {
+      sized = total > 0;
+      if (loadsOf.get(target) === load && sized) {
         avm1.set(target, "_bytesTotal", total, host.version);
       }
     },
-    data: (_chunk, loaded, total) => {
+    data: (_chunk, loaded, total, last) => {
       if (loadsOf.get(target) === load) {
         avm1.set(target, "_bytesLoaded", loaded, host.version);
-        if (total > 0) {
+        if (sized || last) {
           avm1.set(target, "_bytesTotal", total, host.version);
         }
       }

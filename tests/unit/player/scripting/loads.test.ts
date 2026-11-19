@@ -1947,15 +1947,17 @@ test("a host that tells a response as it comes has each piece told in the frame 
     frames.push(lines.splice(0).map((l) => l.replace("progress: ", "")));
   }
 
-  // Each piece's PROGRESS comes a frame after the next piece, growing, the total what the
-  // head told, the last with the end, all of it; a URLStream's bytes readable as each comes.
+  // Each piece's PROGRESS comes the frame after it, growing, the total what the head told; a
+  // URLStream's bytes readable as each comes. Without a length, a last PROGRESS once all has
+  // come tells all that came of all.
   const told = frames.filter((f) => f.length > 0);
   const third = Math.ceil(child.length / 3);
-  assert.deepEqual(told.slice(0, 4), [
+  assert.deepEqual(told.slice(0, 5), [
     [`loader progress 0 ${child.length}`],
     [`loader progress ${third} ${child.length}`],
     [`loader progress ${2 * third} ${child.length}`],
-    [`loader progress ${child.length} ${child.length}`, "loader complete"],
+    [`loader progress ${child.length} ${child.length}`],
+    ["loader complete"],
   ]);
   const of = (kind: string) => told.flat().filter((l) => l.startsWith(`${kind} `));
   assert.deepEqual(of("urlloader"), [
@@ -1974,6 +1976,7 @@ test("a host that tells a response as it comes has each piece told in the frame 
   assert.deepEqual(of("unsized"), [
     "unsized progress 10 0 10",
     "unsized progress 20 0 20",
+    "unsized progress 30 0 30",
     "unsized progress 30 30 30",
     "unsized complete",
   ]);
@@ -2121,11 +2124,55 @@ public class ProgressEdges extends Sprite {
     "urlstream  progress 10 30",
     "urlstream  progress 20 30",
     "urlstream  ioError",
-    // More than the length told: unknown from then, and all of it with the last.
+    // More than the length told: unknown from then, and all of it of all once all has come.
     "urlstream  progress 10 10",
     "urlstream  progress 20 0",
+    "urlstream  progress 30 0",
     "urlstream  progress 30 30",
     "urlstream  complete",
     "done",
   ]);
+});
+
+test("a URLStream hears each piece of a response that stays open as it comes, readable then", {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const source = `package {
+import flash.display.*; import flash.events.*; import flash.net.*;
+public class OpenStream extends Sprite {
+  private var stream:URLStream = new URLStream();
+  public function OpenStream() {
+    stream.addEventListener(ProgressEvent.PROGRESS, function(e:ProgressEvent):void {
+      trace("progress " + e.bytesLoaded + " " + stream.bytesAvailable + " " + stream.readUTFBytes(stream.bytesAvailable));
+    });
+    stream.load(new URLRequest("http://example.test/push"));
+  }
+}
+}`;
+  // A server that pushes a message, then another, and keeps the response open.
+  const steps: (() => void)[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    fetch: (_request, _signal, progress) =>
+      new Promise(() => {
+        steps.push(() => progress?.open({ status: 200, headers: [] }, 0));
+        steps.push(() => progress?.data(new TextEncoder().encode("one")));
+        steps.push(() => progress?.data(new TextEncoder().encode("two")));
+      }),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("OpenStream", source), 1, "OpenStream"), scripting);
+  t.after(() => player.destroy());
+  await player.start();
+  const frames: string[][] = [];
+  for (let i = 0; i < 4; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    player.tick();
+    frames.push(lines.splice(0));
+  }
+
+  assert.deepEqual(frames, [[], ["progress 3 3 one"], ["progress 6 3 two"], []]);
 });

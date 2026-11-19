@@ -184,29 +184,34 @@ body was decoded from another length) and then each piece of the body
 (`data`); `responseBytes` reads a fetch `Response` that way, and the web
 element's, the test pages' and the desktop app's fetches do (the desktop
 app's main process sends the pieces over IPC). The loads cut each piece
-into reads of at most 8 KB and tell each once the next has come or the
-response has (`piecesOf`, `pieces.ts`), so the last is known as the last.
-Each is told in the frame after it comes, in the order it came: a
+into reads of at most 8 KB (`piecesOf`, `pieces.ts`), each told in the
+frame after it comes, in the order it came, so that a response that stays
+open, as a server pushing messages keeps one, is heard as each comes: a
 `Loader`'s `LoaderInfo` hears `OPEN` and `PROGRESS` of none at the head and
-`PROGRESS` at each read, its query parameters from the first on and its
-bytes and SWF header with the last; a `URLStream` (and the `URLLoader` over
+`PROGRESS` at each read, its query parameters from the first on, and its
+bytes and SWF header with the last where the response has all come by the
+frame that read is told, as it most often has, else from the frame after;
+a `URLStream` (and the `URLLoader` over
 it) `OPEN` at the head and `PROGRESS` at each read with the read already
 readable, so `bytesAvailable` is what came; a `Sound` as a `Loader`.
 `bytesTotal` is the length the headers told until more comes than that,
-then 0, and with the last `PROGRESS` what came. Flash told a `PROGRESS` at
+then 0. Once all has come, where the last read's total was not all that
+came (no length, or more than it told), one more `PROGRESS` tells all of
+all. Flash told a `PROGRESS` at
 each network read of up to 8 KB, whatever the frame rate, a 64 KB piece as
 8 in the same millisecond (adl, and Flash Player 32's projector over HTTP,
 against a server sending a piece every 2 to 300 ms), and its total was
 the headers' length to the end: 0 without one, and in adl, whose network
 decodes a body a server compressed unasked, the compressed length below
 the bytes decoded (262144 of 4703 at `COMPLETE`); the projector's did not
-decode it. The last `PROGRESS` here has `bytesLoaded` and `bytesTotal`
-equal in every case, so that a preloader waiting for them to meet
-finishes, as it did before progress was told as it came. AVM1's
+decode it. Here a load ends with `bytesLoaded` and `bytesTotal` equal,
+without a length too, where Flash keeps 0: a deliberate difference, so
+that a preloader waiting for them to meet finishes, as it did before
+progress was told as it came. AVM1's
 `MovieClipLoader` empties its target and tells `onLoadStart` at the head,
 then `onLoadProgress` at each read, the target's `getBytesLoaded` and
 `getBytesTotal` those bytes and an uncompressed SWF's length as its header
-gives it (adl), the last all that came of all, for the first load into a
+gives it (adl), ending with all that came of all, for the first load into a
 clip and by a loader; those after it arrive told all at once, in their
 order. Flash told a compressed SWF's bytes decompressed against its
 header's length (adl and the projector), where here they are told as they

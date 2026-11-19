@@ -299,6 +299,11 @@ export class MovieLoads {
           }
         }
 
+        // The last word only where the last read did not tell all of all, by the header.
+        if (last && load.told === loaded && length === loaded) {
+          return;
+        }
+
         this.progressed(load, loaded, last ? loaded : length || total);
       },
     };

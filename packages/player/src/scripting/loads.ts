@@ -54,9 +54,10 @@ interface Load {
   streamed: boolean;
   /** The bytes told so far, after OPEN; -1 before it, and for a load from bytes. */
   told: number;
-  /** Whether its LoaderInfo has been told what its bytes are, all of them having come. */
+  /** Whether all its bytes have come, and whether its LoaderInfo has been told what they are. */
+  whole: boolean;
   known: boolean;
-  /** Tells the piece piecesOf holds back, once the response has come or failed. */
+  /** Tells piecesOf the response has come or failed, for its last word. */
   end: ((whole: boolean) => void) | null;
 }
 
@@ -532,13 +533,21 @@ export class Loads {
       info.$params = queryParameters(load.url);
     }
 
-    // The last PROGRESS tells the bytes there are, as Flash's (the corpus's loader_events).
-    if (last) {
+    // The last PROGRESS tells the bytes there are, as Flash's (the corpus's loader_events), and
+    // all that came of all: where the response had all come by the frame its last read is told,
+    // as it most often has, that read's; else the word piecesOf adds once it has.
+    let all = total;
+    if (last || (load.whole && loaded === load.bytes.length)) {
       this.arrived(load);
+      all = loaded;
+    }
+
+    if (last && load.told === loaded && info.$total === loaded) {
+      return;
     }
 
     load.told = loaded;
-    info.$total = total;
+    info.$total = all;
     this.progress(info, loaded);
   }
 
@@ -790,6 +799,7 @@ export class Loads {
       swf,
       streamed: false,
       told: -1,
+      whole: false,
       known: false,
       end: null,
     };
@@ -822,6 +832,7 @@ export class Loads {
         }
 
         const length = result.bytes.length;
+        load.whole = true;
         if (load.streamed) {
           load.end?.(true);
         } else {
