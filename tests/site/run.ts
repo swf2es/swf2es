@@ -563,6 +563,29 @@ async function check(): Promise<void> {
             await shortcut();
             await until(meterShown);
             assert.equal(await value<number>("heardF"), 0);
+            // An F held down before Ctrl and Shift is the SWF's: its repeats under them and its
+            // release reach it, and the meter stays as it was, so the SWF never keeps F held.
+            await value(
+              "(globalThis.releasedF = 0, document.getElementById('player').addEventListener('keyup', (e) => { if (e.code === 'KeyF') releasedF++; }), true)",
+            );
+            const f = { key: "f", code: "KeyF", windowsVirtualKeyCode: 70 };
+            await send("Input.dispatchKeyEvent", { type: "keyDown", ...f });
+            await send("Input.dispatchKeyEvent", {
+              type: "keyDown",
+              ...f,
+              key: "F",
+              modifiers: 2 | 8,
+              autoRepeat: true,
+            });
+            await send("Input.dispatchKeyEvent", {
+              type: "keyUp",
+              ...f,
+              key: "F",
+              modifiers: 2 | 8,
+            });
+            await until("releasedF === 1");
+            assert.equal(await value<number>("heardF"), 2);
+            assert.equal(await value<boolean>(meterShown), true);
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
               "1",

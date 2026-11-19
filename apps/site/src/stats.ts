@@ -35,8 +35,9 @@ const STORED = "swf2es.performanceMeter";
 /**
  * The draw calls made on a context, counted by wrapping its draw functions
  * only while the meter shows: off, and before a context is given, the
- * context has its own functions back and the count costs nothing. A
- * multi-draw is one call and the draws it makes, as the GPU sees them.
+ * context has its own functions back, its canvas none of the counter's
+ * listeners, and the count costs nothing. A multi-draw is one call and the
+ * draws it makes, as the GPU sees them.
  */
 class DrawCounter {
   draws = 0;
@@ -47,21 +48,42 @@ class DrawCounter {
 
   /** Count `gl`'s draws, while shown; null for none. */
   attach(gl: GL | null): void {
+    this.listen(false);
     this.unwrap();
-    this.gl?.canvas.removeEventListener("webglcontextlost", this.lost);
-    this.gl?.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.gl = gl;
-    gl?.canvas.addEventListener("webglcontextlost", this.lost);
-    gl?.canvas.addEventListener("webglcontextrestored", this.restored);
-    this.wrap();
+    if (this.shown) {
+      this.listen(true);
+      this.wrap();
+    }
   }
 
   show(shown: boolean): void {
+    if (shown === this.shown) {
+      return;
+    }
+
     this.shown = shown;
+    this.listen(shown);
     if (shown) {
       this.wrap();
     } else {
       this.unwrap();
+    }
+  }
+
+  /** Hear the context lost and given back, or no longer. */
+  private listen(on: boolean): void {
+    const canvas = this.gl?.canvas;
+    if (!canvas) {
+      return;
+    }
+
+    if (on) {
+      canvas.addEventListener("webglcontextlost", this.lost);
+      canvas.addEventListener("webglcontextrestored", this.restored);
+    } else {
+      canvas.removeEventListener("webglcontextlost", this.lost);
+      canvas.removeEventListener("webglcontextrestored", this.restored);
     }
   }
 
@@ -208,10 +230,10 @@ export class Meter {
 
     this.times[i] = stats.time;
     this.frames[i] = stats.frames;
-    this.costs[i] = stats.frames > 0 || stats.draw > 0 ? stats.play + stats.draw : -1;
+    this.costs[i] = stats.frames > 0 || stats.drew ? stats.play + stats.draw : -1;
     this.rate = stats.frameRate;
     // What the context was asked since the last call belongs to the frame this one drew.
-    if (stats.draw > 0 && this.counter.calls > 0) {
+    if (stats.drew && this.counter.calls > 0) {
       this.draws += this.counter.draws;
       this.calls += this.counter.calls;
       this.drawnFrames++;
@@ -322,7 +344,9 @@ function store(on: boolean): void {
 /**
  * The meter turned on and off by `toggle` and by Ctrl+Shift+F, as the
  * viewer last left it. The shortcut is the page's even while the player has
- * the focus: its F, pressed and released, never reaches the SWF.
+ * the focus: its F, pressed and released, never reaches the SWF. An F held
+ * down before is the SWF's, its repeats and its release with it, so that it
+ * is never left held there.
  */
 export function bindMeter(meter: Meter, toggle: HTMLInputElement): void {
   const set = (on: boolean) => {
@@ -336,6 +360,10 @@ export function bindMeter(meter: Meter, toggle: HTMLInputElement): void {
     "keydown",
     (e) => {
       if (e.code !== "KeyF" || !e.ctrlKey || !e.shiftKey || e.altKey || e.metaKey) {
+        return;
+      }
+
+      if (e.repeat && !swallowed) {
         return;
       }
 
@@ -358,6 +386,10 @@ export function bindMeter(meter: Meter, toggle: HTMLInputElement): void {
     },
     { capture: true },
   );
+  // A release the window never hears, the focus gone elsewhere, leaves no F to swallow later.
+  addEventListener("blur", () => {
+    swallowed = false;
+  });
   if (stored()) {
     toggle.checked = true;
     meter.show(true);
