@@ -15,6 +15,8 @@ const surfaces: Surface[] = [];
 const retired: WeakRef<object>[] = [];
 const errors: string[] = [];
 let failAttachment = false;
+/** The next surface made is lost as soon as its context3DCreate is handled (recoverTwice). */
+let loseNext = false;
 let creations = 0;
 const workerThreadsRunning = new Set<Worker>();
 const BrowserWorker = globalThis.Worker;
@@ -125,6 +127,19 @@ function factory(slot: number) {
 
     remove(type, listener, options);
   };
+  if (loseNext) {
+    loseNext = false;
+    // After the script that handles context3DCreate, before a frame draws with what it made.
+    queueMicrotask(() => {
+      const extension = gl.getExtension("WEBGL_lose_context");
+      // Not counted among the host's listeners, which are all to be removed by the end.
+      add("webglcontextlost", () => setTimeout(() => extension?.restoreContext(), 0), {
+        once: true,
+      });
+      extension?.loseContext();
+    });
+  }
+
   if (failAttachment) {
     failAttachment = false;
     const parent = element?.shadowRoot?.querySelector<HTMLDivElement>(".box > div");
@@ -310,6 +325,35 @@ export async function recover(): Promise<void> {
         (surface) => surface.slot === 0 && !surface.destroyed && surface.owned.canvas.width === 48,
       ),
   );
+}
+
+/**
+ * Lost, and the surface made for the context given back lost too as soon
+ * as the script has made its resources again: back on a third surface.
+ */
+export async function recoverTwice(): Promise<void> {
+  const before = surfaces.find((surface) => surface.slot === 0 && !surface.destroyed);
+  check(before, "no surface to lose");
+  const made = creations;
+  const extension = before.owned.gl.getExtension("WEBGL_lose_context");
+  check(extension, "no context loss extension");
+  extension.loseContext();
+  await until(() => before.owned.backend.disposed);
+  loseNext = true;
+  extension.restoreContext();
+  await until(
+    () =>
+      creations === made + 2 &&
+      surfaces.some(
+        (surface) =>
+          surface.slot === 0 &&
+          !surface.destroyed &&
+          !surface.owned.gl.isContextLost() &&
+          surface.owned.canvas.width === 48,
+      ),
+  );
+  check(!loseNext, "the second surface was never made");
+  await until(ready);
 }
 
 /** Calls a public method of the root. */

@@ -190,6 +190,9 @@ await withPage(
       await call("recover");
       await capture("recovered", 96, 96, composition.points, composition.samples[0]);
       assert.deepEqual((await call<Status>("status")).errors, []);
+      await call("recoverTwice");
+      await capture("recovered-twice", 96, 96, composition.points, composition.samples[0]);
+      assert.deepEqual((await call<Status>("status")).errors, []);
     } finally {
       await call("close");
     }
