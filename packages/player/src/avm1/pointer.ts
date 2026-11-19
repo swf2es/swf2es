@@ -559,7 +559,7 @@ export class Avm1Pointer implements Pointer {
       area.parent = d;
       parentage.changes++;
       try {
-        return hitsPoint(area, x, y, true, this.stage) ? d : null;
+        return hitsPoint(area, x, y, true, this.stage, true) ? d : null;
       } finally {
         area.parent = parent;
         parentage.changes++;
@@ -575,7 +575,7 @@ export class Avm1Pointer implements Pointer {
     // misses, its children may still be hit.
     if (this.avm1.input.buttonMode(d)) {
       const area = any ? null : this.avm1.input.hitArea(d);
-      if (hitsPoint(area ?? d, x, y, true, this.stage)) {
+      if (hitsPoint(area ?? d, x, y, true, this.stage, true)) {
         return d;
       }
     }
@@ -605,7 +605,9 @@ export class Avm1Pointer implements Pointer {
 
   /** Whether `d`, a shape or anything but a clip or button, draws at (x, y), shown and no mask. */
   private drawnAt(d: DisplayObject, x: number, y: number): boolean {
-    return d.visible && d.clipDepth === 0 && !d.maskOf && hitsPoint(d, x, y, true, this.stage);
+    return (
+      d.visible && d.clipDepth === 0 && !d.maskOf && hitsPoint(d, x, y, true, this.stage, true)
+    );
   }
 
   /** Whether `d` is still on the stage, not taken off since it was picked. */

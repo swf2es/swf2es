@@ -1306,6 +1306,9 @@ Object.assign(globalThis, {
   },
   focusPlayer,
   focusCall: (name: string, ...args: unknown[]) => element("focus-rect")[name](...args),
+  focusCursor: () =>
+    (element("focus-rect").shadowRoot?.querySelector("canvas") as HTMLCanvasElement | null)?.style
+      .cursor ?? "",
   focusDestroy: () => {
     element("focus-rect").destroy();
     element("focus-rect").remove();

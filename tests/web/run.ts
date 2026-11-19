@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { flashAssembler, script } from "../avm1-script.ts";
+import { rectPath } from "../player/cases/common.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { compareImages, decodePng, type Image } from "../player/image.ts";
@@ -52,6 +53,10 @@ const abcs = compileScripts(
     { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
     { name: "FocusRectTest", source: readFileSync(`${here}scripts/FocusRectTest.as`, "utf8") },
+    {
+      name: "TweenHoverTest",
+      source: readFileSync(`${here}scripts/TweenHoverTest.as`, "utf8"),
+    },
     {
       name: "ActivationTest",
       source: readFileSync(`${here}scripts/ActivationTest.as`, "utf8"),
@@ -236,6 +241,73 @@ writeFileSync(
       w.place({ depth: 4, character: 13, name: "btn", matrix: { tx: 2000, ty: 1400 } }),
       w.place({ depth: 5, character: 3, matrix: { tx: 200, ty: 500 } }),
       w.doAction([...script(focusAvm1, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+// A shape tween pulsing every frame between a 100 by 75 box at (50, 37.5) and a 150 by 110 one
+// at (25, 20), (100, 75) always in it: in AS3 a Sprite in button mode (scripts/TweenHoverTest.as),
+// in AVM1 a clip with onRollOver and onRollOut, each logging what the pointer gives it.
+const pulse = [0, 16384, 32768, 49152, 65535, 49152, 32768, 16384];
+const tweenTags = [
+  w.morphShape({
+    id: 1,
+    startBounds: [1000, 3000, 750, 2250],
+    endBounds: [500, 3500, 400, 2600],
+    fills: [{ start: 0xff3366cc, end: 0xffcc6633 }],
+    start: [{ fill0: 1, commands: rectPath(50, 37.5, 100, 75) }],
+    end: [rectPath(25, 20, 150, 110)],
+  }),
+  w.sprite(10, pulse.length, [
+    ...pulse.flatMap((ratio, i) => [
+      i === 0
+        ? w.place({ depth: 1, character: 1, ratio })
+        : w.place({ depth: 1, move: true, ratio }),
+      w.showFrame(),
+    ]),
+    w.end(),
+  ]),
+];
+writeFileSync(
+  `${site}tween-hover-as3.swf`,
+  w.swf({
+    version: 10,
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      ...tweenTags,
+      w.doAbc(abcs.get("TweenHoverTest") as Uint8Array, "TweenHoverTest"),
+      w.symbolClass([[0, "TweenHoverTest"]]),
+      w.place({ depth: 1, character: 10, name: "btn" }),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+const tweenHoverAvm1 = `var log = [];
+btn.onRollOver = function() { log.push("rollOver"); };
+btn.onRollOut = function() { log.push("rollOut"); };
+flash.external.ExternalInterface.addCallback("hoverLog", null, function() { return log.join(" "); });
+stop();`;
+writeFileSync(
+  `${site}tween-hover-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      ...tweenTags,
+      w.place({ depth: 1, character: 10, name: "btn" }),
+      w.doAction([...script(tweenHoverAvm1, 8)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
     ],
@@ -1732,6 +1804,49 @@ check("a stage holding nothing shows its background colour, not black", async (e
     const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
     assert.deepEqual([...colours(image, [left, top, 100, 60], 2).keys()], [0x3366cc], vm);
     await call(evaluate, "scriptFreeDestroy()");
+  }
+});
+
+// Flash Player 32's projector under a real mouse: a pointer resting or moving over a shape tween
+// that pulses every frame, in a Sprite in button mode or an AVM1 clip with onRollOver, gets one
+// rollOver, keeps the hand, and gets one rollOut when it leaves. The pointer meets the tween's
+// last blend while a frame's place has given it a ratio not yet drawn, where a script's shape
+// test meets nothing of it (ShapeObject.blending).
+check("a pointer over a pulsing shape tween rolls over it once", async (evaluate, send) => {
+  const mouse = (x: number, y: number) =>
+    send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
+  const frames = (n: number) => call(evaluate, `frames(${n}).then(() => true)`);
+  const log = () => call<string>(evaluate, `focusCall("hoverLog")`);
+  const cursor = () => call<string>(evaluate, "focusCursor()");
+  for (const vm of ["as3", "avm1"]) {
+    const over = vm === "as3" ? "rollOver mouseOver" : "rollOver";
+    const out = vm === "as3" ? "mouseOut rollOut" : "rollOut";
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `focusPlayer("/web-test/tween-hover-${vm}.swf")`,
+    );
+    try {
+      await mouse(left + 195, top + 145);
+      await frames(3);
+      await mouse(left + 100, top + 75);
+      await frames(24);
+      assert.equal(await log(), over, `${vm}: resting`);
+      assert.equal(await cursor(), "pointer", `${vm}: the hand, resting`);
+
+      for (let i = 0; i < 24; i++) {
+        await mouse(left + 90 + (i % 6) * 4, top + 70 + (i % 4) * 3);
+        await frames(1);
+      }
+
+      assert.equal(await log(), over, `${vm}: moving`);
+      assert.equal(await cursor(), "pointer", `${vm}: the hand, moving`);
+
+      await mouse(left + 195, top + 145);
+      await frames(3);
+      assert.equal(await log(), `${over} ${out}`, `${vm}: left`);
+    } finally {
+      await call(evaluate, "focusDestroy()");
+    }
   }
 });
 

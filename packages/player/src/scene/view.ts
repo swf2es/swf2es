@@ -38,7 +38,7 @@ import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 import { concat, invert, shifted } from "../display/geometry.js";
 import { bitmapScale, drawnRect, outsideMaskMap, placeQuad } from "../display/plane.js";
 import { type Slice, sliceDrawn, sliceLayers } from "../display/scale9.js";
-import { cached, ShapeObject } from "../display/shapeobject.js";
+import { cached, framePassed, ShapeObject } from "../display/shapeobject.js";
 import { facing } from "../display/shapes.js";
 import { type Linear, settledStretch, stretchOf } from "../display/stretch.js";
 import { StaticTextObject, settleFits, TextObject } from "../display/textobjects.js";
@@ -440,6 +440,8 @@ export class RenderView implements Drawer {
   render(root: DisplayObject): void {
     // A field a script changed since the last frame ended, or before the first, is fitted before it is drawn.
     settleFits();
+    // Drawn, MorphShapes placed at a new ratio meet shape tests at it (ShapeObject.blending).
+    framePassed();
     // Not drawn until it is all drawn: a render that throws leaves no frame to keep.
     this.drawnRoot = null;
     // Nothing to draw into while the context is lost, and nothing walked: what changed meanwhile
