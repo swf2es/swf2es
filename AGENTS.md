@@ -199,6 +199,8 @@ node tests/bench/players.ts [--runs N] [--ruffle DIR] [--only swf2es,ruffle,flas
                               # and Ruffle's web build (DIR, or RUFFLE) in Chrome and in adl -nodebug
 node tests/bench/players.ts --only swf2es,flash vector   # indexed reads, writes, push and pop on
                               # Vectors of int, Number, String, Object and a class, and on Arrays
+node tests/bench/random.ts [runs] [calls]   # Flash's generator against JavaScript's Math.random
+                              # in node, directly and through AS3's native (players.ts random: in Chrome)
 node tests/bench/players.ts avm1   # AVM1: loops, members, calls, scopes, clips made and removed,
                               # onEnterFrame on 2,000 clips (docs/benchmarks.md, "AVM1 against Flash")
 node tests/bench/players.ts avm2   # AS3: the avmshell benchmarks above, display objects, ENTER_FRAME

@@ -293,6 +293,26 @@ Flash Player's own instead. No version mark goes past the reference's 41:
 a builtin's highest mark from 42 up is the VM's internal one
 (`API_FirstInternalMark`), which a higher mark would make public.
 
+## Random numbers
+
+`Math.random`, `Number.random` and `float.random` draw from avmplus'
+generator (`src/random.ts`, translated from `core/MathUtils.cpp` and so
+MPL-2.0): a 31-bit LFSR (RandomFastNext, XOR mask 0x48000000) whose state,
+times 71, RandomPureHasher hashes by a third-order polynomial in 32-bit
+wrapping arithmetic to an int from 0 to 2^31 - 1, divided by 2^31. Every
+value is a multiple of 2^-31: content that relies on Flash's value set
+checks that (Ruffle's corpus test `avm2/rng`), and JavaScript's
+Math.random, of 52 bits, gives values Flash never does. Each runtime has
+a generator of its own, as each avmplus toplevel's Math has, so workers
+and players draw independently. Flash seeds it from the performance
+counter; the runtime from the clock in microseconds, mixed with a count
+of the generators made and, where `crypto` is there, a random word, since
+a browser coarsens its clock enough for two runtimes to start within one
+tick, and each worker counts from 0. adl's sequences, AS3's and
+AVM1's, are this generator's from some seed (recovered by searching its
+2^31 states), so only the seed is the host's. AVM1's Math.random and
+RandomNumber share their realm's generator (docs/avm1.md).
+
 ## AS3 classes in TypeScript
 
 Natives and hosts see AS3 objects as untyped JS objects, whose members
