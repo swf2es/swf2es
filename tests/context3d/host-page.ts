@@ -67,6 +67,28 @@ export async function idle(): Promise<void> {
   );
 }
 
+/**
+ * Once the page has the device pixel ratio the test emulated and the player
+ * has played two frames at it: the first lays the stage out for it before
+ * its scripts run, and the fixtures read what they see of it (contentsScaleFactor,
+ * the back buffer's size) in their ENTER_FRAME. Two animation frames, as
+ * the checks waited, can pass without a frame of the SWF's when the page's
+ * frames come faster than its, or the machine is busy.
+ */
+export async function density(ratio: number): Promise<void> {
+  check(element, "no player element");
+  await until(() => devicePixelRatio === ratio);
+  let played = 0;
+  element.frameListener = (stats) => {
+    played += stats.frames;
+  };
+  try {
+    await until(() => played >= 2);
+  } finally {
+    element.frameListener = null;
+  }
+}
+
 async function until(ready: () => boolean): Promise<void> {
   const deadline = performance.now() + 10000;
   while (!ready()) {

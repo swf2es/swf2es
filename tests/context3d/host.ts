@@ -173,7 +173,7 @@ await withPage(
         deviceScaleFactor: 2,
         mobile: false,
       });
-      await call("idle");
+      await call("density", 2);
       const dense = await call<Status>("status");
       assert.equal(dense.overlayWidth, 192);
       for (const surface of dense.surfaces) {
@@ -185,6 +185,7 @@ await withPage(
         }
       }
       await send("Emulation.clearDeviceMetricsOverride");
+      await call("density", 1);
       await call("layout", "noScale", "TL", 0, 0);
       await call("layout", "noScale", "TL", 96, 96);
       await call("recover");
@@ -285,7 +286,7 @@ await withPage(
         deviceScaleFactor: 2,
         mobile: false,
       });
-      await call("idle");
+      await call("density", 2);
       const dense = await call<Status>("status");
       assert.equal(dense.overlayWidth, 440);
       assert.ok(
@@ -293,7 +294,7 @@ await withPage(
       );
       assert.equal(await call("scriptState"), "noScale|TL|220|160|220,160,false,false,2,true;");
       await send("Emulation.clearDeviceMetricsOverride");
-      await call("idle");
+      await call("density", 1);
       await call("scriptLayout", "noScale", "TL");
       await call("resizeToShowAll");
       await call("resize", 240, 180);
@@ -361,8 +362,7 @@ await withPage(
         deviceScaleFactor: 2,
         mobile: false,
       });
-      await call("idle");
-      await call("idle");
+      await call("density", 2);
       assert.equal(await call("rootProperty", "sizes"), "2,128,128");
       assert.deepEqual(
         [(await surface()).width, (await surface()).height, await call("surfaceStyle")],
@@ -375,7 +375,7 @@ await withPage(
       assert.equal((await surface()).width, 64);
       await board("plain-2", 2, false);
       await send("Emulation.clearDeviceMetricsOverride");
-      await call("idle");
+      await call("density", 1);
       assert.equal(await call("rootProperty", "sizes"), "1,64,64");
       assert.deepEqual((await call<Status>("status")).errors, []);
     } finally {
