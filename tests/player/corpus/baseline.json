@@ -1430,7 +1430,7 @@
   "avm2/mouse_pick_avm1_root": {"matched":1,"lines":2,"traced":1,"error":null},
   "avm2/mouse_pick_button_mode": {"matched":2,"lines":2,"traced":2,"error":null},
   "avm2/mouse_pick_dobj_mask": {"matched":4,"lines":4,"traced":4,"error":null},
-  "avm2/mouse_pick_loader_avm1": {"matched":6,"lines":42,"traced":42,"error":null},
+  "avm2/mouse_pick_loader_avm1": {"matched":42,"lines":42,"traced":42,"error":null},
   "avm2/mouse_pick_masking": {"matched":7,"lines":7,"traced":7,"error":null},
   "avm2/mouse_pick_non_interactive_bitmap_mask": {"matched":4,"lines":4,"traced":4,"error":null},
   "avm2/mouse_pick_non_interactive_dobj_mask": {"matched":3,"lines":3,"traced":3,"error":null},
