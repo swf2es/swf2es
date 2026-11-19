@@ -366,6 +366,8 @@ field.type = "input";
 field.border = true;
 var log = [];
 field.onChanged = function() { log.push("change " + field.text); };
+var scrolls = [];
+field.onScroller = function() { scrolls.push(field.hscroll + "/" + field.maxhscroll); };
 var EI = flash.external.ExternalInterface;
 EI.addCallback("focusField", null, function() { Selection.setFocus(field); });
 EI.addCallback("blurField", null, function() { Selection.setFocus(null); });
@@ -373,6 +375,7 @@ EI.addCallback("text", null, function() { return field.text; });
 EI.addCallback("fill", null, function(text, scroll) { field.text = text; field.hscroll = scroll; });
 EI.addCallback("scrollState", null, function() { return field.hscroll + " " + field.maxhscroll + " " + Selection.getCaretIndex(); });
 EI.addCallback("takeLog", null, function() { var taken = log; log = []; return taken; });
+EI.addCallback("takeScrolls", null, function() { var taken = scrolls; scrolls = []; return taken; });
 stop();`;
 writeFileSync(
   `${site}avm1-field.swf`,
@@ -1269,6 +1272,78 @@ for (const [vm, src] of [
         assert.deepEqual(await scroll(), [0, typed[1], 0]);
         await press("End", "End", 35);
         atEnd(await scroll());
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `typing that moves an ${vm} input field's scroll tells it, as Flash Player 32 did`,
+    async (evaluate, send) => {
+      // [scrollH, maxScrollH, caretIndex]
+      const scroll = async () =>
+        (await call<string>(evaluate, "imeScroll()")).split(" ").map(Number) as [
+          number,
+          number,
+          number,
+        ];
+      // What the field told of its scroll since last asked: AS3's SCROLL at once, AVM1's
+      // onScroller once the SWF's frame has run, which may take a few of the page's. Asked
+      // till it told something, or `last` last.
+      const told = async (last?: string) => {
+        const all: string[] = [];
+        for (let i = 0; i < 60 && (last ? all.at(-1) !== last : all.length === 0); i++) {
+          await call(evaluate, "imeFrames()");
+          all.push(...(await call<string[]>(evaluate, "imeScrolls()")));
+        }
+
+        return all;
+      };
+      const press = async (key: string, code: string, keyCode: number, text?: string) => {
+        for (const type of ["keyDown", "keyUp"]) {
+          await send("Input.dispatchKeyEvent", {
+            type,
+            key,
+            code,
+            windowsVirtualKeyCode: keyCode,
+            ...(text && type === "keyDown" ? { text } : {}),
+          });
+        }
+      };
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Typed till the text reaches into the quarter of the room an input field scrolls by,
+        // the field not scrolled yet: how far it scrolls moved alone, and that is told.
+        let state = await scroll();
+        while (state[1] === 0 && state[2] < 60) {
+          await press("a", "KeyA", 65, "a");
+          state = await scroll();
+        }
+
+        assert.ok(state[1] > 0 && state[0] === 0, `maxScrollH moved alone: ${state}`);
+        assert.ok((await told()).length > 0, "a maxScrollH typed further was not told");
+
+        // Typed past the edge: scrolled, and told so, the last as the field now is.
+        for (let i = 0; i < 30; i++) {
+          await press("a", "KeyA", 65, "a");
+        }
+
+        state = await scroll();
+        assert.ok(state[0] > 0, `scrolled to the caret: ${state}`);
+        assert.equal((await told(`${state[0]}/${state[1]}`)).at(-1), `${state[0]}/${state[1]}`);
+
+        // All of it selected and deleted: back to no scroll at all, told.
+        await ctrl(send, "a", "selectAll");
+        await press("Backspace", "Backspace", 8);
+        assert.deepEqual(await scroll(), [0, 0, 0]);
+        assert.equal((await told("0/0")).at(-1), "0/0");
       } finally {
         await call(evaluate, "imeDestroy()");
       }

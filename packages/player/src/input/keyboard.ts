@@ -18,7 +18,7 @@ import {
 import { apply } from "../display/geometry.js";
 import type { ClipboardText } from "../hosts.js";
 import { TEXT } from "../scripting/clipboard.js";
-import { dispatchEvent } from "../scripting/events.js";
+import { dispatchEvent, heard } from "../scripting/events.js";
 import type { Scripting } from "../scripting.js";
 import { caretAt, pasteable, selectionAt, TextEditor } from "./text-editor.js";
 import { isTextInput } from "./text-input.js";
@@ -215,6 +215,14 @@ export class KeyboardInput implements Keyboard {
           text.replace(/\r/g, "\n"),
         ),
       ),
+    {
+      heard: (field) => !!field.object && heard(field.object, "scroll"),
+      tell: (field) => {
+        if (field.object) {
+          dispatchEvent(this.scripting, field.object, this.scripting.event("scroll"));
+        }
+      },
+    },
   );
 
   constructor(

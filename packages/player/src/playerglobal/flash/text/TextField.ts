@@ -857,8 +857,7 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
     const before = heard(target, "scroll") ? field.scrollState() : null;
     const result = change();
     if (before && scrollMoved(before, field.scrollState())) {
-      const event = s.rt.construct(s.rt.classNamed("flash.events::Event"), "scroll", false, false);
-      dispatchEvent(s, target, event);
+      dispatchEvent(s, target, s.event("scroll"));
     }
 
     return result;

@@ -1230,6 +1230,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private madeField(field: TextObject, face: avm1.Avm1Object): void {
     this.bindings.made(field);
     field.scrollTold = this.scrollTold;
+    // A timeline's field tells only what moves from the text it was placed with.
+    if (field.definition && field.model.text !== "") {
+      field.toldScroll = field.scrollState();
+    }
 
     const version = this.swfVersion;
     avm1.initializeBroadcaster(face, this.rt.realm, version);
