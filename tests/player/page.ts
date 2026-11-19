@@ -247,6 +247,15 @@ async function pageFetch(
   // The corpus's files are served over HTTP here, but Flash loaded them from disk.
   const local = new URL(request.url).pathname.startsWith("/corpus/");
   const head = { status: local ? 0 : response.status, headers: local ? [] : headers, local };
+  // Flash read the corpus's files from disk, each a single read: told as one piece, whatever
+  // pieces the browser happens to cut the page server's response into.
+  if (local && response.ok && progress) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    progress.open(head, bytes.length);
+    progress.data(bytes);
+    return { ...head, bytes };
+  }
+
   return { ...head, bytes: response.ok ? await responseBytes(response, head, progress) : null };
 }
 
