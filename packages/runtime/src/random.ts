@@ -23,7 +23,7 @@ let made = 0;
 function counterSeed(): number {
   const ms = clock !== undefined ? (clock.timeOrigin ?? 0) + clock.now() : Date.now();
   made = (made + 1) >>> 0;
-  return (Math.floor(ms * 1000) ^ Math.imul(made, 0x9e3779b9)) >>> 0;
+  return Math.floor(ms * 1000) ^ Math.imul(made, 0x9e3779b9);
 }
 
 /** RandomPureHasher, in the 32-bit wrapping arithmetic of avmplus' C++. */
@@ -39,7 +39,7 @@ function pureHash(seed: number): number {
 
 /** A TRandomFast: each runtime has its own, as each avmplus toplevel's Math has. */
 export class FlashRandom {
-  /** uValue, the LFSR's state, a uint32. */
+  /** uValue, the LFSR's state: a uint32's bits, kept as an int32 as V8 keeps it best. */
   private value = 0;
 
   /** Seeded from the clock, as Flash's is, unless given a seed. */
@@ -49,7 +49,7 @@ export class FlashRandom {
 
   /** RandomFastInit with a seed: the sequence from there. */
   seed(seed: number): void {
-    this.value = seed >>> 0;
+    this.value = seed | 0;
   }
 
   /** GenerateRandomNumber: an int from 0 to 2^31 - 1. */
@@ -59,8 +59,9 @@ export class FlashRandom {
       v = counterSeed();
     }
 
-    // RandomFastNext.
-    v = v & 1 ? (v >>> 1) ^ XOR_MASK : v >>> 1;
+    // RandomFastNext, without a branch: its low bit is a coin flip, which
+    // a branch mispredicts half the time, doubling the call's cost.
+    v = (v >>> 1) ^ (-(v & 1) & XOR_MASK);
     this.value = v;
 
     return pureHash(Math.imul(v, 71)) & PURE_MAX;
