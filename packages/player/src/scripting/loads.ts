@@ -613,7 +613,9 @@ export class Loads {
    * the frame after its request, as Flash's loadBytes does.
    */
   settled(): Promise<void> {
-    return Promise.all([this.preparing, ...this.pendingRequests]).then(() => {});
+    // A loaded AVM1 movie's own loads, as loadMovie and MovieClipLoader ask them, count too.
+    const movies = [...this.avm1Movies.values()].map((movie) => movie.vm.settled());
+    return Promise.all([this.preparing, ...this.pendingRequests, ...movies]).then(() => {});
   }
 
   /**
