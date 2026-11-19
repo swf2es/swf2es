@@ -143,6 +143,9 @@ async function run(p: Awaited<ReturnType<typeof play>>, steps: Step[]): Promise<
       case "key":
         p.type(a as string);
         break;
+      case "type":
+        p.type(...(a as string));
+        break;
       case "control":
         await p.control(a as string);
         break;
@@ -597,5 +600,149 @@ test("a tabIndex on AS3's objects alone, or on a movie's alone, leaves the rest 
     ]);
   } finally {
     q.player.destroy();
+  }
+});
+
+// m1's second Selection listener takes the focus back to f where a move leaves nothing in a movie
+// focused, once F2 turns it on.
+const KEEP: Movie = {
+  start:
+    'var keepOn = false; var keep = {}; keep.onSetFocus = function(o, n) { if (keepOn && n == null) { log("keep"); Selection.setFocus(f); } }; Selection.addListener(keep);',
+  keys: { 113: 'keepOn = true; log("keepOn");', 114: "selection();" },
+};
+const M2_SELECTION: Movie = { keys: { 117: "selection();" } };
+
+test("a Selection listener that takes the focus as AS3's field takes it leaves one focus, the movie's field's", {
+  skip,
+}, async () => {
+  // Flash Player 32 tells these, the field hearing a focusOut and no focusIn, the later movies'
+  // listeners the move they heard. Then its stage.focus is null and Selection names f, as here,
+  // but its keys type into the AS3 field, and Selection's indices are that field's: the player
+  // keeps the one focus whole, f's.
+  const flash = [
+    "m1:keepOn",
+    "as3:mouseFocusChange stage related as3field focus null",
+    "m1:Selection.onSetFocus null null",
+    "m1:keep",
+    "m1:f.onSetFocus null",
+    "m1:Selection.onSetFocus null f",
+    "m2:Selection.onSetFocus null f",
+    "as3:focusOut as3field related null focus null",
+    "m2:Selection.onSetFocus null null",
+  ];
+  const p = await play(KEEP, M2_SELECTION);
+  try {
+    const lines = await run(p, [
+      ["key", "F2"],
+      ["click", ...AS3FIELD],
+      ["key", "F3"],
+      ["key", "F6"],
+      ["type", "x"],
+      ["control", "state"],
+    ]);
+    assert.deepEqual(lines, [
+      ...flash,
+      "m1:getFocus f begin 0 end 6 caret 6",
+      "m2:getFocus f begin 0 end 6 caret 6",
+      "m1:changed f=x",
+      "as3:text mnopqr",
+      "as3:state focus null selection 6,6",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+
+  // stage.focus set by a script: the same, with no mouseFocusChange.
+  const q = await play(KEEP, M2_SELECTION);
+  try {
+    const lines = await run(q, [
+      ["key", "F2"],
+      ["control", "focus:as3field"],
+      ["key", "F3"],
+    ]);
+    assert.deepEqual(lines, [
+      ...[
+        "m1:keepOn",
+        "m1:Selection.onSetFocus null null",
+        "m1:keep",
+        "m1:f.onSetFocus null",
+        "m1:Selection.onSetFocus null f",
+        "m2:Selection.onSetFocus null f",
+        "as3:focusOut as3field related null focus null",
+        "m2:Selection.onSetFocus null null",
+      ],
+      "as3:focus:as3field focus null selection 0,0",
+      "m1:getFocus f begin 0 end 6 caret 6",
+    ]);
+  } finally {
+    q.player.destroy();
+  }
+});
+
+test("a field's onKillFocus that focuses it again moves nothing, and the move to another movie's field goes on", {
+  skip,
+}, async () => {
+  const p = await play(
+    {
+      start:
+        'var back = false; f.onKillFocus = function(n) { log("f.onKillFocus " + nameOf(n)); if (back) { back = false; log("back"); Selection.setFocus(f); } };',
+      keys: { 113: 'back = true; log("backOn");', 114: "selection();" },
+    },
+    M2_SELECTION,
+  );
+  try {
+    const lines = await run(p, [
+      ["click", ...M1F],
+      ["key", "F2"],
+      ["click", ...M2F],
+      ["key", "F3"],
+      ["key", "F6"],
+      ["type", "y"],
+    ]);
+    assert.deepEqual(lines, [
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "m1:backOn",
+      "m1:f.onKillFocus f",
+      "m1:back",
+      "m2:f.onSetFocus f",
+      "m1:Selection.onSetFocus f f",
+      "m2:Selection.onSetFocus f f",
+      "m1:getFocus f begin 6 end 6 caret 6",
+      "m2:getFocus f begin 6 end 6 caret 6",
+      "m2:changed f=abcdefy",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie unloaded with the focus tells its field and every movie's Selection listeners", {
+  skip,
+}, async () => {
+  const p = await play({}, M2_SELECTION);
+  try {
+    const lines = await run(p, [
+      ["click", ...M1F],
+      ["control", "unload:1"],
+      ["key", "F6"],
+      ["type", "z"],
+      ["key", "F6"],
+    ]);
+    // Flash Player 32 tells them once unload() has returned, after the host's trace of it.
+    assert.deepEqual(lines, [
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "m1:f.onKillFocus null",
+      "m1:Selection.onSetFocus f null",
+      "m2:Selection.onSetFocus f null",
+      "as3:unload:1 focus null selection 0,0",
+      "m2:getFocus null begin -1 end -1 caret -1",
+      "m2:getFocus null begin -1 end -1 caret -1",
+    ]);
+  } finally {
+    p.player.destroy();
   }
 });

@@ -529,7 +529,15 @@ passes a movie's object to another movie's code; `Selection.getFocus`
 in any movie gives the path of whatever has the focus, AS3's objects from
 the root as `_level0`, its indices read AS3's focused field too,
 `setSelection` selects in it, and `setFocus(null)` takes the focus
-wherever it is. Tab moves through one order of AS3's objects and the
+wherever it is. A listener that moves the focus again does not stop the
+rest hearing the move it interrupted, as in Flash; one that takes it to a
+movie's field as AS3's object takes it leaves that object a `focusOut`
+and no `focusIn`, and the field the focus, where Flash, naming the field
+to `getFocus` and nothing to `stage.focus` too, types into AS3's object
+and reads its indices. A field's `onKillFocus` runs while the field still
+has the focus, so focusing it again there moves nothing and the move goes
+on. A movie unloaded with the focus tells its field and every movie's
+listeners, as Flash does once `unload()` has returned. Tab moves through one order of AS3's objects and the
 movies' (each in its movie's own terms, `avm1/focus.ts`), by tabIndex
 where any object of either has one, the two kinds sorted as numbers
 together, equal ones as the display list has them and -1 none in either,

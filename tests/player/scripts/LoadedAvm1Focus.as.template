@@ -95,6 +95,12 @@ package
 				case "select":
 					_field.setSelection(int(parts[1]), int(parts[2]));
 					break;
+				case "state":
+					trace("as3:text " + _field.text);
+					break;
+				case "unload":
+					Loader(getChildByName("loader" + parts[1])).unload();
+					break;
 			}
 
 			trace("as3:" + command + " focus " + nameOf(stage.focus) + " selection " + _field.selectionBeginIndex + "," + _field.selectionEndIndex);

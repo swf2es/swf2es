@@ -98,7 +98,7 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
   // One focus in the player: the AVM1 movies the host's Loaders hold give theirs up first. One
   // whose onKillFocus takes it back keeps it, its setFocus(null) having told `previous`. A move
   // among AS3's objects, or to or from none, the movies' Selection listeners hear as one from
-  // null to null (Flash Player 32).
+  // null to null (Flash Player 32), before the focusOut.
   if (s.avm1Input) {
     if (next && s.avm1Input.focused()) {
       s.avm1Input.blur();
@@ -106,10 +106,15 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
         return;
       }
     } else {
+      // The focus is `next`'s as they hear it, as in Flash Player 32: a listener's
+      // Selection.setFocus takes it from `next`, which then hears a focusOut and no focusIn.
+      s.focus = next;
       s.avm1Input.hostMoved();
-      if (s.focus !== previous) {
+      if (s.focus !== next) {
         return;
       }
+
+      s.focus = previous;
     }
   }
 

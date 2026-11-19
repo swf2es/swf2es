@@ -168,6 +168,7 @@ f.onSetFocus = function(o) { log("f.onSetFocus " + nameOf(o)); };
 f.onKillFocus = function(o) { log("f.onKillFocus " + nameOf(o)); };
 g.onSetFocus = function(o) { log("g.onSetFocus " + nameOf(o)); };
 g.onKillFocus = function(o) { log("g.onKillFocus " + nameOf(o)); };
+f.onChanged = function() { log("changed f=" + f.text); };
 var sel = {};
 sel.onSetFocus = function(o, n) { log("Selection.onSetFocus " + nameOf(o) + " " + nameOf(n)); };
 Selection.addListener(sel);

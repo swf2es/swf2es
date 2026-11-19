@@ -802,6 +802,7 @@ export class Loads {
     if (content) {
       const movie = this.avm1Movies.get(content.$display);
       if (movie) {
+        this.s.avm1Input?.unloading(content.$display as MovieClip);
         movie.vm.destroy(false);
         this.avm1Movies.delete(content.$display);
         if (this.s.avm1Input?.remove(content.$display)) {
