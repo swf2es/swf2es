@@ -170,19 +170,22 @@ has its own broker; an embedding may explicitly share a `LocalConnections`
 instance across players. Connections live in a map keyed by ASCII-folded
 names, prefixed with the SWF's domain unless the name starts with `_`.
 Messages snapshot arguments as bounded bytes (40 KiB) and wait on one
-queue that each frame empties, so that a message a handler sends arrives
-in the same frame, as Flash delivers it (`Loads.deferLocal`). AVM1 sends AMF0; AS3 sends AMF3 to
-preserve ByteArray, XML, Vector and class aliases, converting the snapshot
-to AMF0 only when an AVM1 receiver needs it. AMF3 scratch buffers are
-reused except for externalizable streams that may escape the call. A broker
-with no messages does no frame work. Receiver methods, domain permissions
-and sender status events enter the appropriate VM, never sharing live script objects. A method
-a receiver lacks, or a property that is no function, is passed over in silence, as in Flash.
-Closing or destroying a receiver frees its name; an AVM1 movie an AS3 Loader unloads keeps its
-names, and stays while it listens or has a send to deliver, as Flash keeps it (avm1.md, "AVM1
-and AVM2"). This is in-process messaging, not
-Flash's machine-wide transport: browser tabs and desktop processes do not
-share connections.
+queue where the frame's host events are, which delivers up to 16 a frame,
+first in first out, so that a message a handler sends arrives in the same
+frame unless a chain keeps sending, as Flash's real-time delivery has it
+(`Loads.deferLocal`). AVM1 sends AMF0; AS3 sends AMF3 to preserve
+ByteArray, XML, Vector and class aliases, converting the snapshot to AMF0
+only when an AVM1 receiver needs it. AMF3 scratch buffers are reused
+except for externalizable streams that may escape the call. A broker with
+no messages does no frame work. Receiver methods, domain permissions and
+sender status events enter the appropriate VM, never sharing live script
+objects. A method a receiver lacks, or a property that is no function, is
+passed over in silence, as in Flash. Closing or destroying a receiver
+frees its name; an AVM1 movie an AS3 Loader unloads keeps its names, and
+stays while it listens or has a send to deliver, as Flash keeps it
+(avm1.md, "AVM1 and AVM2"). This is in-process messaging, not Flash's
+machine-wide transport: browser tabs and desktop processes do not share
+connections.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;

@@ -9,9 +9,11 @@ import type { avm2 } from "@swf2es/runtime";
 import { LocalConnections } from "../../../packages/player/dist/localconnection.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
+import { flashAssembler, script } from "../../avm1-script.ts";
 import { bare } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compileScripts } from "../../player/scripts.ts";
+import * as w from "../../swf-writer.ts";
 import { movie, play, take } from "./avm1/network.ts";
 
 const wasm = await WebAssembly.compile(
@@ -177,6 +179,130 @@ test("AS3 copies messages and reports size, status and receiver errors through t
     "status status",
     "copy 3 false",
   ]);
+  player.destroy();
+});
+
+test("a frame delivers 16 LocalConnection messages at most, the rest in the frames after", async () => {
+  const source = `package {
+import flash.display.Sprite;import flash.net.LocalConnection;
+public class LocalRate extends Sprite {
+ public var got:Array = [];
+ private var r:LocalConnection = new LocalConnection(); private var s:LocalConnection = new LocalConnection();
+ public function LocalRate() {
+  r.client = {take: function(n:int):void {got.push(n);}, chain: function(n:int):void {got.push(n);s.send("_rate","chain",n + 1);}};
+  r.connect("_rate");
+ }
+ public function burst():void {for (var i:int = 0; i < 40; i++) {s.send("_rate","take",i);}}
+ public function chain():void {got = [];s.send("_rate","chain",0);}
+ public function taken():String {return got.length + " " + got[0] + " " + got[got.length - 1];}
+}}
+`;
+  const abc = compileScripts([{ name: "LocalRate", source }], out).get("LocalRate") as Uint8Array;
+  const errors: unknown[] = [];
+  const s = new Scripting(await createCodegen(wasm), {
+    url: "file:///test.swf",
+    onUncaught: (error) => errors.push(error),
+    audio: null,
+    realTime: null,
+  });
+  await s.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "LocalRate"), s);
+  await player.start();
+  const root = player.root.object as avm2.AsObject;
+  const taken = () => s.rt.callProperty(root, s.rt.publicName("taken"));
+  // Forty sent at once: sixteen a frame, in the order sent.
+  s.rt.callProperty(root, s.rt.publicName("burst"));
+  const burst: unknown[] = [];
+  for (let i = 0; i < 3; i++) {
+    player.tick();
+    burst.push(taken());
+  }
+  assert.deepEqual(burst, ["16 0 15", "32 0 31", "40 0 39"]);
+  // A handler that sends again for ever: sixteen hops a frame, the chain carried over.
+  s.rt.callProperty(root, s.rt.publicName("chain"));
+  const chain: unknown[] = [];
+  for (let i = 0; i < 2; i++) {
+    player.tick();
+    chain.push(taken());
+  }
+  assert.deepEqual(chain, ["16 0 15", "32 0 31"]);
+  assert.deepEqual(errors, []);
+  player.destroy();
+});
+
+test("an AVM1 handler's queued actions run after it, and an unloaded movie that quits is let go of", async () => {
+  const actions = (source: string) =>
+    w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]);
+  // Two frames: the handler's gotoAndStop enters the second, whose script
+  // runs after the handler and in its frame, as adl and Flash Player 32
+  // trace it: "go at N", "go after N 2", "frame 2 script at N".
+  const child = w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameCount: 2,
+    tags: [
+      actions(`var ticks = 0;
+onEnterFrame = function() { ticks++; };
+var r = new LocalConnection();
+r.go = function() { trace("go at " + ticks); gotoAndStop(2); trace("go after " + ticks + " " + _currentframe); };
+r.quit = function() { fscommand("quit"); };
+r.connect("_frames");
+stop();`),
+      w.showFrame(),
+      actions(`trace("frame 2 script at " + ticks);`),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const source = `package {
+import flash.display.Sprite;import flash.display.Loader;import flash.net.LocalConnection;import flash.net.URLRequest;
+public class LocalFrames extends Sprite {
+ public var loader:Loader = new Loader(); public var s:LocalConnection = new LocalConnection();
+ public function LocalFrames() {addChild(loader);loader.load(new URLRequest("child.swf"));}
+ public function retake():String {try {new LocalConnection().connect("_frames");return "connected";} catch (e:Error) {return e.message;} return "";}
+}}
+`;
+  const abc = compileScripts([{ name: "LocalFrames", source }], out).get(
+    "LocalFrames",
+  ) as Uint8Array;
+  const lines: string[] = [];
+  const errors: unknown[] = [];
+  const s = new Scripting(await createCodegen(wasm), {
+    url: "https://example.test/main.swf",
+    fetch: async () => ({ bytes: child, status: 200, headers: [] }),
+    print: (line) => lines.push(line),
+    onUncaught: (error) => errors.push(error),
+    audio: null,
+    realTime: null,
+  });
+  await s.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(abc, 1, "LocalFrames"), s);
+  await player.start();
+  await s.settled();
+  for (let i = 0; i < 3; i++) {
+    player.tick();
+    await s.settled();
+  }
+
+  const root = player.root.object as avm2.AsObject;
+  const sender = s.rt.getProperty(root, s.rt.publicName("s"));
+  const send = (method: string) =>
+    s.rt.callProperty(sender, s.rt.publicName("send"), "_frames", method);
+  send("go");
+  player.tick();
+  const at = /^go at (\d+)$/.exec(lines[0] ?? "")?.[1];
+  assert.deepEqual(lines, [`go at ${at}`, `go after ${at} 2`, `frame 2 script at ${at}`]);
+  // Unloaded, it keeps its name until fscommand("quit") stops it for good.
+  const loader = s.rt.getProperty(root, s.rt.publicName("loader"));
+  s.rt.callProperty(loader, s.rt.publicName("unloadAndStop"));
+  player.tick();
+  assert.match(String(s.rt.callProperty(root, s.rt.publicName("retake"))), /#2082/);
+  send("quit");
+  player.tick();
+  player.tick();
+  assert.equal(s.rt.callProperty(root, s.rt.publicName("retake")), "connected");
+  assert.deepEqual(errors, []);
   player.destroy();
 });
 
