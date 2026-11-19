@@ -171,7 +171,9 @@ with no unload handler anywhere in it is kept, stopped, while its
 LocalConnections listen or send (below); one with a handler goes whole,
 its names free from the next frame, though only once what it sent, its
 onUnload's sends among them, is delivered, their onStatus no longer told
-it (measured in adl and the projector). A kept movie's LocalConnection
+it (measured in adl and the projector). An onUnload's send arrives the
+next frame, as adl delivers it and as the host's queue delivers any send
+made at a frame's end; the projector delivers it in the same frame. A kept movie's LocalConnection
 handlers still run: a sound one starts plays and holds its channel until
 the movie goes, its onSoundComplete never told, as no frame of it plays;
 Flash keeps such a movie running, sounds and all.

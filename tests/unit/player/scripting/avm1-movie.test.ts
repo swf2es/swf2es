@@ -315,10 +315,11 @@ test("what a movie's onUnload sends is delivered, its onStatus untold", { skip }
     p.lines.splice(0);
     p.later("exitFrame", "unload");
     await p.tick();
+    assert.deepEqual(p.lines.splice(0), ["avm1:ef 4", "as3:unload", "avm1:onUnload"]);
+    // The next frame, as adl delivers it; the projector delivers it in the same.
     await p.tick();
     await p.tick();
-    // adl delivers it the next frame, the projector in the same.
-    assert.deepEqual(p.lines, ["avm1:ef 4", "as3:unload", "avm1:onUnload", "as3:pong 99"]);
+    assert.deepEqual(p.lines, ["as3:pong 99"]);
   } finally {
     p.player.destroy();
   }
