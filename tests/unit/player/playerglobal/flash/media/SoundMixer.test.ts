@@ -8,6 +8,7 @@ import { containerEngine } from "../../../../../../oracle/oracle.ts";
 import type { AudioHost, SoundMix } from "../../../../../../packages/player/dist/media/audio.js";
 import { outputMix } from "../../../../../../packages/player/dist/media/sounds.js";
 import { Player } from "../../../../../../packages/player/dist/player.js";
+import { channelMix } from "../../../../../../packages/player/dist/playerglobal/flash/media/Sound.js";
 import { playerNatives } from "../../../../../../packages/player/dist/playerglobal/index.js";
 import { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 import { toneScript } from "../../../../../player/cases.ts";
@@ -35,6 +36,16 @@ const mix = (
   rightToLeft: number,
   rightToRight: number,
 ): SoundMix => ({ volume, leftToLeft, leftToRight, rightToLeft, rightToRight });
+
+test("a transform is kept in whole hundredths, NaN and what is past 32 bits as -2^31", () => {
+  // adl, for SoundMixer's and a channel's: x86's conversion of NaN or of what is out of range.
+  assert.deepEqual(
+    channelMix(mix(0.333, Math.sqrt(0.75), 0, 0, Number.NaN)),
+    mix(0.33, 0.86, 0, 0, -21474836.48),
+  );
+  assert.equal(channelMix(mix(3e7, 1, 0, 0, 1)).volume, -21474836.48);
+  assert.equal(channelMix(mix(-3e7, 1, 0, 0, 1)).volume, -21474836.48);
+});
 
 test("SoundMixer keeps AIR's playback settings and the stream buffer time", async () => {
   const s = new Scripting(await createCodegen(wasm), { audio: null });

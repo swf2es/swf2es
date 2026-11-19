@@ -97,11 +97,12 @@ function stateOf(o: AsObject): SoundState {
 
 /** The mixer stores channel coefficients in hundredths when a transform is assigned. */
 export function channelMix(mix: SoundMix): SoundMix {
-  // Whole percents, as Ruffle's i32: NaN is 0 and the range saturates.
-  const hundredths = (value: number) =>
-    Number.isNaN(value)
-      ? 0
-      : Math.max(-(2 ** 31), Math.min(2 ** 31 - 1, Math.trunc(value * 100))) / 100;
+  // Whole percents in 32 bits: NaN, and what is out of their range either
+  // way, is -2^31, as x86 converts it (adl, for SoundMixer's and a channel's).
+  const hundredths = (value: number) => {
+    const n = Math.trunc(value * 100);
+    return (n >= -(2 ** 31) && n < 2 ** 31 ? n : -(2 ** 31)) / 100;
+  };
   return {
     volume: hundredths(mix.volume),
     leftToLeft: hundredths(mix.leftToLeft),
