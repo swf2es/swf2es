@@ -95,6 +95,17 @@ package
 				case "select":
 					_field.setSelection(int(parts[1]), int(parts[2]));
 					break;
+				case "onOut":
+					// Once, the focusOut of parts[1] focuses parts[2].
+					var from:InteractiveObject = InteractiveObject(getChildByName(parts[1]));
+					var to:InteractiveObject = InteractiveObject(getChildByName(parts[2]));
+					from.addEventListener(FocusEvent.FOCUS_OUT, function(e:FocusEvent):void
+						{
+							from.removeEventListener(FocusEvent.FOCUS_OUT, arguments.callee);
+							trace("as3:onOut " + parts[1] + " focuses " + parts[2]);
+							stage.focus = to;
+						});
+					break;
 				case "state":
 					trace("as3:text " + _field.text);
 					break;

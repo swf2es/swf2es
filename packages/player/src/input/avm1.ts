@@ -22,6 +22,8 @@ export class LoadedAvm1Input implements FocusHost {
   private over: Avm1Pointer | null = null;
   /** Whether a movie's move of the focus is taking it from AS3, which tells the movies nothing more. */
   private moving = false;
+  /** How many movies' moves have taken the focus from AS3, which tells AS3 a listener took it. */
+  private steals = 0;
   /** The object hearing onKillFocus, which no move inside it kills again. */
   private killing: DisplayObject | null = null;
   /** The movie being unloaded, which nothing focuses. */
@@ -128,11 +130,12 @@ export class LoadedAvm1Input implements FocusHost {
     const oldFace = old?.avm1 ?? null;
     const newFace = d?.avm1 ?? null;
     if (holder !== null && old !== null) {
+      const outer = this.killing;
       this.killing = old;
       try {
         holder.focusTracker.killed(old, newFace);
       } finally {
-        this.killing = null;
+        this.killing = outer;
       }
 
       if (this.current !== old) {
@@ -155,6 +158,7 @@ export class LoadedAvm1Input implements FocusHost {
     tracker.selectFocused(byPointer);
 
     if (d !== null && this.s.focus !== null) {
+      this.steals++;
       this.moving = true;
       try {
         setFocus(this.s, null);
@@ -179,12 +183,16 @@ export class LoadedAvm1Input implements FocusHost {
    * AS3's focus moving from one of its objects, or none, to another, or
    * none: every movie's Selection listeners hear onSetFocus(null, null)
    * first, as Flash Player 32 tells them, unless a movie's move of the
-   * focus took it.
+   * focus took it. Whether a listener's move then took the focus from AS3.
    */
-  hostMoved(): void {
-    if (!this.moving) {
-      this.selectionMoved(null, null);
+  hostMoved(): boolean {
+    if (this.moving) {
+      return false;
     }
+
+    const steals = this.steals;
+    this.selectionMoved(null, null);
+    return this.steals !== steals;
   }
 
   clear(): void {

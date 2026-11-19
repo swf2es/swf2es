@@ -885,3 +885,107 @@ test("a movie unloaded with the focus takes none back as its listeners hear it g
     p.player.destroy();
   }
 });
+
+/** The steps of a move from AS3's field to its sprite whose focusOut focuses `to` once. */
+const ON_OUT = (to: string): Step[] => [
+  ["control", "focus:as3field"],
+  ["control", `onOut:as3btn:${to}`],
+  ["key", "F2"],
+  ["control", "focus:as3btn"],
+  ["control", "state"],
+  ["key", "F3"],
+  ["type", "x"],
+  ["key", "F3"],
+];
+
+test("a focus a focusOut listener gives AS3 as a Selection listener took it is taken back the same way", {
+  skip,
+}, async () => {
+  const p = await play(KEEP, M2_SELECTION);
+  try {
+    const lines = await run(p, ON_OUT("as3field"));
+    assert.deepEqual(lines, [
+      "m1:Selection.onSetFocus null null",
+      "m2:Selection.onSetFocus null null",
+      "as3:focusIn as3field related null focus as3field",
+      "as3:focus:as3field focus as3field selection 0,0",
+      "as3:onOut:as3btn:as3field focus as3field selection 0,0",
+      "m1:keepOn",
+      "m1:Selection.onSetFocus null null",
+      "m1:keep",
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "as3:focusOut as3btn related null focus null",
+      "as3:onOut as3btn focuses as3field",
+      "m1:f.onKillFocus null",
+      "m1:Selection.onSetFocus f null",
+      "m1:keep",
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "as3:focusOut as3field related null focus null",
+      "m2:Selection.onSetFocus f null",
+      "m2:Selection.onSetFocus null null",
+      "as3:focusOut as3field related null focus null",
+      "as3:focus:as3btn focus null selection 0,0",
+      "as3:text mnopqr",
+      "as3:state focus null selection 0,0",
+      "m1:getFocus f begin 0 end 6 caret 6",
+      "m1:changed f=x",
+      "m1:getFocus f begin 1 end 1 caret 1",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("an object a focusOut listener focuses as a Selection listener took the focus keeps it whole", {
+  skip,
+}, async () => {
+  // m1's listener takes the focus once, and the sprite's focusOut gives it to the field.
+  const once: Movie = {
+    ...KEEP,
+    start: (KEEP.start as string).replace("{ log(", "{ keepOn = false; log("),
+  };
+  const p = await play(once, M2_SELECTION);
+  try {
+    const lines = await run(p, ON_OUT("as3field"));
+    // Flash Player 32 sends the field a second focusIn, and a focusOut and a focusIn naming
+    // itself, and types into m1's f while stage.focus and Selection name the field: the player
+    // leaves the field the one focus, with no more events.
+    assert.deepEqual(lines, [
+      "m1:Selection.onSetFocus null null",
+      "m2:Selection.onSetFocus null null",
+      "as3:focusIn as3field related null focus as3field",
+      "as3:focus:as3field focus as3field selection 0,0",
+      "as3:onOut:as3btn:as3field focus as3field selection 0,0",
+      "m1:keepOn",
+      "m1:Selection.onSetFocus null null",
+      "m1:keep",
+      "m1:f.onSetFocus null",
+      "m1:Selection.onSetFocus null f",
+      "m2:Selection.onSetFocus null f",
+      "as3:focusOut as3btn related null focus null",
+      "as3:onOut as3btn focuses as3field",
+      "m1:f.onKillFocus null",
+      "m1:Selection.onSetFocus f null",
+      "m2:Selection.onSetFocus f null",
+      "as3:focusIn as3field related null focus as3field",
+      "m2:Selection.onSetFocus null null",
+      "as3:focus:as3btn focus as3field selection 0,0",
+      "as3:text mnopqr",
+      "as3:state focus as3field selection 0,0",
+      "m1:getFocus as3field begin 0 end 0 caret 0",
+      "m1:getFocus as3field begin 1 end 1 caret 1",
+    ]);
+    const field = (p.player.root as unknown as { children: { name: string }[] }).children.find(
+      (c) => c.name === "as3field",
+    ) as unknown as { focused: boolean; focusDrop: unknown };
+    assert.equal(p.scripting.focus, field);
+    assert.equal(field.focused, true);
+    assert.notEqual(field.focusDrop, null);
+  } finally {
+    p.player.destroy();
+  }
+});

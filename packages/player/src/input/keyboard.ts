@@ -101,7 +101,17 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
   // null to null (Flash Player 32), before the focusOut.
   if (s.avm1Input) {
     if (next && s.avm1Input.focused()) {
-      s.avm1Input.blur();
+      // `next`'s as the movies hear it go, as in Flash Player 32: a listener that takes it back
+      // to a movie's field leaves `next` a focusOut and no focusIn.
+      s.focus = next;
+      try {
+        s.avm1Input.blur();
+      } finally {
+        if (s.focus === next) {
+          s.focus = previous;
+        }
+      }
+
       if (s.focus !== previous || s.avm1Input?.focused()) {
         return;
       }
@@ -149,7 +159,8 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
  * `next`, as they hear it with the focus `next`'s, as in Flash Player 32.
  * Whether one of them took the focus to a movie's field: `next` then hears
  * a focusOut and no focusIn, and `previous`, once the rest heard the move,
- * a focusOut naming nothing.
+ * a focusOut naming what has the focus then, unless a focusOut listener
+ * gave the focus back to it.
  */
 function hostMoved(
   s: Scripting,
@@ -157,28 +168,28 @@ function hostMoved(
   next: DisplayObject | null,
 ): boolean {
   s.focus = next;
-  let moved = true;
+  let stolen = false;
   try {
-    s.avm1Input?.hostMoved();
+    stolen = s.avm1Input?.hostMoved() ?? false;
   } finally {
-    moved = s.focus !== next;
-    if (!moved) {
+    if (!stolen && s.focus === next) {
       s.focus = previous;
     }
   }
 
-  if (!moved) {
-    return false;
+  if (!stolen) {
+    return s.focus !== previous;
   }
 
-  if (previous && previous !== next) {
+  // Unless a focusOut listener gave it back.
+  if (previous && previous !== next && s.focus !== previous) {
     previous.focusDrop = null;
     if (previous instanceof TextObject) {
       previous.focused = false;
       previous.invalidate(CONTENT);
     }
 
-    focusEvent(s, "focusOut", previous, null, false);
+    focusEvent(s, "focusOut", previous, s.focus, false);
   }
 
   return true;
