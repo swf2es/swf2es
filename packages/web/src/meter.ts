@@ -1,5 +1,5 @@
 // The performance meter the element shows over its player, off until the
-// viewer turns it on (the context menu's "Show performance", or the page,
+// viewer turns it on (the context menu's "Show stats", or the page,
 // through `performanceMeter`): twice a second, the SWF's frames played a
 // second against its frame rate, the player's ms in a frame (its scripts
 // and its drawing, as the frame listener tells them), the draws of a frame
@@ -18,26 +18,40 @@ type GL = WebGLRenderingContext | WebGL2RenderingContext;
 
 /**
  * Its look, which a page may give its own through custom properties on the
- * element (font, color, background, border and muted, the labels' colour),
- * as the demo site gives its theme's; by default the browser's light or dark
- * colours, as the context menu's.
+ * element (font, color, background, border, muted, the labels' colour, and
+ * opacity, the background's, 0.7 by default, which multiplies a background's
+ * own alpha), as the demo site gives its
+ * theme's; by default the browser's light or dark colours, as the context
+ * menu's. The background lets the SWF show through; a halo of it around
+ * each figure keeps the figures readable over white text or busy content.
+ * No backdrop blur: blurring a canvas that changes every frame costs the
+ * GPU every frame.
  */
 export const METER_STYLE =
-  " .meter { position: absolute; top: 6px; left: 6px; z-index: 3; display: grid;" +
+  " .meter { --swf2es-meter-fill: var(--swf2es-meter-background, Canvas);" +
+  " position: absolute; top: 6px; left: 6px; z-index: 3; display: grid;" +
   " grid-template-columns: max-content max-content; gap: 0 8px; box-sizing: border-box;" +
   " max-width: calc(100% - 12px); max-height: calc(100% - 12px); overflow: hidden;" +
   " margin: 0; padding: 3px 7px;" +
   " font: var(--swf2es-meter-font, 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);" +
   " font-variant-numeric: tabular-nums; color-scheme: light dark;" +
-  " color: var(--swf2es-meter-color, CanvasText); background: var(--swf2es-meter-background, Canvas);" +
-  " border: 1px solid var(--swf2es-meter-border, GrayText); border-radius: 4px;" +
+  " color: var(--swf2es-meter-color, CanvasText);" +
+  " background: color-mix(in srgb, var(--swf2es-meter-fill)" +
+  " clamp(0%, calc(var(--swf2es-meter-opacity, 0.7) * 100%), 100%), transparent);" +
+  " border: 1px solid color-mix(in srgb, var(--swf2es-meter-border, GrayText) 50%, transparent);" +
+  " border-radius: 4px;" +
+  " text-shadow: 1px 0 0 var(--swf2es-meter-fill), -1px 0 0 var(--swf2es-meter-fill)," +
+  " 0 1px 0 var(--swf2es-meter-fill), 0 -1px 0 var(--swf2es-meter-fill)," +
+  " 0 0 2px var(--swf2es-meter-fill);" +
   " pointer-events: none; user-select: none }" +
   " .meter[data-corner$=right] { left: auto; right: 6px }" +
   " .meter[data-corner^=bottom] { top: auto; bottom: 6px }" +
   " .meter[hidden], .meter > div[hidden] { display: none }" +
   " .meter > div { display: contents }" +
-  " .meter dt { color: var(--swf2es-meter-muted, GrayText) }" +
-  " .meter dd { margin: 0; text-align: right }";
+  " .meter dt { color: var(--swf2es-meter-muted, color-mix(in srgb, CanvasText 70%, Canvas)) }" +
+  " .meter dd { margin: 0; text-align: right }" +
+  // High contrast drops text-shadow, the halo the figures need over a box the SWF shows through.
+  " @media (forced-colors: active) { .meter { --swf2es-meter-opacity: 1 } }";
 
 /** Each figure's name, in the dd's `data-figure`, and its label. */
 const FIGURES = [

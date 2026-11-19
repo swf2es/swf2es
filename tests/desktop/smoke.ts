@@ -990,7 +990,7 @@ try {
       offered = await evaluate<string[]>(`${menuButtons}.slice(-2).map((b) => b.textContent)`);
       await new Promise((done) => setTimeout(done, 50));
     }
-    assert.deepEqual(offered.slice(0, 1), ["Show performance"]);
+    assert.deepEqual(offered.slice(0, 1), ["Show stats"]);
     assert.match(offered[1] ?? "", /^About swf2es/);
     assert.equal(
       await evaluate<boolean>(`(() => {

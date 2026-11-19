@@ -537,8 +537,22 @@ async function check(): Promise<void> {
             const figure = (name: string) =>
               `document.getElementById('player').shadowRoot.querySelector('[data-figure=${name}]')`;
             const meterHidden = `!(${meter}) || ${meter}.hidden`;
-            const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').checked`;
+            const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').getAttribute('aria-pressed') === 'true'`;
             assert.equal(await value<boolean>(`!${meter}`), true);
+            // The page's own control: a Show stats toggle beside Full screen, its shortcut in its title.
+            assert.deepEqual(
+              await value<string[]>(
+                "(() => { const b = document.getElementById('meter-toggle'); return [b.tagName, b.textContent, b.getAttribute('aria-pressed'), b.previousElementSibling.id, String(/Ctrl\\+Shift\\+F/.test(b.title))]; })()",
+              ),
+              ["BUTTON", "Show stats", "false", "fullscreen", "true"],
+            );
+            // Every control says what it does when hovered, on itself or its label.
+            assert.deepEqual(
+              await value<string[]>(
+                "['quality', 'scale', 'stage3d', 'reload', 'close', 'fullscreen', 'meter-toggle', 'trace-logging', 'copy-log', 'clear-log', 'report'].filter((id) => { const e = document.getElementById(id); return !(e.title || e.closest('label')?.title || '').trim(); })",
+              ),
+              [],
+            );
             // Whether anything hears the player's frames: the element's test-only key tells
             // whether its loop has a hook, the meter's or a page's.
             const hooked = "document.getElementById('player')[Symbol.for('swf2es.frameHook')]";
@@ -699,7 +713,7 @@ async function check(): Promise<void> {
               });
             }
             const moveItem =
-              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move performance meter')";
+              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move stats')";
             await until(`!!${moveItem}`);
             await value(`(${moveItem}.click(), true)`);
             assert.equal(await value<string>(corner), "bottom-left");
@@ -740,7 +754,7 @@ async function check(): Promise<void> {
               await value<string>(
                 `[...${menu}.shadowRoot.querySelectorAll('button')].at(-2).textContent`,
               ),
-              "Show performance",
+              "Show stats",
             );
             await send("Input.dispatchKeyEvent", {
               type: "keyDown",

@@ -300,7 +300,7 @@ export class Swf2esPlayerElement extends ElementBase {
    * letterboxed or noScale player may be in the bars beside the stage:
    * "top-left", the default, "top-right", "bottom-left" or "bottom-right";
    * another value is ignored.
-   * The context menu's "Move performance meter" moves it to the next and
+   * The context menu's "Move stats" moves it to the next and
    * keeps the viewer's choice; setting this moves it for the page alone,
    * keeping nothing, and fires `performancemeterchange`.
    */
@@ -401,7 +401,7 @@ export class Swf2esPlayerElement extends ElementBase {
 
     const items: MenuItem[] = [
       {
-        caption: this.#meterShown ? "Hide performance" : "Show performance",
+        caption: this.#meterShown ? "Hide stats" : "Show stats",
         enabled: true,
         select: () => {
           const on = !this.#meterShown;
@@ -413,7 +413,7 @@ export class Swf2esPlayerElement extends ElementBase {
     ];
     if (this.#meterShown) {
       items.push({
-        caption: "Move performance meter",
+        caption: "Move stats",
         enabled: true,
         select: () => {
           const corner = nextCorner(this.#meterCorner);

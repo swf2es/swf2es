@@ -1,5 +1,5 @@
 // The play page's way to the element's performance meter, besides its
-// context menu: the controls' Performance box and Ctrl+Shift+F. The meter is
+// context menu: the controls' Show stats button and Ctrl+Shift+F. The meter is
 // the element's; the page keeps the viewer's choice of either for the next
 // visit under the element's own keys, which its menu writes too.
 import type { MeterCorner, Swf2esPlayerElement } from "@swf2es/web";
@@ -52,16 +52,16 @@ function store(on: boolean): void {
 }
 
 /**
- * The element's meter turned on and off by `toggle`, and by Ctrl+Shift+F,
+ * The element's meter turned on and off by `toggle`, a toggle button, and by Ctrl+Shift+F,
  * which shows it in its kept corner, moves it through the others, and hides
- * it back in the corner it started from, so that the shortcut and the box
+ * it back in the corner it started from, so that the shortcut and the button
  * open it in the same corner, and one the viewer picked from the menu
- * stays theirs; the box follows the meter however it is turned. The shortcut is the page's
+ * stays theirs; the button follows the meter however it is turned. The shortcut is the page's
  * even while the player has the focus: its F, pressed and released, never
  * reaches the SWF. An F held down before is the SWF's, its repeats and its
  * release with it, so that it is never left held there.
  */
-export function bindMeter(player: Swf2esPlayerElement, toggle: HTMLInputElement): void {
+export function bindMeter(player: Swf2esPlayerElement, toggle: HTMLButtonElement): void {
   const set = (on: boolean) => {
     player.performanceMeter = on;
     store(on);
@@ -69,14 +69,15 @@ export function bindMeter(player: Swf2esPlayerElement, toggle: HTMLInputElement)
   /** The corner the shortcut's cycle began in, and hides the meter back in. */
   let start = player.performanceMeterCorner;
   let cycling = false;
+  const pressed = () => toggle.setAttribute("aria-pressed", String(player.performanceMeter));
   player.addEventListener("performancemeterchange", () => {
-    toggle.checked = player.performanceMeter;
-    // Moved or shown otherwise, by the menu, the box or a kept choice: a cycle begins there.
+    pressed();
+    // Moved or shown otherwise, by the menu, the button or a kept choice: a cycle begins there.
     if (!cycling) {
       start = player.performanceMeterCorner;
     }
   });
-  toggle.addEventListener("change", () => set(toggle.checked));
+  toggle.addEventListener("click", () => set(!player.performanceMeter));
   const place = (corner: MeterCorner) => {
     player.performanceMeterCorner = corner;
     storeCorner(corner);
@@ -144,5 +145,5 @@ export function bindMeter(player: Swf2esPlayerElement, toggle: HTMLInputElement)
     player.performanceMeter = true;
   }
 
-  toggle.checked = player.performanceMeter;
+  pressed();
 }

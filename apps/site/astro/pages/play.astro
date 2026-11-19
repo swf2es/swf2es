@@ -105,7 +105,7 @@ const failure = `(() => {
     <noscript><p class="status error">The player needs JavaScript, which this browser has turned off.</p></noscript>
 
     <section class="controls" aria-label="Player controls">
-      <label>Quality
+      <label title="How smoothly edges and bitmaps are drawn: Low is the fastest, Best the smoothest">Quality
         <select id="quality">
           <option value="low">Low</option>
           <option value="medium">Medium</option>
@@ -113,7 +113,7 @@ const failure = `(() => {
           <option value="best">Best</option>
         </select>
       </label>
-      <label>Scale
+      <label title="How the SWF fits the player">Scale
         <select id="scale">
           <option value="showAll" selected>Show all</option>
           <option value="noBorder">No border</option>
@@ -121,21 +121,21 @@ const failure = `(() => {
           <option value="noScale">No scale</option>
         </select>
       </label>
-      <label><input id="stage3d" type="checkbox"> Stage3D</label>
-      <label title="Ctrl+Shift+F"><input id="meter-toggle" type="checkbox" aria-keyshortcuts="Control+Shift+F"> Performance</label>
-      <button id="reload" type="button" disabled>Restart</button>
-      <button id="close" type="button" disabled>Close</button>
-      <button id="fullscreen" type="button">Full screen</button>
+      <label title="Turns Stage3D (GPU 3D for SWFs that use it) on or off, restarting the SWF"><input id="stage3d" type="checkbox"> Stage3D</label>
+      <button id="reload" type="button" title="Plays the SWF again from the start" disabled>Restart</button>
+      <button id="close" type="button" title="Stops and closes the SWF" disabled>Close</button>
+      <button id="fullscreen" type="button" title="Fills the screen with the player">Full screen</button>
+      <button id="meter-toggle" class="toggle" type="button" aria-pressed="false" aria-keyshortcuts="Control+Shift+F" title="Shows or hides the performance meter (fps, frame time, memory). Ctrl+Shift+F shows it, moves it through the corners, then hides it">Show stats</button>
     </section>
 
     <div class="panels">
       <section class="panel console" aria-labelledby="console-title">
         <div class="panel-head">
           <h2 id="console-title">Console</h2>
-          <label class="trace-toggle"><input id="trace-logging" type="checkbox" checked> Trace logging</label>
-          <button id="copy-log" type="button">Copy</button>
-          <button id="clear-log" type="button">Clear</button>
-          <a id="report" class="button" href="https://github.com/swf2es/swf2es/issues/new" target="_blank" rel="noopener">Report a problem</a>
+          <label class="trace-toggle" title="Shows the SWF's trace() output in the console"><input id="trace-logging" type="checkbox" checked> Trace logging</label>
+          <button id="copy-log" type="button" title="Copies the console's text to the clipboard">Copy</button>
+          <button id="clear-log" type="button" title="Empties the console">Clear</button>
+          <a id="report" class="button" href="https://github.com/swf2es/swf2es/issues/new" target="_blank" rel="noopener" title="Opens a GitHub issue filled in with the build, browser, settings, SWF details and errors; local file names are left out">Report a problem</a>
         </div>
         <div id="log" class="log" role="log" aria-live="off"></div>
       </section>
