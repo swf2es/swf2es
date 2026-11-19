@@ -1,3 +1,4 @@
+import { TARGET_TEXEL } from "../geometry.js";
 import { ROWS_A_LINE } from "../rows.js";
 import {
   ADD,
@@ -97,6 +98,9 @@ export const TABLE_UNIT = MERGED_UNIT + 1;
  * changes from frame to frame where the vertices need not; the atlas leaves
  * that attribute disabled and negative.
  */
+/** In a fill's vSlot past its texture's: its texel is the stage's pixel (TARGET_TEXEL). */
+const ON_TARGET = 16;
+
 export const fillVertex = (multi: boolean, merged = multi) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
 precision highp float;
@@ -130,7 +134,11 @@ void main(void) {
 
   gl_Position = vec4(p * uView.xy + uView.zw, 0.0, 1.0);
   vColor = aColor;
-  vTexel = aTexel;
+  // A texel of TARGET_TEXEL or below samples the stage's pixel the vertex lands on, which the
+  // fragment reads at its centre (ON_TARGET, 16 in vSlot).
+  bool onTarget = aTexel.x <= ${TARGET_TEXEL / 2};
+  vTexel = onTarget ? p : aTexel;
+  vSlot |= onTarget ? ${ON_TARGET} : 0;
 }
 `;
 
@@ -167,7 +175,11 @@ out vec4 finalColor;
 
 vec4 texel(vec2 at) {
   vec4 t = vec4(0.0);
-  switch (vSlot) {
+  if (vSlot >= ${ON_TARGET}) {
+    at = floor(at) + 0.5;
+  }
+
+  switch (vSlot & ${ON_TARGET - 1}) {
 ${slotTexel}
   }
 
@@ -176,7 +188,7 @@ ${slotTexel}
 
 void main(void) {
   vec4 straight = vColor;
-  if (vSlot != 0) {
+  if ((vSlot & ${ON_TARGET - 1}) != 0) {
     vec4 t = texel(vTexel);
     if (t.a == 0.0) {
       finalColor = vec4(0.0);
@@ -629,7 +641,11 @@ out vec4 finalColor;
 ${BLEND_HELPERS}
 vec4 texel(vec2 at) {
   vec4 t = vec4(0.0);
-  switch (vSlot) {
+  if (vSlot >= ${ON_TARGET}) {
+    at = floor(at) + 0.5;
+  }
+
+  switch (vSlot & ${ON_TARGET - 1}) {
 ${slotTexel}
   }
 
@@ -640,7 +656,7 @@ void main(void) {
   vec4 front = vec4(0.0);
   vec4 fill = vColor;
   bool clear = false;
-  if (vSlot != 0) {
+  if ((vSlot & ${ON_TARGET - 1}) != 0) {
     vec4 t = texel(vTexel);
     clear = t.a == 0.0;
     fill = clear ? fill : vec4(t.rgb / t.a * vColor.rgb, t.a * vColor.a);

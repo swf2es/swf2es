@@ -4,7 +4,7 @@
 // then drawTriangles' textured triangles, a geometry each mesh. What is left out is counted.
 
 import { IDENTITY, type Matrix } from "@swf2es/format";
-import type { GeometryData } from "@swf2es/render";
+import { type GeometryData, TARGET_TEXEL } from "@swf2es/render";
 import { invert } from "../display/geometry.js";
 import { type Region as Area, RADIAL_MAX } from "../display/gradients.js";
 import type {
@@ -286,8 +286,11 @@ class Sampling {
 
   /** As set, a radial gradient's texture over `region`, which is null for any other paint. */
   setIn(paint: ImageFill | GradientFill | ShaderPaint, region: Area | null): this {
-    // A gradient whose matrix collapses the plane takes every point to its square's centre.
-    this.m = invert(paint.matrix) ?? COLLAPSED;
+    // A gradient whose matrix collapses the plane takes every point to its square's centre; a
+    // bitmap's, to its last texel where it is clipped, the stage's pixel where it repeats.
+    this.m =
+      invert(paint.matrix) ??
+      (paint.type !== "image" ? COLLAPSED : paint.repeat ? ON_TARGET : LAST_TEXEL);
     // A shader's coordinates are its matrix's inverse of the shape's, as a bitmap's texels are.
     this.kind = paint.type !== "gradient" ? "image" : paint.radial ? "radial" : "linear";
     this.region = region;
@@ -326,6 +329,21 @@ class Sampling {
  * not the edge between two entries a sampler could round either way.
  */
 const COLLAPSED: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: 1638.4 / RAMP / 2, ty: 0 };
+
+/**
+ * Where a clipped bitmap whose matrix collapses the plane samples: past its
+ * last texel, which the clamp at its edges gives, as adl fills it in the
+ * bottom right texel whatever the matrix, smoothed or not.
+ */
+const LAST_TEXEL: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: 1 << 24, ty: 1 << 24 };
+
+/**
+ * Where a repeating one samples: the stage's pixel, a texel each, read at
+ * its centre (TARGET_TEXEL), as adl repeats it from the stage's corner,
+ * unturned and unscaled and not smoothed, whatever the matrix and the
+ * transform.
+ */
+const ON_TARGET: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: TARGET_TEXEL, ty: TARGET_TEXEL };
 
 function collapses(m: Matrix): boolean {
   return m.a * m.d - m.b * m.c === 0;
@@ -404,9 +422,9 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     const { fill, contours } = layer.fills[i];
     const textured =
       fill.type === "image" || fill.type === "gradient" || fill.type === "shader" ? fill : null;
-    // A bitmap or shader whose matrix collapses the plane is left out, though Flash draws such a
-    // bitmap in some of its texels; a gradient is drawn (COLLAPSED).
-    if (textured && textured.type !== "gradient" && collapses(textured.matrix)) {
+    // A shader whose matrix collapses the plane is left out; a gradient or a bitmap is drawn
+    // (COLLAPSED, LAST_TEXEL, ON_TARGET).
+    if (textured?.type === "shader" && collapses(textured.matrix)) {
       continue;
     }
 
@@ -433,8 +451,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
  * A painted line's outline as the line builder made it (strokes.ts),
  * through the linear transform (a b c d), white: a part sampling `paint`
  * where each vertex lies in the shape's space, as a fill's do, so that the
- * paint is mapped as Flash maps a line's. Null where a bitmap's matrix
- * collapses the plane, which covers nothing.
+ * paint is mapped as Flash maps a line's, a collapsed matrix's as a fill's.
  */
 export function strokePart(
   data: GeometryData,
@@ -444,10 +461,6 @@ export function strokePart(
   d: number,
   paint: LinePaint,
 ): Part | null {
-  if (paint.type !== "gradient" && collapses(paint.matrix)) {
-    return null;
-  }
-
   // Back into the shape's space, which the builder left by (a b c d), never collapsed there.
   const det = a * d - b * c;
   const ia = d / det;
