@@ -83,6 +83,10 @@ const abcs = compileScripts(
     { name: "RemoteSmoke", source: remoteSource },
     { name: "AirSmoke", source: airSource },
     "WorkerMutex",
+    {
+      name: "ProgressTest",
+      source: readFileSync(new URL("../web/scripts/ProgressTest.as", import.meta.url), "utf8"),
+    },
   ],
   out,
 );
@@ -189,6 +193,105 @@ async function socketSite(policy: ((port: number) => string) | null) {
   await new Promise<void>((done) => tcp.listen(0, "127.0.0.1", done));
   port = (tcp.address() as { port: number }).port;
   return { server: tcp, port };
+}
+
+/**
+ * Downloads' progress through the shell, whose main process sends the
+ * SWF's requests and relays each piece of a response to the page as it
+ * comes: a remote SWF's Loader, URLLoader, URLStream and Sound, from its
+ * own origin, which sends each body a piece every 60 ms, hear PROGRESS
+ * several times, growing, before COMPLETE (tests/web's check, there through
+ * the browser's fetch).
+ */
+async function progress(): Promise<void> {
+  const swfBytes = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true, false),
+      w.doAbc(abcs.get("ProgressTest") as Uint8Array, "ProgressTest"),
+      w.symbolClass([[0, "ProgressTest"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const child = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  const bodies: Record<string, Uint8Array> = {
+    "/swf": child,
+    "/bin": new Uint8Array(16 * 1024).fill(65),
+    "/mp3": new Uint8Array(readFileSync(new URL("../player/sounds/tone.mp3", import.meta.url))),
+  };
+  const http = createHttpServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://x");
+    if (url.pathname === "/progress.swf") {
+      response.writeHead(200, { "content-type": "application/x-shockwave-flash" }).end(swfBytes);
+      return;
+    }
+
+    const body = bodies[url.pathname];
+    if (!body) {
+      response.writeHead(404).end();
+      return;
+    }
+
+    response.writeHead(
+      200,
+      url.searchParams.has("unsized") ? {} : { "content-length": body.length },
+    );
+    const piece = Math.ceil(body.length / 4);
+    let at = 0;
+    const next = () => {
+      response.write(body.subarray(at, at + piece));
+      at += piece;
+      if (at < body.length) {
+        setTimeout(next, 60);
+      } else {
+        response.end();
+      }
+    };
+    next();
+  });
+  await new Promise<void>((done) => http.listen(0, "127.0.0.1", done));
+  const origin = `http://127.0.0.1:${(http.address() as { port: number }).port}`;
+  try {
+    const url = `${origin}/progress.swf?base=${encodeURIComponent(origin)}`;
+    await withApp(both, [url], async ({ stdout, until }) => {
+      await until("the loads' progress", () => stdout.includes("progress: done"));
+      const lines = stdout.filter((l) => l.startsWith("progress: ")).map((l) => l.slice(10));
+      for (const [kind, size, total] of [
+        ["loader", child.length, child.length],
+        ["urlloader", 16384, 16384],
+        ["urlstream", 16384, 16384],
+        ["unsized", 16384, 0],
+        ["sound", bodies["/mp3"].length, bodies["/mp3"].length],
+      ] as const) {
+        const own = lines.filter((l) => l.startsWith(`${kind} `));
+        assert.equal(own.at(-1), `${kind} complete`, kind);
+        const told = own
+          .filter((l) => l.startsWith(`${kind} progress `))
+          .map((l) => l.split(" ").slice(2).map(Number))
+          .filter(([loaded]) => loaded > 0);
+        assert.ok(told.length >= 3, `${kind}: ${told.length} progress events with bytes`);
+        assert.ok(
+          told.every(([loaded], i) => i === 0 || loaded > told[i - 1][0]),
+          `${kind}: bytesLoaded grows`,
+        );
+        assert.equal(told.at(-1)?.[0], size, kind);
+        assert.ok(
+          told.every(([, t]) => t === total),
+          `${kind}: bytesTotal ${total}`,
+        );
+      }
+    });
+  } finally {
+    http.close();
+  }
 }
 
 /**
@@ -1194,6 +1297,7 @@ try {
   });
 
   await remote();
+  await progress();
   await air();
 
   // Through proxies of the test's own: a SOCKS5 one with a password, and an HTTP one.
