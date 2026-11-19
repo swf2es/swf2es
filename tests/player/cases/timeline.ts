@@ -146,6 +146,33 @@ function lateScripts9(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Clips a to e of three frames on a root of five, bound to
+// scripts/LateQueue.as, in a SWF of `version`.
+function lateQueue(version: number): (abc: Uint8Array) => Uint8Array {
+  return (abc) =>
+    w.swf({
+      version,
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 5,
+      tags: [
+        w.fileAttributes(true),
+        w.sprite(1, 3, [w.showFrame(), w.showFrame(), w.showFrame(), w.end()]),
+        w.doAbc(abc, "LateQueue"),
+        w.symbolClass([
+          [0, "Main"],
+          [1, "Clip"],
+        ]),
+        ...["a", "b", "c", "d", "e"].map((name, i) =>
+          w.place({ depth: i + 1, character: 1, name }),
+        ),
+        ...Array.from({ length: 5 }, () => w.showFrame()),
+        w.end(),
+      ],
+    });
+}
+
 // A button whose up state is a scripted clip, in a clip the timeline places
 // beside another, by a frame or by a frame script's goto, and in clips
 // scripts make with `new`, from a listener and from a frame script, as
@@ -1634,6 +1661,25 @@ export const timelineCases: PlayerCase[] = [
     swf: lateScripts9,
     script: "LateScripts9",
     frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "late-queue",
+    swf: lateQueue(10),
+    script: "LateQueue",
+    // The goto cycles' EXIT_FRAMEs count as frames to Flash's harness.
+    frames: 16,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "late-queue-9",
+    swf: lateQueue(9),
+    script: "LateQueue",
+    frames: 8,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

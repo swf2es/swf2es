@@ -188,10 +188,14 @@ export class Scripting {
    * The clips whose script for the frame they are on was registered while
    * frame scripts ran, in that order: after the round's walk each runs its
    * frame's script, though one ran there, as Flash runs them; a pass of
-   * frame scripts begun inside drops those queued before it, its walk
-   * running them as it would any (`late-scripts`).
+   * frame scripts begun inside takes those queued before it, its walk
+   * running them in its order (`late-scripts`, `late-queue`).
    */
   private readonly lateScripts: MovieClip[] = [];
+  /** How many late scripts each clip ran in the passes under way, up to MAX_LATE_RUNS. */
+  private readonly lateRuns = new Map<MovieClip, number>();
+  /** The clips whose frame a round marked lost (MovieClip.scriptLost), cleared as the passes end. */
+  private readonly lostScripts: MovieClip[] = [];
   /** queueDue's stack of the clips open in a list it walks (openClip), kept. */
   private readonly openClip: (DisplayObject | null)[] = [];
   private readonly openEnd: number[] = [];
@@ -1134,7 +1138,7 @@ export class Scripting {
     // script's goto happens though the script throws after it").
     // Overflowed, cycles stop their script loops; the frame's own pass goes on.
     const stopped = () => this.overflowed && this.cycles > 0;
-    this.dropLateScripts();
+    this.takeLateScripts();
     const depth = this.scriptDepth++;
     const queue = this.scriptQueues[depth] ?? [];
     this.scriptQueues[depth] = queue;
@@ -1158,6 +1162,15 @@ export class Scripting {
       }
     } finally {
       this.scriptDepth--;
+      // A frame lost while its clip made a button is lost for the frame's scripts alone.
+      if (this.scriptDepth === 0) {
+        for (const o of this.lostScripts) {
+          o.scriptLost = 0;
+        }
+
+        this.lostScripts.length = 0;
+        this.lateRuns.clear();
+      }
     }
   }
 
@@ -1204,6 +1217,7 @@ export class Scripting {
         }
 
         o.scriptLost = o.currentFrame;
+        this.lostScripts.push(o);
       }
 
       // Registered as scripts ran, it runs after the walk (lateScripts).
@@ -1263,6 +1277,7 @@ export class Scripting {
     // The clip whose script runs, the one before it again after: a goto's
     // cycle runs scripts inside another's (`goto-cycle-nested`).
     const outer = this.inFrameScript;
+    const placed = this.scriptPlaced.length;
     this.inFrameScript = o;
     try {
       this.rt.call(script, o.object);
@@ -1272,17 +1287,7 @@ export class Scripting {
       this.inFrameScript = outer;
     }
 
-    if (outer === null) {
-      for (let goto = this.scriptPlaced.shift(); goto; goto = this.scriptPlaced.shift()) {
-        this.placing.push(goto);
-        try {
-          this.constructGoto(goto);
-        } finally {
-          this.placing.splice(this.placing.indexOf(goto), 1);
-        }
-      }
-    }
-
+    this.constructScriptPlaced(placed);
     if (o.queuedGoto === null) {
       return false;
     }
@@ -1291,6 +1296,9 @@ export class Scripting {
     o.queuedGoto = null;
     o.playing = o.queuedPlay;
     o.gotoFrame(frame);
+    // A goto of its own happens once its script returned: what it places
+    // is made at once, though another clip's script is running around it.
+    this.constructScriptPlaced(placed);
     try {
       this.gotoCycle(o);
     } catch (error) {
@@ -1298,6 +1306,19 @@ export class Scripting {
     }
 
     return true;
+  }
+
+  /** What gotos placed as a frame script ran, from `from` on, made alive now that it returned. */
+  private constructScriptPlaced(from: number): void {
+    while (this.scriptPlaced.length > from) {
+      const goto = this.scriptPlaced.splice(from, 1)[0];
+      this.placing.push(goto);
+      try {
+        this.constructGoto(goto);
+      } finally {
+        this.placing.splice(this.placing.indexOf(goto), 1);
+      }
+    }
   }
 
   /**
@@ -1334,7 +1355,8 @@ export class Scripting {
    * frame with a script: that script runs after the walk, with those
    * registered as scripts ran, before those of the children it places. The
    * walk runs it too where the clip's frame had a script due as it began,
-   * not yet run; else it passes the clip by, as adl has it.
+   * not yet run; else, its script run or its frame without one, it passes
+   * the clip by, as adl has it.
    */
   lateGoto(clip: MovieClip, frame: number): void {
     const target = Math.max(1, Math.min(frame, clip.totalFrames));
@@ -1342,7 +1364,7 @@ export class Scripting {
       return;
     }
 
-    if (clip.scriptedFrame === clip.currentFrame) {
+    if (clip.scriptedFrame === clip.currentFrame || !clip.frameScripts.has(clip.currentFrame)) {
       clip.scriptHeld = true;
     }
 
@@ -1363,6 +1385,19 @@ export class Scripting {
         continue;
       }
 
+      // Scripts that send their clip back and forth, or register themselves
+      // again, keep the queue going: Flash hangs (adl), and here each clip
+      // runs at most 64 of them in a frame's scripts, as its gotos jump at
+      // most 64 times in a round.
+      const count = this.lateRuns.get(o) ?? 0;
+      if (count >= MAX_LATE_RUNS) {
+        // Its frame taken as run, so that no walk runs it again either.
+        o.scriptedFrame = o.currentFrame;
+        continue;
+      }
+
+      this.lateRuns.set(o, count + 1);
+
       if (o.scriptedFrame !== o.currentFrame) {
         o.scriptedFrame = o.currentFrame;
         this.framesMarked++;
@@ -1375,10 +1410,18 @@ export class Scripting {
     return ran;
   }
 
-  /** A pass of frame scripts begins: those registered in another, around it, are its own to run. */
-  private dropLateScripts(): void {
+  /**
+   * A pass of frame scripts begins: those registered in another, around
+   * it, are its own, due in its walk, which runs them in its order, as adl
+   * has a goto's cycle run them.
+   */
+  private takeLateScripts(): void {
     for (const o of this.lateScripts) {
-      o.scriptHeld = false;
+      if (o.scriptHeld) {
+        o.scriptHeld = false;
+      } else {
+        o.scriptAgain();
+      }
     }
 
     this.lateScripts.length = 0;
@@ -1863,6 +1906,9 @@ export class Scripting {
 
 /** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
 const MAX_GOTO_CYCLES = 256;
+
+/** How many scripts registered as scripts ran a clip runs after the walks of one frame's passes (runLateScripts). */
+const MAX_LATE_RUNS = 64;
 
 /** `o`'s mark (scriptsDue) as a round's walk found it, `due`: its orphan entry's too. */
 function settle(o: DisplayObject, due: boolean): void {

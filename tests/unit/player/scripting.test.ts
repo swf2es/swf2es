@@ -441,6 +441,65 @@ test("frame scripts that send their clip to each other's frame end in a stack ov
   });
 });
 
+// Flash hangs on these (adl never finishes the frame): the scripts that run
+// after the walk keep coming. The player runs at most 64 of a clip's in a
+// frame, and the frame ends; a clip left due runs as many the next.
+for (const [name, body] of [
+  [
+    "Pong",
+    "addFrameScript(0, function():void { trace(1); gotoAndStop(2); }, 1, function():void { trace(2); gotoAndStop(1); });",
+  ],
+  ["Again", "addFrameScript(0, again);"],
+] as const) {
+  test(`scripts after the walk that never stop end the frame: ${name}, version 9`, {
+    skip,
+  }, async () => {
+    const source = `package {
+      import flash.display.MovieClip;
+      public class ${name} extends MovieClip {
+        public function ${name}() { stop(); }
+        public function start():void { ${body} }
+        public function again():void { trace("again"); addFrameScript(0, again); }
+      }
+      public class ${name}Main extends MovieClip {
+        public var kid:MovieClip;
+        public function ${name}Main() {
+          addFrameScript(1, function():void { stop(); Object(kid).start(); trace("main 2"); });
+        }
+      }
+    }`;
+    const swf = w.swf({
+      version: 9,
+      width: 20,
+      height: 20,
+      frameCount: 2,
+      tags: [
+        w.fileAttributes(true),
+        w.sprite(2, 2, [w.showFrame(), w.showFrame(), w.end()]),
+        w.doAbc(compiler(out)(name, source)),
+        w.symbolClass([
+          [0, `${name}Main`],
+          [2, name],
+        ]),
+        w.place({ depth: 1, character: 2, name: "kid" }),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(swf, scripting);
+    await player.start();
+    player.tick();
+    assert.equal(lines.filter((l) => l !== "main 2").length, 64);
+    lines.length = 0;
+    player.tick();
+    assert.ok(lines.length <= 64, `${lines.length}`);
+  });
+}
+
 test("a goto plays or stops as it happens, so the landing frame's script has the last word", {
   skip,
 }, async () => {
