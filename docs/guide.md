@@ -183,7 +183,7 @@ them, leaves the item out and ignores the kept choice, hiding a meter it
 showed; removing the attribute applies the choice again. A script can
 show or hide the meter with `element.performanceMeter = true` or `false`
 whatever the item, for the page alone: it keeps nothing, so a page that
-wants its own control remembered (the play page's Performance box)
+wants its own control remembered (the play page's Show stats button)
 writes the same key, `swf2es.performanceMeter` set to `"1"`. While the
 meter shows, the menu also has "Move performance meter", which moves it
 to the player element's next corner, from top left to top right, bottom
