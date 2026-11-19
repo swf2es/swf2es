@@ -116,7 +116,9 @@ function linkProgram(gl: WebGL2RenderingContext, vertex: string, fragment: strin
     }
 
     // Lost meanwhile, as a script sees a context that is: disposed, not a shader it got wrong.
-    if (e.lost) {
+    // Not flagged lost, a failure that says nothing is the shader's (#3613), even from a GPU
+    // process that died, till the loss that follows disposes the context.
+    if (gl.isContextLost()) {
       throw new Context3DError("disposed", "Context3D experiment: context disposed or lost");
     }
 
