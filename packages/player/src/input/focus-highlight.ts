@@ -24,7 +24,7 @@ export function focusBounds(
 ): Rect {
   const area = d instanceof ButtonObject ? d.hitTestState : null;
   if (!area) {
-    return boundsIn(d, target, stage, true);
+    return boundsIn(d, target, stage, true, false);
   }
 
   const own = bounds(area, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };

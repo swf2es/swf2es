@@ -7,6 +7,18 @@ import type { Filter } from "./filters.js";
 import { morphAt } from "./morph.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
+/**
+ * Frames drawn, or played and not drawn (framePassed), so far: a MorphShape
+ * placed at another ratio since the last is blending. One count for every
+ * player on the page, as pickWork is.
+ */
+export const blendWork = { frames: 0 };
+
+/** A frame drawn, or played with no draw to follow, which ends what blending its places began. */
+export function framePassed(): void {
+  blendWork.frames++;
+}
+
 export class ShapeObject extends DisplayObject {
   /** The shape it draws, or last drew; null for a Shape a script made, which draws nothing yet. */
   shape: ShapeCharacter | null;
@@ -30,28 +42,80 @@ export class ShapeObject extends DisplayObject {
     this.character = shape;
   }
 
-  /** A MorphShape, its morph's start until it is drawn at another ratio. */
+  /** A MorphShape, its morph's start until its first place gives it a ratio. */
   static ofMorph(morph: MorphCharacter): ShapeObject {
     const shape = morphAt(morph, 0);
     const object = new ShapeObject(shape);
     object.morph = morph;
     object.blended = { morph, ratio: 0, shape };
     object.character = morph;
+    object.unplaced = true;
     return object;
   }
 
+  /** A MorphShape not yet placed, which its first place blends at once. */
+  private unplaced = false;
+  /** The blendWork frame in which a place last gave it another ratio or morph; -1 for none. */
+  private placedIn = -1;
+  /** Its ratio and morph as that frame began, which the last frame passed blended. */
+  private settledRatio = 0;
+  private settledMorph: MorphCharacter | null = null;
+
   /**
-   * A MorphShape takes on a new ratio when it is next drawn (drawn): until
-   * then its bounds and hit tests are the last drawn blend's, as Flash's
-   * are (the corpus's hittest_morph).
+   * A MorphShape made by a place is blended at its ratio there and then;
+   * one placed at another ratio is blending until a frame is drawn, or
+   * played undrawn (framePassed): a script's test of a point against its
+   * shape finds nothing of it meanwhile, as in adl, unless it is back at
+   * the ratio the last frame had (the `morph-bounds` cases), and the
+   * pointer meets the blend it last made, as Flash's does under a resting
+   * or moving mouse. What scripts are told of its bounds is its start's
+   * (ownBounds).
    */
   override applyPlace(place: Place): void {
     const ratio = this.ratio;
     super.applyPlace(place);
 
-    if (this.morph && this.ratio !== ratio) {
+    const morph = this.morph;
+    if (morph && this.unplaced) {
+      this.shape = morphAt(morph, this.ratio);
+      this.blended = { morph, ratio: this.ratio, shape: this.shape };
+    } else if (morph && this.ratio !== ratio) {
+      this.placing(ratio, morph);
+    }
+
+    this.unplaced = false;
+    if (morph && this.ratio !== ratio) {
       this.invalidate(CONTENT);
     }
+  }
+
+  /** Another morph placed in its stead (movieclip.ts swap): blending, as a new ratio is. */
+  takeMorph(morph: MorphCharacter): void {
+    this.placing(this.ratio, this.morph);
+    this.morph = morph;
+  }
+
+  /** A place changes its ratio or morph from these: the first in a frame keeps them as settled. */
+  private placing(ratio: number, morph: MorphCharacter | null): void {
+    if (this.placedIn !== blendWork.frames) {
+      this.placedIn = blendWork.frames;
+      this.settledRatio = ratio;
+      this.settledMorph = morph;
+    }
+  }
+
+  /**
+   * Whether it is a MorphShape placed, since the last frame passed, at
+   * another ratio or morph than that frame left it with. Only places and
+   * frames passing change it: a blend a script's draw or readGraphicsData
+   * makes meanwhile does not.
+   */
+  get blending(): boolean {
+    return (
+      this.morph !== null &&
+      this.placedIn === blendWork.frames &&
+      (this.ratio !== this.settledRatio || this.morph !== this.settledMorph)
+    );
   }
 
   /** The shape to draw now: a MorphShape's blend at its ratio, which it keeps from here. */

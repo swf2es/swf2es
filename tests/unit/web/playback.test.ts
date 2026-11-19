@@ -60,7 +60,7 @@ test("the loop reads the clock once more a call only while something hears its f
     drawn: 0,
     dirty: false,
     destroyed: false,
-    player: { advance: () => 2, quality: "HIGH", changes: 0, frameRate: 30 },
+    player: { advance: () => 2, undrawn() {}, quality: "HIGH", changes: 0, frameRate: 30 },
     textInput: { sync() {} },
   });
   const step = playback.step as (now: number, show: boolean) => void;
@@ -111,6 +111,7 @@ test("a call's time never goes back, an animation frame's after the timer's just
         handed.push(dt);
         return 0;
       },
+      undrawn() {},
       quality: "HIGH",
       changes: 0,
       frameRate: 30,
