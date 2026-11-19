@@ -23,6 +23,8 @@ const crossCutting: Record<string, string> = {
     "the natives the player's libraries declare against the runtime's and playerglobal's",
   "input/avm1-keys.test.ts":
     "keys and focus between an AS3 host and the AVM1 movies it loads: keyboard.ts, avm1.ts and AVM1's focus",
+  "input/avm1-focus.test.ts":
+    "one focus and one Selection across an AS3 host and its AVM1 movies: keyboard.ts, avm1.ts, Selection",
   "playerglobal/air-only.test.ts":
     "AIR's classes on the web and in AIR: playerglobal's marks, codegen's series, lookups by name",
 };
