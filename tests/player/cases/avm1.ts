@@ -3210,6 +3210,105 @@ function avm1Movie(compile: Compile): Uint8Array {
   });
 }
 
+// What the AVM1 movies of avm1Local trace a value as: its kind and, for an
+// array or an object, its members, named ones sorted.
+const avm1Show = `function local(d) { return d == "localhost" || d.indexOf("app#") == 0 ? "local" : d; }
+function show(v) {
+  if (v === undefined) { return "undefined"; }
+  if (v === null) { return "null"; }
+  if (typeof v == "string") { return "'" + v + "'"; }
+  if (v instanceof Date) { return "Date(" + v.getTime() + ")"; }
+  if (typeof v != "object") { return typeof v + ":" + v; }
+  var items = [];
+  var keys = [];
+  var k;
+  if (v instanceof Array) {
+    for (var i = 0; i < v.length; i++) { items.push(show(v[i])); }
+    for (k in v) { if (isNaN(Number(k))) { keys.push(k); } }
+  } else {
+    for (k in v) { keys.push(k); }
+  }
+  keys.sort();
+  for (var j = 0; j < keys.length; j++) { keys[j] = keys[j] + "=" + show(v[keys[j]]); }
+  if (v instanceof Array) { return "[" + items.join(",") + (keys.length ? ";" + keys.join(",") : "") + "]"; }
+  return "{" + keys.join(",") + "}";
+}
+`;
+
+// An AS3 SWF and two AVM1 SWFs it loads talking by LocalConnection
+// (scripts/Avm1Local.as.template). A takes the host's messages on "_childA"
+// and "childAPlain", answers on the host's "_host" and "hostPlain", and
+// calls B; B, on "_childB", has an allowDomain that tells when it is asked,
+// and closes its connection when told.
+function avm1Local(compile: Compile): Uint8Array {
+  const movie = (source: string) =>
+    w.swf({
+      version: 8,
+      width: 20,
+      height: 20,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.doAction([...script(`${avm1Show}${source}\nstop();`, 8)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const a = movie(`var s = new LocalConnection();
+s.onStatus = function(info) { trace("A status " + info.level + " " + info.code); };
+var ra = new LocalConnection();
+ra.value = 5;
+ra.take = function() { trace("A take " + arguments.length + " " + show(arguments)); };
+ra.reply = function() {
+  trace("A reply " + arguments.length);
+  var list = [1, "two", [3]];
+  list.label = "named";
+  trace("A sent " + s.send("_host", "take", 1, 1.5, "s", true, null, undefined, NaN));
+  trace("A sent " + s.send("_host", "take", {a: 1, nested: {b: [1, 2]}}, list, new Date(123000)));
+  trace("A sent " + s.send("hostPlain", "take", "plain"));
+  trace("A sent " + s.send(ra.domain() + ":hostPlain", "take", "prefixed"));
+  trace("A sent " + s.send(ra.domain() + ":_host", "take", "prefixed"));
+  trace("A sent " + s.send("_host", "missing"));
+  trace("A sent " + s.send("_host", "value"));
+  trace("A sent " + s.send("_host", "bad"));
+};
+ra.bad = function() { trace("A bad"); __op("Throw", "thrown"); };
+ra.toB = function() { trace("A sent " + s.send("_childB", "take", "from A", {k: 1})); };
+trace("A connect " + ra.connect("_childA") + " " + local(ra.domain()));
+var rp = new LocalConnection();
+rp.take = function(n) { trace("A plain " + n); };
+trace("A plain connect " + rp.connect("childAPlain"));`);
+  const b = movie(`var rb = new LocalConnection();
+rb.allowDomain = function(d) { trace("B allowDomain " + local(d)); return true; };
+rb.take = function() { trace("B take " + arguments.length + " " + show(arguments)); };
+rb.shut = function() { trace("B close " + rb.close()); };
+trace("B connect " + rb.connect("_childB"));`);
+  const template = readFileSync(
+    new URL("../scripts/Avm1Local.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "Avm1Local",
+    template
+      .replaceAll("@@A@@", Buffer.from(a).toString("base64"))
+      .replaceAll("@@B@@", Buffer.from(b).toString("base64")),
+  );
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Avm1Local"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Bitmap fills in an AVM1 SWF of `version`: a 4 x 4 bitmap, every pixel
 // its own colour, at four times its size in a smoothed (0x41) and an
 // unsmoothed (0x43) clipped fill, and a smoothed one the timeline moves a
@@ -3809,6 +3908,14 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
     build: avm1Movie,
     frames: 6,
     capture: [2, 3, 4, 5, 6],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-local-connection",
+    build: avm1Local,
+    frames: 36,
+    capture: [],
     tolerance: 0,
     maxOutliers: 0,
   },
