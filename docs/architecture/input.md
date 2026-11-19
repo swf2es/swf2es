@@ -378,12 +378,37 @@ after the handlers for a press too, and has that double click. In an
 AS3 host, the AVM1 movie's own pick before its broadcast is kept for
 its press in the same way, pickable or not as the move that brought the
 pointer there left the movie, since the host's own pick for the press
-comes after the broadcast; no probe has measured that case. Flash sent
-no `dragOver` or `dragOut` to a button the press did not reach, pressed
-on another or on nothing, where the player still sends them to any
-button as to a menu's items, Ruffle's rule: a button shown under the
-press so gets a `dragOut` and a `dragOver` when the pointer, still down,
-leaves it and comes back, which Flash did not send.
+comes after the broadcast; no probe has measured that case. A press on
+a button or a clip with handlers is its own: Flash sends no `dragOver`
+or `dragOut` to another, and its release elsewhere is its
+`releaseOutside`. A press on nothing, none of an AS3 host's objects
+either, or on one that tracks as a menu's (`trackAsMenu`, a script's, or
+else a button's flag from its tag, which a script reads as undefined and
+a script's false overrides), tracks as a menu's: each other item that
+tracks as one hears `dragOver` and `dragOut` as the pointer crosses it,
+the one let go over its `release`, and the pressed one no
+`releaseOutside`, as the projector traced dragsMovie
+(`tests/unit/player/avm1/pointer.test.ts`, and over an AS3 host
+`tests/unit/player/input/avm1.test.ts`) and the corpus's
+`drag_over_from_outside` has it.
+
+In an AS3 host, the projector traced the same probe's movie under a
+Loader beside an AS3 sprite in buttonMode
+(`tests/unit/player/input/avm1.test.ts`): what has the pointer
+over a movie's button, or a clip with a button's handlers, is the
+movie's alone, its `rollOver` and `rollOut`, `press`, `release` and the
+rest, and AS3 hears nothing of it, not even the Loader's `rollOver`; a
+clip with handlers takes the pointer for its children with theirs, as
+AVM1 has it, and a disabled one still keeps it from AS3. The movie's
+drawing elsewhere is the Loader's, which then gets AS3's events, its
+`relatedObject` null when the pointer came from the movie's button. The
+hand shows over the movie's buttons and clips with handlers unless their
+`useHandCursor` or `enabled` is false, the arrow over its drawing. A
+movie's button pressed and let go over an AS3 object or nothing calls
+`onReleaseOutside` before AS3 hears that `mouseUp`, and AS3 hears no
+`click`; one AS3 pressed and let go over a movie's button hears no
+`mouseUp`. Every movie's Mouse listeners hear each press and release
+first, as in a movie alone.
 
 ## Touch
 

@@ -43,6 +43,8 @@ export class Avm1Pointer implements Pointer {
    * own, a main SWF, has its button take its field's focus.
    */
   keepFocus = false;
+  /** Whether the press the host is handing on is on an object of its own, which no menu tracks. */
+  hostPressed = false;
   onCursor: ((cursor: Cursor) => void) | null = null;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
@@ -324,9 +326,13 @@ export class Avm1Pointer implements Pointer {
       this.pressedAt = null;
       if (pressed && hover && same(pressed, hover)) {
         events.push([pressed, ClipEvent.release]);
+      } else if (hover && this.tracking(pressed) && this.avm1.input.tracksAsMenu(hover)) {
+        // A menu's: the item it is let go over is released.
+        events.push([hover, ClipEvent.release]);
       } else {
-        // Released elsewhere, or after a press on nothing: what is under it is rolled over.
-        if (pressed) {
+        // Released elsewhere, or after a press on nothing: what is under it is rolled over. A
+        // menu's item pressed is no more than left.
+        if (pressed && !this.avm1.input.tracksAsMenu(pressed)) {
           events.push([pressed, ClipEvent.releaseOutside]);
         }
 
@@ -379,12 +385,28 @@ export class Avm1Pointer implements Pointer {
   }
 
   /**
+   * Whether a press tracks as a menu's, as Flash Player 32's projector
+   * traced it: one on nothing (in an AS3 host, on none of its objects
+   * either), or on an item that tracks as a menu's, its `trackAsMenu` a
+   * script's or else its tag's, while no script drags a clip. Other items that track as a menu's then hear `dragOver` and
+   * `dragOut` as the pointer crosses them, and the one it is let go over
+   * its `release`; a press on anything else is that object's alone.
+   */
+  private tracking(pressed = this.pressed): boolean {
+    return (
+      this.drag === null &&
+      (pressed === null ? !this.hostPressed : this.avm1.input.tracksAsMenu(pressed))
+    );
+  }
+
+  /**
    * The hover moved to `target`: with the button up, a roll out of what it
    * was over and a roll over of what it is over; with it down, a drag out
    * of the one and a drag over of the other, the pressed object's as the
-   * pointer leaves it and comes back, any other's as a menu's items have
-   * them, but while a script drags a clip (Ruffle's order: the pressed
+   * pointer leaves it and comes back, any other's only where it tracks as
+   * a menu, but while a script drags a clip (Ruffle's order: the pressed
    * object's drag over before the drag out of what the pointer left).
+   * Flash Player 32 sent no drag over or out to another button.
    */
   private hoverTo(target: DisplayObject | null, events: ButtonEvent[]): ButtonEvent[] {
     const hover = this.hover;
@@ -402,16 +424,16 @@ export class Avm1Pointer implements Pointer {
       }
     } else {
       const pressed = this.pressed;
-      const menu = this.drag === null;
+      const menu = (d: DisplayObject) => this.tracking() && this.avm1.input.tracksAsMenu(d);
       if (target && target === pressed) {
         events.push([target, ClipEvent.dragOver]);
       }
 
-      if (hover && (hover === pressed || menu)) {
+      if (hover && (hover === pressed || menu(hover))) {
         events.push([hover, ClipEvent.dragOut]);
       }
 
-      if (target && target !== pressed && menu) {
+      if (target && target !== pressed && menu(target)) {
         events.push([target, ClipEvent.dragOver]);
       }
     }
