@@ -198,11 +198,15 @@ fires `performancemeterchange` (`event.detail.shown` and
 `event.detail.corner`) as the meter shows, hides or moves. While hidden
 it costs nothing: it hears no frames, runs no timer and leaves the WebGL
 context alone. While shown, it counts draw calls by wrapping the
-context's draw functions. A page can style it with the custom properties
-`--swf2es-meter-font`, `--swf2es-meter-color`,
-`--swf2es-meter-background`, `--swf2es-meter-border` and
-`--swf2es-meter-muted` on the element; by default it takes the browser's
-light or dark colours.
+context's draw functions. Its background is 70% opaque, so the SWF shows
+through, and each figure has a thin halo of the background colour to keep
+it readable over white text or busy content; there is no backdrop blur,
+which would cost the GPU every frame. A page can style it with the custom
+properties `--swf2es-meter-font`, `--swf2es-meter-color`,
+`--swf2es-meter-background`, `--swf2es-meter-border`,
+`--swf2es-meter-muted` and `--swf2es-meter-opacity` (the background's,
+from 0 to 1; 1 makes it opaque) on the element; by default it takes the
+browser's light or dark colours.
 
 A page can measure the player itself, as the meter does, by
 setting `element.frameListener` to a function. After each animation frame

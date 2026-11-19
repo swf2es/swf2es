@@ -126,8 +126,17 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         });
         const pixel = decodePng(Buffer.from(shot.data, "base64"));
         assert.deepEqual([...pixel.data], [0, 255, 0, 255]);
-        // The performance meter shows above Stage3D's layer in every corner: inside its border,
-        // the screen is the meter's own background.
+        // The performance meter shows above Stage3D's layer in every corner. Its background lets
+        // what is under it through: inside its border, the screen is that background laid over
+        // what shows there with the meter hidden, as only a meter on top draws it.
+        const pixelAt = async (x: number, y: number) => {
+          const shot = await send<{ data: string }>("Page.captureScreenshot", {
+            format: "png",
+            clip: { x, y, width: 1, height: 1, scale: 1 },
+          });
+          return [...decodePng(Buffer.from(shot.data, "base64")).data].slice(0, 3);
+        };
+        let visible = 0;
         for (const corner of ["top-left", "top-right", "bottom-left", "bottom-right"]) {
           const at = await value<{ x: number; y: number; background: string }>(`(() => {
             const player = document.getElementById('player');
@@ -135,17 +144,25 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
             player.performanceMeter = true;
             const meter = player.shadowRoot.querySelector('.meter');
             const rect = meter.getBoundingClientRect();
-            return { x: rect.x + 3, y: rect.y + 3, background: getComputedStyle(meter).backgroundColor };
+            return { x: rect.x + 2, y: rect.y + 2, background: getComputedStyle(meter).backgroundColor };
           })()`);
           await new Promise((done) => setTimeout(done, 100));
-          const under = await send<{ data: string }>("Page.captureScreenshot", {
-            format: "png",
-            clip: { x: at.x, y: at.y, width: 1, height: 1, scale: 1 },
-          });
-          const seen = [...decodePng(Buffer.from(under.data, "base64")).data].slice(0, 3);
-          const background = (at.background.match(/\d+/g) ?? []).slice(0, 3).map(Number);
-          assert.deepEqual(seen, background, `the meter at the ${corner} is not on top`);
+          const shown = await pixelAt(at.x, at.y);
+          await value("(document.getElementById('player').performanceMeter = false, true)");
+          await new Promise((done) => setTimeout(done, 100));
+          const under = await pixelAt(at.x, at.y);
+          const [fill, alpha] = cssColor(at.background);
+          assert.ok(alpha > 0.3 && alpha < 1, `the meter's background is ${at.background}`);
+          const expected = fill.map((c, i) => alpha * c + (1 - alpha) * under[i]);
+          assert.ok(
+            expected.every((c, i) => Math.abs(c - shown[i]) <= 12),
+            `the meter at the ${corner} is not on top: ${shown} for ${expected.map(Math.round)} over ${under}`,
+          );
+          if (shown.some((c, i) => Math.abs(c - under[i]) > 30)) {
+            visible++;
+          }
         }
+        assert.ok(visible > 0, "the meter changed no corner it covered");
         await value(
           "(Object.assign(document.getElementById('player'), { performanceMeter: false, performanceMeterCorner: 'top-left' }), true)",
         );
@@ -224,4 +241,17 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
       },
     ],
   ];
+}
+
+/**
+ * A computed CSS colour's sRGB channels, 0 to 255, and its alpha: rgb(), rgba() or a
+ * color(srgb …) as a color-mix() computes.
+ */
+function cssColor(text: string): [number[], number] {
+  const numbers = (text.match(/[\d.]+/g) ?? []).map(Number);
+  if (text.startsWith("color(srgb")) {
+    return [numbers.slice(0, 3).map((c) => c * 255), numbers[3] ?? 1];
+  }
+
+  return [numbers.slice(0, 3), numbers[3] ?? 1];
 }
