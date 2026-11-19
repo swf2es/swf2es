@@ -184,6 +184,14 @@ export class Scripting {
    */
   private readonly scriptQueues: (MovieClip | null)[][] = [];
   private scriptDepth = 0;
+  /**
+   * The clips whose script for the frame they are on was registered while
+   * frame scripts ran, in that order: after the round's walk each runs its
+   * frame's script, though one ran there, as Flash runs them; a pass of
+   * frame scripts begun inside drops those queued before it, its walk
+   * running them as it would any (`late-scripts`).
+   */
+  private readonly lateScripts: MovieClip[] = [];
   /** queueDue's stack of the clips open in a list it walks (openClip), kept. */
   private readonly openClip: (DisplayObject | null)[] = [];
   private readonly openEnd: number[] = [];
@@ -202,6 +210,11 @@ export class Scripting {
   private readonly toConstruct: {
     display: DisplayObject;
     character: DisplayCharacter;
+    library: Library;
+  }[] = [];
+  /** What gotos placed before version 10 as a frame script ran, made alive once it returns. */
+  private readonly scriptPlaced: {
+    placed: { display: DisplayObject; character: DisplayCharacter }[];
     library: Library;
   }[] = [];
   /** The children of the gotos under way placed and not yet made alive, each goto's in order. */
@@ -747,6 +760,13 @@ export class Scripting {
     };
     library.constructPlaced = (placed) => {
       const goto = { placed, library };
+      // Before version 10, what another frame script's goto places is made
+      // once that script returns, as adl has it (`late-scripts-9`).
+      if (this.inFrameScript !== null && (library.version ?? 10) <= 9) {
+        this.scriptPlaced.push(goto);
+        return;
+      }
+
       this.placing.push(goto);
       try {
         this.constructGoto(goto);
@@ -1101,7 +1121,8 @@ export class Scripting {
    * they last ran: the orphans' first, newest first, then those under
    * `root`, each in tree order: a clip's own, again for the frame a goto of
    * its own lands it on, then its children's, as Flash runs a parent's
-   * landing script before a child the jump made. A clip a script removes
+   * landing script before a child the jump made; after each round's walk,
+   * those registered as scripts ran (lateScripts). A clip a script removes
    * still runs its own, as Flash queues them first. Rounds until none is
    * left, bounded, as a script that jumps on every run would never settle.
    * `also`, a button being made, is visited after them all, for one none
@@ -1113,6 +1134,7 @@ export class Scripting {
     // script's goto happens though the script throws after it").
     // Overflowed, cycles stop their script loops; the frame's own pass goes on.
     const stopped = () => this.overflowed && this.cycles > 0;
+    this.dropLateScripts();
     const depth = this.scriptDepth++;
     const queue = this.scriptQueues[depth] ?? [];
     this.scriptQueues[depth] = queue;
@@ -1174,49 +1196,33 @@ export class Scripting {
       // registered no script for its frame yet, unless it did so before
       // super(), and keeps the frame's for later: always, placed by a
       // timeline, made with `new`, only outside the frame's own scripts;
-      // one a frame script makes loses it (`button-frame-order`).
-      if (
-        o.makingChildren &&
-        !o.frameScripts.has(o.currentFrame) &&
-        (o.timelineChild || !this.scriptPhase)
-      ) {
+      // one a frame script makes loses it, and one it registers for the
+      // frame afterwards too (`button-frame-order`).
+      if (o.makingChildren && !o.frameScripts.has(o.currentFrame)) {
+        if (o.timelineChild || !this.scriptPhase) {
+          return;
+        }
+
+        o.scriptLost = o.currentFrame;
+      }
+
+      // Registered as scripts ran, it runs after the walk (lateScripts).
+      if (o.scriptHeld) {
         return;
       }
 
       for (let jumps = 0; jumps < 64 && o.scriptedFrame !== o.currentFrame && !stopped(); jumps++) {
         o.scriptedFrame = o.currentFrame;
         this.framesMarked++;
-        const script = o.frameScripts.get(o.currentFrame);
-        if (!script) {
+        if (!o.frameScripts.has(o.currentFrame)) {
           return;
         }
 
         ran = true;
-        // The clip whose script runs, the one before it again after: a
-        // goto's cycle runs scripts inside another's (`goto-cycle-nested`).
-        const outer = this.inFrameScript;
-        this.inFrameScript = o;
-        try {
-          this.rt.call(script, o.object);
-        } catch (error) {
-          this.reportUncaught(error, script);
-        } finally {
-          this.inFrameScript = outer;
-        }
-
-        // The goto the script asked for, now that it has returned, or
-        // thrown; the frame it lands on has its script run next, in this
-        // same phase, or, from version 10, in the goto's own cycle.
-        if (o.queuedGoto !== null) {
-          const frame = o.queuedGoto;
-          o.queuedGoto = null;
-          o.playing = o.queuedPlay;
-          o.gotoFrame(frame);
-          try {
-            this.gotoCycle(o);
-          } catch (error) {
-            this.reportUncaught(error);
-          }
+        // Before version 10, the frame a goto of its own lands it on has
+        // its script run after the walk, as one registered then would.
+        if (this.runClipScript(o) && (o.library.version ?? 10) < 10) {
+          return;
         }
       }
     };
@@ -1229,12 +1235,12 @@ export class Scripting {
         own(o);
       }
 
-      return ran;
+      return this.runLateScripts(stopped) || ran;
     }
 
     if (Scripting.checkRounds) {
       this.checkedRound(queue, root, also, own);
-      return ran;
+      return this.runLateScripts(stopped) || ran;
     }
 
     const count = this.queueDue(queue, root, also, null);
@@ -1244,7 +1250,138 @@ export class Scripting {
       own(o);
     }
 
+    return this.runLateScripts(stopped) || ran;
+  }
+
+  /**
+   * Run `o`'s script for its frame, which it has, and then the goto the
+   * script asked for, now that it has returned, or thrown: from version 10
+   * the goto's own cycle runs the frame it lands on. Whether it went.
+   */
+  private runClipScript(o: MovieClip): boolean {
+    const script = o.frameScripts.get(o.currentFrame);
+    // The clip whose script runs, the one before it again after: a goto's
+    // cycle runs scripts inside another's (`goto-cycle-nested`).
+    const outer = this.inFrameScript;
+    this.inFrameScript = o;
+    try {
+      this.rt.call(script, o.object);
+    } catch (error) {
+      this.reportUncaught(error, script);
+    } finally {
+      this.inFrameScript = outer;
+    }
+
+    if (outer === null) {
+      for (let goto = this.scriptPlaced.shift(); goto; goto = this.scriptPlaced.shift()) {
+        this.placing.push(goto);
+        try {
+          this.constructGoto(goto);
+        } finally {
+          this.placing.splice(this.placing.indexOf(goto), 1);
+        }
+      }
+    }
+
+    if (o.queuedGoto === null) {
+      return false;
+    }
+
+    const frame = o.queuedGoto;
+    o.queuedGoto = null;
+    o.playing = o.queuedPlay;
+    o.gotoFrame(frame);
+    try {
+      this.gotoCycle(o);
+    } catch (error) {
+      this.reportUncaught(error);
+    }
+
+    return true;
+  }
+
+  /**
+   * A script registered for the frame a clip is on: while frame scripts
+   * run, it runs after the walk of their round, in the order such scripts
+   * were registered, though the clip's frame ran one already (lateScripts);
+   * else it runs in the next round, again (`late-scripts`).
+   */
+  frameScriptRegistered(clip: MovieClip, frame: number, had: boolean): void {
+    if (frame !== clip.currentFrame || !clip.object) {
+      return;
+    }
+
+    if (this.scriptDepth === 0) {
+      clip.scriptAgain();
+      return;
+    }
+
+    if (clip.scriptLost === frame && clip.scriptedFrame === frame) {
+      return;
+    }
+
+    // A clip due with no script as the walk began runs none in it.
+    if (!had && clip.scriptedFrame !== frame) {
+      clip.scriptHeld = true;
+    }
+
+    this.lateScripts.push(clip);
+    scriptWork.changes++;
+  }
+
+  /**
+   * A goto before version 10, asked for as frame scripts run, to another
+   * frame with a script: that script runs after the walk, with those
+   * registered as scripts ran, before those of the children it places. The
+   * walk runs it too where the clip's frame had a script due as it began,
+   * not yet run; else it passes the clip by, as adl has it.
+   */
+  lateGoto(clip: MovieClip, frame: number): void {
+    const target = Math.max(1, Math.min(frame, clip.totalFrames));
+    if (this.scriptDepth === 0 || target === clip.currentFrame || !clip.frameScripts.has(target)) {
+      return;
+    }
+
+    if (clip.scriptedFrame === clip.currentFrame) {
+      clip.scriptHeld = true;
+    }
+
+    this.lateScripts.push(clip);
+    scriptWork.changes++;
+  }
+
+  /**
+   * The scripts registered for their clips' frames as frame scripts ran,
+   * each its clip's current frame's, first registered first, those they
+   * register after them: whether any ran.
+   */
+  private runLateScripts(stopped: () => boolean): boolean {
+    let ran = false;
+    for (let o = this.lateScripts.shift(); o; o = this.lateScripts.shift()) {
+      o.scriptHeld = false;
+      if (stopped() || !o.frameScripts.has(o.currentFrame)) {
+        continue;
+      }
+
+      if (o.scriptedFrame !== o.currentFrame) {
+        o.scriptedFrame = o.currentFrame;
+        this.framesMarked++;
+      }
+
+      ran = true;
+      this.runClipScript(o);
+    }
+
     return ran;
+  }
+
+  /** A pass of frame scripts begins: those registered in another, around it, are its own to run. */
+  private dropLateScripts(): void {
+    for (const o of this.lateScripts) {
+      o.scriptHeld = false;
+    }
+
+    this.lateScripts.length = 0;
   }
 
   /**

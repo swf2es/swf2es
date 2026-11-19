@@ -1037,8 +1037,9 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
 // Clip, of 4 frames, the fourth placing a Kid, each frame's script traced;
 // on its second frame, the clip after a, named for what it does, sends a,
 // whose script ran, to a frame, or makes a Kid with `new`, and adds it or
-// not. Each makes a script due after the round has listed its clips,
-// which only another round runs.
+// not. Each makes a script due after the walk passed its clip, which runs
+// after the walk, with the scripts registered as scripts ran, in the
+// order adl runs them.
 const SOURCE = readFileSync(new URL("./Rounds.as", import.meta.url), "utf8");
 
 /** A version 9 root of a Clip "a" and one named `second` after it. */
@@ -1083,7 +1084,7 @@ for (const [second, due] of [
   ["make", ["kid make"]],
   ["add", ["kid add"]],
 ] as const) {
-  test(`a script that makes another's due has it run in the next round: ${second}`, {
+  test(`a script that makes another's due has it run after the walk: ${second}`, {
     skip,
   }, async () => {
     const lines: string[] = [];
@@ -1103,10 +1104,9 @@ for (const [second, due] of [
 
 // Clips a, c and b in that order, each a Hop of three frames: c stops on
 // its first, whose script ran, and a's second sends it to its third. In a
-// SWF of version 9 the goto runs no cycle, and c's script runs in the
-// round that listed it before b's; from version 10 the goto's cycle runs
-// it, and b's with it. A round that left c out as not due when it listed
-// it would run its script after b's, in the next.
+// SWF of version 9 the goto runs no cycle: c, with no script due as the
+// walk began, runs its third frame's after the walk, after b's, as adl
+// has it; from version 10 the goto's cycle runs it, and b's with it.
 const HOP = `package {
   import flash.display.MovieClip;
   public dynamic class Hop extends MovieClip {
@@ -1126,7 +1126,7 @@ const HOP = `package {
 }`;
 
 for (const version of [9, 10]) {
-  test(`a goto has a clip listed as not due run its script in the round, version ${version}`, {
+  test(`a goto has a clip not due run its script, version ${version}`, {
     skip,
   }, async () => {
     const lines: string[] = [];
@@ -1158,17 +1158,16 @@ for (const version of [9, 10]) {
     assert.deepEqual(lines.splice(0), ["a 1", "c 1", "b 1"]);
 
     player.tick();
-    assert.deepEqual(lines, ["a 2", "c 3", "b 2"]);
+    assert.deepEqual(lines, version < 10 ? ["a 2", "b 2", "c 3"] : ["a 2", "c 3", "b 2"]);
   });
 }
 
-test("a goto has a clip of version 9 under one of version 10 run its script in the round", {
+test("a goto has a clip of version 9 under one of version 10 run its script after the walk", {
   skip,
 }, async () => {
   // As the Hop tests, with c the root of a SWF of version 9 loaded between a
   // and b, which are of version 10: a's goto runs no cycle for c, whose
-  // script runs in the round that listed it before b's. Rounds walk only what
-  // is marked there, so one that left c out as not due would run it after b's.
+  // script runs after the walk, after b's, as adl has it.
   const inner = w.swf({
     version: 9,
     width: 20,
@@ -1243,7 +1242,7 @@ test("a goto has a clip of version 9 under one of version 10 run its script in t
     player.tick();
   }
 
-  assert.deepEqual(lines, ["loaded", "a 2", "c 3", "b 2"]);
+  assert.deepEqual(lines, ["loaded", "a 2", "b 2", "c 3"]);
 });
 
 test("a frame whose scripts change nothing a round reads takes one round", {

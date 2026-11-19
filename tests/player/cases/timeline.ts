@@ -80,6 +80,72 @@ function buttonFirstFrame(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Kids b, a and c on a root of five frames, bound to
+// scripts/LateScripts.as, in a SWF of version 10.
+function lateScripts(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    version: 10,
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 5,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(1, 2, [w.showFrame(), w.showFrame(), w.end()]),
+      w.doAbc(abc, "LateScripts"),
+      w.symbolClass([
+        [0, "Main"],
+        [1, "Kid"],
+      ]),
+      w.place({ depth: 1, character: 1, name: "b" }),
+      w.place({ depth: 2, character: 1, name: "a" }),
+      w.place({ depth: 3, character: 1, name: "c" }),
+      ...Array.from({ length: 5 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
+// Clips p, a and q of four frames, the fourth placing a Kid, on a root
+// whose second frame places a Clip d and third a Clip r, bound to
+// scripts/LateScripts9.as, in a SWF of version 9.
+function lateScripts9(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    version: 9,
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 3,
+    tags: [
+      w.fileAttributes(true),
+      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      w.sprite(2, 4, [
+        w.showFrame(),
+        w.showFrame(),
+        w.showFrame(),
+        w.place({ depth: 1, character: 1, name: "kid" }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.doAbc(abc, "LateScripts9"),
+      w.symbolClass([
+        [0, "Main"],
+        [1, "Kid"],
+        [2, "Clip"],
+      ]),
+      w.place({ depth: 1, character: 2, name: "p" }),
+      w.place({ depth: 2, character: 2, name: "a" }),
+      w.place({ depth: 3, character: 2, name: "q" }),
+      w.showFrame(),
+      w.place({ depth: 4, character: 2, name: "d" }),
+      w.showFrame(),
+      w.place({ depth: 5, character: 2, name: "r" }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // A button whose up state is a scripted clip, in a clip the timeline places
 // beside another, by a frame or by a frame script's goto, and in clips
 // scripts make with `new`, from a listener and from a frame script, as
@@ -1549,6 +1615,25 @@ export const timelineCases: PlayerCase[] = [
     swf: buttonFirstFrame,
     script: "ButtonFirstFrame",
     frames: 6,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "late-scripts",
+    swf: lateScripts,
+    script: "LateScripts",
+    // The goto cycles' EXIT_FRAMEs count as frames to Flash's harness.
+    frames: 9,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "late-scripts-9",
+    swf: lateScripts9,
+    script: "LateScripts9",
+    frames: 4,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
