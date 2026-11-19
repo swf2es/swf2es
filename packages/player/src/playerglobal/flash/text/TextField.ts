@@ -2,7 +2,8 @@
 // TextModel (text/text.ts), its properties as adl reports them; a TextFormat's
 // values stored as Flash converts them, null for one it does not set.
 import { avm2 } from "@swf2es/runtime";
-import { CONTENT, type TextObject } from "../../../display/display.js";
+import { CONTENT, scrollMoved, type TextObject } from "../../../display/display.js";
+import { dispatchEvent, heard } from "../../../scripting/events.js";
 import type { Scripting } from "../../../scripting.js";
 import { GUTTER, lineOf, maxScrollH, maxScrollV, shownLines, TWIPS } from "../../../text/layout.js";
 import { applied, emptyFormat, type PartialFormat } from "../../../text/text.js";
@@ -844,6 +845,47 @@ export function textFieldNatives(s: Scripting): avm2.Natives {
       return style && typeof style === "object" ? formatOf(style as AsObject) : null;
     });
   };
+
+  /**
+   * `change` made to a field, and Event.SCROLL dispatched to it at once if
+   * that moved its scrollV, maxScrollV, scrollH or maxScrollH (adl), which
+   * are measured only while something hears it.
+   */
+  const scrolling = (o: TextFieldNatives, change: () => unknown): unknown => {
+    const field = o.$display;
+    const target = o as unknown as AsObject;
+    const before = heard(target, "scroll") ? field.scrollState() : null;
+    const result = change();
+    if (before && scrollMoved(before, field.scrollState())) {
+      const event = s.rt.construct(s.rt.classNamed("flash.events::Event"), "scroll", false, false);
+      dispatchEvent(s, target, event);
+    }
+
+    return result;
+  };
+
+  // What a script changes that adl dispatches SCROLL for. A new size it measures only later.
+  for (const name of [
+    "text",
+    "htmlText",
+    "appendText",
+    "replaceText",
+    "replaceSelectedText",
+    "setTextFormat",
+    "scrollV",
+    "scrollH",
+  ]) {
+    const d = Object.getOwnPropertyDescriptor(
+      TextFieldNatives.prototype,
+      name,
+    ) as PropertyDescriptor;
+    const key = d.set ? "set" : "value";
+    const inner = d[key] as (...args: unknown[]) => unknown;
+    d[key] = function (this: TextFieldNatives, ...args: unknown[]) {
+      return scrolling(this, () => inner.apply(this, args));
+    };
+    Object.defineProperty(TextFieldNatives.prototype, name, d);
+  }
 
   avm2.registerNativeClass(natives, "flash.text::TextFormat", TextFormatNatives);
   avm2.registerNativeClass(natives, "flash.text::TextField", TextFieldNatives);

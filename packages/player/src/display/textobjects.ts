@@ -65,6 +65,11 @@ export function settleFits(): void {
  * formats are a TextModel; a timeline's starts with its tag's text, read
  * as HTML if the tag says so, in the format the tag gives.
  */
+/** Whether two scrollState()s differ. */
+export function scrollMoved(a: readonly number[], b: readonly number[]): boolean {
+  return a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2] || a[3] !== b[3];
+}
+
 export class TextObject extends DisplayObject {
   readonly model = new TextModel();
   /** The embedded fonts its text may be in: its SWF's. */
@@ -114,6 +119,14 @@ export class TextObject extends DisplayObject {
   private scrolledRevision = -1;
   /** The first line shown, from 1: as a script, the wheel or the caret left it, and no further than new text scrolls. */
   private lineScroll = 1;
+  /**
+   * Told as a script, new text or the caret may have moved its scroll or
+   * how far it scrolls: an AVM1 field's onScroller comes as the frame ends,
+   * if they moved since it last came (Avm1.tellScrollers).
+   */
+  scrollTold: ((field: TextObject) => void) | null = null;
+  /** scrollV, maxScrollV, scrollH and maxScrollH as onScroller last told them. */
+  toldScroll: readonly number[] = [1, 1, 0, 0];
   /** The selection, from the end it was started at to the caret, as text indices; empty, a caret alone. */
   private anchorAt = 0;
   private caretAt = 0;
@@ -222,6 +235,11 @@ export class TextObject extends DisplayObject {
       this.scrollX = Math.min(this.scrollX, maxScrollH(this));
       this.lineScroll = Math.min(this.lineScroll, maxScrollV(this));
     }
+  }
+
+  /** scrollV, maxScrollV, scrollH and maxScrollH, the last in twips, as Event.SCROLL and onScroller compare them. */
+  scrollState(): number[] {
+    return [this.scrollV, maxScrollV(this), this.scrollH, maxScrollH(this)];
   }
 
   /** The first line shown, from 1. */
@@ -422,6 +440,8 @@ export class TextObject extends DisplayObject {
       this.scrollV = first + 1;
       this.scrollX = scroll;
       this.invalidate(CONTENT);
+      // AS3 dispatches no SCROLL for a caret's scroll; AVM1 calls onScroller (adl).
+      this.scrollTold?.(this);
     }
   }
 }

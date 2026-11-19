@@ -565,6 +565,26 @@ function textHitEdges(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Fields in Probe whose scroll scripts, text and carets change
+// (scripts/TextScrollEvents.as): when each dispatches Event.SCROLL.
+function textScrollEvents(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 160,
+    height: 80,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      w.doAbc(abc, "TextScrollEvents"),
+      w.symbolClass([[0, "TextScrollEvents"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 input fields in Probe scrolled to their carets by the focus, which
 // selects all their text, as TextInputScroll's: hscroll and maxhscroll in
 // twips, as Flash gives them for a field of embedded fonts. adl's AVM1
@@ -1201,6 +1221,15 @@ export const textCases: PlayerCase[] = [
     capture: [1],
     tolerance: 64,
     maxOutliers: 12,
+  },
+  {
+    name: "text-scroll-events",
+    swf: textScrollEvents,
+    script: "TextScrollEvents",
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "text-input-scroll",
