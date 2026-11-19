@@ -1053,9 +1053,34 @@ export class Scripting {
 
     this.stageWidth = width;
     this.stageHeight = height;
+    if (this.stageScaleMode !== "noScale") {
+      return;
+    }
+
     const stage = this.stage?.object;
-    if (this.stageScaleMode === "noScale" && stage && heard(stage, "resize")) {
+    if (stage && heard(stage, "resize")) {
       dispatchTo(this, stage, this.event("resize"));
+    }
+
+    // Then the loaded AVM1 movies' Stage.onResize (Flash Player 32).
+    this.loads.stageResized();
+  }
+
+  /** A script's scale mode, one of AS3's names: the host lays the stage out again for a new one. */
+  setStageScaleMode(mode: StageScaleMode): void {
+    this.stageScaleModeSet = true;
+    if (mode !== this.stageScaleMode) {
+      this.stageScaleMode = mode;
+      this.onStageLayout?.();
+    }
+  }
+
+  /** A script's alignment, as stageAlignment gives it. */
+  setStageAlign(align: string): void {
+    this.stageAlignSet = true;
+    if (align !== this.stageAlign) {
+      this.stageAlign = align;
+      this.onStageLayout?.();
     }
   }
 

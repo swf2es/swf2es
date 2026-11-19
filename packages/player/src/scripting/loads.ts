@@ -7,6 +7,7 @@
 import { isAs3, readSwf, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { Avm1, getUrlNavigate } from "../avm1/avm1.js";
+import type { StageHost } from "../avm1/globals/Stage.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import { decodeImageFile, decodeImages, hasUndecoded, imageFormat } from "../bitmap/images.js";
 import { type Container, MovieClip, rootOf, unloads } from "../display/display.js";
@@ -21,6 +22,7 @@ import {
   warmAudioFor,
 } from "../media/sounds.js";
 import type { Scripting } from "../scripting.js";
+import type { StageScaleMode } from "../stage.js";
 import { dispatchEvent } from "./events.js";
 
 const textEncoder = new TextEncoder();
@@ -91,6 +93,8 @@ export class Loads {
   private readonly unloadedAvm1: { vm: Avm1; state: "play" | "played" | "unload" }[] = [];
   /** Whether the frame's AVM1 has played, from then until the next frame starts. */
   private avm1Ticked = false;
+  /** The stage the loaded movies' Stage reads and sets, once one is loaded. */
+  private stage: StageHost | null = null;
 
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
@@ -157,6 +161,48 @@ export class Loads {
 
       movie.vm.destroy(false);
     }
+  }
+
+  /** The stage resized in noScale: each loaded movie's Stage.onResize. */
+  stageResized(): void {
+    for (const movie of [...this.avm1Movies.values()]) {
+      movie.vm.stageResized();
+    }
+  }
+
+  /** The stage as a loaded movie's Stage has it: this player's, one for every movie. */
+  private avm1Stage(): StageHost {
+    if (this.stage === null) {
+      const s = this.s;
+      this.stage = {
+        get stageWidth() {
+          return s.stageWidth;
+        },
+        get stageHeight() {
+          return s.stageHeight;
+        },
+        get scaleMode() {
+          return s.stageScaleMode;
+        },
+        set scaleMode(mode: string) {
+          s.setStageScaleMode(mode as StageScaleMode);
+        },
+        get align() {
+          return s.stageAlign;
+        },
+        set align(align: string) {
+          s.setStageAlign(align);
+        },
+        get showMenu() {
+          return s.showDefaultContextMenu;
+        },
+        set showMenu(show: boolean) {
+          s.showDefaultContextMenu = show;
+        },
+      };
+    }
+
+    return this.stage;
   }
 
   /** The loaded movies' sounds, which play under this player's mixer, those unloaded in the frame among them. */
@@ -1064,6 +1110,7 @@ export class Loads {
         socket: s.socket ?? undefined,
         audio: s.audio,
         mixer: sharedMixerOf(s),
+        quality: s,
         storage: s.storage,
         fileHost: s.fileHost,
         decodeImage: s.decodeImage,
@@ -1078,7 +1125,7 @@ export class Loads {
         screenCapabilities: s.screenCapabilities,
         debugger: s.rt.debugger,
       });
-      vm.attach(swf, library, root, load.bytes.length, s.frameRate, s, false);
+      vm.attach(swf, library, root, load.bytes.length, s.frameRate, this.avm1Stage(), false);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
       s.avm1Input ??= new LoadedAvm1Input(s);
       s.avm1Input.add(root, vm);

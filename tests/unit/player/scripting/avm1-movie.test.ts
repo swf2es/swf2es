@@ -1,9 +1,10 @@
 // AVM1 movies an AS3 Loader holds, with the player around them: one mixer
-// for both VMs' sounds, and the frame an unloaded movie still plays or the
-// unload handlers it runs instead. The host is scripts/LoadedAvm1Lifecycle.as,
-// the movies tests/avm1-lifecycle.ts. What each test expects was measured in
-// Flash Player 32 (adl, and the Windows debug projector for the unload
-// handlers and the frames) with probes that do the same.
+// for both VMs' sounds, the frame an unloaded movie still plays or the
+// unload handlers it runs instead, and one stage and quality. The host is
+// scripts/LoadedAvm1Lifecycle.as, the movies tests/avm1-lifecycle.ts. What
+// each test expects was measured in Flash Player 32 (adl, and the Windows
+// debug projector for the stage, the unload handlers and the frames) with
+// probes that do the same.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -13,7 +14,7 @@ import { containerEngine } from "../../../../oracle/oracle.ts";
 import type { AudioHost } from "../../../../packages/player/dist/media/audio.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
-import { soundMovie, unloadMovie } from "../../../avm1-lifecycle.ts";
+import { soundMovie, stageMovie, unloadMovie } from "../../../avm1-lifecycle.ts";
 import { bare } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
@@ -249,6 +250,53 @@ test("a movie taken off the display list plays on, its interval too", { skip }, 
     await p.tick();
     assert.deepEqual(framed(p.lines), ["avm1:ef 4", "avm1:ef 5"]);
     assert.ok(p.lines.includes("avm1:interval"));
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a loaded movie's Stage and quality are the AS3 stage's, onResize with its RESIZE", {
+  skip,
+}, async () => {
+  const p = await play(stageMovie());
+  // A page's layout: in noScale the stage takes the box it is shown in, else its own size.
+  p.scripting.onStageLayout = () => {
+    const noScale = p.scripting.stageScaleMode === "noScale";
+    p.scripting.resizeStage(noScale ? 260 : 200, noScale ? 170 : 150);
+  };
+  try {
+    p.control("load");
+    await p.until("avm1:_quality LOW 200x150 showAll  true LOW 0");
+    p.control("stage");
+    p.control("quality medium");
+    await p.until("avm1:_highquality 2 200x150 showAll  true BEST 2");
+    p.control("stage");
+    await p.until("avm1:align 200x150 showAll RB false LOW 0");
+    p.control("stage");
+    await p.until("avm1:noScale 260x170 noScale RB false LOW 0");
+    p.control("scaleMode showAll");
+    p.control("scaleMode noScale");
+    p.control("stage");
+    await p.until("avm1:stage 260x170 noScale RB false LOW 0");
+    assert.deepEqual(p.lines, [
+      "avm1:stage 200x150 showAll  true HIGH 1",
+      "avm1:_quality LOW 200x150 showAll  true LOW 0",
+      "as3:stage 200x150 showAll  true LOW",
+      "avm1:stage 200x150 showAll  true MEDIUM 0",
+      "avm1:_highquality 2 200x150 showAll  true BEST 2",
+      "as3:stage 200x150 showAll  true BEST",
+      "avm1:stage 200x150 showAll  true BEST 2",
+      "avm1:_highquality 0 200x150 showAll  true LOW 0",
+      // Read as L, T, R and B, as AS3's T, B, L and R.
+      "avm1:align 200x150 showAll RB false LOW 0",
+      "as3:stage 200x150 showAll BR false LOW",
+      "avm1:onResize 260x170 noScale RB false LOW 0",
+      "avm1:noScale 260x170 noScale RB false LOW 0",
+      // No onResize out of noScale.
+      "avm1:onResize 260x170 noScale RB false LOW 0",
+      "as3:stage 260x170 noScale BR false LOW",
+      "avm1:stage 260x170 noScale RB false LOW 0",
+    ]);
   } finally {
     p.player.destroy();
   }

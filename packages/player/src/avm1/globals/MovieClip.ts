@@ -359,7 +359,11 @@ const PROPERTIES: [string, DisplayProperty][] = [
   [
     "_highquality",
     {
-      get: (f) => (f.movie.quality === "BEST" ? 2 : f.movie.quality === "LOW" ? 0 : 1),
+      // MEDIUM reads as LOW does (Flash Player 32, the AS3 stage's set to it).
+      get: (f) => {
+        const quality = f.movie.quality;
+        return quality === "BEST" ? 2 : quality === "LOW" || quality === "MEDIUM" ? 0 : 1;
+      },
       set(f, value, version) {
         if (value === undefined || value === null) {
           return;

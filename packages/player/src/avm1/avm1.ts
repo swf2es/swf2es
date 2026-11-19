@@ -98,7 +98,7 @@ import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
-import { type StageSize, stageObject } from "./globals/Stage.js";
+import { ownStage, type StageHost, stageObject } from "./globals/Stage.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { systemObject } from "./globals/System.js";
 import { textFieldClass } from "./globals/TextField.js";
@@ -175,6 +175,8 @@ export interface Avm1Options {
   audio?: AudioHost | null;
   /** The mixer of the AS3 player that loaded the movie, which its sounds play under; its own without one. */
   mixer?: SharedMixer;
+  /** What keeps the quality of the AS3 player that loaded the movie, which _quality reads and sets; its own without one. */
+  quality?: { quality: string };
   /**
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
@@ -347,7 +349,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The player's clock, the scripts' timeout and setInterval's timers. */
   readonly timers: Timers;
 
-  quality = "HIGH";
+  /** Stage, once the SWF is attached: whose listeners hear onResize. */
+  private stageFace: avm1.Avm1Object | null = null;
+  /** The quality, where no AS3 player that loaded the movie keeps it. */
+  private ownQuality = "HIGH";
+  private readonly sharedQuality: { quality: string } | null;
   focusRect = true;
   soundBufferTime = 5;
   newInvalidBounds = false;
@@ -399,6 +405,19 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return this.rate;
   }
 
+  /** The stage's quality, "LOW" to "BEST": an AS3 player's, which it shares with its loaded movies. */
+  get quality(): string {
+    return this.sharedQuality?.quality ?? this.ownQuality;
+  }
+
+  set quality(quality: string) {
+    if (this.sharedQuality === null) {
+      this.ownQuality = quality;
+    } else {
+      this.sharedQuality.quality = quality;
+    }
+  }
+
   constructor(
     readonly codegen: Codegen,
     options: Avm1Options = {},
@@ -412,6 +431,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.debugger = options.debugger ?? false;
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
+    this.sharedQuality = options.quality ?? null;
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
       options.fetch ?? null,
@@ -536,10 +556,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     root: MovieClip,
     size = swf.header.fileLength,
     frameRate = swf.frameRate,
-    stageSize: StageSize = {
+    stage: StageHost = ownStage({
       stageWidth: Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
       stageHeight: Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
-    },
+    }),
     standalone = true,
   ): void {
     this.movieRoot = root;
@@ -583,7 +603,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("Key", this.input.keyFace, avm1.DONT_ENUM);
     this.input.mouseFace = mouseObject(realm, this.input, this.swfVersion);
     realm.global.define("Mouse", this.input.mouseFace, avm1.DONT_ENUM);
-    realm.global.define("Stage", stageObject(realm, stageSize), avm1.DONT_ENUM);
+    this.stageFace = stageObject(realm, stage);
+    realm.global.define("Stage", this.stageFace, avm1.DONT_ENUM);
     this.focusTracker.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.focusTracker.selectionFace, avm1.DONT_ENUM);
     realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
@@ -1305,6 +1326,22 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     stopTimelineSounds(this.sounds);
     if (closeAudio) {
       this.audio?.close?.();
+    }
+  }
+
+  /** The stage resized in noScale: Stage's listeners hear onResize, as an AS3 stage's RESIZE goes. */
+  stageResized(): void {
+    const stage = this.stageFace;
+    if (stage === null || this.halted) {
+      return;
+    }
+
+    this.timers.begin();
+    try {
+      this.callback(stage, "broadcastMessage", ["onResize"]);
+      this.queue.run();
+    } finally {
+      this.timers.end();
     }
   }
 

@@ -76,11 +76,7 @@ export function stageNatives(s: Scripting): avm2.Natives {
           throw s.rt.error("ArgumentError", 2008, "scaleMode");
       }
 
-      s.stageScaleModeSet = true;
-      if (value !== s.stageScaleMode) {
-        s.stageScaleMode = value;
-        s.onStageLayout?.();
-      }
+      s.setStageScaleMode(value);
     }
 
     get align(): string {
@@ -92,12 +88,7 @@ export function stageNatives(s: Scripting): avm2.Natives {
         throw s.rt.error("TypeError", 2007, "align");
       }
 
-      const value = stageAlignment(s.rt.toString(v));
-      s.stageAlignSet = true;
-      if (value !== s.stageAlign) {
-        s.stageAlign = value;
-        s.onStageLayout?.();
-      }
+      s.setStageAlign(stageAlignment(s.rt.toString(v)));
     }
 
     get quality(): string {

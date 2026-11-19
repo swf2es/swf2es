@@ -1,6 +1,6 @@
 // Authored AVM1 movies for an AS3 Loader's lifecycle tests
 // (tests/unit/player/scripting/avm1-movie.test.ts): what a loaded movie's
-// sounds and unload do with the AS3 player around it.
+// sounds, unload and stage do with the AS3 player around it.
 // Each logs "avm1:" lines; `ef` counts its frames from its first.
 import { flashAssembler, script } from "./avm1-script.ts";
 import * as w from "./swf-writer.ts";
@@ -81,6 +81,29 @@ onEnterFrame = function () {
   ef++;
   log("ef " + ef);
   if (ef == 2) { startAll(); }
+};
+stop();`);
+}
+
+/** Stage and the quality as the movie reads them, its own changes to them, and onResize. */
+export function stageMovie(): Uint8Array {
+  return movie(`${prelude}
+function st() {
+  return Stage.width + "x" + Stage.height + " " + Stage.scaleMode + " " + Stage.align + " " +
+    Stage.showMenu + " " + _quality + " " + _highquality;
+}
+var listener = {};
+listener.onResize = function () { log("onResize " + st()); };
+Stage.addListener(listener);
+onEnterFrame = function () {
+  ef++;
+  if (ef == 1) { log("stage " + st()); }
+  if (ef == 2) { _quality = "LOW"; log("_quality LOW " + st()); }
+  if (ef == 4) { log("stage " + st()); _highquality = 2; log("_highquality 2 " + st()); }
+  if (ef == 6) { log("stage " + st()); _highquality = 0; log("_highquality 0 " + st()); }
+  if (ef == 8) { Stage.align = "BR"; Stage.showMenu = false; log("align " + st()); }
+  if (ef == 10) { Stage.scaleMode = "noScale"; log("noScale " + st()); }
+  if (ef == 12) { log("stage " + st()); }
 };
 stop();`);
 }
