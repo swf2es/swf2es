@@ -78,6 +78,8 @@ export class Loads {
   private readonly pendingRequests = new Set<Promise<void>>();
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
+  /** The Stage's LoaderInfo, made for the main SWF's when first asked for. */
+  private stageInfo: { main: AsObject; info: AsObject } | null = null;
   /** A load from bytes was asked, and heldTime has not yet told of it ready. */
   private holding = false;
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
@@ -171,6 +173,27 @@ export class Loads {
     info.$loaderURL = loader ? this.ownerUrl(loader) : this.s.url;
     info.$loaded = 0;
     info.$total = 0;
+    return info;
+  }
+
+  /**
+   * The Stage's LoaderInfo. Flash's is another object than the main SWF's
+   * (Flash Player 32's projector: `stage.loaderInfo == loaderInfo` is
+   * false), which tells what that one knows, its content the main SWF's
+   * root, but hears none of its events, nor its uncaught errors.
+   */
+  stageLoaderInfo(main: AsObject): AsObject {
+    const made = this.stageInfo;
+    if (made !== null && made.main === main) {
+      return made.info;
+    }
+
+    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    for (const name of MIRRORED) {
+      Object.defineProperty(info, name, { get: () => main[name], configurable: true });
+    }
+
+    this.stageInfo = { main, info };
     return info;
   }
 
@@ -1109,6 +1132,22 @@ export class Loads {
 }
 
 const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
+
+/** What the Stage's LoaderInfo reads from the main SWF's (stageLoaderInfo). */
+const MIRRORED = [
+  "$loader",
+  "$content",
+  "$bytes",
+  "$swf",
+  "$typed",
+  "$image",
+  "$url",
+  "$params",
+  "$loaderURL",
+  "$loaded",
+  "$total",
+  "$domain",
+];
 const NO_BYTES = new Uint8Array(0);
 
 /**
