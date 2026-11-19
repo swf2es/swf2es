@@ -253,7 +253,7 @@ export function action(
       out.text("V.implementsOp(cx);\n");
       break;
     case ops.OP_RandomNumber:
-      pushed(em, top(em, "st.push(V.randomNumber(", "));\n"));
+      pushed(em, top(em, "st.push(V.randomNumber(cx, ", "));\n"));
       break;
     case ops.OP_DefineFunction:
     case ops.OP_DefineFunction2:

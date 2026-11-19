@@ -787,8 +787,11 @@ the ninth digit (`Math.pow(1.0000001, 1e9)`), which the corpus's tests
 leave to their tolerance. So swf2es takes the corpus's special cases and
 JavaScript's precision, and the cases trace no result adl and Flash
 Player may differ in. RandomNumber (`random(n)`) is an int below its max
-cast as Rust casts one (saturated), 0 for a max below 1; its values and
-Math.random's are JavaScript's generator's, not Flash's.
+cast as Rust casts one (saturated), 0 for a max below 1: the next value
+of Flash's generator modulo the max, as avmplus' Random. RandomNumber and
+Math.random draw from one generator, the realm's, as adl's interleaved
+sequences show; it is AS3's (docs/architecture/runtime.md, "Random
+numbers"), so Math.random's values are multiples of 2^-31.
 
 ### Date
 
