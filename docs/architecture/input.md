@@ -683,16 +683,22 @@ built-in actions remain unimplemented. The model is renderer-independent.
 AVM1's `ContextMenu` and `ContextMenuItem` (`avm1/globals/ContextMenu.ts`)
 are adl's: a menu's `onSelect`, its `builtInItems`, which `hideBuiltInItems`
 turns all false and a copy shares, and its `customItems`, which a copy
-copies one by one with each item's `copy`; an item's caption, `onSelect`,
-`separatorBefore`, `enabled` and `visible` kept as given; their methods
-SWF 7's. A right click on an AVM1 movie, played alone or loaded by AS3,
-shows the menu of the nearest of the clip whose drawing is under it and
-that clip's parents whose `menu` is one, the root's on the empty stage of
-a movie alone: its `onSelect` is called with that clip and the menu first,
-then its visible items show, and the quality entries unless its
-`builtInItems.quality` is false; a choice calls the item's `onSelect` with
-the clip and the item. Off a loaded movie AS3's menu shows, as Flash
-Player 32's projector showed all this
+copies one by one with each item's `copy`; an item's caption and
+`onSelect` kept as given, its `separatorBefore`, `enabled` and `visible`
+made booleans; their methods SWF 7's. A right click on an AVM1 movie,
+played alone or loaded by AS3, shows the menu of the nearest of the clip
+whose own drawing is under it and that clip's parents whose `menu` is an
+object, a ContextMenu or not; a clip of another level with none, and the
+empty stage of a movie alone, have level 0's. Its `onSelect` is called
+with that clip and the menu first; then its custom items show as Flash
+Player 32's projector showed them: each object whose `onSelect` is a
+function, a ContextMenuItem or not, whose caption begins none of Flash's
+own entries ("" and "Zoom", "Prin" or "Abo" among those that do) and is
+no earlier one's, the first 15 such, the hidden among them, and of those
+the visible; the quality entries unless `builtInItems.quality` is false.
+A choice calls the item's `onSelect` with the clip and the item, and
+nothing once the movie is unloaded or the player gone. Off a loaded
+movie AS3's menu shows, as the projector showed all this
 (`tests/unit/player/input/context-menu.test.ts`); over one none of whose
 clips has a menu, AS3's too, which no probe measured. A button's or a
 text field's own `menu` is not read yet.
