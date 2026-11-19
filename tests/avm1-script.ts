@@ -1350,8 +1350,10 @@ function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
       args[0](a);
       a.op("RemoveSprite");
       return;
-    // GetURL2, as Flash's compiler writes them: the URL, then the target, a
-    // level's "_levelN", its flags loadTarget (0x40) for a clip's, and
+    // As Flash's compiler writes them: a load into a level of a constant URL
+    // and number, and its unload, a GetURL to "_levelN"; anything else a
+    // GetURL2 of the URL and the target, a level's "_level" and its number
+    // joined by StringAdd, its flags loadTarget (0x40) for a clip's and
     // loadVariables (0x80); an unload is a load of "".
     case "loadMovie":
     case "loadVariables":
@@ -1361,24 +1363,35 @@ function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
     case "unloadMovieNum": {
       const unload = name.startsWith("unload");
       const level = name.endsWith("Num");
+      const variables = name.startsWith("loadVariables");
+      const target = args[unload ? 0 : 1];
+      const constant = (emit: Emit) => {
+        const probe = new Avm1Assembler();
+        emit(probe);
+        return constantOf(probe.bytes());
+      };
+      const url = unload ? "" : constant(args[0]);
+      const n = constant(target);
+      if (level && !variables && typeof url === "string" && typeof n === "number") {
+        a.getUrl(url, `_level${n}`);
+        return;
+      }
+
       if (unload) {
         a.push("");
       } else {
         args[0](a);
       }
 
-      const target = args[unload ? 0 : 1];
       if (level) {
         a.push("_level");
         target(a);
-        a.op("Add2");
+        a.op("StringAdd");
       } else {
         target(a);
       }
 
-      a.action(0x9a, [
-        (level ? 0 : 0x40) | (name === "loadVariables" || name === "loadVariablesNum" ? 0x80 : 0),
-      ]);
+      a.action(0x9a, [(level ? 0 : 0x40) | (variables ? 0x80 : 0)]);
       return;
     }
     // Of constant strings only, a GetURL of "FSCommand:" and the command, its target the arguments.
