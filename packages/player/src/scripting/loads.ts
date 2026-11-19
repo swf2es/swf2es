@@ -547,8 +547,8 @@ export class Loads {
   }
 
   /**
-   * All of a load's bytes came, after its last PROGRESS: what its
-   * LoaderInfo knows of them from then, before its content, a frame on.
+   * All of a load's bytes came: what its LoaderInfo knows of them from its
+   * last PROGRESS on, before its content comes.
    */
   private arrived(load: Load): void {
     if (load.generation !== load.loader.$generation || load.told < 0 || load.known) {
