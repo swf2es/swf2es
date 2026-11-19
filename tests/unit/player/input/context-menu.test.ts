@@ -178,6 +178,12 @@ test("a loaded AVM1 movie's own menus show over its drawing, AS3's elsewhere", {
       "as3:menuSelect owner [object LoadedAvm1Menu] target [object LoadedAvm1Menu]",
       "as3:item owner [object LoadedAvm1Menu] target [object LoadedAvm1Menu]",
     ]);
+    // A menu open as the player goes calls nothing.
+    const late = player.contextMenu({ x: 50, y: 50 });
+    lines.length = 0;
+    player.destroy();
+    late[0].select();
+    assert.deepEqual(lines, []);
   } finally {
     player.destroy();
   }
@@ -209,6 +215,155 @@ test("an AVM1 movie's menus: the clip's, or the root's, the empty stage's too", 
     );
     stage[0].select();
     assert.deepEqual(lines.splice(0), ["avm1:root onSelect _level0", "avm1:root item _level0"]);
+  } finally {
+    player.destroy();
+  }
+});
+
+/** An AVM1 SWF of 400 by 700 pixels whose one frame runs `source`. */
+function avm1Swf(source: string): Uint8Array {
+  return w.swf({
+    version: 8,
+    width: 400,
+    height: 700,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** A clip of 100 by 100 pixels at the origin, and `_root.menu` as `menu` makes it. */
+const ART = `
+function f() { trace("f"); }
+var art = createEmptyMovieClip("art", 1);
+art.beginFill(0x2266cc); art.moveTo(0, 0); art.lineTo(100, 0); art.lineTo(100, 100); art.lineTo(0, 100); art.endFill();
+var cm = new ContextMenu(function(o, m) { trace("onSelect " + o); });
+cm.hideBuiltInItems();`;
+
+/** `source` played alone, its loads answered from `files`, as `play` gives it. */
+async function alone(source: string, files: Record<string, Uint8Array> = {}) {
+  const wasm = await WebAssembly.compile(
+    readFileSync(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const lines: string[] = [];
+  const errors: unknown[] = [];
+  const avm1 = new Avm1(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    onUncaught: (error) => errors.push(error),
+    realTime: null,
+    audio: null,
+    url: "http://example.test/main.swf",
+    fetch: async (request) => {
+      const bytes = files[request.url.slice(request.url.lastIndexOf("/") + 1)] ?? null;
+      return { bytes, status: bytes ? 200 : 404, headers: [] };
+    },
+  });
+  const player = new Player(avm1Swf(source), null, avm1);
+  await player.start();
+  for (let i = 0; i < 3; i++) {
+    await avm1.settled();
+    player.tick();
+  }
+
+  return { player, lines, errors };
+}
+
+// What the projector's menus showed over each probe's drawing, alone (screenshots): an item
+// needs a function for its onSelect, a ContextMenuItem or not, and a caption that begins none of
+// Flash's own entries and is no earlier one's; the first 15 such count, the hidden among them.
+const MENUS: [string, string, string[]][] = [
+  [
+    "duplicates count once",
+    `var c = ["Kx", "Kx", "Kx", "Kx", "Kx"]; for (var i = 1; i <= 14; i++) { c.push("K" + i); }
+for (var i = 0; i < c.length; i++) { cm.customItems.push(new ContextMenuItem(c[i], f)); }`,
+    ["Kx", ...Array.from({ length: 14 }, (_, i) => `K${i + 1}`)],
+  ],
+  [
+    "hidden items count toward 15",
+    `for (var i = 0; i < 5; i++) { var h = new ContextMenuItem("Hid" + i, f); h.visible = false; cm.customItems.push(h); }
+for (var i = 1; i <= 16; i++) { cm.customItems.push(new ContextMenuItem("K" + i, f)); }`,
+    Array.from({ length: 10 }, (_, i) => `K${i + 1}`),
+  ],
+  [
+    "an item needs a function, not a class",
+    `cm.customItems.push(new ContextMenuItem("Nnull", null));
+cm.customItems.push(new ContextMenuItem("Nstr", "x"));
+cm.customItems.push(new ContextMenuItem("Nfn", f));
+cm.customItems.push({ caption: "Plain", onSelect: f, enabled: true, visible: true, separatorBefore: false });
+var d = new ContextMenuItem("Dis", f); d.enabled = false; cm.customItems.push(d);
+cm.customItems.push(new ContextMenuItem("Sep", f, true));`,
+    ["Nfn", "Plain", "Dis", "Sep"],
+  ],
+  [
+    "a caption may not begin Flash's own entries",
+    `var c = ["Zoom", "Zoom In", "Print", "Prin", "Sett", "Settings", "About", "Abo", "Qual", "Quality", "Show", "Loop", "Rew", "Play", "Debug", "Global", "", "1", "10"];
+for (var i = 0; i < c.length; i++) { cm.customItems.push(new ContextMenuItem(c[i], f)); }`,
+    ["Global"],
+  ],
+];
+
+for (const [name, items, captions] of MENUS) {
+  test(`an AVM1 menu's items as Flash shows them: ${name}`, async () => {
+    const { player, lines } = await alone(`${ART}\n${items}\n_root.menu = cm;`);
+    try {
+      const menu = player.contextMenu({ x: 20, y: 10 });
+      assert.deepEqual(
+        menu.map((item) => item.caption),
+        captions,
+      );
+      assert.deepEqual(lines, ["onSelect _level0"]);
+      if (name.startsWith("an item needs")) {
+        assert.deepEqual(
+          menu.map((item) => [item.enabled, item.separatorBefore]),
+          [
+            [true, false],
+            [true, false],
+            [false, false],
+            [true, true],
+          ],
+        );
+      }
+    } finally {
+      player.destroy();
+    }
+  });
+}
+
+// A movie of two levels, as the projector showed it: _level1's drawing, with no menu of its own,
+// has _level0's. A choice shows at once (Player.changes), and none is made once the player is gone.
+test("an AVM1 level with no menu has level 0's, and a choice shows at once", async () => {
+  const { player, lines, errors } = await alone(
+    `${ART}
+cm.customItems.push(new ContextMenuItem("One", f));
+_root.menu = cm;
+loadMovieNum("level.swf", 1);`,
+    {
+      "level.swf": avm1Swf(`var box = createEmptyMovieClip("box", 1);
+box.beginFill(0x22aa77); box.moveTo(150, 0); box.lineTo(250, 0); box.lineTo(250, 100); box.lineTo(150, 100); box.endFill();
+trace("level " + this);`),
+    },
+  );
+  try {
+    assert.deepEqual(lines.splice(0), ["level _level1"]);
+    assert.deepEqual(errors, []);
+    const menu = player.contextMenu({ x: 200, y: 50 });
+    assert.deepEqual(
+      menu.map((item) => item.caption),
+      ["One"],
+    );
+    assert.deepEqual(lines.splice(0), ["onSelect _level0"]);
+    const changes = player.changes;
+    menu[0].select();
+    assert.deepEqual(lines.splice(0), ["f"]);
+    assert.ok(player.changes > changes);
+    const late = player.contextMenu({ x: 20, y: 10 });
+    lines.length = 0;
+    player.destroy();
+    late[0].select();
+    assert.deepEqual(lines, []);
   } finally {
     player.destroy();
   }

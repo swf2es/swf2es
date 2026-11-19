@@ -255,6 +255,8 @@ export class Player {
   }
 
   private stopped = false;
+  /** Menus an AVM1 movie alone opened, and their choices, which may change what shows. */
+  private menuChanges = 0;
 
   /** Snapshot the SWF's menu on demand; hosts keep the callbacks only while it is open. */
   contextMenu(p: PointerState): MenuItem[] {
@@ -272,8 +274,17 @@ export class Player {
       } else if (this.avm1 && this.avm1Pointer) {
         // The menu of the clip under the pointer, or else the root's, as `_root.menu` covers the stage.
         const own = this.avm1.menu(this.avm1Pointer.contentAt(p.x, p.y) ?? this.root);
+        // What onSelect and a choice change shows at once, as a script's AS3 menu does.
+        this.menuChanges++;
         if (own !== null) {
-          menu = { items: own.items, quality: menu.quality && own.quality };
+          const items = own.items.map((item) => ({
+            ...item,
+            select: () => {
+              item.select();
+              this.menuChanges++;
+            },
+          }));
+          menu = { items, quality: menu.quality && own.quality };
         }
       }
     } catch (error) {
@@ -418,6 +429,7 @@ export class Player {
       (this.scripting?.updates ?? 0) +
       (this.keyboard?.handled ?? 0) +
       (this.scripting?.hostCalls ?? 0) +
+      this.menuChanges +
       this.activations
     );
   }

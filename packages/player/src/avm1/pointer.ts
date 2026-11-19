@@ -8,7 +8,7 @@
 // moves, drags while the button is down, a press, and a release or a
 // release outside.
 import { ClipEvent } from "@swf2es/format";
-import { hitsPoint, toStage } from "../display/bounds.js";
+import { hitsOwnPoint, hitsPoint, toStage } from "../display/bounds.js";
 import {
   ButtonObject,
   type Container,
@@ -602,7 +602,9 @@ export class Avm1Pointer implements Pointer {
 
     const child = this.pickChildren(d, x, y, any);
     // A clip's own drawing, as the drawing API makes it, below its children.
-    return child ?? (any && d.drawing !== null && this.drawnAt(d, x, y) ? d : null);
+    return (
+      child ?? (any && d.drawing !== null && hitsOwnPoint(d, x, y, this.stage, true) ? d : null)
+    );
   }
 
   private pickChildren(d: Container, x: number, y: number, any: boolean): DisplayObject | null {

@@ -12,19 +12,14 @@ const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.VERSION_7;
 /** The built-in items, in the order Flash lists them. */
 const BUILT_IN = ["save", "zoom", "quality", "play", "loop", "rewind", "forward_back", "print"];
 
-/** The menus and items these classes made, which a right click takes for a menu and its items. */
+/** The two classes. */
 export interface ContextMenus {
   ContextMenu: avm1.Avm1Function;
   ContextMenuItem: avm1.Avm1Function;
-  menus: WeakSet<avm1.Avm1Object>;
-  items: WeakSet<avm1.Avm1Object>;
 }
 
 /** `ContextMenu` and `ContextMenuItem`. */
 export function contextMenuClasses(realm: avm1.Realm): ContextMenus {
-  const menus = new WeakSet<avm1.Avm1Object>();
-  const items = new WeakSet<avm1.Avm1Object>();
-
   const itemProto = new avm1.Avm1Object(realm.objectProto);
   // Each of its own, in Flash's order: for..in lists the last first.
   const item = (
@@ -35,7 +30,6 @@ export function contextMenuClasses(realm: avm1.Realm): ContextMenus {
     enabled: avm1.Value,
     visible: avm1.Value,
   ) => {
-    items.add(self);
     self.define("caption", caption, 0);
     self.define("onSelect", onSelect, 0);
     self.define("separatorBefore", separatorBefore, 0);
@@ -78,7 +72,6 @@ export function contextMenuClasses(realm: avm1.Realm): ContextMenus {
     builtIn: avm1.Avm1Object,
     custom: avm1.Avm1Object,
   ) => {
-    menus.add(self);
     self.define("onSelect", onSelect, 0);
     self.define("builtInItems", builtIn, 0);
     self.define("customItems", custom, 0);
@@ -137,7 +130,7 @@ export function contextMenuClasses(realm: avm1.Realm): ContextMenus {
     }),
     FIXED,
   );
-  return { ContextMenu, ContextMenuItem, menus, items };
+  return { ContextMenu, ContextMenuItem };
 }
 
 /** A custom item of a menu a right click shows, and what choosing it calls. */
@@ -160,14 +153,41 @@ export interface Avm1Menu {
 }
 
 /**
+ * Flash's own entries, which a custom caption may not begin: one that is
+ * the start of any, "" among them, is left out of the menu.
+ */
+const RESERVED = [
+  "Zoom In",
+  "Zoom Out",
+  "100%",
+  "Show All",
+  "Quality",
+  "High",
+  "Medium",
+  "Low",
+  "Play",
+  "Loop",
+  "Rewind",
+  "Forward",
+  "Back",
+  "Print...",
+  "Settings...",
+  "About Adobe Flash Player",
+  "Show Redraw Regions",
+  "Debugger",
+];
+
+/**
  * The menu a right click on `d` shows, from `d` up through its parents to
- * the first whose AVM1 object's `menu` is a ContextMenu: its onSelect
- * called first with that object and the menu, as Flash Player 32 calls it
- * as the menu opens, through `call`; then its visible custom items, at
- * most 15, one of each caption. Null where none has a menu.
+ * the first whose AVM1 object's `menu` is an object, a ContextMenu or not:
+ * its onSelect called first with that object and the menu, as Flash
+ * Player 32 calls it as the menu opens, through `call`; then its custom
+ * items as the projector showed them: each object whose onSelect is a
+ * function, a ContextMenuItem or not, but one whose caption begins none of
+ * Flash's entries and is no earlier one's, the first 15 of those, the
+ * hidden among them, and of those the visible. Null where none has a menu.
  */
 export function menuAt(
-  classes: ContextMenus,
   d: DisplayObject | null,
   version: number,
   call: (o: avm1.Avm1Object, name: string, args: avm1.Value[]) => void,
@@ -179,7 +199,7 @@ export function menuAt(
     }
 
     const menu = avm1.get(owner, "menu", version);
-    if (!(menu instanceof avm1.Avm1Object) || !classes.menus.has(menu)) {
+    if (!(menu instanceof avm1.Avm1Object)) {
       continue;
     }
 
@@ -197,25 +217,30 @@ export function menuAt(
 
     const captions = new Set<string>();
     const length = avm1.toNumber(avm1.get(custom, "length", version), version);
-    for (let i = 0; i < length && result.items.length < 15; i++) {
+    for (let i = 0; i < length && captions.size < 15; i++) {
       const item = avm1.get(custom, String(i), version);
-      if (!(item instanceof avm1.Avm1Object) || !classes.items.has(item)) {
+      if (
+        !(item instanceof avm1.Avm1Object) ||
+        !(avm1.get(item, "onSelect", version) instanceof avm1.Avm1Function)
+      ) {
         continue;
       }
 
-      const flag = (name: string) => avm1.toBoolean(avm1.get(item, name, version), version);
       const caption = avm1.stringOf(avm1.get(item, "caption", version), version);
-      if (!flag("visible") || caption === "" || captions.has(caption)) {
+      if (captions.has(caption) || RESERVED.some((entry) => entry.startsWith(caption))) {
         continue;
       }
 
       captions.add(caption);
-      result.items.push({
-        caption,
-        enabled: flag("enabled"),
-        separatorBefore: flag("separatorBefore"),
-        item,
-      });
+      const flag = (name: string) => avm1.toBoolean(avm1.get(item, name, version), version);
+      if (flag("visible")) {
+        result.items.push({
+          caption,
+          enabled: flag("enabled"),
+          separatorBefore: flag("separatorBefore"),
+          item,
+        });
+      }
     }
 
     return result;

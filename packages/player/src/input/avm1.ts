@@ -11,6 +11,7 @@ import { Avm1Keyboard } from "../avm1/keyboard.js";
 import { Avm1Pointer } from "../avm1/pointer.js";
 import { Container, type DisplayObject, type MovieClip } from "../display/display.js";
 import type { Scripting } from "../scripting.js";
+import type { MenuItem } from "./context-menu.js";
 import { type KeyState, setFocus } from "./keyboard.js";
 import type { Cursor, PointerState } from "./pointer.js";
 
@@ -233,11 +234,23 @@ export class LoadedAvm1Input {
 
     const pointer = root === null ? undefined : this.movies.get(root);
     const movie = root === null ? undefined : this.keyboards.get(root);
-    if (pointer === undefined || movie === undefined) {
+    if (root === null || pointer === undefined || movie === undefined) {
       return null;
     }
 
-    return movie.vm.menu(pointer.contentAt(p.x, p.y));
+    const menu = movie.vm.menu(pointer.contentAt(p.x, p.y));
+    if (menu === null) {
+      return null;
+    }
+
+    // A movie unloaded, or a player destroyed, while its menu is open calls nothing.
+    const movieRoot = root;
+    const select = (item: MenuItem) => () => {
+      if (this.movies.has(movieRoot) && !this.s.destroyed) {
+        item.select();
+      }
+    };
+    return { ...menu, items: menu.items.map((item) => ({ ...item, select: select(item) })) };
   }
 
   cursor(): Cursor | null {
