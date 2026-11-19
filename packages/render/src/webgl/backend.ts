@@ -385,6 +385,15 @@ export class WebGLBackend {
     // A frame drawn into a layer, for BitmapData, is no frame of the canvas': idle layers are
     // counted in the canvas' frames.
     const counted = root === null;
+    // Once the first frame is drawn, the programs not drawn with yet are made, a frame's share,
+    // before this frame draws anything: Chrome clears a canvas it composited at the first draw
+    // call after, into whatever framebuffer, and the stage's blit onto the canvas is none. A
+    // warming draw after a frame that blitted and drew nothing else, as of a stage holding
+    // nothing, wiped that frame, and the canvas showed black.
+    if (counted) {
+      this.programs.step();
+    }
+
     const gl = this.gl;
     this.frameFilters = filters;
     this.atlas.place(geometries);
@@ -610,8 +619,6 @@ export class WebGLBackend {
       // The free layers, and the stage's (stageAlpha), undrawn into for LAYER_IDLE_FRAMES let go of.
       this.stage.dropIdleLayer();
       this.pool.endFrame();
-      // Once the first frame is drawn, the programs not drawn with yet are made, a frame's share.
-      this.programs.step();
     }
   }
 

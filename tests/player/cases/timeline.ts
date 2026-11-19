@@ -1632,7 +1632,68 @@ const looped = { frames: 4, capture: [1, 3, 4], tolerance: 0, maxOutliers: 0 };
 
 const rewound = { frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 };
 
+// A root with nothing on it, only its SetBackgroundColor: the stage is that colour, not black.
+function emptyStage(as3: boolean): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0x3366cc),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// The root's script draws a square and takes it away again (scripts/EmptiedStage.as): once the
+// stage holds nothing drawn, its background shows again where the square was.
+function emptiedStage(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xcc6633),
+      w.doAbc(abc, "EmptiedStage"),
+      w.symbolClass([[0, "EmptiedStage"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 export const timelineCases: PlayerCase[] = [
+  {
+    name: "empty-stage",
+    swf: emptyStage(true),
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "empty-stage-avm1",
+    swf: emptyStage(false),
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "emptied-stage",
+    swf: emptiedStage,
+    script: "EmptiedStage",
+    frames: 4,
+    capture: [1, 2, 4],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   { name: "depths", swf: depths, frames: 3, capture: [1, 2, 3], tolerance: 0, maxOutliers: 0 },
   {
     name: "frame-origin",
