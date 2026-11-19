@@ -155,6 +155,14 @@ package
 					}
 
 					break;
+				case "listen":
+					connection = new LocalConnection();
+					connection.client = {pong: function(n:int):void
+						{
+							log("pong " + n);
+						}};
+					connection.connect(words[1]);
+					break;
 				case "stage":
 					log("stage " + stage.stageWidth + "x" + stage.stageHeight + " " + stage.scaleMode + " " + stage.align + " " + stage.showDefaultContextMenu + " " + stage.quality);
 					break;

@@ -90,6 +90,19 @@ onEnterFrame = function () {
 stop();`);
 }
 
+/**
+ * A movie whose onUnload sends "pong" to the host's LocalConnection
+ * "hostlc", and logs the send's onStatus.
+ */
+export function sendingMovie(): Uint8Array {
+  return movie(`${prelude}
+var back = new LocalConnection();
+back.onStatus = function (info) { log("status " + info.level); };
+this.onUnload = function () { log("onUnload"); back.send("hostlc", "pong", 99); };
+onEnterFrame = function () { ef++; log("ef " + ef); };
+stop();`);
+}
+
 /** Stage and the quality as the movie reads them, its own changes to them, and onResize. */
 export function stageMovie(): Uint8Array {
   return movie(`${prelude}

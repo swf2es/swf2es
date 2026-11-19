@@ -75,12 +75,14 @@ interface Avm1Load {
 
 const NO_SOUND_HOSTS: SoundHost[] = [];
 
-/** An AVM1 movie its Loader let go of, until it goes (Loads.unloadedAvm1). */
+/**
+ * An AVM1 movie its Loader let go of, until it goes (Loads.unloadedAvm1):
+ * then kept "listening" without an unload handler, or "sending" with one,
+ * its connections closed, until its sends are delivered.
+ */
 interface UnloadedAvm1 {
   vm: Avm1;
-  state: "play" | "played" | "unload" | "listening";
-  /** Whether a clip in it had an unload handler as it was unloaded: Flash then keeps nothing of it. */
-  handled: boolean;
+  state: "play" | "played" | "unload" | "listening" | "sending";
 }
 
 /**
@@ -109,7 +111,8 @@ export class Loads {
    * unloaded. A movie with no unload handler anywhere in it whose
    * LocalConnections still listen or send is then kept for them
    * ("listening", Avm1.unloadFromLoader), as Flash keeps it, until neither
-   * holds (keeps).
+   * holds (keeps); one with a handler and sends still to deliver, until they
+   * are ("sending", Avm1.closeForSends).
    */
   private readonly unloadedAvm1: UnloadedAvm1[] = [];
   /** Whether the frame's AVM1 has played, from then until the next frame starts. */
@@ -186,28 +189,62 @@ export class Loads {
       return;
     }
 
-    for (const movie of this.unloadedAvm1.splice(0)) {
-      // A handler that throws still lets the movie, and those after it, go.
-      try {
-        if (movie.state === "unload") {
-          movie.vm.runUnloadHandlers();
-        }
-      } catch (error) {
-        // As the movie's own errors go: AVM1 has no event for them.
-        this.s.tellHost(error);
-      } finally {
-        if (!movie.handled && this.keeps(movie.vm)) {
-          if (movie.state !== "listening") {
-            movie.state = "listening";
-            movie.vm.unloadFromLoader();
-          }
-
-          this.unloadedAvm1.push(movie);
-        } else {
-          movie.vm.destroy(false);
-        }
+    const batch = this.unloadedAvm1.splice(0);
+    let next = 0;
+    try {
+      while (next < batch.length && !this.s.destroyed) {
+        this.releaseUnloaded(batch[next++]);
+      }
+    } finally {
+      // What a throw, or a handler that had the host destroy the player, left: gone now.
+      for (const movie of batch.slice(next)) {
+        movie.vm.destroy(false);
       }
     }
+  }
+
+  /**
+   * An unloaded movie at the frame's end. One with an unload handler (as it
+   * is now, its last frame played) runs it and goes, though not before its
+   * sends are delivered, as Flash delivers one its onUnload makes (adl, the
+   * projector); one without is kept while it listens or sends.
+   */
+  private releaseUnloaded(movie: UnloadedAvm1): void {
+    const vm = movie.vm;
+    if (movie.state === "listening" || movie.state === "sending") {
+      if (this.keeps(vm)) {
+        this.unloadedAvm1.push(movie);
+      } else {
+        vm.destroy(false);
+      }
+
+      return;
+    }
+
+    const handled = vm.hasUnloadHandler();
+    try {
+      if (handled && movie.state === "unload") {
+        vm.runUnloadHandlers();
+      }
+    } catch (error) {
+      // As the movie's own errors go: AVM1 has no event for them.
+      this.s.tellHost(error);
+    }
+
+    if (this.s.destroyed || !this.keeps(vm) || (handled && vm.localPending === 0)) {
+      vm.destroy(false);
+      return;
+    }
+
+    if (handled) {
+      movie.state = "sending";
+      vm.closeForSends();
+    } else {
+      movie.state = "listening";
+      vm.unloadFromLoader();
+    }
+
+    this.unloadedAvm1.push(movie);
   }
 
   /** The stage resized in noScale: each loaded movie's Stage.onResize. */
@@ -1013,7 +1050,6 @@ export class Loads {
               : this.avm1Ticked
                 ? "unload"
                 : "play",
-          handled: movie.vm.hasUnloadHandler(),
         });
         timers.clear();
         if (this.s.avm1Input?.remove(content.$display)) {

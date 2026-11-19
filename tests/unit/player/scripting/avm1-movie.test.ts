@@ -14,7 +14,13 @@ import { containerEngine } from "../../../../oracle/oracle.ts";
 import type { AudioHost } from "../../../../packages/player/dist/media/audio.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
-import { sharedMovie, soundMovie, stageMovie, unloadMovie } from "../../../avm1-lifecycle.ts";
+import {
+  sendingMovie,
+  sharedMovie,
+  soundMovie,
+  stageMovie,
+  unloadMovie,
+} from "../../../avm1-lifecycle.ts";
 import { bare } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
@@ -295,6 +301,24 @@ test("a movie with no unload handler keeps its LocalConnection after unloadAndSt
       "as3:play channel",
       "as3:connect lifecycle 2082",
     ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("what a movie's onUnload sends is delivered, its onStatus untold", { skip }, async () => {
+  const p = await play(sendingMovie());
+  try {
+    p.control("listen hostlc");
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.later("exitFrame", "unload");
+    await p.tick();
+    await p.tick();
+    await p.tick();
+    // adl delivers it the next frame, the projector in the same.
+    assert.deepEqual(p.lines, ["avm1:ef 4", "as3:unload", "avm1:onUnload", "as3:pong 99"]);
   } finally {
     p.player.destroy();
   }

@@ -169,7 +169,12 @@ handlers never running; one unloaded after its frame runs its clips'
 next starts. `unloadAndStop` stops its sounds and timers at once. A movie
 with no unload handler anywhere in it is kept, stopped, while its
 LocalConnections listen or send (below); one with a handler goes whole,
-its names free from the next frame (measured in adl and the projector).
+its names free from the next frame, though only once what it sent, its
+onUnload's sends among them, is delivered, their onStatus no longer told
+it (measured in adl and the projector). A kept movie's LocalConnection
+handlers still run: a sound one starts plays and holds its channel until
+the movie goes, its onSoundComplete never told, as no frame of it plays;
+Flash keeps such a movie running, sounds and all.
 Flash also keeps such a movie's intervals, sounds and Key and Mouse
 listeners running after `unload()`, its sounds and its Key and Mouse
 listeners after `unloadAndStop` too; these stop here. The parent's audio

@@ -408,6 +408,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly fileLifetime = new AbortController();
   /** Destroyed: nothing of it is left, its LocalConnections closed. */
   closed = false;
+  /** Unloaded with an unload handler, its sends still to deliver: their onStatus no longer comes. */
+  private muted = false;
   /** Its LocalConnection sends not yet delivered: an unloaded movie is kept for them. */
   localPending = 0;
   private readonly deferLocalTo: ((deliver: () => void) => void) | null;
@@ -1358,6 +1360,19 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   /**
+   * Unloaded with an unload handler while its sends wait: it stops, its
+   * connections close, their names free from the next frame, and it stays
+   * only to have its sends delivered, whose onStatus it no longer hears, as
+   * Flash delivers what an onUnload sends and tells it nothing (adl and the
+   * projector).
+   */
+  closeForSends(): void {
+    this.stop();
+    this.localConnections.destroy(this);
+    this.muted = true;
+  }
+
+  /**
    * A LocalConnection's delivery, on the host's queue or else the
    * network's, counted until it is made.
    */
@@ -1440,7 +1455,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * clips' unloads at most.
    */
   localInvoke(o: avm1.Avm1Object, name: string, args: Value[], fallback: Value = undefined): Value {
-    const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
+    const cx =
+      this.movieRoot === null || this.halted || this.muted
+        ? null
+        : this.activationOf(this.movieRoot);
     if (cx === null) {
       return undefined;
     }
@@ -1796,7 +1814,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * a movie with one go whole once unloaded, and keeps one without listening.
    */
   hasUnloadHandler(): boolean {
-    return this.movieRoot !== null && this.delays(this.movieRoot);
+    return this.movieRoot !== null && this.swfVersion >= 5 && this.delays(this.movieRoot);
   }
 
   /** Whether `d` or a clip in it has an unload handler. */
