@@ -442,17 +442,24 @@ test("frame scripts that send their clip to each other's frame end in a stack ov
 });
 
 // Flash hangs on these (adl never finishes the frame): the scripts that run
-// after the walk keep coming. The player runs at most 64 of a clip's in a
-// frame, and the frame ends; a clip left due runs as many the next.
-for (const [name, body] of [
+// after the walk keep coming. The player's outermost pass of frame scripts
+// runs at most 64 of a clip's, and 4096 in all, then takes the clips' frames
+// as run: the frame ends, and the next runs none of them.
+for (const [name, body, version, runs] of [
   [
     "Pong",
     "addFrameScript(0, function():void { trace(1); gotoAndStop(2); }, 1, function():void { trace(2); gotoAndStop(1); });",
+    9,
+    64,
   ],
-  ["Again", "addFrameScript(0, again);"],
+  ["Again", "addFrameScript(0, again);", 9, 64],
+  ["Again10", "addFrameScript(0, again);", 10, 64],
+  // Each link's first frame makes the next, which registers its own.
+  ["Chain", "new Link();", 9, 4096],
 ] as const) {
-  test(`scripts after the walk that never stop end the frame: ${name}, version 9`, {
+  test(`scripts after the walk that never stop end the frame: ${name}, version ${version}`, {
     skip,
+    timeout: 120_000,
   }, async () => {
     const source = `package {
       import flash.display.MovieClip;
@@ -460,6 +467,9 @@ for (const [name, body] of [
         public function ${name}() { stop(); }
         public function start():void { ${body} }
         public function again():void { trace("again"); addFrameScript(0, again); }
+      }
+      public class Link extends MovieClip {
+        public function Link() { addFrameScript(0, function():void { trace("link"); new Link(); }); }
       }
       public class ${name}Main extends MovieClip {
         public var kid:MovieClip;
@@ -469,7 +479,7 @@ for (const [name, body] of [
       }
     }`;
     const swf = w.swf({
-      version: 9,
+      version,
       width: 20,
       height: 20,
       frameCount: 2,
@@ -493,12 +503,69 @@ for (const [name, body] of [
     const player = new Player(swf, scripting);
     await player.start();
     player.tick();
-    assert.equal(lines.filter((l) => l !== "main 2").length, 64);
+    assert.equal(lines.filter((l) => l !== "main 2").length, runs);
     lines.length = 0;
     player.tick();
-    assert.ok(lines.length <= 64, `${lines.length}`);
+    assert.deepEqual(lines, []);
   });
 }
+
+// A script that registers itself again and makes a clip holding a button
+// whose up state is a clip: the button's early frame, a pass of its own,
+// takes the script and runs it in its walk, which makes another button, and
+// so on, one pass inside the last. Each counts as one of the clip's 64.
+test("a script that registers itself again around a button's early frame ends", {
+  skip,
+  timeout: 120_000,
+}, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Holder extends MovieClip {}
+    public class Looper extends MovieClip {
+      public function Looper() { addFrameScript(0, frame1); }
+      public function frame1():void {
+        trace("looper");
+        addFrameScript(0, frame1);
+        addChild(new Holder());
+      }
+    }
+    public class LooperMain extends MovieClip {}
+  }`;
+  // Up state the clip, the others a square, at depth 1 and with no matrix.
+  const button = w.tag(7, Uint8Array.of(2, 0, 0x01, 1, 0, 1, 0, 0, 0x0e, 7, 0, 1, 0, 0, 0, 0));
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(7, 0x3366cc),
+      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      button,
+      w.sprite(3, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(4, 1, [w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("Looper", source)),
+      w.symbolClass([
+        [0, "LooperMain"],
+        [3, "Holder"],
+        [4, "Looper"],
+      ]),
+      w.place({ depth: 1, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await player.start();
+  assert.ok(lines.length > 2 && lines.length <= 65, `${lines.length}`);
+  lines.length = 0;
+  player.tick();
+  assert.deepEqual(lines, []);
+});
 
 test("a goto plays or stops as it happens, so the landing frame's script has the last word", {
   skip,

@@ -192,8 +192,10 @@ export class Scripting {
    * running them in its order (`late-scripts`, `late-queue`).
    */
   private readonly lateScripts: MovieClip[] = [];
-  /** How many late scripts each clip ran in the passes under way, up to MAX_LATE_RUNS. */
+  /** How many late scripts each clip ran in the outermost pass under way, up to MAX_LATE_RUNS. */
   private readonly lateRuns = new Map<MovieClip, number>();
+  /** How many late scripts all clips ran in the passes under way (lateRun). */
+  private lateTotal = 0;
   /** The clips whose frame a round marked lost (MovieClip.scriptLost), cleared as the passes end. */
   private readonly lostScripts: MovieClip[] = [];
   /** queueDue's stack of the clips open in a list it walks (openClip), kept. */
@@ -1170,6 +1172,7 @@ export class Scripting {
 
         this.lostScripts.length = 0;
         this.lateRuns.clear();
+        this.lateTotal = 0;
       }
     }
   }
@@ -1385,18 +1388,9 @@ export class Scripting {
         continue;
       }
 
-      // Scripts that send their clip back and forth, or register themselves
-      // again, keep the queue going: Flash hangs (adl), and here each clip
-      // runs at most 64 of them in a frame's scripts, as its gotos jump at
-      // most 64 times in a round.
-      const count = this.lateRuns.get(o) ?? 0;
-      if (count >= MAX_LATE_RUNS) {
-        // Its frame taken as run, so that no walk runs it again either.
-        o.scriptedFrame = o.currentFrame;
+      if (!this.lateRun(o)) {
         continue;
       }
-
-      this.lateRuns.set(o, count + 1);
 
       if (o.scriptedFrame !== o.currentFrame) {
         o.scriptedFrame = o.currentFrame;
@@ -1417,14 +1411,37 @@ export class Scripting {
    */
   private takeLateScripts(): void {
     for (const o of this.lateScripts) {
-      if (o.scriptHeld) {
-        o.scriptHeld = false;
-      } else {
+      const held = o.scriptHeld;
+      o.scriptHeld = false;
+      // The walk's run of it counts as one of them: a script that registers
+      // itself again around a pass of its own would recurse without end.
+      if (this.lateRun(o) && !held) {
         o.scriptAgain();
       }
     }
 
     this.lateScripts.length = 0;
+  }
+
+  /**
+   * Whether `o` may run one more script registered as scripts ran, counted
+   * if so. Scripts that send their clip back and forth, register themselves
+   * again, or make a clip that does, keep the queue going: Flash hangs
+   * (adl), and here the outermost pass of frame scripts runs at most 64 of
+   * a clip's, as its gotos jump at most 64 times in a round, and 64 times
+   * 64 in all. Past either, the clip's frame is taken as run, so that no
+   * walk runs it either.
+   */
+  private lateRun(o: MovieClip): boolean {
+    const count = this.lateRuns.get(o) ?? 0;
+    if (count >= MAX_LATE_RUNS || this.lateTotal >= MAX_LATE_RUNS * MAX_LATE_RUNS) {
+      o.scriptedFrame = o.currentFrame;
+      return false;
+    }
+
+    this.lateRuns.set(o, count + 1);
+    this.lateTotal++;
+    return true;
   }
 
   /**
@@ -1907,7 +1924,7 @@ export class Scripting {
 /** How deep goto cycles may nest before a goto throws a stack overflow, Error #1023. */
 const MAX_GOTO_CYCLES = 256;
 
-/** How many scripts registered as scripts ran a clip runs after the walks of one frame's passes (runLateScripts). */
+/** How many scripts registered as scripts ran a clip runs in an outermost pass of frame scripts, and the square of it all clips (lateRun). */
 const MAX_LATE_RUNS = 64;
 
 /** `o`'s mark (scriptsDue) as a round's walk found it, `due`: its orphan entry's too. */

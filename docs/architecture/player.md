@@ -224,8 +224,10 @@ script due as it began, not yet run: then it runs twice; a clip whose
 frame ran its script, or has none, as a playing clip's often has not, is
 passed by (`late-scripts-9`, `late-queue-9`, the corpus's
 `swf_9_frame_script_*`). Scripts that send their clip back and forth, or
-register themselves again, keep coming: Flash hangs, and the player runs
-at most 64 of a clip's in a frame, then takes its frame as run. A clip a
+register themselves again, or make a clip that does, keep coming: Flash
+hangs, and the player's outermost pass of frame scripts runs at most 64
+of a clip's, those a goto's cycle or a button's early frame takes over
+among them, and 4096 in all, then takes the clip's frame as run. A clip a
 frame script made, whose `super()` made a button with an early frame,
 still loses a first frame's script it registers after `super()` in that
 frame's scripts (below); one registered later runs.
