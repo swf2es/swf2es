@@ -339,3 +339,59 @@ test("getURL opens what the movie's base names, as its loads load it", async () 
     delete g.document;
   }
 });
+
+test("a MovieClipLoader's load is told a piece at a time where the host tells it as it comes, its target's bytes with it", async () => {
+  const child = movie(`trace("child");`);
+  // The head, then three pieces, then the end: one a frame.
+  const steps: (() => void)[] = [];
+  const played = await play(
+    `var mcl = new MovieClipLoader();
+var l = {};
+l.onLoadStart = function (t) { trace("start " + t.getBytesLoaded() + " " + t.getBytesTotal()); };
+l.onLoadProgress = function (t, a, b) {
+  var p = mcl.getProgress(t);
+  trace("progress " + a + " " + b + " " + t.getBytesLoaded() + " " + t.getBytesTotal() + " " + p.bytesLoaded + " " + p.bytesTotal);
+};
+l.onLoadComplete = function (t, s) { trace("complete " + s); };
+l.onLoadInit = function (t) { trace("init"); };
+mcl.addListener(l);
+mcl.loadClip("child.swf", createEmptyMovieClip("c", 1));`,
+    {
+      url: "http://example.test/t/test.swf",
+      fetch: (_request, _signal, progress) =>
+        new Promise((done) => {
+          const head = { status: 200, headers: [] };
+          const third = Math.ceil(child.length / 3);
+          steps.push(() => progress?.open(head, 0));
+          for (let at = 0; at < child.length; at += third) {
+            const piece = child.slice(at, at + third);
+            steps.push(() => progress?.data(piece));
+          }
+
+          steps.push(() => done({ ...head, bytes: child }));
+        }),
+    },
+  );
+  take(played);
+  const frames: string[][] = [];
+  for (let i = 0; i < 7; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    played.avm1.network();
+    played.player.tick();
+    frames.push(take(played));
+  }
+
+  // Its length is its header's, from the first piece on, as Flash's.
+  const n = child.length;
+  const third = Math.ceil(n / 3);
+  assert.deepEqual(frames, [
+    ["start 0 0"],
+    [`progress ${third} ${n} ${third} ${n} ${third} ${n}`],
+    [`progress ${2 * third} ${n} ${2 * third} ${n} ${2 * third} ${n}`],
+    [`progress ${n} ${n} ${n} ${n} ${n} ${n}`],
+    ["complete 200", "child", "init"],
+    [],
+    [],
+  ]);
+});

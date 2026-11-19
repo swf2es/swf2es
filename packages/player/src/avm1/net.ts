@@ -5,6 +5,8 @@
 // held for the next frame, where the movie delivers it between frames, as
 // Flash's network callbacks come.
 import type {
+  FetchHost,
+  FetchProgress,
   FetchPurpose,
   FetchRequest,
   FetchResult,
@@ -15,7 +17,7 @@ import type {
 import { resolve } from "../scripting/loads.js";
 import { fetchWhile } from "../signals.js";
 
-export type Fetch = (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+export type Fetch = FetchHost;
 
 /** A request as a script asks it: its URL as given, resolved here against the SWF's. */
 export interface NetRequest {
@@ -93,9 +95,26 @@ export class Avm1Net {
    * `request` sent by the host's fetch, as "data", which the host judges
    * as it judges a URLLoader's; `deliver` gets the result in a frame
    * after, a failure as no bytes, status 0, where nothing answered.
+   * `progress` hears of the response as it comes, each word in a frame
+   * after, where the host tells it.
    */
-  fetch(request: NetRequest, deliver: (result: FetchResult) => void): void {
-    this.after(this.request(request, "data"), deliver);
+  fetch(
+    request: NetRequest,
+    deliver: (result: FetchResult) => void,
+    progress?: FetchProgress,
+  ): void {
+    this.after(
+      this.request(request, "data", undefined, progress && this.deferred(progress)),
+      deliver,
+    );
+  }
+
+  /** `progress`, each of its calls held for the next frame, as the host's other callbacks are. */
+  deferred(progress: FetchProgress): FetchProgress {
+    return {
+      open: (head, total) => this.defer(() => progress.open(head, total)),
+      data: (chunk) => this.defer(() => progress.data(chunk)),
+    };
   }
 
   /**
@@ -103,7 +122,12 @@ export class Avm1Net {
    * failure as no bytes, status 0, where nothing answered. A movie's load
    * is "content", as AS3's Loader's is.
    */
-  request(request: NetRequest, purpose: FetchPurpose, signal?: AbortSignal): Promise<FetchResult> {
+  request(
+    request: NetRequest,
+    purpose: FetchPurpose,
+    signal?: AbortSignal,
+    progress?: FetchProgress,
+  ): Promise<FetchResult> {
     const fetch = this.fetchHost;
     if (this.destroyed) {
       return Promise.resolve(FAILED);
@@ -111,7 +135,14 @@ export class Avm1Net {
 
     const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose };
     return (
-      fetch ? fetchWhile(fetch, outgoing, this.stopped.signal, signal) : Promise.reject()
+      fetch
+        ? fetchWhile(
+            (r: FetchRequest, s: AbortSignal) => fetch(r, s, progress),
+            outgoing,
+            this.stopped.signal,
+            signal,
+          )
+        : Promise.reject()
     ).then(
       (result) => result,
       () => FAILED,

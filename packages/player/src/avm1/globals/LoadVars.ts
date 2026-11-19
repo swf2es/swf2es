@@ -8,7 +8,7 @@
 // failed or was empty. LoadVars' onData decodes the text's variables onto
 // the object and calls onLoad.
 import { avm1 } from "@swf2es/runtime";
-import type { FetchResult } from "../../hosts.js";
+import type { FetchProgress, FetchResult } from "../../hosts.js";
 import { type Avm1Net, type NetRequest, textFor } from "../net.js";
 
 const textEncoder = new TextEncoder();
@@ -57,23 +57,42 @@ export function startLoad(
   setHidden(target, "_bytesLoaded", 0, version);
   setHidden(target, "_bytesTotal", undefined, version);
   setHidden(target, "loaded", false, version);
-  host.net.fetch(request, (result: FetchResult) => {
-    const v = host.version;
-    const length = result.bytes?.length ?? 0;
-    if (result.bytes !== null) {
-      avm1.set(target, "_bytesTotal", length, v);
-      if (length > 0) {
-        avm1.set(target, "_bytesLoaded", length, v);
+  // As the answer comes, its length as its headers tell it, then the bytes so far (adl: a
+  // LoadVars polled each frame has its bytes grow a piece at a time).
+  let loaded = 0;
+  const progress: FetchProgress = {
+    open: (_head, total) => {
+      if (total > 0) {
+        avm1.set(target, "_bytesTotal", total, host.version);
       }
-    }
+    },
+    data: (chunk) => {
+      loaded += chunk.length;
+      avm1.set(target, "_bytesLoaded", loaded, host.version);
+    },
+  };
+  host.net.fetch(
+    request,
+    (result: FetchResult) => {
+      const v = host.version;
+      const length = result.bytes?.length ?? 0;
+      if (result.bytes !== null) {
+        avm1.set(target, "_bytesTotal", length, v);
+        if (length > 0) {
+          avm1.set(target, "_bytesLoaded", length, v);
+        }
+      }
 
-    if (httpStatus) {
-      host.callback(target, "onHTTPStatus", [result.status]);
-    }
+      if (httpStatus) {
+        host.callback(target, "onHTTPStatus", [result.status]);
+      }
 
-    const data = result.bytes !== null && length > 0 ? textFor(textOf(result.bytes), v) : undefined;
-    host.callback(target, "onData", [data]);
-  });
+      const data =
+        result.bytes !== null && length > 0 ? textFor(textOf(result.bytes), v) : undefined;
+      host.callback(target, "onData", [data]);
+    },
+    progress,
+  );
 }
 
 /**

@@ -30,8 +30,8 @@ export interface LoaderHost {
   loadClip(loader: avm1.Avm1Object, target: DisplayObject, url: string): boolean;
   /** unloadMovie: what `d` shows unloaded. */
   unloadMovie(d: DisplayObject): void;
-  /** The size of the SWF `d` is of, as it came, which getProgress gives. */
-  sizeOf(d: DisplayObject): number;
+  /** The bytes of the SWF `d` is of that have come, and in all, which getProgress gives. */
+  progressOf(d: DisplayObject): [loaded: number, total: number];
 }
 
 const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE;
@@ -120,9 +120,9 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
       const result = new avm1.Avm1Object(null);
       const target = targetOf(value, v, false);
       if (target !== null) {
-        const size = host.sizeOf(target);
-        result.define("bytesLoaded", size, 0);
-        result.define("bytesTotal", size, 0);
+        const [loaded, total] = host.progressOf(target);
+        result.define("bytesLoaded", loaded, 0);
+        result.define("bytesTotal", total, 0);
       }
 
       return result;

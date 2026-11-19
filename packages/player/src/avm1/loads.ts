@@ -24,7 +24,7 @@ import {
   readLibrary,
   type Timeline,
 } from "../display/timeline.js";
-import type { FetchResult } from "../hosts.js";
+import type { FetchProgress, FetchResult } from "../hosts.js";
 import { warmAudioFor } from "../media/sounds.js";
 import type { Avm1 } from "./avm1.js";
 import { formRequest } from "./globals/LoadVars.js";
@@ -110,6 +110,10 @@ interface MovieLoad {
    * loaded, its onLoadInit to come; or done, with nothing more to tell.
    */
   status: "pending" | "cancelled" | "loaded" | "done";
+  /** Whether its target was emptied for it and onLoadStart told, as its answer began to come. */
+  started: boolean;
+  /** The bytes onLoadProgress has told of as they came. */
+  told: number;
 }
 
 /** What a load brought, its blocks compiled where it is a SWF. */
@@ -214,10 +218,12 @@ export class MovieLoads {
       loader,
       url: this.movie.net.resolve(url),
       status: "pending",
+      started: false,
+      told: 0,
     };
     this.movieLoads.push(load);
     const arrival = this.movie.net
-      .request(request, "content")
+      .request(request, "content", undefined, this.movie.net.deferred(this.progressOf(load)))
       .then(async (result): Promise<Arrived> => {
         // One replaced or cancelled meanwhile is not read, nor its code compiled.
         if (load.status !== "pending") {
@@ -257,12 +263,117 @@ export class MovieLoads {
   }
 
   /**
-   * A load's bytes arrived, between frames: as Ruffle's movie_loader has
-   * it, what the clip showed unloads, its variables go, and onLoadStart;
-   * then the SWF or image takes its place, or an empty one where the bytes
-   * are neither, with onLoadProgress and onLoadComplete, or onLoadError
-   * where nothing came. A clip removed meanwhile takes nothing, and
-   * nothing is told; one a listener removes or unloads is told no more.
+   * What a load hears as its answer comes, in a frame after each word
+   * (net.deferred): its target emptied for it and onLoadStart as it
+   * begins, then onLoadProgress at each piece, the target's
+   * getBytesLoaded growing with it, as Flash's (adl, a server sending a
+   * piece every 100 ms: onLoadStart as the answer begins, onLoadProgress
+   * at each piece of 2 or 4 KB with the bytes so far and the SWF's length
+   * as its header tells it, then onLoadComplete once all came, onLoadInit
+   * the frame after). Only the first load into its clip and by its loader
+   * is told as it comes: those after it arrive in their order, told all
+   * at once.
+   */
+  private progressOf(load: MovieLoad): FetchProgress {
+    let loaded = 0;
+    let total = 0;
+    // An uncompressed SWF tells its length in its header, which Flash gives as the total.
+    const header = new Uint8Array(8);
+    return {
+      open: (_head, length) => {
+        total = length;
+        if (this.first(load)) {
+          this.begin(load);
+        }
+      },
+      data: (chunk) => {
+        if (loaded < header.length) {
+          header.set(chunk.subarray(0, header.length - loaded), loaded);
+          if (
+            loaded + chunk.length >= header.length &&
+            String.fromCharCode(...header.subarray(0, 3)) === "FWS"
+          ) {
+            total = new DataView(header.buffer).getUint32(4, true);
+          }
+        }
+
+        loaded += chunk.length;
+        this.progressed(load, loaded, total);
+      },
+    };
+  }
+
+  /** Whether no load asked before `load` into its clip, or by its loader, is still under way. */
+  private first(load: MovieLoad): boolean {
+    for (const earlier of this.movieLoads) {
+      if (earlier === load) {
+        return true;
+      }
+
+      if (
+        earlier.status === "pending" &&
+        (earlier.target === load.target || (load.loader !== null && earlier.loader === load.loader))
+      ) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  /** More of a load's bytes came, `loaded` of `total`: the target's bytes, and onLoadProgress. */
+  private progressed(load: MovieLoad, loaded: number, total: number): void {
+    const target = load.target;
+    if (!load.started || load.status !== "pending" || this.movie.removed(target)) {
+      return;
+    }
+
+    const swf = this.movie.swfOf(target);
+    swf.loading = { loaded, total };
+    load.told = loaded;
+    this.tell(load, "onLoadProgress", [target.avm1 ?? undefined, loaded, total]);
+  }
+
+  /**
+   * A load's answer began: as Ruffle's movie_loader has it, what the clip
+   * showed unloads, its variables go, and onLoadStart. False where the
+   * load went no further: its clip was removed, or a listener ended it.
+   */
+  private begin(load: MovieLoad): boolean {
+    const target = load.target;
+    const face = target.avm1 ?? undefined;
+    if (load.status !== "pending" || this.movie.removed(target)) {
+      return false;
+    }
+
+    load.started = true;
+    const version = this.movie.swfOf(target).version;
+    this.movie.unload(target);
+    if (face !== undefined) {
+      for (const p of [...face.ownProperties()]) {
+        if ((p.flags & avm1.DONT_DELETE) === 0) {
+          face.remove(p);
+        }
+      }
+    }
+
+    this.movie.fill(target, new Avm1Swf(null, null, version, load.url, 0));
+    this.tell(load, "onLoadStart", [face]);
+    if (load.status !== "pending" || this.movie.removed(target)) {
+      load.status = "done";
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * A load's bytes arrived, between frames: begun, where it was not as
+   * they came (begin); then the SWF or image takes its place, or an empty
+   * one where the bytes are neither, with onLoadProgress, where the last
+   * piece did not tell it, and onLoadComplete, or onLoadError where
+   * nothing came. A clip removed meanwhile takes nothing, and nothing is
+   * told; one a listener removes or unloads is told no more.
    */
   private arrived(load: MovieLoad, arrived: Arrived): void {
     const target = load.target;
@@ -275,7 +386,7 @@ export class MovieLoads {
     };
     if (over()) {
       // One an unload cancelled still starts, and no more (the corpus's load_cancel_*).
-      if (load.status === "cancelled" && !this.movie.removed(target)) {
+      if (load.status === "cancelled" && !load.started && !this.movie.removed(target)) {
         this.tell(load, "onLoadStart", [face]);
       }
 
@@ -283,18 +394,7 @@ export class MovieLoads {
       return;
     }
 
-    const version = this.movie.swfOf(target).version;
-    this.movie.unload(target);
-    if (face !== undefined) {
-      for (const p of [...face.ownProperties()]) {
-        if ((p.flags & avm1.DONT_DELETE) === 0) {
-          face.remove(p);
-        }
-      }
-    }
-
-    this.movie.fill(target, new Avm1Swf(null, null, version, load.url, 0));
-    if (!told("onLoadStart", [face])) {
+    if (!load.started && !this.begin(load)) {
       load.status = "done";
       return;
     }
@@ -322,7 +422,8 @@ export class MovieLoads {
           target.placeAtDepth(new BitmapObject(BitmapStore.of(arrived.pixels)), 1);
         }
 
-        going = told("onLoadProgress", [face, arrived.size, arrived.size]);
+        going =
+          load.told === arrived.size || told("onLoadProgress", [face, arrived.size, arrived.size]);
         break;
       }
       case "swf": {
@@ -352,10 +453,11 @@ export class MovieLoads {
           }
         }
 
-        // Ruffle tells a load into level 0 twice.
+        // Ruffle tells a load into level 0 twice; its last piece told it where it came so.
         going =
-          (target !== this.movie.root || told("onLoadProgress", [face, size, size])) &&
-          told("onLoadProgress", [face, size, size]);
+          load.told === size ||
+          ((target !== this.movie.root || told("onLoadProgress", [face, size, size])) &&
+            told("onLoadProgress", [face, size, size]));
         break;
       }
     }

@@ -1096,14 +1096,18 @@ export function movieClipClass(movie: Movie): {
     const target = args.length > 0 ? targetOf(movie, clip, args[0], version) : clip;
     return target === null ? undefined : boundsObject(movie, clip, target, true, version);
   });
-  // A sprite's are its tags', a SWF's root's the SWF's.
-  const bytes = (clip: MovieClip) => {
+  // A sprite's are its tags', a SWF's root's the SWF's, or a load's as it comes.
+  const bytes = (clip: MovieClip, loaded: boolean) => {
     const swf = movie.swfOf(clip);
-    return clip === swf.root ? swf.length : (clip.timeline.length ?? 0);
+    if (clip !== swf.root) {
+      return clip.timeline.length ?? 0;
+    }
+
+    return swf.loading ? (loaded ? swf.loading.loaded : swf.loading.total) : swf.length;
   };
-  method("getBytesTotal", 0, bytes);
+  method("getBytesTotal", 0, (clip) => bytes(clip, false));
   // A load in error has -1 bytes in all, none loaded (the corpus's movieclip_state_values).
-  method("getBytesLoaded", 0, (clip) => Math.max(0, bytes(clip)));
+  method("getBytesLoaded", 0, (clip) => Math.max(0, bytes(clip, true)));
   // The root is level 0's, at depth 0 (the corpus's movieclip_get_instance_at_depth).
   method("getDepth", avm1.READ_ONLY | avm1.VERSION_6, (clip) =>
     clip.depth !== null ? clip.depth - DEPTH_BIAS : clip === movie.root ? -DEPTH_BIAS : undefined,
