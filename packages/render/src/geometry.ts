@@ -17,6 +17,25 @@ export const GLYPH_FLOATS = 18;
  */
 export const TARGET_TEXEL = -1e30;
 
+/**
+ * Whether any of a fill's vertices samples the stage's pixel (TARGET_TEXEL),
+ * which the stage fill program alone draws.
+ */
+export function samplesStage(data: GeometryData): boolean {
+  const texels = data.texels;
+  if (!texels || data.depths) {
+    return false;
+  }
+
+  for (let k = 0; k < texels.length; k += 2) {
+    if (texels[k] <= TARGET_TEXEL / 2) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** A geometry as its owner holds it: its id, and the generation the id had, which a reused id moves on. */
 export type GeometryHandle = Handle;
 
@@ -75,21 +94,11 @@ export class Geometries extends Registry {
   added: number[] = [];
   /** Changed in place since the backend last took them (update). */
   updated: number[] = [];
-  /**
-   * Whether any geometry added has sampled the stage's pixel (TARGET_TEXEL),
-   * which the fill programs are told where the stage lies for only then.
-   */
-  stageTexels = false;
 
   add(data: GeometryData): GeometryHandle {
     const handle = this.hold(IDLE_FRAMES);
     const id = handle.id;
     this.data[id] = data;
-    const texels = data.texels;
-    if (texels && texels.length > 0 && texels[0] <= TARGET_TEXEL / 2) {
-      this.stageTexels = true;
-    }
-
     this.added.push(id);
     this.measure(id);
     return handle;
