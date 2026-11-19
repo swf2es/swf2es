@@ -529,6 +529,42 @@ function textScrollHits(abc: Uint8Array): Uint8Array {
   });
 }
 
+// The text hit tests at their edges (scripts/TextHitEdges.as), with two
+// fields in Probe placed from DefineEditText tags whose bounds start 2 pixels
+// before their origins, 10 after and at them.
+function textHitEdges(abc: Uint8Array): Uint8Array {
+  const edit = (id: number, at: [number, number]) =>
+    w.editText(id, "ab\rab", 1200, 1000, 0, {
+      at,
+      font: 1,
+      fontHeight: 400,
+      multiline: true,
+      readOnly: true,
+      useOutlines: true,
+    });
+  return w.swf({
+    width: 240,
+    height: 100,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      edit(2, [-40, -40]),
+      edit(3, [200, 200]),
+      edit(4, [0, 0]),
+      w.doAbc(abc, "TextHitEdges"),
+      w.symbolClass([[0, "TextHitEdges"]]),
+      w.place({ depth: 1, character: 2, name: "inset", matrix: { tx: 400, ty: 400 } }),
+      w.place({ depth: 2, character: 3, name: "outset", matrix: { tx: 1800, ty: 400 } }),
+      w.place({ depth: 3, character: 4, name: "flush", matrix: { tx: 3200, ty: 400 } }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 input fields in Probe scrolled to their carets by the focus, which
 // selects all their text, as TextInputScroll's: hscroll and maxhscroll in
 // twips, as Flash gives them for a field of embedded fonts. adl's AVM1
@@ -1156,6 +1192,15 @@ export const textCases: PlayerCase[] = [
     // The borders' bottom right corners, a pixel of each of ten fields.
     tolerance: 64,
     maxOutliers: 30,
+  },
+  {
+    name: "text-hit-edges",
+    swf: textHitEdges,
+    script: "TextHitEdges",
+    frames: 1,
+    capture: [1],
+    tolerance: 64,
+    maxOutliers: 12,
   },
   {
     name: "text-input-scroll",
