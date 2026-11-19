@@ -50,6 +50,12 @@ export class Avm1Pointer implements Pointer {
   private shown: Cursor = "default";
   private drag: Drag | null = null;
   private selection: { field: TextObject; anchor: number } | null = null;
+  /**
+   * What was under the pointer when a press came, before its handlers ran,
+   * and where it was, for one they make again in its place; null but
+   * between the two.
+   */
+  private beforePress: { target: DisplayObject | null; at: Spot | null } | null = null;
 
   constructor(
     private readonly stage: Container,
@@ -161,6 +167,13 @@ export class Avm1Pointer implements Pointer {
   broadcast(type: "move" | "down" | "up", p: PointerState): void {
     this.last = p;
     this.position(p);
+    if (type === "down" && (p.button ?? 0) === 0) {
+      // Pickable as the move that brought the pointer here left it, an AS3
+      // host's pick for this press coming after the broadcast.
+      const target = this.pick(p.x, p.y);
+      this.beforePress = { target, at: target ? spotOf(target) : null };
+    }
+
     if (type !== "move") {
       this.avm1.input.mouseButton(p.button ?? 0, type === "down");
     }
@@ -190,7 +203,15 @@ export class Avm1Pointer implements Pointer {
     this.last = p;
     this.position(p);
     this.pickable = pickable;
-    this.frameEnded(true);
+    // A press's pick waits for its handle, which weighs it against the one before its handlers.
+    if (this.beforePress === null) {
+      this.frameEnded(true);
+    }
+  }
+
+  /** A press its host broadcast but never handed on, an error between them, forgotten. */
+  forgetPress(): void {
+    this.beforePress = null;
   }
 
   handle(type: "move" | "down" | "up" | "leave", p: PointerState, broadcast = true): void {
@@ -205,6 +226,7 @@ export class Avm1Pointer implements Pointer {
 
     // Left with the button up: nothing is under it. With the button down, Flash keeps the mouse.
     if (type === "leave") {
+      this.beforePress = null;
       if (!this.held) {
         this.last = null;
         this.send(this.hoverTo(null, []));
@@ -220,14 +242,36 @@ export class Avm1Pointer implements Pointer {
 
     this.last = p;
     const left = (p.button ?? 0) === 0;
-    // Every clip's clip event first, and what they queue runs, before the pick.
+    // Every clip's clip event first, and what they queue runs, before the
+    // pick, which a press weighs against the one before them.
     if (broadcast) {
       this.broadcast(type, p);
     } else {
       this.position(p);
     }
 
+    // What the handlers took off the list and a goto made again in its place
+    // is the one made again.
+    this.replaced();
     this.dragged();
+    const target = this.pick(p.x, p.y);
+    const before = this.beforePress;
+    this.beforePress = null;
+    const events: ButtonEvent[] = [];
+    // A press reaches only what was under the pointer before its handlers ran
+    // and still is after them, as Flash Player 32 has it: what they took from
+    // under it rolls out, as with the button up, and what they brought under
+    // it takes nothing, not even a drag over while the button stays down,
+    // until the release rolls it over. One a goto made again in its place, at
+    // its depth, of its character, is still the one it was, and pressed.
+    const changed =
+      left &&
+      type === "down" &&
+      before !== null &&
+      target !== (before.target && this.again(before.target, before.at));
+    if (changed) {
+      this.hoverTo(null, events);
+    }
 
     // The button's state first, which the hover's events follow, as Ruffle has it.
     const held = this.held;
@@ -235,10 +279,17 @@ export class Avm1Pointer implements Pointer {
       this.held = type === "down";
     }
 
-    const events = this.hoverTo(this.pick(p.x, p.y), []);
+    if (changed) {
+      this.hover = target;
+      this.hoverAt = target ? spotOf(target) : null;
+    } else {
+      this.hoverTo(target, events);
+    }
+
     if (left && type === "down") {
+      const pressed = changed ? null : this.hover;
       this.selection = null;
-      const field = this.hover instanceof TextObject ? this.hover : null;
+      const field = pressed instanceof TextObject ? pressed : null;
       // Where the press is in the text, as the field was scrolled before it.
       const position = field ? this.textPosition(field, p.x, p.y) : 0;
       if (field || this.avm1.focused instanceof TextObject) {
@@ -251,10 +302,10 @@ export class Avm1Pointer implements Pointer {
         this.selection = { field, anchor: position };
       }
 
-      this.pressed = this.hover;
-      this.pressedAt = this.hoverAt;
-      if (this.hover) {
-        events.push([this.hover, ClipEvent.press]);
+      this.pressed = pressed;
+      this.pressedAt = pressed ? this.hoverAt : null;
+      if (pressed) {
+        events.push([pressed, ClipEvent.press]);
       }
     } else if (left && type === "up" && held) {
       this.selection = null;
@@ -391,18 +442,20 @@ export class Avm1Pointer implements Pointer {
 
   /**
    * The events to their objects: a hidden button up gets none, one not up
-   * all, and a hidden clip only its release outside; one disabled gets
-   * none, a button going up unless the event is to over, and the pointer
-   * letting go of it, so that enabled again under the pointer it gets its
-   * roll over (Ruffle's filter_clip_event and Avm1Button's). Then the
-   * cursor follows what is under it.
+   * all, and a hidden clip only those of the pointer leaving it, its roll
+   * out, drag out and release outside, as Flash Player 32 sends them
+   * where Ruffle's filter_clip_event sends the last alone; one disabled
+   * gets none, a button going up unless the event is to over, and the
+   * pointer letting go of it, so that enabled again under the pointer it
+   * gets its roll over (Avm1Button's). Then the cursor follows what is
+   * under it.
    */
   private send(events: ButtonEvent[]): void {
     const kept: ButtonEvent[] = [];
     for (const event of events) {
       const [d, e] = event;
       const button = d instanceof ButtonObject ? d : null;
-      if (!d.visible && (button ? button.state === "up" : e !== ClipEvent.releaseOutside)) {
+      if (!d.visible && (button ? button.state === "up" : !LEAVING.has(e))) {
         continue;
       }
 
@@ -598,6 +651,13 @@ export class Avm1Pointer implements Pointer {
     return this.avm1.input.flag(d, "useHandCursor") && this.avm1.input.flag(d, "enabled");
   }
 }
+
+/** The events of the pointer leaving a clip, which it gets hidden too. */
+const LEAVING: ReadonlySet<number> = new Set([
+  ClipEvent.rollOut,
+  ClipEvent.dragOut,
+  ClipEvent.releaseOutside,
+]);
 
 function spotOf(d: DisplayObject): Spot | null {
   return d.parent ? { parent: d.parent, depth: d.depth, id: d.character?.id } : null;
