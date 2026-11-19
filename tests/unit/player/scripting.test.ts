@@ -20,6 +20,7 @@ import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
+import { timelineSwf } from "./scripting/name-order.ts";
 
 // This package's own out directory: the player's tests run at the same time and use theirs.
 const out = fileURLToPath(new URL("../out/player/", import.meta.url));
@@ -1789,4 +1790,29 @@ test("an event dispatched again whose clone is null is a TypeError #2007", { ski
   await player.start();
 
   assert.deepEqual(lines, ["cloned", "2007"]);
+});
+
+// Flash Player 32's projector, and adl, name what a timeline places as it
+// places it, a placed clip's first frame then too, depth first, before the
+// document class's field initializers run (scripting/name-order.ts).
+test("a timeline names what it places, its clips' first frames depth first, before field initializers", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (line) => lines.push(line) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(timelineSwf(compiler(out)), scripting);
+  try {
+    await player.start();
+    assert.deepEqual(lines, [
+      "early instance10",
+      "child 0 instance1 [instance2 [instance3] [instance4]] [instance5]",
+      "child 1 instance6",
+      "child 2 named [instance7] [instance8]",
+      "child 3 instance9",
+      "new instance11",
+    ]);
+  } finally {
+    player.destroy();
+  }
 });

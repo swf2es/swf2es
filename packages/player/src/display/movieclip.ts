@@ -382,6 +382,8 @@ export class MovieClip extends Container {
    */
   private runFrame(frame: number, later: "frame" | "held" | null = null): void {
     this.library.avm1?.entered(this, frame);
+    // Told once the frame's sounds started, as its clips' first frames come after them.
+    const placed: [Library, DisplayObject][] = [];
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
         this.removeAtDepth(command.depth);
@@ -449,6 +451,15 @@ export class MovieClip extends Container {
       child.placeFrame = frame;
       this.library.avm1?.placing(child, place);
       this.placeAtDepth(child, place.depth);
+      // Before its own first frame is placed, which the hook may do: those it places sit out too.
+      if (later === "held" && this.fresh && child instanceof MovieClip) {
+        child.fresh = true;
+      }
+
+      if (library.placed) {
+        placed.push([library, child]);
+      }
+
       if (later === "held" && library.construct) {
         this.held.push({ display: child, character, library });
       } else if (later === "frame" && library.constructLater) {
@@ -459,6 +470,9 @@ export class MovieClip extends Container {
     }
 
     this.frameSounds(frame);
+    for (const [library, child] of placed) {
+      library.placed?.(child);
+    }
   }
 
   /**
@@ -684,6 +698,7 @@ export class MovieClip extends Container {
       child.placeFrame = jump.frame;
       this.library.avm1?.placing(child, jump.place);
       this.placeAtDepth(child, depth);
+      this.library.placed?.(child);
       if (looping && this.library.constructLater) {
         this.library.constructLater(child, character);
       } else {

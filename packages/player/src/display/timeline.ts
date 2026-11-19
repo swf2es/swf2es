@@ -326,6 +326,12 @@ export interface Library {
   placedSymbol?:
     | ((className: string) => { character: DisplayCharacter; library: Library } | null)
     | null;
+  /**
+   * Tells of a display object the timeline just placed, before any
+   * constructor runs, which Scripting names as Flash names what it places
+   * (Scripting.bind). Absent where there are no scripts.
+   */
+  placed?: ((display: DisplayObject) => void) | null;
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
   /** What an AVM1 movie's timelines tell its AVM1 (avm1/avm1.ts); null in an AS3 movie. */
