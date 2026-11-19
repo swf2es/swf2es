@@ -269,6 +269,12 @@ export class Player {
       if (s) {
         menu = s.clipboard.gesture(() => customContextMenu(s, this.stage, p));
         s.updates++;
+      } else if (this.avm1 && this.avm1Pointer) {
+        // The menu of the clip under the pointer, or else the root's, as `_root.menu` covers the stage.
+        const own = this.avm1.menu(this.avm1Pointer.contentAt(p.x, p.y) ?? this.root);
+        if (own !== null) {
+          menu = { items: own.items, quality: menu.quality && own.quality };
+        }
       }
     } catch (error) {
       s?.reportUncaught(error);

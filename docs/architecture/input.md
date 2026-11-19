@@ -677,9 +677,25 @@ The first implementation supports AVM2 custom items, separators,
 visibility, disabled items, quality actions and an About entry.
 `ContextMenu.isSupported` is true. `Stage.showDefaultContextMenu`,
 the web element's `menu="false"`, and `hideBuiltInItems` control
-built-in quality entries while keeping custom entries. AVM1 custom
-menus and the other Flash built-in actions remain unimplemented. The
-model is renderer-independent so those can reuse the presentation.
+built-in quality entries while keeping custom entries. Flash's other
+built-in actions remain unimplemented. The model is renderer-independent.
+
+AVM1's `ContextMenu` and `ContextMenuItem` (`avm1/globals/ContextMenu.ts`)
+are adl's: a menu's `onSelect`, its `builtInItems`, which `hideBuiltInItems`
+turns all false and a copy shares, and its `customItems`, which a copy
+copies one by one with each item's `copy`; an item's caption, `onSelect`,
+`separatorBefore`, `enabled` and `visible` kept as given; their methods
+SWF 7's. A right click on an AVM1 movie, played alone or loaded by AS3,
+shows the menu of the nearest of the clip whose drawing is under it and
+that clip's parents whose `menu` is one, the root's on the empty stage of
+a movie alone: its `onSelect` is called with that clip and the menu first,
+then its visible items show, and the quality entries unless its
+`builtInItems.quality` is false; a choice calls the item's `onSelect` with
+the clip and the item. Off a loaded movie AS3's menu shows, as Flash
+Player 32's projector showed all this
+(`tests/unit/player/input/context-menu.test.ts`); over one none of whose
+clips has a menu, AS3's too, which no probe measured. A button's or a
+text field's own `menu` is not read yet.
 
 `NativeMenu`, `NativeMenuItem` and `ContextMenu`'s menu members are AS3
 (as3/playerglobal), held to adl by the `native-menu-natives` player case:

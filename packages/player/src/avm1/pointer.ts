@@ -521,6 +521,11 @@ export class Avm1Pointer implements Pointer {
     return target !== null && !(target instanceof TextObject);
   }
 
+  /** What a right click at (x, y) is on: what `_droptarget` would name there, the clip whose drawing is there. */
+  contentAt(x: number, y: number): DisplayObject | null {
+    return this.targetAt(x, y, true);
+  }
+
   /** Whether this movie has a button or selectable field under the host's pointer. */
   hit(x: number, y: number): boolean {
     return this.targetAt(x, y) !== null;
@@ -595,7 +600,9 @@ export class Avm1Pointer implements Pointer {
       }
     }
 
-    return this.pickChildren(d, x, y, any);
+    const child = this.pickChildren(d, x, y, any);
+    // A clip's own drawing, as the drawing API makes it, below its children.
+    return child ?? (any && d.drawing !== null && this.drawnAt(d, x, y) ? d : null);
   }
 
   private pickChildren(d: Container, x: number, y: number, any: boolean): DisplayObject | null {

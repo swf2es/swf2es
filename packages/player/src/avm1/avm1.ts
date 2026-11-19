@@ -58,6 +58,7 @@ import {
   type SocketHost,
   screenCapabilities,
 } from "../hosts.js";
+import type { MenuItem } from "../input/context-menu.js";
 import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
@@ -76,6 +77,7 @@ import { FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
+import { type ContextMenus, contextMenuClasses, menuAt } from "./globals/ContextMenu.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { fileReferenceClasses } from "./globals/FileReference.js";
 import { type FilterFaces, filtersPackage } from "./globals/filters.js";
@@ -630,6 +632,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       avm1.DONT_ENUM,
     );
     realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
+    this.contextMenus = contextMenuClasses(realm);
+    realm.global.define("ContextMenu", this.contextMenus.ContextMenu, avm1.DONT_ENUM);
+    realm.global.define("ContextMenuItem", this.contextMenus.ContextMenuItem, avm1.DONT_ENUM);
     realm.global.define(
       "System",
       systemObject(realm, this.platform, this.screen, this.debugger, this.swfVersion),
@@ -1316,6 +1321,57 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
     }
+  }
+
+  /** ContextMenu's and ContextMenuItem's classes, which a right click reads menus by. */
+  private contextMenus: ContextMenus | null = null;
+
+  /**
+   * The menu a right click on `d` shows, from it up through its parents
+   * (globals/ContextMenu.ts): its onSelect run now, and each item's as it
+   * is chosen, as a callback runs, what they queue after them; null where
+   * none has a menu.
+   */
+  menu(d: DisplayObject | null): { items: MenuItem[]; quality: boolean } | null {
+    const classes = this.contextMenus;
+    if (classes === null || this.halted || !this.loaded) {
+      return null;
+    }
+
+    const run = <T>(body: () => T): T => {
+      this.timers.begin();
+      try {
+        const result = body();
+        this.queue.run();
+        return result;
+      } finally {
+        this.timers.end();
+      }
+    };
+    const menu = run(() =>
+      menuAt(classes, d, this.swfVersion, (o, name, args) => this.callback(o, name, args)),
+    );
+    if (menu === null) {
+      return null;
+    }
+
+    let chosen = false;
+    return {
+      quality: menu.quality,
+      items: menu.items.map(({ caption, enabled, separatorBefore, item }) => ({
+        caption,
+        enabled,
+        separatorBefore,
+        select: () => {
+          if (!enabled || chosen || this.halted) {
+            return;
+          }
+
+          chosen = true;
+          run(() => this.callback(item, "onSelect", [menu.owner, item]));
+        },
+      })),
+    };
   }
 
   /** LocalConnection may enter this VM from AS3, outside its own frame's script budget. */

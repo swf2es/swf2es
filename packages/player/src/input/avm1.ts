@@ -9,7 +9,7 @@ import type { Avm1 } from "../avm1/avm1.js";
 import type { Tabbed } from "../avm1/focus.js";
 import { Avm1Keyboard } from "../avm1/keyboard.js";
 import { Avm1Pointer } from "../avm1/pointer.js";
-import type { DisplayObject, MovieClip } from "../display/display.js";
+import { Container, type DisplayObject, type MovieClip } from "../display/display.js";
 import type { Scripting } from "../scripting.js";
 import { type KeyState, setFocus } from "./keyboard.js";
 import type { Cursor, PointerState } from "./pointer.js";
@@ -215,6 +215,29 @@ export class LoadedAvm1Input {
     }
 
     return redraws;
+  }
+
+  /**
+   * The menu a right click at `p` shows over a movie: the one whose root is
+   * `target`, as the host picked it (its button), or held by `target`, a
+   * Loader whose content's drawing is under the pointer; null where it is
+   * no movie's or no clip of the movie there has a menu (avm1/avm1.ts menu).
+   */
+  menu(p: PointerState, target: DisplayObject | null): ReturnType<Avm1["menu"]> {
+    let root: MovieClip | null = null;
+    if (target !== null && this.movies.has(target as MovieClip)) {
+      root = target as MovieClip;
+    } else if (target instanceof Container) {
+      root = (target.children.find((c) => this.movies.has(c as MovieClip)) as MovieClip) ?? null;
+    }
+
+    const pointer = root === null ? undefined : this.movies.get(root);
+    const movie = root === null ? undefined : this.keyboards.get(root);
+    if (pointer === undefined || movie === undefined) {
+      return null;
+    }
+
+    return movie.vm.menu(pointer.contentAt(p.x, p.y));
   }
 
   cursor(): Cursor | null {
