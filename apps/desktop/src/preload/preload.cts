@@ -7,6 +7,7 @@ import type {
   ConnectionEvents,
   DesktopApi,
   LibraryName,
+  NetworkProgress,
   NetworkResponse,
   OpenedMovie,
   SocketEvent,
@@ -20,9 +21,44 @@ let nextWebSocket = 1;
 let nextRequest = 1;
 /** The requests waiting for their response, by number. */
 const responses = new Map<number, (response: NetworkResponse) => void>();
-ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) =>
-  responses.get(id)?.(response),
+/** Those told of as they come: who hears of it, and the pieces of its body so far. */
+const streams = new Map<number, { progress: NetworkProgress; chunks: Uint8Array[] }>();
+ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) => {
+  const stream = streams.get(id);
+  streams.delete(id);
+  if (response.streamed && stream) {
+    const { streamed: _, ...rest } = response;
+    responses.get(id)?.({ ...rest, bytes: joined(stream.chunks) });
+    return;
+  }
+
+  responses.get(id)?.(response);
+});
+ipcRenderer.on("net:open", (_event, id: number, head: Omit<NetworkResponse, "bytes">, total) =>
+  streams.get(id)?.progress.open(head, Number(total)),
 );
+ipcRenderer.on("net:data", (_event, id: number, chunk: Uint8Array) => {
+  const stream = streams.get(id);
+  if (stream) {
+    stream.chunks.push(chunk);
+    stream.progress.data(chunk);
+  }
+});
+
+function joined(chunks: Uint8Array[]): Uint8Array {
+  if (chunks.length === 1) {
+    return chunks[0];
+  }
+
+  const bytes = new Uint8Array(chunks.reduce((n, chunk) => n + chunk.length, 0));
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.length;
+  }
+
+  return bytes;
+}
 
 // One cache per movie lifetime; reads after the first never block on the main process.
 let captureEpoch = -1;
@@ -145,24 +181,30 @@ const api: DesktopApi = {
     },
   },
   network: {
-    fetch: (request, cancel) => {
+    fetch: (request, cancel, progress) => {
       const id = nextRequest++;
       cancel(() => ipcRenderer.send("net:abort", id));
+      if (progress) {
+        streams.set(id, { progress, chunks: [] });
+      }
+
       // The response comes as a message of its own, before the answer that says it went.
       return new Promise<NetworkResponse>((resolve, reject) => {
         responses.set(id, (response) => {
           responses.delete(id);
           resolve(response);
         });
-        ipcRenderer.invoke("net:fetch", id, request).then(
+        ipcRenderer.invoke("net:fetch", id, request, progress !== undefined).then(
           ({ delivered }: { delivered: boolean }) => {
             if (!delivered) {
               responses.delete(id);
+              streams.delete(id);
               reject(new Error("swf2es: the request was refused"));
             }
           },
           (error: unknown) => {
             responses.delete(id);
+            streams.delete(id);
             reject(error);
           },
         );
