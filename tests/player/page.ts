@@ -136,6 +136,12 @@ async function scriptingFor(
     };
   }
 
+  // As avm1For: Flash played it from disk, so its URL is a file's at the disk's root
+  // (`file:///test.swf`), its host localhost, and the fetch serves what it loads from beside it.
+  const swfUrl = url ? new URL(url, location.href) : undefined;
+  const fileUrl = swfUrl
+    ? `file:///${swfUrl.pathname.split("/").pop()}${swfUrl.search}`
+    : undefined;
   const scripting = new Scripting(codegen, {
     moduleCache,
     lazyCompilation,
@@ -151,7 +157,7 @@ async function scriptingFor(
     screenCapabilities: url?.startsWith("/corpus/")
       ? { screenResolutionX: 1536, screenResolutionY: 864, pixelAspectRatio: 1, screenDPI: 72 }
       : undefined,
-    url: url ? new URL(url, location.href).href : undefined,
+    url: fileUrl,
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
     // An ErrorEvent no listener heard (#2044) ends no run: Flash tells its debugger of it and
@@ -161,7 +167,7 @@ async function scriptingFor(
         uncaught.push(error);
       }
     },
-    fetch: testFetch(url ? new URL(url, location.href).href : undefined, trace, logFetch, true),
+    fetch: testFetch(swfUrl?.href, trace, logFetch, true),
     // Background workers on Web Workers, which load the packages as serve.ts resolves them for one.
     workerHost: webWorkerHost({ codegen: wasm, url: "/worker/player-hosts/web-worker.js" }),
   });
