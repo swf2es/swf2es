@@ -3,6 +3,8 @@
 // in Flash), where Ruffle's are not.
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import {
   Avm1Object,
   DONT_DELETE,
@@ -438,4 +440,29 @@ test("Error has a message and a name on its prototype, listed, and gives its mes
   st.push("called", 1, "Error");
   V.callFunction(cx);
   assert.equal(st.pop(), undefined);
+});
+
+test("a path's variable, read, lets go of the object it was found on", async () => {
+  // The collector, which node gives a script only with --expose-gc.
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const { V, cx } = frame(7);
+  // The object a GetVariable of a path found its variable on, as eval("_root.clip.x") finds a
+  // clip's, dropped from everything that held it.
+  const found = (() => {
+    const holder = rt.newObject();
+    const inner = rt.newObject();
+    set(inner, "x", 1, 7);
+    set(holder, "inner", inner, 7);
+    V.setVariable(cx, holder, "holder");
+    assert.equal(V.getVariable(cx, "holder.inner.x"), 1);
+    assert.equal(V.getVariable(cx, "holder:inner:x"), 1);
+    V.setVariable(cx, undefined, "holder");
+    return new WeakRef(inner);
+  })();
+  // A WeakRef keeps its target till the job that made it ends.
+  await new Promise((done) => setImmediate(done));
+  gc();
+  // A boolean: a failure printing the kept object would format the whole runtime it reaches.
+  assert.ok(found.deref() === undefined, "a path's variable kept the object it was found on");
 });

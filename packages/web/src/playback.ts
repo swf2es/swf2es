@@ -240,7 +240,11 @@ export class Playback {
     }
   };
 
-  private step(now: number, show: boolean): void {
+  private step(at: number, show: boolean): void {
+    // The timer reads performance.now() as it runs; an animation frame's time is when the frame
+    // began, which may be before a timer's call just ahead of it. Its time so goes no further back
+    // than the last call's, and the player is never handed time going backwards.
+    const now = this.last === null ? at : Math.max(at, this.last);
     const dt = this.last === null ? 0 : now - this.last;
     this.last = now;
     // Moved to a display of another density, or zoomed: drawn anew for its pixels.

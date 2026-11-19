@@ -167,13 +167,23 @@ export let foundOn: Value;
 /** Whether that was a function's activation object. */
 export let foundLocal = false;
 
+/**
+ * Let go of what `resolveCallable` found, once read: a module's variable
+ * kept the last object a CallFunction found, and so its clip, its movie
+ * and that movie's compiler, alive after the player was destroyed, till
+ * another movie's CallFunction found something else.
+ */
+export function releaseFound(): void {
+  foundOn = undefined;
+}
+
 /** As `resolve`, setting `foundOn` to the object that had the name, undefined for none. */
 export function resolveCallable(cx: Variables, name: string, version: number): Value {
   foundOn = undefined;
   foundLocal = false;
   const separator = lastSeparator(name, version);
   if (separator >= 0 || (version >= 5 && name.includes("/"))) {
-    return getVariable(cx, name, version);
+    return variable(cx, name, version, true);
   }
 
   if (isThis(name, version)) {
@@ -198,6 +208,15 @@ export function resolveCallable(cx: Variables, name: string, version: number): V
  * it names, from SWF 5.
  */
 export function getVariable(cx: Variables, name: string, version: number): Value {
+  return variable(cx, name, version, false);
+}
+
+/**
+ * getVariable, with `found` setting foundOn to the object a path's variable
+ * was found on, for resolveCallable's CallFunction alone: no other caller
+ * releases it, and kept there it kept the object's movie alive.
+ */
+function variable(cx: Variables, name: string, version: number, found: boolean): Value {
   const separator = lastSeparator(name, version);
   if (separator >= 0) {
     if (separator === 0) {
@@ -205,13 +224,16 @@ export function getVariable(cx: Variables, name: string, version: number): Value
     }
 
     const path = name.slice(0, separator);
-    const variable = name.slice(separator + 1);
+    const property = name.slice(separator + 1);
     for (let s: Scope | null = cx.scope; s !== null; s = s.parent) {
       const object = targetPath(cx, s.object, path, true, true, version);
-      if (object !== null && has(object, variable, version)) {
+      if (object !== null && has(object, property, version)) {
         // After the getter, which may call functions of its own.
-        const value = get(object, variable, version);
-        foundOn = object;
+        const value = get(object, property, version);
+        if (found) {
+          foundOn = object;
+        }
+
         return value;
       }
     }
