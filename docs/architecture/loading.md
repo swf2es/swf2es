@@ -155,27 +155,37 @@ following frame's AS3 ENTER_FRAME; a URL-loaded movie runs it in the load
 frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
 and script-driven playback run with the child. Unloading destroys the
-child VM and its connections without closing the parent's audio device.
-Keys and focus reach these loaded movies as Flash Player 32 sends them
-(input.md, "Keyboard and focus"). Wheel routing into them, and
-`AVM1Movie`'s `call` and `addCallback`, remain incomplete; those methods
-still throw #2014.
+child VM without closing the parent's audio device, but for its
+LocalConnections, which Flash keeps connected (below). Keys and focus
+reach these loaded movies as Flash Player 32 sends them (input.md,
+"Keyboard and focus"). Wheel routing into them remains incomplete.
+`AVM1Movie`'s `call` and `addCallback` throw #2014 as Flash Player 32's
+do with any movie it loads (the `avm1-movie` player case), after its
+argument counts; their #1063's text names no method yet ("on function",
+where Flash's debugger player names `flash.display::AVM1Movie/call()`).
 
 `LocalConnection` uses one native broker (`player/src/localconnection.ts`)
 shared by a player's AS3 and loaded AVM1 movies. A standalone AVM1 player
 has its own broker; an embedding may explicitly share a `LocalConnections`
 instance across players. Connections live in a map keyed by ASCII-folded
 names, prefixed with the SWF's domain unless the name starts with `_`.
-Messages snapshot arguments as bounded bytes (40 KiB) and use the
-sender's existing host-event queue. AVM1 sends AMF0; AS3 sends AMF3 to
-preserve ByteArray, XML, Vector and class aliases, converting the snapshot
-to AMF0 only when an AVM1 receiver needs it. AMF3 scratch buffers are
-reused except for externalizable streams that may escape the call. A broker
-with no messages does no frame work. Receiver methods, domain permissions
-and sender status events enter the appropriate VM, never sharing live script objects. Closing or
-destroying a receiver frees its name. This is in-process messaging, not
-Flash's machine-wide transport: browser tabs and desktop processes do not
-share connections.
+Messages snapshot arguments as bounded bytes (40 KiB) and wait on one
+queue where the frame's host events are, which delivers up to 16 a frame,
+first in first out, so that a message a handler sends arrives in the same
+frame unless a chain keeps sending, as Flash's real-time delivery has it
+(`Loads.deferLocal`). AVM1 sends AMF0; AS3 sends AMF3 to preserve
+ByteArray, XML, Vector and class aliases, converting the snapshot to AMF0
+only when an AVM1 receiver needs it. AMF3 scratch buffers are reused
+except for externalizable streams that may escape the call. A broker with
+no messages does no frame work. Receiver methods, domain permissions and
+sender status events enter the appropriate VM, never sharing live script
+objects. A method a receiver lacks, or a property that is no function, is
+passed over in silence, as in Flash. Closing or destroying a receiver
+frees its name; an AVM1 movie an AS3 Loader unloads keeps its names, and
+stays while it listens or has a send to deliver, as Flash keeps it
+(avm1.md, "AVM1 and AVM2"). This is in-process messaging, not Flash's
+machine-wide transport: browser tabs and desktop processes do not share
+connections.
 
 Downloads report their progress as their bytes come. A host's fetch may
 take a third argument, a `FetchProgress`, and tell it the response's head
