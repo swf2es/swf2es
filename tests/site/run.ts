@@ -539,7 +539,7 @@ async function check(): Promise<void> {
             const meterHidden = `!(${meter}) || ${meter}.hidden`;
             const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').getAttribute('aria-pressed') === 'true'`;
             assert.equal(await value<boolean>(`!${meter}`), true);
-            // The page's own control: a Stats toggle beside Full screen, its shortcut in its title.
+            // The page's own control: a Show stats toggle beside Full screen, its shortcut in its title.
             assert.deepEqual(
               await value<string[]>(
                 "(() => { const b = document.getElementById('meter-toggle'); return [b.tagName, b.textContent, b.getAttribute('aria-pressed'), b.previousElementSibling.id, String(/Ctrl\\+Shift\\+F/.test(b.title))]; })()",

@@ -128,7 +128,11 @@ export function stage3DChecks(page: Page): [string, () => Promise<void>][] {
         assert.deepEqual([...pixel.data], [0, 255, 0, 255]);
         // The performance meter shows above Stage3D's layer in every corner. Its background lets
         // what is under it through: inside its border, the screen is that background laid over
-        // what shows there with the meter hidden, as only a meter on top draws it.
+        // what shows there with the meter hidden, as only a meter on top draws it. That tells
+        // only where what is under differs from the meter's fill by more than about 17 a channel
+        // (the 12 allowed, over the fill's 0.7), as Stage3D's green and the display list's colours
+        // do from the theme's panel; and only the top left corner lies over the SWF's 32 by 32
+        // back buffer, the others over the display list around it.
         const pixelAt = async (x: number, y: number) => {
           const shot = await send<{ data: string }>("Page.captureScreenshot", {
             format: "png",

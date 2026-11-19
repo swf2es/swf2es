@@ -19,7 +19,8 @@ type GL = WebGLRenderingContext | WebGL2RenderingContext;
 /**
  * Its look, which a page may give its own through custom properties on the
  * element (font, color, background, border, muted, the labels' colour, and
- * opacity, the background's, 0.7 by default), as the demo site gives its
+ * opacity, the background's, 0.7 by default, which multiplies a background's
+ * own alpha), as the demo site gives its
  * theme's; by default the browser's light or dark colours, as the context
  * menu's. The background lets the SWF show through; a halo of it around
  * each figure keeps the figures readable over white text or busy content.
@@ -36,7 +37,7 @@ export const METER_STYLE =
   " font-variant-numeric: tabular-nums; color-scheme: light dark;" +
   " color: var(--swf2es-meter-color, CanvasText);" +
   " background: color-mix(in srgb, var(--swf2es-meter-fill)" +
-  " calc(var(--swf2es-meter-opacity, 0.7) * 100%), transparent);" +
+  " clamp(0%, calc(var(--swf2es-meter-opacity, 0.7) * 100%), 100%), transparent);" +
   " border: 1px solid color-mix(in srgb, var(--swf2es-meter-border, GrayText) 50%, transparent);" +
   " border-radius: 4px;" +
   " text-shadow: 1px 0 0 var(--swf2es-meter-fill), -1px 0 0 var(--swf2es-meter-fill)," +
@@ -48,7 +49,9 @@ export const METER_STYLE =
   " .meter[hidden], .meter > div[hidden] { display: none }" +
   " .meter > div { display: contents }" +
   " .meter dt { color: var(--swf2es-meter-muted, color-mix(in srgb, CanvasText 70%, Canvas)) }" +
-  " .meter dd { margin: 0; text-align: right }";
+  " .meter dd { margin: 0; text-align: right }" +
+  // High contrast drops text-shadow, the halo the figures need over a box the SWF shows through.
+  " @media (forced-colors: active) { .meter { --swf2es-meter-opacity: 1 } }";
 
 /** Each figure's name, in the dd's `data-figure`, and its label. */
 const FIGURES = [
