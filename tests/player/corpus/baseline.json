@@ -1380,7 +1380,7 @@
   "avm2/loader_try_click_root": {"matched":0,"lines":16,"traced":16,"error":null},
   "avm2/loader_unknown_content": {"matched":24,"lines":24,"traced":24,"error":null},
   "avm2/loader_visibility_interactive": {"matched":0,"lines":1,"traced":0,"error":null},
-  "avm2/loaderinfo_events": {"matched":5,"lines":7,"traced":8,"error":null},
+  "avm2/loaderinfo_events": {"matched":7,"lines":7,"traced":7,"error":null},
   "avm2/loaderinfo_loadurl": {"matched":12,"lines":12,"traced":12,"error":null},
   "avm2/loaderinfo_more": {"matched":6,"lines":6,"traced":6,"error":null},
   "avm2/loaderinfo_properties": {"matched":18,"lines":18,"traced":18,"error":null},

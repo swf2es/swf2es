@@ -65,9 +65,23 @@ interface Avm1Load {
   failed: boolean;
 }
 
+/**
+ * The LocalConnection messages a frame delivers at most, the rest the
+ * frames after, first in first out (Loads.deferLocal). Flash polls them in
+ * real time: at 30 fps, adl delivers a median of about 25 a frame of a
+ * chain a handler keeps sending to itself, 12 of one between the host and
+ * a movie, and 10 where each message sends two; Flash Player 32's
+ * projector about 4, 2 and 2.
+ */
+const LOCAL_DELIVERIES = 16;
+
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
   private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
+  /** Movies unloaded whose LocalConnections still listen or send (Avm1.unloadFromLoader). */
+  private readonly unloadedAvm1 = new Set<Avm1>();
+  /** LocalConnection's deliveries, AS3's and the loaded AVM1 movies' (deferLocal). */
+  private readonly localReady: (() => void)[] = [];
 
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
@@ -78,6 +92,8 @@ export class Loads {
   private readonly pendingRequests = new Set<Promise<void>>();
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
+  /** The Stage's LoaderInfo, made for the main SWF's when first asked for. */
+  private stageInfo: { main: AsObject; info: AsObject } | null = null;
   /** A load from bytes was asked, and heldTime has not yet told of it ready. */
   private holding = false;
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
@@ -95,6 +111,13 @@ export class Loads {
   }
 
   tickAvm1(): void {
+    for (const vm of this.unloadedAvm1) {
+      if (!this.keeps(vm)) {
+        this.unloadedAvm1.delete(vm);
+        vm.destroy(false);
+      }
+    }
+
     if (this.avm1Movies.size === 0) {
       return;
     }
@@ -129,6 +152,18 @@ export class Loads {
     for (const movie of this.avm1Movies.values()) {
       movie.vm.saveSharedObjects();
     }
+
+    for (const vm of this.unloadedAvm1) {
+      vm.saveSharedObjects();
+    }
+  }
+
+  /**
+   * Whether an unloaded movie is kept: while it listens or has a send to
+   * deliver, as Flash keeps it; never once its script stopped it for good.
+   */
+  private keeps(vm: Avm1): boolean {
+    return !vm.stopped && (vm.localPending > 0 || this.s.localConnections.listening(vm));
   }
 
   destroyAvm1(): void {
@@ -136,6 +171,11 @@ export class Loads {
       movie.vm.destroy(false);
     }
 
+    for (const vm of this.unloadedAvm1) {
+      vm.destroy(false);
+    }
+
+    this.unloadedAvm1.clear();
     this.avm1Movies.clear();
     this.s.avm1Input = null;
   }
@@ -155,6 +195,18 @@ export class Loads {
   }
 
   /**
+   * A LocalConnection delivery, made where the frame's host events are:
+   * in this frame's if it has not reached them yet, else the next's. What
+   * a delivery sends is delivered in the same frame, as Flash delivers a
+   * short chain of sends from AS3's handlers and an AVM1 movie's answer
+   * before the next ENTER_FRAME (the `avm1-local-connection` case), up to
+   * LOCAL_DELIVERIES a frame.
+   */
+  deferLocal(deliver: () => void): void {
+    this.localReady.push(deliver);
+  }
+
+  /**
    * A LoaderInfo for `loader` (null for the main SWF's), empty until its
    * content is known: what its natives read is kept on it as $ fields.
    */
@@ -171,6 +223,27 @@ export class Loads {
     info.$loaderURL = loader ? this.ownerUrl(loader) : this.s.url;
     info.$loaded = 0;
     info.$total = 0;
+    return info;
+  }
+
+  /**
+   * The Stage's LoaderInfo. Flash's is another object than the main SWF's
+   * (Flash Player 32's projector: `stage.loaderInfo == loaderInfo` is
+   * false), which tells what that one knows, its content the main SWF's
+   * root, but hears none of its events, nor its uncaught errors.
+   */
+  stageLoaderInfo(main: AsObject): AsObject {
+    const made = this.stageInfo;
+    if (made !== null && made.main === main) {
+      return made.info;
+    }
+
+    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    for (const name of MIRRORED) {
+      Object.defineProperty(info, name, { get: () => main[name], configurable: true });
+    }
+
+    this.stageInfo = { main, info };
     return info;
   }
 
@@ -802,7 +875,14 @@ export class Loads {
     if (content) {
       const movie = this.avm1Movies.get(content.$display);
       if (movie) {
-        movie.vm.destroy(false);
+        // Its LocalConnections outlive it, as in Flash, until it closes them.
+        if (this.keeps(movie.vm)) {
+          movie.vm.unloadFromLoader();
+          this.unloadedAvm1.add(movie.vm);
+        } else {
+          movie.vm.destroy(false);
+        }
+
         this.avm1Movies.delete(content.$display);
         if (this.s.avm1Input?.remove(content.$display)) {
           this.s.avm1Input = null;
@@ -857,6 +937,15 @@ export class Loads {
         } catch (error) {
           this.s.reportUncaught(error);
         }
+      }
+    }
+
+    for (let n = 0; n < LOCAL_DELIVERIES && this.localReady.length !== 0; n++) {
+      const deliver = this.localReady.shift() as () => void;
+      try {
+        deliver();
+      } catch (error) {
+        this.s.reportUncaught(error);
       }
     }
 
@@ -995,6 +1084,7 @@ export class Loads {
         fsCommand: s.fsCommand ?? undefined,
         sendToUrl: s.sendToUrl,
         localConnections: s.localConnections,
+        deferLocal: (deliver) => this.deferLocal(deliver),
         realTime: s.timers.realTime,
         platform: s.platform,
         screenCapabilities: s.screenCapabilities,
@@ -1109,6 +1199,22 @@ export class Loads {
 }
 
 const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
+
+/** What the Stage's LoaderInfo reads from the main SWF's (stageLoaderInfo). */
+const MIRRORED = [
+  "$loader",
+  "$content",
+  "$bytes",
+  "$swf",
+  "$typed",
+  "$image",
+  "$url",
+  "$params",
+  "$loaderURL",
+  "$loaded",
+  "$total",
+  "$domain",
+];
 const NO_BYTES = new Uint8Array(0);
 
 /**
