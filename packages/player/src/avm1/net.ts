@@ -5,6 +5,7 @@
 // held for the next frame, where the movie delivers it between frames, as
 // Flash's network callbacks come.
 import type {
+  FetchHost,
   FetchPurpose,
   FetchRequest,
   FetchResult,
@@ -12,10 +13,11 @@ import type {
   SocketHost,
   SocketTransport,
 } from "../hosts.js";
+import { type Pieces, piecesOf } from "../pieces.js";
 import { resolve } from "../scripting/loads.js";
 import { fetchWhile } from "../signals.js";
 
-export type Fetch = (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+export type Fetch = FetchHost;
 
 /** A request as a script asks it: its URL as given, resolved here against the SWF's. */
 export interface NetRequest {
@@ -93,28 +95,57 @@ export class Avm1Net {
    * `request` sent by the host's fetch, as "data", which the host judges
    * as it judges a URLLoader's; `deliver` gets the result in a frame
    * after, a failure as no bytes, status 0, where nothing answered.
+   * `pieces` hears of the response as it comes (request), where the host
+   * tells it.
    */
-  fetch(request: NetRequest, deliver: (result: FetchResult) => void): void {
-    this.after(this.request(request, "data"), deliver);
+  fetch(request: NetRequest, deliver: (result: FetchResult) => void, pieces?: Pieces): void {
+    this.after(this.request(request, "data", undefined, pieces), deliver);
   }
 
   /**
    * `request` sent by the host's fetch, as `purpose`: its result, a
    * failure as no bytes, status 0, where nothing answered. A movie's load
-   * is "content", as AS3's Loader's is.
+   * is "content", as AS3's Loader's is. `pieces` hears of the response as
+   * it comes, in pieces as AS3's loads do (piecesOf), each in a frame after,
+   * where the host tells it, before the result.
    */
-  request(request: NetRequest, purpose: FetchPurpose, signal?: AbortSignal): Promise<FetchResult> {
+  request(
+    request: NetRequest,
+    purpose: FetchPurpose,
+    signal?: AbortSignal,
+    pieces?: Pieces,
+  ): Promise<FetchResult> {
     const fetch = this.fetchHost;
     if (this.destroyed) {
       return Promise.resolve(FAILED);
     }
 
+    const told =
+      pieces &&
+      piecesOf({
+        open: (head, total) => this.defer(() => pieces.open(head, total)),
+        data: (chunk, loaded, total, last) =>
+          this.defer(() => pieces.data(chunk, loaded, total, last)),
+      });
     const outgoing: FetchRequest = { ...request, url: this.resolve(request.url), purpose };
     return (
-      fetch ? fetchWhile(fetch, outgoing, this.stopped.signal, signal) : Promise.reject()
+      fetch
+        ? fetchWhile(
+            (r: FetchRequest, s: AbortSignal) => fetch(r, s, told?.progress),
+            outgoing,
+            this.stopped.signal,
+            signal,
+          )
+        : Promise.reject()
     ).then(
-      (result) => result,
-      () => FAILED,
+      (result) => {
+        told?.end(result.bytes !== null);
+        return result;
+      },
+      () => {
+        told?.end(false);
+        return FAILED;
+      },
     );
   }
 

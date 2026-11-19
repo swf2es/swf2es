@@ -48,8 +48,7 @@ import {
   type Drawer,
   defaultStorage,
   type ExternalInterfaceHost,
-  type FetchRequest,
-  type FetchResult,
+  type FetchHost,
   type Navigate,
   type PlatformCapabilities,
   platformCapabilities,
@@ -200,7 +199,7 @@ export interface Avm1Options {
    * URLLoader goes through; without one, every load fails as a missing
    * file does.
    */
-  fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+  fetch?: FetchHost;
   /** XMLSocket's TCP, AS3's Socket's host; without one, every connect fails with onConnect(false). */
   socket?: SocketHost;
   /** Where relative URLs resolve, as a page's `base` parameter has it: the SWF's URL by default. */
@@ -1604,9 +1603,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return this.levels.get(n) ?? this.makeLevel(n);
   }
 
-  /** The size of the SWF `d` is of, as it came. */
-  sizeOf(d: DisplayObject): number {
-    return this.swfOf(d).size;
+  /** The bytes of the SWF `d` is of that have come, and in all: its size, or a load's so far. */
+  progressOf(d: DisplayObject): [loaded: number, total: number] {
+    const swf = this.swfOf(d);
+    return swf.loading ? [swf.loading.loaded, swf.loading.total] : [swf.size, swf.size];
   }
 
   /**

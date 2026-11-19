@@ -103,7 +103,7 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   {
     name: "Loading and security",
     status: "supported",
-    note: "Loader, URLLoader, sandboxes and application domains.",
+    note: "Loader, URLLoader, sandboxes and application domains. Progress is reported while files download, as Flash reported it; a loaded SWF starts playing once it has fully arrived, not while it streams in. Where the server sends no length, the last progress event reports the size that arrived, where Flash kept the total at 0, so that preloaders finish.",
     href: source("docs/architecture/loading.md"),
   },
   {

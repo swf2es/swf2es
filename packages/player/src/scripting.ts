@@ -42,6 +42,7 @@ import {
   defaultStorage,
   type EncryptedStoreHost,
   type ExternalInterfaceHost,
+  type FetchHost,
   type FetchRequest,
   type FetchResult,
   type FileSystemHost,
@@ -260,7 +261,7 @@ export class Scripting {
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(soundHostOf(this));
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
-  fetch: ((request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>) | null = null;
+  fetch: FetchHost | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
   readonly decodeImage: ImageDecode | null;
   /**
@@ -405,7 +406,7 @@ export class Scripting {
     readonly codegen: Codegen,
     // The API version follows `air`, the one switch for it, below.
     options: Omit<avm2.RuntimeOptions, "apiVersion"> & {
-      fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+      fetch?: FetchHost;
       url?: string;
       localConnections?: LocalConnections;
       /**
@@ -570,7 +571,13 @@ export class Scripting {
     this.lazyCompilation = options.lazyCompilation ?? false;
     const fetch = options.fetch;
     this.fetch = fetch
-      ? (request, signal) => fetchWhile(fetch, request, this.stopped.signal, signal)
+      ? (request, signal, progress) =>
+          fetchWhile(
+            (r: FetchRequest, s: AbortSignal) => fetch(r, s, progress),
+            request,
+            this.stopped.signal,
+            signal,
+          )
       : null;
     this.url = options.url ?? this.url;
     this.air = options.air ?? false;

@@ -8,8 +8,7 @@ import {
   builtinLibrary,
   type CaptureHost,
   type EncryptedStoreHost,
-  type FetchRequest,
-  type FetchResult,
+  type FetchHost,
   type FileHost,
   type FileSystemHost,
   type ModuleCache,
@@ -76,9 +75,11 @@ export interface Configuration {
    * A fetch of the embedder's own for what the SWFs load, the SWF the
    * element plays among it (its purpose "movie"), in place of the
    * browser's: a desktop app's, which judges each request by Flash's
-   * sandboxes and policy files rather than CORS.
+   * sandboxes and policy files rather than CORS. Where it tells the
+   * response's `progress` as it comes (responseBytes reads a Response's
+   * body so), the SWF's loads hear of it as they go.
    */
-  fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+  fetch?: FetchHost;
   /** Takes the policy files a SWF names with Security.loadPolicyFile, for such a fetch. */
   loadPolicyFile?: (url: string) => void;
   /** Security.sandboxType of the SWFs the element plays next: "remote" by default. */

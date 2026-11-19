@@ -9,6 +9,7 @@
 // the object and calls onLoad.
 import { avm1 } from "@swf2es/runtime";
 import type { FetchResult } from "../../hosts.js";
+import type { Pieces } from "../../pieces.js";
 import { type Avm1Net, type NetRequest, textFor } from "../net.js";
 
 const textEncoder = new TextEncoder();
@@ -31,6 +32,9 @@ export interface LoadHost {
 
 const HIDDEN = avm1.DONT_ENUM | avm1.DONT_DELETE;
 const FORM = "application/x-www-form-urlencoded";
+
+/** Each object's latest load, which alone hears of its answer as it comes. */
+const loadsOf = new WeakMap<Obj, number>();
 
 /** `name` on `o` as `value`: defined hidden where it has none, else set as a script would. */
 function setHidden(o: Obj, name: string, value: Value, version: number): void {
@@ -57,23 +61,51 @@ export function startLoad(
   setHidden(target, "_bytesLoaded", 0, version);
   setHidden(target, "_bytesTotal", undefined, version);
   setHidden(target, "loaded", false, version);
-  host.net.fetch(request, (result: FetchResult) => {
-    const v = host.version;
-    const length = result.bytes?.length ?? 0;
-    if (result.bytes !== null) {
-      avm1.set(target, "_bytesTotal", length, v);
-      if (length > 0) {
-        avm1.set(target, "_bytesLoaded", length, v);
+  // As the answer comes, its length as its headers tell it, then the bytes so far (adl: a
+  // LoadVars polled each frame has its bytes grow a piece at a time), the total as AS3's loads
+  // have it (piecesOf): 0 once more came than told, all that came at the end; none until then
+  // where the headers told none. A load asked since takes the place of this one's.
+  const load = (loadsOf.get(target) ?? 0) + 1;
+  loadsOf.set(target, load);
+  let sized = false;
+  const pieces: Pieces = {
+    open: (_head, total) => {
+      sized = total > 0;
+      if (loadsOf.get(target) === load && sized) {
+        avm1.set(target, "_bytesTotal", total, host.version);
       }
-    }
+    },
+    data: (_chunk, loaded, total, last) => {
+      if (loadsOf.get(target) === load) {
+        avm1.set(target, "_bytesLoaded", loaded, host.version);
+        if (sized || last) {
+          avm1.set(target, "_bytesTotal", total, host.version);
+        }
+      }
+    },
+  };
+  host.net.fetch(
+    request,
+    (result: FetchResult) => {
+      const v = host.version;
+      const length = result.bytes?.length ?? 0;
+      if (result.bytes !== null) {
+        avm1.set(target, "_bytesTotal", length, v);
+        if (length > 0) {
+          avm1.set(target, "_bytesLoaded", length, v);
+        }
+      }
 
-    if (httpStatus) {
-      host.callback(target, "onHTTPStatus", [result.status]);
-    }
+      if (httpStatus) {
+        host.callback(target, "onHTTPStatus", [result.status]);
+      }
 
-    const data = result.bytes !== null && length > 0 ? textFor(textOf(result.bytes), v) : undefined;
-    host.callback(target, "onData", [data]);
-  });
+      const data =
+        result.bytes !== null && length > 0 ? textFor(textOf(result.bytes), v) : undefined;
+      host.callback(target, "onData", [data]);
+    },
+    pieces,
+  );
 }
 
 /**

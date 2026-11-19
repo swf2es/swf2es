@@ -14,6 +14,7 @@
 import { avm2 } from "@swf2es/runtime";
 import type { As3, As3Classes } from "../../../as3/types.js";
 import { dispatchEvent, heard } from "../../../scripting/events.js";
+import type { BytesProgress } from "../../../scripting/loads.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -34,6 +35,16 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
     stream.$abort = null;
     stream.$connected = false;
   };
+
+  const progressEvent = (loaded: number, total: number): AsObject =>
+    s.rt.construct(
+      s.rt.classNamed("flash.events::ProgressEvent"),
+      "progress",
+      false,
+      false,
+      loaded,
+      total,
+    ) as AsObject;
 
   class URLStreamNatives {
     declare $buffer: AsObject | undefined;
@@ -56,23 +67,104 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
       const source = request as AsObject;
       // AIR's: whether an HTTP error will complete, decided as the load is asked for.
       const errorsComplete = s.air && heard(this, "httpResponseStatus");
-      s.loads.requestBytes(source, abort.signal, (result, url) => {
-        if (this.$generation !== generation) {
-          return;
-        }
+      // Whether its response was told as it came: OPEN at its head, then its bytes readable as
+      // they come, each piece with its PROGRESS, as Flash's (adl: bytesAvailable is what came).
+      let streamed = false;
+      const progress: BytesProgress = {
+        open: (head, _total, url) => {
+          // Flash Player reads no error's body, whatever a host gives.
+          if (this.$generation !== generation || (head.status >= 400 && !s.air)) {
+            return;
+          }
 
-        const { status, local } = result;
-        const error = status >= 400;
-        // Flash Player reads no error's body, whatever a host gives.
-        const bytes = error && !s.air ? null : result.bytes;
-        const redirected = result.url !== undefined;
-        // AIR's, as the response's headers come: before the bytes and Flash Player's status.
-        const response = s.httpResponseStatus(result, url);
-        this.$abort = null;
-        if (bytes === null) {
-          this.$connected = false;
-          if (response) {
+          streamed = true;
+          this.$connected = true;
+          dispatchEvent(s, this, s.event("open"));
+          const response = s.httpResponseStatus({ ...head, bytes: null }, url);
+          if (response && this.$generation === generation) {
             dispatchEvent(s, this, response);
+          }
+        },
+        data: (chunk, loaded, total) => {
+          if (this.$generation !== generation || !streamed) {
+            return;
+          }
+
+          const buffer = avm2.bytesOf(s.rt, bufferOf(this));
+          const at = buffer.position;
+          buffer.position = buffer.length;
+          buffer.write(chunk);
+          buffer.position = at;
+          dispatchEvent(s, this, progressEvent(loaded, total));
+        },
+      };
+      s.loads.requestBytes(
+        source,
+        abort.signal,
+        (result, url) => {
+          if (this.$generation !== generation) {
+            return;
+          }
+
+          const { status, local } = result;
+          const error = status >= 400;
+          // Flash Player reads no error's body, whatever a host gives.
+          const bytes = error && !s.air ? null : result.bytes;
+          const redirected = result.url !== undefined;
+          // AIR's, as the response's headers come: before the bytes and Flash Player's status.
+          const response = s.httpResponseStatus(result, url);
+          this.$abort = null;
+          if (bytes === null) {
+            this.$connected = false;
+            if (response && !streamed) {
+              dispatchEvent(s, this, response);
+              if (this.$generation !== generation) {
+                return;
+              }
+            }
+
+            dispatchEvent(s, this, s.httpStatus(status, redirected));
+            if (this.$generation !== generation) {
+              return;
+            }
+
+            dispatchEvent(
+              s,
+              this,
+              s.rt.construct(
+                s.rt.classNamed("flash.events::IOErrorEvent"),
+                "ioError",
+                false,
+                false,
+                s.loads.streamError(url, local),
+                2032,
+              ) as AsObject,
+            );
+            return;
+          }
+
+          if (!streamed) {
+            this.$connected = true;
+            dispatchEvent(s, this, s.event("open"));
+            if (this.$generation !== generation) {
+              return;
+            }
+
+            if (response) {
+              dispatchEvent(s, this, response);
+              if (this.$generation !== generation) {
+                return;
+              }
+            }
+
+            const buffer = avm2.bytesOf(s.rt, bufferOf(this));
+            buffer.write(bytes);
+            buffer.position = 0;
+          }
+
+          // An AIR application hears of no progress where no bytes came (adl, AIR 51.3).
+          if ((!streamed || bytes.length === 0) && (bytes.length > 0 || !s.air)) {
+            dispatchEvent(s, this, progressEvent(bytes.length, bytes.length));
             if (this.$generation !== generation) {
               return;
             }
@@ -86,73 +178,21 @@ export function urlStreamNatives(s: Scripting): avm2.Natives {
           dispatchEvent(
             s,
             this,
-            s.rt.construct(
-              s.rt.classNamed("flash.events::IOErrorEvent"),
-              "ioError",
-              false,
-              false,
-              s.loads.streamError(url, local),
-              2032,
-            ) as AsObject,
+            error && !errorsComplete
+              ? (s.rt.construct(
+                  s.rt.classNamed("flash.events::IOErrorEvent"),
+                  "ioError",
+                  false,
+                  false,
+                  s.loads.streamError(url, local),
+                  2032,
+                ) as AsObject)
+              : s.event("complete"),
           );
-          return;
-        }
-
-        this.$connected = true;
-        dispatchEvent(s, this, s.event("open"));
-        if (this.$generation !== generation) {
-          return;
-        }
-
-        if (response) {
-          dispatchEvent(s, this, response);
-          if (this.$generation !== generation) {
-            return;
-          }
-        }
-
-        const buffer = avm2.bytesOf(s.rt, bufferOf(this));
-        buffer.write(bytes);
-        buffer.position = 0;
-        // An AIR application hears of no progress where no bytes came (adl, AIR 51.3).
-        if (bytes.length > 0 || !s.air) {
-          dispatchEvent(
-            s,
-            this,
-            s.rt.construct(
-              s.rt.classNamed("flash.events::ProgressEvent"),
-              "progress",
-              false,
-              false,
-              bytes.length,
-              bytes.length,
-            ) as AsObject,
-          );
-          if (this.$generation !== generation) {
-            return;
-          }
-        }
-
-        dispatchEvent(s, this, s.httpStatus(status, redirected));
-        if (this.$generation !== generation) {
-          return;
-        }
-
-        dispatchEvent(
-          s,
-          this,
-          error && !errorsComplete
-            ? (s.rt.construct(
-                s.rt.classNamed("flash.events::IOErrorEvent"),
-                "ioError",
-                false,
-                false,
-                s.loads.streamError(url, local),
-                2032,
-              ) as AsObject)
-            : s.event("complete"),
-        );
-      });
+        },
+        "data",
+        progress,
+      );
     }
 
     get connected(): boolean {

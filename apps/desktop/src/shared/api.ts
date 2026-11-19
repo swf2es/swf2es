@@ -209,15 +209,28 @@ export interface NetworkResponse {
   status: number;
   headers: [string, string][];
   url?: string;
+  /** Over IPC: its bytes came as pieces before it (net:data), which make up the whole. */
+  streamed?: true;
+}
+
+/** What the page hears of a response as it comes, as player's FetchProgress has it. */
+export interface NetworkProgress {
+  open(head: Omit<NetworkResponse, "bytes">, total: number): void;
+  data(chunk: Uint8Array): void;
 }
 
 /** A SWF's http and https requests, sent and judged by the shell, as Flash's sandboxes had them. */
 export interface DesktopNetwork {
   /**
    * The response, or a rejection where the shell refused the request.
-   * `cancel` is called at once with what aborts it.
+   * `cancel` is called at once with what aborts it; `progress`, where
+   * given, is told of the response as it comes.
    */
-  fetch(request: NetworkRequest, cancel: (abort: () => void) => void): Promise<NetworkResponse>;
+  fetch(
+    request: NetworkRequest,
+    cancel: (abort: () => void) => void,
+    progress?: NetworkProgress,
+  ): Promise<NetworkResponse>;
   /** A policy file the SWF named with Security.loadPolicyFile. */
   loadPolicyFile(url: string): void;
 }

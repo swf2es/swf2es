@@ -36,6 +36,7 @@ import {
   LIMITS,
   type Limits,
   type Movie,
+  type NetProgress,
   type NetRequest,
   type NetResponse,
   type NetworkOptions,
@@ -81,6 +82,8 @@ interface SendOptions {
   partition?: string;
   /** A policy file's fetch: fresh only as long as its server says. */
   policyFile?: boolean;
+  /** Told of the body as it comes, where it is read; a stored one comes whole. */
+  progress?: NetProgress;
 }
 
 /**
@@ -231,12 +234,14 @@ export class Network {
    * if the movie may; `signal` aborts it. Refused, it throws a Refused
    * saying why. `deliver` is handed the response while its bytes still
    * count against the movie's budget, for a caller that copies them away
-   * (over IPC) before they are given back.
+   * (over IPC) before they are given back. `progress` is told of the body
+   * of what the SWF loads as it comes.
    */
   async fetch(
     request: unknown,
     signal: AbortSignal,
     deliver?: (response: NetResponse) => void,
+    progress?: NetProgress,
   ): Promise<NetResponse> {
     const session = this.session;
     if (!session) {
@@ -254,7 +259,7 @@ export class Network {
       const response =
         checked.purpose === "movie"
           ? await this.fetchMovie(session, checked, bounded, budget)
-          : await this.fetchFor(session, checked, bounded, budget);
+          : await this.fetchFor(session, checked, bounded, budget, progress);
       deliver?.(response);
       return response;
     } catch (error) {
@@ -564,6 +569,7 @@ export class Network {
     request: NetRequest & { target: URL },
     signal: AbortSignal,
     budget: Budget,
+    progress?: NetProgress,
   ): Promise<NetResponse> {
     let requester: Requester;
     let rank: number;
@@ -619,9 +625,17 @@ export class Network {
         }
       }
 
+      // Its head as the response will have it: the URL redirects took it to.
+      const moved = url.href === request.url ? {} : { url: url.href };
       const response = await this.exchange(url, target.address, method, headers, body, signal, {
         // sendToURL's answer is no one's to read.
         read: request.purpose !== "send",
+        ...(progress && {
+          progress: {
+            open: (head, total) => progress.open({ ...head, ...moved }, total),
+            data: progress.data,
+          },
+        }),
         // In AIR's application sandbox alone: Flash Player's fail such a load, with no data.
         errorBody: application && request.errorBody === true,
         max: this.limits.response,
@@ -631,11 +645,7 @@ export class Network {
       });
       const next = redirectOf(url, response);
       if (!next) {
-        return {
-          ...response,
-          ...(url.href === request.url ? {} : { url: url.href }),
-          ...(ignored ? { policyIgnored: true } : {}),
-        };
+        return { ...response, ...moved, ...(ignored ? { policyIgnored: true } : {}) };
       }
 
       // As browsers do: a 303, and a 301 or 302 after a POST, go on as a GET without the body.
@@ -1208,6 +1218,8 @@ export class Network {
           return;
         }
 
+        const progress = options.progress;
+        progress?.open({ status, headers: received }, exact ? declared : 0);
         const take = (chunk: Buffer) => {
           if (finished) {
             return;
@@ -1231,6 +1243,8 @@ export class Network {
           body.set(chunk, length);
           length += chunk.length;
           arm();
+          // A copy of its own: IPC would carry a pooled Buffer's whole memory.
+          progress?.data(new Uint8Array(chunk));
         };
         // Bytes of their own, since IPC would carry a view's whole array; the
         // larger one let go so it may be collected before IPC copies.
