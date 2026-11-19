@@ -382,6 +382,8 @@ export class MovieClip extends Container {
    */
   private runFrame(frame: number, later: "frame" | "held" | null = null): void {
     this.library.avm1?.entered(this, frame);
+    // Told once the frame's sounds started, as its clips' first frames come after them.
+    const placed: [Library, DisplayObject][] = [];
     for (const command of this.timeline.frames[frame - 1] ?? []) {
       if (command.type === "remove") {
         this.removeAtDepth(command.depth);
@@ -449,6 +451,15 @@ export class MovieClip extends Container {
       child.placeFrame = frame;
       this.library.avm1?.placing(child, place);
       this.placeAtDepth(child, place.depth);
+      // Before its own first frame is placed, which the hook may do: those it places sit out too.
+      if (later === "held" && this.fresh && child instanceof MovieClip) {
+        child.fresh = true;
+      }
+
+      if (library.placed) {
+        placed.push([library, child]);
+      }
+
       if (later === "held" && library.construct) {
         this.held.push({ display: child, character, library });
       } else if (later === "frame" && library.constructLater) {
@@ -459,6 +470,33 @@ export class MovieClip extends Container {
     }
 
     this.frameSounds(frame);
+    for (const [library, child] of placed) {
+      library.placed?.(child);
+    }
+  }
+
+  /**
+   * A goto's names, in the order its frames placed anew, as Flash makes an
+   * object of each and names it, its first frame's too, then keeps only
+   * what the jump leaves: Flash Player 32's projector numbered a forward
+   * goto's children past a clip placed and removed between, and a rewind
+   * past the frames' places of the children it kept. The child a place
+   * made here is named; any other place's names are passed over.
+   */
+  private named(anew: { jump: Jump; place: Place }[], made: Map<Jump, DisplayObject>): void {
+    const library = this.library;
+    if (!library.placed) {
+      return;
+    }
+
+    for (const { jump, place } of anew) {
+      const child = made.get(jump);
+      if (child !== undefined) {
+        library.placed(child);
+      } else if (place.character !== null) {
+        library.passedOver?.(namesOf(library, place.character, place.name !== null));
+      }
+    }
   }
 
   /**
@@ -496,6 +534,8 @@ export class MovieClip extends Container {
     }
 
     const jumps = new Map<number, Jump>();
+    // Each place anew the frames replay, in their order, for the names Flash gives them (named).
+    const anew: { jump: Jump; place: Place }[] = [];
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
       for (const command of this.timeline.frames[f - 1] ?? []) {
         if (command.type === "actions") {
@@ -538,6 +578,7 @@ export class MovieClip extends Container {
           jump.place = rewind ? asFirstPlaced(place) : place;
           jump.frame = f;
           jump.placed = true;
+          anew.push({ jump, place });
         } else if (jump.place) {
           jump.place = mergePlace(jump.place, place);
         } else if (!rewind && this.depths.has(place.depth)) {
@@ -618,6 +659,7 @@ export class MovieClip extends Container {
     // FRAME_CONSTRUCTED, which a parent's listener reads them in
     // (`goto-place-first`).
     const placed: { display: DisplayObject; character: DisplayCharacter }[] = [];
+    const made = new Map<Jump, DisplayObject>();
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
       if (existing && kept.has(depth) && jump.place) {
@@ -684,6 +726,7 @@ export class MovieClip extends Container {
       child.placeFrame = jump.frame;
       this.library.avm1?.placing(child, jump.place);
       this.placeAtDepth(child, depth);
+      made.set(jump, child);
       if (looping && this.library.constructLater) {
         this.library.constructLater(child, character);
       } else {
@@ -691,6 +734,10 @@ export class MovieClip extends Container {
       }
     }
 
+    // Named once all are placed, before any is made alive: their first frames' sounds then
+    // come before the target frame's, as they did as each was made. A goto places this
+    // timeline's own characters alone, no symbol by class name, so the library is its own.
+    this.named(anew, made);
     if (this.library.constructPlaced) {
       this.library.constructPlaced(placed);
     } else if (this.library.avm1 && target !== from) {
@@ -872,6 +919,58 @@ export class MovieClip extends Container {
  * goto fills them in. The name and visibility are not among them: they
  * stay as they were.
  */
+/**
+ * How many names placing `id` takes: its own, where the place names it
+ * none, and its first frame's, a clip's children's as they are placed.
+ */
+function namesOf(library: Library, id: number, named: boolean, depth = 0): number {
+  const character = library.characters.get(id);
+  if (!isDisplayCharacter(character)) {
+    return 0;
+  }
+
+  let count = named ? 0 : 1;
+  if (character.type === "sprite" && depth < 64) {
+    // What its first frame places, as runFrame places it: one place at a depth, until removed,
+    // a symbol by class name the library's that bound it.
+    const taken = new Set<number>();
+    for (const command of character.timeline.frames[0] ?? []) {
+      if (command.type === "remove") {
+        taken.delete(command.depth);
+      } else if (
+        command.type === "place" &&
+        !command.place.move &&
+        !taken.has(command.place.depth)
+      ) {
+        const place = command.place;
+        const symbol =
+          place.character === null && place.className !== null && !place.hasImage
+            ? (library.placedSymbol?.(place.className) ?? null)
+            : null;
+        const from = symbol?.library ?? library;
+        const placed = symbol?.character.id ?? place.character;
+        if (placed !== null && isDisplayCharacter(from.characters.get(placed))) {
+          taken.add(place.depth);
+          count += namesOf(from, placed, place.name !== null, depth + 1);
+        }
+      }
+    }
+  }
+
+  return count;
+}
+
+/** Whether a place of `character` makes a display object: data, a font or a sound, none. */
+function isDisplayCharacter(character: Character | undefined): character is DisplayCharacter {
+  return (
+    !!character &&
+    character.type !== "binary" &&
+    character.type !== "font" &&
+    character.type !== "fontCff" &&
+    character.type !== "sound"
+  );
+}
+
 function asFirstPlaced(place: Place): Place {
   return {
     ...place,
