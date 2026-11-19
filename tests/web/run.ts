@@ -1948,7 +1948,7 @@ check(
           "meterButtons().slice(-2).map((b) => [b.textContent, b.previousElementSibling?.tagName ?? null])",
         ),
         [
-          ["Show performance", "HR"],
+          ["Show stats", "HR"],
           ["About swf2es", "BUTTON"],
         ],
       );
@@ -1966,8 +1966,8 @@ check(
       await open();
       // While it shows, the item to move it follows.
       assert.deepEqual(await call(evaluate, "meterButtons().slice(-3).map((b) => b.textContent)"), [
-        "Hide performance",
-        "Move performance meter",
+        "Hide stats",
+        "Move stats",
         "About swf2es",
       ]);
       await call(evaluate, "meterButtons().at(-3).click(), true");
@@ -2130,14 +2130,14 @@ check(
     try {
       // Hidden, nothing to move.
       await open();
-      assert.equal(await call(evaluate, "cornerItem('Move performance meter') === null"), true);
-      await call(evaluate, "cornerItem('Show performance').click(), true");
+      assert.equal(await call(evaluate, "cornerItem('Move stats') === null"), true);
+      await call(evaluate, "cornerItem('Show stats').click(), true");
       assert.equal(await call(evaluate, "cornerOf()"), "top-left");
 
       // Each choice moves it to the next corner and is kept, the pointer passing through it.
       for (const corner of ["top-right", "bottom-left", "bottom-right", "top-left"]) {
         await open();
-        await call(evaluate, "cornerItem('Move performance meter').click(), true");
+        await call(evaluate, "cornerItem('Move stats').click(), true");
         assert.equal(await call(evaluate, "cornerPlayer.performanceMeterCorner"), corner);
         assert.equal(await call(evaluate, "cornerOf()"), corner);
         assert.equal(await call(evaluate, "cornerEvents()"), "none");
@@ -2243,7 +2243,7 @@ check(
       assert.deepEqual(
         await call(
           evaluate,
-          "[cornerItem('Hide performance'), cornerItem('Move performance meter')].map((b) => b === null)",
+          "[cornerItem('Hide stats'), cornerItem('Move stats')].map((b) => b === null)",
         ),
         [true, true],
       );

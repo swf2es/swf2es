@@ -1,5 +1,5 @@
 // The performance meter the element shows over its player, off until the
-// viewer turns it on (the context menu's "Show performance", or the page,
+// viewer turns it on (the context menu's "Show stats", or the page,
 // through `performanceMeter`): twice a second, the SWF's frames played a
 // second against its frame rate, the player's ms in a frame (its scripts
 // and its drawing, as the frame listener tells them), the draws of a frame

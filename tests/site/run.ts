@@ -713,7 +713,7 @@ async function check(): Promise<void> {
               });
             }
             const moveItem =
-              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move performance meter')";
+              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move stats')";
             await until(`!!${moveItem}`);
             await value(`(${moveItem}.click(), true)`);
             assert.equal(await value<string>(corner), "bottom-left");
@@ -754,7 +754,7 @@ async function check(): Promise<void> {
               await value<string>(
                 `[...${menu}.shadowRoot.querySelectorAll('button')].at(-2).textContent`,
               ),
-              "Show performance",
+              "Show stats",
             );
             await send("Input.dispatchKeyEvent", {
               type: "keyDown",
