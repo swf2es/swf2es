@@ -339,18 +339,24 @@ records for ratio 0, whatever ratio it is placed or drawn at: in AVM1
 the clip a tween is in measuring as small as the tween's first frame
 however far it has grown. Only a point tested against the shape, by
 `hitTest(x, y, true)`, `hitTestPoint(x, y, true)` or the pointer, and
-`getObjectsUnderPoint`, meets the blend the morph was last drawn at (the
-corpus's `hittest_morph_input`, whose input tests the corpus run draws
-each frame of, as a host does). A
-morph that a place makes is blended at its ratio there and then; one
-placed again at another ratio, by the timeline playing or a goto, is
-hit nowhere by those tests until it is next drawn, as in adl (the
-player's `morph-bounds` and `avm1-morph-bounds-swf6` and `-swf8`
-cases). A rewind that makes a morph anew, as one to a place of another
-ratio does, blends it at once. In AS3 a Shape or MorphShape from the
-SWF has an empty `transform.pixelBounds` at its origin, as adl gives
-it, though the clip holding it has its bounds; a Shape a script draws
-in has its drawing's.
+`getObjectsUnderPoint`, meets the morph's blend at its ratio. A morph
+that a place makes is blended at its ratio there and then. One placed
+again at another ratio, by the timeline playing or a goto, is blending
+until a frame is drawn: a script's shape test meets nothing of it
+meanwhile, as in adl, unless a later place has put it back at the ratio
+the frame began with (the player's `morph-bounds` and
+`avm1-morph-bounds-swf6` and `-swf8` cases). The pointer meets the blend
+it last made, so that a tween pulsing under a resting or moving mouse
+keeps its rollOver and its hand cursor, as in Flash Player's projector
+(the web tests' pulsing tween, and the corpus's `hittest_morph_input`). A
+frame played and not drawn, as a hidden page's or a test's uncaptured
+one, ends the blending as a drawn one does (`Player.undrawn`), so that
+scripts that hit-test in timers or socket handlers meet the tweens as
+they would on a shown page. A rewind that makes a morph anew, as one to
+a place of another ratio does, blends it at once. In AS3 a Shape or
+MorphShape from the SWF has an empty `transform.pixelBounds` at its
+origin, as adl gives it, though the clip holding it has its bounds; a
+Shape a script draws in has its drawing's.
 
 ## Scale and rotation
 

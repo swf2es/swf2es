@@ -349,6 +349,7 @@ function boundsInThrough(
  * has it (the corpus's `displayobject_hittestpoint_root`): moving the root
  * moves nothing under the point, moving a loaded SWF's root does. The
  * shape test asks for a root above `d`, the bounds test does not.
+ * `pointer`, for the pointer's own pick (Probe).
  */
 export function hitsPoint(
   d: DisplayObject,
@@ -356,6 +357,7 @@ export function hitsPoint(
   y: number,
   shape: boolean,
   root: DisplayObject | null,
+  pointer = false,
 ): boolean {
   const up = toStage(d, root);
   if (isProjective(up) && inHidden3D(d)) {
@@ -390,7 +392,7 @@ export function hitsPoint(
   // point on a shape's right edge hits, one on its left, top or bottom edge
   // does not (the corpus's displayobject_hittestpoint_boundary).
   const [lx, ly] = apply(toLocal, x - 0.5, y);
-  const probe = { x: x - 0.5, y, root };
+  const probe = { x: x - 0.5, y, root, pointer };
   return drawnAt(d, lx, ly, probe, false) && !clippedAbove(d, probe);
 }
 
@@ -416,7 +418,7 @@ export function hitsOwnPoint(
     return false;
   }
 
-  const probe = { x: x - 0.5, y, root };
+  const probe = { x: x - 0.5, y, root, pointer: clips };
   const [lx, ly] = apply(toLocal, probe.x, probe.y);
   return hitsOwnLocal(d, lx, ly, probe, clips);
 }
@@ -511,6 +513,25 @@ export interface Probe {
   x: number;
   y: number;
   root: DisplayObject | null;
+  /**
+   * Whether the pointer's own pick asks, which meets a blending MorphShape's
+   * last blend, as Flash's pointer does; a script's test meets nothing of it.
+   */
+  pointer?: boolean;
+}
+
+/**
+ * What a shape test meets of `d`: a MorphShape placed at another ratio since
+ * the last frame passed is hit nowhere by a script's test, as in adl, and by
+ * the pointer's where it was last blended; otherwise its ratio's blend,
+ * made now where no frame drawn made it.
+ */
+function morphLayers(d: ShapeObject, probe: Probe): ShapeLayer[] | undefined {
+  if (!d.blending) {
+    return d.drawn()?.layers;
+  }
+
+  return probe.pointer ? d.shape?.layers : undefined;
 }
 
 /** Whether the probe is on `mask`'s fills, where it is: its lines clip nothing; a 3D mask's, all of it. */
@@ -573,12 +594,11 @@ function drawnAt(
     return hitsGlyph(d.definition, d.glyphs.glyphs, x, y, mask);
   }
 
-  // A MorphShape given another ratio is hit nowhere until it is drawn at it, as in adl.
   const drawing = d.drawing;
   let layers: ShapeLayer[] = drawing
     ? facing(drawing.layers, drawing.culled && turnedOver(d), drawing.version)
-    : d instanceof ShapeObject && !d.blending
-      ? (d.shape?.layers ?? [])
+    : d instanceof ShapeObject
+      ? (morphLayers(d, probe) ?? [])
       : [];
   // A 9-slice is hit where it is drawn, its layers as the renderer moves them, and only within
   // its own bounds as drawn unsliced: adl misses an owner's fill that a wider child stretched

@@ -4,7 +4,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ShapeRecord } from "../../../../packages/format/dist/index.js";
 import { readMorphShape, readPlace, readSwf } from "../../../../packages/format/dist/index.js";
-import { bounds, reportedBounds } from "../../../../packages/player/dist/display/bounds.js";
+import {
+  bounds,
+  hitsPoint,
+  reportedBounds,
+} from "../../../../packages/player/dist/display/bounds.js";
 import { Container } from "../../../../packages/player/dist/display/container.js";
 import { ShapeObject } from "../../../../packages/player/dist/display/display.js";
 import { CLEAN, CONTENT } from "../../../../packages/player/dist/display/displayobject.js";
@@ -211,6 +215,27 @@ test("a MorphShape blends at its first place's ratio, and blends a later one's o
   shape.applyPlace(ratioPlace(1000));
   shape.applyPlace(ratioPlace(30000));
   assert.equal(shape.blending, false);
+});
+
+test("a script's shape test misses a blending MorphShape, the pointer's meets its last blend", () => {
+  const c = character();
+  const root = new Container();
+  root.loaderInfo = {} as never;
+  const shape = ShapeObject.ofMorph(c);
+  root.addChildAt(shape, 0);
+  shape.applyPlace(ratioPlace(0));
+  framePassed();
+  shape.applyPlace(ratioPlace(65535));
+  // (57.5, 57.5), sampled half a pixel left of the point: in the start, outside the end.
+  const hits = (pointer: boolean) => hitsPoint(shape, 58, 57.5, true, root, pointer);
+
+  assert.equal(hits(false), false);
+  assert.equal(hits(true), true);
+
+  framePassed();
+  assert.equal(hits(false), false);
+  assert.equal(hits(true), false);
+  assert.equal(hitsPoint(shape, 30, 30, true, root), true);
 });
 
 test("scripts are told a MorphShape's start bounds, in a container too, whatever blend it draws", () => {
