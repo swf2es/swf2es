@@ -1,5 +1,5 @@
 import type { GlState } from "@swf2es/context3d/device";
-import { type Geometries, type GeometryData, GLYPH_FLOATS } from "../geometry.js";
+import { type Geometries, type GeometryData, GLYPH_FLOATS, samplesStage } from "../geometry.js";
 import { FreeRanges } from "./free-ranges.js";
 import { GlyphTables } from "./glyph-tables.js";
 import {
@@ -96,6 +96,8 @@ export interface Place {
   glyphs: { mode: Float32Array; table: Float32Array; slot: number } | null;
   /** Its geometry's flat (GeometryData.flat). */
   flat: boolean;
+  /** Whether it samples the stage's pixel (samplesStage), which the stage fill program draws. */
+  stage: boolean;
   /** Small, unchanged geometries may be copied into a run's streaming buffer. */
   batch: { data: GeometryData; frame: number } | null;
 }
@@ -262,6 +264,7 @@ export class GeometryAtlas {
       const data = geometries.get(id);
       if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
         this.copyVertices(this.pages[place.page], data, place.vertexStart);
+        place.stage = samplesStage(data);
         place.batch = this.batch(data);
       } else if (place && data) {
         this.letGo(id);
@@ -500,6 +503,7 @@ export class GeometryAtlas {
       indices: length,
       glyphs: null,
       flat: data.flat === true,
+      stage: samplesStage(data),
       batch: this.batch(data),
     };
     page.live += count;
@@ -607,6 +611,7 @@ export class GeometryAtlas {
         slot: this.tables.slot(glyphs.mode, glyphs.table),
       },
       flat: false,
+      stage: false,
       batch: null,
     };
     g.top += count;
