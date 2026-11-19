@@ -925,27 +925,50 @@ export class MovieClip extends Container {
  */
 function namesOf(library: Library, id: number, named: boolean, depth = 0): number {
   const character = library.characters.get(id);
-  // Data is no display object: Flash places nothing for it.
-  if (
-    !character ||
-    character.type === "binary" ||
-    character.type === "font" ||
-    character.type === "fontCff" ||
-    character.type === "sound"
-  ) {
+  if (!isDisplayCharacter(character)) {
     return 0;
   }
 
   let count = named ? 0 : 1;
   if (character.type === "sprite" && depth < 64) {
+    // What its first frame places, as runFrame places it: one place at a depth, until removed,
+    // a symbol by class name the library's that bound it.
+    const taken = new Set<number>();
     for (const command of character.timeline.frames[0] ?? []) {
-      if (command.type === "place" && !command.place.move && command.place.character !== null) {
-        count += namesOf(library, command.place.character, command.place.name !== null, depth + 1);
+      if (command.type === "remove") {
+        taken.delete(command.depth);
+      } else if (
+        command.type === "place" &&
+        !command.place.move &&
+        !taken.has(command.place.depth)
+      ) {
+        const place = command.place;
+        const symbol =
+          place.character === null && place.className !== null && !place.hasImage
+            ? (library.placedSymbol?.(place.className) ?? null)
+            : null;
+        const from = symbol?.library ?? library;
+        const placed = symbol?.character.id ?? place.character;
+        if (placed !== null && isDisplayCharacter(from.characters.get(placed))) {
+          taken.add(place.depth);
+          count += namesOf(from, placed, place.name !== null, depth + 1);
+        }
       }
     }
   }
 
   return count;
+}
+
+/** Whether a place of `character` makes a display object: data, a font or a sound, none. */
+function isDisplayCharacter(character: Character | undefined): character is DisplayCharacter {
+  return (
+    !!character &&
+    character.type !== "binary" &&
+    character.type !== "font" &&
+    character.type !== "fontCff" &&
+    character.type !== "sound"
+  );
 }
 
 function asFirstPlaced(place: Place): Place {

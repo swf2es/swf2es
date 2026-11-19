@@ -2,7 +2,8 @@
 // on the first, a clip, one placed and removed at once, and a shape on the
 // second, a clip on the third (name-order.ts), each frame's ENTER_FRAME and
 // EXIT_FRAME making a Sprite. Variant 3 rewinds to the first frame from
-// the second's ENTER_FRAME, 4 goes to the third from the constructor.
+// the second's ENTER_FRAME, 4 goes to the third from the constructor, 5
+// plays on past the third, looping to the first once.
 package
 {
 	import flash.display.DisplayObject;
@@ -17,6 +18,7 @@ package
 		private static const VARIANT:int = @@VARIANT@@;
 		public var early:Sprite = new Sprite();
 		private var rewound:Boolean = false;
+		private var looped:Boolean = false;
 
 		public function InstanceNamesFrames()
 		{
@@ -46,7 +48,13 @@ package
 		private function exit(e:Event):void
 		{
 			trace("exit " + currentFrame + " new " + new Sprite().name + " | " + dump(this));
-			if (currentFrame == 3 || (rewound && currentFrame == 1))
+			if (VARIANT == 5 && currentFrame == 3 && !looped)
+			{
+				looped = true;
+				return;
+			}
+
+			if (currentFrame == 3 || (rewound && currentFrame == 1) || (looped && currentFrame == 1))
 			{
 				stop();
 				removeEventListener(Event.ENTER_FRAME, enter);
