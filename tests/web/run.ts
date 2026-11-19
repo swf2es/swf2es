@@ -1854,6 +1854,145 @@ check(
 );
 
 check(
+  "the context menu shows and hides the performance meter, kept for the viewer, unless left out",
+  async (evaluate, send) => {
+    const at = await call<number[]>(
+      evaluate,
+      `(async () => {
+    localStorage.removeItem("swf2es.performanceMeter");
+    window.meterPlayer = document.createElement("swf2es-player");
+    meterPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
+    window.meterChanges = [];
+    meterPlayer.addEventListener("performancemeterchange", (e) => meterChanges.push(e.detail.shown));
+    document.body.append(meterPlayer);
+    await meterPlayer.load("/web-test/context-menu.swf");
+    window.meterMenu = () => meterPlayer.shadowRoot.querySelector("[data-swf2es-context-menu]");
+    window.meterButtons = () => Array.from(meterMenu()?.shadowRoot.querySelectorAll("button") ?? []);
+    window.meterBox = () => meterPlayer.shadowRoot.querySelector(".meter");
+    window.meterFigure = (name) => meterBox().querySelector("[data-figure=" + name + "]");
+    window.meterWrapped = () => Object.hasOwn(meterPlayer.gl, "drawElements");
+    const r = meterPlayer.getBoundingClientRect();
+    return [r.x, r.y];
+  })()`,
+    );
+    const open = async () => {
+      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: at[0] + 45,
+          y: at[1] + 45,
+          button: type === "mouseMoved" ? "none" : "right",
+          clickCount: 1,
+        });
+      }
+    };
+    const until = async (expression: string) => {
+      for (let i = 0; i < 100; i++) {
+        if (await call<boolean>(evaluate, expression)) {
+          return;
+        }
+
+        await new Promise((done) => setTimeout(done, 50));
+      }
+
+      assert.fail(`not ${expression}`);
+    };
+    const dismiss = async () => {
+      for (const type of ["keyDown", "keyUp"]) {
+        await send("Input.dispatchKeyEvent", { type, key: "Escape", windowsVirtualKeyCode: 27 });
+      }
+    };
+    try {
+      // Off: not even made, and the context its own.
+      assert.equal(await call(evaluate, "meterBox() === null && !meterWrapped()"), true);
+      // Just above About, in their own group below the SWF's items.
+      await open();
+      assert.deepEqual(
+        await call(
+          evaluate,
+          "meterButtons().slice(-2).map((b) => [b.textContent, b.previousElementSibling?.tagName ?? null])",
+        ),
+        [
+          ["Show performance", "HR"],
+          ["About swf2es", "BUTTON"],
+        ],
+      );
+      await call(evaluate, "meterButtons().at(-2).click(), true");
+      assert.equal(
+        await call(evaluate, "meterMenu() === null && meterPlayer.performanceMeter"),
+        true,
+      );
+      assert.equal(await call(evaluate, "!meterBox().hidden && meterWrapped()"), true);
+      assert.equal(await call(evaluate, "localStorage.getItem('swf2es.performanceMeter')"), "1");
+      await until("/^\\d+\\.\\d \\/ \\d+(\\.\\d+)? fps$/.test(meterFigure('fps').textContent)");
+      await until("/ ms, max /.test(meterFigure('frame').textContent)");
+
+      // Hidden again by its item, it hears, ticks and wraps nothing more.
+      await open();
+      assert.equal(await call(evaluate, "meterButtons().at(-2).textContent"), "Hide performance");
+      await call(evaluate, "meterButtons().at(-2).click(), true");
+      assert.equal(
+        await call(evaluate, "meterBox().hidden && !meterPlayer.performanceMeter"),
+        true,
+      );
+      assert.equal(await call(evaluate, "meterWrapped()"), false);
+      assert.equal(await call(evaluate, "localStorage.getItem('swf2es.performanceMeter')"), null);
+      await call(evaluate, "meterFigure('fps').textContent = 'still', true");
+      await new Promise((done) => setTimeout(done, 700));
+      assert.equal(await call(evaluate, "meterFigure('fps').textContent"), "still");
+      assert.deepEqual(await call(evaluate, "meterChanges"), [true, false]);
+
+      // Left out by the attribute or the page's configuration: no item, though a script may still
+      // show it, and taking the item away hides what it showed.
+      await call(evaluate, 'meterPlayer.setAttribute("performancemeter", "false"), true');
+      await open();
+      assert.equal(await call(evaluate, "meterButtons().at(-1).textContent"), "About swf2es");
+      assert.equal(await call(evaluate, "meterButtons().at(-2)?.textContent"), "<b>Literal</b>");
+      await dismiss();
+      await call(evaluate, "meterPlayer.performanceMeter = true, true");
+      assert.equal(await call(evaluate, "!meterBox().hidden"), true);
+      await call(evaluate, 'meterPlayer.removeAttribute("performancemeter"), true');
+      await call(
+        evaluate,
+        `(async () => { (await import("@swf2es/web")).configure({ performanceMeter: false }); return true; })()`,
+      );
+      await call(evaluate, 'meterPlayer.setAttribute("performancemeter", ""), true');
+      assert.equal(await call(evaluate, "meterBox().hidden"), true);
+      await open();
+      assert.equal(await call(evaluate, "meterButtons().at(-2)?.textContent"), "<b>Literal</b>");
+      await dismiss();
+      await call(
+        evaluate,
+        `(async () => { (await import("@swf2es/web")).configure({ performanceMeter: true }); return true; })()`,
+      );
+
+      // Kept on, a new element shows it as it is connected.
+      assert.equal(
+        await call(
+          evaluate,
+          `(() => {
+        meterPlayer.performanceMeter = true;
+        window.meterSecond = document.createElement("swf2es-player");
+        document.body.append(meterSecond);
+        return meterSecond.performanceMeter && !meterSecond.shadowRoot.querySelector(".meter").hidden;
+      })()`,
+        ),
+        true,
+      );
+    } finally {
+      await call(
+        evaluate,
+        `(() => {
+        localStorage.removeItem("swf2es.performanceMeter");
+        for (const p of [window.meterPlayer, window.meterSecond]) { p?.destroy(); p?.remove(); }
+        return true;
+      })()`,
+      );
+    }
+  },
+);
+
+check(
   "custom context menus inherit, snapshot after menuSelect, select and release their DOM",
   async (evaluate, send) => {
     const at = await call<number[]>(
@@ -1862,6 +2001,8 @@ check(
     window.menuLines = [];
     window.menuTrace = line => menuLines.push(line);
     window.menuPlayer = document.createElement("swf2es-player");
+    // Without the performance meter's item, as an embedder may leave it out: About comes last alone.
+    menuPlayer.setAttribute("performancemeter", "false");
     menuPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
     document.body.append(menuPlayer);
     await menuPlayer.load("/web-test/context-menu.swf");
