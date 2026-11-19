@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { flashAssembler, script } from "../avm1-script.ts";
 import { rectPath } from "../player/cases/common.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
@@ -812,6 +813,8 @@ const pieceBodies: Record<string, [Uint8Array, number]> = {
   "/swf": [pieceSwf, 8192],
   "/avm1": [pieceAvm1, 8192],
   "/bin": [new Uint8Array(16 * 1024).fill(65), 4096],
+  // Text of little repetition, for the compressed one: a few pieces once compressed.
+  "/text": [Uint8Array.from({ length: 64 * 1024 }, (_, i) => 97 + ((i * 2654435761) >>> 27)), 4096],
   "/mp3": [new Uint8Array(Buffer.concat(Array.from({ length: 5 }, () => tone))), 4096],
 };
 const pieces = createServer((request, response) => {
@@ -822,10 +825,14 @@ const pieces = createServer((request, response) => {
     return;
   }
 
-  const [body, size] = found;
+  // Compressed unasked, where asked: the page sees the compressed length, not the encoding,
+  // which this origin does not expose, and the body decoded.
+  const gzipped = url.searchParams.has("gzip");
+  const [body, size] = gzipped ? [new Uint8Array(gzipSync(found[0])), 256] : found;
   response.writeHead(200, {
     "access-control-allow-origin": "*",
     ...(url.searchParams.has("unsized") ? {} : { "content-length": body.length }),
+    ...(gzipped ? { "content-encoding": "gzip" } : {}),
   });
   let at = 0;
   const next = () => {
@@ -884,7 +891,7 @@ writeFileSync(
         trace("progress: vars complete " + v.getBytesLoaded() + " " + v.getBytesTotal());
         trace("progress: done");
       };
-      v.load(base + "/bin");
+      v.load(base + "/text");
     }
     stop();
   `,
@@ -3540,8 +3547,8 @@ check("loads tell their progress a piece at a time as their bytes come", async (
     const told = grows(own, kind);
     assert.equal(told.at(-1)?.[0], size, kind);
     assert.ok(
-      told.every(([, t]) => t === total),
-      `${kind}: bytesTotal ${total}`,
+      told.every(([, t], i) => t === (i === told.length - 1 ? size : total)),
+      `${kind}: bytesTotal ${total}, the last all that came`,
     );
     if (kind === "urlstream" || kind === "unsized") {
       assert.ok(
@@ -3550,6 +3557,19 @@ check("loads tell their progress a piece at a time as their bytes come", async (
       );
     }
   }
+
+  // Compressed by a server of another origin: more comes than the length it told, so the total is
+  // unknown from then, and the last PROGRESS has all of it of all, as COMPLETE finds it.
+  const gzipped = lines.filter((l) => l.startsWith("gzipped "));
+  assert.equal(gzipped.at(-1), "gzipped complete");
+  assert.deepEqual(gzipped.at(-2)?.split(" ").slice(2).map(Number), [65536, 65536]);
+  assert.ok(
+    gzipped
+      .slice(0, -2)
+      .map((l) => l.split(" ").slice(2).map(Number))
+      .every(([loaded, total]) => total === 0 || loaded <= total),
+    "gzipped: never more loaded than its total",
+  );
 
   // AS2: onLoadStart, then onLoadProgress a piece at a time, the SWF's length its total and the
   // target's bytes those told; onLoadComplete and onLoadInit after the last. A LoadVars' bytes
@@ -3571,10 +3591,10 @@ check("loads tell their progress a piece at a time as their bytes come", async (
   assert.equal(clip.at(-1)?.[0], pieceAvm1.length);
   const vars = grows(avm1Lines, "vars");
   assert.ok(
-    vars.every(([, total]) => total === 16384),
+    vars.every(([, total]) => total === 65536),
     "vars: getBytesTotal the length told",
   );
-  assert.equal(avm1Lines.at(-2), "vars complete 16384 16384");
+  assert.equal(avm1Lines.at(-2), "vars complete 65536 65536");
 });
 
 const failures = await withPage(

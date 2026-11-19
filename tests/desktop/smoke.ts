@@ -225,6 +225,7 @@ async function progress(): Promise<void> {
   const bodies: Record<string, Uint8Array> = {
     "/swf": child,
     "/bin": new Uint8Array(16 * 1024).fill(65),
+    "/text": new Uint8Array(16 * 1024).fill(66),
     "/mp3": new Uint8Array(readFileSync(new URL("../player/sounds/tone.mp3", import.meta.url))),
   };
   const http = createHttpServer((request, response) => {
@@ -284,8 +285,8 @@ async function progress(): Promise<void> {
         );
         assert.equal(told.at(-1)?.[0], size, kind);
         assert.ok(
-          told.every(([, t]) => t === total),
-          `${kind}: bytesTotal ${total}`,
+          told.every(([, t], i) => t === (i === told.length - 1 ? size : total)),
+          `${kind}: bytesTotal ${total}, the last all that came`,
         );
       }
     });

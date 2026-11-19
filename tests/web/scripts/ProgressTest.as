@@ -12,7 +12,8 @@ package {
 	import flash.net.URLStream;
 
 	// Loads, one after another, from a server that sends each a piece at a time: a Loader's SWF,
-	// a URLLoader's and a URLStream's data, with and without a length, and a Sound's MP3. Each
+	// a URLLoader's and a URLStream's data, with and without a length, a URLLoader's compressed by
+	// the server, and a Sound's MP3. Each
 	// tells its progress as it goes, a URLStream what it can read then.
 	public class ProgressTest extends Sprite {
 		private var base:String;
@@ -21,6 +22,7 @@ package {
 			["urlloader", "/bin"],
 			["urlstream", "/bin"],
 			["unsized", "/bin?unsized"],
+			["gzipped", "/text?gzip"],
 			["sound", "/mp3"]
 		];
 		private var kept:Array = [];
@@ -46,7 +48,7 @@ package {
 				target = loader.contentLoaderInfo;
 				loader.load(request);
 				kept.push(loader);
-			} else if (kind == "urlloader") {
+			} else if (kind == "urlloader" || kind == "gzipped") {
 				var urlLoader:URLLoader = new URLLoader();
 				urlLoader.dataFormat = URLLoaderDataFormat.BINARY;
 				target = urlLoader;
