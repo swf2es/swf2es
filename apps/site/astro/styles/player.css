@@ -261,28 +261,56 @@ body.dragging .player-app .stage {
   font-size: 0.9rem;
 }
 
-.player-app .stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 6px;
-  margin: 0 0 0 auto;
+/* The performance meter, over the stage's top left corner: opaque, so that no SWF shows through
+   its figures, and the pointer goes through it to the SWF. A row each figure, its label and
+   value in two columns. */
+.player-app .meter {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: max-content max-content;
+  gap: 0 8px;
+  margin: 0;
+  padding: 4px 8px;
   font-family: var(--mono);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  pointer-events: none;
+  user-select: none;
 }
 
-/* Each figure with its label, so that a narrow page wraps between figures, never within one. */
-.player-app .stats > div {
-  display: flex;
-  gap: 6px;
+.player-app .meter[hidden],
+.player-app .meter > div[hidden] {
+  display: none;
 }
 
-.player-app .stats dt {
+.player-app .meter > div {
+  display: contents;
+}
+
+.player-app .meter dt {
   color: var(--muted);
 }
 
-.player-app .stats dd {
-  margin: 0 10px 0 0;
-  min-width: 4.5em;
+.player-app .meter dd {
+  margin: 0;
+  text-align: right;
+}
+
+@media (max-width: 480px) {
+  .player-app .meter {
+    top: 4px;
+    left: 4px;
+    padding: 2px 6px;
+    font-size: 0.6875rem;
+  }
 }
 
 .player-app .panels {
@@ -295,10 +323,6 @@ body.dragging .player-app .stage {
 @media (max-width: 760px) {
   .player-app .panels {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .player-app .stats {
-    margin-left: 0;
   }
 }
 
