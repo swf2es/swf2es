@@ -10,9 +10,12 @@
 // - avm1: the same with AVM1 SWFs, each of frames of DoAction blocks; nor
 //   may the WebAssembly memories the page holds, codegen's, grow with them;
 // - avm1movie: loader's, AVM1 movies in its Loader, each kept a few frames
-//   with what an AVM1 movie leaves running, an interval, Key, Mouse and
-//   Stage listeners, a LocalConnection, a sound, a SharedObject and a clip
-//   it draws, then let go of by unload(), which must take all of it.
+//   with what an AVM1 movie leaves running, Key, Mouse and Stage
+//   listeners, a LocalConnection, a sound, a SharedObject, a clip it draws
+//   and, one kind in three, an interval, then let go of by unload() and
+//   unloadAndStop() in turn, in ENTER_FRAME or EXIT_FRAME, which must take
+//   all of it. Each has an onUnload, which Flash lets a movie go by: one
+//   without keeps what listens running after it is unloaded.
 //
 // And what an online game does with each player's gear, never unloading
 // it: KINDS gear SWFs, each a symbol of a class with shapes and a bitmap
@@ -300,8 +303,8 @@ ${calls}
 var ef = 0;
 var data = [];
 for (var n = 0; n < 10000; n++) { data.push({ n: n, s: "${name}" + n }); }
-setInterval(function () { ef++; }, 5);
-setTimeout(function () { data = null; }, 1000000);
+${i % 3 === 0 ? "setInterval(function () { ef++; }, 5);" : ""}
+this.onUnload = function () { ef = 0; };
 var keys = {}; keys.onKeyDown = function () { ef++; }; Key.addListener(keys);
 var mouse = {}; mouse.onMouseMove = function () { ef++; }; Mouse.addListener(mouse);
 var stage = {}; stage.onResize = function () { ef++; }; Stage.addListener(stage);
@@ -405,7 +408,7 @@ await withSteppedPage(
             ? await page.open(
                 mainSwf,
                 mode === "avm1movie"
-                  ? `/leak/main.swf?kinds=${KINDS}&prefix=avm1-movie-&keep=3&stop=0`
+                  ? `/leak/main.swf?kinds=${KINDS}&prefix=avm1-movie-&keep=3&vary=1`
                   : `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
                 cached,
               )

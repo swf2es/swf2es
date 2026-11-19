@@ -6,7 +6,9 @@ package
 	import flash.net.URLRequest;
 	// Loads children-N.swf in turn: kinds of them, each unloaded once it is
 	// complete or, given keep, kept on the stage that many frames first; stop=0
-	// unloads with unload() rather than unloadAndStop(); prefix names others.
+	// unloads with unload() rather than unloadAndStop(), and vary=1 with each
+	// in turn, every other pair in EXIT_FRAME rather than ENTER_FRAME; prefix
+	// names others.
 	public class LeakMain extends Sprite
 	{
 		private var count:int = 0;
@@ -25,7 +27,9 @@ package
 			var params:Object = loaderInfo.parameters;
 			var kinds:int = int(params.kinds);
 			var keep:int = int(params.keep);
-			var stop:Boolean = params.stop != "0";
+			var vary:Boolean = params.vary == "1";
+			var stop:Boolean = vary ? count % 2 == 1 : params.stop != "0";
+			var phase:String = vary && count % 4 >= 2 ? Event.EXIT_FRAME : Event.ENTER_FRAME;
 			var prefix:String = params.prefix || "child-";
 			var loader:Loader = new Loader();
 			var done:Function = function():void
@@ -59,11 +63,11 @@ package
 						{
 							if (++frames >= keep)
 							{
-								removeEventListener(Event.ENTER_FRAME, wait);
+								removeEventListener(phase, wait);
 								done();
 							}
 						};
-					addEventListener(Event.ENTER_FRAME, wait);
+					addEventListener(phase, wait);
 				});
 			loader.load(new URLRequest(prefix + (count % kinds) + ".swf"));
 		}
