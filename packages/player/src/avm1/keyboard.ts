@@ -7,7 +7,7 @@
 // of the editing keys' below 20. A host whose text comes apart from its
 // keys (the corpus's replay) gives the character by `text`.
 
-import { TextObject } from "../display/display.js";
+import { type DisplayObject, TextObject } from "../display/display.js";
 import type { ClipboardText } from "../hosts.js";
 import type { Keyboard, KeyState } from "../input/keyboard.js";
 import { pasteable, TextEditor } from "../input/text-editor.js";
@@ -54,8 +54,12 @@ export class Avm1Keyboard implements Keyboard {
 
   constructor(private readonly avm1: Avm1) {}
 
-  /** A key: its keyPress, where it is one, the editing key's, else, with edits, its character's. */
-  handle(type: "down" | "up", k: KeyState, edits = true): boolean {
+  /**
+   * A key: its keyPress, where it is one, the editing key's, else, with
+   * edits, its character's. In a movie an AS3 host holds, `hosted`, Tab
+   * moves nothing here: the host moves the focus through its own order.
+   */
+  handle(type: "down" | "up", k: KeyState, edits = true, hosted = false): boolean {
     this.handled++;
     if (type === "up") {
       this.avm1.input.key(false, k.keyCode, k.charCode, 0);
@@ -64,8 +68,15 @@ export class Avm1Keyboard implements Keyboard {
 
     const typed = edits ? printable(k.charCode) : 0;
     const press = KEY_PRESSES.get(k.keyCode) ?? typed;
-    const used = this.avm1.input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey);
-    return used || (edits && k.keyCode !== 9 && this.edit(k));
+    const input = this.avm1.input;
+    const used = input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey, !hosted);
+    // A host types after every movie's listeners (input/avm1.ts).
+    return used || (edits && !hosted && k.keyCode !== 9 && this.edit(k));
+  }
+
+  /** What has the movie's focus: a field, a button or a clip. */
+  get focused(): DisplayObject | null {
+    return this.avm1.halted ? null : this.avm1.focused;
   }
 
   text(k: KeyState): boolean {
@@ -95,7 +106,8 @@ export class Avm1Keyboard implements Keyboard {
     return !this.avm1.halted && d instanceof TextObject && !this.avm1.removed(d) ? d : null;
   }
 
-  private edit(k: KeyState): boolean {
+  /** The key's edit of the field with the focus, or select all for Ctrl+A. Whether it was one. */
+  edit(k: KeyState): boolean {
     const field = this.field();
     if (!field || (field.type !== "input" && !field.selectable)) {
       return false;

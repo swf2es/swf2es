@@ -263,6 +263,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.invalidate(TRANSFORM);
       if (!v) {
         this.$display.focusDrop?.(this.$display);
+        s.avm1Input?.hidden(this.$display);
       }
     }
 

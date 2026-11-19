@@ -908,6 +908,11 @@ async function imePlayer(src: string) {
   document.body.append(p);
   await p.ready;
   await frames(2);
+  // A movie an AS3 Loader holds has its callbacks once it has loaded.
+  for (let i = 0; i < 100 && typeof element("ime").focusField !== "function"; i++) {
+    await frames(1);
+  }
+
   p.focus();
   element("ime").focusField();
   await frames(2);

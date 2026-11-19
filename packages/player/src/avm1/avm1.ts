@@ -1543,6 +1543,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The host's renderer, which BitmapData's draw of a display object draws by; null where there is none. */
   drawer: Drawer | null = null;
 
+  /**
+   * Told when the focus moves to `d`, or to nothing, after the move's
+   * events: an AS3 host keeps one focus across its loaded movies (input/avm1.ts).
+   */
+  onFocus: ((d: DisplayObject | null) => void) | null = null;
+
   /** The library's bitmap exported as `name`, as a new transparent store, as loadBitmap makes one. */
   libraryBitmap(name: string): BitmapStore | null {
     const swf = this.currentSwf();

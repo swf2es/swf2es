@@ -95,6 +95,15 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
     return;
   }
 
+  // One focus in the player: the AVM1 movies the host's Loaders hold give theirs up first. One
+  // whose onKillFocus takes it back keeps it, its setFocus(null) having told `previous`.
+  if (next && s.avm1Input) {
+    s.avm1Input.blur();
+    if (s.focus !== previous || s.avm1Input?.focused()) {
+      return;
+    }
+  }
+
   s.focus = next;
   if (previous) {
     previous.focusDrop = null;
@@ -280,6 +289,11 @@ export class KeyboardInput implements Keyboard {
     this.handled++;
     // A user's gesture, as a key is: a listener may write to the clipboard.
     return this.scripting.clipboard.gesture(() => {
+      const loaded = this.loaded();
+      if (loaded) {
+        return loaded.text(k);
+      }
+
       const focus = this.focused();
       if (k.ctrlKey && !k.altKey && k.keyCode === 65) {
         return this.selectAll(focus);
@@ -293,12 +307,19 @@ export class KeyboardInput implements Keyboard {
 
   get editing(): boolean {
     const focus = this.focused();
-    return focus instanceof TextObject && focus.type === "input";
+    return (
+      (focus instanceof TextObject && focus.type === "input") || (this.loaded()?.editing ?? false)
+    );
   }
 
   insert(text: string): boolean {
     this.handled++;
     return this.scripting.clipboard.gesture(() => {
+      const loaded = this.loaded();
+      if (loaded) {
+        return loaded.insert(text);
+      }
+
       const focus = this.focused();
       if (!(focus instanceof TextObject) || focus.type !== "input") {
         return false;
@@ -311,8 +332,9 @@ export class KeyboardInput implements Keyboard {
 
   private key(type: "down" | "up", k: KeyState, edits: boolean): boolean {
     const s = this.scripting;
-    const target = this.focused() ?? this.stage;
-    if (target.object) {
+    // No KeyboardEvent while a loaded AVM1 movie has the focus, as Flash Player 32 sends none.
+    const target = this.loaded() ? null : (this.focused() ?? this.stage);
+    if (target?.object) {
       const event = s.rt.construct(
         s.rt.classNamed("flash.events::KeyboardEvent"),
         type === "down" ? "keyDown" : "keyUp",
@@ -328,12 +350,19 @@ export class KeyboardInput implements Keyboard {
       dispatchEvent(s, target.object, event);
     }
 
+    // The AVM1 movies the host's Loaders hold hear every key, after its listeners, as Flash
+    // Player 32 sends it; one that has the focus types or presses with it, Tab aside.
+    const used = s.avm1Input?.key(type, k, edits) ?? false;
     if (type !== "down") {
       return false;
     }
 
     if (k.keyCode === TAB) {
-      return this.tab(!!k.shiftKey);
+      return used || this.tab(!!k.shiftKey);
+    }
+
+    if (this.loaded()) {
+      return used;
     }
 
     if (!edits) {
@@ -354,6 +383,11 @@ export class KeyboardInput implements Keyboard {
     }
 
     return false;
+  }
+
+  /** The keyboard of a loaded AVM1 movie that has the focus, where one has it. */
+  private loaded(): Keyboard | null {
+    return this.scripting.avm1Input?.focused() ?? null;
   }
 
   /** What has focus, while it is on the stage. */
@@ -389,6 +423,11 @@ export class KeyboardInput implements Keyboard {
    */
   copy(cut = false): ClipboardText | null {
     this.handled++;
+    const loaded = this.loaded();
+    if (loaded) {
+      return loaded.copy(cut);
+    }
+
     const s = this.scripting;
     const focus = this.focused();
     if (!(focus instanceof TextObject)) {
@@ -422,6 +461,11 @@ export class KeyboardInput implements Keyboard {
    */
   paste(data: ClipboardText | null = null): boolean {
     this.handled++;
+    const loaded = this.loaded();
+    if (loaded) {
+      return loaded.paste(data);
+    }
+
     const s = this.scripting;
     const focus = this.focused();
     if (!(focus instanceof TextObject)) {
@@ -464,13 +508,29 @@ export class KeyboardInput implements Keyboard {
    * A press on `target`, with the point in its own pixels: as Flash, a
    * cancelable mouseFocusChange on what has focus, or the stage, then
    * focus to the target where a click focuses it, else to nothing; a
-   * field's caret where it was clicked.
+   * field's caret where it was clicked. A press on a button of a loaded
+   * AVM1 movie, `onMovie`, moves no focus, though what has it hears the
+   * mouseFocusChange, naming nothing, as Flash Player 32 has it.
    */
-  pressed(target: DisplayObject | null, localX: number, localY: number, clicks = 1): void {
+  pressed(
+    target: DisplayObject | null,
+    localX: number,
+    localY: number,
+    clicks = 1,
+    onMovie = false,
+  ): void {
     const s = this.scripting;
     s.focusHighlight = false;
-    const pressed = target === this.stage ? null : target;
     this.press = null;
+    if (onMovie) {
+      if (s.focus && focusableByMouse(s.focus)) {
+        focusEvent(s, "mouseFocusChange", s.focus, null, true);
+      }
+
+      return;
+    }
+
+    const pressed = target === this.stage ? null : target;
     if (pressed instanceof TextObject && pressed.selectable) {
       const position = caretAt(pressed, localX * 20, localY * 20);
       this.press = { field: pressed, position, clicks };
@@ -517,18 +577,36 @@ export class KeyboardInput implements Keyboard {
    * Tab: the next object Tab visits, or with Shift the one before, after a
    * cancelable keyFocusChange: by tabIndex where any has one, only those
    * then, else by where their bounds start on the stage, 6y + x in twips,
-   * one of each place, as Flash orders them.
+   * one of each place, as Flash orders them. The objects of the AVM1 movies
+   * the host's Loaders hold are in the same order, each as its movie has
+   * it (avm1/focus.ts), as Flash Player 32 tabs between them; a move from
+   * one of them sends no keyFocusChange, and a move to one names nothing.
+   * A field it focuses has all its text selected.
    */
   private tab(back: boolean): boolean {
-    const found: DisplayObject[] = [];
+    const s = this.scripting;
+    const loaded = s.avm1Input;
+    // Each object, its tabIndex, if any, and the root of the loaded AVM1 movie it is in, if any.
+    const found: { d: DisplayObject; index: number | undefined; movie: DisplayObject | null }[] =
+      [];
     const walk = (d: DisplayObject) => {
       for (const child of (d as Container).children ?? []) {
         if (!child.visible) {
           continue;
         }
 
+        const movie = loaded?.tabbables(child) ?? null;
+        if (movie) {
+          for (const t of movie) {
+            found.push({ d: t.d, index: t.index, movie: child });
+          }
+
+          continue;
+        }
+
         if (tabbable(child, this.stage)) {
-          found.push(child);
+          const index = fieldsOf(child).$tabIndex ?? -1;
+          found.push({ d: child, index: index >= 0 ? index : undefined, movie: null });
         }
 
         // A SimpleButton's states are not its children to AS3.
@@ -543,29 +621,44 @@ export class KeyboardInput implements Keyboard {
     };
     walk(this.stage);
 
-    const indexed = found.filter((d) => (fieldsOf(d).$tabIndex ?? -1) >= 0);
-    let order: DisplayObject[];
+    const indexed = found.filter((t) => t.index !== undefined);
+    let order: typeof found;
     if (indexed.length > 0) {
       order = indexed
-        .map((d, i) => ({ d, i, key: fieldsOf(d).$tabIndex ?? 0 }))
+        .map((t, i) => ({ t, i, key: t.index ?? 0 }))
         .sort((a, b) => a.key - b.key || a.i - b.i)
-        .map((e) => e.d);
+        .map((e) => e.t);
     } else {
-      const keyed = found.map((d, i) => ({ d, i, key: placeKey(d, this.stage) }));
+      const keyed = found.map((t, i) => ({ t, i, key: placeKey(t.d, this.stage) }));
       keyed.sort((a, b) => a.key - b.key || a.i - b.i);
-      order = keyed.filter((e, j) => j === 0 || e.key !== keyed[j - 1].key).map((e) => e.d);
+      order = keyed.filter((e, j) => j === 0 || e.key !== keyed[j - 1].key).map((e) => e.t);
     }
 
     if (order.length === 0) {
       return false;
     }
 
-    const s = this.scripting;
-    const at = s.focus ? order.indexOf(s.focus) : -1;
+    const inMovie = loaded?.focused()?.focused ?? null;
+    const current = s.focus ?? inMovie;
+    const at = current ? order.findIndex((t) => t.d === current) : -1;
     const n = order.length;
     const next = order[at < 0 ? (back ? n - 1 : 0) : (at + (back ? -1 : 1) + n) % n];
-    if (!focusEvent(s, "keyFocusChange", s.focus ?? this.stage, next, true, TAB)) {
-      setFocus(s, next, true);
+    if (
+      inMovie === null &&
+      focusEvent(s, "keyFocusChange", s.focus ?? this.stage, next.movie ? null : next.d, true, TAB)
+    ) {
+      return true;
+    }
+
+    if (next.movie) {
+      loaded?.tabTo(next.movie, next.d);
+      return true;
+    }
+
+    setFocus(s, next.d, true);
+    // A field Tab focuses has all its text selected, so what is typed replaces it (Flash Player 32).
+    if (next.d instanceof TextObject && s.focus === next.d) {
+      next.d.select(0, next.d.model.text.length);
     }
 
     return true;

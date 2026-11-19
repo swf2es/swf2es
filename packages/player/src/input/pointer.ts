@@ -641,7 +641,7 @@ export class PointerInput implements Pointer {
       if (this.keyboard) {
         const m = target && invert(toStage(target, this.stage));
         const [x, y] = m ? apply(m, p.x, p.y) : [0, 0];
-        this.keyboard.pressed(target, x, y, clicks);
+        this.keyboard.pressed(target, x, y, clicks, !!this.found?.avm1Root);
       }
 
       if (target) {

@@ -491,6 +491,43 @@ field that takes no typing moves its caret and selection with the same
 keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
 this is recorded against Flash; there is no IME.
 
+The AVM1 movies an AS3 SWF's Loaders hold share the player's one focus
+(`input/avm1.ts`), as Flash Player 32's Windows projector, typed into
+with real keys, keeps it (`tests/unit/player/input/avm1-keys.test.ts`).
+Each movie focuses its fields and buttons itself, by a click or
+`Selection.setFocus`, and what it focuses takes the focus from AS3, with
+a `focusOut` naming nothing, and from the other movies; an AS3 object
+that takes it, or `stage.focus = null`, takes it from the movies, each
+field hearing `onKillFocus` with null. A field whose Loader, or anything
+above it, is hidden loses the focus at once; one whose Loader leaves the
+stage keeps it, and the keys with it, as in Flash. While a movie has the
+focus, AS3 hears no `KeyboardEvent` at all, not even on the stage: every
+movie's Key listeners and clip events hear the key, and then the field
+types it. Otherwise the key goes to AS3 as above, and every movie's Key
+listeners hear it after AS3's `keyDown` listeners and before the field's
+`TextEvent`. A press on a movie's field focuses it: what AS3 had focused
+hears a `mouseFocusChange` naming nothing, then its `focusOut`. A press on
+any movie's button moves no focus at all, no movie's field's nor AS3's,
+though what AS3 has focused hears the same `mouseFocusChange` (a movie's
+own button, where it is the main SWF, takes its field's focus away, as
+Flash Player does there too). What counts is the button under the pointer
+once the press's Mouse listeners ran: one they bring there keeps the
+focus too, though the press reaches none of its handlers, and one they
+take away does not. A press on a movie's drawn clip is one on
+its Loader, as AS3 has it, and one elsewhere takes a movie's field's
+focus away. As the focus moves from one movie's field to another's, Flash
+names the other field to `onKillFocus` and `onSetFocus`; the player names
+nothing, as no movie's objects are another's. Tab moves through one order
+of AS3's objects and the movies' (each in its movie's own terms,
+`avm1/focus.ts`), by tabIndex where any has one, else by place, one
+object of each place as AS3 keeps it, the movies' among AS3's: from AS3
+to a movie's field after a `keyFocusChange` naming nothing, then
+`focusOut`; from a movie's field with no `keyFocusChange`. A field Tab
+focuses, AS3's or a movie's, has all its text selected, as typing then
+replaces it in Flash. Where both have tabIndex, the two kinds sort as
+numbers together, which is not measured, and a movie's negative indices,
+which AVM1 keeps, come before AS3's.
+
 The focus's rectangle (`input/focus-highlight.ts`) is drawn as Flash
 Player 32's projector draws it under real keys, measured there since adl
 takes no keys and its harness's captures, BitmapData draws of the stage,
@@ -515,8 +552,8 @@ parent, on which Flash also drops the focus, which the player does not
 yet. In AS3 the object's `focusRect`, or where that is null the stage's
 `stageFocusRect`, decides as the focus moves, and a change of either
 later leaves it as it is; AVM1's rules are in docs/avm1.md. In a movie
-of both, AS3's focus alone draws one: an AVM1 movie AS3 loaded takes no
-keys. Flash repaints only what changed, and drew a button's rectangle
+of both, an AVM1 movie AS3 loaded draws its focus's as its own tracker
+shows it, as Flash Player 32 draws it around a button Tab focuses there. Flash repaints only what changed, and drew a button's rectangle
 only where the button itself was repainted, so one whose hit area
 reaches past what it shows had it cut to that, or had none; the player
 draws it whole. A host asks `Player.focusHighlight()` before each render

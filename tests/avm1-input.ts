@@ -55,3 +55,86 @@ log("ready");`;
     ],
   });
 }
+
+/** A square of 60 by 30 pixels in `color`. */
+const square = (id: number, color: number) =>
+  w.shape({
+    id,
+    bounds: [0, 1200, 0, 600],
+    fills: [color],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [1200, 0] },
+          { line: [1200, 600] },
+          { line: [0, 600] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+
+/**
+ * An authored AVM1 movie for an AS3 Loader's keyboard: two bordered input
+ * fields, f over g, a button b beside f that Tab passes by, and a drawn
+ * clip s beside g. It logs Key's listeners, the fields' changes and focus,
+ * and b's presses; `focused`, it focuses f itself as it starts. `id` names
+ * its lines, avm1 by default, `tabButton` lets Tab focus b, and `swap`
+ * moves b under a press at the stage's bottom right in Mouse's
+ * onMouseDown, before the press is picked.
+ */
+export function keysMovie(
+  focused = false,
+  options: { id?: string; tabButton?: boolean; swap?: boolean } = {},
+): Uint8Array {
+  const source = `
+function log(s) { trace("${options.id ?? "avm1"}:" + s); }
+function nameOf(o) { if (o == null) { return "null"; } return o._name; }
+f.border = true;
+g.border = true;
+${options.tabButton ? "" : "b.tabEnabled = false;"}
+b.onPress = function() { log("b.onPress"); };
+${
+  options.swap
+    ? `var m = {};
+m.onMouseDown = function() { if (_xmouse > 270 && _ymouse > 180) { b._x = 250; b._y = 190; log("swap"); } };
+Mouse.addListener(m);`
+    : ""
+}
+var k = {};
+k.onKeyDown = function() { log("keyDown " + Key.getCode()); };
+k.onKeyUp = function() { log("keyUp " + Key.getCode()); };
+Key.addListener(k);
+f.onChanged = function() { log("changed f=" + f.text); };
+g.onChanged = function() { log("changed g=" + g.text); };
+f.onSetFocus = function(o) { log("f.onSetFocus " + nameOf(o)); };
+f.onKillFocus = function(o) { log("f.onKillFocus " + nameOf(o)); };
+g.onSetFocus = function(o) { log("g.onSetFocus " + nameOf(o)); };
+g.onKillFocus = function(o) { log("g.onKillFocus " + nameOf(o)); };
+${focused ? "Selection.setFocus(f);" : ""}
+stop();
+log("ready");`;
+  return w.swf({
+    version: 8,
+    width: 320,
+    height: 240,
+    frameCount: 1,
+    tags: [
+      w.editText(1, "", 3000, 500, 0, { at: [200, 200] }),
+      w.editText(2, "", 3000, 500, 0, { at: [200, 1000] }),
+      square(3, 0xff0000),
+      w.button2(4, 3),
+      square(5, 0x00aa00),
+      w.sprite(6, 1, [w.place({ depth: 1, character: 5 }), w.showFrame(), w.end()]),
+      w.place({ depth: 1, character: 1, name: "f" }),
+      w.place({ depth: 2, character: 2, name: "g" }),
+      w.place({ depth: 3, character: 4, name: "b", matrix: { tx: 4000, ty: 200 } }),
+      w.place({ depth: 4, character: 6, name: "s", matrix: { tx: 4000, ty: 1000 } }),
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
