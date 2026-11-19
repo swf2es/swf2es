@@ -50,8 +50,12 @@ export class Avm1Pointer implements Pointer {
   private shown: Cursor = "default";
   private drag: Drag | null = null;
   private selection: { field: TextObject; anchor: number } | null = null;
-  /** What was under the pointer when a press came, before its handlers ran; undefined but between the two. */
-  private beforePress: DisplayObject | null | undefined = undefined;
+  /**
+   * What was under the pointer when a press came, before its handlers ran,
+   * and where it was, for one they make again in its place; null but
+   * between the two.
+   */
+  private beforePress: { target: DisplayObject | null; at: Spot | null } | null = null;
 
   constructor(
     private readonly stage: Container,
@@ -164,7 +168,10 @@ export class Avm1Pointer implements Pointer {
     this.last = p;
     this.position(p);
     if (type === "down" && (p.button ?? 0) === 0) {
-      this.beforePress = this.targetAt(p.x, p.y);
+      // Pickable as the move that brought the pointer here left it, an AS3
+      // host's pick for this press coming after the broadcast.
+      const target = this.pick(p.x, p.y);
+      this.beforePress = { target, at: target ? spotOf(target) : null };
     }
 
     if (type !== "move") {
@@ -197,7 +204,7 @@ export class Avm1Pointer implements Pointer {
     this.position(p);
     this.pickable = pickable;
     // A press's pick waits for its handle, which weighs it against the one before its handlers.
-    if (this.beforePress === undefined) {
+    if (this.beforePress === null) {
       this.frameEnded(true);
     }
   }
@@ -237,23 +244,25 @@ export class Avm1Pointer implements Pointer {
       this.position(p);
     }
 
+    // What the handlers took off the list and a goto made again in its place
+    // is the one made again.
+    this.replaced();
     this.dragged();
     const target = this.pick(p.x, p.y);
     const before = this.beforePress;
-    this.beforePress = undefined;
+    this.beforePress = null;
     const events: ButtonEvent[] = [];
     // A press reaches only what was under the pointer before its handlers ran
     // and still is after them, as Flash Player 32 has it: what they took from
     // under it rolls out, as with the button up, and what they brought under
     // it takes nothing, not even a drag over while the button stays down,
-    // until the release rolls it over. One a goto made again in its place is
-    // still the one it was.
-    const kept = this.pickable ? before : null;
+    // until the release rolls it over. One a goto made again in its place, at
+    // its depth, of its character, is still the one it was, and pressed.
     const changed =
       left &&
       type === "down" &&
-      kept !== undefined &&
-      (target && kept ? !same(target, kept) : target !== kept);
+      before !== null &&
+      target !== (before.target && this.again(before.target, before.at));
     if (changed) {
       this.hoverTo(null, events);
     }

@@ -479,7 +479,8 @@ writeFileSync(
 );
 // AS2 buttons whose press's own onMouseDown changes what is under the pointer: "shown", hidden
 // at (10, 20), is shown by it, and "gone", at (60, 20), hidden by it, as is "goneClip", a clip in
-// button mode at (110, 20).
+// button mode at (110, 20); "remade", a clip at (160, 20), goes by it to a frame that places its
+// button again in its place, a new instance, which logs its transitions from its own actions.
 const pressChanges = `var log = [];
 shown._visible = false;
 function watch(b, name) {
@@ -493,7 +494,7 @@ watch(gone, "gone");
 watch(goneClip, "goneClip");
 Mouse.addListener({ onMouseDown: function () {
   var x = _root._xmouse;
-  if (x < 50) { shown._visible = true; } else if (x < 100) { gone._visible = false; } else { goneClip._visible = false; }
+  if (x < 50) { shown._visible = true; } else if (x < 100) { gone._visible = false; } else if (x < 150) { goneClip._visible = false; } else { remade.gotoAndStop(3); }
 } });
 flash.external.ExternalInterface.addCallback("takeLog", null, function () { var taken = log; log = []; return taken; });
 stop();`;
@@ -501,7 +502,7 @@ writeFileSync(
   `${site}avm1-press-changes.swf`,
   w.swf({
     version: 8,
-    width: 150,
+    width: 200,
     height: 60,
     frameCount: 1,
     tags: [
@@ -510,9 +511,39 @@ writeFileSync(
       square(1, 0xff0000),
       w.button2(2, 1),
       w.sprite(3, 1, [w.place({ character: 1, depth: 1 }), w.showFrame(), w.end()]),
+      w.button2(
+        4,
+        1,
+        (
+          [
+            [1 << 0, "onRollOver"],
+            [1 << 1, "onRollOut"],
+            [1 << 2, "onPress"],
+            [1 << 3, "onRelease"],
+            [1 << 4, "onDragOut"],
+            [1 << 5, "onDragOver"],
+          ] as const
+        ).map(([conditions, name]) => ({
+          conditions,
+          actions: [
+            ...script(`_root.log.push(_name + " ${name}");`, 8)(flashAssembler()).end().bytes(),
+          ],
+        })),
+      ),
+      w.sprite(5, 3, [
+        w.place({ character: 4, depth: 1 }),
+        w.doAction([...script("stop();", 8)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.remove(1),
+        w.showFrame(),
+        w.place({ character: 4, depth: 1 }),
+        w.showFrame(),
+        w.end(),
+      ]),
       w.place({ character: 2, depth: 1, name: "shown", matrix: { tx: 200, ty: 400 } }),
       w.place({ character: 2, depth: 2, name: "gone", matrix: { tx: 1200, ty: 400 } }),
       w.place({ character: 3, depth: 3, name: "goneClip", matrix: { tx: 2200, ty: 400 } }),
+      w.place({ character: 5, depth: 4, name: "remade", matrix: { tx: 3200, ty: 400 } }),
       w.doAction([...script(pressChanges, 8)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
@@ -2019,6 +2050,10 @@ check(
       // A clip hidden so gets its roll out too, as Flash sends a hidden clip's roll and drag outs.
       assert.deepEqual(await mouse(["mouseMoved"], 120, 30), ["goneClip onRollOver"]);
       assert.deepEqual(await mouse(click, 120, 30), ["goneClip onRollOut"]);
+
+      // A button a goto makes again in its place is still the one pressed, as in Flash.
+      assert.deepEqual(await mouse(["mouseMoved"], 170, 30), ["remade onRollOver"]);
+      assert.deepEqual(await mouse(click, 170, 30), ["remade onPress", "remade onRelease"]);
     } finally {
       await call(evaluate, "scriptFreeDestroy()");
     }
