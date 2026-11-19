@@ -1665,8 +1665,13 @@ movie's on; AS3 hears none of its fscommands, as in Flash.
 `LocalConnection` carries messages from AVM1 to AVM1 and between AVM1
 and AVM2 within a player. Names are case-insensitive; a leading
 underscore opts out of the domain prefix. `send` copies its arguments
-into AMF0, keeping references and cycles, and queues the delivery on the
-sender's host-event queue; arguments over 40 KiB give false. AS3 sends
+into AMF0, keeping references and cycles, and queues the delivery;
+arguments over 40 KiB give false. Under an AS3 host, AS3's and its
+movies' deliveries share one queue, which the frame empties, a message a
+handler sends delivered in the same frame (`Loads.deferLocal`): Flash
+delivers as soon as it polls, which adl shows within the frame mostly,
+not always, so the tests trace no frame numbers for it. A standalone
+AVM1 player delivers on its network's queue, the next frame. AS3 sends
 AMF3, which the broker turns into AMF0 only for an AVM1 receiver, so
 AS3-only types survive between AS3 peers. The receiver's methods,
 `allowDomain`, `allowInsecureDomain` and `onStatus` run in the
@@ -1679,8 +1684,10 @@ client's #1069, is an AsyncErrorEvent. A movie an AS3 Loader unloads
 keeps its connections, as Flash Player 32 and adl keep them even after
 `unloadAndStop`, a removal and a collection: it plays no more, but takes
 messages and answers them, its sends' onStatus comes, and its names stay
-taken until it closes them or the player ends (`Avm1.unloadFromLoader`;
-the `avm1-local-connection` case). Connections are not shared with other
+taken until it closes them or the player ends; a send still to be
+delivered keeps it too, as a movie unloaded by the first of its two
+messages still delivers the second (`Avm1.unloadFromLoader`; the
+`avm1-local-connection` case). Then it is destroyed, its code let go of. Connections are not shared with other
 tabs or applications.
 
 ### PrintJob
