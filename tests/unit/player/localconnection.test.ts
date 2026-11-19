@@ -184,7 +184,7 @@ for (const fromBytes of [true, false]) {
   test(`an AS3 Loader's ${fromBytes ? "loadBytes" : "load"} runs AVM1 scripts whose connections outlive unload`, async () => {
     const name = fromBytes ? "LocalMixed" : "LocalMixedURL";
     const child = movie(
-      `var r=new LocalConnection();r.connect("_as1");
+      `var r=new LocalConnection();r.connect("_as1");r.shut=function(){r.close();};
 r.take=function(a,b,list) {trace("as1 " + a.x + " " + (a==b) + " " + (a.self==a) + " " + list.label + " " + list.length + " " + (list[0]==a));
  var reply=new LocalConnection();var arr=[a];arr.label="reply";reply.send("_as3","answer",new Date(123),new XML("<root/>"),arr);};`,
     );
@@ -210,7 +210,15 @@ public class ${name} extends Sprite {
     const lines: string[] = [],
       errors: unknown[] = [];
     let audioClosed = 0;
-    const s = new Scripting(await createCodegen(wasm), {
+    // A movie destroyed lets go of its blocks' code: what tells it was.
+    const codegen = await createCodegen(wasm);
+    const releaseActions = codegen.releaseActions.bind(codegen);
+    let released = 0;
+    codegen.releaseActions = (bytes) => {
+      released++;
+      releaseActions(bytes);
+    };
+    const s = new Scripting(codegen, {
       url: "https://example.test/main.swf",
       fetch: async () => ({ bytes: child, status: 200, headers: [] }),
       print: (line) => lines.push(line),
@@ -249,9 +257,17 @@ public class ${name} extends Sprite {
       "as3 answer 123 root reply 1 true",
     ]);
     assert.match(String(s.rt.callProperty(root, s.rt.publicName("retake"))), /#2082/);
-    // Destroyed with the player, it lets go of the name.
+    assert.equal(released, 0);
+    // Once it closes its connection it is destroyed, its code let go of, and its name free.
+    const sender = s.rt.getProperty(root, s.rt.publicName("sender"));
+    s.rt.callProperty(sender, s.rt.publicName("send"), "_as1", "shut");
+    player.tick();
+    player.tick();
+    assert.equal(released > 0, true);
+    assert.equal(s.rt.callProperty(root, s.rt.publicName("retake")), "connected");
     player.destroy();
     assert.equal(audioClosed, 1);
+    // Destroyed with the player, the host lets go of its own names.
     const endpoint = {
       owner: {},
       domain: "example.test",
@@ -263,6 +279,6 @@ public class ${name} extends Sprite {
       status: () => {},
       receive: () => {},
     };
-    assert.equal(s.localConnections.connect(endpoint, "_as1"), true);
+    assert.equal(s.localConnections.connect(endpoint, "_as3"), true);
   });
 }

@@ -3235,11 +3235,15 @@ function show(v) {
 }
 `;
 
-// An AS3 SWF and two AVM1 SWFs it loads talking by LocalConnection
+// An AS3 SWF and four AVM1 SWFs it loads talking by LocalConnection
 // (scripts/Avm1Local.as.template). A takes the host's messages on "_childA"
 // and "childAPlain", answers on the host's "_host" and "hostPlain", and
 // calls B; B, on "_childB", has an allowDomain that tells when it is asked,
-// and closes its connection when told.
+// and closes its connection when told. C answers and plays a chain of
+// messages with the host, and is unloaded the frame after it answers; D
+// sends the host two messages as it closes its connection, the first of
+// which unloads it. The movies tell their onStatus levels when asked, not
+// as they come, whose order with the host's traces adl does not keep.
 function avm1Local(compile: Compile): Uint8Array {
   const movie = (source: string) =>
     w.swf({
@@ -3255,8 +3259,10 @@ function avm1Local(compile: Compile): Uint8Array {
       ],
     });
   const a = movie(`var s = new LocalConnection();
-s.onStatus = function(info) { trace("A status " + info.level + " " + info.code); };
+var statuses = [];
+s.onStatus = function(info) { statuses.push(info.level + "/" + info.code); };
 var ra = new LocalConnection();
+ra.report = function() { trace("A statuses " + statuses.join(" ")); statuses = []; };
 ra.value = 5;
 ra.take = function() { trace("A take " + arguments.length + " " + show(arguments)); };
 ra.reply = function() {
@@ -3283,6 +3289,23 @@ rb.allowDomain = function(d) { trace("B allowDomain " + local(d)); return true; 
 rb.take = function() { trace("B take " + arguments.length + " " + show(arguments)); };
 rb.shut = function() { trace("B close " + rb.close()); };
 trace("B connect " + rb.connect("_childB"));`);
+  const c = movie(`var rc = new LocalConnection();
+var sc = new LocalConnection();
+var statuses = [];
+sc.onStatus = function(info) { statuses.push(info.level); };
+rc.report = function() { trace("C statuses " + statuses.join(" ")); statuses = []; };
+rc.reply = function() { trace("C reply"); trace("C sent " + sc.send("_host", "take", "from C")); };
+rc.shut = function() { trace("C close " + rc.close()); };
+rc.chain = function(n) { trace("C chain " + n); if (n > 0) { sc.send("_host", "chainC", n - 1); } };
+trace("C connect " + rc.connect("_childC"));`);
+  const d = movie(`var rd = new LocalConnection();
+var sd = new LocalConnection();
+sd.onStatus = function(info) { trace("D status " + info.level); };
+rd.go = function() {
+  trace("D sent " + sd.send("_host", "unloadD") + " " + sd.send("_host", "take", "late from D"));
+  trace("D close " + rd.close());
+};
+trace("D connect " + rd.connect("_childD"));`);
   const template = readFileSync(
     new URL("../scripts/Avm1Local.as.template", import.meta.url),
     "utf8",
@@ -3291,7 +3314,9 @@ trace("B connect " + rb.connect("_childB"));`);
     "Avm1Local",
     template
       .replaceAll("@@A@@", Buffer.from(a).toString("base64"))
-      .replaceAll("@@B@@", Buffer.from(b).toString("base64")),
+      .replaceAll("@@B@@", Buffer.from(b).toString("base64"))
+      .replaceAll("@@C@@", Buffer.from(c).toString("base64"))
+      .replaceAll("@@D@@", Buffer.from(d).toString("base64")),
   );
   return w.swf({
     width: 100,
@@ -3914,7 +3939,7 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
   {
     name: "avm1-local-connection",
     build: avm1Local,
-    frames: 36,
+    frames: 66,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

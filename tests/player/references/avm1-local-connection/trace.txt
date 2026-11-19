@@ -1,5 +1,7 @@
-host connect ok ok
+host connect ok ok ok
 host domain local
+D connect true
+C connect true
 B connect true
 A connect true local
 A plain connect true
@@ -46,6 +48,12 @@ host status status null
 host status status null
 host bad
 host async Error: thrown
+-- clients
+host send _host cls
+host send _proxy anything
+host status status null
+host status status null
+proxy get anything
 -- replies
 host send _childA reply
 host status status null
@@ -58,29 +66,26 @@ A sent true
 A sent true
 A sent true
 A sent true
-A status status undefined
 host take 7 [int:1,Number:1.5,'s',Boolean:true,null,undefined,Number:NaN]
-A status status undefined
 host take 3 [{a=int:1,nested={b=[int:1,int:2]}},[int:1,'two',[int:3];label='named'],Date(123000)]
-A status status undefined
 hostPlain take 1 ['plain']
-A status status undefined
 hostPlain take 1 ['prefixed']
-A status error undefined
-A status status undefined
-A status status undefined
-A status status undefined
 host bad
 host async Error: thrown
 -- between
+host send _childA report
 host send _childA toB
 host status status null
+A statuses status/undefined status/undefined status/undefined status/undefined error/undefined status/undefined status/undefined status/undefined
+host status status null
 A sent true
-A status status undefined
 B allowDomain local
 B take 2 ['from A',{k=number:1}]
 -- closed
+host send _childA report
 host send _childB shut
+host status status null
+A statuses status/undefined
 host status status null
 B allowDomain local
 B close true
@@ -106,22 +111,69 @@ A sent true
 A sent true
 A sent true
 A sent true
-A status status undefined
 host take 7 [int:1,Number:1.5,'s',Boolean:true,null,undefined,Number:NaN]
-A status status undefined
 host take 3 [{a=int:1,nested={b=[int:1,int:2]}},[int:1,'two',[int:3];label='named'],Date(123000)]
-A status status undefined
 hostPlain take 1 ['plain']
-A status status undefined
 hostPlain take 1 ['prefixed']
-A status error undefined
-A status status undefined
-A status status undefined
-A status status undefined
 host bad
 host async Error: thrown
 -- collected
 host send _childA take
+host send _childA report
 host status status null
 A take 1 ['collected']
+host status status null
+A statuses status/undefined status/undefined status/undefined status/undefined error/undefined status/undefined status/undefined status/undefined
+-- chain
+host send _host chain
+host status status null
+host chain 3
+host send _host chain
+host status status null
+host chain 2
+host send _host chain
+host status status null
+host chain 1
+host send _host chain
+host status status null
+host chain 0
+-- chainMixed
+host send _childC chain
+host status status null
+C chain 4
+host chainC 3
+host send _childC chain
+host status status null
+C chain 2
+host chainC 1
+host send _childC chain
+host status status null
+C chain 0
+-- replyUnload
+host send _childC reply
+host status status null
+C reply
+C sent true
+host take 1 ['from C']
+host unloads C
+-- shutC
+host send _childC report
+host send _childC shut
+host status status null
+C statuses status status status
+host status status null
+C close true
+-- retakeC
+host takes _childC ok
+-- unloadingD
+host send _childD go
+host status status null
+D sent true true
+D close true
+D status status
+host unloads D
+D status status
+host take 1 ['late from D']
+-- retakeD
+host takes _childD ok
 done

@@ -1,13 +1,18 @@
-// An AS3 SWF talking to two AVM1 SWFs it loads (tests/player/cases/avm1.ts,
+// An AS3 SWF talking to three AVM1 SWFs it loads (tests/player/cases/avm1.ts,
 // avm1Local) by LocalConnection, both ways: values of each kind, names
 // with and without an underscore, with the domain or another before them
-// and in other cases, a method the movie lacks, a movie answering, one movie calling the
-// other, and a movie unloaded. A step every third frame, so that a step's
-// messages arrive and its traces are printed before the next begins.
+// and in other cases, a method the movie lacks, a movie answering, one
+// movie calling the other, a movie unloaded, one unloaded the frame after
+// it queued an answer, which then closes its connection, one unloaded by
+// the first of two messages it sent as it closed its connection, and clients
+// that are a Proxy and that hold a class. A step every third frame, so
+// that a step's messages arrive and its traces are printed before the
+// next begins.
 package
 {
 	import flash.display.Loader;
 	import flash.display.MovieClip;
+	import flash.display.Sprite;
 	import flash.events.AsyncErrorEvent;
 	import flash.events.Event;
 	import flash.events.StatusEvent;
@@ -22,8 +27,14 @@ package
 	{
 		private static const A:String = "@@A@@";
 		private static const B:String = "@@B@@";
+		private static const C:String = "@@C@@";
+		private static const D:String = "@@D@@";
 		private var a:Loader;
 		private var b:Loader;
+		private var c:Loader;
+		private var d:Loader;
+		private var unloadNext:Boolean = false;
+		private var proxied:LocalConnection = new LocalConnection();
 		private var receiver:LocalConnection = new LocalConnection();
 		private var plain:LocalConnection = new LocalConnection();
 		private var sender:LocalConnection = new LocalConnection();
@@ -32,7 +43,25 @@ package
 
 		public function Main()
 		{
-			receiver.client = {take: take("host"), value: 5, bad: function():void
+			receiver.client = {take: take("host"), value: 5, cls: Sprite, chain: function(n:int):void
+				{
+					trace("host chain " + n);
+					if (n > 0)
+					{
+						send("_host", "chain", n - 1);
+					}
+				}, chainC: function(n:int):void
+				{
+					trace("host chainC " + n);
+					if (n > 0)
+					{
+						send("_childC", "chain", n - 1);
+					}
+				}, unloadD: function():void
+				{
+					trace("host unloads D");
+					d.unloadAndStop();
+				}, bad: function():void
 				{
 					trace("host bad");
 					throw new Error("thrown");
@@ -46,16 +75,30 @@ package
 				{
 					trace("host status " + e.level + " " + e.code);
 				});
-			trace("host connect " + connect(receiver, "_host") + " " + connect(plain, "hostPlain"));
+			proxied.client = new ProxyClient();
+			proxied.addEventListener(AsyncErrorEvent.ASYNC_ERROR, function(e:AsyncErrorEvent):void
+				{
+					trace("proxy async " + e.error);
+				});
+			trace("host connect " + connect(receiver, "_host") + " " + connect(plain, "hostPlain") + " " + connect(proxied, "_proxy"));
 			trace("host domain " + local(receiver.domain));
 			a = load(A);
 			b = load(B);
-			steps = [primitives, objects, names, missing, replies, between, closed, unloaded, later, collected];
+			c = load(C);
+			d = load(D);
+			steps = [primitives, objects, names, missing, clients, replies, between, closed, unloaded, later, collected, chain, chainMixed, replyUnload, shutC, retakeC, unloadingD, retakeD];
 			addEventListener(Event.ENTER_FRAME, step);
 		}
 
 		private function step(e:Event):void
 		{
+			if (unloadNext)
+			{
+				unloadNext = false;
+				trace("host unloads C");
+				c.unloadAndStop();
+			}
+
 			if (++frame % 3 != 0)
 			{
 				return;
@@ -70,6 +113,57 @@ package
 
 			var next:Function = steps.shift();
 			next();
+		}
+
+		private function clients():void
+		{
+			trace("-- clients");
+			send("_host", "cls", 1, 2);
+			send("_proxy", "anything", 1);
+		}
+
+		private function chain():void
+		{
+			trace("-- chain");
+			send("_host", "chain", 3);
+		}
+
+		private function chainMixed():void
+		{
+			trace("-- chainMixed");
+			send("_childC", "chain", 4);
+		}
+
+		private function replyUnload():void
+		{
+			trace("-- replyUnload");
+			send("_childC", "reply");
+			unloadNext = true;
+		}
+
+		private function shutC():void
+		{
+			trace("-- shutC");
+			send("_childC", "report");
+			send("_childC", "shut");
+		}
+
+		private function unloadingD():void
+		{
+			trace("-- unloadingD");
+			send("_childD", "go");
+		}
+
+		private function retakeD():void
+		{
+			trace("-- retakeD");
+			trace("host takes _childD " + connect(new LocalConnection(), "_childD"));
+		}
+
+		private function retakeC():void
+		{
+			trace("-- retakeC");
+			trace("host takes _childC " + connect(new LocalConnection(), "_childC"));
 		}
 
 		private function primitives():void
@@ -118,12 +212,14 @@ package
 		private function between():void
 		{
 			trace("-- between");
+			send("_childA", "report");
 			send("_childA", "toB");
 		}
 
 		private function closed():void
 		{
 			trace("-- closed");
+			send("_childA", "report");
 			send("_childB", "shut");
 		}
 
@@ -150,6 +246,7 @@ package
 		{
 			trace("-- collected");
 			send("_childA", "take", "collected");
+			send("_childA", "report");
 		}
 
 		/** The domain, the same however the SWF is played: adl's is its AIR application's, a page's from disk localhost. */
@@ -293,5 +390,30 @@ package
 			out.position = 0;
 			return out;
 		}
+	}
+}
+
+import flash.utils.Proxy;
+import flash.utils.flash_proxy;
+
+/** A client whose lookups and calls tell which of them a message makes. */
+class ProxyClient extends Proxy
+{
+	override flash_proxy function callProperty(name:*, ... rest):*
+	{
+		trace("proxy call " + name + " " + rest.length);
+		return null;
+	}
+
+	override flash_proxy function getProperty(name:*):*
+	{
+		trace("proxy get " + name);
+		return undefined;
+	}
+
+	override flash_proxy function hasProperty(name:*):Boolean
+	{
+		trace("proxy has " + name);
+		return false;
 	}
 }
