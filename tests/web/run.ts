@@ -408,6 +408,43 @@ writeFileSync(
     ],
   }),
 );
+// AS2 buttons whose press's own onMouseDown changes what is under the pointer: "shown", hidden
+// at (10, 20), is shown by it, and "gone", at (60, 20), hidden by it.
+const pressChanges = `var log = [];
+shown._visible = false;
+function watch(b, name) {
+  var events = ["onPress", "onRelease", "onRollOver", "onRollOut", "onDragOver", "onDragOut"];
+  for (var i = 0; i < events.length; i++) {
+    b[events[i]] = (function (e) { return function () { log.push(name + " " + e); }; })(events[i]);
+  }
+}
+watch(shown, "shown");
+watch(gone, "gone");
+Mouse.addListener({ onMouseDown: function () {
+  if (_root._xmouse < 50) { shown._visible = true; } else { gone._visible = false; }
+} });
+flash.external.ExternalInterface.addCallback("takeLog", null, function () { var taken = log; log = []; return taken; });
+stop();`;
+writeFileSync(
+  `${site}avm1-press-changes.swf`,
+  w.swf({
+    version: 8,
+    width: 100,
+    height: 60,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.button2(2, 1),
+      w.place({ character: 2, depth: 1, name: "shown", matrix: { tx: 200, ty: 400 } }),
+      w.place({ character: 2, depth: 2, name: "gone", matrix: { tx: 1200, ty: 400 } }),
+      w.doAction([...script(pressChanges, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
 writeFileSync(
   `${site}embed.swf`,
   bare(abcs.get("EmbedTest") as Uint8Array, 1, "EmbedTest", 160, 120),
@@ -1667,6 +1704,46 @@ check("a SWF with no code has buttons the pointer reaches", async (evaluate, sen
     await call(evaluate, "scriptFreeDestroy()");
   }
 });
+
+check(
+  "an AS2 press reaches only what was under the pointer before its onMouseDown and still is",
+  async (evaluate, send) => {
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `scriptFreePlayer("/web-test/avm1-press-changes.swf")`,
+    );
+    const mouse = async (types: string[], x: number, y: number) => {
+      for (const type of types) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: type === "mouseMoved" ? "none" : "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount: type === "mouseMoved" ? 0 : 1,
+        });
+      }
+
+      await call(evaluate, "frames(2).then(() => true)");
+      return call<string[]>(evaluate, `scriptFreeCall("takeLog")`);
+    };
+    const click = ["mousePressed", "mouseReleased"];
+
+    try {
+      // Flash Player 32 under real clicks: the button the press shows takes no press, nor its
+      // release, only the roll over the release gives it; then it is pressed as any other.
+      assert.deepEqual(await mouse(["mouseMoved"], 20, 30), []);
+      assert.deepEqual(await mouse(click, 20, 30), ["shown onRollOver"]);
+      assert.deepEqual(await mouse(click, 20, 30), ["shown onPress", "shown onRelease"]);
+
+      // The one it hides rolls out, as with the button up, and takes no press either.
+      assert.deepEqual(await mouse(["mouseMoved"], 70, 30), ["shown onRollOut", "gone onRollOver"]);
+      assert.deepEqual(await mouse(click, 70, 30), ["gone onRollOut"]);
+    } finally {
+      await call(evaluate, "scriptFreeDestroy()");
+    }
+  },
+);
 
 check(
   "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",

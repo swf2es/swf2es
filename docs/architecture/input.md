@@ -356,6 +356,27 @@ has it. With Ctrl, as a touchpad's pinch comes too, the page zooms and the
 SWF hears nothing. Right and middle buttons, and
 Flash's drag and focus rules, still need their own cases.
 
+An AVM1 movie's pointer (`avm1/pointer.ts`, in docs/avm1.md) runs a
+press's `onMouseDown` clip events and Mouse listeners before it picks,
+as Flash does, but the press reaches only what was under the pointer
+before they ran and still is after them, as Flash Player 32's Windows
+debug projector traced a probe under real clicks (XTest on Xvfb; adl
+takes no pointer). A button or a clip in button mode that the handlers
+show, move or attach under the pointer takes no `press`, so no
+`release` either, nor a `dragOver` while the button stays down, even
+when the pointer moves on it; the release gives it its `rollOver`, and
+the next press is its own. One they hide or move from under it takes no
+`press` and gets a `rollOut`, as with the button up, rather than a
+`dragOut`; one hidden and shown again in them is pressed as if nothing
+had happened. A move's and a release's handlers are picked after, as
+they were: a button a release's `onMouseUp` or a move's `onMouseMove`
+shows under the pointer gets its `rollOver` in that event. Without the
+rule, a dialogue that advances on `onMouseDown` and shows its answers
+where the click was answered them with the same click. Ruffle picks
+after the handlers for a press too, and has that double click. In an
+AS3 host, the AVM1 movie's own pick before its broadcast is kept for
+its press in the same way.
+
 ## Touch
 
 `Multitouch` reports the host's touch screen: `maxTouchPoints` is the

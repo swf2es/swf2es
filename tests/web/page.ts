@@ -1279,6 +1279,7 @@ Object.assign(globalThis, {
     return true;
   },
   scriptFreePlayer,
+  scriptFreeCall: (name: string) => element("script-free")[name](),
   scriptFreeDestroy: () => {
     element("script-free").destroy();
     element("script-free").remove();

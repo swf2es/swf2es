@@ -50,6 +50,8 @@ export class Avm1Pointer implements Pointer {
   private shown: Cursor = "default";
   private drag: Drag | null = null;
   private selection: { field: TextObject; anchor: number } | null = null;
+  /** What was under the pointer when a press came, before its handlers ran; undefined but between the two. */
+  private beforePress: DisplayObject | null | undefined = undefined;
 
   constructor(
     private readonly stage: Container,
@@ -161,6 +163,10 @@ export class Avm1Pointer implements Pointer {
   broadcast(type: "move" | "down" | "up", p: PointerState): void {
     this.last = p;
     this.position(p);
+    if (type === "down" && (p.button ?? 0) === 0) {
+      this.beforePress = this.targetAt(p.x, p.y);
+    }
+
     if (type !== "move") {
       this.avm1.input.mouseButton(p.button ?? 0, type === "down");
     }
@@ -190,7 +196,10 @@ export class Avm1Pointer implements Pointer {
     this.last = p;
     this.position(p);
     this.pickable = pickable;
-    this.frameEnded(true);
+    // A press's pick waits for its handle, which weighs it against the one before its handlers.
+    if (this.beforePress === undefined) {
+      this.frameEnded(true);
+    }
   }
 
   handle(type: "move" | "down" | "up" | "leave", p: PointerState, broadcast = true): void {
@@ -220,7 +229,8 @@ export class Avm1Pointer implements Pointer {
 
     this.last = p;
     const left = (p.button ?? 0) === 0;
-    // Every clip's clip event first, and what they queue runs, before the pick.
+    // Every clip's clip event first, and what they queue runs, before the
+    // pick, which a press weighs against the one before them.
     if (broadcast) {
       this.broadcast(type, p);
     } else {
@@ -228,6 +238,25 @@ export class Avm1Pointer implements Pointer {
     }
 
     this.dragged();
+    const target = this.pick(p.x, p.y);
+    const before = this.beforePress;
+    this.beforePress = undefined;
+    const events: ButtonEvent[] = [];
+    // A press reaches only what was under the pointer before its handlers ran
+    // and still is after them, as Flash Player 32 has it: what they took from
+    // under it rolls out, as with the button up, and what they brought under
+    // it takes nothing, not even a drag over while the button stays down,
+    // until the release rolls it over. One a goto made again in its place is
+    // still the one it was.
+    const kept = this.pickable ? before : null;
+    const changed =
+      left &&
+      type === "down" &&
+      kept !== undefined &&
+      (target && kept ? !same(target, kept) : target !== kept);
+    if (changed) {
+      this.hoverTo(null, events);
+    }
 
     // The button's state first, which the hover's events follow, as Ruffle has it.
     const held = this.held;
@@ -235,10 +264,17 @@ export class Avm1Pointer implements Pointer {
       this.held = type === "down";
     }
 
-    const events = this.hoverTo(this.pick(p.x, p.y), []);
+    if (changed) {
+      this.hover = target;
+      this.hoverAt = target ? spotOf(target) : null;
+    } else {
+      this.hoverTo(target, events);
+    }
+
     if (left && type === "down") {
+      const pressed = changed ? null : this.hover;
       this.selection = null;
-      const field = this.hover instanceof TextObject ? this.hover : null;
+      const field = pressed instanceof TextObject ? pressed : null;
       // Where the press is in the text, as the field was scrolled before it.
       const position = field ? this.textPosition(field, p.x, p.y) : 0;
       if (field || this.avm1.focused instanceof TextObject) {
@@ -251,10 +287,10 @@ export class Avm1Pointer implements Pointer {
         this.selection = { field, anchor: position };
       }
 
-      this.pressed = this.hover;
-      this.pressedAt = this.hoverAt;
-      if (this.hover) {
-        events.push([this.hover, ClipEvent.press]);
+      this.pressed = pressed;
+      this.pressedAt = pressed ? this.hoverAt : null;
+      if (pressed) {
+        events.push([pressed, ClipEvent.press]);
       }
     } else if (left && type === "up" && held) {
       this.selection = null;

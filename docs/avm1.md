@@ -1178,7 +1178,9 @@ The pointer (`avm1/pointer.ts`) follows AVM1's rules in Ruffle's order
 first goes to every clip, the newest first, as `mouseMove`, `mouseDown`
 or `mouseUp` (the left button's alone), and what they queue runs; then
 the object under the pointer is picked again and gets its button
-events, all queued before the queue runs once: as the hover moves with
+events (a `press` only if it was under the pointer before those clip
+events too, Flash's rule in docs/architecture/input.md), all queued
+before the queue runs once: as the hover moves with
 the button up, `rollOut` of what it was over and `rollOver` of what it
 is over; with it down, `dragOut` and `dragOver`, any button's as a
 menu's items have them, none while a script drags a clip; then `press`,
