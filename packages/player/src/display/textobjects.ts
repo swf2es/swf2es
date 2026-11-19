@@ -6,6 +6,7 @@ import {
   GUTTER,
   layoutText,
   maxScrollH,
+  maxScrollV,
   roomH,
   shownLines,
   type TextLayout,
@@ -369,6 +370,9 @@ export class TextObject extends DisplayObject {
       while (first < at && first + shownLines(this, first) - 1 < at) {
         first++;
       }
+
+      // No further than a script may scroll it: a dynamic field's final empty line takes no room.
+      first = Math.min(first, maxScrollV(this) - 1);
     }
 
     const line = lines[at];
