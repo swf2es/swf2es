@@ -105,6 +105,7 @@ export class VariableBindings {
     field.model.setText(field.definition?.definition?.text ?? "");
     field.invalidate(CONTENT);
     field.fit();
+    field.scrollTold?.(field);
     this.bind(field, true);
   }
 

@@ -455,6 +455,9 @@ export class PointerInput implements Pointer {
           field.scrollV = scrollV;
           field.invalidate(CONTENT);
           this.redraws++;
+          if (field.object && heard(field.object, "scroll")) {
+            dispatchEvent(this.scripting, field.object, this.scripting.event("scroll"));
+          }
         }
       }
     }

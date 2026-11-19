@@ -60,6 +60,11 @@ export function settleFits(): void {
   pendingFits.clear();
 }
 
+/** Whether two scrollState()s differ. */
+export function scrollMoved(a: readonly number[], b: readonly number[]): boolean {
+  return a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2] || a[3] !== b[3];
+}
+
 /**
  * A TextField: placed by DefineEditText, or made by a script. Its text and
  * formats are a TextModel; a timeline's starts with its tag's text, read
@@ -114,6 +119,14 @@ export class TextObject extends DisplayObject {
   private scrolledRevision = -1;
   /** The first line shown, from 1: as a script, the wheel or the caret left it, and no further than new text scrolls. */
   private lineScroll = 1;
+  /**
+   * Told as a script, new text or the caret may have moved its scroll or
+   * how far it scrolls: an AVM1 field's onScroller comes as the frame ends,
+   * if they moved since it last came (Avm1.tellScrollers).
+   */
+  scrollTold: ((field: TextObject) => void) | null = null;
+  /** scrollV, maxScrollV, scrollH and maxScrollH as onScroller last told them. */
+  toldScroll: readonly number[] = [1, 1, 0, 0];
   /** The selection, from the end it was started at to the caret, as text indices; empty, a caret alone. */
   private anchorAt = 0;
   private caretAt = 0;
@@ -131,6 +144,7 @@ export class TextObject extends DisplayObject {
     initialText = true,
   ) {
     super();
+    this.model.changed = this.textChanged;
     this.character = definition;
     const edit = definition?.definition;
     if (!edit) {
@@ -215,13 +229,42 @@ export class TextObject extends DisplayObject {
   /**
    * The scroll kept within new text's maxScrollH and maxScrollV, as Flash
    * keeps it as the text changes, but not as the field's size does (adl).
+   * A scroll it moves is told, as a script's is (scrollTold).
    */
   private keepScroll(): void {
     if (this.scrolledRevision !== this.model.revision) {
       this.scrolledRevision = this.model.revision;
-      this.scrollX = Math.min(this.scrollX, maxScrollH(this));
-      this.lineScroll = Math.min(this.lineScroll, maxScrollV(this));
+      const x = Math.min(this.scrollX, maxScrollH(this));
+      const v = Math.min(this.lineScroll, maxScrollV(this));
+      if (x !== this.scrollX || v !== this.lineScroll) {
+        this.scrollX = x;
+        this.lineScroll = v;
+        this.scrollTold?.(this);
+      }
     }
+  }
+
+  /**
+   * The text or its formats changed: the scroll kept within them at once,
+   * not as it is next read, so that text set twice keeps it as Flash does
+   * whether or not anything reads it between. A field not scrolled has
+   * nothing to keep, and is laid out no sooner.
+   */
+  private readonly textChanged = (): void => {
+    if (this.lineScroll > 1 || this.scrollX > 0) {
+      this.keepScroll();
+    }
+  };
+
+  /**
+   * scrollV, maxScrollV, scrollH and maxScrollH as Event.SCROLL and
+   * onScroller compare them, a pending fit settled first: the last two in
+   * twips, finer than AS3 reads them, as Flash Player 32 dispatched SCROLL
+   * for a maxScrollH that moved by less than a pixel.
+   */
+  scrollState(): number[] {
+    this.settle();
+    return [this.scrollV, maxScrollV(this), this.scrollX, maxScrollH(this)];
   }
 
   /** The first line shown, from 1. */
@@ -422,6 +465,8 @@ export class TextObject extends DisplayObject {
       this.scrollV = first + 1;
       this.scrollX = scroll;
       this.invalidate(CONTENT);
+      // AS3 dispatches no SCROLL for a caret's scroll; AVM1 calls onScroller (adl).
+      this.scrollTold?.(this);
     }
   }
 }

@@ -565,6 +565,122 @@ function textHitEdges(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Fields in Probe whose scroll scripts, text and carets change
+// (scripts/TextScrollEvents.as): when each dispatches Event.SCROLL.
+function textScrollEvents(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 160,
+    height: 80,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      w.doAbc(abc, "TextScrollEvents"),
+      w.symbolClass([[0, "TextScrollEvents"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+// TextScrollEvents' changes in AVM1, a frame each: when a field calls its
+// onScroller and broadcasts it to its listeners.
+function avm1TextScroller(): Uint8Array {
+  return w.swf({
+    version: 8,
+    width: 160,
+    height: 80,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      as1(
+        `function field(name, depth, x, y, type) {
+  createTextField(name, depth, x, y, 60, 50);
+  var t = _root[name];
+  t.type = type;
+  t.embedFonts = true;
+  t.multiline = true;
+  t.border = true;
+  t.setNewTextFormat(new TextFormat("Probe", 20));
+  t.text = "ab\rba\raab\rbba\rab\rba\rccc\rab\raaaaaaaaaabbbbbbbbbbaaaaaaaaaa";
+  t.onScroller = function (f) {
+    trace("  onScroller " + this._name + " " + (f == this) + " during " + step + " " + state(this) + " args " + arguments.length);
+  };
+  return t;
+}
+function state(t) {
+  return t.scroll + "/" + t.maxscroll + " " + t.hscroll + "/" + t.maxhscroll;
+}
+function at(label) {
+  step = label;
+  trace("step " + label + " " + state(input));
+}
+var step = "";
+var input = field("input", 1, 10, 10, "input");
+var dynamic = field("dynamic", 2, 80, 10, "dynamic");
+var listener = {};
+listener.onScroller = function (f) {
+  trace("  listener onScroller " + f._name + " during " + step);
+};
+input.addListener(listener);
+at("constructed");
+var frames = 0;
+onEnterFrame = function () {
+  frames++;
+  at("frame " + frames);
+  if (frames == 1) {
+    at("scroll 3");
+    input.scroll = 3;
+  } else if (frames == 2) {
+    at("scroll 3 again");
+    input.scroll = 3;
+  } else if (frames == 3) {
+    at("hscroll 10");
+    input.hscroll = 10;
+  } else if (frames == 4) {
+    at("text with a line more");
+    input.replaceText(0, 0, "a\r");
+  } else if (frames == 5) {
+    at("format bigger");
+    input.setTextFormat(new TextFormat("Probe", 30));
+  } else if (frames == 6) {
+    at("scroll 2 and 3 in a frame");
+    input.scroll = 2;
+    input.scroll = 3;
+  } else if (frames == 7) {
+    at("text shorter");
+    input.text = "ab";
+  } else if (frames == 8) {
+    at("text longer then scroll 4");
+    input.text = "ab\rba\raab\rbba\rab\rba\rccc\rab\raaaaaaaaaabbbbbbbbbbaaaaaaaaaa";
+    input.scroll = 4;
+  } else if (frames == 9) {
+    at("focus and caret at the end");
+    Selection.setFocus(input);
+    Selection.setSelection(input.length, input.length);
+  } else if (frames == 10) {
+    at("dynamic scroll 4");
+    dynamic.scroll = 4;
+  } else if (frames == 11) {
+    at("width shrunk");
+    input._width = 30;
+  } else if (frames == 12) {
+    delete onEnterFrame;
+  }
+};`,
+        8,
+      ),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 input fields in Probe scrolled to their carets by the focus, which
 // selects all their text, as TextInputScroll's: hscroll and maxhscroll in
 // twips, as Flash gives them for a field of embedded fonts. adl's AVM1
@@ -1201,6 +1317,24 @@ export const textCases: PlayerCase[] = [
     capture: [1],
     tolerance: 64,
     maxOutliers: 12,
+  },
+  {
+    name: "text-scroll-events",
+    swf: textScrollEvents,
+    script: "TextScrollEvents",
+    frames: 5,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-text-scroller",
+    swf: avm1TextScroller(),
+    traced: true,
+    frames: 13,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
   },
   {
     name: "text-input-scroll",

@@ -1298,6 +1298,7 @@ Object.assign(globalThis, {
   imeBlur,
   imeState: () => ({ log: element("ime").takeLog(), text: element("ime").text() }),
   imeScroll: () => element("ime").scrollState(),
+  imeScrolls: () => element("ime").takeScrolls(),
   imeFill: (text: string, scroll: number) => {
     element("ime").fill(text, scroll);
     return true;
