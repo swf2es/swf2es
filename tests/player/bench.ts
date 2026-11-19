@@ -475,7 +475,7 @@ function rigSwf(
     sprite.push(w.showFrame());
   }
 
-  tags.push(w.sprite(20, loop, sprite));
+  tags.push(w.sprite(20, loop, [...sprite, w.end()]));
   const columns = Math.ceil(Math.sqrt(count));
   for (let i = 0; i < count; i++) {
     tags.push(
@@ -558,7 +558,7 @@ function pulseSwf(count: number, loop: number, line: number, squash = 1): Uint8A
     sprite.push(w.showFrame());
   }
 
-  tags.push(w.sprite(20, loop, sprite));
+  tags.push(w.sprite(20, loop, [...sprite, w.end()]));
   const columns = Math.ceil(Math.sqrt(count));
   for (let i = 0; i < count; i++) {
     tags.push(
@@ -812,7 +812,7 @@ function masksSwf(count: number, unmasked: boolean): Uint8Array {
     panel.push(w.showFrame());
   }
 
-  tags.push(w.sprite(40, loop, panel));
+  tags.push(w.sprite(40, loop, [...panel, w.end()]));
   const columns = Math.ceil(Math.sqrt(count * 1.5));
   for (let i = 0; i < count; i++) {
     tags.push(
