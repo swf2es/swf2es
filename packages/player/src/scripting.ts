@@ -1859,6 +1859,7 @@ export class Scripting {
 
   private playFrame(root: DisplayObject, entered: boolean, render: boolean): void {
     this.overflowed = false;
+    this.loads.beginAvm1Frame();
     finishSounds(this);
     if (entered) {
       this.frames++;
@@ -1891,6 +1892,7 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    this.loads.releaseUnloadedAvm1();
     // What is under a mouse that stands still, as the frame left the list.
     this.pointer?.frameEnded();
     if (render) {

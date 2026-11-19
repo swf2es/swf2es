@@ -1,6 +1,6 @@
 // Authored AVM1 movies for an AS3 Loader's lifecycle tests
 // (tests/unit/player/scripting/avm1-movie.test.ts): what a loaded movie's
-// sounds do with the AS3 player around it.
+// sounds and unload do with the AS3 player around it.
 // Each logs "avm1:" lines; `ef` counts its frames from its first.
 import { flashAssembler, script } from "./avm1-script.ts";
 import * as w from "./swf-writer.ts";
@@ -60,6 +60,27 @@ onEnterFrame = function () {
   if (ef == 8 || ef == 12 || ef == 16) { startAll(); log("started"); }
   if (ef == 10) { g.stop(); log("stop"); }
   if (ef == 14) { stopAllSounds(); log("stopAllSounds"); }
+};
+stop();`);
+}
+
+/**
+ * A movie that logs each frame, holds the LocalConnection "lifecycle",
+ * fills the 32 channels in its second frame, and has onUnload on its root
+ * and on a clip in it; with `interval`, an interval logs while it runs.
+ */
+export function unloadMovie(interval: boolean): Uint8Array {
+  return movie(`${prelude}
+this.onUnload = function () { log("onUnload " + ef); };
+this.createEmptyMovieClip("kid", 1);
+kid.onUnload = function () { log("kid onUnload"); };
+var lc = new LocalConnection();
+lc.connect("lifecycle");
+${interval ? 'setInterval(function () { log("interval"); }, 10);' : ""}
+onEnterFrame = function () {
+  ef++;
+  log("ef " + ef);
+  if (ef == 2) { startAll(); }
 };
 stop();`);
 }

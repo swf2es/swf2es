@@ -1308,6 +1308,25 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
+  /**
+   * The movie unloaded from the AS3 Loader that held it: its clips' unload
+   * handlers, the children's first, run now, as Flash Player 32 runs them
+   * for a movie unloaded after its frame has played.
+   */
+  unloadFromLoader(): void {
+    if (this.movieRoot === null || this.halted) {
+      return;
+    }
+
+    this.timers.begin();
+    try {
+      this.unload(this.movieRoot);
+      this.queue.run();
+    } finally {
+      this.timers.end();
+    }
+  }
+
   /** Resolves once every request the SWF has made so far has come back, for the next frame. */
   settled(): Promise<void> {
     return this.net.settled();

@@ -1,7 +1,9 @@
 // AVM1 movies an AS3 Loader holds, with the player around them: one mixer
-// for both VMs' sounds. The host is scripts/LoadedAvm1Lifecycle.as, the
-// movies tests/avm1-lifecycle.ts. What each test expects was measured in
-// Flash Player 32 (adl) with probes that do the same.
+// for both VMs' sounds, and the frame an unloaded movie still plays or the
+// unload handlers it runs instead. The host is scripts/LoadedAvm1Lifecycle.as,
+// the movies tests/avm1-lifecycle.ts. What each test expects was measured in
+// Flash Player 32 (adl, and the Windows debug projector for the unload
+// handlers and the frames) with probes that do the same.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -11,7 +13,7 @@ import { containerEngine } from "../../../../oracle/oracle.ts";
 import type { AudioHost } from "../../../../packages/player/dist/media/audio.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
-import { soundMovie } from "../../../avm1-lifecycle.ts";
+import { soundMovie, unloadMovie } from "../../../avm1-lifecycle.ts";
 import { bare } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
@@ -142,6 +144,111 @@ test("a loaded movie's sounds play under SoundMixer: one transform, one stop, 32
       "as3:play null",
       "as3:play channel",
     ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+/** The lines but the interval's, which logs while the movie runs. */
+const framed = (lines: string[]) => lines.filter((line) => line !== "avm1:interval");
+
+test("a movie unloadAndStop takes before its frame plays it, its sounds and interval stopped", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(true));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.later("enterFrame", "unloadAndStop;play;connect lifecycle");
+    await p.tick();
+    await p.tick();
+    p.control("connect lifecycle");
+    // Its LocalConnection's name is its until the frame's end; its unload handlers never run.
+    assert.deepEqual(p.lines, [
+      "as3:unloadAndStop",
+      "as3:play channel",
+      "as3:connect lifecycle 2082",
+      "avm1:ef 4",
+      "as3:connect lifecycle",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie unload takes before its frame with an interval to come plays no more", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(true));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.later("enterFrame", "unload");
+    await p.tick();
+    await p.tick();
+    assert.deepEqual(p.lines, ["as3:unload"]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie unloaded after its frame runs its unload handlers at the frame's end", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(false));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.later("exitFrame", "unload;connect lifecycle");
+    await p.tick();
+    await p.tick();
+    p.control("connect lifecycle");
+    p.control("play");
+    assert.deepEqual(p.lines, [
+      "avm1:ef 4",
+      "as3:unload",
+      "as3:connect lifecycle 2082",
+      "avm1:kid onUnload",
+      "avm1:onUnload 4",
+      "as3:connect lifecycle",
+      "as3:play channel",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie unloaded between frames runs its unload handlers as the next starts", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(false));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.control("unload");
+    await p.tick();
+    await p.tick();
+    assert.deepEqual(p.lines, ["as3:unload", "avm1:kid onUnload", "avm1:onUnload 3"]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie taken off the display list plays on, its interval too", { skip }, async () => {
+  const p = await play(unloadMovie(true));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.control("remove");
+    p.lines.splice(0);
+    await p.tick();
+    await p.tick();
+    assert.deepEqual(framed(p.lines), ["avm1:ef 4", "avm1:ef 5"]);
+    assert.ok(p.lines.includes("avm1:interval"));
   } finally {
     p.player.destroy();
   }
