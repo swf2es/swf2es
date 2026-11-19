@@ -53,8 +53,10 @@ function store(on: boolean): void {
 
 /**
  * The element's meter turned on and off by `toggle`, and by Ctrl+Shift+F,
- * which shows it in the top left corner, moves it through the others, and
- * hides it after the last; the box follows it however it is turned. The shortcut is the page's
+ * which shows it in its kept corner, moves it through the others, and hides
+ * it back in the corner it started from, so that the shortcut and the box
+ * open it in the same corner, and one the viewer picked from the menu
+ * stays theirs; the box follows the meter however it is turned. The shortcut is the page's
  * even while the player has the focus: its F, pressed and released, never
  * reaches the SWF. An F held down before is the SWF's, its repeats and its
  * release with it, so that it is never left held there.
@@ -64,8 +66,15 @@ export function bindMeter(player: Swf2esPlayerElement, toggle: HTMLInputElement)
     player.performanceMeter = on;
     store(on);
   };
+  /** The corner the shortcut's cycle began in, and hides the meter back in. */
+  let start = player.performanceMeterCorner;
+  let cycling = false;
   player.addEventListener("performancemeterchange", () => {
     toggle.checked = player.performanceMeter;
+    // Moved or shown otherwise, by the menu, the box or a kept choice: a cycle begins there.
+    if (!cycling) {
+      start = player.performanceMeterCorner;
+    }
   });
   toggle.addEventListener("change", () => set(toggle.checked));
   const place = (corner: MeterCorner) => {
@@ -73,15 +82,21 @@ export function bindMeter(player: Swf2esPlayerElement, toggle: HTMLInputElement)
     storeCorner(corner);
   };
   const cycle = () => {
-    const at = CORNERS.indexOf(player.performanceMeterCorner);
-    if (!player.performanceMeter) {
-      place(CORNERS[0]);
-      set(true);
-    } else if (at < CORNERS.length - 1) {
-      place(CORNERS[at + 1]);
-    } else {
-      set(false);
-      place(CORNERS[0]);
+    cycling = true;
+    try {
+      const at = player.performanceMeterCorner;
+      const next = CORNERS[(CORNERS.indexOf(at) + 1) % CORNERS.length];
+      if (!player.performanceMeter) {
+        start = at;
+        set(true);
+      } else if (next !== start) {
+        place(next);
+      } else {
+        set(false);
+        place(start);
+      }
+    } finally {
+      cycling = false;
     }
   };
   let swallowed = false;

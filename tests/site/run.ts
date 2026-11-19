@@ -699,9 +699,9 @@ async function check(): Promise<void> {
             await until(meterShown);
             assert.equal(await value<string>(corner), "top-right");
             await until(`/ fps$/.test(${figure("fps")}.textContent)`);
-            // On through the other corners, then off, then on at the top left again; each corner
-            // inside the stage, the pointer passing through.
-            for (const next of ["bottom-left", "bottom-right"]) {
+            // On through the other corners, each inside the stage and the pointer passing through,
+            // then off, back in the corner the cycle began in, which stays kept.
+            for (const next of ["bottom-left", "bottom-right", "top-left"]) {
               await shortcut();
               assert.equal(await value<string>(corner), next);
               assert.deepEqual(
@@ -713,19 +713,47 @@ async function check(): Promise<void> {
             }
             await shortcut();
             await until(meterHidden);
-            assert.equal(await value<string | null>(storedCorner), null);
+            assert.equal(await value<string>(corner), "top-right");
+            assert.equal(await value<string | null>(storedCorner), "top-right");
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
               null,
             );
+            // The shortcut and the box open it in that corner alike.
             await shortcut();
             await until(meterShown);
-            assert.equal(await value<string>(corner), "top-left");
-            await shortcut();
-            await shortcut();
-            await shortcut();
-            await shortcut();
+            assert.equal(await value<string>(corner), "top-right");
+            await value("(document.getElementById('meter-toggle').click(), true)");
             await until(meterHidden);
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
+            // A corner picked from the menu survives the shortcut.
+            for (const type of ["mousePressed", "mouseReleased"]) {
+              await send("Input.dispatchMouseEvent", {
+                type,
+                x: box[0] + box[2] / 2,
+                y: box[1] + box[3] / 2,
+                button: "right",
+                clickCount: 1,
+              });
+            }
+            const moveItem =
+              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move performance meter')";
+            await until(`!!${moveItem}`);
+            await value(`(${moveItem}.click(), true)`);
+            assert.equal(await value<string>(corner), "bottom-left");
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterHidden);
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "bottom-left");
+            for (let i = 0; i < 4; i++) {
+              await shortcut();
+            }
+            await until(meterHidden);
+            assert.equal(await value<string>(corner), "bottom-left");
+            assert.equal(await value<string | null>(storedCorner), "bottom-left");
 
             // The context menu's About item names the build the page was made from.
             for (const type of ["mousePressed", "mouseReleased"]) {
