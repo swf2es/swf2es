@@ -1406,6 +1406,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * as Windows-1252, a later one as UTF-8.
    */
   loadVariables(into: DisplayObject, url: string, form: avm1.UrlForm | null): void {
+    // Nothing loads into the root of a movie an AS3 Loader holds (Flash Player 32).
+    if (this.hosted && into === this.root) {
+      return;
+    }
+
     const request =
       form === null
         ? { url, method: "GET" as const, headers: [], body: null }
@@ -1449,7 +1454,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** unloadMovie: what `d` shows unloaded and it left empty (loads.ts). */
   unloadMovie(d: DisplayObject): void {
-    this.loads.unloadMovie(d);
+    // A movie an AS3 Loader holds keeps its root, as Flash Player 32 keeps it.
+    if (!(this.hosted && d === this.root)) {
+      this.loads.unloadMovie(d);
+    }
   }
 
   /** Level `n`'s clip, null where there is none. */

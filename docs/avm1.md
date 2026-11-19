@@ -1661,9 +1661,14 @@ player's; the pointer reaches its buttons and clips by AVM1's rules
 traced it (`tests/unit/player/scripting/loads.test.ts`): its root is
 `_root`, which is what it converts to and `targetPath` gives, its clips
 `_root.a.b` and `_target` `/a/b`; `_level0` and every `_levelN` are
-undefined, and the root has no `_parent`; `loadMovieNum`, and a load into
-the root itself, load nothing, while `MovieClipLoader` and a clip's
-`loadMovie` load into its clips. Not yet followed: Flash gives the AS3
+undefined, and the root has no `_parent`. Nothing loads into a level or
+the root itself, or unloads it: `loadMovieNum`, `loadVariablesNum`,
+`unloadMovieNum`, the root's `loadMovie`, `loadVariables` and
+`unloadMovie` do nothing, and `MovieClipLoader.loadClip` into a level
+gives false; `MovieClipLoader`, a clip's `loadMovie` and `loadVariables`,
+and `LoadVars` load into its clips and objects. A `loadClip` into the
+root gives true in the projector, which then traced nothing more, the
+host's frames included; the player loads it. Not yet followed: Flash gives the AS3
 display list to the SWFs loaded into such a movie's clips, whose
 `_level0` is the host's root, a MovieClip to them, with its children by
 name (the corpus's `avm2/avm1_root`), and the path of a clip a
