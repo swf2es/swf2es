@@ -198,7 +198,14 @@ whose entries go once unused for their idle frames:
   addressing reading `vc[]` by a vertex's value as its programs ask.
 
 After a lost context everything is made again from what the player
-keeps, as it is for Stage3D.
+keeps, as it is for Stage3D. While it is lost a frame costs nothing:
+the view neither walks nor plans. A program whose link fails because
+the context was lost (`ShaderError.lost`) is no error. When a GPU
+process dies, every status reads false and every log reads empty, and
+Chrome flags the context as lost only a task later, so a failure with no
+log counts as a loss too. The backend drops the frame or restore it was
+in and makes everything again on the next restore, however many losses
+come and whenever they come, during a restore included.
 
 ### The backend
 

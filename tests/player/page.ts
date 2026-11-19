@@ -621,8 +621,10 @@ async function surfaceFor(
   zoom: number,
   antialias: boolean,
   preserve = true,
+  canvas?: HTMLCanvasElement,
 ): Promise<RenderView> {
   const view = new RenderView({
+    canvas,
     width: player.width,
     height: player.height,
     resolution,
@@ -1493,9 +1495,13 @@ interface Drawn {
   destroy(): void;
 }
 
-async function drawn(bytes: Uint8Array, preserve: boolean): Promise<Drawn> {
+async function drawn(
+  bytes: Uint8Array,
+  preserve: boolean,
+  canvas?: HTMLCanvasElement,
+): Promise<Drawn> {
   const player = new Player(bytes, null);
-  const view = await surfaceFor(player, 1, 1, 1, false, preserve);
+  const view = await surfaceFor(player, 1, 1, 1, false, preserve, canvas);
   const lose = view.gl.getExtension("WEBGL_lose_context");
   await player.start();
   return {
@@ -1754,8 +1760,12 @@ async function contextLossSwf(
  * its WebGL context and gets it back as `plan` says: each `t` plays a
  * frame and draws it in both, `l` loses the context, `r` waits for it to
  * come back, which it does once the steps between have run, and `s`
- * resizes both. Frames drawn while it is lost are drawn into nothing; every
- * frame drawn with it must match the other renderer's. What first
+ * resizes both. `k`, `c` and `d` lose it inside the renderer's own work
+ * (lossTrap): at its next program link, a frame's or a restore's; there
+ * as a GPU process that dies; at its third drawArrays, midway through a
+ * frame's filter passes. Frames drawn while it is lost are drawn into
+ * nothing; every frame drawn with it must match the other renderer's, and
+ * nothing may throw, in a step or in an event's handler. What first
  * differed, or threw.
  */
 async function contextLossPlanSwf(base64: string, plan: string): Promise<string | null> {
@@ -1763,6 +1773,14 @@ async function contextLossPlanSwf(base64: string, plan: string): Promise<string 
   const steady = await drawn(bytes, true);
   const losing = await drawn(bytes, true);
   const canvas = losing.canvas;
+  const trap = lossTrap(losing);
+  const uncaught = catchUncaught();
+  let losses = 0;
+  let restores = 0;
+  const countLoss = () => losses++;
+  const countRestore = () => restores++;
+  canvas.addEventListener("webglcontextlost", countLoss);
+  canvas.addEventListener("webglcontextrestored", countRestore);
   const within = (event: Promise<unknown>) =>
     Promise.race([
       event.then(() => true),
@@ -1772,6 +1790,10 @@ async function contextLossPlanSwf(base64: string, plan: string): Promise<string 
   let wide = false;
   try {
     for (let step = 0; step < plan.length; step++) {
+      if (uncaught.errors.length > 0) {
+        return `before step ${step} of ${plan}: uncaught ${uncaught.errors[0]}`;
+      }
+
       switch (plan[step]) {
         case "t": {
           // Both scenes represent one frame: GPU work must not age what one keeps and not the
@@ -1789,30 +1811,34 @@ async function contextLossPlanSwf(base64: string, plan: string): Promise<string 
           }
 
           if (!lost) {
-            const a = pixelsOf(steady.gl);
-            const b = pixelsOf(losing.gl);
-            // A filtered layer whose kept output was lost with the context is drawn as a held
-            // layer, reading its passes' targets within a shared page, whose texel coordinates
-            // may round a level apart from a texture of its own's: a level, times the strength a
-            // glow multiplies it by, 2 at most in context-loss.ts.
-            const slack = 2;
-            let differ = 0;
-            let most = 0;
-            for (let i = 0; i < a.length; i++) {
-              const by = Math.abs(a[i] - b[i]);
-              most = Math.max(most, by);
-              if (by > slack) {
-                differ++;
-              }
+            const differ = framesDiffer(steady.gl, losing.gl);
+            if (differ) {
+              return `step ${step} of ${plan}: ${differ}`;
             }
+          }
 
-            if (differ > 0) {
-              return `step ${step} of ${plan}: ${differ} of ${a.length} bytes differ, by ${most} at most`;
-            }
+          // A GPU process that died is flagged lost a task later, as the next frame comes.
+          if (trap.dead) {
+            await new Promise((done) => setTimeout(done, 0));
           }
 
           break;
         }
+
+        case "k":
+          trap.arm("link");
+          lost = true;
+          break;
+
+        case "c":
+          trap.arm("crash");
+          lost = true;
+          break;
+
+        case "d":
+          trap.arm("draw");
+          lost = true;
+          break;
 
         case "l": {
           const gone = new Promise((done) =>
@@ -1829,16 +1855,18 @@ async function contextLossPlanSwf(base64: string, plan: string): Promise<string 
         }
 
         case "r": {
-          // Registered before anything yields, so the restore asked for cannot be missed.
-          const back = new Promise((done) =>
-            canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), {
-              once: true,
-            }),
-          );
-          if (!(await within(back))) {
-            return `step ${step} of ${plan}: the context did not come back`;
+          // Back once every loss is restored and none is armed or under way: a loss during a
+          // restore is restored again.
+          const deadline = performance.now() + 5000;
+          while (losing.gl.isContextLost() || trap.waiting || restores < losses || losses === 0) {
+            if (performance.now() > deadline) {
+              return `step ${step} of ${plan}: the context did not come back (${trap.waiting ? "a loss armed never came" : `${losses} lost, ${restores} restored`})`;
+            }
+
+            await new Promise((done) => setTimeout(done, 5));
           }
 
+          await new Promise((done) => setTimeout(done, 0));
           lost = false;
           break;
         }
@@ -1854,13 +1882,200 @@ async function contextLossPlanSwf(base64: string, plan: string): Promise<string 
       }
     }
 
-    return null;
+    return uncaught.errors.length > 0 ? `after ${plan}: uncaught ${uncaught.errors[0]}` : null;
   } catch (e) {
     return describe(e, null);
   } finally {
+    uncaught.release();
+    canvas.removeEventListener("webglcontextlost", countLoss);
+    canvas.removeEventListener("webglcontextrestored", countRestore);
     steady.destroy();
     losing.destroy();
   }
+}
+
+/**
+ * Play a SWF with no scripts in two renderers, one made on a context lost
+ * already: its frames draw nothing and throw nothing till the context is
+ * restored, and then match the other's. What first differed, or threw.
+ */
+async function contextLostAtStartSwf(base64: string, frames: number): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const canvas = document.createElement("canvas");
+  // As the view asks for it, which then gets this one.
+  const gl = canvas.getContext("webgl2", {
+    alpha: false,
+    antialias: false,
+    depth: false,
+    premultipliedAlpha: true,
+    preserveDrawingBuffer: true,
+    stencil: true,
+  }) as WebGL2RenderingContext;
+  const lose = gl.getExtension("WEBGL_lose_context") as WEBGL_lose_context;
+  // Asked back, as the view asks for its own, which is not there yet to ask.
+  const gone = new Promise((done) =>
+    canvas.addEventListener(
+      "webglcontextlost",
+      (event) => {
+        event.preventDefault();
+        done(null);
+      },
+      { once: true },
+    ),
+  );
+  lose.loseContext();
+  await gone;
+  const uncaught = catchUncaught();
+  const steady = await drawn(bytes, true);
+  let losing: Drawn | null = null;
+  try {
+    losing = await drawn(bytes, true, canvas);
+    const both = [steady, losing];
+    const play = () => {
+      for (const r of both) {
+        r.player.tick();
+        r.render();
+      }
+    };
+    for (let i = 0; i < frames; i++) {
+      play();
+    }
+
+    const back = new Promise((done) =>
+      canvas.addEventListener("webglcontextrestored", () => setTimeout(done, 0), { once: true }),
+    );
+    lose.restoreContext();
+    const came = await Promise.race([
+      back.then(() => true),
+      new Promise<boolean>((done) => setTimeout(done, 5000, false)),
+    ]);
+    if (!came) {
+      return "the context did not come back";
+    }
+
+    for (let i = 0; i < frames; i++) {
+      play();
+      const differ = framesDiffer(steady.gl, losing.gl);
+      if (differ) {
+        return `frame ${i} after the restore: ${differ}`;
+      }
+    }
+
+    return uncaught.errors.length > 0 ? `uncaught ${uncaught.errors[0]}` : null;
+  } catch (e) {
+    return describe(e, null);
+  } finally {
+    uncaught.release();
+    steady.destroy();
+    losing?.destroy();
+  }
+}
+
+/**
+ * What differs between the frames `a` and `b` show, or null. A filtered
+ * layer whose kept output was lost with the context is drawn as a held
+ * layer, reading its passes' targets within a shared page, whose texel
+ * coordinates may round a level apart from a texture of its own's: a
+ * level, times the strength a glow multiplies it by, 2 at most in
+ * context-loss.ts.
+ */
+function framesDiffer(a: WebGL2RenderingContext, b: WebGL2RenderingContext): string | null {
+  const x = pixelsOf(a);
+  const y = pixelsOf(b);
+  const slack = 2;
+  let differ = 0;
+  let most = 0;
+  for (let i = 0; i < x.length; i++) {
+    const by = Math.abs(x[i] - y[i]);
+    most = Math.max(most, by);
+    if (by > slack) {
+      differ++;
+    }
+  }
+
+  return differ > 0 ? `${differ} of ${x.length} bytes differ, by ${most} at most` : null;
+}
+
+/** Errors thrown where nothing catches them, an event's handler's among them, till released. */
+function catchUncaught(): { errors: string[]; release(): void } {
+  const errors: string[] = [];
+  const thrown = (event: ErrorEvent) => {
+    errors.push(describe(event.error ?? event.message, null));
+  };
+  const rejected = (event: PromiseRejectionEvent) => {
+    errors.push(describe(event.reason, null));
+  };
+  window.addEventListener("error", thrown);
+  window.addEventListener("unhandledrejection", rejected);
+  return {
+    errors,
+    release() {
+      window.removeEventListener("error", thrown);
+      window.removeEventListener("unhandledrejection", rejected);
+    },
+  };
+}
+
+/**
+ * Losses of `d`'s context set to come inside the renderer's own work, each
+ * armed after the one before comes: `link` at its next program link, flagged lost at once, as
+ * WEBGL_lose_context does; `crash` there too, as a GPU process that dies:
+ * every status false and every log empty, the context flagged lost only a
+ * task later, as Chrome does; `draw` at its third drawArrays from then,
+ * midway through a frame's filter passes. Each is restored as `l`'s is.
+ */
+function lossTrap(d: Drawn) {
+  const gl = d.gl;
+  const proto = Object.getPrototypeOf(gl) as WebGL2RenderingContext;
+  const armed: ("link" | "crash" | "draw")[] = [];
+  let draws = 0;
+  let dead = false;
+  d.canvas.addEventListener("webglcontextlost", () => {
+    dead = false;
+  });
+  const own = gl as unknown as Record<string, unknown>;
+  own.linkProgram = (program: WebGLProgram) => {
+    if (armed[0] === "link") {
+      armed.shift();
+      d.loseContext();
+    } else if (armed[0] === "crash") {
+      armed.shift();
+      dead = true;
+      setTimeout(() => d.loseContext(), 0);
+    }
+
+    proto.linkProgram.call(gl, program);
+  };
+  own.drawArrays = (mode: number, first: number, count: number) => {
+    if (armed[0] === "draw" && ++draws === 3) {
+      armed.shift();
+      d.loseContext();
+    }
+
+    proto.drawArrays.call(gl, mode, first, count);
+  };
+  own.getProgramParameter = (program: WebGLProgram, name: number) =>
+    dead ? false : proto.getProgramParameter.call(gl, program, name);
+  own.getShaderParameter = (shader: WebGLShader, name: number) =>
+    dead ? false : proto.getShaderParameter.call(gl, shader, name);
+  own.getProgramInfoLog = (program: WebGLProgram) =>
+    dead ? "" : proto.getProgramInfoLog.call(gl, program);
+  own.getShaderInfoLog = (shader: WebGLShader) =>
+    dead ? "" : proto.getShaderInfoLog.call(gl, shader);
+  return {
+    arm(kind: "link" | "crash" | "draw") {
+      armed.push(kind);
+      draws = 0;
+    },
+    /** Whether a crash is under way, the context not yet flagged lost. */
+    get dead() {
+      return dead;
+    },
+    /** Whether a loss is armed or under way. */
+    get waiting() {
+      return armed.length > 0 || dead;
+    },
+  };
 }
 
 /** The SWF openSwf started, which stepSwf plays on: for leak.ts, which measures the heap between steps. */
@@ -2179,6 +2394,7 @@ const page = globalThis as unknown as {
   canvasText: typeof canvasText;
   contextLossSwf: typeof contextLossSwf;
   contextLossPlanSwf: typeof contextLossPlanSwf;
+  contextLostAtStartSwf: typeof contextLostAtStartSwf;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -2195,3 +2411,4 @@ page.deviceTextSwf = deviceTextSwf;
 page.canvasText = canvasText;
 page.contextLossSwf = contextLossSwf;
 page.contextLossPlanSwf = contextLossPlanSwf;
+page.contextLostAtStartSwf = contextLostAtStartSwf;

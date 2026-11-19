@@ -955,6 +955,16 @@ export function playLosingContextPlan(swf: Uint8Array, plan: string): Promise<st
   });
 }
 
+/** Play a SWF with no scripts in the page's contextLostAtStartSwf, one renderer made on a lost context. */
+export function playLostAtStart(swf: Uint8Array, frames: number): Promise<string | null> {
+  return withPage("contextLostAtStartSwf", async (evaluate) => {
+    const { value, exception } = await evaluate<string | null>(
+      `contextLostAtStartSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames})`,
+    );
+    return exception ?? value ?? null;
+  });
+}
+
 /** Play a SWF with no scripts in the page's contextLossSwf: what differs after a lost context, or threw. */
 export function playLosingContext(
   swf: Uint8Array,

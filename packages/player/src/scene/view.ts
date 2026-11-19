@@ -169,7 +169,7 @@ export class RenderView implements Drawer {
   private readonly filterLayers: FilterLayers;
   private readonly planes: Planes;
   /** The largest texture side the context makes, which a filtered layer's padding must fit. */
-  private readonly textureLimit: number;
+  private textureLimit: number;
   /** The outlines' store kept while the view is (text/saffron.ts, holdSegments), let go of with it. */
   private readonly releaseOutlines = holdSegments();
   /** The walk's depth, and a colour transform a depth, which a concatenation there is made in. */
@@ -257,7 +257,8 @@ export class RenderView implements Drawer {
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
-    this.textureLimit = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
+    // None of a context made lost, till it is restored (remake).
+    this.textureLimit = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number | null) ?? 0;
 
     this.lineCache = new LineCache(this.geometries, this.tessellator);
     this.counts = this.lineCache.counts;
@@ -280,11 +281,21 @@ export class RenderView implements Drawer {
 
   /** The context came back: the backend made again, and every texture added again as it is drawn. */
   private readonly restored = () => {
+    this.remake(true);
+  };
+
+  /**
+   * The backend made again (WebGLBackend.restore), the context having come
+   * back (`lost`) or been given up on as lost while it is still there, and
+   * every texture and kept output added again as it is drawn.
+   */
+  private remake(lost: boolean): void {
     this.drawnRoot = null;
-    this.backend.restore(this.geometries);
+    this.backend.restore(this.geometries, lost);
     this.textures.lost();
     this.keeps.lost();
-  };
+    this.textureLimit ||= (this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number | null) ?? 0;
+  }
 
   /**
    * Whether bitmaps that ask to be are smoothed: not at the stage's low
@@ -395,7 +406,7 @@ export class RenderView implements Drawer {
       }
     }
 
-    return !this.gl.isContextLost();
+    return !this.gl.isContextLost() && !this.backend.stale;
   }
 
   /** The numbers a render draws from, besides its root and its quality, in `to`. */
@@ -424,6 +435,20 @@ export class RenderView implements Drawer {
     settleFits();
     // Not drawn until it is all drawn: a render that throws leaves no frame to keep.
     this.drawnRoot = null;
+    // Nothing to draw into while the context is lost, and nothing walked: what changed meanwhile
+    // is drawn once it is back. A backend that gave up on it before the browser said it was lost
+    // is made again, unless it gives up again.
+    if (this.gl.isContextLost()) {
+      return;
+    }
+
+    if (this.backend.stale) {
+      this.remake(false);
+      if (this.backend.stale) {
+        return;
+      }
+    }
+
     this.scene.reset();
     this.rows.reset();
     this.filters.reset();
@@ -1505,7 +1530,8 @@ export class RenderView implements Drawer {
       store.disposed ||
       store.holdsAlpha ||
       Math.max(store.width, store.height) > this.textureLimit ||
-      this.gl.isContextLost()
+      this.gl.isContextLost() ||
+      this.backend.stale
     ) {
       return false;
     }

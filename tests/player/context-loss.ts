@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { deflateSync } from "node:zlib";
 import * as w from "../swf-writer.ts";
-import { playLosingContext, playLosingContextPlan } from "./chrome.ts";
+import { playLosingContext, playLosingContextPlan, playLostAtStart } from "./chrome.ts";
 
 /** A closed ring of `n` curves round (cx, cy), `r` twips out: hundreds of vertices once flattened. */
 function ring(cx: number, cy: number, r: number, n: number): w.PathCommand[] {
@@ -192,6 +192,10 @@ const layered = w.swf({
   ],
 });
 assert.equal(await playLosingContext(layered, 4), null, "kept filter outputs and blend layers");
+// Lost midway through a frame's filter passes, and again at the restore's links.
+for (const plan of ["ttdtrtt", "ttlkrtt"]) {
+  assert.equal(await playLosingContextPlan(layered, plan), null, `layered ${plan}`);
+}
 
 assert.equal(await playLosingContext(swf, 4), null, "drawn again");
 assert.equal(await playLosingContext(swf, 4, true), null, "with objects turned in 3D");
@@ -200,6 +204,27 @@ assert.equal(await playLosingContext(swf, 4, true), null, "with objects turned i
 for (const plan of ["tttltttrtt", "ttltrtltrtt", "ttlstrtstt", "tltttrsttltrt"]) {
   assert.equal(await playLosingContextPlan(swf, plan), null, plan);
 }
+
+// Lost inside the renderer's own work, where a program that would not link threw: at the first
+// frame's links as the SWF starts, flagged lost at once (k), or as a GPU process that dies, its
+// statuses false and its logs empty a task before the context is flagged lost (c); at the
+// restore's links, before it finishes, once and twice; midway through a frame's filter passes
+// (d); while the frames after a restore link the passes ahead; and many times in a row.
+for (const plan of [
+  "ktrtt",
+  "ctrtt",
+  "ttlkrtt",
+  "ttlcrtt",
+  "ttlkkrtt",
+  "ttdtrtt",
+  "ttltrktttrtt",
+  "tltrtltrtlcrtlkrtdtrtt",
+]) {
+  assert.equal(await playLosingContextPlan(swf, plan), null, plan);
+}
+
+// Made on a context lost already: nothing drawn or thrown till it is back, then the same.
+assert.equal(await playLostAtStart(swf, 3), null, "made lost");
 
 // Long runs use cached merged buffers after their first frame. Restoration must discard those
 // buffers and rebuild them from the live geometry before reusing the batch.
