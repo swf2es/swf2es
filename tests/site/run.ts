@@ -529,17 +529,52 @@ async function check(): Promise<void> {
             });
             writeFileSync(`${out}site.png`, Buffer.from(page.data, "base64"));
 
-            // The performance meter is off until asked for: no listener on the player, the
-            // context's own functions, nothing shown, the choice not kept.
+            // The element's performance meter is off until asked for: not made, no listener on
+            // the player, the context's own functions, the choice not kept.
             const gl = "document.getElementById('player').gl";
             const wrapped = `Object.hasOwn(${gl}, 'drawElements')`;
-            const meterShown =
-              "!document.getElementById('meter').hidden && document.getElementById('meter-toggle').checked";
-            assert.equal(await value<boolean>("document.getElementById('meter').hidden"), true);
-            assert.equal(
-              await value<boolean>("document.getElementById('player').frameListener === null"),
-              true,
-            );
+            const meter = "document.getElementById('player').shadowRoot.querySelector('.meter')";
+            const figure = (name: string) =>
+              `document.getElementById('player').shadowRoot.querySelector('[data-figure=${name}]')`;
+            const meterHidden = `!(${meter}) || ${meter}.hidden`;
+            const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').checked`;
+            assert.equal(await value<boolean>(`!${meter}`), true);
+            // Whether anything hears the player's frames, told by the clock: a listener costs the
+            // loop one more read of it a call. Counted outside the player's advance, whose reads
+            // follow the SWF's frames and how many fall in each call, which the page's pacing
+            // sways; around it the loop reads the clock a fixed few times a call.
+            const readsPerFrame = async () =>
+              await value<number>(`(async () => {
+                const player = document.getElementById('player').player;
+                const now = performance.now;
+                const advance = player.advance;
+                let reads = 0;
+                let inside = 0;
+                let calls = 0;
+                performance.now = () => (reads++, now.call(performance));
+                player.advance = function (dt, busy) {
+                  calls++;
+                  const before = reads;
+                  try {
+                    return advance.call(this, dt, busy);
+                  } finally {
+                    inside += reads - before;
+                  }
+                };
+                const frame = () => new Promise((done) => requestAnimationFrame(() => done()));
+                try {
+                  await frame();
+                  reads = inside = calls = 0;
+                  for (let i = 0; i < 30; i++) {
+                    await frame();
+                  }
+                  return (reads - inside) / Math.max(1, calls);
+                } finally {
+                  performance.now = now;
+                  delete player.advance;
+                }
+              })()`);
+            const unheard = await readsPerFrame();
             assert.equal(await value<boolean>(wrapped), false);
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
@@ -592,20 +627,25 @@ async function check(): Promise<void> {
             );
             // Its figures: the frames played a second against the SWF's rate, the player's ms in a
             // frame, and the heap and memories behind it.
-            await until("/ fps$/.test(document.getElementById('fps').textContent)");
+            await until(`/ fps$/.test(${figure("fps")}.textContent)`);
             const figures = await value<Record<string, string>>(
-              "Object.fromEntries([...document.querySelectorAll('#meter dd')].map((dd) => [dd.id, dd.textContent]))",
+              `Object.fromEntries([...${meter}.querySelectorAll('dd')].map((dd) => [dd.dataset.figure, dd.textContent]))`,
             );
             const fps = /^(\d+\.\d) \/ (\d+(?:\.\d+)?) fps$/.exec(figures.fps);
             assert.ok(fps, figures.fps);
             assert.ok(Number(fps[1]) > 0 && Number(fps[1]) <= Number(fps[2]) * 1.5, figures.fps);
-            assert.match(figures["frame-time"], /^\d+\.\d ms, max \d+\.\d$/);
+            assert.match(figures.frame, /^\d+\.\d ms, max \d+\.\d$/);
             assert.match(figures.heap, /^\d+(\.\d)? MB$/);
-            assert.match(figures["codegen-memory"], /^\d+(\.\d)? MB$/);
-            assert.match(figures["native-memory"], /^\d+(\.\d)? MB$/);
+            assert.match(figures.codegen, /^\d+(\.\d)? MB$/);
+            assert.match(figures.native, /^\d+(\.\d)? MB$/);
+            const heard = await readsPerFrame();
+            assert.ok(
+              Math.abs(heard - unheard - 1) < 0.5,
+              `${unheard} clock reads a call unheard, ${heard} with the meter`,
+            );
             // Over the stage's corner, the pointer passing through it to the SWF.
             const meterBox = await value<{ inside: boolean; events: string }>(
-              "(() => { const m = document.getElementById('meter').getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(document.getElementById('meter')).pointerEvents }; })()",
+              `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
             );
             assert.deepEqual(meterBox, { inside: true, events: "none" });
             const meterShot = await send<{ data: string }>("Page.captureScreenshot", {
@@ -616,10 +656,10 @@ async function check(): Promise<void> {
 
             // The meter counts the renderer's draws, and the GL calls that make them, while it
             // shows: a multi-draw is one call of many draws.
-            await until("Number(document.getElementById('sub-draws').textContent) > 0");
+            await until(`Number(${figure("sub-draws")}.textContent) > 0`);
             // Both read at once, so that they are of one showing.
             const [calls, draws] = await value<number[]>(
-              "['gl-calls', 'sub-draws'].map((id) => Number(document.getElementById(id).textContent))",
+              `[${figure("gl-calls")}, ${figure("sub-draws")}].map((dd) => Number(dd.textContent))`,
             );
             assert.ok(calls > 0 && calls <= draws, `${calls} GL calls for ${draws} draws`);
             // While the context is lost, the context has its own functions back.
@@ -630,16 +670,17 @@ async function check(): Promise<void> {
             await until(`!${wrapped}`);
             await value("(lose.restoreContext(), true)");
             await until(wrapped);
-            await value("(document.getElementById('sub-draws').textContent = '', true)");
-            await until("Number(document.getElementById('sub-draws').textContent) > 0");
+            await value(`(${figure("sub-draws")}.textContent = '', true)`);
+            await until(`Number(${figure("sub-draws")}.textContent) > 0`);
             // Off again, by its box: hidden, unmeasured and unwrapped, and so kept.
             await value("(document.getElementById('meter-toggle').click(), true)");
-            await until("document.getElementById('meter').hidden");
-            assert.equal(
-              await value<boolean>("document.getElementById('player').frameListener === null"),
-              true,
-            );
+            await until(meterHidden);
             await until(`!${wrapped}`);
+            const unheardAgain = await readsPerFrame();
+            assert.ok(
+              Math.abs(unheardAgain - unheard) < 0.5,
+              `${unheard} clock reads a call before the meter, ${unheardAgain} after it`,
+            );
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
               null,
@@ -650,9 +691,9 @@ async function check(): Promise<void> {
             await navigate("play/?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
             await until(meterShown);
-            await until("/ fps$/.test(document.getElementById('fps').textContent)");
+            await until(`/ fps$/.test(${figure("fps")}.textContent)`);
             await shortcut();
-            await until("document.getElementById('meter').hidden");
+            await until(meterHidden);
 
             // The context menu's About item names the build the page was made from.
             for (const type of ["mousePressed", "mouseReleased"]) {
@@ -674,6 +715,13 @@ async function check(): Promise<void> {
               "document.querySelector('[data-build]').dataset.build",
             );
             assert.equal(about, build === "unknown" ? "About swf2es" : `About swf2es (${build})`);
+            // The element's meter offered just above it, hidden as the shortcut last left it.
+            assert.equal(
+              await value<string>(
+                `[...${menu}.shadowRoot.querySelectorAll('button')].at(-2).textContent`,
+              ),
+              "Show performance",
+            );
             await send("Input.dispatchKeyEvent", {
               type: "keyDown",
               key: "Escape",
@@ -1253,6 +1301,12 @@ async function check(): Promise<void> {
           for (const text of thrown.splice(0)) {
             console.log(`  the page threw: ${text}`);
           }
+        } finally {
+          // Each check starts without the performance meter, which a failed one may have left on,
+          // kept for the next page too, over the stage's corner where others read pixels.
+          await evaluate(
+            "(localStorage.removeItem('swf2es.performanceMeter'), document.getElementById('player') && (document.getElementById('player').performanceMeter = false), true)",
+          ).catch(() => null);
         }
       }
 

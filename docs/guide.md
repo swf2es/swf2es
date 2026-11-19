@@ -170,7 +170,31 @@ the click. A page that makes the element full screen itself
 `configure({ fullScreen })` takes a full screen of the embedder's own
 instead, as the desktop app's window, which needs no click.
 
-A page can measure the player, as the site's performance meter does, by
+The player's context menu has a "Show performance" item, just above
+"About swf2es", that shows a small meter over the stage's top left
+corner. It shows the SWF's frames a second against its frame rate, the
+player's ms in a frame (median and worst over the last second), draw
+calls, the JS heap where the browser reports it, and the WebAssembly
+memories. Choosing the item is the viewer's choice and is kept in
+localStorage for every element of the origin; each element applies it as
+its SWF starts, and the meter is off by default. `performancemeter="false"`
+on an element, or `configure({ performanceMeter: false })` for all of
+them, leaves the item out and ignores the kept choice, hiding a meter it
+showed; removing the attribute applies the choice again. A script can
+show or hide the meter with `element.performanceMeter = true` or `false`
+whatever the item, for the page alone: it keeps nothing, so a page that
+wants its own control remembered (the play page's Performance box)
+writes the same key, `swf2es.performanceMeter` set to `"1"`. The element
+fires `performancemeterchange` (`event.detail.shown`) either way. While hidden
+it costs nothing: it hears no frames, runs no timer and leaves the WebGL
+context alone. While shown, it counts draw calls by wrapping the
+context's draw functions. A page can style it with the custom properties
+`--swf2es-meter-font`, `--swf2es-meter-color`,
+`--swf2es-meter-background`, `--swf2es-meter-border` and
+`--swf2es-meter-muted` on the element; by default it takes the browser's
+light or dark colours.
+
+A page can measure the player itself, as the meter does, by
 setting `element.frameListener` to a function. After each animation frame
 the player calls it with a `FrameStats` object: `time`, the frame's time
 by `performance.now()`; `frames`, the SWF's frames it played, often 0

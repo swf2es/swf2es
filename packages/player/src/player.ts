@@ -95,6 +95,11 @@ export class Player {
 
   /** The host's build, a short commit or a version, which the context menu's About item names. */
   build: string | null = null;
+  /**
+   * The host's own context menu items, asked for each time the menu opens:
+   * after the SWF's and Flash's, just above About.
+   */
+  hostMenu: (() => MenuItem[]) | null = null;
 
   private defaultContextMenu = true;
 

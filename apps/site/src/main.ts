@@ -14,7 +14,7 @@ import {
 import { isolate } from "./isolation.js";
 import { bindFullscreen } from "./presentation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
-import { bindMeter, Meter } from "./stats.js";
+import { bindMeter } from "./stats.js";
 
 interface DemoEntry {
   file: string;
@@ -190,16 +190,7 @@ function cancelInput(): number {
   return ++inputGeneration;
 }
 
-const meter = new Meter(player, byId("meter"), {
-  fps: byId("fps"),
-  frameTime: byId("frame-time"),
-  subDraws: byId("sub-draws"),
-  glCalls: byId("gl-calls"),
-  heap: byId("heap"),
-  codegen: byId("codegen-memory"),
-  native: byId("native-memory"),
-});
-bindMeter(meter, byId("meter-toggle"));
+bindMeter(player, byId("meter-toggle"));
 
 function showStatus(message: string, isError = false): void {
   status.textContent = message;
@@ -293,7 +284,6 @@ async function play(
   const enabled = stage3D.checked;
   current = { bytes, name, facts: f, base, stage3D: enabled, air };
   close.disabled = false;
-  meter.watch(null);
   ask.hidden = true;
   showFacts(name, f);
   stage.classList.remove("authored");
@@ -330,7 +320,6 @@ async function play(
       return;
     }
 
-    meter.watch(player.gl);
     if (input === inputGeneration) {
       hideLoading();
       showStatus(`Playing ${name}.`);
@@ -637,7 +626,6 @@ close.addEventListener("click", () => {
   loadGeneration++;
   hideLoading();
   player.destroy();
-  meter.watch(null);
   player.hidden = true;
   empty.hidden = false;
   reload.disabled = true;

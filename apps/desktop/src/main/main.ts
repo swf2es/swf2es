@@ -120,6 +120,19 @@ const GESTURE_MS = 5000;
 /** The least time between two pages opened, whatever the gestures. */
 const OPEN_INTERVAL_MS = 1000;
 const GESTURES = new Set(["mouseDown", "rawKeyDown", "keyDown", "touchEnd", "gestureTap"]);
+/**
+ * Whether `input` is the user asking, as the player counts it: a key, a touch, or the
+ * primary button's press. A right-click opens the context menu, which Flash never took
+ * for a click that may open a page; nor is a middle press one.
+ */
+function isGesture(input: Electron.InputEvent): boolean {
+  if (!GESTURES.has(input.type)) {
+    return false;
+  }
+
+  return input.type !== "mouseDown" || (input as Electron.MouseInputEvent).button === "left";
+}
+
 /** When the user last clicked or pressed a key in the window, and when a page last opened. */
 let gestureAt = Number.NEGATIVE_INFINITY;
 let openedAt = Number.NEGATIVE_INFINITY;
@@ -170,7 +183,7 @@ function guard(contents: WebContents): void {
     openExternal(event.url);
   });
   contents.on("input-event", (_event, input) => {
-    if (GESTURES.has(input.type)) {
+    if (isGesture(input)) {
       gestureAt = performance.now();
     }
   });
