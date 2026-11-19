@@ -1118,6 +1118,38 @@ try {
     await until("the local SWF after a click", () => traced("smoke: started") === 5);
     await until("its pages refused", () => (stderr().match(noNetwork)?.length ?? 0) === 12);
     assert.equal(stderr().match(noGesture)?.length, 3);
+
+    // The element's own context menu offers its performance meter here too, just above About:
+    // last, as its right-click is a gesture the checks above must not have had.
+    const [middleX, middleY] = await evaluate<number[]>("[innerWidth / 2, innerHeight / 2]");
+    for (const type of ["mousePressed", "mouseReleased"]) {
+      await devtools.send("Input.dispatchMouseEvent", {
+        type,
+        x: middleX,
+        y: middleY,
+        button: "right",
+        clickCount: 1,
+      });
+    }
+    const menuButtons =
+      'Array.from(document.getElementById("player").shadowRoot.querySelector("[data-swf2es-context-menu]")?.shadowRoot.querySelectorAll("button") ?? [])';
+    let offered: string[] = [];
+    for (let i = 0; i < 100 && offered.length === 0; i++) {
+      offered = await evaluate<string[]>(`${menuButtons}.slice(-2).map((b) => b.textContent)`);
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    assert.deepEqual(offered.slice(0, 1), ["Show performance"]);
+    assert.match(offered[1] ?? "", /^About swf2es/);
+    assert.equal(
+      await evaluate<boolean>(`(() => {
+        ${menuButtons}.at(-2).click();
+        const player = document.getElementById("player");
+        const shown = player.performanceMeter && !player.shadowRoot.querySelector(".meter").hidden;
+        player.performanceMeter = false;
+        return shown;
+      })()`),
+      true,
+    );
   });
 
   // With no library chosen, the builtin.abc and playerglobal swf2es ships
