@@ -1,7 +1,8 @@
 // How @swf2es/render's ProgramQueue makes programs ahead of their first use (webgl/precompile.ts):
 // after the first frame, all at once where the driver compiles in parallel, asked after only once
 // complete; one a frame without; each drawn with once, a frame apart; and at once where a frame
-// needs one first.
+// needs one first. And which failed links, the queue's and the kernels', are a lost context's
+// (webgl/losses.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
@@ -10,6 +11,8 @@ import {
   lostShader,
   ShaderError,
 } from "../../../packages/context3d/dist/device/index.js";
+import { KernelPrograms } from "../../../packages/render/dist/webgl/kernels.js";
+import { LinkLosses, LOSS_GRACE_MS } from "../../../packages/render/dist/webgl/losses.js";
 import { ProgramQueue } from "../../../packages/render/dist/webgl/precompile.js";
 
 /** The context the queue takes, whose DOM type the unit tests do not load. */
@@ -228,20 +231,18 @@ test("a program that cannot be begun leaves the ones begun before it begun once"
   assert.deepEqual(made, ["a", "b", "c"]);
 });
 
-test("a link the context was lost in is thrown as lost, not left to its owner as the shaders' fault", () => {
+test("a link that fails on a context flagged lost is thrown as lost, not left to its owner", () => {
   const { gl, context } = fakeGl(false);
   const { queue, made } = queued(gl);
+  // Not flagged, a failure that says nothing is the owner's to link again, whose own failure
+  // the backend weighs (LinkLosses).
   context.dead = true;
-  assert.throws(
-    () => queue.take("a"),
-    (e: unknown) => e instanceof ShaderError && e.lost && lostShader(e),
-  );
-  // Flagged lost, it makes no shaders: lost too.
+  assert.equal(queue.take("a"), false);
   context.dead = false;
   context.lost = true;
   assert.throws(
     () => queue.take("b"),
-    (e: unknown) => lostShader(e),
+    (e: unknown) => e instanceof ShaderError && e.lost && lostShader(e),
   );
   assert.deepEqual(made, []);
 });
@@ -251,5 +252,84 @@ test("a shader that does not compile, with the context there, is not taken for a
   assert.throws(
     () => linkProgram(gl, "vertex", "bad"),
     (e: unknown) => e instanceof ShaderError && e.stage === "compile" && !e.lost,
+  );
+});
+
+/** performance.now set to `at` while `run` runs. */
+function at<T>(now: { t: number }, run: () => T): T {
+  const real = performance.now;
+  performance.now = () => now.t;
+  try {
+    return run();
+  } finally {
+    performance.now = real;
+  }
+}
+
+test("a kernel that fails saying nothing is drawn without, kept as failed only once it outlives a loss", () => {
+  const { gl, log, context } = fakeGl(false);
+  const losses = new LinkLosses(gl);
+  const kernels = new KernelPrograms(gl, new GlState(gl), losses);
+  const now = { t: 1000 };
+  const links = () => log.filter((l) => l.startsWith("link")).length;
+  context.dead = true;
+  // Taken for a context lost but not flagged yet: drawn without, and linked again as next used.
+  at(now, () => {
+    assert.equal(
+      kernels.use("vertex", "k", () => {}),
+      null,
+    );
+    losses.endFrame();
+  });
+  now.t += LOSS_GRACE_MS / 2;
+  at(now, () => {
+    assert.equal(
+      kernels.use("vertex", "k", () => {}),
+      null,
+    );
+    losses.endFrame();
+  });
+  assert.equal(links(), 2);
+  // Still failing, still not flagged, past the grace: the kernel's fault, kept, not linked again.
+  now.t += LOSS_GRACE_MS;
+  at(now, () => {
+    assert.equal(
+      kernels.use("vertex", "k", () => {}),
+      null,
+    );
+    losses.endFrame();
+    assert.equal(
+      kernels.use("vertex", "k", () => {}),
+      null,
+    );
+  });
+  assert.equal(links(), 3);
+  // A frame drawn without a failure starts the clock again for another.
+  at(now, () => losses.endFrame());
+  assert.equal(losses.expired, true);
+  at(now, () =>
+    assert.equal(
+      kernels.use("vertex", "other", () => {}),
+      null,
+    ),
+  );
+  assert.equal(links(), 4);
+  at(now, () => assert.equal(losses.expired, false));
+  // Flagged lost: drawn without, not kept, whatever the clock.
+  context.dead = false;
+  context.lost = true;
+  now.t += LOSS_GRACE_MS * 4;
+  at(now, () =>
+    assert.equal(
+      kernels.use("vertex", "flagged", () => {}),
+      null,
+    ),
+  );
+  context.lost = false;
+  at(now, () =>
+    assert.notEqual(
+      kernels.use("vertex", "flagged", () => {}),
+      null,
+    ),
   );
 });

@@ -203,9 +203,14 @@ the view neither walks nor plans. A program whose link fails because
 the context was lost (`ShaderError.lost`) is no error. When a GPU
 process dies, every status reads false and every log reads empty, and
 Chrome flags the context as lost only a task later, so a failure with no
-log counts as a loss too. The backend drops the frame or restore it was
-in and makes everything again on the next restore, however many losses
-come and whenever they come, during a restore included.
+log counts as a loss too, for 500 ms (`webgl/losses.ts`). The backend
+drops the frame or restore it was in, and frames wait. The next restore
+makes everything again, however many losses come and whenever they come,
+during a restore included. If the context is still not flagged lost after
+500 ms, the failure was the shaders' after all, and it is handled as one:
+a kernel is drawn without, any other program throws. Frames then go on
+with the objects the context still holds; nothing is made again on a live
+context, where a BitmapData's newest pixels may live only on the GPU.
 
 ### The backend
 

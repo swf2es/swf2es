@@ -1972,6 +1972,62 @@ async function contextLostAtStartSwf(base64: string, frames: number): Promise<st
 }
 
 /**
+ * A SWF with no scripts played while a filter pass's program fails to link
+ * saying nothing, on a context never lost (lossTrap's `fault`): taken for a
+ * loss Chrome has not flagged yet, frames wait, making nothing on the GPU
+ * and throwing nothing, till it has failed so for longer than a loss takes
+ * to be flagged; then it is the shaders' fault, and the frame that links it
+ * again throws it, as before. What went otherwise, or null.
+ */
+async function shaderFaultSwf(base64: string): Promise<string | null> {
+  const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+  const d = await drawn(bytes, true);
+  const trap = lossTrap(d);
+  const uncaught = catchUncaught();
+  const frame = () => {
+    d.player.tick();
+    d.render();
+  };
+  try {
+    trap.arm("fault");
+    frame();
+    const made = trap.made;
+    for (let i = 0; i < 20; i++) {
+      frame();
+    }
+
+    if (trap.made !== made) {
+      return `${trap.made - made} GL objects made in 20 frames waiting`;
+    }
+
+    // Past LinkLosses' grace, 500 ms.
+    await new Promise((done) => setTimeout(done, 700));
+    const thrown: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      try {
+        frame();
+      } catch (e) {
+        thrown.push(describe(e, null));
+      }
+    }
+
+    // The first frame to link it again throws it; those after draw from what the view keeps.
+    if (thrown.length === 0 || !thrown.every((t) => t.startsWith("ShaderError"))) {
+      return `the frames after threw ${JSON.stringify(thrown)}`;
+    }
+
+    if (d.gl.isContextLost()) {
+      return "the context was lost";
+    }
+
+    return uncaught.errors.length > 0 ? `uncaught ${uncaught.errors[0]}` : null;
+  } finally {
+    uncaught.release();
+    d.destroy();
+  }
+}
+
+/**
  * What differs between the frames `a` and `b` show, or null. A filtered
  * layer whose kept output was lost with the context is drawn as a held
  * layer, reading its passes' targets within a shared page, whose texel
@@ -2023,18 +2079,48 @@ function catchUncaught(): { errors: string[]; release(): void } {
  * every status false and every log empty, the context flagged lost only a
  * task later, as Chrome does; `draw` at its third drawArrays from then,
  * midway through a frame's filter passes. Each is restored as `l`'s is.
+ * `fault` loses nothing: every program linked from then on fails, saying
+ * nothing, on a context never lost.
+ * `made` counts the GL objects made besides programs and shaders.
  */
 function lossTrap(d: Drawn) {
   const gl = d.gl;
   const proto = Object.getPrototypeOf(gl) as WebGL2RenderingContext;
-  const armed: ("link" | "crash" | "draw")[] = [];
+  const armed: ("link" | "crash" | "draw" | "fault")[] = [];
   let draws = 0;
   let dead = false;
+  let made = 0;
+  let faulty = false;
+  const failing = new WeakSet<WebGLProgram>();
   d.canvas.addEventListener("webglcontextlost", () => {
     dead = false;
   });
   const own = gl as unknown as Record<string, unknown>;
+  for (const name of [
+    "createTexture",
+    "createFramebuffer",
+    "createRenderbuffer",
+    "createBuffer",
+    "createVertexArray",
+    "createSampler",
+  ]) {
+    const create = (proto as unknown as Record<string, () => unknown>)[name];
+    own[name] = () => {
+      made++;
+      return create.call(gl);
+    };
+  }
+
   own.linkProgram = (program: WebGLProgram) => {
+    if (armed[0] === "fault") {
+      armed.shift();
+      faulty = true;
+    }
+
+    if (faulty) {
+      failing.add(program);
+    }
+
     if (armed[0] === "link") {
       armed.shift();
       d.loseContext();
@@ -2055,17 +2141,23 @@ function lossTrap(d: Drawn) {
     proto.drawArrays.call(gl, mode, first, count);
   };
   own.getProgramParameter = (program: WebGLProgram, name: number) =>
-    dead ? false : proto.getProgramParameter.call(gl, program, name);
+    dead || (failing.has(program) && name === gl.LINK_STATUS)
+      ? false
+      : proto.getProgramParameter.call(gl, program, name);
   own.getShaderParameter = (shader: WebGLShader, name: number) =>
     dead ? false : proto.getShaderParameter.call(gl, shader, name);
   own.getProgramInfoLog = (program: WebGLProgram) =>
-    dead ? "" : proto.getProgramInfoLog.call(gl, program);
+    dead || failing.has(program) ? "" : proto.getProgramInfoLog.call(gl, program);
   own.getShaderInfoLog = (shader: WebGLShader) =>
     dead ? "" : proto.getShaderInfoLog.call(gl, shader);
   return {
-    arm(kind: "link" | "crash" | "draw") {
+    arm(kind: "link" | "crash" | "draw" | "fault") {
       armed.push(kind);
       draws = 0;
+    },
+    /** GL objects made so far, besides programs and shaders. */
+    get made() {
+      return made;
     },
     /** Whether a crash is under way, the context not yet flagged lost. */
     get dead() {
@@ -2395,6 +2487,7 @@ const page = globalThis as unknown as {
   contextLossSwf: typeof contextLossSwf;
   contextLossPlanSwf: typeof contextLossPlanSwf;
   contextLostAtStartSwf: typeof contextLostAtStartSwf;
+  shaderFaultSwf: typeof shaderFaultSwf;
 };
 page.runSwf = runSwf;
 page.precompiledSwf = precompiledSwf;
@@ -2412,3 +2505,4 @@ page.canvasText = canvasText;
 page.contextLossSwf = contextLossSwf;
 page.contextLossPlanSwf = contextLossPlanSwf;
 page.contextLostAtStartSwf = contextLostAtStartSwf;
+page.shaderFaultSwf = shaderFaultSwf;

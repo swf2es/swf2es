@@ -1,4 +1,4 @@
-import { GlState, linkProgram, lostShader } from "@swf2es/context3d/device";
+import { GlState, linkProgram } from "@swf2es/context3d/device";
 import {
   CLEAR,
   COMPOSITE,
@@ -38,19 +38,13 @@ import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
 import { KernelPrograms } from "./kernels.js";
+import { LinkLosses } from "./losses.js";
 import { ProgramQueue } from "./precompile.js";
 import { LAYER_UNIT, TEXTURE_UNIT } from "./programs.js";
 import { Stage } from "./stage.js";
 import { type Layer, type Open, objectOf, type Target, TargetPool } from "./targets.js";
 
 export type { Target } from "./targets.js";
-
-/**
- * Lost programs given up on in a row, the context still not flagged lost,
- * after which they throw (WebGLBackend.gaveUp): a frame or two passes
- * before Chrome says a GPU process that died lost the context.
- */
-const UNFLAGGED_LOSSES = 3;
 
 /** The blend modes a flat fill may be drawn in straight onto what is below (blendDirect). */
 function direct(mode: number): boolean {
@@ -154,15 +148,20 @@ export class WebGLBackend {
   /** Framebuffers onto registry textures, drawn into or read, by texture id, with the texture they were made for. */
   private textureFramebuffers: ({ texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null)[] =
     [];
+  /** Which failed links are a lost context's (gaveUp, and the kernels'). */
+  private readonly losses: LinkLosses;
   /** Whether what the context holds is made (setUp): not after it was lost, till it is back. */
+  private made = false;
+  /** Whether frames draw: made, and no work given up on since (gaveUp). */
   private ready = false;
-  /** Work given up on as lost in a row with the context not flagged lost (gaveUp). */
-  private unflagged = 0;
+  /** The failure work was last given up on for, the context not flagged lost (resume). */
+  private fault: unknown = null;
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
     this.state = new GlState(gl);
-    this.kernels = new KernelPrograms(gl, this.state);
+    this.losses = new LinkLosses(gl);
+    this.kernels = new KernelPrograms(gl, this.state, this.losses);
     this.pool = new TargetPool(gl, this.state);
     this.stage = new Stage(gl, this.state, this.pool);
     this.gpu = new GpuTextures(gl, this.state);
@@ -194,19 +193,44 @@ export class WebGLBackend {
     // A context lost already gives up here, and is made again once it is restored.
     try {
       this.setUp();
-      this.ready = true;
+      this.made = this.ready = true;
     } catch (e) {
       this.gaveUp(e);
     }
   }
 
   /**
-   * Whether the context must be made again before a frame draws (restore):
-   * it was lost and its loss reached the backend, or a frame gave up on it
-   * as lost before the browser said so.
+   * Whether frames wait (resume): the context was lost and is not back
+   * yet, or work was given up on as lost before the browser said so.
    */
   get stale(): boolean {
     return !this.ready;
+  }
+
+  /**
+   * Whether a stale backend draws again, the context not flagged lost: not
+   * while a failure that said nothing may yet be a loss Chrome has not
+   * flagged (LinkLosses); after that, it was the shaders' fault, and frames
+   * draw on as before the failure, linking again what failed, which then
+   * throws. Nothing is made again on a live context, whose objects are
+   * all there, a BitmapData's newest pixels among them. Throws that
+   * failure where the setUp it came from never finished.
+   */
+  resume(): boolean {
+    if (this.ready) {
+      return true;
+    }
+
+    if (this.gl.isContextLost() || !this.losses.expired) {
+      return false;
+    }
+
+    if (!this.made) {
+      throw this.fault;
+    }
+
+    this.ready = true;
+    return true;
   }
 
   /** Whether frames draw: the context there, and what it holds made. */
@@ -215,18 +239,14 @@ export class WebGLBackend {
   }
 
   /**
-   * The context came back after it was lost (`lost`), or was given up on
-   * as lost and is still there: everything made again, every geometry
-   * copied in again from the registry's arrays. The textures were lost
-   * with it, which their owners add again (Textures.lost). Lost again
+   * The context came back after it was lost: everything made again, every
+   * geometry copied in again from the registry's arrays. The textures were
+   * lost with it, which their owners add again (Textures.lost). Lost again
    * meanwhile, it stays stale, for the next restore.
    */
-  restore(geometries: Geometries, lost = true): void {
-    if (lost) {
-      this.unflagged = 0;
-    }
-
-    this.ready = false;
+  restore(geometries: Geometries): void {
+    this.losses.clear();
+    this.made = this.ready = false;
     geometries.added.length = 0;
     geometries.removed.length = 0;
     geometries.updated.length = 0;
@@ -238,8 +258,7 @@ export class WebGLBackend {
       this.setUp();
       this.atlas.repack(geometries);
       this.atlas.repackGlyphs(geometries);
-      this.ready = true;
-      this.unflagged = 0;
+      this.made = this.ready = true;
     } catch (e) {
       this.gaveUp(e);
     }
@@ -247,17 +266,17 @@ export class WebGLBackend {
 
   /**
    * Work that threw `e` given up on, where a program would not be made as
-   * the context was lost (ShaderError.lost): drawing stops till it is made
-   * again (restore), with nothing thrown. A GPU process that died says so
-   * a task or more later; a failure that says nothing a few times in a
-   * row, still not flagged, is a fault of the shaders after all, and throws.
+   * the context was lost (LinkLosses): frames wait (stale) till it is
+   * restored, or till the failure turns out the shaders' (resume), with
+   * nothing thrown. Anything else is thrown on.
    */
   private gaveUp(e: unknown): void {
-    if (!lostShader(e) || (!this.gl.isContextLost() && ++this.unflagged >= UNFLAGGED_LOSSES)) {
+    if (!this.losses.lost(e)) {
       throw e;
     }
 
     this.ready = false;
+    this.fault = e;
   }
 
   /** Programs, buffers and textures made, as the context comes or comes back. */
@@ -330,6 +349,7 @@ export class WebGLBackend {
 
     try {
       this.run(commands, scene, rows, geometries, textures, filters, keeps, target, null);
+      this.losses.endFrame();
     } catch (e) {
       this.gaveUp(e);
     }

@@ -1,10 +1,4 @@
-import {
-  beginProgram,
-  endProgram,
-  type GlState,
-  linkProgram,
-  lostShader,
-} from "@swf2es/context3d/device";
+import { beginProgram, endProgram, type GlState, linkProgram } from "@swf2es/context3d/device";
 import { type Commands, RUN, STENCIL_POP, STENCIL_PUSH } from "../commands.js";
 import { FILL_SHADER, type Filters } from "../filters.js";
 import { fillKernel, kernelImagesFit } from "../kernel-shaders.js";
@@ -233,7 +227,8 @@ export class Draws {
     try {
       this.program = endProgram(gl, fill);
     } catch (e) {
-      if (!this.multi || lostShader(e)) {
+      // Not where the context is flagged lost, whose every link fails.
+      if (!this.multi || gl.isContextLost()) {
         throw e;
       }
 

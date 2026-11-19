@@ -2,6 +2,7 @@ import { type GlState, linkProgram, ShaderError } from "@swf2es/context3d/device
 import type { Filters } from "../filters.js";
 import type { KernelImage } from "../kernel-shaders.js";
 import { CLAMP } from "../scene.js";
+import type { LinkLosses } from "./losses.js";
 
 /**
  * A Pixel Bender kernel's program: where it takes its uniforms, asked
@@ -47,6 +48,8 @@ export class KernelPrograms {
   constructor(
     private readonly gl: WebGL2RenderingContext,
     private readonly state: GlState,
+    /** Which failed links are a lost context's, which are not kept as failed. */
+    private readonly losses: LinkLosses,
   ) {}
 
   /**
@@ -99,10 +102,15 @@ export class KernelPrograms {
         this.state.useProgram(program);
         prepare(program);
       } catch (e) {
-        // A kernel that would not link is drawn without; one lost with the context is linked
-        // again once it is back, so nothing is kept of it.
-        if (!(e instanceof ShaderError) || e.lost) {
+        if (!(e instanceof ShaderError)) {
           throw e;
+        }
+
+        // A kernel that would not link is drawn without. One lost with the context is drawn
+        // without too, into nothing or for a frame or so, but not kept as failed: it is linked
+        // again as it is next used, or once the context is back.
+        if (this.losses.lost(e)) {
+          return null;
         }
       }
     }

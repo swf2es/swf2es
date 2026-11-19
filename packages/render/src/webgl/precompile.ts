@@ -163,9 +163,10 @@ export class ProgramQueue {
     try {
       program = endProgram(this.gl, job.pending as PendingProgram);
     } catch (e) {
-      // A program that does not link is linked again as it is needed, which says why; one the
-      // context took with it is the backend's to give up on (WebGLBackend.gaveUp).
-      if (e instanceof ShaderError && !e.lost) {
+      // A program that does not link is linked again as it is needed, which says why, or gives
+      // up on the frame where the context is lost unflagged (WebGLBackend.gaveUp); one on a
+      // context flagged lost gives up on it now.
+      if (e instanceof ShaderError && !this.gl.isContextLost()) {
         return false;
       }
 

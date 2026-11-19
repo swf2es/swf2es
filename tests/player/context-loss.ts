@@ -8,7 +8,12 @@
 import assert from "node:assert/strict";
 import { deflateSync } from "node:zlib";
 import * as w from "../swf-writer.ts";
-import { playLosingContext, playLosingContextPlan, playLostAtStart } from "./chrome.ts";
+import {
+  playLosingContext,
+  playLosingContextPlan,
+  playLostAtStart,
+  playShaderFault,
+} from "./chrome.ts";
 
 /** A closed ring of `n` curves round (cx, cy), `r` twips out: hundreds of vertices once flattened. */
 function ring(cx: number, cy: number, r: number, n: number): w.PathCommand[] {
@@ -225,6 +230,10 @@ for (const plan of [
 
 // Made on a context lost already: nothing drawn or thrown till it is back, then the same.
 assert.equal(await playLostAtStart(swf, 3), null, "made lost");
+
+// A filter pass failing saying nothing on a context that is never lost: waited out as a loss
+// not flagged yet, making nothing on the GPU, then thrown as the shaders' fault.
+assert.equal(await playShaderFault(swf), null, "a failure that says nothing, never lost");
 
 // Long runs use cached merged buffers after their first frame. Restoration must discard those
 // buffers and rebuild them from the live geometry before reusing the batch.

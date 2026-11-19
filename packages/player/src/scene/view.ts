@@ -257,7 +257,7 @@ export class RenderView implements Drawer {
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
-    // None of a context made lost, till it is restored (remake).
+    // None of a context made lost, till it is restored.
     this.textureLimit = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number | null) ?? 0;
 
     this.lineCache = new LineCache(this.geometries, this.tessellator);
@@ -281,21 +281,12 @@ export class RenderView implements Drawer {
 
   /** The context came back: the backend made again, and every texture added again as it is drawn. */
   private readonly restored = () => {
-    this.remake(true);
-  };
-
-  /**
-   * The backend made again (WebGLBackend.restore), the context having come
-   * back (`lost`) or been given up on as lost while it is still there, and
-   * every texture and kept output added again as it is drawn.
-   */
-  private remake(lost: boolean): void {
     this.drawnRoot = null;
-    this.backend.restore(this.geometries, lost);
+    this.backend.restore(this.geometries);
     this.textures.lost();
     this.keeps.lost();
     this.textureLimit ||= (this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number | null) ?? 0;
-  }
+  };
 
   /**
    * Whether bitmaps that ask to be are smoothed: not at the stage's low
@@ -436,17 +427,20 @@ export class RenderView implements Drawer {
     // Not drawn until it is all drawn: a render that throws leaves no frame to keep.
     this.drawnRoot = null;
     // Nothing to draw into while the context is lost, and nothing walked: what changed meanwhile
-    // is drawn once it is back. A backend that gave up on it before the browser said it was lost
-    // is made again, unless it gives up again.
+    // is drawn once it is back. Nor while a backend that gave up on a frame before the browser
+    // said the context was lost waits to see whether it was (WebGLBackend.resume).
     if (this.gl.isContextLost()) {
       return;
     }
 
     if (this.backend.stale) {
-      this.remake(false);
-      if (this.backend.stale) {
+      if (!this.backend.resume()) {
         return;
       }
+
+      // Drawing on with the context it has: the outputs the frame given up on was to keep were
+      // never all drawn, and are drawn again.
+      this.keeps.lost();
     }
 
     this.scene.reset();
