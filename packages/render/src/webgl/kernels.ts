@@ -99,7 +99,9 @@ export class KernelPrograms {
         this.state.useProgram(program);
         prepare(program);
       } catch (e) {
-        if (!(e instanceof ShaderError)) {
+        // A kernel that would not link is drawn without; one lost with the context is linked
+        // again once it is back, so nothing is kept of it.
+        if (!(e instanceof ShaderError) || e.lost) {
           throw e;
         }
       }

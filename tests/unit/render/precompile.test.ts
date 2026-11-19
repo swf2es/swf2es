@@ -4,7 +4,12 @@
 // needs one first.
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GlState } from "../../../packages/context3d/dist/device/index.js";
+import {
+  GlState,
+  linkProgram,
+  lostShader,
+  ShaderError,
+} from "../../../packages/context3d/dist/device/index.js";
 import { ProgramQueue } from "../../../packages/render/dist/webgl/precompile.js";
 
 /** The context the queue takes, whose DOM type the unit tests do not load. */
@@ -16,13 +21,15 @@ const COMPLETION_STATUS_KHR = 0x91b1;
  * A WebGL 2 context of what the queue calls, logging the calls that matter: programs linked,
  * their status asked (and whether it had to wait for the link), and draws. A program's link
  * completes `delay` asks of its completion after it was linked; a fragment shader of "bad" fails.
+ * A `dead` one answers as a GPU process that died before the context is flagged lost: every
+ * status false, every log empty.
  */
 function fakeGl(parallel: boolean, delay = 1) {
   const log: string[] = [];
   let next = 0;
   const programs = new Map<object, { name: string; asks: number; shaders: string[] }>();
   const shaders = new Map<object, string>();
-  const context = { lost: false, refuse: -1 };
+  const context = { lost: false, dead: false, refuse: -1 };
   const gl = {
     VERTEX_SHADER: 1,
     FRAGMENT_SHADER: 2,
@@ -63,10 +70,10 @@ function fakeGl(parallel: boolean, delay = 1) {
       }
 
       log.push(`status ${known.name}${known.asks > delay || !parallel ? "" : " (waits)"}`);
-      return known.name !== "bad";
+      return !context.dead && known.name !== "bad";
     },
-    getShaderParameter: (shader: object) => shaders.get(shader) !== "bad",
-    getShaderInfoLog: () => "refused",
+    getShaderParameter: (shader: object) => !context.dead && shaders.get(shader) !== "bad",
+    getShaderInfoLog: () => (context.dead ? "" : "refused"),
     getProgramInfoLog: () => "",
     detachShader: () => {},
     deleteShader: () => {},
@@ -219,4 +226,30 @@ test("a program that cannot be begun leaves the ones begun before it begun once"
     ["link a", "link b", "link c"],
   );
   assert.deepEqual(made, ["a", "b", "c"]);
+});
+
+test("a link the context was lost in is thrown as lost, not left to its owner as the shaders' fault", () => {
+  const { gl, context } = fakeGl(false);
+  const { queue, made } = queued(gl);
+  context.dead = true;
+  assert.throws(
+    () => queue.take("a"),
+    (e: unknown) => e instanceof ShaderError && e.lost && lostShader(e),
+  );
+  // Flagged lost, it makes no shaders: lost too.
+  context.dead = false;
+  context.lost = true;
+  assert.throws(
+    () => queue.take("b"),
+    (e: unknown) => lostShader(e),
+  );
+  assert.deepEqual(made, []);
+});
+
+test("a shader that does not compile, with the context there, is not taken for a loss", () => {
+  const { gl } = fakeGl(false);
+  assert.throws(
+    () => linkProgram(gl, "vertex", "bad"),
+    (e: unknown) => e instanceof ShaderError && e.stage === "compile" && !e.lost,
+  );
 });

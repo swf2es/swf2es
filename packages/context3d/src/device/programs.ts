@@ -1,12 +1,22 @@
-/** Why a program could not be made: no objects to make it of, a stage that did not compile, or no link. */
+/**
+ * Why a program could not be made: no objects to make it of, a stage that
+ * did not compile, or no link. `lost` where the context was lost meanwhile,
+ * which is no fault of the shaders: made again once it is restored.
+ */
 export class ShaderError extends Error {
   constructor(
     readonly stage: "allocate" | "compile" | "link",
     readonly log: string,
+    readonly lost = false,
   ) {
-    super(log);
+    super(log || `${stage} failed${lost ? ", the context lost" : ""}`);
     this.name = "ShaderError";
   }
+}
+
+/** Whether `e` is a program not made because the context was lost (ShaderError.lost). */
+export function lostShader(e: unknown): e is ShaderError {
+  return e instanceof ShaderError && e.lost;
 }
 
 /** A program whose shaders were compiled and which was linked, its status not asked yet (endProgram). */
@@ -34,7 +44,8 @@ export function beginProgram(
     gl.deleteShader(v);
     gl.deleteShader(f);
     gl.deleteProgram(p);
-    throw new ShaderError("allocate", "cannot allocate shader");
+    // WebGL makes no objects on a lost context alone.
+    throw new ShaderError("allocate", "cannot allocate shader", gl.isContextLost());
   }
 
   gl.shaderSource(v, vertex);
@@ -57,14 +68,15 @@ export function endProgram(gl: WebGL2RenderingContext, pending: PendingProgram):
   let linked = false;
   try {
     if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-      if (
-        !gl.getShaderParameter(v, gl.COMPILE_STATUS) ||
-        !gl.getShaderParameter(f, gl.COMPILE_STATUS)
-      ) {
-        throw new ShaderError("compile", `${gl.getShaderInfoLog(v)} ${gl.getShaderInfoLog(f)}`);
-      }
-
-      throw new ShaderError("link", `${gl.getProgramInfoLog(p)}`);
+      const compiled =
+        gl.getShaderParameter(v, gl.COMPILE_STATUS) && gl.getShaderParameter(f, gl.COMPILE_STATUS);
+      const log = compiled
+        ? (gl.getProgramInfoLog(p) ?? "")
+        : `${gl.getShaderInfoLog(v) ?? ""} ${gl.getShaderInfoLog(f) ?? ""}`.trim();
+      // A GPU process that died answers every status false and every log empty, and Chrome
+      // flags the context lost only a task later: a failure that says nothing is taken for a
+      // loss, as a shader that did not compile or link says why.
+      throw new ShaderError(compiled ? "link" : "compile", log, gl.isContextLost() || log === "");
     }
 
     linked = true;

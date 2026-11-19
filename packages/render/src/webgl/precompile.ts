@@ -163,8 +163,9 @@ export class ProgramQueue {
     try {
       program = endProgram(this.gl, job.pending as PendingProgram);
     } catch (e) {
-      // A program that does not link is linked again as it is needed, which says why.
-      if (e instanceof ShaderError) {
+      // A program that does not link is linked again as it is needed, which says why; one the
+      // context took with it is the backend's to give up on (WebGLBackend.gaveUp).
+      if (e instanceof ShaderError && !e.lost) {
         return false;
       }
 
