@@ -382,9 +382,10 @@ export class Avm1Pointer implements Pointer {
    * The hover moved to `target`: with the button up, a roll out of what it
    * was over and a roll over of what it is over; with it down, a drag out
    * of the one and a drag over of the other, the pressed object's as the
-   * pointer leaves it and comes back, any other's as a menu's items have
-   * them, but while a script drags a clip (Ruffle's order: the pressed
+   * pointer leaves it and comes back, any other's only where it tracks as
+   * a menu, but while a script drags a clip (Ruffle's order: the pressed
    * object's drag over before the drag out of what the pointer left).
+   * Flash Player 32 sent no drag over or out to another button.
    */
   private hoverTo(target: DisplayObject | null, events: ButtonEvent[]): ButtonEvent[] {
     const hover = this.hover;
@@ -402,16 +403,16 @@ export class Avm1Pointer implements Pointer {
       }
     } else {
       const pressed = this.pressed;
-      const menu = this.drag === null;
+      const menu = (d: DisplayObject) => this.drag === null && this.avm1.input.tracksAsMenu(d);
       if (target && target === pressed) {
         events.push([target, ClipEvent.dragOver]);
       }
 
-      if (hover && (hover === pressed || menu)) {
+      if (hover && (hover === pressed || menu(hover))) {
         events.push([hover, ClipEvent.dragOut]);
       }
 
-      if (target && target !== pressed && menu) {
+      if (target && target !== pressed && menu(target)) {
         events.push([target, ClipEvent.dragOver]);
       }
     }
