@@ -1655,12 +1655,29 @@ its timeline plays, and none of its code runs.
 ### AVM1 and AVM2
 
 An AVM1 SWF loaded by AS3 runs its actions in an AVM1 realm of its own,
-its `_root` and `_level0` that movie's, its compiler, host services and
-LocalConnection broker the parent player's; the pointer reaches its
-buttons and clips by AVM1's rules (`input/avm1.ts`). Its `fscommand`
-and `ExternalInterface` reach the page through the parent's bridge,
-beside the host's own calls and callbacks, as the plug-in passed every
-movie's on; AS3 hears none of its fscommands, as in Flash.
+its compiler, host services and LocalConnection broker the parent
+player's; the pointer reaches its buttons and clips by AVM1's rules
+(`input/avm1.ts`). Its `fscommand` and `ExternalInterface` reach the page
+through the parent's bridge, beside the host's own calls and callbacks,
+as the plug-in passed every movie's on; AS3 hears none of its
+fscommands, as in Flash. It has no levels, as Flash Player 32's projector
+traced it (`tests/unit/player/scripting/loads.test.ts`): its root is
+`_root`, which is what it converts to and `targetPath` gives, its clips
+`_root.a.b` and `_target` `/a/b`; `_level0` and every `_levelN` are
+undefined, and the root has no `_parent`. Nothing loads into a level or
+the root itself, or unloads it: `loadMovieNum`, `loadVariablesNum`,
+`unloadMovieNum`, the root's `loadMovie`, `loadVariables` and
+`unloadMovie` do nothing, and `MovieClipLoader.loadClip` into a level
+gives false; `MovieClipLoader`, a clip's `loadMovie` and `loadVariables`,
+and `LoadVars` load into its clips and objects. A `loadClip` into the
+root gives true in the projector, which then traced nothing more, the
+host's frames included; the player loads it. Not yet followed: Flash
+gives the AS3 display list to the SWFs loaded into such a movie's clips,
+whose `_level0` is the host's root, a MovieClip to them, with its
+children by name (the corpus's `avm2/avm1_root`), and the path of a clip
+a MovieClipLoader loaded into runs through it,
+`_level0.loader.movie.clip`, the root's own `_parent` then becoming its
+Loader.
 
 `LocalConnection` carries messages from AVM1 to AVM1 and between AVM1
 and AVM2 within a player. Names are case-insensitive; a leading

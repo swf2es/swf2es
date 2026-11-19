@@ -9,8 +9,9 @@ import type { Avm1 } from "../avm1/avm1.js";
 import type { Tabbed } from "../avm1/focus.js";
 import { Avm1Keyboard } from "../avm1/keyboard.js";
 import { Avm1Pointer } from "../avm1/pointer.js";
-import type { DisplayObject, MovieClip } from "../display/display.js";
+import { Container, type DisplayObject, type MovieClip } from "../display/display.js";
 import type { Scripting } from "../scripting.js";
+import type { MenuItem } from "./context-menu.js";
 import { type KeyState, setFocus } from "./keyboard.js";
 import type { Cursor, PointerState } from "./pointer.js";
 
@@ -156,9 +157,16 @@ export class LoadedAvm1Input {
   prepare(type: "move" | "down" | "up", p: PointerState, target: DisplayObject | null): number {
     this.over = this.movies.get(target as MovieClip) ?? null;
     let redraws = 0;
-    for (const pointer of this.movies.values()) {
+    for (const [root, pointer] of this.movies) {
       const before = pointer.redraws;
       pointer.pickable = pointer === this.over;
+      // A press on an object of the host's, not on the movie or its Loader, is no press on
+      // nothing to the movie: it tracks no menu (Flash Player 32).
+      if (type === "down") {
+        pointer.hostPressed =
+          target !== null && target !== this.s.stage && target !== root && target !== root.parent;
+      }
+
       if (type === "move") {
         pointer.handle(type, p, false);
       } else {
@@ -215,6 +223,41 @@ export class LoadedAvm1Input {
     }
 
     return redraws;
+  }
+
+  /**
+   * The menu a right click at `p` shows over a movie: the one whose root is
+   * `target`, as the host picked it (its button), or held by `target`, a
+   * Loader whose content's drawing is under the pointer; null where it is
+   * no movie's or no clip of the movie there has a menu (avm1/avm1.ts menu).
+   */
+  menu(p: PointerState, target: DisplayObject | null): ReturnType<Avm1["menu"]> {
+    let root: MovieClip | null = null;
+    if (target !== null && this.movies.has(target as MovieClip)) {
+      root = target as MovieClip;
+    } else if (target instanceof Container) {
+      root = (target.children.find((c) => this.movies.has(c as MovieClip)) as MovieClip) ?? null;
+    }
+
+    const pointer = root === null ? undefined : this.movies.get(root);
+    const movie = root === null ? undefined : this.keyboards.get(root);
+    if (root === null || pointer === undefined || movie === undefined) {
+      return null;
+    }
+
+    const menu = movie.vm.menu(pointer.contentAt(p.x, p.y));
+    if (menu === null) {
+      return null;
+    }
+
+    // A movie unloaded, or a player destroyed, while its menu is open calls nothing.
+    const movieRoot = root;
+    const select = (item: MenuItem) => () => {
+      if (this.movies.has(movieRoot) && !this.s.destroyed) {
+        item.select();
+      }
+    };
+    return { ...menu, items: menu.items.map((item) => ({ ...item, select: select(item) })) };
   }
 
   cursor(): Cursor | null {

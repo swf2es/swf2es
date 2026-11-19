@@ -37,6 +37,12 @@ export function customContextMenu(s: Scripting, stage: Container, p: PointerStat
     s.stageViewportX,
     s.stageViewportY,
   );
+  // Over a loaded AVM1 movie, the movie's menu where one of its clips has one, as Flash Player 32 shows it.
+  const hosted = s.avm1Input?.menu(p, picked) ?? null;
+  if (hosted !== null) {
+    return { items: hosted.items, quality: result.quality && hosted.quality };
+  }
+
   const target = picked === stage ? s.root : picked;
   let owner = target;
   let menu: avm2.AsObject | null = null;

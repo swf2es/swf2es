@@ -22,7 +22,7 @@ import {
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import { cached } from "../../display/shapeobject.js";
-import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import { asciiLower, childByName, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
 import { blendModeOf, storeOf } from "./BitmapData.js";
 import { drawingMethods } from "./drawing.js";
@@ -53,6 +53,10 @@ export interface Movie extends GeomHost {
   levelOf(d: DisplayObject): number | null;
   /** Level `n`'s clip, null where there is none. */
   level(n: number): MovieClip | null;
+  /** The clip `_levelN` names, null for none: none at all in a movie an AS3 Loader holds. */
+  namedLevel(n: number): MovieClip | null;
+  /** The dot path of `d`, as a clip converts to a string. */
+  pathOf(d: DisplayObject): string;
   /** The stage's quality, "LOW" to "BEST". */
   quality: string;
   /** The stage's focus rectangle's, `_focusrect` up to SWF 5 and on the root. */
@@ -684,7 +688,7 @@ function pathProperty(face: ClipNative, name: string, version: number): Value | 
     return avm1.ABSENT;
   }
 
-  const level = movie.level(levelOf(key.slice(6)));
+  const level = movie.namedLevel(levelOf(key.slice(6)));
   return level === null ? undefined : (movie.faceOf(level) ?? undefined);
 }
 
@@ -809,7 +813,7 @@ export class ClipNative implements avm1.DisplayNative {
   }
 
   path(): string {
-    return pathOf(this.target, (d) => this.movie.levelOf(d));
+    return this.movie.pathOf(this.target);
   }
 
   live(): avm1.Avm1Object | null {

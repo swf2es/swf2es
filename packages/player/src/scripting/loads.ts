@@ -59,6 +59,8 @@ interface Load {
   known: boolean;
   /** Tells piecesOf the response has come or failed, for its last word. */
   end: ((whole: boolean) => void) | null;
+  /** The instance name the call took, which a SWF's root gets as it is made (begin). */
+  name: string;
 }
 
 /**
@@ -345,7 +347,7 @@ export class Loads {
       return;
     }
 
-    const { info, generation } = begun;
+    const { info, generation, name } = begun;
     // The bytes' SWF is the calling SWF's, as Flash gave loadBytes content
     // the domain of the SWF that loaded it: its code is judged as that SWF's.
     info.$loaderURL = this.bytesOwner(loader);
@@ -372,7 +374,7 @@ export class Loads {
     }
 
     if (swf && !isAs3(swf)) {
-      const load = this.newLoad(loader, generation, null, domain, parameters, swf);
+      const load = this.newLoad(loader, generation, null, domain, parameters, swf, name);
       load.bytes = bytes;
       this.requestAvm1(load, swf);
       return;
@@ -380,7 +382,7 @@ export class Loads {
 
     this.holding = true;
     this.enqueue(
-      this.newLoad(loader, generation, null, domain, parameters, swf),
+      this.newLoad(loader, generation, null, domain, parameters, swf, name),
       Promise.resolve({ bytes, status: 0, headers: [] }),
     );
   }
@@ -399,7 +401,7 @@ export class Loads {
       load,
       swf,
       library,
-      movie: this.avm1Movie(library),
+      movie: this.avm1Movie(library, load.name),
       ready: false,
       failed: false,
     };
@@ -435,9 +437,10 @@ export class Loads {
    * AVM1Movie, which is no InteractiveObject, so the pointer's hits on the
    * movie's artwork go to its Loader; its own VM picks its buttons (input/avm1.ts).
    */
-  private avm1Movie(library: Library): AsObject {
+  private avm1Movie(library: Library, name: string): AsObject {
     const root = new MovieClip(library.root, library);
     root.avm1Root = true;
+    root.name = name;
     return this.s.constructAs(root, this.s.rt.classNamed("flash.display::AVM1Movie"));
   }
 
@@ -485,12 +488,15 @@ export class Loads {
    * (Ruffle's `loader_reuse` trace), but the parameters its context gave,
    * which Flash tells from the call on. The old content's REMOVED listeners
    * may load anew themselves, and that load is then the one that counts:
-   * null tells the caller so.
+   * null tells the caller so. The call takes the next instance name, which
+   * a SWF's root, AS3's or AVM1's, gets when the content comes, and which
+   * an image, whose Bitmap is named as it is made, or a failed load leaves
+   * unused, as Flash Player 32 counts them.
    */
   private begin(
     loader: AsObject,
     parameters: ReadonlyMap<string, string> | null,
-  ): { info: AsObject; generation: number } | null {
+  ): { info: AsObject; generation: number; name: string } | null {
     this.closeLoad(loader);
     const generation: number = loader.$generation;
     this.dropContent(loader);
@@ -503,7 +509,7 @@ export class Loads {
     info.$params = parameters ?? NO_PARAMETERS;
     // Its bytes are an empty ByteArray from the load on, null only before any, as Flash's.
     info.$bytes = NO_BYTES;
-    return { info, generation };
+    return { info, generation, name: `instance${++this.s.instances}` };
   }
 
   /** A Loader's close, and what a new load does first: a pending load does nothing when its turn comes, and its fetch is aborted. */
@@ -541,7 +547,7 @@ export class Loads {
       return;
     }
 
-    const { info, generation } = begun;
+    const { info, generation, name } = begun;
     const outgoing = {
       ...this.fetchRequest(request, info.$loaderURL),
       purpose: "content" as const,
@@ -549,7 +555,7 @@ export class Loads {
     const abort = new AbortController();
     loader.$abort = abort;
     const fetch = this.s.fetch;
-    const load = this.newLoad(loader, generation, outgoing.url, domain, parameters, null);
+    const load = this.newLoad(loader, generation, outgoing.url, domain, parameters, null, name);
     const told = piecesOf(this.piecesFor(load));
     load.end = told.end;
     this.enqueue(load, fetch ? fetch(outgoing, abort.signal, told.progress) : Promise.reject());
@@ -814,7 +820,9 @@ export class Loads {
    * the frame after its request, as Flash's loadBytes does.
    */
   settled(): Promise<void> {
-    return Promise.all([this.preparing, ...this.pendingRequests]).then(() => {});
+    // A loaded AVM1 movie's own loads, as loadMovie and MovieClipLoader ask them, count too.
+    const movies = [...this.avm1Movies.values()].map((movie) => movie.vm.settled());
+    return Promise.all([this.preparing, ...this.pendingRequests, ...movies]).then(() => {});
   }
 
   /**
@@ -856,8 +864,10 @@ export class Loads {
     domain: avm2.Domain,
     parameters: ReadonlyMap<string, string> | null,
     swf: Swf | null,
+    name: string,
   ): Load {
     return {
+      name,
       loader,
       generation,
       url,
@@ -1185,6 +1195,7 @@ export class Loads {
       run();
       this.s.symbols.addFontLibrary(library);
       root = new MovieClip(library.root, library);
+      root.name = load.name;
       root.loaderInfo = info;
       root.placeFirstFrame();
       object = this.s.constructAs(
@@ -1199,7 +1210,7 @@ export class Loads {
       }
     } else {
       // Its scripts run in AVM1, sharing only the message broker and host services with AS3.
-      object = made ?? this.avm1Movie(library);
+      object = made ?? this.avm1Movie(library, load.name);
       root = object.$display;
       root.loaderInfo = info;
       const s = this.s;

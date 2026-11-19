@@ -21,6 +21,7 @@ import { bare, innerSwf } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
 import * as w from "../../../swf-writer.ts";
+import { loadsSwfs } from "./name-order.ts";
 
 // This file's own out directory: the other test files compile at the same time.
 const out = fileURLToPath(new URL("../../out/player-loads/", import.meta.url));
@@ -966,6 +967,120 @@ test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no Int
   assert.equal(pointerTarget(player.stage, 5, 5, player.width, player.height), loader.$display);
   // Off the movie's artwork, the stage.
   assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
+});
+
+// The names of an AVM1 movie an AS3 Loader holds, and its levels, as Flash
+// Player 32's Windows debug projector traced scripts/LoadedAvm1Root.as over
+// HOSTED_ROOT: its root is `_root`, never `_level0`, no `_levelN` names
+// anything, loadMovieNum and a load into the root itself load nothing and
+// the Loader keeps one child, while a MovieClipLoader's load into a clip
+// comes, its `_root` the movie's; nor does anything load into the root,
+// loadVariables or MovieClipLoader's, or unload it, but into its clips.
+const HOSTED_ROOT = `
+function show(p) {
+  trace(p + " this " + this + " | _root " + _root + " | _level0 " + _level0 + " | _level1 " + _level1 + " | _parent " + _parent);
+  trace(p + " a " + a + " | " + a._target + " | " + targetPath(a) + " | " + a.b + " | " + a.b._target + " | " + targetPath(a.b));
+  trace(p + " root " + this._target + " | " + targetPath(this) + " | " + eval("_level0") + " | " + eval("/a") + " | " + eval("_root.a") + " | " + _root["_level0"]);
+}
+var a = createEmptyMovieClip("a", 1);
+a.createEmptyMovieClip("b", 1);
+show("1");
+loadMovieNum("level.swf", 1);
+loadVariablesNum("vars.txt", 0);
+loadVariablesNum("vars.txt", 1);
+var mcl = new MovieClipLoader();
+trace("1 loadClip " + mcl.loadClip("level.swf", 1) + " " + mcl.loadClip("level.swf", 0));
+var c = createEmptyMovieClip("c", 2);
+new MovieClipLoader().loadClip("child.swf", c);
+this._name = "renamed";
+var n = 0;
+onEnterFrame = function () {
+  n++;
+  if (n == 2) {
+    this.loadMovie("level.swf");
+    this.loadVariables("vars.txt");
+    c.loadVariables("vars.txt");
+    unloadMovieNum(0);
+    _root.unloadMovie();
+    _root.loadMovie("");
+  }
+  if (n == 6) {
+    show("6");
+    trace("6 level " + _level1 + " " + typeof _level1 + " " + c.getBytesTotal() + " " + v + " " + c.v);
+    var ref = a;
+    a.removeMovieClip();
+    var again = createEmptyMovieClip("a", 3);
+    trace("6 ref " + ref + " " + (ref == again) + " " + ref._name);
+    delete onEnterFrame;
+  }
+};`;
+
+/** An AVM1 SWF of version 8 whose one frame runs `source`. */
+function avm1Movie(source: string): Uint8Array {
+  return w.swf({
+    version: 8,
+    width: 320,
+    height: 240,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+test("a loaded AVM1 movie's root is _root, with no levels, as Flash names them", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    url: "http://example.test/main.swf",
+    // Slow to come, as from a network: settled() waits for the movie's own loads too.
+    fetch: async ({ url }) => {
+      await new Promise((done) => setTimeout(done, 20));
+      if (url.endsWith("vars.txt")) {
+        return { bytes: new TextEncoder().encode("v=hello"), status: 200, headers: [] };
+      }
+
+      const source = url.endsWith("root.swf")
+        ? HOSTED_ROOT
+        : url.endsWith("child.swf")
+          ? 'trace("child " + _root + " " + _parent);'
+          : 'trace("level " + this);';
+      return { bytes: avm1Movie(source), status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(compiler(out)("LoadedAvm1Root"), 1, "LoadedAvm1Root", 320, 240),
+    scripting,
+  );
+  try {
+    await player.start();
+    for (let i = 0; i < 16; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+
+    assert.deepEqual(lines, [
+      "1 this _root | _root _root | _level0 undefined | _level1 undefined | _parent undefined",
+      "1 a _root.a | /a | _root.a | _root.a.b | /a/b | _root.a.b",
+      "1 root / | _root | undefined | _root.a | _root.a | undefined",
+      "1 loadClip false false",
+      "child _root _root",
+      "6 this _root | _root _root | _level0 undefined | _level1 undefined | _parent undefined",
+      "6 a _root.a | /a | _root.a | _root.a.b | /a/b | _root.a.b",
+      "6 root / | _root | undefined | _root.a | _root.a | undefined",
+      "6 level undefined undefined 78 undefined hello",
+      "6 ref _root.a true a",
+      "as3:children 1 renamed",
+    ]);
+  } finally {
+    player.destroy();
+  }
 });
 
 /**
@@ -2175,4 +2290,66 @@ public class OpenStream extends Sprite {
   }
 
   assert.deepEqual(frames, [[], ["progress 3 3 one"], ["progress 6 3 two"], []]);
+});
+
+// Flash Player 32's projector, and adl, give Loader.load and loadBytes the
+// next instance name in the call, for the root of the SWF to come, AS3's
+// or AVM1's; a load that fails or is replaced leaves its own unused.
+test("Loader.load and loadBytes take the name of the root to come in the call", {
+  skip,
+}, async () => {
+  const files = loadsSwfs(compiler(out));
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    url: "http://example.test/test.swf",
+    fetch: async ({ url }) => {
+      const bytes = files[url.slice(url.lastIndexOf("/") + 1)] ?? null;
+      return { bytes, status: bytes ? 200 : 404, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(files["test.swf"], scripting);
+  try {
+    await player.start();
+    for (let i = 0; i < 4; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+  } finally {
+    player.destroy();
+  }
+
+  // The calls in order; what comes, in the order it arrives, which is the network's.
+  assert.deepEqual(
+    lines.filter((line) => /^(before|after) /.test(line)),
+    [
+      "before url0 instance2",
+      "after url0 instance4",
+      "before url1 instance6",
+      "after url1 instance8",
+      "before url2 instance10",
+      "after url2 instance12",
+      "before url3 instance13",
+      "after url3 instance15",
+      "before bytes instance17",
+      "after bytes instance19",
+    ],
+  );
+  assert.deepEqual(lines.filter((line) => /^(init|ioError) /.test(line)).sort(), [
+    "init bytes instance18",
+    "init url0 instance14",
+    "init url1 instance7",
+    "init url3 instance14",
+    "ioError url2",
+  ]);
+  // An AS3 root has its load's name as its constructor runs.
+  assert.deepEqual(
+    lines
+      .filter((line) => line.startsWith("child "))
+      .map((line) => line.split(" ")[1])
+      .sort(),
+    ["instance18", "instance7"],
+  );
 });
