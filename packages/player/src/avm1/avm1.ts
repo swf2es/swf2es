@@ -1347,6 +1347,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       this.localPending--;
       deliver();
     };
+
     if (this.deferLocalTo) {
       this.deferLocalTo(counted);
     } else {
@@ -1367,7 +1368,18 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /** LocalConnection may enter this VM from AS3, outside its own frame's script budget. */
+  /** Stopped for good, or to be once its frame has run (fscommand's "quit"). */
+  get stopped(): boolean {
+    return this.halted || this.stopNext;
+  }
+
+  /**
+   * LocalConnection may enter this VM from AS3, outside its own frame's
+   * script budget. What the call queued runs after it, as a frame's
+   * script a gotoAndStop in a handler enters runs before the next frame in
+   * adl and Flash Player 32; for an unloaded movie that is its removed
+   * clips' unloads at most.
+   */
   localInvoke(o: avm1.Avm1Object, name: string, args: Value[], fallback: Value = undefined): Value {
     const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
     if (cx === null) {
@@ -1384,6 +1396,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
             ? avm1.invoke(method, o, args, this.version)
             : fallback;
       });
+      this.queue.run();
     } finally {
       this.timers.end();
     }
