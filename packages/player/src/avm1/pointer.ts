@@ -421,18 +421,20 @@ export class Avm1Pointer implements Pointer {
 
   /**
    * The events to their objects: a hidden button up gets none, one not up
-   * all, and a hidden clip only its release outside; one disabled gets
-   * none, a button going up unless the event is to over, and the pointer
-   * letting go of it, so that enabled again under the pointer it gets its
-   * roll over (Ruffle's filter_clip_event and Avm1Button's). Then the
-   * cursor follows what is under it.
+   * all, and a hidden clip only those of the pointer leaving it, its roll
+   * out, drag out and release outside, as Flash Player 32 sends them
+   * where Ruffle's filter_clip_event sends the last alone; one disabled
+   * gets none, a button going up unless the event is to over, and the
+   * pointer letting go of it, so that enabled again under the pointer it
+   * gets its roll over (Avm1Button's). Then the cursor follows what is
+   * under it.
    */
   private send(events: ButtonEvent[]): void {
     const kept: ButtonEvent[] = [];
     for (const event of events) {
       const [d, e] = event;
       const button = d instanceof ButtonObject ? d : null;
-      if (!d.visible && (button ? button.state === "up" : e !== ClipEvent.releaseOutside)) {
+      if (!d.visible && (button ? button.state === "up" : !LEAVING.has(e))) {
         continue;
       }
 
@@ -626,6 +628,13 @@ export class Avm1Pointer implements Pointer {
     return this.avm1.input.flag(d, "useHandCursor") && this.avm1.input.flag(d, "enabled");
   }
 }
+
+/** The events of the pointer leaving a clip, which it gets hidden too. */
+const LEAVING: ReadonlySet<number> = new Set([
+  ClipEvent.rollOut,
+  ClipEvent.dragOut,
+  ClipEvent.releaseOutside,
+]);
 
 function spotOf(d: DisplayObject): Spot | null {
   return d.parent ? { parent: d.parent, depth: d.depth, id: d.character?.id } : null;

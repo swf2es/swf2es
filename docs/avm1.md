@@ -1197,7 +1197,11 @@ state shows, then its hit test state; a clip in button mode takes the
 pointer itself, its buttons with it, where its `hitArea` or it is drawn;
 other clips' children are searched topmost first. A hidden button that
 is up gets no button event, one not up all of them, and a hidden clip
-only its `releaseOutside`; one whose `enabled` is false gets none, and a
+only those of the pointer leaving it, `rollOut`, `dragOut` and
+`releaseOutside`, as Flash Player 32 sent them to clips hidden from
+under a still pointer by a frame, an interval, their own `onRollOver` or
+`onPress`, or a press's `onMouseDown` (Ruffle's `filter_clip_event`
+lets the last alone through); one whose `enabled` is false gets none, and a
 button so goes up unless the event would show it over (a `rollOver`,
 `release` or `dragOut`) and the pointer lets go of it. After each frame
 the pointer is picked again where nothing was under it or what was is

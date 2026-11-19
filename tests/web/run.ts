@@ -409,7 +409,8 @@ writeFileSync(
   }),
 );
 // AS2 buttons whose press's own onMouseDown changes what is under the pointer: "shown", hidden
-// at (10, 20), is shown by it, and "gone", at (60, 20), hidden by it.
+// at (10, 20), is shown by it, and "gone", at (60, 20), hidden by it, as is "goneClip", a clip in
+// button mode at (110, 20).
 const pressChanges = `var log = [];
 shown._visible = false;
 function watch(b, name) {
@@ -420,8 +421,10 @@ function watch(b, name) {
 }
 watch(shown, "shown");
 watch(gone, "gone");
+watch(goneClip, "goneClip");
 Mouse.addListener({ onMouseDown: function () {
-  if (_root._xmouse < 50) { shown._visible = true; } else { gone._visible = false; }
+  var x = _root._xmouse;
+  if (x < 50) { shown._visible = true; } else if (x < 100) { gone._visible = false; } else { goneClip._visible = false; }
 } });
 flash.external.ExternalInterface.addCallback("takeLog", null, function () { var taken = log; log = []; return taken; });
 stop();`;
@@ -429,7 +432,7 @@ writeFileSync(
   `${site}avm1-press-changes.swf`,
   w.swf({
     version: 8,
-    width: 100,
+    width: 150,
     height: 60,
     frameCount: 1,
     tags: [
@@ -437,8 +440,10 @@ writeFileSync(
       w.backgroundColor(0xffffff),
       square(1, 0xff0000),
       w.button2(2, 1),
+      w.sprite(3, 1, [w.place({ character: 1, depth: 1 }), w.showFrame(), w.end()]),
       w.place({ character: 2, depth: 1, name: "shown", matrix: { tx: 200, ty: 400 } }),
       w.place({ character: 2, depth: 2, name: "gone", matrix: { tx: 1200, ty: 400 } }),
+      w.place({ character: 3, depth: 3, name: "goneClip", matrix: { tx: 2200, ty: 400 } }),
       w.doAction([...script(pressChanges, 8)(flashAssembler()).end().bytes()]),
       w.showFrame(),
       w.end(),
@@ -1739,6 +1744,10 @@ check(
       // The one it hides rolls out, as with the button up, and takes no press either.
       assert.deepEqual(await mouse(["mouseMoved"], 70, 30), ["shown onRollOut", "gone onRollOver"]);
       assert.deepEqual(await mouse(click, 70, 30), ["gone onRollOut"]);
+
+      // A clip hidden so gets its roll out too, as Flash sends a hidden clip's roll and drag outs.
+      assert.deepEqual(await mouse(["mouseMoved"], 120, 30), ["goneClip onRollOver"]);
+      assert.deepEqual(await mouse(click, 120, 30), ["goneClip onRollOut"]);
     } finally {
       await call(evaluate, "scriptFreeDestroy()");
     }
