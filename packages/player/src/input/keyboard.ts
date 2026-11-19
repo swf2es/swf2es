@@ -95,14 +95,21 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
     return;
   }
 
+  // One focus in the player: the AVM1 movies the host's Loaders hold give theirs up first. One
+  // whose onKillFocus takes it back keeps it, its setFocus(null) having told `previous`.
+  if (next && s.avm1Input) {
+    s.avm1Input.blur();
+    if (s.focus !== previous || s.avm1Input?.focused()) {
+      return;
+    }
+  }
+
   s.focus = next;
   if (previous) {
     previous.focusDrop = null;
   }
 
   if (next) {
-    // One focus in the player: the AVM1 movies the host's Loaders hold give theirs up.
-    s.avm1Input?.blur();
     next.focusDrop = (d) => {
       if (s.focus === d) {
         setFocus(s, null);

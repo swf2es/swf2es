@@ -38,6 +38,37 @@ package
 			}
 
 			_loader.load(new URLRequest("keys.swf"));
+			// schedule
+		}
+
+		// What a test does to the host between keys, as the Flash probe's timers did.
+		public function control(command:String):void
+		{
+			trace("as3:" + command);
+			switch (command)
+			{
+				case "hide":
+					_loader.visible = false;
+					break;
+				case "show":
+					_loader.visible = true;
+					break;
+				case "remove":
+					removeChild(_loader);
+					break;
+				case "add":
+					addChildAt(_loader, 0);
+					break;
+				case "unfocus":
+					stage.focus = null;
+					break;
+				case "second":
+					var second:Loader = new Loader();
+					second.y = 140;
+					addChild(second);
+					second.load(new URLRequest("keys2.swf"));
+					break;
+			}
 		}
 
 		private function changed(e:Event):void

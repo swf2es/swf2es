@@ -73,6 +73,18 @@ export class LoadedAvm1Input {
     return null;
   }
 
+  /** What a movie's focus is on where its tracker shows the highlight, as Tab onto a button does. */
+  highlighted(): DisplayObject | null {
+    for (const { vm } of this.keyboards.values()) {
+      const tracker = vm.focusTracker;
+      if (!vm.halted && tracker.highlight === "visible" && tracker.focusedObject !== null) {
+        return tracker.focusedObject;
+      }
+    }
+
+    return null;
+  }
+
   /** The objects Tab may focus in the movie `root` is the root of, or null for no such movie. */
   tabbables(root: DisplayObject): Tabbed[] | null {
     return this.keyboards.get(root as MovieClip)?.vm.focusTracker.tabbables() ?? null;
@@ -94,7 +106,9 @@ export class LoadedAvm1Input {
 
   /**
    * A key to each movie, as `edits` lets its host type (KeyboardInput's
-   * handle), Tab moving nothing: whether a movie used it.
+   * handle), Tab moving nothing: every movie's Key listeners and clip
+   * events, then the edit of the field that has the focus, as Flash Player
+   * 32 orders them. Whether a movie used it.
    */
   key(type: "down" | "up", k: KeyState, edits: boolean): boolean {
     let used = false;
@@ -105,7 +119,27 @@ export class LoadedAvm1Input {
       }
     }
 
+    if (type === "down" && edits && !used && k.keyCode !== 9) {
+      used = this.focused()?.edit(k) ?? false;
+    }
+
     return used;
+  }
+
+  /**
+   * A display object hidden: a movie whose focus is on it, or in it, loses
+   * the focus at once, as Flash Player 32 takes it from a field whose Loader
+   * is hidden, though not from one whose Loader leaves the stage.
+   */
+  hidden(d: DisplayObject): void {
+    for (const { vm } of [...this.keyboards.values()]) {
+      for (let p = vm.focused; p !== null; p = p.parent) {
+        if (p === d) {
+          vm.focus(null);
+          break;
+        }
+      }
+    }
   }
 
   /** A stable callback for the AS3 pick: the AVM1Movie stands in for its interactive children. */
@@ -139,8 +173,11 @@ export class LoadedAvm1Input {
 
   finish(type: "down" | "up", p: PointerState): number {
     let redraws = 0;
+    // A press on any movie's button moves no movie's focus (Flash Player 32).
+    const keep = type === "down" && (this.over?.pressable(p.x, p.y) ?? false);
     for (const pointer of this.movies.values()) {
       const before = pointer.redraws;
+      pointer.keepFocus = keep;
       pointer.handle(type, p, false);
       redraws += pointer.redraws - before;
     }

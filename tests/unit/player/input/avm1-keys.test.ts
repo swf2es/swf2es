@@ -32,13 +32,19 @@ const KEYS: Record<string, [number, number]> = {
   Shift: [16, 0],
 };
 
-async function play(focused: boolean) {
+async function play(focused: boolean, tabButton = false) {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
     print: (line) => lines.push(line),
     realTime: null,
     url: "http://example.test/main.swf",
-    fetch: async () => ({ bytes: keysMovie(focused), status: 200, headers: [] }),
+    fetch: async ({ url }) => ({
+      bytes: url.endsWith("keys2.swf")
+        ? keysMovie(false, { id: "two" })
+        : keysMovie(focused, { tabButton }),
+      status: 200,
+      headers: [],
+    }),
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   const player = new Player(
@@ -74,7 +80,13 @@ async function play(focused: boolean) {
       }
     }
   };
-  return { player, lines, click, type };
+  /** LoadedAvm1Keys.control, as the Flash probe's timers called it between keys. */
+  const control = async (command: string) => {
+    scripting.rt.callProperty(player.root.object, scripting.rt.publicName("control"), command);
+    await scripting.settled();
+    player.tick();
+  };
+  return { player, lines, click, type, control };
 }
 
 // Where the projector's pointer pressed: AVM1's field f, button b and clip s, the AS3 field, and
@@ -84,6 +96,8 @@ const BUTTON: [number, number] = [230, 25];
 const CLIP: [number, number] = [230, 75];
 const AS3: [number, number] = [60, 123];
 const EMPTY: [number, number] = [280, 201];
+// The second movie's button, its Loader 140 pixels down.
+const SECOND_BUTTON: [number, number] = [230, 165];
 
 test("keys type into a loaded AVM1 movie's focused field with no AS3 KeyboardEvent, and Tab moves through both movies' fields", {
   skip,
@@ -308,6 +322,166 @@ test("a press on a loaded AVM1 movie's button moves no focus; one on its drawn c
       "avm1:keyDown 72",
       "avm1:changed f=h",
       "avm1:keyUp 72",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a loaded AVM1 movie's field loses the focus as its Loader is hidden, and AS3 has the keys", {
+  skip,
+}, async () => {
+  const p = await play(false);
+  try {
+    p.click(...F);
+    p.type("a");
+    await p.control("hide");
+    p.type("b");
+    await p.control("show");
+    p.type("c");
+    assert.deepEqual(p.lines, [
+      "avm1:f.onSetFocus null",
+      "avm1:keyDown 65",
+      "avm1:changed f=a",
+      "avm1:keyUp 65",
+      "as3:hide",
+      "avm1:f.onKillFocus null",
+      "as3:keyDown stage code 66 focus null",
+      "avm1:keyDown 66",
+      "as3:keyUp stage code 66 focus null",
+      "avm1:keyUp 66",
+      "as3:show",
+      "as3:keyDown stage code 67 focus null",
+      "avm1:keyDown 67",
+      "as3:keyUp stage code 67 focus null",
+      "avm1:keyUp 67",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a loaded AVM1 movie's field keeps the focus and the keys as its Loader leaves the stage", {
+  skip,
+}, async () => {
+  const p = await play(false);
+  try {
+    p.click(...F);
+    p.type("a");
+    await p.control("remove");
+    p.type("b");
+    await p.control("add");
+    p.type("c");
+    assert.deepEqual(p.lines, [
+      "avm1:f.onSetFocus null",
+      "avm1:keyDown 65",
+      "avm1:changed f=a",
+      "avm1:keyUp 65",
+      "as3:remove",
+      "avm1:keyDown 66",
+      "avm1:changed f=ab",
+      "avm1:keyUp 66",
+      "as3:add",
+      "avm1:keyDown 67",
+      "avm1:changed f=abc",
+      "avm1:keyUp 67",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a press on a movie's field takes the focus from an AS3 field after its mouseFocusChange, and stage.focus = null takes it back", {
+  skip,
+}, async () => {
+  const p = await play(false);
+  try {
+    p.click(...AS3);
+    p.type("a");
+    p.click(...F);
+    p.type("b");
+    await p.control("unfocus");
+    p.type("c");
+    assert.deepEqual(p.lines, [
+      "as3:mouseFocusChange stage related as3field focus null",
+      "as3:focusIn as3field related null focus as3field",
+      "as3:keyDown as3field code 65 focus as3field",
+      "avm1:keyDown 65",
+      "as3:textInput as3field text a focus as3field",
+      "as3:change as3field=a",
+      "as3:keyUp as3field code 65 focus as3field",
+      "avm1:keyUp 65",
+      "as3:mouseFocusChange as3field related null focus as3field",
+      "avm1:f.onSetFocus null",
+      "as3:focusOut as3field related null focus null",
+      "avm1:keyDown 66",
+      "avm1:changed f=b",
+      "avm1:keyUp 66",
+      "as3:unfocus",
+      "avm1:f.onKillFocus null",
+      "as3:keyDown stage code 67 focus null",
+      "avm1:keyDown 67",
+      "as3:keyUp stage code 67 focus null",
+      "avm1:keyUp 67",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a press on another movie's button leaves a movie's field the focus, and every movie's Key listeners hear a key before it types", {
+  skip,
+}, async () => {
+  const p = await play(false);
+  try {
+    await p.control("second");
+    assert.ok(p.lines.splice(0).includes("two:ready"));
+    p.click(...F);
+    p.type("a");
+    p.click(...SECOND_BUTTON);
+    p.type("b");
+    assert.deepEqual(p.lines, [
+      "avm1:f.onSetFocus null",
+      "avm1:keyDown 65",
+      "two:keyDown 65",
+      "avm1:changed f=a",
+      "avm1:keyUp 65",
+      "two:keyUp 65",
+      "two:b.onPress",
+      "avm1:keyDown 66",
+      "two:keyDown 66",
+      "avm1:changed f=ab",
+      "avm1:keyUp 66",
+      "two:keyUp 66",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("Tab onto a loaded AVM1 movie's button draws the focus's rectangle around it", {
+  skip,
+}, async () => {
+  const p = await play(false, true);
+  try {
+    p.click(...AS3);
+    p.type("Tab", "Tab");
+    assert.deepEqual(p.player.focusHighlight(), { xMin: 200, yMin: 10, xMax: 260, yMax: 40 });
+    p.type("a");
+    assert.deepEqual(p.lines, [
+      "as3:mouseFocusChange stage related as3field focus null",
+      "as3:focusIn as3field related null focus as3field",
+      "as3:keyDown as3field code 9 focus as3field",
+      "avm1:keyDown 9",
+      "as3:keyFocusChange as3field related null focus as3field",
+      "avm1:f.onSetFocus null",
+      "as3:focusOut as3field related null focus null",
+      "avm1:keyUp 9",
+      "avm1:keyDown 9",
+      "avm1:f.onKillFocus b",
+      "avm1:keyUp 9",
+      "avm1:keyDown 65",
+      "avm1:keyUp 65",
     ]);
   } finally {
     p.player.destroy();

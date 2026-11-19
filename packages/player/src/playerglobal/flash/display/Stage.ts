@@ -137,6 +137,11 @@ export function stageNatives(s: Scripting): avm2.Natives {
     // A field given focus keeps its selection (the corpus's edittext_focus_selection). The
     // focus's rectangle shows, as after Tab.
     set focus(v: Value) {
+      // Null takes it from a loaded AVM1 movie too, whose field hears onKillFocus (Flash Player 32).
+      if (!v) {
+        s.avm1Input?.blur();
+      }
+
       setFocus(s, v ? (displayOf(v as avm2.AsObject) ?? null) : null, true);
     }
 

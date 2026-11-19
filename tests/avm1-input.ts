@@ -80,15 +80,19 @@ const square = (id: number, color: number) =>
  * An authored AVM1 movie for an AS3 Loader's keyboard: two bordered input
  * fields, f over g, a button b beside f that Tab passes by, and a drawn
  * clip s beside g. It logs Key's listeners, the fields' changes and focus,
- * and b's presses; `focused`, it focuses f itself as it starts.
+ * and b's presses; `focused`, it focuses f itself as it starts. `id` names
+ * its lines, avm1 by default, and `tabButton` lets Tab focus b.
  */
-export function keysMovie(focused = false): Uint8Array {
+export function keysMovie(
+  focused = false,
+  options: { id?: string; tabButton?: boolean } = {},
+): Uint8Array {
   const source = `
-function log(s) { trace("avm1:" + s); }
+function log(s) { trace("${options.id ?? "avm1"}:" + s); }
 function nameOf(o) { if (o == null) { return "null"; } return o._name; }
 f.border = true;
 g.border = true;
-b.tabEnabled = false;
+${options.tabButton ? "" : "b.tabEnabled = false;"}
 b.onPress = function() { log("b.onPress"); };
 var k = {};
 k.onKeyDown = function() { log("keyDown " + Key.getCode()); };

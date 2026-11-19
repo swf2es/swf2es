@@ -419,15 +419,15 @@ export class Player {
    * The focus's yellow rectangle as a view draws it (RenderView.highlight),
    * or null: around what Tab, or a script, focused, until a press or the
    * focus moves on, as Flash draws it; for an AVM1 movie as its focus
-   * tracker shows it. In a movie of both, AS3's focus alone: an AVM1 movie
-   * AS3 loaded takes no keys. A host that draws it asks before each render;
-   * cheap where none shows, and measured again only as what it frames changes.
+   * tracker shows it, an AVM1 movie an AS3 Loader holds too, where that has
+   * the focus. A host that draws it asks before each render; cheap where
+   * none shows, and measured again only as what it frames changes.
    */
   focusHighlight(): FocusHighlight | null {
     const s = this.scripting;
     let d: DisplayObject | null = null;
     if (s) {
-      d = highlighted(s);
+      d = highlighted(s) ?? s.avm1Input?.highlighted() ?? null;
     } else if (this.avm1) {
       const tracker = this.avm1.focusTracker;
       d = tracker.highlight === "visible" ? tracker.focusedObject : null;

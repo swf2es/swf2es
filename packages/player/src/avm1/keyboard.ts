@@ -70,7 +70,8 @@ export class Avm1Keyboard implements Keyboard {
     const press = KEY_PRESSES.get(k.keyCode) ?? typed;
     const input = this.avm1.input;
     const used = input.key(true, k.keyCode, k.charCode, press, typed, !!k.shiftKey, !hosted);
-    return used || (edits && k.keyCode !== 9 && this.edit(k));
+    // A host types after every movie's listeners (input/avm1.ts).
+    return used || (edits && !hosted && k.keyCode !== 9 && this.edit(k));
   }
 
   /** What has the movie's focus: a field, a button or a clip. */
@@ -105,7 +106,8 @@ export class Avm1Keyboard implements Keyboard {
     return !this.avm1.halted && d instanceof TextObject && !this.avm1.removed(d) ? d : null;
   }
 
-  private edit(k: KeyState): boolean {
+  /** The key's edit of the field with the focus, or select all for Ctrl+A. Whether it was one. */
+  edit(k: KeyState): boolean {
     const field = this.field();
     if (!field || (field.type !== "input" && !field.selectable)) {
       return false;

@@ -37,6 +37,12 @@ export class Avm1Pointer implements Pointer {
   redraws = 0;
   /** An AS3 host chooses which loaded movie may pick buttons; global mouse events still reach all. */
   pickable = true;
+  /**
+   * Set by an AS3 host for a press on a button of any movie it holds,
+   * which moves no movie's focus, as Flash Player 32 has it; a movie of its
+   * own, a main SWF, has its button take its field's focus.
+   */
+  keepFocus = false;
   onCursor: ((cursor: Cursor) => void) | null = null;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
@@ -241,10 +247,9 @@ export class Avm1Pointer implements Pointer {
       const field = this.hover instanceof TextObject ? this.hover : null;
       // Where the press is in the text, as the field was scrolled before it.
       const position = field ? this.textPosition(field, p.x, p.y) : 0;
-      // A press on a button or clip of a movie an AS3 Loader holds leaves the focus where it is,
-      // as Flash Player 32 does, which takes it from a field of a movie of its own.
-      const kept = this.hover !== null && field === null && this.avm1.hosted;
-      if (!kept && (field || this.avm1.focused instanceof TextObject)) {
+      // keepFocus is the host's, for a press on any of its movies' buttons. Where `handle` has a
+      // `pressed` of its own (a double click's, #1112), the host's test stays as it is.
+      if (!this.keepFocus && (field || this.avm1.focused instanceof TextObject)) {
         this.avm1.focus(field, true);
       }
 
@@ -454,6 +459,12 @@ export class Avm1Pointer implements Pointer {
    */
   private pick(x: number, y: number, any = false): DisplayObject | null {
     return any || this.pickable ? this.targetAt(x, y, any) : null;
+  }
+
+  /** Whether this movie has a button or a clip in button mode under the host's pointer, not a field. */
+  pressable(x: number, y: number): boolean {
+    const target = this.targetAt(x, y);
+    return target !== null && !(target instanceof TextObject);
   }
 
   /** Whether this movie has a button or selectable field under the host's pointer. */

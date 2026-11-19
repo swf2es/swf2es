@@ -328,11 +328,6 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private movieRoot: MovieClip | null = null;
   /** Whether this plays the main movie, not an AVM1Movie an AS3 Loader loaded, which has no `$version`. */
   private standalone = true;
-
-  /** Whether this plays an AVM1Movie an AS3 Loader loaded. */
-  get hosted(): boolean {
-    return !this.standalone;
-  }
   private swfVersion = 0;
   private swfLength = 0;
   private rate = 24;
