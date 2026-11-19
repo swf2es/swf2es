@@ -1,5 +1,6 @@
-// The AS3 host of picksMovie (tests/avm1-input.ts): its Loader at the origin, a
-// sprite in buttonMode beside the movie, and the mouse's events traced as AS3 hears them.
+// The AS3 host of picksMovie and dragsMovie (tests/avm1-picks.ts): its
+// Loader at the origin, a sprite in buttonMode beside the movie, and the
+// mouse's events traced as AS3 hears them.
 package
 {
 	import flash.display.Loader;

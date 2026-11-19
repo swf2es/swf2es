@@ -1,5 +1,5 @@
-// An authored AVM1 movie for picks, hover and the cursor across an AS3
-// Loader (tests/unit/player/input/avm1-picks.test.ts) and native Flash probes.
+// Authored AVM1 movies for picks, hover, drags and the cursor across an AS3
+// Loader (tests/unit/player/input/avm1.test.ts) and native Flash probes.
 import { flashAssembler, script } from "./avm1-script.ts";
 import * as w from "./swf-writer.ts";
 
@@ -96,3 +96,140 @@ log("ready");`;
     ],
   });
 }
+
+/**
+ * An authored AVM1 movie for drags between buttons: buttons a and b at
+ * (10, 10) and (100, 10), button m at (190, 10) whose tag tracks it as a
+ * menu, and clips n at (10, 60), which a script tracks as a menu, and k at
+ * (100, 60), which it does not, each 60 by 30 with every handler logged.
+ */
+export function dragsMovie(): Uint8Array {
+  const handlers = (name: string) =>
+    [
+      "onRollOver",
+      "onRollOut",
+      "onPress",
+      "onRelease",
+      "onReleaseOutside",
+      "onDragOver",
+      "onDragOut",
+    ]
+      .map((h) => `${name}.${h} = function() { log("${name}.${h}"); };`)
+      .join("\n");
+  const source = `
+function log(s) { trace("avm1:" + s); }
+${["a", "b", "m", "n", "k"].map(handlers).join("\n")}
+n.trackAsMenu = true;
+stop();
+log("ready " + a.trackAsMenu + " " + m.trackAsMenu + " " + n.trackAsMenu);`;
+  return w.swf({
+    version: 8,
+    width: 320,
+    height: 240,
+    frameCount: 1,
+    tags: [
+      rect(1, 0x2266cc, 60, 30),
+      w.button2(2, 1),
+      w.button2(3, 1, [], true),
+      w.sprite(4, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.place({ depth: 1, character: 2, name: "a", matrix: { tx: 200, ty: 200 } }),
+      w.place({ depth: 2, character: 2, name: "b", matrix: { tx: 2000, ty: 200 } }),
+      w.place({ depth: 3, character: 3, name: "m", matrix: { tx: 3800, ty: 200 } }),
+      w.place({ depth: 4, character: 4, name: "n", matrix: { tx: 200, ty: 1200 } }),
+      w.place({ depth: 5, character: 4, name: "k", matrix: { tx: 2000, ty: 1200 } }),
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/**
+ * Presses dragged between dragsMovie's buttons and clips, as the projector
+ * was given them: from a onto b and back, from a onto m, from m onto b and
+ * onto n, from nothing over m, n and k, and from k onto n. What the press
+ * reaches is its own unless it tracks as a menu's, m by its tag and n by a
+ * script, or is on nothing: then each menu item crossed hears dragOver and
+ * dragOut, the one let go over its release, and the pressed one no
+ * releaseOutside. tests/unit/player/input/avm1.test.ts plays them over an AS3 host,
+ * tests/unit/player/avm1/pointer.test.ts the movie alone.
+ */
+export const DRAG_STEPS: (["move" | "down", number, number] | ["up"] | ["wait", number])[] = [
+  ["wait", 1500],
+  ["move", 300, 220],
+  ["wait", 100],
+  ["down", 20, 20],
+  ["move", 60, 25],
+  ["move", 110, 20],
+  ["wait", 100],
+  ["move", 20, 20],
+  ["wait", 100],
+  ["up"],
+  ["wait", 150],
+  ["down", 20, 20],
+  ["move", 200, 20],
+  ["wait", 100],
+  ["up"],
+  ["wait", 150],
+  ["down", 200, 20],
+  ["move", 110, 20],
+  ["wait", 100],
+  ["up"],
+  ["wait", 150],
+  ["down", 200, 20],
+  ["move", 20, 70],
+  ["wait", 100],
+  ["up"],
+  ["wait", 150],
+  ["down", 300, 220],
+  ["move", 200, 20],
+  ["wait", 100],
+  ["move", 20, 70],
+  ["wait", 100],
+  ["move", 110, 70],
+  ["wait", 100],
+  ["up"],
+  ["wait", 150],
+  ["down", 110, 70],
+  ["move", 20, 70],
+  ["wait", 100],
+  ["up"],
+  ["wait", 150],
+  ["move", 300, 220],
+  ["wait", 100],
+];
+
+/** What the projector traced over LoadedAvm1Picks; alone, the same without AS3's line. */
+export const DRAGS_FLASH = [
+  "avm1:ready undefined undefined true",
+  "avm1:a.onRollOver",
+  "avm1:a.onPress",
+  "avm1:a.onDragOut",
+  "avm1:a.onDragOver",
+  "avm1:a.onRelease",
+  "avm1:a.onPress",
+  "avm1:a.onDragOut",
+  "avm1:a.onReleaseOutside",
+  "avm1:m.onRollOver",
+  "avm1:m.onPress",
+  "avm1:m.onDragOut",
+  "avm1:b.onRollOver",
+  "avm1:b.onRollOut",
+  "avm1:m.onRollOver",
+  "avm1:m.onPress",
+  "avm1:m.onDragOut",
+  "avm1:n.onDragOver",
+  "avm1:n.onRelease",
+  "avm1:n.onRollOut",
+  "as3:mouseDown stage@stage related null",
+  "avm1:m.onDragOver",
+  "avm1:m.onDragOut",
+  "avm1:n.onDragOver",
+  "avm1:n.onDragOut",
+  "avm1:k.onRollOver",
+  "avm1:k.onPress",
+  "avm1:k.onDragOut",
+  "avm1:k.onReleaseOutside",
+  "avm1:n.onRollOver",
+  "avm1:n.onRollOut",
+];

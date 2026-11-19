@@ -324,9 +324,13 @@ export class Avm1Pointer implements Pointer {
       this.pressedAt = null;
       if (pressed && hover && same(pressed, hover)) {
         events.push([pressed, ClipEvent.release]);
+      } else if (hover && this.tracking(pressed) && this.avm1.input.tracksAsMenu(hover)) {
+        // A menu's: the item it is let go over is released.
+        events.push([hover, ClipEvent.release]);
       } else {
-        // Released elsewhere, or after a press on nothing: what is under it is rolled over.
-        if (pressed) {
+        // Released elsewhere, or after a press on nothing: what is under it is rolled over. A
+        // menu's item pressed is no more than left.
+        if (pressed && !this.avm1.input.tracksAsMenu(pressed)) {
           events.push([pressed, ClipEvent.releaseOutside]);
         }
 
@@ -379,6 +383,18 @@ export class Avm1Pointer implements Pointer {
   }
 
   /**
+   * Whether a press tracks as a menu's, as Flash Player 32's projector
+   * traced it: one on nothing or on an item that tracks as a menu's, its
+   * `trackAsMenu` a script's or else its tag's, while no script drags a
+   * clip. Other items that track as a menu's then hear `dragOver` and
+   * `dragOut` as the pointer crosses them, and the one it is let go over
+   * its `release`; a press on anything else is that object's alone.
+   */
+  private tracking(pressed = this.pressed): boolean {
+    return this.drag === null && (pressed === null || this.avm1.input.tracksAsMenu(pressed));
+  }
+
+  /**
    * The hover moved to `target`: with the button up, a roll out of what it
    * was over and a roll over of what it is over; with it down, a drag out
    * of the one and a drag over of the other, the pressed object's as the
@@ -403,7 +419,7 @@ export class Avm1Pointer implements Pointer {
       }
     } else {
       const pressed = this.pressed;
-      const menu = (d: DisplayObject) => this.drag === null && this.avm1.input.tracksAsMenu(d);
+      const menu = (d: DisplayObject) => this.tracking() && this.avm1.input.tracksAsMenu(d);
       if (target && target === pressed) {
         events.push([target, ClipEvent.dragOver]);
       }

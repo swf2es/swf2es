@@ -378,15 +378,22 @@ after the handlers for a press too, and has that double click. In an
 AS3 host, the AVM1 movie's own pick before its broadcast is kept for
 its press in the same way, pickable or not as the move that brought the
 pointer there left the movie, since the host's own pick for the press
-comes after the broadcast; no probe has measured that case. Flash sends
-no `dragOver` or `dragOut` to a button the press did not reach, pressed
-on another, on nothing or on AS3's objects, but to one that tracks as a
-menu (`trackAsMenu`, a script's or a button's own flag), as the
-corpus's `drag_over_from_outside` has it; nor does the player.
+comes after the broadcast; no probe has measured that case. A press on
+a button or a clip with handlers is its own: Flash sends no `dragOver`
+or `dragOut` to another, and its release elsewhere is its
+`releaseOutside`. A press on nothing, or on one that tracks as a menu's
+(`trackAsMenu`, a script's, or else a button's flag from its tag, which
+a script reads as undefined), tracks as a menu's: each other item that
+tracks as one hears `dragOver` and `dragOut` as the pointer crosses it,
+the one let go over its `release`, and the pressed one no
+`releaseOutside`, as the projector traced dragsMovie
+(`tests/unit/player/avm1/pointer.test.ts`, and over an AS3 host
+`tests/unit/player/input/avm1.test.ts`) and the corpus's
+`drag_over_from_outside` has it.
 
 In an AS3 host, the projector traced the same probe's movie under a
 Loader beside an AS3 sprite in buttonMode
-(`tests/unit/player/input/avm1-picks.test.ts`): what has the pointer
+(`tests/unit/player/input/avm1.test.ts`): what has the pointer
 over a movie's button, or a clip with a button's handlers, is the
 movie's alone, its `rollOver` and `rollOut`, `press`, `release` and the
 rest, and AS3 hears nothing of it, not even the Loader's `rollOver`; a
