@@ -2,6 +2,7 @@ package
 {
 	import flash.display.Shape;
 	import flash.display.Sprite;
+	import flash.events.MouseEvent;
 	import flash.external.ExternalInterface;
 	import flash.text.TextField;
 	import flash.text.TextFieldType;
@@ -10,6 +11,8 @@ package
 	// blue 40 by 30 sprite at (20, 20) under a green square over its left
 	// edge; "kid", 10 by 10 in a holder scaled twice at (100, 20); "off", at
 	// (20, 70), whose focusRect is false; and an input field at (100, 70).
+	// A press on the red square at (170, 20) focuses the clip from its
+	// mouseDown, one on the one at (170, 70) the stage.
 	public class FocusRectTest extends Sprite
 	{
 		private function box(color:uint, width:Number, height:Number):Shape
@@ -65,13 +68,56 @@ package
 			cover.y = 25;
 			addChild(cover);
 
+			var pad:Sprite = new Sprite();
+			pad.addChild(box(0xff0000, 20, 20));
+			pad.x = 170;
+			pad.y = 20;
+			pad.addEventListener(MouseEvent.MOUSE_DOWN, function(e:MouseEvent):void
+				{
+					stage.focus = clip;
+				});
+			addChild(pad);
+
+			var stagePad:Sprite = new Sprite();
+			stagePad.addChild(box(0xff0000, 20, 20));
+			stagePad.x = 170;
+			stagePad.y = 70;
+			stagePad.addEventListener(MouseEvent.MOUSE_DOWN, function(e:MouseEvent):void
+				{
+					stage.focus = stage;
+				});
+			addChild(stagePad);
+
+			var self:Sprite = this;
 			ExternalInterface.addCallback("focusName", function():String
 				{
-					return stage.focus ? stage.focus.name : "null";
+					var focus:Object = stage.focus;
+					return focus == null ? "null" : focus == stage ? "stage" : focus == self ? "root" : focus.name;
 				});
 			ExternalInterface.addCallback("focusOn", function(name:String):void
 				{
-					stage.focus = name == "kid" ? Sprite(holder.getChildAt(0)) : Sprite(getChildByName(name));
+					switch (name)
+					{
+						case "stage":
+							stage.focus = stage;
+							break;
+						case "root":
+							stage.focus = self;
+							break;
+						case "kid":
+							stage.focus = Sprite(holder.getChildAt(0));
+							break;
+						default:
+							stage.focus = Sprite(getChildByName(name));
+					}
+				});
+			ExternalInterface.addCallback("showHolder", function(on:Boolean):void
+				{
+					holder.visible = on;
+				});
+			ExternalInterface.addCallback("nudge", function():void
+				{
+					clip.x += 10;
 				});
 			ExternalInterface.addCallback("stageFocusRect", function(on:Boolean):void
 				{

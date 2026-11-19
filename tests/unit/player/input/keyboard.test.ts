@@ -374,7 +374,7 @@ test("tab moves by tabIndex where any has one, else by place, after a keyFocusCh
   equal(scripting.focus, a);
 });
 
-test("Tab and a script show the focus's rectangle; a press, a field and focusRect false do not", () => {
+test("Tab and a script show the focus's rectangle; a press, a field, the root and focusRect false do not", () => {
   const { stage, fields, scripting, keyboard } = setUp("field");
   const [field] = fields;
   const sprite = (index: number, focusRect: boolean | null) => {
@@ -416,6 +416,16 @@ test("Tab and a script show the focus's rectangle; a press, a field and focusRec
   setFocus(scripting, null);
   setFocus(scripting, a, true);
   assert.equal(scripting.focus === a && shows(null), true);
+
+  // Nor on the stage or the root, which a script focuses to hear the keys.
+  scripting.stageFocusRect = true;
+  scripting.stage = stage;
+  scripting.root = a as never;
+  for (const target of [stage, a]) {
+    setFocus(scripting, null);
+    setFocus(scripting, target, true);
+    assert.equal(scripting.focus === target && shows(null), true);
+  }
 });
 
 test("a click focuses a field after a mouseFocusChange, and the stage's click takes it away", () => {

@@ -205,6 +205,7 @@ var EI = flash.external.ExternalInterface;
 EI.addCallback("focusName", null, function() { return String(Selection.getFocus()); });
 EI.addCallback("focusOn", null, function(name) { Selection.setFocus(eval(name)); });
 EI.addCallback("stageFocusRect", null, function(on) { _root._focusrect = on; });
+EI.addCallback("showHolder", null, function(on) { holder._visible = on; });
 stop();`;
 writeFileSync(
   `${site}focus-avm1.swf`,
@@ -1664,9 +1665,10 @@ check("a stage holding nothing shows its background colour, not black", async (e
 // Flash Player 32's projector, driven by real keys (adl takes none): the focus's rectangle is
 // opaque yellow, three screen pixels wide inside its object's bounds on the stage, over what
 // is above the object; a button's hit area's. Two device pixels a stage pixel here, so its
-// bars are three device pixels. Tab and a script show it; a press hides it, in AVM1 below SWF 9
-// a move too; an object's focusRect or _focusrect, or the stage's, as the focus moves, keeps
-// it off, as does a text field.
+// bars are three device pixels. Tab and a script show it, a press's listener's too; a press
+// hides it, in AVM1 below SWF 9 a move too; an object's focusRect or _focusrect, or the
+// stage's, as the focus moves, keeps it off, as do a text field, the stage, the root and a
+// hidden parent.
 check("the focus's yellow rectangle shows as Flash draws it", async (evaluate, send) => {
   const YELLOW = 0xffff00;
   const settle = () => call(evaluate, "frames(3).then(() => true)");
@@ -1813,10 +1815,49 @@ check("the focus's yellow rectangle shows as Flash draws it", async (evaluate, s
       assert.equal((await look([])).yellow, 0, `${vm}: the stage's focus rectangle off`);
       await focusCall("stageFocusRect", true);
 
-      // A script's focus shows it, as Tab does.
+      // A script's focus shows it, as Tab does, but not where a parent of it is hidden.
       await focusCall("focusOn", vm === "as3" ? "kid" : "holder.kid");
       await settle();
       assert.equal((await look([])).yellow, frame(40, 40), `${vm}: a script's focus`);
+      await focusCall("showHolder", false);
+      await settle();
+      assert.equal((await look([])).yellow, 0, `${vm}: a hidden parent's child's`);
+      await focusCall("showHolder", true);
+      await settle();
+
+      if (vm === "as3") {
+        // The stage or the root focused, to hear the keys: none.
+        for (const target of ["stage", "root"]) {
+          await focusCall("focusOn", target);
+          await settle();
+          assert.equal(await focusCall("focusName"), target);
+          assert.equal((await look([])).yellow, 0, `as3: the ${target}'s focus`);
+        }
+
+        // It follows what it frames as that moves, drawn once where it was first.
+        await focusCall("focusOn", "clip");
+        await settle();
+        assert.equal((await look([])).yellow, frame(80, 60), "as3: the clip's before it moves");
+        await focusCall("nudge");
+        await settle();
+        seen = await look([
+          [59, 70],
+          [60, 70],
+          [139, 70],
+          [140, 70],
+        ]);
+        assert.equal(seen.yellow, frame(80, 60), "as3: the moved clip's rectangle");
+        assert.deepEqual(seen.colours, [G, Y, Y, W], "as3: the moved clip's edges");
+
+        // A mouseDown listener's focus shows it, as Flash Player 32's does; the stage's not.
+        await focusCall("focusOn", "stage");
+        await mouse(["mouseMoved", "mousePressed", "mouseReleased"], left + 180, top + 30);
+        assert.equal(await focusCall("focusName"), "clip");
+        assert.equal((await look([])).yellow, frame(80, 60), "as3: a mouseDown's focus");
+        await mouse(["mouseMoved", "mousePressed", "mouseReleased"], left + 180, top + 80);
+        assert.equal(await focusCall("focusName"), "stage");
+        assert.equal((await look([])).yellow, 0, "as3: a mouseDown's focus on the stage");
+      }
     } finally {
       await call(evaluate, "focusDestroy()");
     }

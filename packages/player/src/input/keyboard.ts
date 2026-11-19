@@ -135,12 +135,13 @@ export const highlighted = (s: Scripting): DisplayObject | null =>
 
 /**
  * Whether the focus's rectangle shows on `d` as the focus moves to it: not
- * on a text field, which shows its caret instead, nor where its focusRect
+ * on a text field, which shows its caret instead, nor on the stage or the
+ * root, which a script focuses to hear the keys, nor where its focusRect
  * is false, or null and the stage's stageFocusRect is. A change of either
  * later leaves it as it is, as in Flash Player 32's projector.
  */
 function highlightable(s: Scripting, d: DisplayObject): boolean {
-  if (d instanceof TextObject) {
+  if (d instanceof TextObject || d === s.stage || d === s.root) {
     return false;
   }
 
