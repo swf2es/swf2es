@@ -25,7 +25,7 @@
 // `trace(e)` is the Trace action; the timeline's functions (`gotoAndStop`,
 // `play`, `nextFrame`, `setProperty`, `getProperty`, `eval`,
 // `targetPath`, `call`, `getTimer`, `getVersion`, `set`, `duplicateMovieClip`,
-// `removeMovieClip`...), `tellTarget` and `ifFrameLoaded` are their
+// `removeMovieClip`, `fscommand` of constant strings...), `tellTarget` and `ifFrameLoaded` are their
 // actions, a constant frame or target as an operand; `with` is With. A call of `__op("Name", ...values)`
 // pushes the values and writes the action of that name, for the actions
 // that no syntax writes (CastOp, ImplementsOp, Extends...).
@@ -1264,6 +1264,7 @@ const TIMELINE: Record<string, true> = {
   call: true,
   duplicateMovieClip: true,
   removeMovieClip: true,
+  fscommand: true,
 };
 
 /**
@@ -1343,6 +1344,20 @@ function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
       args[0](a);
       a.op("RemoveSprite");
       return;
+    // Of constant strings only, a GetURL of "FSCommand:" and the command, its target the arguments.
+    case "fscommand": {
+      const [command, rest] = args.map((arg) => {
+        const probe = new Avm1Assembler();
+        arg(probe);
+        return constantOf(probe.bytes());
+      });
+      if (typeof command !== "string" || (args.length > 1 && typeof rest !== "string")) {
+        throw new Error("fscommand takes constant strings");
+      }
+
+      a.getUrl(`FSCommand:${command}`, typeof rest === "string" ? rest : "");
+      return;
+    }
   }
 }
 
