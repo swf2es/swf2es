@@ -1854,6 +1854,40 @@ check(
 );
 
 check(
+  "a page's frame listener and the meter each hear the frames, whichever comes first",
+  async (evaluate) => {
+    const r = await call<{ steps: [string, number, string][]; reads: number[] }>(
+      evaluate,
+      "meterWithListener()",
+    );
+    const live = (text: string) => Number(/^(\d+\.\d) \//.exec(text)?.[1] ?? 0) > 0;
+    const expected: [string, boolean, boolean | null][] = [
+      ["listener", true, null],
+      ["both", true, true],
+      ["meter", false, true],
+      ["both again", true, true],
+      ["listener again", true, null],
+    ];
+    for (let i = 0; i < expected.length; i++) {
+      const [label, listening, metered] = expected[i];
+      const [step, heard, fps] = r.steps[i];
+      assert.equal(step, label);
+      assert.equal(heard > 0, listening, `${label}: the listener heard ${heard} calls`);
+      if (metered !== null) {
+        assert.equal(live(fps), metered, `${label}: the meter shows ${fps}`);
+      }
+    }
+    // Hidden, the meter's hook is gone from the loop: one read of the clock a frame less.
+    const [unheard, metered, unheardAgain] = r.reads;
+    assert.ok(
+      Math.abs(metered - unheard - 1) < 0.5,
+      `${unheard} reads unheard, ${metered} metered`,
+    );
+    assert.ok(Math.abs(unheardAgain - unheard) < 0.5, `${unheard} reads, then ${unheardAgain}`);
+  },
+);
+
+check(
   "the context menu shows and hides the performance meter, kept for the viewer, unless left out",
   async (evaluate, send) => {
     const at = await call<number[]>(
@@ -1942,16 +1976,39 @@ check(
       assert.equal(await call(evaluate, "meterFigure('fps').textContent"), "still");
       assert.deepEqual(await call(evaluate, "meterChanges"), [true, false]);
 
-      // Left out by the attribute or the page's configuration: no item, though a script may still
-      // show it, and taking the item away hides what it showed.
+      // A script shows and hides it for the page alone: the viewer's choice is not touched.
+      await call(evaluate, "meterPlayer.performanceMeter = true, true");
+      assert.equal(await call(evaluate, "!meterBox().hidden"), true);
+      assert.equal(await call(evaluate, "localStorage.getItem('swf2es.performanceMeter')"), null);
+      await call(evaluate, "localStorage.setItem('swf2es.performanceMeter', '1'), true");
+      await call(evaluate, "meterPlayer.performanceMeter = false, true");
+      assert.equal(await call(evaluate, "localStorage.getItem('swf2es.performanceMeter')"), "1");
+      await call(evaluate, "localStorage.removeItem('swf2es.performanceMeter'), true");
+
+      // Left out by the attribute: no item, though a script may still show it, which the
+      // attribute leaves be.
       await call(evaluate, 'meterPlayer.setAttribute("performancemeter", "false"), true');
       await open();
       assert.equal(await call(evaluate, "meterButtons().at(-1).textContent"), "About swf2es");
       assert.equal(await call(evaluate, "meterButtons().at(-2)?.textContent"), "<b>Literal</b>");
       await dismiss();
       await call(evaluate, "meterPlayer.performanceMeter = true, true");
+      await call(evaluate, 'meterPlayer.setAttribute("performancemeter", "False"), true');
       assert.equal(await call(evaluate, "!meterBox().hidden"), true);
+      await call(evaluate, "meterPlayer.performanceMeter = false, true");
+
+      // What the viewer turned on goes as the item is taken away, and comes back with it.
       await call(evaluate, 'meterPlayer.removeAttribute("performancemeter"), true');
+      await open();
+      await call(evaluate, "meterButtons().at(-2).click(), true");
+      assert.equal(await call(evaluate, "!meterBox().hidden"), true);
+      await call(evaluate, 'meterPlayer.setAttribute("performancemeter", "false"), true');
+      assert.equal(await call(evaluate, "meterBox().hidden"), true);
+      assert.equal(await call(evaluate, "localStorage.getItem('swf2es.performanceMeter')"), "1");
+      await call(evaluate, 'meterPlayer.removeAttribute("performancemeter"), true');
+      assert.equal(await call(evaluate, "!meterBox().hidden"), true);
+
+      // Left out by the page's configuration, likewise.
       await call(
         evaluate,
         `(async () => { (await import("@swf2es/web")).configure({ performanceMeter: false }); return true; })()`,
@@ -1961,19 +2018,36 @@ check(
       await open();
       assert.equal(await call(evaluate, "meterButtons().at(-2)?.textContent"), "<b>Literal</b>");
       await dismiss();
-      await call(
-        evaluate,
-        `(async () => { (await import("@swf2es/web")).configure({ performanceMeter: true }); return true; })()`,
-      );
 
-      // Kept on, a new element shows it as it is connected.
+      // An element connected before the page's configure(), as one in its markup is, plays
+      // without the meter the viewer kept on: the choice is read as its SWF starts.
+      assert.deepEqual(
+        await call(
+          evaluate,
+          `(async () => {
+        const web = await import("@swf2es/web");
+        web.configure({ performanceMeter: true });
+        localStorage.setItem("swf2es.performanceMeter", "1");
+        document.body.insertAdjacentHTML(
+          "beforeend",
+          '<swf2es-player id="meter-markup" src="/web-test/context-menu.swf" style="position:fixed;left:0;top:200px"></swf2es-player>',
+        );
+        window.meterSecond = document.getElementById("meter-markup");
+        web.configure({ performanceMeter: false });
+        await meterSecond.ready;
+        await new Promise((done) => requestAnimationFrame(() => done()));
+        return [meterSecond.performanceMeter, meterSecond.shadowRoot.querySelector(".meter") === null];
+      })()`,
+        ),
+        [false, true],
+      );
+      // Offered again, the next SWF it plays shows it.
       assert.equal(
         await call(
           evaluate,
-          `(() => {
-        meterPlayer.performanceMeter = true;
-        window.meterSecond = document.createElement("swf2es-player");
-        document.body.append(meterSecond);
+          `(async () => {
+        (await import("@swf2es/web")).configure({ performanceMeter: true });
+        await meterSecond.load("/web-test/context-menu.swf");
         return meterSecond.performanceMeter && !meterSecond.shadowRoot.querySelector(".meter").hidden;
       })()`,
         ),
@@ -1982,8 +2056,9 @@ check(
     } finally {
       await call(
         evaluate,
-        `(() => {
+        `(async () => {
         localStorage.removeItem("swf2es.performanceMeter");
+        (await import("@swf2es/web")).configure({ performanceMeter: undefined });
         for (const p of [window.meterPlayer, window.meterSecond]) { p?.destroy(); p?.remove(); }
         return true;
       })()`,

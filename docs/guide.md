@@ -175,13 +175,17 @@ The player's context menu has a "Show performance" item, just above
 corner. It shows the SWF's frames a second against its frame rate, the
 player's ms in a frame (median and worst over the last second), draw
 calls, the JS heap where the browser reports it, and the WebAssembly
-memories. The viewer's choice is kept in localStorage for every element of
-the origin, and the meter is off by default. `performancemeter="false"`
+memories. Choosing the item is the viewer's choice and is kept in
+localStorage for every element of the origin; each element applies it as
+its SWF starts, and the meter is off by default. `performancemeter="false"`
 on an element, or `configure({ performanceMeter: false })` for all of
-them, leaves the item out and ignores the kept choice. A script can still
-show or hide the meter with `element.performanceMeter = true` or `false`,
-which is kept like the menu's choice, and the element fires
-`performancemeterchange` (`event.detail.shown`) either way. While hidden
+them, leaves the item out and ignores the kept choice, hiding a meter it
+showed; removing the attribute applies the choice again. A script can
+show or hide the meter with `element.performanceMeter = true` or `false`
+whatever the item, for the page alone: it keeps nothing, so a page that
+wants its own control remembered (the play page's Performance box)
+writes the same key, `swf2es.performanceMeter` set to `"1"`. The element
+fires `performancemeterchange` (`event.detail.shown`) either way. While hidden
 it costs nothing: it hears no frames, runs no timer and leaves the WebGL
 context alone. While shown, it counts draw calls by wrapping the
 context's draw functions. A page can style it with the custom properties

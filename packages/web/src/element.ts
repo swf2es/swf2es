@@ -181,8 +181,8 @@ export class Swf2esPlayerElement extends ElementBase {
   /** The performance meter, made the first time it shows. */
   #meter: PerformanceMeter | null = null;
   #meterShown = false;
-  /** Whether the viewer's kept choice has been read, once, as the element is first connected. */
-  #meterRead = false;
+  /** Whether the meter shows by the viewer's choice, the menu's or the one kept, not a script's. */
+  #meterChosen = false;
   /** The page's frame listener and the meter's together, made once both listen. */
   #bothListeners: FrameListener | null = null;
 
@@ -255,32 +255,49 @@ export class Swf2esPlayerElement extends ElementBase {
   /**
    * Whether the performance meter shows over the player: fps against the
    * SWF's rate, the player's ms in a frame, draw calls, the JS heap and the
-   * WebAssembly memories. Off by default; the context menu's "Show
-   * performance" turns it on, as setting this does, and either is kept for
-   * the viewer, for every element of the origin, in localStorage. The
-   * element fires `performancemeterchange` as it shows or hides.
+   * WebAssembly memories. Off by default. The context menu's "Show
+   * performance" turns it on and keeps the viewer's choice, for every
+   * element of the origin, in localStorage; setting this shows or hides it
+   * for the page alone, keeping nothing. The element fires
+   * `performancemeterchange` as it shows or hides.
    */
   get performanceMeter(): boolean {
     return this.#meterShown;
   }
 
   set performanceMeter(on: boolean) {
-    this.#showMeter(Boolean(on), true);
+    this.#meterChosen = false;
+    this.#showMeter(Boolean(on));
   }
 
-  /** The meter shown or hidden, and the viewer's choice kept where `keep`. */
-  #showMeter(on: boolean, keep: boolean): void {
-    if (keep) {
-      storeMeter(on);
+  /**
+   * The viewer's kept choice applied where the menu offers the meter, as a
+   * SWF starts and as the offer changes: read then, not as the element is
+   * connected, so that a page's configure() after its markup holds. Not
+   * offered, a meter the viewer's choice showed goes; a script's stays.
+   */
+  #applyChoice(): void {
+    if (this.#meterOffered()) {
+      if (!this.#meterShown && storedMeter()) {
+        this.#meterChosen = true;
+        this.#showMeter(true);
+      }
+    } else if (this.#meterChosen && this.#meterShown) {
+      this.#meterChosen = false;
+      this.#showMeter(false);
     }
+  }
 
-    if (on === this.#meterShown || !this.#box.parentNode) {
+  /** The meter shown or hidden. */
+  #showMeter(on: boolean): void {
+    const parent = this.#box.parentNode;
+    if (on === this.#meterShown || !parent) {
       return;
     }
 
     this.#meterShown = on;
     if (on) {
-      this.#meter ??= new PerformanceMeter(this.#box.parentNode, () => this.wasmMemory);
+      this.#meter ??= new PerformanceMeter(parent, () => this.wasmMemory);
       const playback = this.#session?.playback;
       this.#meter.attach(playback?.gl ?? null, !!playback);
     }
@@ -346,14 +363,6 @@ export class Swf2esPlayerElement extends ElementBase {
       setAttribute(this, "tabindex", "0");
     }
 
-    // As the viewer last left it, where the menu offers it.
-    if (!this.#meterRead) {
-      this.#meterRead = true;
-      if (this.#meterOffered() && storedMeter()) {
-        this.#showMeter(true, false);
-      }
-    }
-
     const src = attribute(this, "src");
     if (src && !this.#session) {
       void this.#load(src);
@@ -403,12 +412,10 @@ export class Swf2esPlayerElement extends ElementBase {
       return;
     }
 
-    // Taken from the viewer, the meter they turned on goes too, their choice kept for elsewhere.
+    // Taken from the viewer, the meter they turned on goes too, their choice kept for elsewhere;
+    // given back, it shows again.
     if (name === "performancemeter") {
-      if (!this.#meterOffered()) {
-        this.#showMeter(false, false);
-      }
-
+      this.#applyChoice();
       return;
     }
 
@@ -674,7 +681,13 @@ export class Swf2esPlayerElement extends ElementBase {
               {
                 caption: this.#meterShown ? "Hide performance" : "Show performance",
                 enabled: true,
-                select: () => this.#showMeter(!this.#meterShown, true),
+                select: () => {
+                  // The viewer's own choice, kept for the next time.
+                  const on = !this.#meterShown;
+                  storeMeter(on);
+                  this.#meterChosen = on;
+                  this.#showMeter(on);
+                },
               },
             ]
           : [];
@@ -696,6 +709,8 @@ export class Swf2esPlayerElement extends ElementBase {
       if (this.#meterShown) {
         this.#meter?.attach(playback.gl, true);
       }
+
+      this.#applyChoice();
       // The workers started ahead, loaded before a script may wait for one;
       // a script that never says it loaded does not keep the SWF from playing.
       if (session.workers) {

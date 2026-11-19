@@ -399,6 +399,72 @@ async function frameStats() {
   };
 }
 
+/**
+ * The scripted SWF's frame listener and its performance meter, one set and
+ * unset with the other on, both ways round: for each step, the calls the
+ * listener heard in it and the meter's fps after it; then the clock's reads
+ * an animation frame with neither, with the meter, and with neither again,
+ * as a listener costs the loop one read.
+ */
+async function meterWithListener() {
+  // A player of its own: the scripted SWF's is destroyed by the time this runs.
+  const movie = await newPlayer();
+  movie.setAttribute("src", "/web-test/embed.swf");
+  movie.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  document.body.append(movie);
+  await movie.ready;
+  let heard = 0;
+  const listener = () => {
+    heard++;
+  };
+  const fps = () => movie.shadowRoot?.querySelector("[data-figure=fps]")?.textContent ?? "";
+  const steps: [string, number, string][] = [];
+  const step = async (label: string) => {
+    const before = heard;
+    await new Promise((done) => setTimeout(done, 1300));
+    steps.push([label, heard - before, fps()]);
+  };
+  const now = performance.now;
+  let reads = 0;
+  const readsPerFrame = async () => {
+    performance.now = () => {
+      reads++;
+      return now.call(performance);
+    };
+    try {
+      await frames(1);
+      reads = 0;
+      await frames(30);
+      return reads / 30;
+    } finally {
+      performance.now = now;
+    }
+  };
+  try {
+    movie.frameListener = listener;
+    await step("listener");
+    movie.performanceMeter = true;
+    await step("both");
+    movie.frameListener = null;
+    await step("meter");
+    movie.frameListener = listener;
+    await step("both again");
+    movie.performanceMeter = false;
+    await step("listener again");
+    movie.frameListener = null;
+
+    const unheard = await readsPerFrame();
+    movie.performanceMeter = true;
+    const metered = await readsPerFrame();
+    movie.performanceMeter = false;
+    const unheardAgain = await readsPerFrame();
+    return { steps, reads: [unheard, metered, unheardAgain] };
+  } finally {
+    movie.destroy();
+    movie.remove();
+  }
+}
+
 /** Destroy the scripted SWF: its callbacks leave the element, and its socket and audio close. */
 async function destroyMovie() {
   const movie = element("movie");
@@ -1294,6 +1360,7 @@ Object.assign(globalThis, {
   destroyMovie,
   playsUnframed,
   frameStats,
+  meterWithListener,
   resize,
   requality,
   embedderFetch,
