@@ -34,7 +34,7 @@ export interface GeometryData {
   colors: Uint32Array;
   /**
    * A mesh's (MESH) are its u and v from 0 to 1, which its program reads as
-   * they are; a vertex' u of TARGET_TEXEL samples the target's pixel.
+   * they are; a vertex' u of TARGET_TEXEL samples the stage's pixel.
    */
   texels?: Float32Array;
   /** A mesh's depth at each vertex, its t, in place of its colour. */
