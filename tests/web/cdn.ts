@@ -188,12 +188,12 @@ async function play(
 ): Promise<{ traces: string[]; errors: string[] }> {
   const traces: string[] = [];
   const errors: string[] = [];
-  // Only the fresh document's: the one before it, which withPage loaded and may still be starting
-  // its SWFs on a busy machine, traced into these too until the navigation took it away, its
-  // lines twice over with the fresh one's.
+  // Only the fresh document's traces: the one before it, which withPage loaded and may still be
+  // starting its SWFs on a busy machine, traced into these too until the navigation took it away,
+  // its lines twice over with the fresh one's. Errors are kept, so that one the navigation itself
+  // raised before the fresh document began is still reported.
   listen("Runtime.executionContextsCleared", () => {
     traces.length = 0;
-    errors.length = 0;
   });
   listen("Runtime.consoleAPICalled", (params) => {
     const args = params.args as { value?: unknown; description?: string }[];
