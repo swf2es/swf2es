@@ -183,6 +183,8 @@ export async function serve(
 
         response.writeHead(200, {
           "content-type": types[extname(file)] ?? "application/octet-stream",
+          // As a static server sends it: a load's bytesTotal is what it tells.
+          "content-length": Buffer.byteLength(body),
           ...isolation,
           // The worker script with CORS, as a CDN serves it, for a page of another origin.
           ...(prefix === "/player-hosts/" ? { "access-control-allow-origin": "*" } : {}),

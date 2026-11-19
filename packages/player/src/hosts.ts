@@ -406,6 +406,29 @@ export interface FetchRequest {
   errorBody?: boolean;
 }
 
+/**
+ * What a host that reads a response's body as it comes tells of it, before
+ * the FetchResult that has all of it: `open` once, as the head comes, with
+ * what the result will have but its bytes, and the length its headers tell
+ * (0 where they tell none, or where the body comes decoded from another
+ * length); then `data` for each piece of the body in order, which together
+ * are the result's bytes. A host tells nothing of a response whose body it
+ * does not read. Flash told a load's progress at each read from the
+ * network, and so do the loads here; a host that tells none of it has the
+ * body told as come at once.
+ */
+export interface FetchProgress {
+  open(head: Omit<FetchResult, "bytes">, total: number): void;
+  data(chunk: Uint8Array): void;
+}
+
+/** The host's fetch of what a SWF loads, `progress` told of the response as it comes where given. */
+export type FetchHost = (
+  request: FetchRequest,
+  signal: AbortSignal,
+  progress?: FetchProgress,
+) => Promise<FetchResult>;
+
 /** A TCP connection supplied by the embedding host. */
 export interface SocketTransport {
   send(bytes: Uint8Array): void;

@@ -25,10 +25,13 @@ import {
   airLibrary,
   Container,
   type DisplayObject,
+  type FetchHost,
+  type FetchProgress,
   type FetchRequest,
   type FetchResult,
   type ModuleCache,
   Player,
+  responseBytes,
   Scripting,
   type SocketHost,
 } from "@swf2es/player";
@@ -192,8 +195,8 @@ function testFetch(
   trace: string[],
   logFetch: boolean,
   later = false,
-): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
-  return (request, signal) => {
+): FetchHost {
+  return (request, signal, progress) => {
     if (logFetch) {
       if (later) {
         queueMicrotask(() => logRequest(request, swfUrl, trace));
@@ -205,21 +208,25 @@ function testFetch(
     const served = new URL(request.url);
     if (swfUrl && served.host === "localhost:8000") {
       const local = new URL(`localhost${served.pathname}`, swfUrl).href;
-      return pageFetch({ ...request, url: local }, signal);
+      return pageFetch({ ...request, url: local }, signal, progress);
     }
 
     // What an AVM1 SWF asks of the disk's root, where Flash played it, is served beside it.
     if (swfUrl && served.protocol === "file:") {
       const local = new URL(served.pathname.slice(1) + served.search, swfUrl).href;
-      return pageFetch({ ...request, url: local }, signal);
+      return pageFetch({ ...request, url: local }, signal, progress);
     }
 
-    return pageFetch(request, signal);
+    return pageFetch(request, signal, progress);
   };
 }
 
 /** The page's fetch, a test's files served from the corpus as Flash loaded them from disk. */
-async function pageFetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
+async function pageFetch(
+  request: FetchRequest,
+  signal: AbortSignal,
+  progress?: FetchProgress,
+): Promise<FetchResult> {
   const response = await fetch(request.url, {
     signal,
     method: request.method,
@@ -233,12 +240,8 @@ async function pageFetch(request: FetchRequest, signal: AbortSignal): Promise<Fe
 
   // The corpus's files are served over HTTP here, but Flash loaded them from disk.
   const local = new URL(request.url).pathname.startsWith("/corpus/");
-  return {
-    bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
-    status: local ? 0 : response.status,
-    headers: local ? [] : headers,
-    local,
-  };
+  const head = { status: local ? 0 : response.status, headers: local ? [] : headers, local };
+  return { ...head, bytes: response.ok ? await responseBytes(response, head, progress) : null };
 }
 
 /** What a socket.json step does: Ruffle's ruffle_socket_format::SocketEvent. */

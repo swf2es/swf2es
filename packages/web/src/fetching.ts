@@ -1,6 +1,12 @@
 // The fetches of an element's load: the SWF itself, and what its SWFs load,
 // through an AIR application's files, the embedder's fetch or the browser's.
-import type { FetchRequest, FetchResult } from "@swf2es/player";
+import {
+  type FetchHost,
+  type FetchProgress,
+  type FetchRequest,
+  type FetchResult,
+  responseBytes,
+} from "@swf2es/player";
 import { configuration } from "./config.js";
 import type { Session } from "./element.js";
 
@@ -35,11 +41,8 @@ export async function fetchMovie(
  * embedder's fetch or the browser's; `offline` (allowNetworking "none"),
  * nothing past the application's own files, which are no network.
  */
-export function fetchFor(
-  session: Session,
-  offline: boolean,
-): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
-  const fetchOf: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> = offline
+export function fetchFor(session: Session, offline: boolean): FetchHost {
+  const fetchOf: FetchHost = offline
     ? () => Promise.reject(new Error("allowNetworking is none"))
     : (configuration().fetch ?? browserFetch);
   const app = session.air?.app;
@@ -47,23 +50,30 @@ export function fetchFor(
     return fetchOf;
   }
 
-  return (request, signal) => {
+  return (request, signal, progress) => {
     const local = app.fetch(request, session.air?.files);
     if (!local) {
-      return fetchOf(request, signal);
+      return fetchOf(request, signal, progress);
     }
 
     // A file the application does not hold, from the directory it came from: one the server
     // has none of is a file that is not there, not its error's body.
     const remote = local.bytes ? null : app.remote(request.url);
     return remote
-      ? fetchOf({ ...request, url: remote, errorBody: false }, signal)
+      ? fetchOf({ ...request, url: remote, errorBody: false }, signal, progress)
       : Promise.resolve(local);
   };
 }
 
-/** The host's fetch for what a SWF loads: the browser's, its status and headers as they come. */
-async function browserFetch(request: FetchRequest, signal: AbortSignal): Promise<FetchResult> {
+/**
+ * The host's fetch for what a SWF loads: the browser's, its status and
+ * headers as they come, and its body told as it comes.
+ */
+async function browserFetch(
+  request: FetchRequest,
+  signal: AbortSignal,
+  progress?: FetchProgress,
+): Promise<FetchResult> {
   const response = await fetch(request.url, {
     signal,
     method: request.method,
@@ -77,11 +87,11 @@ async function browserFetch(request: FetchRequest, signal: AbortSignal): Promise
 
   // An error's body only where it is asked for, as an AIR application's URLLoader reads it.
   const read = response.ok || (!!request.errorBody && response.status >= 400);
-  return {
-    bytes: read ? new Uint8Array(await response.arrayBuffer()) : null,
+  const head = {
     status: response.status,
     headers,
     // Where a redirect took it: the SWF is judged and named by that.
     ...(response.redirected ? { url: response.url } : {}),
   };
+  return { ...head, bytes: read ? await responseBytes(response, head, progress) : null };
 }
