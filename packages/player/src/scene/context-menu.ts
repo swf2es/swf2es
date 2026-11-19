@@ -72,10 +72,17 @@ export function bindContextMenu(
       return;
     }
 
+    // The host's items and About, in a group of their own below the SWF's and Flash's.
+    const own = player.hostMenu?.() ?? [];
+    const group = items.length;
+    for (let i = 0; i < own.length; i++) {
+      items.push({ ...own[i], separatorBefore: i === 0 && group > 0 });
+    }
+
     items.push({
       caption: aboutCaption(player.build),
       enabled: true,
-      separatorBefore: items.length > 0,
+      separatorBefore: own.length === 0 && group > 0,
       select: () => window?.open("https://swf2es.github.io/swf2es/", "_blank", "noopener"),
     });
     present(items, keyboard, event.clientX, event.clientY);
