@@ -229,8 +229,9 @@ for (const lazy of [false, true]) {
         "one:press",
         "one:up",
         "one:dragOut",
-        "as3:overlay:mouseUp",
+        // The movie's release first, as the projector traced it (LoadedAvm1Picks).
         "one:outside",
+        "as3:overlay:mouseUp",
       ]);
       p.control("overlayOff");
       p.mouse("move", 300, 300);
