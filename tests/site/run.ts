@@ -540,22 +540,38 @@ async function check(): Promise<void> {
             const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').checked`;
             assert.equal(await value<boolean>(`!${meter}`), true);
             // Whether anything hears the player's frames, told by the clock: a listener costs the
-            // loop one more read of it a frame. Read over 30 animation frames.
+            // loop one more read of it a call. Counted outside the player's advance, whose reads
+            // follow the SWF's frames and how many fall in each call, which the page's pacing
+            // sways; around it the loop reads the clock a fixed few times a call.
             const readsPerFrame = async () =>
               await value<number>(`(async () => {
+                const player = document.getElementById('player').player;
                 const now = performance.now;
+                const advance = player.advance;
                 let reads = 0;
+                let inside = 0;
+                let calls = 0;
                 performance.now = () => (reads++, now.call(performance));
+                player.advance = function (dt, busy) {
+                  calls++;
+                  const before = reads;
+                  try {
+                    return advance.call(this, dt, busy);
+                  } finally {
+                    inside += reads - before;
+                  }
+                };
                 const frame = () => new Promise((done) => requestAnimationFrame(() => done()));
                 try {
                   await frame();
-                  reads = 0;
+                  reads = inside = calls = 0;
                   for (let i = 0; i < 30; i++) {
                     await frame();
                   }
-                  return reads / 30;
+                  return (reads - inside) / Math.max(1, calls);
                 } finally {
                   performance.now = now;
+                  delete player.advance;
                 }
               })()`);
             const unheard = await readsPerFrame();
@@ -625,7 +641,7 @@ async function check(): Promise<void> {
             const heard = await readsPerFrame();
             assert.ok(
               Math.abs(heard - unheard - 1) < 0.5,
-              `${unheard} clock reads a frame unheard, ${heard} with the meter`,
+              `${unheard} clock reads a call unheard, ${heard} with the meter`,
             );
             // Over the stage's corner, the pointer passing through it to the SWF.
             const meterBox = await value<{ inside: boolean; events: string }>(
@@ -663,7 +679,7 @@ async function check(): Promise<void> {
             const unheardAgain = await readsPerFrame();
             assert.ok(
               Math.abs(unheardAgain - unheard) < 0.5,
-              `${unheard} clock reads a frame before the meter, ${unheardAgain} after it`,
+              `${unheard} clock reads a call before the meter, ${unheardAgain} after it`,
             );
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
@@ -1285,6 +1301,12 @@ async function check(): Promise<void> {
           for (const text of thrown.splice(0)) {
             console.log(`  the page threw: ${text}`);
           }
+        } finally {
+          // Each check starts without the performance meter, which a failed one may have left on,
+          // kept for the next page too, over the stage's corner where others read pixels.
+          await evaluate(
+            "(localStorage.removeItem('swf2es.performanceMeter'), document.getElementById('player') && (document.getElementById('player').performanceMeter = false), true)",
+          ).catch(() => null);
         }
       }
 
