@@ -86,6 +86,15 @@ export const MERGED_LINE = 1024;
 export const TABLE_UNIT = MERGED_UNIT + 1;
 
 /**
+ * The bit of a fill's vSlot past its texture's slot (FILL_TEXTURES of them,
+ * in the bits below): its texel is the stage's pixel (TARGET_TEXEL).
+ */
+const STAGE_TEXEL = 16;
+if (FILL_TEXTURES >= STAGE_TEXEL) {
+  throw new Error("the fill textures' slots run into vSlot's stage texel bit");
+}
+
+/**
  * Places a vertex by its row's transform, on a quarter of a pixel of
  * Flash's (uUnit of them a stage pixel, from the stage's origin) where it
  * snaps (SNAP), then on the target by uView (scale and offset into clip
@@ -98,9 +107,6 @@ export const TABLE_UNIT = MERGED_UNIT + 1;
  * changes from frame to frame where the vertices need not; the atlas leaves
  * that attribute disabled and negative.
  */
-/** In a fill's vSlot past its texture's: its texel is the stage's pixel (TARGET_TEXEL). */
-const ON_TARGET = 16;
-
 export const fillVertex = (multi: boolean, merged = multi) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
 precision highp float;
@@ -134,11 +140,11 @@ void main(void) {
 
   gl_Position = vec4(p * uView.xy + uView.zw, 0.0, 1.0);
   vColor = aColor;
-  // A texel of TARGET_TEXEL or below samples the stage's pixel the vertex lands on, which the
-  // fragment reads at its centre (ON_TARGET, 16 in vSlot).
+  // A texel of TARGET_TEXEL or below samples the stage's pixel under the fragment, which the
+  // fragment finds from its place (STAGE_TEXEL in vSlot).
   bool onTarget = aTexel.x <= ${TARGET_TEXEL / 2};
   vTexel = onTarget ? p : aTexel;
-  vSlot |= onTarget ? ${ON_TARGET} : 0;
+  vSlot |= onTarget ? ${STAGE_TEXEL} : 0;
 }
 `;
 
@@ -171,15 +177,21 @@ flat in vec4 vMul;
 flat in vec4 vAdd;
 flat in int vSlot;
 uniform sampler2D uTextures[${FILL_TEXTURES}];
+uniform vec4 uStage;
 out vec4 finalColor;
 
 vec4 texel(vec2 at) {
   vec4 t = vec4(0.0);
-  if (vSlot >= ${ON_TARGET}) {
-    at = floor(at) + 0.5;
+  if (vSlot >= ${STAGE_TEXEL}) {
+    // The stage's pixel under the pixel's centre, from the fragment's place, not the position
+    // interpolated across the triangle: at a scale of a half, a quarter or a tenth that centre
+    // falls on a whole stage pixel, which interpolation leaves a hair either side of, a texel or
+    // its neighbour as each triangle rounds. A sixty-fourth on keeps it off that edge.
+    vec2 f = vec2(gl_FragCoord.x + uStage.x, uStage.y + uStage.z * gl_FragCoord.y) * uStage.w;
+    at = floor(f + 1.0 / 64.0) + 0.5;
   }
 
-  switch (vSlot & ${ON_TARGET - 1}) {
+  switch (vSlot & ${STAGE_TEXEL - 1}) {
 ${slotTexel}
   }
 
@@ -188,7 +200,7 @@ ${slotTexel}
 
 void main(void) {
   vec4 straight = vColor;
-  if ((vSlot & ${ON_TARGET - 1}) != 0) {
+  if ((vSlot & ${STAGE_TEXEL - 1}) != 0) {
     vec4 t = texel(vTexel);
     if (t.a == 0.0) {
       finalColor = vec4(0.0);
@@ -631,6 +643,7 @@ flat in vec4 vMul;
 flat in vec4 vAdd;
 flat in int vSlot;
 uniform sampler2D uTextures[${FILL_TEXTURES}];
+uniform vec4 uStage;
 uniform sampler2D uBack;
 uniform highp sampler2D uRows;
 uniform int uLayerRow;
@@ -641,11 +654,16 @@ out vec4 finalColor;
 ${BLEND_HELPERS}
 vec4 texel(vec2 at) {
   vec4 t = vec4(0.0);
-  if (vSlot >= ${ON_TARGET}) {
-    at = floor(at) + 0.5;
+  if (vSlot >= ${STAGE_TEXEL}) {
+    // The stage's pixel under the pixel's centre, from the fragment's place, not the position
+    // interpolated across the triangle: at a scale of a half, a quarter or a tenth that centre
+    // falls on a whole stage pixel, which interpolation leaves a hair either side of, a texel or
+    // its neighbour as each triangle rounds. A sixty-fourth on keeps it off that edge.
+    vec2 f = vec2(gl_FragCoord.x + uStage.x, uStage.y + uStage.z * gl_FragCoord.y) * uStage.w;
+    at = floor(f + 1.0 / 64.0) + 0.5;
   }
 
-  switch (vSlot & ${ON_TARGET - 1}) {
+  switch (vSlot & ${STAGE_TEXEL - 1}) {
 ${slotTexel}
   }
 
@@ -656,7 +674,7 @@ void main(void) {
   vec4 front = vec4(0.0);
   vec4 fill = vColor;
   bool clear = false;
-  if ((vSlot & ${ON_TARGET - 1}) != 0) {
+  if ((vSlot & ${STAGE_TEXEL - 1}) != 0) {
     vec4 t = texel(vTexel);
     clear = t.a == 0.0;
     fill = clear ? fill : vec4(t.rgb / t.a * vColor.rgb, t.a * vColor.a);

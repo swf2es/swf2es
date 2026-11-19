@@ -34,7 +34,8 @@ export interface GeometryData {
   colors: Uint32Array;
   /**
    * A mesh's (MESH) are its u and v from 0 to 1, which its program reads as
-   * they are; a vertex' u of TARGET_TEXEL samples the stage's pixel.
+   * they are. A fill's vertex whose u is TARGET_TEXEL samples the stage's
+   * pixel, which no mesh's does.
    */
   texels?: Float32Array;
   /** A mesh's depth at each vertex, its t, in place of its colour. */
@@ -74,11 +75,21 @@ export class Geometries extends Registry {
   added: number[] = [];
   /** Changed in place since the backend last took them (update). */
   updated: number[] = [];
+  /**
+   * Whether any geometry added has sampled the stage's pixel (TARGET_TEXEL),
+   * which the fill programs are told where the stage lies for only then.
+   */
+  stageTexels = false;
 
   add(data: GeometryData): GeometryHandle {
     const handle = this.hold(IDLE_FRAMES);
     const id = handle.id;
     this.data[id] = data;
+    const texels = data.texels;
+    if (texels && texels.length > 0 && texels[0] <= TARGET_TEXEL / 2) {
+      this.stageTexels = true;
+    }
+
     this.added.push(id);
     this.measure(id);
     return handle;
