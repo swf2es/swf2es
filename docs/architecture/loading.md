@@ -154,8 +154,22 @@ services. A movie from bytes runs its first-frame script after the
 following frame's AS3 ENTER_FRAME; a URL-loaded movie runs it in the load
 frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
-and script-driven playback run with the child. Unloading destroys the
-child VM and its connections without closing the parent's audio device.
+and script-driven playback run with the child, under the parent's mixer:
+its global `Sound` reads and sets `SoundMixer.soundTransform`, either
+side's stop stops both, and they share the 32 channels. It has the
+parent's stage, `Stage`'s scale mode, align and menu, `onResize` after
+`RESIZE` in noScale, and `_quality`; one from bytes has the loading SWF's
+URL as its `_url`, for its SharedObjects and relative loads. Unloading
+lets the child VM go at the frame's end, as Flash Player 32 does, its
+LocalConnections' names and its sounds' channels taken until then: one
+unloaded in `ENTER_FRAME`, before its AVM1 has played, still plays that
+frame unless an interval or a timeout of its is to come, its unload
+handlers never running; one unloaded after its frame runs its clips'
+`onUnload`, children first, as the frame ends, or, between frames, as the
+next starts. `unloadAndStop` stops its sounds and timers at once. Flash
+keeps the intervals and Key and Mouse listeners of a movie `unload()`
+left without an unload handler running until it collects the movie;
+these stop here. The parent's audio device stays open.
 Keys and focus reach these loaded movies as Flash Player 32 sends them
 (input.md, "Keyboard and focus"). Wheel routing into them, and
 `AVM1Movie`'s `call` and `addCallback`, remain incomplete; those methods

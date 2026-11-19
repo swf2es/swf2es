@@ -107,6 +107,12 @@ const features: { name: string; status: Status; note: string; href: string }[] =
     href: source("docs/architecture/loading.md"),
   },
   {
+    name: "AS3 and AVM1 together",
+    status: "partial",
+    note: "AVM1 SWFs an AS3 Loader loads share the AS3 player's stage (Stage's scale mode, align, menu and onResize), quality and sound mixer (SoundMixer's transform and stopAll, the global Sound and the 32 channels), and go on unload and unloadAndStop when Flash Player 32 lets them go. Flash keeps an unloaded movie's intervals and listeners running until it collects the movie; they stop here.",
+    href: source("docs/architecture/loading.md"),
+  },
+  {
     name: "Mouse, keyboard and touch",
     status: "partial",
     note: "Gesture events are not supported yet: touches go to the mouse.",
