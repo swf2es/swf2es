@@ -37,24 +37,22 @@ export interface TabHost {
   buttonMode(clip: MovieClip): boolean;
 }
 
-interface Tabbed {
+/** An object Tab may focus, and its tabIndex, if it has one. */
+export interface Tabbed {
   d: DisplayObject;
   index: number | undefined;
 }
 
-/** The objects Tab moves the focus through, in order, from `root`, on `stage`. */
-function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
+/** The objects Tab may focus in `root`, as the display list is walked. */
+function tabbables(root: MovieClip, host: TabHost): Tabbed[] {
   const found: Tabbed[] = [];
-  let custom = false;
   const walk = (d: DisplayObject) => {
     if (!d.visible) {
       return;
     }
 
     if (d !== root && tabbable(d, host)) {
-      const index = host.tabIndex(d);
-      custom ||= index !== undefined;
-      found.push({ d, index });
+      found.push({ d, index: host.tabIndex(d) });
     }
 
     // A button's states are no part of the order.
@@ -65,8 +63,13 @@ function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObje
     }
   };
   walk(root);
+  return found;
+}
 
-  if (custom) {
+/** The objects Tab moves the focus through, in order, from `root`, on `stage`. */
+function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
+  const found = tabbables(root, host);
+  if (found.some((t) => t.index !== undefined)) {
     // Array.prototype.sort is stable: equal indices keep the walk's order.
     return found
       .filter((t) => t.index !== undefined)
@@ -200,6 +203,7 @@ export class FocusTracker implements TabHost {
     }
 
     this.selectFocused(byPointer);
+    this.movie.onFocus?.(d);
   }
 
   /**
@@ -297,6 +301,12 @@ export class FocusTracker implements TabHost {
         ? avm1.toNumber(value, this.movie.version) | 0
         : -2147483648;
     return index === -1 ? undefined : index;
+  }
+
+  /** The objects Tab may focus in the movie, for an AS3 host's tab order, which takes them in. */
+  tabbables(): Tabbed[] {
+    const root = this.movie.root;
+    return root instanceof MovieClip && !this.movie.halted ? tabbables(root, this) : [];
   }
 
   /** Tab, or Shift+Tab: the focus to the next object in the tab order, or the one before, round. */

@@ -1737,8 +1737,7 @@ AVM1, so nothing is expected from it.
 - **AS3 and AVM1 together.** `AVM1Movie.call` and `addCallback` throw
   #2014 (the corpus's `avm2/avm1movie_addcallback_call`; the
   `avm1-movie` case is to be recorded again with adl once they work).
-  The keyboard and the focus do not reach an AVM1 movie AS3 loaded, only
-  the pointer does. An AS3 SWF that AS2 loads runs none of its code.
+  An AS3 SWF that AS2 loads runs none of its code.
 - **Modules.** The player compiles AVM1 itself: the IndexedDB module
   cache and precompiled modules do not take AVM1 modules, though
   `swf2es compile` writes them.

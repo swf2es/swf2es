@@ -175,7 +175,9 @@ export class Avm1Input implements InputState {
    * listeners' onKeyDown or onKeyUp; then, for a press of a key that
    * `press` is a keyPress of, the first button or clip in the order they
    * are drawn whose keyPress it is runs its actions for it. The queue runs
-   * once. Whether a keyPress ran.
+   * once. Whether a keyPress ran. Without `tabs`, as for a movie an AS3
+   * host holds, whose Tab moves the focus through the host's order, Tab
+   * moves nothing here.
    */
   key(
     down: boolean,
@@ -184,6 +186,7 @@ export class Avm1Input implements InputState {
     press: number,
     typed = 0,
     shift = false,
+    tabs = true,
   ): boolean {
     if (this.movie.halted || !this.movie.loaded) {
       return false;
@@ -230,7 +233,7 @@ export class Avm1Input implements InputState {
       if (down && !pressed && keyCode === 9) {
         this.movie.queue.run();
         // A movie with nothing to tab to leaves Tab to the page.
-        used = this.movie.focusTracker.tab(shift);
+        used = tabs && this.movie.focusTracker.tab(shift);
       } else if (down && !pressed && (keyCode === 13 || typed === 32)) {
         // A press it made keeps the page from acting on the key too: Space would scroll it.
         used = this.movie.focusTracker.activate();

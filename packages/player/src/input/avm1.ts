@@ -1,12 +1,22 @@
-// Mouse input shared by an AS3 host and the AVM1 movies its Loaders hold.
+// Mouse and keyboard input shared by an AS3 host and the AVM1 movies its
+// Loaders hold. The player has one focus, as Flash Player 32 keeps it: what
+// a movie focuses takes it from the host's objects and the other movies,
+// and an object of the host's that takes it takes it from the movies. Every
+// key goes to each movie's Key listeners and clip events; the movie with
+// the focus alone types or presses with it, and Tab moves through one order
+// of the host's objects and the movies' (input/keyboard.ts).
 import type { Avm1 } from "../avm1/avm1.js";
+import type { Tabbed } from "../avm1/focus.js";
+import { Avm1Keyboard } from "../avm1/keyboard.js";
 import { Avm1Pointer } from "../avm1/pointer.js";
 import type { DisplayObject, MovieClip } from "../display/display.js";
 import type { Scripting } from "../scripting.js";
+import { type KeyState, setFocus } from "./keyboard.js";
 import type { Cursor, PointerState } from "./pointer.js";
 
 export class LoadedAvm1Input {
   private readonly movies = new Map<MovieClip, Avm1Pointer>();
+  private readonly keyboards = new Map<MovieClip, { vm: Avm1; keyboard: Avm1Keyboard }>();
   private over: Avm1Pointer | null = null;
 
   constructor(private readonly s: Scripting) {}
@@ -20,6 +30,20 @@ export class LoadedAvm1Input {
     const pointer = new Avm1Pointer(stage, vm, root);
     pointer.onCursor = () => this.s.pointer?.updateCursor();
     this.movies.set(root, pointer);
+    this.keyboards.set(root, { vm, keyboard: new Avm1Keyboard(vm) });
+    vm.onFocus = (d) => {
+      if (d === null) {
+        return;
+      }
+
+      for (const [other, movie] of this.keyboards) {
+        if (other !== root && movie.vm.focused !== null) {
+          movie.vm.focus(null);
+        }
+      }
+
+      setFocus(this.s, null);
+    };
   }
 
   remove(root: MovieClip): boolean {
@@ -28,8 +52,60 @@ export class LoadedAvm1Input {
       this.over = null;
     }
 
+    const movie = this.keyboards.get(root);
+    if (movie) {
+      movie.vm.onFocus = null;
+    }
+
     this.movies.delete(root);
+    this.keyboards.delete(root);
     return this.movies.size === 0;
+  }
+
+  /** The keyboard of the movie whose focus is on something, which no object of the host's has then. */
+  focused(): Avm1Keyboard | null {
+    for (const { keyboard } of this.keyboards.values()) {
+      if (keyboard.focused !== null) {
+        return keyboard;
+      }
+    }
+
+    return null;
+  }
+
+  /** The objects Tab may focus in the movie `root` is the root of, or null for no such movie. */
+  tabbables(root: DisplayObject): Tabbed[] | null {
+    return this.keyboards.get(root as MovieClip)?.vm.focusTracker.tabbables() ?? null;
+  }
+
+  /** Tab's move of the focus to `d`, in the movie `root` is the root of. */
+  tabTo(root: DisplayObject, d: DisplayObject): void {
+    this.keyboards.get(root as MovieClip)?.vm.focus(d);
+  }
+
+  /** An object of the host's took the focus: no movie keeps it. */
+  blur(): void {
+    for (const { vm } of [...this.keyboards.values()]) {
+      if (vm.focused !== null) {
+        vm.focus(null);
+      }
+    }
+  }
+
+  /**
+   * A key to each movie, as `edits` lets its host type (KeyboardInput's
+   * handle), Tab moving nothing: whether a movie used it.
+   */
+  key(type: "down" | "up", k: KeyState, edits: boolean): boolean {
+    let used = false;
+    // A listener may unload a movie, or load one, as the key goes round.
+    for (const { keyboard } of [...this.keyboards.values()]) {
+      if (keyboard.handle(type, k, edits, true)) {
+        used = true;
+      }
+    }
+
+    return used;
   }
 
   /** A stable callback for the AS3 pick: the AVM1Movie stands in for its interactive children. */

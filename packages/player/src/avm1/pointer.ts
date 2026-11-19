@@ -241,7 +241,10 @@ export class Avm1Pointer implements Pointer {
       const field = this.hover instanceof TextObject ? this.hover : null;
       // Where the press is in the text, as the field was scrolled before it.
       const position = field ? this.textPosition(field, p.x, p.y) : 0;
-      if (field || this.avm1.focused instanceof TextObject) {
+      // A press on a button or clip of a movie an AS3 Loader holds leaves the focus where it is,
+      // as Flash Player 32 does, which takes it from a field of a movie of its own.
+      const kept = this.hover !== null && field === null && this.avm1.hosted;
+      if (!kept && (field || this.avm1.focused instanceof TextObject)) {
         this.avm1.focus(field, true);
       }
 

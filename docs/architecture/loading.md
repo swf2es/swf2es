@@ -156,8 +156,10 @@ frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
 and script-driven playback run with the child. Unloading destroys the
 child VM and its connections without closing the parent's audio device.
-Keyboard and wheel routing into these loaded movies, and `AVM1Movie`'s
-`call` and `addCallback`, remain incomplete; those methods still throw #2014.
+Keys and focus reach these loaded movies as Flash Player 32 sends them
+(input.md, "Keyboard and focus"). Wheel routing into them, and
+`AVM1Movie`'s `call` and `addCallback`, remain incomplete; those methods
+still throw #2014.
 
 `LocalConnection` uses one native broker (`player/src/localconnection.ts`)
 shared by a player's AS3 and loaded AVM1 movies. A standalone AVM1 player

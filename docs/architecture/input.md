@@ -462,6 +462,31 @@ field that takes no typing moves its caret and selection with the same
 keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
 this is recorded against Flash; there is no IME.
 
+The AVM1 movies an AS3 SWF's Loaders hold share the player's one focus
+(`input/avm1.ts`), as Flash Player 32's Windows projector, typed into
+with real keys, keeps it (`tests/unit/player/input/avm1-keys.test.ts`).
+Each movie focuses its fields and buttons itself, by a click or
+`Selection.setFocus`, and what it focuses takes the focus from AS3, with
+a `focusOut` naming nothing, and from the other movies; an AS3 object
+that takes it takes it from the movies, each field hearing `onKillFocus`
+with null. While a movie has the focus, AS3 hears no `KeyboardEvent` at
+all, not even on the stage: the movie's Key listeners and clip events
+hear the key, and its field types it. Otherwise the key goes to AS3 as
+above, and every movie's Key listeners hear it after AS3's `keyDown`
+listeners and before the field's `TextEvent`. A press on a movie's field
+focuses it, with no `mouseFocusChange`; one on a movie's button moves no
+focus at all, its field's nor AS3's, though what AS3 has focused hears a
+`mouseFocusChange` naming nothing (a movie's own button, where it is the
+main SWF, takes its field's focus away, as Flash Player does there too);
+one on a movie's drawn clip is one on its Loader, as AS3 has it, and one
+elsewhere takes a movie's field's focus away. Tab moves
+through one order of AS3's objects and the movies' (each in its movie's
+own terms, `avm1/focus.ts`), by tabIndex where any has one, else by
+place: from AS3 to a movie's field after a `keyFocusChange` naming
+nothing, then `focusOut`; from a movie's field with no `keyFocusChange`.
+How tabIndex values of the two kinds order among themselves is not
+measured.
+
 A field scrolls to keep its caret in view (`TextObject.scrollTo`) as
 `setSelection`, a key, a press or a drag moves the caret, and as a field
 takes the focus, as adl's does from a script (`text-input-scroll`): up or

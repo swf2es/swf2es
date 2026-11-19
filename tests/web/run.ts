@@ -48,6 +48,10 @@ const abcs = compileScripts(
     { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
     { name: "TextLifecycle", source: readFileSync(`${here}scripts/TextLifecycle.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
+    {
+      name: "LoadedAvm1Field",
+      source: readFileSync(`${here}scripts/LoadedAvm1Field.as`, "utf8"),
+    },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
     { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
@@ -407,6 +411,10 @@ writeFileSync(
       w.end(),
     ],
   }),
+);
+writeFileSync(
+  `${site}loaded-avm1-field.swf`,
+  bare(abcs.get("LoadedAvm1Field") as Uint8Array, 1, "LoadedAvm1Field", 160, 120),
 );
 writeFileSync(
   `${site}embed.swf`,
@@ -1236,6 +1244,55 @@ for (const [vm, src] of [
     },
   );
 }
+
+check(
+  "keys type into an AS2 input field of a movie an AS3 Loader holds, and nowhere once it lets go",
+  async (evaluate, send) => {
+    type State = { log: string[]; text: string };
+    const state = () => call<State>(evaluate, "imeState()");
+    const press = async (key: string, code: string, keyCode: number, text?: string) => {
+      await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key,
+        code,
+        windowsVirtualKeyCode: keyCode,
+        ...(text ? { text } : {}),
+      });
+      await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key,
+        code,
+        windowsVirtualKeyCode: keyCode,
+      });
+    };
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    const focused = await call(evaluate, `imePlayer("/web-test/loaded-avm1-field.swf")`);
+    try {
+      // The movie's own Selection.setFocus gave its field the focus: the player's textarea, where
+      // an IME types, took the page's.
+      assert.equal(focused, "TEXTAREA");
+      await press("a", "KeyA", 65, "a");
+      await press("b", "KeyB", 66, "b");
+      await press("Backspace", "Backspace", 8);
+      await press("c", "KeyC", 67, "c");
+      assert.deepEqual(await state(), {
+        log: ["change a", "change ab", "change a", "change ac"],
+        text: "ac",
+      });
+
+      // An IME's text, with no key.
+      await send("Input.insertText", { text: "仮名" });
+      assert.deepEqual(await state(), { log: ["change ac仮名"], text: "ac仮名" });
+
+      // The field's focus gone, the player itself has the page's focus, and keys type nothing.
+      assert.equal(await call(evaluate, "imeBlur()"), "HOST");
+      await press("x", "KeyX", 88, "x");
+      assert.deepEqual(await state(), { log: [], text: "ac仮名" });
+    } finally {
+      await call(evaluate, "imeDestroy()");
+    }
+  },
+);
 
 for (const [vm, src] of [
   ["AS3", "/web-test/clipboard.swf"],
