@@ -221,7 +221,11 @@ commands through parts of a file each, which it owns and makes again
 with the context:
 
 - **Programs** (`programs.ts`): the fill program (fills, bitmaps and
-  colour transforms, by row), drawTriangles' meshes (textured in
+  colour transforms, by row) and its variant for the rare fill that
+  samples the stage's pixel (`stageFillFragment`, each such fill drawn
+  alone, linked as one is first drawn: in the fill program that path,
+  never taken, made a frame of plain fills take Intel's GPUs over half
+  as long again), drawTriangles' meshes (textured in
   perspective, their bitmap read as adl reads it), the glyph program, the
   filter passes, the blend formulas, the 3D plane. A closed set, compiled
   once a context. The programs every frame draws with are linked as the
