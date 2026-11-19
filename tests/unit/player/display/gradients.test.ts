@@ -96,3 +96,19 @@ test("a radial gradient's centre is the first stop, a focal point off it the las
   const focal = radialPixels(colors, m, 0.5, 0, region, 20, 20);
   assert.equal(focal[10 * 20 + 15], 0xffffffff);
 });
+
+test("a radial gradient whose matrix collapses the plane is the colour at its centre throughout", () => {
+  const colors = ramp(stops([0, 0xff000000], [255, 0xffffffff]), false);
+  const region = { x: 0, y: 0, width: 20, height: 20 };
+  for (const m of [
+    { a: 0, b: 0, c: 0, d: 0, tx: 10, ty: 10 },
+    { a: 0.02, b: 0.01, c: 0.04, d: 0.02, tx: -300, ty: 0 },
+  ]) {
+    // The first stop, at the centre; seen from a focus at 0.5, the centre is a third of the way.
+    assert.deepEqual(new Set(radialPixels(colors, m, 0, 0, region, 20, 20)), new Set([colors[0]]));
+    assert.deepEqual(
+      new Set(radialPixels(colors, m, 0.5, 0, region, 20, 20)),
+      new Set([colors[85]]),
+    );
+  }
+});
