@@ -1,8 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GlState } from "../../../../packages/context3d/dist/device/state.js";
-import { Geometries, type GeometryData } from "../../../../packages/render/dist/geometry.js";
+import {
+  Geometries,
+  type GeometryData,
+  TARGET_TEXEL,
+} from "../../../../packages/render/dist/geometry.js";
 import { GeometryAtlas, type Place } from "../../../../packages/render/dist/webgl/atlas.js";
+import {
+  blendFillFragment,
+  fillFragment,
+  fillVertex,
+  stageFillFragment,
+} from "../../../../packages/render/dist/webgl/programs.js";
 
 const ARRAY_BUFFER = 0x8892;
 const ELEMENT_ARRAY_BUFFER = 0x8893;
@@ -361,4 +371,41 @@ test("random adds, removals and in-place updates keep every live shape whole and
       }
     }
   }
+});
+
+test("a fill sampling the stage's pixel anywhere is marked for the stage fill program, as it changes", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const plain = { ...shape(1, 4), texels: new Float32Array(8) };
+  // One fill of a part that samples the stage, after one that does not (samplesAlike).
+  const mixed = { ...shape(2, 4), texels: Float32Array.of(0, 0, 1, 1, TARGET_TEXEL, 0, 2, 2) };
+  const a = geometries.add(plain).id;
+  const b = geometries.add(mixed).id;
+  atlas.place(geometries);
+  assert.equal(atlas.places[a]?.stage, false);
+  assert.equal(atlas.places[b]?.stage, true);
+
+  plain.texels[6] = TARGET_TEXEL;
+  geometries.update(a);
+  mixed.texels[4] = 3;
+  geometries.update(b);
+  atlas.place(geometries);
+  assert.equal(atlas.places[a]?.stage, true);
+  assert.equal(atlas.places[b]?.stage, false);
+});
+
+test("only the stage fill program finds the stage's pixel, so the fill program's fragments never pay for it", () => {
+  for (const vertex of [fillVertex(true), fillVertex(false, true), fillVertex(false)]) {
+    assert.equal(vertex.includes(String(TARGET_TEXEL / 2)), false);
+  }
+
+  // The blend program reads what is below by gl_FragCoord, as it always did.
+  assert.equal(fillFragment.includes("gl_FragCoord"), false);
+  assert.equal(fillFragment.includes("uStage"), false);
+  assert.equal(blendFillFragment.includes("uStage"), false);
+
+  assert.equal(fillVertex(false, false, true).includes(String(TARGET_TEXEL / 2)), true);
+  assert.equal(stageFillFragment.includes("gl_FragCoord"), true);
 });
