@@ -995,6 +995,68 @@ check("destroy takes the callbacks off and closes the socket and the audio", asy
   assert.equal(r.counts.openAudio, before.openAudio - 1);
 });
 
+// Before the checks that count the compilers left, which then hold its AVM1 movies, which call
+// functions and load others, to letting theirs go: the last object a CallFunction found kept
+// its movie's compiler alive (releaseFound), as whatever AVM1 ran last before a count did.
+check(
+  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
+  async (evaluate) => {
+    const loads = async (
+      src: string,
+      attributes: Record<string, string>,
+      n: number,
+      page?: string,
+      suffix?: string,
+    ) =>
+      (
+        await call<string[]>(
+          evaluate,
+          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
+        )
+      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
+    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
+    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
+    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
+    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
+    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
+    // it came from, which its sibling's load follows.
+    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
+    assert.deepEqual(await avm1({}), pair("/web-test/"));
+    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
+    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
+    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
+    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
+    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
+    // A page URL's query and fragment are no directory.
+    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
+    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
+    // The page's choice for elements that make none, which the attribute overrides.
+    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
+  },
+);
+
+/** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
+async function ctrl(send: Send, letter: string, command?: string) {
+  const key = {
+    modifiers: 2,
+    key: letter,
+    code: `Key${letter.toUpperCase()}`,
+    windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
+  };
+  await send("Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    ...key,
+    ...(command ? { commands: [command] } : {}),
+  });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+}
+
 check(`${CHURN} elements made and destroyed leave nothing behind`, async (evaluate, send) => {
   const heap = async () => {
     await send("HeapProfiler.collectGarbage");
@@ -1057,67 +1119,6 @@ check(
     assert.equal(left.codegens, 2);
   },
 );
-
-// After the checks that count the compilers left: an AVM1 movie that loaded others kept its
-// compiler alive through the churn check's collection when this came before it, on dev too.
-check(
-  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
-  async (evaluate) => {
-    const loads = async (
-      src: string,
-      attributes: Record<string, string>,
-      n: number,
-      page?: string,
-      suffix?: string,
-    ) =>
-      (
-        await call<string[]>(
-          evaluate,
-          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
-        )
-      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
-    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
-      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
-    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
-      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
-    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
-    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
-    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
-    // it came from, which its sibling's load follows.
-    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
-    assert.deepEqual(await avm1({}), pair("/web-test/"));
-    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
-    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
-    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
-    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
-    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
-    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
-    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
-    // A page URL's query and fragment are no directory.
-    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
-    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
-    // The page's choice for elements that make none, which the attribute overrides.
-    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
-    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
-    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
-  },
-);
-
-/** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
-async function ctrl(send: Send, letter: string, command?: string) {
-  const key = {
-    modifiers: 2,
-    key: letter,
-    code: `Key${letter.toUpperCase()}`,
-    windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
-  };
-  await send("Input.dispatchKeyEvent", {
-    type: "rawKeyDown",
-    ...key,
-    ...(command ? { commands: [command] } : {}),
-  });
-  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
-}
 
 check(
   "Ctrl+C, X and V and a press use the clipboard, as Flash Player did",

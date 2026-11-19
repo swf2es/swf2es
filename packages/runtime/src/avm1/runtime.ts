@@ -57,6 +57,7 @@ import {
   foundLocal,
   foundOn,
   getVariable,
+  releaseFound,
   resolve,
   resolveCallable,
   SCOPE_Target,
@@ -575,6 +576,7 @@ function operations(version: number): Operations {
       // `this` is what had the name, a function's activation object too,
       // but in a SWF 5, which takes the target's clip for it (adl).
       const self = foundOn === undefined || (version < 6 && foundLocal) ? cx.clip : foundOn;
+      releaseFound();
       // `super(...)` called by name runs the class above's constructor, as CallMethod of it does.
       st.push(
         fn instanceof Avm1Super

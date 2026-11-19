@@ -167,6 +167,16 @@ export let foundOn: Value;
 /** Whether that was a function's activation object. */
 export let foundLocal = false;
 
+/**
+ * Let go of what `resolveCallable` found, once read: a module's variable
+ * kept the last object a CallFunction found, and so its clip, its movie
+ * and that movie's compiler, alive after the player was destroyed, till
+ * another movie's CallFunction found something else.
+ */
+export function releaseFound(): void {
+  foundOn = undefined;
+}
+
 /** As `resolve`, setting `foundOn` to the object that had the name, undefined for none. */
 export function resolveCallable(cx: Variables, name: string, version: number): Value {
   foundOn = undefined;
