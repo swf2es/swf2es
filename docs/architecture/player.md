@@ -169,8 +169,13 @@ as the current one (`event-fields`).
 A display object nobody named is named `instance` and the next of one
 count for the player, which every SWF it loads shares, as it is made:
 what a timeline places as it places it, a placed clip's first frame
-then too, depth first, before any constructor or field initializer runs,
-and what a script makes as its AS3 object is. `Loader.load` and
+then too, depth first, before any constructor or field initializer runs
+and before the frame's ENTER_FRAME, a place the frame removes at once
+among them, and what a script makes as its AS3 object is; a button's
+states are named as it is made. A goto names each place the frames it
+replays make, in their order, also those it keeps no child of: a clip
+placed and removed between, and on a rewind the places of the children it
+keeps, as Flash makes an object of each. `Loader.load` and
 `loadBytes` take the next in the call, for the root of the SWF to come,
 AS3's or AVM1's, which an image's Bitmap, named as it is made, or a load
 that fails leaves unused, as Flash Player 32's projector and adl number

@@ -20,7 +20,7 @@ import { bare, boundClip, innerSwf, scripted } from "../../player/cases.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
 import { compiler, compileScripts } from "../../player/scripts.ts";
 import * as w from "../../swf-writer.ts";
-import { timelineSwf } from "./scripting/name-order.ts";
+import { framesSwf, timelineSwf } from "./scripting/name-order.ts";
 
 // This package's own out directory: the player's tests run at the same time and use theirs.
 const out = fileURLToPath(new URL("../out/player/", import.meta.url));
@@ -1816,3 +1816,56 @@ test("a timeline names what it places, its clips' first frames depth first, befo
     player.destroy();
   }
 });
+
+// Flash Player 32's projector names what a frame places before its
+// ENTER_FRAME, a placed clip's first frame too, and a place a frame removes
+// at once takes its names; a button's states are named as it is made. A
+// goto names each place its frames replay, in their order, the ones it
+// keeps no child of too: past a clip placed and removed between, and on a
+// rewind, past the frames' places of the children it kept. adl numbers
+// them all the same, two higher, its harness's Loader and root first.
+const FRAMES: Record<number, string[]> = {
+  "1": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance14 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "enter 2 new instance22 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 null null]",
+    "exit 2 new instance23 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21]",
+    "enter 3 new instance27 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21 null]",
+    "exit 3 new instance28 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance15[instance16 instance17] instance21 instance24[instance25 instance26]]",
+  ],
+  "3": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance14 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance28 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "enter 2 new instance22 rewound | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 1 new instance29 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+  ],
+  "4": [
+    "ctor early instance6 new instance13 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5]",
+    "exit 3 new instance24 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance14[instance15 instance16] instance20 instance21[instance22 instance23]]",
+    "after goto new instance25 | root1[instance1[instance2 instance3] instance4(instance7[instance8 instance9] instance10 instance11 instance12) instance5 instance14[instance15 instance16] instance20 instance21[instance22 instance23]]",
+  ],
+};
+
+for (const variant of [1, 3, 4]) {
+  test(`a frame's places and a goto's are named before the frame's scripts, as Flash names them (${variant})`, {
+    skip,
+  }, async () => {
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), {
+      print: (line) => lines.push(line),
+    });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(framesSwf(compiler(out), variant), scripting);
+    try {
+      await player.start();
+      for (let i = 0; i < 4; i++) {
+        player.tick();
+      }
+
+      assert.deepEqual(lines, FRAMES[variant]);
+    } finally {
+      player.destroy();
+    }
+  });
+}

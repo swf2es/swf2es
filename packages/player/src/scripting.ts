@@ -802,6 +802,9 @@ export class Scripting {
         display.placeFirstFrame();
       }
     };
+    library.passedOver = (count) => {
+      this.instances += count;
+    };
     library.removing = (display, byTimeline) => this.lifecycle.removing(display, byTimeline);
     library.placedSymbol = (className) =>
       this.symbols.placedSymbol(className, library.domain ?? this.mainDomain);

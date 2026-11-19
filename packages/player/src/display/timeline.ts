@@ -332,6 +332,12 @@ export interface Library {
    * (Scripting.bind). Absent where there are no scripts.
    */
   placed?: ((display: DisplayObject) => void) | null;
+  /**
+   * Tells of `count` names a goto's frames gave objects it makes no child
+   * of, as Flash makes and names each object the frames it replays place,
+   * and keeps only what the jump leaves. Absent where there are no scripts.
+   */
+  passedOver?: ((count: number) => void) | null;
   /** Tells of a display object about to lose its parent, and whether the timeline takes it (a script's removal otherwise). */
   removing: ((display: DisplayObject, byTimeline: boolean) => void) | null;
   /** What an AVM1 movie's timelines tell its AVM1 (avm1/avm1.ts); null in an AS3 movie. */
