@@ -75,13 +75,17 @@ export function localConnectionNatives(s: Scripting): avm2.Natives {
       },
       receive: (method, message) => {
         try {
-          s.rt.callProperty(
-            endpoint.client,
-            s.rt.publicName(method),
-            ...(message.encoding === 0
+          const args =
+            message.encoding === 0
               ? readLocalValues(s.rt, message.bytes)
-              : readModernValues(s.rt, message.bytes)),
-          );
+              : readModernValues(s.rt, message.bytes);
+          // Flash calls only a function: a method a dynamic client lacks, or
+          // a value that is none, is passed over with no AsyncErrorEvent, as
+          // adl has it; a sealed client's lookup throws #1069, which is one.
+          const f = s.rt.getProperty(endpoint.client, s.rt.publicName(method));
+          if (s.rt.isInstance(f, s.rt.classNamed("Function"))) {
+            s.rt.call(f, endpoint.client, ...args);
+          }
         } catch (error) {
           if (error instanceof Error) {
             s.reportUncaught(error);
