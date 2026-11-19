@@ -65,8 +65,15 @@ interface Avm1Load {
   failed: boolean;
 }
 
-/** The rounds of LocalConnection deliveries a frame makes at most (Loads.deferLocal). */
-const LOCAL_PASSES = 1000;
+/**
+ * The LocalConnection messages a frame delivers at most, the rest the
+ * frames after, first in first out (Loads.deferLocal). Flash polls them in
+ * real time: at 30 fps, adl delivers a median of about 25 a frame of a
+ * chain a handler keeps sending to itself, 12 of one between the host and
+ * a movie, and 10 where each message sends two; Flash Player 32's
+ * projector about 4, 2 and 2.
+ */
+const LOCAL_DELIVERIES = 16;
 
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
@@ -154,7 +161,7 @@ export class Loads {
    * deliver, as Flash keeps it; never once its script stopped it for good.
    */
   private keeps(vm: Avm1): boolean {
-    return !vm.halted && (vm.localPending > 0 || this.s.localConnections.listening(vm));
+    return !vm.stopped && (vm.localPending > 0 || this.s.localConnections.listening(vm));
   }
 
   destroyAvm1(): void {
@@ -186,12 +193,12 @@ export class Loads {
   }
 
   /**
-   * A LocalConnection delivery, for the next frame's host events. Those a
-   * delivery sends are delivered in the same frame, as Flash delivers a
-   * chain of sends from AS3's handlers and an AVM1 movie's answer before
-   * the next ENTER_FRAME (the `avm1-local-connection` case), up to
-   * LOCAL_PASSES rounds, so that two receivers answering each other for
-   * ever leave the rest to the next frame.
+   * A LocalConnection delivery, made where the frame's host events are:
+   * in this frame's if it has not reached them yet, else the next's. What
+   * a delivery sends is delivered in the same frame, as Flash delivers a
+   * short chain of sends from AS3's handlers and an AVM1 movie's answer
+   * before the next ENTER_FRAME (the `avm1-local-connection` case), up to
+   * LOCAL_DELIVERIES a frame.
    */
   deferLocal(deliver: () => void): void {
     this.localReady.push(deliver);
@@ -910,13 +917,12 @@ export class Loads {
       }
     }
 
-    for (let pass = 0; pass < LOCAL_PASSES && this.localReady.length !== 0; pass++) {
-      for (const deliver of this.localReady.splice(0)) {
-        try {
-          deliver();
-        } catch (error) {
-          this.s.reportUncaught(error);
-        }
+    for (let n = 0; n < LOCAL_DELIVERIES && this.localReady.length !== 0; n++) {
+      const deliver = this.localReady.shift() as () => void;
+      try {
+        deliver();
+      } catch (error) {
+        this.s.reportUncaught(error);
       }
     }
 
