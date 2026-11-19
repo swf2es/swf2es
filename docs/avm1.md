@@ -1658,7 +1658,7 @@ An AVM1 SWF loaded by AS3 runs its actions in an AVM1 realm of its own,
 its compiler, host services and LocalConnection broker the parent
 player's; the pointer reaches its buttons and clips by AVM1's rules
 (`input/avm1.ts`). It has no levels, as Flash Player 32's projector
-traced it (`tests/unit/player/avm1/hosted-root.test.ts`): its root is
+traced it (`tests/unit/player/scripting/loads.test.ts`): its root is
 `_root`, which is what it converts to and `targetPath` gives, its clips
 `_root.a.b` and `_target` `/a/b`; `_level0` and every `_levelN` are
 undefined, and the root has no `_parent`; `loadMovieNum`, and a load into
