@@ -12,6 +12,7 @@ import { drawKernelFrame, drawKernelLetGo, drawKernelUsed } from "./bitmap/kerne
 import { AdvanceWalk, walkChecks } from "./display/advance.js";
 import { Container, type DisplayObject, MovieClip, unloads } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
+import { framePassed } from "./display/shapeobject.js";
 import { settleFits } from "./display/textobjects.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { customContextMenu, type MenuItem } from "./input/context-menu.js";
@@ -703,5 +704,15 @@ export class Player {
 
     // The fits a set size left pending happen before the frame is drawn, as in Flash.
     settleFits();
+  }
+
+  /**
+   * The frames played since the last draw are not to be drawn, as a hidden
+   * page's (web playback) or the tests' uncaptured ones: what drawing them
+   * would settle for scripts' shape tests, a MorphShape's blend at the
+   * ratio it was last placed at, settles now, as for a frame drawn.
+   */
+  undrawn(): void {
+    framePassed();
   }
 }

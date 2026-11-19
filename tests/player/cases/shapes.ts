@@ -1609,7 +1609,6 @@ export const shapeCases: PlayerCase[] = [
     name: "morph-bounds",
     swf: morphBounds,
     script: "MorphBounds",
-    draw: true,
     // adl prints the last frames' traces only once more have run.
     frames: 12,
     capture: [],

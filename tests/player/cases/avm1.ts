@@ -3277,7 +3277,8 @@ function avm1BitmapSmoothing(version: number, smoothed: 0x41 | 0x43 = 0x41): Uin
 // goto, and what setting its size scales it by. Flash measures a
 // MorphShape by its start, whatever its ratio, but for a point tested
 // against its shape: that meets the blend it last drew, or, placed at
-// another ratio since, nothing until it is drawn again.
+// another ratio since, nothing until it is drawn again, even placed back
+// at the ratio it was drawn at.
 function avm1MorphBounds(version: number): Uint8Array {
   const { defs, places } = morphBoundsTimeline([as1("stop();", version)]);
   const points = MORPH_PROBE_POINTS.map(([x, y]) => `[${x}, ${y}]`).join(", ");
@@ -3339,10 +3340,10 @@ function setters(label, m) {
       w.showFrame(),
       probe(
         2,
-        `h.gotoAndStop(2);\nprobe("2 h at 2", h);\nj.gotoAndStop(2);\nprobe("2 j at 2", j);`,
+        `h.gotoAndStop(2);\nprobe("2 h at 2", h);\nj.gotoAndStop(2);\nprobe("2 j at 2", j);\nm.gotoAndStop(2);\nm.gotoAndStop(3);\nprobe("2 m back at 0", m);`,
       ),
       w.showFrame(),
-      probe(3, `h.gotoAndStop(3);\nprobe("3 h at 3", h);\nprobe("3 j", j);`),
+      probe(3, `h.gotoAndStop(3);\nprobe("3 h at 3", h);\nprobe("3 j", j);\nprobe("3 m", m);`),
       w.showFrame(),
       probe(4, `setters("4 h", h);\nh.gotoAndStop(1);\nprobe("4 h at 1", h);`),
       w.showFrame(),
@@ -3361,7 +3362,6 @@ export const avm1Cases: PlayerCase[] = [
       name: `avm1-morph-bounds-swf${version}`,
       swf: avm1MorphBounds(version),
       traced: true,
-      draw: true,
       frames: 6,
       capture: [],
       tolerance: 0,

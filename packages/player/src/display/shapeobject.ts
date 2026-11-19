@@ -7,6 +7,18 @@ import type { Filter } from "./filters.js";
 import { morphAt } from "./morph.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
+/**
+ * Frames drawn, or played and not drawn (framePassed), so far: a MorphShape
+ * placed at another ratio since the last is blending. One count for every
+ * player on the page, as pickWork is.
+ */
+export const blendWork = { frames: 0 };
+
+/** A frame drawn, or played with no draw to follow, which ends what blending its places began. */
+export function framePassed(): void {
+  blendWork.frames++;
+}
+
 export class ShapeObject extends DisplayObject {
   /** The shape it draws, or last drew; null for a Shape a script made, which draws nothing yet. */
   shape: ShapeCharacter | null;
@@ -43,13 +55,21 @@ export class ShapeObject extends DisplayObject {
 
   /** A MorphShape not yet placed, which its first place blends at once. */
   private unplaced = false;
+  /** The blendWork frame in which a place last gave it another ratio or morph; -1 for none. */
+  private placedIn = -1;
+  /** Its ratio and morph as that frame began, which the last frame passed blended. */
+  private settledRatio = 0;
+  private settledMorph: MorphCharacter | null = null;
 
   /**
    * A MorphShape made by a place is blended at its ratio there and then;
-   * one placed again takes on a new ratio only when it is next drawn
-   * (drawn), and until then a test of a point against its shape finds
-   * nothing (blending), as in Flash (the `morph-bounds` cases). What
-   * scripts are told of its bounds is its start's (ownBounds).
+   * one placed at another ratio is blending until a frame is drawn, or
+   * played undrawn (framePassed): a script's test of a point against its
+   * shape finds nothing of it meanwhile, as in adl, unless it is back at
+   * the ratio the last frame had (the `morph-bounds` cases), and the
+   * pointer meets the blend it last made, as Flash's does under a resting
+   * or moving mouse. What scripts are told of its bounds is its start's
+   * (ownBounds).
    */
   override applyPlace(place: Place): void {
     const ratio = this.ratio;
@@ -59,6 +79,8 @@ export class ShapeObject extends DisplayObject {
     if (morph && this.unplaced) {
       this.shape = morphAt(morph, this.ratio);
       this.blended = { morph, ratio: this.ratio, shape: this.shape };
+    } else if (morph && this.ratio !== ratio) {
+      this.placing(ratio, morph);
     }
 
     this.unplaced = false;
@@ -67,12 +89,32 @@ export class ShapeObject extends DisplayObject {
     }
   }
 
-  /** Whether it is a MorphShape whose ratio or morph has changed since it was last blended. */
+  /** Another morph placed in its stead (movieclip.ts swap): blending, as a new ratio is. */
+  takeMorph(morph: MorphCharacter): void {
+    this.placing(this.ratio, this.morph);
+    this.morph = morph;
+  }
+
+  /** A place changes its ratio or morph from these: the first in a frame keeps them as settled. */
+  private placing(ratio: number, morph: MorphCharacter | null): void {
+    if (this.placedIn !== blendWork.frames) {
+      this.placedIn = blendWork.frames;
+      this.settledRatio = ratio;
+      this.settledMorph = morph;
+    }
+  }
+
+  /**
+   * Whether it is a MorphShape placed, since the last frame passed, at
+   * another ratio or morph than that frame left it with. Only places and
+   * frames passing change it: a blend a script's draw or readGraphicsData
+   * makes meanwhile does not.
+   */
   get blending(): boolean {
-    const b = this.blended;
     return (
       this.morph !== null &&
-      (b?.morph !== this.morph || b.ratio !== this.ratio || b.shape !== this.shape)
+      this.placedIn === blendWork.frames &&
+      (this.ratio !== this.settledRatio || this.morph !== this.settledMorph)
     );
   }
 
@@ -80,7 +122,11 @@ export class ShapeObject extends DisplayObject {
   drawn(): ShapeCharacter | null {
     // The blend it has is kept while its morph and ratio are: asking the
     // morph again would turn over its few latest blends for nothing.
-    if (this.morph && this.blending) {
+    const b = this.blended;
+    if (
+      this.morph &&
+      (b?.morph !== this.morph || b.ratio !== this.ratio || b.shape !== this.shape)
+    ) {
       this.shape = morphAt(this.morph, this.ratio);
       this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
       // New bounds, which no invalidate tells of: the change of ratio did,

@@ -23,6 +23,7 @@ package
 		public var tb:MovieClip;
 		public var tc:MovieClip;
 		public var j:MovieClip;
+		public var m:MovieClip;
 
 		public function Main()
 		{
@@ -38,6 +39,7 @@ package
 		{
 			clip("h").stop();
 			clip("j").stop();
+			clip("m").stop();
 			all(1);
 			var drawn:Shape = new Shape();
 			drawn.graphics.beginFill(0);
@@ -54,6 +56,9 @@ package
 			both("2 h at 2", clip("h"));
 			clip("j").gotoAndStop(2);
 			both("2 j at 2", clip("j"));
+			clip("m").gotoAndStop(2);
+			clip("m").gotoAndStop(3);
+			both("2 m back at 0", clip("m"));
 		}
 
 		private function frame3():void
@@ -62,6 +67,7 @@ package
 			clip("h").gotoAndStop(3);
 			both("3 h at 3", clip("h"));
 			both("3 j", clip("j"));
+			both("3 m", clip("m"));
 		}
 
 		private function frame4():void

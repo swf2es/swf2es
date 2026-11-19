@@ -55,9 +55,6 @@ const results = await runPlayer(
     capture: [],
     url: `/corpus/${t.path}/test.swf`,
     input: t.input ? JSON.parse(readFileSync(t.input, "utf8")) : undefined,
-    // The pointer meets what was drawn, as a MorphShape's blend: a test of input draws
-    // each frame, as a host does.
-    draw: t.input !== null,
     viewport: t.viewport ?? undefined,
     logFetch: t.logFetch,
     socket: t.socket ? JSON.parse(readFileSync(t.socket, "utf8")) : undefined,

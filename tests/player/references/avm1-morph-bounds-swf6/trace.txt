@@ -6,11 +6,13 @@
 2 k: bounds 39 39 61 61 size 22 22 box 100 shape 000 clips 100
 2 h at 2: bounds 39 39 61 61 size 22 22 box 100 shape 000 clips 100
 2 j at 2: bounds 39 39 61 61 size 22 22 box 100 shape 000 clips 100
+2 m back at 0: bounds 39 39 61 61 size 22 22 box 100 shape 100 clips 100
 3 h: bounds 39 39 61 61 size 22 22 box 100 shape 010 clips 100
 3 g: bounds 39 39 61 61 size 22 22 box 100 shape 010 clips 100
 3 k: bounds 39 39 61 61 size 22 22 box 100 shape 000 clips 100
 3 h at 3: bounds 39 39 61 61 size 22 22 box 100 shape 000 clips 100
 3 j: bounds 39 39 61 61 size 22 22 box 100 shape 100 clips 100
+3 m: bounds 39 39 61 61 size 22 22 box 100 shape 100 clips 100
 4 h: bounds 39 39 61 61 size 22 22 box 100 shape 001 clips 100
 4 g: bounds 39 39 61 61 size 22 22 box 100 shape 010 clips 100
 4 k: bounds 39 39 61 61 size 22 22 box 100 shape 100 clips 100

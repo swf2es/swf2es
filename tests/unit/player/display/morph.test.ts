@@ -9,6 +9,7 @@ import { Container } from "../../../../packages/player/dist/display/container.js
 import { ShapeObject } from "../../../../packages/player/dist/display/display.js";
 import { CLEAN, CONTENT } from "../../../../packages/player/dist/display/displayobject.js";
 import { blend, morphAt } from "../../../../packages/player/dist/display/morph.js";
+import { framePassed } from "../../../../packages/player/dist/display/shapeobject.js";
 import type { MorphCharacter } from "../../../../packages/player/dist/display/timeline.js";
 import { syncHidden } from "../../../../packages/player/dist/scene/hidden.js";
 import * as w from "../../../swf-writer.ts";
@@ -188,7 +189,7 @@ function ratioPlace(ratio: number) {
   return readPlace(swf.bytes, swf.tags[0]);
 }
 
-test("a MorphShape blends at its first place's ratio, and at a later place's when next drawn", () => {
+test("a MorphShape blends at its first place's ratio, and blends a later one's once a frame passes", () => {
   const c = character();
   const shape = ShapeObject.ofMorph(c);
   shape.applyPlace(ratioPlace(65535));
@@ -199,8 +200,16 @@ test("a MorphShape blends at its first place's ratio, and at a later place's whe
   assert.equal(shape.shape, morphAt(c, 65535));
   assert.equal(shape.blending, true);
 
+  // A script's draw blends it, and it is blending still until the frame passes.
   assert.equal(shape.drawn(), morphAt(c, 30000));
-  assert.equal(shape.shape, morphAt(c, 30000));
+  assert.equal(shape.blending, true);
+
+  framePassed();
+  assert.equal(shape.blending, false);
+
+  // Placed away and back within a frame, it is at the ratio the frame began with.
+  shape.applyPlace(ratioPlace(1000));
+  shape.applyPlace(ratioPlace(30000));
   assert.equal(shape.blending, false);
 });
 

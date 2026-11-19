@@ -15,6 +15,8 @@ shapes: pixels (x=65, y=48, w=0, h=0) drawn (x=10, y=20, w=30, h=40)
 2 h at 2 morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 000 objects 100 under 000
 2 j at 2: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 000 objects 100 under 000
 2 j at 2 morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 000 objects 100 under 000
+2 m back at 0: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 100 objects 100 under 100
+2 m back at 0 morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 100 objects 100 under 100
 3 h: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 010 objects 100 under 010
 3 h morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 010 objects 100 under 010
 3 g: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 010 objects 100 under 010
@@ -25,6 +27,8 @@ shapes: pixels (x=65, y=48, w=0, h=0) drawn (x=10, y=20, w=30, h=40)
 3 h at 3 morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 000 objects 100 under 000
 3 j: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 100 objects 100 under 100
 3 j morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 100 objects 100 under 100
+3 m: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 100 objects 100 under 100
+3 m morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 100 objects 100 under 100
 4 h: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 001 objects 100 under 001
 4 h morph: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=40, y=40, w=0, h=0) size 22 22 box 100 shape 001 objects 100 under 001
 4 g: bounds (x=39, y=39, w=22, h=22) rect (x=39, y=39, w=22, h=22) pixels (x=39, y=39, w=22, h=22) size 22 22 box 100 shape 010 objects 100 under 010
