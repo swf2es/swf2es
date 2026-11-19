@@ -1,0 +1,29 @@
+main frame 1
+a frame 1
+c frame 1
+d frame 1
+e frame 1
+exit 1
+main frame 2 sends b, on 2 to 3
+main frame 2 sent b
+b frame 3
+exit 2
+main frame 3 sends c to 2, 3 and d to 2, 1
+main frame 3 sent them
+c frame 3
+c frame 3
+d frame 1
+d frame 1
+exit 3
+main frame 4 registers e's and c's
+main frame 4 registered them
+e h
+e h
+c g
+exit 4
+main frame 5 registers a's and d's, sends e to 2
+main frame 5 sent e
+a g
+d g
+e frame 2
+exit 5

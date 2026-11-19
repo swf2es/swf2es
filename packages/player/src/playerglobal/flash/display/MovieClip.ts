@@ -91,6 +91,7 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
   const goto = (clip: MovieClip, frame: number, play: boolean) => {
     if ((clip.library.version ?? 10) <= 9) {
       clip.skipsAfter = s.frames;
+      s.lateGoto(clip, frame);
     }
 
     if (s.inFrameScript === clip) {
@@ -109,11 +110,20 @@ export function movieClipNatives(s: Scripting): avm2.Natives {
 
     addFrameScript(...args: Value[]): void {
       const clip = this.$display;
+      const had = clip.frameScripts.has(clip.currentFrame);
+      let current = false;
       for (let i = 0; i + 1 < args.length; i += 2) {
         // What is no function, as a string, clears the frame's script, as null does in Flash.
         const script = args[i + 1];
         const callable = s.rt.isInstanceOf(script, s.rt.functionTraits);
-        clip.setFrameScript(s.rt.toInt(args[i]) + 1, callable ? script : null);
+        const frame = s.rt.toInt(args[i]) + 1;
+        clip.setFrameScript(frame, callable ? script : null);
+        current ||= callable && frame === clip.currentFrame;
+      }
+
+      // One call registers once, however many of its pairs name the frame (adl).
+      if (current) {
+        s.frameScriptRegistered(clip, clip.currentFrame, had);
       }
     }
 

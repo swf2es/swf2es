@@ -148,7 +148,9 @@ places its new children at once, but makes their AS3 objects only after
 a script counts them in `numChildren` and `getChildAt` gives null. Their
 classes are ready as the frame plays, their scripts run, and one taken off
 before the phase is never made (`delayed_symbolclass`). A goto makes what
-it places at once. `EventDispatcher()` calls its private native
+it places at once, but before version 10 one a frame script asks for of
+another clip, which makes it once that script returns (`late-scripts-9`).
+`EventDispatcher()` calls its private native
 `ctor`, and `InteractiveObject()` calls `addEventListener`, so event
 dispatch is part of the first slice: listeners by type and phase on the
 player object, `dispatchEvent` through the player's parent chain
@@ -194,6 +196,41 @@ else happens at once. All the timelines advance before any frame script
 runs, parents' scripts before their children's (`nested`); the clips
 whose scripts are to run are fixed as the phase begins, so one a script
 removes still runs its own (`loads`, `orphans`).
+
+So are the scripts the walk runs. A script `addFrameScript` registers for
+the frame its clip is on while frame scripts run is not the walk's: the
+clip waits for the walk to end, and its script runs then, with the others
+registered so, in the order they were registered, those they register
+after them. It runs though its frame ran a script already, or the walk
+would have run the one it replaced, which then runs twice; each call
+counts once, however many of its pairs name the frame, and two calls
+twice. A clip made with `new` in a frame script runs its first frame's
+this way, after the script, in that order: the timeline children its
+`super()` made register theirs before it does, and run them first. One
+registered outside them, in a constructor or a listener, makes its frame
+due again: the next walk runs it, though it ran there before, as adl
+shows (`late-scripts`, `late-queue`, the corpus's
+`frame_script_cleanup*` and `frame_script_construct`). A goto's cycle,
+and a button's early frame, take those registered before them, due in
+their own walk, which runs them in its order, and run those registered
+in it after it, before their `EXIT_FRAME`. Before version 10, a goto
+that a script asks for, to another frame with a script, puts the clip
+among them too, once for each goto: the frame a frame script's own goto
+lands on has its script run after the walk, not at once, and so has the
+frame another frame script sends a clip to, whose children the jump
+placed are made once that script returns, and run theirs after it. The
+walk runs the landing script as well only where the clip's frame had a
+script due as it began, not yet run: then it runs twice; a clip whose
+frame ran its script, or has none, as a playing clip's often has not, is
+passed by (`late-scripts-9`, `late-queue-9`, the corpus's
+`swf_9_frame_script_*`). Scripts that send their clip back and forth, or
+register themselves again, or make a clip that does, keep coming: Flash
+hangs, and the player's outermost pass of frame scripts runs at most 64
+of a clip's, those a goto's cycle or a button's early frame takes over
+among them, and 4096 in all, then takes the clip's frame as run. A clip a
+frame script made, whose `super()` made a button with an early frame,
+still loses a first frame's script it registers after `super()` in that
+frame's scripts (below); one registered later runs.
 
 A frame walks the display list once to find the clips that advance, and
 once for each round of frame scripts, which a busy scene of some 13,000

@@ -441,6 +441,132 @@ test("frame scripts that send their clip to each other's frame end in a stack ov
   });
 });
 
+// Flash hangs on these (adl never finishes the frame): the scripts that run
+// after the walk keep coming. The player's outermost pass of frame scripts
+// runs at most 64 of a clip's, and 4096 in all, then takes the clips' frames
+// as run: the frame ends, and the next runs none of them.
+for (const [name, body, version, runs] of [
+  [
+    "Pong",
+    "addFrameScript(0, function():void { trace(1); gotoAndStop(2); }, 1, function():void { trace(2); gotoAndStop(1); });",
+    9,
+    64,
+  ],
+  ["Again", "addFrameScript(0, again);", 9, 64],
+  ["Again10", "addFrameScript(0, again);", 10, 64],
+  // Each link's first frame makes the next, which registers its own.
+  ["Chain", "new Link();", 9, 4096],
+] as const) {
+  test(`scripts after the walk that never stop end the frame: ${name}, version ${version}`, {
+    skip,
+    timeout: 120_000,
+  }, async () => {
+    const source = `package {
+      import flash.display.MovieClip;
+      public class ${name} extends MovieClip {
+        public function ${name}() { stop(); }
+        public function start():void { ${body} }
+        public function again():void { trace("again"); addFrameScript(0, again); }
+      }
+      public class Link extends MovieClip {
+        public function Link() { addFrameScript(0, function():void { trace("link"); new Link(); }); }
+      }
+      public class ${name}Main extends MovieClip {
+        public var kid:MovieClip;
+        public function ${name}Main() {
+          addFrameScript(1, function():void { stop(); Object(kid).start(); trace("main 2"); });
+        }
+      }
+    }`;
+    const swf = w.swf({
+      version,
+      width: 20,
+      height: 20,
+      frameCount: 2,
+      tags: [
+        w.fileAttributes(true),
+        w.sprite(2, 2, [w.showFrame(), w.showFrame(), w.end()]),
+        w.doAbc(compiler(out)(name, source)),
+        w.symbolClass([
+          [0, `${name}Main`],
+          [2, name],
+        ]),
+        w.place({ depth: 1, character: 2, name: "kid" }),
+        w.showFrame(),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+    const lines: string[] = [];
+    const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+    const player = new Player(swf, scripting);
+    await player.start();
+    player.tick();
+    assert.equal(lines.filter((l) => l !== "main 2").length, runs);
+    lines.length = 0;
+    player.tick();
+    assert.deepEqual(lines, []);
+  });
+}
+
+// A script that registers itself again and makes a clip holding a button
+// whose up state is a clip: the button's early frame, a pass of its own,
+// takes the script and runs it in its walk, which makes another button, and
+// so on, one pass inside the last. Each counts as one of the clip's 64.
+test("a script that registers itself again around a button's early frame ends", {
+  skip,
+  timeout: 120_000,
+}, async () => {
+  const source = `package {
+    import flash.display.MovieClip;
+    public class Holder extends MovieClip {}
+    public class Looper extends MovieClip {
+      public function Looper() { addFrameScript(0, frame1); }
+      public function frame1():void {
+        trace("looper");
+        addFrameScript(0, frame1);
+        addChild(new Holder());
+      }
+    }
+    public class LooperMain extends MovieClip {}
+  }`;
+  // Up state the clip, the others a square, at depth 1 and with no matrix.
+  const button = w.tag(7, Uint8Array.of(2, 0, 0x01, 1, 0, 1, 0, 0, 0x0e, 7, 0, 1, 0, 0, 0, 0));
+  const swf = w.swf({
+    version: 10,
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      square(7, 0x3366cc),
+      w.sprite(1, 1, [w.showFrame(), w.end()]),
+      button,
+      w.sprite(3, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(4, 1, [w.showFrame(), w.end()]),
+      w.doAbc(compiler(out)("Looper", source)),
+      w.symbolClass([
+        [0, "LooperMain"],
+        [3, "Holder"],
+        [4, "Looper"],
+      ]),
+      w.place({ depth: 1, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), { print: (l) => lines.push(l) });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(swf, scripting);
+  await player.start();
+  assert.ok(lines.length > 2 && lines.length <= 65, `${lines.length}`);
+  lines.length = 0;
+  player.tick();
+  assert.deepEqual(lines, []);
+});
+
 test("a goto plays or stops as it happens, so the landing frame's script has the last word", {
   skip,
 }, async () => {
@@ -1037,8 +1163,9 @@ test("a bitmap a timeline places is a Bitmap, its bound class its data's with Ha
 // Clip, of 4 frames, the fourth placing a Kid, each frame's script traced;
 // on its second frame, the clip after a, named for what it does, sends a,
 // whose script ran, to a frame, or makes a Kid with `new`, and adds it or
-// not. Each makes a script due after the round has listed its clips,
-// which only another round runs.
+// not. Each makes a script due after the walk passed its clip, which runs
+// after the walk, with the scripts registered as scripts ran, in the
+// order adl runs them.
 const SOURCE = readFileSync(new URL("./Rounds.as", import.meta.url), "utf8");
 
 /** A version 9 root of a Clip "a" and one named `second` after it. */
@@ -1083,7 +1210,7 @@ for (const [second, due] of [
   ["make", ["kid make"]],
   ["add", ["kid add"]],
 ] as const) {
-  test(`a script that makes another's due has it run in the next round: ${second}`, {
+  test(`a script that makes another's due has it run after the walk: ${second}`, {
     skip,
   }, async () => {
     const lines: string[] = [];
@@ -1103,10 +1230,9 @@ for (const [second, due] of [
 
 // Clips a, c and b in that order, each a Hop of three frames: c stops on
 // its first, whose script ran, and a's second sends it to its third. In a
-// SWF of version 9 the goto runs no cycle, and c's script runs in the
-// round that listed it before b's; from version 10 the goto's cycle runs
-// it, and b's with it. A round that left c out as not due when it listed
-// it would run its script after b's, in the next.
+// SWF of version 9 the goto runs no cycle: c, with no script due as the
+// walk began, runs its third frame's after the walk, after b's, as adl
+// has it; from version 10 the goto's cycle runs it, and b's with it.
 const HOP = `package {
   import flash.display.MovieClip;
   public dynamic class Hop extends MovieClip {
@@ -1126,7 +1252,7 @@ const HOP = `package {
 }`;
 
 for (const version of [9, 10]) {
-  test(`a goto has a clip listed as not due run its script in the round, version ${version}`, {
+  test(`a goto has a clip not due run its script, version ${version}`, {
     skip,
   }, async () => {
     const lines: string[] = [];
@@ -1158,17 +1284,16 @@ for (const version of [9, 10]) {
     assert.deepEqual(lines.splice(0), ["a 1", "c 1", "b 1"]);
 
     player.tick();
-    assert.deepEqual(lines, ["a 2", "c 3", "b 2"]);
+    assert.deepEqual(lines, version < 10 ? ["a 2", "b 2", "c 3"] : ["a 2", "c 3", "b 2"]);
   });
 }
 
-test("a goto has a clip of version 9 under one of version 10 run its script in the round", {
+test("a goto has a clip of version 9 under one of version 10 run its script after the walk", {
   skip,
 }, async () => {
   // As the Hop tests, with c the root of a SWF of version 9 loaded between a
   // and b, which are of version 10: a's goto runs no cycle for c, whose
-  // script runs in the round that listed it before b's. Rounds walk only what
-  // is marked there, so one that left c out as not due would run it after b's.
+  // script runs after the walk, after b's, as adl has it.
   const inner = w.swf({
     version: 9,
     width: 20,
@@ -1243,7 +1368,7 @@ test("a goto has a clip of version 9 under one of version 10 run its script in t
     player.tick();
   }
 
-  assert.deepEqual(lines, ["loaded", "a 2", "c 3", "b 2"]);
+  assert.deepEqual(lines, ["loaded", "a 2", "b 2", "c 3"]);
 });
 
 test("a frame whose scripts change nothing a round reads takes one round", {

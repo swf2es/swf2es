@@ -141,9 +141,22 @@ export class MovieClip extends Container {
   /**
    * The frame whose script last ran, so that entering a frame runs its
    * script once: set to currentFrame alone, as a round's skipping
-   * (scriptWork) has it.
+   * (scriptWork) has it, or to 0 to run it again (scriptAgain).
    */
   scriptedFrame = 0;
+  /**
+   * Whether its frame's script, registered while frame scripts ran and
+   * not there as they began, waits for the scripts registered so, which
+   * run after the round's walk, as it passes the clip by
+   * (Scripting.lateScripts).
+   */
+  scriptHeld = false;
+  /**
+   * The frame a round passed while its super() made a button, the clip
+   * made by a frame script: a script registered for that frame then is
+   * lost, as adl has it (`button-frame-order`); 0 for none.
+   */
+  scriptLost = 0;
   /**
    * Whether every round of frame scripts lists it, due or not, its mark
    * (scriptsDue) never taken off: a clip of a SWF before version 10 with an
@@ -264,6 +277,7 @@ export class MovieClip extends Container {
   set currentFrame(frame: number) {
     if (frame !== this.frame) {
       this.frame = frame;
+      this.scriptLost = 0;
       scriptWork.changes++;
       if (frame !== this.scriptedFrame && !this.scriptsDue) {
         markScriptsDue(this);
@@ -288,6 +302,15 @@ export class MovieClip extends Container {
     }
 
     scriptWork.changes++;
+  }
+
+  /** Due again: the next round runs its frame's script, though it ran on this frame. */
+  scriptAgain(): void {
+    this.scriptedFrame = 0;
+    scriptWork.changes++;
+    if (!this.scriptsDue) {
+      markScriptsDue(this);
+    }
   }
 
   /** Whether its constructor's super() is making its first frame's children. */

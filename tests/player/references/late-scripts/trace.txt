@@ -1,0 +1,25 @@
+main frame 1
+a frame 1 registers c's frame 1, then b's
+c late frame 1
+b late frame 1
+exit 1
+enter 2
+exit 2
+exit registers a's frame 1 again
+enter 3
+a frame 1 again
+exit 3
+enter 4
+main frame 4 sends a to 2
+a frame 2 registers b's frame 1
+b late frame 1
+exit 4
+main frame 4 after goto
+exit 4
+enter 5
+enter sends c to 2
+main frame 5
+c frame 2 registers b's frame 1
+b late frame 1
+exit 5
+enter after goto
