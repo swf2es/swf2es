@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
 import { Avm1 } from "../../../../packages/player/dist/avm1/avm1.js";
 import { Player } from "../../../../packages/player/dist/player.js";
-import { DRAG_STEPS, DRAGS_FLASH, dragsMovie } from "../../../avm1-picks.ts";
+import { DRAG_STEPS, DRAGS_ALONE, dragsMovie } from "../../../avm1-picks.ts";
 
 test("a press reaches other buttons only where it and they track as a menu's, as in Flash", async () => {
   const wasm = await WebAssembly.compile(
@@ -49,11 +49,7 @@ test("a press reaches other buttons only where it and they track as a menu's, as
       }
     }
 
-    // Alone, AS3 hears nothing.
-    assert.deepEqual(
-      lines,
-      DRAGS_FLASH.filter((line) => !line.startsWith("as3:")),
-    );
+    assert.deepEqual(lines, DRAGS_ALONE);
   } finally {
     player.destroy();
   }

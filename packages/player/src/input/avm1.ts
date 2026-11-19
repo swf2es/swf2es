@@ -156,9 +156,16 @@ export class LoadedAvm1Input {
   prepare(type: "move" | "down" | "up", p: PointerState, target: DisplayObject | null): number {
     this.over = this.movies.get(target as MovieClip) ?? null;
     let redraws = 0;
-    for (const pointer of this.movies.values()) {
+    for (const [root, pointer] of this.movies) {
       const before = pointer.redraws;
       pointer.pickable = pointer === this.over;
+      // A press on an object of the host's, not on the movie or its Loader, is no press on
+      // nothing to the movie: it tracks no menu (Flash Player 32).
+      if (type === "down") {
+        pointer.hostPressed =
+          target !== null && target !== this.s.stage && target !== root && target !== root.parent;
+      }
+
       if (type === "move") {
         pointer.handle(type, p, false);
       } else {

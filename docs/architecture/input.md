@@ -381,9 +381,10 @@ pointer there left the movie, since the host's own pick for the press
 comes after the broadcast; no probe has measured that case. A press on
 a button or a clip with handlers is its own: Flash sends no `dragOver`
 or `dragOut` to another, and its release elsewhere is its
-`releaseOutside`. A press on nothing, or on one that tracks as a menu's
-(`trackAsMenu`, a script's, or else a button's flag from its tag, which
-a script reads as undefined), tracks as a menu's: each other item that
+`releaseOutside`. A press on nothing, none of an AS3 host's objects
+either, or on one that tracks as a menu's (`trackAsMenu`, a script's, or
+else a button's flag from its tag, which a script reads as undefined and
+a script's false overrides), tracks as a menu's: each other item that
 tracks as one hears `dragOver` and `dragOut` as the pointer crosses it,
 the one let go over its `release`, and the pressed one no
 `releaseOutside`, as the projector traced dragsMovie

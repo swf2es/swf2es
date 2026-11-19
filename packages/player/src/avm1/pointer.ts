@@ -43,6 +43,8 @@ export class Avm1Pointer implements Pointer {
    * own, a main SWF, has its button take its field's focus.
    */
   keepFocus = false;
+  /** Whether the press the host is handing on is on an object of its own, which no menu tracks. */
+  hostPressed = false;
   onCursor: ((cursor: Cursor) => void) | null = null;
   private hover: DisplayObject | null = null;
   private pressed: DisplayObject | null = null;
@@ -384,14 +386,17 @@ export class Avm1Pointer implements Pointer {
 
   /**
    * Whether a press tracks as a menu's, as Flash Player 32's projector
-   * traced it: one on nothing or on an item that tracks as a menu's, its
-   * `trackAsMenu` a script's or else its tag's, while no script drags a
-   * clip. Other items that track as a menu's then hear `dragOver` and
+   * traced it: one on nothing (in an AS3 host, on none of its objects
+   * either), or on an item that tracks as a menu's, its `trackAsMenu` a
+   * script's or else its tag's, while no script drags a clip. Other items that track as a menu's then hear `dragOver` and
    * `dragOut` as the pointer crosses them, and the one it is let go over
    * its `release`; a press on anything else is that object's alone.
    */
   private tracking(pressed = this.pressed): boolean {
-    return this.drag === null && (pressed === null || this.avm1.input.tracksAsMenu(pressed));
+    return (
+      this.drag === null &&
+      (pressed === null ? !this.hostPressed : this.avm1.input.tracksAsMenu(pressed))
+    );
   }
 
   /**
