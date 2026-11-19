@@ -1,6 +1,7 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
+import type { Codegen } from "@swf2es/codegen";
 import { definesInput, definesSound, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   type AirApplication,
@@ -8,6 +9,7 @@ import {
   type ExternalInterfaceHost,
   type FileSystemHost,
   type FullScreenHost,
+  nativeMemory,
   Player,
   Scripting,
   type WorkerHost,
@@ -36,7 +38,7 @@ import {
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
 import { fetchFor, fetchMovie } from "./fetching.js";
 import { scaleMode } from "./layout.js";
-import { type Look, Playback } from "./playback.js";
+import { type FrameListener, type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
 import { UncaughtReports } from "./uncaught.js";
 import { UNMUTE_STYLE, UnmutePrompt } from "./unmute.js";
@@ -79,6 +81,8 @@ const idOf = (e: HTMLElement): string => String(dom?.id?.call(e) ?? "");
 
 /** What one load holds, let go of all at once when the next load or destroy comes. */
 export interface Session {
+  /** The compiler its code is compiled by, an AS3 SWF's or an AVM1 SWF's; null for a SWF without code. */
+  codegen: Codegen | null;
   scripting: Scripting | null;
   player: Player | null;
   playback: Playback | null;
@@ -171,6 +175,7 @@ export class Swf2esPlayerElement extends ElementBase {
   #stageSize: [number, number] | null = null;
   /** The button over the player while its sound is held, made the first time it is. */
   #prompt: UnmutePrompt | null = null;
+  #frameListener: FrameListener | null = null;
 
   constructor() {
     super();
@@ -217,6 +222,38 @@ export class Swf2esPlayerElement extends ElementBase {
    */
   get gl(): WebGL2RenderingContext | null {
     return this.#session?.playback?.gl ?? null;
+  }
+
+  /**
+   * Told after each animation frame what the player did in it: the SWF's
+   * frames played, its frame rate, and the ms its frames and the drawing
+   * took (FrameStats), for a page's performance meter. The object is the
+   * same each time, overwritten by the next frame's: copy what is kept.
+   * It holds for every SWF the element plays until set to null, as it
+   * starts; unset, the player measures nothing. There is one: setting it
+   * replaces the one before.
+   */
+  get frameListener(): FrameListener | null {
+    return this.#frameListener;
+  }
+
+  set frameListener(listener: FrameListener | null) {
+    this.#frameListener = typeof listener === "function" ? listener : null;
+    const playback = this.#session?.playback;
+    if (playback) {
+      playback.onFrame = this.#frameListener;
+    }
+  }
+
+  /**
+   * The bytes of the WebAssembly memories behind the player: its compiler's
+   * (`codegen`, 0 for a SWF without code or before a load), and the native
+   * modules' (`native`: bitmap kernels, tessellators, decoders, zlib), which
+   * every player on the page shares, its Flash Workers' left out, as their
+   * own threads hold them. A memory grows and never shrinks.
+   */
+  get wasmMemory(): { codegen: number; native: number } {
+    return { codegen: this.#session?.codegen?.memoryBytes() ?? 0, native: nativeMemory() };
   }
 
   get src(): string {
@@ -319,6 +356,7 @@ export class Swf2esPlayerElement extends ElementBase {
 
     const ready = this.#readiness;
     const session: Session = {
+      codegen: null,
       scripting: null,
       player: null,
       playback: null,
@@ -457,6 +495,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         session.workers = host;
+        session.codegen = codegen;
         session.scripting = this.#scripting(session, codegen, url, baseUrl, pageUrl, host);
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
@@ -483,6 +522,8 @@ export class Swf2esPlayerElement extends ElementBase {
         if (!current()) {
           return;
         }
+
+        session.codegen = codegen;
 
         // Its URL keys its SharedObjects, as a page's AS3 SWFs' are. Its
         // fscommand, getURL and ExternalInterface reach the page as an AS3
@@ -548,6 +589,7 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.playback = playback;
+      playback.onFrame = this.#frameListener;
       // The workers started ahead, loaded before a script may wait for one;
       // a script that never says it loaded does not keep the SWF from playing.
       if (session.workers) {

@@ -896,6 +896,60 @@ check("a SWF plays on while the page gets no animation frames", async (evaluate)
   assert.ok(r.played >= r.rate / 2, `played ${r.played} frames in a second at ${r.rate} fps`);
 });
 
+check(
+  "a frame listener hears each animation frame's work, and costs nothing unset",
+  async (evaluate) => {
+    const r = await call<{
+      heard: {
+        time: number;
+        frames: number;
+        frameRate: number;
+        play: number;
+        draw: number;
+        drew: boolean;
+        shown: boolean;
+      }[];
+      same: boolean;
+      after: number;
+      rate: number;
+      off: number;
+      on: number;
+      memory: { codegen: number; native: number };
+    }>(evaluate, "frameStats()");
+    // About a second's animation frames, each one object filled anew.
+    // At least a slow display's, as a loaded machine's software GL may give.
+    assert.ok(r.heard.length >= 10, `${r.heard.length} calls in a second`);
+    assert.ok(r.same, "a new object for a call");
+    let played = 0;
+    for (let i = 0; i < r.heard.length; i++) {
+      const s = r.heard[i];
+      assert.ok(i === 0 || s.time >= r.heard[i - 1].time, `time went back at ${i}`);
+      assert.ok(Number.isInteger(s.frames) && s.frames >= 0, `frames ${s.frames}`);
+      assert.equal(s.frameRate, r.rate);
+      assert.ok(Number.isFinite(s.play) && s.play >= 0 && s.play < 1000, `play ${s.play}`);
+      assert.ok(Number.isFinite(s.draw) && s.draw >= 0 && s.draw < 1000, `draw ${s.draw}`);
+      assert.ok(s.drew || s.draw === 0, `${s.draw} ms drawing what was not drawn`);
+      assert.equal(s.shown, true);
+      played += s.frames;
+    }
+    const span = (r.heard.at(-1)?.time ?? 0) - r.heard[0].time;
+    const expected = (span / 1000) * r.rate;
+    assert.ok(
+      played >= expected * 0.5 && played <= expected + 2,
+      `${played} frames in ${span.toFixed(0)} ms at ${r.rate} fps`,
+    );
+    assert.ok(
+      r.heard.some((s) => s.drew),
+      "no call drew",
+    );
+    // Unset, nothing is told, and the loop reads the clock once less a frame: no measuring.
+    assert.equal(r.after, 0);
+    // The SWF's own reads of the clock vary a little with how many of its frames fall in each.
+    assert.ok(Math.abs(r.on - r.off - 1) < 0.5, `${r.off} clock reads a frame unset, ${r.on} set`);
+    assert.ok(r.memory.codegen > 0 && r.memory.native > 0, JSON.stringify(r.memory));
+  },
+);
+
 check("destroy takes the callbacks off and closes the socket and the audio", async (evaluate) => {
   const before = await call<Record<string, number>>(evaluate, "webCounts()");
   const r = await call<{

@@ -1,4 +1,4 @@
-import type { Swf2esPlayerElement } from "@swf2es/web";
+import type { FrameStats, Swf2esPlayerElement } from "@swf2es/web";
 
 // The web test's page (run.ts writes its HTML): <swf2es-player>s and Flash
 // tags for replaceFlash, the page's functions the SWF calls, and what
@@ -340,6 +340,63 @@ async function playsUnframed() {
       requestAnimationFrame(callback);
     }
   }
+}
+
+/**
+ * The scripted SWF's frame listener: what it heard over a second, each call
+ * copied, and whether every call gave the same object; then, unset, the
+ * calls it heard after; and the clock's reads an animation frame, with no
+ * listener and with one, which measuring adds one to.
+ */
+async function frameStats() {
+  const movie = element("movie");
+  const heard: FrameStats[] = [];
+  let last: FrameStats | null = null;
+  let same = true;
+  movie.frameListener = (stats) => {
+    same &&= last === null || last === stats;
+    last = stats;
+    heard.push({ ...stats });
+  };
+  await new Promise((done) => setTimeout(done, 1000));
+  movie.frameListener = null;
+  const told = heard.length;
+  await frames(5);
+  const after = heard.length - told;
+
+  // The clock's reads over as many animation frames, without a listener and with one.
+  const now = performance.now;
+  let reads = 0;
+  performance.now = () => {
+    reads++;
+    return now.call(performance);
+  };
+  const readsOver = async (n: number) => {
+    await frames(1);
+    reads = 0;
+    await frames(n);
+    return reads / n;
+  };
+  let off = 0;
+  let on = 0;
+  try {
+    off = await readsOver(30);
+    movie.frameListener = () => {};
+    on = await readsOver(30);
+  } finally {
+    movie.frameListener = null;
+    performance.now = now;
+  }
+
+  return {
+    heard: heard.slice(0, told),
+    same,
+    after,
+    rate: (movie.player as unknown as { frameRate: number }).frameRate,
+    off,
+    on,
+    memory: movie.wasmMemory,
+  };
 }
 
 /** Destroy the scripted SWF: its callbacks leave the element, and its socket and audio close. */
@@ -1236,6 +1293,7 @@ Object.assign(globalThis, {
   externalInterface,
   destroyMovie,
   playsUnframed,
+  frameStats,
   resize,
   requality,
   embedderFetch,

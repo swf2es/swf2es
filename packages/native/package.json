@@ -33,6 +33,10 @@
       "types": "./dist/compress/index.d.ts",
       "default": "./dist/compress/index.js"
     },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "default": "./dist/memory.js"
+    },
     "./mp3": {
       "types": "./dist/mp3/index.d.ts",
       "default": "./dist/mp3/index.js"

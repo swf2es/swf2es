@@ -15,6 +15,8 @@ swf2es's WebAssembly modules, built with the repository's pinned Zig:
 - `@swf2es/native/atf`: Stage3D's ATF textures, read and decoded to what a
   desktop GPU takes, their JPEG XR images by jxrlib; and JPEG XR files
   written as Flash's `BitmapData.encode` writes them, by jxrlib's encoder.
+- `@swf2es/native/memory`: `nativeMemory()`, the bytes the other modules'
+  live instances hold in their memories, for a host that shows them.
 
 The package depends on no other package and uses no DOM or node APIs.
 `compress`, `mp3`, `audio` and `atf` each compile their own module. What the renderer
