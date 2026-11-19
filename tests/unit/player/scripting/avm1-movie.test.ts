@@ -275,6 +275,31 @@ test("a movie unloaded between frames runs its unload handlers as the next start
   }
 });
 
+test("a movie with no unload handler keeps its LocalConnection after unloadAndStop", {
+  skip,
+}, async () => {
+  const p = await play(unloadMovie(false, false));
+  try {
+    p.control("load");
+    await p.until("avm1:ef 3");
+    p.lines.splice(0);
+    p.control("unloadAndStop");
+    p.control("play");
+    for (let i = 0; i < 4; i++) {
+      await p.tick();
+    }
+    p.control("connect lifecycle");
+    // One with a handler frees it as the frame ends (the tests above).
+    assert.deepEqual(p.lines, [
+      "as3:unloadAndStop",
+      "as3:play channel",
+      "as3:connect lifecycle 2082",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
 test("a movie taken off the display list plays on, its interval too", { skip }, async () => {
   const p = await play(unloadMovie(true));
   try {

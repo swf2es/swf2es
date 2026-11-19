@@ -31,7 +31,8 @@ export function localConnectionClass(
         owner: movie,
         ...origin,
         key: null,
-        alive: () => !movie.halted && !movie.fileLifetime.signal.aborted,
+        // An unloaded movie's connections live on (Avm1.unloadFromLoader).
+        alive: () => !movie.halted && !movie.closed,
         allows: (sender) => {
           const v = movie.version;
           const insecure = endpoint.secure && !sender.secure && v >= 7;
@@ -46,7 +47,7 @@ export function localConnectionClass(
             v,
           );
         },
-        defer: (deliver) => movie.net.defer(deliver),
+        defer: (deliver) => movie.deferLocal(deliver),
         status: (success) => {
           const info = realm.newObject(movie.version);
           info.define("level", success ? "status" : "error", 0);

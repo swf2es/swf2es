@@ -75,6 +75,24 @@ interface Avm1Load {
 
 const NO_SOUND_HOSTS: SoundHost[] = [];
 
+/** An AVM1 movie its Loader let go of, until it goes (Loads.unloadedAvm1). */
+interface UnloadedAvm1 {
+  vm: Avm1;
+  state: "play" | "played" | "unload" | "listening";
+  /** Whether a clip in it had an unload handler as it was unloaded: Flash then keeps nothing of it. */
+  handled: boolean;
+}
+
+/**
+ * The LocalConnection messages a frame delivers at most, the rest the
+ * frames after, first in first out (Loads.deferLocal). Flash polls them in
+ * real time: at 30 fps, adl delivers a median of about 25 a frame of a
+ * chain a handler keeps sending to itself, 12 of one between the host and
+ * a movie, and 10 where each message sends two; Flash Player 32's
+ * projector about 4, 2 and 2.
+ */
+const LOCAL_DELIVERIES = 16;
+
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
   private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
@@ -88,15 +106,18 @@ export class Loads {
    * frame), runs its clips' unload handlers as it goes, at the frame's end,
    * or as the next frame starts. One with an interval or a timeout to come,
    * which unloadAndStop clears first, does neither, wherever it is
-   * unloaded. (Flash keeps the intervals and Key and Mouse listeners of
-   * a movie unload() left without an unload handler running on, its frames
-   * stopped, until it collects the movie; these stop them with the rest.)
+   * unloaded. A movie with no unload handler anywhere in it whose
+   * LocalConnections still listen or send is then kept for them
+   * ("listening", Avm1.unloadFromLoader), as Flash keeps it, until neither
+   * holds (keeps).
    */
-  private readonly unloadedAvm1: { vm: Avm1; state: "play" | "played" | "unload" }[] = [];
+  private readonly unloadedAvm1: UnloadedAvm1[] = [];
   /** Whether the frame's AVM1 has played, from then until the next frame starts. */
   private avm1Ticked = false;
   /** The stage the loaded movies' Stage reads and sets, once one is loaded. */
   private stage: StageHost | null = null;
+  /** LocalConnection's deliveries, AS3's and the loaded AVM1 movies' (deferLocal). */
+  private readonly localReady: (() => void)[] = [];
 
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
@@ -107,6 +128,8 @@ export class Loads {
   private readonly pendingRequests = new Set<Promise<void>>();
   /** Completed host byte requests delivered at the next frame, with scripts on the player thread. */
   private readonly readyBytes: (() => void)[] = [];
+  /** The Stage's LoaderInfo, made for the main SWF's when first asked for. */
+  private stageInfo: { main: AsObject; info: AsObject } | null = null;
   /** A load from bytes was asked, and heldTime has not yet told of it ready. */
   private holding = false;
   /** How many loads from bytes there have been: each gets a URL of its own under the main SWF's. */
@@ -154,19 +177,35 @@ export class Loads {
     }
   }
 
-  /** The frame over: the movies unloaded in it go. */
+  /**
+   * The frame over: the movies unloaded in it go, or, listening, are kept
+   * stopped; those kept go once nothing keeps them.
+   */
   releaseUnloadedAvm1(): void {
+    if (this.unloadedAvm1.length === 0) {
+      return;
+    }
+
     for (const movie of this.unloadedAvm1.splice(0)) {
       // A handler that throws still lets the movie, and those after it, go.
       try {
         if (movie.state === "unload") {
-          movie.vm.unloadFromLoader();
+          movie.vm.runUnloadHandlers();
         }
       } catch (error) {
         // As the movie's own errors go: AVM1 has no event for them.
         this.s.tellHost(error);
       } finally {
-        movie.vm.destroy(false);
+        if (!movie.handled && this.keeps(movie.vm)) {
+          if (movie.state !== "listening") {
+            movie.state = "listening";
+            movie.vm.unloadFromLoader();
+          }
+
+          this.unloadedAvm1.push(movie);
+        } else {
+          movie.vm.destroy(false);
+        }
       }
     }
   }
@@ -242,6 +281,14 @@ export class Loads {
     }
   }
 
+  /**
+   * Whether an unloaded movie is kept: while it listens or has a send to
+   * deliver, as Flash keeps it; never once its script stopped it for good.
+   */
+  private keeps(vm: Avm1): boolean {
+    return !vm.stopped && (vm.localPending > 0 || this.s.localConnections.listening(vm));
+  }
+
   destroyAvm1(): void {
     for (const movie of [...this.avm1Movies.values(), ...this.unloadedAvm1.splice(0)]) {
       movie.vm.destroy(false);
@@ -266,6 +313,18 @@ export class Loads {
   }
 
   /**
+   * A LocalConnection delivery, made where the frame's host events are:
+   * in this frame's if it has not reached them yet, else the next's. What
+   * a delivery sends is delivered in the same frame, as Flash delivers a
+   * short chain of sends from AS3's handlers and an AVM1 movie's answer
+   * before the next ENTER_FRAME (the `avm1-local-connection` case), up to
+   * LOCAL_DELIVERIES a frame.
+   */
+  deferLocal(deliver: () => void): void {
+    this.localReady.push(deliver);
+  }
+
+  /**
    * A LoaderInfo for `loader` (null for the main SWF's), empty until its
    * content is known: what its natives read is kept on it as $ fields.
    */
@@ -282,6 +341,27 @@ export class Loads {
     info.$loaderURL = loader ? this.ownerUrl(loader) : this.s.url;
     info.$loaded = 0;
     info.$total = 0;
+    return info;
+  }
+
+  /**
+   * The Stage's LoaderInfo. Flash's is another object than the main SWF's
+   * (Flash Player 32's projector: `stage.loaderInfo == loaderInfo` is
+   * false), which tells what that one knows, its content the main SWF's
+   * root, but hears none of its events, nor its uncaught errors.
+   */
+  stageLoaderInfo(main: AsObject): AsObject {
+    const made = this.stageInfo;
+    if (made !== null && made.main === main) {
+      return made.info;
+    }
+
+    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    for (const name of MIRRORED) {
+      Object.defineProperty(info, name, { get: () => main[name], configurable: true });
+    }
+
+    this.stageInfo = { main, info };
     return info;
   }
 
@@ -933,6 +1013,7 @@ export class Loads {
               : this.avm1Ticked
                 ? "unload"
                 : "play",
+          handled: movie.vm.hasUnloadHandler(),
         });
         timers.clear();
         if (this.s.avm1Input?.remove(content.$display)) {
@@ -988,6 +1069,15 @@ export class Loads {
         } catch (error) {
           this.s.reportUncaught(error);
         }
+      }
+    }
+
+    for (let n = 0; n < LOCAL_DELIVERIES && this.localReady.length !== 0; n++) {
+      const deliver = this.localReady.shift() as () => void;
+      try {
+        deliver();
+      } catch (error) {
+        this.s.reportUncaught(error);
       }
     }
 
@@ -1130,6 +1220,7 @@ export class Loads {
         fsCommand: s.fsCommand ?? undefined,
         sendToUrl: s.sendToUrl,
         localConnections: s.localConnections,
+        deferLocal: (deliver) => this.deferLocal(deliver),
         realTime: s.timers.realTime,
         platform: s.platform,
         screenCapabilities: s.screenCapabilities,
@@ -1244,6 +1335,22 @@ export class Loads {
 }
 
 const NO_PARAMETERS: ReadonlyMap<string, string> = new Map();
+
+/** What the Stage's LoaderInfo reads from the main SWF's (stageLoaderInfo). */
+const MIRRORED = [
+  "$loader",
+  "$content",
+  "$bytes",
+  "$swf",
+  "$typed",
+  "$image",
+  "$url",
+  "$params",
+  "$loaderURL",
+  "$loaded",
+  "$total",
+  "$domain",
+];
 const NO_BYTES = new Uint8Array(0);
 
 /**

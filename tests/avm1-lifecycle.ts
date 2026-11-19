@@ -66,14 +66,19 @@ stop();`);
 
 /**
  * A movie that logs each frame, holds the LocalConnection "lifecycle",
- * fills the 32 channels in its second frame, and has onUnload on its root
- * and on a clip in it; with `interval`, an interval logs while it runs.
+ * fills the 32 channels in its second frame, and, unless `handlers` is
+ * false, has onUnload on its root and on a clip in it; with `interval`, an
+ * interval logs while it runs.
  */
-export function unloadMovie(interval: boolean): Uint8Array {
+export function unloadMovie(interval: boolean, handlers = true): Uint8Array {
   return movie(`${prelude}
-this.onUnload = function () { log("onUnload " + ef); };
 this.createEmptyMovieClip("kid", 1);
-kid.onUnload = function () { log("kid onUnload"); };
+${
+  handlers
+    ? `this.onUnload = function () { log("onUnload " + ef); };
+kid.onUnload = function () { log("kid onUnload"); };`
+    : ""
+}
 var lc = new LocalConnection();
 lc.connect("lifecycle");
 ${interval ? 'setInterval(function () { log("interval"); }, 10);' : ""}

@@ -166,30 +166,44 @@ unloaded in `ENTER_FRAME`, before its AVM1 has played, still plays that
 frame unless an interval or a timeout of its is to come, its unload
 handlers never running; one unloaded after its frame runs its clips'
 `onUnload`, children first, as the frame ends, or, between frames, as the
-next starts. `unloadAndStop` stops its sounds and timers at once. Flash
-keeps the intervals and Key and Mouse listeners of a movie `unload()`
-left without an unload handler running until it collects the movie;
-these stop here. The parent's audio device stays open.
-Keys and focus reach these loaded movies as Flash Player 32 sends them
-(input.md, "Keyboard and focus"). Wheel routing into them, and
-`AVM1Movie`'s `call` and `addCallback`, remain incomplete; those methods
-still throw #2014.
+next starts. `unloadAndStop` stops its sounds and timers at once. A movie
+with no unload handler anywhere in it is kept, stopped, while its
+LocalConnections listen or send (below); one with a handler goes whole,
+its names free from the next frame (measured in adl and the projector).
+Flash also keeps such a movie's intervals, sounds and Key and Mouse
+listeners running after `unload()`, its sounds and its Key and Mouse
+listeners after `unloadAndStop` too; these stop here. The parent's audio
+device stays open. Keys and focus
+reach these loaded movies as Flash Player 32 sends them (input.md,
+"Keyboard and focus"). Wheel routing into them remains incomplete.
+`AVM1Movie`'s `call` and `addCallback` throw #2014 as Flash Player 32's
+do with any movie it loads (the `avm1-movie` player case), after its
+argument counts; their #1063's text names no method yet ("on function",
+where Flash's debugger player names `flash.display::AVM1Movie/call()`).
 
 `LocalConnection` uses one native broker (`player/src/localconnection.ts`)
 shared by a player's AS3 and loaded AVM1 movies. A standalone AVM1 player
 has its own broker; an embedding may explicitly share a `LocalConnections`
 instance across players. Connections live in a map keyed by ASCII-folded
 names, prefixed with the SWF's domain unless the name starts with `_`.
-Messages snapshot arguments as bounded bytes (40 KiB) and use the
-sender's existing host-event queue. AVM1 sends AMF0; AS3 sends AMF3 to
-preserve ByteArray, XML, Vector and class aliases, converting the snapshot
-to AMF0 only when an AVM1 receiver needs it. AMF3 scratch buffers are
-reused except for externalizable streams that may escape the call. A broker
-with no messages does no frame work. Receiver methods, domain permissions
-and sender status events enter the appropriate VM, never sharing live script objects. Closing or
-destroying a receiver frees its name. This is in-process messaging, not
-Flash's machine-wide transport: browser tabs and desktop processes do not
-share connections.
+Messages snapshot arguments as bounded bytes (40 KiB) and wait on one
+queue where the frame's host events are, which delivers up to 16 a frame,
+first in first out, so that a message a handler sends arrives in the same
+frame unless a chain keeps sending, as Flash's real-time delivery has it
+(`Loads.deferLocal`). AVM1 sends AMF0; AS3 sends AMF3 to preserve
+ByteArray, XML, Vector and class aliases, converting the snapshot to AMF0
+only when an AVM1 receiver needs it. AMF3 scratch buffers are reused
+except for externalizable streams that may escape the call. A broker with
+no messages does no frame work. Receiver methods, domain permissions and
+sender status events enter the appropriate VM, never sharing live script
+objects. A method a receiver lacks, or a property that is no function, is
+passed over in silence, as in Flash. Closing or destroying a receiver
+frees its name; an AVM1 movie an AS3 Loader unloads with no unload
+handler in it keeps its names, and stays while it listens or has a send
+to deliver, as Flash keeps it (avm1.md, "AVM1 and AVM2"); one with a
+handler frees them as the frame ends. This is in-process messaging, not Flash's
+machine-wide transport: browser tabs and desktop processes do not share
+connections.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;
