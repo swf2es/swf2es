@@ -509,6 +509,26 @@ function textInputScroll(abc: Uint8Array): Uint8Array {
   });
 }
 
+// Fields in Probe scrolled sideways, down and both, by script and by a caret
+// (scripts/TextScrollHits.as): what the hit tests give for each.
+function textScrollHits(abc: Uint8Array): Uint8Array {
+  return w.swf({
+    width: 330,
+    height: 200,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      probeFont(1),
+      w.doAbc(abc, "TextScrollHits"),
+      w.symbolClass([[0, "TextScrollHits"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // AVM1 input fields in Probe scrolled to their carets by the focus, which
 // selects all their text, as TextInputScroll's: hscroll and maxhscroll in
 // twips, as Flash gives them for a field of embedded fonts. adl's AVM1
@@ -1126,6 +1146,17 @@ export const textCases: PlayerCase[] = [
   },
   // An input field's scroll as a script moves its caret or changes its text:
   // scrollH and scrollV follow the caret, and the text is drawn scrolled.
+  {
+    name: "text-scroll-hits",
+    swf: textScrollHits,
+    script: "TextScrollHits",
+    frames: 3,
+    // Before the input field has the focus, whose caret adl's hidden window does not draw.
+    capture: [1],
+    // The borders' bottom right corners, a pixel of each of ten fields.
+    tolerance: 64,
+    maxOutliers: 30,
+  },
   {
     name: "text-input-scroll",
     swf: textInputScroll,
