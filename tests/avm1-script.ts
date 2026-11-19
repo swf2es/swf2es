@@ -1265,6 +1265,12 @@ const TIMELINE: Record<string, true> = {
   duplicateMovieClip: true,
   removeMovieClip: true,
   fscommand: true,
+  loadMovie: true,
+  loadMovieNum: true,
+  loadVariables: true,
+  loadVariablesNum: true,
+  unloadMovie: true,
+  unloadMovieNum: true,
 };
 
 /**
@@ -1344,6 +1350,37 @@ function timeline(a: Avm1Assembler, name: string, args: Emit[]): void {
       args[0](a);
       a.op("RemoveSprite");
       return;
+    // GetURL2, as Flash's compiler writes them: the URL, then the target, a
+    // level's "_levelN", its flags loadTarget (0x40) for a clip's, and
+    // loadVariables (0x80); an unload is a load of "".
+    case "loadMovie":
+    case "loadVariables":
+    case "unloadMovie":
+    case "loadMovieNum":
+    case "loadVariablesNum":
+    case "unloadMovieNum": {
+      const unload = name.startsWith("unload");
+      const level = name.endsWith("Num");
+      if (unload) {
+        a.push("");
+      } else {
+        args[0](a);
+      }
+
+      const target = args[unload ? 0 : 1];
+      if (level) {
+        a.push("_level");
+        target(a);
+        a.op("Add2");
+      } else {
+        target(a);
+      }
+
+      a.action(0x9a, [
+        (level ? 0 : 0x40) | (name === "loadVariables" || name === "loadVariablesNum" ? 0x80 : 0),
+      ]);
+      return;
+    }
     // Of constant strings only, a GetURL of "FSCommand:" and the command, its target the arguments.
     case "fscommand": {
       const [command, rest] = args.map((arg) => {
