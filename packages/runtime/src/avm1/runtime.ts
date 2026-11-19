@@ -199,8 +199,8 @@ export interface Operations {
   castOp(cx: Activation, object: Value, constr: Value): Value;
   /** ImplementsOp, which pops its operands itself. */
   implementsOp(cx: Activation): void;
-  /** RandomNumber: an int from 0 below `max`, 0 for a max below 1. */
-  randomNumber(max: Value): number;
+  /** RandomNumber: an int from 0 below `max`, 0 for a max below 1, from the realm's generator, which Math.random shares. */
+  randomNumber(cx: Activation, max: Value): number;
   /** What DefineFunction2 preloads: its `arguments`, its `super`, `_root` and `_parent`, undefined for none. */
   argumentsOf(cx: Activation, args: Value[]): Value;
   superOf(cx: Activation, self: Value): Value;
@@ -628,11 +628,11 @@ function operations(version: number): Operations {
     implementsOp(cx) {
       implementsOp(cx, version);
     },
-    randomNumber(max) {
+    randomNumber(cx, max) {
       // Rust's cast of the max: saturated, NaN 0.
       const n = toNumber(max, version);
       const m = Number.isNaN(n) ? 0 : Math.trunc(Math.min(Math.max(n, -2147483648), 2147483647));
-      return m > 0 ? Math.floor(Math.random() * 0x80000000) % m : 0;
+      return cx.realm.random.range(m);
     },
     argumentsOf: (cx, args) => argumentsOf(cx, args, version),
     superOf: (cx, self) => superOf(cx, self, version),
