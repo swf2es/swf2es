@@ -204,7 +204,8 @@ the context was lost (`ShaderError.lost`) is no error. When a GPU
 process dies, every status reads false and every log reads empty, and
 Chrome flags the context as lost only a task later, so a failure with no
 log counts as a loss too, for 500 ms (`webgl/losses.ts`). The backend
-drops the frame or restore it was in, and frames wait. The next restore
+drops the frame or restore it was in, and frames wait. A BitmapData's
+texture is still read, filled and drawn into while they wait. The next restore
 makes everything again, however many losses come and whenever they come,
 during a restore included. If the context is still not flagged lost after
 500 ms, the failure was the shaders' after all, and it is handled as one:

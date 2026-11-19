@@ -1487,6 +1487,7 @@ WebAssembly.instantiate = (async (module: WebAssembly.Module, imports?: WebAssem
  */
 interface Drawn {
   player: Player;
+  view: RenderView;
   gl: WebGL2RenderingContext;
   canvas: HTMLCanvasElement;
   render(): void;
@@ -1506,6 +1507,7 @@ async function drawn(
   await player.start();
   return {
     player,
+    view,
     gl: view.gl,
     canvas: view.canvas,
     render: () => view.render(player.stage),
@@ -1975,9 +1977,10 @@ async function contextLostAtStartSwf(base64: string, frames: number): Promise<st
  * A SWF with no scripts played while a filter pass's program fails to link
  * saying nothing, on a context never lost (lossTrap's `fault`): taken for a
  * loss Chrome has not flagged yet, frames wait, making nothing on the GPU
- * and throwing nothing, till it has failed so for longer than a loss takes
- * to be flagged; then it is the shaders' fault, and the frame that links it
- * again throws it, as before. What went otherwise, or null.
+ * and throwing nothing, while BitmapData drawn on the GPU is read and drawn
+ * into as ever; once it has failed so for longer than a loss takes to be
+ * flagged, it is the shaders' fault, and a frame that links it again
+ * throws it, as before. What went otherwise, or null.
  */
 async function shaderFaultSwf(base64: string): Promise<string | null> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
@@ -1988,9 +1991,54 @@ async function shaderFaultSwf(base64: string): Promise<string | null> {
     d.player.tick();
     d.render();
   };
+  // BitmapData drawn into on the GPU, its newest pixels its texture's alone: a triangle of the
+  // SWF's, which needs no program a frame has not linked yet.
+  const { BitmapStore } = (await import(`${"/player/bitmap/bitmap.js"}`)) as {
+    BitmapStore: new (
+      width: number,
+      height: number,
+      transparent: boolean,
+      fill: number,
+    ) => { getPixel32(x: number, y: number): number };
+  };
+  const identity = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+  const drawnOnGpu = () => {
+    // The SWF's second object, an unfiltered triangle in context-loss.ts.
+    const triangle = (d.player.stage.children[0] as unknown as Container).children[1];
+    const store = new BitmapStore(32, 32, true, 0);
+    const done = d.view.drawInto(store as never, triangle, identity, 0, 0, 32, 32, 1);
+    return done ? store : null;
+  };
+  const pixelsOfStore = (store: { getPixel32(x: number, y: number): number }) => {
+    const out: number[] = [];
+    for (let i = 0; i < 32 * 32; i++) {
+      out.push(store.getPixel32(i % 32, Math.floor(i / 32)));
+    }
+
+    return out.join();
+  };
   try {
+    // Its objects placed, nothing drawn yet.
+    d.player.tick();
+    const expected = drawnOnGpu();
+    const kept = drawnOnGpu();
+    if (!expected || !kept) {
+      return "the BitmapData was not drawn on the GPU";
+    }
+
+    const want = pixelsOfStore(expected);
+    if (!want.split(",").some((p) => p !== "0")) {
+      return "the BitmapData was drawn empty";
+    }
+
     trap.arm("fault");
+    // The first frame links the filter passes it draws, the program queue linking nothing ahead
+    // till the second: the fault comes inside its draws, and frames wait from the next.
     frame();
+    if (trap.failures === 0) {
+      return "the first frame linked nothing";
+    }
+
     const made = trap.made;
     for (let i = 0; i < 20; i++) {
       frame();
@@ -1998,6 +2046,16 @@ async function shaderFaultSwf(base64: string): Promise<string | null> {
 
     if (trap.made !== made) {
       return `${trap.made - made} GL objects made in 20 frames waiting`;
+    }
+
+    // Meanwhile, a BitmapData's texture is read and drawn into as ever.
+    if (pixelsOfStore(kept) !== want) {
+      return "a BitmapData drawn on the GPU lost its pixels while frames waited";
+    }
+
+    const late = drawnOnGpu();
+    if (!late || pixelsOfStore(late) !== want) {
+      return "a BitmapData was not drawn on the GPU while frames waited";
     }
 
     // Past LinkLosses' grace, 500 ms.
@@ -2011,7 +2069,9 @@ async function shaderFaultSwf(base64: string): Promise<string | null> {
       }
     }
 
-    // The first frame to link it again throws it; those after draw from what the view keeps.
+    // The first frame that links it again throws it. Here the frames after take the filtered
+    // output the view registered as kept in the frame that threw, link nothing, and throw
+    // nothing, as on dev for a failure that says why.
     if (thrown.length === 0 || !thrown.every((t) => t.startsWith("ShaderError"))) {
       return `the frames after threw ${JSON.stringify(thrown)}`;
     }
@@ -2090,6 +2150,7 @@ function lossTrap(d: Drawn) {
   let draws = 0;
   let dead = false;
   let made = 0;
+  let failures = 0;
   let faulty = false;
   const failing = new WeakSet<WebGLProgram>();
   d.canvas.addEventListener("webglcontextlost", () => {
@@ -2140,10 +2201,14 @@ function lossTrap(d: Drawn) {
 
     proto.drawArrays.call(gl, mode, first, count);
   };
-  own.getProgramParameter = (program: WebGLProgram, name: number) =>
-    dead || (failing.has(program) && name === gl.LINK_STATUS)
-      ? false
-      : proto.getProgramParameter.call(gl, program, name);
+  own.getProgramParameter = (program: WebGLProgram, name: number) => {
+    if (failing.has(program) && name === gl.LINK_STATUS) {
+      failures++;
+      return false;
+    }
+
+    return dead ? false : proto.getProgramParameter.call(gl, program, name);
+  };
   own.getShaderParameter = (shader: WebGLShader, name: number) =>
     dead ? false : proto.getShaderParameter.call(gl, shader, name);
   own.getProgramInfoLog = (program: WebGLProgram) =>
@@ -2154,6 +2219,10 @@ function lossTrap(d: Drawn) {
     arm(kind: "link" | "crash" | "draw" | "fault") {
       armed.push(kind);
       draws = 0;
+    },
+    /** Links `fault` failed so far. */
+    get failures() {
+      return failures;
     },
     /** GL objects made so far, besides programs and shaders. */
     get made() {

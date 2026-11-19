@@ -272,64 +272,66 @@ test("a kernel that fails saying nothing is drawn without, kept as failed only o
   const kernels = new KernelPrograms(gl, new GlState(gl), losses);
   const now = { t: 1000 };
   const links = () => log.filter((l) => l.startsWith("link")).length;
+  // A frame of each `step` ms, using the kernel `name`.
+  const frame = (name: string, step = 100) => {
+    now.t += step;
+    const kernel = at(now, () => kernels.use("vertex", name, () => {}));
+    at(now, () => losses.endFrame());
+    return kernel;
+  };
   context.dead = true;
-  // Taken for a context lost but not flagged yet: drawn without, and linked again as next used.
-  at(now, () => {
-    assert.equal(
-      kernels.use("vertex", "k", () => {}),
-      null,
-    );
-    losses.endFrame();
-  });
-  now.t += LOSS_GRACE_MS / 2;
-  at(now, () => {
-    assert.equal(
-      kernels.use("vertex", "k", () => {}),
-      null,
-    );
-    losses.endFrame();
-  });
-  assert.equal(links(), 2);
-  // Still failing, still not flagged, past the grace: the kernel's fault, kept, not linked again.
-  now.t += LOSS_GRACE_MS;
-  at(now, () => {
-    assert.equal(
-      kernels.use("vertex", "k", () => {}),
-      null,
-    );
-    losses.endFrame();
-    assert.equal(
-      kernels.use("vertex", "k", () => {}),
-      null,
-    );
-  });
-  assert.equal(links(), 3);
-  // A frame drawn without a failure starts the clock again for another.
-  at(now, () => losses.endFrame());
-  assert.equal(losses.expired, true);
-  at(now, () =>
-    assert.equal(
-      kernels.use("vertex", "other", () => {}),
-      null,
-    ),
-  );
+  // Taken for a context lost but not flagged yet: drawn without, and linked again each frame.
+  for (let i = 0; i < 4; i++) {
+    assert.equal(frame("k"), null);
+  }
+
   assert.equal(links(), 4);
+  // Still failing, still not flagged, past the grace: the kernel's fault, kept, not linked again.
+  assert.equal(frame("k", LOSS_GRACE_MS - 300), null);
+  assert.equal(links(), 5);
+  assert.equal(frame("k"), null);
+  assert.equal(links(), 5);
+  // A frame drawn without a failure ended the run: another failure starts one of its own.
+  assert.equal(losses.expired, true);
+  assert.equal(frame("other"), null);
+  assert.equal(links(), 6);
   at(now, () => assert.equal(losses.expired, false));
   // Flagged lost: drawn without, not kept, whatever the clock.
   context.dead = false;
   context.lost = true;
-  now.t += LOSS_GRACE_MS * 4;
-  at(now, () =>
-    assert.equal(
-      kernels.use("vertex", "flagged", () => {}),
-      null,
-    ),
-  );
+  assert.equal(frame("flagged", LOSS_GRACE_MS * 4), null);
   context.lost = false;
-  at(now, () =>
-    assert.notEqual(
-      kernels.use("vertex", "flagged", () => {}),
-      null,
-    ),
-  );
+  assert.notEqual(frame("flagged"), null);
+});
+
+test("a failure a grace after the last starts a run of its own; one conceded throws till a clean frame", () => {
+  const { gl, context } = fakeGl(false);
+  const losses = new LinkLosses(gl);
+  const now = { t: 1000 };
+  context.dead = true;
+  const failure = () => {
+    try {
+      linkProgram(gl, "vertex", "k");
+    } catch (e) {
+      return e;
+    }
+
+    throw new Error("linked");
+  };
+  // Work given up on, as a BitmapData draw, and no frame drawn after.
+  at(now, () => assert.equal(losses.lost(failure()), true));
+  now.t += LOSS_GRACE_MS * 10;
+  // Long after, the GPU process dies: a loss again, not the fault of the run before.
+  at(now, () => assert.equal(losses.lost(failure()), true));
+  now.t += LOSS_GRACE_MS;
+  at(now, () => assert.equal(losses.expired, true));
+  // Its grace over unflagged, conceded: what fails is the shaders', till a frame draws clean.
+  losses.concede();
+  now.t += LOSS_GRACE_MS * 10;
+  at(now, () => assert.equal(losses.lost(failure()), false));
+  at(now, () => losses.endFrame());
+  at(now, () => assert.equal(losses.lost(failure()), false));
+  at(now, () => losses.endFrame());
+  at(now, () => losses.endFrame());
+  at(now, () => assert.equal(losses.lost(failure()), true));
 });

@@ -1524,8 +1524,7 @@ export class RenderView implements Drawer {
       store.disposed ||
       store.holdsAlpha ||
       Math.max(store.width, store.height) > this.textureLimit ||
-      this.gl.isContextLost() ||
-      this.backend.stale
+      this.gl.isContextLost()
     ) {
       return false;
     }

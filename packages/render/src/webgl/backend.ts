@@ -229,6 +229,7 @@ export class WebGLBackend {
       throw this.fault;
     }
 
+    this.losses.concede();
     this.ready = true;
     return true;
   }
@@ -236,6 +237,17 @@ export class WebGLBackend {
   /** Whether frames draw: the context there, and what it holds made. */
   private get usable(): boolean {
     return this.ready && !this.gl.isContextLost();
+  }
+
+  /**
+   * Whether what the context holds may be drawn into and read: made, and
+   * not lost. Not stopped by a frame given up on as lost (stale): a
+   * BitmapData's texture, whose pixels may be newer than its store's, is
+   * read, filled and drawn into meanwhile as ever, unless that needs a
+   * program that fails.
+   */
+  private get live(): boolean {
+    return this.made && !this.gl.isContextLost();
   }
 
   /**
@@ -624,7 +636,7 @@ export class WebGLBackend {
   ): Uint8Array {
     const gl = this.gl;
     const bytes = new Uint8Array(width * height * 4);
-    if (!this.usable) {
+    if (!this.live) {
       return bytes;
     }
 
@@ -678,7 +690,7 @@ export class WebGLBackend {
     y: number,
     opaque: boolean,
   ): boolean {
-    if (!this.usable) {
+    if (!this.live) {
       return false;
     }
 
@@ -779,7 +791,7 @@ export class WebGLBackend {
    * row by row; null on a lost context or without the texture.
    */
   readTexture(id: number, width: number, height: number): Uint8Array | null {
-    const framebuffer = this.usable ? this.textureFramebuffer(id) : null;
+    const framebuffer = this.live ? this.textureFramebuffer(id) : null;
     if (!framebuffer) {
       return null;
     }
@@ -804,7 +816,7 @@ export class WebGLBackend {
     height: number,
     pixel: number,
   ): boolean {
-    if (!this.usable) {
+    if (!this.live) {
       return false;
     }
 
@@ -868,7 +880,7 @@ export class WebGLBackend {
     dy: number,
   ): boolean {
     const gl = this.gl;
-    if (!this.usable) {
+    if (!this.live) {
       return false;
     }
 
