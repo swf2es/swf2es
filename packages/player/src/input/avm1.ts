@@ -84,6 +84,13 @@ export class LoadedAvm1Input {
     return redraws;
   }
 
+  /** The press each movie keeps from its broadcast, forgotten once the host is done with it. */
+  forgetPress(): void {
+    for (const pointer of this.movies.values()) {
+      pointer.forgetPress();
+    }
+  }
+
   leave(p: PointerState): number {
     let redraws = 0;
     this.over = null;

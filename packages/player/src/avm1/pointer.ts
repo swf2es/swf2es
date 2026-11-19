@@ -209,6 +209,11 @@ export class Avm1Pointer implements Pointer {
     }
   }
 
+  /** A press its host broadcast but never handed on, an error between them, forgotten. */
+  forgetPress(): void {
+    this.beforePress = null;
+  }
+
   handle(type: "move" | "down" | "up" | "leave", p: PointerState, broadcast = true): void {
     // A move posted before this input comes first; a move given now replaces it.
     if (type === "move") {
@@ -221,6 +226,7 @@ export class Avm1Pointer implements Pointer {
 
     // Left with the button up: nothing is under it. With the button down, Flash keeps the mouse.
     if (type === "leave") {
+      this.beforePress = null;
       if (!this.held) {
         this.last = null;
         this.send(this.hoverTo(null, []));
