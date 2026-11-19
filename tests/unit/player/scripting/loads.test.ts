@@ -255,18 +255,20 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   // The closed load and the replaced one come to nothing; the replacement
   // loads. A loaded SWF's own load resolves against it.
   await scripting.settled();
+  // Each load's bytes are told as they came, in the order they came, before
+  // the contents that came of them, in the order asked.
   player.tick();
   assert.deepEqual(lines.splice(0), [
     "2 open - null false",
     `2 progress 0/${inner.length} null false`,
     `2 progress ${inner.length}/${inner.length} null false`,
-    ...content,
     `3 open - null false`,
     `3 progress 0/${nested.length} null false`,
     `3 progress ${nested.length}/${nested.length} null false`,
     "5 open - null false",
     `5 progress 0/${inner.length} null false`,
     `5 progress ${inner.length}/${inner.length} null false`,
+    ...content,
     ...content,
     "frame 3 1,0,1,1,0,1",
     `before reload true ${inner.length} 10`,
@@ -301,10 +303,10 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "0 open - null false",
     `0 progress 0/${inner.length} null false`,
     `0 progress ${inner.length}/${inner.length} null false`,
-    ...content,
     // A load replaced from its OPEN listener ends there: no progress, no content.
     "7 open - null false",
     "replaced from open true 0",
+    ...content,
     ...content,
     // Loader 0's first content, let go of by the reload, plays on as an orphan: its scripts first.
     "inner frame 1 false true true false",
@@ -359,11 +361,11 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "8 open - null false",
     `8 progress 0/${inner.length} null false`,
     `8 progress ${inner.length}/${inner.length} null false`,
-    ...content,
     // The load asked for from REMOVED, the nested SWF, is loader 5's; the one that replaced it is not.
     "5 open - null false",
     `5 progress 0/${nested.length} null false`,
     `5 progress ${nested.length}/${nested.length} null false`,
+    ...content,
     ...content,
     ...content,
     // The orphans, newest first: loader 5's replaced content, then loader 0's.
@@ -1871,3 +1873,111 @@ import flash.utils.setTimeout;
     assert.equal(copies.length, 1);
   });
 }
+
+test("a host that tells a response as it comes has each piece told in the frame after", {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  const source = readFileSync(
+    fileURLToPath(new URL("../../../web/scripts/ProgressTest.as", import.meta.url)),
+    "utf8",
+  );
+  const child = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  const tone = readFileSync(
+    fileURLToPath(new URL("../../../player/sounds/tone.mp3", import.meta.url)),
+  );
+  const bodies: Record<string, Uint8Array> = {
+    "/swf": child,
+    "/bin": new Uint8Array(30).fill(65),
+    "/mp3": new Uint8Array(tone),
+  };
+  // Each response in three pieces, one a frame, its head the frame before the first; `true` the
+  // step that ends it, after which the frame may wait for what it brought to be ready.
+  const steps: (() => boolean)[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    parameters: { base: "http://example.test" },
+    fetch: (request, _signal, progress) => {
+      const url = new URL(request.url);
+      const body = bodies[url.pathname];
+      const head = { status: 200, headers: [] };
+      const third = Math.ceil(body.length / 3);
+      return new Promise((done) => {
+        steps.push(() => {
+          progress?.open(head, url.search === "?unsized" ? 0 : body.length);
+          return false;
+        });
+        for (let at = 0; at < body.length; at += third) {
+          const piece = body.slice(at, at + third);
+          steps.push(() => {
+            progress?.data(piece);
+            return false;
+          });
+        }
+
+        steps.push(() => {
+          done({ ...head, bytes: body });
+          return true;
+        });
+      });
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compile("ProgressTest", source), 1, "ProgressTest"), scripting);
+  t.after(() => player.destroy());
+  await player.start();
+  const frames: string[][] = [];
+  for (let i = 0; i < 60 && !lines.includes("progress: done"); i++) {
+    // settled() waits for the fetches under way, which end only in a later step.
+    if (steps.shift()?.() ?? true) {
+      await scripting.settled();
+    } else {
+      await new Promise((next) => setTimeout(next, 0));
+    }
+
+    player.tick();
+    frames.push(lines.splice(0).map((l) => l.replace("progress: ", "")));
+  }
+
+  // The pieces' PROGRESS come a frame each, growing, the total what the head told; a
+  // URLStream's bytes readable as each comes.
+  const told = frames.filter((f) => f.length > 0);
+  assert.deepEqual(told.slice(0, 5), [
+    [`loader progress 0 ${child.length}`],
+    [`loader progress ${Math.ceil(child.length / 3)} ${child.length}`],
+    [`loader progress ${2 * Math.ceil(child.length / 3)} ${child.length}`],
+    [`loader progress ${child.length} ${child.length}`],
+    ["loader complete"],
+  ]);
+  assert.deepEqual(told.slice(5, 13).flat(), [
+    "urlloader progress 10 30",
+    "urlloader progress 20 30",
+    "urlloader progress 30 30",
+    "urlloader complete",
+    "urlstream progress 10 30 10",
+    "urlstream progress 20 30 20",
+    "urlstream progress 30 30 30",
+    "urlstream complete",
+  ]);
+  assert.deepEqual(told.slice(13, 17).flat(), [
+    "unsized progress 10 0 10",
+    "unsized progress 20 0 20",
+    "unsized progress 30 0 30",
+    "unsized complete",
+  ]);
+  const sound = told.slice(17).flat();
+  assert.deepEqual(sound.slice(0, 4), [
+    `sound progress 0 ${tone.length}`,
+    `sound progress ${Math.ceil(tone.length / 3)} ${tone.length}`,
+    `sound progress ${2 * Math.ceil(tone.length / 3)} ${tone.length}`,
+    `sound progress ${tone.length} ${tone.length}`,
+  ]);
+  assert.deepEqual(sound.slice(-2), ["sound complete", "done"]);
+});
