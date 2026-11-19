@@ -58,6 +58,7 @@ import {
   type SocketHost,
   screenCapabilities,
 } from "../hosts.js";
+import type { MenuItem } from "../input/context-menu.js";
 import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
@@ -76,6 +77,7 @@ import { FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
+import { contextMenuClasses, menuAt } from "./globals/ContextMenu.js";
 import { externalInterfaceClass } from "./globals/ExternalInterface.js";
 import { fileReferenceClasses } from "./globals/FileReference.js";
 import { type FilterFaces, filtersPackage } from "./globals/filters.js";
@@ -334,6 +336,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private movieRoot: MovieClip | null = null;
   /** Whether this plays the main movie, not an AVM1Movie an AS3 Loader loaded, which has no `$version`. */
   private standalone = true;
+  /** Whether destroy has run: a menu still open calls nothing. */
+  private destroyed = false;
   private swfVersion = 0;
   private swfLength = 0;
   private rate = 24;
@@ -642,6 +646,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       avm1.DONT_ENUM,
     );
     realm.global.define("PrintJob", printJobClass(realm), avm1.DONT_ENUM);
+    const menus = contextMenuClasses(realm);
+    realm.global.define("ContextMenu", menus.ContextMenu, avm1.DONT_ENUM);
+    realm.global.define("ContextMenuItem", menus.ContextMenuItem, avm1.DONT_ENUM);
     realm.global.define(
       "System",
       systemObject(realm, this.platform, this.screen, this.debugger, this.swfVersion),
@@ -1303,6 +1310,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** The player gone: SharedObject writes what its scripts changed, as Flash did as a SWF closed. */
   destroy(closeAudio = true): void {
+    this.destroyed = true;
     for (const bytes of this.codeLive) {
       this.codegen.releaseActions(bytes);
     }
@@ -1366,6 +1374,57 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
     }
+  }
+
+  /**
+   * The menu a right click on `d` shows, from it up through its parents
+   * (globals/ContextMenu.ts): its onSelect run now, and each item's as it
+   * is chosen, as a callback runs, what they queue after them; null where
+   * none has a menu.
+   */
+  menu(d: DisplayObject | null): { items: MenuItem[]; quality: boolean } | null {
+    if (this.halted || !this.loaded) {
+      return null;
+    }
+
+    const run = <T>(body: () => T): T => {
+      this.timers.begin();
+      try {
+        const result = body();
+        this.queue.run();
+        return result;
+      } finally {
+        this.timers.end();
+      }
+    };
+    const call = (o: avm1.Avm1Object, name: string, args: Value[]) => this.callback(o, name, args);
+    // A clip in another level with no menu has level 0's, as Flash Player 32 shows it alone.
+    const menu = run(
+      () =>
+        menuAt(d, this.swfVersion, call) ??
+        (this.standalone && d !== this.root ? menuAt(this.root, this.swfVersion, call) : null),
+    );
+    if (menu === null) {
+      return null;
+    }
+
+    let chosen = false;
+    return {
+      quality: menu.quality,
+      items: menu.items.map(({ caption, enabled, separatorBefore, item }) => ({
+        caption,
+        enabled,
+        separatorBefore,
+        select: () => {
+          if (!enabled || chosen || this.stopped || this.destroyed) {
+            return;
+          }
+
+          chosen = true;
+          run(() => this.callback(item, "onSelect", [menu.owner, item]));
+        },
+      })),
+    };
   }
 
   /** Stopped for good, or to be once its frame has run (fscommand's "quit"). */
