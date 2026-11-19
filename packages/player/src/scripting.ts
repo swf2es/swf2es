@@ -318,6 +318,13 @@ export class Scripting {
   stage: Container | null = null;
   /** stage.focus: the object keys go to, a TextField that edits with them; null for the stage. */
   focus: DisplayObject | null = null;
+  /**
+   * Whether the focus's yellow rectangle shows (input/keyboard.ts,
+   * highlighted): Tab or a script moved the focus, and no press came since.
+   */
+  focusHighlight = false;
+  /** Stage.stageFocusRect: whether an object whose focusRect is null shows the rectangle. */
+  stageFocusRect = true;
   root: MovieClip | null = null;
   library: Library | null = null;
   /** Whether a script asked the stage to render (Stage.invalidate). */
