@@ -94,6 +94,20 @@ package
 			_dynamic.scrollV = 5;
 
 			_input.text = LINES + "\n" + WIDE;
+			// Heard by nothing: its scroll kept within each text as it is set, read only after both.
+			const unheard:TextField = new TextField();
+			unheard.embedFonts = true;
+			unheard.defaultTextFormat = new TextFormat("Probe", 20);
+			unheard.multiline = true;
+			unheard.width = 60;
+			unheard.height = 50;
+			unheard.text = LINES + "\n" + WIDE;
+			unheard.scrollV = 6;
+			unheard.scrollH = 40;
+			unheard.text = "";
+			unheard.text = LINES + "\n" + WIDE;
+			trace("unheard after two texts", state(unheard));
+
 			step("constructed");
 			addEventListener(Event.ENTER_FRAME, frame);
 		}

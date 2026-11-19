@@ -51,6 +51,7 @@ step format back then scrollV 5 1/1 0/0
   scroll dynamic during format back then scrollV 5 1/8 0/275 false false 2
   scroll dynamic during format back then scrollV 5 5/8 0/275 false false 2
   scroll input during format back then scrollV 5 1/8 0/289 false false 2
+unheard after two texts 1/8 0/275
 step constructed 1/8 0/289
 step frame 1 1/8 0/289
 step focus 1/8 0/289

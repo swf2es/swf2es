@@ -144,6 +144,7 @@ export class TextObject extends DisplayObject {
     initialText = true,
   ) {
     super();
+    this.model.changed = this.textChanged;
     this.character = definition;
     const edit = definition?.definition;
     if (!edit) {
@@ -228,18 +229,42 @@ export class TextObject extends DisplayObject {
   /**
    * The scroll kept within new text's maxScrollH and maxScrollV, as Flash
    * keeps it as the text changes, but not as the field's size does (adl).
+   * A scroll it moves is told, as a script's is (scrollTold).
    */
   private keepScroll(): void {
     if (this.scrolledRevision !== this.model.revision) {
       this.scrolledRevision = this.model.revision;
-      this.scrollX = Math.min(this.scrollX, maxScrollH(this));
-      this.lineScroll = Math.min(this.lineScroll, maxScrollV(this));
+      const x = Math.min(this.scrollX, maxScrollH(this));
+      const v = Math.min(this.lineScroll, maxScrollV(this));
+      if (x !== this.scrollX || v !== this.lineScroll) {
+        this.scrollX = x;
+        this.lineScroll = v;
+        this.scrollTold?.(this);
+      }
     }
   }
 
-  /** scrollV, maxScrollV, scrollH and maxScrollH, the last in twips, as Event.SCROLL and onScroller compare them. */
+  /**
+   * The text or its formats changed: the scroll kept within them at once,
+   * not as it is next read, so that text set twice keeps it as Flash does
+   * whether or not anything reads it between. A field not scrolled has
+   * nothing to keep, and is laid out no sooner.
+   */
+  private readonly textChanged = (): void => {
+    if (this.lineScroll > 1 || this.scrollX > 0) {
+      this.keepScroll();
+    }
+  };
+
+  /**
+   * scrollV, maxScrollV, scrollH and maxScrollH as Event.SCROLL and
+   * onScroller compare them, a pending fit settled first: the last two in
+   * twips, finer than AS3 reads them, as Flash Player 32 dispatched SCROLL
+   * for a maxScrollH that moved by less than a pixel.
+   */
   scrollState(): number[] {
-    return [this.scrollV, maxScrollV(this), this.scrollH, maxScrollH(this)];
+    this.settle();
+    return [this.scrollV, maxScrollV(this), this.scrollX, maxScrollH(this)];
   }
 
   /** The first line shown, from 1. */
