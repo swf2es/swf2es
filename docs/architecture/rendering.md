@@ -94,7 +94,13 @@ it, a fill's or a line's alike: a gradient in the colour at its square's
 centre; a clipped bitmap in its bottom right texel; a repeating one a
 texel to a stage pixel from the stage's corner, unturned, unscaled and
 not smoothed whatever the transform (`TARGET_TEXEL`, read at the pixel's
-centre; `collapsed-gradients`, `collapsed-bitmaps`). No line is
+centre; `collapsed-gradients`, `collapsed-bitmaps`). adl draws the stage
+at its size, a stage pixel a screen pixel, so what a stage pixel is
+otherwise is a choice of the player's, unmeasured: on a stage shown larger
+or smaller, or letterboxed, the stage's own pixels from its corner, each
+screen pixel the texel of the stage pixel under its centre (a stage shown
+at half its size so shows every other texel), and in `BitmapData.draw`
+the bitmap's pixels from its corner. No line is
 thinner than a pixel of the screen, which is how wide Flash draws a
 hairline however far its stage is zoomed: `RenderView.screenScale`
 screen pixels to a stage pixel, the view's scale and resolution unless

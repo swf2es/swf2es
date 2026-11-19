@@ -290,7 +290,7 @@ class Sampling {
     // bitmap's, to its last texel where it is clipped, the stage's pixel where it repeats.
     this.m =
       invert(paint.matrix) ??
-      (paint.type !== "image" ? COLLAPSED : paint.repeat ? ON_TARGET : LAST_TEXEL);
+      (paint.type !== "image" ? COLLAPSED : paint.repeat ? ON_STAGE : LAST_TEXEL);
     // A shader's coordinates are its matrix's inverse of the shape's, as a bitmap's texels are.
     this.kind = paint.type !== "gradient" ? "image" : paint.radial ? "radial" : "linear";
     this.region = region;
@@ -343,7 +343,7 @@ const LAST_TEXEL: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: 1 << 24, ty: 1 << 24 };
  * unturned and unscaled and not smoothed, whatever the matrix and the
  * transform.
  */
-const ON_TARGET: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: TARGET_TEXEL, ty: TARGET_TEXEL };
+const ON_STAGE: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: TARGET_TEXEL, ty: TARGET_TEXEL };
 
 function collapses(m: Matrix): boolean {
   return m.a * m.d - m.b * m.c === 0;
@@ -423,7 +423,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     const textured =
       fill.type === "image" || fill.type === "gradient" || fill.type === "shader" ? fill : null;
     // A shader whose matrix collapses the plane is left out; a gradient or a bitmap is drawn
-    // (COLLAPSED, LAST_TEXEL, ON_TARGET).
+    // (COLLAPSED, LAST_TEXEL, ON_STAGE).
     if (textured?.type === "shader" && collapses(textured.matrix)) {
       continue;
     }
