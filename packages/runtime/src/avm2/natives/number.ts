@@ -159,7 +159,10 @@ for (const prefix of ["Math", "Number"]) {
   numberNatives[`${prefix}.atan2`] = (rt) => (y: Value, x: Value) =>
     Math.atan2(rt.toNumber(y), rt.toNumber(x));
   numberNatives[`${prefix}.pow`] = (rt) => (x: Value, y: Value) => rt.toNumber(x) ** rt.toNumber(y);
-  numberNatives[`${prefix}.random`] = plain(() => Math.random());
+  numberNatives[`${prefix}.random`] = (rt) => {
+    const random = rt.random;
+    return () => random.random();
+  };
   // Of two declared parameters, and any more, so that their length is 2.
   numberNatives[`${prefix}.max`] = (rt) =>
     function (x: Value, y: Value) {

@@ -564,7 +564,9 @@ async function runSwf(
       }
 
       // As the web host draws: a frame that changed nothing drawn is left as it shows.
+      let rendered = false;
       if (draw && player.changes !== drawn && !surface.unchanged(player.stage)) {
+        rendered = true;
         drawn = player.changes;
         surface.render(player.stage);
         // Chrome's finish returns before the GPU process has drawn; a read waits for it.
@@ -573,6 +575,7 @@ async function runSwf(
       }
 
       if (capture.includes(frame)) {
+        rendered = true;
         surface.render(player.stage);
         // A call GL refused drew nothing, which the picture may not show.
         const glError = surface.gl.getError();
@@ -583,6 +586,11 @@ async function runSwf(
         samples.getContext("2d")?.drawImage(surface.canvas, 0, 0);
         downsample(samples, output, n);
         images[frame] = output.toDataURL("image/png");
+      }
+
+      // As the web host does with a frame it plays and does not draw.
+      if (!rendered) {
+        player.undrawn();
       }
     }
 

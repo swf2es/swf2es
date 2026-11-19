@@ -4,11 +4,11 @@ import type { Matrix } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import {
-  bounds,
   boundsIn,
   hitsObject,
   hitsPoint,
   placedRect,
+  reportedBounds,
   toStage,
 } from "../../../display/bounds.js";
 import {
@@ -89,7 +89,7 @@ const twips = (v: number) => Math.round(v * 20) / 20;
 
 /** The object's width and height in its parent's space, or what that would be for one with no parent: its bounds through its own matrix. */
 function size(d: DisplayObject): [number, number] {
-  const r = placedRect(d, bounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 });
+  const r = placedRect(d, reportedBounds(d, true) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 });
   return [twips(r.xMax - r.xMin), twips(r.yMax - r.yMin)];
 }
 
@@ -263,6 +263,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
       this.$display.invalidate(TRANSFORM);
       if (!v) {
         this.$display.focusDrop?.(this.$display);
+        s.avm1Input?.hidden(this.$display);
       }
     }
 
@@ -462,7 +463,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const r = bounds(d, true);
+      const r = reportedBounds(d, true);
       const base = r ? twips(r.xMax - r.xMin) : 0;
       const current = d.rotation === 0 && d.skew === 0 ? base : size(d)[0];
       // Nothing to measure that way: a scale of 0, as adl gives it, and of 0 the other way too
@@ -499,7 +500,7 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
         return;
       }
 
-      const r = bounds(d, true);
+      const r = reportedBounds(d, true);
       const base = r ? twips(r.yMax - r.yMin) : 0;
       const current = d.rotation === 0 && d.skew === 0 ? base : size(d)[1];
       // Nothing to measure that way: a scale of 0, as adl gives it, and of 0 the other way too
@@ -519,14 +520,20 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     getBounds(target: Value): Value {
       return rectangle(
         s,
-        boundsIn(this.$display, (target as AsObject | null)?.$display ?? null, s.stage, true),
+        boundsIn(this.$display, (target as AsObject | null)?.$display ?? null, s.stage, true, true),
       );
     }
 
     getRect(target: Value): Value {
       return rectangle(
         s,
-        boundsIn(this.$display, (target as AsObject | null)?.$display ?? null, s.stage, false),
+        boundsIn(
+          this.$display,
+          (target as AsObject | null)?.$display ?? null,
+          s.stage,
+          false,
+          true,
+        ),
       );
     }
 

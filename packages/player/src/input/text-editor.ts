@@ -1,7 +1,7 @@
 // Text editing shared by AVM1 and AVM2; each supplies its own notifications.
 // After Ruffle's edit_text.rs and EditTextRestrict (https://github.com/ruffle-rs/ruffle):
 // MIT OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
-import { CONTENT, type TextObject } from "../display/display.js";
+import { CONTENT, scrollMoved, type TextObject } from "../display/display.js";
 import { GUTTER } from "../text/layout.js";
 import type { KeyState } from "./keyboard.js";
 
@@ -122,9 +122,18 @@ function parseRestrict(restrict: string): { allowed: Interval[]; disallowed: Int
 
 /** Edits a field, with the movie's input and change notifications. */
 export class TextEditor {
+  /**
+   * With `scrolled`, an edit that moves a field's scroll or how far it
+   * scrolls, measured while `heard` says something listens, is told after
+   * its change, as Flash Player 32 dispatched SCROLL after CHANGE.
+   */
   constructor(
     private readonly changed: (field: TextObject) => void,
     private readonly input?: (field: TextObject, text: string) => boolean,
+    private readonly scrolled?: {
+      heard: (field: TextObject) => boolean;
+      tell: (field: TextObject) => void;
+    },
   ) {}
 
   /**
@@ -220,13 +229,20 @@ export class TextEditor {
 
   /** [from, to) of the field's text as `text`, the caret after it, and the change notification. */
   replace(field: TextObject, from: number, to: number, text: string): void {
+    const scrolled = this.scrolled;
+    const before = scrolled?.heard(field) ? field.scrollState() : null;
     field.model.replace(from, to, text);
     // Fitted at once to what was typed, so that the caret's scroll is by the new size.
     field.settle();
     field.fit();
     field.select(from + text.length, from + text.length);
     field.invalidate(CONTENT);
+    // An AVM1 field's onScroller, should the edit have moved its scroll or how far it scrolls.
+    field.scrollTold?.(field);
     this.changed(field);
+    if (scrolled && before && scrollMoved(before, field.scrollState())) {
+      scrolled.tell(field);
+    }
   }
 }
 

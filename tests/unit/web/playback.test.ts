@@ -60,7 +60,7 @@ test("the loop reads the clock once more a call only while something hears its f
     drawn: 0,
     dirty: false,
     destroyed: false,
-    player: { advance: () => 2, quality: "HIGH", changes: 0, frameRate: 30 },
+    player: { advance: () => 2, undrawn() {}, quality: "HIGH", changes: 0, frameRate: 30 },
     textInput: { sync() {} },
   });
   const step = playback.step as (now: number, show: boolean) => void;
@@ -90,4 +90,55 @@ test("the loop reads the clock once more a call only while something hears its f
   step.call(playback, 132, false);
   assert.equal(reads() - before, unheard);
   assert.equal(told.length, 1);
+});
+
+test("a call's time never goes back, an animation frame's after the timer's just ahead of it", (t) => {
+  // A playback without a page, as above; the player hears what time it is handed.
+  const handed: number[] = [];
+  const playback = Object.create(Playback.prototype) as Record<string, unknown>;
+  Object.assign(playback, {
+    onFrame: null,
+    stats: { time: 0, frames: 0, frameRate: 0, play: 0, draw: 0, drew: false, shown: false },
+    last: null,
+    busy: 0,
+    dpr: 1,
+    quality: "HIGH",
+    drawn: 0,
+    dirty: false,
+    destroyed: false,
+    player: {
+      advance: (dt: number) => {
+        handed.push(dt);
+        return 0;
+      },
+      undrawn() {},
+      quality: "HIGH",
+      changes: 0,
+      frameRate: 30,
+    },
+    textInput: { sync() {} },
+  });
+  const step = playback.step as (now: number, show: boolean) => void;
+  const global = globalThis as { devicePixelRatio?: number };
+  global.devicePixelRatio = 1;
+  t.after(() => {
+    delete global.devicePixelRatio;
+  });
+  const times: number[] = [];
+  playback.onFrame = (stats: { time: number }) => times.push(stats.time);
+
+  // A frame, the stall timer's call by performance.now(), then the next frame, whose time is
+  // when it began, half a millisecond before the timer ran.
+  step.call(playback, 1000, true);
+  step.call(playback, 1300.5, false);
+  step.call(playback, 1300, true);
+  step.call(playback, 1316.7, true);
+  for (let i = 1; i < times.length; i++) {
+    assert.ok(times[i] >= times[i - 1], `time went back at ${i}: ${times}`);
+  }
+
+  assert.ok(
+    handed.every((dt) => dt >= 0),
+    `time handed backwards: ${handed}`,
+  );
 });

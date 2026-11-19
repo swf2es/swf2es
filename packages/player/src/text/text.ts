@@ -100,6 +100,8 @@ export class TextModel {
   formats: CharFormat[] = [];
   /** Counts the changes, text, formats or the default, for a layout to know it is current. */
   revision = 0;
+  /** Told after the text or its formats change, not the default format: the field keeps its scroll within them. */
+  changed: (() => void) | null = null;
   private fallback: CharFormat = { ...DEFAULT_FORMAT };
 
   /** The format of text set as a whole, and of an empty field's line. */
@@ -117,6 +119,7 @@ export class TextModel {
     this.revision++;
     this.text = normalize(text);
     this.formats = new Array(this.text.length).fill(this.defaultFormat);
+    this.changed?.();
   }
 
   /**
@@ -133,6 +136,7 @@ export class TextModel {
     this.formats = this.formats
       .slice(0, begin)
       .concat(new Array(inserted.length).fill(format), this.formats.slice(end));
+    this.changed?.();
   }
 
   /** What [begin, end) has in common: each value null where its characters differ; the default's for none. */
@@ -183,6 +187,8 @@ export class TextModel {
 
       this.formats[i] = next;
     }
+
+    this.changed?.();
   }
 
   /** The runs of each paragraph: its text up to a \r, in runs of one format. */
@@ -465,6 +471,7 @@ export class TextModel {
 
     this.text = text;
     this.formats = formats;
+    this.changed?.();
   }
 }
 

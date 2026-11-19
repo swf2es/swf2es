@@ -131,7 +131,7 @@ export interface Configuration {
   unmutePrompt?: boolean;
   /**
    * Whether an element offers its performance meter in its context menu
-   * ("Show performance"), and shows it as the viewer last left it there: on
+   * ("Show stats"), and shows it as the viewer last left it there: on
    * by default; an element's `performancemeter` attribute decides for
    * itself. The page may show the meter through `performanceMeter` either way.
    */

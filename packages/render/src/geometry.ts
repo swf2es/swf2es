@@ -9,6 +9,33 @@ export const IDLE_FRAMES = 300;
 /** Floats a vertex of advanced text's glyph quads (GeometryData.glyphs). */
 export const GLYPH_FLOATS = 18;
 
+/**
+ * A texel a vertex may give in place of where it samples: the stage's
+ * pixel it lands on instead, one texel each, read at the pixel's centre, as
+ * Flash draws a repeating bitmap whose matrix collapses the plane, from the
+ * stage's corner whatever the transform. Below it, any texel takes the same.
+ */
+export const TARGET_TEXEL = -1e30;
+
+/**
+ * Whether any of a fill's vertices samples the stage's pixel (TARGET_TEXEL),
+ * which the stage fill program alone draws.
+ */
+export function samplesStage(data: GeometryData): boolean {
+  const texels = data.texels;
+  if (!texels || data.depths) {
+    return false;
+  }
+
+  for (let k = 0; k < texels.length; k += 2) {
+    if (texels[k] <= TARGET_TEXEL / 2) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 /** A geometry as its owner holds it: its id, and the generation the id had, which a reused id moves on. */
 export type GeometryHandle = Handle;
 
@@ -24,7 +51,11 @@ export interface GeometryData {
   positions: Float32Array;
   /** None for a mesh, whose depths take their place. */
   colors: Uint32Array;
-  /** A mesh's (MESH) are its u and v from 0 to 1, which its program reads as they are. */
+  /**
+   * A mesh's (MESH) are its u and v from 0 to 1, which its program reads as
+   * they are. A fill's vertex whose u is TARGET_TEXEL samples the stage's
+   * pixel, which no mesh's does.
+   */
   texels?: Float32Array;
   /** A mesh's depth at each vertex, its t, in place of its colour. */
   depths?: Float32Array;

@@ -356,6 +356,35 @@ has it. With Ctrl, as a touchpad's pinch comes too, the page zooms and the
 SWF hears nothing. Right and middle buttons, and
 Flash's drag and focus rules, still need their own cases.
 
+An AVM1 movie's pointer (`avm1/pointer.ts`, in docs/avm1.md) runs a
+press's `onMouseDown` clip events and Mouse listeners before it picks,
+as Flash does, but the press reaches only what was under the pointer
+before they ran and still is after them, as Flash Player 32's Windows
+debug projector traced a probe under real clicks (XTest on Xvfb; adl
+takes no pointer). A button or a clip in button mode that the handlers
+show or move under the pointer takes no `press`, so no `release`
+either, nor a `dragOver` while the button stays down, even when the
+pointer moves on it; the release gives it its `rollOver`, and the next
+press is its own. One they hide or move from under it takes no
+`press` and gets a `rollOut`, as with the button up, rather than a
+`dragOut`; one hidden and shown again in them is pressed as if nothing
+had happened, and so is one a goto in them makes again in its place, at
+its depth, of its character, a new instance, going forwards or back. A move's and a release's handlers are picked after, as
+they were: a button a release's `onMouseUp` or a move's `onMouseMove`
+shows under the pointer gets its `rollOver` in that event. Without the
+rule, a dialogue that advances on `onMouseDown` and shows its answers
+where the click was answered them with the same click. Ruffle picks
+after the handlers for a press too, and has that double click. In an
+AS3 host, the AVM1 movie's own pick before its broadcast is kept for
+its press in the same way, pickable or not as the move that brought the
+pointer there left the movie, since the host's own pick for the press
+comes after the broadcast; no probe has measured that case. Flash sent
+no `dragOver` or `dragOut` to a button the press did not reach, pressed
+on another or on nothing, where the player still sends them to any
+button as to a menu's items, Ruffle's rule: a button shown under the
+press so gets a `dragOut` and a `dragOver` when the pointer, still down,
+leaves it and comes back, which Flash did not send.
+
 ## Touch
 
 `Multitouch` reports the host's touch screen: `maxTouchPoints` is the
@@ -462,6 +491,78 @@ field that takes no typing moves its caret and selection with the same
 keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
 this is recorded against Flash; there is no IME.
 
+The AVM1 movies an AS3 SWF's Loaders hold share the player's one focus
+(`input/avm1.ts`), as Flash Player 32's Windows projector, typed into
+with real keys, keeps it (`tests/unit/player/input/avm1-keys.test.ts`).
+Each movie focuses its fields and buttons itself, by a click or
+`Selection.setFocus`, and what it focuses takes the focus from AS3, with
+a `focusOut` naming nothing, and from the other movies; an AS3 object
+that takes it, or `stage.focus = null`, takes it from the movies, each
+field hearing `onKillFocus` with null. A field whose Loader, or anything
+above it, is hidden loses the focus at once; one whose Loader leaves the
+stage keeps it, and the keys with it, as in Flash. While a movie has the
+focus, AS3 hears no `KeyboardEvent` at all, not even on the stage: every
+movie's Key listeners and clip events hear the key, and then the field
+types it. Otherwise the key goes to AS3 as above, and every movie's Key
+listeners hear it after AS3's `keyDown` listeners and before the field's
+`TextEvent`. A press on a movie's field focuses it: what AS3 had focused
+hears a `mouseFocusChange` naming nothing, then its `focusOut`. A press on
+any movie's button moves no focus at all, no movie's field's nor AS3's,
+though what AS3 has focused hears the same `mouseFocusChange` (a movie's
+own button, where it is the main SWF, takes its field's focus away, as
+Flash Player does there too). What counts is the button under the pointer
+once the press's Mouse listeners ran: one they bring there keeps the
+focus too, though the press reaches none of its handlers, and one they
+take away does not. A press on a movie's drawn clip is one on
+its Loader, as AS3 has it, and one elsewhere takes a movie's field's
+focus away. As the focus moves from one movie's field to another's, Flash
+names the other field to `onKillFocus` and `onSetFocus`; the player names
+nothing, as no movie's objects are another's. Tab moves through one order
+of AS3's objects and the movies' (each in its movie's own terms,
+`avm1/focus.ts`), by tabIndex where any has one, else by place, one
+object of each place as AS3 keeps it, the movies' among AS3's: from AS3
+to a movie's field after a `keyFocusChange` naming nothing, then
+`focusOut`; from a movie's field with no `keyFocusChange`. A field Tab
+focuses, AS3's or a movie's, has all its text selected, as typing then
+replaces it in Flash. Where both have tabIndex, the two kinds sort as
+numbers together, which is not measured, and a movie's negative indices,
+which AVM1 keeps, come before AS3's.
+
+The focus's rectangle (`input/focus-highlight.ts`) is drawn as Flash
+Player 32's projector draws it under real keys, measured there since adl
+takes no keys and its harness's captures, BitmapData draws of the stage,
+never hold it: opaque yellow, 0xFFFF00, three screen pixels wide inside
+the focused object's bounds on the stage, the box around them for a
+rotated one, a button's hit area's whatever state it shows, filters and
+masks left out, anti-aliased where the bounds fall between pixels. It is
+over everything, the objects above the focused one too, and in showAll's
+margins, and it follows its object as it moves, frame by frame. It stays
+three pixels wide under a parent scaled twice and on a stage shown 3.2
+times its size in full screen: the view takes a screen pixel as it takes
+a hairline's (`screenScale`). Tab shows it, and so does a script's
+focus, `stage.focus` or AVM1's `Selection.setFocus`, one set again on
+what has it, and in AS3 one a press's own `mouseDown`, `mouseUp` or
+`click` listener sets: a game that focuses a sprite as it is clicked
+shows its rectangle in Flash too. A press hides it otherwise, one on
+what has the focus too, until the focus moves again, and a key other
+than Tab leaves it. The stage and the root, which a script focuses to
+hear the keys, never show it, nor does a text field; the focus taken
+away, or its object removed or hidden, takes it, and so does a hidden
+parent, on which Flash also drops the focus, which the player does not
+yet. In AS3 the object's `focusRect`, or where that is null the stage's
+`stageFocusRect`, decides as the focus moves, and a change of either
+later leaves it as it is; AVM1's rules are in docs/avm1.md. In a movie
+of both, an AVM1 movie AS3 loaded draws its focus's as its own tracker
+shows it, as Flash Player 32 draws it around a button Tab focuses there. Flash repaints only what changed, and drew a button's rectangle
+only where the button itself was repainted, so one whose hit area
+reaches past what it shows had it cut to that, or had none; the player
+draws it whole. A host asks `Player.focusHighlight()` before each render
+and gives the view the frame (`RenderView.highlight`), which draws its
+four bars last and draws again when it changes. The frame is measured
+again only when its object, what is in it or what is above it changed
+since the last render (their flags, which the view clears); where none
+shows, nothing is measured or drawn.
+
 A field scrolls to keep its caret in view (`TextObject.scrollTo`) as
 `setSelection`, a key, a press or a drag moves the caret, and as a field
 takes the focus, as adl's does from a script (`text-input-scroll`): up or
@@ -484,6 +585,50 @@ twips in a field of embedded fonts and pixels in one of device fonts, as
 Flash Player 32 gives them. adl's AVM1 moves no caret for
 `Selection.setSelection`, so its case (`avm1-text-input-scroll`) has the
 focus's select-all move it, and the web test types past the edge.
+
+A TextField's hit tests take its scroll as adl does (`text-scroll-hits`,
+`text-hit-edges`). `getLineIndexAtPoint` and `getCharIndexAtPoint` find
+the lines as scrolled, and `getCharIndexAtPoint` the characters scrolled
+sideways too; a point counts inside the gutters alone, both ends in,
+taken a pixel right of where it is, and a field placed from a
+DefineEditText tag another two pixels right and one down whatever its
+bounds; below the last line it is on the last. A character is hit from
+past its left edge to its right edge, and a line's own left edge hits its
+first character, an empty line's newline or an empty field's end. NaN
+hits nothing. `getCharBoundaries` gives the text where it lies
+unscrolled, from a placed field's origin and two pixels on, and none for
+a line above the first shown or past the one after the last shown whole.
+New text keeps `scrollV` within its `maxScrollV`, as it keeps `scrollH`;
+a change of size does not. `maxScrollV` is the first line whose top is
+within the room of the text's bottom, `textHeight` down, so the empty
+line a dynamic field's final newline leaves, which counts nothing in
+`textHeight`, is scrolled to only where no line fits. Flash Player 32
+differed from adl in two of these, and the player follows adl in all
+SWFs: its `getCharIndexAtPoint` left `scrollH` out (AIR's issue 2315,
+which Harman fixed), and its `getCharBoundaries` gave y as scrolled. Ruffle's
+expectations come from Flash Player 32, so the corpus's
+`edittext_getcharboundaries_scroll` stays partial on purpose.
+
+A field tells of its scroll as adl does (`text-scroll-events`,
+`avm1-text-scroller`). In AS3 a script's `scrollV`, `scrollH`, `text`,
+`htmlText`, `appendText`, `replaceText`, `replaceSelectedText` or
+`setTextFormat`, and the wheel, dispatch `Event.SCROLL` at once, neither
+bubbling nor cancelable, if they moved its `scrollV`, `maxScrollV`,
+`scrollH` or `maxScrollH`, a field off the display list too; the scroll
+`setSelection` gives a caret dispatches none. Typing, a paste, a cut or
+a deletion dispatches it after the edit's `CHANGE`, as Flash Player 32's
+projector did under keys sent to it (adl takes no keys): a `maxScrollH`
+that moved by less than a pixel is a move, as the four are compared in
+twips. They are measured only while something hears it; the scroll is
+kept within new text as it is set, heard or not. AVM1's field calls `onScroller`, and its
+listeners, once a frame's scripts have run, before the next frame's, if
+those four moved since it last did, by a script's `scroll` or `hscroll`,
+new text, a format, an edit or a caret; AVM1's `replaceText` scrolls the field
+back to its start. adl measures a field anew only now and then, so a new
+size tells late, at the next change, and sometimes twice, and Flash
+Player 32 kept a field scrolled past a deleted line till the next frame,
+telling that twice: none of these is followed. Nor does AVM1's wheel scroll a field yet, which the corpus's
+`edittext_onscroller` drives.
 
 A key's release goes elsewhere when the page or the window loses focus
 while it is held, and never reaches the player. The host tells the

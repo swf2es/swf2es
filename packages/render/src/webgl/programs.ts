@@ -1,3 +1,4 @@
+import { TARGET_TEXEL } from "../geometry.js";
 import { ROWS_A_LINE } from "../rows.js";
 import {
   ADD,
@@ -85,6 +86,16 @@ export const MERGED_LINE = 1024;
 export const TABLE_UNIT = MERGED_UNIT + 1;
 
 /**
+ * The bit of a fill's vSlot past its texture's slot (FILL_TEXTURES of them,
+ * in the bits below), in the stage fill program alone: its texel is the
+ * stage's pixel (TARGET_TEXEL).
+ */
+const STAGE_TEXEL = 16;
+if (FILL_TEXTURES >= STAGE_TEXEL) {
+  throw new Error("the fill textures' slots run into vSlot's stage texel bit");
+}
+
+/**
  * Places a vertex by its row's transform, on a quarter of a pixel of
  * Flash's (uUnit of them a stage pixel, from the stage's origin) where it
  * snaps (SNAP), then on the target by uView (scale and offset into clip
@@ -95,9 +106,11 @@ export const TABLE_UNIT = MERGED_UNIT + 1;
  * `multi`, a merged fill's vertices carry as aDraw where its packed row is
  * in uMergedRows, which the stream keeps for its copy, so that the row
  * changes from frame to frame where the vertices need not; the atlas leaves
- * that attribute disabled and negative.
+ * that attribute disabled and negative. With `stage`, the stage fill
+ * program's (stageFillFragment), a texel of TARGET_TEXEL or below samples
+ * the stage's pixel under the fragment instead.
  */
-export const fillVertex = (multi: boolean, merged = multi) => `#version 300 es
+export const fillVertex = (multi: boolean, merged = multi, stage = false) => `#version 300 es
 ${multi ? "#extension GL_ANGLE_multi_draw : require" : ""}
 precision highp float;
 layout(location = ${POSITION_AT}) in vec2 aPosition;
@@ -130,7 +143,14 @@ void main(void) {
 
   gl_Position = vec4(p * uView.xy + uView.zw, 0.0, 1.0);
   vColor = aColor;
-  vTexel = aTexel;
+${
+  stage
+    ? `  // The fragment finds the stage's pixel from its place (STAGE_TEXEL in vSlot).
+  bool onStage = aTexel.x <= ${TARGET_TEXEL / 2};
+  vTexel = onStage ? p : aTexel;
+  vSlot |= onStage ? ${STAGE_TEXEL} : 0;`
+    : "  vTexel = aTexel;"
+}
 }
 `;
 
@@ -153,9 +173,10 @@ const slotTexel = Array.from(
  * Flash's colour transform on the straight colour, clamped, then
  * premultiplied for blending: the vertex' colour, or with a texture the
  * texel's (premultiplied in the texture) times it, as the colour batcher
- * did, a clear texel staying clear.
+ * did, a clear texel staying clear. With `stage`, the stage fill program's
+ * (stageFillFragment).
  */
-export const fillFragment = `#version 300 es
+const fillFragmentOf = (stage: boolean) => `#version 300 es
 precision highp float;
 in vec4 vColor;
 in vec2 vTexel;
@@ -163,11 +184,24 @@ flat in vec4 vMul;
 flat in vec4 vAdd;
 flat in int vSlot;
 uniform sampler2D uTextures[${FILL_TEXTURES}];
-out vec4 finalColor;
+${stage ? "uniform vec4 uStage;\n" : ""}out vec4 finalColor;
 
 vec4 texel(vec2 at) {
   vec4 t = vec4(0.0);
-  switch (vSlot) {
+${
+  stage
+    ? `  if (vSlot >= ${STAGE_TEXEL}) {
+    // The stage's pixel under the pixel's centre, from the fragment's place, not the position
+    // interpolated across the triangle: at a scale of a half, a quarter or a tenth that centre
+    // falls on a whole stage pixel, which interpolation leaves a hair either side of, a texel or
+    // its neighbour as each triangle rounds. A sixty-fourth on keeps it off that edge.
+    vec2 f = vec2(gl_FragCoord.x + uStage.x, uStage.y + uStage.z * gl_FragCoord.y) * uStage.w;
+    at = floor(f + 1.0 / 64.0) + 0.5;
+  }
+
+  switch (vSlot & ${STAGE_TEXEL - 1}) {`
+    : "  switch (vSlot) {"
+}
 ${slotTexel}
   }
 
@@ -176,7 +210,7 @@ ${slotTexel}
 
 void main(void) {
   vec4 straight = vColor;
-  if (vSlot != 0) {
+  if (${stage ? `(vSlot & ${STAGE_TEXEL - 1})` : "vSlot"} != 0) {
     vec4 t = texel(vTexel);
     if (t.a == 0.0) {
       finalColor = vec4(0.0);
@@ -190,6 +224,20 @@ void main(void) {
   finalColor = vec4(c.rgb * c.a, c.a);
 }
 `;
+
+/** The fill program's fragment shader, which every fill draws with but those of stageFillFragment. */
+export const fillFragment = fillFragmentOf(false);
+
+/**
+ * The stage fill program's, for a fill some of whose texels are the
+ * stage's pixel (TARGET_TEXEL, Place.stage), drawn alone: the stage's
+ * pixel found from gl_FragCoord through uStage, which takes a fragment to
+ * the target's pixels from the stage's origin, down (x + uStage.x,
+ * uStage.y + uStage.z * y), then to stage pixels (times w). A program of
+ * its own: in the fill program, that path, though no fill took it, made a
+ * frame of plain fills take Intel's GPUs over half as long again.
+ */
+export const stageFillFragment = fillFragmentOf(true);
 
 /**
  * drawTriangles' textured triangles (MESH), placed as fills are, their u

@@ -908,6 +908,11 @@ async function imePlayer(src: string) {
   document.body.append(p);
   await p.ready;
   await frames(2);
+  // A movie an AS3 Loader holds has its callbacks once it has loaded.
+  for (let i = 0; i < 100 && typeof element("ime").focusField !== "function"; i++) {
+    await frames(1);
+  }
+
   p.focus();
   element("ime").focusField();
   await frames(2);
@@ -999,6 +1004,25 @@ async function scriptFreePlayer(src: string) {
   document.body.append(p);
   await p.ready;
   await frames(3);
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top];
+}
+
+/**
+ * A player of `src` at the page's top left, given the page's focus with no
+ * press, as a Tab from the page would: where it is.
+ */
+async function focusPlayer(src: string) {
+  document.getElementById("focus-rect")?.remove();
+  const p = await newPlayer();
+  p.id = "focus-rect";
+  p.setAttribute("src", src);
+  p.setAttribute("allowscriptaccess", "always");
+  p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  document.body.append(p);
+  await p.ready;
+  await frames(3);
+  p.focus();
   const box = p.getBoundingClientRect();
   return [box.left, box.top];
 }
@@ -1279,9 +1303,20 @@ Object.assign(globalThis, {
     return true;
   },
   scriptFreePlayer,
+  scriptFreeCall: (name: string) => element("script-free")[name](),
   scriptFreeDestroy: () => {
     element("script-free").destroy();
     element("script-free").remove();
+    return true;
+  },
+  focusPlayer,
+  focusCall: (name: string, ...args: unknown[]) => element("focus-rect")[name](...args),
+  focusCursor: () =>
+    (element("focus-rect").shadowRoot?.querySelector("canvas") as HTMLCanvasElement | null)?.style
+      .cursor ?? "",
+  focusDestroy: () => {
+    element("focus-rect").destroy();
+    element("focus-rect").remove();
     return true;
   },
   touchPlayer,
@@ -1298,6 +1333,7 @@ Object.assign(globalThis, {
   imeBlur,
   imeState: () => ({ log: element("ime").takeLog(), text: element("ime").text() }),
   imeScroll: () => element("ime").scrollState(),
+  imeScrolls: () => element("ime").takeScrolls(),
   imeFill: (text: string, scroll: number) => {
     element("ime").fill(text, scroll);
     return true;

@@ -12,16 +12,15 @@
 // a place is kept, as Ruffle keeps it.
 import { ClipEvent } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
-import { boundsIn } from "../display/bounds.js";
 import {
   ButtonObject,
   CONTENT,
   Container,
   type DisplayObject,
   MovieClip,
-  parentage,
   TextObject,
 } from "../display/display.js";
+import { focusBounds } from "../input/focus-highlight.js";
 import type { Avm1 } from "./avm1.js";
 import { nativeOf } from "./globals/MovieClip.js";
 import { stateOf } from "./globals/TextField.js";
@@ -37,24 +36,22 @@ export interface TabHost {
   buttonMode(clip: MovieClip): boolean;
 }
 
-interface Tabbed {
+/** An object Tab may focus, and its tabIndex, if it has one. */
+export interface Tabbed {
   d: DisplayObject;
   index: number | undefined;
 }
 
-/** The objects Tab moves the focus through, in order, from `root`, on `stage`. */
-function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
+/** The objects Tab may focus in `root`, as the display list is walked. */
+function tabbables(root: MovieClip, host: TabHost): Tabbed[] {
   const found: Tabbed[] = [];
-  let custom = false;
   const walk = (d: DisplayObject) => {
     if (!d.visible) {
       return;
     }
 
     if (d !== root && tabbable(d, host)) {
-      const index = host.tabIndex(d);
-      custom ||= index !== undefined;
-      found.push({ d, index });
+      found.push({ d, index: host.tabIndex(d) });
     }
 
     // A button's states are no part of the order.
@@ -65,8 +62,13 @@ function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObje
     }
   };
   walk(root);
+  return found;
+}
 
-  if (custom) {
+/** The objects Tab moves the focus through, in order, from `root`, on `stage`. */
+function tabOrder(root: MovieClip, stage: Container, host: TabHost): DisplayObject[] {
+  const found = tabbables(root, host);
+  if (found.some((t) => t.index !== undefined)) {
     // Array.prototype.sort is stable: equal indices keep the walk's order.
     return found
       .filter((t) => t.index !== undefined)
@@ -102,22 +104,8 @@ function tabbable(d: DisplayObject, host: TabHost): boolean {
 
 /** 6 × y + x of `d`'s top left corner on the stage, in twips: a button's hit area's. */
 function placeKey(d: DisplayObject, stage: Container): number {
-  const area = d instanceof ButtonObject ? d.hitTestState : null;
-  const parent = area?.parent ?? null;
-  if (area) {
-    area.parent = d as ButtonObject;
-    parentage.changes++;
-  }
-
-  try {
-    const r = boundsIn(area ?? d, stage, stage, true);
-    return 6 * Math.round(r.yMin * 20) + Math.round(r.xMin * 20);
-  } finally {
-    if (area) {
-      area.parent = parent;
-      parentage.changes++;
-    }
-  }
+  const r = focusBounds(d, stage, stage);
+  return 6 * Math.round(r.yMin * 20) + Math.round(r.xMin * 20);
 }
 
 /** The movie's focus: the object that has it, its highlight, and Tab's and Enter's moves of it. */
@@ -200,6 +188,7 @@ export class FocusTracker implements TabHost {
     }
 
     this.selectFocused(byPointer);
+    this.movie.onFocus?.(d);
   }
 
   /**
@@ -253,22 +242,8 @@ export class FocusTracker implements TabHost {
     }
 
     // A button's by its hit area, which it is tested by whatever it shows.
-    const area = d instanceof ButtonObject ? d.hitTestState : null;
-    const parent = area?.parent ?? null;
-    if (area) {
-      area.parent = d as ButtonObject;
-      parentage.changes++;
-    }
-
-    try {
-      const r = boundsIn(area ?? d, d.parent, null, true);
-      return r.xMax > r.xMin || r.yMax > r.yMin;
-    } finally {
-      if (area) {
-        area.parent = parent;
-        parentage.changes++;
-      }
-    }
+    const r = focusBounds(d, d.parent, null);
+    return r.xMax > r.xMin || r.yMax > r.yMin;
   }
 
   tabEnabled(d: DisplayObject): boolean | undefined {
@@ -297,6 +272,12 @@ export class FocusTracker implements TabHost {
         ? avm1.toNumber(value, this.movie.version) | 0
         : -2147483648;
     return index === -1 ? undefined : index;
+  }
+
+  /** The objects Tab may focus in the movie, for an AS3 host's tab order, which takes them in. */
+  tabbables(): Tabbed[] {
+    const root = this.movie.root;
+    return root instanceof MovieClip && !this.movie.halted ? tabbables(root, this) : [];
   }
 
   /** Tab, or Shift+Tab: the focus to the next object in the tab order, or the one before, round. */

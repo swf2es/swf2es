@@ -24,6 +24,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { flashAssembler, script } from "../avm1-script.ts";
+import { rectPath } from "../player/cases/common.ts";
 import { bare, cases, scripted } from "../player/cases.ts";
 import { withPage } from "../player/chrome.ts";
 import { compareImages, decodePng, type Image } from "../player/image.ts";
@@ -48,9 +49,18 @@ const abcs = compileScripts(
     { name: "EmbedTest", source: readFileSync(`${here}scripts/EmbedTest.as`, "utf8") },
     { name: "TextLifecycle", source: readFileSync(`${here}scripts/TextLifecycle.as`, "utf8") },
     { name: "ClipboardTest", source: readFileSync(`${here}scripts/ClipboardTest.as`, "utf8") },
+    {
+      name: "LoadedAvm1Field",
+      source: readFileSync(`${here}scripts/LoadedAvm1Field.as`, "utf8"),
+    },
     { name: "TouchTest", source: readFileSync(`${here}scripts/TouchTest.as`, "utf8") },
     { name: "MarginsTest", source: readFileSync(`${here}scripts/MarginsTest.as`, "utf8") },
     { name: "ContextMenuTest", source: readFileSync(`${here}scripts/ContextMenuTest.as`, "utf8") },
+    { name: "FocusRectTest", source: readFileSync(`${here}scripts/FocusRectTest.as`, "utf8") },
+    {
+      name: "TweenHoverTest",
+      source: readFileSync(`${here}scripts/TweenHoverTest.as`, "utf8"),
+    },
     {
       name: "ActivationTest",
       source: readFileSync(`${here}scripts/ActivationTest.as`, "utf8"),
@@ -173,6 +183,141 @@ writeFileSync(
   bare(abcs.get("ContextMenuTest") as Uint8Array, 1, "ContextMenuTest", 200, 120),
 );
 writeFileSync(
+  `${site}focus-as3.swf`,
+  bare(abcs.get("FocusRectTest") as Uint8Array, 1, "FocusRectTest", 200, 120),
+);
+// The same in AS2, SWF 8: Tab goes to "clip" under its green square, to "kid" in "holder",
+// to "off", whose _focusrect is false, and to "btn", a button whose hit area is its up state.
+const focusBox = (id: number, color: number, size: [number, number]) =>
+  w.shape({
+    id,
+    bounds: [0, size[0] * 20, 0, size[1] * 20],
+    fills: [color],
+    paths: [
+      {
+        fill1: 1,
+        commands: [
+          { move: [0, 0] },
+          { line: [size[0] * 20, 0] },
+          { line: [size[0] * 20, size[1] * 20] },
+          { line: [0, size[1] * 20] },
+          { line: [0, 0] },
+        ],
+      },
+    ],
+  });
+const focusAvm1 = `clip.onRelease = function() {};
+holder.kid.onRelease = function() {};
+off.onRelease = function() {};
+off._focusrect = false;
+var EI = flash.external.ExternalInterface;
+EI.addCallback("focusName", null, function() { return String(Selection.getFocus()); });
+EI.addCallback("focusOn", null, function(name) { Selection.setFocus(eval(name)); });
+EI.addCallback("stageFocusRect", null, function(on) { _root._focusrect = on; });
+EI.addCallback("showHolder", null, function(on) { holder._visible = on; });
+stop();`;
+writeFileSync(
+  `${site}focus-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 120,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      focusBox(1, 0x0000ff, [40, 30]),
+      focusBox(2, 0x0000ff, [10, 10]),
+      focusBox(3, 0x00ff00, [20, 20]),
+      focusBox(4, 0xff0000, [40, 20]),
+      w.sprite(10, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]),
+      w.sprite(11, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(12, 1, [w.place({ depth: 1, character: 11, name: "kid" }), w.showFrame(), w.end()]),
+      w.button2Records(13, [{ states: 15, character: 4 }]),
+      w.place({ depth: 1, character: 10, name: "clip", matrix: { tx: 400, ty: 400 } }),
+      w.place({
+        depth: 2,
+        character: 12,
+        name: "holder",
+        matrix: { a: 2, d: 2, tx: 2000, ty: 400 },
+      }),
+      w.place({ depth: 3, character: 10, name: "off", matrix: { tx: 400, ty: 1400 } }),
+      w.place({ depth: 4, character: 13, name: "btn", matrix: { tx: 2000, ty: 1400 } }),
+      w.place({ depth: 5, character: 3, matrix: { tx: 200, ty: 500 } }),
+      w.doAction([...script(focusAvm1, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+// A shape tween pulsing every frame between a 100 by 75 box at (50, 37.5) and a 150 by 110 one
+// at (25, 20), (100, 75) always in it: in AS3 a Sprite in button mode (scripts/TweenHoverTest.as),
+// in AVM1 a clip with onRollOver and onRollOut, each logging what the pointer gives it.
+const pulse = [0, 16384, 32768, 49152, 65535, 49152, 32768, 16384];
+const tweenTags = [
+  w.morphShape({
+    id: 1,
+    startBounds: [1000, 3000, 750, 2250],
+    endBounds: [500, 3500, 400, 2600],
+    fills: [{ start: 0xff3366cc, end: 0xffcc6633 }],
+    start: [{ fill0: 1, commands: rectPath(50, 37.5, 100, 75) }],
+    end: [rectPath(25, 20, 150, 110)],
+  }),
+  w.sprite(10, pulse.length, [
+    ...pulse.flatMap((ratio, i) => [
+      i === 0
+        ? w.place({ depth: 1, character: 1, ratio })
+        : w.place({ depth: 1, move: true, ratio }),
+      w.showFrame(),
+    ]),
+    w.end(),
+  ]),
+];
+writeFileSync(
+  `${site}tween-hover-as3.swf`,
+  w.swf({
+    version: 10,
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      ...tweenTags,
+      w.doAbc(abcs.get("TweenHoverTest") as Uint8Array, "TweenHoverTest"),
+      w.symbolClass([[0, "TweenHoverTest"]]),
+      w.place({ depth: 1, character: 10, name: "btn" }),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+const tweenHoverAvm1 = `var log = [];
+btn.onRollOver = function() { log.push("rollOver"); };
+btn.onRollOut = function() { log.push("rollOut"); };
+flash.external.ExternalInterface.addCallback("hoverLog", null, function() { return log.join(" "); });
+stop();`;
+writeFileSync(
+  `${site}tween-hover-avm1.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 150,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      ...tweenTags,
+      w.place({ depth: 1, character: 10, name: "btn" }),
+      w.doAction([...script(tweenHoverAvm1, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+writeFileSync(
   `${site}full-screen.swf`,
   bare(abcs.get("FullScreenTest") as Uint8Array, 1, "FullScreenTest", 200, 120),
 );
@@ -258,6 +403,21 @@ const scriptFreeButton = (as3: boolean) =>
       w.end(),
     ],
   });
+// A stage with nothing on it, only its SetBackgroundColor, which Flash shows in that colour.
+const emptyStage = (as3: boolean) =>
+  w.swf({
+    version: as3 ? 10 : 8,
+    width: 100,
+    height: 60,
+    frameCount: 2,
+    tags: [
+      w.fileAttributes(as3),
+      w.backgroundColor(0x3366cc),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
 /**
  * A streamed tone on the root's frames, ten seconds of 440 Hz at 22 kHz in 8-bit PCM, a block a
  * frame: with no code at all, AVM1 or AS3, or the unmute SWF's.
@@ -302,6 +462,8 @@ writeFileSync(`${site}tone-as3-bare.swf`, streamedTone(true, false));
 writeFileSync(`${site}tone-as3.swf`, streamedTone(true, true));
 writeFileSync(`${site}button-as3.swf`, scriptFreeButton(true));
 writeFileSync(`${site}button-avm1.swf`, scriptFreeButton(false));
+writeFileSync(`${site}empty-as3.swf`, emptyStage(true));
+writeFileSync(`${site}empty-avm1.swf`, emptyStage(false));
 writeFileSync(`${site}avm1.swf`, cases.find((c) => c.name === "avm1-hello")?.swf as Uint8Array);
 writeFileSync(`${site}scripted.swf`, scripted(abcs.get("Main") as Uint8Array));
 // An AS2 SWF that calls the page, tells it what came back, and takes its calls.
@@ -366,6 +528,8 @@ field.type = "input";
 field.border = true;
 var log = [];
 field.onChanged = function() { log.push("change " + field.text); };
+var scrolls = [];
+field.onScroller = function() { scrolls.push(field.hscroll + "/" + field.maxhscroll); };
 var EI = flash.external.ExternalInterface;
 EI.addCallback("focusField", null, function() { Selection.setFocus(field); });
 EI.addCallback("blurField", null, function() { Selection.setFocus(null); });
@@ -373,6 +537,7 @@ EI.addCallback("text", null, function() { return field.text; });
 EI.addCallback("fill", null, function(text, scroll) { field.text = text; field.hscroll = scroll; });
 EI.addCallback("scrollState", null, function() { return field.hscroll + " " + field.maxhscroll + " " + Selection.getCaretIndex(); });
 EI.addCallback("takeLog", null, function() { var taken = log; log = []; return taken; });
+EI.addCallback("takeScrolls", null, function() { var taken = scrolls; scrolls = []; return taken; });
 stop();`;
 writeFileSync(
   `${site}avm1-field.swf`,
@@ -387,6 +552,83 @@ writeFileSync(
       w.end(),
     ],
   }),
+);
+// AS2 buttons whose press's own onMouseDown changes what is under the pointer: "shown", hidden
+// at (10, 20), is shown by it, and "gone", at (60, 20), hidden by it, as is "goneClip", a clip in
+// button mode at (110, 20); "remade", a clip at (160, 20), goes by it to a frame that places its
+// button again in its place, a new instance, which logs its transitions from its own actions.
+const pressChanges = `var log = [];
+shown._visible = false;
+function watch(b, name) {
+  var events = ["onPress", "onRelease", "onRollOver", "onRollOut", "onDragOver", "onDragOut"];
+  for (var i = 0; i < events.length; i++) {
+    b[events[i]] = (function (e) { return function () { log.push(name + " " + e); }; })(events[i]);
+  }
+}
+watch(shown, "shown");
+watch(gone, "gone");
+watch(goneClip, "goneClip");
+Mouse.addListener({ onMouseDown: function () {
+  var x = _root._xmouse;
+  if (x < 50) { shown._visible = true; } else if (x < 100) { gone._visible = false; } else if (x < 150) { goneClip._visible = false; } else { remade.gotoAndStop(3); }
+} });
+flash.external.ExternalInterface.addCallback("takeLog", null, function () { var taken = log; log = []; return taken; });
+stop();`;
+writeFileSync(
+  `${site}avm1-press-changes.swf`,
+  w.swf({
+    version: 8,
+    width: 200,
+    height: 60,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(false),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000),
+      w.button2(2, 1),
+      w.sprite(3, 1, [w.place({ character: 1, depth: 1 }), w.showFrame(), w.end()]),
+      w.button2(
+        4,
+        1,
+        (
+          [
+            [1 << 0, "onRollOver"],
+            [1 << 1, "onRollOut"],
+            [1 << 2, "onPress"],
+            [1 << 3, "onRelease"],
+            [1 << 4, "onDragOut"],
+            [1 << 5, "onDragOver"],
+          ] as const
+        ).map(([conditions, name]) => ({
+          conditions,
+          actions: [
+            ...script(`_root.log.push(_name + " ${name}");`, 8)(flashAssembler()).end().bytes(),
+          ],
+        })),
+      ),
+      w.sprite(5, 3, [
+        w.place({ character: 4, depth: 1 }),
+        w.doAction([...script("stop();", 8)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.remove(1),
+        w.showFrame(),
+        w.place({ character: 4, depth: 1 }),
+        w.showFrame(),
+        w.end(),
+      ]),
+      w.place({ character: 2, depth: 1, name: "shown", matrix: { tx: 200, ty: 400 } }),
+      w.place({ character: 2, depth: 2, name: "gone", matrix: { tx: 1200, ty: 400 } }),
+      w.place({ character: 3, depth: 3, name: "goneClip", matrix: { tx: 2200, ty: 400 } }),
+      w.place({ character: 5, depth: 4, name: "remade", matrix: { tx: 3200, ty: 400 } }),
+      w.doAction([...script(pressChanges, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  }),
+);
+writeFileSync(
+  `${site}loaded-avm1-field.swf`,
+  bare(abcs.get("LoadedAvm1Field") as Uint8Array, 1, "LoadedAvm1Field", 160, 120),
 );
 writeFileSync(
   `${site}embed.swf`,
@@ -975,6 +1217,68 @@ check("destroy takes the callbacks off and closes the socket and the audio", asy
   assert.equal(r.counts.openAudio, before.openAudio - 1);
 });
 
+// Before the checks that count the compilers left, which then hold its AVM1 movies, which call
+// functions and load others, to letting theirs go: the last object a CallFunction found kept
+// its movie's compiler alive (releaseFound), as whatever AVM1 ran last before a count did.
+check(
+  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
+  async (evaluate) => {
+    const loads = async (
+      src: string,
+      attributes: Record<string, string>,
+      n: number,
+      page?: string,
+      suffix?: string,
+    ) =>
+      (
+        await call<string[]>(
+          evaluate,
+          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
+        )
+      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
+    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
+    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
+      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
+    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
+    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
+    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
+    // it came from, which its sibling's load follows.
+    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
+    assert.deepEqual(await avm1({}), pair("/web-test/"));
+    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
+    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
+    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
+    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
+    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
+    // A page URL's query and fragment are no directory.
+    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
+    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
+    // The page's choice for elements that make none, which the attribute overrides.
+    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
+    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
+    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
+  },
+);
+
+/** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
+async function ctrl(send: Send, letter: string, command?: string) {
+  const key = {
+    modifiers: 2,
+    key: letter,
+    code: `Key${letter.toUpperCase()}`,
+    windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
+  };
+  await send("Input.dispatchKeyEvent", {
+    type: "rawKeyDown",
+    ...key,
+    ...(command ? { commands: [command] } : {}),
+  });
+  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
+}
+
 check(`${CHURN} elements made and destroyed leave nothing behind`, async (evaluate, send) => {
   const heap = async () => {
     await send("HeapProfiler.collectGarbage");
@@ -1037,67 +1341,6 @@ check(
     assert.equal(left.codegens, 2);
   },
 );
-
-// After the checks that count the compilers left: an AVM1 movie that loaded others kept its
-// compiler alive through the churn check's collection when this came before it, on dev too.
-check(
-  'relative URLs resolve against the page, base against it but ".", the SWF\'s own with relativeurls="movie"',
-  async (evaluate) => {
-    const loads = async (
-      src: string,
-      attributes: Record<string, string>,
-      n: number,
-      page?: string,
-      suffix?: string,
-    ) =>
-      (
-        await call<string[]>(
-          evaluate,
-          `relativeLoads(${[src, attributes, n, page ?? null, suffix ?? null].map((v) => JSON.stringify(v)).join(", ")})`,
-        )
-      ).map((url) => (url.startsWith("as3 ") ? url : new URL(url).pathname));
-    const avm1 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
-      loads("/web-test/sub/avm1-urls.swf", attributes, 2, page, suffix);
-    const as3 = (attributes: Record<string, string>, page?: string, suffix?: string) =>
-      loads("/web-test/sub/as3-urls.swf", attributes, 1, page, suffix);
-    // The page is /web-test/index.html and the SWFs are in /web-test/sub/. As Flash's plug-in
-    // (PepperFlash 32) resolved them, AS3's and AVM1's alike: against the page, or its base, "."
-    // the SWF's directory and any other value against the page. Each AVM1 child's _url is where
-    // it came from, which its sibling's load follows.
-    const pair = (dir: string) => [`${dir}avm1-url-child.swf`, `${dir}avm1-url-sibling.swf`];
-    assert.deepEqual(await avm1({}), pair("/web-test/"));
-    assert.deepEqual(await avm1({ base: "." }), pair("/web-test/sub/"));
-    assert.deepEqual(await avm1({ base: "assets/" }), pair("/web-test/assets/"));
-    assert.deepEqual(await avm1({ relativeurls: "movie" }), pair("/web-test/sub/"));
-    assert.deepEqual(await as3({}), ["as3 /web-test/"]);
-    assert.deepEqual(await as3({ base: "." }), ["as3 /web-test/sub/"]);
-    assert.deepEqual(await as3({ base: "assets/" }), ["as3 /web-test/assets/"]);
-    assert.deepEqual(await as3({ relativeurls: "movie" }), ["as3 /web-test/sub/"]);
-    // A page URL's query and fragment are no directory.
-    assert.deepEqual(await avm1({}, undefined, "?x=/a/b#/c/d"), pair("/web-test/"));
-    assert.deepEqual(await as3({}, undefined, "?x=/a/b#/c/d"), ["as3 /web-test/"]);
-    // The page's choice for elements that make none, which the attribute overrides.
-    assert.deepEqual(await avm1({}, "movie"), pair("/web-test/sub/"));
-    assert.deepEqual(await as3({}, "movie"), ["as3 /web-test/sub/"]);
-    assert.deepEqual(await as3({ relativeurls: "page" }, "movie"), ["as3 /web-test/"]);
-  },
-);
-
-/** Ctrl and a letter, as a user presses it, with the editing command Chrome runs for it, if any. */
-async function ctrl(send: Send, letter: string, command?: string) {
-  const key = {
-    modifiers: 2,
-    key: letter,
-    code: `Key${letter.toUpperCase()}`,
-    windowsVirtualKeyCode: letter.toUpperCase().charCodeAt(0),
-  };
-  await send("Input.dispatchKeyEvent", {
-    type: "rawKeyDown",
-    ...key,
-    ...(command ? { commands: [command] } : {}),
-  });
-  await send("Input.dispatchKeyEvent", { type: "keyUp", ...key });
-}
 
 check(
   "Ctrl+C, X and V and a press use the clipboard, as Flash Player did",
@@ -1216,6 +1459,55 @@ for (const [vm, src] of [
   );
 }
 
+check(
+  "keys type into an AS2 input field of a movie an AS3 Loader holds, and nowhere once it lets go",
+  async (evaluate, send) => {
+    type State = { log: string[]; text: string };
+    const state = () => call<State>(evaluate, "imeState()");
+    const press = async (key: string, code: string, keyCode: number, text?: string) => {
+      await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key,
+        code,
+        windowsVirtualKeyCode: keyCode,
+        ...(text ? { text } : {}),
+      });
+      await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key,
+        code,
+        windowsVirtualKeyCode: keyCode,
+      });
+    };
+    await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+    const focused = await call(evaluate, `imePlayer("/web-test/loaded-avm1-field.swf")`);
+    try {
+      // The movie's own Selection.setFocus gave its field the focus: the player's textarea, where
+      // an IME types, took the page's.
+      assert.equal(focused, "TEXTAREA");
+      await press("a", "KeyA", 65, "a");
+      await press("b", "KeyB", 66, "b");
+      await press("Backspace", "Backspace", 8);
+      await press("c", "KeyC", 67, "c");
+      assert.deepEqual(await state(), {
+        log: ["change a", "change ab", "change a", "change ac"],
+        text: "ac",
+      });
+
+      // An IME's text, with no key.
+      await send("Input.insertText", { text: "仮名" });
+      assert.deepEqual(await state(), { log: ["change ac仮名"], text: "ac仮名" });
+
+      // The field's focus gone, the player itself has the page's focus, and keys type nothing.
+      assert.equal(await call(evaluate, "imeBlur()"), "HOST");
+      await press("x", "KeyX", 88, "x");
+      assert.deepEqual(await state(), { log: [], text: "ac仮名" });
+    } finally {
+      await call(evaluate, "imeDestroy()");
+    }
+  },
+);
+
 for (const [vm, src] of [
   ["AS3", "/web-test/clipboard.swf"],
   ["AVM1", "/web-test/avm1-field.swf"],
@@ -1269,6 +1561,78 @@ for (const [vm, src] of [
         assert.deepEqual(await scroll(), [0, typed[1], 0]);
         await press("End", "End", 35);
         atEnd(await scroll());
+      } finally {
+        await call(evaluate, "imeDestroy()");
+      }
+    },
+  );
+}
+
+for (const [vm, src] of [
+  ["AS3", "/web-test/clipboard.swf"],
+  ["AVM1", "/web-test/avm1-field.swf"],
+]) {
+  check(
+    `typing that moves an ${vm} input field's scroll tells it, as Flash Player 32 did`,
+    async (evaluate, send) => {
+      // [scrollH, maxScrollH, caretIndex]
+      const scroll = async () =>
+        (await call<string>(evaluate, "imeScroll()")).split(" ").map(Number) as [
+          number,
+          number,
+          number,
+        ];
+      // What the field told of its scroll since last asked: AS3's SCROLL at once, AVM1's
+      // onScroller once the SWF's frame has run, which may take a few of the page's. Asked
+      // till it told something, or `last` last.
+      const told = async (last?: string) => {
+        const all: string[] = [];
+        for (let i = 0; i < 60 && (last ? all.at(-1) !== last : all.length === 0); i++) {
+          await call(evaluate, "imeFrames()");
+          all.push(...(await call<string[]>(evaluate, "imeScrolls()")));
+        }
+
+        return all;
+      };
+      const press = async (key: string, code: string, keyCode: number, text?: string) => {
+        for (const type of ["keyDown", "keyUp"]) {
+          await send("Input.dispatchKeyEvent", {
+            type,
+            key,
+            code,
+            windowsVirtualKeyCode: keyCode,
+            ...(text && type === "keyDown" ? { text } : {}),
+          });
+        }
+      };
+      await send("Emulation.setFocusEmulationEnabled", { enabled: true });
+      await call(evaluate, `imePlayer(${JSON.stringify(src)})`);
+      try {
+        // Typed till the text reaches into the quarter of the room an input field scrolls by,
+        // the field not scrolled yet: how far it scrolls moved alone, and that is told.
+        let state = await scroll();
+        while (state[1] === 0 && state[2] < 60) {
+          await press("a", "KeyA", 65, "a");
+          state = await scroll();
+        }
+
+        assert.ok(state[1] > 0 && state[0] === 0, `maxScrollH moved alone: ${state}`);
+        assert.ok((await told()).length > 0, "a maxScrollH typed further was not told");
+
+        // Typed past the edge: scrolled, and told so, the last as the field now is.
+        for (let i = 0; i < 30; i++) {
+          await press("a", "KeyA", 65, "a");
+        }
+
+        state = await scroll();
+        assert.ok(state[0] > 0, `scrolled to the caret: ${state}`);
+        assert.equal((await told(`${state[0]}/${state[1]}`)).at(-1), `${state[0]}/${state[1]}`);
+
+        // All of it selected and deleted: back to no scroll at all, told.
+        await ctrl(send, "a", "selectAll");
+        await press("Backspace", "Backspace", 8);
+        assert.deepEqual(await scroll(), [0, 0, 0]);
+        assert.equal((await told("0/0")).at(-1), "0/0");
       } finally {
         await call(evaluate, "imeDestroy()");
       }
@@ -1485,6 +1849,266 @@ check(
   },
 );
 
+check("a stage holding nothing shows its background colour, not black", async (evaluate, send) => {
+  for (const vm of ["as3", "avm1"]) {
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `scriptFreePlayer("/web-test/empty-${vm}.swf")`,
+    );
+    // Past the frames that draw, and those after that draw nothing: the canvas shows what it drew.
+    await call(evaluate, "frames(10).then(() => true)");
+    const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+    const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
+    assert.deepEqual([...colours(image, [left, top, 100, 60], 2).keys()], [0x3366cc], vm);
+    await call(evaluate, "scriptFreeDestroy()");
+  }
+});
+
+// Flash Player 32's projector under a real mouse: a pointer resting or moving over a shape tween
+// that pulses every frame, in a Sprite in button mode or an AVM1 clip with onRollOver, gets one
+// rollOver, keeps the hand, and gets one rollOut when it leaves. The pointer meets the tween's
+// last blend while a frame's place has given it a ratio not yet drawn, where a script's shape
+// test meets nothing of it (ShapeObject.blending).
+check("a pointer over a pulsing shape tween rolls over it once", async (evaluate, send) => {
+  const mouse = (x: number, y: number) =>
+    send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "none" });
+  const frames = (n: number) => call(evaluate, `frames(${n}).then(() => true)`);
+  const log = () => call<string>(evaluate, `focusCall("hoverLog")`);
+  const cursor = () => call<string>(evaluate, "focusCursor()");
+  for (const vm of ["as3", "avm1"]) {
+    const over = vm === "as3" ? "rollOver mouseOver" : "rollOver";
+    const out = vm === "as3" ? "mouseOut rollOut" : "rollOut";
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `focusPlayer("/web-test/tween-hover-${vm}.swf")`,
+    );
+    try {
+      await mouse(left + 195, top + 145);
+      await frames(3);
+      await mouse(left + 100, top + 75);
+      await frames(24);
+      assert.equal(await log(), over, `${vm}: resting`);
+      assert.equal(await cursor(), "pointer", `${vm}: the hand, resting`);
+
+      for (let i = 0; i < 24; i++) {
+        await mouse(left + 90 + (i % 6) * 4, top + 70 + (i % 4) * 3);
+        await frames(1);
+      }
+
+      assert.equal(await log(), over, `${vm}: moving`);
+      assert.equal(await cursor(), "pointer", `${vm}: the hand, moving`);
+
+      await mouse(left + 195, top + 145);
+      await frames(3);
+      assert.equal(await log(), `${over} ${out}`, `${vm}: left`);
+    } finally {
+      await call(evaluate, "focusDestroy()");
+    }
+  }
+});
+
+// Flash Player 32's projector, driven by real keys (adl takes none): the focus's rectangle is
+// opaque yellow, three screen pixels wide inside its object's bounds on the stage, over what
+// is above the object; a button's hit area's. Two device pixels a stage pixel here, so its
+// bars are three device pixels. Tab and a script show it, a press's listener's too; a press
+// hides it, in AVM1 below SWF 9 a move too; an object's focusRect or _focusrect, or the
+// stage's, as the focus moves, keeps it off, as do a text field, the stage, the root and a
+// hidden parent.
+check("the focus's yellow rectangle shows as Flash draws it", async (evaluate, send) => {
+  const YELLOW = 0xffff00;
+  const settle = () => call(evaluate, "frames(3).then(() => true)");
+  const tab = async () => {
+    for (const type of ["rawKeyDown", "keyUp"]) {
+      await send("Input.dispatchKeyEvent", {
+        type,
+        key: "Tab",
+        code: "Tab",
+        windowsVirtualKeyCode: 9,
+      });
+    }
+    await settle();
+  };
+  const mouse = async (types: string[], x: number, y: number) => {
+    for (const type of types) {
+      await send("Input.dispatchMouseEvent", {
+        type,
+        x,
+        y,
+        button: type === "mouseMoved" ? "none" : "left",
+        buttons: type === "mousePressed" ? 1 : 0,
+        clickCount: type === "mouseMoved" ? 0 : 1,
+      });
+    }
+    await settle();
+  };
+  const focusCall = <R>(name: string, ...args: unknown[]) =>
+    call<R>(
+      evaluate,
+      `focusCall(${[name, ...args].map((a) => JSON.stringify(a)).join(", ")}) ?? true`,
+    );
+  // The device pixels' colours at the given points, and how many are yellow in the stage.
+  const look = async (points: [number, number][]) => {
+    const data = (await send<{ data: string }>("Page.captureScreenshot", { format: "png" })).data;
+    const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
+    const at = (x: number, y: number) => {
+      const i = (y * image.width + x) * 4;
+      return (image.data[i] << 16) | (image.data[i + 1] << 8) | image.data[i + 2];
+    };
+    let yellow = 0;
+    for (let y = 0; y < 240; y++) {
+      for (let x = 0; x < 400; x++) {
+        yellow += at(x, y) === YELLOW ? 1 : 0;
+      }
+    }
+
+    return { yellow, colours: points.map(([x, y]) => at(x, y)) };
+  };
+  // A frame of 3 device pixels inside w by h device pixels: its pixel count.
+  const frame = (w: number, h: number) => w * h - (w - 6) * (h - 6);
+  // The clip's frame, at (40, 40) to (120, 100) in device pixels: each bar's outer and inner
+  // pixels yellow, the pixels on either side not. The green square covers its left edge.
+  const clipPoints: [number, number][] = [
+    [39, 70],
+    [40, 70],
+    [42, 70],
+    [43, 70],
+    [80, 39],
+    [80, 40],
+    [80, 42],
+    [80, 43],
+    [120, 70],
+    [119, 70],
+    [117, 70],
+    [116, 70],
+    [80, 100],
+    [80, 99],
+    [80, 97],
+    [80, 96],
+  ];
+  const G = 0x00ff00;
+  const B = 0x0000ff;
+  const W = 0xffffff;
+  const Y = YELLOW;
+  const clipColours = [G, Y, Y, G, W, Y, Y, B, W, Y, Y, B, W, Y, Y, B];
+
+  for (const vm of ["as3", "avm1"]) {
+    const name = (n: string) => (vm === "as3" ? n.replace(/^.*\./, "") : `_level0.${n}`);
+    const [left, top] = await call<number[]>(evaluate, `focusPlayer("/web-test/focus-${vm}.swf")`);
+    assert.deepEqual([left, top], [0, 0], vm);
+    try {
+      assert.equal((await look([])).yellow, 0, `${vm}: a rectangle before Tab`);
+
+      await tab();
+      assert.equal(await focusCall("focusName"), name("clip"), vm);
+      let seen = await look(clipPoints);
+      assert.equal(seen.yellow, frame(80, 60), `${vm}: the clip's rectangle`);
+      assert.deepEqual(seen.colours, clipColours, `${vm}: the clip's rectangle's edges`);
+
+      // Three screen pixels in a holder scaled twice, not six.
+      await tab();
+      assert.equal(await focusCall("focusName"), name("holder.kid"), vm);
+      seen = await look([
+        [200, 60],
+        [202, 60],
+        [203, 60],
+      ]);
+      assert.equal(seen.yellow, frame(40, 40), `${vm}: the scaled kid's rectangle`);
+      assert.deepEqual(seen.colours, [Y, Y, B], `${vm}: the scaled kid's rectangle's edge`);
+
+      // Its own focusRect false: none.
+      await tab();
+      assert.equal(await focusCall("focusName"), name("off"), vm);
+      assert.equal((await look([])).yellow, 0, `${vm}: off's rectangle`);
+
+      // A text field, AS3's, shows none; a button, AS2's, its hit area's.
+      await tab();
+      if (vm === "as3") {
+        assert.equal(await focusCall("focusName"), "field", vm);
+        assert.equal((await look([])).yellow, 0, "as3: the field's rectangle");
+      } else {
+        assert.equal(await focusCall("focusName"), name("btn"), vm);
+        seen = await look([
+          [200, 160],
+          [202, 160],
+          [203, 160],
+          [279, 160],
+          [280, 160],
+        ]);
+        assert.equal(seen.yellow, frame(80, 40), "avm1: the button's rectangle");
+        assert.deepEqual(seen.colours, [Y, Y, 0xff0000, Y, W], "avm1: the button's edges");
+      }
+
+      // Round to the clip, then a press on it hides the rectangle, the focus kept.
+      await tab();
+      assert.equal((await look([])).yellow, frame(80, 60), `${vm}: the clip's again`);
+      await mouse(["mouseMoved", "mousePressed", "mouseReleased"], left + 50, top + 35);
+      assert.equal(await focusCall("focusName"), name("clip"), vm);
+      assert.equal((await look([])).yellow, 0, `${vm}: a rectangle after a press`);
+
+      // Tab shows it again; below SWF 9 a move hides it, as a press does.
+      await tab();
+      assert.equal((await look([])).yellow, frame(40, 40), `${vm}: the kid's after a press`);
+      await mouse(["mouseMoved"], left + 190, top + 110);
+      assert.equal((await look([])).yellow, vm === "avm1" ? 0 : frame(40, 40), `${vm}: a move`);
+
+      // The stage's off: none on the clip, whose own is not set.
+      await focusCall("stageFocusRect", false);
+      for (let i = 0; i < 3; i++) {
+        await tab();
+      }
+      assert.equal(await focusCall("focusName"), name("clip"), vm);
+      assert.equal((await look([])).yellow, 0, `${vm}: the stage's focus rectangle off`);
+      await focusCall("stageFocusRect", true);
+
+      // A script's focus shows it, as Tab does, but not where a parent of it is hidden.
+      await focusCall("focusOn", vm === "as3" ? "kid" : "holder.kid");
+      await settle();
+      assert.equal((await look([])).yellow, frame(40, 40), `${vm}: a script's focus`);
+      await focusCall("showHolder", false);
+      await settle();
+      assert.equal((await look([])).yellow, 0, `${vm}: a hidden parent's child's`);
+      await focusCall("showHolder", true);
+      await settle();
+
+      if (vm === "as3") {
+        // The stage or the root focused, to hear the keys: none.
+        for (const target of ["stage", "root"]) {
+          await focusCall("focusOn", target);
+          await settle();
+          assert.equal(await focusCall("focusName"), target);
+          assert.equal((await look([])).yellow, 0, `as3: the ${target}'s focus`);
+        }
+
+        // It follows what it frames as that moves, drawn once where it was first.
+        await focusCall("focusOn", "clip");
+        await settle();
+        assert.equal((await look([])).yellow, frame(80, 60), "as3: the clip's before it moves");
+        await focusCall("nudge");
+        await settle();
+        seen = await look([
+          [59, 70],
+          [60, 70],
+          [139, 70],
+          [140, 70],
+        ]);
+        assert.equal(seen.yellow, frame(80, 60), "as3: the moved clip's rectangle");
+        assert.deepEqual(seen.colours, [G, Y, Y, W], "as3: the moved clip's edges");
+
+        // A mouseDown listener's focus shows it, as Flash Player 32's does; the stage's not.
+        await focusCall("focusOn", "stage");
+        await mouse(["mouseMoved", "mousePressed", "mouseReleased"], left + 180, top + 30);
+        assert.equal(await focusCall("focusName"), "clip");
+        assert.equal((await look([])).yellow, frame(80, 60), "as3: a mouseDown's focus");
+        await mouse(["mouseMoved", "mousePressed", "mouseReleased"], left + 180, top + 80);
+        assert.equal(await focusCall("focusName"), "stage");
+        assert.equal((await look([])).yellow, 0, "as3: a mouseDown's focus on the stage");
+      }
+    } finally {
+      await call(evaluate, "focusDestroy()");
+    }
+  }
+});
+
 check("a SWF with no code has buttons the pointer reaches", async (evaluate, send) => {
   // The GL clears of the player's canvas from now, which every frame it draws makes.
   const countClears = (left: number, top: number) =>
@@ -1559,6 +2183,54 @@ check("a SWF with no code has buttons the pointer reaches", async (evaluate, sen
     await call(evaluate, "scriptFreeDestroy()");
   }
 });
+
+check(
+  "an AS2 press reaches only what was under the pointer before its onMouseDown and still is",
+  async (evaluate, send) => {
+    const [left, top] = await call<number[]>(
+      evaluate,
+      `scriptFreePlayer("/web-test/avm1-press-changes.swf")`,
+    );
+    const mouse = async (types: string[], x: number, y: number) => {
+      for (const type of types) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: left + x,
+          y: top + y,
+          button: type === "mouseMoved" ? "none" : "left",
+          buttons: type === "mousePressed" ? 1 : 0,
+          clickCount: type === "mouseMoved" ? 0 : 1,
+        });
+      }
+
+      await call(evaluate, "frames(2).then(() => true)");
+      return call<string[]>(evaluate, `scriptFreeCall("takeLog")`);
+    };
+    const click = ["mousePressed", "mouseReleased"];
+
+    try {
+      // Flash Player 32 under real clicks: the button the press shows takes no press, nor its
+      // release, only the roll over the release gives it; then it is pressed as any other.
+      assert.deepEqual(await mouse(["mouseMoved"], 20, 30), []);
+      assert.deepEqual(await mouse(click, 20, 30), ["shown onRollOver"]);
+      assert.deepEqual(await mouse(click, 20, 30), ["shown onPress", "shown onRelease"]);
+
+      // The one it hides rolls out, as with the button up, and takes no press either.
+      assert.deepEqual(await mouse(["mouseMoved"], 70, 30), ["shown onRollOut", "gone onRollOver"]);
+      assert.deepEqual(await mouse(click, 70, 30), ["gone onRollOut"]);
+
+      // A clip hidden so gets its roll out too, as Flash sends a hidden clip's roll and drag outs.
+      assert.deepEqual(await mouse(["mouseMoved"], 120, 30), ["goneClip onRollOver"]);
+      assert.deepEqual(await mouse(click, 120, 30), ["goneClip onRollOut"]);
+
+      // A button a goto makes again in its place is still the one pressed, as in Flash.
+      assert.deepEqual(await mouse(["mouseMoved"], 170, 30), ["remade onRollOver"]);
+      assert.deepEqual(await mouse(click, 170, 30), ["remade onPress", "remade onRelease"]);
+    } finally {
+      await call(evaluate, "scriptFreeDestroy()");
+    }
+  },
+);
 
 check(
   "the mouse's events come in Flash's order, and a drag off the player keeps the mouse",
@@ -1948,7 +2620,7 @@ check(
           "meterButtons().slice(-2).map((b) => [b.textContent, b.previousElementSibling?.tagName ?? null])",
         ),
         [
-          ["Show performance", "HR"],
+          ["Show stats", "HR"],
           ["About swf2es", "BUTTON"],
         ],
       );
@@ -1966,8 +2638,8 @@ check(
       await open();
       // While it shows, the item to move it follows.
       assert.deepEqual(await call(evaluate, "meterButtons().slice(-3).map((b) => b.textContent)"), [
-        "Hide performance",
-        "Move performance meter",
+        "Hide stats",
+        "Move stats",
         "About swf2es",
       ]);
       await call(evaluate, "meterButtons().at(-3).click(), true");
@@ -2130,14 +2802,14 @@ check(
     try {
       // Hidden, nothing to move.
       await open();
-      assert.equal(await call(evaluate, "cornerItem('Move performance meter') === null"), true);
-      await call(evaluate, "cornerItem('Show performance').click(), true");
+      assert.equal(await call(evaluate, "cornerItem('Move stats') === null"), true);
+      await call(evaluate, "cornerItem('Show stats').click(), true");
       assert.equal(await call(evaluate, "cornerOf()"), "top-left");
 
       // Each choice moves it to the next corner and is kept, the pointer passing through it.
       for (const corner of ["top-right", "bottom-left", "bottom-right", "top-left"]) {
         await open();
-        await call(evaluate, "cornerItem('Move performance meter').click(), true");
+        await call(evaluate, "cornerItem('Move stats').click(), true");
         assert.equal(await call(evaluate, "cornerPlayer.performanceMeterCorner"), corner);
         assert.equal(await call(evaluate, "cornerOf()"), corner);
         assert.equal(await call(evaluate, "cornerEvents()"), "none");
@@ -2243,7 +2915,7 @@ check(
       assert.deepEqual(
         await call(
           evaluate,
-          "[cornerItem('Hide performance'), cornerItem('Move performance meter')].map((b) => b === null)",
+          "[cornerItem('Hide stats'), cornerItem('Move stats')].map((b) => b === null)",
         ),
         [true, true],
       );

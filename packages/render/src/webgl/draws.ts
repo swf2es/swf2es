@@ -37,6 +37,7 @@ import {
   RUN_MOST,
   RUN_UNIT,
   SNAP_BIT,
+  stageFillFragment,
   TABLE_UNIT,
   TEXTURE_UNIT,
 } from "./programs.js";
@@ -101,6 +102,17 @@ export class Draws {
   private viewLocation: WebGLUniformLocation | null = null;
   private fillUnitLocation: WebGLUniformLocation | null = null;
   /**
+   * The stage fill program (stageFillFragment), for fills that sample the
+   * stage's pixel (Place.stage), each drawn alone: linked as one is first
+   * drawn, null till then and after the context is made again; and where it
+   * takes its row, view, Flash's pixels a stage pixel and the stage.
+   */
+  private stageProgram: WebGLProgram | null = null;
+  private stageRowLocation: WebGLUniformLocation | null = null;
+  private stageViewLocation: WebGLUniformLocation | null = null;
+  private stageUnitLocation: WebGLUniformLocation | null = null;
+  private stageLocation: WebGLUniformLocation | null = null;
+  /**
    * The fill program that blends a fill straight onto what is below it
    * (drawBlended), a draw a call, and where it takes what the fill program
    * does and the blend's mode, its layer's row and where the copy of what
@@ -161,6 +173,10 @@ export class Draws {
    */
   private readonly view = new Float32Array(4);
   private readonly frag = new Float32Array(4);
+  /** A fragment to the target's pixels from the stage's origin, as frag, then a stage pixel of them. */
+  private readonly stage = new Float32Array(4);
+  /** Whether the stage fill program is to be told the view, unit and stage as it next draws. */
+  private stageStale = true;
   private meshStale = true;
   /** The row and mode (REPEAT, SMOOTH) the mesh program was told last, -1 for none. */
   private meshRow = -1;
@@ -240,6 +256,8 @@ export class Draws {
     this.unitIds.fill(-1);
     this.rowLocation = gl.getUniformLocation(this.program, "uRow");
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
+    // The context's own, gone with it, or not made yet.
+    this.stageProgram = null;
     this.state.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
     gl.uniform1iv(
@@ -343,7 +361,11 @@ export class Draws {
         }
 
         const place = this.atlas.places[scene.geometry[i]];
-        if (!place || place.glyphs || (!stencil && scene.sampler[i] & (MESH | PLANE | SHADED))) {
+        if (
+          !place ||
+          place.glyphs ||
+          (!stencil && (place.stage || scene.sampler[i] & (MESH | PLANE | SHADED)))
+        ) {
           continue;
         }
 
@@ -478,8 +500,14 @@ export class Draws {
     frag[1] = (open.layer ? open.y : open.y + open.height) - target.y - oy;
     frag[2] = down;
     frag[3] = target.pixel;
+    const stage = this.stage;
+    stage[0] = frag[0];
+    stage[1] = frag[1];
+    stage[2] = down;
+    stage[3] = 1 / target.scale;
     this.unit = target.scale / target.pixel;
     gl.uniform1f(this.fillUnitLocation, this.unit);
+    this.stageStale = true;
     this.meshStale = true;
     this.glyphStale = true;
   }
@@ -509,7 +537,8 @@ export class Draws {
    * one fill of a shape, of no mesh, shader fill or text, whose texture, if
    * it samples one, is there. Drawn straight onto what is below in a blend
    * mode, it is as its layer would be composited, as no part of it is over
-   * another.
+   * another. Not one that samples the stage's pixel, which the blend
+   * program does not: its layer takes it.
    */
   blendable(scene: SceneList, i: number): boolean {
     if (scene.kind[i] !== DRAW || scene.sampler[i] & (MESH | PLANE | SHADED)) {
@@ -518,7 +547,9 @@ export class Draws {
 
     const place = this.atlas.places[scene.geometry[i]];
     const id = scene.texture[i];
-    return !!place && place.flat && !place.glyphs && (id < 0 || !!this.gpu.textures[id]);
+    return (
+      !!place && place.flat && !place.glyphs && !place.stage && (id < 0 || !!this.gpu.textures[id])
+    );
   }
 
   /**
@@ -646,6 +677,12 @@ export class Draws {
         continue;
       }
 
+      // In a mask, its coverage as any fill's.
+      if (!stencil && place.stage) {
+        other = this.drawStage(scene, i) || other;
+        continue;
+      }
+
       if (other) {
         this.useFill();
         other = false;
@@ -751,8 +788,9 @@ export class Draws {
    * geometries too large to merge (Place.batch), of geometries added this
    * frame, or of stable ones alone, so that a stable run's merged copy is
    * drawn again while a part of it changes from frame to frame; and without
-   * merging each fill is a run. The last entry gathered, past those whose
-   * texture is gone, which draw nothing.
+   * merging each fill is a run. A fill that samples the stage's pixel
+   * (Place.stage) ends a run, drawn alone (drawStage). The last entry
+   * gathered, past those whose texture is gone, which draw nothing.
    */
   private gatherRun(scene: SceneList, i: number, end: number, stencil: boolean): number {
     const places = this.atlas.places;
@@ -777,7 +815,10 @@ export class Draws {
         continue;
       }
 
-      if (place.glyphs || (!stencil && scene.sampler[j] & (MESH | PLANE | SHADED))) {
+      if (
+        place.glyphs ||
+        (!stencil && ((place.stage && j > i) || scene.sampler[j] & (MESH | PLANE | SHADED)))
+      ) {
         break;
       }
 
@@ -854,6 +895,57 @@ export class Draws {
     this.unitNext = (free + 1) % FILL_TEXTURES;
     this.runUnits |= 1 << free;
     return free + 1;
+  }
+
+  /**
+   * Entry `i`, a fill that samples the stage's pixel (Place.stage), drawn
+   * alone by the stage fill program, linked as it is first needed and told
+   * the view as it changed; whether it was drawn, that program left in use.
+   */
+  private drawStage(scene: SceneList, i: number): boolean {
+    this.gatherRun(scene, i, i + 1, false);
+    if (this.runCount === 0) {
+      return false;
+    }
+
+    const gl = this.gl;
+    const state = this.state;
+    if (!this.stageProgram) {
+      // A link that fails is given up on as the fill program's would be (WebGLBackend.gaveUp).
+      const program = linkProgram(gl, fillVertex(false, false, true), stageFillFragment);
+      this.stageProgram = program;
+      this.stageRowLocation = gl.getUniformLocation(program, "uRow");
+      this.stageViewLocation = gl.getUniformLocation(program, "uView");
+      this.stageUnitLocation = gl.getUniformLocation(program, "uUnit");
+      this.stageLocation = gl.getUniformLocation(program, "uStage");
+      state.useProgram(program);
+      gl.uniform1i(gl.getUniformLocation(program, "uRows"), 0);
+      gl.uniform1iv(
+        gl.getUniformLocation(program, "uTextures"),
+        Array.from({ length: FILL_TEXTURES }, (_, k) => FILL_UNIT + k),
+      );
+      this.stageStale = true;
+    }
+
+    state.useProgram(this.stageProgram);
+    if (this.stageStale) {
+      gl.uniform4fv(this.stageViewLocation, this.view);
+      gl.uniform1f(this.stageUnitLocation, this.unit);
+      gl.uniform4fv(this.stageLocation, this.stage);
+      this.stageStale = false;
+    }
+
+    state.bindVertexArray(this.atlas.pages[this.runPlaces[0].page].vertexArray);
+    for (let k = 0; k < FILL_TEXTURES; k++) {
+      if (this.runUnits & (1 << k)) {
+        state.bindTexture(FILL_UNIT + k, this.gpu.textures[this.unitIds[k]] as WebGLTexture);
+        state.bindSampler(FILL_UNIT + k, this.gpu.sampler(this.unitSampling[k]));
+      }
+    }
+
+    gl.uniform1i(this.stageRowLocation, this.runRows[0]);
+    gl.drawElements(gl.TRIANGLES, this.runCounts[0], gl.UNSIGNED_INT, this.runOffsets[0]);
+    return true;
   }
 
   /**
@@ -1018,6 +1110,7 @@ export class Draws {
 
     const gl = this.gl;
     gl.deleteProgram(this.program);
+    gl.deleteProgram(this.stageProgram);
     gl.deleteProgram(this.mesh);
     gl.deleteProgram(this.glyphProgram);
   }

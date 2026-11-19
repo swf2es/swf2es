@@ -787,8 +787,11 @@ the ninth digit (`Math.pow(1.0000001, 1e9)`), which the corpus's tests
 leave to their tolerance. So swf2es takes the corpus's special cases and
 JavaScript's precision, and the cases trace no result adl and Flash
 Player may differ in. RandomNumber (`random(n)`) is an int below its max
-cast as Rust casts one (saturated), 0 for a max below 1; its values and
-Math.random's are JavaScript's generator's, not Flash's.
+cast as Rust casts one (saturated), 0 for a max below 1: the next value
+of Flash's generator modulo the max, as avmplus' Random. RandomNumber and
+Math.random draw from one generator, the realm's, as adl's interleaved
+sequences show; it is AS3's (docs/architecture/runtime.md, "Random
+numbers"), so Math.random's values are multiples of 2^-31.
 
 ### Date
 
@@ -1178,7 +1181,9 @@ The pointer (`avm1/pointer.ts`) follows AVM1's rules in Ruffle's order
 first goes to every clip, the newest first, as `mouseMove`, `mouseDown`
 or `mouseUp` (the left button's alone), and what they queue runs; then
 the object under the pointer is picked again and gets its button
-events, all queued before the queue runs once: as the hover moves with
+events (a `press` only if it was under the pointer before those clip
+events too, Flash's rule in docs/architecture/input.md), all queued
+before the queue runs once: as the hover moves with
 the button up, `rollOut` of what it was over and `rollOver` of what it
 is over; with it down, `dragOut` and `dragOver`, any button's as a
 menu's items have them, none while a script drags a clip; then `press`,
@@ -1195,7 +1200,11 @@ state shows, then its hit test state; a clip in button mode takes the
 pointer itself, its buttons with it, where its `hitArea` or it is drawn;
 other clips' children are searched topmost first. A hidden button that
 is up gets no button event, one not up all of them, and a hidden clip
-only its `releaseOutside`; one whose `enabled` is false gets none, and a
+only those of the pointer leaving it, `rollOut`, `dragOut` and
+`releaseOutside`, as Flash Player 32 sent them to clips hidden from
+under a still pointer by a frame, an interval, their own `onRollOver` or
+`onPress`, or a press's `onMouseDown` (Ruffle's `filter_clip_event`
+lets the last alone through); one whose `enabled` is false gets none, and a
 button so goes up unless the event would show it over (a `rollOver`,
 `release` or `dragOut`) and the pointer lets go of it. After each frame
 the pointer is picked again where nothing was under it or what was is
@@ -1267,9 +1276,12 @@ that has it `onSetFocus(old)`, then Selection's listeners
 `onSetFocus(old, new)`; focusing it again tells none. A focused object
 removed, or hidden by its own `_visible`, loses the focus. The highlight
 shows as the focus moves where the object draws something and its
-`_focusrect` (from SWF 6 its own where set, else the stage's) is true; a
-left press makes it inactive, and below SWF 9 any press, release or move
-does, until the focus moves again. While it is not inactive the focused
+`_focusrect` (from SWF 6 its own where set, else the stage's; in SWF 5
+any clip's sets the stage's) is true, a later change leaving it as it is;
+a left press makes it inactive, and below SWF 9 any press, release or move
+does, until the focus moves again. While it shows, the view draws the
+yellow rectangle around the object, as AS3's (docs/architecture/input.md),
+all measured in Flash Player 32's projector at SWF 5, 6 and 8. While it is not inactive the focused
 object hears `onKeyDown` and `onKeyUp` (from SWF 6), after its keyDown
 clip actions; while it shows, Enter and Space that no keyPress took
 press and release it, if enabled.
@@ -1737,8 +1749,7 @@ AVM1, so nothing is expected from it.
 - **AS3 and AVM1 together.** `AVM1Movie.call` and `addCallback` throw
   #2014 (the corpus's `avm2/avm1movie_addcallback_call`; the
   `avm1-movie` case is to be recorded again with adl once they work).
-  The keyboard and the focus do not reach an AVM1 movie AS3 loaded, only
-  the pointer does. An AS3 SWF that AS2 loads runs none of its code.
+  An AS3 SWF that AS2 loads runs none of its code.
 - **Modules.** The player compiles AVM1 itself: the IndexedDB module
   cache and precompiled modules do not take AVM1 modules, though
   `swf2es compile` writes them.
@@ -1766,12 +1777,11 @@ AVM1, so nothing is expected from it.
 - **Display.** `duplicateMovieClip` copies no drawing a script made and
   no text field's properties; Stage's scale mode, alignment, full screen
   and resize events are not there; `PrintJob` prints nothing.
-- **Input and text.** The focus's highlight is tracked but not drawn;
-  touches reach only an AS3 movie's pointer. `onScroller` from the user,
-  `asfunction:` links, the HTML of SWF 6 and 7 fields as Flash reads it,
-  and layout metrics (`textWidth`, `maxscroll`) where AS3's fields part
-  from Flash's too; TextSnapshot's selection, `hitTestTextNearPos` and
-  `getTextRunInfo` do nothing.
+- **Input and text.** Touches reach only an AS3 movie's pointer.
+  `onScroller` from the user, `asfunction:` links, the HTML of SWF 6 and
+  7 fields as Flash reads it, and layout metrics (`textWidth`,
+  `maxscroll`) where AS3's fields part from Flash's too; TextSnapshot's
+  selection, `hitTestTextNearPos` and `getTextRunInfo` do nothing.
 - **The corpus.** `mixed_avm/` (12 tests, AS3 loading AS2 and the
   reverse) and `from_gnash/` (404, Gnash's test suite for each class at
   SWF 5 to 8, many of them Ruffle's known failures) are not run, and the

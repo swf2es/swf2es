@@ -67,6 +67,12 @@
   font-weight: 600;
 }
 
+/* A toggle button, as Show stats: pressed, it takes the accent's outline. */
+.player-app .toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 .player-app .open {
   display: flex;
   flex-wrap: wrap;

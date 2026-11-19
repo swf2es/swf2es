@@ -240,7 +240,11 @@ export class Playback {
     }
   };
 
-  private step(now: number, show: boolean): void {
+  private step(at: number, show: boolean): void {
+    // The timer reads performance.now() as it runs; an animation frame's time is when the frame
+    // began, which may be before a timer's call just ahead of it. Its time so goes no further back
+    // than the last call's, and the player is never handed time going backwards.
+    const now = this.last === null ? at : Math.max(at, this.last);
     const dt = this.last === null ? 0 : now - this.last;
     this.last = now;
     // Moved to a display of another density, or zoomed: drawn anew for its pixels.
@@ -268,6 +272,11 @@ export class Playback {
     if (show && (this.player.changes !== this.drawn || this.dirty)) {
       this.draw();
       drew = true;
+    }
+
+    // A frame played and not drawn still settles what a draw would for its scripts.
+    if (!drew && played > 0) {
+      this.player.undrawn();
     }
 
     // A frame's script may have destroyed the player: there is nothing left to tell of.
@@ -356,6 +365,7 @@ export class Playback {
     this.dirty = false;
     this.view.background = background;
     this.view.transparent = clear;
+    this.view.highlight = this.player.focusHighlight();
     // A frame played that changed nothing drawn is left as it shows: no frame for the browser to
     // composite, as Flash repaints nothing of a still stage. What the host changed draws anew.
     if (forced || !this.view.unchanged(this.player.stage)) {

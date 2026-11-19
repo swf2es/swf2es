@@ -3,7 +3,15 @@ import { deflateSync } from "node:zlib";
 // the drawing API and the stage's quality.
 import { zlibCompress } from "../../../packages/format/dist/index.js";
 import * as w from "../../swf-writer.ts";
-import { bare, moved, type PlayerCase, probeFont, rectPath, square } from "./common.ts";
+import {
+  bare,
+  morphBoundsTimeline,
+  moved,
+  type PlayerCase,
+  probeFont,
+  rectPath,
+  square,
+} from "./common.ts";
 
 // A fill with a curved side and a hole, outlined, so that the fill, the
 // hole and the lines all show.
@@ -565,6 +573,89 @@ function fillHoles(): Uint8Array {
       w.end(),
     ],
   });
+}
+
+/**
+ * Bitmap fills whose matrices collapse the plane: a zero matrix, translated
+ * or not, and matrices of rank one that keep one direction of the bitmap,
+ * each clipped and repeating, smoothed and not, in squares as placed and
+ * turned, and lines of the zero matrix's. The bitmap's 4 by 4 texels are each a colour of their own, so that
+ * the texels Flash draws can be told apart.
+ */
+function collapsedBitmaps(): Uint8Array {
+  const pixels: number[] = [];
+  for (let i = 0; i < 16; i++) {
+    const x = i % 4;
+    const y = i >> 2;
+    pixels.push(255, 40 + x * 70, 40 + y * 70, (x + y) % 2 ? 230 : 30);
+  }
+
+  const lossless = [1, 0, 5, 4, 0, 4, 0, ...zlibCompress(Uint8Array.from(pixels))];
+  const matrices = [
+    { a: 0, d: 0 },
+    { a: 0, d: 0, tx: 600, ty: 300 },
+    { a: 100, d: 0 },
+    { a: 0, d: 100 },
+    { a: 60, b: 60, c: 60, d: 60, tx: 200 },
+    { a: 0, b: 100, c: 0, d: 0 },
+  ];
+  const types = [0x43, 0x42, 0x41, 0x40] as const;
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0x808080),
+    w.tag(20, Uint8Array.from(lossless), true),
+  ];
+  let id = 2;
+  let depth = 1;
+  const turn = Math.SQRT1_2;
+  types.forEach((type, row) => {
+    matrices.forEach((matrix, column) => {
+      tags.push(
+        w.shape({
+          id,
+          version: 3,
+          bounds: [0, 800, 0, 800],
+          fills: [{ bitmap: 1, type, matrix }],
+          paths: [{ fill1: 1, commands: rectPath(0, 0, 40, 40) }],
+        }),
+      );
+      for (const [m, dx] of [
+        [{}, 0],
+        [{ a: turn, b: turn, c: -turn, d: turn }, 370],
+      ] as const) {
+        tags.push(
+          w.place({
+            depth: depth++,
+            character: id,
+            matrix: {
+              ...m,
+              tx: (10 + column * 60 + dx + (dx ? 20 : 0)) * 20,
+              ty: (10 + row * 60) * 20,
+            },
+          }),
+        );
+      }
+
+      id++;
+    });
+  });
+  // Lines 8 px wide, filled with the zero matrix's bitmap, clipped and repeating.
+  ([0x43, 0x42] as const).forEach((type, i) => {
+    tags.push(
+      w.shape({
+        id,
+        version: 4,
+        bounds: [-80, 880, -80, 880],
+        fills: [],
+        lines: [{ width: 160, color: 0xff000000, fill: { bitmap: 1, type, matrix: matrices[0] } }],
+        paths: [{ fill1: 0, line: 1, commands: rectPath(0, 0, 40, 40) }],
+      }),
+      w.place({ depth: depth++, character: id, matrix: { tx: (10 + i * 60) * 20, ty: 260 * 20 } }),
+    );
+    id++;
+  });
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: 760, height: 320, frameRate: 24, frameCount: 1, tags });
 }
 
 /**
@@ -1490,7 +1581,40 @@ function scale9Hits(abc: Uint8Array): Uint8Array {
   });
 }
 
+// The AS3 side of avm1-morph-bounds: a MorphShape and the clip holding it
+// measured as the morph's ratio changes (scripts/MorphBounds.as).
+function morphBounds(abc: Uint8Array): Uint8Array {
+  const { defs, places } = morphBoundsTimeline([]);
+  return w.swf({
+    version: 10,
+    width: 160,
+    height: 110,
+    frameRate: 24,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      ...defs,
+      w.doAbc(abc, "MorphBounds"),
+      w.symbolClass([[0, "Main"]]),
+      ...places,
+      ...Array.from({ length: 6 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
 export const shapeCases: PlayerCase[] = [
+  {
+    name: "morph-bounds",
+    swf: morphBounds,
+    script: "MorphBounds",
+    // adl prints the last frames' traces only once more have run.
+    frames: 12,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   { name: "moves", swf: moves(true), ...moved },
   { name: "moves-avm1", swf: moves(false), ...moved },
   {
@@ -1514,6 +1638,16 @@ export const shapeCases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "collapsed-bitmaps",
+    swf: collapsedBitmaps(),
+    frames: 1,
+    capture: [1],
+    // Every texel inside the fills and lines is Flash's; the edges anti-alias apart, two pixels
+    // by more than 32, where one square undrawn is 1,600.
+    tolerance: 32,
+    maxOutliers: 12,
+  },
   {
     name: "collapsed-gradients",
     swf: collapsedGradients(),

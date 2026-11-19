@@ -13,12 +13,13 @@ package
 
 	// The web test's clipboard SWF: an input field and a sprite, either of
 	// which the page focuses through ExternalInterface, logging what each
-	// hears of copy, cut and paste, and of text typed; a press on the stage
+	// hears of copy, cut and paste, of text typed and of its scroll; a press on the stage
 	// writes the clipboard with System.setClipboard.
 	public class ClipboardTest extends Sprite
 	{
 		private var field:TextField = new TextField();
 		private var log:Array = [];
+		private var scrolls:Array = [];
 
 		public function ClipboardTest()
 		{
@@ -34,6 +35,10 @@ package
 			field.addEventListener(Event.CHANGE, function(e:Event):void
 				{
 					log.push("change " + field.text);
+				});
+			field.addEventListener(Event.SCROLL, function(e:Event):void
+				{
+					scrolls.push(field.scrollH + "/" + field.maxScrollH);
 				});
 
 			var box:Sprite = new Sprite();
@@ -87,6 +92,12 @@ package
 			ExternalInterface.addCallback("scrollState", function():String
 				{
 					return field.scrollH + " " + field.maxScrollH + " " + field.caretIndex;
+				});
+			ExternalInterface.addCallback("takeScrolls", function():Array
+				{
+					var taken:Array = scrolls;
+					scrolls = [];
+					return taken;
 				});
 			ExternalInterface.addCallback("takeLog", function():Array
 				{

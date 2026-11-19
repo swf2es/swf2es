@@ -10,12 +10,14 @@ import { Avm1Pointer } from "./avm1/pointer.js";
 import { decodeImages, decodeInBrowser } from "./bitmap/images.js";
 import { drawKernelFrame, drawKernelLetGo, drawKernelUsed } from "./bitmap/kernel.js";
 import { AdvanceWalk, walkChecks } from "./display/advance.js";
-import { Container, MovieClip, unloads } from "./display/display.js";
+import { Container, type DisplayObject, MovieClip, unloads } from "./display/display.js";
 import { setStageSize } from "./display/perspective.js";
+import { framePassed } from "./display/shapeobject.js";
 import { settleFits } from "./display/textobjects.js";
 import { type Library, readLibrary } from "./display/timeline.js";
 import { customContextMenu, type MenuItem } from "./input/context-menu.js";
-import { type Keyboard, KeyboardInput } from "./input/keyboard.js";
+import { type FocusHighlight, Highlights } from "./input/focus-highlight.js";
+import { highlighted, type Keyboard, KeyboardInput } from "./input/keyboard.js";
 import { type Pointer, PointerInput, type PointerState } from "./input/pointer.js";
 import { TouchInput } from "./input/touch.js";
 import type { AudioHost } from "./media/audio.js";
@@ -415,6 +417,35 @@ export class Player {
   }
 
   /**
+   * The focus's yellow rectangle as a view draws it (RenderView.highlight),
+   * or null: around what Tab, or a script, focused, until a press or the
+   * focus moves on, as Flash draws it; for an AVM1 movie as its focus
+   * tracker shows it, an AVM1 movie an AS3 Loader holds too, where that has
+   * the focus. A host that draws it asks before each render; cheap where
+   * none shows, and measured again only as what it frames changes.
+   */
+  focusHighlight(): FocusHighlight | null {
+    const s = this.scripting;
+    let d: DisplayObject | null = null;
+    if (s) {
+      d = highlighted(s) ?? s.avm1Input?.highlighted() ?? null;
+    } else if (this.avm1) {
+      const tracker = this.avm1.focusTracker;
+      d = tracker.highlight === "visible" ? tracker.focusedObject : null;
+    }
+
+    if (d === null) {
+      this.highlights.forget();
+      return null;
+    }
+
+    return this.highlights.around(d, this.stage);
+  }
+
+  /** The focus's frame, measured again only as what it frames changes. */
+  private readonly highlights = new Highlights();
+
+  /**
    * Play what `dt` milliseconds are worth, as Flash paces: frames on a
    * grid of the frame rate's duration. Without streamed audio, those a
    * long frame or a stall lost are dropped, not caught up with. Flash runs
@@ -673,5 +704,15 @@ export class Player {
 
     // The fits a set size left pending happen before the frame is drawn, as in Flash.
     settleFits();
+  }
+
+  /**
+   * The frames played since the last draw are not to be drawn, as a hidden
+   * page's (web playback) or the tests' uncaptured ones: what drawing them
+   * would settle for scripts' shape tests, a MorphShape's blend at the
+   * ratio it was last placed at, settles now, as for a frame drawn.
+   */
+  undrawn(): void {
+    framePassed();
   }
 }

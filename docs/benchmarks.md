@@ -36,6 +36,9 @@ clock, and every other line must be as Flash traces it.
   int, Number, String, Object and a class (`vector/VectorAccess.as`);
 - `pixels`: a BitmapData's pixels set and read whole, by ByteArray and by
   Vector (`pixels/BitmapPixels.as`);
+- `random`: Math.random summed, scaled to an index and compared, ten
+  million calls each (`random/Random.as`); `tests/bench/random.ts` times
+  Flash's generator against JavaScript's in node;
 - `primitives`, `typed`, `untyped`, `native-collections`, `display`,
   `display-frames`, `as3pb` and `lz4`: see "AVM2 against Flash" below;
 - `avm1-*`: see "AVM1 against Flash".

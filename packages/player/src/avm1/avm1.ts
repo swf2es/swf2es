@@ -37,6 +37,7 @@ import {
   EMPTY_TIMELINE,
   MovieClip,
   parentage,
+  scrollMoved,
   TextObject,
   VideoObject,
 } from "../display/display.js";
@@ -847,6 +848,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     try {
       this.frameStart();
       this.dropPending();
+      // What the last frame's scripts, and the events since, did to the fields' scroll.
+      this.tellScrollers();
       // Sounds whose time has run are over before the clips play on, as AS3's are: a stream
       // starts again at its first block, a NoMultiple may start again.
       this.media.frames++;
@@ -897,6 +900,40 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     } finally {
       this.timers.end();
     }
+  }
+
+  /** The fields whose scroll a script, new text or a caret may have moved since the frame began. */
+  private readonly scrolled = new Set<TextObject>();
+  private readonly scrollTold = (field: TextObject) => {
+    this.scrolled.add(field);
+  };
+
+  /**
+   * Once a frame's scripts have run, before the next frame's, each field
+   * whose scrollV, maxScrollV, scrollH or maxScrollH moved since its
+   * onScroller last came calls it, once, with its listeners (adl), and what
+   * that queues runs.
+   */
+  private tellScrollers(): void {
+    if (this.scrolled.size === 0) {
+      return;
+    }
+
+    const fields = [...this.scrolled];
+    this.scrolled.clear();
+    for (const field of fields) {
+      const now = field.scrollState();
+      if (!scrollMoved(now, field.toldScroll)) {
+        continue;
+      }
+
+      field.toldScroll = now;
+      if (field.avm1 && !this.removed(field)) {
+        this.callback(field.avm1, "broadcastMessage", ["onScroller", field.avm1]);
+      }
+    }
+
+    this.queue.run();
   }
 
   /** Between frames: what the network answered is delivered, and the timers due by the real clock fire. */
@@ -1192,6 +1229,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    */
   private madeField(field: TextObject, face: avm1.Avm1Object): void {
     this.bindings.made(field);
+    field.scrollTold = this.scrollTold;
+    // A timeline's field tells only what moves from the text it was placed with.
+    if (field.definition && field.model.text !== "") {
+      field.toldScroll = field.scrollState();
+    }
 
     const version = this.swfVersion;
     avm1.initializeBroadcaster(face, this.rt.realm, version);
@@ -1500,6 +1542,12 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   /** The host's renderer, which BitmapData's draw of a display object draws by; null where there is none. */
   drawer: Drawer | null = null;
+
+  /**
+   * Told when the focus moves to `d`, or to nothing, after the move's
+   * events: an AS3 host keeps one focus across its loaded movies (input/avm1.ts).
+   */
+  onFocus: ((d: DisplayObject | null) => void) | null = null;
 
   /** The library's bitmap exported as `name`, as a new transparent store, as loadBitmap makes one. */
   libraryBitmap(name: string): BitmapStore | null {

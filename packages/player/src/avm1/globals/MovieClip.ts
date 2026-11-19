@@ -11,7 +11,7 @@
 import type { Matrix } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import type { BitmapStore } from "../../bitmap/bitmap.js";
-import { bounds, hitsObject, hitsPoint, toStage } from "../../display/bounds.js";
+import { hitsObject, hitsPoint, reportedBounds, toStage } from "../../display/bounds.js";
 import {
   ButtonObject,
   type DisplayObject,
@@ -632,7 +632,7 @@ function transformTwips(m: TwipsMatrix, x: number, y: number): [number, number] 
  * corner rounded to twips; null for an object with nothing in it.
  */
 function twipsBounds(d: DisplayObject, m: TwipsMatrix | null, lines = true): Rect | null {
-  const r = bounds(d, lines);
+  const r = reportedBounds(d, lines);
   if (r === null) {
     return null;
   }
@@ -1070,7 +1070,7 @@ export function movieClipClass(movie: Movie): {
           return hitsPoint(clip, sx, sy, true, stage);
         }
 
-        const r = bounds(clip, true);
+        const r = reportedBounds(clip, true);
         return r !== null && contains(transformRect(r, toStage(clip, stage)), sx, sy);
       }
 

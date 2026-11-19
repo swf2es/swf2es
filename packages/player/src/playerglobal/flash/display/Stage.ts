@@ -134,9 +134,15 @@ export function stageNatives(s: Scripting): avm2.Natives {
       return s.focus?.object ?? null;
     }
 
-    // A field given focus keeps its selection (the corpus's edittext_focus_selection).
+    // A field given focus keeps its selection (the corpus's edittext_focus_selection). The
+    // focus's rectangle shows, as after Tab.
     set focus(v: Value) {
-      setFocus(s, v ? (displayOf(v as avm2.AsObject) ?? null) : null);
+      // Null takes it from a loaded AVM1 movie too, whose field hears onKillFocus (Flash Player 32).
+      if (!v) {
+        s.avm1Input?.blur();
+      }
+
+      setFocus(s, v ? (displayOf(v as avm2.AsObject) ?? null) : null, true);
     }
 
     get showDefaultContextMenu(): boolean {
@@ -147,13 +153,12 @@ export function stageNatives(s: Scripting): avm2.Natives {
       s.showDefaultContextMenu = s.rt.toBoolean(v);
     }
 
-    // Kept, though no focus rectangle is drawn.
     get stageFocusRect(): boolean {
-      return focusRect;
+      return s.stageFocusRect;
     }
 
     set stageFocusRect(v: Value) {
-      focusRect = !!v;
+      s.stageFocusRect = s.rt.toBoolean(v);
     }
 
     /** The background, opaque: what a SWF's SetBackgroundColor gave until set, the alpha set ignored. */
@@ -298,7 +303,6 @@ export function stageNatives(s: Scripting): avm2.Natives {
     }
   }
 
-  let focusRect = true;
   let colorCorrection = "default";
   let stage3Ds: Value[] | null = null;
 

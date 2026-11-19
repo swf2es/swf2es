@@ -536,22 +536,26 @@ export function maxScrollH(field: {
   return Math.max(0, over);
 }
 
-/** The last first line a scroll can show: the lines after it fit the field's height. */
+/**
+ * The last first line a scroll can show: the first whose top is no further
+ * above the text's bottom, textHeight down, than the field's height inside
+ * its gutters. The empty line a final newline leaves in a field other than
+ * an input one counts nothing in textHeight, so a field scrolls to it only
+ * where no line fits (adl; the corpus's `edittext_max_scroll_v_basic`).
+ */
 export function maxScrollV(field: { layout: TextLayout; height: number }): number {
   const lines = field.layout.lines;
-  const room = field.height * TWIPS - 2 * GUTTER;
-  let used = 0;
-  let first = lines.length;
-  while (first > 0) {
-    const line = lines[first - 1];
-    const next = used + line.ascent + line.descent + (first < lines.length ? line.leading : 0);
-    if (next > room && first < lines.length) {
-      break;
-    }
-
-    used = next;
-    first--;
+  if (lines.length === 0) {
+    return 1;
   }
 
-  return Math.max(1, first + 1);
+  const room = field.height * TWIPS - 2 * GUTTER;
+  const top = lines[0].y + field.layout.height - room;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].y >= top) {
+      return i + 1;
+    }
+  }
+
+  return lines.length;
 }

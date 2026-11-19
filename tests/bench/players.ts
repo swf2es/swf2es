@@ -2,7 +2,8 @@
 // Ruffle's web build, each in headless Chrome, and Flash, AIR's adl without
 // the debugger. The AS3 benchmarks (the group `avm2`) are those that time
 // themselves for avmshell (enumeration, dictionary, primitives, typed,
-// untyped and native-collections under their names), vector/VectorAccess.as,
+// untyped and native-collections under their names), random/Random.as,
+// Math.random in loops, vector/VectorAccess.as,
 // indexed access to Vectors and Arrays, and pixels/BitmapPixels.as, a
 // bitmap's pixels set and read whole, each compiled against playerglobal
 // into a SWF whose document class is empty: their script runs as it is
@@ -75,6 +76,7 @@ const BENCHES: Record<string, Bench> = {
   vector: { source: "vector/VectorAccess.as" },
   pixels: { source: "pixels/BitmapPixels.as" },
   primitives: { source: "primitives/Primitives.as" },
+  random: { source: "random/Random.as" },
   typed: { source: "typed/Typed.as" },
   untyped: { source: "untyped/Untyped.as" },
   "native-collections": { source: "native-collections/Collections.as" },

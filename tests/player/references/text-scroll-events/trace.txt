@@ -1,0 +1,73 @@
+step scrollV 3 1/8 0/289
+  scroll input during scrollV 3 3/8 0/289 false false 2
+step scrollV 3 again 3/8 0/289
+step scrollV 100 3/8 0/289
+  scroll input during scrollV 100 8/8 0/289 false false 2
+step scrollV 0 8/8 0/289
+  scroll input during scrollV 0 1/8 0/289 false false 2
+step scrollH 10 1/8 0/289
+  scroll input during scrollH 10 1/8 10/289 false false 2
+step scrollH 10 again 1/8 10/289
+step scrollH -5 1/8 10/289
+  scroll input during scrollH -5 1/8 5/289 false false 2
+step scrollH 1000 1/8 5/289
+  scroll input during scrollH 1000 1/8 289/289 false false 2
+step scrollV 5 scrollH 0 1/8 289/289
+  scroll input during scrollV 5 scrollH 0 5/8 289/289 false false 2
+  scroll input during scrollV 5 scrollH 0 5/8 0/289 false false 2
+step dynamic scrollV 4 5/8 0/289
+  scroll dynamic during dynamic scrollV 4 4/8 0/275 false false 2
+step dynamic scrollH 7 5/8 0/289
+  scroll dynamic during dynamic scrollH 7 4/8 7/275 false false 2
+step text shorter 5/8 0/289
+  scroll input during text shorter 1/1 0/0 false false 2
+step text longer 1/1 0/0
+  scroll input during text longer 1/8 0/289 false false 2
+step scrollV 6 1/8 0/289
+  scroll input during scrollV 6 6/8 0/289 false false 2
+step appendText 6/8 0/289
+  scroll input during appendText 6/9 0/289 false false 2
+step replaceText at the start 6/9 0/289
+  scroll input during replaceText at the start 6/10 0/289 false false 2
+step htmlText shorter 6/10 0/289
+  scroll input during htmlText shorter 1/1 0/0 false false 2
+step dynamic text same length 1/1 0/0
+step dynamic text empty 1/1 0/0
+  scroll dynamic during dynamic text empty 1/1 0/0 false false 2
+step off the list scrollV 3 1/1 0/0
+  scroll off during off the list scrollV 3 3/7 0/0 false false 2
+step off the list text 1/1 0/0
+  scroll off during off the list text 1/1 0/0 false false 2
+step short swapped 1/1 0/0
+step short longer within the room 1/1 0/0
+step short format bigger 1/1 0/0
+  scroll short during short format bigger 1/1 0/14 false false 2
+step long swapped in a line 1/1 0/0
+  scroll dynamic during long swapped in a line 1/8 0/275 false false 2
+step long same text again 1/1 0/0
+step long format bigger 1/1 0/0
+  scroll dynamic during long format bigger 1/9 0/441 false false 2
+step format back then scrollV 5 1/1 0/0
+  scroll dynamic during format back then scrollV 5 1/8 0/275 false false 2
+  scroll dynamic during format back then scrollV 5 5/8 0/275 false false 2
+  scroll input during format back then scrollV 5 1/8 0/289 false false 2
+unheard after two texts 1/8 0/275
+step constructed 1/8 0/289
+step frame 1 1/8 0/289
+step focus 1/8 0/289
+step caret at the end 1/8 0/289
+  after 8/8 280/289
+step caret at the start 8/8 280/289
+  after 1/8 0/289
+step caret on the wide line's end 1/8 0/289
+  after 8/8 280/289
+step replaceSelectedText at the end 8/8 280/289
+  scroll input during replaceSelectedText at the end 8/8 280/426 false false 2
+step scrollV 2 and 3 in a frame 8/8 280/426
+  scroll input during scrollV 2 and 3 in a frame 2/8 280/426 false false 2
+  scroll input during scrollV 2 and 3 in a frame 3/8 280/426 false false 2
+step frame 2 3/8 280/426
+step text shorter with focus 3/8 280/426
+  scroll input during text shorter with focus 1/1 0/0 false false 2
+step frame 3 1/1 0/0
+step frame 4 1/1 0/0
