@@ -230,7 +230,8 @@ export class Swf2esPlayerElement extends ElementBase {
    * took (FrameStats), for a page's performance meter. The object is the
    * same each time, overwritten by the next frame's: copy what is kept.
    * It holds for every SWF the element plays until set to null, as it
-   * starts; unset, the player measures nothing.
+   * starts; unset, the player measures nothing. There is one: setting it
+   * replaces the one before.
    */
   get frameListener(): FrameListener | null {
     return this.#frameListener;
@@ -248,7 +249,8 @@ export class Swf2esPlayerElement extends ElementBase {
    * The bytes of the WebAssembly memories behind the player: its compiler's
    * (`codegen`, 0 for a SWF without code or before a load), and the native
    * modules' (`native`: bitmap kernels, tessellators, decoders, zlib), which
-   * every player on the page shares. A memory grows and never shrinks.
+   * every player on the page shares, its Flash Workers' left out, as their
+   * own threads hold them. A memory grows and never shrinks.
    */
   get wasmMemory(): { codegen: number; native: number } {
     return { codegen: this.#session?.codegen?.memoryBytes() ?? 0, native: nativeMemory() };

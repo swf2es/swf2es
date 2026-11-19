@@ -21,8 +21,10 @@ export function track(memory: WebAssembly.Memory): void {
 /**
  * The bytes the native modules' instances hold in their memories now:
  * bitmap kernels, tessellators, lines, decoders, zlib and LZMA, every
- * player's on the page together. A memory grows and never shrinks; one
- * whose instance was let go of counts until it is collected.
+ * player's on the page together, but only this realm's: a worker's
+ * instances (a Flash Worker's thread) are counted in that worker alone. A
+ * memory grows and never shrinks; one whose instance was let go of counts
+ * until it is collected.
  */
 export function nativeMemory(): number {
   let bytes = 0;

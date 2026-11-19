@@ -45,8 +45,14 @@ export interface FrameStats {
   frameRate: number;
   /** The ms the frames took: their scripts, events, timeline and sound, the SWF's own work. */
   play: number;
-  /** The ms drawing the stage took on the CPU, the GPU's own work aside; 0 where nothing was drawn. */
+  /**
+   * The ms the rest of the call took on the CPU where it drew: drawing the stage, the GPU's own
+   * work aside, and the little before it (the text input's focus kept, the samples chosen anew
+   * for a changed quality); 0 where it did not draw.
+   */
   draw: number;
+  /** Whether it drew the stage: a coarse clock may time a short drawing as 0 ms. */
+  drew: boolean;
   /** Whether it was an animation frame, which draws, rather than the timer, which never does. */
   shown: boolean;
 }
@@ -56,9 +62,9 @@ export type FrameListener = (stats: FrameStats) => void;
 
 export class Playback {
   /**
-   * Told after every call of the loop, while set; unset, the loop measures
-   * nothing for it. Its time is not the player's: the frames' pacing counts
-   * only the frames' own.
+   * Told after every call of the loop, while set: one listener, which
+   * another replaces; unset, the loop measures nothing for it. Its time is
+   * not the player's: the frames' pacing counts only the frames' own.
    */
   onFrame: FrameListener | null = null;
   /** What onFrame hears, filled anew for each call. */
@@ -68,6 +74,7 @@ export class Playback {
     frameRate: 0,
     play: 0,
     draw: 0,
+    drew: false,
     shown: false,
   };
   private frame = 0;
@@ -263,7 +270,8 @@ export class Playback {
       drew = true;
     }
 
-    if (this.onFrame) {
+    // A frame's script may have destroyed the player: there is nothing left to tell of.
+    if (this.onFrame && !this.destroyed) {
       this.told(this.onFrame, now, played, start, drew, show);
     }
   }
@@ -284,6 +292,7 @@ export class Playback {
     stats.frameRate = this.player.frameRate;
     stats.play = this.busy;
     stats.draw = drew ? end - start - this.busy : 0;
+    stats.drew = drew;
     stats.shown = shown;
     // A listener that throws is the page's error, not the loop's: the loop goes on.
     try {

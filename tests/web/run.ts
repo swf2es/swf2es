@@ -906,6 +906,7 @@ check(
         frameRate: number;
         play: number;
         draw: number;
+        drew: boolean;
         shown: boolean;
       }[];
       same: boolean;
@@ -927,6 +928,7 @@ check(
       assert.equal(s.frameRate, r.rate);
       assert.ok(Number.isFinite(s.play) && s.play >= 0 && s.play < 1000, `play ${s.play}`);
       assert.ok(Number.isFinite(s.draw) && s.draw >= 0 && s.draw < 1000, `draw ${s.draw}`);
+      assert.ok(s.drew || s.draw === 0, `${s.draw} ms drawing what was not drawn`);
       assert.equal(s.shown, true);
       played += s.frames;
     }
@@ -937,7 +939,7 @@ check(
       `${played} frames in ${span.toFixed(0)} ms at ${r.rate} fps`,
     );
     assert.ok(
-      r.heard.some((s) => s.draw > 0),
+      r.heard.some((s) => s.drew),
       "no call drew",
     );
     // Unset, nothing is told, and the loop reads the clock once less a frame: no measuring.
