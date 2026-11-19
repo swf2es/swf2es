@@ -21,6 +21,7 @@ import { bare, innerSwf } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
 import * as w from "../../../swf-writer.ts";
+import { loadsSwfs } from "./name-order.ts";
 
 // This file's own out directory: the other test files compile at the same time.
 const out = fileURLToPath(new URL("../../out/player-loads/", import.meta.url));
@@ -1871,3 +1872,65 @@ import flash.utils.setTimeout;
     assert.equal(copies.length, 1);
   });
 }
+
+// Flash Player 32's projector, and adl, give Loader.load and loadBytes the
+// next instance name in the call, for the root of the SWF to come, AS3's
+// or AVM1's; a load that fails or is replaced leaves its own unused.
+test("Loader.load and loadBytes take the name of the root to come in the call", {
+  skip,
+}, async () => {
+  const files = loadsSwfs(compiler(out));
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    url: "http://example.test/test.swf",
+    fetch: async ({ url }) => {
+      const bytes = files[url.slice(url.lastIndexOf("/") + 1)] ?? null;
+      return { bytes, status: bytes ? 200 : 404, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(files["test.swf"], scripting);
+  try {
+    await player.start();
+    for (let i = 0; i < 4; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+  } finally {
+    player.destroy();
+  }
+
+  // The calls in order; what comes, in the order it arrives, which is the network's.
+  assert.deepEqual(
+    lines.filter((line) => /^(before|after) /.test(line)),
+    [
+      "before url0 instance2",
+      "after url0 instance4",
+      "before url1 instance6",
+      "after url1 instance8",
+      "before url2 instance10",
+      "after url2 instance12",
+      "before url3 instance13",
+      "after url3 instance15",
+      "before bytes instance17",
+      "after bytes instance19",
+    ],
+  );
+  assert.deepEqual(lines.filter((line) => /^(init|ioError) /.test(line)).sort(), [
+    "init bytes instance18",
+    "init url0 instance14",
+    "init url1 instance7",
+    "init url3 instance14",
+    "ioError url2",
+  ]);
+  // An AS3 root has its load's name as its constructor runs.
+  assert.deepEqual(
+    lines
+      .filter((line) => line.startsWith("child "))
+      .map((line) => line.split(" ")[1])
+      .sort(),
+    ["instance18", "instance7"],
+  );
+});
