@@ -360,6 +360,7 @@ export class Playback {
     this.dirty = false;
     this.view.background = background;
     this.view.transparent = clear;
+    this.view.highlight = this.player.focusHighlight();
     // A frame played that changed nothing drawn is left as it shows: no frame for the browser to
     // composite, as Flash repaints nothing of a still stage. What the host changed draws anew.
     if (forced || !this.view.unchanged(this.player.stage)) {

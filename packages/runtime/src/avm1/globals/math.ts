@@ -7,6 +7,7 @@
 // whether it uses them or not, as their valueOf can tell; a SWF up to 6
 // gets NaN from a method given fewer arguments than it takes.
 
+import type { FlashRandom } from "../../random.js";
 import { Avm1Object, DONT_DELETE, DONT_ENUM, type Native, READ_ONLY } from "../objects.js";
 import type { Realm } from "../realm.js";
 import { toNumber } from "../values.js";
@@ -39,9 +40,6 @@ const ATAN2 = 5;
 const RANDOM = 11;
 const POW = 17;
 
-/** A random number from 0 to 1, of the 2^31 Flash's generator gives. */
-const random = () => Math.floor(Math.random() * 0x80000000) / 0x80000000;
-
 /** Whether a SWF up to 6 runs method `index` with `count` arguments, `x` the first. */
 function enough(index: number, count: number, x: number): boolean {
   switch (index) {
@@ -73,7 +71,7 @@ function pow(x: number, y: number): number {
   return x ** y;
 }
 
-function compute(index: number, x: number, y: number, count: number): number {
+function compute(index: number, x: number, y: number, count: number, random: FlashRandom): number {
   switch (index) {
     case 0:
       return Math.abs(x);
@@ -99,7 +97,7 @@ function compute(index: number, x: number, y: number, count: number): number {
     case 10:
       return Math.floor(x + 0.5);
     case RANDOM:
-      return random();
+      return random.random();
     case 12:
       return Math.floor(x);
     case 13:
@@ -117,8 +115,8 @@ function compute(index: number, x: number, y: number, count: number): number {
   }
 }
 
-/** ASnative(200, index): a Math method, NaN for an index of none. */
-export function mathNative(index: number): Native {
+/** ASnative(200, index): a Math method, NaN for an index of none; random draws from `random`. */
+export function mathNative(index: number, random: FlashRandom): Native {
   return (_, args, version) => {
     const x = toNumber(args.length > 0 ? args[0] : undefined, version);
     const y = toNumber(args.length > 1 ? args[1] : undefined, version);
@@ -126,7 +124,7 @@ export function mathNative(index: number): Native {
       return Number.NaN;
     }
 
-    return compute(index, x, y, args.length);
+    return compute(index, x, y, args.length, random);
   };
 }
 
@@ -145,7 +143,7 @@ export function mathObject(realm: Realm): Avm1Object {
   math.define("LN10", Math.LN10, flags);
   math.define("E", Math.E, flags);
   for (let i = 0; i < MATH_METHODS.length; i++) {
-    math.define(MATH_METHODS[i], realm.method(mathNative(i)), flags);
+    math.define(MATH_METHODS[i], realm.method(mathNative(i, realm.random)), flags);
   }
 
   return math;

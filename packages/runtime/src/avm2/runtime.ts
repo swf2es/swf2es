@@ -12,6 +12,7 @@
 // derives one (docs/architecture/compiler.md, "Modules and the bootstrap").
 
 import { API_VERSION, checkApiVersion } from "@swf2es/format";
+import { FlashRandom } from "../random.js";
 import { AmfClasses } from "./amf-classes.js";
 import { ArrayConversion } from "./array-conversion.js";
 import type { MethodName, PropertyName, Ref, WritableName } from "./as3-types.js";
@@ -269,6 +270,8 @@ export class Runtime {
   view: DataView | SharedMemoryView = this.scratchMemory;
   memoryProvider: AsObject | null = null;
   private refresh: (() => void) | null = null;
+  /** Math.random's generator, which Number.random and float.random share, as avmplus' Math seed. */
+  readonly random = new FlashRandom();
   /** ByteArray.defaultObjectEncoding: AMF3 until set. */
   defaultObjectEncoding = 3;
   /** ObjectEncoding.dynamicPropertyWriter: what writes a dynamic object's own properties in AMF3, if anything. */

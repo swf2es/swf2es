@@ -483,6 +483,41 @@ field that takes no typing moves its caret and selection with the same
 keys, and selects all with Ctrl+A. adl cannot be typed into, so none of
 this is recorded against Flash; there is no IME.
 
+The focus's rectangle (`input/focus-highlight.ts`) is drawn as Flash
+Player 32's projector draws it under real keys, measured there since adl
+takes no keys and its harness's captures, BitmapData draws of the stage,
+never hold it: opaque yellow, 0xFFFF00, three screen pixels wide inside
+the focused object's bounds on the stage, the box around them for a
+rotated one, a button's hit area's whatever state it shows, filters and
+masks left out, anti-aliased where the bounds fall between pixels. It is
+over everything, the objects above the focused one too, and in showAll's
+margins, and it follows its object as it moves, frame by frame. It stays
+three pixels wide under a parent scaled twice and on a stage shown 3.2
+times its size in full screen: the view takes a screen pixel as it takes
+a hairline's (`screenScale`). Tab shows it, and so does a script's
+focus, `stage.focus` or AVM1's `Selection.setFocus`, one set again on
+what has it, and in AS3 one a press's own `mouseDown`, `mouseUp` or
+`click` listener sets: a game that focuses a sprite as it is clicked
+shows its rectangle in Flash too. A press hides it otherwise, one on
+what has the focus too, until the focus moves again, and a key other
+than Tab leaves it. The stage and the root, which a script focuses to
+hear the keys, never show it, nor does a text field; the focus taken
+away, or its object removed or hidden, takes it, and so does a hidden
+parent, on which Flash also drops the focus, which the player does not
+yet. In AS3 the object's `focusRect`, or where that is null the stage's
+`stageFocusRect`, decides as the focus moves, and a change of either
+later leaves it as it is; AVM1's rules are in docs/avm1.md. In a movie
+of both, AS3's focus alone draws one: an AVM1 movie AS3 loaded takes no
+keys. Flash repaints only what changed, and drew a button's rectangle
+only where the button itself was repainted, so one whose hit area
+reaches past what it shows had it cut to that, or had none; the player
+draws it whole. A host asks `Player.focusHighlight()` before each render
+and gives the view the frame (`RenderView.highlight`), which draws its
+four bars last and draws again when it changes. The frame is measured
+again only when its object, what is in it or what is above it changed
+since the last render (their flags, which the view clears); where none
+shows, nothing is measured or drawn.
+
 A field scrolls to keep its caret in view (`TextObject.scrollTo`) as
 `setSelection`, a key, a press or a drag moves the caret, and as a field
 takes the focus, as adl's does from a script (`text-input-scroll`): up or

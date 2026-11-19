@@ -105,7 +105,10 @@ for (const name of ["max", "min"] as const) {
     };
 }
 
-floatNatives["float.random"] = (rt) => () => rt.float(Math.random());
+floatNatives["float.random"] = (rt) => {
+  const random = rt.random;
+  return () => rt.float(random.random());
+};
 floatNatives["float.round"] = (rt) => (value: Value) => {
   const rounded = Math.round(Math.fround(rt.toNumber(value)));
   return rt.float(rounded === 0 ? 0 : rounded);
