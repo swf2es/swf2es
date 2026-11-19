@@ -154,9 +154,14 @@ export class MovieLoads {
   /**
    * loadMovie and loadMovieNum: the SWF or image at `url` into a clip, or
    * into a level, which the load makes where there is none; an empty URL
-   * unloads what is there.
+   * unloads what is there. A movie an AS3 Loader holds has no levels, and
+   * Flash Player 32 loads nothing into one there, nor into its root.
    */
   loadMovie(into: DisplayObject | number, url: string, form: avm1.UrlForm | null): void {
+    if (this.movie.hosted && (typeof into === "number" || (into === this.movie.root && url !== ""))) {
+      return;
+    }
+
     if (typeof into === "number") {
       const level = this.movie.level(into);
       if (url !== "") {

@@ -453,7 +453,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
         this.halted = true;
       },
       root: (base) => face(this.rootOf(base as DisplayObject)),
-      level: (level) => face(this.levels.get(level)),
+      level: (level) => face(this.namedLevel(level) ?? undefined),
       parent: (object) => {
         const d = display(object);
         return d === undefined || this.levelNumbers.has(d) ? undefined : face(d.parent);
@@ -986,7 +986,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   atPath(path: string): DisplayObject | null {
-    return atPath(path, (n) => this.levels.get(n) ?? null, this.swfVersion > 6);
+    return atPath(path, (n) => this.levels.get(n) ?? null, this.swfVersion > 6, !this.standalone);
   }
 
   /** The level `d` is, null for a display object that is none. */
@@ -1457,6 +1457,19 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     return this.levels.get(n) ?? null;
   }
 
+  /** Whether an AS3 Loader holds this movie, which then has no levels of its own but its root. */
+  get hosted(): boolean {
+    return !this.standalone;
+  }
+
+  /**
+   * The clip `_levelN` names: none in a movie an AS3 Loader holds, whose
+   * root is `_root` alone, as Flash Player 32 has `_level0` undefined there.
+   */
+  namedLevel(n: number): MovieClip | null {
+    return this.standalone ? this.level(n) : null;
+  }
+
   /** Level `n`'s clip, an empty one made where there is none. */
   levelToLoad(n: number): MovieClip {
     return this.levels.get(n) ?? this.makeLevel(n);
@@ -1598,7 +1611,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   pathOf(d: DisplayObject): string {
-    return pathOf(d, (o) => this.levelOf(o));
+    return pathOf(d, (o) => this.levelOf(o), !this.standalone);
   }
 
   resolve(value: avm1.Value, version: number): DisplayObject | null {
@@ -1611,7 +1624,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const mark = (o: DisplayObject) => {
       const native = o.avm1?.display;
       if (native instanceof ClipNative && native.removedAt === null) {
-        native.removedAt = pathOf(o, (p) => this.levelOf(p));
+        native.removedAt = this.pathOf(o);
       }
 
       if (o instanceof MovieClip || o instanceof ButtonObject) {
