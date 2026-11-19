@@ -753,7 +753,8 @@ export class MovieClip extends Container {
 
   /**
    * Whether advance() would do anything now, read from it case by case:
-   * sit out, an AVM1 clip's tail, a stopped one's stream, a frame or a loop.
+   * sit out, an AVM1 clip's tail, the stream of a stopped one or one that
+   * stays on its last frame, a frame or a loop.
    * What it reads changes through the setters that mark the clip
    * (markAdvanceDue) as it may come to be so, and a new timeline.
    */
@@ -776,7 +777,7 @@ export class MovieClip extends Container {
       return !!this.playingStream;
     }
 
-    return this.frame < last || timeline.loops;
+    return this.frame < last || timeline.loops || !!this.playingStream;
   }
 
   /** The frame it plays to before it loops or stays (Timeline.played). */
@@ -827,6 +828,11 @@ export class MovieClip extends Container {
     if (this.currentFrame >= last) {
       if (this.timeline.loops) {
         this.gotoFrame(1, true);
+      } else if (this.stream) {
+        // One that stays still plays, as adl's isPlaying has it, but its
+        // stream stops, as a stopped clip's does (unmeasured: adl's harness
+        // has no sound).
+        this.library.sounds?.stopStream(this);
       }
 
       return;

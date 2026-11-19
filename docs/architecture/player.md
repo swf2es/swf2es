@@ -139,8 +139,10 @@ frame, as Flash does, where fl.controls' components keep their skins on a
 second frame (the `sprite-frames` case). A timeline has as many frames as
 its header says, but plays only as far as its ShowFrame tags end: from
 there it loops to its first frame where an End tag ends it and it ended
-more than one, and else stays, the root as well, as adl shows
-(`end-tags`, the corpus's `missing_frame_scripts`). A frame played on
+more than one, and else stays, the root as well, still playing to
+`isPlaying`, as adl shows (`end-tags`, the corpus's
+`missing_frame_scripts`); its stream sound stops there, as a stopped
+clip's does, which adl's harness, without sound, cannot show. A frame played on
 places its new children at once, but makes their AS3 objects only after
 `ENTER_FRAME`, in a construct phase before `frameConstructed`: until then
 a script counts them in `numChildren` and `getChildAt` gives null. Their
