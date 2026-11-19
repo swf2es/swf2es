@@ -21,6 +21,7 @@ export {
 export { defineElement, Swf2esPlayerElement, type SwfSource, TAG } from "./element.js";
 export { ExternalInterfaceError, type PageValue } from "./external.js";
 export { type Placement, place, type ScaleMode, scaleMode } from "./layout.js";
+export type { MeterCorner } from "./meter.js";
 export type { FrameListener, FrameStats } from "./playback.js";
 export { flashAttributes, isFlash, replaceFlash, watchFlash } from "./replace.js";
 export type { Stage3DSurfaceFactory, Stage3DSurfaceLoader } from "./stage3d.js";

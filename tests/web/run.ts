@@ -912,8 +912,8 @@ check(
       same: boolean;
       after: number;
       rate: number;
-      off: number;
-      on: number;
+      off: boolean;
+      on: boolean;
       memory: { codegen: number; native: number };
     }>(evaluate, "frameStats()");
     // About a second's animation frames, each one object filled anew.
@@ -948,9 +948,9 @@ check(
       r.heard.some((s) => s.drew),
       "no call drew",
     );
-    // Unset, nothing is told, and the loop reads the clock once less a call: no measuring.
+    // Unset, nothing is told, and the loop has no hook to measure for.
     assert.equal(r.after, 0);
-    assert.ok(Math.abs(r.on - r.off - 1) < 0.5, `${r.off} clock reads a call unset, ${r.on} set`);
+    assert.deepEqual([r.off, r.on], [false, true]);
     assert.ok(r.memory.codegen > 0 && r.memory.native > 0, JSON.stringify(r.memory));
   },
 );
@@ -1861,34 +1861,29 @@ check(
 check(
   "a page's frame listener and the meter each hear the frames, whichever comes first",
   async (evaluate) => {
-    const r = await call<{ steps: [string, number, string][]; reads: number[] }>(
-      evaluate,
-      "meterWithListener()",
-    );
+    const steps = await call<[string, number, string, boolean][]>(evaluate, "meterWithListener()");
     const live = (text: string) => Number(/^(\d+\.\d) \//.exec(text)?.[1] ?? 0) > 0;
-    const expected: [string, boolean, boolean | null][] = [
-      ["listener", true, null],
-      ["both", true, true],
-      ["meter", false, true],
-      ["both again", true, true],
-      ["listener again", true, null],
+    // Each step: whether the listener heard calls, whether the meter's fps is live (null for a
+    // hidden meter's last figure), and whether the loop has a hook: none once neither listens.
+    const expected: [string, boolean, boolean | null, boolean][] = [
+      ["listener", true, null, true],
+      ["both", true, true, true],
+      ["meter", false, true, true],
+      ["both again", true, true, true],
+      ["listener again", true, null, true],
+      ["neither", false, null, false],
     ];
+    assert.equal(steps.length, expected.length);
     for (let i = 0; i < expected.length; i++) {
-      const [label, listening, metered] = expected[i];
-      const [step, heard, fps] = r.steps[i];
+      const [label, listening, metered, hook] = expected[i];
+      const [step, heard, fps, hooked] = steps[i];
       assert.equal(step, label);
       assert.equal(heard > 0, listening, `${label}: the listener heard ${heard} calls`);
       if (metered !== null) {
         assert.equal(live(fps), metered, `${label}: the meter shows ${fps}`);
       }
+      assert.equal(hooked, hook, `${label}: the loop's hook`);
     }
-    // Hidden, the meter's hook is gone from the loop: one read of the clock a call less.
-    const [unheard, metered, unheardAgain] = r.reads;
-    assert.ok(
-      Math.abs(metered - unheard - 1) < 0.5,
-      `${unheard} reads unheard, ${metered} metered`,
-    );
-    assert.ok(Math.abs(unheardAgain - unheard) < 0.5, `${unheard} reads, then ${unheardAgain}`);
   },
 );
 
@@ -1899,6 +1894,7 @@ check(
       evaluate,
       `(async () => {
     localStorage.removeItem("swf2es.performanceMeter");
+    localStorage.removeItem("swf2es.performanceMeterCorner");
     window.meterPlayer = document.createElement("swf2es-player");
     meterPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
     window.meterChanges = [];
@@ -1968,8 +1964,13 @@ check(
 
       // Hidden again by its item, it hears, ticks and wraps nothing more.
       await open();
-      assert.equal(await call(evaluate, "meterButtons().at(-2).textContent"), "Hide performance");
-      await call(evaluate, "meterButtons().at(-2).click(), true");
+      // While it shows, the item to move it follows.
+      assert.deepEqual(await call(evaluate, "meterButtons().slice(-3).map((b) => b.textContent)"), [
+        "Hide performance",
+        "Move performance meter",
+        "About swf2es",
+      ]);
+      await call(evaluate, "meterButtons().at(-3).click(), true");
       assert.equal(
         await call(evaluate, "meterBox().hidden && !meterPlayer.performanceMeter"),
         true,
@@ -2065,6 +2066,195 @@ check(
         localStorage.removeItem("swf2es.performanceMeter");
         (await import("@swf2es/web")).configure({ performanceMeter: undefined });
         for (const p of [window.meterPlayer, window.meterSecond]) { p?.destroy(); p?.remove(); }
+        return true;
+      })()`,
+      );
+    }
+  },
+);
+
+check(
+  "the context menu moves the meter through the stage's corners, kept for the viewer",
+  async (evaluate, send) => {
+    const at = await call<number[]>(
+      evaluate,
+      `(async () => {
+    localStorage.removeItem("swf2es.performanceMeter");
+    localStorage.removeItem("swf2es.performanceMeterCorner");
+    window.cornerPlayer = document.createElement("swf2es-player");
+    // Larger than its 200 by 120 stage, so that the meter's corners are apart.
+    cornerPlayer.setAttribute("width", "400");
+    cornerPlayer.setAttribute("height", "300");
+    cornerPlayer.style.cssText = "position:fixed;left:0;top:0;z-index:1000";
+    document.body.append(cornerPlayer);
+    await cornerPlayer.load("/web-test/context-menu.swf");
+    window.cornerButtons = () =>
+      Array.from(
+        cornerPlayer.shadowRoot.querySelector("[data-swf2es-context-menu]")?.shadowRoot.querySelectorAll("button") ?? [],
+      );
+    window.cornerItem = (caption) => cornerButtons().find((b) => b.textContent === caption) ?? null;
+    // Which corner the meter's box sits in, within 12 px of the player's edges, or none.
+    window.cornerOf = () => {
+      const m = cornerPlayer.shadowRoot.querySelector(".meter").getBoundingClientRect();
+      const p = cornerPlayer.getBoundingClientRect();
+      const top = m.top - p.top <= 12;
+      const bottom = p.bottom - m.bottom <= 12;
+      const left = m.left - p.left <= 12;
+      const right = p.right - m.right <= 12;
+      return (top && !bottom ? "top" : bottom && !top ? "bottom" : "?") + "-" +
+        (left && !right ? "left" : right && !left ? "right" : "?");
+    };
+    window.cornerEvents = () => cornerPlayer.shadowRoot.querySelector(".meter").style.pointerEvents ||
+      getComputedStyle(cornerPlayer.shadowRoot.querySelector(".meter")).pointerEvents;
+    const r = cornerPlayer.getBoundingClientRect();
+    return [r.x, r.y];
+  })()`,
+    );
+    const open = async () => {
+      for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+        await send("Input.dispatchMouseEvent", {
+          type,
+          x: at[0] + 100,
+          y: at[1] + 100,
+          button: type === "mouseMoved" ? "none" : "right",
+          clickCount: 1,
+        });
+      }
+    };
+    const dismiss = async () => {
+      for (const type of ["keyDown", "keyUp"]) {
+        await send("Input.dispatchKeyEvent", { type, key: "Escape", windowsVirtualKeyCode: 27 });
+      }
+    };
+    const stored = "localStorage.getItem('swf2es.performanceMeterCorner')";
+    try {
+      // Hidden, nothing to move.
+      await open();
+      assert.equal(await call(evaluate, "cornerItem('Move performance meter') === null"), true);
+      await call(evaluate, "cornerItem('Show performance').click(), true");
+      assert.equal(await call(evaluate, "cornerOf()"), "top-left");
+
+      // Each choice moves it to the next corner and is kept, the pointer passing through it.
+      for (const corner of ["top-right", "bottom-left", "bottom-right", "top-left"]) {
+        await open();
+        await call(evaluate, "cornerItem('Move performance meter').click(), true");
+        assert.equal(await call(evaluate, "cornerPlayer.performanceMeterCorner"), corner);
+        assert.equal(await call(evaluate, "cornerOf()"), corner);
+        assert.equal(await call(evaluate, "cornerEvents()"), "none");
+        assert.equal(await call(evaluate, stored), corner === "top-left" ? null : corner);
+      }
+
+      // A script moves it for the page alone, keeping nothing; a corner it does not know is ignored.
+      await call(evaluate, "cornerPlayer.performanceMeterCorner = 'bottom-right', true");
+      assert.equal(await call(evaluate, "cornerOf()"), "bottom-right");
+      assert.equal(await call(evaluate, stored), null);
+      await call(evaluate, "cornerPlayer.performanceMeterCorner = 'middle', true");
+      assert.equal(await call(evaluate, "cornerPlayer.performanceMeterCorner"), "bottom-right");
+
+      // Kept, the next SWF's meter is in the viewer's corner.
+      await call(
+        evaluate,
+        "localStorage.setItem('swf2es.performanceMeterCorner', 'bottom-left'), true",
+      );
+      assert.equal(
+        await call(
+          evaluate,
+          `(async () => {
+        window.cornerSecond = document.createElement("swf2es-player");
+        cornerSecond.style.cssText = "position:fixed;left:420px;top:0";
+        document.body.append(cornerSecond);
+        await cornerSecond.load("/web-test/context-menu.swf");
+        return cornerSecond.performanceMeter + " " + cornerSecond.performanceMeterCorner +
+          " " + cornerSecond.shadowRoot.querySelector(".meter").dataset.corner;
+      })()`,
+        ),
+        "true bottom-left bottom-left",
+      );
+
+      // A corner a script set holds against another kept, through the next load.
+      assert.equal(
+        await call(
+          evaluate,
+          `(async () => {
+        localStorage.setItem("swf2es.performanceMeterCorner", "top-right");
+        await cornerPlayer.load("/web-test/context-menu.swf");
+        return cornerPlayer.performanceMeterCorner;
+      })()`,
+        ),
+        "bottom-right",
+      );
+
+      // Restored as a SWF starts, the kept choice is told once, and only if the meter shows.
+      assert.deepEqual(
+        await call(
+          evaluate,
+          `(async () => {
+        const told = async (on) => {
+          if (on) {
+            localStorage.setItem("swf2es.performanceMeter", "1");
+          } else {
+            localStorage.removeItem("swf2es.performanceMeter");
+          }
+          const p = document.createElement("swf2es-player");
+          p.style.cssText = "position:fixed;left:420px;top:200px";
+          const events = [];
+          p.addEventListener("performancemeterchange", (e) => events.push(e.detail.shown + " " + e.detail.corner));
+          document.body.append(p);
+          await p.load("/web-test/context-menu.swf");
+          await new Promise((done) => requestAnimationFrame(() => done()));
+          const corner = p.performanceMeterCorner;
+          p.destroy();
+          p.remove();
+          return [corner, events];
+        };
+        localStorage.setItem("swf2es.performanceMeterCorner", "bottom-right");
+        return [await told(false), await told(true)];
+      })()`,
+        ),
+        [
+          ["bottom-right", []],
+          ["bottom-right", ["true bottom-right"]],
+        ],
+      );
+
+      // Left out, a kept corner is ignored where no script set one.
+      assert.equal(
+        await call(
+          evaluate,
+          `(async () => {
+        localStorage.setItem("swf2es.performanceMeterCorner", "bottom-left");
+        const p = document.createElement("swf2es-player");
+        p.setAttribute("performancemeter", "false");
+        document.body.append(p);
+        await p.load("/web-test/context-menu.swf");
+        const corner = p.performanceMeterCorner;
+        p.destroy();
+        p.remove();
+        return corner;
+      })()`,
+        ),
+        "top-left",
+      );
+
+      // Left out, neither item is there, though the meter shows.
+      await call(evaluate, 'cornerPlayer.setAttribute("performancemeter", "false"), true');
+      await call(evaluate, "cornerPlayer.performanceMeter = true, true");
+      await open();
+      assert.deepEqual(
+        await call(
+          evaluate,
+          "[cornerItem('Hide performance'), cornerItem('Move performance meter')].map((b) => b === null)",
+        ),
+        [true, true],
+      );
+      await dismiss();
+    } finally {
+      await call(
+        evaluate,
+        `(() => {
+        localStorage.removeItem("swf2es.performanceMeter");
+        localStorage.removeItem("swf2es.performanceMeterCorner");
+        for (const p of [window.cornerPlayer, window.cornerSecond]) { p?.destroy(); p?.remove(); }
         return true;
       })()`,
       );

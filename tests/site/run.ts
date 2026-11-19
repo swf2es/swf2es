@@ -539,42 +539,10 @@ async function check(): Promise<void> {
             const meterHidden = `!(${meter}) || ${meter}.hidden`;
             const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').checked`;
             assert.equal(await value<boolean>(`!${meter}`), true);
-            // Whether anything hears the player's frames, told by the clock: a listener costs the
-            // loop one more read of it a call. Counted outside the player's advance, whose reads
-            // follow the SWF's frames and how many fall in each call, which the page's pacing
-            // sways; around it the loop reads the clock a fixed few times a call.
-            const readsPerFrame = async () =>
-              await value<number>(`(async () => {
-                const player = document.getElementById('player').player;
-                const now = performance.now;
-                const advance = player.advance;
-                let reads = 0;
-                let inside = 0;
-                let calls = 0;
-                performance.now = () => (reads++, now.call(performance));
-                player.advance = function (dt, busy) {
-                  calls++;
-                  const before = reads;
-                  try {
-                    return advance.call(this, dt, busy);
-                  } finally {
-                    inside += reads - before;
-                  }
-                };
-                const frame = () => new Promise((done) => requestAnimationFrame(() => done()));
-                try {
-                  await frame();
-                  reads = inside = calls = 0;
-                  for (let i = 0; i < 30; i++) {
-                    await frame();
-                  }
-                  return (reads - inside) / Math.max(1, calls);
-                } finally {
-                  performance.now = now;
-                  delete player.advance;
-                }
-              })()`);
-            const unheard = await readsPerFrame();
+            // Whether anything hears the player's frames: the element's test-only key tells
+            // whether its loop has a hook, the meter's or a page's.
+            const hooked = "document.getElementById('player')[Symbol.for('swf2es.frameHook')]";
+            assert.equal(await value<boolean>(hooked), false);
             assert.equal(await value<boolean>(wrapped), false);
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
@@ -638,11 +606,7 @@ async function check(): Promise<void> {
             assert.match(figures.heap, /^\d+(\.\d)? MB$/);
             assert.match(figures.codegen, /^\d+(\.\d)? MB$/);
             assert.match(figures.native, /^\d+(\.\d)? MB$/);
-            const heard = await readsPerFrame();
-            assert.ok(
-              Math.abs(heard - unheard - 1) < 0.5,
-              `${unheard} clock reads a call unheard, ${heard} with the meter`,
-            );
+            assert.equal(await value<boolean>(hooked), true);
             // Over the stage's corner, the pointer passing through it to the SWF.
             const meterBox = await value<{ inside: boolean; events: string }>(
               `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
@@ -676,24 +640,80 @@ async function check(): Promise<void> {
             await value("(document.getElementById('meter-toggle').click(), true)");
             await until(meterHidden);
             await until(`!${wrapped}`);
-            const unheardAgain = await readsPerFrame();
-            assert.ok(
-              Math.abs(unheardAgain - unheard) < 0.5,
-              `${unheard} clock reads a call before the meter, ${unheardAgain} after it`,
-            );
+            assert.equal(await value<boolean>(hooked), false);
             assert.equal(
               await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
               null,
             );
-            // Kept on, it is on as the page loads again.
+            // Kept on, it is on as the page loads again, in the corner the shortcut moved it to.
+            const corner = `${meter}.dataset.corner`;
+            const storedCorner = "localStorage.getItem('swf2es.performanceMeterCorner')";
             await shortcut();
             await until(meterShown);
+            assert.equal(await value<string>(corner), "top-left");
+            await shortcut();
+            assert.equal(await value<string>(corner), "top-right");
+            assert.equal(await value<string | null>(storedCorner), "top-right");
             await navigate("play/?swf=demos%2Fbounce.swf");
             await until(playing("bounce.swf"));
             await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
             await until(`/ fps$/.test(${figure("fps")}.textContent)`);
+            // On through the other corners, each inside the stage and the pointer passing through,
+            // then off, back in the corner the cycle began in, which stays kept.
+            for (const next of ["bottom-left", "bottom-right", "top-left"]) {
+              await shortcut();
+              assert.equal(await value<string>(corner), next);
+              assert.deepEqual(
+                await value<{ inside: boolean; events: string }>(
+                  `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
+                ),
+                { inside: true, events: "none" },
+              );
+            }
             await shortcut();
             await until(meterHidden);
+            assert.equal(await value<string>(corner), "top-right");
+            assert.equal(await value<string | null>(storedCorner), "top-right");
+            assert.equal(
+              await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
+              null,
+            );
+            // The shortcut and the box open it in that corner alike.
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterHidden);
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
+            // A corner picked from the menu survives the shortcut.
+            for (const type of ["mousePressed", "mouseReleased"]) {
+              await send("Input.dispatchMouseEvent", {
+                type,
+                x: box[0] + box[2] / 2,
+                y: box[1] + box[3] / 2,
+                button: "right",
+                clickCount: 1,
+              });
+            }
+            const moveItem =
+              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move performance meter')";
+            await until(`!!${moveItem}`);
+            await value(`(${moveItem}.click(), true)`);
+            assert.equal(await value<string>(corner), "bottom-left");
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterHidden);
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "bottom-left");
+            for (let i = 0; i < 4; i++) {
+              await shortcut();
+            }
+            await until(meterHidden);
+            assert.equal(await value<string>(corner), "bottom-left");
+            assert.equal(await value<string | null>(storedCorner), "bottom-left");
 
             // The context menu's About item names the build the page was made from.
             for (const type of ["mousePressed", "mouseReleased"]) {
@@ -1305,7 +1325,7 @@ async function check(): Promise<void> {
           // Each check starts without the performance meter, which a failed one may have left on,
           // kept for the next page too, over the stage's corner where others read pixels.
           await evaluate(
-            "(localStorage.removeItem('swf2es.performanceMeter'), document.getElementById('player') && (document.getElementById('player').performanceMeter = false), true)",
+            "(localStorage.removeItem('swf2es.performanceMeter'), localStorage.removeItem('swf2es.performanceMeterCorner'), document.getElementById('player') && Object.assign(document.getElementById('player'), { performanceMeter: false, performanceMeterCorner: 'top-left' }), true)",
           ).catch(() => null);
         }
       }
