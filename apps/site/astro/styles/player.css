@@ -126,6 +126,12 @@ body.dragging .player-app .stage {
   display: block;
   position: absolute;
   inset: 0;
+  /* Its performance meter in the page's theme (@swf2es/web's meter.ts). */
+  --swf2es-meter-font: 0.75rem / 1.35 var(--mono);
+  --swf2es-meter-color: var(--fg);
+  --swf2es-meter-background: var(--panel);
+  --swf2es-meter-border: var(--border);
+  --swf2es-meter-muted: var(--muted);
 }
 
 .player-app swf2es-player[hidden] {
@@ -261,30 +267,6 @@ body.dragging .player-app .stage {
   font-size: 0.9rem;
 }
 
-.player-app .stats {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 6px;
-  margin: 0 0 0 auto;
-  font-family: var(--mono);
-  font-size: 0.85rem;
-}
-
-/* Each figure with its label, so that a narrow page wraps between figures, never within one. */
-.player-app .stats > div {
-  display: flex;
-  gap: 6px;
-}
-
-.player-app .stats dt {
-  color: var(--muted);
-}
-
-.player-app .stats dd {
-  margin: 0 10px 0 0;
-  min-width: 4.5em;
-}
-
 .player-app .panels {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
@@ -295,10 +277,6 @@ body.dragging .player-app .stage {
 @media (max-width: 760px) {
   .player-app .panels {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .player-app .stats {
-    margin-left: 0;
   }
 }
 

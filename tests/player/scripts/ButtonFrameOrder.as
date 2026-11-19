@@ -97,6 +97,11 @@ package
 		{
 			trace("menu", id, "frame 1");
 		}
+
+		public function again():void
+		{
+			trace("menu", id, "frame 1 again");
+		}
 	}
 
 	public class Other extends MovieClip
@@ -120,6 +125,7 @@ package
 	public class Main extends MovieClip
 	{
 		private var kept:Array = [];
+		private var lost:Menu;
 
 		public function Main()
 		{
@@ -143,7 +149,8 @@ package
 		{
 			trace("main frame 4");
 			kept.push(new Other());
-			addChild(new Menu());
+			lost = new Menu();
+			addChild(lost);
 			trace("main frame 4 attached");
 			kept.push(new Other());
 		}
@@ -156,9 +163,11 @@ package
 			trace("main frame 6 after goto");
 		}
 
+		// The frame menu 2 lost its script on is past: one registered now runs.
 		private function frame8():void
 		{
 			trace("main frame 8");
+			lost.addFrameScript(0, lost.again);
 		}
 
 		// Made after the frame's construct phase, before its frame scripts.

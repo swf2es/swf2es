@@ -1,4 +1,4 @@
-import type { Swf2esPlayerElement } from "@swf2es/web";
+import type { FrameStats, Swf2esPlayerElement } from "@swf2es/web";
 
 // The web test's page (run.ts writes its HTML): <swf2es-player>s and Flash
 // tags for replaceFlash, the page's functions the SWF calls, and what
@@ -339,6 +339,92 @@ async function playsUnframed() {
     for (const callback of asked.splice(0)) {
       requestAnimationFrame(callback);
     }
+  }
+}
+
+/** Whether `movie`'s loop has a frame hook, by the element's test-only key. */
+const hooked = (movie: Player) =>
+  (movie as unknown as Record<symbol, boolean>)[Symbol.for("swf2es.frameHook")];
+
+/**
+ * The scripted SWF's frame listener: what it heard over a second, each call
+ * copied, and whether every call gave the same object; then, unset, the
+ * calls it heard after; and whether its loop had a hook with no listener
+ * and with one.
+ */
+async function frameStats() {
+  const movie = element("movie");
+  const heard: FrameStats[] = [];
+  let last: FrameStats | null = null;
+  let same = true;
+  movie.frameListener = (stats) => {
+    same &&= last === null || last === stats;
+    last = stats;
+    heard.push({ ...stats });
+  };
+  await new Promise((done) => setTimeout(done, 1000));
+  movie.frameListener = null;
+  const told = heard.length;
+  await frames(5);
+  const after = heard.length - told;
+
+  const off = hooked(movie);
+  movie.frameListener = () => {};
+  const on = hooked(movie);
+  movie.frameListener = null;
+
+  return {
+    heard: heard.slice(0, told),
+    same,
+    after,
+    rate: (movie.player as unknown as { frameRate: number }).frameRate,
+    off,
+    on,
+    memory: movie.wasmMemory,
+  };
+}
+
+/**
+ * The scripted SWF's frame listener and its performance meter, one set and
+ * unset with the other on, both ways round: for each step, the calls the
+ * listener heard in it and the meter's fps after it, and whether the loop
+ * had a hook after it.
+ */
+async function meterWithListener() {
+  // A player of its own: the scripted SWF's is destroyed by the time this runs.
+  const movie = await newPlayer();
+  movie.setAttribute("src", "/web-test/embed.swf");
+  movie.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  document.body.append(movie);
+  await movie.ready;
+  let heard = 0;
+  const listener = () => {
+    heard++;
+  };
+  const fps = () => movie.shadowRoot?.querySelector("[data-figure=fps]")?.textContent ?? "";
+  const steps: [string, number, string, boolean][] = [];
+  const step = async (label: string) => {
+    const before = heard;
+    await new Promise((done) => setTimeout(done, 1300));
+    steps.push([label, heard - before, fps(), hooked(movie)]);
+  };
+  try {
+    movie.frameListener = listener;
+    await step("listener");
+    movie.performanceMeter = true;
+    await step("both");
+    movie.frameListener = null;
+    await step("meter");
+    movie.frameListener = listener;
+    await step("both again");
+    movie.performanceMeter = false;
+    await step("listener again");
+    movie.frameListener = null;
+    await step("neither");
+    return steps;
+  } finally {
+    movie.destroy();
+    movie.remove();
   }
 }
 
@@ -1236,6 +1322,8 @@ Object.assign(globalThis, {
   externalInterface,
   destroyMovie,
   playsUnframed,
+  frameStats,
+  meterWithListener,
   resize,
   requality,
   embedderFetch,

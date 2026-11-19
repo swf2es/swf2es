@@ -567,6 +567,87 @@ function fillHoles(): Uint8Array {
   });
 }
 
+/**
+ * Gradient fills and lines whose matrices collapse the plane, which Flash
+ * draws in the colour at the gradient's centre, the translation ignored:
+ * the middle of a linear ramp, a radial one's first entry, and a focal
+ * one's place of the centre. Each ramp is one colour for some way around
+ * that place, as Flash's fixed point drifts a few entries across the stage.
+ */
+function collapsedGradients(): Uint8Array {
+  const linear: [number, number][] = [
+    [0, 0xffe02020],
+    [104, 0xff20b040],
+    [168, 0xff20b040],
+    [255, 0xff2040e0],
+  ];
+  const radial: [number, number][] = [
+    [0, 0xffe0c020],
+    [48, 0xffe0c020],
+    [255, 0xff2040e0],
+  ];
+  const focal: [number, number][] = [
+    [0, 0xffe02020],
+    [56, 0xffc040c0],
+    [112, 0xffc040c0],
+    [255, 0xff2040e0],
+  ];
+  const fills: w.GradientFillSpec[] = [
+    { type: 0x10, matrix: { a: 0, d: 0 }, stops: linear },
+    { type: 0x10, matrix: { a: 0, d: 0, tx: -3000, ty: 900 }, stops: linear },
+    { type: 0x10, matrix: { a: 0.02, d: 0 }, stops: linear },
+    { type: 0x10, matrix: { a: 0, b: 0.01, c: 0, d: 0 }, spread: 1, stops: linear },
+    { type: 0x10, matrix: { a: 0, d: 0.02 }, spread: 2, stops: linear },
+    { type: 0x12, matrix: { a: 0, d: 0, tx: 400 }, stops: radial },
+    { type: 0x12, matrix: { a: 0.03, c: 0.03, b: 0.01, d: 0.01 }, stops: radial },
+    { type: 0x13, matrix: { a: 0, d: 0 }, focal: 0.5, stops: focal },
+  ];
+  const square = rectPath(0, 0, 40, 40);
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0x808080)];
+  fills.forEach((fill, i) => {
+    tags.push(
+      w.shape({
+        id: i + 1,
+        version: 3,
+        bounds: [0, 800, 0, 800],
+        fills: [fill],
+        paths: [{ fill1: 1, commands: square }],
+      }),
+    );
+  });
+  // Lines 8 px wide, filled with a linear and a radial gradient collapsed.
+  [fills[0], fills[5]].forEach((fill, i) => {
+    tags.push(
+      w.shape({
+        id: 9 + i,
+        version: 4,
+        bounds: [-80, 880, -80, 880],
+        fills: [],
+        lines: [{ width: 160, color: 0xff000000, fill }],
+        paths: [{ fill1: 0, line: 1, commands: square }],
+      }),
+    );
+  });
+  // A row as placed, one scaled down, one turned.
+  const turn = Math.SQRT1_2;
+  const rows = [{}, { a: 0.5, d: 0.75 }, { a: turn, b: turn, c: -turn, d: turn }];
+  let depth = 1;
+  rows.forEach((m, row) => {
+    for (let i = 0; i < 10; i++) {
+      const x = 10 + i * 48 + (row === 2 ? 20 : 0);
+      tags.push(
+        w.place({
+          depth: depth++,
+          character: i + 1,
+          matrix: { ...m, tx: x * 20, ty: (10 + row * 60) * 20 },
+        }),
+      );
+    }
+  });
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: 500, height: 200, frameRate: 24, frameCount: 1, tags });
+}
+
 /** Static shape masks keep their authored winding, unlike Graphics drawings used as masks. */
 function staticMaskWinding(): Uint8Array {
   return w.swf({
@@ -1433,6 +1514,16 @@ export const shapeCases: PlayerCase[] = [
     maxOutliers: 1300,
   },
   { name: "fill-holes", swf: fillHoles(), frames: 1, capture: [1], tolerance: 0, maxOutliers: 0 },
+  {
+    name: "collapsed-gradients",
+    swf: collapsedGradients(),
+    frames: 1,
+    capture: [1],
+    // The fills and lines are Flash's colours exactly; only the turned squares' and the lines'
+    // edges anti-alias apart, some 15 pixels by more than 32, where one square undrawn is 1,600.
+    tolerance: 32,
+    maxOutliers: 60,
+  },
   {
     name: "record-styles",
     swf: recordStyles(),

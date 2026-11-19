@@ -1,0 +1,16 @@
+main frame 1
+p frame 1
+p sends a to 4, then q to 2
+p sent them
+kid made
+a frame 4
+q frame 2
+a frame 4
+q frame 2
+kid frame 1
+main frame 2 sends p to 2, goes to 3
+main frame 2 after goto
+d frame 1
+p frame 2
+main frame 3
+r frame 1

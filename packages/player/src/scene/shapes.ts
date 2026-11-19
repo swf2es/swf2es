@@ -286,7 +286,8 @@ class Sampling {
 
   /** As set, a radial gradient's texture over `region`, which is null for any other paint. */
   setIn(paint: ImageFill | GradientFill | ShaderPaint, region: Area | null): this {
-    this.m = invert(paint.matrix) as Matrix;
+    // A gradient whose matrix collapses the plane takes every point to its square's centre.
+    this.m = invert(paint.matrix) ?? COLLAPSED;
     // A shader's coordinates are its matrix's inverse of the shape's, as a bitmap's texels are.
     this.kind = paint.type !== "gradient" ? "image" : paint.radial ? "radial" : "linear";
     this.region = region;
@@ -316,6 +317,18 @@ class Sampling {
       }
     }
   }
+}
+
+/**
+ * Where a gradient whose matrix collapses the plane maps the shape: to its
+ * square's centre, as Flash draws one in the colour there (gradients.ts).
+ * For a linear one, half a texel on, to the middle of the ramp's entry 128,
+ * not the edge between two entries a sampler could round either way.
+ */
+const COLLAPSED: Matrix = { a: 0, b: 0, c: 0, d: 0, tx: 1638.4 / RAMP / 2, ty: 0 };
+
+function collapses(m: Matrix): boolean {
+  return m.a * m.d - m.b * m.c === 0;
 }
 
 /** The one Sampling fillParts sets for each textured fill. */
@@ -391,12 +404,10 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     const { fill, contours } = layer.fills[i];
     const textured =
       fill.type === "image" || fill.type === "gradient" || fill.type === "shader" ? fill : null;
-    // A paint whose matrix collapses the plane covers nothing.
-    if (textured) {
-      const m = textured.matrix;
-      if (m.a * m.d - m.b * m.c === 0) {
-        continue;
-      }
+    // A bitmap or shader whose matrix collapses the plane is left out, though Flash draws such a
+    // bitmap in some of its texels; a gradient is drawn (COLLAPSED).
+    if (textured && textured.type !== "gradient" && collapses(textured.matrix)) {
+      continue;
     }
 
     const how = textured ? sampling.set(textured, contours) : null;
@@ -422,7 +433,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
  * A painted line's outline as the line builder made it (strokes.ts),
  * through the linear transform (a b c d), white: a part sampling `paint`
  * where each vertex lies in the shape's space, as a fill's do, so that the
- * paint is mapped as Flash maps a line's. Null where the paint's matrix
+ * paint is mapped as Flash maps a line's. Null where a bitmap's matrix
  * collapses the plane, which covers nothing.
  */
 export function strokePart(
@@ -433,8 +444,7 @@ export function strokePart(
   d: number,
   paint: LinePaint,
 ): Part | null {
-  const m = paint.matrix;
-  if (m.a * m.d - m.b * m.c === 0) {
+  if (paint.type !== "gradient" && collapses(paint.matrix)) {
     return null;
   }
 

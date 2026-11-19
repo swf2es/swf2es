@@ -3,6 +3,7 @@
 // instance made as needed, and let go after a call that threw, or whose
 // memory grew past MEMORY_KEPT, since memory never shrinks.
 import { decodeBase64 } from "./base64.js";
+import { track } from "./memory.js";
 
 /**
  * Memory an instance may keep between calls: what a bitmap or a SWF of a
@@ -27,7 +28,11 @@ export class KeptInstance<Exports extends { memory: WebAssembly.Memory }> {
    */
   call<T>(f: (x: Exports) => T): T {
     this.compiled ??= new WebAssembly.Module(decodeBase64(this.binary));
-    this.instance ??= new WebAssembly.Instance(this.compiled).exports as unknown as Exports;
+    if (!this.instance) {
+      this.instance = new WebAssembly.Instance(this.compiled).exports as unknown as Exports;
+      track(this.instance.memory);
+    }
+
     const x = this.instance;
     try {
       return f(x);

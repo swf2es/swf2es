@@ -115,6 +115,13 @@ function linkProgram(gl: WebGL2RenderingContext, vertex: string, fragment: strin
       throw e;
     }
 
+    // Lost meanwhile, as a script sees a context that is: disposed, not a shader it got wrong.
+    // Not flagged lost, a failure that says nothing is the shader's (#3613), even from a GPU
+    // process that died, till the loss that follows disposes the context.
+    if (gl.isContextLost()) {
+      throw new Context3DError("disposed", "Context3D experiment: context disposed or lost");
+    }
+
     switch (e.stage) {
       case "allocate":
         throw new Context3DError("operation", "Context3D experiment: cannot allocate shader");

@@ -529,30 +529,191 @@ async function check(): Promise<void> {
             });
             writeFileSync(`${out}site.png`, Buffer.from(page.data, "base64"));
 
-            // The stats count the renderer's draws, and the GL calls that make them, while they are
-            // on screen: a multi-draw is one call of many draws.
-            await until("Number(document.getElementById('sub-draws').textContent) > 0");
-            // Both read at once, so that they are of one showing.
-            const [calls, draws] = await value<number[]>(
-              "['gl-calls', 'sub-draws'].map((id) => Number(document.getElementById(id).textContent))",
-            );
-            assert.ok(calls > 0 && calls <= draws, `${calls} GL calls for ${draws} draws`);
-            // Off screen, and while the context is lost, the context has its own functions back.
+            // The element's performance meter is off until asked for: not made, no listener on
+            // the player, the context's own functions, the choice not kept.
             const gl = "document.getElementById('player').gl";
             const wrapped = `Object.hasOwn(${gl}, 'drawElements')`;
+            const meter = "document.getElementById('player').shadowRoot.querySelector('.meter')";
+            const figure = (name: string) =>
+              `document.getElementById('player').shadowRoot.querySelector('[data-figure=${name}]')`;
+            const meterHidden = `!(${meter}) || ${meter}.hidden`;
+            const meterShown = `!(${meterHidden}) && document.getElementById('meter-toggle').checked`;
+            assert.equal(await value<boolean>(`!${meter}`), true);
+            // Whether anything hears the player's frames: the element's test-only key tells
+            // whether its loop has a hook, the meter's or a page's.
+            const hooked = "document.getElementById('player')[Symbol.for('swf2es.frameHook')]";
+            assert.equal(await value<boolean>(hooked), false);
+            assert.equal(await value<boolean>(wrapped), false);
+            assert.equal(
+              await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
+              null,
+            );
+            // Ctrl+Shift+F shows it while the player has the focus, the SWF never hearing the F.
+            await value(
+              "(globalThis.heardF = 0, document.getElementById('player').addEventListener('keydown', (e) => { if (e.code === 'KeyF') heardF++; }), document.getElementById('player').focus(), true)",
+            );
+            const shortcut = async () => {
+              for (const type of ["keyDown", "keyUp"]) {
+                await send("Input.dispatchKeyEvent", {
+                  type,
+                  key: "F",
+                  code: "KeyF",
+                  windowsVirtualKeyCode: 70,
+                  modifiers: 2 | 8,
+                });
+              }
+            };
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<number>("heardF"), 0);
+            // An F held down before Ctrl and Shift is the SWF's: its repeats under them and its
+            // release reach it, and the meter stays as it was, so the SWF never keeps F held.
+            await value(
+              "(globalThis.releasedF = 0, document.getElementById('player').addEventListener('keyup', (e) => { if (e.code === 'KeyF') releasedF++; }), true)",
+            );
+            const f = { key: "f", code: "KeyF", windowsVirtualKeyCode: 70 };
+            await send("Input.dispatchKeyEvent", { type: "keyDown", ...f });
+            await send("Input.dispatchKeyEvent", {
+              type: "keyDown",
+              ...f,
+              key: "F",
+              modifiers: 2 | 8,
+              autoRepeat: true,
+            });
+            await send("Input.dispatchKeyEvent", {
+              type: "keyUp",
+              ...f,
+              key: "F",
+              modifiers: 2 | 8,
+            });
+            await until("releasedF === 1");
+            assert.equal(await value<number>("heardF"), 2);
+            assert.equal(await value<boolean>(meterShown), true);
+            assert.equal(
+              await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
+              "1",
+            );
+            // Its figures: the frames played a second against the SWF's rate, the player's ms in a
+            // frame, and the heap and memories behind it.
+            await until(`/ fps$/.test(${figure("fps")}.textContent)`);
+            const figures = await value<Record<string, string>>(
+              `Object.fromEntries([...${meter}.querySelectorAll('dd')].map((dd) => [dd.dataset.figure, dd.textContent]))`,
+            );
+            const fps = /^(\d+\.\d) \/ (\d+(?:\.\d+)?) fps$/.exec(figures.fps);
+            assert.ok(fps, figures.fps);
+            assert.ok(Number(fps[1]) > 0 && Number(fps[1]) <= Number(fps[2]) * 1.5, figures.fps);
+            assert.match(figures.frame, /^\d+\.\d ms, max \d+\.\d$/);
+            assert.match(figures.heap, /^\d+(\.\d)? MB$/);
+            assert.match(figures.codegen, /^\d+(\.\d)? MB$/);
+            assert.match(figures.native, /^\d+(\.\d)? MB$/);
+            assert.equal(await value<boolean>(hooked), true);
+            // Over the stage's corner, the pointer passing through it to the SWF.
+            const meterBox = await value<{ inside: boolean; events: string }>(
+              `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
+            );
+            assert.deepEqual(meterBox, { inside: true, events: "none" });
+            const meterShot = await send<{ data: string }>("Page.captureScreenshot", {
+              format: "png",
+              clip: { x: box[0], y: box[1], width: box[2], height: box[3], scale: 1 },
+            });
+            writeFileSync(`${out}meter.png`, Buffer.from(meterShot.data, "base64"));
+
+            // The meter counts the renderer's draws, and the GL calls that make them, while it
+            // shows: a multi-draw is one call of many draws.
+            await until(`Number(${figure("sub-draws")}.textContent) > 0`);
+            // Both read at once, so that they are of one showing.
+            const [calls, draws] = await value<number[]>(
+              `[${figure("gl-calls")}, ${figure("sub-draws")}].map((dd) => Number(dd.textContent))`,
+            );
+            assert.ok(calls > 0 && calls <= draws, `${calls} GL calls for ${draws} draws`);
+            // While the context is lost, the context has its own functions back.
             assert.equal(await value<boolean>(wrapped), true);
-            await value("(document.querySelector('.stats').style.display = 'none', true)");
-            await until(`!${wrapped}`);
-            await value("(document.querySelector('.stats').style.display = '', true)");
-            await until(wrapped);
             await value(
               `((globalThis.lose = ${gl}.getExtension('WEBGL_lose_context')).loseContext(), true)`,
             );
             await until(`!${wrapped}`);
             await value("(lose.restoreContext(), true)");
             await until(wrapped);
-            await value("(document.getElementById('sub-draws').textContent = '', true)");
-            await until("Number(document.getElementById('sub-draws').textContent) > 0");
+            await value(`(${figure("sub-draws")}.textContent = '', true)`);
+            await until(`Number(${figure("sub-draws")}.textContent) > 0`);
+            // Off again, by its box: hidden, unmeasured and unwrapped, and so kept.
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterHidden);
+            await until(`!${wrapped}`);
+            assert.equal(await value<boolean>(hooked), false);
+            assert.equal(
+              await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
+              null,
+            );
+            // Kept on, it is on as the page loads again, in the corner the shortcut moved it to.
+            const corner = `${meter}.dataset.corner`;
+            const storedCorner = "localStorage.getItem('swf2es.performanceMeterCorner')";
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-left");
+            await shortcut();
+            assert.equal(await value<string>(corner), "top-right");
+            assert.equal(await value<string | null>(storedCorner), "top-right");
+            await navigate("play/?swf=demos%2Fbounce.swf");
+            await until(playing("bounce.swf"));
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
+            await until(`/ fps$/.test(${figure("fps")}.textContent)`);
+            // On through the other corners, each inside the stage and the pointer passing through,
+            // then off, back in the corner the cycle began in, which stays kept.
+            for (const next of ["bottom-left", "bottom-right", "top-left"]) {
+              await shortcut();
+              assert.equal(await value<string>(corner), next);
+              assert.deepEqual(
+                await value<{ inside: boolean; events: string }>(
+                  `(() => { const m = ${meter}.getBoundingClientRect(); const s = document.getElementById('stage').getBoundingClientRect(); return { inside: m.left >= s.left && m.top >= s.top && m.right <= s.right && m.bottom <= s.bottom, events: getComputedStyle(${meter}).pointerEvents }; })()`,
+                ),
+                { inside: true, events: "none" },
+              );
+            }
+            await shortcut();
+            await until(meterHidden);
+            assert.equal(await value<string>(corner), "top-right");
+            assert.equal(await value<string | null>(storedCorner), "top-right");
+            assert.equal(
+              await value<string | null>("localStorage.getItem('swf2es.performanceMeter')"),
+              null,
+            );
+            // The shortcut and the box open it in that corner alike.
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterHidden);
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "top-right");
+            // A corner picked from the menu survives the shortcut.
+            for (const type of ["mousePressed", "mouseReleased"]) {
+              await send("Input.dispatchMouseEvent", {
+                type,
+                x: box[0] + box[2] / 2,
+                y: box[1] + box[3] / 2,
+                button: "right",
+                clickCount: 1,
+              });
+            }
+            const moveItem =
+              "[...(document.getElementById('player').shadowRoot.querySelector('[data-swf2es-context-menu]')?.shadowRoot.querySelectorAll('button') ?? [])].find((b) => b.textContent === 'Move performance meter')";
+            await until(`!!${moveItem}`);
+            await value(`(${moveItem}.click(), true)`);
+            assert.equal(await value<string>(corner), "bottom-left");
+            await value("(document.getElementById('meter-toggle').click(), true)");
+            await until(meterHidden);
+            await shortcut();
+            await until(meterShown);
+            assert.equal(await value<string>(corner), "bottom-left");
+            for (let i = 0; i < 4; i++) {
+              await shortcut();
+            }
+            await until(meterHidden);
+            assert.equal(await value<string>(corner), "bottom-left");
+            assert.equal(await value<string | null>(storedCorner), "bottom-left");
 
             // The context menu's About item names the build the page was made from.
             for (const type of ["mousePressed", "mouseReleased"]) {
@@ -574,6 +735,13 @@ async function check(): Promise<void> {
               "document.querySelector('[data-build]').dataset.build",
             );
             assert.equal(about, build === "unknown" ? "About swf2es" : `About swf2es (${build})`);
+            // The element's meter offered just above it, hidden as the shortcut last left it.
+            assert.equal(
+              await value<string>(
+                `[...${menu}.shadowRoot.querySelectorAll('button')].at(-2).textContent`,
+              ),
+              "Show performance",
+            );
             await send("Input.dispatchKeyEvent", {
               type: "keyDown",
               key: "Escape",
@@ -1153,6 +1321,12 @@ async function check(): Promise<void> {
           for (const text of thrown.splice(0)) {
             console.log(`  the page threw: ${text}`);
           }
+        } finally {
+          // Each check starts without the performance meter, which a failed one may have left on,
+          // kept for the next page too, over the stage's corner where others read pixels.
+          await evaluate(
+            "(localStorage.removeItem('swf2es.performanceMeter'), localStorage.removeItem('swf2es.performanceMeterCorner'), document.getElementById('player') && Object.assign(document.getElementById('player'), { performanceMeter: false, performanceMeterCorner: 'top-left' }), true)",
+          ).catch(() => null);
         }
       }
 

@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.28"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.29"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.28`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.29`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -169,6 +169,64 @@ the click. A page that makes the element full screen itself
 (`element.requestFullscreen()`) puts the stage in full screen too.
 `configure({ fullScreen })` takes a full screen of the embedder's own
 instead, as the desktop app's window, which needs no click.
+
+The player's context menu has a "Show performance" item, just above
+"About swf2es", that shows a small meter in the player's top left
+corner. It shows the SWF's frames a second against its frame rate, the
+player's ms in a frame (median and worst over the last second), draw
+calls, the JS heap where the browser reports it, and the WebAssembly
+memories. Choosing the item is the viewer's choice and is kept in
+localStorage for every element of the origin; each element applies it as
+its SWF starts, and the meter is off by default. `performancemeter="false"`
+on an element, or `configure({ performanceMeter: false })` for all of
+them, leaves the item out and ignores the kept choice, hiding a meter it
+showed; removing the attribute applies the choice again. A script can
+show or hide the meter with `element.performanceMeter = true` or `false`
+whatever the item, for the page alone: it keeps nothing, so a page that
+wants its own control remembered (the play page's Performance box)
+writes the same key, `swf2es.performanceMeter` set to `"1"`. While the
+meter shows, the menu also has "Move performance meter", which moves it
+to the player element's next corner, from top left to top right, bottom
+left and bottom right (in a letterboxed or noScale player, a corner may
+be in the bars beside the stage); Flash's menus have no submenus, nor has this one. The
+meter never takes the pointer, in whichever corner. The corner is kept
+like the choice to show it, under `swf2es.performanceMeterCorner` (none
+for top left), and the opt-outs leave the item out too. A script moves
+it with `element.performanceMeterCorner = "top-left"`, `"top-right"`,
+`"bottom-left"` or `"bottom-right"`, for the page alone. The element
+fires `performancemeterchange` (`event.detail.shown` and
+`event.detail.corner`) as the meter shows, hides or moves. While hidden
+it costs nothing: it hears no frames, runs no timer and leaves the WebGL
+context alone. While shown, it counts draw calls by wrapping the
+context's draw functions. A page can style it with the custom properties
+`--swf2es-meter-font`, `--swf2es-meter-color`,
+`--swf2es-meter-background`, `--swf2es-meter-border` and
+`--swf2es-meter-muted` on the element; by default it takes the browser's
+light or dark colours.
+
+A page can measure the player itself, as the meter does, by
+setting `element.frameListener` to a function. After each animation frame
+the player calls it with a `FrameStats` object: `time`, the frame's time
+by `performance.now()`; `frames`, the SWF's frames it played, often 0
+where the display runs faster than the SWF; `frameRate`, the SWF's rate
+then; `play`, the ms those frames took (scripts, events, timeline and
+sound); `drew`, whether it drew the stage; `draw`, the ms drawing took on
+the CPU, with the little work just before it (keeping the text input's
+focus, choosing samples again after a quality change), and 0 where it did
+not draw; and `shown`, false for the frames a timer plays while the page
+gets no animation frames, which draw nothing. Tell a drawn frame by
+`drew`, not by `draw`: a browser with a coarse clock (Safari's, or
+Firefox's on a page that is not cross-origin isolated) may time a short
+drawing as 0 ms. The same object comes each time, overwritten by the next
+frame, so copy what you keep. There is one listener: setting it replaces
+the one before. It holds across loads until set to `null`; without one
+the player measures nothing, and the listener's own time is not counted
+as the player's, so it does not change how frames are paced.
+`element.wasmMemory` gives the bytes of the WebAssembly memories behind
+the player: `codegen`, its compiler's, and `native`, the bitmap kernels',
+tessellators' and decoders' on the page, which every player on it shares.
+A Flash Worker's thread holds its own, which are not counted.
+`element.gl` is the WebGL context it draws with, for counting draw calls.
 
 With Stage3D on, a back buffer may be from 32 to 16384 pixels a side in
 every profile, as Flash Player 32 and AIR 51 take one on a desktop GPU,

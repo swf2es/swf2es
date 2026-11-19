@@ -1,4 +1,5 @@
 import { decodeBase64 } from "../base64.js";
+import { track } from "../memory.js";
 import { binary } from "./binary.js";
 
 let module: WebAssembly.Module | null = null;
@@ -26,5 +27,7 @@ function renderImports(failure: () => never): object {
 
 /** An instance of the module, its memory its own. */
 export function renderInstance(failure: () => never): Record<string, unknown> {
-  return new WebAssembly.Instance(renderModule(), renderImports(failure)).exports;
+  const exports = new WebAssembly.Instance(renderModule(), renderImports(failure)).exports;
+  track(exports.memory as WebAssembly.Memory);
+  return exports;
 }

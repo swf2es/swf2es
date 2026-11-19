@@ -5,6 +5,7 @@ export {
   beginProgram,
   endProgram,
   linkProgram,
+  lostShader,
   type PendingProgram,
   ShaderError,
 } from "./programs.js";

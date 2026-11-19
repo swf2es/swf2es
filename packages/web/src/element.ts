@@ -1,6 +1,7 @@
 // <swf2es-player>: a SWF on a page as an <embed> showed one, with the
 // embedding's attributes, a load() and destroy() of its own, and the
 // SWF's ExternalInterface callbacks as methods on the element.
+import type { Codegen } from "@swf2es/codegen";
 import { definesInput, definesSound, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   type AirApplication,
@@ -8,6 +9,8 @@ import {
   type ExternalInterfaceHost,
   type FileSystemHost,
   type FullScreenHost,
+  type MenuItem,
+  nativeMemory,
   Player,
   Scripting,
   type WorkerHost,
@@ -36,7 +39,18 @@ import {
 import { externalInterfaceHost, type PageBridge, type PageValue } from "./external.js";
 import { fetchFor, fetchMovie } from "./fetching.js";
 import { scaleMode } from "./layout.js";
-import { type Look, Playback } from "./playback.js";
+import {
+  isMeterCorner,
+  METER_STYLE,
+  type MeterCorner,
+  nextCorner,
+  PerformanceMeter,
+  storeCorner,
+  storedCorner,
+  storedMeter,
+  storeMeter,
+} from "./meter.js";
+import { type FrameListener, type Look, Playback } from "./playback.js";
 import type { Stage3DSession } from "./stage3d.js";
 import { UncaughtReports } from "./uncaught.js";
 import { UNMUTE_STYLE, UnmutePrompt } from "./unmute.js";
@@ -79,6 +93,8 @@ const idOf = (e: HTMLElement): string => String(dom?.id?.call(e) ?? "");
 
 /** What one load holds, let go of all at once when the next load or destroy comes. */
 export interface Session {
+  /** The compiler its code is compiled by, an AS3 SWF's or an AVM1 SWF's; null for a SWF without code. */
+  codegen: Codegen | null;
   scripting: Scripting | null;
   player: Player | null;
   playback: Playback | null;
@@ -158,8 +174,19 @@ export class Swf2esPlayerElement extends ElementBase {
     "quality",
     "menu",
     "unmuteprompt",
+    "performancemeter",
     "allowcapture",
   ];
+
+  // For the tests alone, under a key no page types: whether anything hears the loop's frames,
+  // the page's frame listener or the meter, which the loop then measures for.
+  static {
+    Object.defineProperty(Swf2esPlayerElement.prototype, Symbol.for("swf2es.frameHook"), {
+      get(this: Swf2esPlayerElement): boolean {
+        return !!this.#session?.playback?.onFrame;
+      },
+    });
+  }
 
   #session: Session | null = null;
   #readiness = deferred();
@@ -171,6 +198,18 @@ export class Swf2esPlayerElement extends ElementBase {
   #stageSize: [number, number] | null = null;
   /** The button over the player while its sound is held, made the first time it is. */
   #prompt: UnmutePrompt | null = null;
+  #frameListener: FrameListener | null = null;
+  /** The performance meter, made the first time it shows. */
+  #meter: PerformanceMeter | null = null;
+  #meterShown = false;
+  /** Whether the meter shows by the viewer's choice, the menu's or the one kept, not a script's. */
+  #meterChosen = false;
+  /** The element's corner the meter sits in. */
+  #meterCorner: MeterCorner = "top-left";
+  /** Whether a script put the meter in its corner, which the viewer's kept corner then leaves. */
+  #cornerSet = false;
+  /** The page's frame listener and the meter's together, made once both listen. */
+  #bothListeners: FrameListener | null = null;
 
   constructor() {
     super();
@@ -180,7 +219,8 @@ export class Swf2esPlayerElement extends ElementBase {
     style.textContent =
       ":host { display: inline-block; position: relative; overflow: hidden; outline: none }" +
       " .box { position: absolute; inset: 0; overflow: hidden }" +
-      UNMUTE_STYLE;
+      UNMUTE_STYLE +
+      METER_STYLE;
     this.#sizing = document.createElement("style");
     this.#box = document.createElement("div");
     this.#box.className = "box";
@@ -217,6 +257,216 @@ export class Swf2esPlayerElement extends ElementBase {
    */
   get gl(): WebGL2RenderingContext | null {
     return this.#session?.playback?.gl ?? null;
+  }
+
+  /**
+   * Told after each animation frame what the player did in it: the SWF's
+   * frames played, its frame rate, and the ms its frames and the drawing
+   * took (FrameStats), for a page's performance meter. The object is the
+   * same each time, overwritten by the next frame's: copy what is kept.
+   * It holds for every SWF the element plays until set to null, as it
+   * starts; unset, the player measures nothing. There is one: setting it
+   * replaces the one before.
+   */
+  get frameListener(): FrameListener | null {
+    return this.#frameListener;
+  }
+
+  set frameListener(listener: FrameListener | null) {
+    this.#frameListener = typeof listener === "function" ? listener : null;
+    this.#listen();
+  }
+
+  /**
+   * Whether the performance meter shows over the player: fps against the
+   * SWF's rate, the player's ms in a frame, draw calls, the JS heap and the
+   * WebAssembly memories. Off by default. The context menu's "Show
+   * performance" turns it on and keeps the viewer's choice, for every
+   * element of the origin, in localStorage; setting this shows or hides it
+   * for the page alone, keeping nothing. The element fires
+   * `performancemeterchange` as it shows or hides.
+   */
+  get performanceMeter(): boolean {
+    return this.#meterShown;
+  }
+
+  set performanceMeter(on: boolean) {
+    this.#meterChosen = false;
+    this.#showMeter(Boolean(on));
+  }
+
+  /**
+   * The corner of the player element the meter sits in, which in a
+   * letterboxed or noScale player may be in the bars beside the stage:
+   * "top-left", the default, "top-right", "bottom-left" or "bottom-right";
+   * another value is ignored.
+   * The context menu's "Move performance meter" moves it to the next and
+   * keeps the viewer's choice; setting this moves it for the page alone,
+   * keeping nothing, and fires `performancemeterchange`.
+   */
+  get performanceMeterCorner(): MeterCorner {
+    return this.#meterCorner;
+  }
+
+  set performanceMeterCorner(corner: MeterCorner) {
+    if (isMeterCorner(corner)) {
+      this.#cornerSet = true;
+      this.#placeMeter(corner);
+    }
+  }
+
+  /** The meter moved to `corner`, the page told where `tell` and it moved. */
+  #placeMeter(corner: MeterCorner, tell = true): void {
+    if (corner === this.#meterCorner) {
+      return;
+    }
+
+    this.#meterCorner = corner;
+    this.#meter?.place(corner);
+    if (tell) {
+      this.#changedMeter();
+    }
+  }
+
+  #changedMeter(): void {
+    dispatch(
+      this,
+      new CustomEvent("performancemeterchange", {
+        detail: { shown: this.#meterShown, corner: this.#meterCorner },
+      }),
+    );
+  }
+
+  /**
+   * The viewer's kept choice applied where the menu offers the meter, as a
+   * SWF starts and as the offer changes: read then, not as the element is
+   * connected, so that a page's configure() after its markup holds. Not
+   * offered, a meter the viewer's choice showed goes; a script's stays.
+   */
+  #applyChoice(): void {
+    const shown = this.#meterShown;
+    const corner = this.#meterCorner;
+    if (!this.#cornerSet) {
+      this.#placeMeter(this.#meterOffered() ? storedCorner() : "top-left", false);
+    }
+
+    if (this.#meterOffered()) {
+      if (!this.#meterShown && storedMeter()) {
+        this.#meterChosen = true;
+        this.#showMeter(true, false);
+      }
+    } else if (this.#meterChosen && this.#meterShown) {
+      this.#meterChosen = false;
+      this.#showMeter(false, false);
+    }
+
+    // Told once, and only of what shows differently: not of a hidden meter's corner.
+    if (this.#meterShown !== shown || (this.#meterShown && this.#meterCorner !== corner)) {
+      this.#changedMeter();
+    }
+  }
+
+  /** The meter shown or hidden, the page told where `tell`. */
+  #showMeter(on: boolean, tell = true): void {
+    const parent = this.#box.parentNode;
+    if (on === this.#meterShown || !parent) {
+      return;
+    }
+
+    this.#meterShown = on;
+    if (on) {
+      this.#meter ??= new PerformanceMeter(parent, () => this.wasmMemory);
+      this.#meter.place(this.#meterCorner);
+      const playback = this.#session?.playback;
+      this.#meter.attach(playback?.gl ?? null, !!playback);
+    }
+
+    this.#meter?.show(on);
+    this.#listen();
+    if (tell) {
+      this.#changedMeter();
+    }
+  }
+
+  /**
+   * The context menu's items for the meter, where it offers them: one to
+   * show or hide it and, while it shows, one to move it to the next corner.
+   * Flash's menus had no submenus, nor has this one. Each is the viewer's own
+   * choice, kept for the next time.
+   */
+  #meterMenu(): MenuItem[] {
+    if (!this.#meterOffered()) {
+      return [];
+    }
+
+    const items: MenuItem[] = [
+      {
+        caption: this.#meterShown ? "Hide performance" : "Show performance",
+        enabled: true,
+        select: () => {
+          const on = !this.#meterShown;
+          storeMeter(on);
+          this.#meterChosen = on;
+          this.#showMeter(on);
+        },
+      },
+    ];
+    if (this.#meterShown) {
+      items.push({
+        caption: "Move performance meter",
+        enabled: true,
+        select: () => {
+          const corner = nextCorner(this.#meterCorner);
+          storeCorner(corner);
+          this.#cornerSet = false;
+          this.#placeMeter(corner);
+        },
+      });
+    }
+
+    return items;
+  }
+
+  /** Whether the context menu offers the meter, by the element's attribute or the page's configuration. */
+  #meterOffered(): boolean {
+    const own = attribute(this, "performancemeter")?.trim().toLowerCase();
+    return own === "true" || (own !== "false" && configuration().performanceMeter !== false);
+  }
+
+  /** The playback told of each frame by whichever listen, the page's listener and the meter's. */
+  #listen(): void {
+    const playback = this.#session?.playback;
+    if (playback) {
+      playback.onFrame = this.#frameHook();
+    }
+  }
+
+  #frameHook(): FrameListener | null {
+    const meter = this.#meterShown ? this.#meter : null;
+    if (!meter) {
+      return this.#frameListener;
+    }
+
+    if (!this.#frameListener) {
+      return meter.heard;
+    }
+
+    this.#bothListeners ??= (stats) => {
+      this.#meter?.heard(stats);
+      this.#frameListener?.(stats);
+    };
+    return this.#bothListeners;
+  }
+
+  /**
+   * The bytes of the WebAssembly memories behind the player: its compiler's
+   * (`codegen`, 0 for a SWF without code or before a load), and the native
+   * modules' (`native`: bitmap kernels, tessellators, decoders, zlib), which
+   * every player on the page shares, its Flash Workers' left out, as their
+   * own threads hold them. A memory grows and never shrinks.
+   */
+  get wasmMemory(): { codegen: number; native: number } {
+    return { codegen: this.#session?.codegen?.memoryBytes() ?? 0, native: nativeMemory() };
   }
 
   get src(): string {
@@ -282,6 +532,13 @@ export class Swf2esPlayerElement extends ElementBase {
       return;
     }
 
+    // Taken from the viewer, the meter they turned on goes too, their choice kept for elsewhere;
+    // given back, it shows again.
+    if (name === "performancemeter") {
+      this.#applyChoice();
+      return;
+    }
+
     this.#session?.playback?.changed();
   }
 
@@ -319,6 +576,7 @@ export class Swf2esPlayerElement extends ElementBase {
 
     const ready = this.#readiness;
     const session: Session = {
+      codegen: null,
       scripting: null,
       player: null,
       playback: null,
@@ -457,6 +715,7 @@ export class Swf2esPlayerElement extends ElementBase {
         }
 
         session.workers = host;
+        session.codegen = codegen;
         session.scripting = this.#scripting(session, codegen, url, baseUrl, pageUrl, host);
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
@@ -483,6 +742,8 @@ export class Swf2esPlayerElement extends ElementBase {
         if (!current()) {
           return;
         }
+
+        session.codegen = codegen;
 
         // Its URL keys its SharedObjects, as a page's AS3 SWFs' are. Its
         // fscommand, getURL and ExternalInterface reach the page as an AS3
@@ -534,6 +795,7 @@ export class Swf2esPlayerElement extends ElementBase {
       session.player.quality = quality(attribute(this, "quality"));
       session.player.showDefaultContextMenu = attribute(this, "menu")?.toLowerCase() !== "false";
       session.player.build = configuration().build ?? null;
+      session.player.hostMenu = () => this.#meterMenu();
       const playback = await Playback.create(
         this.#box,
         session.player,
@@ -548,6 +810,12 @@ export class Swf2esPlayerElement extends ElementBase {
       }
 
       session.playback = playback;
+      playback.onFrame = this.#frameHook();
+      if (this.#meterShown) {
+        this.#meter?.attach(playback.gl, true);
+      }
+
+      this.#applyChoice();
       // The workers started ahead, loaded before a script may wait for one;
       // a script that never says it loaded does not keep the SWF from playing.
       if (session.workers) {
@@ -961,6 +1229,10 @@ export class Swf2esPlayerElement extends ElementBase {
 
     session.callbacks.clear();
     session.abort.abort();
+    if (session.playback) {
+      this.#meter?.attach(null, false);
+    }
+
     session.playback?.destroy();
     session.stage3D?.destroy();
     session.player?.destroy();

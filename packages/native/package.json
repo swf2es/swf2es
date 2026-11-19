@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/native",
-  "version": "0.1.28",
+  "version": "0.1.29",
   "description": "swf2es's WebAssembly modules: bitmap kernels, MP3, ADPCM and Nellymoser decoding, zlib and LZMA, fill and line tessellation, and ATF textures",
   "keywords": [
     "swf",
@@ -32,6 +32,10 @@
     "./compress": {
       "types": "./dist/compress/index.d.ts",
       "default": "./dist/compress/index.js"
+    },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "default": "./dist/memory.js"
     },
     "./mp3": {
       "types": "./dist/mp3/index.d.ts",

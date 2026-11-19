@@ -122,16 +122,10 @@ const failure = `(() => {
         </select>
       </label>
       <label><input id="stage3d" type="checkbox"> Stage3D</label>
+      <label title="Ctrl+Shift+F"><input id="meter-toggle" type="checkbox" aria-keyshortcuts="Control+Shift+F"> Performance</label>
       <button id="reload" type="button" disabled>Restart</button>
       <button id="close" type="button" disabled>Close</button>
       <button id="fullscreen" type="button">Full screen</button>
-      <dl class="stats" aria-label="Performance">
-        <div><dt>fps</dt><dd id="fps">–</dd></div>
-        <div><dt>frame</dt><dd id="frame-time">–</dd></div>
-        <div><dt>sub-draws</dt><dd id="sub-draws">–</dd></div>
-        <div><dt>GL calls</dt><dd id="gl-calls">–</dd></div>
-        <div><dt>heap</dt><dd id="heap">–</dd></div>
-      </dl>
     </section>
 
     <div class="panels">

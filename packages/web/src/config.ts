@@ -129,6 +129,13 @@ export interface Configuration {
    * element fires `audioblocked` and `audiounblocked` either way.
    */
   unmutePrompt?: boolean;
+  /**
+   * Whether an element offers its performance meter in its context menu
+   * ("Show performance"), and shows it as the viewer last left it there: on
+   * by default; an element's `performancemeter` attribute decides for
+   * itself. The page may show the meter through `performanceMeter` either way.
+   */
+  performanceMeter?: boolean;
   /** The page's build, a short commit or a version, which the context menu's About item names. */
   build?: string;
   /**

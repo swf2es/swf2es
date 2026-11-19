@@ -14,7 +14,7 @@ import {
 import { isolate } from "./isolation.js";
 import { bindFullscreen } from "./presentation.js";
 import { reportUrl, type SwfFacts } from "./report.js";
-import { Stats } from "./stats.js";
+import { bindMeter } from "./stats.js";
 
 interface DemoEntry {
   file: string;
@@ -190,13 +190,7 @@ function cancelInput(): number {
   return ++inputGeneration;
 }
 
-const stats = new Stats(
-  byId("fps"),
-  byId("frame-time"),
-  byId("sub-draws"),
-  byId("gl-calls"),
-  byId("heap"),
-);
+bindMeter(player, byId("meter-toggle"));
 
 function showStatus(message: string, isError = false): void {
   status.textContent = message;
@@ -290,7 +284,6 @@ async function play(
   const enabled = stage3D.checked;
   current = { bytes, name, facts: f, base, stage3D: enabled, air };
   close.disabled = false;
-  stats.watch(null, 0);
   ask.hidden = true;
   showFacts(name, f);
   stage.classList.remove("authored");
@@ -327,7 +320,6 @@ async function play(
       return;
     }
 
-    stats.watch(player.player, f.frameRate, player.gl);
     if (input === inputGeneration) {
       hideLoading();
       showStatus(`Playing ${name}.`);
@@ -634,7 +626,6 @@ close.addEventListener("click", () => {
   loadGeneration++;
   hideLoading();
   player.destroy();
-  stats.watch(null, 0);
   player.hidden = true;
   empty.hidden = false;
   reload.disabled = true;
