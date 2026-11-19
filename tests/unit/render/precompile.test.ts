@@ -1,10 +1,18 @@
 // How @swf2es/render's ProgramQueue makes programs ahead of their first use (webgl/precompile.ts):
 // after the first frame, all at once where the driver compiles in parallel, asked after only once
 // complete; one a frame without; each drawn with once, a frame apart; and at once where a frame
-// needs one first.
+// needs one first. And which failed links, the queue's and the kernels', are a lost context's
+// (webgl/losses.ts).
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { GlState } from "../../../packages/context3d/dist/device/index.js";
+import {
+  GlState,
+  linkProgram,
+  lostShader,
+  ShaderError,
+} from "../../../packages/context3d/dist/device/index.js";
+import { KernelPrograms } from "../../../packages/render/dist/webgl/kernels.js";
+import { LinkLosses, LOSS_GRACE_MS } from "../../../packages/render/dist/webgl/losses.js";
 import { ProgramQueue } from "../../../packages/render/dist/webgl/precompile.js";
 
 /** The context the queue takes, whose DOM type the unit tests do not load. */
@@ -16,13 +24,15 @@ const COMPLETION_STATUS_KHR = 0x91b1;
  * A WebGL 2 context of what the queue calls, logging the calls that matter: programs linked,
  * their status asked (and whether it had to wait for the link), and draws. A program's link
  * completes `delay` asks of its completion after it was linked; a fragment shader of "bad" fails.
+ * A `dead` one answers as a GPU process that died before the context is flagged lost: every
+ * status false, every log empty.
  */
 function fakeGl(parallel: boolean, delay = 1) {
   const log: string[] = [];
   let next = 0;
   const programs = new Map<object, { name: string; asks: number; shaders: string[] }>();
   const shaders = new Map<object, string>();
-  const context = { lost: false, refuse: -1 };
+  const context = { lost: false, dead: false, refuse: -1 };
   const gl = {
     VERTEX_SHADER: 1,
     FRAGMENT_SHADER: 2,
@@ -63,10 +73,10 @@ function fakeGl(parallel: boolean, delay = 1) {
       }
 
       log.push(`status ${known.name}${known.asks > delay || !parallel ? "" : " (waits)"}`);
-      return known.name !== "bad";
+      return !context.dead && known.name !== "bad";
     },
-    getShaderParameter: (shader: object) => shaders.get(shader) !== "bad",
-    getShaderInfoLog: () => "refused",
+    getShaderParameter: (shader: object) => !context.dead && shaders.get(shader) !== "bad",
+    getShaderInfoLog: () => (context.dead ? "" : "refused"),
     getProgramInfoLog: () => "",
     detachShader: () => {},
     deleteShader: () => {},
@@ -219,4 +229,109 @@ test("a program that cannot be begun leaves the ones begun before it begun once"
     ["link a", "link b", "link c"],
   );
   assert.deepEqual(made, ["a", "b", "c"]);
+});
+
+test("a link that fails on a context flagged lost is thrown as lost, not left to its owner", () => {
+  const { gl, context } = fakeGl(false);
+  const { queue, made } = queued(gl);
+  // Not flagged, a failure that says nothing is the owner's to link again, whose own failure
+  // the backend weighs (LinkLosses).
+  context.dead = true;
+  assert.equal(queue.take("a"), false);
+  context.dead = false;
+  context.lost = true;
+  assert.throws(
+    () => queue.take("b"),
+    (e: unknown) => e instanceof ShaderError && e.lost && lostShader(e),
+  );
+  assert.deepEqual(made, []);
+});
+
+test("a shader that does not compile, with the context there, is not taken for a loss", () => {
+  const { gl } = fakeGl(false);
+  assert.throws(
+    () => linkProgram(gl, "vertex", "bad"),
+    (e: unknown) => e instanceof ShaderError && e.stage === "compile" && !e.lost,
+  );
+});
+
+/** performance.now set to `at` while `run` runs. */
+function at<T>(now: { t: number }, run: () => T): T {
+  const real = performance.now;
+  performance.now = () => now.t;
+  try {
+    return run();
+  } finally {
+    performance.now = real;
+  }
+}
+
+test("a kernel that fails saying nothing is drawn without, kept as failed only once it outlives a loss", () => {
+  const { gl, log, context } = fakeGl(false);
+  const losses = new LinkLosses(gl);
+  const kernels = new KernelPrograms(gl, new GlState(gl), losses);
+  const now = { t: 1000 };
+  const links = () => log.filter((l) => l.startsWith("link")).length;
+  // A frame of each `step` ms, using the kernel `name`.
+  const frame = (name: string, step = 100) => {
+    now.t += step;
+    const kernel = at(now, () => kernels.use("vertex", name, () => {}));
+    at(now, () => losses.endFrame());
+    return kernel;
+  };
+  context.dead = true;
+  // Taken for a context lost but not flagged yet: drawn without, and linked again each frame.
+  for (let i = 0; i < 4; i++) {
+    assert.equal(frame("k"), null);
+  }
+
+  assert.equal(links(), 4);
+  // Still failing, still not flagged, past the grace: the kernel's fault, kept, not linked again.
+  assert.equal(frame("k", LOSS_GRACE_MS - 300), null);
+  assert.equal(links(), 5);
+  assert.equal(frame("k"), null);
+  assert.equal(links(), 5);
+  // A frame drawn without a failure ended the run: another failure starts one of its own.
+  assert.equal(losses.expired, true);
+  assert.equal(frame("other"), null);
+  assert.equal(links(), 6);
+  at(now, () => assert.equal(losses.expired, false));
+  // Flagged lost: drawn without, not kept, whatever the clock.
+  context.dead = false;
+  context.lost = true;
+  assert.equal(frame("flagged", LOSS_GRACE_MS * 4), null);
+  context.lost = false;
+  assert.notEqual(frame("flagged"), null);
+});
+
+test("a failure a grace after the last starts a run of its own; one conceded throws till a clean frame", () => {
+  const { gl, context } = fakeGl(false);
+  const losses = new LinkLosses(gl);
+  const now = { t: 1000 };
+  context.dead = true;
+  const failure = () => {
+    try {
+      linkProgram(gl, "vertex", "k");
+    } catch (e) {
+      return e;
+    }
+
+    throw new Error("linked");
+  };
+  // Work given up on, as a BitmapData draw, and no frame drawn after.
+  at(now, () => assert.equal(losses.lost(failure()), true));
+  now.t += LOSS_GRACE_MS * 10;
+  // Long after, the GPU process dies: a loss again, not the fault of the run before.
+  at(now, () => assert.equal(losses.lost(failure()), true));
+  now.t += LOSS_GRACE_MS;
+  at(now, () => assert.equal(losses.expired, true));
+  // Its grace over unflagged, conceded: what fails is the shaders', till a frame draws clean.
+  losses.concede();
+  now.t += LOSS_GRACE_MS * 10;
+  at(now, () => assert.equal(losses.lost(failure()), false));
+  at(now, () => losses.endFrame());
+  at(now, () => assert.equal(losses.lost(failure()), false));
+  at(now, () => losses.endFrame());
+  at(now, () => losses.endFrame());
+  at(now, () => assert.equal(losses.lost(failure()), true));
 });

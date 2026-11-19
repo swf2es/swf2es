@@ -38,6 +38,7 @@ import { FilterRunner } from "./filters.js";
 import { GpuTextures } from "./gpu-textures.js";
 import { HeldLayers } from "./holds.js";
 import { KernelPrograms } from "./kernels.js";
+import { LinkLosses } from "./losses.js";
 import { ProgramQueue } from "./precompile.js";
 import { LAYER_UNIT, TEXTURE_UNIT } from "./programs.js";
 import { Stage } from "./stage.js";
@@ -147,11 +148,20 @@ export class WebGLBackend {
   /** Framebuffers onto registry textures, drawn into or read, by texture id, with the texture they were made for. */
   private textureFramebuffers: ({ texture: WebGLTexture; framebuffer: WebGLFramebuffer } | null)[] =
     [];
+  /** Which failed links are a lost context's (gaveUp, and the kernels'). */
+  private readonly losses: LinkLosses;
+  /** Whether what the context holds is made (setUp): not after it was lost, till it is back. */
+  private made = false;
+  /** Whether frames draw: made, and no work given up on since (gaveUp). */
+  private ready = false;
+  /** The failure work was last given up on for, the context not flagged lost (resume). */
+  private fault: unknown = null;
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
     this.state = new GlState(gl);
-    this.kernels = new KernelPrograms(gl, this.state);
+    this.losses = new LinkLosses(gl);
+    this.kernels = new KernelPrograms(gl, this.state, this.losses);
     this.pool = new TargetPool(gl, this.state);
     this.stage = new Stage(gl, this.state, this.pool);
     this.gpu = new GpuTextures(gl, this.state);
@@ -180,21 +190,105 @@ export class WebGLBackend {
       this.kernels,
     );
     this.holds = new HeldLayers(gl, this.state, this.pool, this.draws, this.compositor, this.gpu);
-    this.setUp();
+    // A context lost already gives up here, and is made again once it is restored.
+    try {
+      this.setUp();
+      this.made = this.ready = true;
+    } catch (e) {
+      this.gaveUp(e);
+    }
+  }
+
+  /**
+   * Whether frames wait (resume): the context was lost and is not back
+   * yet, or work was given up on as lost before the browser said so.
+   */
+  get stale(): boolean {
+    return !this.ready;
+  }
+
+  /**
+   * Whether a stale backend draws again, the context not flagged lost: not
+   * while a failure that said nothing may yet be a loss Chrome has not
+   * flagged (LinkLosses); after that, it was the shaders' fault, and frames
+   * draw on as before the failure, linking again what failed, which then
+   * throws. Nothing is made again on a live context, whose objects are
+   * all there, a BitmapData's newest pixels among them. Throws that
+   * failure where the setUp it came from never finished.
+   */
+  resume(): boolean {
+    if (this.ready) {
+      return true;
+    }
+
+    if (this.gl.isContextLost() || !this.losses.expired) {
+      return false;
+    }
+
+    if (!this.made) {
+      throw this.fault;
+    }
+
+    this.losses.concede();
+    this.ready = true;
+    return true;
+  }
+
+  /** Whether frames draw: the context there, and what it holds made. */
+  private get usable(): boolean {
+    return this.ready && !this.gl.isContextLost();
+  }
+
+  /**
+   * Whether what the context holds may be drawn into and read: made, and
+   * not lost. Not stopped by a frame given up on as lost (stale): a
+   * BitmapData's texture, whose pixels may be newer than its store's, is
+   * read, filled and drawn into meanwhile as ever, unless that needs a
+   * program that fails.
+   */
+  private get live(): boolean {
+    return this.made && !this.gl.isContextLost();
   }
 
   /**
    * The context came back after it was lost: everything made again, every
    * geometry copied in again from the registry's arrays. The textures were
-   * lost with it, which their owners add again (Textures.lost).
+   * lost with it, which their owners add again (Textures.lost). Lost again
+   * meanwhile, it stays stale, for the next restore.
    */
   restore(geometries: Geometries): void {
-    this.setUp();
+    this.losses.clear();
+    this.made = this.ready = false;
     geometries.added.length = 0;
     geometries.removed.length = 0;
     geometries.updated.length = 0;
-    this.atlas.repack(geometries);
-    this.atlas.repackGlyphs(geometries);
+    if (this.gl.isContextLost()) {
+      return;
+    }
+
+    try {
+      this.setUp();
+      this.atlas.repack(geometries);
+      this.atlas.repackGlyphs(geometries);
+      this.made = this.ready = true;
+    } catch (e) {
+      this.gaveUp(e);
+    }
+  }
+
+  /**
+   * Work that threw `e` given up on, where a program would not be made as
+   * the context was lost (LinkLosses): frames wait (stale) till it is
+   * restored, or till the failure turns out the shaders' (resume), with
+   * nothing thrown. Anything else is thrown on.
+   */
+  private gaveUp(e: unknown): void {
+    if (!this.losses.lost(e)) {
+      throw e;
+    }
+
+    this.ready = false;
+    this.fault = e;
   }
 
   /** Programs, buffers and textures made, as the context comes or comes back. */
@@ -215,8 +309,6 @@ export class WebGLBackend {
     // Kernels' programs made again as first used, the context's own gone with it.
     this.kernels.clear();
     const textureMost = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number;
-    this.draws.setUp(textureMost);
-    this.compositor.setUp();
     // A lost context's programs went with it: all queued again.
     this.programs = new ProgramQueue(gl, this.state);
     this.overProgram = null;
@@ -243,12 +335,15 @@ export class WebGLBackend {
     this.gpu.setUp();
     // The context's own, gone with it.
     this.textureFramebuffers = [];
+    // Linked last: a context lost meanwhile throws here (gaveUp), the rest made, for destroy.
+    this.draws.setUp(textureMost);
+    this.compositor.setUp();
   }
 
   /**
    * Draw a frame: what the geometries added and removed first, then the
-   * rows, then the commands; onto the canvas, or into `root`, a layer the
-   * target's size, as BitmapData.draw's frames go.
+   * rows, then the commands, onto the canvas. Nothing while the context is
+   * lost; a frame the context is lost in midway is given up on (gaveUp).
    */
   execute(
     commands: Commands,
@@ -259,16 +354,38 @@ export class WebGLBackend {
     filters: Filters,
     keeps: Keeps,
     target: Target,
-    root: Layer | null = null,
+  ): void {
+    if (!this.usable) {
+      return;
+    }
+
+    try {
+      this.run(commands, scene, rows, geometries, textures, filters, keeps, target, null);
+      this.losses.endFrame();
+    } catch (e) {
+      this.gaveUp(e);
+    }
+  }
+
+  /**
+   * A frame drawn as `execute` draws it, onto the canvas or into `root`, a
+   * layer the target's size, as BitmapData.draw's frames go.
+   */
+  private run(
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    root: Layer | null,
   ): void {
     // A frame drawn into a layer, for BitmapData, is no frame of the canvas': idle layers are
     // counted in the canvas' frames.
     const counted = root === null;
     const gl = this.gl;
-    if (gl.isContextLost()) {
-      return;
-    }
-
     this.frameFilters = filters;
     this.atlas.place(geometries);
     this.gpu.uploadTextures(textures, this.clearTexture);
@@ -519,26 +636,31 @@ export class WebGLBackend {
   ): Uint8Array {
     const gl = this.gl;
     const bytes = new Uint8Array(width * height * 4);
-    if (gl.isContextLost()) {
+    if (!this.live) {
       return bytes;
     }
 
-    const layer = this.drawSampled(
-      commands,
-      scene,
-      rows,
-      geometries,
-      textures,
-      filters,
-      keeps,
-      target,
-      width,
-      height,
-      samples,
-    );
-    this.state.bindFramebuffer(layer.framebuffer);
-    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
-    this.pool.giveLayer(layer);
+    try {
+      const layer = this.drawSampled(
+        commands,
+        scene,
+        rows,
+        geometries,
+        textures,
+        filters,
+        keeps,
+        target,
+        width,
+        height,
+        samples,
+      );
+      this.state.bindFramebuffer(layer.framebuffer);
+      gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+      this.pool.giveLayer(layer);
+    } catch (e) {
+      this.gaveUp(e);
+    }
+
     return bytes;
   }
 
@@ -568,31 +690,35 @@ export class WebGLBackend {
     y: number,
     opaque: boolean,
   ): boolean {
-    const gl = this.gl;
-    if (gl.isContextLost()) {
+    if (!this.live) {
       return false;
     }
 
-    const layer = this.drawSampled(
-      commands,
-      scene,
-      rows,
-      geometries,
-      textures,
-      filters,
-      keeps,
-      target,
-      width,
-      height,
-      samples,
-    );
-    const into = this.textureFramebuffer(id);
-    if (into) {
-      this.compositeOver(layer, into, x, y, width, height, opaque);
-    }
+    try {
+      const layer = this.drawSampled(
+        commands,
+        scene,
+        rows,
+        geometries,
+        textures,
+        filters,
+        keeps,
+        target,
+        width,
+        height,
+        samples,
+      );
+      const into = this.textureFramebuffer(id);
+      if (into) {
+        this.compositeOver(layer, into, x, y, width, height, opaque);
+      }
 
-    this.pool.giveLayer(layer);
-    return into !== null;
+      this.pool.giveLayer(layer);
+      return into !== null;
+    } catch (e) {
+      this.gaveUp(e);
+      return false;
+    }
   }
 
   /**
@@ -665,7 +791,7 @@ export class WebGLBackend {
    * row by row; null on a lost context or without the texture.
    */
   readTexture(id: number, width: number, height: number): Uint8Array | null {
-    const framebuffer = this.gl.isContextLost() ? null : this.textureFramebuffer(id);
+    const framebuffer = this.live ? this.textureFramebuffer(id) : null;
     if (!framebuffer) {
       return null;
     }
@@ -690,8 +816,12 @@ export class WebGLBackend {
     height: number,
     pixel: number,
   ): boolean {
+    if (!this.live) {
+      return false;
+    }
+
     this.gpu.uploadTextures(textures, this.clearTexture);
-    const framebuffer = this.gl.isContextLost() ? null : this.textureFramebuffer(id);
+    const framebuffer = this.textureFramebuffer(id);
     if (!framebuffer) {
       return false;
     }
@@ -750,8 +880,12 @@ export class WebGLBackend {
     dy: number,
   ): boolean {
     const gl = this.gl;
+    if (!this.live) {
+      return false;
+    }
+
     this.gpu.uploadTextures(textures, this.clearTexture);
-    const source = gl.isContextLost() ? null : this.textureFramebuffer(from);
+    const source = this.textureFramebuffer(from);
     const target = source ? this.textureFramebuffer(to) : null;
     if (!source || !target) {
       return false;
@@ -849,11 +983,46 @@ export class WebGLBackend {
     height: number,
     samples: number,
   ): void {
-    const gl = this.gl;
-    if (gl.isContextLost()) {
+    if (!this.usable) {
       return;
     }
 
+    try {
+      this.planeInto(
+        keep,
+        commands,
+        scene,
+        rows,
+        geometries,
+        textures,
+        filters,
+        keeps,
+        target,
+        width,
+        height,
+        samples,
+      );
+    } catch (e) {
+      this.gaveUp(e);
+    }
+  }
+
+  /** drawPlane's drawing, what throws thrown on. */
+  private planeInto(
+    keep: number,
+    commands: Commands,
+    scene: SceneList,
+    rows: Rows,
+    geometries: Geometries,
+    textures: Textures,
+    filters: Filters,
+    keeps: Keeps,
+    target: Target,
+    width: number,
+    height: number,
+    samples: number,
+  ): void {
+    const gl = this.gl;
     const layer = this.drawSampled(
       commands,
       scene,
@@ -906,7 +1075,7 @@ export class WebGLBackend {
     samples: number,
   ): Layer {
     let layer = this.pool.takeLayer(width * samples, height * samples);
-    this.execute(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
+    this.run(commands, scene, rows, geometries, textures, filters, keeps, target, layer);
     for (let k = samples; k > 1; k /= 2) {
       const half = this.filters.halve(layer, (width * k) / 2, (height * k) / 2);
       this.pool.giveLayer(layer);

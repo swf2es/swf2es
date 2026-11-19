@@ -227,7 +227,8 @@ export class Draws {
     try {
       this.program = endProgram(gl, fill);
     } catch (e) {
-      if (!this.multi) {
+      // Not where the context is flagged lost, whose every link fails.
+      if (!this.multi || gl.isContextLost()) {
         throw e;
       }
 
