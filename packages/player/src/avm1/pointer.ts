@@ -298,8 +298,9 @@ export class Avm1Pointer implements Pointer {
       const field = pressed instanceof TextObject ? pressed : null;
       // Where the press is in the text, as the field was scrolled before it.
       const position = field ? this.textPosition(field, p.x, p.y) : 0;
-      // keepFocus is the host's, for a press on any of its movies' buttons. Where `handle` has a
-      // `pressed` of its own (a double click's, #1112), the host's test stays as it is.
+      // keepFocus is the host's: a button of any of its movies under the pointer once the press's
+      // handlers ran, whether or not the press reaches it (`pressed`), as Flash Player 32 keeps
+      // a field's focus when a Mouse listener brings a button under the press.
       if (!this.keepFocus && (field || this.avm1.focused instanceof TextObject)) {
         this.avm1.focus(field, true);
       }

@@ -173,7 +173,8 @@ export class LoadedAvm1Input {
 
   finish(type: "down" | "up", p: PointerState): number {
     let redraws = 0;
-    // A press on any movie's button moves no movie's focus (Flash Player 32).
+    // A press over any movie's button, as its handlers left what is under the pointer, moves no
+    // movie's focus (Flash Player 32), whether or not the press reaches the button.
     const keep = type === "down" && (this.over?.pressable(p.x, p.y) ?? false);
     for (const pointer of this.movies.values()) {
       const before = pointer.redraws;

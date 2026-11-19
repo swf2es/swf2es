@@ -510,7 +510,10 @@ hears a `mouseFocusChange` naming nothing, then its `focusOut`. A press on
 any movie's button moves no focus at all, no movie's field's nor AS3's,
 though what AS3 has focused hears the same `mouseFocusChange` (a movie's
 own button, where it is the main SWF, takes its field's focus away, as
-Flash Player does there too). A press on a movie's drawn clip is one on
+Flash Player does there too). What counts is the button under the pointer
+once the press's Mouse listeners ran: one they bring there keeps the
+focus too, though the press reaches none of its handlers, and one they
+take away does not. A press on a movie's drawn clip is one on
 its Loader, as AS3 has it, and one elsewhere takes a movie's field's
 focus away. As the focus moves from one movie's field to another's, Flash
 names the other field to `onKillFocus` and `onSetFocus`; the player names

@@ -81,11 +81,13 @@ const square = (id: number, color: number) =>
  * fields, f over g, a button b beside f that Tab passes by, and a drawn
  * clip s beside g. It logs Key's listeners, the fields' changes and focus,
  * and b's presses; `focused`, it focuses f itself as it starts. `id` names
- * its lines, avm1 by default, and `tabButton` lets Tab focus b.
+ * its lines, avm1 by default, `tabButton` lets Tab focus b, and `swap`
+ * moves b under a press at the stage's bottom right in Mouse's
+ * onMouseDown, before the press is picked.
  */
 export function keysMovie(
   focused = false,
-  options: { id?: string; tabButton?: boolean } = {},
+  options: { id?: string; tabButton?: boolean; swap?: boolean } = {},
 ): Uint8Array {
   const source = `
 function log(s) { trace("${options.id ?? "avm1"}:" + s); }
@@ -94,6 +96,13 @@ f.border = true;
 g.border = true;
 ${options.tabButton ? "" : "b.tabEnabled = false;"}
 b.onPress = function() { log("b.onPress"); };
+${
+  options.swap
+    ? `var m = {};
+m.onMouseDown = function() { if (_xmouse > 270 && _ymouse > 180) { b._x = 250; b._y = 190; log("swap"); } };
+Mouse.addListener(m);`
+    : ""
+}
 var k = {};
 k.onKeyDown = function() { log("keyDown " + Key.getCode()); };
 k.onKeyUp = function() { log("keyUp " + Key.getCode()); };

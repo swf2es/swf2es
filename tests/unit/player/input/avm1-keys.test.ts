@@ -32,7 +32,7 @@ const KEYS: Record<string, [number, number]> = {
   Shift: [16, 0],
 };
 
-async function play(focused: boolean, tabButton = false) {
+async function play(focused: boolean, options: { tabButton?: boolean; swap?: boolean } = {}) {
   const lines: string[] = [];
   const scripting = new Scripting(await createCodegen(wasm), {
     print: (line) => lines.push(line),
@@ -41,7 +41,7 @@ async function play(focused: boolean, tabButton = false) {
     fetch: async ({ url }) => ({
       bytes: url.endsWith("keys2.swf")
         ? keysMovie(false, { id: "two" })
-        : keysMovie(focused, { tabButton }),
+        : keysMovie(focused, options),
       status: 200,
       headers: [],
     }),
@@ -462,7 +462,7 @@ test("a press on another movie's button leaves a movie's field the focus, and ev
 test("Tab onto a loaded AVM1 movie's button draws the focus's rectangle around it", {
   skip,
 }, async () => {
-  const p = await play(false, true);
+  const p = await play(false, { tabButton: true });
   try {
     p.click(...AS3);
     p.type("Tab", "Tab");
@@ -482,6 +482,42 @@ test("Tab onto a loaded AVM1 movie's button draws the focus's rectangle around i
       "avm1:keyUp 9",
       "avm1:keyDown 65",
       "avm1:keyUp 65",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a Mouse listener that brings a button under a press leaves a field the focus, though the press reaches none", {
+  skip,
+}, async () => {
+  const p = await play(false, { swap: true });
+  try {
+    p.click(...F);
+    p.type("a");
+    p.click(...EMPTY);
+    p.type("b");
+    p.click(...F);
+    p.type("c");
+    p.click(...EMPTY);
+    p.type("d");
+    assert.deepEqual(p.lines, [
+      "avm1:f.onSetFocus null",
+      "avm1:keyDown 65",
+      "avm1:changed f=a",
+      "avm1:keyUp 65",
+      "avm1:swap",
+      "avm1:keyDown 66",
+      "avm1:changed f=ab",
+      "avm1:keyUp 66",
+      "avm1:keyDown 67",
+      "avm1:changed f=abc",
+      "avm1:keyUp 67",
+      "avm1:swap",
+      "avm1:b.onPress",
+      "avm1:keyDown 68",
+      "avm1:changed f=abcd",
+      "avm1:keyUp 68",
     ]);
   } finally {
     p.player.destroy();
