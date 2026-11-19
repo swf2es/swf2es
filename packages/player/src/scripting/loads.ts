@@ -1104,7 +1104,9 @@ export class Loads {
         print: s.rt.print,
         // AVM1 has no event for it: the host's alone.
         onUncaught: (error) => s.tellHost(error),
-        url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
+        // One from bytes has the URL of the SWF that loaded it, not its LoaderInfo's
+        // [[DYNAMIC]] one: its _url, and its SharedObjects' path (Flash Player 32).
+        url: load.url ?? info.$loaderURL ?? s.url,
         base: s.base ?? undefined,
         fetch: s.fetch ?? undefined,
         socket: s.socket ?? undefined,

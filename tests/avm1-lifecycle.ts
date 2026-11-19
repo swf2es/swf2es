@@ -1,6 +1,6 @@
 // Authored AVM1 movies for an AS3 Loader's lifecycle tests
 // (tests/unit/player/scripting/avm1-movie.test.ts): what a loaded movie's
-// sounds, unload and stage do with the AS3 player around it.
+// sounds, unload, stage and SharedObjects do with the AS3 player around it.
 // Each logs "avm1:" lines; `ef` counts its frames from its first.
 import { flashAssembler, script } from "./avm1-script.ts";
 import * as w from "./swf-writer.ts";
@@ -105,5 +105,26 @@ onEnterFrame = function () {
   if (ef == 10) { Stage.scaleMode = "noScale"; log("noScale " + st()); }
   if (ef == 12) { log("stage " + st()); }
 };
+stop();`);
+}
+
+/**
+ * SharedObjects: x, its default path's, written and flushed; y the same
+ * and z at "/" written and left to be written as the movie goes.
+ */
+export function sharedMovie(): Uint8Array {
+  return movie(`${prelude}
+function d(o) { var r = ""; for (var k in o.data) { r += k + "=" + o.data[k] + ";"; } return r; }
+log("url " + _url);
+var x = SharedObject.getLocal("x");
+var y = SharedObject.getLocal("y");
+var z = SharedObject.getLocal("z", "/");
+log("read x " + d(x) + " y " + d(y) + " z " + d(z));
+if (x.data.v == undefined) {
+  x.data.v = "avm1";
+  log("flush " + x.flush());
+  y.data.v = "avm1";
+  z.data.v = "avm1";
+}
 stop();`);
 }

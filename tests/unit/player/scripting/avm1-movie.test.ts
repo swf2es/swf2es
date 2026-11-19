@@ -1,10 +1,10 @@
 // AVM1 movies an AS3 Loader holds, with the player around them: one mixer
 // for both VMs' sounds, the frame an unloaded movie still plays or the
-// unload handlers it runs instead, and one stage and quality. The host is
-// scripts/LoadedAvm1Lifecycle.as, the movies tests/avm1-lifecycle.ts. What
-// each test expects was measured in Flash Player 32 (adl, and the Windows
-// debug projector for the stage, the unload handlers and the frames) with
-// probes that do the same.
+// unload handlers it runs instead, one stage and quality, and the URL its
+// SharedObjects are kept under. The host is scripts/LoadedAvm1Lifecycle.as,
+// the movies tests/avm1-lifecycle.ts. What each test expects was measured in
+// Flash Player 32 (adl, and the Windows debug projector for the stage, the
+// unload handlers and SharedObjects over HTTP) with probes that do the same.
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
@@ -14,7 +14,7 @@ import { containerEngine } from "../../../../oracle/oracle.ts";
 import type { AudioHost } from "../../../../packages/player/dist/media/audio.js";
 import { Player } from "../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../packages/player/dist/scripting.js";
-import { soundMovie, stageMovie, unloadMovie } from "../../../avm1-lifecycle.ts";
+import { sharedMovie, soundMovie, stageMovie, unloadMovie } from "../../../avm1-lifecycle.ts";
 import { bare } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
@@ -296,6 +296,54 @@ test("a loaded movie's Stage and quality are the AS3 stage's, onResize with its 
       "avm1:onResize 260x170 noScale RB false LOW 0",
       "as3:stage 260x170 noScale BR false LOW",
       "avm1:stage 260x170 noScale RB false LOW 0",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie from bytes has its loader's URL, which its SharedObjects are kept under", {
+  skip,
+}, async () => {
+  const p = await play(sharedMovie());
+  try {
+    p.control("bytes");
+    await p.until("avm1:flush true");
+    p.control("url");
+    p.control("shared x");
+    // What it has not flushed yet is its own.
+    p.control("shared z /");
+    p.control("unload");
+    await p.tick();
+    p.control("bytes");
+    await p.until("avm1:read x v=avm1; y v=avm1; z v=avm1;");
+    assert.deepEqual(p.lines, [
+      "avm1:url http://example.test/swf/main.swf",
+      "avm1:read x  y  z ",
+      "avm1:flush true",
+      "as3:url http://example.test/swf/main.swf http://example.test/swf/main.swf/[[DYNAMIC]]/1",
+      "as3:shared x v=avm1;",
+      "as3:shared z ",
+      "as3:unload",
+      "avm1:url http://example.test/swf/main.swf",
+      "avm1:read x v=avm1; y v=avm1; z v=avm1;",
+    ]);
+  } finally {
+    p.player.destroy();
+  }
+});
+
+test("a movie from a URL keeps its SharedObjects under its own", { skip }, async () => {
+  const p = await play(sharedMovie());
+  try {
+    p.control("load");
+    await p.until("avm1:flush true");
+    p.control("shared x");
+    assert.deepEqual(p.lines, [
+      "avm1:url http://example.test/swf/movie.swf",
+      "avm1:read x  y  z ",
+      "avm1:flush true",
+      "as3:shared x ",
     ]);
   } finally {
     p.player.destroy();
