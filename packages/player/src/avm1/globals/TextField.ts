@@ -77,6 +77,7 @@ function fieldOf(self: Value): TextObject | null {
 function changed(field: TextObject): void {
   field.invalidate(CONTENT);
   field.fit();
+  field.scrollTold?.(field);
 }
 
 /** Whether the field's text is read as HTML: an HTML field's, or one with a style sheet. */
@@ -307,6 +308,9 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
     }
 
     model.replace(Math.min(from, model.text.length), Math.min(to, model.text.length), text);
+    // Scrolled back to its start, as adl does.
+    field.scrollV = 1;
+    field.scrollH = 0;
     changed(field);
     return undefined;
   });
@@ -370,6 +374,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       const line = Number.isNaN(n) || n < 0 || n >= 767100486418433 ? 1 : Math.trunc(n);
       field.scrollV = Math.max(1, Math.min(line, maxScrollV(field)));
       field.invalidate(CONTENT);
+      field.scrollTold?.(field);
     },
   );
   property("maxscroll", (field) => maxScrollV(field), null);
@@ -476,6 +481,7 @@ export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function
       const max = maxScrollH(field) / (20 / units);
       field.scrollH = Math.max(0, Math.min(avm1.toNumber(value, version) | 0, max)) / units;
       field.invalidate(CONTENT);
+      field.scrollTold?.(field);
     },
   );
   property(

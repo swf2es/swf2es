@@ -508,6 +508,22 @@ which Harman fixed), and its `getCharBoundaries` gave y as scrolled. Ruffle's
 expectations come from Flash Player 32, so the corpus's
 `edittext_getcharboundaries_scroll` stays partial on purpose.
 
+A field tells of its scroll as adl does (`text-scroll-events`,
+`avm1-text-scroller`). In AS3 a script's `scrollV`, `scrollH`, `text`,
+`htmlText`, `appendText`, `replaceText`, `replaceSelectedText` or
+`setTextFormat`, and the wheel, dispatch `Event.SCROLL` at once, neither
+bubbling nor cancelable, if they moved its `scrollV`, `maxScrollV`,
+`scrollH` or `maxScrollH`, a field off the display list too; the scroll
+`setSelection` gives a caret dispatches none. They are measured only
+while something hears it. AVM1's field calls `onScroller`, and its
+listeners, once a frame's scripts have run, before the next frame's, if
+those four moved since it last did, by a script's `scroll` or `hscroll`,
+new text or a format, or a caret; AVM1's `replaceText` scrolls the field
+back to its start. adl measures a field anew only now and then, so a new
+size tells late, at the next change, and sometimes twice: neither is
+followed. Nor does AVM1's wheel scroll a field yet, which the corpus's
+`edittext_onscroller` drives.
+
 A key's release goes elsewhere when the page or the window loses focus
 while it is held, and never reaches the player. The host tells the
 player its focus (`Player.setActive`, bound by `bindActivation`,

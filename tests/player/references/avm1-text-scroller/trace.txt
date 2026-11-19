@@ -1,0 +1,44 @@
+step constructed 1/8 0/5790
+  onScroller input true during constructed 1/8 0/5790 args 1
+  listener onScroller input during constructed
+  onScroller dynamic true during constructed 1/8 0/5510 args 1
+step frame 1 1/8 0/5790
+step scroll 3 1/8 0/5790
+  onScroller input true during scroll 3 3/8 0/5790 args 1
+  listener onScroller input during scroll 3
+step frame 2 3/8 0/5790
+step scroll 3 again 3/8 0/5790
+step frame 3 3/8 0/5790
+step hscroll 10 3/8 0/5790
+  onScroller input true during hscroll 10 3/8 10/5790 args 1
+  listener onScroller input during hscroll 10
+step frame 4 3/8 10/5790
+step text with a line more 3/8 10/5790
+  onScroller input true during text with a line more 1/9 0/5790 args 1
+  listener onScroller input during text with a line more
+step frame 5 1/9 0/5790
+step format bigger 1/9 0/5790
+  onScroller input true during format bigger 1/10 0/9100 args 1
+  listener onScroller input during format bigger
+step frame 6 1/10 0/9100
+step scroll 2 and 3 in a frame 1/10 0/9100
+  onScroller input true during scroll 2 and 3 in a frame 3/10 0/9100 args 1
+  listener onScroller input during scroll 2 and 3 in a frame
+step frame 7 3/10 0/9100
+step text shorter 3/10 0/9100
+  onScroller input true during text shorter 1/1 0/0 args 1
+  listener onScroller input during text shorter
+step frame 8 1/1 0/0
+step text longer then scroll 4 1/1 0/0
+  onScroller input true during text longer then scroll 4 4/8 0/5790 args 1
+  listener onScroller input during text longer then scroll 4
+step frame 9 4/8 0/5790
+step focus and caret at the end 4/8 0/5790
+  onScroller input true during focus and caret at the end 8/8 5600/5790 args 1
+  listener onScroller input during focus and caret at the end
+step frame 10 8/8 5600/5790
+step dynamic scroll 4 8/8 5600/5790
+  onScroller dynamic true during dynamic scroll 4 4/8 0/5510 args 1
+step frame 11 8/8 5600/5790
+step width shrunk 8/8 5600/5790
+step frame 12 8/8 5600/6240
