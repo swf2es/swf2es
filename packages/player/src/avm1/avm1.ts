@@ -146,6 +146,12 @@ export interface Avm1Options {
   /** The LocalConnection registry shared with other VMs of this player. */
   localConnections?: LocalConnections;
   /**
+   * Where its LocalConnection deliveries wait: an AS3 host's queue for a
+   * movie its Loader holds (Loads.deferLocal); its network's, for the next
+   * frame, by default.
+   */
+  deferLocal?: (deliver: () => void) => void;
+  /**
    * Where trace's text goes, as it is, the console's log by default: a
    * "\r" in it breaks Flash's log's line as a "\n" does.
    */
@@ -391,6 +397,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly localConnections: LocalConnections;
   readonly fileHost: FileHost | null;
   readonly fileLifetime = new AbortController();
+  /** Destroyed: nothing of it is left, its LocalConnections closed. */
+  closed = false;
+  /** Its LocalConnection sends not yet delivered: an unloaded movie is kept for them. */
+  localPending = 0;
+  private readonly deferLocalTo: ((deliver: () => void) => void) | null;
 
   get frameRate(): number {
     return this.rate;
@@ -409,6 +420,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.debugger = options.debugger ?? false;
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
+    this.deferLocalTo = options.deferLocal ?? null;
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
       options.fetch ?? null,
@@ -1295,13 +1307,51 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       this.codegen.releaseActions(bytes);
     }
     this.codeLive.clear();
+    this.closed = true;
     this.localConnections.destroy(this);
+    this.stop();
+    if (closeAudio) {
+      this.audio?.close?.();
+    }
+  }
+
+  /**
+   * Its Loader's content let go of: it stops as destroyed, but its
+   * LocalConnections stay connected and take messages, and its code stays
+   * to answer them, until it closes them or is destroyed. Flash Player 32
+   * and adl keep an unloaded movie's connections so, even after
+   * unloadAndStop and a collection: the name cannot be connected to again.
+   */
+  unloadFromLoader(): void {
+    this.stop();
+  }
+
+  private stop(): void {
     this.fileLifetime.abort();
     this.net.destroy();
     this.sharedObjects?.flush(this.swfVersion);
     stopTimelineSounds(this.sounds);
-    if (closeAudio) {
-      this.audio?.close?.();
+  }
+
+  /**
+   * A LocalConnection's delivery, on the host's queue or else the
+   * network's, counted until it is made.
+   */
+  deferLocal(deliver: () => void): void {
+    if (this.closed) {
+      return;
+    }
+
+    this.localPending++;
+    const counted = () => {
+      this.localPending--;
+      deliver();
+    };
+
+    if (this.deferLocalTo) {
+      this.deferLocalTo(counted);
+    } else {
+      this.net.defer(counted);
     }
   }
 
@@ -1318,7 +1368,18 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
-  /** LocalConnection may enter this VM from AS3, outside its own frame's script budget. */
+  /** Stopped for good, or to be once its frame has run (fscommand's "quit"). */
+  get stopped(): boolean {
+    return this.halted || this.stopNext;
+  }
+
+  /**
+   * LocalConnection may enter this VM from AS3, outside its own frame's
+   * script budget. What the call queued runs after it, as a frame's
+   * script a gotoAndStop in a handler enters runs before the next frame in
+   * adl and Flash Player 32; for an unloaded movie that is its removed
+   * clips' unloads at most.
+   */
   localInvoke(o: avm1.Avm1Object, name: string, args: Value[], fallback: Value = undefined): Value {
     const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
     if (cx === null) {
@@ -1335,6 +1396,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
             ? avm1.invoke(method, o, args, this.version)
             : fallback;
       });
+      this.queue.run();
     } finally {
       this.timers.end();
     }

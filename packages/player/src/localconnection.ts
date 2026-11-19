@@ -1,5 +1,6 @@
-// LocalConnection's registry is shared by the VMs of one player. Delivery
-// uses their existing host-event queues: an idle registry does no frame work.
+// LocalConnection's registry is shared by the VMs of one player. Deliveries
+// wait on the AS3 host's queue (Loads.deferLocal), or a standalone AVM1
+// player's network queue: an idle registry does no frame work.
 
 export const LOCAL_MESSAGE_LIMIT = 40 * 1024;
 
@@ -117,6 +118,17 @@ export class LocalConnections {
         }
       }
     });
+  }
+
+  /** Whether any of `owner`'s endpoints is connected. */
+  listening(owner: object): boolean {
+    for (const endpoint of this.listeners.values()) {
+      if (endpoint.owner === owner) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   destroy(owner: object): void {
