@@ -47,13 +47,21 @@ const FIGURES = [
   ["native", "native"],
 ] as const;
 
-const DRAWS = ["drawArrays", "drawElements", "drawArraysInstanced", "drawElementsInstanced"];
-// Each of WEBGL_multi_draw's takes the number of draws it makes last.
-const MULTI_DRAWS = [
-  "multiDrawArraysWEBGL",
-  "multiDrawElementsWEBGL",
-  "multiDrawArraysInstancedWEBGL",
-  "multiDrawElementsInstancedWEBGL",
+/**
+ * The draw functions counted, each with where its count of draws is: -1 for
+ * one, else the index of its last argument, a multi-draw's drawcount.
+ */
+const DRAWS: [string, number][] = [
+  ["drawArrays", -1],
+  ["drawElements", -1],
+  ["drawArraysInstanced", -1],
+  ["drawElementsInstanced", -1],
+];
+const MULTI_DRAWS: [string, number][] = [
+  ["multiDrawArraysWEBGL", 5],
+  ["multiDrawElementsWEBGL", 6],
+  ["multiDrawArraysInstancedWEBGL", 7],
+  ["multiDrawElementsInstancedWEBGL", 8],
 ];
 
 /** The calls of the loop kept: a second's at 500 a second, more than any display's rate. */
@@ -156,14 +164,14 @@ class DrawCounter {
       return;
     }
 
-    for (const name of DRAWS) {
-      this.patch(gl, name, () => 1);
+    for (const [name, drawcount] of DRAWS) {
+      this.patch(gl, name, drawcount);
     }
 
     const multi = gl.getExtension("WEBGL_multi_draw");
     if (multi) {
-      for (const name of MULTI_DRAWS) {
-        this.patch(multi, name, (args) => args[args.length - 1] as number);
+      for (const [name, drawcount] of MULTI_DRAWS) {
+        this.patch(multi, name, drawcount);
       }
     }
   }
@@ -174,19 +182,43 @@ class DrawCounter {
     }
   }
 
-  /** Wrap `target[name]`, to be put back as it was, a property of its own or its prototype's. */
-  private patch(target: object, name: string, count: (args: unknown[]) => number): void {
+  /**
+   * Wrap `target[name]`, to be put back as it was, a property of its own or
+   * its prototype's: with as many arguments as the widest multi-draw takes,
+   * the rest undefined, which WebGL ignores, so that a draw allocates no
+   * array of its arguments.
+   */
+  private patch(target: object, name: string, drawcount: number): void {
     const functions = target as Record<string, unknown>;
-    const original = functions[name];
+    const original = functions[name] as (...args: unknown[]) => unknown;
     if (typeof original !== "function") {
       return;
     }
 
     const own = Object.getOwnPropertyDescriptor(target, name);
-    functions[name] = (...args: unknown[]) => {
-      this.draws += count(args);
+    functions[name] = (
+      a: unknown,
+      b: unknown,
+      c: unknown,
+      d: unknown,
+      e: unknown,
+      f: unknown,
+      g: unknown,
+      h: unknown,
+      i: unknown,
+    ) => {
       this.calls++;
-      return original.apply(target, args);
+      this.draws +=
+        drawcount === 5
+          ? (f as number)
+          : drawcount === 6
+            ? (g as number)
+            : drawcount === 7
+              ? (h as number)
+              : drawcount === 8
+                ? (i as number)
+                : 1;
+      return original.call(target, a, b, c, d, e, f, g, h, i);
     };
     this.restores.push(() => {
       if (own) {
