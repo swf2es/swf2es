@@ -1657,7 +1657,10 @@ its timeline plays, and none of its code runs.
 An AVM1 SWF loaded by AS3 runs its actions in an AVM1 realm of its own,
 its `_root` and `_level0` that movie's, its compiler, host services and
 LocalConnection broker the parent player's; the pointer reaches its
-buttons and clips by AVM1's rules (`input/avm1.ts`).
+buttons and clips by AVM1's rules (`input/avm1.ts`). Its `fscommand`
+and `ExternalInterface` reach the page through the parent's bridge,
+beside the host's own calls and callbacks, as the plug-in passed every
+movie's on; AS3 hears none of its fscommands, as in Flash.
 
 `LocalConnection` carries messages from AVM1 to AVM1 and between AVM1
 and AVM2 within a player. Names are case-insensitive; a leading
@@ -1668,9 +1671,17 @@ AMF3, which the broker turns into AMF0 only for an AVM1 receiver, so
 AS3-only types survive between AS3 peers. The receiver's methods,
 `allowDomain`, `allowInsecureDomain` and `onStatus` run in the
 receiver's or the sender's own activation; the status says whether a
-listener was found, even where its domain callback refuses the call.
-Unloading a child AS3 loaded closes its names and cancels its queued
-callbacks. Connections are not shared with other tabs or applications.
+listener was found, even where its domain callback refuses the call,
+which is asked of the sender's domain whether it is the receiver's or
+not. A method the receiver lacks, or a property that is no function, is
+passed over in silence; in AS3, what the method throws, or a sealed
+client's #1069, is an AsyncErrorEvent. A movie an AS3 Loader unloads
+keeps its connections, as Flash Player 32 and adl keep them even after
+`unloadAndStop`, a removal and a collection: it plays no more, but takes
+messages and answers them, its sends' onStatus comes, and its names stay
+taken until it closes them or the player ends (`Avm1.unloadFromLoader`;
+the `avm1-local-connection` case). Connections are not shared with other
+tabs or applications.
 
 ### PrintJob
 
