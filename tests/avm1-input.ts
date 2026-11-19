@@ -157,8 +157,7 @@ export function focusMovie(
 function log(s) { trace("${id}:" + s); }
 function nameOf(o) { if (o === null) { return "null"; } if (o === undefined) { return "undefined"; } return o._name; }
 function selection() {
-  var p = Selection.getFocus();
-  log("getFocus " + (p == null ? p : p.substr(p.lastIndexOf(".") + 1)) + " begin " + Selection.getBeginIndex() + " end " + Selection.getEndIndex() + " caret " + Selection.getCaretIndex());
+  log("getFocus " + Selection.getFocus() + " begin " + Selection.getBeginIndex() + " end " + Selection.getEndIndex() + " caret " + Selection.getCaretIndex());
 }
 f.border = true;
 g.border = true;

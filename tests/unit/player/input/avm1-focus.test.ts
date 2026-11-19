@@ -309,24 +309,24 @@ test("a movie's Selection reads the one focus wherever it is, moves it from anot
       "m2:Selection.onSetFocus null null",
       "as3:focusIn as3field related null focus as3field",
       "as3:focus:as3field focus as3field selection 1,4",
-      "m1:getFocus as3field begin 1 end 4 caret 4",
-      "m2:getFocus as3field begin 1 end 4 caret 4",
+      "m1:getFocus _level0.as3field begin 1 end 4 caret 4",
+      "m2:getFocus _level0.as3field begin 1 end 4 caret 4",
       "m1:F2",
       "m1:f.onSetFocus null",
       "m1:Selection.onSetFocus null f",
       "m2:Selection.onSetFocus null f",
       "as3:focusOut as3field related null focus null",
-      "m1:getFocus f begin 0 end 6 caret 6",
-      "m2:getFocus f begin 0 end 6 caret 6",
+      "m1:getFocus _root.f begin 0 end 6 caret 6",
+      "m2:getFocus _root.f begin 0 end 6 caret 6",
       "m1:F5",
-      "m1:getFocus f begin 1 end 3 caret 3",
+      "m1:getFocus _root.f begin 1 end 3 caret 3",
       "m2:F7",
       "m1:f.onKillFocus g",
       "m2:g.onSetFocus f",
       "m1:Selection.onSetFocus f g",
       "m2:Selection.onSetFocus f g",
-      "m1:getFocus g begin 0 end 6 caret 6",
-      "m2:getFocus g begin 0 end 6 caret 6",
+      "m1:getFocus _root.g begin 0 end 6 caret 6",
+      "m2:getFocus _root.g begin 0 end 6 caret 6",
       "m1:F4",
       "m2:g.onKillFocus null",
       "m1:Selection.onSetFocus g null",
@@ -337,8 +337,8 @@ test("a movie's Selection reads the one focus wherever it is, moves it from anot
       "m2:Selection.onSetFocus null null",
       "as3:focusIn as3field related null focus as3field",
       "as3:focus:as3field focus as3field selection 1,4",
-      "m1:getFocus as3field begin 1 end 4 caret 4",
-      "m2:getFocus as3field begin 1 end 4 caret 4",
+      "m1:getFocus _level0.as3field begin 1 end 4 caret 4",
+      "m2:getFocus _level0.as3field begin 1 end 4 caret 4",
     ]);
   } finally {
     p.player.destroy();
@@ -370,17 +370,17 @@ test("a movie's Selection selects in AS3's focused field, names AS3's focused sp
       "as3:focusIn as3field related null focus as3field",
       "as3:focus:as3field focus as3field selection 0,0",
       "as3:select:1:4 focus as3field selection 1,4",
-      "m1:getFocus as3field begin 1 end 4 caret 4",
+      "m1:getFocus _level0.as3field begin 1 end 4 caret 4",
       "m1:F5",
-      "m1:getFocus as3field begin 1 end 3 caret 3",
-      "m2:getFocus as3field begin 1 end 3 caret 3",
+      "m1:getFocus _level0.as3field begin 1 end 3 caret 3",
+      "m2:getFocus _level0.as3field begin 1 end 3 caret 3",
       "m1:Selection.onSetFocus null null",
       "m2:Selection.onSetFocus null null",
       "as3:focusOut as3field related as3btn focus as3btn",
       "as3:focusIn as3btn related as3field focus as3btn",
       "as3:focus:as3btn focus as3btn selection 1,3",
-      "m1:getFocus as3btn begin -1 end -1 caret -1",
-      "m2:getFocus as3btn begin -1 end -1 caret -1",
+      "m1:getFocus _level0.as3btn begin -1 end -1 caret -1",
+      "m2:getFocus _level0.as3btn begin -1 end -1 caret -1",
       "m1:Selection.onSetFocus null null",
       "m2:Selection.onSetFocus null null",
       "as3:focusOut as3btn related as3field focus as3field",
@@ -572,7 +572,7 @@ test("a tabIndex on AS3's objects alone, or on a movie's alone, leaves the rest 
   const q = await play({
     start: "g.tabIndex = 1;",
     keys: {
-      9: 'var p = Selection.getFocus(); log("tab " + (p == null ? p : p.substr(p.lastIndexOf(".") + 1)));',
+      9: 'log("tab " + Selection.getFocus());',
     },
   });
   try {
@@ -582,21 +582,21 @@ test("a tabIndex on AS3's objects alone, or on a movie's alone, leaves the rest 
       "m1:g.onSetFocus null",
       "m1:Selection.onSetFocus null g",
       "m2:Selection.onSetFocus null g",
-      "m1:tab g",
-      "m1:tab g",
-      "m1:tab g",
+      "m1:tab _root.g",
+      "m1:tab _root.g",
+      "m1:tab _root.g",
       "m1:g.onKillFocus null",
       "m1:Selection.onSetFocus g null",
       "m2:Selection.onSetFocus g null",
       "as3:focusIn as3field related null focus as3field",
-      "m1:tab as3field",
+      "m1:tab _level0.as3field",
       "as3:keyFocusChange as3field related null focus as3field",
       "m1:g.onSetFocus null",
       "m1:Selection.onSetFocus null g",
       "m2:Selection.onSetFocus null g",
       "as3:focusOut as3field related null focus null",
-      "m1:tab g",
-      "m1:tab g",
+      "m1:tab _root.g",
+      "m1:tab _root.g",
     ]);
   } finally {
     q.player.destroy();
@@ -642,8 +642,8 @@ test("a Selection listener that takes the focus as AS3's field takes it leaves o
     ]);
     assert.deepEqual(lines, [
       ...flash,
-      "m1:getFocus f begin 0 end 6 caret 6",
-      "m2:getFocus f begin 0 end 6 caret 6",
+      "m1:getFocus _root.f begin 0 end 6 caret 6",
+      "m2:getFocus _root.f begin 0 end 6 caret 6",
       "m1:changed f=x",
       "as3:text mnopqr",
       "as3:state focus null selection 6,6",
@@ -672,7 +672,7 @@ test("a Selection listener that takes the focus as AS3's field takes it leaves o
         "m2:Selection.onSetFocus null null",
       ],
       "as3:focus:as3field focus null selection 0,0",
-      "m1:getFocus f begin 0 end 6 caret 6",
+      "m1:getFocus _root.f begin 0 end 6 caret 6",
     ]);
   } finally {
     q.player.destroy();
@@ -709,8 +709,8 @@ test("a field's onKillFocus that focuses it again moves nothing, and the move to
       "m2:f.onSetFocus f",
       "m1:Selection.onSetFocus f f",
       "m2:Selection.onSetFocus f f",
-      "m1:getFocus f begin 6 end 6 caret 6",
-      "m2:getFocus f begin 6 end 6 caret 6",
+      "m1:getFocus _root.f begin 6 end 6 caret 6",
+      "m2:getFocus _root.f begin 6 end 6 caret 6",
       "m2:changed f=abcdefy",
     ]);
   } finally {
@@ -777,12 +777,12 @@ test("a listener that takes the focus as AS3's moves from one object to another 
       "m2:Selection.onSetFocus null null",
       "as3:focusOut as3field related null focus null",
       "as3:focus:as3btn focus null selection 0,0",
-      "m1:getFocus f begin 0 end 6 caret 6",
-      "m2:getFocus f begin 0 end 6 caret 6",
+      "m1:getFocus _root.f begin 0 end 6 caret 6",
+      "m2:getFocus _root.f begin 0 end 6 caret 6",
       "as3:text mnopqr",
       "as3:state focus null selection 0,0",
       "m1:changed f=x",
-      "m1:getFocus f begin 1 end 1 caret 1",
+      "m1:getFocus _root.f begin 1 end 1 caret 1",
     ]);
     // The field the focus left draws no caret, and keeps no hook to give it up by.
     const field = (p.player.root as unknown as { children: { name: string }[] }).children.find(
@@ -824,7 +824,7 @@ test("a field's onKillFocus that moves the focus elsewhere hears it once, and th
       "m1:Selection.onSetFocus f null",
       "m2:Selection.onSetFocus f null",
       "as3:focusIn as3field related null focus as3field",
-      "m1:getFocus as3field begin 6 end 6 caret 6",
+      "m1:getFocus _level0.as3field begin 6 end 6 caret 6",
       "as3:text mnopqrx",
       "as3:state focus as3field selection 7,7",
     ]);
@@ -847,7 +847,7 @@ test("a field's onKillFocus that moves the focus elsewhere hears it once, and th
       "m1:g.onSetFocus f",
       "m1:Selection.onSetFocus f g",
       "m2:Selection.onSetFocus f g",
-      "m1:getFocus g begin 6 end 6 caret 6",
+      "m1:getFocus _root.g begin 6 end 6 caret 6",
     ]);
   } finally {
     q.player.destroy();
@@ -931,9 +931,9 @@ test("a focus a focusOut listener gives AS3 as a Selection listener took it is t
       "as3:focus:as3btn focus null selection 0,0",
       "as3:text mnopqr",
       "as3:state focus null selection 0,0",
-      "m1:getFocus f begin 0 end 6 caret 6",
+      "m1:getFocus _root.f begin 0 end 6 caret 6",
       "m1:changed f=x",
-      "m1:getFocus f begin 1 end 1 caret 1",
+      "m1:getFocus _root.f begin 1 end 1 caret 1",
     ]);
   } finally {
     p.player.destroy();
@@ -976,8 +976,8 @@ test("an object a focusOut listener focuses as a Selection listener took the foc
       "as3:focus:as3btn focus as3field selection 0,0",
       "as3:text mnopqr",
       "as3:state focus as3field selection 0,0",
-      "m1:getFocus as3field begin 0 end 0 caret 0",
-      "m1:getFocus as3field begin 1 end 1 caret 1",
+      "m1:getFocus _level0.as3field begin 0 end 0 caret 0",
+      "m1:getFocus _level0.as3field begin 1 end 1 caret 1",
     ]);
     const field = (p.player.root as unknown as { children: { name: string }[] }).children.find(
       (c) => c.name === "as3field",
