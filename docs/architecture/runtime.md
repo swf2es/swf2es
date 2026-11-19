@@ -306,8 +306,9 @@ Math.random, of 52 bits, gives values Flash never does. Each runtime has
 a generator of its own, as each avmplus toplevel's Math has, so workers
 and players draw independently. Flash seeds it from the performance
 counter; the runtime from the clock in microseconds, mixed with a count
-of the generators made, since a browser coarsens its clock enough for
-two runtimes to start within one tick. adl's sequences, AS3's and
+of the generators made and, where `crypto` is there, a random word, since
+a browser coarsens its clock enough for two runtimes to start within one
+tick, and each worker counts from 0. adl's sequences, AS3's and
 AVM1's, are this generator's from some seed (recovered by searching its
 2^31 states), so only the seed is the host's. AVM1's Math.random and
 RandomNumber share their realm's generator (docs/avm1.md).

@@ -13,17 +13,23 @@ const XOR_MASK = 0x48000000;
 const PURE_MAX = 0x7fffffff;
 
 const clock = (globalThis as { performance?: { now(): number; timeOrigin?: number } }).performance;
+const entropy = (globalThis as { crypto?: { getRandomValues(a: Uint32Array): Uint32Array } })
+  .crypto;
+const word = new Uint32Array(1);
 let made = 0;
 
 /**
  * Flash's seed, the performance counter's low 32 bits: microseconds here.
- * A browser coarsens its clock to as much as 100 µs, so a count of the
- * seeds taken sets apart generators made within one tick of it.
+ * A browser coarsens its clock to as much as 100 µs (100 ms when resisting
+ * fingerprinting), so a count of the seeds taken sets apart generators made
+ * within one tick of it on a thread, and a random word, where there is one,
+ * those of workers, each of which counts from 0.
  */
 function counterSeed(): number {
   const ms = clock !== undefined ? (clock.timeOrigin ?? 0) + clock.now() : Date.now();
   made = (made + 1) >>> 0;
-  return Math.floor(ms * 1000) ^ Math.imul(made, 0x9e3779b9);
+  const salt = entropy !== undefined ? entropy.getRandomValues(word)[0] : 0;
+  return Math.floor(ms * 1000) ^ Math.imul(made, 0x9e3779b9) ^ salt;
 }
 
 /** RandomPureHasher, in the 32-bit wrapping arithmetic of avmplus' C++. */
