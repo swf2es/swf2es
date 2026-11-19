@@ -3,7 +3,15 @@ import { deflateSync } from "node:zlib";
 // the drawing API and the stage's quality.
 import { zlibCompress } from "../../../packages/format/dist/index.js";
 import * as w from "../../swf-writer.ts";
-import { bare, moved, type PlayerCase, probeFont, rectPath, square } from "./common.ts";
+import {
+  bare,
+  morphBoundsTimeline,
+  moved,
+  type PlayerCase,
+  probeFont,
+  rectPath,
+  square,
+} from "./common.ts";
 
 // A fill with a curved side and a hole, outlined, so that the fill, the
 // hole and the lines all show.
@@ -1573,7 +1581,41 @@ function scale9Hits(abc: Uint8Array): Uint8Array {
   });
 }
 
+// The AS3 side of avm1-morph-bounds: a MorphShape and the clip holding it
+// measured as the morph's ratio changes (scripts/MorphBounds.as).
+function morphBounds(abc: Uint8Array): Uint8Array {
+  const { defs, places } = morphBoundsTimeline([]);
+  return w.swf({
+    version: 10,
+    width: 160,
+    height: 110,
+    frameRate: 24,
+    frameCount: 6,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      ...defs,
+      w.doAbc(abc, "MorphBounds"),
+      w.symbolClass([[0, "Main"]]),
+      ...places,
+      ...Array.from({ length: 6 }, () => w.showFrame()),
+      w.end(),
+    ],
+  });
+}
+
 export const shapeCases: PlayerCase[] = [
+  {
+    name: "morph-bounds",
+    swf: morphBounds,
+    script: "MorphBounds",
+    draw: true,
+    // adl prints the last frames' traces only once more have run.
+    frames: 12,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   { name: "moves", swf: moves(true), ...moved },
   { name: "moves-avm1", swf: moves(false), ...moved },
   {

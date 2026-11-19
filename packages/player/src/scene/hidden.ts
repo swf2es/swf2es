@@ -4,7 +4,7 @@ import { ShapeObject } from "../display/shapeobject.js";
 
 /**
  * Finish a subtree that draws nothing, including children of a reused filter output.
- * Hidden morphs still take their new ratio, which bounds and hit tests observe. A
+ * Hidden morphs still take their new ratio, which shape hit tests observe. A
  * BitmapData snapshot leaves the stage's dirty flags alone, as the normal walk does.
  */
 export function syncHidden(o: DisplayObject, snapshotting: boolean): void {

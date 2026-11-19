@@ -5,9 +5,9 @@
 // drawn in perspective (display/perspective.ts).
 import type { Matrix as Linear } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
-import { bounds, boundsIn } from "../../../display/bounds.js";
-import { type DisplayObject, TRANSFORM } from "../../../display/display.js";
-import { concat } from "../../../display/geometry.js";
+import { bounds, boundsIn, toStage } from "../../../display/bounds.js";
+import { type DisplayObject, ShapeObject, TRANSFORM } from "../../../display/display.js";
+import { apply, concat, type Rect } from "../../../display/geometry.js";
 import {
   determinant3D,
   identity3D,
@@ -288,9 +288,21 @@ export function transformNatives(s: Scripting): avm2.Natives {
       this.$display.invalidate(TRANSFORM);
     }
 
-    /** The bounds on the stage, out to whole pixels. */
+    /**
+     * The bounds on the stage, out to whole pixels. A Shape or MorphShape
+     * from the SWF has none, an empty box at its origin, in adl (the
+     * `morph-bounds` case); one a script draws in, its drawing's.
+     */
     get pixelBounds(): Value {
-      const r = boundsIn(this.$display, s.stage, s.stage, true);
+      const d = this.$display;
+      let r: Rect;
+      if (d instanceof ShapeObject && !d.drawing) {
+        const [x, y] = apply(toStage(d, s.stage), 0, 0);
+        r = { xMin: x, yMin: y, xMax: x, yMax: y };
+      } else {
+        r = boundsIn(d, s.stage, s.stage, true, true);
+      }
+
       // Math.ceil gives -0 for an edge just left of 0, which Flash reports as 0.
       const x = Math.ceil(r.xMin) || 0;
       const y = Math.ceil(r.yMin) || 0;

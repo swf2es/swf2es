@@ -30,39 +30,57 @@ export class ShapeObject extends DisplayObject {
     this.character = shape;
   }
 
-  /** A MorphShape, its morph's start until it is drawn at another ratio. */
+  /** A MorphShape, its morph's start until its first place gives it a ratio. */
   static ofMorph(morph: MorphCharacter): ShapeObject {
     const shape = morphAt(morph, 0);
     const object = new ShapeObject(shape);
     object.morph = morph;
     object.blended = { morph, ratio: 0, shape };
     object.character = morph;
+    object.unplaced = true;
     return object;
   }
 
+  /** A MorphShape not yet placed, which its first place blends at once. */
+  private unplaced = false;
+
   /**
-   * A MorphShape takes on a new ratio when it is next drawn (drawn): until
-   * then its bounds and hit tests are the last drawn blend's, as Flash's
-   * are (the corpus's hittest_morph).
+   * A MorphShape made by a place is blended at its ratio there and then;
+   * one placed again takes on a new ratio only when it is next drawn
+   * (drawn), and until then a test of a point against its shape finds
+   * nothing (blending), as in Flash (the `morph-bounds` cases). What
+   * scripts are told of its bounds is its start's (ownBounds).
    */
   override applyPlace(place: Place): void {
     const ratio = this.ratio;
     super.applyPlace(place);
 
-    if (this.morph && this.ratio !== ratio) {
+    const morph = this.morph;
+    if (morph && this.unplaced) {
+      this.shape = morphAt(morph, this.ratio);
+      this.blended = { morph, ratio: this.ratio, shape: this.shape };
+    }
+
+    this.unplaced = false;
+    if (morph && this.ratio !== ratio) {
       this.invalidate(CONTENT);
     }
+  }
+
+  /** Whether it is a MorphShape whose ratio or morph has changed since it was last blended. */
+  get blending(): boolean {
+    const b = this.blended;
+    return (
+      this.morph !== null &&
+      (b?.morph !== this.morph || b.ratio !== this.ratio || b.shape !== this.shape)
+    );
   }
 
   /** The shape to draw now: a MorphShape's blend at its ratio, which it keeps from here. */
   drawn(): ShapeCharacter | null {
     // The blend it has is kept while its morph and ratio are: asking the
     // morph again would turn over its few latest blends for nothing.
-    const b = this.blended;
-    if (
-      this.morph &&
-      (b?.morph !== this.morph || b.ratio !== this.ratio || b.shape !== this.shape)
-    ) {
+    if (this.morph && this.blending) {
       this.shape = morphAt(this.morph, this.ratio);
       this.blended = { morph: this.morph, ratio: this.ratio, shape: this.shape };
       // New bounds, which no invalidate tells of: the change of ratio did,

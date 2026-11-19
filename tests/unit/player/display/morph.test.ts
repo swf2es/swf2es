@@ -1,8 +1,10 @@
-// A morph shape blended at a ratio, and a MorphShape taking its ratio on as it is drawn.
+// A morph shape blended at a ratio, a MorphShape taking its ratio on as it is drawn, and the
+// start bounds scripts are told of it.
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ShapeRecord } from "../../../../packages/format/dist/index.js";
 import { readMorphShape, readPlace, readSwf } from "../../../../packages/format/dist/index.js";
+import { bounds, reportedBounds } from "../../../../packages/player/dist/display/bounds.js";
 import { Container } from "../../../../packages/player/dist/display/container.js";
 import { ShapeObject } from "../../../../packages/player/dist/display/display.js";
 import { CLEAN, CONTENT } from "../../../../packages/player/dist/display/displayobject.js";
@@ -172,23 +174,47 @@ test("clearing a morph's blends resets its growth history", () => {
   assert.equal(c.blends.size, 64);
 });
 
-test("a MorphShape keeps the blend it last drew until it is drawn at a new ratio", () => {
-  const c = character();
-  const shape = ShapeObject.ofMorph(c);
+/** A PlaceObject2 moving depth 1 to `ratio`. */
+function ratioPlace(ratio: number) {
   const swf = readSwf(
     w.swf({
       width: 100,
       height: 100,
       frameRate: 12,
       frameCount: 1,
-      tags: [w.place({ depth: 1, move: true, ratio: 65535 })],
+      tags: [w.place({ depth: 1, move: true, ratio })],
     }),
   );
-  shape.applyPlace(readPlace(swf.bytes, swf.tags[0]));
-  assert.equal(shape.shape, morphAt(c, 0));
+  return readPlace(swf.bytes, swf.tags[0]);
+}
 
-  assert.equal(shape.drawn(), morphAt(c, 65535));
+test("a MorphShape blends at its first place's ratio, and at a later place's when next drawn", () => {
+  const c = character();
+  const shape = ShapeObject.ofMorph(c);
+  shape.applyPlace(ratioPlace(65535));
   assert.equal(shape.shape, morphAt(c, 65535));
+  assert.equal(shape.blending, false);
+
+  shape.applyPlace(ratioPlace(30000));
+  assert.equal(shape.shape, morphAt(c, 65535));
+  assert.equal(shape.blending, true);
+
+  assert.equal(shape.drawn(), morphAt(c, 30000));
+  assert.equal(shape.shape, morphAt(c, 30000));
+  assert.equal(shape.blending, false);
+});
+
+test("scripts are told a MorphShape's start bounds, in a container too, whatever blend it draws", () => {
+  const c = character();
+  const clip = new Container();
+  const shape = ShapeObject.ofMorph(c);
+  clip.addChildAt(shape, 0);
+  shape.applyPlace(ratioPlace(65535));
+  const start = { xMin: 0, yMin: 0, xMax: 60, yMax: 60 };
+
+  assert.deepEqual(reportedBounds(shape, true), start);
+  assert.deepEqual(reportedBounds(clip, true), start);
+  assert.deepEqual(bounds(clip, true), { xMin: -10, yMin: -10, xMax: 70, yMax: 70 });
 });
 
 test("a MorphShape swapped to a shape and back to its morph at the same ratio draws the morph", async () => {

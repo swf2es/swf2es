@@ -41,6 +41,11 @@ export interface PlayerCase {
   /** An AVM1 SWF whose trace must match Flash's. */
   traced?: boolean;
   /**
+   * Every frame drawn as a host draws it (page.ts), for what drawing a frame
+   * changes, as a MorphShape's blend; frames are not captured.
+   */
+  draw?: boolean;
+  /**
    * A known gap: what Flash does that the player does not yet. The case is
    * left out of the default run and runs, expected to fail, when named.
    */
@@ -280,6 +285,78 @@ export const toneScript =
 export function rectPath(x: number, y: number, width: number, height: number): w.PathCommand[] {
   const [l, t, r, b] = [x * 20, y * 20, (x + width) * 20, (y + height) * 20];
   return [{ move: [l, t] }, { line: [r, t] }, { line: [r, b] }, { line: [l, b] }, { line: [l, t] }];
+}
+
+/** Stage points only the morph's start, its blend at 1/2 and its end cover (morphBoundsTimeline). */
+export const MORPH_PROBE_POINTS: [number, number][] = [
+  [50, 50],
+  [65, 48],
+  [130, 85],
+];
+
+/**
+ * A MorphShape growing from a 20-pixel square with a 2-pixel outline at
+ * (0, 0) to a 60 by 40 one with a 6-pixel outline at (40, 10), in clips at
+ * (40, 40): h, its three frames at ratios 0, 1/2 and 1, stopped on the
+ * first by `stop` (AVM1) or its script; g, at 1/2 from its first frame;
+ * k, the three frames playing; and j, at 1/2 then 0, stopped on the
+ * first. Squares of 2 pixels, ta, tb and tc, lie at MORPH_PROBE_POINTS,
+ * which only one of the three blends covers each.
+ */
+export function morphBoundsTimeline(stop: Uint8Array[]): {
+  defs: Uint8Array[];
+  places: Uint8Array[];
+} {
+  const morph = w.morphShape({
+    id: 1,
+    startBounds: [-20, 420, -20, 420],
+    endBounds: [740, 2060, 140, 1060],
+    fills: [{ start: 0xff3366cc, end: 0xffcc6633 }],
+    lines: [{ startWidth: 40, endWidth: 120, startColor: 0xff000000, endColor: 0xff006600 }],
+    start: [{ fill0: 1, line: 1, commands: rectPath(0, 0, 20, 20) }],
+    end: [rectPath(40, 10, 60, 40)],
+  });
+  const ratios = (more: Uint8Array[]) => [
+    w.place({ depth: 1, character: 1, ratio: 0 }),
+    ...more,
+    w.showFrame(),
+    w.place({ depth: 1, move: true, ratio: 32768 }),
+    w.showFrame(),
+    w.place({ depth: 1, move: true, ratio: 65535 }),
+    w.showFrame(),
+    w.end(),
+  ];
+  const at = { tx: 800, ty: 800 };
+  const target = (depth: number, name: string, [x, y]: [number, number]) =>
+    w.place({ depth, character: 13, name, matrix: { tx: x * 20, ty: y * 20 } });
+
+  return {
+    defs: [
+      morph,
+      square(2, 0xff0000, 40),
+      w.sprite(10, 3, ratios(stop)),
+      w.sprite(11, 1, [w.place({ depth: 1, character: 1, ratio: 32768 }), w.showFrame(), w.end()]),
+      w.sprite(12, 3, ratios([])),
+      w.sprite(13, 1, [w.place({ depth: 1, character: 2 }), w.showFrame(), w.end()]),
+      w.sprite(14, 2, [
+        w.place({ depth: 1, character: 1, ratio: 32768 }),
+        ...stop,
+        w.showFrame(),
+        w.place({ depth: 1, move: true, ratio: 0 }),
+        w.showFrame(),
+        w.end(),
+      ]),
+    ],
+    places: [
+      w.place({ depth: 1, character: 10, name: "h", matrix: at }),
+      w.place({ depth: 2, character: 11, name: "g", matrix: at }),
+      w.place({ depth: 3, character: 12, name: "k", matrix: at }),
+      target(4, "ta", MORPH_PROBE_POINTS[0]),
+      target(5, "tb", MORPH_PROBE_POINTS[1]),
+      target(6, "tc", MORPH_PROBE_POINTS[2]),
+      w.place({ depth: 7, character: 14, name: "j", matrix: at }),
+    ],
+  };
 }
 
 /** A circle's path, in pixels: eight quadratics, as Flash's drawCircle; an ellipse `r` by `ry`. */

@@ -50,8 +50,13 @@ export function toStage(d: DisplayObject, stage: DisplayObject | null): Matrix {
   return m;
 }
 
-/** What `d` itself draws, in its own space: null for nothing. `lines` counts the lines' widths. */
-export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
+/**
+ * What `d` itself draws, in its own space: null for nothing. `lines` counts
+ * the lines' widths. `reported`, what scripts are told: a MorphShape's start,
+ * whatever ratio it is drawn at, as Flash reports it to getBounds, width,
+ * hitTestObject and the rest (the `morph-bounds` cases).
+ */
+export function ownBounds(d: DisplayObject, lines: boolean, reported = false): Rect | null {
   if (d.drawing) {
     return d.drawing.bounds(lines);
   }
@@ -82,6 +87,17 @@ export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
     };
   }
 
+  const morph = reported && d instanceof ShapeObject ? d.morph?.morph : null;
+  if (morph) {
+    const r = (lines ? null : morph.startEdgeBounds) ?? morph.startBounds;
+    return {
+      xMin: r.xMin / TWIPS,
+      yMin: r.yMin / TWIPS,
+      xMax: r.xMax / TWIPS,
+      yMax: r.yMax / TWIPS,
+    };
+  }
+
   if (d instanceof ShapeObject && d.shape) {
     const r = (lines ? null : d.shape.shape.edgeBounds) ?? d.shape.shape.bounds;
     return {
@@ -100,18 +116,32 @@ export function ownBounds(d: DisplayObject, lines: boolean): Rect | null {
  * object with nothing in it. A scrolled object's are its scroll's size at
  * (0, 0), whatever it draws, as Flash reports them; masks clip none.
  * `drawn` takes a 3D object in another as drawn, not as reported
- * (placedRect), for the bitmap the other is drawn into.
+ * (placedRect), for the bitmap the other is drawn into. These are the
+ * bounds of what is drawn; reportedBounds gives scripts theirs.
  */
 export function bounds(d: DisplayObject, lines: boolean, drawn = false): Rect | null {
+  return measure(d, lines, drawn, false);
+}
+
+/**
+ * bounds as scripts are told them: each MorphShape in it measured by its
+ * start (ownBounds), for getBounds, getRect, width and height and their
+ * setters, hit tests by bounds and hitTestObject, and pixelBounds.
+ */
+export function reportedBounds(d: DisplayObject, lines: boolean): Rect | null {
+  return measure(d, lines, false, true);
+}
+
+function measure(d: DisplayObject, lines: boolean, drawn: boolean, reported: boolean): Rect | null {
   const scroll = d.scroll;
   if (scroll) {
     return { xMin: 0, yMin: 0, xMax: scroll.xMax - scroll.xMin, yMax: scroll.yMax - scroll.yMin };
   }
 
-  let r = ownBounds(d, lines);
+  let r = ownBounds(d, lines, reported);
   if (d instanceof Container) {
     for (const child of d.children) {
-      const b = bounds(child, lines, drawn);
+      const b = measure(child, lines, drawn, reported);
       // A 3D child with a corner behind the eye is not drawn, and counts for nothing.
       if (b && !(child.space && behindEye(b, child.placed))) {
         r = union(r, placedRect(child, b, drawn));
@@ -246,14 +276,15 @@ function invertFlat(m: Matrix): boolean {
   return true;
 }
 
-/** `d`'s bounds in `target`'s space (its own for null), through the stage. */
+/** `d`'s bounds in `target`'s space (its own for null), through the stage; `reported`, as scripts are told them. */
 export function boundsIn(
   d: DisplayObject,
   target: DisplayObject | null,
   stage: DisplayObject | null,
   lines: boolean,
+  reported: boolean,
 ): Rect {
-  const own = bounds(d, lines) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
+  const own = measure(d, lines, false, reported) ?? { xMin: 0, yMin: 0, xMax: 0, yMax: 0 };
   if (!target || target === d) {
     return own;
   }
@@ -333,7 +364,7 @@ export function hitsPoint(
 
   // In 3D, the bounds are the box around what is drawn on the stage, as Flash tests them.
   if (!shape && isProjective(up)) {
-    const r = bounds(d, true);
+    const r = reportedBounds(d, true);
     return r !== null && !behindEye(r, up) && contains(transformRect(r, up), x, y);
   }
 
@@ -344,7 +375,7 @@ export function hitsPoint(
 
   if (!shape) {
     const [lx, ly] = apply(toLocal, x, y);
-    const r = bounds(d, true);
+    const r = reportedBounds(d, true);
     return r !== null && contains(r, lx, ly);
   }
 
@@ -542,10 +573,11 @@ function drawnAt(
     return hitsGlyph(d.definition, d.glyphs.glyphs, x, y, mask);
   }
 
+  // A MorphShape given another ratio is hit nowhere until it is drawn at it, as in adl.
   const drawing = d.drawing;
   let layers: ShapeLayer[] = drawing
     ? facing(drawing.layers, drawing.culled && turnedOver(d), drawing.version)
-    : d instanceof ShapeObject
+    : d instanceof ShapeObject && !d.blending
       ? (d.shape?.layers ?? [])
       : [];
   // A 9-slice is hit where it is drawn, its layers as the renderer moves them, and only within
@@ -817,8 +849,8 @@ export function hitsObject(
   b: DisplayObject,
   stage: DisplayObject | null,
 ): boolean {
-  const ra = bounds(a, true);
-  const rb = bounds(b, true);
+  const ra = reportedBounds(a, true);
+  const rb = reportedBounds(b, true);
   if (!ra || !rb) {
     return false;
   }

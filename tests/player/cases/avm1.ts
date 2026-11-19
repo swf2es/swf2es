@@ -31,6 +31,8 @@ import {
   code,
   cornerFont,
   label,
+  MORPH_PROBE_POINTS,
+  morphBoundsTimeline,
   op,
   type PlayerCase,
   square,
@@ -3269,7 +3271,103 @@ function avm1BitmapSmoothing(version: number, smoothed: 0x41 | 0x43 = 0x41): Uin
   );
 }
 
+// What a clip holding a MorphShape measures as the morph's ratio changes
+// (morphBoundsTimeline): its bounds, size, hit tests by point, with and
+// without the shape flag, and by clip, each frame and straight after a
+// goto, and what setting its size scales it by. Flash measures a
+// MorphShape by its start, whatever its ratio, but for a point tested
+// against its shape: that meets the blend it last drew, or, placed at
+// another ratio since, nothing until it is drawn again.
+function avm1MorphBounds(version: number): Uint8Array {
+  const { defs, places } = morphBoundsTimeline([as1("stop();", version)]);
+  const points = MORPH_PROBE_POINTS.map(([x, y]) => `[${x}, ${y}]`).join(", ");
+  const extra =
+    version >= 8
+      ? `var q = m.getRect(_root);
+  s += " rect " + q.xMin + " " + q.yMin + " " + q.xMax + " " + q.yMax;
+  var p = m.transform.pixelBounds;
+  s += " pixels " + p.x + " " + p.y + " " + p.width + " " + p.height;`
+      : "";
+  const probe = (frame: number, more = "") =>
+    as1(
+      `${frame === 1 ? defines : ""}probe("${frame} h", h);
+probe("${frame} g", g);
+probe("${frame} k", k);
+${more}`,
+      version,
+    );
+  const defines = `var points = [${points}];
+function hits(m, flag) {
+  var t = "";
+  for (var i = 0; i < 3; i++) {
+    t += m.hitTest(points[i][0], points[i][1], flag) ? 1 : 0;
+  }
+  return t;
+}
+function probe(label, m) {
+  var r = m.getBounds(_root);
+  var s = label + ": bounds " + r.xMin + " " + r.yMin + " " + r.xMax + " " + r.yMax;
+  ${extra}
+  s += " size " + m._width + " " + m._height;
+  s += " box " + hits(m, false) + " shape " + hits(m, true);
+  s += " clips " + (m.hitTest(ta) ? 1 : 0) + (m.hitTest(tb) ? 1 : 0) + (m.hitTest(tc) ? 1 : 0);
+  trace(s);
+}
+function setters(label, m) {
+  m._width = 100;
+  var sx = m._xscale;
+  m._xscale = 100;
+  m._height = 100;
+  var sy = m._yscale;
+  m._yscale = 100;
+  trace(label + ": scaled " + sx + " " + sy);
+}
+`;
+
+  return w.swf({
+    version,
+    width: 160,
+    height: 110,
+    frameRate: 24,
+    frameCount: 6,
+    tags: [
+      ...(version >= 8 ? [w.fileAttributes(false)] : []),
+      w.backgroundColor(0xffffff),
+      ...defs,
+      ...places,
+      probe(1),
+      w.showFrame(),
+      probe(
+        2,
+        `h.gotoAndStop(2);\nprobe("2 h at 2", h);\nj.gotoAndStop(2);\nprobe("2 j at 2", j);`,
+      ),
+      w.showFrame(),
+      probe(3, `h.gotoAndStop(3);\nprobe("3 h at 3", h);\nprobe("3 j", j);`),
+      w.showFrame(),
+      probe(4, `setters("4 h", h);\nh.gotoAndStop(1);\nprobe("4 h at 1", h);`),
+      w.showFrame(),
+      probe(5, `setters("5 g", g);\nsetters("5 k", k);`),
+      w.showFrame(),
+      as1("stop();", version),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 export const avm1Cases: PlayerCase[] = [
+  ...[6, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-morph-bounds-swf${version}`,
+      swf: avm1MorphBounds(version),
+      traced: true,
+      draw: true,
+      frames: 6,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+    }),
+  ),
   // A text field's _x and _y are its box's corner, as AS3's x and y: a
   // DefineEditText's bounds start left of and above its origin, and a
   // script that centres a field by them put it that far left.

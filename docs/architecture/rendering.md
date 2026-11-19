@@ -328,6 +328,30 @@ asks whether two objects' bounds in the stage's space overlap. The
 corpus's `displayobject_getrect`, `_hittestpoint`, `_hittestpoint_root`
 and `_hittestobject` are the reference, with the `draws` case.
 
+A MorphShape (a shape tween) is drawn at its ratio, but what scripts are
+told of its bounds is its start's, the rectangles DefineMorphShape
+records for ratio 0, whatever ratio it is placed or drawn at: in AVM1
+`getBounds`, `getRect`, `_width` and `_height` and their setters,
+`hitTest(x, y)` without the shape flag, `hitTest(clip)` and
+`transform.pixelBounds`; in AS3 `getBounds`, `getRect`, `width` and
+`height` and their setters, `hitTestPoint` without the shape flag and
+`hitTestObject`; and so too for the bounds of every container above it,
+the clip a tween is in measuring as small as the tween's first frame
+however far it has grown. Only a point tested against the shape, by
+`hitTest(x, y, true)`, `hitTestPoint(x, y, true)` or the pointer, and
+`getObjectsUnderPoint`, meets the blend the morph was last drawn at (the
+corpus's `hittest_morph_input`, whose input tests the corpus run draws
+each frame of, as a host does). A
+morph that a place makes is blended at its ratio there and then; one
+placed again at another ratio, by the timeline playing or a goto, is
+hit nowhere by those tests until it is next drawn, as in adl (the
+player's `morph-bounds` and `avm1-morph-bounds-swf6` and `-swf8`
+cases). A rewind that makes a morph anew, as one to a place of another
+ratio does, blends it at once. In AS3 a Shape or MorphShape from the
+SWF has an empty `transform.pixelBounds` at its origin, as adl gives
+it, though the clip holding it has its bounds; a Shape a script draws
+in has its drawing's.
+
 ## Scale and rotation
 
 Flash keeps a display object's `scaleX`, `scaleY` and `rotation` apart
