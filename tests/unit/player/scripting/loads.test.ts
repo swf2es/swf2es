@@ -1895,6 +1895,7 @@ test("a host that tells a response as it comes has each piece told in the frame 
   const bodies: Record<string, Uint8Array> = {
     "/swf": child,
     "/bin": new Uint8Array(30).fill(65),
+    "/text": new Uint8Array(30).fill(66),
     "/mp3": new Uint8Array(tone),
   };
   // Each response in three pieces, one a frame, its head the frame before the first; `true` the
@@ -1946,38 +1947,185 @@ test("a host that tells a response as it comes has each piece told in the frame 
     frames.push(lines.splice(0).map((l) => l.replace("progress: ", "")));
   }
 
-  // The pieces' PROGRESS come a frame each, growing, the total what the head told; a
-  // URLStream's bytes readable as each comes.
+  // Each piece's PROGRESS comes a frame after the next piece, growing, the total what the
+  // head told, the last with the end, all of it; a URLStream's bytes readable as each comes.
   const told = frames.filter((f) => f.length > 0);
-  assert.deepEqual(told.slice(0, 5), [
+  const third = Math.ceil(child.length / 3);
+  assert.deepEqual(told.slice(0, 4), [
     [`loader progress 0 ${child.length}`],
-    [`loader progress ${Math.ceil(child.length / 3)} ${child.length}`],
-    [`loader progress ${2 * Math.ceil(child.length / 3)} ${child.length}`],
-    [`loader progress ${child.length} ${child.length}`],
-    ["loader complete"],
+    [`loader progress ${third} ${child.length}`],
+    [`loader progress ${2 * third} ${child.length}`],
+    [`loader progress ${child.length} ${child.length}`, "loader complete"],
   ]);
-  assert.deepEqual(told.slice(5, 13).flat(), [
+  const of = (kind: string) => told.flat().filter((l) => l.startsWith(`${kind} `));
+  assert.deepEqual(of("urlloader"), [
     "urlloader progress 10 30",
     "urlloader progress 20 30",
     "urlloader progress 30 30",
     "urlloader complete",
+  ]);
+  assert.deepEqual(of("urlstream"), [
     "urlstream progress 10 30 10",
     "urlstream progress 20 30 20",
     "urlstream progress 30 30 30",
     "urlstream complete",
   ]);
-  assert.deepEqual(told.slice(13, 17).flat(), [
+  // Without a length, the total is unknown until the last, which tells all that came.
+  assert.deepEqual(of("unsized"), [
     "unsized progress 10 0 10",
     "unsized progress 20 0 20",
-    "unsized progress 30 0 30",
+    "unsized progress 30 30 30",
     "unsized complete",
   ]);
-  const sound = told.slice(17).flat();
+  assert.deepEqual(of("gzipped"), [
+    "gzipped progress 10 30",
+    "gzipped progress 20 30",
+    "gzipped progress 30 30",
+    "gzipped complete",
+  ]);
+  const sound = of("sound");
   assert.deepEqual(sound.slice(0, 4), [
     `sound progress 0 ${tone.length}`,
     `sound progress ${Math.ceil(tone.length / 3)} ${tone.length}`,
     `sound progress ${2 * Math.ceil(tone.length / 3)} ${tone.length}`,
     `sound progress ${tone.length} ${tone.length}`,
   ]);
-  assert.deepEqual(sound.slice(-2), ["sound complete", "done"]);
+  assert.deepEqual(sound.slice(-1), ["sound complete"]);
+  assert.equal(told.flat().at(-1), "done");
+});
+
+test("a load closed or replaced as it comes tells no more, one that fails midway ends in IOError, and a body longer than its length is told as of an unknown total", {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const source = `package {
+import flash.display.*; import flash.events.*; import flash.net.*;
+public class ProgressEdges extends Sprite {
+  private var jobs:Array = [
+    ["loader", "/swf", "close"], ["loader", "/swf", "replace"], ["urlstream", "/bin", "close"],
+    ["loader", "/fail", ""], ["urlstream", "/fail", ""], ["urlstream", "/lie", ""]
+  ];
+  private var kept:Array = [];
+  public function ProgressEdges() { next(); }
+  private function next():void {
+    if (jobs.length == 0) { trace("done"); return; }
+    var job:Array = jobs.shift();
+    var kind:String = job[0];
+    var action:String = job[2];
+    var request:URLRequest = new URLRequest("http://example.test" + job[1]);
+    var target:IEventDispatcher;
+    var loader:Loader = null;
+    var stream:URLStream = null;
+    if (kind == "loader") { loader = new Loader(); target = loader.contentLoaderInfo; }
+    else { stream = new URLStream(); target = stream; }
+    kept.push(target);
+    var acted:Boolean = false;
+    target.addEventListener(ProgressEvent.PROGRESS, function(e:ProgressEvent):void {
+      trace(kind + " " + action + " progress " + e.bytesLoaded + " " + e.bytesTotal);
+      if (e.bytesLoaded > 0 && !acted && action != "") {
+        acted = true;
+        if (action == "replace") { loader.load(new URLRequest("http://example.test/bin")); return; }
+        if (loader) { loader.close(); } else { stream.close(); }
+        trace(kind + " closed");
+        next();
+      }
+    });
+    target.addEventListener(Event.COMPLETE, function(e:Event):void { trace(kind + " " + action + " complete"); next(); });
+    target.addEventListener(IOErrorEvent.IO_ERROR, function(e:IOErrorEvent):void { trace(kind + " " + action + " ioError"); next(); });
+    if (loader) { loader.load(request); } else { stream.load(request); }
+  }
+}
+}`;
+  const child = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  // Three pieces of a body each, one a frame: /fail fails after two, /lie tells a length of 10.
+  const steps: (() => boolean)[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    fetch: (request, signal, progress) => {
+      const path = new URL(request.url).pathname;
+      const body = path === "/swf" ? child : new Uint8Array(30).fill(65);
+      const head = { status: 200, headers: [] };
+      const third = Math.ceil(body.length / 3);
+      return new Promise((done, fail) => {
+        const step = (run: () => void, ends = false) =>
+          steps.push(() => {
+            if (!signal.aborted) {
+              run();
+            }
+
+            return ends;
+          });
+        step(() => progress?.open(head, path === "/lie" ? 10 : body.length));
+        for (let at = 0; at < body.length; at += third) {
+          const piece = body.slice(at, at + third);
+          if (path === "/fail" && at >= 2 * third) {
+            step(() => fail(new Error("broken off")), true);
+            return;
+          }
+
+          step(() => progress?.data(piece));
+        }
+
+        step(() => done({ ...head, bytes: body }), true);
+        signal.addEventListener("abort", () => fail(new Error("aborted")));
+      });
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(compiler(out)("ProgressEdges", source), 1, "ProgressEdges"),
+    scripting,
+  );
+  t.after(() => player.destroy());
+  await player.start();
+  // settled() waits for every fetch under way: only once no host step is left to come.
+  for (let i = 0; i < 120 && !lines.includes("done"); i++) {
+    steps.shift()?.();
+    if (steps.length === 0) {
+      await scripting.settled();
+    } else {
+      await new Promise((next) => setTimeout(next, 5));
+    }
+
+    player.tick();
+  }
+
+  const n = child.length;
+  const third = Math.ceil(n / 3);
+  assert.deepEqual(lines, [
+    // Closed at its first bytes: nothing more of it.
+    `loader close progress 0 ${n}`,
+    `loader close progress ${third} ${n}`,
+    "loader closed",
+    // Replaced at its first bytes: the replacement's alone from then on.
+    `loader replace progress 0 ${n}`,
+    `loader replace progress ${third} ${n}`,
+    "loader replace progress 0 30",
+    "loader replace progress 10 30",
+    "loader replace progress 20 30",
+    "loader replace progress 30 30",
+    "loader replace ioError",
+    "urlstream close progress 10 30",
+    "urlstream closed",
+    // Broken off after two pieces: what came is told, then the error.
+    "loader  progress 0 30",
+    "loader  progress 10 30",
+    "loader  progress 20 30",
+    "loader  ioError",
+    "urlstream  progress 10 30",
+    "urlstream  progress 20 30",
+    "urlstream  ioError",
+    // More than the length told: unknown from then, and all of it with the last.
+    "urlstream  progress 10 10",
+    "urlstream  progress 20 0",
+    "urlstream  progress 30 30",
+    "urlstream  complete",
+    "done",
+  ]);
 });

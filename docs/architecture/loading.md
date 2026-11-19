@@ -183,28 +183,39 @@ take a third argument, a `FetchProgress`, and tell it the response's head
 body was decoded from another length) and then each piece of the body
 (`data`); `responseBytes` reads a fetch `Response` that way, and the web
 element's, the test pages' and the desktop app's fetches do (the desktop
-app's main process sends the pieces over IPC). Each is told in the frame
-after it comes, in the order it came: a `Loader`'s `LoaderInfo` hears
-`OPEN` and `PROGRESS` of none at the head and `PROGRESS` at each piece, its
-query parameters from the first piece on and its bytes and SWF header
-before the last; a `URLStream` (and the `URLLoader` over it) `OPEN` at the
-head and `PROGRESS` at each piece with the piece already readable, so
-`bytesAvailable` is what came; a `Sound` as a `Loader`. `bytesTotal` is the
-length the headers told and stays so, 0 to the end without one. Flash did
-the same (adl against a server sending a piece every 2 to 300 ms: one
-`PROGRESS` a network read of up to 8 KB, whatever the frame rate, a 256 KB
-piece as 32; no `Content-Length`, `bytesTotal` 0 throughout). AVM1's
+app's main process sends the pieces over IPC). The loads cut each piece
+into reads of at most 8 KB and tell each once the next has come or the
+response has (`piecesOf`, `pieces.ts`), so the last is known as the last.
+Each is told in the frame after it comes, in the order it came: a
+`Loader`'s `LoaderInfo` hears `OPEN` and `PROGRESS` of none at the head and
+`PROGRESS` at each read, its query parameters from the first on and its
+bytes and SWF header with the last; a `URLStream` (and the `URLLoader` over
+it) `OPEN` at the head and `PROGRESS` at each read with the read already
+readable, so `bytesAvailable` is what came; a `Sound` as a `Loader`.
+`bytesTotal` is the length the headers told until more comes than that,
+then 0, and with the last `PROGRESS` what came. Flash told a `PROGRESS` at
+each network read of up to 8 KB, whatever the frame rate, a 64 KB piece as
+8 in the same millisecond (adl, and Flash Player 32's projector over HTTP,
+against a server sending a piece every 2 to 300 ms), and its total was
+the headers' length to the end: 0 without one, and in adl, whose network
+decodes a body a server compressed unasked, the compressed length below
+the bytes decoded (262144 of 4703 at `COMPLETE`); the projector's did not
+decode it. The last `PROGRESS` here has `bytesLoaded` and `bytesTotal`
+equal in every case, so that a preloader waiting for them to meet
+finishes, as it did before progress was told as it came. AVM1's
 `MovieClipLoader` empties its target and tells `onLoadStart` at the head,
-then `onLoadProgress` at each piece, the target's `getBytesLoaded` and
-`getBytesTotal` those bytes and the SWF's length as its header gives it
-(adl), for the first load into a clip and by a loader; those after it
-arrive told all at once, in their order. A `LoadVars`' or `XML`'s
-`getBytesLoaded` grows the same way. A host that tells none of this has
-the body told as come at once, `OPEN` and the two `PROGRESS` together.
-What arrives is still compiled and played only once all of it has: a
-`Loader`'s content, which Flash would start from its first frame while the
-rest streamed in, comes after the last `PROGRESS`, and a `Sound`'s
-`length` stays 0 until `COMPLETE`.
+then `onLoadProgress` at each read, the target's `getBytesLoaded` and
+`getBytesTotal` those bytes and an uncompressed SWF's length as its header
+gives it (adl), the last all that came of all, for the first load into a
+clip and by a loader; those after it arrive told all at once, in their
+order. Flash told a compressed SWF's bytes decompressed against its
+header's length (adl and the projector), where here they are told as they
+came. A `LoadVars`' or `XML`'s `getBytesLoaded` grows the same way. A host
+that tells none of this has the body told as come at once, `OPEN` and the
+two `PROGRESS` together. What arrives is still compiled and played only
+once all of it has: a `Loader`'s content, which Flash would start from its
+first frame while the rest streamed in, comes after the last `PROGRESS`,
+and a `Sound`'s `length` stays 0 until `COMPLETE`.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;

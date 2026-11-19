@@ -8,7 +8,8 @@
 // failed or was empty. LoadVars' onData decodes the text's variables onto
 // the object and calls onLoad.
 import { avm1 } from "@swf2es/runtime";
-import type { FetchProgress, FetchResult } from "../../hosts.js";
+import type { FetchResult } from "../../hosts.js";
+import type { Pieces } from "../../pieces.js";
 import { type Avm1Net, type NetRequest, textFor } from "../net.js";
 
 const textEncoder = new TextEncoder();
@@ -31,6 +32,9 @@ export interface LoadHost {
 
 const HIDDEN = avm1.DONT_ENUM | avm1.DONT_DELETE;
 const FORM = "application/x-www-form-urlencoded";
+
+/** Each object's latest load, which alone hears of its answer as it comes. */
+const loadsOf = new WeakMap<Obj, number>();
 
 /** `name` on `o` as `value`: defined hidden where it has none, else set as a script would. */
 function setHidden(o: Obj, name: string, value: Value, version: number): void {
@@ -58,17 +62,23 @@ export function startLoad(
   setHidden(target, "_bytesTotal", undefined, version);
   setHidden(target, "loaded", false, version);
   // As the answer comes, its length as its headers tell it, then the bytes so far (adl: a
-  // LoadVars polled each frame has its bytes grow a piece at a time).
-  let loaded = 0;
-  const progress: FetchProgress = {
+  // LoadVars polled each frame has its bytes grow a piece at a time); a load asked since takes
+  // the place of this one's.
+  const load = (loadsOf.get(target) ?? 0) + 1;
+  loadsOf.set(target, load);
+  const pieces: Pieces = {
     open: (_head, total) => {
-      if (total > 0) {
+      if (loadsOf.get(target) === load && total > 0) {
         avm1.set(target, "_bytesTotal", total, host.version);
       }
     },
-    data: (chunk) => {
-      loaded += chunk.length;
-      avm1.set(target, "_bytesLoaded", loaded, host.version);
+    data: (_chunk, loaded, total) => {
+      if (loadsOf.get(target) === load) {
+        avm1.set(target, "_bytesLoaded", loaded, host.version);
+        if (total > 0) {
+          avm1.set(target, "_bytesTotal", total, host.version);
+        }
+      }
     },
   };
   host.net.fetch(
@@ -91,7 +101,7 @@ export function startLoad(
         result.bytes !== null && length > 0 ? textFor(textOf(result.bytes), v) : undefined;
       host.callback(target, "onData", [data]);
     },
-    progress,
+    pieces,
   );
 }
 

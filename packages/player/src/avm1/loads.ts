@@ -24,8 +24,9 @@ import {
   readLibrary,
   type Timeline,
 } from "../display/timeline.js";
-import type { FetchProgress, FetchResult } from "../hosts.js";
+import type { FetchResult } from "../hosts.js";
 import { warmAudioFor } from "../media/sounds.js";
+import type { Pieces } from "../pieces.js";
 import type { Avm1 } from "./avm1.js";
 import { formRequest } from "./globals/LoadVars.js";
 import { textFor } from "./net.js";
@@ -223,7 +224,7 @@ export class MovieLoads {
     };
     this.movieLoads.push(load);
     const arrival = this.movie.net
-      .request(request, "content", undefined, this.movie.net.deferred(this.progressOf(load)))
+      .request(request, "content", undefined, this.piecesFor(load))
       .then(async (result): Promise<Arrived> => {
         // One replaced or cancelled meanwhile is not read, nor its code compiled.
         if (load.status !== "pending") {
@@ -264,41 +265,41 @@ export class MovieLoads {
 
   /**
    * What a load hears as its answer comes, in a frame after each word
-   * (net.deferred): its target emptied for it and onLoadStart as it
+   * (net.request): its target emptied for it and onLoadStart as it
    * begins, then onLoadProgress at each piece, the target's
    * getBytesLoaded growing with it, as Flash's (adl, a server sending a
    * piece every 100 ms: onLoadStart as the answer begins, onLoadProgress
    * at each piece of 2 or 4 KB with the bytes so far and the SWF's length
    * as its header tells it, then onLoadComplete once all came, onLoadInit
-   * the frame after). Only the first load into its clip and by its loader
-   * is told as it comes: those after it arrive in their order, told all
-   * at once.
+   * the frame after). The last piece tells all that came of all, as the
+   * last does where the length was not known. A compressed SWF's pieces
+   * are told as they come, compressed, against the length the headers
+   * told, where Flash told its bytes decompressed against its header's
+   * length (adl and the projector alike). Only the first load into its
+   * clip and by its loader is told as it comes: those after it arrive in
+   * their order, told all at once.
    */
-  private progressOf(load: MovieLoad): FetchProgress {
-    let loaded = 0;
-    let total = 0;
-    // An uncompressed SWF tells its length in its header, which Flash gives as the total.
+  private piecesFor(load: MovieLoad): Pieces {
+    // An uncompressed SWF tells its length in its header, which Flash gives as the total; the
+    // last piece tells all that came, whatever was told before.
     const header = new Uint8Array(8);
+    let length = 0;
     return {
-      open: (_head, length) => {
-        total = length;
+      open: () => {
         if (this.first(load)) {
           this.begin(load);
         }
       },
-      data: (chunk) => {
-        if (loaded < header.length) {
-          header.set(chunk.subarray(0, header.length - loaded), loaded);
-          if (
-            loaded + chunk.length >= header.length &&
-            String.fromCharCode(...header.subarray(0, 3)) === "FWS"
-          ) {
-            total = new DataView(header.buffer).getUint32(4, true);
+      data: (chunk, loaded, total, last) => {
+        const before = loaded - chunk.length;
+        if (before < header.length) {
+          header.set(chunk.subarray(0, header.length - before), before);
+          if (loaded >= header.length && String.fromCharCode(...header.subarray(0, 3)) === "FWS") {
+            length = new DataView(header.buffer).getUint32(4, true);
           }
         }
 
-        loaded += chunk.length;
-        this.progressed(load, loaded, total);
+        this.progressed(load, loaded, last ? loaded : length || total);
       },
     };
   }

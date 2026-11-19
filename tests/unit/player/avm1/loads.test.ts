@@ -385,13 +385,58 @@ mcl.loadClip("child.swf", createEmptyMovieClip("c", 1));`,
   // Its length is its header's, from the first piece on, as Flash's.
   const n = child.length;
   const third = Math.ceil(n / 3);
+  // Each piece is told a frame after the next comes, the last with the end.
   assert.deepEqual(frames, [
     ["start 0 0"],
+    [],
     [`progress ${third} ${n} ${third} ${n} ${third} ${n}`],
     [`progress ${2 * third} ${n} ${2 * third} ${n} ${2 * third} ${n}`],
-    [`progress ${n} ${n} ${n} ${n} ${n} ${n}`],
-    ["complete 200", "child", "init"],
+    [`progress ${n} ${n} ${n} ${n} ${n} ${n}`, "complete 200", "child", "init"],
     [],
     [],
   ]);
+});
+
+test("a LoadVars' bytes are its latest load's as they come, an earlier one's answer heard no more", async () => {
+  const steps: (() => void)[] = [];
+  const played = await play(
+    `var v = new LoadVars();
+v.load("a.txt");
+v.load("b.txt");
+var last = "";
+this.onEnterFrame = function () {
+  var now = v.getBytesLoaded() + " " + v.getBytesTotal();
+  if (now != last) { trace(now); last = now; }
+};`,
+    {
+      url: "http://example.test/t/test.swf",
+      // a.txt, 300 bytes, comes a piece at a time and never ends; b.txt, 30, after it.
+      fetch: (request, _signal, progress) =>
+        new Promise((done) => {
+          const a = request.url.endsWith("a.txt");
+          const body = new Uint8Array(a ? 300 : 30).fill(65);
+          const head = { status: 200, headers: [] };
+          steps.push(() => progress?.open(head, body.length));
+          for (let at = 0; at < body.length; at += body.length / 3) {
+            const piece = body.slice(at, at + body.length / 3);
+            steps.push(() => progress?.data(piece));
+          }
+
+          if (!a) {
+            steps.push(() => done({ ...head, bytes: body }));
+          }
+        }),
+    },
+  );
+  take(played);
+  const lines: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    played.avm1.network();
+    played.player.tick();
+    lines.push(...take(played));
+  }
+
+  assert.deepEqual(lines, ["0 undefined", "0 30", "10 30", "20 30", "30 30"]);
 });

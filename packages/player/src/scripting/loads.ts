@@ -14,6 +14,7 @@ import { type BitmapPixels, type Library, readLibrary } from "../display/timelin
 import type { FetchProgress, FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import { LoadedAvm1Input } from "../input/avm1.js";
 import { streamFrames, warmAudioFor } from "../media/sounds.js";
+import { type Pieces, piecesOf } from "../pieces.js";
 import type { Scripting } from "../scripting.js";
 import { dispatchEvent } from "./events.js";
 
@@ -53,11 +54,10 @@ interface Load {
   streamed: boolean;
   /** The bytes told so far, after OPEN; -1 before it, and for a load from bytes. */
   told: number;
-  /** The total its OPEN told: the response's length, 0 where its headers told none. */
-  total: number;
-  /** Whether all its bytes have come, and whether its LoaderInfo has been told what they are. */
-  whole: boolean;
+  /** Whether its LoaderInfo has been told what its bytes are, all of them having come. */
   known: boolean;
+  /** Tells the piece piecesOf holds back, once the response has come or failed. */
+  end: ((whole: boolean) => void) | null;
 }
 
 /**
@@ -201,9 +201,9 @@ export class Loads {
    * Flash has it for a frame that does not start at (0, 0): xMax by yMax,
    * not the stage's xMax - xMin by yMax - yMin.
    */
-  describe(info: AsObject, bytes: Uint8Array, swf: Swf, total = bytes.length): void {
+  describe(info: AsObject, bytes: Uint8Array, swf: Swf): void {
     info.$bytes = swf.bytes;
-    info.$total = total;
+    info.$total = bytes.length;
     info.$swf = {
       version: swf.header.version,
       frameRate: swf.frameRate,
@@ -476,32 +476,28 @@ export class Loads {
     loader.$abort = abort;
     const fetch = this.s.fetch;
     const load = this.newLoad(loader, generation, outgoing.url, domain, parameters, null);
-    this.enqueue(
-      load,
-      fetch ? fetch(outgoing, abort.signal, this.progressOf(load)) : Promise.reject(),
-    );
+    const told = piecesOf(this.piecesFor(load));
+    load.end = told.end;
+    this.enqueue(load, fetch ? fetch(outgoing, abort.signal, told.progress) : Promise.reject());
   }
 
   /**
    * What a Loader's LoaderInfo hears as its URL's response comes, each in
    * the frame after: OPEN with PROGRESS of none as its head comes, then
-   * PROGRESS at each piece of its body, as Flash told it at each read from
-   * the network (adl, a server sending a piece every 2 to 300 ms: one
-   * PROGRESS a piece of up to 8 KB, the read's size, a 256 KB piece as 32,
-   * whatever the frame rate). The total is the length the headers told,
-   * 0 where they told none, and stays so to COMPLETE, as Flash's.
+   * PROGRESS at each piece of its body (piecesOf), as Flash told it at each
+   * read from the network (adl and Flash Player 32's projector, a server
+   * sending a piece every 2 to 300 ms: one PROGRESS a read of up to 8 KB,
+   * whatever the frame rate). The total is the length the headers told, 0
+   * where they told none, and what came with the last PROGRESS.
    */
-  private progressOf(load: Load): FetchProgress {
-    let loaded = 0;
+  private piecesFor(load: Load): Pieces {
     return {
       open: (_head, total) => {
         load.streamed = true;
         this.readyBytes.push(() => this.opened(load, total));
       },
-      data: (chunk) => {
-        loaded += chunk.length;
-        const now = loaded;
-        this.readyBytes.push(() => this.arriving(load, now));
+      data: (_chunk, loaded, total, last) => {
+        this.readyBytes.push(() => this.arriving(load, loaded, total, last));
       },
     };
   }
@@ -514,7 +510,6 @@ export class Loads {
 
     const info = this.loaderInfoOf(load.loader);
     load.told = 0;
-    load.total = total;
     dispatchEvent(this.s, info, this.s.event("open"));
     if (load.generation !== load.loader.$generation) {
       return;
@@ -524,8 +519,8 @@ export class Loads {
     this.progress(info, 0);
   }
 
-  /** More of a load's bytes came, `loaded` in all: PROGRESS. */
-  private arriving(load: Load, loaded: number): void {
+  /** More of a load's bytes came, `loaded` of `total` in all: PROGRESS. */
+  private arriving(load: Load, loaded: number, total: number, last: boolean): void {
     if (load.generation !== load.loader.$generation || load.told < 0) {
       return;
     }
@@ -538,11 +533,12 @@ export class Loads {
     }
 
     // The last PROGRESS tells the bytes there are, as Flash's (the corpus's loader_events).
-    if (load.whole && loaded === load.bytes.length) {
+    if (last) {
       this.arrived(load);
     }
 
     load.told = loaded;
+    info.$total = total;
     this.progress(info, loaded);
   }
 
@@ -575,7 +571,7 @@ export class Loads {
     }
 
     info.$domain = load.domain;
-    this.describe(info, load.bytes, load.swf, load.total);
+    this.describe(info, load.bytes, load.swf);
   }
 
   /**
@@ -599,13 +595,16 @@ export class Loads {
     };
     const fetch = this.s.fetch;
     // Attach both handlers at once; an early rejection must not be unhandled.
-    const fetched = (
-      fetch
-        ? fetch(outgoing, signal, progress && this.bytesProgress(progress, outgoing.url))
-        : Promise.reject()
-    ).then(
-      (result) => result,
-      () => ({ bytes: null, status: 0, headers: [] }),
+    const told = progress && this.bytesProgress(progress, outgoing.url);
+    const fetched = (fetch ? fetch(outgoing, signal, told?.progress) : Promise.reject()).then(
+      (result) => {
+        told?.end(result.bytes !== null);
+        return result;
+      },
+      () => {
+        told?.end(false);
+        return { bytes: null, status: 0, headers: [] };
+      },
     );
     const asked = this.s.uncaughtErrors.asCaller(deliver);
     const completed = fetched.then((result) => {
@@ -614,23 +613,20 @@ export class Loads {
     this.trackRequest(completed);
   }
 
-  /** `progress` told in the frame after each word of the host, the SWF that asked as the caller. */
-  private bytesProgress(progress: BytesProgress, url: string): FetchProgress {
+  /**
+   * `progress` told in the frame after each word of the host, in pieces as
+   * a Loader's (piecesOf), the SWF that asked as the caller.
+   */
+  private bytesProgress(
+    progress: BytesProgress,
+    url: string,
+  ): { progress: FetchProgress; end(whole: boolean): void } {
     const open = this.s.uncaughtErrors.asCaller(progress.open);
     const data = this.s.uncaughtErrors.asCaller(progress.data);
-    let loaded = 0;
-    let total = 0;
-    return {
-      open: (head, length) => {
-        total = length;
-        this.readyBytes.push(() => open(head, length, url));
-      },
-      data: (chunk) => {
-        loaded += chunk.length;
-        const now = loaded;
-        this.readyBytes.push(() => data(chunk, now, total));
-      },
-    };
+    return piecesOf({
+      open: (head, total) => this.readyBytes.push(() => open(head, total, url)),
+      data: (chunk, loaded, total) => this.readyBytes.push(() => data(chunk, loaded, total)),
+    });
   }
 
   /**
@@ -794,9 +790,8 @@ export class Loads {
       swf,
       streamed: false,
       told: -1,
-      total: 0,
-      whole: false,
       known: false,
+      end: null,
     };
   }
 
@@ -815,6 +810,8 @@ export class Loads {
         load.status = result.status;
         load.redirected = result.url !== undefined;
         if (!result.bytes || url === null) {
+          // What came of one that failed midway is told, as not all of it.
+          load.end?.(false);
           return result;
         }
 
@@ -824,13 +821,15 @@ export class Loads {
           load.url = result.url;
         }
 
-        load.whole = true;
         const length = result.bytes.length;
-        if (!load.streamed) {
+        if (load.streamed) {
+          load.end?.(true);
+        } else {
           this.readyBytes.push(() => this.opened(load, length));
-          this.readyBytes.push(() => this.arriving(load, length));
+          this.readyBytes.push(() => this.arriving(load, length, length, true));
         }
 
+        // An empty body has no last piece to tell it.
         this.readyBytes.push(() => this.arrived(load));
         return result;
       });
