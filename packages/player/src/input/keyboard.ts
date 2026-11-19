@@ -85,10 +85,12 @@ const focusableByMouse = (d: DisplayObject): boolean => d instanceof TextObject 
  * Move focus to `next`: focusOut on the one that had it, then focusIn on
  * it, each naming the other, unless a focusOut listener moved it on; a
  * field gains or loses its caret, and the object a hook to give it up by
- * when it is taken off the list or hidden.
+ * when it is taken off the list or hidden. `highlight`, as Tab and a
+ * script move it, shows its rectangle; a press's move does not.
  */
-export function setFocus(s: Scripting, next: DisplayObject | null): void {
+export function setFocus(s: Scripting, next: DisplayObject | null, highlight = false): void {
   const previous = s.focus;
+  s.focusHighlight = highlight && next !== null && highlightable(s, next);
   if (previous === next) {
     return;
   }
@@ -127,6 +129,26 @@ export function setFocus(s: Scripting, next: DisplayObject | null): void {
   if (next && s.focus === next) {
     focusEvent(s, "focusIn", next, previous, false);
   }
+}
+
+/** What the focus's rectangle is drawn around: what has the focus, where it shows (setFocus). */
+export const highlighted = (s: Scripting): DisplayObject | null =>
+  s.focusHighlight ? s.focus : null;
+
+/**
+ * Whether the focus's rectangle shows on `d` as the focus moves to it: not
+ * on a text field, which shows its caret instead, nor on the stage or the
+ * root, which a script focuses to hear the keys, nor where its focusRect
+ * is false, or null and the stage's stageFocusRect is. A change of either
+ * later leaves it as it is, as in Flash Player 32's projector.
+ */
+function highlightable(s: Scripting, d: DisplayObject): boolean {
+  if (d instanceof TextObject || d === s.stage || d === s.root) {
+    return false;
+  }
+
+  const own = (d.object as { $focusRect?: unknown } | null)?.$focusRect;
+  return own === null || own === undefined ? s.stageFocusRect : s.rt.toBoolean(own);
 }
 
 /** A FocusEvent on `target`, naming `related`: whether a listener cancelled it. */
@@ -491,6 +513,7 @@ export class KeyboardInput implements Keyboard {
     onMovie = false,
   ): void {
     const s = this.scripting;
+    s.focusHighlight = false;
     this.press = null;
     if (onMovie) {
       if (s.focus && focusableByMouse(s.focus)) {
@@ -625,7 +648,7 @@ export class KeyboardInput implements Keyboard {
       return true;
     }
 
-    setFocus(s, next.d);
+    setFocus(s, next.d, true);
     // A field Tab focuses has all its text selected, so what is typed replaces it (Flash Player 32).
     if (next.d instanceof TextObject && s.focus === next.d) {
       next.d.select(0, next.d.model.text.length);

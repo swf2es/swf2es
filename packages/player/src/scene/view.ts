@@ -45,6 +45,7 @@ import { StaticTextObject, settleFits, TextObject } from "../display/textobjects
 import { VideoObject } from "../display/videoobject.js";
 import { Clips } from "../display/walk.js";
 import type { Drawer } from "../hosts.js";
+import type { FocusHighlight } from "../input/focus-highlight.js";
 import type { Player } from "../player.js";
 import {
   allowResets,
@@ -98,7 +99,11 @@ export interface RenderViewOptions {
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
 
 /** The numbers a render draws from besides its root and quality (RenderView.inputsInto). */
-const INPUTS = 13;
+const INPUTS = 18;
+
+/** The focus's rectangle's width in screen pixels, inside its object's bounds, and its colour. */
+const HIGHLIGHT_WIDTH = 3;
+const HIGHLIGHT_COLOR = { rMul: 1, gMul: 1, bMul: 0, aMul: 1, rAdd: 0, gAdd: 0, bAdd: 0, aAdd: 0 };
 
 /** What a pass of its own swaps out of the walk (RenderView.passState). */
 interface PassState {
@@ -132,6 +137,11 @@ export class RenderView implements Drawer {
   scale = 1;
   /** Screen pixels a stage pixel, which hairlines will be drawn a pixel of; the scale's if null. */
   screenScale: number | null = null;
+  /**
+   * The focus's yellow rectangle, drawn over everything (Player.focusHighlight);
+   * a host sets it before each render, null where none shows.
+   */
+  highlight: FocusHighlight | null = null;
   background: number;
   transparent: boolean;
   /** Lines stroked anew and lines found stroked already (LineCache.counts). */
@@ -417,6 +427,12 @@ export class RenderView implements Drawer {
     to[11] = this.viewY;
     to[12] =
       this.textures.pending.length + this.geometries.added.length + this.geometries.updated.length;
+    const h = this.highlight;
+    to[13] = h ? 1 : 0;
+    to[14] = h ? h.xMin : 0;
+    to[15] = h ? h.yMin : 0;
+    to[16] = h ? h.xMax : 0;
+    to[17] = h ? h.yMax : 0;
     return to;
   }
 
@@ -480,6 +496,10 @@ export class RenderView implements Drawer {
       allowResets(true);
     }
 
+    if (this.highlight) {
+      this.drawHighlight(this.highlight);
+    }
+
     measureLayers(this.scene, this.rows, this.geometries, target);
     this.filterLayers.noteKept(this.scene);
     this.frames++;
@@ -501,6 +521,42 @@ export class RenderView implements Drawer {
     this.drawnRoot = root;
     this.drawnQuality = this.stageQuality;
     this.inputsInto(this.drawnInputs);
+  }
+
+  /**
+   * The focus's rectangle, last, over all: four yellow bars inside the
+   * frame, each three screen pixels wide, as a hairline is one (Flash's
+   * stays that wide on a stage shown larger), on the walk's top level.
+   */
+  private drawHighlight(frame: FocusHighlight): void {
+    const pixel = 1 / (this.screenScale ?? this.scale * this.resolution);
+    const across = Math.min(HIGHLIGHT_WIDTH * pixel, (frame.xMax - frame.xMin) / 2);
+    const down = Math.min(HIGHLIGHT_WIDTH * pixel, (frame.yMax - frame.yMin) / 2);
+    const top = frame.yMin + down;
+    const bottom = frame.yMax - down;
+    this.highlightBar(frame.xMin, frame.yMin, frame.xMax, top);
+    this.highlightBar(frame.xMin, bottom, frame.xMax, frame.yMax);
+    this.highlightBar(frame.xMin, top, frame.xMin + across, bottom);
+    this.highlightBar(frame.xMax - across, top, frame.xMax, bottom);
+  }
+
+  private highlightBar(left: number, top: number, right: number, bottom: number): void {
+    if (right <= left || bottom <= top) {
+      return;
+    }
+
+    const quad = this.parts.unitQuad();
+    this.geometries.use(quad.id);
+    const row = this.rows.add(
+      right - left,
+      0,
+      0,
+      bottom - top,
+      left - this.viewX,
+      top - this.viewY,
+      HIGHLIGHT_COLOR,
+    );
+    this.scene.draw(quad.id, row, NORMAL);
   }
 
   /**

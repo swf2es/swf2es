@@ -1008,6 +1008,25 @@ async function scriptFreePlayer(src: string) {
   return [box.left, box.top];
 }
 
+/**
+ * A player of `src` at the page's top left, given the page's focus with no
+ * press, as a Tab from the page would: where it is.
+ */
+async function focusPlayer(src: string) {
+  document.getElementById("focus-rect")?.remove();
+  const p = await newPlayer();
+  p.id = "focus-rect";
+  p.setAttribute("src", src);
+  p.setAttribute("allowscriptaccess", "always");
+  p.style.cssText = "position: fixed; left: 0; top: 0; z-index: 10";
+  document.body.append(p);
+  await p.ready;
+  await frames(3);
+  p.focus();
+  const box = p.getBoundingClientRect();
+  return [box.left, box.top];
+}
+
 /** The unmute player's events and traces, from its load on. */
 const unmuteEvents: string[] = [];
 const unmuteTraces: string[] = [];
@@ -1287,6 +1306,13 @@ Object.assign(globalThis, {
   scriptFreeDestroy: () => {
     element("script-free").destroy();
     element("script-free").remove();
+    return true;
+  },
+  focusPlayer,
+  focusCall: (name: string, ...args: unknown[]) => element("focus-rect")[name](...args),
+  focusDestroy: () => {
+    element("focus-rect").destroy();
+    element("focus-rect").remove();
     return true;
   },
   touchPlayer,

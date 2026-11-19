@@ -787,8 +787,11 @@ the ninth digit (`Math.pow(1.0000001, 1e9)`), which the corpus's tests
 leave to their tolerance. So swf2es takes the corpus's special cases and
 JavaScript's precision, and the cases trace no result adl and Flash
 Player may differ in. RandomNumber (`random(n)`) is an int below its max
-cast as Rust casts one (saturated), 0 for a max below 1; its values and
-Math.random's are JavaScript's generator's, not Flash's.
+cast as Rust casts one (saturated), 0 for a max below 1: the next value
+of Flash's generator modulo the max, as avmplus' Random. RandomNumber and
+Math.random draw from one generator, the realm's, as adl's interleaved
+sequences show; it is AS3's (docs/architecture/runtime.md, "Random
+numbers"), so Math.random's values are multiples of 2^-31.
 
 ### Date
 
@@ -1267,9 +1270,12 @@ that has it `onSetFocus(old)`, then Selection's listeners
 `onSetFocus(old, new)`; focusing it again tells none. A focused object
 removed, or hidden by its own `_visible`, loses the focus. The highlight
 shows as the focus moves where the object draws something and its
-`_focusrect` (from SWF 6 its own where set, else the stage's) is true; a
-left press makes it inactive, and below SWF 9 any press, release or move
-does, until the focus moves again. While it is not inactive the focused
+`_focusrect` (from SWF 6 its own where set, else the stage's; in SWF 5
+any clip's sets the stage's) is true, a later change leaving it as it is;
+a left press makes it inactive, and below SWF 9 any press, release or move
+does, until the focus moves again. While it shows, the view draws the
+yellow rectangle around the object, as AS3's (docs/architecture/input.md),
+all measured in Flash Player 32's projector at SWF 5, 6 and 8. While it is not inactive the focused
 object hears `onKeyDown` and `onKeyUp` (from SWF 6), after its keyDown
 clip actions; while it shows, Enter and Space that no keyPress took
 press and release it, if enabled.
@@ -1765,12 +1771,11 @@ AVM1, so nothing is expected from it.
 - **Display.** `duplicateMovieClip` copies no drawing a script made and
   no text field's properties; Stage's scale mode, alignment, full screen
   and resize events are not there; `PrintJob` prints nothing.
-- **Input and text.** The focus's highlight is tracked but not drawn;
-  touches reach only an AS3 movie's pointer. `onScroller` from the user,
-  `asfunction:` links, the HTML of SWF 6 and 7 fields as Flash reads it,
-  and layout metrics (`textWidth`, `maxscroll`) where AS3's fields part
-  from Flash's too; TextSnapshot's selection, `hitTestTextNearPos` and
-  `getTextRunInfo` do nothing.
+- **Input and text.** Touches reach only an AS3 movie's pointer.
+  `onScroller` from the user, `asfunction:` links, the HTML of SWF 6 and
+  7 fields as Flash reads it, and layout metrics (`textWidth`,
+  `maxscroll`) where AS3's fields part from Flash's too; TextSnapshot's
+  selection, `hitTestTextNearPos` and `getTextRunInfo` do nothing.
 - **The corpus.** `mixed_avm/` (12 tests, AS3 loading AS2 and the
   reverse) and `from_gnash/` (404, Gnash's test suite for each class at
   SWF 5 to 8, many of them Ruffle's known failures) are not run, and the

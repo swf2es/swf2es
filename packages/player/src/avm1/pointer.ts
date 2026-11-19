@@ -287,8 +287,14 @@ export class Avm1Pointer implements Pointer {
 
     this.send(events);
 
-    // After the input and what it ran, as Ruffle resets the focus's highlight.
-    this.avm1.focusTracker.pointerInput(type, p.button ?? 0);
+    // After the input and what it ran, as Ruffle resets the focus's highlight; a rectangle
+    // hidden so draws again, a move included.
+    const tracker = this.avm1.focusTracker;
+    const shown = tracker.highlight === "visible";
+    tracker.pointerInput(type, p.button ?? 0);
+    if (shown && tracker.highlight !== "visible") {
+      this.redraws++;
+    }
   }
 
   private textPosition(field: TextObject, x: number, y: number): number {

@@ -10,6 +10,8 @@
 // need them, completed by their classes (docs/avm1.md, "Objects").
 // The realm also holds what runs AVM1 code across calls: the activation
 // running, how many function calls are, and the movie's global registers.
+
+import { FlashRandom } from "../random.js";
 import type { Activation, Region, Units } from "./activation.js";
 import { TimedOut } from "./errors.js";
 import { pendingLocal, ScriptFunction } from "./functions.js";
@@ -75,6 +77,8 @@ export class Realm implements Boxer {
   readonly AsBroadcaster: Class;
   readonly Date: Class;
   readonly Math: Avm1Object;
+  /** Math.random's and RandomNumber's generator, one for both, as Flash's is. */
+  readonly random = new FlashRandom();
   /**
    * ASnative's tables: by category, the native at an index, null for none
    * (an index past its natives is undefined's, but Math's, NaN's).
@@ -151,7 +155,7 @@ export class Realm implements Boxer {
     this.AsBroadcaster = broadcasterClass(this);
     this.Date = dateClass(this);
     this.Math = mathObject(this);
-    this.natives.set(200, (i) => mathNative(i));
+    this.natives.set(200, (i) => mathNative(i, this.random));
 
     // In Flash's order (Ruffle's globals.rs), each DontEnum.
     const g = this.global;
