@@ -9,6 +9,14 @@ export const IDLE_FRAMES = 300;
 /** Floats a vertex of advanced text's glyph quads (GeometryData.glyphs). */
 export const GLYPH_FLOATS = 18;
 
+/**
+ * A texel a vertex may give in place of where it samples: the stage's
+ * pixel it lands on instead, one texel each, read at the pixel's centre, as
+ * Flash draws a repeating bitmap whose matrix collapses the plane, from the
+ * stage's corner whatever the transform. Below it, any texel takes the same.
+ */
+export const TARGET_TEXEL = -1e30;
+
 /** A geometry as its owner holds it: its id, and the generation the id had, which a reused id moves on. */
 export type GeometryHandle = Handle;
 
@@ -24,7 +32,11 @@ export interface GeometryData {
   positions: Float32Array;
   /** None for a mesh, whose depths take their place. */
   colors: Uint32Array;
-  /** A mesh's (MESH) are its u and v from 0 to 1, which its program reads as they are. */
+  /**
+   * A mesh's (MESH) are its u and v from 0 to 1, which its program reads as
+   * they are. A fill's vertex whose u is TARGET_TEXEL samples the stage's
+   * pixel, which no mesh's does.
+   */
   texels?: Float32Array;
   /** A mesh's depth at each vertex, its t, in place of its colour. */
   depths?: Float32Array;
@@ -63,11 +75,21 @@ export class Geometries extends Registry {
   added: number[] = [];
   /** Changed in place since the backend last took them (update). */
   updated: number[] = [];
+  /**
+   * Whether any geometry added has sampled the stage's pixel (TARGET_TEXEL),
+   * which the fill programs are told where the stage lies for only then.
+   */
+  stageTexels = false;
 
   add(data: GeometryData): GeometryHandle {
     const handle = this.hold(IDLE_FRAMES);
     const id = handle.id;
     this.data[id] = data;
+    const texels = data.texels;
+    if (texels && texels.length > 0 && texels[0] <= TARGET_TEXEL / 2) {
+      this.stageTexels = true;
+    }
+
     this.added.push(id);
     this.measure(id);
     return handle;

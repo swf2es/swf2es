@@ -99,6 +99,9 @@ export class Draws {
   program!: WebGLProgram;
   private rowLocation: WebGLUniformLocation | null = null;
   private viewLocation: WebGLUniformLocation | null = null;
+  /** Where the fill program's fragments lie on the stage (fillFragment's uStage). */
+  private stageLocation: WebGLUniformLocation | null = null;
+  private blendStageLocation: WebGLUniformLocation | null = null;
   private fillUnitLocation: WebGLUniformLocation | null = null;
   /**
    * The fill program that blends a fill straight onto what is below it
@@ -161,6 +164,13 @@ export class Draws {
    */
   private readonly view = new Float32Array(4);
   private readonly frag = new Float32Array(4);
+  /** A fragment to the target's pixels from the stage's origin, as frag, then a stage pixel of them. */
+  private readonly stage = new Float32Array(4);
+  /** Whether a geometry samples the stage's pixel (Geometries.stageTexels): the stage told only then. */
+  stageTexels = false;
+  /** The stage the fill and blend programs were told last, NaN for none: told again only as it moves. */
+  private readonly toldStage = new Float32Array(4).fill(Number.NaN);
+  private readonly blendToldStage = new Float32Array(4).fill(Number.NaN);
   private meshStale = true;
   /** The row and mode (REPEAT, SMOOTH) the mesh program was told last, -1 for none. */
   private meshRow = -1;
@@ -240,6 +250,8 @@ export class Draws {
     this.unitIds.fill(-1);
     this.rowLocation = gl.getUniformLocation(this.program, "uRow");
     this.viewLocation = gl.getUniformLocation(this.program, "uView");
+    this.stageLocation = gl.getUniformLocation(this.program, "uStage");
+    this.toldStage.fill(Number.NaN);
     this.state.useProgram(this.program);
     gl.uniform1i(gl.getUniformLocation(this.program, "uRows"), 0);
     gl.uniform1iv(
@@ -263,6 +275,8 @@ export class Draws {
     this.blendProgram = endProgram(gl, blend);
     this.blendRowLocation = gl.getUniformLocation(this.blendProgram, "uRow");
     this.blendViewLocation = gl.getUniformLocation(this.blendProgram, "uView");
+    this.blendStageLocation = gl.getUniformLocation(this.blendProgram, "uStage");
+    this.blendToldStage.fill(Number.NaN);
     this.blendUnitLocation = gl.getUniformLocation(this.blendProgram, "uUnit");
     this.blendModeLocation = gl.getUniformLocation(this.blendProgram, "uMode");
     this.blendLayerRowLocation = gl.getUniformLocation(this.blendProgram, "uLayerRow");
@@ -478,6 +492,14 @@ export class Draws {
     frag[1] = (open.layer ? open.y : open.y + open.height) - target.y - oy;
     frag[2] = down;
     frag[3] = target.pixel;
+    const stage = this.stage;
+    stage[0] = frag[0];
+    stage[1] = frag[1];
+    stage[2] = down;
+    stage[3] = 1 / target.scale;
+    if (this.stageTexels) {
+      tellStage(gl, this.stageLocation, stage, this.toldStage);
+    }
     this.unit = target.scale / target.pixel;
     gl.uniform1f(this.fillUnitLocation, this.unit);
     this.meshStale = true;
@@ -543,6 +565,9 @@ export class Draws {
     state.useProgram(this.blendProgram);
     state.bindTexture(0, this.gpu.rowsTexture);
     gl.uniform4fv(this.blendViewLocation, this.view);
+    if (this.stageTexels) {
+      tellStage(gl, this.blendStageLocation, this.stage, this.blendToldStage);
+    }
     gl.uniform1f(this.blendUnitLocation, this.unit);
     // Its pixel alone where GL's blending computes the mode (readsBelow).
     gl.uniform1i(this.blendModeLocation, reads ? mode : NORMAL);
@@ -1021,4 +1046,24 @@ export class Draws {
     gl.deleteProgram(this.mesh);
     gl.deleteProgram(this.glyphProgram);
   }
+}
+
+/** `stage` told to the program in use at `location`, unless it was told that last (`told`). */
+function tellStage(
+  gl: WebGL2RenderingContext,
+  location: WebGLUniformLocation | null,
+  stage: Float32Array,
+  told: Float32Array,
+): void {
+  if (
+    stage[0] === told[0] &&
+    stage[1] === told[1] &&
+    stage[2] === told[2] &&
+    stage[3] === told[3]
+  ) {
+    return;
+  }
+
+  told.set(stage);
+  gl.uniform4fv(location, stage);
 }

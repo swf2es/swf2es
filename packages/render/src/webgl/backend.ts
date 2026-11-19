@@ -397,6 +397,7 @@ export class WebGLBackend {
     const gl = this.gl;
     this.frameFilters = filters;
     this.atlas.place(geometries);
+    this.draws.stageTexels = geometries.stageTexels;
     this.gpu.uploadTextures(textures, this.clearTexture);
     for (const id of keeps.removed) {
       this.pool.release(id);
