@@ -391,6 +391,15 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly localConnections: LocalConnections;
   readonly fileHost: FileHost | null;
   readonly fileLifetime = new AbortController();
+  /**
+   * Unloaded from its Loader (`unloadFromLoader`): it plays no more, but its
+   * LocalConnections stay connected, as Flash keeps them, and their
+   * messages come through `localReady`, the network being gone.
+   */
+  unloaded = false;
+  /** Destroyed: nothing of it is left, its LocalConnections closed. */
+  closed = false;
+  private localReady: (() => void)[] = [];
 
   get frameRate(): number {
     return this.rate;
@@ -1295,13 +1304,44 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       this.codegen.releaseActions(bytes);
     }
     this.codeLive.clear();
+    this.closed = true;
+    this.localReady = [];
     this.localConnections.destroy(this);
+    this.stop();
+    if (closeAudio) {
+      this.audio?.close?.();
+    }
+  }
+
+  /**
+   * Its Loader's content let go of: it stops as destroyed, but its
+   * LocalConnections stay connected and take messages, and its code stays
+   * to answer them, until it closes them or is destroyed. Flash Player 32
+   * and adl keep an unloaded movie's connections so, even after
+   * unloadAndStop and a collection: the name cannot be connected to again.
+   */
+  unloadFromLoader(): void {
+    this.unloaded = true;
+    this.stop();
+  }
+
+  private stop(): void {
     this.fileLifetime.abort();
     this.net.destroy();
     this.sharedObjects?.flush(this.swfVersion);
     stopTimelineSounds(this.sounds);
-    if (closeAudio) {
-      this.audio?.close?.();
+  }
+
+  /** A LocalConnection's delivery, for the next frame: by the network's queue, or once unloaded its own. */
+  deferLocal(deliver: () => void): void {
+    if (this.closed) {
+      return;
+    }
+
+    if (this.unloaded) {
+      this.localReady.push(deliver);
+    } else {
+      this.net.defer(deliver);
     }
   }
 
@@ -1374,6 +1414,26 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     }
   }
 
+  /** An unloaded movie's LocalConnection messages since the last frame delivered: whether any are left to come. */
+  localNetwork(): boolean {
+    if (this.closed || this.halted) {
+      return false;
+    }
+
+    const ready = this.localReady;
+    this.localReady = [];
+    this.timers.begin();
+    try {
+      if (this.delivered(ready)) {
+        this.queue.run();
+      }
+    } finally {
+      this.timers.end();
+    }
+
+    return this.localReady.length > 0;
+  }
+
   /**
    * The network's answers since the last frame delivered, each in the
    * root's activation as a callback runs, so that a setter or watcher it
@@ -1382,7 +1442,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * whether there were any.
    */
   private netDelivered(): boolean {
-    const ready = this.net.take();
+    return this.delivered(this.net.take());
+  }
+
+  private delivered(ready: (() => void)[]): boolean {
     const cx = this.movieRoot === null ? null : this.activationOf(this.movieRoot);
     for (const deliver of ready) {
       if (this.halted || cx === null) {

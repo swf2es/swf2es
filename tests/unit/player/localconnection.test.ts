@@ -181,7 +181,7 @@ test("AS3 copies messages and reports size, status and receiver errors through t
 });
 
 for (const fromBytes of [true, false]) {
-  test(`an AS3 Loader's ${fromBytes ? "loadBytes" : "load"} runs AVM1 scripts and unload closes its connections`, async () => {
+  test(`an AS3 Loader's ${fromBytes ? "loadBytes" : "load"} runs AVM1 scripts whose connections outlive unload`, async () => {
     const name = fromBytes ? "LocalMixed" : "LocalMixedURL";
     const child = movie(
       `var r=new LocalConnection();r.connect("_as1");
@@ -200,7 +200,9 @@ public class ${name} extends Sprite {
   addChild(loader);var bytes:ByteArray=new ByteArray();var values:Array=[${[...child].join(",")}];for each(var value:uint in values){bytes.writeByte(value);}bytes.position=0;
   var context:LoaderContext=new LoaderContext();context.allowCodeImport=true;${fromBytes ? "loader.loadBytes(bytes,context);" : 'loader.load(new URLRequest("child.swf"),context);'}
  }
- private function sendOnce(e:Event):void {if(++frames<2){return;}removeEventListener(Event.ENTER_FRAME,sendOnce);var a:Object={x:1};a.self=a;var list:Array=[a];list.label="hello";sender.send("_as1","take",a,a,list);a.x=2;}
+ private function sendOnce(e:Event):void {if(++frames<2){return;}removeEventListener(Event.ENTER_FRAME,sendOnce);again();}
+ public function again():void {var a:Object={x:1};a.self=a;var list:Array=[a];list.label="hello";sender.send("_as1","take",a,a,list);a.x=2;}
+ public function retake():String {try {new LocalConnection().connect("_as1");return "connected";} catch (e:Error) {return e.message;} return "";}
  public function answer(date:Date,xml:XMLDocument,list:Array):void {trace("as3 answer " + date.getTime() + " " + xml.firstChild.nodeName + " " + list.label + " " + list.length + " " + (list[0].self==list[0]));}
 }}
 `;
@@ -230,15 +232,37 @@ public class ${name} extends Sprite {
       "as1 1 true true hello 1 true",
       "as3 answer 123 root reply 1 true",
     ]);
+    // As Flash Player 32 and adl: the unloaded movie's connection stays,
+    // takes messages and answers them, and its name cannot be taken.
     const root = player.root.object as avm2.AsObject;
     const loader = s.rt.getProperty(root, s.rt.publicName("loader"));
     s.rt.callProperty(loader, s.rt.publicName("unloadAndStop"));
     assert.equal(audioClosed, 0);
-    const sender = s.rt.getProperty(root, s.rt.publicName("sender"));
-    s.rt.callProperty(sender, s.rt.publicName("send"), "_as1", "take");
+    lines.length = 0;
+    s.rt.callProperty(root, s.rt.publicName("again"));
     player.tick();
-    assert.equal(lines.at(-1), "as3 status error");
+    player.tick();
+    assert.deepEqual(errors, []);
+    assert.deepEqual(lines, [
+      "as3 status status",
+      "as1 1 true true hello 1 true",
+      "as3 answer 123 root reply 1 true",
+    ]);
+    assert.match(String(s.rt.callProperty(root, s.rt.publicName("retake"))), /#2082/);
+    // Destroyed with the player, it lets go of the name.
     player.destroy();
     assert.equal(audioClosed, 1);
+    const endpoint = {
+      owner: {},
+      domain: "example.test",
+      secure: true,
+      key: null,
+      alive: () => true,
+      allows: () => true,
+      defer: () => {},
+      status: () => {},
+      receive: () => {},
+    };
+    assert.equal(s.localConnections.connect(endpoint, "_as1"), true);
   });
 }

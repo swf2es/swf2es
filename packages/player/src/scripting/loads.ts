@@ -68,6 +68,8 @@ interface Avm1Load {
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
   private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
+  /** Movies unloaded whose LocalConnections are still connected (Avm1.unloadFromLoader). */
+  private readonly unloadedAvm1 = new Set<Avm1>();
 
   /** Loads asked for and not yet completed, in order; each prepared after the one before it. */
   private readonly loads: Load[] = [];
@@ -95,6 +97,13 @@ export class Loads {
   }
 
   tickAvm1(): void {
+    for (const vm of this.unloadedAvm1) {
+      if (!vm.localNetwork() && !this.s.localConnections.listening(vm)) {
+        this.unloadedAvm1.delete(vm);
+        vm.destroy(false);
+      }
+    }
+
     if (this.avm1Movies.size === 0) {
       return;
     }
@@ -136,6 +145,11 @@ export class Loads {
       movie.vm.destroy(false);
     }
 
+    for (const vm of this.unloadedAvm1) {
+      vm.destroy(false);
+    }
+
+    this.unloadedAvm1.clear();
     this.avm1Movies.clear();
     this.s.avm1Input = null;
   }
@@ -802,7 +816,14 @@ export class Loads {
     if (content) {
       const movie = this.avm1Movies.get(content.$display);
       if (movie) {
-        movie.vm.destroy(false);
+        // Its LocalConnections outlive it, as in Flash, until it closes them.
+        if (this.s.localConnections.listening(movie.vm)) {
+          movie.vm.unloadFromLoader();
+          this.unloadedAvm1.add(movie.vm);
+        } else {
+          movie.vm.destroy(false);
+        }
+
         this.avm1Movies.delete(content.$display);
         if (this.s.avm1Input?.remove(content.$display)) {
           this.s.avm1Input = null;

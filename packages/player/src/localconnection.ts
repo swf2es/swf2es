@@ -119,6 +119,17 @@ export class LocalConnections {
     });
   }
 
+  /** Whether any of `owner`'s endpoints is connected. */
+  listening(owner: object): boolean {
+    for (const endpoint of this.listeners.values()) {
+      if (endpoint.owner === owner) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   destroy(owner: object): void {
     for (const endpoint of this.listeners.values()) {
       if (endpoint.owner === owner) {
