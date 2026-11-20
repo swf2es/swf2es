@@ -455,6 +455,45 @@ warm-up; `--counts` also counts fill and line calls into wasm. Compare built
 checkouts with `--checkout DIR` using the same harness. Longer loops should
 reuse their geometry without increasing retained shapes on fresh ratios.
 
+### The census
+
+`bench.ts --census`, on a synthetic scene or with `--swf`, counts what
+each frame asks of the renderer, to say which change has something to
+take before it is made (`tests/player/census.ts`):
+
+- **sub-draws by path:** merged into one draw, a multi-draw's, a call a
+  fill, the blend program's, meshes, glyphs, stage-sampling fills, and
+  everything else (composites, filter passes, shader fills, the stage);
+- **fill runs** as `Draws.prepare` gathers them: their lengths, how many
+  were merged, and what ended each: a kept or held output's composite, a
+  layer begun or ended, a mask, a blend mode, a glyph run or mesh, the
+  texture slots, a run's 256 draws; and, as a projection of drawing kept
+  and held outputs in normal mode as quads in the runs around them, how
+  many runs, merged draws and sub-draws there would be with the runs a
+  composite alone came between joined (texture slots left out, so the
+  most that could be taken);
+- **repeats** among the fills not merged, which instanced drawing would
+  draw as one: a fill of the geometry, texture and sampling of the one
+  just before it, or of one within 64 before it with no draw between
+  overlapping it, and, as a bound, of any fill earlier in the frame;
+- **blend layers** drawn direct or as layers, by the draws inside and
+  their area, and how many hold what a layer held the frame before, still,
+  moved by whole pixels, or by fractions; and backdrop copies;
+- **the walk:** objects visited against objects changed (transform or
+  colour, content, children, pixels), how many a walk of what changed
+  would visit, and the frames in which only transforms and colours did.
+
+It costs nothing outside its runs, as `--counts` costs nothing: the
+renderer has no census code. The bench page wraps the view's `render`
+and `walk`, the backend's `execute`, `blendDirect` and `copyBelow`,
+`Draws.prepare` and `gatherRun`, the merged stream's `add` and GL's
+binds and draws, on that view's objects alone and only when `--census`
+is given, and counts from the scene list, rows and commands the frame
+made. It reads those private parts by name and throws where one is
+gone rather than count wrong, so a renaming in the renderer is one in
+`tests/player/page.ts` too. Its frames' times include its own work and
+are not compared with others'.
+
 ## Why not Pixi
 
 Until #650 and #651 the player drew with PixiJS, through a fork. Pixi is

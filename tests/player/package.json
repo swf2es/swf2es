@@ -11,6 +11,7 @@
     "@swf2es/format": "workspace:*",
     "@swf2es/player": "workspace:*",
     "@swf2es/player-hosts": "workspace:*",
+    "@swf2es/render": "workspace:*",
     "@swf2es/runtime": "workspace:*",
     "@swf2es/native": "workspace:*"
   }

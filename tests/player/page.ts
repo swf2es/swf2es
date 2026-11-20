@@ -39,6 +39,32 @@ import { RenderView } from "@swf2es/player/scene";
 import { indexedDbModuleCache } from "@swf2es/player-hosts/indexeddb";
 import { precompiledModules } from "@swf2es/player-hosts/precompiled";
 import { webWorkerHost } from "@swf2es/player-hosts/workers";
+import {
+  type Commands,
+  DRAW,
+  MESH,
+  PLANE,
+  RUN,
+  type SceneList,
+  SHADED,
+  STENCIL_POP,
+  STENCIL_PUSH,
+} from "@swf2es/render";
+import {
+  analyseFrame,
+  type BlendMemory,
+  type Dirtied,
+  dirtyCensus,
+  FORM_FILL,
+  FORM_FRESH,
+  FORM_GLYPHS,
+  FORM_MESH,
+  FORM_NONE,
+  FORM_SHADED,
+  FORM_SMALL,
+  FORM_STAGE,
+  SUB_RUN_INTS,
+} from "./census.ts";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
 /**
@@ -707,6 +733,8 @@ interface Bench {
   counts: Record<string, number>;
   /** Each frame's meter readings after the first: see meter. */
   meters: Record<string, number>[];
+  /** Each frame's census after the first, where asked for: see installCensus. */
+  census: Record<string, number>[];
   /** Filled in by chrome.ts from a sampled heap profile, where asked for. */
   allocated: number;
   heap: [number, number];
@@ -919,6 +947,288 @@ function meter(gl: WebGL2RenderingContext): { read(): Record<string, number> } {
   };
 }
 
+/** What the census reads of the atlas's place of a geometry (webgl/atlas.ts, Place). */
+interface CensusPlace {
+  glyphs: unknown;
+  stage: boolean;
+  batch: { frame: number } | null;
+}
+
+/** A method of one of the renderer's objects, found by name, which a census wraps. */
+function censusMethod(
+  object: Record<string, unknown>,
+  name: string,
+): (...args: unknown[]) => unknown {
+  const method = object[name];
+  if (typeof method !== "function") {
+    throw new Error(`the census found no ${name}: the renderer changed, and census.ts with it`);
+  }
+
+  return method as (...args: unknown[]) => unknown;
+}
+
+/**
+ * The renderer's census (census.ts) of each frame `view` draws from here on, a record a frame: the
+ * view's render and walk, the backend's execute, its run gathering, merging, direct blends and
+ * backdrop copies, and GL's program and vertex array binds and draws are wrapped, on these objects
+ * alone and only when a census is asked for, so that no other frame pays for it. It reads the
+ * renderer's private parts by name, and throws where one is missing rather than count wrong.
+ */
+function installCensus(view: RenderView): Record<string, number>[] {
+  const frames: Record<string, number>[] = [];
+  const v = view as unknown as Record<string, unknown>;
+  const backend = v.backend as Record<string, unknown>;
+  const draws = backend.draws as Record<string, unknown>;
+  const batches = draws.batches as Record<string, unknown> & { vertexArray: unknown };
+  const atlas = backend.atlas as { places: (CensusPlace | undefined)[]; frame: number };
+  const gpu = backend.gpu as { textures: unknown[] };
+  const compositor = backend.compositor as Record<string, unknown>;
+  const gl = view.gl;
+
+  let walked = { visited: 0, hidden: 0 };
+  const walk = censusMethod(v, "walk");
+  v.walk = function (this: unknown, ...args: unknown[]) {
+    walked[args[2] ? "hidden" : "visited"]++;
+    return walk.apply(this, args);
+  };
+
+  // What the frame's execute gathered, then counted.
+  let preparing = false;
+  let subRuns = new Int32Array(SUB_RUN_INTS * 256);
+  let subRunCount = 0;
+  const direct = new Set<number>();
+  let copies = 0;
+  let paths: Record<string, number> = {};
+  let counted: Record<string, number> | null = null;
+  let memory: BlendMemory | null = null;
+
+  const prepare = censusMethod(draws, "prepare");
+  draws.prepare = function (this: unknown, ...args: unknown[]) {
+    preparing = true;
+    try {
+      return prepare.apply(this, args);
+    } finally {
+      preparing = false;
+    }
+  };
+  const gatherRun = censusMethod(draws, "gatherRun");
+  draws.gatherRun = function (this: Record<string, unknown>, ...args: unknown[]) {
+    const last = gatherRun.apply(this, args) as number;
+    if (preparing) {
+      if ((subRunCount + 1) * SUB_RUN_INTS > subRuns.length) {
+        const grown = new Int32Array(subRuns.length * 2);
+        grown.set(subRuns);
+        subRuns = grown;
+      }
+
+      const at = subRunCount++ * SUB_RUN_INTS;
+      // Its command found once the frame's commands are known.
+      subRuns[at] = -1;
+      subRuns[at + 1] = args[1] as number;
+      subRuns[at + 2] = last;
+      subRuns[at + 3] = this.runCount as number;
+      subRuns[at + 4] = 0;
+      subRuns[at + 5] = args[3] ? 1 : 0;
+    }
+
+    return last;
+  };
+  const merge = censusMethod(batches, "add");
+  batches.add = function (this: unknown, ...args: unknown[]) {
+    const segment = merge.apply(this, args);
+    if (preparing && segment && subRunCount > 0) {
+      subRuns[(subRunCount - 1) * SUB_RUN_INTS + 4] = 1;
+    }
+
+    return segment;
+  };
+  const blendDirect = censusMethod(backend, "blendDirect");
+  backend.blendDirect = function (this: unknown, ...args: unknown[]) {
+    const drawn = blendDirect.apply(this, args);
+    if (drawn) {
+      direct.add(args[1] as number);
+    }
+
+    return drawn;
+  };
+  const copyBelow = censusMethod(compositor, "copyBelow");
+  compositor.copyBelow = function (this: unknown, ...args: unknown[]) {
+    const copied = copyBelow.apply(this, args);
+    if (copied) {
+      copies++;
+    }
+
+    return copied;
+  };
+
+  // Each sub-draw by how it was drawn: the program in use, and for fills the merged stream's
+  // vertex array or another.
+  let program = gl.getParameter(gl.CURRENT_PROGRAM) as unknown;
+  let vertexArray = gl.getParameter(gl.VERTEX_ARRAY_BINDING) as unknown;
+  const path = (by: number) => {
+    const key =
+      program === draws.program
+        ? vertexArray === batches.vertexArray
+          ? "path.merged"
+          : "path.single"
+        : program === draws.blendProgram
+          ? "path.blended"
+          : program === draws.mesh
+            ? "path.mesh"
+            : program === draws.glyphProgram
+              ? "path.glyphs"
+              : program === draws.stageProgram
+                ? "path.stage"
+                : "path.other";
+    paths[key] = (paths[key] ?? 0) + by;
+  };
+  const glMethods = gl as unknown as Record<string, unknown>;
+  const useProgram = censusMethod(glMethods, "useProgram");
+  glMethods.useProgram = function (this: unknown, ...args: unknown[]) {
+    program = args[0];
+    return useProgram.apply(this, args);
+  };
+  const bindVertexArray = censusMethod(glMethods, "bindVertexArray");
+  glMethods.bindVertexArray = function (this: unknown, ...args: unknown[]) {
+    vertexArray = args[0];
+    return bindVertexArray.apply(this, args);
+  };
+  for (const name of [
+    "drawElements",
+    "drawArrays",
+    "drawElementsInstanced",
+    "drawArraysInstanced",
+  ]) {
+    const draw = censusMethod(glMethods, name);
+    glMethods[name] = function (this: unknown, ...args: unknown[]) {
+      path(1);
+      return draw.apply(this, args);
+    };
+  }
+
+  const multi = gl.getExtension("WEBGL_multi_draw") as Record<string, unknown> | null;
+  if (multi) {
+    const multiDraw = censusMethod(multi, "multiDrawElementsWEBGL");
+    multi.multiDrawElementsWEBGL = function (this: unknown, ...args: unknown[]) {
+      paths["path.multi"] = (paths["path.multi"] ?? 0) + (args[6] as number);
+      return multiDraw.apply(this, args);
+    };
+  }
+
+  const execute = censusMethod(backend, "execute");
+  backend.execute = function (this: unknown, ...args: unknown[]) {
+    subRunCount = 0;
+    direct.clear();
+    copies = 0;
+    paths = {};
+    const out = execute.apply(this, args);
+    const commands = args[0] as Commands;
+    const scene = args[1] as SceneList;
+    const rows = args[2] as { data: Float32Array };
+    const geometries = args[3] as { box: Float32Array };
+    const target = args[7] as { scale: number };
+    // A frame drawn without its runs prepared (a run table too large) is left out.
+    if (!draws.prepared) {
+      return out;
+    }
+
+    // Each run's command: Draws.prepare gathers them in the commands' order.
+    const ops = commands.ops;
+    let k = 0;
+    for (let s = 0; s < subRunCount; s++) {
+      const at = s * SUB_RUN_INTS;
+      const first = subRuns[at + 1];
+      const stencil = subRuns[at + 5] === 1;
+      while (
+        k < commands.length &&
+        !(
+          (stencil
+            ? ops[k * 4] === STENCIL_PUSH || ops[k * 4] === STENCIL_POP
+            : ops[k * 4] === RUN) &&
+          ops[k * 4 + 1] <= first &&
+          first < ops[k * 4 + 1] + ops[k * 4 + 2]
+        )
+      ) {
+        k++;
+      }
+
+      subRuns[at] = k;
+    }
+
+    const form = new Uint8Array(scene.length);
+    for (let i = 0; i < scene.length; i++) {
+      const place = atlas.places[scene.geometry[i]];
+      if (scene.kind[i] !== DRAW || !place) {
+        continue;
+      }
+
+      const texture = scene.texture[i];
+      const of = place.glyphs
+        ? FORM_GLYPHS
+        : scene.sampler[i] & (MESH | PLANE)
+          ? FORM_MESH
+          : scene.sampler[i] & SHADED
+            ? FORM_SHADED
+            : place.stage
+              ? FORM_STAGE
+              : texture >= 0 && !gpu.textures[texture]
+                ? FORM_NONE
+                : FORM_FILL;
+      form[i] =
+        of |
+        (place.batch ? FORM_SMALL : 0) |
+        (place.batch && place.batch.frame === atlas.frame ? FORM_FRESH : 0);
+    }
+
+    const analysed = analyseFrame(
+      {
+        ops,
+        commandCount: commands.length,
+        params: commands.params,
+        kind: scene.kind,
+        geometry: scene.geometry,
+        row: scene.row,
+        texture: scene.texture,
+        sampler: scene.sampler,
+        form,
+        boxes: geometries.box,
+        rows: rows.data,
+        scale: target.scale,
+        multi: draws.multi !== null,
+        subRuns,
+        subRunCount,
+        direct,
+      },
+      memory,
+    );
+    memory = analysed.memory;
+    counted = { ...analysed.counts, ...paths, copies };
+    return out;
+  };
+
+  const render = censusMethod(v, "render");
+  v.render = function (this: unknown, ...args: unknown[]) {
+    const dirty = dirtyCensus(args[0] as Dirtied);
+    walked = { visited: 0, hidden: 0 };
+    counted = null;
+    const out = render.apply(this, args);
+    // Set by the execute the render called, which the compiler cannot see.
+    const frame = counted as Record<string, number> | null;
+    if (frame) {
+      frames.push({
+        ...frame,
+        ...dirty,
+        "walk.visited": walked.visited,
+        "walk.hidden": walked.hidden,
+      });
+    }
+
+    return out;
+  };
+
+  return frames;
+}
+
 /** Chrome's console profiler, which the DOM's types leave out. */
 type Profiling = Console & { profile(label: string): void; profileEnd(label: string): void };
 
@@ -951,6 +1261,7 @@ async function benchSwf(
   clock = false,
   metered = false,
   measureMorphs = false,
+  census = false,
 ): Promise<Bench> {
   // With `clock`, the page's clock stands still but for a frame's time at each tick, so what the
   // player and the renderer keep or let go by age happens on the same frames however fast the
@@ -1010,6 +1321,8 @@ async function benchSwf(
     const meters: Record<string, number>[] = [];
     // Only when asked for: each call wrapped and timed would slow the frames timed.
     const counter = metered ? meter(gl) : { read: () => ({}) as Record<string, number> };
+    // Only when asked for, as the meter: the census wraps the renderer's own methods.
+    const censused = census ? installCensus(view) : [];
     const lineCounts = view.counts;
     const nativeCalls = (globalThis as { benchNativeCalls?: { layer: number; lineBuild: number } })
       .benchNativeCalls;
@@ -1097,6 +1410,7 @@ async function benchSwf(
     return {
       counts,
       meters,
+      census: censused,
       allocated: 0,
       heap,
       tick,
@@ -1112,6 +1426,7 @@ async function benchSwf(
     return {
       counts: {},
       meters: [],
+      census: [],
       allocated: 0,
       heap: [0, 0],
       tick,
@@ -1158,6 +1473,8 @@ interface Played {
   gpu: string;
   /** Whether the context compiles programs in parallel (KHR_parallel_shader_compile). */
   parallel: boolean;
+  /** Each frame drawn's census, where asked for: see installCensus. */
+  census: Record<string, number>[];
   error: string | null;
 }
 
@@ -1313,6 +1630,7 @@ async function playSwf(
   frames: number,
   resolution: number,
   cpuProfile = false,
+  census = false,
 ): Promise<Played> {
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const steps: PlayedStep[] = [];
@@ -1344,6 +1662,7 @@ async function playSwf(
     gpu = rendererName(gl);
     const parallel = gl.getSupportedExtensions()?.includes("KHR_parallel_shader_compile") ?? false;
     meter.watch(gl);
+    const censused = census ? installCensus(view) : [];
     // As the element's stageSamples: 4 at medium, 8 at high, 16 at best, fewer on a denser canvas.
     const samplesFor = (quality: string) => {
       const samples = quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16;
@@ -1455,6 +1774,7 @@ async function playSwf(
       links,
       gpu,
       parallel,
+      census: censused,
       error: null,
     };
   } catch (e) {
@@ -1469,6 +1789,7 @@ async function playSwf(
       links,
       gpu,
       parallel: false,
+      census: [],
       error: describe(e, null),
     };
   }
