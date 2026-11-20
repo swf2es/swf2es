@@ -165,7 +165,10 @@ function blendDrift(): Uint8Array {
   });
 }
 
-/** The modes of blendFills' columns: multiply, overlay, add, screen, hardlight, darken, lighten, difference, invert. */
+/**
+ * The modes of blendFills' columns: multiply, overlay, add, screen, hard
+ * light, darken, lighten, difference and invert.
+ */
 const FILL_MODES = [3, 13, 8, 4, 14, 6, 5, 7, 10];
 
 // Shapes of several fills that meet, each alone in a blend mode, over a
@@ -502,11 +505,12 @@ function blendFills(): Uint8Array {
 
 export const blendCases: PlayerCase[] = [
   {
-    // Shapes of fills that meet, drawn straight onto what is below where they do not overlap.
+    // Shapes of fills that meet, drawn through their layers on the first frame and, where they do
+    // not overlap, straight onto what is below from the second, once they have stood a frame.
     name: "blend-fills",
     swf: blendFills(),
-    frames: 1,
-    capture: [1],
+    frames: 2,
+    capture: [1, 2],
     // Their edges, anti-aliased otherwise than adl's, as `blend-shapes`': 280 channels past 32,
     // up to 76, in hard light, difference and darken, which turn an edge's shade the most. Two
     // fills that overlap blended one after the other, not as one picture, would add 375.
@@ -514,11 +518,26 @@ export const blendCases: PlayerCase[] = [
     maxOutliers: 300,
   },
   {
+    // The same drawn as the web element draws, a pixel a stage pixel, its edges by multisampling
+    // alone: where two fills meet in a pixel, adl blends each by what it covers, as the samples
+    // drawn straight onto the stage do, not the pixel they make together, as a layer does.
+    name: "blend-fills-host",
+    swf: blendFills(),
+    frames: 2,
+    capture: [2],
+    antialias: true,
+    draw: true,
+    // 220 channels past 48, up to 93: the turned slant's edge and the rows that keep their
+    // layers the most. Through layers, 514; fills that overlap blended one after the other, 508.
+    tolerance: 48,
+    maxOutliers: 260,
+  },
+  {
     // The same multisampled, where each sample of a pixel two fills share blends apart.
     name: "blend-fills-antialias",
     swf: blendFills(),
-    frames: 1,
-    capture: [1],
+    frames: 2,
+    capture: [1, 2],
     antialias: true,
     // As `blend-fills`: 214 channels past 32, up to 69.
     tolerance: 32,
