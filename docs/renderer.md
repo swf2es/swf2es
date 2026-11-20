@@ -142,9 +142,14 @@ have changed:
   an object made a mask there is unflagged at its place (the checked
   mode's first find, on `mask-ancestors` and `avm1-script-masks`).
 
-A context lost and given back drops every span. `BitmapData.draw`'s and
-a 3D object's passes walk from roots of their own into lists of their
-own, and neither read nor write the stage's spans.
+A context lost and given back drops every span. A 3D object's pass and
+`BitmapData.draw`'s walk from roots of their own into lists of their own
+(`Planes.enter`, the view's `drawScene`), and neither read nor write the
+stage's spans nor the frame before's list they name. Spans follow the
+objects' flags, which a stage's walk clears: a view's spans are read only
+where it walked its display list last (`Spans.begin`, by the list's
+topmost object), so several views of one list, as tests make, walk it
+whole each frame.
 
 The spans are kept, so far, only to be checked: the view's `checked`
 option (`RenderView.checkSpans`, which `pnpm test:checked`'s pages set)
@@ -154,7 +159,8 @@ wrote, compares the two entry for entry and row for row
 (`spanDifference`), takes the copy off and throws where they differ,
 naming the object and the first entry and row that differ. An object
 found changed under one whose flags said nothing in it had throws too.
-Off, the view keeps no span and pays nothing. `tests/player/spans.ts`
+Off, the view keeps no span and pays a few field reads and null checks a
+walked object. `tests/player/spans.ts`
 breaks a span on purpose, a drawing changed with no flag set, and sees
 it caught.
 

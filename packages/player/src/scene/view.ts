@@ -26,6 +26,7 @@ import {
   SceneList,
   SHADED,
   SMOOTH,
+  type Span,
   spanDifference,
   Textures,
   WHOLE_ALIASED,
@@ -102,7 +103,10 @@ export interface RenderViewOptions {
    * the frame before would stand for it, the two compared entry for entry
    * and row for row, and an error thrown where they differ, naming the
    * object and where. For tests (`pnpm test:checked`); RenderView.checkSpans
-   * if left out.
+   * if left out. Spans follow the objects' flags, which a walk clears, so
+   * they are read only while this view alone walks its display list: one
+   * walked by another view since (several views of one list, as a test may
+   * make) is walked whole.
    */
   checked?: boolean;
 }
@@ -260,6 +264,9 @@ export class RenderView implements Drawer {
   private drawnQuality = "";
   private readonly drawnInputs = new Float64Array(INPUTS);
   private readonly nowInputs = new Float64Array(INPUTS);
+  /** What BitmapData.draw's passes write (drawAlone), apart from the stage's. */
+  private readonly drawScene = new SceneList();
+  private readonly drawRows = new Rows();
   /** The stage's objects' spans of the scene list, kept where they are checked (`checked`), else none. */
   private readonly spans: Spans | null;
   /**
@@ -517,7 +524,12 @@ export class RenderView implements Drawer {
     // The lists the frame before wrote kept for its spans, this frame's written into others.
     const spans = this.spans;
     if (spans) {
-      const free = spans.begin(this.scene, this.rows, this.keptGeneration);
+      let top = root;
+      while (top.parent) {
+        top = top.parent;
+      }
+
+      const free = spans.begin(this.scene, this.rows, this.keptGeneration, top);
       this.scene = free.scene;
       this.rows = free.rows;
     }
@@ -622,7 +634,7 @@ export class RenderView implements Drawer {
     const rowsFirst = this.rows.count;
     const unkept = this.unkept;
     const spanning = spans !== null && this.spanContext();
-    let kept: { first: number; end: number; rowsFirst: number; rowsEnd: number } | null = null;
+    let kept: Span | null = null;
     if (spans !== null) {
       if (this.checking > 0 && !clean(o)) {
         throw new Error(
@@ -1408,12 +1420,7 @@ export class RenderView implements Drawer {
    * frame that keeps it would copy it, then taken off again; an error,
    * saying where they differ, where they do.
    */
-  private checkSpan(
-    o: DisplayObject,
-    kept: { first: number; end: number; rowsFirst: number; rowsEnd: number },
-    first: number,
-    rowsFirst: number,
-  ): void {
+  private checkSpan(o: DisplayObject, kept: Span, first: number, rowsFirst: number): void {
     const spans = this.spans as Spans;
     const scene = this.scene;
     const rows = this.rows;
@@ -1836,7 +1843,10 @@ export class RenderView implements Drawer {
       return null;
     }
 
+    // Into lists of its own: the stage's hold the frame before's, which its spans name.
     const stage = this.passState();
+    this.scene = this.drawScene;
+    this.rows = this.drawRows;
     this.target = {
       width: width * n,
       height: height * n,

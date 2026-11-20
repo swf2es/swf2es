@@ -42,7 +42,20 @@ export function clean(o: DisplayObject): boolean {
  * the spans name, with the generation each draw's geometry and texture had,
  * so that one let go of since is never named again.
  */
+/** The Spans made, which numbers each. */
+let made = 0;
+
+/**
+ * Each display list's last stage walk, by its topmost object: the Spans of
+ * the view that walked it, and that view's count of walks then. A walk
+ * clears the flags of what it visits, so another view's walk of the same
+ * list since leaves a span unflagged that changed.
+ */
+const lastWalks = new WeakMap<object, { spans: number; walk: number }>();
+
 export class Spans {
+  /** Its number (lastWalks): a number, so that what it spans holds no view. */
+  private readonly id = ++made;
   private readonly spans = new WeakMap<DisplayObject, ObjectSpan>();
   /** The stage's walks begun, the one under way the last. */
   private frame = 0;
@@ -58,13 +71,29 @@ export class Spans {
   private textureGenerations = new Int32Array(1024);
 
   /**
-   * A stage's walk begun into `scene` and `rows`, at kept outputs'
-   * `generation` (the view's scale, quality and screen): the lists the frame
-   * before wrote are kept for its spans, and the ones before those given
-   * back to be written again, as this frame's.
+   * A stage's walk of the display list under `top`, its topmost object,
+   * begun into `scene` and `rows`, at kept outputs' `generation` (the view's
+   * scale, quality and screen): the lists the frame before wrote are kept
+   * for its spans, and the ones before those given back to be written
+   * again, as this frame's. Its spans are read only where this view walked
+   * that list last: another view's walk cleared flags they follow.
    */
-  begin(scene: SceneList, rows: Rows, generation: number): { scene: SceneList; rows: Rows } {
-    this.usable = this.ended && generation === this.generation;
+  begin(
+    scene: SceneList,
+    rows: Rows,
+    generation: number,
+    top: object,
+  ): { scene: SceneList; rows: Rows } {
+    let last = lastWalks.get(top);
+    const mine = last !== undefined && last.spans === this.id && last.walk === this.frame;
+    if (!last) {
+      last = { spans: 0, walk: 0 };
+      lastWalks.set(top, last);
+    }
+
+    last.spans = this.id;
+    last.walk = this.frame + 1;
+    this.usable = this.ended && mine && generation === this.generation;
     this.ended = false;
     this.generation = generation;
     this.frame++;

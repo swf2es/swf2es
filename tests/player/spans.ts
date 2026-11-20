@@ -1,6 +1,9 @@
-// The view's checked mode (docs/renderer.md, "Spans"): a scene that changes
-// as flags say passes it, and a span made stale on purpose, by a change no
-// flag tells of, is caught, the error naming the object and the difference.
+// Spans (docs/renderer.md, "Spans"): a scene that changes as flags say draws
+// as a fresh view draws a twin of it, and passes the checked mode, through
+// BitmapData.draw's passes between frames, a context lost and given back, a
+// mask given mid-run and two views of one display list; a span made stale on
+// purpose, by a change no flag tells of, is caught, the error naming the
+// object and the difference.
 import assert from "node:assert/strict";
 import { withPage } from "./chrome.ts";
 
@@ -52,28 +55,89 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       return String(e?.message ?? e);
     }
   };
-  for (const checked of [true, false]) {
-    const view = new RenderView({ width: 64, height: 64, checked });
+  const pixels = (view) => {
+    const gl = view.gl;
+    const out = new Uint8Array(64 * 64 * 4);
+    gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    return out;
+  };
+  const make = (checked) => new RenderView({ width: 64, height: 64, checked, preserveDrawingBuffer: true });
+  // Drawn by \`view\`, \`s\` as a fresh view draws \`twin\`, which took the same steps.
+  const same = (label, view, s, twin) => {
+    const fresh = make(false);
     try {
-      const { root, clips } = scene();
-      // Changes the flags tell of: a clip moved, a shape drawn anew, one taken out.
-      const steps = [
-        () => {},
-        () => {},
-        () => { clips[1].matrix.tx = 3; clips[1].invalidate(TRANSFORM); },
-        () => { clips[2].children[1].drawing = drawing(0xff00ff00, 12); clips[2].children[1].invalidate(CONTENT); },
-        () => { clips[3].removeChild(clips[3].children[0]); },
-        () => {},
-      ];
-      for (const [i, step] of steps.entries()) {
-        step();
-        const error = thrown(() => view.render(root));
-        if (error) failures.push(checked + ': step ' + i + ' threw ' + error);
+      fresh.render(twin.root);
+      const a = pixels(view);
+      const b = pixels(fresh);
+      if (a.some((v, k) => v !== b[k])) failures.push(label + ': draws otherwise than a fresh view');
+      if (!a.some((v, k) => k % 4 === 2 && v > 128 && a[k - 2] < 128)) failures.push(label + ': drew no blue');
+    } finally {
+      fresh.destroy();
+    }
+  };
+  // Resolved as \`event\` comes to \`view\`'s canvas, or after 10 s as a failure, so a missed one cannot hang the run.
+  const event = (view, name) => new Promise((done) => {
+    const timer = setTimeout(() => { failures.push('no ' + name); done(); }, 10000);
+    view.canvas.addEventListener(name, () => { clearTimeout(timer); setTimeout(done, 0); }, { once: true });
+  });
+  const I = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
+  // What a scene goes through, a step a frame, each taken by the scene and its twin alike.
+  const steps = [
+    ['first', () => {}],
+    ['still', () => {}],
+    ['a clip moved', (s) => { s.clips[1].matrix.tx = 3; s.clips[1].invalidate(TRANSFORM); }],
+    ['a shape drawn anew', (s) => { s.clips[2].children[1].drawing = drawing(0xff00ff00, 12); s.clips[2].children[1].invalidate(CONTENT); }],
+    ['a shape taken out', (s) => { s.clips[3].removeChild(s.clips[3].children[0]); }],
+    ['still again', () => {}],
+    // A later clip made the mask of an earlier one: the mask walker clears its flags first.
+    ['a mask given', (s) => { s.clips[0].setMask(s.clips[3]); }],
+    ['masked, still', () => {}],
+    ['the mask taken back', (s) => { s.clips[0].setMask(null); }],
+    ['unmasked, still', () => {}],
+  ];
+  for (const checked of [true, false]) {
+    const view = make(checked);
+    try {
+      const s = scene();
+      const twin = scene();
+      for (const [name, step] of steps) {
+        step(s);
+        step(twin);
+        const error = thrown(() => view.render(s.root));
+        if (error) failures.push(checked + ', ' + name + ': threw ' + error);
+        same(checked + ', ' + name, view, s, twin);
+      }
+
+      // BitmapData.draw between frames, of another list and of a part of this one: its passes must
+      // not write over the frame before's list, which the spans name.
+      const other = scene();
+      other.clips[0].matrix.tx = 7;
+      other.clips[0].invalidate(TRANSFORM);
+      for (const [name, draw] of [['other', other.root], ['own part', s.clips[2]]]) {
+        view.snapshot(draw, I, 64, 64, 1);
+        const error = thrown(() => view.render(s.root));
+        if (error) failures.push(checked + ', after a draw of ' + name + ': threw ' + error);
+        same(checked + ', after a draw of ' + name, view, s, twin);
+      }
+
+      // A context lost and given back drops every span.
+      const ext = view.gl.getExtension('WEBGL_lose_context');
+      const gone = event(view, 'webglcontextlost');
+      ext.loseContext();
+      await gone;
+      const back = event(view, 'webglcontextrestored');
+      ext.restoreContext();
+      await back;
+      if (checked && view.spans?.ended !== false) failures.push('a context given back kept its spans');
+      for (const name of ['restored', 'restored, still']) {
+        const error = thrown(() => view.render(s.root));
+        if (error) failures.push(checked + ', ' + name + ': threw ' + error);
+        same(checked + ', ' + name, view, s, twin);
       }
 
       // A shape drawn anew with no flag set: its span, and its clip's, are stale.
-      clips[0].children[2].drawing = drawing(0xffff0000, 30);
-      const stale = thrown(() => view.render(root));
+      s.clips[0].children[2].drawing = drawing(0xffff0000, 30);
+      const stale = thrown(() => view.render(s.root));
       if (checked) {
         if (!stale || !/the span of root\\.clip0 \\(Container\\) is stale|the span of root\\.clip0\\.shape2 \\(ShapeObject\\) is stale/.test(stale) || !/entry 0 of the span/.test(stale)) {
           failures.push('stale span not caught as it should be: ' + stale);
@@ -83,11 +147,11 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       }
 
       // A shape marked changed while its clip is not told: what descendantsDirty promises broken.
-      const { root: other, clips: others } = scene();
-      view.render(other);
-      view.render(other);
-      others[3].children[3].dirty |= CONTENT;
-      const untold = thrown(() => view.render(other));
+      const untoldScene = scene();
+      view.render(untoldScene.root);
+      view.render(untoldScene.root);
+      untoldScene.clips[3].children[3].dirty |= CONTENT;
+      const untold = thrown(() => view.render(untoldScene.root));
       if (checked) {
         if (!untold || !/root\\.clip3\\.shape3 \\(ShapeObject\\)/.test(untold) || !/changed/.test(untold)) {
           failures.push('untold change not caught: ' + untold);
@@ -100,9 +164,29 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     }
   }
 
+  // Two views of one display list, each walk clearing flags the other's spans follow.
+  const first = make(true);
+  const second = make(true);
+  try {
+    const s = scene();
+    const twin = scene();
+    for (const [name, step] of steps) {
+      step(s);
+      step(twin);
+      for (const [which, view] of [['first', first], ['second', second]]) {
+        const error = thrown(() => view.render(s.root));
+        if (error) failures.push('two views, ' + which + ', ' + name + ': threw ' + error);
+        same('two views, ' + which + ', ' + name, view, s, twin);
+      }
+    }
+  } finally {
+    first.destroy();
+    second.destroy();
+  }
+
   return failures;
 })()`),
 );
 assert.equal(exception, null, exception ?? "browser exception");
 assert.deepEqual(value, []);
-console.log("spans' checked mode: ok");
+console.log("spans: ok");
