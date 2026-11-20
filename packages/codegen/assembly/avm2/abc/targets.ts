@@ -176,12 +176,12 @@ function sameDepths(
   otherScope: u32,
 ): bool {
   if (stack !== otherStack) {
-    bd.code.fail(C.kStackDepthUnbalancedError);
+    bd.code.failWith(C.kStackDepthUnbalancedError, otherStack, stack);
     return false;
   }
 
   if (scope !== otherScope) {
-    bd.code.fail(C.kScopeDepthUnbalancedError);
+    bd.code.failWith(C.kScopeDepthUnbalancedError, otherScope, scope);
     return false;
   }
 
