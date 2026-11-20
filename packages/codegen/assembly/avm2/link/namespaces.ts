@@ -19,12 +19,13 @@ import {
 } from "./domain";
 
 /**
- * VM_INTERNAL is the last mark of the table an ABC was built with: 42 in
- * the AIR 15 SDK's, which the oracle's playerglobal has, 52 in
- * core/api-versions.h, which the submodule's builtin has. A builtin ABC's
- * highest mark, from 42 up, is its internal one.
+ * VM_INTERNAL is the last mark of the table a library was built with: 52
+ * in core/api-versions.h, which avmplus' builtin and swf2es' playerglobal
+ * have, 42 in the AIR 15 SDK's, which Flash Player's playerglobal has. A
+ * library states its table by its marks: one that marks anything past 42 is
+ * of the newer, whose 42 is SWF_27, and its internal mark is 52.
  */
-const API_FirstInternalMark: i32 = 42;
+const API_OldInternalMark: i32 = 42;
 const API_Count: u32 = 53;
 const API_MinMark: u32 = 0xe294;
 
@@ -53,6 +54,7 @@ export function addNamespaces(dom: Domain, abc: Abc, base: usize, strings: Stati
     }
   }
 
+  const internalMark = highestMark > API_OldInternalMark ? <i32>API_Internal : API_OldInternalMark;
   for (let i: u32 = 1; i < count; i++) {
     const type = namespaceType(pool.nsKind[i]);
     const index = pool.nsName[i];
@@ -67,10 +69,7 @@ export function addNamespaces(dom: Domain, abc: Abc, base: usize, strings: Stati
     if (type === NS_Private) {
       version = API_AllVersions;
     } else if (index && abc.builtin) {
-      if (
-        (mark < 0 && type === NS_Public && dom.versioned[uri]) ||
-        (mark >= API_FirstInternalMark && mark === highestMark)
-      ) {
+      if ((mark < 0 && type === NS_Public && dom.versioned[uri]) || mark >= internalMark) {
         version = API_Internal;
       }
     } else if (index && type === NS_Public) {
