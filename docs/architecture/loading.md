@@ -418,7 +418,10 @@ the script as run, as avmplus does (`Runtime.definitionNamed`, the
 avmplus' public namespace is the caller's: a name of AIR's series or the
 VM's own is not defined to them, as it is not to the code itself, so on
 the web `hasDefinition("flash.desktop.NativeApplication")` is false, as
-in Flash Player's plugin (`air-only.test.ts`).
+in Flash Player's plugin (`air-only.test.ts`). A name in no package is
+looked up at every version, as Flash does: a SWF 9 root's
+`getDefinitionByName("JSON")` finds JSON, of SWF 13, though its code does
+not see it (the corpus's `avm2/appdomain_lookup_edge_cases`).
 
 A SWF the player loads is in the position the oracle's harness puts
 every SWF in, so what the harness could not judge for a main movie, the

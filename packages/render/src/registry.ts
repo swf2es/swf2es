@@ -40,6 +40,11 @@ export class Registry {
     return this.held[id] === true;
   }
 
+  /** The generation `id` has, or had when it was last let go of; 0 for one never handed out. */
+  generation(id: number): number {
+    return this.generations[id] ?? 0;
+  }
+
   /** How many ids there have been, the free ones among them. */
   get size(): number {
     return this.held.length;

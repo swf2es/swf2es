@@ -2509,7 +2509,7 @@ export class Runtime {
    * words it: the local name of the class object's traits, "Name$".
    */
   cantInstantiate(name: string): Value {
-    const colons = name.indexOf("::");
+    const colons = name.lastIndexOf("::");
     return this.error("ArgumentError", 2012, `${colons < 0 ? name : name.slice(colons + 2)}$`);
   }
 
@@ -2756,8 +2756,8 @@ export class Runtime {
   }
 
   /** See definitionNamed in definitions.ts. */
-  definitionNamed(qualified: string, domain: Domain): Value {
-    return definitionNamed(this, qualified, domain);
+  definitionNamed(qualified: string, domain: Domain, versions?: readonly number[] | null): Value {
+    return definitionNamed(this, qualified, domain, versions);
   }
 
   /** See definingAbc in definitions.ts. */
@@ -3797,16 +3797,16 @@ export class Runtime {
     return r;
   }
 
-  get noBody(): Factory {
-    return noBodyFactory(this);
+  noBody(name: string): Factory {
+    return noBodyFactory(this, name);
   }
 
   get unverified(): Factory {
     return unverifiedFactory(this);
   }
 
-  verifyError(id: number): Factory {
-    return verifyErrorFactory(this, id);
+  verifyError(id: number, ...args: Value[]): Factory {
+    return verifyErrorFactory(this, id, args);
   }
 
   isPrimitive(v: Value): boolean {

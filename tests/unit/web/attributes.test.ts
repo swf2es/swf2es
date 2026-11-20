@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  apiVersion,
   parseColor,
   parseFlashVars,
   relativeBase,
@@ -43,6 +44,18 @@ test("relativeurls is page or movie, the page's choice otherwise, else page", ()
   assert.equal(relativeUrls(" page ", "movie"), "page");
   assert.equal(relativeUrls(null, "movie"), "movie");
   assert.equal(relativeUrls("swf", undefined), "page");
+});
+
+test("apiversion is latest, root or a SWF version, the page's choice otherwise, else latest", () => {
+  assert.equal(apiVersion(" Root ", undefined), "root");
+  assert.equal(apiVersion("latest", "root"), "latest");
+  assert.equal(apiVersion("12", undefined), 12);
+  assert.equal(apiVersion(null, 30), 30);
+  for (const word of ["0", "1.5", "-3", "newest", ""]) {
+    assert.equal(apiVersion(word, "root"), "root", word);
+  }
+
+  assert.equal(apiVersion(null, undefined), "latest");
 });
 
 test("base is the SWF's directory for \".\", against the page otherwise, else the page or each SWF's own", () => {

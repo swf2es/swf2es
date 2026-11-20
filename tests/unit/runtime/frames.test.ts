@@ -117,3 +117,25 @@ test("deferred method frames retain their module's code context", () => {
   assert.equal(avm2.siteScript("https://example.test/$f17.js:3:8"), "https://example.test/$f17.js");
   assert.deepEqual(avm2.stackFrames("f@swf2es-42.js/$f17.js:3:8"), ["swf2es-42.js"]);
 });
+
+test("stack trace names are read back from compiled functions' identifiers, one a call", () => {
+  const stack = [
+    "Error",
+    "    at Object.create (runtime.js:10:5)",
+    "    at $_Test$sget$wvalue$u (swf2es-3.js:4:9)",
+    "    at Object.$_Test$sget$wvalue [as get_value] (swf2es-3.js:9:2)",
+    "    at $_Test$$$sx$x00e9 (swf2es-3.js:12:1)",
+    "    at $_Function$s$lanonymous$g (swf2es-3.js:20:3)",
+    "    at cls.$convert (runtime.js:30:1)",
+    "    at $_bad$q (swf2es-3.js:1:1)",
+    "    at $_global$$init (swf2es-3.js:2:1)",
+  ].join("\n");
+  assert.deepEqual(avm2.stackNames(stack), [
+    "Test/get value",
+    "Test$/xé",
+    "Function/<anonymous>",
+    "global$init",
+  ]);
+  // Other engines' frames, "name@site".
+  assert.deepEqual(avm2.stackNames("$_Test@swf2es-1.js:1:2\nhelper@runtime.js:3:4"), ["Test"]);
+});

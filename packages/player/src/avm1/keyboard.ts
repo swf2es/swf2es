@@ -43,7 +43,7 @@ export class Avm1Keyboard implements Keyboard {
       field.fit();
       movie.textChanged(field);
       if (field.avm1) {
-        movie.callback(field.avm1, "broadcastMessage", ["onChanged", field.avm1]);
+        movie.broadcast(field.avm1, "onChanged", [field.avm1]);
       }
 
       movie.queue.run();

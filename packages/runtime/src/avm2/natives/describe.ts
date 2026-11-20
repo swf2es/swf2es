@@ -200,8 +200,7 @@ function describeTraits(rt: Runtime, t: Traits, flags: number): AsObject {
 
   let interfaces: Value = null;
   if (flags & INCLUDE_INTERFACES) {
-    t.settleInterfaces();
-    interfaces = rt.array([...t.interfaces].map((i) => className(i)));
+    interfaces = rt.array([...t.everyInterface()].map((i) => className(i)));
   }
 
   let ctor: Value = null;
@@ -332,11 +331,10 @@ function members(t: Traits, flags: number, apiVersion: number): Member[] {
 
   const found = new Map<string, Member>();
   for (const owner of chain) {
-    owner.settleInterfaces();
     // An interface's namespace has its qualified name as URI, pkg:Name where the traits say pkg::Name.
     const interfaceNames = owner.isInterface
       ? null
-      : new Set([...owner.interfaces].flatMap((i) => [i.name, i.name.replace("::", ":")]));
+      : new Set([...owner.everyInterface()].flatMap((i) => [i.name, i.name.replace("::", ":")]));
     for (const [name, list] of owner.bindings) {
       for (const b of list) {
         if (

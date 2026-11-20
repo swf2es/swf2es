@@ -31,6 +31,29 @@ export const KERNEL = 14;
  */
 export const ALPHA_MASK = -2;
 
+/**
+ * Whether a layer of one flat geometry (GeometryData.flat) in blend mode
+ * `mode` may be drawn straight onto what is below instead: each pixel's
+ * blend of what covers it in part then is that of its layer's pixel, as
+ * adl's is (WebGLBackend.blendDirect).
+ */
+export function blendsDirect(mode: number): boolean {
+  switch (mode) {
+    case ADD:
+    case SCREEN:
+    case MULTIPLY:
+    case LIGHTEN:
+    case DARKEN:
+    case DIFFERENCE:
+    case OVERLAY:
+    case HARDLIGHT:
+    case INVERT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Flash's blend mode names, by their number here. */
 export const BLEND_NAMES = [
   "normal",
@@ -150,6 +173,12 @@ export class SceneList {
    */
   wholes = new Uint8Array(16);
   /**
+   * Whether each layer is drawn as a layer whatever it holds, never straight
+   * onto what is below (WebGLBackend.blendDirect): a blend over what Flash
+   * keeps a bitmap of, which it blends as one picture.
+   */
+  groups = new Uint8Array(16);
+  /**
    * Each whole layer's object, Flash's bitmap of it, uncut by the target:
    * x, y, width and height in target pixels, as measureLayers finds it.
    */
@@ -178,13 +207,61 @@ export class SceneList {
   }
 
   /**
-   * A layer begun, padded for its filters (or -1), over whole units as
-   * `whole` says (wholes), its rectangle none till measured (layerRect):
-   * its number.
+   * Entries `first` to `end` of `from`, draws alone, written after these as
+   * they were, each naming its row `rowShift` on: a span a frame before
+   * wrote, its rows put elsewhere (docs/renderer.md, "Spans"). A boundary
+   * names layers and draws by number, which a span does not move yet.
    */
-  layerBegin(padding = -1, keep = -1, whole = NO_WHOLE): number {
+  appendDraws(from: SceneList, first: number, end: number, rowShift: number): void {
+    const at = this.length;
+    const length = at + end - first;
+    while (length > this.geometry.length) {
+      this.geometry = grow(this.geometry);
+      this.row = grow(this.row);
+      this.blend = grow(this.blend);
+      this.texture = grow(this.texture);
+      this.sampler = grow(this.sampler);
+      this.kind = grow(this.kind);
+    }
+
+    const kinds = from.kind;
+    const rows = from.row;
+    const row = this.row;
+    for (let e = first, to = at; e < end; e++, to++) {
+      if (kinds[e] !== DRAW) {
+        throw new Error(`entry ${e} of a span is no draw, which a span cannot move`);
+      }
+
+      row[to] = rows[e] + rowShift;
+    }
+
+    this.kind.fill(DRAW, at, length);
+    this.geometry.set(from.geometry.subarray(first, end), at);
+    this.blend.set(from.blend.subarray(first, end), at);
+    this.texture.set(from.texture.subarray(first, end), at);
+    this.sampler.set(from.sampler.subarray(first, end), at);
+    this.length = length;
+  }
+
+  /**
+   * The entries from `length` on taken off, as draws written only to be
+   * compared are: draws alone, as a layer begun among them would stay
+   * counted.
+   */
+  truncate(length: number): void {
+    this.length = length;
+  }
+
+  /**
+   * A layer begun, padded for its filters (or -1), over whole units as
+   * `whole` says (wholes), drawn as a layer whatever it holds where
+   * `grouped` (groups), its rectangle none till measured (layerRect): its
+   * number.
+   */
+  layerBegin(padding = -1, keep = -1, whole = NO_WHOLE, grouped = false): number {
     const layer = this.newLayer(padding, keep);
     this.wholes[layer] = whole;
+    this.groups[layer] = grouped ? 1 : 0;
     this.push(LAYER_BEGIN, layer, 0, 0, -1, 0);
     this.open.push(layer);
     return layer;
@@ -214,6 +291,7 @@ export class SceneList {
       this.layers = grow(this.layers);
       this.pads = grow(this.pads);
       this.wholes = grow(this.wholes);
+      this.groups = grow(this.groups);
       const objects = new Float64Array(this.objects.length * 2);
       objects.set(this.objects);
       this.objects = objects;
@@ -226,6 +304,7 @@ export class SceneList {
 
     this.pads[layer] = padding;
     this.wholes[layer] = NO_WHOLE;
+    this.groups[layer] = 0;
     this.keeps[layer] = keep;
     this.parents[layer] = this.open.at(-1) ?? -1;
     this.layerRect(layer, 0, 0, 0, 0);

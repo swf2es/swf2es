@@ -7,6 +7,7 @@ import {
   ALPHA_MASK,
   BLEND,
   BLEND_NAMES,
+  blendsDirect,
   CLAMP,
   Commands,
   FILL_SHADER,
@@ -25,6 +26,8 @@ import {
   SceneList,
   SHADED,
   SMOOTH,
+  type Span,
+  spanDifference,
   Textures,
   WHOLE_ALIASED,
   WHOLE_SMOOTH,
@@ -66,6 +69,7 @@ import { Parts } from "./parts.js";
 import { Planes, planeUnchanged } from "./planes.js";
 import { bindCanvasPointer } from "./pointer.js";
 import { unsupported } from "./shapes.js";
+import { clean, Spans } from "./spans.js";
 import { StaleShapes } from "./stale-shapes.js";
 import { deviceTextResolution, fieldItems, staticItems, type TextOmissions } from "./text.js";
 import { placedRow, TextItems } from "./text-items.js";
@@ -93,6 +97,18 @@ export interface RenderViewOptions {
   fillTessellator?: FillTessellator;
   /** Samples a pixel the stage and its layers are multisampled with (`samples`); 1, none, if left out. */
   samples?: number;
+  /**
+   * Whether each object's span of the scene list (Spans) is checked: walked
+   * in full, as a frame with no spans would walk it, where a span kept from
+   * the frame before would stand for it, the two compared entry for entry
+   * and row for row, and an error thrown where they differ, naming the
+   * object and where. For tests (`pnpm test:checked`); RenderView.checkSpans
+   * if left out. Spans follow the objects' flags, which a walk clears, so
+   * they are read only while this view alone walks its display list: one
+   * walked by another view since (several views of one list, as a test may
+   * make) is walked whole.
+   */
+  checked?: boolean;
 }
 
 /** No transform, where a walk starts. */
@@ -131,6 +147,8 @@ interface PassState {
  * while drawn; then plans the frame and has the backend draw it.
  */
 export class RenderView implements Drawer {
+  /** Whether views made from here on check their spans where not told (RenderViewOptions' `checked`). */
+  static checkSpans = false;
   readonly canvas: HTMLCanvasElement;
   readonly gl: WebGL2RenderingContext;
   /** View pixels a stage pixel, before the resolution: a host showing the stage larger. */
@@ -193,6 +211,12 @@ export class RenderView implements Drawer {
   private sliceOwner: DisplayObject | null = null;
   private ownerSlice: Slice | null = null;
   private ownerParent: number[] = [1, 0, 0, 1];
+  /**
+   * The object the blend layer being walked holds alone, at the end of its
+   * chain of only children (soleChild): a part of several fills it draws
+   * may be drawn without the layer, as if the blend were its own.
+   */
+  private soleBlended: DisplayObject | null = null;
   /** The outputs kept: filtered objects' (FilterLayers) and 3D objects' bitmaps (Planes). */
   private readonly keeps = new Keeps();
   /** Moves on as what every kept output was made at changes: the scale, the stage's quality. */
@@ -240,6 +264,18 @@ export class RenderView implements Drawer {
   private drawnQuality = "";
   private readonly drawnInputs = new Float64Array(INPUTS);
   private readonly nowInputs = new Float64Array(INPUTS);
+  /** What BitmapData.draw's passes write (drawAlone), apart from the stage's. */
+  private readonly drawScene = new SceneList();
+  private readonly drawRows = new Rows();
+  /** The stage's objects' spans of the scene list, kept where they are checked (`checked`), else none. */
+  private readonly spans: Spans | null;
+  /**
+   * What the walk met that a span does not follow, counted as it is met: an
+   * object's span stands for it only where its walk counted none (plain).
+   */
+  private unkept = 0;
+  /** The spans being checked, a walk of each under way (checkSpan). */
+  private checking = 0;
 
   constructor(options: RenderViewOptions) {
     // First, so that a page that cannot run the render module throws before a context is made.
@@ -267,6 +303,7 @@ export class RenderView implements Drawer {
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
+    this.spans = (options.checked ?? RenderView.checkSpans) ? new Spans() : null;
     // None of a context made lost, till it is restored.
     this.textureLimit = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number | null) ?? 0;
 
@@ -292,6 +329,7 @@ export class RenderView implements Drawer {
   /** The context came back: the backend made again, and every texture added again as it is drawn. */
   private readonly restored = () => {
     this.drawnRoot = null;
+    this.spans?.drop();
     this.backend.restore(this.geometries);
     this.textures.lost();
     this.keeps.lost();
@@ -459,11 +497,9 @@ export class RenderView implements Drawer {
       // Drawing on with the context it has: the outputs the frame given up on was to keep were
       // never all drawn, and are drawn again.
       this.keeps.lost();
+      this.spans?.drop();
     }
 
-    this.scene.reset();
-    this.rows.reset();
-    this.filters.reset();
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
     const target = this.target;
     target.width = this.gl.drawingBufferWidth;
@@ -485,6 +521,23 @@ export class RenderView implements Drawer {
       this.keptGeneration++;
     }
 
+    // The lists the frame before wrote kept for its spans, this frame's written into others.
+    const spans = this.spans;
+    if (spans) {
+      let top = root;
+      while (top.parent) {
+        top = top.parent;
+      }
+
+      const free = spans.begin(this.scene, this.rows, this.keptGeneration, top);
+      this.scene = free.scene;
+      this.rows = free.rows;
+    }
+
+    this.scene.reset();
+    this.rows.reset();
+    this.filters.reset();
+
     // The outlines' store started again between frames, before it fills: not in a walk, where the
     // quads drawn before would name runs it let go of (text/saffron.ts, allowResets).
     if (saffronStore.used > MOST * 0.75) {
@@ -492,12 +545,14 @@ export class RenderView implements Drawer {
     }
 
     allowResets(false);
+    this.checking = 0;
     try {
       this.walkFrom(root);
     } finally {
       allowResets(true);
     }
 
+    spans?.end(this.scene, this.geometries, this.textures);
     if (this.highlight) {
       this.drawHighlight(this.highlight);
     }
@@ -571,6 +626,37 @@ export class RenderView implements Drawer {
     if (hidden) {
       syncHidden(o, this.snapshotting);
       return;
+    }
+
+    // Where its span begins, and whether one is kept for it (Spans): counted unkept unless plain.
+    const spans = this.spans;
+    const first = this.scene.length;
+    const rowsFirst = this.rows.count;
+    const unkept = this.unkept;
+    const spanning = spans !== null && this.spanContext();
+    let kept: Span | null = null;
+    if (spans !== null) {
+      if (this.checking > 0 && !clean(o)) {
+        throw new Error(
+          `the span of an object above ${describe(o)} was taken as unchanged, but it changed`,
+        );
+      }
+
+      // Plain now, as well as when its span was written: a mask walked before its place on the
+      // list had its flags cleared there (Masks.walkMask), and becomes no plain object unflagged.
+      const isPlain = plain(o);
+      if (!isPlain) {
+        this.unkept++;
+      }
+
+      const s =
+        spanning && isPlain && clean(o)
+          ? spans.kept(o, this.places, this.walkDepth * 6, tint, this.geometries, this.textures)
+          : null;
+      if (s) {
+        kept = { first: s.first, end: s.end, rowsFirst: s.rowsFirst, rowsEnd: s.rowsEnd };
+        this.checking++;
+      }
     }
 
     // Its parent's transform from the stack of them, where its own goes for its children: numbers
@@ -721,6 +807,11 @@ export class RenderView implements Drawer {
         : WHOLE_SMOOTH;
     let layerRow = -1;
     let layer = -1;
+    // A blend over what Flash keeps a bitmap of, it or the chain of only children it holds, where
+    // that is fills that meet: Flash blends the bitmap as one picture, which the fills drawn
+    // straight onto what is below would not be, each blended by what it covers
+    // (WebGLBackend.blendDirect, SceneList.groups). One fill or a bitmap draws alike either way.
+    const grouped = !hidden && blendsDirect(mode) && cachedChain(o) && severalFills(o);
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
     // Its filters run before its alpha mask is applied, as Flash masks the bitmap they make: then in
@@ -769,13 +860,17 @@ export class RenderView implements Drawer {
         // once its filters are fitted to that.
         drawnFrom = this.scene.length;
         const keep = output?.keeping ? (output.handle as KeepHandle).id : -1;
-        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole);
+        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole, grouped);
       }
     }
 
     // Drawn in its pass, which walked all in it, its flags cleared: walked here no further. Else
-    // walked hidden, to clear them.
+    // walked hidden, to clear them. What it holds is drawn into its bitmap, never straight onto
+    // what is below a blend around it (soleBlended).
+    const sole = this.soleBlended;
+    this.soleBlended = plane ? null : sole;
     const passed = plane && this.drawPlane(o, full, pa, pb, pc, pd, ptx, pty);
+    this.soleBlended = sole;
     hidden ||= plane;
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -826,12 +921,31 @@ export class RenderView implements Drawer {
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
       // Read once for the object, not for each textured part.
       const smoothing = this.smoothing;
+      // A layer of a part of several fills alone, its own or an ancestor's that holds it alone,
+      // drawn without the layer where they do not overlap (WebGLBackend.blendDirect): looked into
+      // only then, as it tessellates them again.
+      const alone =
+        ((layer >= 0 && blendsDirect(mode) && !grouped) ||
+          (mode === NORMAL && o === this.soleBlended && !clipped)) &&
+        !filtering &&
+        !alphaMask &&
+        !r &&
+        !childful &&
+        layers.length === 1 &&
+        layers[0].strokes.length === 0;
+
       for (let i = 0; i < layers.length; i++) {
-        for (const part of this.parts.partsOf(layers[i], version)) {
+        const parts = this.parts.partsOf(layers[i], version);
+        if (alone && parts.length === 1) {
+          this.parts.markFlat(o, layers[i], parts[0]);
+        }
+
+        for (const part of parts) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(part.handle.id);
           // A shader fill's draw names its kernel's chain of the frame's filters.
           if (part.paint?.type === "shader") {
+            this.unkept++;
             if (row < 0) {
               row = this.rows.addPlaced(this.places, at + 6, color);
             }
@@ -843,7 +957,9 @@ export class RenderView implements Drawer {
 
           const textured = part.paint !== null || part.mesh !== null;
           const texture = textured ? this.paints.paintTexture(part) : null;
+          // Its bitmap still to come, which no flag will tell of.
           if (textured && !texture) {
+            this.unkept++;
             continue;
           }
 
@@ -949,7 +1065,9 @@ export class RenderView implements Drawer {
                 opaque,
                 layerLines,
               );
+        // Stroked to nothing, or not built, which a later frame tries again.
         if (!lines && !pieces?.length) {
+          this.unkept++;
           continue;
         }
 
@@ -984,6 +1102,7 @@ export class RenderView implements Drawer {
           this.geometries.use(handle.id);
           const texture = part.paint ? this.paints.paintTexture(part) : null;
           if (part.paint && !texture) {
+            this.unkept++;
             continue;
           }
 
@@ -1142,6 +1261,23 @@ export class RenderView implements Drawer {
       const owner = this.sliceOwner;
       const ownerSlice = this.ownerSlice;
       const ownerParent = this.ownerParent;
+      // A clip in a blend mode that draws nothing but one child, as a SWF blends its art: that
+      // child's fills may be drawn without the clip's layer, as a blend set on it would be. A layer,
+      // mask, scroll rectangle or 3D plane on the way between leaves that layer more than them.
+      const soleBlended = this.soleBlended;
+      if (layer >= 0 || clipped || alphaMask || r || plane) {
+        this.soleBlended =
+          layer >= 0 &&
+          blendsDirect(mode) &&
+          !grouped &&
+          !filtering &&
+          !alphaMask &&
+          !r &&
+          !o.drawing?.layers.length
+            ? soleChild(o)
+            : null;
+      }
+
       this.sliceOwner = ownSlice ? o : null;
       this.ownerSlice = ownSlice;
       if (ownSlice) {
@@ -1159,6 +1295,10 @@ export class RenderView implements Drawer {
           for (; open > n; open--) {
             this.masks.popMask(this.scene);
           }
+        }
+
+        if (child.clipDepth > 0) {
+          this.unkept++;
         }
 
         if (child.clipDepth > 0 && !hidden) {
@@ -1187,6 +1327,7 @@ export class RenderView implements Drawer {
       this.sliceOwner = owner;
       this.ownerSlice = ownerSlice;
       this.ownerParent = ownerParent;
+      this.soleBlended = soleBlended;
       for (; open > 0; open--) {
         this.masks.popMask(this.scene);
       }
@@ -1234,10 +1375,74 @@ export class RenderView implements Drawer {
       this.masks.popMask(this.scene);
     }
 
+    if (kept) {
+      this.checking--;
+      this.checkSpan(o, kept, first, rowsFirst);
+    }
+
+    if (spanning && this.unkept === unkept) {
+      (spans as Spans).record(
+        o,
+        first,
+        this.scene.length,
+        rowsFirst,
+        this.rows.count,
+        this.places,
+        depth * 6,
+        tint,
+      );
+    }
+
     this.walkDepth--;
     // A draw for BitmapData leaves them for the stage's.
     if (!this.snapshotting) {
       o.dirty = CLEAN;
+    }
+  }
+
+  /**
+   * Whether the walk is where spans are kept: the stage's, and not inside an
+   * alpha mask, a sliced owner or a blend's only child, whose objects draw
+   * by more than their own flags and transform.
+   */
+  private spanContext(): boolean {
+    return (
+      this.drawRoot === null &&
+      !this.inAlphaMask &&
+      this.sliceOwner === null &&
+      this.soleBlended === null
+    );
+  }
+
+  /**
+   * `o`'s span `kept` from the frame before, compared with what its walk
+   * just wrote, from entry `first` and row `rowsFirst`: copied after it as a
+   * frame that keeps it would copy it, then taken off again; an error,
+   * saying where they differ, where they do.
+   */
+  private checkSpan(o: DisplayObject, kept: Span, first: number, rowsFirst: number): void {
+    const spans = this.spans as Spans;
+    const scene = this.scene;
+    const rows = this.rows;
+    const walked = { first, end: scene.length, rowsFirst, rowsEnd: rows.count };
+    const at = scene.length;
+    const rowsAt = rows.append(spans.rows, kept.rowsFirst, kept.rowsEnd);
+    scene.appendDraws(spans.scene, kept.first, kept.end, rowsAt - kept.rowsFirst);
+    const copied = { first: at, end: scene.length, rowsFirst: rowsAt, rowsEnd: rows.count };
+    const difference = spanDifference(
+      "the span kept from the frame before",
+      scene,
+      rows,
+      copied,
+      "the walk",
+      scene,
+      rows,
+      walked,
+    );
+    scene.truncate(at);
+    rows.truncate(rowsAt);
+    if (difference) {
+      throw new Error(`the span of ${describe(o)} is stale: ${difference}`);
     }
   }
 
@@ -1638,7 +1843,10 @@ export class RenderView implements Drawer {
       return null;
     }
 
+    // Into lists of its own: the stage's hold the frame before's, which its spans name.
     const stage = this.passState();
+    this.scene = this.drawScene;
+    this.rows = this.drawRows;
     this.target = {
       width: width * n,
       height: height * n,
@@ -1789,6 +1997,82 @@ export class RenderView implements Drawer {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
+}
+
+/**
+ * The object at the end of `o`'s chain of only children, those between
+ * drawing nothing of their own, if it has no children itself; else null.
+ */
+function soleChild(o: Container): DisplayObject | null {
+  let c: DisplayObject = o;
+  while (
+    c instanceof Container &&
+    c.children.length === 1 &&
+    (c === o || !c.drawing?.layers.length)
+  ) {
+    c = c.children[0];
+  }
+
+  return c === o || (c instanceof Container && c.children.length > 0) ? null : c;
+}
+
+/** Whether Flash keeps a bitmap of `o` or of one in its chain of only children (cached). */
+function cachedChain(o: DisplayObject): boolean {
+  let c = o;
+  while (!cached(c)) {
+    if (!(c instanceof Container) || c.children.length !== 1) {
+      return false;
+    }
+
+    c = c.children[0];
+  }
+
+  return true;
+}
+
+/**
+ * Whether what `o` holds alone, at the end of its chain of only children,
+ * draws a layer of several fills, which drawing straight onto what is
+ * below blends otherwise than Flash's kept bitmap of them.
+ */
+function severalFills(o: DisplayObject): boolean {
+  const leaf = o instanceof Container && o.children.length > 0 ? soleChild(o) : o;
+  const layers = leaf?.drawing?.layers ?? (leaf instanceof ShapeObject ? leaf.shape?.layers : null);
+  return !!layers?.some((layer) => layer.fills.length > 1);
+}
+
+/**
+ * Whether what `o` draws of its own follows its flags, its transform and
+ * its colour alone, which its span keeps (Spans): a container, a shape or a
+ * bitmap, with no filter, blend, mask, scroll rectangle, 9-slice grid, 3D
+ * transform, bitmap cache, clip depth, nor a mask's part to play. Text,
+ * video and the rest draw by more, and are walked.
+ */
+function plain(o: DisplayObject): boolean {
+  return (
+    (o instanceof ShapeObject
+      ? o.stale === null
+      : o instanceof Container || o instanceof BitmapObject) &&
+    o.filters.length === 0 &&
+    o.blendMode === "normal" &&
+    o.mask === null &&
+    o.maskOf === null &&
+    o.scroll === null &&
+    o.scale9Grid === null &&
+    o.space === null &&
+    o.clipDepth === 0 &&
+    !o.cachedAsBitmap
+  );
+}
+
+/** `o` as an error names it: the names, or else the indices, of it and its ancestors. */
+function describe(o: DisplayObject): string {
+  const path: string[] = [];
+  for (let p: DisplayObject | null = o; p; p = p.parent) {
+    path.push(p.name || (p.parent ? `[${p.parent.children.indexOf(p)}]` : "root"));
+  }
+
+  return `${path.reverse().join(".")} (${o.constructor.name})`;
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */

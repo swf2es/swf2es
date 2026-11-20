@@ -1,6 +1,6 @@
 {
   "name": "@swf2es/web",
-  "version": "0.1.31",
+  "version": "0.1.33",
   "description": "Plays SWFs on any web page: the <swf2es-player> element, replaceFlash and ExternalInterface",
   "keywords": [
     "swf",
@@ -24,6 +24,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.ts",
+      "default": "./dist/plugin.js"
     }
   },
   "files": [

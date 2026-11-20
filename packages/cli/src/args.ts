@@ -51,3 +51,28 @@ export function parse<T extends { values: { help?: boolean; version?: boolean } 
 
   return parsed;
 }
+
+/**
+ * --api's value, as the player's apiVersion takes it: "latest" (the
+ * default), "root", or a SWF version, a whole number from 1; a usage error
+ * of `command`'s for anything else, and for "root" where `root` is false.
+ */
+export function apiVersionArgument(
+  value: string | undefined,
+  command: string,
+  root = true,
+): "latest" | "root" | number {
+  const word = (value ?? "latest").trim().toLowerCase();
+  if (word === "latest" || (root && word === "root")) {
+    return word;
+  }
+
+  if (/^\d+$/.test(word) && Number(word) >= 1) {
+    return Number(word);
+  }
+
+  usageError(
+    `--api takes ${root ? "root, latest" : "latest"} or a SWF version, not ${JSON.stringify(value)}`,
+    command,
+  );
+}

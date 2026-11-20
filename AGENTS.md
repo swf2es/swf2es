@@ -27,7 +27,8 @@ pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit, conformance, library, program, fuzz, player, web, site, packaging and
                  # desktop tests (needs podman or docker, and Chrome; CHROME names another
                  # browser; the desktop's are skipped without Electron's binary)
-pnpm test:checked # the same with every array access bounds-checked
+pnpm test:checked # the same with every array access bounds-checked, and the player's
+                  # shortcuts and the renderer's spans checked against full walks
 pnpm dlx knip                 # unused files, exports and dependencies (knip.json); before
                               # removing anything, see "Code generated code calls" below
 pnpm determinism              # each module the same however it is compiled, and each method
@@ -45,6 +46,8 @@ pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests
                               # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
+node oracle/flash.ts --root file.swf [frames, 2 at least]   # what it traces run as the
+                              # application's content, at its own version: traces only, AS3 only
 node tests/player/run.ts [--shard i/n] [case...]   # the player's cases in Chrome vs Flash's
                               # frames (--shard: every n-th from the i-th, as CI splits them)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
@@ -81,12 +84,14 @@ node tests/player/leak.ts [--loads N] [--snapshots DIR] [mode...]   # load SWFs 
                               # Chrome, unloaded or, as a game's gear, dropped (dropped, shared,
                               # churn); the heap after a full collection must stay bounded, and
                               # codegen's memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]   # AOT:
-                              # the player's modules for the SWF, their logs and a manifest (by default
-                              # against the libraries the player ships; `compile` may be left out)
-node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
-                              # ABCs after builtin and shell_toplevel (the command's own by default),
-                              # their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]
+                              [--api latest|root|<SWF version>]   # AOT: the player's modules for the
+                              # SWF, their logs and a manifest (by default against the libraries the
+                              # player ships, at the latest API version; `compile` may be left out)
+node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...] [--api <SWF version>]
+                              # avmshell in node: the ABCs after builtin and shell_toplevel (the
+                              # command's own by default), their output on stdout, avmshell's exit
+                              # status; --api runs them at a SWF version's API version, as -api
 node packages/cli/dist/main.js types file.swf [-o file.ts] [--air] [--name prefix]   # TypeScript
                               # declarations of a SWF's or an ABC's classes over the player's libraries'
 node packages/cli/dist/main.js help [command]   # the commands, or one's options
@@ -155,6 +160,12 @@ node tests/player/bench.ts --swf file.swf [--frames N] [--resolution R] [--gpu] 
                               # it: frame times and the frames that overran one of its frames,
                               # each with what the renderer did then (links, first draws, uploads,
                               # filter passes, morphs) and, profiled, where its time went
+node tests/player/bench.ts [scene | --swf file.swf] --census [--gpu] [--json]   # the renderer's
+                              # census of each frame: sub-draws by path, fill runs' lengths and what
+                              # ended them, repeats instancing would take, blend layers by content
+                              # and unchanged, objects walked against changed (docs/renderer.md)
+node tests/player/census-check.ts   # the census's counts add up to GL's sub-draws on masks and
+                              # blends, with and without multi-draw (part of pnpm test)
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh
                               # ratios, --allocs samples allocation, --counts counts native calls

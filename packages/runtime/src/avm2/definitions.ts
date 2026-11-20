@@ -54,10 +54,16 @@ function classIn(
  * again, its error coming through each time, where a name's lookup by
  * code keeps it as run, as avmplus does. Seen at user code's version, as
  * avmplus' public namespace is the caller's: a name of the other series'
- * or the VM's own is not defined, as it is not to the code itself.
+ * or the VM's own is not defined, as it is not to the code itself; or at
+ * `versions`, null for every version.
  */
-export function definitionNamed(rt: Runtime, qualified: string, domain: Domain): Value {
-  const mn = qualifiedNameIn(rt, qualified, domain, rt.userVersions);
+export function definitionNamed(
+  rt: Runtime,
+  qualified: string,
+  domain: Domain,
+  versions: readonly number[] | null = rt.userVersions,
+): Value {
+  const mn = qualifiedNameIn(rt, qualified, domain, versions);
   const script = rt.findScript(mn);
   if (!script) {
     throw rt.error("ReferenceError", 1065, mn.name);

@@ -40,7 +40,12 @@ function swf2es(...args: string[]) {
 }
 
 /** The modules the player compiles for `swf` as its main movie: the libraries' first. */
-async function playerModules(swf: Uint8Array, libs: Uint8Array[], air = false): Promise<string[]> {
+async function playerModules(
+  swf: Uint8Array,
+  libs: Uint8Array[],
+  air = false,
+  apiVersion: "latest" | "root" | number = "latest",
+): Promise<string[]> {
   const modules: string[] = [];
   const codegen = await createCodegen(wasm);
   const recording: Codegen = Object.create(codegen);
@@ -50,7 +55,11 @@ async function playerModules(swf: Uint8Array, libs: Uint8Array[], air = false): 
     return module;
   };
 
-  const scripting = new Scripting(recording, { air });
+  const scripting = new Scripting(recording, {
+    air,
+    apiVersion,
+    swfVersion: readSwf(swf).header.version,
+  });
   await scripting.loadLibraries(libs);
   await scripting.code.link(readSwf(swf), scripting.mainDomain, "", {} as Library);
   return modules;
@@ -177,6 +186,45 @@ test("with --air, the command's modules are an AIR player's, keyed apart", { ski
   assert.ok([...keys(air)].every((key) => !keys(web).has(key)));
 });
 
+test("with --api, the command's modules are a player's at that version", { skip }, async () => {
+  const libs = libraryAbcs(`${out}libraries/`);
+  const libPaths = libraryFiles(`${out}libraries/`);
+  const versioned = cases.find((c) => c.name === "versioned-isplaying");
+  assert.ok(versioned);
+  const abc = compileScripts([versioned.script as string], `${out}scripts-api`).get(
+    versioned.script as string,
+  ) as Uint8Array;
+  // A SWF 12 root.
+  const swf = (versioned.swf as (abc: Uint8Array) => Uint8Array)(abc);
+  mkdirSync(`${out}swfs`, { recursive: true });
+  const path = `${out}swfs/versioned.swf`;
+  writeFileSync(path, swf);
+
+  const root = await playerModules(swf, libs, false, "root");
+  assertSame(cliModules(path, libPaths, "versioned-root", "--api", "root"), root);
+  assertSame(cliModules(path, libPaths, "versioned-12", "--api", "12"), root);
+  assertSame(
+    cliModules(path, libPaths, "versioned-air", "--api", "root", "--air"),
+    await playerModules(swf, libs, true, "root"),
+  );
+  // At the latest, the class's own isPlaying is an override without the word.
+  const latest = swf2es(
+    path,
+    "-o",
+    `${out}aot/versioned-latest/`,
+    "-q",
+    ...libPaths.flatMap((l) => ["--lib", l]),
+  );
+  assert.equal(latest.status, 1);
+  assert.match(latest.stderr, /VerifyError #1053/);
+  const apiVersion = (name: string) =>
+    JSON.parse(readFileSync(`${out}aot/${name}/manifest.json`, "utf8")).apiVersion;
+  assert.deepEqual(
+    ["versioned-root", "versioned-12", "versioned-air"].map(apiVersion),
+    [12, 12, 13],
+  );
+});
+
 test("the command's modules are the player's for as3pb's ABC", { skip }, async () => {
   // avmshell's libraries, which as3pb's code links against.
   const libs = libraries(["builtin", "shell_toplevel"], `${out}shell/`).map((l) => l.abc);
@@ -263,6 +311,17 @@ test("the command explains what it cannot do", () => {
 
   // An output that cannot be written is an error, not a stack.
   refused(write("ok2.abc", abc), /cannot write .*lib\.abc: (EEXIST|ENOTDIR)/, "-o", lib);
+
+  // --api: a version that does not read, and root for an ABC, which has no header.
+  for (const [args, message] of [
+    [["--api", "0"], /--api takes root, latest or a SWF version, not "0"/],
+    [["--api", "newest"], /--api takes root, latest or a SWF version/],
+    [["--api", "root"], /an ABC, whose version --api root has no header to take/],
+  ] as const) {
+    const r = swf2es(write("ok3.abc", abc), "--lib", lib, ...args);
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, message);
+  }
 });
 
 test("an AVM1 SWF compiles to one module of its action blocks, without libraries", async () => {
@@ -310,4 +369,7 @@ test("an AVM1 SWF compiles to one module of its action blocks, without libraries
   assert.equal(air.status, 2);
   assert.match(air.stderr, /AVM1 SWF, which --air does not apply to/);
   assert.ok(!existsSync(`${out}avm1-air/manifest.json`));
+  const api = swf2es(path, "-o", `${out}avm1-api/`, "-q", "--api", "root");
+  assert.equal(api.status, 2);
+  assert.match(api.stderr, /AVM1 SWF, which --api does not apply to/);
 });

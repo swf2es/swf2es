@@ -273,6 +273,15 @@ export class GeometryAtlas {
     }
 
     geometries.updated.length = 0;
+    // Found flat: what is added after reads it from its data.
+    for (const id of geometries.flattened) {
+      const place = this.places[id];
+      if (place) {
+        place.flat = geometries.get(id)?.flat === true;
+      }
+    }
+
+    geometries.flattened.length = 0;
     let vertices = 0;
     let indices = 0;
     let glyphVertices = 0;

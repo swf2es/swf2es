@@ -18,7 +18,7 @@
       "entry": ["src/main.ts", "src/service-worker.ts"]
     },
     "packages/swf2es": {
-      "entry": ["src/swf2es.ts", "src/worker.ts"]
+      "entry": ["src/swf2es.ts", "src/worker.ts", "src/plugin.ts"]
     },
     "tests/bench": {
       "entry": ["**/*.ts"]

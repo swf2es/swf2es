@@ -1625,6 +1625,52 @@ function avm1Script(name: string, version: number): Uint8Array {
   });
 }
 
+// A SWF 5 movie that loads SWF 6, 7 and 8 movies into its clips, each
+// asking for the next (avm1/loaded-broadcasters.as and its -child.as).
+function avm1LoadedBroadcasters(): PlayerCase {
+  const source = (name: string) =>
+    readFileSync(new URL(`../avm1/${name}.as`, import.meta.url), "utf8");
+  const movie = (version: number, code: string, tags: Uint8Array[] = []) =>
+    w.swf({
+      version,
+      width: 40,
+      height: 40,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        ...(version >= 8 ? [w.fileAttributes(false)] : []),
+        w.backgroundColor(0xffffff),
+        ...tags,
+        w.doAction([...script(code, version)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const versions = [6, 7, 8];
+  const clips = [
+    w.sprite(1, 1, [w.showFrame(), w.end()]),
+    ...versions.map((v, i) => w.place({ depth: i + 1, character: 1, name: `clip${v}` })),
+  ];
+  const files: Record<string, Uint8Array> = { "loaded-broadcasters-empty.swf": movie(7, "") };
+  for (const v of versions) {
+    files[`loaded-broadcasters-${v}.swf`] = movie(
+      v,
+      `var swf = ${v};\n${source("loaded-broadcasters-child")}`,
+    );
+  }
+
+  return {
+    name: "avm1-loaded-broadcasters",
+    swf: movie(5, source("loaded-broadcasters"), clips),
+    files,
+    traced: true,
+    frames: 24,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  };
+}
+
 function avm1Drawing(version: number): Uint8Array {
   return w.swf({
     version,
@@ -1766,6 +1812,270 @@ var t = new Sound(this);
 t.setVolume(60); t.setVolume(undefined); trace("clip undefined " + t.getVolume());
 s.setVolume(100); s.setPan(0);`;
   return avm1Swf(version, [], [[as1(source, version)]]);
+}
+
+// Sounds of clips in movies that an AVM1 movie in an AS3 Loader loads, whose
+// code runs under a `_lockroot` clip, set by the loader's onLoadInit for the
+// first and by the movie itself for the second (scripts/Avm1SoundLockroot.as):
+// in adl a Sound of a clip there finds its clip, though the clip's path names
+// the movie's root `_root` and the code's `_root` is the clip locked. A game
+// loaded so plays its effects on its clips, and fades music by its clip.
+function avm1SoundLockroot(): Record<string, Uint8Array> {
+  const version = 8;
+  const samples = 2756; // half a second at 5.5 kHz
+  const pcm = new Uint8Array(samples);
+  for (let i = 0; i < samples; i++) {
+    pcm[i] = 128 + ((i >> 3) & 1 ? 20 : -20);
+  }
+
+  const movie = (frames: Uint8Array[][], extra: Uint8Array[] = []) =>
+    w.swf({
+      version,
+      width: 40,
+      height: 40,
+      frameRate: 24,
+      frameCount: frames.length,
+      tags: [
+        w.fileAttributes(false),
+        ...extra,
+        ...frames.flatMap((tags) => [...tags, w.showFrame()]),
+        w.end(),
+      ],
+    });
+  const child = (tag: string, lock: boolean) =>
+    movie(
+      [
+        lock ? [as1("this._lockroot = true;", version)] : [],
+        [
+          as1(
+            `var tag = "${tag}";
+createEmptyMovieClip("snd", 5);
+trace(tag + " root " + _root + " " + this._lockroot + " snd " + snd);
+s = new Sound(snd);
+s.attachSound("loop");
+s.start();
+trace(tag + " duration " + s.duration + " volume " + s.getVolume());
+s.setVolume(30);
+trace(tag + " volume " + s.getVolume() + " " + new Sound(snd).getVolume() + " " + new Sound(_root.snd).getVolume());
+s.onSoundComplete = function () { trace(tag + " complete " + s.position); };`,
+            version,
+          ),
+        ],
+        [as1("stop();", version)],
+      ],
+      [w.defineSound(1, { rate: 0, samples }, pcm), w.exportAssets([[1, "loop"]])],
+    );
+  const parent = movie([
+    [
+      as1(
+        `var mcl = new MovieClipLoader();
+mcl.addListener({ onLoadInit: function (t) { if (t._name == "a") { t._lockroot = true; } trace("init " + t._name); } });
+createEmptyMovieClip("a", 1);
+createEmptyMovieClip("b", 2);
+mcl.loadClip("avm1-sound-lockroot-a.swf", a);
+var n = 0;
+onEnterFrame = function () {
+  n++;
+  if (n == 20) { mcl.loadClip("avm1-sound-lockroot-b.swf", b); }
+};`,
+        version,
+      ),
+    ],
+  ]);
+  return {
+    "avm1-sound-lockroot-parent.swf": parent,
+    "avm1-sound-lockroot-a.swf": child("a", false),
+    "avm1-sound-lockroot-b.swf": child("b", true),
+  };
+}
+
+// What a Sound's target finds, in a movie an AS3 Loader holds
+// (scripts/Avm1SoundTargets.as), in adl: a clip's path, found again each
+// time, through a rename, a clip made where it was and a variable; a removed
+// clip's reference, which names nothing, nor a clip made later where it was;
+// and a string's `_root` under a `_lockroot` clip, which is the movie's root,
+// as a clip's path's is, not the clip locked, by dots or slashes, whenever the
+// Sound was made and however the clip is locked since. (The string of a
+// removed clip's reference, once a clip is made where it was, is not
+// Flash's, so it is not traced.)
+function avm1SoundTargets(): Uint8Array {
+  const version = 8;
+  const locker = `this._lockroot = true;
+createEmptyMovieClip("snd", 5);
+var s = new Sound(snd);
+s.setVolume(30);
+trace("L root " + _root + " snd " + snd + " vol " + s.getVolume() + " " + new Sound(_root.snd).getVolume() + " str " + new Sound("_root.snd").getVolume() + " " + new Sound("snd").getVolume() + " full " + new Sound(String(snd)).getVolume() + " this " + new Sound(this).getVolume() + " slash " + new Sound("_root/lk/snd").getVolume());
+this._lockroot = false;
+trace("L unlocked root " + _root + " vol " + s.getVolume() + " str " + new Sound("_root.snd").getVolume() + " full " + new Sound(String(snd)).getVolume());
+var q = new Sound("_root.lk.snd");
+this._lockroot = true;
+trace("L relocked " + q.getVolume() + " " + s.getVolume());
+stop();`;
+  const main = `createEmptyMovieClip("a", 1);
+a.createEmptyMovieClip("mc", 1);
+var s = new Sound(a.mc);
+s.setVolume(40);
+trace("A " + a.mc + " " + s.getVolume() + " this " + new Sound(this).getVolume() + " global " + new Sound().getVolume() + " level0 " + typeof _level0);
+a.mc._name = "mc2";
+trace("B renamed " + s.getVolume() + " " + new Sound(a.mc2).getVolume());
+a.createEmptyMovieClip("mc", 2);
+trace("B new same name " + s.getVolume());
+new Sound(a.mc).setVolume(50);
+trace("B set " + s.getVolume() + " " + new Sound(a.mc2).getVolume());
+a.mc.removeMovieClip();
+trace("C removed " + s.getVolume());
+a.mc = a.mc2;
+trace("C variable " + s.getVolume());
+delete a.mc;
+trace("C deleted " + s.getVolume());
+var c = a.mc2;
+a.mc2.removeMovieClip();
+var r = new Sound(c);
+trace("D dead [" + c + "] " + r.getVolume());
+createEmptyMovieClip("mc2", 7);
+new Sound(mc2).setVolume(55);
+trace("D top " + r.getVolume());
+a.createEmptyMovieClip("mc2", 3);
+new Sound(a.mc2).setVolume(77);
+trace("D remade " + r.getVolume());
+mc2.removeMovieClip();
+trace("D top gone " + r.getVolume());
+var e = a.mc2;
+a.mc2.removeMovieClip();
+var u = new Sound(e);
+a.createEmptyMovieClip("mc2", 4);
+new Sound(a.mc2).setVolume(66);
+trace("F made dead then remade [" + e + "] " + u.getVolume());
+a._name = "z";
+trace("G parent renamed " + u.getVolume() + " " + new Sound(e).getVolume() + " " + new Sound(z.mc2).getVolume());
+stop();`;
+  return avm1Swf(
+    version,
+    [w.sprite(10, 2, [w.showFrame(), as1(locker, version), w.showFrame(), w.end()])],
+    [[w.place({ depth: 20, character: 10, name: "lk" })], [as1(main, version)], []],
+  );
+}
+
+// Whose library attachSound looks a name up in: an AVM1 movie in an AS3
+// Loader (scripts/Avm1SoundLibrary.as) exports "ploop", and the movie it
+// loads into its clip `holder` exports "cloop". In adl, a Sound finds the
+// exports of the movie its clip belongs to, whichever movie's code made it:
+// the child's code finds "ploop" by a Sound of the parent's clip, and the
+// parent's code "cloop" by one of the child's. The global Sound finds
+// nothing in a movie a Loader holds. A Sound made of `holder` once the
+// child fills it finds no clip from the parent's code, as Flash names that
+// root by its AS3 path, `_level0.instance1…`, which the main movie's code
+// cannot follow; one made before the load does. Any loaded movie's code
+// follows it: the child's own, and that of the grandchild ("gloop") the
+// child loads into its clip `g`, whose root the child finds by a Sound too.
+function avm1SoundLibrary(): Record<string, Uint8Array> {
+  const version = 8;
+  const sound = (samples: number) => {
+    const pcm = new Uint8Array(samples);
+    for (let i = 0; i < samples; i++) {
+      pcm[i] = 128 + ((i >> 3) & 1 ? 20 : -20);
+    }
+
+    return w.defineSound(1, { rate: 0, samples }, pcm);
+  };
+  const movie = (name: string, samples: number, frames: string[]) =>
+    w.swf({
+      version,
+      width: 40,
+      height: 40,
+      frameRate: 24,
+      frameCount: frames.length,
+      tags: [
+        w.fileAttributes(false),
+        sound(samples),
+        w.exportAssets([[1, name]]),
+        ...frames.flatMap((source) => [
+          ...(source === "" ? [] : [as1(source, version)]),
+          w.showFrame(),
+        ]),
+        w.end(),
+      ],
+    });
+  // Each row a Sound of the target, or the global one for null: the duration it attached, and
+  // its volume, which a Sound that finds its clip has.
+  const rows = (who: string, targets: [string, string][], names = ["cloop", "ploop"]) =>
+    `function d(label, target, name) {
+  var s = target == null ? new Sound() : new Sound(target);
+  s.attachSound(name);
+  trace("${who} " + label + " " + name + " " + s.duration + " " + s.getVolume());
+}
+${targets.flatMap(([label, target]) => names.map((name) => `d("${label}", ${target}, "${name}");`)).join("\n")}`;
+  const grand = movie("gloop", 1378, [
+    "",
+    `${rows(
+      "grand",
+      [
+        ["own-root", "this"],
+        ["parent-root", "_parent"],
+      ],
+      ["gloop", "cloop"],
+    )}
+stop();`,
+  ]);
+  const child = movie("cloop", 2756, [
+    "",
+    `createEmptyMovieClip("inner", 3);
+${rows("child", [
+  ["own-clip", "inner"],
+  ["own-root", "this"],
+  ["parent-clip", "_parent.plocal"],
+  ["parent-root", "_parent"],
+  ["own-root-named", "_parent.holder"],
+  ["global", "null"],
+])}
+createEmptyMovieClip("g", 4);
+new MovieClipLoader().loadClip("avm1-sound-library-grand.swf", g);
+var k = 0;
+onEnterFrame = function () {
+  k++;
+  if (k == 8) {
+    ${rows("child", [["grand-root", "g"]], ["gloop", "cloop"]).replace(/\n/g, "\n    ")}
+    delete onEnterFrame;
+  }
+};
+stop();`,
+  ]);
+  const parent = movie("ploop", 5512, [
+    `createEmptyMovieClip("holder", 1);
+createEmptyMovieClip("plocal", 2);
+${rows("parent", [
+  ["own-clip", "plocal"],
+  ["own-root", "this"],
+  ["global", "null"],
+])}
+var early = new Sound(holder);
+var mcl = new MovieClipLoader();
+mcl.loadClip("avm1-sound-library-child.swf", holder);
+var n = 0;
+onEnterFrame = function () {
+  n++;
+  if (n == 6) {
+    ${rows("parent", [
+      ["child-clip", "holder.inner"],
+      ["child-root", "holder"],
+      ["own-clip", "plocal"],
+      ["own-root", "this"],
+      ["global", "null"],
+    ]).replace(/\n/g, "\n    ")}
+    early.attachSound("cloop");
+    trace("parent early cloop " + early.duration + " " + early.getVolume());
+  }
+  if (n == 16) {
+    ${rows("parent", [["grand-root", "holder.g"]], ["gloop", "cloop"]).replace(/\n/g, "\n    ")}
+    delete onEnterFrame;
+  }
+};`,
+  ]);
+  return {
+    "avm1-sound-library-parent.swf": parent,
+    "avm1-sound-library-child.swf": child,
+    "avm1-sound-library-grand.swf": grand,
+  };
 }
 
 // Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
@@ -3705,19 +4015,46 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
       maxOutliers: 0,
     }),
   ),
-  ...["array", "string", "number", "math", "classes", "broadcaster", "globals", "date"].flatMap(
-    (name) =>
-      [5, 6, 7, 8, 10].map(
-        (version): PlayerCase => ({
-          name: `avm1-${name}-swf${version}`,
-          swf: avm1Script(name, version),
-          traced: true,
-          frames: 2,
-          capture: [],
-          tolerance: 0,
-          maxOutliers: 0,
-        }),
-      ),
+  ...[
+    "array",
+    "string",
+    "number",
+    "math",
+    "classes",
+    "broadcaster",
+    "globals",
+    "date",
+    "devices",
+    "movieclip-loader",
+  ].flatMap((name) =>
+    [5, 6, 7, 8, 10].map(
+      (version): PlayerCase => ({
+        name: `avm1-${name}-swf${version}`,
+        swf: avm1Script(name, version),
+        traced: true,
+        frames: 2,
+        capture: [],
+        tolerance: 0,
+        maxOutliers: 0,
+        // The flags it clears on MovieClipLoader's prototype stay cleared for the next SWF in
+        // the same adl, which shares AVM1's globals.
+        alone: name === "movieclip-loader",
+      }),
+    ),
+  ),
+  avm1LoadedBroadcasters(),
+  // Alone: Flash keeps what a connected stream adds to NetStream's prototype.
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-netstream-swf${version}`,
+      swf: avm1Script("netstream", version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+      alone: true,
+    }),
   ),
   ...[5, 6, 7, 8].map(
     (version): PlayerCase => ({
@@ -3866,6 +4203,36 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
       maxOutliers: 0,
     }),
   ),
+  {
+    name: "avm1-sound-targets",
+    swf: bare,
+    script: "Avm1SoundTargets",
+    files: { "avm1-sound-targets-movie.swf": avm1SoundTargets() },
+    frames: 12,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-sound-library",
+    swf: bare,
+    script: "Avm1SoundLibrary",
+    files: avm1SoundLibrary(),
+    frames: 24,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-sound-lockroot",
+    swf: bare,
+    script: "Avm1SoundLockroot",
+    files: avm1SoundLockroot(),
+    frames: 45,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   ...[5, 6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-depths-swf${version}`,

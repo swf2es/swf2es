@@ -74,6 +74,7 @@ import { constructBlocks, ScriptClips } from "./clips.js";
 import { lazyBlocks } from "./compile.js";
 import { ExternalCalls } from "./external.js";
 import { type FocusHost, FocusTracker } from "./focus.js";
+import { accessibilityObject } from "./globals/Accessibility.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
@@ -94,6 +95,7 @@ import {
   targetOf,
 } from "./globals/MovieClip.js";
 import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
+import { cameraClass, microphoneClass, netStreamClass, videoClass } from "./globals/media.js";
 import { netConnectionClass, Remoting } from "./globals/NetConnection.js";
 import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
@@ -104,6 +106,7 @@ import { styleSheetClass } from "./globals/StyleSheet.js";
 import { systemObject } from "./globals/System.js";
 import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
+import { textPackage } from "./globals/TextRenderer.js";
 import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
 import { type XmlNodes, xmlNodeClass, serialize as xmlString } from "./globals/XMLNode.js";
@@ -645,12 +648,16 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define(
       "LocalConnection",
       localConnectionClass(this, xml, xmlNodes),
-      avm1.DONT_ENUM | avm1.VERSION_6,
+      avm1.DONT_ENUM,
     );
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     realm.global.define("NetConnection", netConnectionClass(this, this.remoting), avm1.DONT_ENUM);
+    realm.global.define("NetStream", netStreamClass(realm, this.remoting), avm1.DONT_ENUM);
+    realm.global.define("Camera", cameraClass(realm), avm1.DONT_ENUM);
+    realm.global.define("Microphone", microphoneClass(realm), avm1.DONT_ENUM);
     const flash = flashPackage(this);
+    flash.define("text", textPackage(realm), 0);
     flash.define("net", fileReferenceClasses(this), 0);
     const external = new avm1.Avm1Object(realm.objectProto);
     external.define("ExternalInterface", externalInterfaceClass(this.external), 0);
@@ -682,6 +689,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const menus = contextMenuClasses(realm);
     realm.global.define("ContextMenu", menus.ContextMenu, avm1.DONT_ENUM);
     realm.global.define("ContextMenuItem", menus.ContextMenuItem, avm1.DONT_ENUM);
+    realm.global.define("Video", videoClass(realm), avm1.DONT_ENUM);
+    realm.global.define("Accessibility", accessibilityObject(realm), avm1.DONT_ENUM);
     realm.global.define(
       "System",
       systemObject(
@@ -988,7 +997,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
       field.toldScroll = now;
       if (field.avm1 && !this.removed(field)) {
-        this.callback(field.avm1, "broadcastMessage", ["onScroller", field.avm1]);
+        this.broadcast(field.avm1, "onScroller", [field.avm1]);
       }
     }
 
@@ -1294,8 +1303,13 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       field.toldScroll = field.scrollState();
     }
 
-    const version = this.swfVersion;
+    const version = avm1.broadcastVersion(this.swfVersion);
     avm1.initializeBroadcaster(face, this.rt.realm, version);
+    // A SWF 5 field hears none of its own changes or scrolls in Flash.
+    if (this.swfOf(field).version < 6) {
+      return;
+    }
+
     const listeners = avm1.get(face, "_listeners", version);
     if (listeners instanceof avm1.Avm1Object) {
       avm1.set(listeners, "0", face, version);
@@ -1425,7 +1439,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     this.timers.begin();
     try {
-      this.callback(stage, "broadcastMessage", ["onResize"]);
+      this.broadcast(stage, "onResize", []);
       this.queue.run();
     } finally {
       this.timers.end();
@@ -1461,6 +1475,20 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
     if (cx !== null) {
       this.rt.callMethod(cx, o, name, args, this.swfVersion);
+    }
+  }
+
+  /**
+   * `o`'s broadcastMessage of `name` with `args`, as a callback: at the
+   * player's broadcast version, so that its listeners in the SWF 6 movies
+   * a SWF 5 movie loads hear it; at `least` for a class of a later SWF,
+   * whose broadcaster is hidden below it.
+   */
+  broadcast(o: avm1.Avm1Object, name: string, args: Value[], least = 0): void {
+    const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
+    if (cx !== null) {
+      const version = Math.max(avm1.broadcastVersion(this.swfVersion), least);
+      this.rt.callMethod(cx, o, "broadcastMessage", [name, ...args], version);
     }
   }
 

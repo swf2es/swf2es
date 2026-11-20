@@ -405,18 +405,15 @@ export class Symbols {
         case "flash.display::Loader":
           return new Container();
         // What reaches it past the classes above only the player makes: DisplayObject,
-        // InteractiveObject, DisplayObjectContainer, Stage and TextLine are abstract and
-        // restricted, so a script's subclass of one is refused too, by its own name.
+        // InteractiveObject, DisplayObjectContainer, Stage and TextLine; a timeline's
+        // MorphShape and StaticText; an AVM1 SWF's load's AVM1Movie (requestLoad). A
+        // script's subclass of one is refused before this, as restricted
+        // (abstract-classes.ts), or cannot be, the class being final.
         case "flash.display::DisplayObject":
-          throw this.s.rt.cantInstantiate(traits.name);
-        // Only a timeline makes a MorphShape or a StaticText.
         case "flash.display::MorphShape":
-          throw this.s.rt.error("ArgumentError", 2012, "MorphShape$");
         case "flash.text::StaticText":
-          throw this.s.rt.error("ArgumentError", 2012, "StaticText$");
-        // Only a load of an AVM1 SWF makes one (requestLoad).
         case "flash.display::AVM1Movie":
-          throw this.s.rt.error("ArgumentError", 2012, "AVM1Movie$");
+          throw this.s.rt.cantInstantiate(traits.name);
         case "flash.display::Bitmap":
           return new BitmapObject(null);
         case "flash.media::Video":

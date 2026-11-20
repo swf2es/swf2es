@@ -36,9 +36,16 @@ export interface PlayerJob {
   /** Played as AIR plays it, AIR's API defined (Scripting's `air`). */
   air?: boolean;
   /**
+   * The API version it runs at (Scripting's `apiVersion`): the latest by
+   * default; "root", its own SWF version's, as Flash runs everything at its
+   * root's; or another SWF version's (run.ts pins its cases to the oracle's
+   * harness's).
+   */
+  apiVersion?: "latest" | "root" | number;
+  /**
    * Every frame drawn, as a host draws it, at the stage's size and no
    * larger, and waited for: a benchmark's frames then take their drawing's
-   * time as Flash's do (players.ts). No frame is captured.
+   * time as Flash's do (players.ts). A frame captured is drawn so too.
    */
   draw?: boolean;
   /** getTimer and timers by the wall clock, as a benchmark times itself, not by the frames. */
@@ -366,6 +373,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               socket: job.socket,
               lazyCompilation: job.lazyCompilation,
               air: job.air,
+              apiVersion: job.apiVersion,
               draw: job.draw,
               realTime: job.realTime,
             })})`,
@@ -431,6 +439,8 @@ export interface BenchResult {
   counts: Record<string, number>;
   /** Each frame's draw calls, state changes, uploads and readbacks (page.ts, meter). */
   meters: Record<string, number>[];
+  /** Each frame's renderer census, with `census` (page.ts, installCensus; census.ts). */
+  census: Record<string, number>[];
   /** Bytes allocated in the frames' tick and render, sampled, with `allocs`. */
   allocated: number;
   heap: [number, number];
@@ -453,6 +463,14 @@ export interface BenchResult {
     pathNumbers: number;
   };
 }
+
+/** WEBGL_multi_draw hidden from the page, which then draws as where there is none, as in Firefox. */
+const HIDE_MULTI_DRAW = `{
+  const getExtension = WebGL2RenderingContext.prototype.getExtension;
+  WebGL2RenderingContext.prototype.getExtension = function (name) {
+    return name === "WEBGL_multi_draw" ? null : getExtension.call(this, name);
+  };
+}`;
 
 /** How benchPlayer plays: see page.ts's benchSwf, and bench.ts's options of the same names. */
 export interface BenchOptions {
@@ -484,6 +502,8 @@ export interface BenchOptions {
   metered?: boolean;
   /** Count morph cache activity; with metered, count fill and line kernel calls too. */
   morphMetrics?: boolean;
+  /** Each frame's renderer census taken (census). */
+  census?: boolean;
   /** Alternate built modules for comparisons while keeping the same harness. */
   mounts?: [string, string][];
   /**
@@ -550,6 +570,7 @@ export function benchPlayer(
     clock = false,
     metered = false,
     morphMetrics = false,
+    census = false,
     mounts,
     multiDraw = true,
   } = options;
@@ -557,12 +578,7 @@ export function benchPlayer(
     "benchSwf",
     async (evaluate, send, _fresh, listen) => {
       if (!multiDraw) {
-        await evaluate(`{
-          const getExtension = WebGL2RenderingContext.prototype.getExtension;
-          WebGL2RenderingContext.prototype.getExtension = function (name) {
-            return name === "WEBGL_multi_draw" ? null : getExtension.call(this, name);
-          };
-        }`);
+        await evaluate(HIDE_MULTI_DRAW);
       }
 
       if (morphMetrics && metered) {
@@ -600,7 +616,7 @@ export function benchPlayer(
       }
 
       const answer = evaluate<BenchResult>(
-        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${clock}, ${metered}, ${morphMetrics})`,
+        `benchSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${idleRenders}, ${toggle}, ${antialias}, ${toggleEvery}, ${pace}, ${!!cpuProfilePath}, ${finishEvery}, ${hover}, true, ${clock}, ${metered}, ${morphMetrics}, ${census})`,
       );
       // The page waits, renderer alive, once its frames are done, for what they left to be measured.
       let retained = { heap: 0, buffers: 0 };
@@ -653,6 +669,7 @@ export function benchPlayer(
         value ?? {
           counts: {},
           meters: [],
+          census: [],
           allocated: 0,
           heap: [0, 0],
           retained: { heap: 0, buffers: 0 },
@@ -692,6 +709,7 @@ export interface PlayResult {
   links: { step: number; ms: number }[];
   gpu: string;
   parallel: boolean;
+  census: Record<string, number>[];
   error: string | null;
 }
 
@@ -709,12 +727,27 @@ export function playPlayer(
     mounts?: [string, string][];
     /** Sample the whole play in Chrome's profiler, written here. */
     cpuProfilePath?: string;
+    /** Each frame drawn's renderer census taken (page.ts, installCensus). */
+    census?: boolean;
+    /** False hides WEBGL_multi_draw, as BenchOptions.multiDraw. */
+    multiDraw?: boolean;
   } = {},
 ): Promise<PlayResult> {
-  const { gpu = false, resolution = 1, mounts, cpuProfilePath } = options;
+  const {
+    gpu = false,
+    resolution = 1,
+    mounts,
+    cpuProfilePath,
+    census = false,
+    multiDraw = true,
+  } = options;
   return withPage(
     "playSwf",
     async (evaluate, send, _fresh, listen) => {
+      if (!multiDraw) {
+        await evaluate(HIDE_MULTI_DRAW);
+      }
+
       let written: Promise<void> | null = null;
       if (cpuProfilePath) {
         await send("Profiler.enable");
@@ -728,7 +761,7 @@ export function playPlayer(
       }
 
       const { value, exception } = await evaluate<PlayResult>(
-        `playSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${resolution}, ${!!cpuProfilePath})`,
+        `playSwf(${JSON.stringify(Buffer.from(swf).toString("base64"))}, ${frames}, ${resolution}, ${!!cpuProfilePath}, ${census})`,
       );
       if (value && !value.error && written) {
         await written;
@@ -746,6 +779,7 @@ export function playPlayer(
           links: [],
           gpu: "",
           parallel: false,
+          census: [],
           error: exception ?? "no result",
         }
       );

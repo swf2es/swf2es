@@ -31,7 +31,7 @@ const source = `package {
     public function DesktopCapture() {
       camera = Camera.getCamera(); mic = Microphone.getMicrophone();
       trace("capture devices", camera != null, mic != null);
-      trace("capture names before", Camera.names.join("") == "", Microphone.names.join("") == "");
+      trace("capture names before", placeholders(Camera.names, "Camera"), placeholders(Microphone.names, "Microphone"));
       addEventListener(Event.ENTER_FRAME, names);
       if (!camera || !mic) return;
       camera.addEventListener(StatusEvent.STATUS, status);
@@ -47,8 +47,15 @@ const source = `package {
       mic.rate = 44; mic.setSilenceLevel(0);
       mic.addEventListener(SampleDataEvent.SAMPLE_DATA, samples);
     }
+    private function placeholders(names:Array, kind:String):Boolean {
+      for (var i:int = 0; i < names.length; i++) {
+        if (names[i] != (i == 0 ? kind : kind + " " + (i + 1))) return false;
+      }
+      return names.length > 0;
+    }
     private function names(e:Event):void {
-      if (Camera.names.join("") != "" && Microphone.names.join("") != "") {
+      if (Camera.names.length > 0 && Microphone.names.length > 0 &&
+          !placeholders(Camera.names, "Camera") && !placeholders(Microphone.names, "Microphone")) {
         trace("capture names after", true, true);
         removeEventListener(Event.ENTER_FRAME, names);
       }

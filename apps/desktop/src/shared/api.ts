@@ -117,10 +117,18 @@ export interface LibraryState {
   playerglobal: string | null;
 }
 
+/**
+ * The API version the SWFs play at, as the player's apiVersion takes it:
+ * "latest", "root", or a root of that SWF version's.
+ */
+export type ApiVersion = "latest" | "root" | number;
+
 /** What the page starts from: the libraries, and the SWF to play, if one is open. */
 export interface StartState {
   /** The user's opt-in; changing it restarts the page. */
   stage3D: boolean;
+  /** --api-version's, for this run. */
+  apiVersion: ApiVersion;
   libraries: LibraryState;
   movie: OpenedMovie | null;
   /** The app's build, a short commit, for the context menu's About item; null where unknown. */

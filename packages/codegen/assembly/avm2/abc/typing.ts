@@ -358,6 +358,11 @@ export function typeAt(bd: BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32, sco
     }
     case ops.OP_getouterscope: {
       const outer = bd.outer;
+      // avmplus names the index only where nothing was captured (Verifier.cpp).
+      if (outer.size === 0) {
+        return bd.failWith(C.kGetScopeObjectBoundsError, a);
+      }
+
       if (a >= outer.size) {
         return bd.fail(C.kGetScopeObjectBoundsError);
       }

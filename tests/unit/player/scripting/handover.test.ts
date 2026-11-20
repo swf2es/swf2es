@@ -92,7 +92,7 @@ function counted(codegen: Codegen): { codegen: Codegen; modules: string[]; logge
 /** Plays `swf` for a frame: its traces, the modules it compiled, and what a worker it started was handed. */
 async function play(
   swf: Uint8Array,
-  options: { host?: boolean; handed?: HandedModules | null } = {},
+  options: { host?: boolean; handed?: HandedModules | null; apiVersion?: number } = {},
 ): Promise<{
   lines: string[];
   compiled: string[];
@@ -114,6 +114,7 @@ async function play(
     realTime: null,
     workerHost: options.host ? host : null,
     handedModules: options.handed ?? null,
+    apiVersion: options.apiVersion,
   });
   await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
   await new Player(swf, scripting).start();
@@ -150,6 +151,27 @@ test("a worker on the primordial's SWF loads its modules and compiles none", { s
   primordial.scripting.destroy();
   fresh.scripting.destroy();
   worker.scripting.destroy();
+});
+
+test("a worker takes no modules compiled at another API version than its own", {
+  skip,
+}, async () => {
+  const swf = workerSwf("Versioned");
+  // SWF 26's version, Flash Player's SWF_26 (40), which has Worker; its
+  // workers run at the latest, as adl runs them.
+  const primordial = await play(swf, { host: true, apiVersion: 26 });
+  const handed = primordial.handed as HandedModules | null;
+  assert.ok(handed);
+  assert.equal(handed.apiVersion, 40);
+
+  const at = await play(swf, { handed, apiVersion: 26 });
+  assert.deepEqual(at.compiled, []);
+  const latest = await play(swf, { handed });
+  assert.equal(latest.compiled.length, handed.modules.length);
+
+  primordial.scripting.destroy();
+  at.scripting.destroy();
+  latest.scripting.destroy();
 });
 
 test("a worker on other ABCs takes the libraries' modules only", { skip }, async () => {
@@ -189,19 +211,20 @@ test("a module that did not load is not handed", () => {
   recorder.compiled(0, 1, { text: "a" }, "");
   recorder.op("add false 1", 1);
   recorder.compiled(1, 1, { text: "b" }, "");
-  recorder.freeze(["x", "y"]);
+  recorder.freeze(["x", "y"], 50);
   recorder.forget(1);
   assert.deepEqual(
-    recorder.handed([])?.modules.map(([at]) => at),
+    recorder.handed([], 50)?.modules.map(([at]) => at),
     [1],
   );
 
   recorder.drop();
-  assert.equal(recorder.handed([]), null);
+  assert.equal(recorder.handed([], 50), null);
 });
 
 test("a log that does not replay fails every later use of the worker's compiler", () => {
   const handover = new ModuleHandover({
+    apiVersion: 50,
     ops: ["add true 0", "compile 0"],
     hashes: ["x"],
     modules: [[1, { module: "m", log: "bad" }]],

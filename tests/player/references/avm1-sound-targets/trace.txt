@@ -1,0 +1,16 @@
+L root _root.lk snd _root.lk.snd vol 30 30 str undefined 30 full 30 this 100 slash 30
+L unlocked root _root vol 30 str undefined full 30
+L relocked 30 30
+A _root.a.mc 40 this 100 global 100 level0 undefined
+B renamed undefined 40
+B new same name 100
+B set 50 40
+C removed undefined
+C variable 40
+C deleted undefined
+D dead [] undefined
+D top undefined
+D remade undefined
+D top gone undefined
+F made dead then remade [_root.a.mc2] undefined
+G parent renamed undefined undefined 66

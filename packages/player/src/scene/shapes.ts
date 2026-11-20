@@ -66,6 +66,15 @@ export interface PartPaint {
 
 export interface Part extends PartPaint {
   geometry: GeometryData;
+  /**
+   * The layer's fills a part of several holds, from the index `fillsFrom`
+   * up to `fillsTo`, each of them in it: flat only if they do not overlap,
+   * which is found out only for a part drawn alone in a blend mode
+   * (Parts.markFlat). Left out for a part of one fill, or of fills with
+   * others between that it leaves out.
+   */
+  fillsFrom?: number;
+  fillsTo?: number;
 }
 
 const WHITE = 0xffffffff;
@@ -124,8 +133,13 @@ class Gathered {
   private corners = 0;
   private paint: ImageFill | GradientFill | ShaderPaint | null = null;
   private region: Area | null = null;
-  /** The fills in the part open, which is flat (GeometryData.flat) with one alone. */
+  /** The fills in the part open: flat (GeometryData.flat) with one alone. */
   private fills = 0;
+  /** The index in the layer of the part open's first fill and of its last. */
+  private firstFill = 0;
+  private lastFill = 0;
+  /** Whether a fill the part open leaves out came between two it holds. */
+  private gapped = false;
 
   /**
    * Open a part for `paint`, the one open first closed, unless both are
@@ -160,9 +174,9 @@ class Gathered {
   /**
    * A fill's triangles in the part open, in room reserve made: its
    * `vertices` in `color`, sampling where `how` puts them, and its
-   * `indices`, which count from `offset`. The loops are over the arrays
-   * themselves: a call a vertex and a triangle showed in a drawing made
-   * again on every frame.
+   * `indices`, which count from `offset`: the layer's fill `fill`. The
+   * loops are over the arrays themselves: a call a vertex and a triangle
+   * showed in a drawing made again on every frame.
    */
   add(
     vertices: Float32Array | Float64Array,
@@ -170,6 +184,7 @@ class Gathered {
     offset: number,
     color: number,
     how: Sampling | null,
+    fill: number,
   ): void {
     const first = this.vertices;
     const count = vertices.length >> 1;
@@ -201,6 +216,13 @@ class Gathered {
 
     this.vertices = first + count;
     this.corners = corners + length;
+    if (this.fills === 0) {
+      this.firstFill = fill;
+    } else if (fill !== this.lastFill + 1) {
+      this.gapped = true;
+    }
+
+    this.lastFill = fill;
     this.fills++;
   }
 
@@ -240,6 +262,8 @@ class Gathered {
 
       const indices = new Uint32Array(buffer, at, corners);
       indices.set(scratchIndices.subarray(0, corners));
+      const several = this.fills > 1;
+      const looked = several && !this.gapped;
       this.parts.push({
         geometry: {
           positions,
@@ -248,17 +272,20 @@ class Gathered {
           depths,
           indices,
           // One fill's triangles cover each point of it once; fills of a drawing may overlap.
-          flat: this.fills === 1,
+          flat: !several,
         },
         paint: this.paint,
         region: this.region,
         mesh: null,
+        fillsFrom: looked ? this.firstFill : undefined,
+        fillsTo: looked ? this.lastFill + 1 : undefined,
       });
     }
 
     this.vertices = 0;
     this.corners = 0;
     this.fills = 0;
+    this.gapped = false;
   }
 }
 
@@ -437,7 +464,7 @@ function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boo
     if (geometry && geometry.vertices.length > 0) {
       const { vertices, indices, indexOffset = 0 } = geometry;
       out.reserve(vertices.length / 2, indices.length);
-      out.add(vertices, indices, indexOffset, color, how);
+      out.add(vertices, indices, indexOffset, color, how, i);
     }
   }
 

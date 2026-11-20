@@ -65,6 +65,31 @@ The browser implementation lives in `@swf2es/player-hosts`:
 permission is granted. The desktop page uses the same implementation; it
 differs only in who answers the permission (section 6).
 
+Flash never names a device with an empty string: `names` holds the
+devices' names, or nothing where there is no device. Content relies on
+it, testing `names[0]` and sending `names` on to a server, which may
+refuse an empty field. So until consent gives a device its label, the
+host names it by its kind and its position among that kind's devices:
+`Camera`, `Camera 2` and so on, and `Microphone`, `Microphone 2`. The
+natives name a blank device of any host the same way
+(`packages/player/src/media/capture-devices.ts`), so a custom host
+cannot give `[""]` either. The browser host reads the devices again
+after a grant (its own `getUserMedia`, a capture that opens, or the
+desktop shell's answer), on `devicechange`, and when a permission's
+state changes, and the labels replace the placeholders. It stops
+listening when the player is destroyed (`CaptureHost.release`).
+
+The positions are what `getCamera` and `getMicrophone` take, and a
+`Camera` or `Microphone` already got is kept by its index and reads its
+name from that position. While the order of the devices holds, as when
+consent only labels them, it keeps its device and gets its real name. A
+device plugged in or out can reorder the list; an object got before
+then still opens the device it was given, while its `name` and the
+index's new device may differ. Keying the objects by device id would
+not help: the browser hides the ids before consent too, so the id of
+the object got before consent changes with it, while `getCamera` keeps
+giving the same object for an index.
+
 ## 3. Live video in the renderer
 
 A `VideoSource` carries the current host picture. The browser camera publishes a
@@ -298,8 +323,10 @@ Before consent, Chromium may expose only an unnamed default device. The desktop
 keeps this restriction: Electron's [permission check API](https://www.electronjs.org/docs/latest/api/session#sessetpermissioncheckhandlerhandler)
 has no separate enumeration-only permission. Allowing `media` at that check also
 answers permission checks used by capture APIs. `Camera.names` and
-`Microphone.names` therefore gain labels and additional devices after consent;
-this differs from Flash's pre-consent device list.
+`Microphone.names` therefore hold the placeholders of section 2 before consent,
+and gain labels and additional devices after it; this differs from Flash's
+pre-consent device list. The shell's grant to an AIR permission request opens no
+device, so the page reads the devices again after it.
 
 The browser implementation also exposes explicit permission requests for AIR
 content running in a web embedding. It briefly opens and closes the requested

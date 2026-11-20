@@ -51,3 +51,5 @@ FilePrivateNS:AbstractClasses::MyFilter: ArgumentError: Error #2012: MyFilter$ c
 FilePrivateNS:AbstractClasses::MyConvolution: made FilePrivateNS:AbstractClasses::MyConvolution
 FilePrivateNS:AbstractClasses::MyGameInputControl: ArgumentError: Error #2012: MyGameInputControl$ class cannot be instantiated.
 FilePrivateNS:AbstractClasses::MyDispatcher: made FilePrivateNS:AbstractClasses::MyDispatcher
+FilePrivateNS:AbstractClasses::MyVertexBuffer3D: ArgumentError: Error #2012: MyVertexBuffer3D$ class cannot be instantiated.
+FilePrivateNS:AbstractClasses::MySecurityDomain: ArgumentError: Error #2012: MySecurityDomain class cannot be instantiated.

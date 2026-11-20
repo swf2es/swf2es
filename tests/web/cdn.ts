@@ -6,8 +6,10 @@
 // AVM1 SWF plays. From the package's own URL, as jsDelivr serves the file,
 // on a cross-origin isolated page, two Flash Workers share a Mutex: their
 // Web Workers start on the CDN's worker.js through a blob: module of the
-// page's. Nothing is reported as an error, and nothing asked of the CDN is
-// missing. Run after `pnpm build`, which builds the bundle.
+// page's. An old page's Flash detection, run as its script loads, finds
+// the plug-in that the bundle's classic plugin.js lists, and the <object>
+// it writes plays. Nothing is reported as an error, and nothing asked of
+// the CDN is missing. Run after `pnpm build`, which builds the bundle.
 //
 //   node tests/web/cdn.ts
 import assert from "node:assert/strict";
@@ -20,6 +22,7 @@ import { withPage } from "../player/chrome.ts";
 import { compileScripts } from "../player/scripts.ts";
 import * as w from "../swf-writer.ts";
 import { abc, tables, u30 } from "../unit/codegen/abc-builder.ts";
+import { detection } from "./detection.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const dist = fileURLToPath(new URL("../../packages/swf2es/dist/", import.meta.url));
@@ -142,6 +145,38 @@ writeFileSync(
   page(`${origin}/${VERSION}/dist/swf2es.js`, ["as3.swf", "avm1.swf"]),
 );
 writeFileSync(`${site}workers.html`, page(`${origin}/${VERSION}`, ["worker-mutex.swf"]));
+// An old page that looks for Flash as soon as its script loads, as swfobject does, and writes the
+// <object> for watchFlash only if it finds it: the bundle's classic plugin.js, loaded before, has
+// listed it by then, as no module could. Its own scripts are files, under the README's policy.
+writeFileSync(
+  `${site}detect.html`,
+  `<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="script-src 'self' ${origin} 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${origin} blob:">
+<script src="${origin}/${VERSION}/dist/plugin.js" crossorigin></script>
+<script src="detect.js"></script>
+<script type="module" src="replace.js"></script>
+</head>
+<body>
+<div id="movie"></div>
+<script src="embed.js"></script>
+</body>
+</html>`,
+);
+writeFileSync(`${site}detect.js`, `${detection}\nvar version = flashVersion();\n`);
+writeFileSync(
+  `${site}embed.js`,
+  `console.log("flash " + version.join(","));
+document.getElementById("movie").innerHTML = version[0] >= 10
+  ? '<object type="application/x-shockwave-flash" data="as3.swf" width="100" height="100"></object>'
+  : "<p>Flash Player required</p>";
+`,
+);
+writeFileSync(
+  `${site}replace.js`,
+  `import { watchFlash } from "${origin}/${VERSION}/dist/swf2es.js";\nwatchFlash();\n`,
+);
 const captureAbc = compileScripts(
   [
     {
@@ -262,6 +297,26 @@ await check("an AS3 and an AVM1 SWF play from the bundle's file on another origi
     },
     false,
     { page: "cdn-test/index.html", mounts, isolated: false },
+  ),
+);
+
+asked.length = 0;
+await check("an old page's detection finds Flash from plugin.js and its <object> plays", () =>
+  withPage(
+    ready,
+    async (evaluate, send, fresh, listen) => {
+      const { traces, errors } = await play(fresh, listen, send, (t) => t.includes(as3Line));
+      assert.deepEqual(errors, []);
+      assert.deepEqual(traces, ["flash 32,0,0", as3Line]);
+      assert.equal(
+        (await evaluate<string>("document.getElementById('movie').firstElementChild.localName"))
+          .value,
+        "swf2es-player",
+      );
+      assert.ok(asked.includes(`/${VERSION}/dist/plugin.js`), asked.join(" "));
+    },
+    false,
+    { page: "cdn-test/detect.html", mounts, isolated: false },
   ),
 );
 

@@ -106,10 +106,63 @@ order, an entry a drawable or a boundary:
   ended in `ALPHA_MASK`, which composites it onto that layer by its alpha
   ([architecture/compositing.md](architecture/compositing.md#masks-and-scroll-rectangles)).
 
-The view writes the list and its rows anew each frame. Keeping a span of
-the list for a subtree that did not change, and writing only rows on a
-frame where only transforms or colours changed, is not built; it waits
-for a profile that shows the walk worth it.
+The view writes the list and its rows anew each frame.
+
+### Spans
+
+An object's **span** is the stretch of the scene list and of the rows
+its subtree wrote in a frame (`scene/spans.ts`). On a busy real-content
+recording the walk visits about 5,000 objects a frame, of which about
+57 (1%) changed, and a walk of only what changed would visit about 300
+(6%); no frame changes transforms and colours alone. So the walk is to
+take an unchanged subtree's span from the frame before, its rows moved to
+where they land now (`SceneList.appendDraws`, `Rows.append`), rather than
+walk it again, and to walk only what changed.
+
+A span stands for its object only where nothing it was drawn from can
+have changed:
+
+- the object and everything in it unchanged (`clean`: its flags, and
+  `descendantsDirty`, which `invalidate` sets up to the root);
+- the same parent's transform on the stage and colour from its ancestors,
+  compared as numbers, which line stretch, hairlines' width, drawTriangles'
+  facing and bitmaps' whole pixels follow;
+- the same kept outputs' generation: the view's scale, quality and screen
+  scale;
+- every geometry and texture it names still kept, of the generation it
+  had (`Registry.generation`), not let go of and handed out again;
+- nothing in it that draws by more than that (`plain` in `view.ts`): it is
+  all containers, shapes and bitmaps, with no filter, blend, mask, scroll
+  rectangle, 9-slice grid, 3D transform, bitmap cache, stale shape, clip
+  layer or mask's part, and no paint still to come, shader fill or line
+  that stroked to nothing; and it is walked on the stage, not inside an
+  alpha mask, a sliced owner or a blend's only child. The object must be
+  plain now as well as then: the mask walker clears a mask's flags where
+  the mask is used, which may come before its own place on the list, so
+  an object made a mask there is unflagged at its place (the checked
+  mode's first find, on `mask-ancestors` and `avm1-script-masks`).
+
+A context lost and given back drops every span. A 3D object's pass and
+`BitmapData.draw`'s walk from roots of their own into lists of their own
+(`Planes.enter`, the view's `drawScene`), and neither read nor write the
+stage's spans nor the frame before's list they name. Spans follow the
+objects' flags, which a stage's walk clears: a view's spans are read only
+where it walked its display list last (`Spans.begin`, by the list's
+topmost object), so several views of one list, as tests make, walk it
+whole each frame.
+
+The spans are kept, so far, only to be checked: the view's `checked`
+option (`RenderView.checkSpans`, which `pnpm test:checked`'s pages set)
+records each object's span, and where one would stand for its object the
+next frame, walks the object as ever, copies the span after what the walk
+wrote, compares the two entry for entry and row for row
+(`spanDifference`), takes the copy off and throws where they differ,
+naming the object and the first entry and row that differ. An object
+found changed under one whose flags said nothing in it had throws too.
+Off, the view keeps no span and pays a few field reads and null checks a
+walked object. `tests/player/spans.ts`
+breaks a span on purpose, a drawing changed with no flag set, and sees
+it caught.
 
 ### The planner
 
@@ -304,7 +357,33 @@ with the context:
   straight onto what is below in its mode (`WebGLBackend.blendDirect`),
   as its layer composited would be, the modes that read what is below
   from the same copy of it, and multiply onto the opaque stage by GL's
-  blending, as its composite.
+  blending, as its composite. So has a shape's part of several fills
+  that meet without overlapping, as a SWF's shape writes them: where two
+  meet inside a pixel, adl blends each by what it covers, not the pixel
+  they make together, which only drawing them straight onto what is
+  below does: drawn as a host draws, at 4 samples, an edge between two
+  fills in hard light was up to 126 off adl's through a layer, 38 drawn
+  straight. adl does the same where the blend is a clip's that holds the
+  shape alone, as a SWF usually blends its art, a chain of clips deep,
+  the shape moved, turned or coloured in it, or the clip coloured: such
+  a shape is drawn as if the blend were its own (`RenderView`'s
+  `soleBlended`), as close to adl as the layer or closer in all but a
+  few edge pixels. Not where Flash keeps a bitmap of the clip, of one
+  between or of the shape (cacheAsBitmap): it blends that bitmap as one
+  picture, its fills' seam showing, so the view begins such a layer
+  grouped (`SceneList.groups`), which the backend never draws straight.
+  Whether they overlap is looked into only for a part drawn alone in
+  such a mode, once it has stood a frame (`Parts.markFlat`): triangles
+  that cover more than their box overlap, and otherwise their contours
+  tessellated together by parity cover less than their triangles do
+  where two overlap. A drawing made again on every frame, as a burst of
+  particles in add is, is never looked into: tessellating its discs
+  together took 4 to 12 times what tessellating them apart did, 5.8 ms a
+  frame for 200 of them. Each look at an object's part doubles how long
+  its next parts must stand, to 64 frames, so one drawn again every
+  second or third frame is looked into once or twice. Fills over each
+  other, as a drawing's may be, keep the layer, which blends them as one
+  picture, as adl does.
 - **One state cache.** The backend sets GL state through context3d's
   device layer (`@swf2es/context3d/device`'s `GlState`), so no bind,
   blend or stencil state is set twice.
@@ -455,6 +534,68 @@ warm-up; `--counts` also counts fill and line calls into wasm. Compare built
 checkouts with `--checkout DIR` using the same harness. Longer loops should
 reuse their geometry without increasing retained shapes on fresh ratios.
 
+### The census
+
+`bench.ts --census`, on a synthetic scene or with `--swf`, counts what
+each frame asks of the renderer, to say which change has something to
+take before it is made (`tests/player/census.ts`):
+
+- **sub-draws by path:** merged into one draw, a multi-draw's, a call a
+  fill, the blend program's, meshes, glyphs, stage-sampling fills, and
+  everything else (composites, filter passes, shader fills, the stage);
+- **fill runs** as `Draws.prepare` gathers them: their lengths, how many
+  were merged, and what ended each: a kept or held output's composite, a
+  layer begun or ended, a mask, a blend mode, a glyph run or mesh, the
+  texture slots, a run's 256 draws. Masks' runs are counted apart;
+- **a projection of item 2** of the renderer plan: the runs that only a
+  normal-mode kept or held composite came between, joined with it as a
+  quad, and how many runs, merged draws and sub-draws there would be,
+  against the fills' sub-draws now, masks' left out. It is an upper
+  bound: it assumes the merged stream has room (`FillBatches.add` gives
+  up when it is full) and leaves out the texture slots, of which each
+  kept output would take one of a run's eight, so a scene of many kept
+  outputs falls short of it;
+- **repeats** among the fills not merged, which instanced drawing would
+  draw as one: a fill of the geometry, texture and sampling of the one
+  just before it, or of one within 64 before it with no draw between
+  overlapping it, and, as a bound, of any fill earlier in the frame;
+- **blend layers** drawn direct or as layers, by the draws inside and
+  their area, and how many hold what a layer held the frame before,
+  still, moved by whole pixels, or by fractions; a kept output inside
+  counts by where it is and how it is coloured, and a layer holding a
+  filter's output made that frame is not compared. A filtered object in
+  a blend mode is one layer, counted with the filter layers. And
+  backdrop copies;
+- **the walk:** the objects `RenderView.walk` visited, once each however
+  often (an alpha mask, a 3D object's content), and of those how many
+  changed (transform or colour, content, children, pixels), how many a
+  walk of what changed would visit, and the frames in which only
+  transforms and colours did; apart, the objects in the tree it did not
+  visit (hidden, masks, which the mask walker walks, a kept output's
+  content) and how many of those changed.
+
+What it does not see: 3D objects' planes and `BitmapData.draw` are
+drawn through the backend's `run` (`drawPlane`, `snapshot`), not
+`execute`, and their passes are not counted; nor is a frame whose run
+table did not fit, whose runs `Draws.prepare` did not gather. Each
+census is tagged with the bench's frame it was taken in, so one left
+out shifts no other, and a run with none counted fails.
+
+It costs nothing outside its runs, as `--counts` costs nothing: the
+renderer has no census code. The bench page wraps the view's `render`
+and `walk`, the mask walker's `walkMask`, the backend's `execute`,
+`blendDirect` and `copyBelow`, `Draws.prepare` and `gatherRun`, the
+merged stream's `add` and GL's binds and draws, on that view's objects
+alone and only when `--census` is given, and counts from the scene list,
+rows and commands the frame made. It reaches the renderer's private
+methods and fields by name, through `censusMethod` and `censusField` in
+`tests/player/page.ts`, which throw where a name is gone rather than
+count wrong, so a renaming in the renderer is one there too;
+`tests/player/census-check.ts` (part of `pnpm test`) runs it on masked
+lists, with and without `WEBGL_multi_draw`, and on blends, and holds
+the runs it counted to the sub-draws GL was asked for. Its frames'
+times include its own work and are not compared with others'.
+
 ## Why not Pixi
 
 Until #650 and #651 the player drew with PixiJS, through a fork. Pixi is
@@ -502,8 +643,9 @@ GPU took its framebuffer binds a frame from 1,300 to 255 (#646) and then
 
 - **WebGPU,** behind the same command buffer: a span that stands still
   onto a render bundle.
-- **Spans kept across frames, and plans reused,** only where profiles
-  show the walk or the planner hot.
+- **Spans drawn from** ([Spans](#spans)): a frame copying unchanged
+  subtrees' spans rather than walking them, then spans across layers,
+  masks and text; plans reused only where profiles show the planner hot.
 - **Geometry buffers owned by wasm,** so that the module writes the
   atlas's vertices where the backend reads them, only if profiles ask.
 - **Known differences from adl,** parked: a filtered object with a mask

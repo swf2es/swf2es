@@ -224,6 +224,9 @@ importers:
       '@swf2es/player-hosts':
         specifier: workspace:*
         version: link:../../packages/player-hosts
+      '@swf2es/render':
+        specifier: workspace:*
+        version: link:../../packages/render
       '@swf2es/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime

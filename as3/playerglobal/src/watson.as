@@ -2,6 +2,6 @@
 
 package
 {
-	[API("702")]
+	[API("712")]
 	public native function watson(arg0:int):Boolean;
 }

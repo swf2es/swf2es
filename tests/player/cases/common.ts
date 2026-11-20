@@ -36,10 +36,34 @@ export interface PlayerCase {
   flash?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
+  /**
+   * Drawn as a host draws, a pixel a stage pixel, not on the grid of samples
+   * a capture averages (page.ts): with `antialias`, as the web element draws
+   * its edges, by multisampling alone.
+   */
+  draw?: boolean;
   /** Played as AIR plays it, AIR's API defined (Scripting's `air`); Flash's harness is AIR's. */
   air?: boolean;
+  /**
+   * Run as the root, at its own SWF version's API version: in Flash as the
+   * application's content (FlashJob.root), and in the player at the
+   * version it takes from the SWF (apiVersion "root"). Flash runs
+   * everything at its root SWF's API version, so a case the harness loads
+   * runs at the harness's, and the player plays the others at it
+   * (HARNESS_SWF_VERSION). An AS3 SWF of two frames at least, traced only:
+   * it captures no frames. adl runs it in AIR's series of versions and the
+   * page in Flash Player's, which see different names at some versions
+   * (SWF 9 and 10, and AIR's own names): such a case is `air` too.
+   */
+  root?: boolean;
   /** An AVM1 SWF whose trace must match Flash's. */
   traced?: boolean;
+  /**
+   * More files, by name, served beside the SWF for what it loads by a
+   * relative URL (in Flash, beside the harness: FlashJob.files). Names are
+   * shared by every case, so each case's must be its own.
+   */
+  files?: Record<string, Uint8Array>;
   /**
    * A known gap: what Flash does that the player does not yet. The case is
    * left out of the default run and runs, expected to fail, when named.
@@ -129,8 +153,10 @@ export function bare(
   documentClass = "Main",
   width = 100,
   height = 50,
+  version?: number,
 ): Uint8Array {
   return w.swf({
+    version,
     width,
     height,
     frameRate: 24,

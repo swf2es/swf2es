@@ -5,6 +5,7 @@
 import { BodyDecoder, verifyMethods } from "../avm2/abc/code";
 import { opcodeNames } from "../avm2/abc/opcodes";
 import { MethodEmitter } from "../avm2/emit/method";
+import { identifierOf, stackName } from "../avm2/emit/stack-names";
 import {
   IR_CallGetter,
   IR_CallInterface,
@@ -271,6 +272,7 @@ export function domainEmit(body: u32): string {
 
   const emitter = new MethodEmitter(domain, index);
   emitter.claims = decoder.claims;
+  emitter.functionName = identifierOf(stackName(domain, index, global));
   emitter.method(method, global, decoder.ir);
   const out = emitter.out;
   return String.UTF8.decodeUnsafe(changetype<usize>(out.bytes), out.length);

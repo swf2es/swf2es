@@ -65,7 +65,7 @@ package
 				TextSnapshot, Texture, TextureBase, Utils3D, VertexBuffer3D, Worker,
 				WorkerDomain, ContentElement, BitmapFilter, Condition, MyDisplayObject,
 				MyInteractiveObject, MyContainer, MyFilter, MyConvolution, MyGameInputControl,
-				MyDispatcher];
+				MyDispatcher, MyVertexBuffer3D, MySecurityDomain];
 			for (var i:int = 0; i < classes.length; i++)
 			{
 				const c:Class = classes[i];
@@ -86,9 +86,11 @@ package
 import flash.display.DisplayObject;
 import flash.display.DisplayObjectContainer;
 import flash.display.InteractiveObject;
+import flash.display3D.VertexBuffer3D;
 import flash.events.EventDispatcher;
 import flash.filters.BitmapFilter;
 import flash.filters.ConvolutionFilter;
+import flash.system.SecurityDomain;
 import flash.ui.GameInputControl;
 
 class MyDisplayObject extends DisplayObject
@@ -116,5 +118,13 @@ class MyGameInputControl extends GameInputControl
 }
 
 class MyDispatcher extends EventDispatcher
+{
+}
+
+class MyVertexBuffer3D extends VertexBuffer3D
+{
+}
+
+class MySecurityDomain extends SecurityDomain
 {
 }

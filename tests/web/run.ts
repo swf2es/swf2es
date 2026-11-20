@@ -18,6 +18,9 @@
 // Under Chrome's autoplay rule, a SWF's held stream shows the unmute
 // button and fires audioblocked, and a click on the button, which the SWF
 // never hears, or on the stage, which it does, lets the stream play.
+// watchFlash lists Flash's plug-in for an old page's detection, after the
+// browser's own, and names it on the browser's listings where navigator
+// will not take others; with its plugin option false, the page finds none.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -35,6 +38,7 @@ import { compileScripts } from "../player/scripts.ts";
 import { importMap, importMapSource } from "../player/serve.ts";
 import * as w from "../swf-writer.ts";
 import { zip } from "../zip-writer.ts";
+import { detection } from "./detection.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const out = `${here}out/`;
@@ -765,6 +769,88 @@ writeFileSync(
 </body>
 </html>`,
 );
+
+// An old page that looks for Flash, as swfobject's embedSWF does, once the page has been read and
+// its modules have run, and writes an <embed> for watchFlash to swap, or "Flash Player required".
+// detect-off.html calls watchFlash without the plug-in; detect-pinned.html has navigator's
+// plugins and mimeTypes pinned first, as a browser's that will not be replaced.
+const detectPage = (options: string, pin: boolean) => `<!doctype html>
+<html>
+<head><meta charset="utf-8">
+<script type="importmap">${JSON.stringify(importMap)}</script>
+<script>
+${pin ? 'for (const key of ["plugins", "mimeTypes"]) Object.defineProperty(navigator, key, { value: navigator[key], configurable: false });' : ""}
+const before = {
+  plugins: [...navigator.plugins].map((p) => p.name),
+  mimeTypes: [...navigator.mimeTypes].map((m) => m.type),
+  first: navigator.plugins.item(0),
+  firstByName: navigator.plugins[0] && navigator.plugins[navigator.plugins[0].name],
+};
+${detection}
+let version = null;
+document.addEventListener("DOMContentLoaded", () => {
+  version = flashVersion();
+  document.getElementById("movie").innerHTML = version[0] >= 10
+    ? '<embed src="/web-test/shapes.swf" type="application/x-shockwave-flash" width="100" height="100">'
+    : "<p>Flash Player required</p>";
+});
+async function detection() {
+  while (version === null) {
+    await new Promise((done) => setTimeout(done, 50));
+  }
+
+  const movie = document.getElementById("movie").firstElementChild;
+  const playing = movie.localName === "swf2es-player" ? await movie.ready.then(() => true, () => false) : false;
+  const plugins = navigator.plugins;
+  const flash = plugins.namedItem("Shockwave Flash");
+  const swf = navigator.mimeTypes.namedItem("application/x-shockwave-flash");
+  return {
+    version,
+    tag: movie.localName,
+    playing,
+    before,
+    plugins: [...plugins].map((p) => p.name),
+    items: Array.from({ length: plugins.length }, (_, i) => plugins.item(i)?.name),
+    // A classic loop to length, which throws on an index past what the listing holds.
+    looped: (() => {
+      try {
+        const names = [];
+        for (let i = 0; i < plugins.length; i++) {
+          names.push(plugins[i].name);
+        }
+
+        return names;
+      } catch (e) {
+        return String(e);
+      }
+    })(),
+    last: plugins.length > 0 ? plugins[plugins.length - 1]?.name ?? null : null,
+    keys: Object.keys(plugins),
+    mimeTypes: [...navigator.mimeTypes].map((m) => m.type),
+    pluginArray: Object.prototype.toString.call(plugins) + " " + (plugins instanceof PluginArray),
+    browsers: plugins.item(0) === before.first && plugins[0] === before.first && (!before.first || plugins[before.first.name] === before.firstByName),
+    flash: flash && {
+      named: plugins["Shockwave Flash"] === flash,
+      description: flash.description,
+      class: Object.prototype.toString.call(flash) + " " + (flash instanceof Plugin),
+      mimeTypes: [...flash].map((m) => m.type + " " + m.suffixes + " " + (m.enabledPlugin === flash)),
+      swf: swf?.enabledPlugin === flash && navigator.mimeTypes["application/x-shockwave-flash"] === swf,
+      outOfRange: plugins.item(plugins.length) === null && plugins.namedItem("none") === null,
+    },
+    refreshed: (plugins.refresh(), true),
+  };
+}
+</script>
+<script type="module">
+import { watchFlash } from "@swf2es/web";
+watchFlash(document${options});
+</script>
+</head>
+<body><div id="movie"></div></body>
+</html>`;
+writeFileSync(`${site}detect.html`, detectPage("", false));
+writeFileSync(`${site}detect-off.html`, detectPage(", { plugin: false }", false));
+writeFileSync(`${site}detect-pinned.html`, detectPage("", true));
 
 type Evaluate = <R>(expression: string) => Promise<{ value?: R; exception: string | null }>;
 type Send = <R>(method: string, params?: object) => Promise<R>;
@@ -3779,6 +3865,132 @@ const unisolated = await withPage(
   },
 );
 
+// The plug-in watchFlash lists for an old page's detection, after the browser's own; none
+// without it; and on the browser's listings themselves where navigator will not take others.
+const detected = await withPage(
+  "detection",
+  async (evaluate, send) => {
+    interface Detected {
+      version: number[];
+      tag: string;
+      playing: boolean;
+      before: { plugins: string[]; mimeTypes: string[] };
+      plugins: string[];
+      items: string[];
+      looped: string[] | string;
+      last: string | null;
+      keys: string[];
+      mimeTypes: string[];
+      pluginArray: string;
+      browsers: boolean;
+      flash: {
+        named: boolean;
+        description: string;
+        class: string;
+        mimeTypes: string[];
+        swf: boolean;
+        outOfRange: boolean;
+      } | null;
+      refreshed: boolean;
+    }
+
+    const open = async (page: string): Promise<Detected> => {
+      const origin = await call<string>(evaluate, "location.origin");
+      await send("Page.navigate", { url: `${origin}/web-test/${page}` });
+      for (let i = 0; i < 600; i++) {
+        if ((await evaluate<boolean>("typeof detection === 'function'")).value) {
+          return call<Detected>(evaluate, "detection()");
+        }
+
+        await new Promise((done) => setTimeout(done, 100));
+      }
+
+      throw new Error(`${page} did not define detection`);
+    };
+    const flashMimeTypes = [
+      "application/x-shockwave-flash swf true",
+      "application/futuresplash spl true",
+    ];
+    // Found by name either way; by index only where Flash's entries could be listed so.
+    const listed = (r: Detected, indexed: boolean) => {
+      assert.deepEqual(r.version, [32, 0, 0]);
+      assert.equal(r.tag, "swf2es-player");
+      assert.ok(r.playing, "the swapped <embed> did not play");
+      const plugins = indexed ? [...r.before.plugins, "Shockwave Flash"] : r.before.plugins;
+      assert.deepEqual(r.plugins, plugins);
+      assert.deepEqual(r.items, plugins);
+      assert.deepEqual(r.looped, plugins);
+      assert.equal(r.last, plugins.at(-1) ?? null);
+      assert.deepEqual(
+        r.mimeTypes,
+        indexed
+          ? [...r.before.mimeTypes, "application/x-shockwave-flash", "application/futuresplash"]
+          : r.before.mimeTypes,
+      );
+      assert.ok(r.browsers, "the browser's own plug-ins are not listed as they were");
+      assert.equal(r.pluginArray, "[object PluginArray] true");
+      assert.deepEqual(r.flash, {
+        named: true,
+        description: "Shockwave Flash 32.0 r0",
+        class: "[object Plugin] true",
+        mimeTypes: flashMimeTypes,
+        swf: true,
+        outOfRange: true,
+      });
+      assert.ok(r.refreshed);
+    };
+    let failed = 0;
+    for (const [name, page, verify] of [
+      [
+        "an old page's detection finds Flash 32 and its <embed> is swapped",
+        "detect.html",
+        (r: Detected) => {
+          listed(r, true);
+          assert.deepEqual(
+            r.keys,
+            r.plugins.map((_, i) => String(i)),
+          );
+        },
+      ],
+      [
+        "without the plug-in, an old page finds no Flash and writes no <embed>",
+        "detect-off.html",
+        (r: Detected) => {
+          assert.deepEqual(r.version, [0, 0, 0]);
+          assert.equal(r.tag, "p");
+          assert.equal(r.flash, null);
+          assert.deepEqual(r.plugins, r.before.plugins);
+          assert.deepEqual(r.mimeTypes, r.before.mimeTypes);
+        },
+      ],
+      [
+        "where navigator's plugins cannot be replaced, the browser's listing names Flash",
+        "detect-pinned.html",
+        (r: Detected) => listed(r, false),
+      ],
+    ] as const) {
+      try {
+        verify(await open(page));
+        console.log(`ok ${name}`);
+      } catch (e) {
+        failed++;
+        console.log(`not ok ${name}\n  ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+
+    return failed;
+  },
+  false,
+  {
+    page: "web-test/detect.html",
+    mounts: [
+      ["/web-test/", site],
+      ["/web-src/", here],
+      ["/libraries/", `${out}libraries/`],
+    ],
+  },
+);
+
 let fillFailures = 0;
 let fillReference: Image | null = null;
 // Drawn by the render module; where the page cannot compile it (blocked, a CSP without
@@ -4144,7 +4356,7 @@ for (const [name, src, attributes, unmute] of [
   }
 }
 
-const failed = failures + unisolated + fillFailures + bitmapFailures + unmuteFailures;
+const failed = failures + unisolated + detected + fillFailures + bitmapFailures + unmuteFailures;
 if (failed > 0) {
   console.log(`${failed} checks failed`);
   process.exitCode = 1;

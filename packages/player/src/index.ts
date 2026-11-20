@@ -92,5 +92,11 @@ export { type VideoPicture, VideoSource } from "./media/video.js";
 export { Player } from "./player.js";
 export { responseBytes } from "./responses.js";
 export type { FillTessellator } from "./scene/fills.js";
-export { airLibrary, builtinLibrary, playerglobalLibrary, Scripting } from "./scripting.js";
+export {
+  type ApiVersionOption,
+  airLibrary,
+  builtinLibrary,
+  playerglobalLibrary,
+  Scripting,
+} from "./scripting.js";
 export type { FromWorker, ToWorker, WorkerInit } from "./workers/protocol.js";

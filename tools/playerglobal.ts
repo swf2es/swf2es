@@ -197,13 +197,22 @@ const slotValue = (type: string, v: unknown) => {
 };
 
 /** A name with its namespace set in one order: the set is what a SWF sees, not its order. */
-function sorted(name: string): string {
+function sortedName(name: string): string {
   const m = name.match(/^\{(.*)\}::(.*)$/);
   return m ? `{${m[1].split(",").sort().join(",")}}::${m[2]}` : name;
 }
 
-function shapes(abc: Uint8Array): Map<string, Shape> {
+/**
+ * Flash Player's playerglobal marks the VM's internal names 42, VM_INTERNAL
+ * in the AIR 15 SDK's table; ours 52, VM_INTERNAL in core/api-versions.h,
+ * so that it can mark names up to 51 (codegen's namespaces.ts): Flash's
+ * shapes are compared with its internal mark spelt as ours.
+ */
+const asOurInternalMark = (s: string) => s.replaceAll(/@v42(?=[,}])/g, "@v52");
+
+function shapes(abc: Uint8Array, spell = (s: string) => s): Map<string, Shape> {
   const out = new Map<string, Shape>();
+  const sorted = (name: string) => sortedName(spell(name));
   const visible = (name: string) =>
     !name.startsWith("{") || /^\{(package|protected|staticprotected|namespace)/.test(name);
   for (const script of readSurface(abc).scripts) {
@@ -277,9 +286,8 @@ function shapes(abc: Uint8Array): Map<string, Shape> {
 }
 
 // What Flash Player 32's playerglobal has (fpdownload.macromedia.com's
-// playerglobal32_0.swc) and the oracle's, older, lacks: ours has it too.
-// Unversioned only: a builtin's highest mark, from 42 up, is the VM's
-// internal one, and a newer one would make 42 public.
+// playerglobal32_0.swc) and the oracle's, older, lacks: ours has it too,
+// unversioned until the versions roots see are measured.
 const NEWER = new Set([
   "flash.ui::ContextMenuBuiltInItems instance method clone",
   "flash.net.drm::DRMDeviceGroup instance getter serverURL",
@@ -306,8 +314,7 @@ const NEWER_CLASSES = new Set([
 
 // What Harman's AIR added to a class Flash Player has, after either
 // playerglobal: ours has it too, marked AIR_15_0 (41), so that only an AIR
-// application's code sees it. Not a later version: as for NEWER, a builtin's
-// highest mark is the VM's internal one, which would hide it and make 42 public.
+// application's code sees it, until the versions roots see are measured.
 const AIR_NEWER = new Set([
   "flash.media::Camera static getter permissionStatus",
   "flash.media::Camera instance method requestPermission",
@@ -338,7 +345,7 @@ function airMarked(shape: Shape): Shape {
 
 /** Each difference between our classes and Flash Player's same ones, as a line. */
 export function check(ours: Uint8Array, flash: Uint8Array): string[] {
-  const theirs = shapes(flash);
+  const theirs = shapes(flash, asOurInternalMark);
   const out: string[] = [];
   const mine = shapes(ours);
   for (const [name, shape] of mine) {

@@ -184,7 +184,7 @@ export function globalScope(bd: BodyDecoder): i32 {
   }
 
   if (bd.scope === 0) {
-    bd.fail(C.kGetScopeObjectBoundsError);
+    bd.failWith(C.kGetScopeObjectBoundsError, 0);
     return -2;
   }
 

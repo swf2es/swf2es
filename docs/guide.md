@@ -25,7 +25,7 @@ that find one another by relative URL (`packages/swf2es`). One tag
 defines the element:
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.31"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.33"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
@@ -37,7 +37,7 @@ page that configures its players adds them from that script. Until
 1.0 a minor release may break a page, so pin a version: on unpkg at least
 the minor one (`swf2es@0.1` redirects to the newest 0.1 release, whose
 files then load together); on jsDelivr the exact one
-(`https://cdn.jsdelivr.net/npm/swf2es@0.1.31`), as it serves a range
+(`https://cdn.jsdelivr.net/npm/swf2es@0.1.33`), as it serves a range
 without redirecting, and the files loaded later would follow the range.
 `swf2es.js` defines the element; `codegen.wasm`, the renderer and the
 workers' host load with the first player, `worker.js` for a SWF that uses
@@ -132,7 +132,26 @@ element, or `configure({ relativeUrls: "movie" })` for all of them, to
 resolve them against each SWF's own URL instead. Like `base`, the
 attribute is read when a movie loads, not watched while it plays; Flash
 tags have no such parameter, so for players `replaceFlash` makes only
-`configure` sets it. It has `load(url | bytes)` and `destroy()`, which
+`configure` sets it.
+
+Flash ran a SWF, and everything it loaded, at its root SWF's API version:
+a class or member of a later Flash Player than the root's version was not
+there for its code, so an old SWF whose class named a getter of its own
+`isPlaying` loaded, where a later root's would refuse it (VerifyError
+#1053). The player runs every SWF at the latest API version by default,
+which shows all of them whatever the SWF's version. `apiversion="root"`
+on an element, or `configure({ apiVersion: "root" })` for all of them,
+runs each at its root's, as Flash did: the root's version from its
+header, and what it loads at the same; its workers run at the latest, as
+they did in AIR. A number names a
+root's SWF version instead, as `apiversion="12"`, for a SWF whose real
+root was another, such as one a wrapper of another version loaded; and
+`"latest"` the default. An AIR application stays at the latest with
+`"root"`. Like `base`, it is read when a movie loads. Modules compiled
+ahead of time are found only at the version they were compiled at
+(`--api`, below).
+
+It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
@@ -312,6 +331,58 @@ import { configure, watchFlash } from "@swf2es/web";
 const stop = watchFlash();
 ```
 
+Many old pages look for Flash before they write a Flash tag, swfobject
+among them, and write "Flash Player required" in its place when they find
+none. So `watchFlash` also lists Flash Player's plug-in in
+`navigator.plugins`, after the browser's own: "Shockwave Flash" with the
+description "Shockwave Flash 32.0 r0", the version `Capabilities.version`
+reports, and its MIME types `application/x-shockwave-flash` and
+`application/futuresplash` in `navigator.mimeTypes`. It does by default,
+as it swaps the tags such a page writes later;
+`watchFlash(document, { plugin: false })` leaves it out. `replaceFlash`
+does not by default, as it swaps only the tags there now, and a page that
+looked later would write tags nothing swaps;
+`replaceFlash(document, { plugin: true })` lists it.
+`installFlashPlugin()` lists it alone. Where a browser will not have
+`navigator.plugins` replaced, the plug-in is named on its own listing
+(`navigator.plugins["Shockwave Flash"]`, `namedItem`), which is what
+detection scripts ask, but not counted in its `length`, as the browser
+will not index it. There is no `ActiveXObject`: old scripts take a page
+that has one for Internet Explorer's, which no page now is, and every
+detection script asks `navigator` first.
+
+A page's script that looks as it loads runs before any module does, so
+before `watchFlash`. On such a page, load the browser build's
+`dist/plugin.js`, a classic script that only lists the plug-in, before
+the page's scripts (`crossorigin` lets it load on a cross-origin isolated
+page whose policy is `require-corp`, too):
+
+```html
+<script src="https://unpkg.com/swf2es@0.1.33/dist/plugin.js" crossorigin></script>
+<script src="swfobject.js"></script>
+<script type="module">
+  import { watchFlash } from "https://unpkg.com/swf2es@0.1.33";
+
+  watchFlash();
+</script>
+```
+
+A bundler's output, where that is a classic script loaded before the
+page's, can call `installFlashPlugin` from `@swf2es/web/plugin`, which
+imports nothing else. Each frame has a `navigator` of its own: detection
+in an `<iframe>` needs `plugin.js` loaded in that frame.
+
+Pass `plugin: false` where a page's scripts would do worse for finding
+Flash:
+
+- libraries that prefer Flash where they detect it pick their SWF over
+  the HTML5 path that works: SoundManager 2 with `preferFlash`, the Flash
+  techs of old JW Player, Flowplayer and video.js, the uploaders
+  SWFUpload, Plupload and Uploadify, ZeroClipboard. swf2es may play those
+  SWFs, but less well than the browser does what they stand in for;
+- a script that checks whether `navigator` was tampered with can tell
+  the plug-in is not the browser's own, and may take the page for a bot's.
+
 ## ExternalInterface
 
 When a SWF calls `ExternalInterface.addCallback`, the callback becomes a
@@ -346,8 +417,12 @@ swf2es movie.swf -o movie.swf2es --emit-libraries
 against the libraries the player loads: builtin.abc and swf2es's
 playerglobal, and AIR's library too with `--air`, all shipped with the
 command. `--lib` names others in their place, in order, such as Flash
-Player's playerglobal for a player given that one. In a checkout,
-`node packages/cli/dist/main.js` is the command.
+Player's playerglobal for a player given that one. `--api` names the API
+version the player plays at (its `apiVersion`): `latest` by default,
+`root` for a player at `apiversion="root"` that plays the SWF as its main
+movie, the version from the SWF's header, or a SWF version, that of the
+root that loads it. A player at another version compiles the modules
+itself. In a checkout, `node packages/cli/dist/main.js` is the command.
 
 The player reads them as a module cache. Chain an IndexedDB cache behind
 it to keep whatever the command did not compile:
@@ -469,6 +544,7 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-policy-files` | Lets the SWF read every public host's data, send it headers and open sockets to it as if its cross-domain policy files allowed it, for this run. This machine and private networks still need their own policy file. |
 | `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
+| `--api-version=root` | Plays the SWF and what it loads at its own SWF version's API version (its workers at the latest), as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |

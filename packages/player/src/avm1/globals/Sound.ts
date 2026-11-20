@@ -41,10 +41,26 @@ export const FULL: Readonly<Avm1SoundTransform> = {
 export interface SoundClassHost {
   readonly realm: avm1.Realm;
   readonly sounds: SoundHost;
-  /** What `value`, an object or a path from the code's target, names; null for nothing. */
-  resolve(value: avm1.Value, version: number): DisplayObject | null;
-  /** The DefineSound ExportAssets named `name`, any case; null for none. */
-  exportedSound(name: string): SoundCharacter | null;
+  /**
+   * The display object at a target path: one that begins `_levelN` from that level, one that
+   * begins `_root` in a movie an AS3 Loader holds from its root, whatever `_root` the code
+   * sees, any other from the code's target; a child or a variable at each name after the
+   * first. Null for nothing, an empty path among it.
+   */
+  atPath(path: string, version: number): DisplayObject | null;
+  /**
+   * Whether `value` is a movie's root that a load filled, in a movie an AS3 Loader holds: Flash
+   * names it by its path in the AS3 display list, `_level0.instance1…`, which only a loaded
+   * movie's code can follow (adl).
+   */
+  namedByAs3Path(value: avm1.Value): boolean;
+  /** Whether the code running now is the main movie's, which has no `_level0` to follow. */
+  mainCode(): boolean;
+  /**
+   * The DefineSound ExportAssets named `name`, any case, in the library of `owner`'s movie, or,
+   * for the global Sound's null, the code's; null for none.
+   */
+  exportedSound(name: string, owner: DisplayObject | null): SoundCharacter | null;
   /** `d`'s transform, the global one for null. */
   soundTransform(d: DisplayObject | null): Avm1SoundTransform;
   /** `d`'s transform, the global one for null, set: the sounds playing follow it. */
@@ -56,8 +72,10 @@ export interface SoundClassHost {
 }
 
 interface State {
-  /** The target as given; undefined or null for the global sound. */
-  target: avm1.Value;
+  /** The target as a path, a clip's too; undefined or null for the global sound. */
+  target: string | null | undefined;
+  /** Whether the target was a loaded root named by its AS3 path, as namedByAs3Path tells. */
+  as3Path: boolean;
   character: SoundCharacter | null;
   /** The ms attachSound found, rounded. */
   duration: number | undefined;
@@ -102,12 +120,16 @@ export function soundClass(host: SoundClassHost): Obj {
   const constr = realm.classOf(
     proto,
     (self, args, v) => {
-      // The target is made a path now, a clip's too, its toString called once (the corpus's
-      // sound_owner_reference): a clip renamed is found by its path, as a variable or a child.
+      // The target is made a path now, a clip's where its reference reaches ("" for a removed
+      // clip's), another object's toString called once (the corpus's sound_owner_reference):
+      // a clip renamed is found by its path, as a variable or a child. A movie's root that a
+      // load filled is named by its AS3 path in a hosted movie, which the main movie's code
+      // cannot follow and any loaded movie's can.
       const given = args.length > 0 ? args[0] : undefined;
       const target = given === undefined || given === null ? given : avm1.stringOf(given, v);
       states.set(self, {
         target,
+        as3Path: host.namedByAs3Path(given),
         character: null,
         duration: undefined,
         playing: null,
@@ -121,7 +143,13 @@ export function soundClass(host: SoundClassHost): Obj {
 
   const global = (state: State) => state.target === undefined || state.target === null;
   // The clip a targeted Sound works on, null where the target names none.
-  const owner = (state: State, v: number) => (global(state) ? null : host.resolve(state.target, v));
+  const owner = (state: State, v: number) => {
+    if (global(state) || (state.as3Path && host.mainCode())) {
+      return null;
+    }
+
+    return host.atPath(state.target as string, v);
+  };
   const valid = (state: State, v: number) => global(state) || owner(state, v) !== null;
   // The transform it reads and sets: its clip's, or the global one; undefined for no clip.
   const transformOf = (state: State, v: number): Avm1SoundTransform | undefined => {
@@ -230,7 +258,8 @@ export function soundClass(host: SoundClassHost): Obj {
   method("stop", (state, args, v) => {
     if (args.length > 0) {
       const name = avm1.stringOf(args[0], v);
-      const character = valid(state, v) ? host.exportedSound(name) : null;
+      const d = owner(state, v);
+      const character = global(state) || d !== null ? host.exportedSound(name, d) : null;
       if (character !== null) {
         stopSoundsOf(h, character);
       }
@@ -251,12 +280,14 @@ export function soundClass(host: SoundClassHost): Obj {
 
     return undefined;
   });
+  // In the library of its clip's movie, whichever movie's code asks (adl).
   method("attachSound", (state, args, v, self) => {
-    if (!valid(state, v)) {
+    const d = owner(state, v);
+    if (!global(state) && d === null) {
       return undefined;
     }
 
-    const character = host.exportedSound(avm1.stringOf(args[0], v));
+    const character = host.exportedSound(avm1.stringOf(args[0], v), d);
     if (character === null) {
       return undefined;
     }

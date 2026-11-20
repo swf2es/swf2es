@@ -17,19 +17,7 @@ import type { Filters } from "../filters.js";
 import type { Geometries } from "../geometry.js";
 import type { Keeps } from "../keeps.js";
 import type { Rows } from "../rows.js";
-import {
-  ADD,
-  DARKEN,
-  DIFFERENCE,
-  HARDLIGHT,
-  INVERT,
-  LIGHTEN,
-  MULTIPLY,
-  NORMAL,
-  OVERLAY,
-  SCREEN,
-  type SceneList,
-} from "../scene.js";
+import { blendsDirect, NORMAL, type SceneList } from "../scene.js";
 import type { Textures } from "../textures.js";
 import { GeometryAtlas } from "./atlas.js";
 import { Compositor, readsBelow } from "./composite.js";
@@ -45,24 +33,6 @@ import { Stage } from "./stage.js";
 import { type Layer, type Open, objectOf, type Target, TargetPool } from "./targets.js";
 
 export type { Target } from "./targets.js";
-
-/** The blend modes a flat fill may be drawn in straight onto what is below (blendDirect). */
-function direct(mode: number): boolean {
-  switch (mode) {
-    case ADD:
-    case SCREEN:
-    case MULTIPLY:
-    case LIGHTEN:
-    case DARKEN:
-    case DIFFERENCE:
-    case OVERLAY:
-    case HARDLIGHT:
-    case INVERT:
-      return true;
-    default:
-      return false;
-  }
-}
 
 /**
  * Executes a frame's commands on a WebGL 2 context it owns, through one
@@ -262,6 +232,7 @@ export class WebGLBackend {
     geometries.added.length = 0;
     geometries.removed.length = 0;
     geometries.updated.length = 0;
+    geometries.flattened.length = 0;
     if (this.gl.isContextLost()) {
       return;
     }
@@ -1131,13 +1102,16 @@ export class WebGLBackend {
 
   /**
    * The layer pushed at command `k` drawn straight onto the target below,
-   * if it may be: unfiltered and not kept, one run of a flat fill alone
-   * (Draws.blendable) drawn normally in it, and a mode whose blend of the
-   * fill pixel by pixel, its edges covering the pixels in part, is that
-   * of the layer's pixels covered alike, as each is linear in what covers it
-   * (add short of its sums' clamp); its colour on the quad's. A layer and its
-   * resolve and composite left out, what reads what is below copies it as
-   * the composite would. Whether it was.
+   * if it may be: unfiltered, not grouped (SceneList.groups) and not kept,
+   * one run of a flat geometry alone (Draws.blendable) drawn normally in
+   * it, and a mode (blendsDirect) whose blend of the fill pixel by pixel,
+   * its edges covering the pixels in part, is that of the layer's pixels
+   * covered alike, as each is linear in what covers it (add short of its
+   * sums' clamp); its colour on the quad's. Where fills of one shape meet
+   * inside a pixel, each blended by what it covers there is as adl blends
+   * them, not the pixel they make together, which a layer would blend. A
+   * layer and its resolve and composite left out, what reads what is below
+   * copies it as the composite would. Whether it was.
    */
   private blendDirect(commands: Commands, k: number, scene: SceneList, canvas: Open): boolean {
     const ops = commands.ops;
@@ -1152,7 +1126,7 @@ export class WebGLBackend {
       ops[run + 3] !== NORMAL ||
       ops[pop] !== LAYER_POP ||
       ops[pop + 3] >= 0 ||
-      !direct(ops[pop + 1]) ||
+      !blendsDirect(ops[pop + 1]) ||
       !this.draws.blendable(scene, ops[run + 1])
     ) {
       return false;

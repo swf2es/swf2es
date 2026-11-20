@@ -37,6 +37,67 @@ function bound(abc: Uint8Array): Uint8Array {
   });
 }
 
+// scripts/BoundAbstractDisplay.as beside script subclasses of the restricted
+// display classes, the first six bound to clips of a square (a shape for
+// BoundShapeDisplayObject), which frame 2 places as a to f, side by side.
+function boundAbstractDisplay(compile: Compile): Uint8Array {
+  const subclasses: [string, string][] = [
+    ["BoundDisplayObject", "DisplayObject"],
+    ["BoundInteractiveObject", "InteractiveObject"],
+    ["BoundContainer", "DisplayObjectContainer"],
+    ["BoundShapeDisplayObject", "DisplayObject"],
+    ["BoundAVM1Movie", "AVM1Movie"],
+    ["BoundStage", "Stage"],
+    ["MyDisplayObject", "DisplayObject"],
+    ["MyAVM1Movie", "AVM1Movie"],
+    ["MyStage", "Stage"],
+  ];
+  const abcs = subclasses.map(([name, base]) =>
+    compile(
+      name,
+      `package { import flash.display.${base}; public class ${name} extends ${base} { public function ${name}() { trace("${name} constructed"); } } }`,
+    ),
+  );
+  const characters = [2, 3, 4, 1, 5, 6];
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      clip(2),
+      clip(3),
+      clip(4),
+      clip(5),
+      clip(6),
+      ...abcs.map((abc) => w.doAbc(abc)),
+      w.doAbc(compile("BoundAbstractDisplay"), "BoundAbstractDisplay"),
+      w.symbolClass([
+        [0, "BoundAbstractDisplay"],
+        ...characters.map((id, i): [number, string] => [id, subclasses[i][0]]),
+      ]),
+      w.showFrame(),
+      ...characters.map((character, i) =>
+        w.place({
+          depth: i + 1,
+          character,
+          name: String.fromCharCode(97 + i),
+          matrix: { tx: i * 320, ty: 0 },
+        }),
+      ),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Clips of a square, two MorphShapes growing a square and three empty
 // text fields, side by side, which frames 2 to 4 move with every property a place sets, for
 // scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
@@ -382,6 +443,23 @@ function uncaughtErrors(compile: Compile): Uint8Array {
 /** A step every third frame, 32 of them, after the load. */
 const UNCAUGHT_FRAMES = 110;
 
+/**
+ * A root of SWF `version` (scripts/VersionedLoads.as.template) loading
+ * scripts/VersionedIsPlaying.as's class in a SWF of `innerVersion`.
+ */
+function versionedLoads(compile: Compile, version: number, innerVersion: number): Uint8Array {
+  const inner = bare(compile("VersionedIsPlaying"), 2, "Main", 100, 50, innerVersion);
+  const template = readFileSync(
+    new URL("../scripts/VersionedLoads.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "VersionedLoads",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 4, "VersionedLoads", 100, 50, version);
+}
+
 function loadsInit(compile: Compile): Uint8Array {
   return loading(compile, "LoadsInit", 1);
 }
@@ -609,6 +687,39 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Run as the root, at SWF 12's API version, where the harness, loading
+    // it, would refuse it at its own.
+    name: "versioned-isplaying",
+    swf: (abc) => bare(abc, 2, "Main", 100, 50, 12),
+    script: "VersionedIsPlaying",
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
+    // A SWF 12 root loading the same class in a SWF 30: it runs at the root's version.
+    name: "versioned-loaded",
+    build: (compile) => versionedLoads(compile, 12, 30),
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
+    // A worker of a SWF 17 root runs at the latest, not at its root's version, as adl runs it.
+    name: "versioned-worker",
+    swf: (abc) => bare(abc, 1, "VersionedWorker", 100, 50, 17),
+    script: "VersionedWorker",
+    frames: 120,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
     name: "events",
     swf: bare,
     script: "Events",
@@ -691,6 +802,24 @@ export const scriptingCases: PlayerCase[] = [
     name: "abstract-classes",
     swf: (abc) => bare(abc, 1, "AbstractClasses"),
     script: "AbstractClasses",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bound-abstract-display",
+    build: boundAbstractDisplay,
+    frames: 4,
+    capture: [2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // Error.getStackTrace, as the debugger player names each method in it.
+    name: "stack-traces",
+    swf: (abc) => bare(abc, 1, "StackTraces"),
+    script: "StackTraces",
     frames: 1,
     capture: [],
     tolerance: 0,
