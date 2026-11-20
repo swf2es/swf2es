@@ -200,6 +200,10 @@ function spriteFills(
     { children: [{ depth: 1, character: 410, matrix: { tx: 60, ty: 40 } }] },
     { children: [{ depth: 1, character: 10, matrix: { tx: 60, ty: 40 }, cacheAsBitmap: true }] },
     { children: [{ depth: 1, character: 10 }], bare: true },
+    // One fill, and a bitmap as an authoring tool places one, a rectangle filled with it, in a
+    // kept clip: they draw alike either way, straight, as before.
+    { children: [{ depth: 1, character: 420 }], cached: true },
+    { children: [{ depth: 1, character: 421, matrix: { tx: 60, ty: 40 } }], cached: true },
   ];
   const rows: Row[] = cachedRows
     ? cachedOnes
@@ -221,6 +225,41 @@ function spriteFills(
         },
       ];
   tags.push(
+    w.shape({
+      id: 420,
+      bounds: [0, 640, 0, 640],
+      fills: [0x40d0f0],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [320, 20] },
+            { line: [620, 250] },
+            { line: [500, 620] },
+            { line: [130, 600] },
+            { line: [30, 230] },
+            { line: [320, 20] },
+          ],
+        },
+      ],
+    }),
+    w.shape({
+      id: 421,
+      bounds: [0, 480, 0, 480],
+      fills: [{ bitmap: 20, type: 0x43, matrix: { a: 60, d: 60 } }],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [480, 0] },
+            { line: [480, 480] },
+            { line: [0, 480] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+    }),
     w.sprite(400, 1, [w.place({ depth: 1, character: 12 }), w.showFrame(), w.end()]),
     w.sprite(410, 1, [
       w.place({ depth: 1, character: 10, cacheAsBitmap: true }),
@@ -259,7 +298,7 @@ function spriteFills(
   tags.push(w.showFrame(), w.end());
   return w.swf({
     width: 400,
-    height: cachedRows ? 210 : 410,
+    height: cachedRows ? 290 : 410,
     frameRate: 24,
     frameCount: 1,
     tags,
@@ -654,17 +693,20 @@ export const blendCases: PlayerCase[] = [
     // As `blend-sprite-fills-host`, with cacheAsBitmap on the clip, on a clip between, on the shape
     // in it, and on a shape blended itself: adl blends the bitmap it keeps as one picture, with a
     // seam where its fills meet, so each keeps its layer, though the same shape blended in a clip
-    // above is drawn without one.
+    // above is drawn without one. A shape of one fill and a bitmap's rectangle in kept clips draw
+    // alike either way, and are drawn without.
     name: "blend-sprite-cached-host",
     swf: blendFills(true, true),
     frames: 2,
     capture: [2],
     antialias: true,
     draw: true,
-    // 72 channels past 48, up to 96. Drawn straight onto the stage where the bitmap is kept,
-    // 112: difference, lighten and the seams their fills make the most; all through layers, 139.
+    // 101 channels past 48, up to 96: 72 in the rows of fills that meet, which drawn straight onto
+    // the stage where the bitmap is kept make 112, difference, lighten and their seams the most;
+    // and 29 in the one fill's edges in add and difference, drawn straight as before, where add
+    // clamps each sample's sum rather than the pixel's.
     tolerance: 48,
-    maxOutliers: 85,
+    maxOutliers: 115,
   },
   {
     // The same multisampled, where each sample of a pixel two fills share blends apart.

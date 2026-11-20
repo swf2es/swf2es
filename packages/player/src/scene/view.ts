@@ -728,10 +728,11 @@ export class RenderView implements Drawer {
         : WHOLE_SMOOTH;
     let layerRow = -1;
     let layer = -1;
-    // A blend over what Flash keeps a bitmap of, it or the chain of only children it holds: Flash
-    // blends that bitmap as one picture, which fills drawn straight onto what is below would not
-    // be, each blended by what it covers (WebGLBackend.blendDirect, SceneList.groups).
-    const grouped = !hidden && blendsDirect(mode) && cachedChain(o);
+    // A blend over what Flash keeps a bitmap of, it or the chain of only children it holds, where
+    // that is fills that meet: Flash blends the bitmap as one picture, which the fills drawn
+    // straight onto what is below would not be, each blended by what it covers
+    // (WebGLBackend.blendDirect, SceneList.groups). One fill or a bitmap draws alike either way.
+    const grouped = !hidden && blendsDirect(mode) && cachedChain(o) && severalFills(o);
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
     // Its filters run before its alpha mask is applied, as Flash masks the bitmap they make: then in
@@ -785,8 +786,12 @@ export class RenderView implements Drawer {
     }
 
     // Drawn in its pass, which walked all in it, its flags cleared: walked here no further. Else
-    // walked hidden, to clear them.
+    // walked hidden, to clear them. What it holds is drawn into its bitmap, never straight onto
+    // what is below a blend around it (soleBlended).
+    const sole = this.soleBlended;
+    this.soleBlended = plane ? null : sole;
     const passed = plane && this.drawPlane(o, full, pa, pb, pc, pd, ptx, pty);
+    this.soleBlended = sole;
     hidden ||= plane;
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -1867,6 +1872,17 @@ function cachedChain(o: DisplayObject): boolean {
   }
 
   return true;
+}
+
+/**
+ * Whether what `o` holds alone, at the end of its chain of only children,
+ * draws a layer of several fills, which drawing straight onto what is
+ * below blends otherwise than Flash's kept bitmap of them.
+ */
+function severalFills(o: DisplayObject): boolean {
+  const leaf = o instanceof Container && o.children.length > 0 ? soleChild(o) : o;
+  const layers = leaf?.drawing?.layers ?? (leaf instanceof ShapeObject ? leaf.shape?.layers : null);
+  return !!layers?.some((layer) => layer.fills.length > 1);
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
