@@ -426,33 +426,28 @@ export class ModuleEmitter {
    * The factory of method `global`, whose body failed verification with
    * `error`: the VerifyError with the arguments avmplus' message takes, the
    * method's name as its stack trace shows it, and the numbers verifying
-   * the body again finds: an illegal opcode and its offset, or unbalanced
-   * depths.
+   * the body again finds: an illegal opcode and its offset, unbalanced
+   * depths, or a scope's index or a register out of range. Numbers found with another error than `error` are not its, and
+   * are left out.
    */
   verifyError(error: i32, global: u32, body: u32, decoder: BodyDecoder): void {
     const out = this.out;
     out.text("rt.verifyError(");
     out.uint(error);
     switch (error) {
-      case C.kIllegalOpcodeError: {
-        const code = decoder.decode(body, this.domain.traits.scopeOf(global));
+      case C.kIllegalOpcodeError:
         out.text(", ");
         this.text(`${stackName(this.domain, this.index, global)}()`);
-        out.text(", ");
-        out.uint(code.errorA);
-        out.text(", ");
-        out.uint(code.errorB);
+        this.errorNumbers(error, global, body, decoder, 2);
         break;
-      }
       case C.kStackDepthUnbalancedError:
-      case C.kScopeDepthUnbalancedError: {
-        const code = decoder.decode(body, this.domain.traits.scopeOf(global));
-        out.text(", ");
-        out.uint(code.errorA);
-        out.text(", ");
-        out.uint(code.errorB);
+      case C.kScopeDepthUnbalancedError:
+        this.errorNumbers(error, global, body, decoder, 2);
         break;
-      }
+      case C.kGetScopeObjectBoundsError:
+      case C.kInvalidRegisterError:
+        this.errorNumbers(error, global, body, decoder, 1);
+        break;
       case C.kIllegalSetDxns:
       case C.kIllegalSuperCallError:
         out.text(", ");
@@ -461,6 +456,22 @@ export class ModuleEmitter {
     }
 
     out.text(")");
+  }
+
+  /** The `count` numbers verifying `body` again records with `error`, as arguments; none for another error. */
+  private errorNumbers(error: i32, global: u32, body: u32, decoder: BodyDecoder, count: u32): void {
+    const code = decoder.decode(body, this.domain.traits.scopeOf(global));
+    if (code.error !== error) {
+      return;
+    }
+
+    const out = this.out;
+    out.text(", ");
+    out.uint(code.errorA);
+    if (count > 1) {
+      out.text(", ");
+      out.uint(code.errorB);
+    }
   }
 
   /**
