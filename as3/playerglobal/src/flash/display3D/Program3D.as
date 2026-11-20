@@ -9,7 +9,6 @@ package flash.display3D
 	{
 		public function Program3D()
 		{
-			Error.throwError(ArgumentError, 2012, "Program3D$");
 		}
 
 		public native function upload(vertexProgram:ByteArray, fragmentProgram:ByteArray):void;

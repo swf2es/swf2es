@@ -57,10 +57,13 @@ export class Code {
   /**
    * The numbers avmplus' message for `error` names: an illegal opcode and
    * its offset, the unbalanced stack or scope depths, the incoming one
-   * first and the target's second, or a scope's index or a register alone.
+   * first and the target's second, or a scope's index or a register alone;
+   * none where `numbered` is false, as getouterscope's index past a captured
+   * scope chain has none.
    */
   errorA: u32 = 0;
   errorB: u32 = 0;
+  numbered: bool = false;
   count: u32 = 0;
   offset: StaticArray<u32> = new StaticArray<u32>(0);
   /** Offset of the next instruction in the code. */
@@ -76,6 +79,7 @@ export class Code {
   fail(error: i32): Code {
     if (!this.error) {
       this.error = error;
+      this.numbered = false;
     }
 
     return this;
@@ -87,6 +91,7 @@ export class Code {
       this.error = error;
       this.errorA = a;
       this.errorB = b;
+      this.numbered = true;
     }
 
     return this;
@@ -297,6 +302,7 @@ export class BodyDecoder {
     code.error = 0;
     code.errorA = 0;
     code.errorB = 0;
+    code.numbered = false;
     code.count = 0;
     code.caseCount = 0;
     // Not the last body's, which may be another ABC's: a body that fails before

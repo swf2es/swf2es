@@ -714,7 +714,7 @@
   "avm1/xml_to_string_comment": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm1/xml_unescaping": {"matched":23,"lines":23,"traced":23,"error":null},
   "avm1/xmlnode_proto": {"matched":1,"lines":1,"traced":1,"error":null},
-  "avm2/abstract_classes": {"matched":14,"lines":132,"traced":147,"error":null},
+  "avm2/abstract_classes": {"matched":132,"lines":132,"traced":132,"error":null},
   "avm2/accessibility": {"matched":1,"lines":1,"traced":1,"error":null},
   "avm2/accessibilityimplementation": {"matched":18,"lines":18,"traced":18,"error":null},
   "avm2/activation_class": {"matched":6,"lines":6,"traced":6,"error":null},

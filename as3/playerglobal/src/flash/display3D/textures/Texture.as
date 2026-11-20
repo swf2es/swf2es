@@ -10,7 +10,6 @@ package flash.display3D.textures
 	{
 		public function Texture()
 		{
-			Error.throwError(ArgumentError, 2012, "Texture$");
 		}
 
 		public native function uploadFromBitmapData(source:BitmapData, miplevel:uint = 0):void;
