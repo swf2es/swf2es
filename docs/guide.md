@@ -312,6 +312,39 @@ import { configure, watchFlash } from "@swf2es/web";
 const stop = watchFlash();
 ```
 
+Many old pages look for Flash before they write a Flash tag, swfobject
+among them, and write "Flash Player required" in its place when they find
+none. So `watchFlash` and `replaceFlash` also list Flash Player's plug-in
+in `navigator.plugins`, after the browser's own: "Shockwave Flash" with
+the description "Shockwave Flash 32.0 r0", the version
+`Capabilities.version` reports, and its MIME types
+`application/x-shockwave-flash` and `application/futuresplash` in
+`navigator.mimeTypes`. `installFlashPlugin()` lists it alone, and
+`watchFlash(document, { plugin: false })` leaves it out. Where a browser
+will not have `navigator.plugins` replaced, the entries go on its own
+listing. There is no `ActiveXObject`: old scripts take a page that has
+one for Internet Explorer's, which no page now is, and every detection
+script asks `navigator` first.
+
+A page's script that looks as it loads runs before any module does, so
+before `watchFlash`. On such a page, load the browser build's
+`dist/plugin.js`, a classic script that only lists the plug-in, before
+the page's scripts:
+
+```html
+<script src="https://unpkg.com/swf2es@0.1.32/dist/plugin.js"></script>
+<script src="swfobject.js"></script>
+<script type="module">
+  import { watchFlash } from "https://unpkg.com/swf2es@0.1.32";
+
+  watchFlash();
+</script>
+```
+
+A bundler's output, where that is a classic script loaded before the
+page's, can call `installFlashPlugin` from `@swf2es/web/plugin`, which
+imports nothing else.
+
 ## ExternalInterface
 
 When a SWF calls `ExternalInterface.addCallback`, the callback becomes a

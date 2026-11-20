@@ -31,6 +31,18 @@ Players already in the markup start as the module loads, before any
 script that imports it runs, so a page that configures its players adds
 them from that script, after `configure`.
 
+`watchFlash` also lists Flash Player's plug-in in `navigator.plugins`,
+for the page's scripts that look for Flash before they write its tags.
+A module runs only once the page has been read, after such a script
+that looks as it loads, as swfobject does; for that one, load
+`dist/plugin.js`, a classic script that lists the plug-in alone (1.8 KB),
+before it:
+
+```html
+<script src="https://unpkg.com/swf2es@0.1.32/dist/plugin.js"></script>
+<script src="swfobject.js"></script>
+```
+
 ## Relative URLs
 
 A SWF's relative URLs resolve as Flash Player's plug-in resolved them:

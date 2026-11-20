@@ -32,6 +32,16 @@ import { watchFlash } from "@swf2es/web";
 watchFlash();
 ```
 
+For the page's scripts that look for Flash before they write its tags,
+as swfobject does, `watchFlash` also lists Flash Player's plug-in,
+"Shockwave Flash 32.0 r0", in `navigator.plugins` and its MIME types in
+`navigator.mimeTypes`, after the browser's own entries;
+`watchFlash(document, { plugin: false })` leaves it out. A script that
+looks before `watchFlash` runs needs `installFlashPlugin` first, from
+`@swf2es/web/plugin` in a classic script ahead of it (the
+[guide](https://swf2es.github.io/swf2es/docs/#replace-the-flash-tags-on-an-existing-page)
+says how).
+
 ActionScript 3 needs no setup: builtin.abc and swf2es's own playerglobal
 ship with the packages. The packages are ES modules: serve them through a
 bundler or an import map. The page must let them compile WebAssembly
