@@ -1030,7 +1030,10 @@ in `tests/unit/player/avm1/avm1.test.ts`, the levels' in `loads.test.ts`.
 `System` has `capabilities`, the values AS3's `Capabilities` reports, as
 plain, enumerable, writable values; `security`, whose `allowDomain`
 and, from SWF 7, `allowInsecureDomain` return true and grant nothing
-more, `loadPolicyFile` doing nothing, and `sandboxType` "remote";
+more, `loadPolicyFile` doing nothing, and `sandboxType` the host's
+(`Avm1`'s `sandboxType` option, "remote" by default; "remote" for an
+AVM1 SWF an AS3 one loaded from the network), which reports and gates
+nothing;
 `useCodepage` false; and from SWF 6 `exactSettings`, true from SWF 7.
 
 What adl traces of clips at SWF 4 to 8 (the `avm1-clips-swf*`,

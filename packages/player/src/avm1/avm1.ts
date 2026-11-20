@@ -216,6 +216,12 @@ export interface Avm1Options {
   /** System.capabilities.isDebugger: AS3's runtime's where AS3 loaded the SWF, else false. */
   debugger?: boolean;
   /**
+   * System.security.sandboxType, as the host placed the SWF: "remote" by
+   * default, a web page's; a local SWF's "localWithFile" or
+   * "localWithNetwork" by its FileAttributes, as AS3's Scripting has it.
+   */
+  sandboxType?: string;
+  /**
    * Whether XML.send, which sends without a window, sends: true by
    * default; false refuses it, as allowNetworking "internal" refuses AS3's
    * sendToURL.
@@ -394,6 +400,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private readonly platform: PlatformCapabilities;
   private readonly screen: ScreenCapabilities;
   private readonly debugger: boolean;
+  private readonly sandboxType: string;
   /** The page's flashvars for the main SWF's root. */
   private readonly parameters: Readonly<Record<string, string>>;
   readonly storage: SharedObjectStorage;
@@ -445,6 +452,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.platform = { ...platformCapabilities(), ...options.platform };
     this.screen = screenCapabilities(options.screenCapabilities);
     this.debugger = options.debugger ?? false;
+    this.sandboxType = options.sandboxType ?? "remote";
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
     this.sharedQuality = options.quality ?? null;
@@ -676,7 +684,14 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("ContextMenuItem", menus.ContextMenuItem, avm1.DONT_ENUM);
     realm.global.define(
       "System",
-      systemObject(realm, this.platform, this.screen, this.debugger, this.swfVersion),
+      systemObject(
+        realm,
+        this.platform,
+        this.screen,
+        this.debugger,
+        this.swfVersion,
+        this.sandboxType,
+      ),
       avm1.DONT_ENUM,
     );
     // Last, as Flash defines it: _global's names are enumerated from the last defined.

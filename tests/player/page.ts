@@ -19,7 +19,7 @@
 // draws: the samples are then each resolved from the multisampled targets,
 // blends' backdrops and the stage alike, before the page averages them.
 import { createCodegen } from "@swf2es/codegen";
-import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { definesInput, fileAttributes, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   Avm1,
   airLibrary,
@@ -158,6 +158,7 @@ async function scriptingFor(
       ? { screenResolutionX: 1536, screenResolutionY: 864, pixelAspectRatio: 1, screenDPI: 72 }
       : undefined,
     url: fileUrl,
+    sandboxType: fileUrl && !air ? localSandbox(bytes) : undefined,
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
     // An ErrorEvent no listener heard (#2044) ends no run: Flash tells its debugger of it and
@@ -389,6 +390,7 @@ async function avm1For(
     onUncaught: (error) => uncaught.push(error),
     realTime: null,
     url: fileName === undefined ? undefined : `file:///${fileName}`,
+    sandboxType: fileName === undefined ? undefined : localSandbox(bytes),
     fetch: testFetch(swfUrl, trace, logFetch),
     socket: scriptedSockets(socket, trace, logFetch, uncaught),
     // A page is never opened: a test that logs fetches traces it as Ruffle's navigator logs it.
@@ -404,6 +406,15 @@ async function avm1For(
         }
       : null,
   });
+}
+
+/**
+ * The sandbox of a SWF Flash played from disk, as the desktop app chooses
+ * it: localWithNetwork if its FileAttributes ask for the network, else
+ * localWithFile.
+ */
+function localSandbox(bytes: Uint8Array): string {
+  return fileAttributes(bytes) & 0x01 ? "localWithNetwork" : "localWithFile";
 }
 
 /**

@@ -968,6 +968,17 @@ export class Code {
     return this.codeOrigin(stack)?.library ?? null;
   }
 
+  /** The URL of the SWF whose code is running, as runningLibrary finds it; null when only the player's is. */
+  runningUrl(): string | null {
+    const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
+    const limit = engine.stackTraceLimit;
+    engine.stackTraceLimit = 48;
+    const stack = new Error().stack;
+    engine.stackTraceLimit = limit;
+
+    return this.codeOrigin(stack)?.url ?? null;
+  }
+
   /**
    * The SWF whose code the player called and whose error nothing caught,
    * as Flash has it from the function it called, not from the one that

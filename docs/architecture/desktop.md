@@ -314,7 +314,10 @@ and the line that holds against a SWF, or a page that misbehaves, is the
 one above: nothing with the user's credentials, and nothing more private
 than the SWF without that place's own policy. What a SWF reads from the
 internet that way is what its author's own server could fetch. The page
-also tells the player the sandbox, which `Security.sandboxType` reports.
+also tells the player the sandbox, which `Security.sandboxType` reports
+for the main SWF and AVM1's `System.security.sandboxType` too; a SWF it
+loads from the network reports "remote". The value gates nothing in the
+player: what a SWF may reach is the main process's to judge.
 
 ### The HTTP cache
 
