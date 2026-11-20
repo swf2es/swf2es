@@ -1,0 +1,17 @@
+swf5 Key:undefined/undefined/undefined/undefined Mouse:undefined/undefined/undefined/undefined Selection:undefined/undefined/undefined/undefined Stage:undefined/undefined/undefined/undefined IME:undefined/undefined
+swf5 revealed function 0 function
+swf6 Key:function/function/function/object Mouse:function/function/function/object Selection:function/function/function/object Stage:function/function/function/object IME:function/object
+swf6 added true 1 true
+swf6 removed true 0
+swf6 pinged 6
+swf6 broadcast true
+swf7 Key:function/function/function/object Mouse:function/function/function/object Selection:function/function/function/object Stage:function/function/function/object IME:function/object
+swf7 added true 1 true
+swf7 removed true 0
+swf7 pinged 7
+swf7 broadcast true
+swf8 Key:function/function/function/object Mouse:function/function/function/object Selection:function/function/function/object Stage:function/function/function/object IME:function/object
+swf8 added true 1 true
+swf8 removed true 0
+swf8 pinged 8
+swf8 broadcast true

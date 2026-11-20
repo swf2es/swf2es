@@ -1,0 +1,9 @@
+types function function function
+remote true false
+connect true true
+before enumerates 
+unconnected enumerates 
+values audiocodec=128,undefined bufferLength=0,undefined bufferTime=0,undefined bytesLoaded=0,undefined bytesTotal=0,undefined checkPolicyFile=false,undefined currentFps=0,undefined decodedFrames=0,undefined liveDelay=0,undefined time=0,undefined videocodec=2048,undefined 
+buffer undefined 2 undefined undefined false true
+written 2
+after enumerates audiocodec bufferLength bufferTime bytesLoaded bytesTotal currentFps decodedFrames liveDelay time videocodec

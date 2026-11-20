@@ -21,3 +21,4 @@ modes ALPHANUMERIC_FULL ALPHANUMERIC_HALF CHINESE JAPANESE_HIRAGANA JAPANESE_KAT
 mode written KOREAN
 IME        
 Accessibility false   true
+Accessibility written function function

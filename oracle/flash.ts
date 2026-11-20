@@ -38,6 +38,11 @@ export interface FlashJob {
    * as a read past a bitmap draws the memory another job left there.
    */
   alone?: boolean;
+  /**
+   * More files, by name, for what it loads by a relative URL: they go
+   * beside the harness, whose URL a SWF it loads from bytes has.
+   */
+  files?: Record<string, Uint8Array>;
 }
 
 export interface FlashResult {
@@ -113,7 +118,14 @@ function descriptor(content: string, id: string): string {
  * local time from.
  */
 export function jobKey(job: FlashJob): string {
-  return createHash("sha256")
+  const hash = createHash("sha256");
+  for (const [name, bytes] of Object.entries(job.files ?? {}).sort(([a], [b]) =>
+    a < b ? -1 : 1,
+  )) {
+    hash.update(`file ${name} ${bytes.length}\n`).update(bytes);
+  }
+
+  return hash
     .update(job.swf)
     .update(
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
@@ -156,6 +168,15 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
   const id = `swf2es-harness-${process.pid}-${Date.now()}`;
   const app = join(out, `${id}.xml`);
   writeFileSync(app, descriptor(content.slice(out.length + 1), id));
+
+  const files = jobs.flatMap((job) => Object.entries(job.files ?? {}));
+  for (const [name, bytes] of files) {
+    if (!/^[\w.-]+$/.test(name) || name.startsWith(".")) {
+      throw new Error(`a job's file is named by a plain file name, not ${JSON.stringify(name)}`);
+    }
+
+    writeFileSync(join(out, name), bytes);
+  }
 
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -256,6 +277,9 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
 
     server.close();
     rmSync(app, { force: true });
+    for (const [name] of files) {
+      rmSync(join(out, name), { force: true });
+    }
   }
 
   return results;

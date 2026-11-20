@@ -41,6 +41,12 @@ export interface PlayerCase {
   /** An AVM1 SWF whose trace must match Flash's. */
   traced?: boolean;
   /**
+   * More files, by name, served beside the SWF for what it loads by a
+   * relative URL (in Flash, beside the harness: FlashJob.files). Names are
+   * shared by every case, so each case's must be its own.
+   */
+  files?: Record<string, Uint8Array>;
+  /**
    * A known gap: what Flash does that the player does not yet. The case is
    * left out of the default run and runs, expected to fail, when named.
    */

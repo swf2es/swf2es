@@ -653,7 +653,9 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     realm.global.define("NetConnection", netConnectionClass(this, this.remoting), avm1.DONT_ENUM);
-    realm.global.define("NetStream", netStreamClass(realm), avm1.DONT_ENUM);
+    const local = (v: avm1.Value) =>
+      v instanceof avm1.Avm1Object && this.remoting.connection(v)?.url === null;
+    realm.global.define("NetStream", netStreamClass(realm, local), avm1.DONT_ENUM);
     realm.global.define("Camera", cameraClass(realm), avm1.DONT_ENUM);
     realm.global.define("Microphone", microphoneClass(realm), avm1.DONT_ENUM);
     const flash = flashPackage(this);

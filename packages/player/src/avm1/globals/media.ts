@@ -7,17 +7,25 @@ import { avm1 } from "@swf2es/runtime";
 
 const HIDDEN = avm1.DONT_ENUM | avm1.DONT_DELETE;
 
-/** A class whose prototype has `methods`, each doing nothing, from the version its flags give. */
+/**
+ * A class whose prototype has `methods`, each doing nothing, from the
+ * version its flags give; `made` sees each object new makes.
+ */
 function placeholderClass(
   realm: avm1.Realm,
   methods: [name: string, flags: number][],
+  made?: (self: avm1.Avm1Object, args: avm1.Value[]) => void,
 ): { constr: avm1.Avm1Function; proto: avm1.Avm1Object } {
   const proto = new avm1.Avm1Object(realm.objectProto);
   const constr = realm.classOf(
     proto,
-    (self) => self,
+    (self, args) => {
+      made?.(self, args);
+      return self;
+    },
     () => undefined,
   );
+
   for (const [name, flags] of methods) {
     proto.define(
       name,
@@ -55,6 +63,7 @@ export function cameraClass(realm: avm1.Realm): avm1.Avm1Function {
     ].map((name) => [name, avm1.VERSION_6]),
   );
   noDevices(realm, constr);
+
   return constr;
 }
 
@@ -70,34 +79,108 @@ export function microphoneClass(realm: avm1.Realm): avm1.Avm1Function {
     ["setUseEchoSuppression", avm1.VERSION_6],
   ]);
   noDevices(realm, constr);
+
   return constr;
 }
 
+/** What a stream on the local connection reads, which plays nothing, its buffer's time aside. */
+const STREAM_VALUES: [string, avm1.Value][] = [
+  ["audiocodec", 128],
+  ["bufferLength", 0],
+  ["bytesLoaded", 0],
+  ["bytesTotal", 0],
+  ["currentFps", 0],
+  ["decodedFrames", 0],
+  ["liveDelay", 0],
+  ["time", 0],
+  ["videocodec", 2048],
+];
+
 /**
  * `_global.NetStream`: what plays a stream from SWF 5, what publishes or
- * closes one from SWF 6, getInfo from SWF 10. Its three properties read
- * undefined, as a stream's do before it connects.
+ * closes one from SWF 6, getInfo from SWF 10. Its properties read
+ * undefined, as a stream's do before it connects. The first stream made
+ * on a connected NetConnection (`connected`: connect(null)'s) gives the
+ * prototype enumerable getters of a stream's state, which such a stream
+ * reads as one that has found nothing to play (adl). Nothing plays, and
+ * play tells nothing.
  */
-export function netStreamClass(realm: avm1.Realm): avm1.Avm1Function {
-  const { constr, proto } = placeholderClass(realm, [
-    ["attachAudio", avm1.VERSION_6],
-    ["attachVideo", avm1.VERSION_6],
-    ["close", avm1.VERSION_6],
-    ["getInfo", avm1.VERSION_10],
-    ["onPeerConnect", 0],
-    ["pause", 0],
-    ["play", 0],
-    ["play2", 0],
-    ["publish", 0],
-    ["receiveAudio", 0],
-    ["receiveVideo", 0],
-    ["seek", 0],
-    ["send", avm1.VERSION_6],
-    ["setBufferTime", avm1.VERSION_6],
-  ]);
+export function netStreamClass(
+  realm: avm1.Realm,
+  connected: (connection: avm1.Value) => boolean,
+): avm1.Avm1Function {
+  const buffers = new WeakMap<avm1.Avm1Object, { time: number }>();
+  const ofStream =
+    (read: (buffer: { time: number }) => avm1.Value) =>
+    (self: avm1.Avm1Object): avm1.Value => {
+      const buffer = buffers.get(self);
+      return buffer === undefined ? undefined : read(buffer);
+    };
+  let streamed = false;
+  const made = (self: avm1.Avm1Object, args: avm1.Value[]) => {
+    if (args.length === 0 || !connected(args[0])) {
+      return;
+    }
+
+    buffers.set(self, { time: 0 });
+    if (streamed) {
+      return;
+    }
+
+    streamed = true;
+    const getter = (name: string, read: (self: avm1.Avm1Object) => avm1.Value) => {
+      const p = proto.add(name, undefined, 0);
+      p.get = realm.method((self) => read(self));
+    };
+    for (const [name, value] of STREAM_VALUES) {
+      getter(
+        name,
+        ofStream(() => value),
+      );
+    }
+
+    getter(
+      "bufferTime",
+      ofStream((buffer) => buffer.time),
+    );
+  };
+  const { constr, proto } = placeholderClass(
+    realm,
+    [
+      ["attachAudio", avm1.VERSION_6],
+      ["attachVideo", avm1.VERSION_6],
+      ["close", avm1.VERSION_6],
+      ["getInfo", avm1.VERSION_10],
+      ["onPeerConnect", 0],
+      ["pause", 0],
+      ["play", 0],
+      ["play2", 0],
+      ["publish", 0],
+      ["receiveAudio", 0],
+      ["receiveVideo", 0],
+      ["seek", 0],
+      ["send", avm1.VERSION_6],
+    ],
+    made,
+  );
+  proto.define(
+    "setBufferTime",
+    realm.method((self, args, version) => {
+      const buffer = buffers.get(self);
+      if (buffer !== undefined) {
+        buffer.time = avm1.toNumber(args[0], version);
+      }
+
+      return undefined;
+    }),
+    HIDDEN | avm1.VERSION_6,
+  );
+
   for (const name of ["backBufferTime", "checkPolicyFile", "maxPauseBufferTime"]) {
     const p = proto.add(name, undefined, HIDDEN);
-    p.get = realm.method(() => undefined);
+    p.get = realm.method((self) =>
+      name === "checkPolicyFile" && buffers.has(self) ? false : undefined,
+    );
     p.set = realm.method(() => undefined);
   }
 

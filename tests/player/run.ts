@@ -67,7 +67,13 @@ const isAvm1 = (swf: Uint8Array): boolean => {
   }
 };
 const traced = (c: PlayerCase) => Boolean(c.script || c.build || c.traced);
-const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), lazyCompilation }));
+// A case's files are served beside it (files below), its SWF at a URL there.
+const jobs = chosen.map((c) => ({
+  ...c,
+  swf: swfOf(c),
+  lazyCompilation,
+  url: c.files ? `/files/${c.name}/${c.name}.swf` : undefined,
+}));
 for (const c of gaps) {
   swfOf(c);
 }
@@ -111,7 +117,18 @@ if (update) {
     );
   }
 } else {
-  const results = await runPlayer(jobs);
+  const files = `${here}out/files/`;
+  for (const c of chosen) {
+    if (c.files) {
+      rmSync(`${files}${c.name}`, { recursive: true, force: true });
+      mkdirSync(`${files}${c.name}`, { recursive: true });
+      for (const [name, bytes] of Object.entries(c.files)) {
+        writeFileSync(`${files}${c.name}/${name}`, bytes);
+      }
+    }
+  }
+
+  const results = await runPlayer(jobs, { mounts: [["/files/", files]] });
   let failed = 0;
   for (const [i, c] of chosen.entries()) {
     const r = results[i];

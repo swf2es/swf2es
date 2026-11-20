@@ -1,0 +1,9 @@
+types function undefined function
+remote  false
+connect  false
+before enumerates 
+unconnected enumerates 
+values audiocodec=, bufferLength=, bufferTime=, bytesLoaded=, bytesTotal=, checkPolicyFile=, currentFps=, decodedFrames=, liveDelay=, time=, videocodec=, 
+buffer      
+written 5
+after enumerates 

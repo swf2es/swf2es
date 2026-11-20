@@ -290,32 +290,41 @@ export function netConnectionClass(host: NetConnectionHost, remoting: Remoting):
       return o === null ? undefined : get(remoting.connection(o));
     });
   };
-  const method = (name: string, f: (self: Obj, args: Value[], v: number) => void) =>
+  // From SWF 6, as adl has them; each gives undefined but connect.
+  const answering = (name: string, f: (self: Obj, args: Value[], v: number) => Value) =>
     proto.define(
       name,
       realm.method((self, args, v) => {
         const o = connectionOf(self);
-        if (o !== null) {
-          f(o, args, v);
-        }
-
-        return undefined;
+        return o === null ? undefined : f(o, args, v);
       }),
-      FIXED,
+      FIXED | avm1.VERSION_6,
     );
+  const method = (name: string, f: (self: Obj, args: Value[], v: number) => void) =>
+    answering(name, (self, args, v) => {
+      f(self, args, v);
+      return undefined;
+    });
 
   getter("protocol", (c) => (c !== undefined && c.url === null ? "rtmp" : undefined));
-  method("connect", (self, args, v) => {
+  // True for anything given, whether or not it connects (adl); nothing given connects nothing.
+  answering("connect", (self, args, v) => {
+    if (args.length === 0) {
+      return undefined;
+    }
+
     const url = args[0];
     if (url === undefined || url === null) {
       remoting.open(self, null);
-      return;
+      return true;
     }
 
     const text = avm1.stringOf(url, v);
     if (/^https?:\/\//i.test(text)) {
       remoting.open(self, text);
     }
+
+    return true;
   });
   method("close", (self) => remoting.close(self, true));
   method("call", (self, args, v) => {

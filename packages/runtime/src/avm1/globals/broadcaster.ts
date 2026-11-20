@@ -102,9 +102,13 @@ export function broadcastMessage(
 /**
  * `o` made a broadcaster, as AsBroadcaster.initialize makes it: its
  * broadcastMessage, addListener, removeListener and an empty `_listeners`,
- * hidden from SWF 5 as ASSetPropFlags(o, names, 131) hides them.
+ * hidden from SWF 5 as ASSetPropFlags(o, names, 131) hides them. Hidden,
+ * not missing: for a SWF 5, as for the player's Key and Mouse that a
+ * SWF 5 movie made, they are AsBroadcaster's functions all the same,
+ * which a SWF 6 movie it loads calls, and clearing the flags shows (adl).
  */
-export function initializeBroadcaster(o: Avm1Object, realm: Realm, version: number): void {
+export function initializeBroadcaster(o: Avm1Object, realm: Realm, swfVersion: number): void {
+  const version = Math.max(swfVersion, 6);
   const constr = realm.AsBroadcaster.constr;
   const hidden = DONT_ENUM | DONT_DELETE | VERSION_6;
   const install = (name: string, value: Value) => {
