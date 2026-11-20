@@ -312,6 +312,58 @@ import { configure, watchFlash } from "@swf2es/web";
 const stop = watchFlash();
 ```
 
+Many old pages look for Flash before they write a Flash tag, swfobject
+among them, and write "Flash Player required" in its place when they find
+none. So `watchFlash` also lists Flash Player's plug-in in
+`navigator.plugins`, after the browser's own: "Shockwave Flash" with the
+description "Shockwave Flash 32.0 r0", the version `Capabilities.version`
+reports, and its MIME types `application/x-shockwave-flash` and
+`application/futuresplash` in `navigator.mimeTypes`. It does by default,
+as it swaps the tags such a page writes later;
+`watchFlash(document, { plugin: false })` leaves it out. `replaceFlash`
+does not by default, as it swaps only the tags there now, and a page that
+looked later would write tags nothing swaps;
+`replaceFlash(document, { plugin: true })` lists it.
+`installFlashPlugin()` lists it alone. Where a browser will not have
+`navigator.plugins` replaced, the plug-in is named on its own listing
+(`navigator.plugins["Shockwave Flash"]`, `namedItem`), which is what
+detection scripts ask, but not counted in its `length`, as the browser
+will not index it. There is no `ActiveXObject`: old scripts take a page
+that has one for Internet Explorer's, which no page now is, and every
+detection script asks `navigator` first.
+
+A page's script that looks as it loads runs before any module does, so
+before `watchFlash`. On such a page, load the browser build's
+`dist/plugin.js`, a classic script that only lists the plug-in, before
+the page's scripts (`crossorigin` lets it load on a cross-origin isolated
+page whose policy is `require-corp`, too):
+
+```html
+<script src="https://unpkg.com/swf2es@0.1.32/dist/plugin.js" crossorigin></script>
+<script src="swfobject.js"></script>
+<script type="module">
+  import { watchFlash } from "https://unpkg.com/swf2es@0.1.32";
+
+  watchFlash();
+</script>
+```
+
+A bundler's output, where that is a classic script loaded before the
+page's, can call `installFlashPlugin` from `@swf2es/web/plugin`, which
+imports nothing else. Each frame has a `navigator` of its own: detection
+in an `<iframe>` needs `plugin.js` loaded in that frame.
+
+Pass `plugin: false` where a page's scripts would do worse for finding
+Flash:
+
+- libraries that prefer Flash where they detect it pick their SWF over
+  the HTML5 path that works: SoundManager 2 with `preferFlash`, the Flash
+  techs of old JW Player, Flowplayer and video.js, the uploaders
+  SWFUpload, Plupload and Uploadify, ZeroClipboard. swf2es may play those
+  SWFs, but less well than the browser does what they stand in for;
+- a script that checks whether `navigator` was tampered with can tell
+  the plug-in is not the browser's own, and may take the page for a bot's.
+
 ## ExternalInterface
 
 When a SWF calls `ExternalInterface.addCallback`, the callback becomes a

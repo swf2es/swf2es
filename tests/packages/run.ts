@@ -342,7 +342,7 @@ test("the installed swf2es command runs an ABC on avmshell's libraries, which it
 
 test("swf2es has the files a CDN serves, and installs alone with nothing else", () => {
   const p = packed.find((q) => q.name === "swf2es") as Packed;
-  for (const file of ["dist/swf2es.js", "dist/worker.js", "dist/codegen.wasm"]) {
+  for (const file of ["dist/swf2es.js", "dist/worker.js", "dist/codegen.wasm", "dist/plugin.js"]) {
     assert.ok(p.files.has(`package/${file}`), file);
   }
 
