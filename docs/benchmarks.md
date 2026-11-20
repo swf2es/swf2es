@@ -647,8 +647,93 @@ without interaction. `node tests/player/run.ts --lazy` and `pnpm corpus
 ## Reference numbers
 
 Measured on one laptop (Intel Core i9-13900H; Intel Iris Xe and an
-NVIDIA RTX 4060 Laptop GPU), Node 24 and Chrome, one benchmark at a time.
-They are for comparing changes on this machine, not across machines.
+NVIDIA RTX 4060 Laptop GPU), Node 24 and Chrome, one benchmark at a time,
+except where a section names another machine. They are for comparing
+changes on one machine, not across machines.
+
+### 0.1.31 against 0.1.30
+
+2026-11-20, on a desktop: AMD Ryzen 9 9950X3D (16 cores, 32 threads),
+60 GB, an AMD Radeon RX 7900 XTX that Chrome for Testing 154 reached
+through ANGLE's Vulkan back end (RADV), Node 24.7, load average 1 to 2
+before each run. The comparison branch's `players.ts --only swf2es
+drawing stage3d pixels startup-hello startup-as3pb` was run in each
+release's built checkout: 0.1.30's browser build is byte for byte the
+CDN's (npm's `swf2es@0.1.30`), and 0.1.31's is integration/0.1.31's
+(4fea0453). Four rounds each, old and new in turn, then four more of
+`drawing` alone; then `bench.ts` four rounds each in alternating order,
+twelve for the shapes and text scenes. Medians, with ranges. The
+drawings, Stage3D, startup and the `--gpu` scenes drew on the Radeon;
+`pixels` and the 2,000 shapes on SwiftShader, as the scripts have them.
+
+Every drawing and Stage3D level holds 60 fps with a 17 ms median frame in
+both versions, stage3d-20000 included, except:
+
+| Level | 0.1.30 fps | 0.1.31 fps |
+|---|---|---|
+| text-800 | 59.3 (58.4–59.6) | 59.2 (58.8–59.4) |
+| shader-400 | 59.8 (59.8–60.0) | 59.8 (59.6–60.0) |
+
+What they lose is a few long frames in a run, alike in both versions: the
+longest frame's median is 77 and 76 ms in text-800, 51 and 52 ms in
+shader-400.
+
+`pixels`, ms:
+
+| Section | 0.1.30 | 0.1.31 |
+|---|---|---|
+| setPixels-opaque | 7.5 (7–8) | 7 (7–8) |
+| setPixels-little-opaque | 6 (6–7) | 6 (6–6) |
+| setPixels-transparent | 17.5 (17–18) | 18 (18–20) |
+| setVector-opaque | 13 (13–13) | 13.5 (13–14) |
+| setVector-transparent | 68.5 (67–70) | 70 (68–72) |
+| getPixels-transparent | 42.5 (41–45) | 41.5 (41–43) |
+| getVector-transparent | 51.5 (46–56) | 49.5 (48–51) |
+| total | 207.5 (198–214) | 205.5 (202–213) |
+
+Startup in Chrome, ms (cold in a new profile with the player's code
+fetched, warm in the same page):
+
+| SWF | | 0.1.30 | 0.1.31 |
+|---|---|---|---|
+| hello | cold | 237.5 (221–262) | 232.5 (216–243) |
+| | warm | 59.5 (56–62) | 58 (57–61) |
+| as3pb | cold | 323 (294–332) | 312 (296–314) |
+| | warm | 96.5 (91–99) | 97 (92–98) |
+
+The browser build's fetched files are 2,715 KB (817 KB in brotli), 19 KB
+(5 KB) more than 0.1.30's.
+
+`tests/player/bench.ts`, frame medians in ms:
+
+| Scene | | 0.1.30 | 0.1.31 |
+|---|---|---|---|
+| `--town 200 --gpu` | frame | 8.91 (8.30–10.07) | 8.42 (8.33–8.99) |
+| | tick | 0.87 (0.79–1.06) | 0.89 (0.88–0.94) |
+| | draw | 4.43 (4.00–5.39) | 4.02 (3.89–4.51) |
+| | gl | 3.38 (3.36–3.48) | 3.38 (3.37–3.41) |
+| 2,000 shapes, SwiftShader | frame | 7.22 (7.01–7.44) | 7.35 (6.86–7.61) |
+| `--text 600 --gpu` | frame | 1.61 (1.54–1.79) | 1.61 (1.52–1.82) |
+| `--scripted 200 --hover --gpu` | frame | 13.06 (12.17–14.74) | 14.25 (13.16–15.22) |
+| | tick | 8.36 (7.68–9.56) | 8.88 (8.52–10.25) |
+
+All within noise but the scripted rigs, added for this release's
+instance naming at placement and input. The shapes' first four rounds
+had 0.1.31 4% slower, all of it in SwiftShader's GL wait, and the next
+eight had it 2% faster. The scripted rigs, which replace 2,400 clips
+with frame scripts every frame, tick about 5% slower in 0.1.31 (twelve
+rounds; eight without `--hover` gave 8.35 (7.76–9.00) and 8.79
+(8.29–10.20) ms, so input plays no part). That is about 0.2 µs for each
+clip placed. Profiled over 600 frames, four rounds each, the added time
+is in the player: #1121 has a clip's first frame placed as its parent's
+frame places it, through `library.placed`, where 0.1.30 placed it from
+`construct`. The first frames' work in all is no greater (0.71 ms a frame
+under `construct` in 0.1.30, 0.68 under `library.placed` and
+`enterFirstFrame` in 0.1.31), but `enterFirstFrame` and `placeFirstFrame`
+take 0.36 ms a frame of self time where they took 0.09, with
+`frameSounds`, `addFrameScript` and the AS3 object's creation a little
+more besides. The collector's time is level. The town, whose clips with
+frame scripts stay put, does not show it.
 
 ### 0.1.25 against 0.1.24
 

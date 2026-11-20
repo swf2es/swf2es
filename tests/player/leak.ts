@@ -8,7 +8,14 @@
 // - fresh: each child played whole in a player of its own, in turn, as
 //   the corpus's runner plays its tests in one document;
 // - avm1: the same with AVM1 SWFs, each of frames of DoAction blocks; nor
-//   may the WebAssembly memories the page holds, codegen's, grow with them.
+//   may the WebAssembly memories the page holds, codegen's, grow with them;
+// - avm1movie: loader's, AVM1 movies in its Loader, each kept a few frames
+//   with what an AVM1 movie leaves running, Key, Mouse and Stage
+//   listeners, a LocalConnection, a sound, a SharedObject, a clip it draws
+//   and, one kind in three, an interval, then let go of by unload() and
+//   unloadAndStop() in turn, in ENTER_FRAME or EXIT_FRAME, which must take
+//   all of it. Each has an onUnload, which Flash lets a movie go by: one
+//   without keeps what listens running after it is unloaded.
 //
 // And what an online game does with each player's gear, never unloading
 // it: KINDS gear SWFs, each a symbol of a class with shapes and a bitmap
@@ -54,6 +61,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { Avm1Assembler } from "../avm1-assembler.ts";
+import { flashAssembler, script } from "../avm1-script.ts";
 import * as w from "../swf-writer.ts";
 import { bare, probeFont } from "./cases.ts";
 import { withSteppedPage } from "./chrome.ts";
@@ -281,6 +289,52 @@ const avm1Children = names.map((name, i) =>
   }),
 );
 
+// AVM1 movies of KINDS kinds for an AS3 Loader, each starting what a movie
+// leaves running, with METHODS / 5 functions of its kind to compile.
+names.forEach((name, i) => {
+  const functions = Array.from(
+    { length: METHODS / 5 },
+    (_, k) => `function f${k}(x) { return x * ${k} + "${name}".length; }`,
+  ).join("\n");
+  const calls = Array.from({ length: METHODS / 5 }, (_, k) => `total += f${k}(total);`).join("\n");
+  const source = `${functions}
+var total = 0;
+${calls}
+var ef = 0;
+var data = [];
+for (var n = 0; n < 10000; n++) { data.push({ n: n, s: "${name}" + n }); }
+${i % 3 === 0 ? "setInterval(function () { ef++; }, 5);" : ""}
+this.onUnload = function () { ef = 0; };
+var keys = {}; keys.onKeyDown = function () { ef++; }; Key.addListener(keys);
+var mouse = {}; mouse.onMouseMove = function () { ef++; }; Mouse.addListener(mouse);
+var stage = {}; stage.onResize = function () { ef++; }; Stage.addListener(stage);
+var lc = new LocalConnection(); lc.connect("leak${i}");
+var sound = new Sound(this); sound.attachSound("tone"); sound.start(0, 100);
+var so = SharedObject.getLocal("leak"); so.data.total = total;
+this.createEmptyMovieClip("c", 1);
+c.beginFill(0xff0000); c.moveTo(0, 0); c.lineTo(10, 0); c.lineTo(10, 10); c.endFill();
+c.onEnterFrame = function () { this._x++; };
+this.onEnterFrame = function () { ef++; };
+stop();`;
+  writeFileSync(
+    `${served}avm1-movie-${i}.swf`,
+    w.swf({
+      version: 8,
+      width: 100,
+      height: 50,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        w.defineSound(1, { rate: 0, samples: 551 }, new Uint8Array(551).fill(128)),
+        w.exportAssets([[1, "tone"]]),
+        w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.end(),
+      ],
+    }),
+  );
+});
+
 const mb = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 let failed = false;
 
@@ -303,7 +357,17 @@ await withSteppedPage(
       );
     }
 
-    for (const mode of ["loader", "same", "fresh", "avm1", "dropped", "shared", "lazy", "churn"]) {
+    for (const mode of [
+      "loader",
+      "same",
+      "fresh",
+      "avm1",
+      "avm1movie",
+      "dropped",
+      "shared",
+      "lazy",
+      "churn",
+    ]) {
       if (modes.length && !modes.includes(mode)) {
         continue;
       }
@@ -340,10 +404,12 @@ await withSteppedPage(
         }
       } else {
         error =
-          mode === "loader" || mode === "same"
+          mode === "loader" || mode === "same" || mode === "avm1movie"
             ? await page.open(
                 mainSwf,
-                `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
+                mode === "avm1movie"
+                  ? `/leak/main.swf?kinds=${KINDS}&prefix=avm1-movie-&keep=3&vary=1`
+                  : `/leak/main.swf?kinds=${mode === "same" ? 1 : KINDS}`,
                 cached,
               )
             : await page.open(

@@ -22,7 +22,7 @@ import {
 } from "../../display/display.js";
 import { apply, contains, invert, type Rect, transformRect } from "../../display/geometry.js";
 import { cached } from "../../display/shapeobject.js";
-import { asciiLower, childByName, pathOf, slashPathOf } from "../paths.js";
+import { asciiLower, childByName, slashPathOf } from "../paths.js";
 import type { Avm1Swf, Handler } from "../swf.js";
 import { blendModeOf, storeOf } from "./BitmapData.js";
 import { drawingMethods } from "./drawing.js";
@@ -53,6 +53,10 @@ export interface Movie extends GeomHost {
   levelOf(d: DisplayObject): number | null;
   /** Level `n`'s clip, null where there is none. */
   level(n: number): MovieClip | null;
+  /** The clip `_levelN` names, null for none: none at all in a movie an AS3 Loader holds. */
+  namedLevel(n: number): MovieClip | null;
+  /** The dot path of `d`, as a clip converts to a string. */
+  pathOf(d: DisplayObject): string;
   /** The stage's quality, "LOW" to "BEST". */
   quality: string;
   /** The stage's focus rectangle's, `_focusrect` up to SWF 5 and on the root. */
@@ -359,7 +363,11 @@ const PROPERTIES: [string, DisplayProperty][] = [
   [
     "_highquality",
     {
-      get: (f) => (f.movie.quality === "BEST" ? 2 : f.movie.quality === "LOW" ? 0 : 1),
+      // MEDIUM reads as LOW does (Flash Player 32, the AS3 stage's set to it).
+      get: (f) => {
+        const quality = f.movie.quality;
+        return quality === "BEST" ? 2 : quality === "LOW" || quality === "MEDIUM" ? 0 : 1;
+      },
       set(f, value, version) {
         if (value === undefined || value === null) {
           return;
@@ -684,7 +692,7 @@ function pathProperty(face: ClipNative, name: string, version: number): Value | 
     return avm1.ABSENT;
   }
 
-  const level = movie.level(levelOf(key.slice(6)));
+  const level = movie.namedLevel(levelOf(key.slice(6)));
   return level === null ? undefined : (movie.faceOf(level) ?? undefined);
 }
 
@@ -809,7 +817,7 @@ export class ClipNative implements avm1.DisplayNative {
   }
 
   path(): string {
-    return pathOf(this.target, (d) => this.movie.levelOf(d));
+    return this.movie.pathOf(this.target);
   }
 
   live(): avm1.Avm1Object | null {
@@ -1096,14 +1104,18 @@ export function movieClipClass(movie: Movie): {
     const target = args.length > 0 ? targetOf(movie, clip, args[0], version) : clip;
     return target === null ? undefined : boundsObject(movie, clip, target, true, version);
   });
-  // A sprite's are its tags', a SWF's root's the SWF's.
-  const bytes = (clip: MovieClip) => {
+  // A sprite's are its tags', a SWF's root's the SWF's, or a load's as it comes.
+  const bytes = (clip: MovieClip, loaded: boolean) => {
     const swf = movie.swfOf(clip);
-    return clip === swf.root ? swf.length : (clip.timeline.length ?? 0);
+    if (clip !== swf.root) {
+      return clip.timeline.length ?? 0;
+    }
+
+    return swf.loading ? (loaded ? swf.loading.loaded : swf.loading.total) : swf.length;
   };
-  method("getBytesTotal", 0, bytes);
+  method("getBytesTotal", 0, (clip) => bytes(clip, false));
   // A load in error has -1 bytes in all, none loaded (the corpus's movieclip_state_values).
-  method("getBytesLoaded", 0, (clip) => Math.max(0, bytes(clip)));
+  method("getBytesLoaded", 0, (clip) => Math.max(0, bytes(clip, true)));
   // The root is level 0's, at depth 0 (the corpus's movieclip_get_instance_at_depth).
   method("getDepth", avm1.READ_ONLY | avm1.VERSION_6, (clip) =>
     clip.depth !== null ? clip.depth - DEPTH_BIAS : clip === movie.root ? -DEPTH_BIAS : undefined,

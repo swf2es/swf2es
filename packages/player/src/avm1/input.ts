@@ -421,6 +421,17 @@ export class Avm1Input implements InputState {
     return value === undefined || avm1.toBoolean(value, this.movie.version);
   }
 
+  /**
+   * Whether a button or clip tracks as a menu's item: its `trackAsMenu`,
+   * where a script set one, else a button's own flag from its tag.
+   */
+  tracksAsMenu(d: DisplayObject): boolean {
+    const value = this.read(d, "trackAsMenu");
+    return value === undefined
+      ? d instanceof ButtonObject && d.trackAsMenu
+      : avm1.toBoolean(value, this.movie.version);
+  }
+
   /** What a clip's `hitArea` names, a clip or button the pointer tests in its place; null for none. */
   hitArea(clip: MovieClip): DisplayObject | null {
     if (this.movie.version < 6) {

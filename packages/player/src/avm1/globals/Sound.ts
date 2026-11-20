@@ -15,7 +15,6 @@ import {
   startScriptSound,
   stopSoundsOf,
   stopTimelineSound,
-  stopTimelineSounds,
   type TimelineSound,
 } from "../../media/sounds.js";
 
@@ -50,6 +49,8 @@ export interface SoundClassHost {
   soundTransform(d: DisplayObject | null): Avm1SoundTransform;
   /** `d`'s transform, the global one for null, set: the sounds playing follow it. */
   setSoundTransform(d: DisplayObject | null, transform: Avm1SoundTransform): void;
+  /** The global Sound's stop: every sound the movie plays under. */
+  stopAll(): void;
   /** `o.onSoundComplete()`, as the frame's actions run. */
   complete(o: Obj): void;
 }
@@ -238,7 +239,7 @@ export function soundClass(host: SoundClassHost): Obj {
     }
 
     if (global(state)) {
-      stopTimelineSounds(h);
+      host.stopAll();
     } else {
       const d = owner(state, v);
       if (d !== null) {
@@ -315,6 +316,17 @@ export function soundClass(host: SoundClassHost): Obj {
 }
 
 /** An AVM1 transform as the device mixes it, from percentages to fractions. */
+/** A mix in SoundMixer's hundredths as Sound reads it: whole percents. */
+export function transformOfMix(mix: SoundMix): Avm1SoundTransform {
+  return {
+    volume: Math.round(mix.volume * 100),
+    leftToLeft: Math.round(mix.leftToLeft * 100),
+    leftToRight: Math.round(mix.leftToRight * 100),
+    rightToLeft: Math.round(mix.rightToLeft * 100),
+    rightToRight: Math.round(mix.rightToRight * 100),
+  };
+}
+
 export function mixOfTransform(t: Avm1SoundTransform): SoundMix {
   return {
     volume: t.volume / 100,

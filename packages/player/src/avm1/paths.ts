@@ -26,9 +26,10 @@ export type LevelOf = (d: DisplayObject) => number | null;
 /**
  * The dot path of `d`, `_level0.a.b`, as a clip converts to a string and
  * TargetPath gives it: from its level, or from level 0 for one off the
- * display list.
+ * display list. In an AVM1 movie an AS3 Loader holds (`hosted`), its root,
+ * level 0 here, is `_root`, as Flash Player 32 names it there: `_root.a.b`.
  */
-export function pathOf(d: DisplayObject, levelOf: LevelOf): string {
+export function pathOf(d: DisplayObject, levelOf: LevelOf, hosted = false): string {
   const names: string[] = [];
   let level = 0;
   for (let o: DisplayObject | null = d; o !== null; o = o.parent) {
@@ -41,7 +42,7 @@ export function pathOf(d: DisplayObject, levelOf: LevelOf): string {
     names.push(o.name);
   }
 
-  names.push(`_level${level}`);
+  names.push(hosted && level === 0 ? "_root" : `_level${level}`);
   return names.reverse().join(".");
 }
 
@@ -99,20 +100,22 @@ export function childByName(
 
 /**
  * The display object at a dot path, `_level0.a.b`, as a clip's reference
- * finds it again: names from the level, each a child. Null where none is.
+ * finds it again: names from the level, each a child, or from `_root` in
+ * a `hosted` movie (pathOf). Null where none is.
  */
 export function atPath(
   path: string,
   level: (n: number) => DisplayObject | null,
   caseSensitive: boolean,
+  hosted = false,
 ): DisplayObject | null {
   const parts = path.split(".");
-  const match = /^_level(-?\d+)$/.exec(parts[0]);
+  const match = hosted ? /^_root$/.exec(parts[0]) : /^_level(-?\d+)$/.exec(parts[0]);
   if (match === null) {
     return null;
   }
 
-  let d: DisplayObject | null = level(Number(match[1]));
+  let d: DisplayObject | null = level(hosted ? 0 : Number(match[1]));
   for (let i = 1; i < parts.length && d !== null; i++) {
     d = childByName(d, parts[i], caseSensitive);
   }

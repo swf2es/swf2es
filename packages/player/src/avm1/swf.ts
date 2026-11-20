@@ -104,6 +104,13 @@ export class Avm1Swf {
     /** Its size as it came, compressed, which MovieClipLoader.getProgress gives. */
     readonly size = length,
   ) {}
+
+  /**
+   * What has come of the movie loading in its place, while this, empty,
+   * stands for it: the bytes so far and in all, which getBytesLoaded,
+   * getBytesTotal and getProgress give then.
+   */
+  loading: { loaded: number; total: number } | null = null;
 }
 
 /** Each root frame's exports, DoInitAction blocks, the tags Flash cannot read and its ScriptLimits. */

@@ -7,6 +7,7 @@ import type {
   ConnectionEvents,
   DesktopApi,
   LibraryName,
+  NetworkProgress,
   NetworkResponse,
   OpenedMovie,
   SocketEvent,
@@ -20,9 +21,87 @@ let nextWebSocket = 1;
 let nextRequest = 1;
 /** The requests waiting for their response, by number. */
 const responses = new Map<number, (response: NetworkResponse) => void>();
-ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) =>
-  responses.get(id)?.(response),
-);
+/**
+ * Those told of as they come: who hears of it, and its body so far, held
+ * at twice its size at most: in one buffer of the length told (up to a
+ * bound until more comes), or as its pieces, joined once at the end, where
+ * none was told or more came, as player's responseBytes holds it.
+ */
+interface Stream {
+  progress: NetworkProgress;
+  declared: number;
+  buffer: Uint8Array | null;
+  pieces: Uint8Array[];
+  length: number;
+}
+const streams = new Map<number, Stream>();
+const CAP = 1 << 24;
+ipcRenderer.on("net:response", (_event, id: number, response: NetworkResponse) => {
+  const stream = streams.get(id);
+  streams.delete(id);
+  if (response.streamed && stream) {
+    const { streamed: _, ...rest } = response;
+    responses.get(id)?.({ ...rest, bytes: whole(stream) });
+    return;
+  }
+
+  responses.get(id)?.(response);
+});
+ipcRenderer.on("net:open", (_event, id: number, head: Omit<NetworkResponse, "bytes">, total) => {
+  const stream = streams.get(id);
+  if (stream) {
+    stream.declared = Number(total) || 0;
+    stream.buffer = stream.declared > 0 ? new Uint8Array(Math.min(stream.declared, CAP)) : null;
+    stream.progress.open(head, Number(total));
+  }
+});
+ipcRenderer.on("net:data", (_event, id: number, chunk: Uint8Array) => {
+  const stream = streams.get(id);
+  if (!stream) {
+    return;
+  }
+
+  const end = stream.length + chunk.length;
+  const buffer = stream.buffer;
+  if (buffer !== null && end > buffer.length) {
+    if (end <= stream.declared) {
+      stream.buffer = new Uint8Array(stream.declared);
+      stream.buffer.set(buffer.subarray(0, stream.length));
+    } else {
+      stream.pieces = [buffer.subarray(0, stream.length)];
+      stream.buffer = null;
+    }
+  }
+
+  if (stream.buffer !== null) {
+    stream.buffer.set(chunk, stream.length);
+  } else {
+    stream.pieces.push(chunk);
+  }
+
+  stream.length = end;
+  stream.progress.data(chunk);
+});
+
+function whole(stream: Stream): Uint8Array {
+  const { buffer, pieces, length } = stream;
+  if (buffer !== null) {
+    return length === buffer.length ? buffer : buffer.slice(0, length);
+  }
+
+  if (pieces.length === 1) {
+    return pieces[0];
+  }
+
+  const bytes = new Uint8Array(length);
+  let at = 0;
+  for (const piece of pieces) {
+    bytes.set(piece, at);
+    at += piece.length;
+  }
+
+  return bytes;
+}
 
 // One cache per movie lifetime; reads after the first never block on the main process.
 let captureEpoch = -1;
@@ -145,24 +224,30 @@ const api: DesktopApi = {
     },
   },
   network: {
-    fetch: (request, cancel) => {
+    fetch: (request, cancel, progress) => {
       const id = nextRequest++;
       cancel(() => ipcRenderer.send("net:abort", id));
+      if (progress) {
+        streams.set(id, { progress, declared: 0, buffer: null, pieces: [], length: 0 });
+      }
+
       // The response comes as a message of its own, before the answer that says it went.
       return new Promise<NetworkResponse>((resolve, reject) => {
         responses.set(id, (response) => {
           responses.delete(id);
           resolve(response);
         });
-        ipcRenderer.invoke("net:fetch", id, request).then(
+        ipcRenderer.invoke("net:fetch", id, request, progress !== undefined).then(
           ({ delivered }: { delivered: boolean }) => {
             if (!delivered) {
               responses.delete(id);
+              streams.delete(id);
               reject(new Error("swf2es: the request was refused"));
             }
           },
           (error: unknown) => {
             responses.delete(id);
+            streams.delete(id);
             reject(error);
           },
         );
