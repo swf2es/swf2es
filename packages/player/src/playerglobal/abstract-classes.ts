@@ -15,7 +15,6 @@ const ABSTRACT = [
   "flash.display3D::Context3D",
   "flash.display3D::IndexBuffer3D",
   "flash.display3D::Program3D",
-  "flash.display3D::VertexBuffer3D",
   "flash.display3D.textures::CubeTexture",
   "flash.display3D.textures::RectangleTexture",
   "flash.display3D.textures::Texture",
@@ -41,7 +40,7 @@ const ABSTRACT = [
 ];
 
 /** Also restricted: a script's subclass is refused too, naming itself. */
-const RESTRICTED = ["flash.ui::GameInputControl"];
+const RESTRICTED = ["flash.display3D::VertexBuffer3D", "flash.ui::GameInputControl"];
 
 /**
  * Restricted display classes, whose own `new` displayFor refuses: a script's
@@ -85,10 +84,20 @@ export function withAbstractClasses(
       throw rt.error("ArgumentError", 2012, "ContentElement");
     },
   };
+  // A script's subclass of SecurityDomain is refused before its constructor runs, named
+  // as SecurityDomain itself is, without the "$" (adl); the player's own currentDomain is
+  // made of the class itself.
   hooks["flash.system::SecurityDomain"] = {
     ...hooks["flash.system::SecurityDomain"],
     construct: (rt) => {
       throw rt.error("ArgumentError", 2012, "SecurityDomain");
+    },
+    create: (traits, rt) => {
+      if (traits.name !== "flash.system::SecurityDomain") {
+        throw rt.error("ArgumentError", 2012, traits.name.slice(traits.name.lastIndexOf("::") + 2));
+      }
+
+      return Object.create(traits.proto);
     },
   };
   return hooks;
