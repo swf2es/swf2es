@@ -8,13 +8,19 @@ import type { avm1 } from "@swf2es/runtime";
 import type { DisplayObject, MovieClip } from "../display/display.js";
 import type { SoundCharacter } from "../display/timeline.js";
 import type { AudioHost, DecodedSound } from "../media/audio.js";
-import { type SoundHost, updateMixes } from "../media/sounds.js";
+import {
+  type SharedMixer,
+  type SoundHost,
+  stopTimelineSounds,
+  updateMixes,
+} from "../media/sounds.js";
 import type { Avm1 } from "./avm1.js";
 import {
   type Avm1SoundTransform,
   FULL,
   mixOfTransform,
   type SoundClassHost,
+  transformOfMix,
 } from "./globals/Sound.js";
 import { asciiLower } from "./paths.js";
 import { NO_ARGS } from "./queue.js";
@@ -36,6 +42,8 @@ export class Avm1Sounds implements SoundClassHost {
   constructor(
     private readonly movie: Avm1,
     readonly audio: AudioHost | null,
+    /** The AS3 player's mixer, for a movie a Loader loaded: the global transform and stop are its. */
+    private readonly shared: SharedMixer | null = null,
   ) {
     const media = this;
     this.sounds = {
@@ -57,9 +65,11 @@ export class Avm1Sounds implements SoundClassHost {
         return t === undefined ? undefined : mixOfTransform(t);
       },
       get mixer() {
-        return mixOfTransform(media.globalSoundTransform);
+        return media.shared === null
+          ? mixOfTransform(media.globalSoundTransform)
+          : media.shared.mix;
       },
-      scriptSounds: () => 0,
+      scriptSounds: () => (this.shared === null ? 0 : this.shared.otherSounds(this.sounds)),
     };
   }
 
@@ -80,17 +90,34 @@ export class Avm1Sounds implements SoundClassHost {
   }
 
   soundTransform(d: DisplayObject | null): Avm1SoundTransform {
-    return d === null ? this.globalSoundTransform : (this.soundTransforms.get(d) ?? FULL);
+    if (d !== null) {
+      return this.soundTransforms.get(d) ?? FULL;
+    }
+
+    return this.shared === null ? this.globalSoundTransform : transformOfMix(this.shared.mix);
   }
 
   setSoundTransform(d: DisplayObject | null, transform: Avm1SoundTransform): void {
-    if (d === null) {
-      this.globalSoundTransform = transform;
-    } else {
+    if (d !== null) {
       this.soundTransforms.set(d, transform);
+    } else if (this.shared !== null) {
+      // SoundMixer's, which updates every movie's sounds and AS3's.
+      this.shared.mix = mixOfTransform(transform);
+      return;
+    } else {
+      this.globalSoundTransform = transform;
     }
 
     updateMixes(this.sounds);
+  }
+
+  /** The global Sound's stop: the player's every sound for a loaded movie, as SoundMixer.stopAll. */
+  stopAll(): void {
+    if (this.shared === null) {
+      stopTimelineSounds(this.sounds);
+    } else {
+      this.shared.stopAll();
+    }
   }
 
   /** A Sound's sound has ended: its onSoundComplete runs once the frame's actions have. */

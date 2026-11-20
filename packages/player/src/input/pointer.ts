@@ -349,6 +349,13 @@ export class PointerInput implements Pointer {
     s.mouseStageY = p.y;
     this.last = p;
     this.updateDrag();
+    // A press or a release at a new point, with no move there first (Ruffle's recorded input):
+    // the AVM1 movies see the pointer arrive there first, as the move a mouse makes would show
+    // them, so that a press weighs what is under it against that.
+    if (type !== "move" && moved && s.avm1Input) {
+      this.redraws += s.avm1Input.sync(p, this.pick(p));
+    }
+
     try {
       s.avm1Input?.broadcast(type, p);
       this.dispatch(type, p, moved);
@@ -404,6 +411,13 @@ export class PointerInput implements Pointer {
       }
     }
 
+    // An AVM1 movie's buttons hear a release before AS3 does: a movie's
+    // button pressed and let go over an AS3 object or nothing calls its
+    // onReleaseOutside, then AS3 hears its mouseUp (Flash Player 32).
+    if (type === "up") {
+      this.redraws += s.avm1Input?.finish(type, p) ?? 0;
+    }
+
     if (type !== "move" && (p.button ?? 0) === 0) {
       // A press or a release is a user's gesture, in whose handlers alone a
       // script may write to the clipboard: not the hover's events around it.
@@ -415,7 +429,7 @@ export class PointerInput implements Pointer {
       this.otherButton(type, p.button, found?.avm1Root ? null : (target ?? this.stage), p);
     }
 
-    if (type !== "move") {
+    if (type === "down") {
       this.redraws += s.avm1Input?.finish(type, p) ?? 0;
     }
 

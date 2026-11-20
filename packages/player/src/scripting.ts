@@ -42,6 +42,7 @@ import {
   defaultStorage,
   type EncryptedStoreHost,
   type ExternalInterfaceHost,
+  type FetchHost,
   type FetchRequest,
   type FetchResult,
   type FileSystemHost,
@@ -260,7 +261,7 @@ export class Scripting {
   /** What plays every library's timeline and button sounds. */
   private readonly timelineSounds = timelineSoundsOf(soundHostOf(this));
   /** The host's fetch of a URL's bytes, for Loader.load, aborted when the load is closed or replaced; null where there is none. */
-  fetch: ((request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>) | null = null;
+  fetch: FetchHost | null = null;
   /** Decodes the images of a SWF's JPEG tags as it is linked; the browser's by default, null for none. */
   readonly decodeImage: ImageDecode | null;
   /**
@@ -405,7 +406,7 @@ export class Scripting {
     readonly codegen: Codegen,
     // The API version follows `air`, the one switch for it, below.
     options: Omit<avm2.RuntimeOptions, "apiVersion"> & {
-      fetch?: (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult>;
+      fetch?: FetchHost;
       url?: string;
       localConnections?: LocalConnections;
       /**
@@ -570,7 +571,13 @@ export class Scripting {
     this.lazyCompilation = options.lazyCompilation ?? false;
     const fetch = options.fetch;
     this.fetch = fetch
-      ? (request, signal) => fetchWhile(fetch, request, this.stopped.signal, signal)
+      ? (request, signal, progress) =>
+          fetchWhile(
+            (r: FetchRequest, s: AbortSignal) => fetch(r, s, progress),
+            request,
+            this.stopped.signal,
+            signal,
+          )
       : null;
     this.url = options.url ?? this.url;
     this.air = options.air ?? false;
@@ -787,6 +794,24 @@ export class Scripting {
         this.placing.splice(this.placing.indexOf(goto), 1);
       }
     };
+    // Flash names what a timeline places as it places it, before any
+    // constructor runs, a field's initializer's among them, and what a
+    // clip's first frame places, depth first: instance1, instance2, ... in
+    // that order, the named ones taking none: a clip has its own first
+    // frame placed then, as Flash Player 32 numbered them.
+    library.placed = (display) => {
+      if (display.name === "") {
+        display.name = `instance${++this.instances}`;
+      }
+
+      if (display instanceof MovieClip) {
+        display.timelineChild = true;
+        display.placeFirstFrame();
+      }
+    };
+    library.passedOver = (count) => {
+      this.instances += count;
+    };
     library.removing = (display, byTimeline) => this.lifecycle.removing(display, byTimeline);
     library.placedSymbol = (className) =>
       this.symbols.placedSymbol(className, library.domain ?? this.mainDomain);
@@ -805,8 +830,13 @@ export class Scripting {
     display.metaData = null;
     const metaData = bytes === null ? null : this.readMetaData(bytes);
 
-    // Its first frame's children are there before its constructor runs, made alive in its super().
+    // Its first frame's children are there before its constructor runs, made alive in its
+    // super(), and named after it, as what a button's states hold is (library.placed).
     if (display instanceof MovieClip) {
+      if (display.name === "") {
+        display.name = `instance${++this.instances}`;
+      }
+
       display.timelineChild = true;
       display.placeFirstFrame();
     }
@@ -1053,9 +1083,34 @@ export class Scripting {
 
     this.stageWidth = width;
     this.stageHeight = height;
+    if (this.stageScaleMode !== "noScale") {
+      return;
+    }
+
     const stage = this.stage?.object;
-    if (this.stageScaleMode === "noScale" && stage && heard(stage, "resize")) {
+    if (stage && heard(stage, "resize")) {
       dispatchTo(this, stage, this.event("resize"));
+    }
+
+    // Then the loaded AVM1 movies' Stage.onResize (Flash Player 32).
+    this.loads.stageResized();
+  }
+
+  /** A script's scale mode, one of AS3's names: the host lays the stage out again for a new one. */
+  setStageScaleMode(mode: StageScaleMode): void {
+    this.stageScaleModeSet = true;
+    if (mode !== this.stageScaleMode) {
+      this.stageScaleMode = mode;
+      this.onStageLayout?.();
+    }
+  }
+
+  /** A script's alignment, as stageAlignment gives it. */
+  setStageAlign(align: string): void {
+    this.stageAlignSet = true;
+    if (align !== this.stageAlign) {
+      this.stageAlign = align;
+      this.onStageLayout?.();
     }
   }
 
@@ -1859,6 +1914,7 @@ export class Scripting {
 
   private playFrame(root: DisplayObject, entered: boolean, render: boolean): void {
     this.overflowed = false;
+    this.loads.beginAvm1Frame();
     finishSounds(this);
     if (entered) {
       this.frames++;
@@ -1891,6 +1947,7 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    this.loads.releaseUnloadedAvm1();
     // What is under a mouse that stands still, as the frame left the list.
     this.pointer?.frameEnded();
     if (render) {

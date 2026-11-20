@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { createCodegen } from "@swf2es/codegen";
+import { Container } from "../../../../../../packages/player/dist/display/display.js";
 import { playerNatives } from "../../../../../../packages/player/dist/playerglobal/index.js";
 import { Scripting } from "../../../../../../packages/player/dist/scripting.js";
 
@@ -96,6 +97,21 @@ test("every SWF's Stage takes its settings and the host's size, not only with St
     scripting.resizeStage(192, 144);
     assert.equal(get("stageWidth"), 192);
     assert.equal(get("stageHeight"), 144);
+  } finally {
+    scripting.destroy();
+  }
+});
+
+test("the stage has no name, as Flash's is null, where other objects have theirs", async () => {
+  const scripting = new Scripting(await createCodegen(wasm));
+  try {
+    const name = playerNatives(scripting)["flash.display::DisplayObject#get:name"](scripting.rt);
+    const stage = new Container();
+    const child = new Container();
+    child.name = "instance1";
+    scripting.stage = stage;
+    assert.equal(name.call({ $display: stage } as never), null);
+    assert.equal(name.call({ $display: child } as never), "instance1");
   } finally {
     scripting.destroy();
   }

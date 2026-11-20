@@ -154,28 +154,108 @@ services. A movie from bytes runs its first-frame script after the
 following frame's AS3 ENTER_FRAME; a URL-loaded movie runs it in the load
 frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
-and script-driven playback run with the child. Unloading destroys the
-child VM and its connections without closing the parent's audio device.
-Keys and focus reach these loaded movies as Flash Player 32 sends them
-(input.md, "Keyboard and focus"). Wheel routing into them, and
-`AVM1Movie`'s `call` and `addCallback`, remain incomplete; those methods
-still throw #2014.
+and script-driven playback run with the child, under the parent's mixer:
+its global `Sound` reads and sets `SoundMixer.soundTransform`, either
+side's stop stops both, and they share the 32 channels. It has the
+parent's stage, `Stage`'s scale mode, align and menu, `onResize` after
+`RESIZE` in noScale, and `_quality`; one from bytes has the loading SWF's
+URL as its `_url`, for its SharedObjects and relative loads. Unloading
+lets the child VM go at the frame's end, as Flash Player 32 does, its
+LocalConnections' names and its sounds' channels taken until then: one
+unloaded in `ENTER_FRAME`, before its AVM1 has played, still plays that
+frame unless an interval or a timeout of its is to come, its unload
+handlers never running; one unloaded after its frame runs its clips'
+`onUnload`, children first, as the frame ends, or, between frames, as the
+next starts. `unloadAndStop` stops its sounds and timers at once. A movie
+with no unload handler anywhere in it is kept, stopped, while its
+LocalConnections listen or send (below); one with a handler goes whole,
+its names free from the next frame, though only once what it sent, its
+onUnload's sends among them, is delivered, their onStatus no longer told
+it (measured in adl and the projector). An onUnload's send arrives the
+next frame, as adl delivers it and as the host's queue delivers any send
+made at a frame's end; the projector delivers it in the same frame. A kept movie's LocalConnection
+handlers still run: a sound one starts plays and holds its channel until
+the movie goes, its onSoundComplete never told, as no frame of it plays;
+Flash keeps such a movie running, sounds and all.
+Flash also keeps such a movie's intervals, sounds and Key and Mouse
+listeners running after `unload()`, its sounds and its Key and Mouse
+listeners after `unloadAndStop` too; these stop here. The parent's audio
+device stays open. Keys and focus
+reach these loaded movies as Flash Player 32 sends them (input.md,
+"Keyboard and focus"). Wheel routing into them remains incomplete.
+`AVM1Movie`'s `call` and `addCallback` throw #2014 as Flash Player 32's
+do with any movie it loads (the `avm1-movie` player case), after its
+argument counts; their #1063's text names no method yet ("on function",
+where Flash's debugger player names `flash.display::AVM1Movie/call()`).
 
 `LocalConnection` uses one native broker (`player/src/localconnection.ts`)
 shared by a player's AS3 and loaded AVM1 movies. A standalone AVM1 player
 has its own broker; an embedding may explicitly share a `LocalConnections`
 instance across players. Connections live in a map keyed by ASCII-folded
 names, prefixed with the SWF's domain unless the name starts with `_`.
-Messages snapshot arguments as bounded bytes (40 KiB) and use the
-sender's existing host-event queue. AVM1 sends AMF0; AS3 sends AMF3 to
-preserve ByteArray, XML, Vector and class aliases, converting the snapshot
-to AMF0 only when an AVM1 receiver needs it. AMF3 scratch buffers are
-reused except for externalizable streams that may escape the call. A broker
-with no messages does no frame work. Receiver methods, domain permissions
-and sender status events enter the appropriate VM, never sharing live script objects. Closing or
-destroying a receiver frees its name. This is in-process messaging, not
-Flash's machine-wide transport: browser tabs and desktop processes do not
-share connections.
+Messages snapshot arguments as bounded bytes (40 KiB) and wait on one
+queue where the frame's host events are, which delivers up to 16 a frame,
+first in first out, so that a message a handler sends arrives in the same
+frame unless a chain keeps sending, as Flash's real-time delivery has it
+(`Loads.deferLocal`). AVM1 sends AMF0; AS3 sends AMF3 to preserve
+ByteArray, XML, Vector and class aliases, converting the snapshot to AMF0
+only when an AVM1 receiver needs it. AMF3 scratch buffers are reused
+except for externalizable streams that may escape the call. A broker with
+no messages does no frame work. Receiver methods, domain permissions and
+sender status events enter the appropriate VM, never sharing live script
+objects. A method a receiver lacks, or a property that is no function, is
+passed over in silence, as in Flash. Closing or destroying a receiver
+frees its name; an AVM1 movie an AS3 Loader unloads with no unload
+handler in it keeps its names, and stays while it listens or has a send
+to deliver, as Flash keeps it (avm1.md, "AVM1 and AVM2"); one with a
+handler frees them as the frame ends. This is in-process messaging, not Flash's
+machine-wide transport: browser tabs and desktop processes do not share
+connections.
+
+Downloads report their progress as their bytes come. A host's fetch may
+take a third argument, a `FetchProgress`, and tell it the response's head
+(`open`, with the length its headers give, 0 where they give none or the
+body was decoded from another length) and then each piece of the body
+(`data`); `responseBytes` reads a fetch `Response` that way, and the web
+element's, the test pages' and the desktop app's fetches do (the desktop
+app's main process sends the pieces over IPC). The loads cut each piece
+into reads of at most 8 KB (`piecesOf`, `pieces.ts`), each told in the
+frame after it comes, in the order it came, so that a response that stays
+open, as a server pushing messages keeps one, is heard as each comes: a
+`Loader`'s `LoaderInfo` hears `OPEN` and `PROGRESS` of none at the head and
+`PROGRESS` at each read, its query parameters from the first on, and its
+bytes and SWF header with the last where the response has all come by the
+frame that read is told, as it most often has, else from the frame after;
+a `URLStream` (and the `URLLoader` over
+it) `OPEN` at the head and `PROGRESS` at each read with the read already
+readable, so `bytesAvailable` is what came; a `Sound` as a `Loader`.
+`bytesTotal` is the length the headers told until more comes than that,
+then 0. Once all has come, where the last read's total was not all that
+came (no length, or more than it told), one more `PROGRESS` tells all of
+all. Flash told a `PROGRESS` at
+each network read of up to 8 KB, whatever the frame rate, a 64 KB piece as
+8 in the same millisecond (adl, and Flash Player 32's projector over HTTP,
+against a server sending a piece every 2 to 300 ms), and its total was
+the headers' length to the end: 0 without one, and in adl, whose network
+decodes a body a server compressed unasked, the compressed length below
+the bytes decoded (262144 of 4703 at `COMPLETE`); the projector's did not
+decode it. Here a load ends with `bytesLoaded` and `bytesTotal` equal,
+without a length too, where Flash keeps 0: a deliberate difference, so
+that a preloader waiting for them to meet finishes, as it did before
+progress was told as it came. AVM1's
+`MovieClipLoader` empties its target and tells `onLoadStart` at the head,
+then `onLoadProgress` at each read, the target's `getBytesLoaded` and
+`getBytesTotal` those bytes and an uncompressed SWF's length as its header
+gives it (adl), ending with all that came of all, for the first load into a
+clip and by a loader; those after it arrive told all at once, in their
+order. Flash told a compressed SWF's bytes decompressed against its
+header's length (adl and the projector), where here they are told as they
+came. A `LoadVars`' or `XML`'s `getBytesLoaded` grows the same way. A host
+that tells none of this has the body told as come at once, `OPEN` and the
+two `PROGRESS` together. What arrives is still compiled and played only
+once all of it has: a `Loader`'s content, which Flash would start from its
+first frame while the rest streamed in, comes after the last `PROGRESS`,
+and a `Sound`'s `length` stays 0 until `COMPLETE`.
 
 `URLStream` uses the same host fetch, which gives bytes (or a failure), HTTP
 status and headers. A `URLRequest`'s GET string or URLVariables data is appended to the query;

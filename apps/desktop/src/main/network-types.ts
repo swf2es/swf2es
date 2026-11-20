@@ -40,6 +40,17 @@ export interface NetResponse {
   policyIgnored?: true;
 }
 
+/**
+ * What a request's response tells as it comes, before the NetResponse
+ * that has all of it: its head, with the length its headers tell (0 for
+ * none, or for a body decoded from another length), then each piece of
+ * the body in order, as the SWF's load reports progress (FetchProgress).
+ */
+export interface NetProgress {
+  open(head: Omit<NetResponse, "bytes">, total: number): void;
+  data(chunk: Uint8Array): void;
+}
+
 /** A request refused, with why, for the terminal; the SWF sees a failed load. */
 export class Refused extends Error {}
 

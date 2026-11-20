@@ -23,15 +23,15 @@ import {
   liveSounds,
   MAX_SOUNDS,
   mixerMix,
-  mixerMixes,
   mixOf,
   outputMix,
   positionOf,
   type SoundState,
+  setMixerMix,
   stopChannel,
-  updateTimelineMixes,
 } from "../../../media/sounds.js";
 import { dispatchEvent } from "../../../scripting/events.js";
+import type { BytesProgress } from "../../../scripting/loads.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -97,11 +97,12 @@ function stateOf(o: AsObject): SoundState {
 
 /** The mixer stores channel coefficients in hundredths when a transform is assigned. */
 export function channelMix(mix: SoundMix): SoundMix {
-  // Whole percents, as Ruffle's i32: NaN is 0 and the range saturates.
-  const hundredths = (value: number) =>
-    Number.isNaN(value)
-      ? 0
-      : Math.max(-(2 ** 31), Math.min(2 ** 31 - 1, Math.trunc(value * 100))) / 100;
+  // Whole percents in 32 bits: NaN, and what is out of their range either
+  // way, is -2^31, as x86 converts it (adl, for SoundMixer's and a channel's).
+  const hundredths = (value: number) => {
+    const n = Math.trunc(value * 100);
+    return (n >= -(2 ** 31) && n < 2 ** 31 ? n : -(2 ** 31)) / 100;
+  };
   return {
     volume: hundredths(mix.volume),
     leftToLeft: hundredths(mix.leftToLeft),
@@ -122,14 +123,7 @@ export function setMixerTransform(s: Scripting, transform: Value): void {
     throw s.rt.error("TypeError", 2007, "sndTransform");
   }
 
-  const global = channelMix(mixOf(transform as AsObject));
-  mixerMixes.set(s, global);
-  for (const channel of channels.get(s) ?? []) {
-    const state = channel.$channel as ChannelState;
-    state.playing?.setMix(outputMix(state.mix, global));
-  }
-
-  updateTimelineMixes(s);
+  setMixerMix(s, channelMix(mixOf(transform as AsObject)));
 }
 
 export function transformOf(s: Scripting, mix: SoundMix): AsObject {
@@ -445,6 +439,42 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
+      const progressEvent = (loaded: number, total: number): AsObject =>
+        s.rt.construct(
+          s.rt.classNamed("flash.events::ProgressEvent"),
+          "progress",
+          false,
+          false,
+          loaded,
+          total,
+        ) as AsObject;
+      // Whether its response was told as it came, as Flash's: OPEN and PROGRESS of none at its
+      // head, then PROGRESS at each piece (adl), bytesTotal its headers' length or 0 to the end.
+      let streamed = false;
+      const progress: BytesProgress = {
+        open: (_head, total, url) => {
+          if (sound.generation !== generation) {
+            return;
+          }
+
+          streamed = true;
+          sound.url = url;
+          sound.loaded = 0;
+          sound.total = total;
+          dispatchEvent(s, this as AsObject, s.event("open"));
+          if (sound.generation === generation) {
+            dispatchEvent(s, this as AsObject, progressEvent(0, total));
+          }
+        },
+        data: (_chunk, loaded, total) => {
+          if (sound.generation !== generation || !streamed) {
+            return;
+          }
+
+          sound.loaded = loaded;
+          dispatchEvent(s, this as AsObject, progressEvent(loaded, total));
+        },
+      };
       s.loads.requestBytes(
         request as AsObject,
         abort.signal,
@@ -473,26 +503,17 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
           sound.bytes = bytes;
           sound.loaded = bytes.length;
-          sound.total = bytes.length;
-          dispatchEvent(s, this as AsObject, s.event("open"));
-          if (sound.generation !== generation) {
-            return;
-          }
+          if (!streamed) {
+            sound.total = bytes.length;
+            dispatchEvent(s, this as AsObject, s.event("open"));
+            if (sound.generation !== generation) {
+              return;
+            }
 
-          dispatchEvent(
-            s,
-            this as AsObject,
-            s.rt.construct(
-              s.rt.classNamed("flash.events::ProgressEvent"),
-              "progress",
-              false,
-              false,
-              bytes.length,
-              bytes.length,
-            ) as AsObject,
-          );
-          if (sound.generation !== generation) {
-            return;
+            dispatchEvent(s, this as AsObject, progressEvent(bytes.length, bytes.length));
+            if (sound.generation !== generation) {
+              return;
+            }
           }
 
           if (!s.audio) {
@@ -540,6 +561,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
           s.loads.trackRequest(completed);
         },
         "content",
+        progress,
       );
     }
 

@@ -21,6 +21,7 @@ import { bare, innerSwf } from "../../../player/cases.ts";
 import { libraryAbcs } from "../../../player/libraries.ts";
 import { compiler } from "../../../player/scripts.ts";
 import * as w from "../../../swf-writer.ts";
+import { loadsSwfs } from "./name-order.ts";
 
 // This file's own out directory: the other test files compile at the same time.
 const out = fileURLToPath(new URL("../../out/player-loads/", import.meta.url));
@@ -255,18 +256,20 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
   // The closed load and the replaced one come to nothing; the replacement
   // loads. A loaded SWF's own load resolves against it.
   await scripting.settled();
+  // Each load's bytes are told as they came, in the order they came, before
+  // the contents that came of them, in the order asked.
   player.tick();
   assert.deepEqual(lines.splice(0), [
     "2 open - null false",
     `2 progress 0/${inner.length} null false`,
     `2 progress ${inner.length}/${inner.length} null false`,
-    ...content,
     `3 open - null false`,
     `3 progress 0/${nested.length} null false`,
     `3 progress ${nested.length}/${nested.length} null false`,
     "5 open - null false",
     `5 progress 0/${inner.length} null false`,
     `5 progress ${inner.length}/${inner.length} null false`,
+    ...content,
     ...content,
     "frame 3 1,0,1,1,0,1",
     `before reload true ${inner.length} 10`,
@@ -301,10 +304,10 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "0 open - null false",
     `0 progress 0/${inner.length} null false`,
     `0 progress ${inner.length}/${inner.length} null false`,
-    ...content,
     // A load replaced from its OPEN listener ends there: no progress, no content.
     "7 open - null false",
     "replaced from open true 0",
+    ...content,
     ...content,
     // Loader 0's first content, let go of by the reload, plays on as an orphan: its scripts first.
     "inner frame 1 false true true false",
@@ -359,11 +362,11 @@ test("a Loader's load of a URL fetches through the host, and fails as one, in fr
     "8 open - null false",
     `8 progress 0/${inner.length} null false`,
     `8 progress ${inner.length}/${inner.length} null false`,
-    ...content,
     // The load asked for from REMOVED, the nested SWF, is loader 5's; the one that replaced it is not.
     "5 open - null false",
     `5 progress 0/${nested.length} null false`,
     `5 progress ${nested.length}/${nested.length} null false`,
+    ...content,
     ...content,
     ...content,
     // The orphans, newest first: loader 5's replaced content, then loader 0's.
@@ -964,6 +967,120 @@ test("the pointer over an AVM1 movie hits its Loader, the AVM1Movie being no Int
   assert.equal(pointerTarget(player.stage, 5, 5, player.width, player.height), loader.$display);
   // Off the movie's artwork, the stage.
   assert.equal(pointerTarget(player.stage, 15, 15, player.width, player.height), player.stage);
+});
+
+// The names of an AVM1 movie an AS3 Loader holds, and its levels, as Flash
+// Player 32's Windows debug projector traced scripts/LoadedAvm1Root.as over
+// HOSTED_ROOT: its root is `_root`, never `_level0`, no `_levelN` names
+// anything, loadMovieNum and a load into the root itself load nothing and
+// the Loader keeps one child, while a MovieClipLoader's load into a clip
+// comes, its `_root` the movie's; nor does anything load into the root,
+// loadVariables or MovieClipLoader's, or unload it, but into its clips.
+const HOSTED_ROOT = `
+function show(p) {
+  trace(p + " this " + this + " | _root " + _root + " | _level0 " + _level0 + " | _level1 " + _level1 + " | _parent " + _parent);
+  trace(p + " a " + a + " | " + a._target + " | " + targetPath(a) + " | " + a.b + " | " + a.b._target + " | " + targetPath(a.b));
+  trace(p + " root " + this._target + " | " + targetPath(this) + " | " + eval("_level0") + " | " + eval("/a") + " | " + eval("_root.a") + " | " + _root["_level0"]);
+}
+var a = createEmptyMovieClip("a", 1);
+a.createEmptyMovieClip("b", 1);
+show("1");
+loadMovieNum("level.swf", 1);
+loadVariablesNum("vars.txt", 0);
+loadVariablesNum("vars.txt", 1);
+var mcl = new MovieClipLoader();
+trace("1 loadClip " + mcl.loadClip("level.swf", 1) + " " + mcl.loadClip("level.swf", 0));
+var c = createEmptyMovieClip("c", 2);
+new MovieClipLoader().loadClip("child.swf", c);
+this._name = "renamed";
+var n = 0;
+onEnterFrame = function () {
+  n++;
+  if (n == 2) {
+    this.loadMovie("level.swf");
+    this.loadVariables("vars.txt");
+    c.loadVariables("vars.txt");
+    unloadMovieNum(0);
+    _root.unloadMovie();
+    _root.loadMovie("");
+  }
+  if (n == 6) {
+    show("6");
+    trace("6 level " + _level1 + " " + typeof _level1 + " " + c.getBytesTotal() + " " + v + " " + c.v);
+    var ref = a;
+    a.removeMovieClip();
+    var again = createEmptyMovieClip("a", 3);
+    trace("6 ref " + ref + " " + (ref == again) + " " + ref._name);
+    delete onEnterFrame;
+  }
+};`;
+
+/** An AVM1 SWF of version 8 whose one frame runs `source`. */
+function avm1Movie(source: string): Uint8Array {
+  return w.swf({
+    version: 8,
+    width: 320,
+    height: 240,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+test("a loaded AVM1 movie's root is _root, with no levels, as Flash names them", {
+  skip,
+}, async () => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    url: "http://example.test/main.swf",
+    // Slow to come, as from a network: settled() waits for the movie's own loads too.
+    fetch: async ({ url }) => {
+      await new Promise((done) => setTimeout(done, 20));
+      if (url.endsWith("vars.txt")) {
+        return { bytes: new TextEncoder().encode("v=hello"), status: 200, headers: [] };
+      }
+
+      const source = url.endsWith("root.swf")
+        ? HOSTED_ROOT
+        : url.endsWith("child.swf")
+          ? 'trace("child " + _root + " " + _parent);'
+          : 'trace("level " + this);';
+      return { bytes: avm1Movie(source), status: 200, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(compiler(out)("LoadedAvm1Root"), 1, "LoadedAvm1Root", 320, 240),
+    scripting,
+  );
+  try {
+    await player.start();
+    for (let i = 0; i < 16; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+
+    assert.deepEqual(lines, [
+      "1 this _root | _root _root | _level0 undefined | _level1 undefined | _parent undefined",
+      "1 a _root.a | /a | _root.a | _root.a.b | /a/b | _root.a.b",
+      "1 root / | _root | undefined | _root.a | _root.a | undefined",
+      "1 loadClip false false",
+      "child _root _root",
+      "6 this _root | _root _root | _level0 undefined | _level1 undefined | _parent undefined",
+      "6 a _root.a | /a | _root.a | _root.a.b | /a/b | _root.a.b",
+      "6 root / | _root | undefined | _root.a | _root.a | undefined",
+      "6 level undefined undefined 78 undefined hello",
+      "6 ref _root.a true a",
+      "as3:children 1 renamed",
+    ]);
+  } finally {
+    player.destroy();
+  }
 });
 
 /**
@@ -1871,3 +1988,368 @@ import flash.utils.setTimeout;
     assert.equal(copies.length, 1);
   });
 }
+
+test("a host that tells a response as it comes has each piece told in the frame after", {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const compile = compiler(out);
+  const source = readFileSync(
+    fileURLToPath(new URL("../../../web/scripts/ProgressTest.as", import.meta.url)),
+    "utf8",
+  );
+  const child = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  const tone = readFileSync(
+    fileURLToPath(new URL("../../../player/sounds/tone.mp3", import.meta.url)),
+  );
+  const bodies: Record<string, Uint8Array> = {
+    "/swf": child,
+    "/bin": new Uint8Array(30).fill(65),
+    "/text": new Uint8Array(30).fill(66),
+    "/mp3": new Uint8Array(tone),
+  };
+  // Each response in three pieces, one a frame, its head the frame before the first; `true` the
+  // step that ends it, after which the frame may wait for what it brought to be ready.
+  const steps: (() => boolean)[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    parameters: { base: "http://example.test" },
+    fetch: (request, _signal, progress) => {
+      const url = new URL(request.url);
+      const body = bodies[url.pathname];
+      const head = { status: 200, headers: [] };
+      const third = Math.ceil(body.length / 3);
+      return new Promise((done) => {
+        steps.push(() => {
+          progress?.open(head, url.search === "?unsized" ? 0 : body.length);
+          return false;
+        });
+        for (let at = 0; at < body.length; at += third) {
+          const piece = body.slice(at, at + third);
+          steps.push(() => {
+            progress?.data(piece);
+            return false;
+          });
+        }
+
+        steps.push(() => {
+          done({ ...head, bytes: body });
+          return true;
+        });
+      });
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compile("ProgressTest", source), 1, "ProgressTest"), scripting);
+  t.after(() => player.destroy());
+  await player.start();
+  const frames: string[][] = [];
+  for (let i = 0; i < 60 && !lines.includes("progress: done"); i++) {
+    // settled() waits for the fetches under way, which end only in a later step.
+    if (steps.shift()?.() ?? true) {
+      await scripting.settled();
+    } else {
+      await new Promise((next) => setTimeout(next, 0));
+    }
+
+    player.tick();
+    frames.push(lines.splice(0).map((l) => l.replace("progress: ", "")));
+  }
+
+  // Each piece's PROGRESS comes the frame after it, growing, the total what the head told; a
+  // URLStream's bytes readable as each comes. Without a length, a last PROGRESS once all has
+  // come tells all that came of all.
+  const told = frames.filter((f) => f.length > 0);
+  const third = Math.ceil(child.length / 3);
+  assert.deepEqual(told.slice(0, 5), [
+    [`loader progress 0 ${child.length}`],
+    [`loader progress ${third} ${child.length}`],
+    [`loader progress ${2 * third} ${child.length}`],
+    [`loader progress ${child.length} ${child.length}`],
+    ["loader complete"],
+  ]);
+  const of = (kind: string) => told.flat().filter((l) => l.startsWith(`${kind} `));
+  assert.deepEqual(of("urlloader"), [
+    "urlloader progress 10 30",
+    "urlloader progress 20 30",
+    "urlloader progress 30 30",
+    "urlloader complete",
+  ]);
+  assert.deepEqual(of("urlstream"), [
+    "urlstream progress 10 30 10",
+    "urlstream progress 20 30 20",
+    "urlstream progress 30 30 30",
+    "urlstream complete",
+  ]);
+  // Without a length, the total is unknown until the last, which tells all that came.
+  assert.deepEqual(of("unsized"), [
+    "unsized progress 10 0 10",
+    "unsized progress 20 0 20",
+    "unsized progress 30 0 30",
+    "unsized progress 30 30 30",
+    "unsized complete",
+  ]);
+  assert.deepEqual(of("gzipped"), [
+    "gzipped progress 10 30",
+    "gzipped progress 20 30",
+    "gzipped progress 30 30",
+    "gzipped complete",
+  ]);
+  const sound = of("sound");
+  assert.deepEqual(sound.slice(0, 4), [
+    `sound progress 0 ${tone.length}`,
+    `sound progress ${Math.ceil(tone.length / 3)} ${tone.length}`,
+    `sound progress ${2 * Math.ceil(tone.length / 3)} ${tone.length}`,
+    `sound progress ${tone.length} ${tone.length}`,
+  ]);
+  assert.deepEqual(sound.slice(-1), ["sound complete"]);
+  assert.equal(told.flat().at(-1), "done");
+});
+
+test("a load closed or replaced as it comes tells no more, one that fails midway ends in IOError, and a body longer than its length is told as of an unknown total", {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const source = `package {
+import flash.display.*; import flash.events.*; import flash.net.*;
+public class ProgressEdges extends Sprite {
+  private var jobs:Array = [
+    ["loader", "/swf", "close"], ["loader", "/swf", "replace"], ["urlstream", "/bin", "close"],
+    ["loader", "/fail", ""], ["urlstream", "/fail", ""], ["urlstream", "/lie", ""]
+  ];
+  private var kept:Array = [];
+  public function ProgressEdges() { next(); }
+  private function next():void {
+    if (jobs.length == 0) { trace("done"); return; }
+    var job:Array = jobs.shift();
+    var kind:String = job[0];
+    var action:String = job[2];
+    var request:URLRequest = new URLRequest("http://example.test" + job[1]);
+    var target:IEventDispatcher;
+    var loader:Loader = null;
+    var stream:URLStream = null;
+    if (kind == "loader") { loader = new Loader(); target = loader.contentLoaderInfo; }
+    else { stream = new URLStream(); target = stream; }
+    kept.push(target);
+    var acted:Boolean = false;
+    target.addEventListener(ProgressEvent.PROGRESS, function(e:ProgressEvent):void {
+      trace(kind + " " + action + " progress " + e.bytesLoaded + " " + e.bytesTotal);
+      if (e.bytesLoaded > 0 && !acted && action != "") {
+        acted = true;
+        if (action == "replace") { loader.load(new URLRequest("http://example.test/bin")); return; }
+        if (loader) { loader.close(); } else { stream.close(); }
+        trace(kind + " closed");
+        next();
+      }
+    });
+    target.addEventListener(Event.COMPLETE, function(e:Event):void { trace(kind + " " + action + " complete"); next(); });
+    target.addEventListener(IOErrorEvent.IO_ERROR, function(e:IOErrorEvent):void { trace(kind + " " + action + " ioError"); next(); });
+    if (loader) { loader.load(request); } else { stream.load(request); }
+  }
+}
+}`;
+  const child = w.swf({
+    width: 20,
+    height: 20,
+    frameCount: 1,
+    tags: [w.fileAttributes(true), w.showFrame(), w.end()],
+  });
+  // Three pieces of a body each, one a frame: /fail fails after two, /lie tells a length of 10.
+  const steps: (() => boolean)[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    fetch: (request, signal, progress) => {
+      const path = new URL(request.url).pathname;
+      const body = path === "/swf" ? child : new Uint8Array(30).fill(65);
+      const head = { status: 200, headers: [] };
+      const third = Math.ceil(body.length / 3);
+      return new Promise((done, fail) => {
+        const step = (run: () => void, ends = false) =>
+          steps.push(() => {
+            if (!signal.aborted) {
+              run();
+            }
+
+            return ends;
+          });
+        step(() => progress?.open(head, path === "/lie" ? 10 : body.length));
+        for (let at = 0; at < body.length; at += third) {
+          const piece = body.slice(at, at + third);
+          if (path === "/fail" && at >= 2 * third) {
+            step(() => fail(new Error("broken off")), true);
+            return;
+          }
+
+          step(() => progress?.data(piece));
+        }
+
+        step(() => done({ ...head, bytes: body }), true);
+        signal.addEventListener("abort", () => fail(new Error("aborted")));
+      });
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(
+    bare(compiler(out)("ProgressEdges", source), 1, "ProgressEdges"),
+    scripting,
+  );
+  t.after(() => player.destroy());
+  await player.start();
+  // settled() waits for every fetch under way: only once no host step is left to come.
+  for (let i = 0; i < 120 && !lines.includes("done"); i++) {
+    steps.shift()?.();
+    if (steps.length === 0) {
+      await scripting.settled();
+    } else {
+      await new Promise((next) => setTimeout(next, 5));
+    }
+
+    player.tick();
+  }
+
+  const n = child.length;
+  const third = Math.ceil(n / 3);
+  assert.deepEqual(lines, [
+    // Closed at its first bytes: nothing more of it.
+    `loader close progress 0 ${n}`,
+    `loader close progress ${third} ${n}`,
+    "loader closed",
+    // Replaced at its first bytes: the replacement's alone from then on.
+    `loader replace progress 0 ${n}`,
+    `loader replace progress ${third} ${n}`,
+    "loader replace progress 0 30",
+    "loader replace progress 10 30",
+    "loader replace progress 20 30",
+    "loader replace progress 30 30",
+    "loader replace ioError",
+    "urlstream close progress 10 30",
+    "urlstream closed",
+    // Broken off after two pieces: what came is told, then the error.
+    "loader  progress 0 30",
+    "loader  progress 10 30",
+    "loader  progress 20 30",
+    "loader  ioError",
+    "urlstream  progress 10 30",
+    "urlstream  progress 20 30",
+    "urlstream  ioError",
+    // More than the length told: unknown from then, and all of it of all once all has come.
+    "urlstream  progress 10 10",
+    "urlstream  progress 20 0",
+    "urlstream  progress 30 0",
+    "urlstream  progress 30 30",
+    "urlstream  complete",
+    "done",
+  ]);
+});
+
+test("a URLStream hears each piece of a response that stays open as it comes, readable then", {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const source = `package {
+import flash.display.*; import flash.events.*; import flash.net.*;
+public class OpenStream extends Sprite {
+  private var stream:URLStream = new URLStream();
+  public function OpenStream() {
+    stream.addEventListener(ProgressEvent.PROGRESS, function(e:ProgressEvent):void {
+      trace("progress " + e.bytesLoaded + " " + stream.bytesAvailable + " " + stream.readUTFBytes(stream.bytesAvailable));
+    });
+    stream.load(new URLRequest("http://example.test/push"));
+  }
+}
+}`;
+  // A server that pushes a message, then another, and keeps the response open.
+  const steps: (() => void)[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    fetch: (_request, _signal, progress) =>
+      new Promise(() => {
+        steps.push(() => progress?.open({ status: 200, headers: [] }, 0));
+        steps.push(() => progress?.data(new TextEncoder().encode("one")));
+        steps.push(() => progress?.data(new TextEncoder().encode("two")));
+      }),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(compiler(out)("OpenStream", source), 1, "OpenStream"), scripting);
+  t.after(() => player.destroy());
+  await player.start();
+  const frames: string[][] = [];
+  for (let i = 0; i < 4; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    player.tick();
+    frames.push(lines.splice(0));
+  }
+
+  assert.deepEqual(frames, [[], ["progress 3 3 one"], ["progress 6 3 two"], []]);
+});
+
+// Flash Player 32's projector, and adl, give Loader.load and loadBytes the
+// next instance name in the call, for the root of the SWF to come, AS3's
+// or AVM1's; a load that fails or is replaced leaves its own unused.
+test("Loader.load and loadBytes take the name of the root to come in the call", {
+  skip,
+}, async () => {
+  const files = loadsSwfs(compiler(out));
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    url: "http://example.test/test.swf",
+    fetch: async ({ url }) => {
+      const bytes = files[url.slice(url.lastIndexOf("/") + 1)] ?? null;
+      return { bytes, status: bytes ? 200 : 404, headers: [] };
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(files["test.swf"], scripting);
+  try {
+    await player.start();
+    for (let i = 0; i < 4; i++) {
+      await scripting.settled();
+      player.tick();
+    }
+  } finally {
+    player.destroy();
+  }
+
+  // The calls in order; what comes, in the order it arrives, which is the network's.
+  assert.deepEqual(
+    lines.filter((line) => /^(before|after) /.test(line)),
+    [
+      "before url0 instance2",
+      "after url0 instance4",
+      "before url1 instance6",
+      "after url1 instance8",
+      "before url2 instance10",
+      "after url2 instance12",
+      "before url3 instance13",
+      "after url3 instance15",
+      "before bytes instance17",
+      "after bytes instance19",
+    ],
+  );
+  assert.deepEqual(lines.filter((line) => /^(init|ioError) /.test(line)).sort(), [
+    "init bytes instance18",
+    "init url0 instance14",
+    "init url1 instance7",
+    "init url3 instance14",
+    "ioError url2",
+  ]);
+  // An AS3 root has its load's name as its constructor runs.
+  assert.deepEqual(
+    lines
+      .filter((line) => line.startsWith("child "))
+      .map((line) => line.split(" ")[1])
+      .sort(),
+    ["instance18", "instance7"],
+  );
+});
