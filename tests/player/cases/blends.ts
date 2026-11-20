@@ -166,6 +166,74 @@ function blendDrift(): Uint8Array {
 }
 
 /**
+ * blendFills' shapes each the only child of a clip in a blend mode, the
+ * usual way a SWF blends its art: the slant inside its clip, turned,
+ * coloured and faded there; the disc in a faded clip; the three a clip
+ * deeper; the disc scaled; the bitmaps; the three in a coloured clip; and,
+ * as a control, the slant beside the square over another.
+ */
+function spriteFills(
+  tags: Uint8Array[],
+  turn: (angle: number, scale: number) => { a: number; b: number; c: number; d: number },
+): Uint8Array {
+  const turned = turn((23 * Math.PI) / 180, 0.85);
+  const about = {
+    ...turned,
+    tx: 320 - (turned.a * 320 + turned.c * 320),
+    ty: 320 - (turned.b * 320 + turned.d * 320),
+  };
+  const colored = { mult: [0.8, 1, 0.6, 1], add: [30, -20, 10, 0] };
+  const faded = { mult: [1, 1, 1, 0.6] };
+  // Each row's children, in the clip's space, and the clip's colour.
+  const rows: { children: w.PlaceSpec[]; color?: w.PlaceSpec["colorTransform"] }[] = [
+    { children: [{ depth: 1, character: 10, matrix: { tx: 60, ty: 40 } }] },
+    { children: [{ depth: 1, character: 10, matrix: about }] },
+    { children: [{ depth: 1, character: 10, colorTransform: colored }] },
+    { children: [{ depth: 1, character: 10, colorTransform: faded }] },
+    { children: [{ depth: 1, character: 11 }], color: faded },
+    { children: [{ depth: 1, character: 400 }] },
+    { children: [{ depth: 1, character: 11, matrix: { a: 0.9, d: 0.9, tx: 30, ty: 30 } }] },
+    { children: [{ depth: 1, character: 13 }] },
+    { children: [{ depth: 1, character: 12 }], color: colored },
+    {
+      children: [
+        { depth: 1, character: 10, matrix: { a: 0.5, d: 0.5 } },
+        { depth: 2, character: 16, matrix: { a: 0.5, d: 0.5, tx: 320, ty: 320 } },
+      ],
+    },
+  ];
+  tags.push(w.sprite(400, 1, [w.place({ depth: 1, character: 12 }), w.showFrame(), w.end()]));
+  for (let r = 0; r < rows.length; r++) {
+    tags.push(
+      w.sprite(200 + r * 10, 1, [
+        ...rows[r].children.map((child) => w.place(child)),
+        w.showFrame(),
+        w.end(),
+      ]),
+    );
+  }
+
+  tags.push(w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 2 }));
+  let depth = 10;
+  for (let i = 0; i < FILL_MODES.length; i++) {
+    for (let r = 0; r < rows.length; r++) {
+      tags.push(
+        w.place({
+          depth: depth++,
+          character: 200 + r * 10,
+          blendMode: FILL_MODES[i],
+          matrix: { tx: (8 + i * 44) * 20, ty: (8 + r * 40) * 20 },
+          colorTransform: rows[r].color,
+        }),
+      );
+    }
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: 400, height: 410, frameRate: 24, frameCount: 1, tags });
+}
+
+/**
  * The modes of blendFills' columns: multiply, overlay, add, screen, hard
  * light, darken, lighten, difference and invert.
  */
@@ -179,7 +247,7 @@ const FILL_MODES = [3, 13, 8, 4, 14, 6, 5, 7, 10];
 // edges; a radial gradient's disc in a solid square; the disc and the
 // three inside clips of their own, one faded, one coloured; and two fills
 // over each other. A column a mode (FILL_MODES), a row each.
-function blendFills(): Uint8Array {
+function blendFills(inSprites = false): Uint8Array {
   const poly = (points: [number, number][]): w.PathCommand[] =>
     points.map((p, i) => (i === 0 ? { move: p } : { line: p }));
   // A circle clockwise from its east, in eight curves: its inside on the right of its edges.
@@ -442,6 +510,10 @@ function blendFills(): Uint8Array {
     }),
   ];
   const tags: Uint8Array[] = [w.backgroundColor(0x808080), ground, ...shapes];
+  if (inSprites) {
+    return spriteFills(tags, turn);
+  }
+
   // Each mode's disc and three in clips of their own, the clips coloured.
   for (let i = 0; i < FILL_MODES.length; i++) {
     for (const [k, character] of [11, 12].entries()) {
@@ -531,6 +603,19 @@ export const blendCases: PlayerCase[] = [
     // layers the most. Through layers, 514; fills that overlap blended one after the other, 508.
     tolerance: 48,
     maxOutliers: 260,
+  },
+  {
+    // As `blend-fills-host`, each shape the only child of a clip in the blend mode, as a SWF
+    // blends its art: adl blends its fills by what each covers as it does a shape's own.
+    name: "blend-sprite-fills-host",
+    swf: blendFills(true),
+    frames: 2,
+    capture: [2],
+    antialias: true,
+    draw: true,
+    // 136 channels past 48, up to 102. Through the clips' layers, 450.
+    tolerance: 48,
+    maxOutliers: 160,
   },
   {
     // The same multisampled, where each sample of a pixel two fills share blends apart.

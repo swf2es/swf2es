@@ -58,7 +58,8 @@
 // other one gliding each frame, as a game's effects and tinted art are:
 // what a blend mode costs an object that is one fill. --blend-fills K cuts
 // the coloured ones into K fills that meet, as a SWF's art in a blend
-// mode often is.
+// mode often is; --blend-clips puts each shape in a clip of its own, which
+// takes the blend mode, as a SWF usually blends its art.
 //
 // --hover holds the mouse still over the stage's middle, as a user's often
 // is, for what a SWF with scripts does for it each frame: with --scripted
@@ -186,7 +187,7 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K]
+//     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
 //     | --scripted N [--still] | --town N
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
@@ -245,6 +246,7 @@ const toggle = option("toggle", 0);
 const masks = option("masks", 0);
 const blends = option("blends", 0);
 const blendFills = Math.max(1, option("blend-fills", 1));
+const blendClips = args.includes("--blend-clips");
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
@@ -725,9 +727,10 @@ function slices(r: number, sides: number, count: number): Pick<w.ShapeSpec, "fil
  * loop of 48 frames: half a polygon filled with a 16 by 16 bitmap, half one
  * of a colour part clear, cut into `fills` slices of colours of their own
  * that meet at its centre, in add, screen, multiply, lighten, overlay and
- * hard light in turn, every other one gliding (--blends, --blend-fills).
+ * hard light in turn, every other one gliding; or each in a clip that takes
+ * the blend mode, where `clips` (--blends, --blend-fills, --blend-clips).
  */
-function blendsSwf(count: number, fills: number): Uint8Array {
+function blendsSwf(count: number, fills: number, clips: boolean): Uint8Array {
   const pixels: number[] = [];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
@@ -772,6 +775,14 @@ function blendsSwf(count: number, fills: number): Uint8Array {
     }),
     w.shape({ id: 4, bounds: [-r, r, -r, r], ...slices(r, 24, fills) }),
   );
+  if (clips) {
+    for (const id of [3, 4]) {
+      tags.push(
+        w.sprite(id + 2, 1, [w.place({ depth: 1, character: id }), w.showFrame(), w.end()]),
+      );
+    }
+  }
+
   const modes = [8, 4, 3, 5, 13, 14];
   const loop = 48;
   const columns = Math.ceil(Math.sqrt(count * (WIDTH / HEIGHT)));
@@ -788,7 +799,7 @@ function blendsSwf(count: number, fills: number): Uint8Array {
     tags.push(
       w.place({
         depth: i + 2,
-        character: 3 + (i % 2),
+        character: (clips ? 5 : 3) + (i % 2),
         matrix: at(i, 0),
         blendMode: modes[Math.floor(i / 2) % modes.length],
       }),
@@ -1939,7 +1950,7 @@ const swf =
                                 : masks > 0
                                   ? masksSwf(masks, args.includes("--unmasked"))
                                   : blends > 0
-                                    ? blendsSwf(blends, blendFills)
+                                    ? blendsSwf(blends, blendFills, blendClips)
                                     : branches > 0
                                       ? branchSwf(branches)
                                       : rig > 0
@@ -2031,7 +2042,7 @@ const summary = {
                                 : masks > 0
                                   ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
                                   : blends > 0
-                                    ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}`
+                                    ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
                                     : branches > 0
                                       ? `${branches} branches`
                                       : rig > 0

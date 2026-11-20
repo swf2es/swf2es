@@ -11,9 +11,10 @@
 // here: a crowd of filled, stroked, bitmap and gradient parts under colour
 // transforms, half of it still; blend modes, a mask, a glow left still and
 // a filtered sprite multiplied between shapes; pictures blended alone; art of
-// fills that meet blended alone; a timeline that replaces, removes and adds
-// shapes and morphs every frame; and counters, fields of the device font
-// whose text changes every frame, their glyphs drawn from one atlas. Software GL
+// fills that meet blended alone, and in clips blended; a timeline that
+// replaces, removes and adds shapes and morphs every frame; and counters,
+// fields of the device font whose text changes every frame, their glyphs
+// drawn from one atlas. Software GL
 // and a GPU must count the same. Buffers made anew and copied on the GPU,
 // as a growing geometry atlas makes them, are printed too. Each case is
 // counted twice: with WEBGL_multi_draw, and with it hidden (its name then
@@ -338,8 +339,10 @@ function blendBitmaps(): Uint8Array {
  * three meeting at a point, in add, screen, multiply, lighten, overlay,
  * hard light, difference and darken in turn, every other one moving each
  * frame; each drawn straight onto what is below, as its fills do not overlap.
+ * `inSprites`, each the only child of a clip in the blend mode, as a SWF
+ * blends its art.
  */
-function blendFills(): Uint8Array {
+function blendFills(inSprites = false): Uint8Array {
   const modes = [8, 4, 3, 5, 13, 14, 7, 6];
   const poly = (points: [number, number][]): w.PathCommand[] =>
     points.map((p, i) => (i === 0 ? { move: p } : { line: p }));
@@ -435,6 +438,14 @@ function blendFills(): Uint8Array {
       ],
     }),
   ];
+  if (inSprites) {
+    for (const id of [1, 2]) {
+      tags.push(
+        w.sprite(id + 2, 1, [w.place({ depth: 1, character: id }), w.showFrame(), w.end()]),
+      );
+    }
+  }
+
   const pieces = 24;
   const frames = 120;
   const at = (i: number, frame: number) => ({
@@ -445,7 +456,7 @@ function blendFills(): Uint8Array {
     tags.push(
       w.place({
         depth: i + 1,
-        character: 1 + (Math.floor(i / 8) % 2),
+        character: (inSprites ? 3 : 1) + (Math.floor(i / 8) % 2),
         matrix: at(i, 0),
         blendMode: modes[i % modes.length],
       }),
@@ -596,6 +607,7 @@ function cases(): Map<string, Uint8Array> {
     ["blend-mask", blendMask()],
     ["blend-bitmaps", blendBitmaps()],
     ["blend-fills", blendFills()],
+    ["blend-sprite-fills", blendFills(true)],
     ["swap", swap()],
     ["counters", counters()],
   ]);

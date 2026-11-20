@@ -194,6 +194,12 @@ export class RenderView implements Drawer {
   private sliceOwner: DisplayObject | null = null;
   private ownerSlice: Slice | null = null;
   private ownerParent: number[] = [1, 0, 0, 1];
+  /**
+   * The object the blend layer being walked holds alone, at the end of its
+   * chain of only children (soleChild): a part of several fills it draws
+   * may be drawn without the layer, as if the blend were its own.
+   */
+  private soleBlended: DisplayObject | null = null;
   /** The outputs kept: filtered objects' (FilterLayers) and 3D objects' bitmaps (Planes). */
   private readonly keeps = new Keeps();
   /** Moves on as what every kept output was made at changes: the scale, the stage's quality. */
@@ -827,15 +833,15 @@ export class RenderView implements Drawer {
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
       // Read once for the object, not for each textured part.
       const smoothing = this.smoothing;
-      // A layer of a part of several fills alone, drawn without the layer where they do not
-      // overlap (WebGLBackend.blendDirect): looked into only then, as it tessellates them again.
+      // A layer of a part of several fills alone, its own or an ancestor's that holds it alone,
+      // drawn without the layer where they do not overlap (WebGLBackend.blendDirect): looked into
+      // only then, as it tessellates them again.
       const alone =
-        layer >= 0 &&
+        ((layer >= 0 && blendsDirect(mode)) || (mode === NORMAL && o === this.soleBlended)) &&
         !filtering &&
         !alphaMask &&
         !r &&
         !childful &&
-        blendsDirect(mode) &&
         layers.length === 1 &&
         layers[0].strokes.length === 0;
 
@@ -1160,6 +1166,20 @@ export class RenderView implements Drawer {
       const owner = this.sliceOwner;
       const ownerSlice = this.ownerSlice;
       const ownerParent = this.ownerParent;
+      // A clip in a blend mode that draws nothing but one child, as a SWF blends its art: that
+      // child's fills may be drawn without the clip's layer, as a blend set on it would be.
+      const soleBlended = this.soleBlended;
+      if (
+        layer >= 0 &&
+        blendsDirect(mode) &&
+        !filtering &&
+        !alphaMask &&
+        !r &&
+        !o.drawing?.layers.length
+      ) {
+        this.soleBlended = soleChild(o);
+      }
+
       this.sliceOwner = ownSlice ? o : null;
       this.ownerSlice = ownSlice;
       if (ownSlice) {
@@ -1205,6 +1225,7 @@ export class RenderView implements Drawer {
       this.sliceOwner = owner;
       this.ownerSlice = ownerSlice;
       this.ownerParent = ownerParent;
+      this.soleBlended = soleBlended;
       for (; open > 0; open--) {
         this.masks.popMask(this.scene);
       }
@@ -1810,6 +1831,23 @@ export class RenderView implements Drawer {
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
+/**
+ * The object at the end of `o`'s chain of only children, those between
+ * drawing nothing of their own, if it has no children itself; else null.
+ */
+function soleChild(o: Container): DisplayObject | null {
+  let c: DisplayObject = o;
+  while (
+    c instanceof Container &&
+    c.children.length === 1 &&
+    (c === o || !c.drawing?.layers.length)
+  ) {
+    c = c.children[0];
+  }
+
+  return c === o || (c instanceof Container && c.children.length > 0) ? null : c;
+}
+
 function noteUnsupported(o: DisplayObject): void {
   if (o.filters.length > 0 && undrawnFilter(o.filters)) {
     unsupported.filters++;
