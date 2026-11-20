@@ -43,7 +43,21 @@
   Flash constructs that before it is the `Loader`'s child: its document
   class finds `stage` null in its constructor, where a main movie's finds
   the stage, as the player's does. A case whose trace depends on that
-  waits for the player's own `Loader`, to run as loaded content too. adl is not in CI (here it runs the Windows AIR
+  waits for the player's own `Loader`, to run as loaded content too.
+  Flash runs a SWF and everything it loads at its root SWF's API version,
+  so every SWF the harness loads runs at the harness's, whatever its own
+  header says: SWF 51, AIR_20_0 in adl and SWF_31 in Flash Player's
+  series. The player plays each case at it (`HARNESS_SWF_VERSION`,
+  Scripting's `apiVersion`), which is the player's default, the latest.
+  A case marked `root` runs as the application's content instead
+  (`FlashJob.root`, `node oracle/flash.ts --root file.swf [frames]`), at
+  its own SWF version, and the player plays it at that version
+  (`versioned-isplaying`, a SWF 12 class with its own `isPlaying`, which
+  the harness refuses with VerifyError #1053). With no harness around it,
+  `oracle/flash/Swf2esOracleRoot.as`'s ABC, put first in its SWF, marks
+  its traces and quits after its frames: such a case is traced only, and
+  an error it leaves uncaught before its first frame ends stops it with
+  AIR's dialog. adl is not in CI (here it runs the Windows AIR
   runtime under Wine), so what the player's tests compare against is drawn
   once and committed (`tests/player/references`, `node tests/player/run.ts
   --update`); CI needs only Chrome.
