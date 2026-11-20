@@ -37,10 +37,11 @@ export interface PlayerJob {
   air?: boolean;
   /**
    * The API version it runs at (Scripting's `apiVersion`): the latest by
-   * default, or a root SWF's version's, as Flash runs everything at its
-   * root's (run.ts pins its cases to the oracle's harness's).
+   * default; "root", its own SWF version's, as Flash runs everything at its
+   * root's; or another SWF version's (run.ts pins its cases to the oracle's
+   * harness's).
    */
-  apiVersion?: "latest" | number;
+  apiVersion?: "latest" | "root" | number;
   /**
    * Every frame drawn, as a host draws it, at the stage's size and no
    * larger, and waited for: a benchmark's frames then take their drawing's

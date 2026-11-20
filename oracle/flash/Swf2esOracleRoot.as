@@ -16,10 +16,11 @@
 // The root's LoaderInfo is not there until its first frame has run, so
 // errors are caught from frame 1's EXIT_FRAME on: one before, as in the
 // document class's constructor, stops the run with AIR's dialog, and the
-// job comes back incomplete, the error's text among its traces. The
-// EXIT_FRAME listener is added again then, after those the SWF's
-// constructor added, so that from frame 2 on the end, as the harness's,
-// follows what they trace in its frame.
+// job comes back incomplete, the error's text among its traces. A root it
+// cannot find is traced as an error. The EXIT_FRAME listener is added
+// again then, after those the SWF's constructor added, so that from frame
+// 2 on the end, as the harness's, follows what they trace in its frame: a
+// job runs for two frames at least.
 package {
   import flash.desktop.NativeApplication;
   import flash.display.DisplayObject;
@@ -38,8 +39,21 @@ package {
     private static var quitting:int = 0;
 
     {
+      start();
+    }
+
+    private static function start():void {
+      var application:NativeApplication;
+      try {
+        application = NativeApplication.nativeApplication;
+      } catch (e:Error) {
+        // A background worker made from the SWF's bytes runs this too, and
+        // is not application content: the primordial's helper does it all.
+        return;
+      }
+
       trace("\x01swf2es:begin 0");
-      NativeApplication.nativeApplication.addEventListener(InvokeEvent.INVOKE, invoked);
+      application.addEventListener(InvokeEvent.INVOKE, invoked);
       ticker.addEventListener("exitFrame", exitFrame);
     }
 
@@ -60,12 +74,21 @@ package {
     }
 
     private static function catchErrors():void {
+      var root:DisplayObject;
       try {
-        var root:DisplayObject = NativeApplication.nativeApplication.openedWindows[0].stage.getChildAt(0);
-        root.loaderInfo["uncaughtErrorEvents"].addEventListener("uncaughtError", uncaught);
+        root = NativeApplication.nativeApplication.openedWindows[0].stage.getChildAt(0);
       } catch (e:Error) {
-        // Not there before AIR 2.0: a root of SWF 9 leaves its errors to AIR.
+        // Said as an error, so that a run that catches none is told from one with none to catch.
+        trace("\x01swf2es:error the oracle's root found no root to catch errors on: " + e);
+        return;
       }
+
+      if (!("uncaughtErrorEvents" in root.loaderInfo)) {
+        // Not there before AIR 2.0: a root of SWF 9 leaves its errors to AIR.
+        return;
+      }
+
+      root.loaderInfo["uncaughtErrorEvents"].addEventListener("uncaughtError", uncaught);
     }
 
     private static function uncaught(e:Event):void {

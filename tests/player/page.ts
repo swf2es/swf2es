@@ -138,8 +138,8 @@ async function scriptingFor(
     lazyCompilation?: boolean;
     /** Played as AIR plays it (Scripting's `air`). */
     air?: boolean;
-    /** The API version it runs at, the latest or a root's SWF version's (Scripting's `apiVersion`). */
-    apiVersion?: "latest" | number;
+    /** The API version it runs at (Scripting's `apiVersion`), "root" its own SWF version's. */
+    apiVersion?: "latest" | "root" | number;
     /** Its fetches traced, for a test with log_fetch (testFetch). */
     logFetch?: boolean;
     /** getTimer and timers by the wall clock, as a benchmark needs, not by the frames. */
@@ -179,6 +179,7 @@ async function scriptingFor(
     lazyCompilation,
     air,
     apiVersion,
+    swfVersion: swf.header.version,
     // A trace of several lines is several lines of Flash's log, which breaks at "\r" as at "\n".
     print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
@@ -528,7 +529,7 @@ interface RunSwfOptions {
   /** Played as AIR plays it (Scripting's `air`). */
   air?: boolean;
   /** The API version it runs at (Scripting's `apiVersion`). */
-  apiVersion?: "latest" | number;
+  apiVersion?: "latest" | "root" | number;
   /** Every frame drawn at the stage's size, as a host draws it, and waited for (chrome.ts). */
   draw?: boolean;
   /** getTimer and timers by the wall clock rather than the frames (scriptingFor). */

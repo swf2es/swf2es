@@ -46,6 +46,8 @@ pnpm tamarin:swf2es [--update-baseline | --relax] [prefix...]   # the same tests
                               # swf2es-baseline.json (compiles them itself, without avmshell)
 node oracle/flash.ts file.swf [frames] [capture...] [low|medium|high|best]
                               # what Flash traces and draws, with AIR's adl (not in CI)
+node oracle/flash.ts --root file.swf [frames, 2 at least]   # what it traces run as the
+                              # application's content, at its own version: traces only, AS3 only
 node tests/player/run.ts [--shard i/n] [case...]   # the player's cases in Chrome vs Flash's
                               # frames (--shard: every n-th from the i-th, as CI splits them)
 node tests/player/run.ts --update [case...]  # draw the player's references in Flash
@@ -82,12 +84,14 @@ node tests/player/leak.ts [--loads N] [--snapshots DIR] [mode...]   # load SWFs 
                               # Chrome, unloaded or, as a game's gear, dropped (dropped, shared,
                               # churn); the heap after a full collection must stay bounded, and
                               # codegen's memory must not grow (part of pnpm test)
-node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]   # AOT:
-                              # the player's modules for the SWF, their logs and a manifest (by default
-                              # against the libraries the player ships; `compile` may be left out)
-node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...]   # avmshell in node: the
-                              # ABCs after builtin and shell_toplevel (the command's own by default),
-                              # their output on stdout, avmshell's exit status
+node packages/cli/dist/main.js compile file.swf [-o dir] [--lib x.abc ...] [--emit-libraries] [--air]
+                              [--api latest|root|<SWF version>]   # AOT: the player's modules for the
+                              # SWF, their logs and a manifest (by default against the libraries the
+                              # player ships, at the latest API version; `compile` may be left out)
+node packages/cli/dist/main.js run file.abc [more.abc ...] [--lib x.abc ...] [--api <SWF version>]
+                              # avmshell in node: the ABCs after builtin and shell_toplevel (the
+                              # command's own by default), their output on stdout, avmshell's exit
+                              # status; --api runs them at a SWF version's API version, as -api
 node packages/cli/dist/main.js types file.swf [-o file.ts] [--air] [--name prefix]   # TypeScript
                               # declarations of a SWF's or an ABC's classes over the player's libraries'
 node packages/cli/dist/main.js help [command]   # the commands, or one's options

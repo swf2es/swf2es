@@ -2,8 +2,9 @@
 // holds, so for any bytes the compiler must reject them with a VerifyError
 // or compile them, never trap: a trap kills the wasm instance. Each case is
 // a seed ABC with a few mutations, added to a domain after the builtins
-// avmshell loads, at SWF_31, SWF_12 or VM_ALLVERSIONS in turn, the API
-// versions the player's and old roots run the compiler at; then
+// avmshell loads, at SWF_31, the player's API version by default, for
+// three cases in four, and at SWF_12 or VM_ALLVERSIONS, which old roots run
+// the compiler at, for one in eight each; then
 //
 //   - the compiler did not trap;
 //   - a module it accepted imports as an ES module;
@@ -184,7 +185,7 @@ function fail(abc: Uint8Array, why: string): void {
 }
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
-const VERSIONS = [50, 12, 0];
+const VERSIONS = [50, 50, 50, 12, 50, 50, 50, 0];
 const started = Date.now();
 for (let k = 0; k < caseCount; k++) {
   const abc = mutate(seeds[below(seeds.length)]);

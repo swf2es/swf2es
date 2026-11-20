@@ -4,6 +4,7 @@
 import { type Codegen, createCodegen } from "@swf2es/codegen";
 import {
   type AirApplication,
+  type ApiVersionOption,
   airLibrary,
   builtinLibrary,
   type CaptureHost,
@@ -101,6 +102,15 @@ export interface Configuration {
   cache?: boolean;
   /** Experimental AVM2 compilation on first method-factory use; off by default. */
   lazyCompilation?: boolean;
+  /**
+   * The API version the SWFs the element plays next run at, where an
+   * element has no `apiversion` attribute: "latest", the default, sees
+   * every class and member whatever the SWF's version; "root" runs them
+   * at the root SWF's, as Flash does, which hides what its version
+   * predates (an AIR application stays at the latest); a SWF version, at
+   * a root of that version's, for a SWF another root loaded.
+   */
+  apiVersion?: ApiVersionOption;
   /**
    * Stage3D's surface factory, or a loader of one, called at a SWF's first
    * requestContext3D so that a SWF that never asks loads no backend; absent/null keeps

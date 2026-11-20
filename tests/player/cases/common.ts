@@ -46,10 +46,14 @@ export interface PlayerCase {
   air?: boolean;
   /**
    * Run as the root, at its own SWF version's API version: in Flash as the
-   * application's content (FlashJob.root), and in the player at that
-   * version. Flash runs everything at its root SWF's API version, so a
-   * case the harness loads runs at the harness's, and the player plays the
-   * others at it (HARNESS_SWF_VERSION). Traces only: it captures no frames.
+   * application's content (FlashJob.root), and in the player at the
+   * version it takes from the SWF (apiVersion "root"). Flash runs
+   * everything at its root SWF's API version, so a case the harness loads
+   * runs at the harness's, and the player plays the others at it
+   * (HARNESS_SWF_VERSION). An AS3 SWF of two frames at least, traced only:
+   * it captures no frames. adl runs it in AIR's series of versions and the
+   * page in Flash Player's, which see different names at some versions
+   * (SWF 9 and 10, and AIR's own names): such a case is `air` too.
    */
   root?: boolean;
   /** An AVM1 SWF whose trace must match Flash's. */

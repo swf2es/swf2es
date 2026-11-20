@@ -132,7 +132,26 @@ element, or `configure({ relativeUrls: "movie" })` for all of them, to
 resolve them against each SWF's own URL instead. Like `base`, the
 attribute is read when a movie loads, not watched while it plays; Flash
 tags have no such parameter, so for players `replaceFlash` makes only
-`configure` sets it. It has `load(url | bytes)` and `destroy()`, which
+`configure` sets it.
+
+Flash ran a SWF, and everything it loaded, at its root SWF's API version:
+a class or member of a later Flash Player than the root's version was not
+there for its code, so an old SWF whose class named a getter of its own
+`isPlaying` loaded, where a later root's would refuse it (VerifyError
+#1053). The player runs every SWF at the latest API version by default,
+which shows all of them whatever the SWF's version. `apiversion="root"`
+on an element, or `configure({ apiVersion: "root" })` for all of them,
+runs each at its root's, as Flash did: the root's version from its
+header, and what it loads at the same; its workers run at the latest, as
+they did in AIR. A number names a
+root's SWF version instead, as `apiversion="12"`, for a SWF whose real
+root was another, such as one a wrapper of another version loaded; and
+`"latest"` the default. An AIR application stays at the latest with
+`"root"`. Like `base`, it is read when a movie loads. Modules compiled
+ahead of time are found only at the version they were compiled at
+(`--api`, below).
+
+It has `load(url | bytes)` and `destroy()`, which
 gives back its GL context, audio and sockets. It fires `load`, `error` and
 `fscommand` events, and with Stage3D on, `stagelayout` as the SWF starts
 and whenever it sets its stage's `scaleMode` or `align` (`event.detail`
@@ -398,8 +417,12 @@ swf2es movie.swf -o movie.swf2es --emit-libraries
 against the libraries the player loads: builtin.abc and swf2es's
 playerglobal, and AIR's library too with `--air`, all shipped with the
 command. `--lib` names others in their place, in order, such as Flash
-Player's playerglobal for a player given that one. In a checkout,
-`node packages/cli/dist/main.js` is the command.
+Player's playerglobal for a player given that one. `--api` names the API
+version the player plays at (its `apiVersion`): `latest` by default,
+`root` for a player at `apiversion="root"` that plays the SWF as its main
+movie, the version from the SWF's header, or a SWF version, that of the
+root that loads it. A player at another version compiles the modules
+itself. In a checkout, `node packages/cli/dist/main.js` is the command.
 
 The player reads them as a module cache. Chain an IndexedDB cache behind
 it to keep whatever the command did not compile:
@@ -521,6 +544,7 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-policy-files` | Lets the SWF read every public host's data, send it headers and open sockets to it as if its cross-domain policy files allowed it, for this run. This machine and private networks still need their own policy file. |
 | `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
+| `--api-version=root` | Plays the SWF and what it loads at its own SWF version's API version (its workers at the latest), as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |

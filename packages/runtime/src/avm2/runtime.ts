@@ -2756,8 +2756,8 @@ export class Runtime {
   }
 
   /** See definitionNamed in definitions.ts. */
-  definitionNamed(qualified: string, domain: Domain): Value {
-    return definitionNamed(this, qualified, domain);
+  definitionNamed(qualified: string, domain: Domain, versions?: readonly number[] | null): Value {
+    return definitionNamed(this, qualified, domain, versions);
   }
 
   /** See definingAbc in definitions.ts. */

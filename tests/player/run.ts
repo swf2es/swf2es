@@ -10,13 +10,20 @@
 // Flash runs everything at its root SWF's API version, and the oracle's
 // harness is every case's root but a `root` case's: the player plays each
 // case at the harness's version, a `root` case at its own, which Flash ran
-// it at as the application's content.
+// it at as the application's content, and the player takes from its
+// header (apiVersion "root"). adl runs it in AIR's series, the page in
+// Flash Player's unless the case is `air`.
 //
 //   node tests/player/run.ts [--lazy] [--shard i/n] [case...]   check (the i-th of n parts)
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HARNESS_SWF_VERSION, plainFileName, runFlash } from "../../oracle/flash.ts";
+import {
+  HARNESS_SWF_VERSION,
+  plainFileName,
+  rootJobProblem,
+  runFlash,
+} from "../../oracle/flash.ts";
 import { isAs3, readSwf } from "../../packages/format/dist/index.js";
 import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
@@ -82,7 +89,14 @@ for (const c of cases) {
 // A case's files are served beside it (files below), its SWF at a URL there.
 const jobs = chosen.map((c) => {
   const swf = swfOf(c);
-  const apiVersion = c.root ? readSwf(swf).header.version : HARNESS_SWF_VERSION;
+  // As Flash would refuse it: an AS3 SWF of two frames at least.
+  const problem = c.root ? rootJobProblem({ swf, frames: c.frames, capture: c.capture }) : null;
+  if (problem) {
+    throw new Error(`${c.name}: ${problem}`);
+  }
+
+  // A root case's from its own SWF, as the player derives it.
+  const apiVersion: "root" | number = c.root ? "root" : HARNESS_SWF_VERSION;
   const url = c.files ? `/files/${c.name}/${c.name}.swf` : undefined;
   return { ...c, swf, lazyCompilation, apiVersion, url };
 });

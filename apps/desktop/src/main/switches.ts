@@ -3,7 +3,9 @@
 // --ignore-policy-files and --proxy, the network judged through them and
 // what opens an AIR application's WebSockets, each said on stderr as the
 // app starts; --no-http-cache;
-// --flashvars and --param, the SWF's embedding (embedding.ts); and --software-gl.
+// --flashvars and --param, the SWF's embedding (embedding.ts); --software-gl; and
+// --api-version (api-version.ts).
+import { apiVersionArgument } from "./api-version.ts";
 import { embeddingArguments } from "./embedding.ts";
 import { Network } from "./network.ts";
 import { policyIgnoredHosts, policyIgnoredNotice, unverifiedHosts } from "./network-rules.ts";
@@ -24,6 +26,15 @@ export const embedding = embeddingArguments(process.argv);
 for (const warning of embedding.warnings) {
   process.stderr.write(`swf2es: ${warning}\n`);
 }
+
+/** --api-version: the API version the SWFs play at; one that does not read stops the app. */
+const versioned = apiVersionArgument(own.slice(1));
+if ("error" in versioned) {
+  process.stderr.write(`swf2es: ${versioned.error}\n`);
+  process.exit(2);
+}
+
+export const apiVersion = versioned.apiVersion;
 
 /** --software-gl: SwiftShader draws, on the CPU, where Chromium takes no GPU or even where it does (gpu.ts). */
 export const softwareGl = own.includes("--software-gl");

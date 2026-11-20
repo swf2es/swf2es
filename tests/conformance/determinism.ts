@@ -106,9 +106,14 @@ let version = SWF_31;
 /**
  * At SWF_31 the corpus is valid, and an ABC that does not link a failure,
  * but for a case run at a version of its own; at an earlier version a
- * rejection is output to compare, ending the chain.
+ * rejection is output to compare, ending the chain. A builtin links at
+ * every version, or the chains after it would pass with nothing compiled.
  */
-function rejected(error: number, abc: Uint8Array): string {
+function rejected(error: number, abc: Uint8Array, builtin: boolean): string {
+  if (builtin) {
+    throw new Error(`a builtin failed to link at API version ${version}: error ${error}`);
+  }
+
   if (version === SWF_31 && !ownVersion.has(abc)) {
     throw new Error(`an ABC of the chain failed to link: error ${error}`);
   }
@@ -128,7 +133,7 @@ function compile(testing: any, abc: Uint8Array, entries?: Map<number, string>[])
   for (const [i, bytes] of [...builtins, abc].entries()) {
     const error = testing.domainAdd(bytes, i < builtins.length);
     if (error) {
-      results.push(rejected(error, abc));
+      results.push(rejected(error, abc, i < builtins.length));
       break;
     }
 
@@ -226,7 +231,7 @@ async function checkAt(): Promise<void> {
       for (const [i, bytes] of [...builtins, chain.abc].entries()) {
         const error = codegen.add(bytes, i < builtins.length);
         if (error) {
-          results.push(rejected(error, chain.abc));
+          results.push(rejected(error, chain.abc, i < builtins.length));
           break;
         }
 

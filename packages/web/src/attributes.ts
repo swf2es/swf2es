@@ -1,5 +1,6 @@
 // What an <embed>'s attributes say, read as Flash read them: sizes, colours,
-// FlashVars, allowScriptAccess and quality.
+// FlashVars, allowScriptAccess and quality; and the element's own.
+import type { ApiVersionOption } from "@swf2es/player";
 
 /** "550" is pixels, as an <embed>'s width is; "100%" and other CSS lengths are themselves. */
 export function cssLength(value: string | null): string | null {
@@ -116,4 +117,25 @@ export function relativeBase(
   }
 
   return choice === "page" && hierarchical(pageUrl) ? pageUrl : null;
+}
+
+/**
+ * The `apiversion` attribute as Scripting's apiVersion: "latest", "root"
+ * or a SWF version, a whole number from 1; `fallback` for none or another
+ * word.
+ */
+export function apiVersion(
+  value: string | null,
+  fallback: ApiVersionOption | undefined,
+): ApiVersionOption {
+  const word = value?.trim().toLowerCase();
+  if (word === "latest" || word === "root") {
+    return word;
+  }
+
+  if (word !== undefined && /^\d+$/.test(word) && Number(word) >= 1) {
+    return Number(word);
+  }
+
+  return fallback ?? "latest";
 }
