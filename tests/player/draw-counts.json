@@ -126,5 +126,21 @@
     "bindVertexArray": 0,
     "bindFramebuffer": 45,
     "uniforms": 146
+  },
+  "blend-sprite-fills": {
+    "calls": 24,
+    "subDraws": 24,
+    "useProgram": 2,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 45,
+    "uniforms": 146
+  },
+  "blend-sprite-fills without multi-draw": {
+    "calls": 24,
+    "subDraws": 24,
+    "useProgram": 2,
+    "bindVertexArray": 0,
+    "bindFramebuffer": 45,
+    "uniforms": 146
   }
 }

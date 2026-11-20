@@ -166,6 +166,146 @@ function blendDrift(): Uint8Array {
 }
 
 /**
+ * blendFills' shapes each the only child of a clip in a blend mode, the
+ * usual way a SWF blends its art: the slant inside its clip, turned,
+ * coloured and faded there; the disc in a faded clip; the three a clip
+ * deeper; the disc scaled; the bitmaps; the three in a coloured clip; and,
+ * as a control, the slant beside the square over another.
+ */
+function spriteFills(
+  tags: Uint8Array[],
+  turn: (angle: number, scale: number) => { a: number; b: number; c: number; d: number },
+  cachedRows: boolean,
+): Uint8Array {
+  const turned = turn((23 * Math.PI) / 180, 0.85);
+  const about = {
+    ...turned,
+    tx: 320 - (turned.a * 320 + turned.c * 320),
+    ty: 320 - (turned.b * 320 + turned.d * 320),
+  };
+  const colored = { mult: [0.8, 1, 0.6, 1], add: [30, -20, 10, 0] };
+  const faded = { mult: [1, 1, 1, 0.6] };
+  // Each row's children, in the clip's space, and the clip's colour; cacheAsBitmap on the clip,
+  // or the shape blended itself, not in a clip.
+  type Row = {
+    children: w.PlaceSpec[];
+    color?: w.PlaceSpec["colorTransform"];
+    cached?: boolean;
+    bare?: boolean;
+  };
+  const cachedOnes: Row[] = [
+    // The slant blended in a clip as below, which finds its fills apart for every instance.
+    { children: [{ depth: 1, character: 10, matrix: { tx: 60, ty: 40 } }] },
+    { children: [{ depth: 1, character: 10, matrix: { tx: 60, ty: 40 } }], cached: true },
+    { children: [{ depth: 1, character: 410, matrix: { tx: 60, ty: 40 } }] },
+    { children: [{ depth: 1, character: 10, matrix: { tx: 60, ty: 40 }, cacheAsBitmap: true }] },
+    { children: [{ depth: 1, character: 10 }], bare: true },
+    // One fill, and a bitmap as an authoring tool places one, a rectangle filled with it, in a
+    // kept clip: they draw alike either way, straight, as before.
+    { children: [{ depth: 1, character: 420 }], cached: true },
+    { children: [{ depth: 1, character: 421, matrix: { tx: 60, ty: 40 } }], cached: true },
+  ];
+  const rows: Row[] = cachedRows
+    ? cachedOnes
+    : [
+        { children: [{ depth: 1, character: 10, matrix: { tx: 60, ty: 40 } }] },
+        { children: [{ depth: 1, character: 10, matrix: about }] },
+        { children: [{ depth: 1, character: 10, colorTransform: colored }] },
+        { children: [{ depth: 1, character: 10, colorTransform: faded }] },
+        { children: [{ depth: 1, character: 11 }], color: faded },
+        { children: [{ depth: 1, character: 400 }] },
+        { children: [{ depth: 1, character: 11, matrix: { a: 0.9, d: 0.9, tx: 30, ty: 30 } }] },
+        { children: [{ depth: 1, character: 13 }] },
+        { children: [{ depth: 1, character: 12 }], color: colored },
+        {
+          children: [
+            { depth: 1, character: 10, matrix: { a: 0.5, d: 0.5 } },
+            { depth: 2, character: 16, matrix: { a: 0.5, d: 0.5, tx: 320, ty: 320 } },
+          ],
+        },
+      ];
+  tags.push(
+    w.shape({
+      id: 420,
+      bounds: [0, 640, 0, 640],
+      fills: [0x40d0f0],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [320, 20] },
+            { line: [620, 250] },
+            { line: [500, 620] },
+            { line: [130, 600] },
+            { line: [30, 230] },
+            { line: [320, 20] },
+          ],
+        },
+      ],
+    }),
+    w.shape({
+      id: 421,
+      bounds: [0, 480, 0, 480],
+      fills: [{ bitmap: 20, type: 0x43, matrix: { a: 60, d: 60 } }],
+      paths: [
+        {
+          fill1: 1,
+          commands: [
+            { move: [0, 0] },
+            { line: [480, 0] },
+            { line: [480, 480] },
+            { line: [0, 480] },
+            { line: [0, 0] },
+          ],
+        },
+      ],
+    }),
+    w.sprite(400, 1, [w.place({ depth: 1, character: 12 }), w.showFrame(), w.end()]),
+    w.sprite(410, 1, [
+      w.place({ depth: 1, character: 10, cacheAsBitmap: true }),
+      w.showFrame(),
+      w.end(),
+    ]),
+  );
+  for (let r = 0; r < rows.length; r++) {
+    tags.push(
+      w.sprite(200 + r * 10, 1, [
+        ...rows[r].children.map((child) => w.place(child)),
+        w.showFrame(),
+        w.end(),
+      ]),
+    );
+  }
+
+  tags.push(w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 2 }));
+  let depth = 10;
+  for (let i = 0; i < FILL_MODES.length; i++) {
+    for (let r = 0; r < rows.length; r++) {
+      const { bare, cached, color } = rows[r];
+      tags.push(
+        w.place({
+          depth: depth++,
+          character: bare ? 10 : 200 + r * 10,
+          blendMode: FILL_MODES[i],
+          matrix: { tx: (8 + i * 44) * 20, ty: (8 + r * 40) * 20 },
+          colorTransform: color,
+          cacheAsBitmap: cached || bare,
+        }),
+      );
+    }
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({
+    width: 400,
+    height: cachedRows ? 290 : 410,
+    frameRate: 24,
+    frameCount: 1,
+    tags,
+  });
+}
+
+/**
  * The modes of blendFills' columns: multiply, overlay, add, screen, hard
  * light, darken, lighten, difference and invert.
  */
@@ -179,7 +319,7 @@ const FILL_MODES = [3, 13, 8, 4, 14, 6, 5, 7, 10];
 // edges; a radial gradient's disc in a solid square; the disc and the
 // three inside clips of their own, one faded, one coloured; and two fills
 // over each other. A column a mode (FILL_MODES), a row each.
-function blendFills(): Uint8Array {
+function blendFills(inSprites = false, cachedRows = false): Uint8Array {
   const poly = (points: [number, number][]): w.PathCommand[] =>
     points.map((p, i) => (i === 0 ? { move: p } : { line: p }));
   // A circle clockwise from its east, in eight curves: its inside on the right of its edges.
@@ -442,6 +582,10 @@ function blendFills(): Uint8Array {
     }),
   ];
   const tags: Uint8Array[] = [w.backgroundColor(0x808080), ground, ...shapes];
+  if (inSprites) {
+    return spriteFills(tags, turn, cachedRows);
+  }
+
   // Each mode's disc and three in clips of their own, the clips coloured.
   for (let i = 0; i < FILL_MODES.length; i++) {
     for (const [k, character] of [11, 12].entries()) {
@@ -531,6 +675,38 @@ export const blendCases: PlayerCase[] = [
     // layers the most. Through layers, 514; fills that overlap blended one after the other, 508.
     tolerance: 48,
     maxOutliers: 260,
+  },
+  {
+    // As `blend-fills-host`, each shape the only child of a clip in the blend mode, as a SWF
+    // blends its art: adl blends its fills by what each covers as it does a shape's own.
+    name: "blend-sprite-fills-host",
+    swf: blendFills(true),
+    frames: 2,
+    capture: [2],
+    antialias: true,
+    draw: true,
+    // 136 channels past 48, up to 102. Through the clips' layers, 450.
+    tolerance: 48,
+    maxOutliers: 160,
+  },
+  {
+    // As `blend-sprite-fills-host`, with cacheAsBitmap on the clip, on a clip between, on the shape
+    // in it, and on a shape blended itself: adl blends the bitmap it keeps as one picture, with a
+    // seam where its fills meet, so each keeps its layer, though the same shape blended in a clip
+    // above is drawn without one. A shape of one fill and a bitmap's rectangle in kept clips draw
+    // alike either way, and are drawn without.
+    name: "blend-sprite-cached-host",
+    swf: blendFills(true, true),
+    frames: 2,
+    capture: [2],
+    antialias: true,
+    draw: true,
+    // 101 channels past 48, up to 96: 72 in the rows of fills that meet, which drawn straight onto
+    // the stage where the bitmap is kept make 112, difference, lighten and their seams the most;
+    // and 29 in the one fill's edges in add and difference, drawn straight as before, where add
+    // clamps each sample's sum rather than the pixel's.
+    tolerance: 48,
+    maxOutliers: 115,
   },
   {
     // The same multisampled, where each sample of a pixel two fills share blends apart.

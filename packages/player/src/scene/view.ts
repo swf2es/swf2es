@@ -194,6 +194,12 @@ export class RenderView implements Drawer {
   private sliceOwner: DisplayObject | null = null;
   private ownerSlice: Slice | null = null;
   private ownerParent: number[] = [1, 0, 0, 1];
+  /**
+   * The object the blend layer being walked holds alone, at the end of its
+   * chain of only children (soleChild): a part of several fills it draws
+   * may be drawn without the layer, as if the blend were its own.
+   */
+  private soleBlended: DisplayObject | null = null;
   /** The outputs kept: filtered objects' (FilterLayers) and 3D objects' bitmaps (Planes). */
   private readonly keeps = new Keeps();
   /** Moves on as what every kept output was made at changes: the scale, the stage's quality. */
@@ -722,6 +728,11 @@ export class RenderView implements Drawer {
         : WHOLE_SMOOTH;
     let layerRow = -1;
     let layer = -1;
+    // A blend over what Flash keeps a bitmap of, it or the chain of only children it holds, where
+    // that is fills that meet: Flash blends the bitmap as one picture, which the fills drawn
+    // straight onto what is below would not be, each blended by what it covers
+    // (WebGLBackend.blendDirect, SceneList.groups). One fill or a bitmap draws alike either way.
+    const grouped = !hidden && blendsDirect(mode) && cachedChain(o) && severalFills(o);
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
     // Its filters run before its alpha mask is applied, as Flash masks the bitmap they make: then in
@@ -770,13 +781,17 @@ export class RenderView implements Drawer {
         // once its filters are fitted to that.
         drawnFrom = this.scene.length;
         const keep = output?.keeping ? (output.handle as KeepHandle).id : -1;
-        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole);
+        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole, grouped);
       }
     }
 
     // Drawn in its pass, which walked all in it, its flags cleared: walked here no further. Else
-    // walked hidden, to clear them.
+    // walked hidden, to clear them. What it holds is drawn into its bitmap, never straight onto
+    // what is below a blend around it (soleBlended).
+    const sole = this.soleBlended;
+    this.soleBlended = plane ? null : sole;
     const passed = plane && this.drawPlane(o, full, pa, pb, pc, pd, ptx, pty);
+    this.soleBlended = sole;
     hidden ||= plane;
 
     // Its scroll's rectangle clips what it draws, inside its layer.
@@ -827,15 +842,16 @@ export class RenderView implements Drawer {
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
       // Read once for the object, not for each textured part.
       const smoothing = this.smoothing;
-      // A layer of a part of several fills alone, drawn without the layer where they do not
-      // overlap (WebGLBackend.blendDirect): looked into only then, as it tessellates them again.
+      // A layer of a part of several fills alone, its own or an ancestor's that holds it alone,
+      // drawn without the layer where they do not overlap (WebGLBackend.blendDirect): looked into
+      // only then, as it tessellates them again.
       const alone =
-        layer >= 0 &&
+        ((layer >= 0 && blendsDirect(mode) && !grouped) ||
+          (mode === NORMAL && o === this.soleBlended && !clipped)) &&
         !filtering &&
         !alphaMask &&
         !r &&
         !childful &&
-        blendsDirect(mode) &&
         layers.length === 1 &&
         layers[0].strokes.length === 0;
 
@@ -1160,6 +1176,23 @@ export class RenderView implements Drawer {
       const owner = this.sliceOwner;
       const ownerSlice = this.ownerSlice;
       const ownerParent = this.ownerParent;
+      // A clip in a blend mode that draws nothing but one child, as a SWF blends its art: that
+      // child's fills may be drawn without the clip's layer, as a blend set on it would be. A layer,
+      // mask, scroll rectangle or 3D plane on the way between leaves that layer more than them.
+      const soleBlended = this.soleBlended;
+      if (layer >= 0 || clipped || alphaMask || r || plane) {
+        this.soleBlended =
+          layer >= 0 &&
+          blendsDirect(mode) &&
+          !grouped &&
+          !filtering &&
+          !alphaMask &&
+          !r &&
+          !o.drawing?.layers.length
+            ? soleChild(o)
+            : null;
+      }
+
       this.sliceOwner = ownSlice ? o : null;
       this.ownerSlice = ownSlice;
       if (ownSlice) {
@@ -1205,6 +1238,7 @@ export class RenderView implements Drawer {
       this.sliceOwner = owner;
       this.ownerSlice = ownerSlice;
       this.ownerParent = ownerParent;
+      this.soleBlended = soleBlended;
       for (; open > 0; open--) {
         this.masks.popMask(this.scene);
       }
@@ -1807,6 +1841,48 @@ export class RenderView implements Drawer {
       this.gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   }
+}
+
+/**
+ * The object at the end of `o`'s chain of only children, those between
+ * drawing nothing of their own, if it has no children itself; else null.
+ */
+function soleChild(o: Container): DisplayObject | null {
+  let c: DisplayObject = o;
+  while (
+    c instanceof Container &&
+    c.children.length === 1 &&
+    (c === o || !c.drawing?.layers.length)
+  ) {
+    c = c.children[0];
+  }
+
+  return c === o || (c instanceof Container && c.children.length > 0) ? null : c;
+}
+
+/** Whether Flash keeps a bitmap of `o` or of one in its chain of only children (cached). */
+function cachedChain(o: DisplayObject): boolean {
+  let c = o;
+  while (!cached(c)) {
+    if (!(c instanceof Container) || c.children.length !== 1) {
+      return false;
+    }
+
+    c = c.children[0];
+  }
+
+  return true;
+}
+
+/**
+ * Whether what `o` holds alone, at the end of its chain of only children,
+ * draws a layer of several fills, which drawing straight onto what is
+ * below blends otherwise than Flash's kept bitmap of them.
+ */
+function severalFills(o: DisplayObject): boolean {
+  const leaf = o instanceof Container && o.children.length > 0 ? soleChild(o) : o;
+  const layers = leaf?.drawing?.layers ?? (leaf instanceof ShapeObject ? leaf.shape?.layers : null);
+  return !!layers?.some((layer) => layer.fills.length > 1);
 }
 
 /** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */

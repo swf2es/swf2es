@@ -237,6 +237,24 @@ test("a layer's draws run inside its push, and it composites in its mode and col
   assert.deepEqual(Array.from(commands.params.subarray(4, 8)), [10, 20, 30, 40]);
 });
 
+test("a grouped layer's push says so, for the backend never to draw it straight", () => {
+  const scene = new SceneList();
+  for (const grouped of [false, true]) {
+    const layer = scene.layerBegin(-1, -1, undefined, grouped);
+    scene.draw(1, 1, 0);
+    scene.layerRect(layer, 10, 20, 30, 40);
+    scene.marker(LAYER_END, MULTIPLY, -1);
+  }
+
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  const pushes = ops(commands).filter(([op]) => op === LAYER_PUSH);
+  assert.deepEqual(
+    pushes.map((push) => push[2]),
+    [0, 2],
+  );
+});
+
 test("a layer of no size is left out, all in it, layers inside it too", () => {
   const scene = new SceneList();
   scene.layerBegin();
