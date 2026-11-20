@@ -235,6 +235,8 @@ export class Scripting {
   readonly webSocket: WebSocketHost | null;
   readonly audio: AudioHost | null;
   private captureHost: CaptureHost | null;
+  /** The host as given, released at destroy though a failed prepare dropped it. */
+  private readonly captureGiven: CaptureHost | null;
   /** The capture host's prepare, once asked for (prepareCapture), and whether it ended. */
   private captureReady: Promise<void> | null = null;
   private captureSettled = false;
@@ -557,6 +559,7 @@ export class Scripting {
       : null;
     this.onUncaught = options.onUncaught ?? null;
     this.captureHost = options.capture ?? null;
+    this.captureGiven = this.captureHost;
     this.audio = options.audio === undefined ? browserAudioHost() : options.audio;
     this.fileHost = options.fileHost === undefined ? browserFileHost() : options.fileHost;
     this.navigate = options.navigate === undefined ? browserNavigate() : options.navigate;
@@ -702,6 +705,7 @@ export class Scripting {
 
     this.destroyed = true;
     this.captureLifetime.abort();
+    this.captureGiven?.release?.();
     this.loads.destroyAvm1();
     this.workers.stopAll();
     this.code.recorder?.drop();

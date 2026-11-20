@@ -50,7 +50,8 @@ const { value, exception } = await withPage(
     check(status.includes('Camera.Unmuted'), 'missing permission status');
     check(get(camera, 'muted') === false, 'granted camera remains muted');
     check(get(video, 'videoWidth') === 320 && get(video, 'videoHeight') === 240, 'setMode dimensions: ' + get(video, 'videoWidth') + 'x' + get(video, 'videoHeight'));
-    await wait(() => get(camera, 'name').length > 0, 'device label');
+    await wait(() => get(camera, 'name') !== 'Camera', 'device label');
+    check(typeof get(camera, 'name') === 'string' && get(camera, 'name').length > 0, 'empty device label');
     check(get(camera, 'activityLevel') >= 0, 'activity not measured');
     view.render(video.$display);
     const pixels = new Uint8Array(64 * 48 * 4);
