@@ -70,9 +70,16 @@ export function workerNatives(s: Scripting): avm2.Natives {
     }
   }
 
+  // The one WorkerDomain, made as Flash's native factory makes it: AS3 may not.
+  let currentDomain: AsObject | null = null;
   class WorkerDomainNatives {
     static get isSupported(): boolean {
       return s.workers.supported;
+    }
+
+    static get current(): AsObject {
+      currentDomain ??= s.rt.constructNative(s.rt.classNamed("flash.system::WorkerDomain"));
+      return currentDomain;
     }
 
     createWorker(swf: Value): Value {

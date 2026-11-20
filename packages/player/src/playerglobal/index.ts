@@ -4,6 +4,7 @@
 // a private native as "Class#pkg:Class::name".
 import type { avm2 } from "@swf2es/runtime";
 import type { Scripting } from "../scripting.js";
+import { withAbstractClasses } from "./abstract-classes.js";
 import { webSocketNatives } from "./air/net/WebSocket.js";
 import { accessibilityNatives } from "./flash/accessibility/Accessibility.js";
 import { cryptoNatives } from "./flash/crypto/generateRandomBytes.js";
@@ -235,7 +236,7 @@ export function playerNatives(s: Scripting): avm2.Natives {
 }
 
 export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
-  return {
+  return withAbstractClasses({
     ...displayObjectHooks(s),
     ...bitmapDataHooks(s),
     ...byteArrayHooks(s),
@@ -247,5 +248,5 @@ export function playerHooks(s: Scripting): Record<string, avm2.ClassHook> {
     ...soundHooks(s),
     ...fontHooks(s),
     ...urlRequestHooks(s),
-  };
+  });
 }
