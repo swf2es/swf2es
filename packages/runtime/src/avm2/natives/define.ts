@@ -123,6 +123,11 @@ export function copyElements(
   to: number,
 ): Value[] {
   const out = a.slice(from, to);
+  // A hole reads as undefined to includes: without one, nothing to fill.
+  if (!out.includes(undefined)) {
+    return out;
+  }
+
   for (let i = 0; i < out.length; i++) {
     if (!(i in out)) {
       out[i] = getElement(rt, o, from + i);
