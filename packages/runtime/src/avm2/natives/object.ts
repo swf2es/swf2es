@@ -252,10 +252,11 @@ export const objectHooks: Record<string, ClassHook> = {
     construct: (rt, _cls, args) =>
       args[0] === null || args[0] === undefined ? rt.newObject([]) : args[0],
   },
-  // As ClassClass::construct: Class itself makes no classes.
+  // As ClassClass::construct: Class itself makes no classes. The message
+  // names its class object's traits, "Class$", as the debugger player has it.
   Class: {
     construct: (rt) => {
-      throw rt.error("TypeError", 1115, "Class");
+      throw rt.error("TypeError", 1115, "Class$");
     },
   },
   // As NamespaceClass: Namespace(),Namespace(uri) or Namespace(prefix, uri).
