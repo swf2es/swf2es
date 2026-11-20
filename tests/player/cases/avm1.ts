@@ -1956,6 +1956,99 @@ stop();`;
   );
 }
 
+// Whose library attachSound looks a name up in: an AVM1 movie in an AS3
+// Loader (scripts/Avm1SoundLibrary.as) exports "ploop", and the movie it
+// loads into its clip `holder` exports "cloop". In adl, a Sound finds the
+// exports of the movie its clip belongs to, whichever movie's code made it:
+// the child's code finds "ploop" by a Sound of the parent's clip, and the
+// parent's code "cloop" by one of the child's. The global Sound finds
+// nothing in a movie a Loader holds. A Sound made of `holder` once the
+// child fills it finds no clip from the parent's code, as Flash names that
+// root by its AS3 path, but does from the child's, and one made before.
+function avm1SoundLibrary(): Record<string, Uint8Array> {
+  const version = 8;
+  const sound = (samples: number) => {
+    const pcm = new Uint8Array(samples);
+    for (let i = 0; i < samples; i++) {
+      pcm[i] = 128 + ((i >> 3) & 1 ? 20 : -20);
+    }
+
+    return w.defineSound(1, { rate: 0, samples }, pcm);
+  };
+  const movie = (name: string, samples: number, frames: string[]) =>
+    w.swf({
+      version,
+      width: 40,
+      height: 40,
+      frameRate: 24,
+      frameCount: frames.length,
+      tags: [
+        w.fileAttributes(false),
+        sound(samples),
+        w.exportAssets([[1, name]]),
+        ...frames.flatMap((source) => [
+          ...(source === "" ? [] : [as1(source, version)]),
+          w.showFrame(),
+        ]),
+        w.end(),
+      ],
+    });
+  // Each row a Sound of the target, or the global one for null: the duration it attached, and
+  // its volume, which a Sound that finds its clip has.
+  const rows = (who: string, targets: [string, string][]) =>
+    `function d(label, target, name) {
+  var s = target == null ? new Sound() : new Sound(target);
+  s.attachSound(name);
+  trace("${who} " + label + " " + name + " " + s.duration + " " + s.getVolume());
+}
+${targets.flatMap(([label, target]) => ["cloop", "ploop"].map((name) => `d("${label}", ${target}, "${name}");`)).join("\n")}`;
+  const child = movie("cloop", 2756, [
+    "",
+    `createEmptyMovieClip("inner", 3);
+${rows("child", [
+  ["own-clip", "inner"],
+  ["own-root", "this"],
+  ["parent-clip", "_parent.plocal"],
+  ["parent-root", "_parent"],
+  ["own-root-named", "_parent.holder"],
+  ["global", "null"],
+])}
+stop();`,
+  ]);
+  const parent = movie("ploop", 5512, [
+    `createEmptyMovieClip("holder", 1);
+createEmptyMovieClip("plocal", 2);
+${rows("parent", [
+  ["own-clip", "plocal"],
+  ["own-root", "this"],
+  ["global", "null"],
+])}
+var early = new Sound(holder);
+var mcl = new MovieClipLoader();
+mcl.loadClip("avm1-sound-library-child.swf", holder);
+var n = 0;
+onEnterFrame = function () {
+  n++;
+  if (n == 6) {
+    ${rows("parent", [
+      ["child-clip", "holder.inner"],
+      ["child-root", "holder"],
+      ["own-clip", "plocal"],
+      ["own-root", "this"],
+      ["global", "null"],
+    ]).replace(/\n/g, "\n    ")}
+    early.attachSound("cloop");
+    trace("parent early cloop " + early.duration + " " + early.getVolume());
+    delete onEnterFrame;
+  }
+};`,
+  ]);
+  return {
+    "avm1-sound-library-parent.swf": parent,
+    "avm1-sound-library-child.swf": child,
+  };
+}
+
 // Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
 // "Clips and paths"): `a` and `c` of a clip of three frames, which places
 // `b` of another, beside an unnamed square and `Beta`; each clip traces its
@@ -4086,6 +4179,16 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
     swf: bare,
     script: "Avm1SoundTargets",
     files: { "avm1-sound-targets-movie.swf": avm1SoundTargets() },
+    frames: 12,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "avm1-sound-library",
+    swf: bare,
+    script: "Avm1SoundLibrary",
+    files: avm1SoundLibrary(),
     frames: 12,
     capture: [],
     tolerance: 0,

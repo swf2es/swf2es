@@ -1351,7 +1351,12 @@ clip's, which then names nothing, not a clip made later where it was), and
 finds the clip by it each time it is used: a path that begins `_root` or
 `_levelN` from that level, whatever `_root` the code sees, so that code
 under a `_lockroot` clip finds the movie's root by `_root` in a clip's path
-or a string's (adl); any other from the code's target.
+or a string's (adl); any other from the code's target. `attachSound` and
+`stop(name)` look the name up in the library of the clip's movie,
+whichever movie's code asks; the global Sound in the code's movie's, and
+in a movie an AS3 Loader holds in none (adl). There a Sound made of a root
+a load filled finds its clip from that movie's code alone, as Flash names
+the root by its AS3 path, which the movie that loaded it cannot follow.
 A Sound's transform is its clip's, which every sound under the clip
 plays by, or with no target the global one; the sounds it starts are the
 timeline's kind, held to the same 32 and stopped with them, StopSounds

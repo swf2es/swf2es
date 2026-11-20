@@ -4,8 +4,8 @@
 // after the frame's actions.
 // Sound's state follows Ruffle's (https://github.com/ruffle-rs/ruffle): MIT
 // OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
-import type { avm1 } from "@swf2es/runtime";
-import type { DisplayObject, MovieClip } from "../display/display.js";
+import { avm1 } from "@swf2es/runtime";
+import { type DisplayObject, MovieClip } from "../display/display.js";
 import type { SoundCharacter } from "../display/timeline.js";
 import type { AudioHost, DecodedSound } from "../media/audio.js";
 import {
@@ -115,9 +115,34 @@ export class Avm1Sounds implements SoundClassHost {
     return movie.root;
   }
 
-  /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
-  exportedSound(name: string): SoundCharacter | null {
-    const swf = this.movie.currentSwf();
+  filledMovie(value: avm1.Value): object | null {
+    const movie = this.movie;
+    const d = value instanceof avm1.Avm1Object ? value.display?.target : undefined;
+    const filled = d instanceof MovieClip ? movie.contents.get(d) : undefined;
+    return movie.hosted && filled?.library && d !== movie.root ? filled : null;
+  }
+
+  codeMovie(): object {
+    return this.movie.currentSwf();
+  }
+
+  /**
+   * The DefineSound ExportAssets named `name`, any case, as attachSound finds it: in the library
+   * of the owner's movie, a clip emptied by unloadMovie its parent's (adl); for the global Sound,
+   * the code's, or none in a movie an AS3 Loader holds (adl), which has no level for it.
+   */
+  exportedSound(name: string, owner: DisplayObject | null): SoundCharacter | null {
+    const movie = this.movie;
+    if (owner === null && movie.hosted) {
+      return null;
+    }
+
+    let d = owner;
+    while (d instanceof MovieClip && d.parent !== null && movie.contents.get(d)?.library === null) {
+      d = d.parent;
+    }
+
+    const swf = d === null ? movie.currentSwf() : movie.swfOf(d);
     const id = swf.exports.get(asciiLower(name));
     const character = id === undefined ? undefined : swf.library?.characters.get(id);
     return character?.type === "sound" ? character : null;
