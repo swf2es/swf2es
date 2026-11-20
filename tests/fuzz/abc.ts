@@ -2,7 +2,8 @@
 // holds, so for any bytes the compiler must reject them with a VerifyError
 // or compile them, never trap: a trap kills the wasm instance. Each case is
 // a seed ABC with a few mutations, added to a domain after the builtins
-// avmshell loads; then
+// avmshell loads, at SWF_31, SWF_12 or VM_ALLVERSIONS in turn, the API
+// versions the player's and old roots run the compiler at; then
 //
 //   - the compiler did not trap;
 //   - a module it accepted imports as an ES module;
@@ -173,20 +174,24 @@ const failures: string[] = [];
 let accepted = 0;
 let slowest = { ms: 0, at: -1 };
 
+let apiVersion = 50;
+
 function fail(abc: Uint8Array, why: string): void {
   mkdirSync(`${out}failures`, { recursive: true });
   const name = `${out}failures/${sha(abc).slice(0, 16)}.abc`;
   writeFileSync(name, abc);
-  failures.push(`${why}: ${name}`);
+  failures.push(`${why}, at API version ${apiVersion}: ${name}`);
 }
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
+const VERSIONS = [50, 12, 0];
 const started = Date.now();
 for (let k = 0; k < caseCount; k++) {
   const abc = mutate(seeds[below(seeds.length)]);
   const t0 = performance.now();
   try {
-    testing.domainReset(50);
+    apiVersion = VERSIONS[k % VERSIONS.length];
+    testing.domainReset(apiVersion);
     for (const b of builtins) {
       testing.domainAdd(b, true);
     }
