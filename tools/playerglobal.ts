@@ -285,6 +285,25 @@ const NEWER = new Set([
   "flash.net.drm::DRMDeviceGroup instance getter serverURL",
 ]);
 
+// Classes of Flash Player 32's playerglobal that the oracle's lacks, so
+// --check has nothing to hold them to. Their members' marks are kept below
+// 42 as NEWER's are: VideoTextureEvent's SWF 29 members are left unmarked.
+const NEWER_CLASSES = new Set([
+  "flash.display::AVLoader",
+  "flash.events::AVDictionaryDataEvent",
+  "flash.events::AVHTTPStatusEvent",
+  "flash.events::AVLoadInfoEvent",
+  "flash.events::AVManifestLoadEvent",
+  "flash.events::AVPauseAtPeriodEndEvent",
+  "flash.events::AVPlayStateEvent",
+  "flash.events::AVStatusEvent",
+  "flash.events::AVStreamSwitchEvent",
+  "flash.events::DRMMetadataEvent",
+  "flash.events::VideoTextureEvent",
+  "flash.media::AVPlayState",
+  "flash.media::AVResult",
+]);
+
 // What Harman's AIR added to a class Flash Player has, after either
 // playerglobal: ours has it too, marked AIR_15_0 (41), so that only an AIR
 // application's code sees it. Not a later version: as for NEWER, a builtin's
@@ -325,7 +344,10 @@ export function check(ours: Uint8Array, flash: Uint8Array): string[] {
   for (const [name, shape] of mine) {
     const flashShape = theirs.get(name);
     if (!flashShape) {
-      out.push(`${name}: not Flash Player's`);
+      if (!NEWER_CLASSES.has(name)) {
+        out.push(`${name}: not Flash Player's`);
+      }
+
       continue;
     }
 
