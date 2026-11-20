@@ -1,0 +1,34 @@
+BoundDisplayObject: ArgumentError: Error #2012: BoundDisplayObject$ class cannot be instantiated.
+BoundInteractiveObject: ArgumentError: Error #2012: BoundInteractiveObject$ class cannot be instantiated.
+BoundContainer: ArgumentError: Error #2012: BoundContainer$ class cannot be instantiated.
+BoundShapeDisplayObject: ArgumentError: Error #2012: BoundShapeDisplayObject$ class cannot be instantiated.
+BoundAVM1Movie: ArgumentError: Error #2012: BoundAVM1Movie$ class cannot be instantiated.
+BoundStage: ArgumentError: Error #2012: BoundStage$ class cannot be instantiated.
+MyDisplayObject: ArgumentError: Error #2012: MyDisplayObject$ class cannot be instantiated.
+MyAVM1Movie: ArgumentError: Error #2012: MyAVM1Movie$ class cannot be instantiated.
+MyStage: ArgumentError: Error #2012: MyStage$ class cannot be instantiated.
+amf0 flash.display::Graphics: ArgumentError: Error #2012: Graphics$ class cannot be instantiated.
+amf0 flash.display::DisplayObject: ArgumentError: Error #2012: DisplayObject$ class cannot be instantiated.
+amf0 flash.display::InteractiveObject: ArgumentError: Error #2012: InteractiveObject$ class cannot be instantiated.
+amf0 MyDisplayObject: ArgumentError: Error #2012: MyDisplayObject$ class cannot be instantiated.
+amf0 BoundDisplayObject: ArgumentError: Error #2012: BoundDisplayObject$ class cannot be instantiated.
+amf0 flash.display3D::Context3D: ArgumentError: Error #2012: Context3D$ class cannot be instantiated.
+amf0 flash.text.engine::ContentElement: ArgumentError: Error #2012: ContentElement class cannot be instantiated.
+amf0 flash.display::Shape: made flash.display::Shape
+amf3 flash.display::Graphics: ArgumentError: Error #2012: Graphics$ class cannot be instantiated.
+amf3 flash.display::DisplayObject: ArgumentError: Error #2012: DisplayObject$ class cannot be instantiated.
+amf3 flash.display::InteractiveObject: ArgumentError: Error #2012: InteractiveObject$ class cannot be instantiated.
+amf3 MyDisplayObject: ArgumentError: Error #2012: MyDisplayObject$ class cannot be instantiated.
+amf3 BoundDisplayObject: ArgumentError: Error #2012: BoundDisplayObject$ class cannot be instantiated.
+amf3 flash.display3D::Context3D: ArgumentError: Error #2012: Context3D$ class cannot be instantiated.
+amf3 flash.text.engine::ContentElement: ArgumentError: Error #2012: ContentElement class cannot be instantiated.
+amf3 flash.display::Shape: made flash.display::Shape
+frame 2: 6 null null null null null null a=null
+uncaught ArgumentError: Error #2012: BoundDisplayObject$ class cannot be instantiated.
+uncaught ArgumentError: Error #2012: BoundInteractiveObject$ class cannot be instantiated.
+uncaught ArgumentError: Error #2012: BoundContainer$ class cannot be instantiated.
+uncaught ArgumentError: Error #2012: BoundShapeDisplayObject$ class cannot be instantiated.
+uncaught ArgumentError: Error #2012: BoundAVM1Movie$ class cannot be instantiated.
+uncaught ArgumentError: Error #2012: BoundStage$ class cannot be instantiated.
+frame 3: 6 null null null null null null a=null
+frame 4: 6 null null null null null null a=null

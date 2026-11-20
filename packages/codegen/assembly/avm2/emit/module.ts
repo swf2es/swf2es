@@ -458,10 +458,10 @@ export class ModuleEmitter {
     out.text(")");
   }
 
-  /** The `count` numbers verifying `body` again records with `error`, as arguments; none for another error. */
+  /** The `count` numbers verifying `body` again records with `error`, as arguments; none for another error, or if it records none. */
   private errorNumbers(error: i32, global: u32, body: u32, decoder: BodyDecoder, count: u32): void {
     const code = decoder.decode(body, this.domain.traits.scopeOf(global));
-    if (code.error !== error) {
+    if (code.error !== error || !code.numbered) {
       return;
     }
 

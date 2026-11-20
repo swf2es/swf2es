@@ -2509,7 +2509,7 @@ export class Runtime {
    * words it: the local name of the class object's traits, "Name$".
    */
   cantInstantiate(name: string): Value {
-    const colons = name.indexOf("::");
+    const colons = name.lastIndexOf("::");
     return this.error("ArgumentError", 2012, `${colons < 0 ? name : name.slice(colons + 2)}$`);
   }
 

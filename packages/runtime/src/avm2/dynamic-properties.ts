@@ -7,6 +7,7 @@
 // slots, and its properties are a Map as any other.
 
 import type { Value } from "./descriptors.js";
+import { arrayIndex } from "./names.js";
 
 /**
  * The slots of an object's names, as avmplus' hashtable keeps them: a name
@@ -154,9 +155,20 @@ export class DynamicProperties extends Map<string, Value> {
    * name is set, or one shown (setPropertyIsEnumerable).
    */
   allHidden = false;
+  /**
+   * A class's prototype's: whether a name set was an Array's index, as a
+   * hole in an Array reads it when the prototype is in the Array's chain
+   * (the natives' indexOf); it stays true once the name is deleted. Null,
+   * and not looked at, for any other object's.
+   */
+  indexed: boolean | null = null;
 
   override set(name: string, value: Value): this {
     this.allHidden = false;
+    if (this.indexed === false && arrayIndex(name) >= 0) {
+      this.indexed = true;
+    }
+
     // Undefined while the Map's constructor runs, before the field is set.
     const walk = this.walk;
     if (walk && !super.has(name)) {

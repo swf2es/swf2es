@@ -71,6 +71,7 @@ function capabilitiesObject(
     ["hasIME", true],
   ];
   const capabilities = new avm1.Avm1Object(realm.objectProto);
+
   for (const [name, value] of values) {
     capabilities.define(name, value, 0);
   }
@@ -98,6 +99,7 @@ const CONVERSION_MODES = [
 function imeObject(realm: avm1.Realm, version: number): avm1.Avm1Object {
   const ime = new avm1.Avm1Object(realm.objectProto);
   const hidden = avm1.DONT_ENUM | avm1.DONT_DELETE;
+
   for (const mode of CONVERSION_MODES) {
     ime.define(mode, mode, hidden | avm1.READ_ONLY);
   }
@@ -111,6 +113,7 @@ function imeObject(realm: avm1.Realm, version: number): avm1.Avm1Object {
     ["setConversionMode", false],
     ["setEnabled", false],
   ];
+
   for (const [name, result] of results) {
     ime.define(
       name,

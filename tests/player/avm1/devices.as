@@ -50,6 +50,9 @@ ime.KOREAN = "changed";
 trace("mode written " + ime.KOREAN);
 trace("IME " + ime.getEnabled() + " " + ime.setEnabled(true) + " " + ime.getEnabled() + " " + ime.getConversionMode() + " " + ime.setConversionMode("KOREAN") + " " + ime.getConversionMode() + " " + ime.doConversion() + " " + ime.setCompositionString("x"));
 trace("Accessibility " + Accessibility.isActive() + " " + Accessibility.sendEvent() + " " + Accessibility.updateProperties() + " " + (Accessibility.constructor == Object));
+Accessibility.isActive = 1;
+Accessibility.updateProperties = "x";
+trace("Accessibility written " + typeof Accessibility.isActive + " " + typeof Accessibility.updateProperties);
 var R = flash.text.TextRenderer;
 if (typeof R == "function") {
   en("flash.text", flash.text);

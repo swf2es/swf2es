@@ -229,7 +229,8 @@ export class FocusTracker implements TabHost {
     if (selection !== null && root !== null) {
       this.tell(root, (cx, _, version) => {
         this.movie.rt.call(cx, () => {
-          avm1.broadcastMessage(selection, "onSetFocus", [old, next], version);
+          const v = avm1.broadcastVersion(version);
+          avm1.broadcastMessage(selection, "onSetFocus", [old, next], v);
         });
       });
     }

@@ -21,6 +21,7 @@ modes ALPHANUMERIC_FULL ALPHANUMERIC_HALF CHINESE JAPANESE_HIRAGANA JAPANESE_KAT
 mode written KOREAN
 IME false false false UNKNOWN false UNKNOWN false false
 Accessibility false undefined undefined true
+Accessibility written function function
 flash.text enumerates TextRenderer
 TextRenderer enumerates displayMode maxLevel setAdvancedAntialiasingTable
 TextRenderer crt 4 undefined undefined undefined true

@@ -244,7 +244,12 @@ export class ActionQueue {
       case CALL: {
         const cx = this.movie.activationOf(clip);
         if (cx !== null && q.object !== null) {
-          this.movie.rt.callMethod(cx, q.object, q.name, q.args, this.movie.version);
+          // A broadcast's, as the player's own, reaches the listeners SWF 5 does not see.
+          const version =
+            q.name === "broadcastMessage"
+              ? avm1.broadcastVersion(this.movie.version)
+              : this.movie.version;
+          this.movie.rt.callMethod(cx, q.object, q.name, q.args, version);
         }
         break;
       }
@@ -253,7 +258,8 @@ export class ActionQueue {
         const object = q.object;
         if (cx !== null && object !== null) {
           this.movie.rt.call(cx, () => {
-            avm1.broadcastMessage(object, q.name, q.args, this.movie.version, (listener) => {
+            const version = avm1.broadcastVersion(this.movie.version);
+            avm1.broadcastMessage(object, q.name, q.args, version, (listener) => {
               const display = listener.display;
               return display instanceof ClipNative && this.movie.removed(display.target);
             });
