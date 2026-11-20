@@ -15,6 +15,7 @@ import {
   updateMixes,
 } from "../media/sounds.js";
 import type { Avm1 } from "./avm1.js";
+import { targetOf } from "./globals/MovieClip.js";
 import {
   type Avm1SoundTransform,
   FULL,
@@ -77,8 +78,30 @@ export class Avm1Sounds implements SoundClassHost {
     return this.movie.realm;
   }
 
-  resolve(value: avm1.Value, version: number): DisplayObject | null {
-    return this.movie.resolve(value, version);
+  atPath(path: string, version: number): DisplayObject | null {
+    if (path === "") {
+      return null;
+    }
+
+    // In a movie an AS3 Loader holds, `_root` is the movie's root, which a clip's path there
+    // begins with, whatever `_root` the code sees: a string's under a `_lockroot` clip too, by
+    // dots or slashes (adl). A movie of its own honours `_lockroot` in a string's `_root` (Flash
+    // Player 32's projector), so that goes as any path from the code's target.
+    const movie = this.movie;
+    if (movie.hosted && /^_root(?:$|[./])/.test(path)) {
+      const root = movie.atPath("_root");
+      const rest = path.slice("_root.".length);
+      return root === null || rest === "" ? root : targetOf(movie, root, rest, version);
+    }
+
+    // `_levelN` from that level; the rest as any target path is, a variable too.
+    const dot = path.indexOf(".");
+    const level = movie.atPath(dot < 0 ? path : path.slice(0, dot));
+    if (level === null) {
+      return movie.resolve(path, version);
+    }
+
+    return dot < 0 ? level : targetOf(movie, level, path.slice(dot + 1), version);
   }
 
   /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
