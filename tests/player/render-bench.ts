@@ -37,7 +37,7 @@ const names = args.includes("--targets")
   ? ["targets"]
   : args.includes("--rebuild")
     ? ["rebuilding"]
-    : ["visible", "moving", "hidden", "filtered"];
+    : ["visible", "moving", "tenth", "hidden", "filtered"];
 const modules = [
   "native",
   "format",

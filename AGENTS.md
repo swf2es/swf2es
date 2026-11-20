@@ -76,6 +76,9 @@ node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]   # native fills match ind
                               # coverage under both winding rules, including crossing contours
 node tests/fuzz/domains.ts [steps, 3000] [seed, 1]   # drops, evictions, revivals and rebuilds of
                               # application domains change no module against a reference
+node tests/player/spans-fuzz.ts [seeds, 60] [first seed, 1] [frames, 40]   # random changes to a
+                              # tree of containers and shapes in Chrome: the renderer's spans,
+                              # checked on odd seeds, draw each frame as a view that takes none
 SWF2ES_FUZZ_STEPS=50000 SWF2ES_FUZZ_SEED=14 node --test tests/unit/player/playerglobal/flash/display/BitmapData.test.ts
                               # BitmapData's natives and filters fed odd numbers longer, or from
                               # another seed, than pnpm test's 2000 steps from 1; a failure names

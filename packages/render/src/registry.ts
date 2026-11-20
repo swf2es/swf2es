@@ -73,6 +73,11 @@ export class Registry {
     }
   }
 
+  /** The frame `id` was last used in. */
+  usedIn(id: number): number {
+    return this.usedAt[id] ?? -1;
+  }
+
   /** `id` used this frame. */
   use(id: number): void {
     this.usedAt[id] = this.frame;

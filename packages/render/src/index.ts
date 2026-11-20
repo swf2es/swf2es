@@ -86,5 +86,5 @@ export {
   WHOLE_ALIASED,
   WHOLE_SMOOTH,
 } from "./scene.js";
-export { type Span, spanDifference } from "./spans.js";
+export { firstDifference, type Span, spanDifference } from "./spans.js";
 export { KEEP_FRAMES, type TextureData, type TextureHandle, Textures } from "./textures.js";

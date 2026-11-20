@@ -392,6 +392,20 @@ export class LineCache {
     return true;
   }
 
+  /** The last frame `e` was drawn in: its geometries' last use, or its own for one of none. */
+  private drawnIn(e: LineEntry): number {
+    let drawn = e.usedAt;
+    if (e.handle) {
+      drawn = Math.max(drawn, this.geometries.usedIn(e.handle.id));
+    }
+
+    for (let i = 0; e.pieces && i < e.pieces.length; i++) {
+      drawn = Math.max(drawn, this.geometries.usedIn(e.pieces[i].handle.id));
+    }
+
+    return drawn;
+  }
+
   /** The geometries `e` holds let go of, those still kept. */
   private release(e: LineEntry): void {
     if (e.handle && this.geometries.alive(e.handle)) {
@@ -429,8 +443,17 @@ export class LineCache {
 
     entries.length = kept;
     if (this.vertices > most) {
-      // Mid-walk, those drawn last frame may yet be drawn in this one.
-      const idle = entries.filter((e) => e.usedAt < frame - 1).sort((x, y) => x.usedAt - y.usedAt);
+      // Mid-walk, those drawn last frame may yet be drawn in this one. Drawn as the geometries
+      // say, which a span taken from the frame before uses without taking its lines here.
+      const idle: LineEntry[] = [];
+      for (const e of entries) {
+        e.usedAt = this.drawnIn(e);
+        if (e.usedAt < frame - 1) {
+          idle.push(e);
+        }
+      }
+
+      idle.sort((x, y) => x.usedAt - y.usedAt);
       for (let i = 0; i < idle.length && this.vertices > most; i++) {
         this.release(idle[i]);
         this.forget(idle[i]);
