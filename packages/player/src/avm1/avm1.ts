@@ -1305,6 +1305,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     const version = avm1.broadcastVersion(this.swfVersion);
     avm1.initializeBroadcaster(face, this.rt.realm, version);
+    // A SWF 5 field hears none of its own changes or scrolls in Flash.
+    if (this.swfOf(field).version < 6) {
+      return;
+    }
+
     const listeners = avm1.get(face, "_listeners", version);
     if (listeners instanceof avm1.Avm1Object) {
       avm1.set(listeners, "0", face, version);
