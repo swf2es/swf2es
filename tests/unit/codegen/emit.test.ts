@@ -453,18 +453,24 @@ test("the builtins compile to modules with every instruction lowered", { skip },
   }
 });
 
-test("a module's functions are named after their methods, for stacks and profiles", {
+test("a module's functions are named as stack traces name their methods, escaped after $_", {
   skip,
 }, () => {
   testing.domainReset(50);
   const js = module("builtin.abc", true);
-  // A script's function, by its qualified name, as a JavaScript identifier after $.
-  assert.match(js, /function \$avmplus__describeType\(/);
-  // A class's method, Class#uri::name, and a setter, Class#set:name.
-  assert.match(js, /function \$Array_http___adobe_com_AS3_2006_builtin__join\(/);
-  assert.match(js, /function \$Array_Array__set_length\(/);
-  // No name the generated code binds: every factory's function starts with $.
-  assert.doesNotMatch(js, /=> function [A-Za-z_][A-Za-z0-9_]*\(/);
+  // A script's function, "global/avmplus::describeType".
+  assert.match(js, /function \$_global\$savmplus\$c\$cdescribeType\(/);
+  // A method in the AS3 namespace, "Array/http://adobe.com/AS3/2006/builtin::join".
+  assert.match(
+    js,
+    /function \$_Array\$shttp\$c\$s\$sadobe\$dcom\$sAS3\$s2006\$sbuiltin\$c\$cjoin\(/,
+  );
+  // A static method, "Array$/_join", the constructor, "Array", and the class's initializer.
+  assert.match(js, /function \$_Array\$\$\$s_join\(/);
+  assert.match(js, /function \$_Array\(/);
+  assert.match(js, /function \$_Array\$\$cinit\(/);
+  // No name the generated code binds: every factory's function starts with $_.
+  assert.doesNotMatch(js, /=> function (?!\$_)[A-Za-z_$][A-Za-z0-9_$]*\(/);
 });
 
 test("the tables name namespaces, classes and multinames by the module's shorthands", {
@@ -538,9 +544,55 @@ test("a method with a long name is named without the memory growing with it", {
   assert.equal(fresh.domainAdd(bytes, false), 0);
   const before = fresh.memory.buffer.byteLength;
   const js = fresh.domainModule("") as string;
-  assert.ok(js.includes(`function $${long}(`), "the method named in full");
+  assert.ok(js.includes(`function $_global$s${long}(`), "the method named in full");
   const grown = fresh.memory.buffer.byteLength - before;
   assert.ok(grown < 4 << 20, `memory grew ${grown} bytes`);
+});
+
+/**
+ * An ABC whose script makes a closure of each method after its first, the
+ * method_info debug name of each the string index `names` gives.
+ */
+function closuresNamed(names: number[]): Uint8Array {
+  const code = [0xd0, 0x30];
+  for (let m = 1; m <= names.length; m++) {
+    code.push(0x40, ...u30(m), 0x29);
+  }
+
+  code.push(0x47);
+  const body = { code: [0x47], maxStack: 1, localCount: 1, maxScopeDepth: 1 };
+  return abc(
+    { strings: ["x", ""] },
+    tables({
+      methods: [{}, ...names.map((name) => ({ name }))],
+      scripts: [{ init: 0 }],
+      bodies: [
+        { method: 0, code, maxStack: 1, localCount: 1, maxScopeDepth: 1 },
+        ...names.map((_, i) => ({ ...body, method: i + 1 })),
+      ],
+    }),
+  );
+}
+
+test("a closure is named by its debug name, <anonymous> if empty, else by its index", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  testing.domainModule("");
+  // "x", "", none, and indices past the pool's 3 strings, which avmplus takes for none.
+  assert.equal(testing.domainAdd(closuresNamed([1, 2, 0, 3, 5000, 0x0fffffff]), false), 0);
+  const js = testing.domainModule("") as string;
+  const names = [...js.matchAll(/function (\$_[\w$]+)\(/g)].map((m) => m[1]);
+  assert.deepEqual(names, [
+    "$_global$$init",
+    "$_Function$sx",
+    "$_Function$s$lanonymous$g",
+    "$_MethodInfo$m3",
+    "$_MethodInfo$m4",
+    "$_MethodInfo$m5",
+    "$_MethodInfo$m6",
+  ]);
 });
 
 test("an ABC compiled again gives the same module", { skip }, () => {
