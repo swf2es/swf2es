@@ -378,12 +378,37 @@ after the handlers for a press too, and has that double click. In an
 AS3 host, the AVM1 movie's own pick before its broadcast is kept for
 its press in the same way, pickable or not as the move that brought the
 pointer there left the movie, since the host's own pick for the press
-comes after the broadcast; no probe has measured that case. Flash sent
-no `dragOver` or `dragOut` to a button the press did not reach, pressed
-on another or on nothing, where the player still sends them to any
-button as to a menu's items, Ruffle's rule: a button shown under the
-press so gets a `dragOut` and a `dragOver` when the pointer, still down,
-leaves it and comes back, which Flash did not send.
+comes after the broadcast; no probe has measured that case. A press on
+a button or a clip with handlers is its own: Flash sends no `dragOver`
+or `dragOut` to another, and its release elsewhere is its
+`releaseOutside`. A press on nothing, none of an AS3 host's objects
+either, or on one that tracks as a menu's (`trackAsMenu`, a script's, or
+else a button's flag from its tag, which a script reads as undefined and
+a script's false overrides), tracks as a menu's: each other item that
+tracks as one hears `dragOver` and `dragOut` as the pointer crosses it,
+the one let go over its `release`, and the pressed one no
+`releaseOutside`, as the projector traced dragsMovie
+(`tests/unit/player/avm1/pointer.test.ts`, and over an AS3 host
+`tests/unit/player/input/avm1.test.ts`) and the corpus's
+`drag_over_from_outside` has it.
+
+In an AS3 host, the projector traced the same probe's movie under a
+Loader beside an AS3 sprite in buttonMode
+(`tests/unit/player/input/avm1.test.ts`): what has the pointer
+over a movie's button, or a clip with a button's handlers, is the
+movie's alone, its `rollOver` and `rollOut`, `press`, `release` and the
+rest, and AS3 hears nothing of it, not even the Loader's `rollOver`; a
+clip with handlers takes the pointer for its children with theirs, as
+AVM1 has it, and a disabled one still keeps it from AS3. The movie's
+drawing elsewhere is the Loader's, which then gets AS3's events, its
+`relatedObject` null when the pointer came from the movie's button. The
+hand shows over the movie's buttons and clips with handlers unless their
+`useHandCursor` or `enabled` is false, the arrow over its drawing. A
+movie's button pressed and let go over an AS3 object or nothing calls
+`onReleaseOutside` before AS3 hears that `mouseUp`, and AS3 hears no
+`click`; one AS3 pressed and let go over a movie's button hears no
+`mouseUp`. Every movie's Mouse listeners hear each press and release
+first, as in a movie alone.
 
 ## Touch
 
@@ -515,18 +540,45 @@ once the press's Mouse listeners ran: one they bring there keeps the
 focus too, though the press reaches none of its handlers, and one they
 take away does not. A press on a movie's drawn clip is one on
 its Loader, as AS3 has it, and one elsewhere takes a movie's field's
-focus away. As the focus moves from one movie's field to another's, Flash
-names the other field to `onKillFocus` and `onSetFocus`; the player names
-nothing, as no movie's objects are another's. Tab moves through one order
-of AS3's objects and the movies' (each in its movie's own terms,
-`avm1/focus.ts`), by tabIndex where any has one, else by place, one
-object of each place as AS3 keeps it, the movies' among AS3's: from AS3
-to a movie's field after a `keyFocusChange` naming nothing, then
-`focusOut`; from a movie's field with no `keyFocusChange`. A field Tab
+focus away; while a movie's field has the focus, a press on AS3's objects
+sends no `mouseFocusChange`. A press where no move took the pointer, as
+Ruffle's recorded input has them, reaches the movies as if one had.
+Flash keeps one `Selection` too (`LoadedAvm1Input` is each movie's
+`FocusHost`), measured in the projector with two movies
+(`tests/unit/player/input/avm1-focus.test.ts`): every movie's Selection
+listeners hear every move, in the order the movies came, a move among
+AS3's objects, or to or from none, as one from null to null before its
+`focusOut`; a move from one movie's field to another's names the other
+field to `onKillFocus`, `onSetFocus` and the listeners, as the player
+passes a movie's object to another movie's code; `Selection.getFocus`
+in any movie gives the path of whatever has the focus, AS3's objects from
+the root as `_level0`, its indices read AS3's focused field too,
+`setSelection` selects in it, and `setFocus(null)` takes the focus
+wherever it is. A listener that moves the focus again does not stop the
+rest hearing the move it interrupted, as in Flash; one that takes it to a
+movie's field as AS3's object takes it leaves that object a `focusOut`
+and no `focusIn`, and then the object AS3 had before a `focusOut` too, and
+the field the focus, where Flash, after a move from nothing, naming the
+field to `getFocus` and nothing to `stage.focus` too, types into AS3's
+object and reads its indices. A field's `onKillFocus` runs while the
+field still has the focus: focusing it again there moves nothing and the
+move goes on, and a
+move anywhere else there kills it once, the move under way going on,
+where Flash kills it again at each move till its AVM1 stack overflows,
+then leaves the focus where the move was going or nowhere. A movie
+unloaded with the focus tells its field and every movie's listeners, as
+Flash does once `unload()` has returned, and nothing of its focuses
+again then. Tab moves through one order of AS3's objects and the movies'
+(each in its movie's own terms, `avm1/focus.ts`), by tabIndex
+where any object of either has one, the two kinds sorted as numbers
+together, equal ones as the display list has them and -1 none in either,
+and the rest left out; else by place, one object of each place as AS3
+keeps it, the movies' among AS3's: from AS3's object to a movie's field
+after a `keyFocusChange` naming nothing, then `focusOut`; from a movie's
+field, or from nothing to it, with no `keyFocusChange`. A field Tab
 focuses, AS3's or a movie's, has all its text selected, as typing then
-replaces it in Flash. Where both have tabIndex, the two kinds sort as
-numbers together, which is not measured, and a movie's negative indices,
-which AVM1 keeps, come before AS3's.
+replaces it in Flash. A movie's indices below -1, which AVM1 keeps, are
+not measured.
 
 The focus's rectangle (`input/focus-highlight.ts`) is drawn as Flash
 Player 32's projector draws it under real keys, measured there since adl
@@ -677,9 +729,35 @@ The first implementation supports AVM2 custom items, separators,
 visibility, disabled items, quality actions and an About entry.
 `ContextMenu.isSupported` is true. `Stage.showDefaultContextMenu`,
 the web element's `menu="false"`, and `hideBuiltInItems` control
-built-in quality entries while keeping custom entries. AVM1 custom
-menus and the other Flash built-in actions remain unimplemented. The
-model is renderer-independent so those can reuse the presentation.
+built-in quality entries while keeping custom entries. Flash's other
+built-in actions remain unimplemented. The model is renderer-independent.
+
+AVM1's `ContextMenu` and `ContextMenuItem` (`avm1/globals/ContextMenu.ts`)
+are adl's: a menu's `onSelect`, its `builtInItems`, which `hideBuiltInItems`
+turns all false and a copy shares, and its `customItems`, which a copy
+copies one by one with each item's `copy`; an item's caption and
+`onSelect` kept as given, its `separatorBefore`, `enabled` and `visible`
+made booleans; their methods SWF 7's. A right click on an AVM1 movie,
+played alone or loaded by AS3, shows the menu of the nearest of the clip
+whose own drawing is under it and that clip's parents whose `menu` is an
+object, a ContextMenu or not, a child clip named `menu` too, which shows
+Flash's entries alone; a clip of another level with none, and the
+empty stage of a movie alone, have level 0's. Its `onSelect` is called
+with that clip and the menu first; then its custom items show as Flash
+Player 32's projector showed them: each object whose `onSelect` is a
+function, a ContextMenuItem or not, whose caption begins none of the
+entries Flash keeps, case aside ("" and "zoom", "Prin", "Copy" or "Abo"
+among those that do; "High" and "Global" not), holds none of "Adobe",
+"Macromedia", "Flash Player" and "Settings", and is no earlier one's, the first 15 such, the hidden among them, and of those
+the visible; the quality entries unless `builtInItems.quality` is false.
+A choice calls the item's `onSelect` with the clip and the item, and
+nothing once the movie is unloaded or the player gone. Off a loaded
+movie AS3's menu shows, as the projector showed all this
+(`tests/unit/player/input/context-menu.test.ts`); over one none of whose
+clips has a menu, AS3's too, which no probe measured. The projector is
+Flash's debug player, whose "Show Redraw Regions" and "Debugger" a
+caption may not begin either; a release player's rule for them is not
+measured. A button's or a text field's own `menu` is not read yet.
 
 `NativeMenu`, `NativeMenuItem` and `ContextMenu`'s menu members are AS3
 (as3/playerglobal), held to adl by the `native-menu-natives` player case:

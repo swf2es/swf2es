@@ -235,8 +235,9 @@ export function displayObjectNatives(s: Scripting): avm2.Natives {
     declare $opaqueBackground: Value;
     declare $accessibilityProperties: Value;
 
-    get name(): string {
-      return this.$display.name;
+    /** The stage has no name in Flash: null (the corpus's `focus_events_mixed_key_mouse`). */
+    get name(): string | null {
+      return this.$display === s.stage ? null : this.$display.name;
     }
 
     /** Flash refuses a timeline-placed object's name, so a script's touch there never marks it (the `replaces` case). */

@@ -36,6 +36,21 @@ export interface TabHost {
   buttonMode(clip: MovieClip): boolean;
 }
 
+/**
+ * The one focus of an AS3 host and the AVM1 movies its Loaders hold
+ * (input/avm1.ts), which a hosted movie's focus moves.
+ */
+export interface FocusHost {
+  /** What has the focus, in any movie or the host. */
+  readonly current: DisplayObject | null;
+  /** The focus to `d` in `movie`, or none where `movie` has it, every movie told. */
+  move(movie: Avm1, d: DisplayObject | null, byPointer: boolean): void;
+  /** No focus anywhere, as a movie's Selection.setFocus(null) leaves it. */
+  clear(): void;
+  /** Selection's path of `d`, in any movie or the host; null for none. */
+  pathOf(d: DisplayObject): string | null;
+}
+
 /** An object Tab may focus, and its tabIndex, if it has one. */
 export interface Tabbed {
   d: DisplayObject;
@@ -132,9 +147,41 @@ export class FocusTracker implements TabHost {
    * onKillFocus(new), `d` onSetFocus(old), then Selection's listeners
    * onSetFocus(old, new), at once, not queued (Ruffle's FocusTracker). The
    * highlight shows where `d` may show it. A press's focus selects all
-   * without scrolling, as the press then puts the caret where it was.
+   * without scrolling, as the press then puts the caret where it was. In a
+   * movie an AS3 host loaded, the host's one focus moves (input/avm1.ts).
    */
   focus(d: DisplayObject | null, byPointer = false): void {
+    const host = this.movie.focusHost;
+    if (host !== null) {
+      host.move(this.movie, d, byPointer);
+      return;
+    }
+
+    const old = this.assign(d);
+    if (d === old) {
+      this.selectFocused(byPointer);
+      return;
+    }
+
+    const oldFace = old?.avm1 ?? null;
+    const newFace = d?.avm1 ?? null;
+    if (old !== null) {
+      this.killed(old, newFace);
+    }
+
+    if (d !== null) {
+      this.given(d, oldFace);
+    }
+
+    this.moved(oldFace, newFace);
+    this.selectFocused(byPointer);
+  }
+
+  /**
+   * The focus put on `d`, or none, with no event: its highlight, and the
+   * fields' focus, a field that loses it losing its selection. What had it.
+   */
+  assign(d: DisplayObject | null): DisplayObject | null {
     const old = this.focusedObject;
     this.focusedObject = d;
     this.highlight =
@@ -144,11 +191,9 @@ export class FocusTracker implements TabHost {
           ? "visible"
           : "hidden";
     if (d === old) {
-      this.selectFocused(byPointer);
-      return;
+      return old;
     }
 
-    // A field that loses the focus loses its selection.
     if (old instanceof TextObject) {
       old.focused = false;
       stateOf(old).selected = false;
@@ -160,35 +205,53 @@ export class FocusTracker implements TabHost {
       d.invalidate(CONTENT);
     }
 
-    // Each object's method in an activation of its own, as its other event methods run.
-    const version = this.movie.version;
-    const oldFace = old?.avm1 ?? null;
-    const newFace = d?.avm1 ?? null;
+    return old;
+  }
+
+  /** `old`'s onKillFocus(new), `next` the AS2 face of what took the focus, this movie's or another's. */
+  killed(old: DisplayObject, next: avm1.Avm1Object | null): void {
+    this.tell(old, (cx, face, version) => {
+      this.movie.rt.callMethod(cx, face, "onKillFocus", [next], version);
+    });
+  }
+
+  /** `d`'s onSetFocus(old), `old` the AS2 face of what had the focus, this movie's or another's. */
+  given(d: DisplayObject, old: avm1.Avm1Object | null): void {
+    this.tell(d, (cx, face, version) => {
+      this.movie.rt.callMethod(cx, face, "onSetFocus", [old], version);
+    });
+  }
+
+  /** Selection's listeners' onSetFocus(old, new), in the root's activation. */
+  moved(old: avm1.Avm1Object | null, next: avm1.Avm1Object | null): void {
+    const selection = this.selectionFace;
+    const root = this.movie.root;
+    if (selection !== null && root !== null) {
+      this.tell(root, (cx, _, version) => {
+        this.movie.rt.call(cx, () => {
+          avm1.broadcastMessage(selection, "onSetFocus", [old, next], version);
+        });
+      });
+    }
+  }
+
+  /** `run` in an activation of `d`'s own, as its other event methods run. */
+  private tell(
+    d: DisplayObject,
+    run: (cx: avm1.Activation, face: avm1.Avm1Object, version: number) => void,
+  ): void {
+    const face = d.avm1;
+    const cx = this.movie.activationOf(d);
+    if (face === null || cx === null) {
+      return;
+    }
+
     this.movie.timers.begin();
     try {
-      const oldCx = old === null ? null : this.movie.activationOf(old);
-      if (oldFace !== null && oldCx !== null) {
-        this.movie.rt.callMethod(oldCx, oldFace, "onKillFocus", [newFace], version);
-      }
-
-      const newCx = d === null ? null : this.movie.activationOf(d);
-      if (newFace !== null && newCx !== null) {
-        this.movie.rt.callMethod(newCx, newFace, "onSetFocus", [oldFace], version);
-      }
-
-      const selection = this.selectionFace;
-      const cx = this.movie.root !== null ? this.movie.activationOf(this.movie.root) : null;
-      if (selection !== null && cx !== null) {
-        this.movie.rt.call(cx, () => {
-          avm1.broadcastMessage(selection, "onSetFocus", [oldFace, newFace], version);
-        });
-      }
+      run(cx, face, this.movie.version);
     } finally {
       this.movie.timers.end();
     }
-
-    this.selectFocused(byPointer);
-    this.movie.onFocus?.(d);
   }
 
   /**
@@ -196,7 +259,7 @@ export class FocusTracker implements TabHost {
    * the focus's events, which see none (Ruffle's update_edittext_selection;
    * the corpus's `selection` and `edittext_programmatic_focus`).
    */
-  private selectFocused(byPointer: boolean): void {
+  selectFocused(byPointer: boolean): void {
     const d = this.focusedObject;
     if (d instanceof TextObject) {
       stateOf(d).selected = true;

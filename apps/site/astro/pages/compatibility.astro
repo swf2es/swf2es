@@ -103,7 +103,7 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   {
     name: "Loading and security",
     status: "supported",
-    note: "Loader, URLLoader, sandboxes and application domains.",
+    note: "Loader, URLLoader, sandboxes and application domains. Progress is reported while files download, as Flash reported it; a loaded SWF starts playing once it has fully arrived, not while it streams in. Where the server sends no length, the last progress event reports the size that arrived, where Flash kept the total at 0, so that preloaders finish.",
     href: source("docs/architecture/loading.md"),
   },
   {
@@ -121,7 +121,7 @@ const features: { name: string; status: Status; note: string; href: string }[] =
   {
     name: "AS3 and AVM1 together",
     status: "partial",
-    note: "AVM1 movies an AS3 Loader holds play in an AVM1 of their own: keys and one focus shared with AS3; LocalConnection both ways, an unloaded movie's connections kept as Flash keeps them; ExternalInterface and fscommand to the page beside the host's. AVM1Movie's call and addCallback throw, as in Flash Player. The AS3 player's stage (Stage's scale mode, align, menu and onResize), quality and sound mixer (SoundMixer's transform and stopAll, the global Sound, the 32 channels) are theirs too, and an unloaded movie goes when Flash Player 32 lets it go; Flash keeps the intervals, sounds and Key and Mouse listeners of one with no unload handler running, which stop here. Mouse picking into the movies and the wheel are still being matched to Flash.",
+    note: "AVM1 movies an AS3 Loader holds play in an AVM1 of their own: keys, Tab, focus and Selection one across both, as in Flash Player 32; LocalConnection both ways, an unloaded movie's connections kept as Flash keeps them; ExternalInterface and fscommand to the page beside the host's. AVM1Movie's call and addCallback throw, as in Flash Player. The AS3 player's stage (Stage's scale mode, align, menu and onResize), quality and sound mixer (SoundMixer's transform and stopAll, the global Sound, the 32 channels) are theirs too, and an unloaded movie goes when Flash Player 32 lets it go; Flash keeps the intervals, sounds and Key and Mouse listeners of one with no unload handler running, which stop here. Mouse picking into the movies and the wheel are still being matched to Flash.",
     href: source("docs/avm1.md"),
   },
   {

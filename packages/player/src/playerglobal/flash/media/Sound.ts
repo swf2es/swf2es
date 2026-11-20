@@ -31,6 +31,7 @@ import {
   stopChannel,
 } from "../../../media/sounds.js";
 import { dispatchEvent } from "../../../scripting/events.js";
+import type { BytesProgress } from "../../../scripting/loads.js";
 import type { Scripting } from "../../../scripting.js";
 
 type AsObject = avm2.AsObject;
@@ -438,6 +439,42 @@ export function soundNatives(s: Scripting): avm2.Natives {
       const generation = ++sound.generation;
       const abort = new AbortController();
       sound.abort = abort;
+      const progressEvent = (loaded: number, total: number): AsObject =>
+        s.rt.construct(
+          s.rt.classNamed("flash.events::ProgressEvent"),
+          "progress",
+          false,
+          false,
+          loaded,
+          total,
+        ) as AsObject;
+      // Whether its response was told as it came, as Flash's: OPEN and PROGRESS of none at its
+      // head, then PROGRESS at each piece (adl), bytesTotal its headers' length or 0 to the end.
+      let streamed = false;
+      const progress: BytesProgress = {
+        open: (_head, total, url) => {
+          if (sound.generation !== generation) {
+            return;
+          }
+
+          streamed = true;
+          sound.url = url;
+          sound.loaded = 0;
+          sound.total = total;
+          dispatchEvent(s, this as AsObject, s.event("open"));
+          if (sound.generation === generation) {
+            dispatchEvent(s, this as AsObject, progressEvent(0, total));
+          }
+        },
+        data: (_chunk, loaded, total) => {
+          if (sound.generation !== generation || !streamed) {
+            return;
+          }
+
+          sound.loaded = loaded;
+          dispatchEvent(s, this as AsObject, progressEvent(loaded, total));
+        },
+      };
       s.loads.requestBytes(
         request as AsObject,
         abort.signal,
@@ -466,26 +503,17 @@ export function soundNatives(s: Scripting): avm2.Natives {
 
           sound.bytes = bytes;
           sound.loaded = bytes.length;
-          sound.total = bytes.length;
-          dispatchEvent(s, this as AsObject, s.event("open"));
-          if (sound.generation !== generation) {
-            return;
-          }
+          if (!streamed) {
+            sound.total = bytes.length;
+            dispatchEvent(s, this as AsObject, s.event("open"));
+            if (sound.generation !== generation) {
+              return;
+            }
 
-          dispatchEvent(
-            s,
-            this as AsObject,
-            s.rt.construct(
-              s.rt.classNamed("flash.events::ProgressEvent"),
-              "progress",
-              false,
-              false,
-              bytes.length,
-              bytes.length,
-            ) as AsObject,
-          );
-          if (sound.generation !== generation) {
-            return;
+            dispatchEvent(s, this as AsObject, progressEvent(bytes.length, bytes.length));
+            if (sound.generation !== generation) {
+              return;
+            }
           }
 
           if (!s.audio) {
@@ -533,6 +561,7 @@ export function soundNatives(s: Scripting): avm2.Natives {
           s.loads.trackRequest(completed);
         },
         "content",
+        progress,
       );
     }
 

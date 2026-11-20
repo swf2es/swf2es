@@ -463,3 +463,56 @@ this.onEnterFrame = function () {
     "6 one true",
   ]);
 });
+
+// A clip dragged onto a clip the drawing API drew, and off it, as Flash
+// Player 32's projector traced the drags under real presses: the drawing
+// is the clip's own, which `_droptarget` names.
+test("_droptarget names a clip whose own drawing is under the dragged one", async () => {
+  const source = `
+var t = createEmptyMovieClip("t", 1);
+t.beginFill(0x2266cc); t.moveTo(100, 100); t.lineTo(150, 100); t.lineTo(150, 150); t.lineTo(100, 150); t.endFill();
+var d = createEmptyMovieClip("d", 2);
+d.beginFill(0xcc2222); d.moveTo(0, 0); d.lineTo(20, 0); d.lineTo(20, 20); d.lineTo(0, 20); d.endFill();
+d.onPress = function() { this.startDrag(); };
+function dropped() { this.stopDrag(); trace("drop " + this._droptarget); }
+d.onRelease = dropped;
+d.onReleaseOutside = dropped;`;
+  const swf = w.swf({
+    version: 8,
+    width: 550,
+    height: 400,
+    frameCount: 1,
+    tags: [
+      w.doAction([...script(source, 8)(flashAssembler()).end().bytes()]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const wasm = await WebAssembly.compile(
+    await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
+  );
+  const lines: string[] = [];
+  const avm1 = new Avm1(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    realTime: null,
+    audio: null,
+  });
+  const player = new Player(swf, null, avm1);
+  try {
+    await player.start();
+    player.tick();
+    const drag = (from: [number, number], to: [number, number]) => {
+      player.pointer?.handle("move", { x: from[0], y: from[1] });
+      player.pointer?.handle("down", { x: from[0], y: from[1], button: 0 });
+      player.pointer?.handle("move", { x: to[0], y: to[1] });
+      player.tick();
+      player.pointer?.handle("up", { x: to[0], y: to[1], button: 0 });
+      player.tick();
+    };
+    drag([10, 10], [120, 120]);
+    drag([125, 125], [300, 300]);
+    assert.deepEqual(lines, ["drop /t", "drop "]);
+  } finally {
+    player.destroy();
+  }
+});

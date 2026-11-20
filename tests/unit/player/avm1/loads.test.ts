@@ -339,3 +339,145 @@ test("getURL opens what the movie's base names, as its loads load it", async () 
     delete g.document;
   }
 });
+
+test("a MovieClipLoader's load is told a piece at a time where the host tells it as it comes, its target's bytes with it", async () => {
+  const child = movie(`trace("child");`);
+  // The head, then three pieces, then the end: one a frame.
+  const steps: (() => void)[] = [];
+  const played = await play(
+    `var mcl = new MovieClipLoader();
+var l = {};
+l.onLoadStart = function (t) { trace("start " + t.getBytesLoaded() + " " + t.getBytesTotal()); };
+l.onLoadProgress = function (t, a, b) {
+  var p = mcl.getProgress(t);
+  trace("progress " + a + " " + b + " " + t.getBytesLoaded() + " " + t.getBytesTotal() + " " + p.bytesLoaded + " " + p.bytesTotal);
+};
+l.onLoadComplete = function (t, s) { trace("complete " + s); };
+l.onLoadInit = function (t) { trace("init"); };
+mcl.addListener(l);
+mcl.loadClip("child.swf", createEmptyMovieClip("c", 1));`,
+    {
+      url: "http://example.test/t/test.swf",
+      fetch: (_request, _signal, progress) =>
+        new Promise((done) => {
+          const head = { status: 200, headers: [] };
+          const third = Math.ceil(child.length / 3);
+          steps.push(() => progress?.open(head, 0));
+          for (let at = 0; at < child.length; at += third) {
+            const piece = child.slice(at, at + third);
+            steps.push(() => progress?.data(piece));
+          }
+
+          steps.push(() => done({ ...head, bytes: child }));
+        }),
+    },
+  );
+  take(played);
+  const frames: string[][] = [];
+  for (let i = 0; i < 7; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    played.avm1.network();
+    played.player.tick();
+    frames.push(take(played));
+  }
+
+  // Its length is its header's, from the first piece on, as Flash's.
+  const n = child.length;
+  const third = Math.ceil(n / 3);
+  // Each piece is told the frame after it comes.
+  assert.deepEqual(frames, [
+    ["start 0 0"],
+    [`progress ${third} ${n} ${third} ${n} ${third} ${n}`],
+    [`progress ${2 * third} ${n} ${2 * third} ${n} ${2 * third} ${n}`],
+    [`progress ${n} ${n} ${n} ${n} ${n} ${n}`],
+    ["complete 200", "child", "init"],
+    [],
+    [],
+  ]);
+});
+
+test("a LoadVars' bytes are its latest load's as they come, an earlier one's answer heard no more", async () => {
+  const steps: (() => void)[] = [];
+  const played = await play(
+    `var v = new LoadVars();
+v.load("a.txt");
+v.load("b.txt");
+var last = "";
+this.onEnterFrame = function () {
+  var now = v.getBytesLoaded() + " " + v.getBytesTotal();
+  if (now != last) { trace(now); last = now; }
+};`,
+    {
+      url: "http://example.test/t/test.swf",
+      // a.txt, 300 bytes, comes a piece at a time and never ends; b.txt, 30, after it.
+      fetch: (request, _signal, progress) =>
+        new Promise((done) => {
+          const a = request.url.endsWith("a.txt");
+          const body = new Uint8Array(a ? 300 : 30).fill(65);
+          const head = { status: 200, headers: [] };
+          steps.push(() => progress?.open(head, body.length));
+          for (let at = 0; at < body.length; at += body.length / 3) {
+            const piece = body.slice(at, at + body.length / 3);
+            steps.push(() => progress?.data(piece));
+          }
+
+          if (!a) {
+            steps.push(() => done({ ...head, bytes: body }));
+          }
+        }),
+    },
+  );
+  take(played);
+  const lines: string[] = [];
+  for (let i = 0; i < 12; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    played.avm1.network();
+    played.player.tick();
+    lines.push(...take(played));
+  }
+
+  assert.deepEqual(lines, ["0 undefined", "0 30", "10 30", "20 30", "30 30"]);
+});
+
+test("a LoadVars' total is unknown once more comes than its headers told, and all that came at the end", async () => {
+  const steps: (() => void)[] = [];
+  const played = await play(
+    `var v = new LoadVars();
+v.onData = function (s) { trace("data " + v.getBytesLoaded() + " " + v.getBytesTotal()); };
+v.load("a.txt");
+var last = "";
+this.onEnterFrame = function () {
+  var now = v.getBytesLoaded() + " " + v.getBytesTotal();
+  if (now != last) { trace(now); last = now; }
+};`,
+    {
+      url: "http://example.test/t/test.swf",
+      // 30 bytes, though its headers tell 10.
+      fetch: (_request, _signal, progress) =>
+        new Promise((done) => {
+          const body = new Uint8Array(30).fill(65);
+          const head = { status: 200, headers: [] };
+          steps.push(() => progress?.open(head, 10));
+          for (let at = 0; at < 30; at += 10) {
+            const piece = body.slice(at, at + 10);
+            steps.push(() => progress?.data(piece));
+          }
+
+          steps.push(() => done({ ...head, bytes: body }));
+        }),
+    },
+  );
+  take(played);
+  const lines: string[] = [];
+  for (let i = 0; i < 7; i++) {
+    steps.shift()?.();
+    await new Promise((next) => setTimeout(next, 0));
+    played.avm1.network();
+    played.player.tick();
+    lines.push(...take(played));
+  }
+
+  assert.deepEqual(lines, ["0 10", "10 10", "20 0", "30 0", "data 30 30", "30 30"]);
+});

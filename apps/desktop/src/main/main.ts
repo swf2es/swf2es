@@ -44,7 +44,7 @@ import { chooseGl } from "./gpu.ts";
 import { HttpCache } from "./http-cache.ts";
 import { buildMenu } from "./menu.ts";
 import { failureLine, requestLine } from "./netlog.ts";
-import { Refused } from "./network-types.ts";
+import { type NetProgress, Refused } from "./network-types.ts";
 import {
   current,
   movieFromArguments,
@@ -397,7 +397,7 @@ function listen(): void {
     application: () => sandbox.application,
   });
   bridgeWebSockets(trusted, permitWebSocket, webSocketOptions, netLog, logSockets, via);
-  ipcMain.handle("net:fetch", (event, id: unknown, request: unknown) => {
+  ipcMain.handle("net:fetch", (event, id: unknown, request: unknown, stream: unknown) => {
     if (!trusted(event) || typeof id !== "number") {
       throw new Error("not the app's page");
     }
@@ -405,14 +405,38 @@ function listen(): void {
     // The response goes as a message of its own, copied as it is sent, so
     // that its bytes count against the movie's budget until then; the answer
     // says whether it went. A refusal is an answer, not an error, which
-    // Electron would print as one.
+    // Electron would print as one. Asked to, its head and each piece of its
+    // body go as they come, and the response then without its bytes, which
+    // the page puts together from the pieces.
     const contents = event.sender;
+    const live = () => !contents.isDestroyed() && !contents.isCrashed();
+    let streamed = false;
+    const progress: NetProgress | undefined =
+      stream === true
+        ? {
+            open: ({ status, headers, url }, total) => {
+              streamed = true;
+              if (live()) {
+                contents.send("net:open", id, { status, headers, ...(url ? { url } : {}) }, total);
+              }
+            },
+            data: (chunk) => {
+              if (live()) {
+                contents.send("net:data", id, chunk);
+              }
+            },
+          }
+        : undefined;
     const deliver = (response: NetworkResponse) => {
-      if (!contents.isDestroyed() && !contents.isCrashed()) {
-        contents.send("net:response", id, response);
+      if (live()) {
+        contents.send(
+          "net:response",
+          id,
+          streamed ? { ...response, bytes: null, streamed: true } : response,
+        );
       }
     };
-    return fetchForPage(id, request, deliver).then(
+    return fetchForPage(id, request, deliver, progress).then(
       () => ({ delivered: true }),
       () => ({ delivered: false }),
     );
@@ -461,6 +485,7 @@ async function fetchForPage(
   id: number,
   request: unknown,
   deliver: (response: NetworkResponse) => void,
+  progress?: NetProgress,
 ): Promise<NetworkResponse> {
   const asked = request as { url?: unknown; purpose?: unknown; method?: unknown } | null;
   const url = typeof asked?.url === "string" ? asked.url : "";
@@ -476,7 +501,7 @@ async function fetchForPage(
   const started = performance.now();
   const method = typeof asked?.method === "string" ? asked.method.slice(0, 16) : "GET";
   try {
-    const response = await network.fetch(request, controller.signal, deliver);
+    const response = await network.fetch(request, controller.signal, deliver, progress);
     netLog?.(
       requestLine(
         method,

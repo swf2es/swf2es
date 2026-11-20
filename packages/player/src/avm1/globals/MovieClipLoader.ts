@@ -21,6 +21,8 @@ export interface LoaderHost {
   resolve(value: Value, version: number): DisplayObject | null;
   /** Level `n`'s clip, null where there is none. */
   level(n: number): DisplayObject | null;
+  /** Whether an AS3 Loader holds the movie, which then has no levels. */
+  readonly hosted: boolean;
   /** Level `n`'s clip, an empty one made where there is none, as a load into it makes one. */
   levelToLoad(n: number): DisplayObject;
   /**
@@ -30,8 +32,8 @@ export interface LoaderHost {
   loadClip(loader: avm1.Avm1Object, target: DisplayObject, url: string): boolean;
   /** unloadMovie: what `d` shows unloaded. */
   unloadMovie(d: DisplayObject): void;
-  /** The size of the SWF `d` is of, as it came, which getProgress gives. */
-  sizeOf(d: DisplayObject): number;
+  /** The bytes of the SWF `d` is of that have come, and in all, which getProgress gives. */
+  progressOf(d: DisplayObject): [loaded: number, total: number];
 }
 
 const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE;
@@ -62,6 +64,11 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
    */
   const targetOf = (value: Value, v: number, load: boolean): DisplayObject | null => {
     if (typeof value === "number") {
+      // A movie an AS3 Loader holds has none: loadClip into one gives false (Flash Player 32).
+      if (host.hosted) {
+        return null;
+      }
+
       const n = levelNumber(value);
       return load ? host.levelToLoad(n) : host.level(n);
     }
@@ -120,9 +127,9 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
       const result = new avm1.Avm1Object(null);
       const target = targetOf(value, v, false);
       if (target !== null) {
-        const size = host.sizeOf(target);
-        result.define("bytesLoaded", size, 0);
-        result.define("bytesTotal", size, 0);
+        const [loaded, total] = host.progressOf(target);
+        result.define("bytesLoaded", loaded, 0);
+        result.define("bytesTotal", total, 0);
       }
 
       return result;

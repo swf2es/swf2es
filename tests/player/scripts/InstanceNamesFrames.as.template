@@ -1,0 +1,89 @@
+// Instance names over three frames: a clip, a button and a shape placed
+// on the first, a clip, one placed and removed at once, and a shape on the
+// second, a clip on the third (name-order.ts), each frame's ENTER_FRAME and
+// EXIT_FRAME making a Sprite. Variant 3 rewinds to the first frame from
+// the second's ENTER_FRAME, 4 goes to the third from the constructor, 5
+// plays on past the third, looping to the first once.
+package
+{
+	import flash.display.DisplayObject;
+	import flash.display.DisplayObjectContainer;
+	import flash.display.MovieClip;
+	import flash.display.SimpleButton;
+	import flash.display.Sprite;
+	import flash.events.Event;
+
+	public class InstanceNamesFrames extends MovieClip
+	{
+		private static const VARIANT:int = @@VARIANT@@;
+		public var early:Sprite = new Sprite();
+		private var rewound:Boolean = false;
+		private var looped:Boolean = false;
+
+		public function InstanceNamesFrames()
+		{
+			trace("ctor early " + early.name + " new " + new Sprite().name + " | " + dump(this));
+			addEventListener(Event.ENTER_FRAME, enter);
+			addEventListener(Event.EXIT_FRAME, exit);
+			if (VARIANT == 4)
+			{
+				gotoAndStop(3);
+				trace("after goto new " + new Sprite().name + " | " + dump(this));
+			}
+		}
+
+		private function enter(e:Event):void
+		{
+			var line:String = "enter " + currentFrame + " new " + new Sprite().name;
+			if (VARIANT == 3 && currentFrame == 2 && !rewound)
+			{
+				gotoAndStop(1);
+				rewound = true;
+				line += " rewound";
+			}
+
+			trace(line + " | " + dump(this));
+		}
+
+		private function exit(e:Event):void
+		{
+			trace("exit " + currentFrame + " new " + new Sprite().name + " | " + dump(this));
+			if (VARIANT == 5 && currentFrame == 3 && !looped)
+			{
+				looped = true;
+				return;
+			}
+
+			if (currentFrame == 3 || (rewound && currentFrame == 1) || (looped && currentFrame == 1))
+			{
+				stop();
+				removeEventListener(Event.ENTER_FRAME, enter);
+				removeEventListener(Event.EXIT_FRAME, exit);
+			}
+		}
+
+		private function dump(d:DisplayObject):String
+		{
+			var s:String = d.name;
+			var b:SimpleButton = d as SimpleButton;
+			if (b)
+			{
+				return s + "(" + (b.upState ? dump(b.upState) : "-") + " " + (b.overState ? dump(b.overState) : "-") + " " + (b.downState ? dump(b.downState) : "-") + " " + (b.hitTestState ? dump(b.hitTestState) : "-") + ")";
+			}
+
+			var c:DisplayObjectContainer = d as DisplayObjectContainer;
+			if (c && c.numChildren > 0)
+			{
+				s += "[";
+				for (var i:int = 0; i < c.numChildren; i++)
+				{
+					s += (i > 0 ? " " : "") + (c.getChildAt(i) ? dump(c.getChildAt(i)) : "null");
+				}
+
+				s += "]";
+			}
+
+			return s;
+		}
+	}
+}

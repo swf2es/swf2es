@@ -5,15 +5,15 @@
 // files allow (main/network.ts), so the page itself never goes to the
 // network. An AIR application's app:, app-storage: and file: URLs are read
 // from disk through the shell while it plays. Nothing else is fetched.
-import type { FetchRequest, FetchResult } from "@swf2es/player";
+import { type FetchHost, responseBytes } from "@swf2es/player";
 import type { DesktopNetwork } from "../shared/api.js";
 
 export function shellFetch(
   network: DesktopNetwork,
   /** An AIR application's local URL read, null where `url` is none; null where none plays. */
   airFile: () => ((url: string) => Promise<Uint8Array | null> | null) | null = () => null,
-): (request: FetchRequest, signal: AbortSignal) => Promise<FetchResult> {
-  return async (request, signal) => {
+): FetchHost {
+  return async (request, signal, progress) => {
     const local = airFile()?.(request.url);
     if (local) {
       const bytes = await local;
@@ -30,11 +30,8 @@ export function shellFetch(
       response.headers.forEach((value, name) => {
         headers.push([name, value]);
       });
-      return {
-        bytes: response.ok ? new Uint8Array(await response.arrayBuffer()) : null,
-        status: response.status,
-        headers,
-      };
+      const head = { status: response.status, headers };
+      return { ...head, bytes: response.ok ? await responseBytes(response, head, progress) : null };
     }
 
     if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -52,6 +49,7 @@ export function shellFetch(
         ...(request.errorBody ? { errorBody: true } : {}),
       },
       (abort) => signal.addEventListener("abort", abort, { once: true }),
+      progress,
     );
   };
 }

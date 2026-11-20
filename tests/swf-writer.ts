@@ -1344,12 +1344,13 @@ export function buttonSound(
 /**
  * DefineButton2 of one character in every state, at depth 1, untransformed,
  * with BUTTONCONDACTIONs: each its conditions (the key code in their top 7
- * bits) and its actions' bytes.
+ * bits) and its actions' bytes; `trackAsMenu` sets the tag's flag.
  */
 export function button2(
   id: number,
   character: number,
   conditions: { conditions: number; actions: number[] }[] = [],
+  trackAsMenu = false,
 ): Uint8Array {
   const records = new BitWriter();
   records.u8(0x0f).u16(character).u16(1);
@@ -1361,7 +1362,7 @@ export function button2(
   // The action offset counts from its own field, which is 2 bytes long.
   const w = new BitWriter()
     .u16(id)
-    .u8(0)
+    .u8(trackAsMenu ? 1 : 0)
     .u16(conditions.length > 0 ? head.length + 2 : 0);
   w.raw(head);
   conditions.forEach((c, i) => {

@@ -205,6 +205,24 @@ function serve(name: string): Handler {
 
         return;
       }
+      case "/trickle": {
+        // Four pieces of 1000 bytes, 30 ms apart, the length told unless asked not to.
+        response.writeHead(
+          200,
+          url.searchParams.has("unsized") ? {} : { "content-length": String(4000) },
+        );
+        let sent = 0;
+        const next = () => {
+          response.write("x".repeat(1000));
+          if (++sent < 4) {
+            setTimeout(next, 30);
+          } else {
+            response.end();
+          }
+        };
+        next();
+        return;
+      }
       case "/hold":
         // 4000 bytes now, the rest a moment later.
         response.writeHead(200);
@@ -989,6 +1007,51 @@ test("a body compressed unasked is decompressed, within the limits", async () =>
   // No Accept-Encoding goes out.
   const echo = JSON.parse((await outcome(ask(net, `${swf()}/echo`))) as string);
   assert.equal(echo.headers["accept-encoding"], undefined);
+});
+
+test("a response's head and the pieces of its body are told as they come, after any redirect", async () => {
+  policies.clear();
+  const net = await playing();
+  const told = async (url: string) => {
+    const heard: string[] = [];
+    let joined = "";
+    const response = await net.fetch(
+      { url, method: "GET", headers: [], body: null, purpose: "content" },
+      never,
+      undefined,
+      {
+        open: (head, total) => heard.push(`open ${head.status} ${total} ${head.url ?? "-"}`),
+        data: (chunk) => {
+          joined += text(chunk);
+          heard.push(`data ${joined.length}`);
+        },
+      },
+    );
+    assert.equal(joined, text(response.bytes) ?? "");
+    return heard;
+  };
+
+  // A piece of the body at a time, as it came, its length told by its headers.
+  assert.deepEqual(await told(`${swf()}/trickle`), [
+    "open 200 4000 -",
+    "data 1000",
+    "data 2000",
+    "data 3000",
+    "data 4000",
+  ]);
+  // Without a length the total is 0; a redirect tells nothing, its target's URL is the head's.
+  assert.deepEqual(await told(`${swf()}/redirect?to=/trickle?unsized`), [
+    `open 200 0 ${swf()}/trickle?unsized`,
+    "data 1000",
+    "data 2000",
+    "data 3000",
+    "data 4000",
+  ]);
+  // A body decoded from another length has none to tell; a failure tells nothing.
+  const coded = await told(`${swf()}/coded?how=gzip`);
+  assert.equal(coded[0], "open 200 0 -");
+  assert.equal(coded.at(-1), "data 11");
+  assert.deepEqual(await told(`${swf()}/missing`), []);
 });
 
 test("HTTPS: verified, and its policies' secure flag kept", async (t) => {
