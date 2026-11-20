@@ -111,6 +111,38 @@ test("1019 and 1025 name the scope's index and the register", () => {
   assert.deepEqual(failure(scriptFunction([0x62, 5, 0x29, 0x47])), ["verifyError", 1025, 5]);
 });
 
+test("1019 from getouterscope names the index only where no scope was captured", () => {
+  // A script's initializer captures nothing: "Getscopeobject 3 is out of bounds."
+  const init = abc(
+    { strings: [""] },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0, traits: [] }],
+      bodies: [{ method: 0, code: [0x67, 3, 0x29, 0x47], maxStack: 1, localCount: 1 }],
+    }),
+  );
+  assert.deepEqual(failure(init), ["verifyError", 1019, 3]);
+  // A closure the initializer makes captures its global scope, and avmplus passes nothing past it.
+  const closure = abc(
+    { strings: [""] },
+    tables({
+      methods: [{}, {}],
+      scripts: [{ init: 0, traits: [] }],
+      bodies: [
+        {
+          method: 0,
+          code: [0xd0, 0x30, 0x40, 1, 0x29, 0x47],
+          maxStack: 1,
+          localCount: 1,
+          maxScopeDepth: 1,
+        },
+        { method: 1, code: [0x67, 3, 0x29, 0x47], maxStack: 1, localCount: 1 },
+      ],
+    }),
+  );
+  assert.deepEqual(failure(closure), ["verifyError", 1019]);
+});
+
 test("1001 names the method without a body", () => {
   assert.deepEqual(failure(scriptFunction(null)), ["noBody", "global/f()"]);
 });
