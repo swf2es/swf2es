@@ -6,7 +6,7 @@ import { forgetStep } from "../enumeration.js";
 import type { ClassHook } from "../hooks.js";
 import { formatClassName, Namespace, prefixOf, publicQname } from "../names.js";
 import { NOT_FOUND, type Runtime } from "../runtime.js";
-import { AS3, elements, type Natives, plain } from "./define.js";
+import { AS3, copyElements, type Natives, plain } from "./define.js";
 import { constructNamespace, newNamespace } from "./xml/names.js";
 
 export const objectNatives: Natives = {
@@ -133,7 +133,9 @@ export const objectNatives: Natives = {
 
       // biome-ignore lint/style/useConst: a const is folded into a tail call (see Runtime.getProperty)
       let r: Value;
-      r = rt.callValue(this, receiver, elements(args).slice(), null);
+      // Read as getUintProperty reads them: a hole is the prototype's element.
+      const a: Value[] = args?.$a ?? [];
+      r = rt.callValue(this, receiver, copyElements(rt, args, a, 0, a.length), null);
       return r;
     },
 

@@ -6,6 +6,7 @@ import type { ClassHook } from "../hooks.js";
 import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import {
   AS3,
+  copyElements,
   eachElement,
   elements,
   getElement,
@@ -322,14 +323,14 @@ export const arrayNatives: Natives = {
     }
 
     const length = lengthOf(rt, o);
+    const from = clampIndex(rt.toNumber(start), length);
+    const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const a = arrayElementsOf(rt, o, length);
     if (a) {
-      return rt.array(a.slice(rt.toNumber(start), rt.toNumber(end)));
+      return rt.array(copyElements(rt, o, a, from, to));
     }
 
     const g = new Generic(rt, o);
-    const from = clampIndex(rt.toNumber(start), length);
-    const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const out: Value[] = [];
     for (let i = from; i < to; i++) {
       out.push(g.get(i));
