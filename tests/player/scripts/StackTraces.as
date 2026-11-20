@@ -40,6 +40,18 @@ package
 
 			trace(new SubError().getStackTrace());
 			scriptFunction();
+			recurse(80);
+		}
+
+		private function recurse(depth:int):void
+		{
+			if (depth == 0)
+			{
+				trace(new Error("deep").getStackTrace());
+				return;
+			}
+
+			recurse(depth - 1);
 		}
 
 		public function method():void

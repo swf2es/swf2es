@@ -122,7 +122,7 @@ export const toplevelNatives: Natives = {
       }
 
       const made = this.$jsError;
-      const frames = made instanceof Error ? stackNames(made.stack) : [];
+      const frames = made instanceof Error ? stackNames(made.stack).slice(0, 64) : [];
       return `${rt.toString(this)}\n${frames.map((name) => `\tat ${name}()`).join("\n")}`;
     },
 };
@@ -142,12 +142,14 @@ const constructs: ClassHook = { call: (rt, cls, args) => rt.constructClass(cls, 
  */
 const errorClass: ClassHook = {
   ...constructs,
-  create: (traits) => {
+  create: (traits, rt) => {
     const o = Object.create(traits.proto);
     // V8 keeps 10 frames, and the runtime's own take most of those before the first AS3 one.
+    // In debugger mode, enough for the 64 methods Flash lists (StackTrace's kMaxDisplayDepth),
+    // a bound method's two entries each, past the runtime's.
     const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
     const limit = engine.stackTraceLimit;
-    engine.stackTraceLimit = 48;
+    engine.stackTraceLimit = rt.debugger ? 192 : 48;
     Object.defineProperty(o, "$jsError", { value: new Error() });
     engine.stackTraceLimit = limit;
     return o;
