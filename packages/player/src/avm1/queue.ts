@@ -245,9 +245,11 @@ export class ActionQueue {
         const cx = this.movie.activationOf(clip);
         if (cx !== null && q.object !== null) {
           // A broadcast's, as the player's own, reaches the listeners SWF 5 does not see.
+          // The one queued is MovieClipLoader's onLoadInit, a class of SWF 7 whose
+          // broadcaster is hidden below it (globals/MovieClipLoader.ts).
           const version =
             q.name === "broadcastMessage"
-              ? avm1.broadcastVersion(this.movie.version)
+              ? Math.max(avm1.broadcastVersion(this.movie.version), 7)
               : this.movie.version;
           this.movie.rt.callMethod(cx, q.object, q.name, q.args, version);
         }

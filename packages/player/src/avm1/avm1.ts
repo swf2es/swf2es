@@ -1481,12 +1481,13 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /**
    * `o`'s broadcastMessage of `name` with `args`, as a callback: at the
    * player's broadcast version, so that its listeners in the SWF 6 movies
-   * a SWF 5 movie loads hear it.
+   * a SWF 5 movie loads hear it; at `least` for a class of a later SWF,
+   * whose broadcaster is hidden below it.
    */
-  broadcast(o: avm1.Avm1Object, name: string, args: Value[]): void {
+  broadcast(o: avm1.Avm1Object, name: string, args: Value[], least = 0): void {
     const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
     if (cx !== null) {
-      const version = avm1.broadcastVersion(this.swfVersion);
+      const version = Math.max(avm1.broadcastVersion(this.swfVersion), least);
       this.rt.callMethod(cx, o, "broadcastMessage", [name, ...args], version);
     }
   }
