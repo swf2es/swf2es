@@ -156,7 +156,8 @@ function typeName(rt: Runtime, type: TypeRef): string {
 
   if (type instanceof ClassRef) {
     try {
-      return rt.traitsOfType(type).name;
+      // A Vector's of int, uint, Number or * by its parameter, as Traits::formatClassName names it.
+      return formatClassName(rt.traitsOfType(type).name);
     } catch {
       return type.ns.uri ? `${type.ns.uri}::${type.name}` : type.name;
     }
