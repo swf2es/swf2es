@@ -341,7 +341,7 @@ function verifySpecial(bd: BodyDecoder, pc: u32, opcode: u8, a: u32, b: u32): bo
     case ops.OP_getscopeobject:
       // The verifier reads the index as the operand's first byte.
       return <u32>load<u8>(bd.start + pc + 1) >= bd.scope
-        ? bd.fail(C.kGetScopeObjectBoundsError)
+        ? bd.failWith(C.kGetScopeObjectBoundsError, load<u8>(bd.start + pc + 1))
         : true;
     default:
       return true;

@@ -56,8 +56,8 @@ export class Code {
   error: i32 = 0;
   /**
    * The numbers avmplus' message for `error` names: an illegal opcode and
-   * its offset, or the unbalanced stack or scope depths, the incoming one
-   * first and the target's second.
+   * its offset, the unbalanced stack or scope depths, the incoming one
+   * first and the target's second, or a scope's index or a register alone.
    */
   errorA: u32 = 0;
   errorB: u32 = 0;
@@ -502,7 +502,7 @@ export class BodyDecoder {
 
   checkLocal(register: u32): bool {
     if (register >= this.localCount) {
-      this.code.fail(C.kInvalidRegisterError);
+      this.code.failWith(C.kInvalidRegisterError, register, 0);
       return false;
     }
 
@@ -1058,6 +1058,12 @@ export class BodyDecoder {
 
   fail(error: i32): bool {
     this.code.fail(error);
+    return false;
+  }
+
+  /** fail, with the number its message names. */
+  failWith(error: i32, a: u32): bool {
+    this.code.failWith(error, a, 0);
     return false;
   }
 
