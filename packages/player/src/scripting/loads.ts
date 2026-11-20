@@ -378,7 +378,7 @@ export class Loads {
    * content is known: what its natives read is kept on it as $ fields.
    */
   loaderInfo(loader: AsObject | null): AsObject {
-    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    const info = this.s.rt.constructNative(this.s.rt.classNamed("flash.display::LoaderInfo"));
     info.$loader = loader;
     info.$content = null;
     info.$bytes = null;
@@ -405,7 +405,7 @@ export class Loads {
       return made.info;
     }
 
-    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    const info = this.s.rt.constructNative(this.s.rt.classNamed("flash.display::LoaderInfo"));
     for (const name of MIRRORED) {
       Object.defineProperty(info, name, { get: () => main[name], configurable: true });
     }

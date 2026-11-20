@@ -174,7 +174,7 @@ export class Workers {
     let o = this.objects.get(id);
     if (!o) {
       const rt = this.s.rt;
-      o = rt.constructClass(cls ?? rt.classNamed("flash.system::Worker"), []) as AsObject;
+      o = rt.constructNative(cls ?? rt.classNamed("flash.system::Worker"));
       o.$worker = id;
       this.objects.set(id, o);
     }
@@ -1067,7 +1067,7 @@ export class Workers {
     const channel = this.channel(ref);
     if (!channel.object) {
       const rt = this.s.rt;
-      const o = rt.constructClass(rt.classNamed("flash.system::MessageChannel"), []) as AsObject;
+      const o = rt.constructNative(rt.classNamed("flash.system::MessageChannel"));
       o.$channel = channel;
       channel.object = o;
     }

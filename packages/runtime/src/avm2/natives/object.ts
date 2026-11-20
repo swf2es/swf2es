@@ -230,7 +230,7 @@ function emptyFunction(rt: Runtime, args: Value[]): AsObject {
 /** A class of static natives only, which cannot be instantiated: construct="none" in its declaration. */
 const notInstantiated = (name: string): ClassHook => ({
   construct: (rt) => {
-    throw rt.error("ArgumentError", 2012, name);
+    throw rt.cantInstantiate(name);
   },
 });
 
