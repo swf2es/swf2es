@@ -71,9 +71,10 @@ export interface GeometryData {
   glyphs?: { vertices: Float32Array; mode: Float32Array; table: Float32Array };
   indices: Uint32Array;
   /**
-   * No part of it over another: a bitmap's quad, or one fill's triangles.
-   * Alone in a blend mode's layer, such a geometry is drawn straight onto
-   * what is below it, as blending it pixel by pixel blends each pixel once.
+   * No part of it over another: a bitmap's quad, one fill's triangles, or
+   * fills found to meet without overlapping (markFlat). Alone in a blend
+   * mode's layer, such a geometry is drawn straight onto what is below it,
+   * as blending it pixel by pixel blends each pixel once.
    */
   flat?: boolean;
 }
@@ -111,6 +112,18 @@ export class Geometries extends Registry {
   update(id: number): void {
     if (this.data[id]) {
       this.measure(id);
+      this.updated.push(id);
+    }
+  }
+
+  /**
+   * Geometry `id` found flat (GeometryData.flat) after it was added: taken
+   * again, as one updated is, for the backend to draw it so.
+   */
+  markFlat(id: number): void {
+    const data = this.data[id];
+    if (data && !data.flat) {
+      data.flat = true;
       this.updated.push(id);
     }
   }

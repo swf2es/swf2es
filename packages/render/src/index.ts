@@ -52,6 +52,7 @@ export {
   ALPHA,
   ALPHA_MASK,
   BLEND_NAMES,
+  blendsDirect,
   CLAMP,
   DARKEN,
   DIFFERENCE,

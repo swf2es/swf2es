@@ -7,7 +7,7 @@ import type { Glyph } from "@swf2es/format";
 import type { Geometries, GeometryHandle } from "@swf2es/render";
 import type { DisplayObject } from "../display/displayobject.js";
 import { type ShapeLayer, shapeLayers } from "../display/shapes.js";
-import type { FillTessellator } from "./fills.js";
+import { type FillTessellator, fillsApart } from "./fills.js";
 import type { LineCache } from "./lines.js";
 import { bitmapQuad, layerParts, type PartPaint } from "./shapes.js";
 import { glyphShape } from "./text.js";
@@ -15,9 +15,18 @@ import { glyphShape } from "./text.js";
 /** Quads made, past which those let go of are looked for and forgotten. */
 const QUAD_KEYS = 512;
 
+/**
+ * A part as made: its geometry's handle, and the fills of a part of several
+ * not yet looked into (markFlat), which is null once they have been.
+ */
+export interface MadePart extends PartPaint {
+  handle: GeometryHandle;
+  fills: readonly number[] | null;
+}
+
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
 export interface Made {
-  parts: (PartPaint & { handle: GeometryHandle })[];
+  parts: MadePart[];
   version: number;
   checkedAt: number;
 }
@@ -139,15 +148,31 @@ export class Parts {
 
     // The layer can outlive its handle. Let the registry release the tessellated buffers on expiry.
     const parts = layerParts(layer, this.tessellator, masking).map(
-      ({ geometry, paint, region, mesh }) => ({
+      ({ geometry, paint, region, mesh, fills }) => ({
         handle: this.geometries.add(geometry),
         paint,
         region,
         mesh,
+        fills: fills ?? null,
       }),
     );
     cache.set(layer, { parts, version, checkedAt: this.geometries.removalVersion });
     return parts;
+  }
+
+  /**
+   * `part` of `layer`, of several fills, marked flat (Geometries.markFlat)
+   * if they do not overlap, looked into once: for a part drawn alone in a
+   * blend mode, which is then drawn without a layer of its own. Asked of
+   * every part of several, it would tessellate each such layer twice.
+   */
+  markFlat(layer: ShapeLayer, part: MadePart): void {
+    const fills = part.fills;
+    const data = this.geometries.get(part.handle.id);
+    part.fills = null;
+    if (fills && data && fillsApart(layer, fills, data.positions, data.indices, this.tessellator)) {
+      this.geometries.markFlat(part.handle.id);
+    }
   }
 
   /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */

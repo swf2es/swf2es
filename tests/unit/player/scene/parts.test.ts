@@ -145,3 +145,29 @@ test("idle shape layers release their geometry buffers between visits", async ()
     tessellator.dispose();
   }
 });
+
+test("a part of fills that meet is marked flat once looked into, one of fills over each other not", () => {
+  const { tessellator, geometries, parts } = fixture();
+  try {
+    const flatness = (x: number) => {
+      const d = new Drawing();
+      d.beginFill({ type: "solid", color: 0xff0088ff });
+      d.drawRect(0, 0, 20, 20);
+      d.beginFill({ type: "solid", color: 0xffff8800 });
+      d.drawRect(x, 0, 20, 20);
+      d.endFill();
+      const [part] = parts.partsOf(d.layers[0], d.version);
+      const before = geometries.get(part.handle.id)?.flat;
+      parts.markFlat(d.layers[0], part);
+      const updated = geometries.updated.length;
+      // Looked into once: asked again, it is not tessellated again.
+      parts.markFlat(d.layers[0], part);
+      return [before, geometries.get(part.handle.id)?.flat, updated, part.fills];
+    };
+    assert.deepEqual(flatness(20), [false, true, 1, null]);
+    geometries.updated.length = 0;
+    assert.deepEqual(flatness(10), [false, false, 0, null]);
+  } finally {
+    tessellator.dispose();
+  }
+});

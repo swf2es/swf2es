@@ -264,6 +264,7 @@ export class GeometryAtlas {
       const data = geometries.get(id);
       if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
         this.copyVertices(this.pages[place.page], data, place.vertexStart);
+        place.flat = data.flat === true;
         place.stage = samplesStage(data);
         place.batch = this.batch(data);
       } else if (place && data) {

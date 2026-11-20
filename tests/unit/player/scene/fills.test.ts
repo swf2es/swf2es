@@ -1,11 +1,12 @@
 // A shape layer's fills resolved for drawing (scene/fills.ts): tessellated
 // natively, a layer at a call, and left out where the tessellator refuses
-// one.
+// one; and whether fills that share a part overlap (fillsApart).
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Tessellator } from "@swf2es/native/render";
 import type { Path, ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
-import { resolveFills } from "../../../../packages/player/dist/scene/fills.js";
+import { fillsApart, resolveFills } from "../../../../packages/player/dist/scene/fills.js";
+import { layerParts } from "../../../../packages/player/dist/scene/shapes.js";
 
 const layer: ShapeLayer = {
   fills: [
@@ -98,4 +99,106 @@ test("a layer call takes the fills' path commands, and a fill it refuses is left
 test("a layer the tessellator refuses whole has none of its fills", () => {
   const resolved = resolveFills(layer, false, { layer: () => null, lines: tess.tessellate.lines });
   assert.deepEqual(resolved, [null]);
+});
+
+/** A solid fill of `contours`, flat path commands, filled by parity unless `winding` says. */
+function solid(contours: Path[], winding: "evenOdd" | "nonZero" = "evenOdd") {
+  return { fill: { type: "solid" as const, color: 0xff336699 }, contours, winding };
+}
+
+const square = (x: number, y: number, size: number): Path => [
+  1,
+  x,
+  y,
+  2,
+  x + size,
+  y,
+  2,
+  x + size,
+  y + size,
+  2,
+  x,
+  y + size,
+  2,
+  x,
+  y,
+];
+
+/** A circle in four curves, its control points on the square around it. */
+const circle = (cx: number, cy: number, r: number): Path => [
+  1,
+  cx + r,
+  cy,
+  3,
+  cx + r,
+  cy + r,
+  cx,
+  cy + r,
+  3,
+  cx - r,
+  cy + r,
+  cx - r,
+  cy,
+  3,
+  cx - r,
+  cy - r,
+  cx,
+  cy - r,
+  3,
+  cx + r,
+  cy - r,
+  cx + r,
+  cy,
+];
+
+/** Whether `layer`'s one part of several fills is found to hold them apart. */
+function apart(layer: ShapeLayer): boolean {
+  const parts = layerParts(layer, tess.tessellate);
+  assert.equal(parts.length, 1);
+  const [{ geometry, fills }] = parts;
+  assert.equal(geometry.flat, false);
+  assert.deepEqual(fills, [...layer.fills.keys()]);
+  return fillsApart(layer, fills ?? [], geometry.positions, geometry.indices, tess.tessellate);
+}
+
+test("a part of one fill is flat, and one of several only once they are found apart", () => {
+  const parts = layerParts(layer, tess.tessellate);
+  assert.equal(parts[0].geometry.flat, true);
+  assert.equal(parts[0].fills, undefined);
+});
+
+test("fills that meet edge to edge, along lines or curves, are apart", () => {
+  const side: ShapeLayer = {
+    fills: [solid([square(0, 0, 10)]), solid([square(10, 0, 10)])],
+    strokes: [],
+  };
+  assert.equal(apart(side), true);
+  // A disc in a square with the disc's hole, the hole's edge both fills'.
+  const disc: ShapeLayer = {
+    fills: [solid([square(0, 0, 40), circle(20, 20, 12)]), solid([circle(20, 20, 12)])],
+    strokes: [],
+  };
+  assert.equal(apart(disc), true);
+});
+
+test("fills that overlap, or filled non-zero, are not apart", () => {
+  const over: ShapeLayer = {
+    fills: [solid([square(0, 0, 10)]), solid([square(5, 5, 10)])],
+    strokes: [],
+  };
+  assert.equal(apart(over), false);
+  // A sliver of a tenth of a pixel over the other, along an edge of 100.
+  const sliver: ShapeLayer = {
+    fills: [
+      solid([square(0, 0, 100)]),
+      solid([[1, 99.9, 0, 2, 200, 0, 2, 200, 100, 2, 99.9, 100, 2, 99.9, 0]]),
+    ],
+    strokes: [],
+  };
+  assert.equal(apart(sliver), false);
+  const wound: ShapeLayer = {
+    fills: [solid([square(0, 0, 10)]), solid([square(10, 0, 10)], "nonZero")],
+    strokes: [],
+  };
+  assert.equal(apart(wound), false);
 });
