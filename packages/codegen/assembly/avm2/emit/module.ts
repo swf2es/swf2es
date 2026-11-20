@@ -294,7 +294,9 @@ export class ModuleEmitter {
       }
 
       if (body < 0) {
-        out.text("rt.noBody");
+        out.text("rt.noBody(");
+        this.text(`${stackName(domain, this.index, global)}()`);
+        out.text(")");
         continue;
       }
 
@@ -305,9 +307,7 @@ export class ModuleEmitter {
       }
 
       if (result > 0) {
-        out.text("rt.verifyError(");
-        out.uint(result);
-        out.text(")");
+        this.verifyError(result, global, <u32>body, decoder);
         continue;
       }
 
@@ -420,6 +420,47 @@ export class ModuleEmitter {
     } else {
       out.uint(traits.paramCount[m]);
     }
+  }
+
+  /**
+   * The factory of method `global`, whose body failed verification with
+   * `error`: the VerifyError with the arguments avmplus' message takes, the
+   * method's name as its stack trace shows it, and the numbers verifying
+   * the body again finds: an illegal opcode and its offset, or unbalanced
+   * depths.
+   */
+  verifyError(error: i32, global: u32, body: u32, decoder: BodyDecoder): void {
+    const out = this.out;
+    out.text("rt.verifyError(");
+    out.uint(error);
+    switch (error) {
+      case C.kIllegalOpcodeError: {
+        const code = decoder.decode(body, this.domain.traits.scopeOf(global));
+        out.text(", ");
+        this.text(`${stackName(this.domain, this.index, global)}()`);
+        out.text(", ");
+        out.uint(code.errorA);
+        out.text(", ");
+        out.uint(code.errorB);
+        break;
+      }
+      case C.kStackDepthUnbalancedError:
+      case C.kScopeDepthUnbalancedError: {
+        const code = decoder.decode(body, this.domain.traits.scopeOf(global));
+        out.text(", ");
+        out.uint(code.errorA);
+        out.text(", ");
+        out.uint(code.errorB);
+        break;
+      }
+      case C.kIllegalSetDxns:
+      case C.kIllegalSuperCallError:
+        out.text(", ");
+        this.text(`${stackName(this.domain, this.index, global)}()`);
+        break;
+    }
+
+    out.text(")");
   }
 
   /**

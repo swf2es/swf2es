@@ -3797,16 +3797,16 @@ export class Runtime {
     return r;
   }
 
-  get noBody(): Factory {
-    return noBodyFactory(this);
+  noBody(name: string): Factory {
+    return noBodyFactory(this, name);
   }
 
   get unverified(): Factory {
     return unverifiedFactory(this);
   }
 
-  verifyError(id: number): Factory {
-    return verifyErrorFactory(this, id);
+  verifyError(id: number, ...args: Value[]): Factory {
+    return verifyErrorFactory(this, id, args);
   }
 
   isPrimitive(v: Value): boolean {

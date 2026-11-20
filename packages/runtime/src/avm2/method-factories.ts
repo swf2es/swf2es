@@ -108,10 +108,10 @@ export function installMethod(
         };
 }
 
-/** A method with no body, as an interface's: VerifyError 1001 when called. */
-export function noBodyFactory(rt: Runtime): Factory {
+/** A method with no body, as an interface's: VerifyError 1001, naming it, when called. */
+export function noBodyFactory(rt: Runtime, name: string): Factory {
   return () => () => {
-    throw rt.error("VerifyError", 1001, "method");
+    throw rt.error("VerifyError", 1001, name);
   };
 }
 
@@ -122,9 +122,9 @@ export function unverifiedFactory(rt: Runtime): Factory {
   };
 }
 
-/** A method the verifier rejected with VerifyError `id`, thrown when it is called. */
-export function verifyErrorFactory(rt: Runtime, id: number): Factory {
+/** A method the verifier rejected with VerifyError `id` and its message's `args`, thrown when it is called. */
+export function verifyErrorFactory(rt: Runtime, id: number, args: Value[]): Factory {
   return () => () => {
-    throw rt.error("VerifyError", id);
+    throw rt.error("VerifyError", id, ...args);
   };
 }
