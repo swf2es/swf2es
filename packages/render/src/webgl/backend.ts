@@ -20,6 +20,7 @@ import type { Rows } from "../rows.js";
 import { blendsDirect, NORMAL, type SceneList } from "../scene.js";
 import type { Textures } from "../textures.js";
 import { GeometryAtlas } from "./atlas.js";
+import { Backdrops } from "./backdrops.js";
 import { Compositor, readsBelow } from "./composite.js";
 import { Draws, type Masks } from "./draws.js";
 import { FilterRunner } from "./filters.js";
@@ -111,6 +112,8 @@ export class WebGLBackend {
   private readonly masks: Masks = { depth: 0, past: 0 };
   /** A layer's rectangle, as blendDirect reads it. */
   private readonly rect = { x: 0, y: 0, width: 0, height: 0 };
+  /** The blends drawn direct that share the copy of what is below made last (shareCopy). */
+  private readonly backdrops = new Backdrops();
   /** The mask counts of the targets below the layers drawn into now, two numbers each. */
   private readonly below: number[] = [];
   /** The program `compositeOver` draws with, linked ahead (programs); null till then and after a lost context. */
@@ -409,6 +412,7 @@ export class WebGLBackend {
       opaque: commands.opaqueStage,
     };
     this.layers.length = 0;
+    this.backdrops.begin(false);
     this.draws.drawInto(canvas, target);
 
     this.draws.forgetRow();
@@ -1111,59 +1115,125 @@ export class WebGLBackend {
    * inside a pixel, each blended by what it covers there is as adl blends
    * them, not the pixel they make together, which a layer would blend. A
    * layer and its resolve and composite left out, what reads what is below
-   * copies it as the composite would. Whether it was.
+   * copies it as the composite would, or shares the copy made for one
+   * drawn direct before it (shareCopy). Whether it was.
    */
   private blendDirect(commands: Commands, k: number, scene: SceneList, canvas: Open): boolean {
-    const ops = commands.ops;
-    const at = k * 4;
-    const run = at + 4;
-    const pop = at + 8;
-    if (
-      k + 2 >= commands.length ||
-      ops[at + 2] !== 0 ||
-      ops[run] !== RUN ||
-      ops[run + 2] !== 1 ||
-      ops[run + 3] !== NORMAL ||
-      ops[pop] !== LAYER_POP ||
-      ops[pop + 3] >= 0 ||
-      !blendsDirect(ops[pop + 1]) ||
-      !this.draws.blendable(scene, ops[run + 1])
-    ) {
+    if (!this.drawsDirect(commands, k, scene)) {
       return false;
     }
 
-    const p = commands.params;
-    const from = ops[at + 1];
+    const ops = commands.ops;
+    const pop = k * 4 + 8;
     const under = this.layers.at(-1) ?? canvas;
-    const rect = this.rect;
-    rect.x = p[from];
-    rect.y = p[from + 1];
-    rect.width = p[from + 2];
-    rect.height = p[from + 3];
     const mode = ops[pop + 1];
     const compositor = this.compositor;
-    if (!compositor.cover(rect, under)) {
+    if (!compositor.cover(this.rectAt(commands, k), under)) {
       return true;
     }
 
     // Drawn into already, as a kept output is composited (COMPOSITE); a copy of what is below
     // binds its framebuffer back.
     const reads = readsBelow(mode, under.opaque);
-    const back = reads && compositor.copyBelow(under);
+    let box = -1;
+    if (reads) {
+      // Shared only while the copy is the last made, which nothing but blends sharing it come
+      // between.
+      const backdrops = this.backdrops;
+      box = backdrops.copy === compositor.copies ? backdrops.boxFor(k) : -1;
+      if (box < 0) {
+        box = this.shareCopy(commands, k, scene, under);
+      } else {
+        compositor.bindBack();
+      }
+    }
+
     this.draws.maskBy(this.masks);
     const place = compositor.place;
     // Kept to the layer's rectangle, as the composite is, past which nothing below is copied.
     this.state.scissor([place.fx, place.fy, place.width, place.height]);
     this.draws.drawBlended(
       scene,
-      ops[run + 1],
+      ops[k * 4 + 5],
       mode,
       reads,
       ops[pop + 2],
-      back ? place.backX : 0,
-      back ? place.backY : 0,
+      reads ? compositor.offsets[box * 2] : 0,
+      reads ? compositor.offsets[box * 2 + 1] : 0,
     );
     this.state.scissor(null);
     return true;
+  }
+
+  /**
+   * Whether the layer pushed at command `k` may be drawn straight onto the
+   * target below (blendDirect): unfiltered, not kept, one run of a flat
+   * geometry alone drawn normally in it, in a mode that blendsDirect.
+   */
+  private drawsDirect(commands: Commands, k: number, scene: SceneList): boolean {
+    const ops = commands.ops;
+    const at = k * 4;
+    const run = at + 4;
+    const pop = at + 8;
+    return (
+      k + 2 < commands.length &&
+      ops[at] === LAYER_PUSH &&
+      ops[at + 2] === 0 &&
+      ops[run] === RUN &&
+      ops[run + 2] === 1 &&
+      ops[run + 3] === NORMAL &&
+      ops[pop] === LAYER_POP &&
+      ops[pop + 3] < 0 &&
+      blendsDirect(ops[pop + 1]) &&
+      this.draws.blendable(scene, ops[run + 1])
+    );
+  }
+
+  /** The rectangle of the layer pushed at command `k`, into rect. */
+  private rectAt(
+    commands: Commands,
+    k: number,
+  ): { x: number; y: number; width: number; height: number } {
+    const p = commands.params;
+    const from = commands.ops[k * 4 + 1];
+    const rect = this.rect;
+    rect.x = p[from];
+    rect.y = p[from + 1];
+    rect.width = p[from + 2];
+    rect.height = p[from + 3];
+    return rect;
+  }
+
+  /**
+   * What is below the blend drawn direct at command `k`, which reads it,
+   * copied once for it and for the blends drawn direct right after it that
+   * may share the copy (Backdrops): the box that holds its rectangle, and
+   * the compositor's place its own again.
+   */
+  private shareCopy(commands: Commands, k: number, scene: SceneList, under: Open): number {
+    const compositor = this.compositor;
+    const backdrops = this.backdrops;
+    const place = compositor.place;
+    backdrops.begin(compositor.copiesWhereLying(under));
+    for (let j = k; j < commands.length && this.drawsDirect(commands, j, scene); j += 3) {
+      if (
+        compositor.cover(this.rectAt(commands, j), under) &&
+        !backdrops.offer(
+          j,
+          place.fx,
+          place.fy,
+          place.width,
+          place.height,
+          readsBelow(commands.ops[j * 4 + 9], under.opaque),
+        )
+      ) {
+        break;
+      }
+    }
+
+    compositor.copyBoxes(under, backdrops.boxes, backdrops.boxCount);
+    backdrops.copy = compositor.copies;
+    compositor.cover(this.rectAt(commands, k), under);
+    return backdrops.boxFor(k);
   }
 }

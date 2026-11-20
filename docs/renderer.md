@@ -304,7 +304,13 @@ with the context:
   straight onto what is below in its mode (`WebGLBackend.blendDirect`),
   as its layer composited would be, the modes that read what is below
   from the same copy of it, and multiply onto the opaque stage by GL's
-  blending, as its composite. So has a shape's part of several fills
+  blending, as its composite. Blends drawn straight one after another
+  share one copy while each one's rectangle meets none drawn since it
+  was made (`webgl/backdrops.ts`), as a blend drawn straight draws
+  inside its rectangle alone: rectangles near each other are copied as
+  one box, at most twice their area, and those far apart as boxes of
+  their own in the same pass where the copy is made where they lie (out
+  of a multisampled target), or in a copy of their own elsewhere. So has a shape's part of several fills
   that meet without overlapping, as a SWF's shape writes them: where two
   meet inside a pixel, adl blends each by what it covers, not the pixel
   they make together, which only drawing them straight onto what is
@@ -512,7 +518,10 @@ take before it is made (`tests/player/census.ts`):
   counts by where it is and how it is coloured, and a layer holding a
   filter's output made that frame is not compared. A filtered object in
   a blend mode is one layer, counted with the filter layers. And
-  backdrop copies;
+  backdrop copies: those made, and of the blends that read what is
+  below, how many could share the copy an earlier one made, between
+  blends drawn direct alone, as the backend shares it, and past draws,
+  masks and composites that do not meet them;
 - **the walk:** the objects `RenderView.walk` visited, once each however
   often (an alpha mask, a 3D object's content), and of those how many
   changed (transform or colour, content, children, pixels), how many a
@@ -531,7 +540,7 @@ out shifts no other, and a run with none counted fails.
 It costs nothing outside its runs, as `--counts` costs nothing: the
 renderer has no census code. The bench page wraps the view's `render`
 and `walk`, the mask walker's `walkMask`, the backend's `execute`,
-`blendDirect` and `copyBelow`, `Draws.prepare` and `gatherRun`, the
+`blendDirect` and `copyBoxes`, `Draws.prepare` and `gatherRun`, the
 merged stream's `add` and GL's binds and draws, on that view's objects
 alone and only when `--census` is given, and counts from the scene list,
 rows and commands the frame made. It reaches the renderer's private

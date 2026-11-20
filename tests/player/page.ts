@@ -1042,6 +1042,7 @@ function installCensus(view: RenderView): Census {
   let subRunCount = 0;
   const direct = new Set<number>();
   let copies = 0;
+  let copyBoxesCount = 0;
   let paths: Record<string, number> = {};
   let counted: Record<string, number> | null = null;
   let memory: BlendMemory | null = null;
@@ -1095,14 +1096,11 @@ function installCensus(view: RenderView): Census {
 
     return drawn;
   };
-  const copyBelow = censusMethod(compositor, "copyBelow");
-  compositor.copyBelow = function (this: unknown, ...args: unknown[]) {
-    const copied = copyBelow.apply(this, args);
-    if (copied) {
-      copies++;
-    }
-
-    return copied;
+  const copyBoxes = censusMethod(compositor, "copyBoxes");
+  compositor.copyBoxes = function (this: unknown, ...args: unknown[]) {
+    copies++;
+    copyBoxesCount += args[2] as number;
+    return copyBoxes.apply(this, args);
   };
 
   // Each sub-draw by how it was drawn: the program in use, and for fills the merged stream's
@@ -1164,6 +1162,7 @@ function installCensus(view: RenderView): Census {
     subRunCount = 0;
     direct.clear();
     copies = 0;
+    copyBoxesCount = 0;
     paths = {};
     const out = execute.apply(this, args);
     const commands = args[0] as Commands;
@@ -1259,7 +1258,7 @@ function installCensus(view: RenderView): Census {
       memory,
     );
     memory = analysed.memory;
-    counted = { ...analysed.counts, ...paths, copies };
+    counted = { ...analysed.counts, ...paths, copies, "copies.boxes": copyBoxesCount };
     return out;
   };
 
