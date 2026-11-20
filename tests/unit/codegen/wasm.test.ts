@@ -27,10 +27,12 @@ test("wrapper and wasm agree on the compiler version", async () => {
 
 test("the compiler is reset only at an API version ABCs run at, which keys name", async () => {
   const codegen = await createCodegen(module);
-  for (const version of [0, 52, 256 + API_VERSION, 1.5]) {
+  for (const version of [-1, 52, 256 + API_VERSION, 1.5]) {
     assert.throws(() => codegen.reset(version), RangeError, `${version}`);
   }
 
+  codegen.reset(0);
+  assert.equal(codegen.apiVersion, 0);
   codegen.reset(AIR_API_VERSION);
   assert.equal(codegen.apiVersion, AIR_API_VERSION);
   codegen.reset();

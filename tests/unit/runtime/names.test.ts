@@ -214,9 +214,12 @@ test("determining an indexed name leaves an object key's string conversion defer
 });
 
 test("a runtime runs only at an API version ABCs run at, and makes its names at it", () => {
-  for (const apiVersion of [0, 52, 256 + API_VERSION, 1.5]) {
+  for (const apiVersion of [-1, 52, 256 + API_VERSION, 1.5]) {
     assert.throws(() => avm2.createRuntime({ apiVersion }), RangeError, `${apiVersion}`);
   }
+
+  // VM_ALLVERSIONS, a Flash Player root of SWF 9's.
+  assert.deepEqual(avm2.createRuntime({ apiVersion: 0 }).userVersions, [0]);
 
   const rt = avm2.createRuntime({ apiVersion: AIR_API_VERSION });
   assert.deepEqual(
