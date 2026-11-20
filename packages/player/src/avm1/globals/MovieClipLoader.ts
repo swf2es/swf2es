@@ -60,6 +60,7 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
     },
     () => undefined,
   );
+
   for (const name of [
     "__proto__",
     "constructor",

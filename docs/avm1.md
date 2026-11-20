@@ -851,9 +851,16 @@ object, and a new `_listeners`, each hidden from SWF 5 but there: the
 player's Key, Mouse, Selection, Stage and `System.IME`, made for a SWF 5
 main movie, have them for the SWF 6 movies it loads, and for a SWF 5
 script that clears their flags; what the player sends, Key's and
-Mouse's events, Selection's focus, Stage's resize, MovieClipLoader's
-loads and a text field's changes, it sends as SWF 6 sees it, so that
-their listeners in those movies hear it (adl; `loaded-broadcasters.as`).
+Mouse's events, Selection's focus, Stage's resize and a text field's
+changes, it sends as SWF 6 sees it, so that their listeners in those
+movies hear it (adl; `loaded-broadcasters.as`). MovieClipLoader is a
+class of SWF 7: a SWF 5 or 6 movie sees the class and an instance's own
+`_listeners` but nothing of its prototype, neither its methods, its
+broadcaster's, its `constructor` nor its `__proto__` (so not Object's
+methods either), hidden from 6 and below, the broadcaster's members from
+5 even when only the version-6 flag is cleared; its loads are told as
+SWF 7 sees them, their names matched by case, as adl calls a SWF 7
+movie's listeners under a SWF 5 or 6 one (`movieclip-loader.as`).
 
 ### The global functions
 
