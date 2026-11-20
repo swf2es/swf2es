@@ -182,6 +182,27 @@ test("a clip's Sound sets the clip's transform, and stop() stops what plays unde
   ]);
 });
 
+test("a Sound keeps its target's path: a removed clip's names nothing, a level's from the level", async () => {
+  const { lines } = await play(
+    soundSwf(
+      `createEmptyMovieClip("a", 1);
+      a.createEmptyMovieClip("mc2", 1);
+      var c = a.mc2;
+      a.mc2.removeMovieClip();
+      var dead = new Sound(c);
+      createEmptyMovieClip("mc2", 7);
+      new Sound(mc2).setVolume(55);
+      a.createEmptyMovieClip("lk", 2);
+      a.lk._lockroot = true;
+      a.lk.createEmptyMovieClip("snd", 1);
+      new Sound(a.lk.snd).setVolume(30);
+      trace(dead.getVolume() + " " + new Sound("_level0.a.lk.snd").getVolume() + " " + new Sound("").getVolume());`,
+    ),
+  );
+  // A clip made where the removed one was, or anywhere by its name, is not its clip (adl).
+  assert.deepEqual(lines, ["1: undefined 30 undefined"]);
+});
+
 test("a loaded movie's Sounds stop as it goes; a clip's of the movie that removes it plays on", async () => {
   // adl: the child's Sound on a clip of its own stops, and never completes, when the child is
   // removed, unloaded or replaced; the parent's Sound on a clip it removes completes.

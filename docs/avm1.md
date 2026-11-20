@@ -1344,8 +1344,14 @@ one runs out, every 100000, is the clock read.
 
 ### Sound, Color and SharedObject
 
-These follow Ruffle's classes. A `Sound` or a `Color` keeps its target as
-given, a clip or a path, and finds the clip again each time it is used.
+These follow Ruffle's classes. A `Color` keeps its target as given, a
+clip or a path, and finds the clip again each time it is used. A `Sound`
+keeps a path, a clip's where its reference reaches (none for a removed
+clip's, which then names nothing, not a clip made later where it was), and
+finds the clip by it each time it is used: a path that begins `_root` or
+`_levelN` from that level, whatever `_root` the code sees, so that code
+under a `_lockroot` clip finds the movie's root by `_root` in a clip's path
+or a string's (adl); any other from the code's target.
 A Sound's transform is its clip's, which every sound under the clip
 plays by, or with no target the global one; the sounds it starts are the
 timeline's kind, held to the same 32 and stopped with them, StopSounds

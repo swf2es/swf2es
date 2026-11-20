@@ -1889,6 +1889,73 @@ onEnterFrame = function () {
   };
 }
 
+// What a Sound's target finds, in a movie an AS3 Loader holds
+// (scripts/Avm1SoundTargets.as), in adl: a clip's path, found again each
+// time, through a rename, a clip made where it was and a variable; a removed
+// clip's reference, which names nothing, nor a clip made later where it was;
+// and a string's `_root` under a `_lockroot` clip, which is the movie's root,
+// as a clip's path's is, not the clip locked, whenever the Sound was made and
+// however the clip is locked since. (The string of a removed clip's
+// reference, once a clip is made where it was, is not Flash's, so it is not
+// traced.)
+function avm1SoundTargets(): Uint8Array {
+  const version = 8;
+  const locker = `this._lockroot = true;
+createEmptyMovieClip("snd", 5);
+var s = new Sound(snd);
+s.setVolume(30);
+trace("L root " + _root + " snd " + snd + " vol " + s.getVolume() + " " + new Sound(_root.snd).getVolume() + " str " + new Sound("_root.snd").getVolume() + " " + new Sound("snd").getVolume() + " full " + new Sound(String(snd)).getVolume() + " this " + new Sound(this).getVolume());
+this._lockroot = false;
+trace("L unlocked root " + _root + " vol " + s.getVolume() + " str " + new Sound("_root.snd").getVolume() + " full " + new Sound(String(snd)).getVolume());
+var q = new Sound("_root.lk.snd");
+this._lockroot = true;
+trace("L relocked " + q.getVolume() + " " + s.getVolume());
+stop();`;
+  const main = `createEmptyMovieClip("a", 1);
+a.createEmptyMovieClip("mc", 1);
+var s = new Sound(a.mc);
+s.setVolume(40);
+trace("A " + a.mc + " " + s.getVolume() + " this " + new Sound(this).getVolume() + " global " + new Sound().getVolume() + " level0 " + typeof _level0);
+a.mc._name = "mc2";
+trace("B renamed " + s.getVolume() + " " + new Sound(a.mc2).getVolume());
+a.createEmptyMovieClip("mc", 2);
+trace("B new same name " + s.getVolume());
+new Sound(a.mc).setVolume(50);
+trace("B set " + s.getVolume() + " " + new Sound(a.mc2).getVolume());
+a.mc.removeMovieClip();
+trace("C removed " + s.getVolume());
+a.mc = a.mc2;
+trace("C variable " + s.getVolume());
+delete a.mc;
+trace("C deleted " + s.getVolume());
+var c = a.mc2;
+a.mc2.removeMovieClip();
+var r = new Sound(c);
+trace("D dead [" + c + "] " + r.getVolume());
+createEmptyMovieClip("mc2", 7);
+new Sound(mc2).setVolume(55);
+trace("D top " + r.getVolume());
+a.createEmptyMovieClip("mc2", 3);
+new Sound(a.mc2).setVolume(77);
+trace("D remade " + r.getVolume());
+mc2.removeMovieClip();
+trace("D top gone " + r.getVolume());
+var e = a.mc2;
+a.mc2.removeMovieClip();
+var u = new Sound(e);
+a.createEmptyMovieClip("mc2", 4);
+new Sound(a.mc2).setVolume(66);
+trace("F made dead then remade [" + e + "] " + u.getVolume());
+a._name = "z";
+trace("G parent renamed " + u.getVolume() + " " + new Sound(e).getVolume() + " " + new Sound(z.mc2).getVolume());
+stop();`;
+  return avm1Swf(
+    version,
+    [w.sprite(10, 2, [w.showFrame(), as1(locker, version), w.showFrame(), w.end()])],
+    [[w.place({ depth: 20, character: 10, name: "lk" })], [as1(main, version)], []],
+  );
+}
+
 // Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
 // "Clips and paths"): `a` and `c` of a clip of three frames, which places
 // `b` of another, beside an unnamed square and `Beta`; each clip traces its
@@ -4014,6 +4081,16 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
       maxOutliers: 0,
     }),
   ),
+  {
+    name: "avm1-sound-targets",
+    swf: bare,
+    script: "Avm1SoundTargets",
+    files: { "avm1-sound-targets-movie.swf": avm1SoundTargets() },
+    frames: 12,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   {
     name: "avm1-sound-lockroot",
     swf: bare,

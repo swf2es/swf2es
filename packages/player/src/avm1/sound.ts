@@ -4,7 +4,7 @@
 // after the frame's actions.
 // Sound's state follows Ruffle's (https://github.com/ruffle-rs/ruffle): MIT
 // OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
-import { avm1 } from "@swf2es/runtime";
+import type { avm1 } from "@swf2es/runtime";
 import type { DisplayObject, MovieClip } from "../display/display.js";
 import type { SoundCharacter } from "../display/timeline.js";
 import type { AudioHost, DecodedSound } from "../media/audio.js";
@@ -78,22 +78,41 @@ export class Avm1Sounds implements SoundClassHost {
     return this.movie.realm;
   }
 
-  resolve(value: avm1.Value, version: number): DisplayObject | null {
-    return this.movie.resolve(value, version);
-  }
-
-  clipPath(value: avm1.Value): string | null {
-    const d = value instanceof avm1.Avm1Object ? value.display?.target : undefined;
-    return d === undefined ? null : this.movie.pathOf(d as DisplayObject);
-  }
-
   atPath(path: string, version: number): DisplayObject | null {
-    // Its level found by name, the rest from there as any target path is, a variable too.
+    if (path === "") {
+      return null;
+    }
+
+    // `_root` and `_levelN` from the level, which a path from a clip in a movie an AS3 Loader
+    // holds begins with, `_root`, and which a string under a `_lockroot` clip names too (adl):
+    // not the clip locked, which the code's `_root` is. The rest as any target path is, a
+    // variable too.
+    const movie = this.movie;
     const dot = path.indexOf(".");
-    const level = this.movie.atPath(dot < 0 ? path : path.slice(0, dot));
-    return level === null || dot < 0
-      ? level
-      : targetOf(this.movie, level, path.slice(dot + 1), version);
+    const first = dot < 0 ? path : path.slice(0, dot);
+    const level = first === "_root" ? this.levelOfCode() : movie.atPath(first);
+    if (level === null) {
+      return movie.resolve(path, version);
+    }
+
+    return dot < 0 ? level : targetOf(movie, level, path.slice(dot + 1), version);
+  }
+
+  /** The level of the code's target, whatever its `_root`: the movie's root where the movie has no levels. */
+  private levelOfCode(): DisplayObject | null {
+    const movie = this.movie;
+    if (movie.hosted) {
+      return movie.atPath("_root");
+    }
+
+    const target = movie.realm.current?.target as DisplayObject | null | undefined;
+    for (let o = target ?? null; o !== null; o = o.parent) {
+      if (movie.levelOf(o) !== null) {
+        return o;
+      }
+    }
+
+    return movie.root;
   }
 
   /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
