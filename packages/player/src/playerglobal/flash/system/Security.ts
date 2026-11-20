@@ -2,6 +2,7 @@
 // SWF's by default, which allows what a browser's would; the policy files
 // a SWF names go to the host, which judges its requests by them.
 import { avm2 } from "@swf2es/runtime";
+import { loadedSandbox } from "../../../scripting/loads.js";
 import type { Scripting } from "../../../scripting.js";
 
 type Value = avm2.Value;
@@ -29,10 +30,9 @@ export function securityNatives(s: Scripting): avm2.Natives {
       disableAVM1Loading = !!v;
     }
 
-    // The calling SWF's: one loaded from the network is remote, wherever the first one is.
+    // The calling SWF's (loadedSandbox).
     static get sandboxType(): string {
-      const url = s.code.runningUrl();
-      return url !== null && url !== s.url && /^https?:/i.test(url) ? "remote" : s.sandboxType;
+      return loadedSandbox(s, s.code.runningUrl());
     }
 
     static get pageDomain(): Value {

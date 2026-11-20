@@ -7,9 +7,11 @@ import { containerEngine } from "../../../../../../oracle/oracle.ts";
 import type { FetchRequest } from "../../../../../../packages/player/dist/hosts.js";
 import { Player } from "../../../../../../packages/player/dist/player.js";
 import { Scripting } from "../../../../../../packages/player/dist/scripting.js";
+import { flashAssembler, script } from "../../../../../avm1-script.ts";
 import { bare } from "../../../../../player/cases.ts";
 import { libraryAbcs } from "../../../../../player/libraries.ts";
 import { compileScripts } from "../../../../../player/scripts.ts";
+import * as w from "../../../../../swf-writer.ts";
 
 // Its own: node runs test files at once, and a compile writes its job list into `out`.
 const out = fileURLToPath(new URL("../../../../out/player-security/", import.meta.url));
@@ -131,6 +133,75 @@ test("a SWF loaded from the network is remote, while the local one that loaded i
   }
 
   assert.deepEqual(lines, ["main localWithNetwork", "child remote"]);
+  player.destroy();
+});
+
+test("an AVM1 SWF a local AS3 one loads from the network is remote, one from disk local", {
+  skip,
+}, async () => {
+  const [main] = compileScripts(
+    [
+      {
+        name: "LoadsAvm1",
+        source: `package {
+  import flash.display.*;
+  import flash.net.URLRequest;
+  public class LoadsAvm1 extends Sprite {
+    public function LoadsAvm1() {
+      new Loader().load(new URLRequest("http://example.test/avm1.swf"));
+      new Loader().load(new URLRequest("local.swf"));
+    }
+  }
+}`,
+      },
+    ],
+    out,
+  ).values();
+  const avm1 = (name: string) =>
+    w.swf({
+      version: 8,
+      width: 10,
+      height: 10,
+      frameCount: 1,
+      tags: [
+        w.doAction([
+          ...script(
+            `trace("${name} " + System.security.sandboxType);`,
+            8,
+          )(flashAssembler())
+            .end()
+            .bytes(),
+        ]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "file:///games/main.swf",
+    sandboxType: "localWithNetwork",
+    fetch: async (request) => {
+      switch (request.url) {
+        case "http://example.test/avm1.swf":
+          return { bytes: avm1("network"), status: 200, headers: [] };
+        case "file:///games/local.swf":
+          return { bytes: avm1("disk"), status: 0, headers: [] };
+        default:
+          return { bytes: null, status: 404, headers: [] };
+      }
+    },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(main, 1, "LoadsAvm1"), scripting);
+  await player.start();
+  await scripting.settled();
+  for (let i = 0; i < 4 && lines.length < 2; i++) {
+    player.tick();
+    await scripting.settled();
+  }
+
+  assert.deepEqual(lines.sort(), ["disk localWithNetwork", "network remote"]);
   player.destroy();
 });
 
