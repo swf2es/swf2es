@@ -49,6 +49,7 @@ import {
   typeExpr,
   uri,
 } from "./refs";
+import { identifierOf, stackName } from "./stack-names";
 
 /**
  * The most slots a traits' fill sets. V8 counts only fields already
@@ -435,28 +436,11 @@ export class ModuleEmitter {
 
   /**
    * Method m's name as a JavaScript identifier for its function: its name
-   * as nativeName gives it, each character outside [A-Za-z0-9_] as `_`, and
-   * `$` before, which no name the generated code binds starts with; a
-   * method no trait binds, such as a closure, as `$f` and its index.
+   * in a stack trace, escaped (stack-names.ts), which begins with `$_`, as
+   * no name the generated code binds does.
    */
   functionName(m: u32): string {
-    const text = this.methodName(m);
-    if (text.length === 0) {
-      return `$f${m - this.domain.methodStart[this.index]}`;
-    }
-
-    // Into one buffer, made once: a string grown a character at a time is
-    // copied each time, which the minimal runtime collects only between calls.
-    const units = new StaticArray<u16>(text.length + 1);
-    units[0] = 0x24; // $
-    for (let i = 0; i < text.length; i++) {
-      const c = <u16>text.charCodeAt(i);
-      const word =
-        (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
-      units[i + 1] = word ? c : 0x5f; // _
-    }
-
-    return String.UTF16.decodeUnsafe(changetype<usize>(units), units.length << 1);
+    return identifierOf(stackName(this.domain, this.index, m));
   }
 
   /** Method m's name: "Class.name", "Class#name", or a script's qualified name, "" if no trait binds it. */
