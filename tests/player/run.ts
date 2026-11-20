@@ -11,6 +11,7 @@
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { plainFileName } from "../../oracle/flash.ts";
 import { isAs3, readSwf } from "../../packages/format/dist/index.js";
 import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
@@ -123,7 +124,7 @@ if (update) {
       rmSync(`${files}${c.name}`, { recursive: true, force: true });
       mkdirSync(`${files}${c.name}`, { recursive: true });
       for (const [name, bytes] of Object.entries(c.files)) {
-        writeFileSync(`${files}${c.name}/${name}`, bytes);
+        writeFileSync(`${files}${c.name}/${plainFileName(name)}`, bytes);
       }
     }
   }

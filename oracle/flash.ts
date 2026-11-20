@@ -45,6 +45,19 @@ export interface FlashJob {
   files?: Record<string, Uint8Array>;
 }
 
+/**
+ * `name`, if it is a plain file name, which a job's or a player case's
+ * file may have: letters, digits, `_`, `-` and dots, not first. Anything
+ * else, a path or `..` among them, throws.
+ */
+export function plainFileName(name: string): string {
+  if (!/^[\w-][\w.-]*$/.test(name)) {
+    throw new Error(`a file of a job is named by a plain file name, not ${JSON.stringify(name)}`);
+  }
+
+  return name;
+}
+
 export interface FlashResult {
   /** The SWF's traces, one per line. */
   output: string[];
@@ -170,12 +183,16 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
   writeFileSync(app, descriptor(content.slice(out.length + 1), id));
 
   const files = jobs.flatMap((job) => Object.entries(job.files ?? {}));
+  // They share the harness's directory: one name, one file.
+  const written = new Map<string, Uint8Array>();
   for (const [name, bytes] of files) {
-    if (!/^[\w.-]+$/.test(name) || name.startsWith(".")) {
-      throw new Error(`a job's file is named by a plain file name, not ${JSON.stringify(name)}`);
+    const before = written.get(name);
+    if (before !== undefined && Buffer.compare(before, bytes) !== 0) {
+      throw new Error(`two jobs have different files named ${name}`);
     }
 
-    writeFileSync(join(out, name), bytes);
+    written.set(name, bytes);
+    writeFileSync(join(out, plainFileName(name)), bytes);
   }
 
   const server = createServer();
