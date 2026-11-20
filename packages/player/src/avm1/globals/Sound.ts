@@ -42,9 +42,10 @@ export interface SoundClassHost {
   readonly realm: avm1.Realm;
   readonly sounds: SoundHost;
   /**
-   * The display object at a target path: one that begins `_root` or `_levelN` from that level,
-   * whatever `_root` the code sees, any other from the code's target; a child or a variable at
-   * each name after the first. Null for nothing, an empty path among it.
+   * The display object at a target path: one that begins `_levelN` from that level, one that
+   * begins `_root` in a movie an AS3 Loader holds from its root, whatever `_root` the code
+   * sees, any other from the code's target; a child or a variable at each name after the
+   * first. Null for nothing, an empty path among it.
    */
   atPath(path: string, version: number): DisplayObject | null;
   /**
