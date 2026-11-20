@@ -9,9 +9,7 @@ import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 
 /**
  * An object's span of the frame it was written in, its entries and rows;
- * and, from its last walk, where its span began then and, for its
- * children, the transform on the stage and the colour they were drawn
- * under, which each child's span written then stands under alike.
+ * and, for a container, what its children's spans stand under (Children).
  */
 export interface ObjectSpan extends Span {
   /** The Spans that wrote it (Spans.id): another view drawing the same object writes its own. */
@@ -24,6 +22,18 @@ export interface ObjectSpan extends Span {
    * a span holds no object.
    */
   parent: number;
+  /** A container's walk's record (Children), made at its first; null for any other object. */
+  children: Children | null;
+}
+
+/**
+ * From a container's last walk, where its span began then and, for its
+ * children, the transform on the stage and the colour they were drawn
+ * under, which each child's span written then stands under alike. Apart
+ * from ObjectSpan, since only containers have children: most objects walked
+ * are leaves, which would otherwise carry its fields too.
+ */
+export interface Children {
   /**
    * The frame it was last walked in with its children's spans written (under),
    * -1 for none, and where its span began then: its own span taken whole
@@ -177,7 +187,7 @@ export class Spans {
     this.ended = false;
   }
 
-  /** `o`'s span and what its children stand under, this Spans', made empty if there was none. */
+  /** `o`'s span, this Spans', made empty if there was none. */
   private own(o: DisplayObject): ObjectSpan {
     let s = o.span as ObjectSpan | null;
     if (s === null || s.owner !== this.id) {
@@ -189,24 +199,7 @@ export class Spans {
         end: 0,
         rowsFirst: 0,
         rowsEnd: 0,
-        walked: -1,
-        walkedFirst: 0,
-        walkedRowsFirst: 0,
-        a: 0,
-        b: 0,
-        c: 0,
-        d: 0,
-        tx: 0,
-        ty: 0,
-        tinted: false,
-        rMul: 1,
-        gMul: 1,
-        bMul: 1,
-        aMul: 1,
-        rAdd: 0,
-        gAdd: 0,
-        bAdd: 0,
-        aAdd: 0,
+        children: null,
       };
       o.span = s;
     }
@@ -236,6 +229,31 @@ export class Spans {
     out: Context,
   ): void {
     const s = this.own(o);
+    let w = s.children;
+    if (w === null) {
+      w = {
+        walked: -1,
+        walkedFirst: 0,
+        walkedRowsFirst: 0,
+        a: 0,
+        b: 0,
+        c: 0,
+        d: 0,
+        tx: 0,
+        ty: 0,
+        tinted: false,
+        rMul: 1,
+        gMul: 1,
+        bMul: 1,
+        aMul: 1,
+        rAdd: 0,
+        gAdd: 0,
+        bAdd: 0,
+        aAdd: 0,
+      };
+      s.children = w;
+    }
+
     const a = places[at];
     const b = places[at + 1];
     const c = places[at + 2];
@@ -244,67 +262,67 @@ export class Spans {
     const ty = places[at + 5];
     const same =
       this.usable &&
-      s.walked >= 0 &&
-      s.a === a &&
-      s.b === b &&
-      s.c === c &&
-      s.d === d &&
-      s.tx === tx &&
-      s.ty === ty &&
+      w.walked >= 0 &&
+      w.a === a &&
+      w.b === b &&
+      w.c === c &&
+      w.d === d &&
+      w.tx === tx &&
+      w.ty === ty &&
       (tint
-        ? s.tinted &&
-          s.rMul === tint.rMul &&
-          s.gMul === tint.gMul &&
-          s.bMul === tint.bMul &&
-          s.aMul === tint.aMul &&
-          s.rAdd === tint.rAdd &&
-          s.gAdd === tint.gAdd &&
-          s.bAdd === tint.bAdd &&
-          s.aAdd === tint.aAdd
-        : !s.tinted);
+        ? w.tinted &&
+          w.rMul === tint.rMul &&
+          w.gMul === tint.gMul &&
+          w.bMul === tint.bMul &&
+          w.aMul === tint.aMul &&
+          w.rAdd === tint.rAdd &&
+          w.gAdd === tint.gAdd &&
+          w.bAdd === tint.bAdd &&
+          w.aAdd === tint.aAdd
+        : !w.tinted);
     const before = this.frame - 1;
     out.frame = -1;
     if (!same) {
       // Nothing of the children's stands.
-    } else if (s.walked === before) {
+    } else if (w.walked === before) {
       out.frame = before;
       out.entries = 0;
       out.rows = 0;
     } else if (s.frame === before) {
-      out.frame = s.walked;
-      out.entries = s.first - s.walkedFirst;
-      out.rows = s.rowsFirst - s.walkedRowsFirst;
+      out.frame = w.walked;
+      out.entries = s.first - w.walkedFirst;
+      out.rows = s.rowsFirst - w.walkedRowsFirst;
     } else if (
       parent.frame >= 0 &&
       s.frame === parent.frame &&
       s.parent === (o.parent ? o.parent.serial : -1)
     ) {
       // Its span lay in its parent's, as copied whole since, only where that parent was its own then.
-      out.frame = s.walked;
-      out.entries = s.first + parent.entries - s.walkedFirst;
-      out.rows = s.rowsFirst + parent.rows - s.walkedRowsFirst;
+      out.frame = w.walked;
+      out.entries = s.first + parent.entries - w.walkedFirst;
+      out.rows = s.rowsFirst + parent.rows - w.walkedRowsFirst;
     }
 
-    s.walked = this.frame;
-    s.walkedFirst = first;
-    s.walkedRowsFirst = rowsFirst;
+    w.walked = this.frame;
+    w.walkedFirst = first;
+    w.walkedRowsFirst = rowsFirst;
     if (!same) {
-      s.a = a;
-      s.b = b;
-      s.c = c;
-      s.d = d;
-      s.tx = tx;
-      s.ty = ty;
-      s.tinted = tint !== null;
+      w.a = a;
+      w.b = b;
+      w.c = c;
+      w.d = d;
+      w.tx = tx;
+      w.ty = ty;
+      w.tinted = tint !== null;
       if (tint) {
-        s.rMul = tint.rMul;
-        s.gMul = tint.gMul;
-        s.bMul = tint.bMul;
-        s.aMul = tint.aMul;
-        s.rAdd = tint.rAdd;
-        s.gAdd = tint.gAdd;
-        s.bAdd = tint.bAdd;
-        s.aAdd = tint.aAdd;
+        w.rMul = tint.rMul;
+        w.gMul = tint.gMul;
+        w.bMul = tint.bMul;
+        w.aMul = tint.aMul;
+        w.rAdd = tint.rAdd;
+        w.gAdd = tint.gAdd;
+        w.bAdd = tint.bAdd;
+        w.aAdd = tint.aAdd;
       }
     }
   }
@@ -373,8 +391,8 @@ export class Spans {
    */
   record(o: DisplayObject, first: number, end: number, rowsFirst: number, rowsEnd: number): void {
     const s = this.own(o);
-    if (s.walked !== this.frame) {
-      s.walked = -1;
+    if (s.children !== null && s.children.walked !== this.frame) {
+      s.children.walked = -1;
     }
 
     s.frame = this.frame;

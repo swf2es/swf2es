@@ -174,7 +174,9 @@ A container's span is found inside its parent's that way only where that
 parent is the one it had when its span was written: one moved to another
 parent standing alike, after a frame that carried one parent down the
 list and not the other, would find its children's spans where the new
-parent's copy moved them, not where they lie.
+parent's copy moved them, not where they lie. Only containers carry what
+their children stand under (`Children`); a leaf's span is its place in the
+lists and its parent.
 Lines are let go of by their geometries' last use rather than the line
 cache's own (`LineCache`'s trim), as a span drawing them never asks the
 cache.
