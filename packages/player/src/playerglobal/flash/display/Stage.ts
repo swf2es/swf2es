@@ -288,7 +288,7 @@ export function stageNatives(s: Scripting): avm2.Natives {
     /** Flash's four, each of which fails to get a Context3D, as Flash without a GPU (Stage3D.ts). */
     get stage3Ds(): Value {
       stage3Ds ??= [0, 1, 2, 3].map(() =>
-        s.rt.construct(s.rt.classNamed("flash.display::Stage3D")),
+        s.rt.constructNative(s.rt.classNamed("flash.display::Stage3D")),
       );
       return vectorOf("flash.display::Stage3D", stage3Ds, true);
     }

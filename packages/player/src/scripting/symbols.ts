@@ -353,7 +353,8 @@ export class Symbols {
   /**
    * The display object for an instance a script makes with `new`: the
    * character of a class SymbolClass bound, if the class or a base of it
-   * is one, else an empty clip, shape or container by the nearest base.
+   * is one, else an empty clip, shape or container by the nearest base;
+   * #2012 for a class only the player makes, as Flash refuses it.
    */
   displayFor(traits: SymbolTraits): DisplayObject {
     const library: Library = this.s.library ?? {
@@ -400,6 +401,14 @@ export class Symbols {
           return new MovieClip(EMPTY_TIMELINE, library);
         case "flash.display::Shape":
           return new ShapeObject(null);
+        case "flash.display::Sprite":
+        case "flash.display::Loader":
+          return new Container();
+        // What reaches it past the classes above only the player makes: DisplayObject,
+        // InteractiveObject, DisplayObjectContainer, Stage and TextLine are abstract and
+        // restricted, so a script's subclass of one is refused too, by its own name.
+        case "flash.display::DisplayObject":
+          throw this.s.rt.cantInstantiate(traits.name);
         // Only a timeline makes a MorphShape or a StaticText.
         case "flash.display::MorphShape":
           throw this.s.rt.error("ArgumentError", 2012, "MorphShape$");

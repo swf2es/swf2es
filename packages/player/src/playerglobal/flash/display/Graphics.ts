@@ -32,7 +32,7 @@ const unplaced = new WeakSet<Paint>();
 /** A Graphics object for `display`, made once. */
 export function graphicsOf(s: Scripting, o: AsObject): AsObject {
   if (!o.$graphics) {
-    const g = s.rt.construct(s.rt.classNamed("flash.display::Graphics")) as AsObject;
+    const g = s.rt.constructNative(s.rt.classNamed("flash.display::Graphics"));
     g.$display = o.$display;
     o.$graphics = g;
   }

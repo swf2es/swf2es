@@ -687,6 +687,16 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // The classes a script may not construct, and what extends them: #2012 naming the class made.
+    name: "abstract-classes",
+    swf: (abc) => bare(abc, 1, "AbstractClasses"),
+    script: "AbstractClasses",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "accessibility-natives",
     swf: (abc) => bare(abc, 1, "AccessibilityNatives"),
     script: "AccessibilityNatives",
