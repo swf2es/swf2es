@@ -54,6 +54,11 @@ export interface FlashJob {
    */
   alone?: boolean;
   /**
+   * More files, by name, for what it loads by a relative URL: they go
+   * beside the harness, whose URL a SWF it loads from bytes has.
+   */
+  files?: Record<string, Uint8Array>;
+  /**
    * Run as the application's content, the root, in an adl of its own,
    * rather than loaded by the harness: at its own SWF version's API
    * version, not the harness's. Traces only: nothing is captured, and it
@@ -61,6 +66,19 @@ export interface FlashJob {
    * ends stops it with AIR's dialog, and it comes back incomplete.
    */
   root?: boolean;
+}
+
+/**
+ * `name`, if it is a plain file name, which a job's or a player case's
+ * file may have: letters, digits, `_`, `-` and dots, not first. Anything
+ * else, a path or `..` among them, throws.
+ */
+export function plainFileName(name: string): string {
+  if (!/^[\w-][\w.-]*$/.test(name)) {
+    throw new Error(`a file of a job is named by a plain file name, not ${JSON.stringify(name)}`);
+  }
+
+  return name;
 }
 
 export interface FlashResult {
@@ -177,7 +195,14 @@ function descriptor(content: string, id: string, size = true): string {
  * local time from.
  */
 export function jobKey(job: FlashJob): string {
-  return createHash("sha256")
+  const hash = createHash("sha256");
+  for (const [name, bytes] of Object.entries(job.files ?? {}).sort(([a], [b]) =>
+    a < b ? -1 : 1,
+  )) {
+    hash.update(`file ${name} ${bytes.length}\n`).update(bytes);
+  }
+
+  return hash
     .update(job.swf)
     .update(
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
@@ -278,6 +303,19 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
   const app = join(out, `${id}.xml`);
   writeFileSync(app, descriptor(content.slice(out.length + 1), id));
 
+  const files = jobs.flatMap((job) => Object.entries(job.files ?? {}));
+  // They share the harness's directory: one name, one file.
+  const written = new Map<string, Uint8Array>();
+  for (const [name, bytes] of files) {
+    const before = written.get(name);
+    if (before !== undefined && Buffer.compare(before, bytes) !== 0) {
+      throw new Error(`two jobs have different files named ${name}`);
+    }
+
+    written.set(name, bytes);
+    writeFileSync(join(out, plainFileName(name)), bytes);
+  }
+
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
   const port = (server.address() as { port: number }).port;
@@ -377,6 +415,9 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
 
     server.close();
     rmSync(app, { force: true });
+    for (const [name] of files) {
+      rmSync(join(out, name), { force: true });
+    }
   }
 
   return results;

@@ -847,7 +847,13 @@ it was called; up to SWF 6 the array as it is by then, so that a
 listener another removes is not called (Ruffle: by index, a removed
 one's place skipped). `initialize` sets a new `broadcastMessage` each
 time and AsBroadcaster's own `addListener` and `removeListener` on the
-object, and a new `_listeners`, each hidden from SWF 5.
+object, and a new `_listeners`, each hidden from SWF 5 but there: the
+player's Key, Mouse, Selection, Stage and `System.IME`, made for a SWF 5
+main movie, have them for the SWF 6 movies it loads, and for a SWF 5
+script that clears their flags; what the player sends, Key's and
+Mouse's events, Selection's focus, Stage's resize, MovieClipLoader's
+loads and a text field's changes, it sends as SWF 6 sees it, so that
+their listeners in those movies hear it (adl; `loaded-broadcasters.as`).
 
 ### The global functions
 
@@ -1569,7 +1575,13 @@ Windows-1252.
 `NetConnection` (as Ruffle's) connects locally for `connect(null)`, at
 once, telling `onStatus` `NetConnection.Connect.Success`, and to Flash
 Remoting for an http or https URL; a new connection closes the one
-before (`Connect.Closed`). Remoting calls are queued, and at the frame's
+before (`Connect.Closed`). `connect` gives true for anything given,
+connecting or not, and undefined for nothing, which connects nothing;
+undefined, up to SWF 6, gives false and connects nothing, and from SWF 7
+connects locally. An RTMP URL fails at the end of its frame, telling
+`onStatus` `NetConnection.Connect.Failed` at level error, as adl's does
+without a server; anything else neither connects nor fails. `uri` reads
+what was given, and the functions are SWF 6's (adl). Remoting calls are queued, and at the frame's
 end each connection's go as one AMF0 packet POSTed to its URL with its
 headers (`addHeader`, one of a name, its case aside); an answer's
 `/n/onResult` or `/n/onStatus` goes to the n-th call's responder, and a
@@ -1741,7 +1753,19 @@ the microphone's codec settings SWF 10's (adl). What adl gives without a
 device, a screen reader or an IME is what they give: no camera or
 microphone to `get` and no `names`, `isActive` false, the IME disabled in
 the `UNKNOWN` mode with each function failing. A stream plays nothing,
-and its buffer properties read undefined. `TextRenderer` keeps
+and its buffer properties read undefined. The first made on a connection
+that `connect` took and that has not failed (local, remoting, RTMP before
+its failure, or any other) gives `NetStream.prototype` enumerable getters
+of a stream's state from SWF 6, over whatever a script set there, which a
+stream made on such a connection reads as one that found nothing to play:
+numbers 0 but its buffer's time, which `setBufferTime` sets, audio codec
+128, video codec 2048 and `checkPolicyFile` false; a stream made without
+one reads them undefined. A SWF 5 main movie does not see those a SWF 6
+movie it loads adds, even with their flags cleared, as Flash keeps a
+NetStream for each (`global_swf6_7_8`, under "Known gaps"). Flash keeps the getters for the player, past
+the movie (`netstream.as` runs alone in adl for that). `play` tells
+nothing, where Flash tells a missing file's `NetStream.Play.StreamNotFound`.
+`Accessibility`'s functions are read-only. `TextRenderer` keeps
 `displayMode` and `maxLevel` as Flash checks them, though text is drawn
 the same whatever they are. `tests/player/avm1/devices.as` holds them to
 adl. AVM1's camera is not wired to the capture host
@@ -1831,10 +1855,11 @@ AVM1, so nothing is expected from it.
   ImportAssets; `onLoadProgress` while a SWF streams in, and
   "LoadNeverCompleted", which a fetch of all or nothing never gives;
   `System.useCodepage`'s guess of a file's encoding.
-- **Classes and natives.** `System` has no `IME`, `setClipboard`,
-  `showSettings` or `Product`, and `useCodepage` changes nothing; no
-  `Video`, `NetStream`, `Camera`,
-  `Microphone`, `ContextMenu` or `Accessibility`; ASnative's display,
+- **Classes and natives.** `System` has no `setClipboard`,
+  `showSettings`, `privateBytes` or `Product`, and `useCodepage` changes
+  nothing; `Video`, `NetStream`, `Camera`, `Microphone` and
+  `Accessibility` are there with nothing behind them, and a `NetStream`
+  plays nothing and tells nothing of it; ASnative's display,
   text, sound and I/O tables give functions that do nothing, and
   `ASconstructor` is left out. Button's prototype has only `enabled`,
   `useHandCursor`, `getDepth` and, from SWF 8, `filters`, `blendMode`

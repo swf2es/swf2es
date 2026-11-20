@@ -16,7 +16,7 @@
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { HARNESS_SWF_VERSION, runFlash } from "../../oracle/flash.ts";
+import { HARNESS_SWF_VERSION, plainFileName, runFlash } from "../../oracle/flash.ts";
 import { isAs3, readSwf } from "../../packages/format/dist/index.js";
 import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
@@ -79,10 +79,12 @@ for (const c of cases) {
   }
 }
 
+// A case's files are served beside it (files below), its SWF at a URL there.
 const jobs = chosen.map((c) => {
   const swf = swfOf(c);
   const apiVersion = c.root ? readSwf(swf).header.version : HARNESS_SWF_VERSION;
-  return { ...c, swf, lazyCompilation, apiVersion };
+  const url = c.files ? `/files/${c.name}/${c.name}.swf` : undefined;
+  return { ...c, swf, lazyCompilation, apiVersion, url };
 });
 for (const c of gaps) {
   swfOf(c);
@@ -126,7 +128,18 @@ if (update) {
     );
   }
 } else {
-  const results = await runPlayer(jobs);
+  const files = `${here}out/files/`;
+  for (const c of chosen) {
+    if (c.files) {
+      rmSync(`${files}${c.name}`, { recursive: true, force: true });
+      mkdirSync(`${files}${c.name}`, { recursive: true });
+      for (const [name, bytes] of Object.entries(c.files)) {
+        writeFileSync(`${files}${c.name}/${plainFileName(name)}`, bytes);
+      }
+    }
+  }
+
+  const results = await runPlayer(jobs, { mounts: [["/files/", files]] });
   let failed = 0;
   for (const [i, c] of chosen.entries()) {
     const r = results[i];

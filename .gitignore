@@ -6,7 +6,7 @@ dist-test-checked/
 oracle/out/
 tests/**/out/
 .DS_Store
-tests/player/corpus/ruffle/
+tests/player/corpus/ruffle
 as3/*/bin/
 .zig-cache/
 zig-out/

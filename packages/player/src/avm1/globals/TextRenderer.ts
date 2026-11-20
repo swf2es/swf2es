@@ -47,5 +47,6 @@ export function textPackage(realm: avm1.Realm): avm1.Avm1Object {
     0,
   );
   text.define("TextRenderer", renderer, 0);
+
   return text;
 }
