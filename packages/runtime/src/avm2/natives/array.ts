@@ -401,13 +401,17 @@ export const arrayNatives: Natives = {
       return -1;
     }
 
+    // As generic_lastIndexOf: from the start clamped, a negative one past the start to 0.
     const length = lengthOf(rt, o);
+    let start = clampIndexInt(rt.toInt(from), length);
+    if (start === length) {
+      start--;
+    }
+
     const a = arrayElementsOf(rt, o, length);
     if (a) {
-      const start = rt.toInt(from);
       if (v instanceof FloatValue) {
-        const at = start < 0 ? a.length + start : Math.min(start, a.length - 1);
-        for (let i = at; i >= 0; i--) {
+        for (let i = start; i >= 0; i--) {
           if (rt.strictEquals(a[i], v)) {
             return i;
           }
@@ -416,14 +420,10 @@ export const arrayNatives: Natives = {
         return -1;
       }
 
-      return a.lastIndexOf(v, start);
+      return start < 0 ? -1 : a.lastIndexOf(v, start);
     }
 
     const g = new Generic(rt, o);
-    let start = clampIndexInt(rt.toInt(from), length);
-    if (start === length) {
-      start--;
-    }
 
     for (let i = start | 0; i >= 0; i--) {
       if (rt.strictEquals(g.get(i), v)) {
