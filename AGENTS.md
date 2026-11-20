@@ -52,7 +52,8 @@ node tests/player/corpus/fetch-ruffle.ts     # Ruffle's test corpus, for the two
 pnpm corpus [--update-baseline] [--diff [--dump]] [prefix...]   # the player on the corpus's avm1, avm2
                               # and timeline tests vs corpus/baseline.json (Chrome; about 5 minutes; CI's
                               # corpus job); a regression shows where it parts from Flash, --diff does so
-                              # for every failing test, --dump with its whole trace
+                              # for every failing test, --dump with its whole trace; --distance ranks the
+                              # failing tests by the lines they differ on, nearest to passing first
 node tests/player/corpus/check-references.ts [prefix...]   # the corpus's expected outputs vs Flash
 node tests/fuzz/abc.ts [cases, 2000] [seed, 1]   # malformed ABCs: codegen never traps, its modules
                               # parse, JIT equals AOT (SWF2ES_CHECKED=1 for the checked build)
