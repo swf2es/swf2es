@@ -319,8 +319,9 @@ with the context:
   together took 4 to 12 times what tessellating them apart did, 5.8 ms
   a frame for 200 of them. Each look at an object's part doubles how long
   its next parts must stand, to 64 frames, so one drawn again every
-  second or third frame is looked into once or twice. Fills over each other, as a drawing's may be, keep the
-  layer, which blends them as one picture, as adl does.
+  second or third frame is looked into once or twice. Fills over each
+  other, as a drawing's may be, keep the layer, which blends them as one
+  picture, as adl does.
 - **One state cache.** The backend sets GL state through context3d's
   device layer (`@swf2es/context3d/device`'s `GlState`), so no bind,
   blend or stencil state is set twice.
