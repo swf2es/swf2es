@@ -24,8 +24,13 @@ export interface HandedModule {
   log: string;
 }
 
-/** What a worker is handed: the primordial's journal, its ABCs' hashes, and its modules, by the place of their compile in the journal. */
+/**
+ * What a worker is handed: the primordial's journal, its ABCs' hashes, and
+ * its modules, by the place of their compile in the journal, compiled at
+ * `apiVersion`, which a worker of another takes none of.
+ */
 export interface HandedModules {
+  apiVersion: number;
   ops: string[];
   hashes: string[];
   modules: [number, HandedModule][];
@@ -81,14 +86,14 @@ export class ModuleRecorder {
     });
   }
 
-  /** Stop journaling, keeping what was: the ABCs added so far are `hashes`. */
-  freeze(hashes: string[]): void {
+  /** Stop journaling, keeping what was: the ABCs added so far are `hashes`, compiled at `apiVersion`. */
+  freeze(hashes: string[], apiVersion: number): void {
     if (this.frozen) {
       return;
     }
 
     this.open = false;
-    this.frozen = { ops: this.ops, hashes: hashes.slice(), modules: [...this.modules] };
+    this.frozen = { apiVersion, ops: this.ops, hashes: hashes.slice(), modules: [...this.modules] };
   }
 
   /** Let go of ABC `index`'s module, which did not load: a worker compiles it. */
@@ -110,12 +115,17 @@ export class ModuleRecorder {
     this.ops.length = 0;
     this.modules.clear();
     this.places.clear();
-    this.frozen = { ops: [], hashes: [], modules: [] };
+    this.frozen = { apiVersion: 0, ops: [], hashes: [], modules: [] };
   }
 
-  /** What a worker is handed: null if nothing. */
-  handed(hashes: string[]): HandedModules | null {
-    const handed = this.frozen ?? { ops: this.ops.slice(), hashes, modules: [...this.modules] };
+  /** What a worker is handed, compiled at `apiVersion`: null if nothing. */
+  handed(hashes: string[], apiVersion: number): HandedModules | null {
+    const handed = this.frozen ?? {
+      apiVersion,
+      ops: this.ops.slice(),
+      hashes,
+      modules: [...this.modules],
+    };
     return handed.modules.length ? handed : null;
   }
 }

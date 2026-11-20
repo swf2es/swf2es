@@ -20,6 +20,7 @@ import { AIR_DIRECTORIES, AirApp, airAppForSwf, elementWindow, namesAir } from "
 import { type AirFiles, airFiles } from "./air-files.js";
 import { type AirItems, airItems } from "./air-items.js";
 import {
+  apiVersion,
   cssLength,
   parseColor,
   parseFlashVars,
@@ -716,7 +717,15 @@ export class Swf2esPlayerElement extends ElementBase {
 
         session.workers = host;
         session.codegen = codegen;
-        session.scripting = this.#scripting(session, codegen, url, baseUrl, pageUrl, host);
+        session.scripting = this.#scripting(
+          session,
+          codegen,
+          url,
+          baseUrl,
+          pageUrl,
+          host,
+          swf.header.version,
+        );
         if (stage3D && stage3DModule) {
           session.stage3D = new stage3DModule.Stage3DSession(
             this.#box,
@@ -893,7 +902,11 @@ export class Swf2esPlayerElement extends ElementBase {
     this.#session?.player?.audio?.resume?.();
   }
 
-  /** The scripting of a load from `url`, its ExternalInterface and fscommand the page's only for the SWFs it lets script it. */
+  /**
+   * The scripting of a load from `url`, a root SWF of `swfVersion`, its
+   * ExternalInterface and fscommand the page's only for the SWFs it lets
+   * script it.
+   */
   #scripting(
     session: Session,
     codegen: Awaited<ReturnType<typeof codegenForPlayer>>,
@@ -901,6 +914,7 @@ export class Swf2esPlayerElement extends ElementBase {
     base: string | null,
     pageUrl: string,
     workerHost: WorkerHost | null,
+    swfVersion: number,
   ): Scripting {
     const { internal, offline, allows, objectID } = this.#access(pageUrl);
     const scripting = new Scripting(codegen, {
@@ -930,6 +944,8 @@ export class Swf2esPlayerElement extends ElementBase {
       onUncaught: (error) => this.#report(session, error),
       fullScreen: this.#fullScreen(session),
       lazyCompilation: configuration().lazyCompilation,
+      apiVersion: apiVersion(attribute(this, "apiversion"), configuration().apiVersion),
+      swfVersion,
       workerHost,
       ...moduleCacheOptions(),
     });

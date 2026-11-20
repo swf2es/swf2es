@@ -12,7 +12,11 @@ import { zlibCompress } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { containerEngine } from "../../../oracle/oracle.ts";
 import type { Container, MovieClip } from "../../../packages/player/dist/display/display.js";
-import type { SocketEndpoints, SocketOptions } from "../../../packages/player/dist/hosts.js";
+import type {
+  AirApplication,
+  SocketEndpoints,
+  SocketOptions,
+} from "../../../packages/player/dist/hosts.js";
 import { Player } from "../../../packages/player/dist/player.js";
 import { Scripting } from "../../../packages/player/dist/scripting.js";
 import { square } from "../../player/cases/common.ts";
@@ -37,7 +41,18 @@ const wasm = await WebAssembly.compile(
 );
 
 test("the API version is the series' latest, or a root SWF version's, for the compiler and runtime alike", async () => {
-  const cases: [options: { air?: boolean; apiVersion?: "latest" | number }, version: number][] = [
+  const application = { descriptor: "<application/>" } as unknown as AirApplication;
+  const workerParent = { id: 1, post() {}, shared: [] };
+  const cases: [
+    options: {
+      air?: boolean;
+      apiVersion?: "latest" | "root" | number;
+      swfVersion?: number;
+      application?: AirApplication;
+      workerParent?: typeof workerParent;
+    },
+    version: number,
+  ][] = [
     [{}, 50],
     [{ apiVersion: "latest" }, 50],
     [{ air: true }, 51],
@@ -48,12 +63,29 @@ test("the API version is the series' latest, or a root SWF version's, for the co
     [{ air: true, apiVersion: 12 }, 13],
     [{ apiVersion: 9 }, 0],
     [{ air: true, apiVersion: 9 }, 1],
+    // The root's own, by its SWF version, as Flash runs it.
+    [{ apiVersion: "root", swfVersion: 12 }, 12],
+    [{ apiVersion: "root", swfVersion: 9 }, 0],
+    [{ air: true, apiVersion: "root", swfVersion: 9 }, 1],
+    [{ apiVersion: "root", swfVersion: 40 }, 50],
+    // An AIR application stays at the latest until its descriptor's part is measured.
+    [{ air: true, apiVersion: "root", swfVersion: 12, application }, 51],
+    [{ air: true, apiVersion: 12, application }, 13],
+    // A worker runs at the latest, as adl runs one, whatever it is asked.
+    [{ apiVersion: "root", swfVersion: 12, workerParent }, 50],
+    [{ air: true, apiVersion: 12, workerParent }, 51],
   ];
   for (const [options, version] of cases) {
     const scripting = new Scripting(await createCodegen(wasm), { realTime: null, ...options });
-    assert.equal(scripting.rt.apiVersion, version);
+    assert.equal(scripting.rt.apiVersion, version, JSON.stringify(options));
     assert.equal(scripting.codegen.apiVersion, version);
   }
+
+  const codegen = await createCodegen(wasm);
+  assert.throws(
+    () => new Scripting(codegen, { apiVersion: "root" }),
+    /needs the root's swfVersion/,
+  );
 });
 
 test("a document class is constructed on the root and its frame scripts run in order", {

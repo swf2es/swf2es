@@ -12,6 +12,7 @@
 // --proxy=socks5://[user:pass@]host:port (or http://...) sends the SWF's network through a proxy.
 // --no-http-cache neither reads nor keeps the HTTP cache.
 // --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
+// --api-version=root|latest|<SWF version> plays the SWFs at that API version (api-version.ts).
 // --flashvars and --param give the SWF what a page's <object> or <embed> would (embedding.ts).
 //
 // The second runs an AIR application by its descriptor, as adl does.
@@ -78,6 +79,7 @@ import {
 } from "./state.ts";
 import {
   announcePolicySwitch,
+  apiVersion,
   embedding,
   httpCacheOff,
   ignorePolicy,
@@ -342,6 +344,7 @@ function listen(): void {
     setListening(true);
     return {
       stage3D: settings.stage3D,
+      apiVersion,
       libraries: settings.libraries(),
       movie: current?.movie ?? null,
       build,

@@ -157,6 +157,50 @@ test("run's File cannot open what it cannot read, as avmshell's", { skip: skip |
   }
 });
 
+test("run runs ABCs at the version --api names", { skip }, () => {
+  // Strings 1 trace, 2 "", 3 avmplus, 4 System, 5 apiVersion; namespaces 1
+  // public, 2 avmplus; multinames 1 trace, 2 avmplus::System, 3 apiVersion.
+  const traceVersion = abc(
+    {
+      strings: ["trace", "", "avmplus", "System", "apiVersion"],
+      namespaces: [
+        [0x16, ...u30(2)],
+        [0x16, ...u30(3)],
+      ],
+      multinames: [
+        [0x07, ...u30(1), ...u30(1)],
+        [0x07, ...u30(2), ...u30(4)],
+        [0x07, ...u30(1), ...u30(5)],
+      ],
+    },
+    tables({
+      methods: [{}],
+      scripts: [{ init: 0 }],
+      bodies: [
+        {
+          method: 0,
+          // findpropstrict trace, getlex System, getproperty apiVersion, callpropvoid trace 1.
+          code: [0xd0, 0x30, 0x5d, 1, 0x60, 2, 0x66, 3, 0x4f, 1, 1, RETURNVOID],
+          maxStack: 3,
+          maxScopeDepth: 2,
+        },
+      ],
+    }),
+  );
+  const file = write("version.abc", traceVersion);
+  const outputs = [[], ["--api", "latest"], ["--api", "12"], ["--api", "9"]].map((args) => {
+    const r = swf2es(file, ...args);
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout;
+  });
+  assert.deepEqual(outputs, ["50\n", "50\n", "12\n", "0\n"]);
+
+  // A root's version is a SWF's, which an ABC has none of.
+  const root = swf2es(file, "--api", "root");
+  assert.equal(root.status, 2);
+  assert.match(root.stderr, /--api takes latest or a SWF version, not "root"/);
+});
+
 test("run refuses what is not an ABC", () => {
   const swf = w.swf({
     width: 10,

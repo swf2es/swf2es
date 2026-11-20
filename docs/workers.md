@@ -164,7 +164,12 @@ knows nothing of the kind of thread: it is posted codegen's compiled
 `WebAssembly.Module` (a module posts without recompiling) with the
 worker's `WorkerInit`, the SWF, the library ABCs as the primordial loaded
 them and the shared properties set before `start`, makes its `Scripting`
-and `Player`, and runs frames by `advance` on a timer.
+and `Player`, and runs frames by `advance` on a timer. The worker runs at
+the latest API version of its series, whatever the primordial's: adl runs
+a worker of a SWF 17 root so, which sees what that root does not and
+neither its root's version nor its SWF's own would show (the
+`versioned-worker` case), though avmshell's workers run at their
+primordial's.
 
 `@swf2es/player-hosts` has two hosts: `webWorkerHost` (`/workers`) starts
 a module Web Worker on its `web-worker.js`, and `nodeWorkerHost` (`/node`)
@@ -574,7 +579,8 @@ the journal ends there. The sources are kept as Blobs, which a browser keeps out
 of the page's heap and a message carries to a thread without a copy. A
 worker journals its own calls the same way, and loads the primordial's
 module for a compile while its journal is the primordial's so far and
-its ABCs are the same bytes; from the first call that differs, as on
+its ABCs are the same bytes, and none if they were compiled at another
+API version than its own (`HandedModules.apiVersion`); from the first call that differs, as on
 ABCs of another SWF after the libraries', it compiles. Where it is not
 ABCs of the primordial's that it loads, it therefore compiles what it
 would have, and a worker on other bytes still takes the libraries'

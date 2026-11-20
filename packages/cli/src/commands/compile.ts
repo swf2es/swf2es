@@ -5,6 +5,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { COMPILER_VERSION, createCodegen } from "@swf2es/codegen";
+import { apiVersionOf } from "@swf2es/format";
 import { airLibrary, builtinLibrary, playerglobalLibrary } from "@swf2es/player/libraries";
 import {
   AIR_API_VERSION,
@@ -18,7 +19,7 @@ import {
   readInput,
   sha256,
 } from "../aot.js";
-import { COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
+import { apiVersionArgument, COMMON_OPTIONS, COMMON_USAGE, type Command, parse } from "../args.js";
 import { codegenModule, read, readLibraries, writing } from "../files.js";
 import { fail, usageError } from "../output.js";
 
@@ -46,6 +47,17 @@ options:
                        (its \`air\` option), AIR's API defined; a player
                        in the other mode looks none of the modules up.
                        Refused for an AVM1 SWF, which has no API versions
+  --api <version>      the API version to compile at, as the player's
+                       apiVersion: latest (the default), every class and
+                       member whatever the SWF's version; root, the SWF's
+                       own, from its header, as a player of apiVersion
+                       "root" plays it as its main movie; or a SWF version,
+                       a root of that version's, for a SWF such a root
+                       loads. A player at another version looks none of
+                       the modules up; an AIR application plays at the
+                       latest whatever its apiVersion. Refused for an AVM1
+                       SWF but latest, and root for an ABC, which has no
+                       header
   -q, --quiet          print nothing but errors
 ${COMMON_USAGE}
 
@@ -58,6 +70,7 @@ const OPTIONS = {
   lib: { type: "string", multiple: true },
   "emit-libraries": { type: "boolean" },
   air: { type: "boolean" },
+  api: { type: "string" },
   quiet: { type: "boolean", short: "q" },
   ...COMMON_OPTIONS,
 } as const;
@@ -133,17 +146,33 @@ export const compile: Command = {
     }
 
     const out = values.out ?? `${basename(file, extname(file))}.swf2es`;
+    const api = apiVersionArgument(values.api, "compile");
     if (input.avm1) {
       // AVM1 has no API versions: its module is the same for every player.
-      if (values.air) {
-        usageError(`${file} is an AVM1 SWF, which --air does not apply to`, "compile");
+      if (values.air || api !== "latest") {
+        usageError(
+          `${file} is an AVM1 SWF, which ${values.air ? "--air" : "--api"} does not apply to`,
+          "compile",
+        );
       }
 
       await compileAvm1(file, bytes, input.avm1, out, values.quiet ?? false);
       return;
     }
 
-    const libs = values.lib ? await readLibraries(values.lib) : playerLibraries(values.air);
+    if (api === "root" && input.kind === "abc") {
+      usageError(`${file} is an ABC, whose version --api root has no header to take`, "compile");
+    }
+
+    const air = values.air ?? false;
+    // A player's apiVersion, as Scripting reads it of its main movie.
+    const apiVersion =
+      api === "latest"
+        ? air
+          ? AIR_API_VERSION
+          : API_VERSION
+        : apiVersionOf(api === "root" ? input.version : api, air);
+    const libs = values.lib ? await readLibraries(values.lib) : playerLibraries(air);
     if (input.abcs.length === 0) {
       fail(`${file}: no DoABC or DoABC2 tag, so no ActionScript 3 to compile`);
     }
@@ -152,13 +181,7 @@ export const compile: Command = {
     const started = performance.now();
     let compiled: ReturnType<typeof compileAhead>;
     try {
-      compiled = compileAhead(
-        codegen,
-        libs,
-        input.abcs,
-        values["emit-libraries"],
-        values.air ? AIR_API_VERSION : API_VERSION,
-      );
+      compiled = compileAhead(codegen, libs, input.abcs, values["emit-libraries"], apiVersion);
     } catch (e) {
       if (!(e instanceof RejectedError)) {
         fail(String((e as Error).stack ?? e));
