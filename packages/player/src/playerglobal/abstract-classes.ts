@@ -36,6 +36,20 @@ const ABSTRACT = [
 /** Also restricted: a script's subclass is refused too, naming itself. */
 const RESTRICTED = ["flash.ui::GameInputControl"];
 
+/**
+ * Restricted display classes, whose own `new` displayFor refuses: a script's
+ * subclass is refused even where SymbolClass binds it to a character, and
+ * so is what the timeline places of that character, leaving its slot a
+ * null child (the bound-abstract-display player case, from adl).
+ */
+const RESTRICTED_DISPLAY = [
+  "flash.display::AVM1Movie",
+  "flash.display::DisplayObject",
+  "flash.display::DisplayObjectContainer",
+  "flash.display::InteractiveObject",
+  "flash.display::Stage",
+];
+
 /** `hooks` with the abstract classes' construct hooks added to whatever else each has. */
 export function withAbstractClasses(
   hooks: Record<string, avm2.ClassHook>,
@@ -49,6 +63,10 @@ export function withAbstractClasses(
 
   for (const name of RESTRICTED) {
     hooks[name] = { ...hooks[name], construct: refuse, restricted: true };
+  }
+
+  for (const name of RESTRICTED_DISPLAY) {
+    hooks[name] = { ...hooks[name], restricted: true };
   }
 
   // Flash's ContentElement refuses in its AS3 constructor, which names it so; its
