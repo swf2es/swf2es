@@ -196,10 +196,12 @@ copy entry for entry and row for row (`spanDifference`), takes the walk
 off and throws where they differ, naming the object copied, the object in
 it whose draws or rows differ first, and the first entry and row that
 differ. An object found changed under one whose flags said nothing in it
-had throws too, and a copy whose draws' geometries and textures it did
-not itself use this frame, before the walk uses them and would hide it.
-`tests/player/spans.ts` breaks a span on purpose, a drawing changed with
-no flag set, and sees it caught.
+had throws too, unless it is hidden and draws nothing (a video's new
+picture flags its ancestors only up to the first hidden one, so that a
+hidden video playing does not wake the stage), and a copy whose draws'
+geometries and textures it did not itself use this frame, before the walk
+uses them and would hide it. `tests/player/spans.ts` breaks a span on
+purpose, a drawing changed with no flag set, and sees it caught.
 
 Video is not plain, and stays so: a video's new picture flags its object
 (`VideoObject`) without telling its ancestors, which a span would miss.

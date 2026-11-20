@@ -1,10 +1,10 @@
 // Spans (docs/renderer.md, "Spans"): a scene that changes as flags say draws
 // as a fresh view draws a twin of it, and passes the checked mode, through
 // BitmapData.draw's passes between frames, a context lost and given back, a
-// mask given mid-run, a container moved between parents that stand alike
-// and two views of one display list; a span made stale on purpose, by a
-// change no flag tells of, is caught, the error naming the object and the
-// difference.
+// mask given mid-run, a container moved between parents that stand alike, a
+// hidden video playing and two views of one display list; a span made stale
+// on purpose, by a change no flag tells of, is caught, the error naming the
+// object and the difference.
 import assert from "node:assert/strict";
 import { withPage } from "./chrome.ts";
 
@@ -12,6 +12,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
   evaluate<string[]>(`(async () => {
   const { RenderView } = await import('@swf2es/player/scene');
   const { Container, ShapeObject, CONTENT, TRANSFORM } = await import('/player/display/display.js');
+  const { PIXELS } = await import('/player/display/displayobject.js');
   const { Drawing } = await import('/player/display/drawing.js');
   // One tessellator for every view: each view's own makes wasm instances, freed only as the page
   // collects them, and fills went missing once a page had made many views.
@@ -255,6 +256,54 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
         const error = thrown(() => view.render(s.root));
         if (error) failures.push('moved, ' + checked + ', ' + name + ': threw ' + error);
         same('moved, ' + checked + ', ' + name, view, s, twin);
+      }
+    } finally {
+      view.destroy();
+    }
+  }
+
+  // A video playing inside a hidden container flags itself and its ancestors up to the hidden one
+  // only (VideoObject.pixelsChanged), so as not to wake the stage: the container's parent, taken
+  // whole as something else changes, holds a flagged object that draws nothing.
+  for (const checked of [true, false]) {
+    const view = make(checked);
+    const copySpan = view.copySpan;
+    let copied = 0;
+    view.copySpan = function (...args) {
+      copied++;
+      return copySpan.apply(this, args);
+    };
+    try {
+      const hiddenVideo = () => {
+        const s = scene();
+        const hidden = new Container();
+        hidden.name = 'hidden';
+        const video = new ShapeObject(null);
+        video.name = 'video';
+        video.drawing = drawing(0xffff00ff, 40);
+        video.invalidate(CONTENT);
+        hidden.addChildAt(video, 0);
+        hidden.visible = false;
+        s.clips[3].addChildAt(hidden, 0);
+        return { ...s, hidden, video };
+      };
+      const s = hiddenVideo();
+      const twin = hiddenVideo();
+      for (let f = 0; f < 5; f++) {
+        if (f >= 2) {
+          for (const t of [s, twin]) {
+            t.video.dirty |= PIXELS;
+            t.hidden.descendantsDirty = true;
+            t.clips[0].matrix.tx = f;
+            t.clips[0].invalidate(TRANSFORM);
+          }
+        }
+
+        copied = 0;
+        const error = thrown(() => view.render(s.root));
+        if (error) failures.push('hidden video, ' + checked + ', frame ' + f + ': threw ' + error);
+        same('hidden video, ' + checked + ', frame ' + f, view, s, twin);
+        if (f >= 2 && copied === 0) failures.push('hidden video, ' + checked + ', frame ' + f + ': took no span');
       }
     } finally {
       view.destroy();

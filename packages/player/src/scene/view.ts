@@ -1423,7 +1423,10 @@ export class RenderView implements Drawer {
   ): number {
     const context = this.spanContext() ? this.contexts[this.walkDepth] : null;
     if (this.checking > 0) {
-      if (!clean(o)) {
+      // Not of a hidden object, which draws nothing, as the comparison sees: a video's new picture
+      // flags its object and ancestors up to the first hidden one only (VideoObject), so that a
+      // hidden video playing does not wake the stage.
+      if (o.visible && !clean(o)) {
         throw new Error(
           `the span of an object above ${describe(o)} was taken as unchanged, but it changed`,
         );
