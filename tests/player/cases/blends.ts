@@ -647,7 +647,162 @@ function blendFills(inSprites = false, cachedRows = false): Uint8Array {
   return w.swf({ width: 400, height: 410, frameRate: 24, frameCount: 1, tags });
 }
 
+/**
+ * Blends drawn straight onto what is below one after another, whose
+ * rectangles meet or not, over bands under a checkerboard: a row of them
+ * near each other; four far apart, two in each corner; a chain of each
+ * meeting the one before, then one meeting the one before that alone,
+ * past an add between; the same in a clip drawn as a layer and in a
+ * glowing clip, its filtered layer; on a second frame each moved by part
+ * of a pixel.
+ */
+function blendShared(): Uint8Array {
+  const rect = (x: number, y: number, width: number, height: number): w.PathCommand[] => [
+    { move: [x, y] },
+    { line: [x + width, y] },
+    { line: [x + width, y + height] },
+    { line: [x, y + height] },
+    { line: [x, y] },
+  ];
+  const cells: w.PathCommand[][] = [];
+  for (let row = 0; row < 12; row++) {
+    for (let col = row % 2; col < 24; col += 2) {
+      cells.push(rect(col * 400, row * 400, 400, 400));
+    }
+  }
+
+  const bands = [0x203050, 0xc08040, 0x60a0c0, 0xe0e0d0];
+  const tags: Uint8Array[] = [
+    w.fileAttributes(true),
+    w.backgroundColor(0x808080),
+    w.shape({
+      id: 1,
+      bounds: [0, 9600, 0, 4800],
+      fills: bands,
+      paths: bands.map((_, k) => ({ fill1: k + 1, commands: rect(k * 2400, 0, 2400, 4800) })),
+    }),
+    w.shape({
+      id: 2,
+      version: 3,
+      bounds: [0, 9600, 0, 4800],
+      fills: [0x80f0e8d0],
+      paths: cells.map((commands) => ({ fill1: 1, commands })),
+    }),
+  ];
+  // Squares of 30 pixels, part clear, and colours of their own.
+  const colours = [0xd0ff4020, 0xff40c060, 0xa02060ff, 0xffe0e040, 0xc0a040e0, 0xff30d0d0];
+  for (let k = 0; k < colours.length; k++) {
+    tags.push(
+      w.shape({
+        id: 3 + k,
+        version: 3,
+        bounds: [0, 600, 0, 600],
+        fills: [colours[k]],
+        paths: [{ fill1: 1, commands: rect(0, 0, 600, 600) }],
+      }),
+    );
+  }
+
+  // Overlay, hard light, difference, lighten, darken, invert; add between.
+  const modes = [13, 14, 7, 5, 6, 10];
+  const ADD = 8;
+  // x, y in pixels, mode, each in its order.
+  const row: [number, number, number][] = [10, 50, 90, 130, 170].map((x, k) => [x, 10, modes[k]]);
+  const apart: [number, number, number][] = [
+    [8, 160, modes[0]],
+    [362, 8, modes[1]],
+    [40, 166, modes[2]],
+    [330, 14, modes[3]],
+  ];
+  const chain: [number, number, number][] = [
+    [220, 60, modes[0]],
+    [240, 70, modes[1]],
+    [260, 60, modes[2]],
+    [300, 60, ADD],
+    [280, 76, modes[4]],
+    [252, 100, modes[5]],
+  ];
+  const inner: [number, number, number][] = [
+    [0, 0, modes[0]],
+    [40, 4, modes[1]],
+    [20, 20, modes[2]],
+    [80, 0, modes[3]],
+  ];
+  const sprites = (id: number, at: [number, number, number][]) =>
+    w.sprite(id, 1, [
+      ...at.map(([x, y, mode], k) =>
+        w.place({
+          depth: k + 1,
+          character: 3 + (k % colours.length),
+          matrix: { tx: x * 20, ty: y * 20 },
+          blendMode: mode,
+        }),
+      ),
+      w.showFrame(),
+      w.end(),
+    ]);
+  tags.push(sprites(20, inner), sprites(21, inner));
+  tags.push(w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 2 }));
+  const placed = [...row, ...apart, ...chain];
+  const at = (k: number, frame: number) => ({
+    tx: placed[k][0] * 20 + frame * ((k % 3) * 7 + 3),
+    ty: placed[k][1] * 20 + frame * ((k % 2) * 9 + 4),
+  });
+  for (let k = 0; k < placed.length; k++) {
+    tags.push(
+      w.place({
+        depth: 3 + k,
+        character: 3 + (k % colours.length),
+        matrix: at(k, 0),
+        blendMode: placed[k][2],
+      }),
+    );
+  }
+
+  const first = 3 + placed.length;
+  tags.push(
+    w.place({ depth: first, character: 20, matrix: { tx: 2000, ty: 2600 }, blendMode: 2 }),
+    w.place({
+      depth: first + 1,
+      character: 21,
+      matrix: { tx: 6000, ty: 2600 },
+      glows: [{ color: 0x000000, blur: 4, strength: 1 }],
+    }),
+    w.showFrame(),
+  );
+  for (let k = 0; k < placed.length; k++) {
+    tags.push(w.place({ depth: 3 + k, move: true, matrix: at(k, 1) }));
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: 480, height: 240, frameRate: 24, frameCount: 2, tags });
+}
+
 export const blendCases: PlayerCase[] = [
+  {
+    // Blends drawn direct one after another share one copy of what is below while their
+    // rectangles meet nothing drawn since it was made; one that meets another sees it.
+    name: "blend-shared",
+    swf: blendShared(),
+    frames: 2,
+    capture: [1, 2],
+    tolerance: 3,
+    maxOutliers: 0,
+  },
+  {
+    // The same multisampled, where the copy is made where the rectangles lie, those far apart
+    // apart.
+    name: "blend-shared-antialias",
+    swf: blendShared(),
+    frames: 2,
+    capture: [1, 2],
+    antialias: true,
+    // The squares' edges moved by part of a pixel on the second frame, multisampled otherwise
+    // than adl anti-aliases them: 437 channels past 8, up to 19, drawn alike with each blend's
+    // copy its own. A blend that read a copy gone stale would be off over its whole square.
+    tolerance: 8,
+    maxOutliers: 480,
+  },
   {
     // Shapes of fills that meet, drawn through their layers on the first frame and, where they do
     // not overlap, straight onto what is below from the second, once they have stood a frame.

@@ -229,40 +229,85 @@ export class Compositor {
    * where the target has it, into place, and `under`'s framebuffer bound again.
    */
   copyBelow(under: Open): boolean {
+    const place = this.place;
+    const one = this.one;
+    one[0] = place.fx;
+    one[1] = place.fy;
+    one[2] = place.width;
+    one[3] = place.height;
+    this.copyBoxes(under, one, 1);
+    place.backX = this.offsets[0];
+    place.backY = this.offsets[1];
+    return true;
+  }
+
+  /** Copies made (copyBoxes), so that a blend sharing one knows it is still the last. */
+  copies = 0;
+
+  /** The rectangle copyBelow copies, as copyBoxes takes it. */
+  private readonly one = [0, 0, 0, 0];
+
+  /**
+   * Where the copy copyBoxes made has each box's corner, less where the
+   * target has it, two numbers a box: a blend's `backX` and `backY`.
+   */
+  readonly offsets: number[] = [];
+
+  /**
+   * Whether copyBoxes copies its boxes where they lie on `under`, so that
+   * it may copy more than one (Backdrops' `spread`); else it copies one,
+   * from its corner.
+   */
+  copiesWhereLying(under: Open): boolean {
+    return under.msaa !== null && !(under.layer !== null && under.ox !== undefined);
+  }
+
+  /**
+   * What is below `count` boxes of `under`'s framebuffer copied in one go,
+   * x, y, width and height each, for blends that read it
+   * (Backdrops): bound to BACK_UNIT, each box's offset into offsets, and
+   * `under`'s framebuffer bound again. More than one only where
+   * copiesWhereLying.
+   */
+  copyBoxes(under: Open, boxes: readonly number[], count: number): void {
     const gl = this.gl;
     const state = this.state;
-    const { fx, fy, width, height } = this.place;
-    // Out of a multisampled page, its rectangle resolved into the page's own texture first, which
-    // a blit may then copy anywhere: copied where it lies, the copy would stay as large as the
+    this.copies++;
+    // Out of a multisampled page, its boxes resolved into the page's own texture first, which a
+    // blit may then copy anywhere: copied where it lies, the copy would stay as large as the
     // page's far corner.
     let from = framebufferOf(under);
     const paged = under.msaa !== null && under.layer !== null && under.ox !== undefined;
     if (paged) {
       gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, (under.layer as Layer).framebuffer);
-      gl.blitFramebuffer(
-        fx,
-        fy,
-        fx + width,
-        fy + height,
-        fx,
-        fy,
-        fx + width,
-        fy + height,
-        gl.COLOR_BUFFER_BIT,
-        gl.NEAREST,
-      );
+      for (let b = 0; b < count; b++) {
+        const fx = boxes[b * 4];
+        const fy = boxes[b * 4 + 1];
+        const right = fx + boxes[b * 4 + 2];
+        const top = fy + boxes[b * 4 + 3];
+        gl.blitFramebuffer(fx, fy, right, top, fx, fy, right, top, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+      }
+
       from = (under.layer as Layer).framebuffer;
     }
 
     // Copied from its corner, or out of a multisampled target to where it lies, as a blit
-    // resolving must keep its rectangle: then as large as the rectangle's far corner.
-    const bx = under.msaa && !paged ? fx : 0;
-    const by = under.msaa && !paged ? fy : 0;
-    this.place.backX = fx - bx;
-    this.place.backY = fy - by;
-    const right = bx + width;
-    const top = by + height;
+    // resolving must keep its rectangle: then as large as the boxes' far corner.
+    const lying = under.msaa !== null && !paged;
+    const offsets = this.offsets;
+    offsets.length = count * 2;
+    let right = 0;
+    let top = 0;
+
+    for (let b = 0; b < count; b++) {
+      const at = b * 4;
+      offsets[b * 2] = lying ? 0 : boxes[at];
+      offsets[b * 2 + 1] = lying ? 0 : boxes[at + 1];
+      right = Math.max(right, (lying ? boxes[at] : 0) + boxes[at + 2]);
+      top = Math.max(top, (lying ? boxes[at + 1] : 0) + boxes[at + 3]);
+    }
+
     if (!this.back || this.backWidth < right || this.backHeight < top) {
       if (this.back) {
         state.dropTexture(this.back);
@@ -293,7 +338,7 @@ export class Compositor {
 
     // Blitted, not copied: the canvas' colour may have no alpha, which copyTexSubImage2D into an
     // RGBA texture refuses, where a blit fills it in.
-    // Out of a multisampled target the blit resolves the rectangle alone.
+    // Out of a multisampled target the blit resolves the box alone.
     if (!this.backFramebuffer) {
       this.backFramebuffer = gl.createFramebuffer() as WebGLFramebuffer;
       gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.backFramebuffer);
@@ -309,23 +354,35 @@ export class Compositor {
     }
 
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, from);
-    gl.blitFramebuffer(
-      fx,
-      fy,
-      fx + width,
-      fy + height,
-      bx,
-      by,
-      right,
-      top,
-      gl.COLOR_BUFFER_BIT,
-      gl.NEAREST,
-    );
+    for (let b = 0; b < count; b++) {
+      const at = b * 4;
+      const fx = boxes[at];
+      const fy = boxes[at + 1];
+      const bx = fx - offsets[b * 2];
+      const by = fy - offsets[b * 2 + 1];
+      gl.blitFramebuffer(
+        fx,
+        fy,
+        fx + boxes[at + 2],
+        fy + boxes[at + 3],
+        bx,
+        by,
+        bx + boxes[at + 2],
+        by + boxes[at + 3],
+        gl.COLOR_BUFFER_BIT,
+        gl.NEAREST,
+      );
+    }
+
     // Both bindings back as the state cache has them.
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebufferOf(under));
-    state.bindTexture(BACK_UNIT, this.back);
-    state.bindSampler(BACK_UNIT, null);
-    return true;
+    this.bindBack();
+  }
+
+  /** The copy copyBoxes made bound to BACK_UNIT again, for a blend after another that shares it. */
+  bindBack(): void {
+    this.state.bindTexture(BACK_UNIT, this.back);
+    this.state.bindSampler(BACK_UNIT, null);
   }
 
   /**

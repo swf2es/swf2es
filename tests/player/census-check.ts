@@ -1,7 +1,8 @@
 // Checks bench.ts --census in Chrome (page.ts, installCensus): on masked lists, with and without
 // WEBGL_multi_draw, and on blends drawn direct, what it counted of the runs it read from the
-// renderer must add up to the sub-draws GL was asked for, and a walk of what changed must visit
-// no more than the walk did. A renaming in the renderer that the census reads throws here.
+// renderer must add up to the sub-draws GL was asked for, the backdrop copies to those it counted
+// unshared less those it found could share one, and a walk of what changed must visit no more
+// than the walk did. A renaming in the renderer that the census reads throws here.
 //
 //   node tests/player/census-check.ts
 import { execFileSync } from "node:child_process";
@@ -51,7 +52,9 @@ for (const multi of [true, false]) {
   }
 }
 
-const blends = census("--blends", "20");
+// Multisampled, where the backend copies rectangles far apart in boxes of their own, so that
+// every blend drawn direct the census finds could share a copy shares it (Backdrops).
+const blends = census("--blends", "20", "--antialias");
 if (!blends["blend.direct"]) {
   failures.push("--blends 20: no blend drawn direct");
 }
@@ -60,6 +63,15 @@ same(
   "--blends 20: blend program sub-draws",
   blends["path.blended"] ?? 0,
   blends["blend.direct"] ?? 0,
+);
+if (!blends["share.strict.direct"]) {
+  failures.push("--blends 20: no copy shared");
+}
+
+same(
+  "--blends 20: backdrop copies",
+  blends.copies ?? 0,
+  (blends["copies.computed"] ?? 0) - (blends["share.strict.direct"] ?? 0),
 );
 
 if (failures.length > 0) {

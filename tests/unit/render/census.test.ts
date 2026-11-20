@@ -2,11 +2,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  ADD,
   Commands,
+  LAYER_PUSH,
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
   NORMAL,
+  OVERLAY,
   plan,
   Rows,
   RUN,
@@ -330,6 +333,46 @@ test("a kept output inside a blend layer is its content, a filter drawn anew cha
   const heldAgain = analyseFrame(keptFrame(5, 5, true), held.memory).counts;
   assert.equal(heldAgain["blend.refiltered"], 1);
   assert.equal(heldAgain["blend.unchanged.still"], undefined);
+});
+
+test("backdrop copies are counted, and those that could share an earlier one's", () => {
+  const scene = new SceneList();
+  const rows = new Rows();
+  const at = (x: number, y: number) => rows.add(1, 0, 0, 1, x, y, null);
+  scene.draw(0, at(0, 0), NORMAL);
+  const blend = (x: number, y: number, mode: number) => {
+    const layer = scene.layerBegin();
+    scene.layerRect(layer, x, y, 20, 20);
+    scene.draw(0, at(x, y), NORMAL);
+    scene.layerEnd(mode, -1);
+  };
+  // A and B apart; C meets A; an add, which does not read over an opaque stage; E meets it.
+  blend(0, 0, OVERLAY);
+  blend(30, 0, OVERLAY);
+  blend(10, 10, OVERLAY);
+  blend(60, 0, ADD);
+  blend(65, 5, OVERLAY);
+  // A draw apart from all of them, then F apart from it and E, and G composited apart too.
+  scene.draw(0, at(100, 100), NORMAL);
+  blend(0, 60, OVERLAY);
+  blend(200, 0, OVERLAY);
+  const input = frame(scene, rows, squares(1));
+  input.direct = new Set([0, 1, 2, 3, 4, 5].map((n) => commandOf(input, LAYER_PUSH, n)));
+  input.opaque = true;
+  input.width = 400;
+  input.height = 400;
+  const { counts } = analyseFrame(input, null);
+  assert.equal(counts["copies.computed"], 6);
+  assert.equal(counts["copies.direct"], 5);
+  assert.equal(counts["copies.composite"], 1);
+  // B alone between blends drawn direct; past the draw, F and G as well.
+  assert.equal(counts["share.strict.direct"], 1);
+  assert.equal(counts["share.loose.direct"], 2);
+  assert.equal(counts["share.loose.composite"], 1);
+  // A and B in one copy: 50 by 20 for 800 pixels.
+  assert.equal(counts["share.strict.groups"], 1);
+  assert.equal(counts["share.strict.parts"], 800);
+  assert.equal(counts["share.strict.union"], 1000);
 });
 
 test("the walk is counted against what it visited, what it did not apart", () => {
