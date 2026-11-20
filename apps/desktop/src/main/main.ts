@@ -13,6 +13,7 @@
 // --no-http-cache neither reads nor keeps the HTTP cache.
 // --software-gl draws with SwiftShader, on the CPU: where Chromium takes no GPU, or even where it does.
 // --api-version=root|latest|<SWF version> plays the SWFs at that API version (api-version.ts).
+// --theme=system|light|dark is the app's look for this run, over View › Theme's (theme.ts).
 // --flashvars and --param give the SWF what a page's <object> or <embed> would (embedding.ts).
 //
 // The second runs an AIR application by its descriptor, as adl does.
@@ -29,6 +30,7 @@ import {
   crashReporter,
   dialog,
   ipcMain,
+  nativeTheme,
   type RenderProcessGoneDetails,
   session,
   shell,
@@ -89,11 +91,13 @@ import {
   proxied,
   proxy,
   softwareGl,
+  themeOverride,
   trace,
   via,
   warn,
   webSocketOptions,
 } from "./switches.ts";
+import { themeNotice, windowBackground } from "./theme.ts";
 import { bridgeWebSockets } from "./websockets.ts";
 
 const preload = fileURLToPath(new URL("../preload/preload.cjs", import.meta.url));
@@ -290,6 +294,7 @@ function createWindow(): void {
     height: 768,
     title: TITLE,
     icon,
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload,
       contextIsolation: true,
@@ -560,6 +565,13 @@ if (!first) {
     );
   }
 
+  if (themeOverride) {
+    process.stderr.write(
+      "swf2es: handed to the app already open, which keeps its theme: " +
+        "--theme counts only for the first start\n",
+    );
+  }
+
   app.quit();
 } else {
   announcePolicySwitch();
@@ -629,6 +641,15 @@ app.on("web-contents-created", (_event, contents) => {
   contents.on("will-attach-webview", (event) => event.preventDefault());
 });
 
+// Under the system's theme, the system may change it: what a window shows before its page draws
+// follows, as the pages do by themselves.
+nativeTheme.on("updated", () => {
+  const background = windowBackground(nativeTheme.shouldUseDarkColors);
+  for (const each of BrowserWindow.getAllWindows()) {
+    each.setBackgroundColor(background);
+  }
+});
+
 app.on("window-all-closed", () => app.quit());
 app.on("before-quit", () => {
   quitting = true;
@@ -646,6 +667,13 @@ void app.whenReady().then(() => {
   }
 
   setSettings(new SettingsFile(app.getPath("userData")));
+  // Before the first window, which then opens in the theme's colours rather than flashing the
+  // system's.
+  nativeTheme.themeSource = themeOverride ?? settings.theme;
+  if (themeOverride) {
+    process.stderr.write(`${themeNotice(themeOverride, settings.theme)}\n`);
+  }
+
   // A playerglobal chosen once is kept across versions of the app: said at each start, as a
   // library older or newer than the app's own makes SWFs fail in ways nothing else explains.
   const chosen = settings.libraries().playerglobal;

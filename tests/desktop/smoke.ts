@@ -14,6 +14,8 @@
 // The remote SWF and an AIR application play the same through a SOCKS5
 // and an HTTP proxy of the test's own (--proxy), which see every
 // connection, and a proxy that refuses stops the movie, saying why.
+// View › Theme and --theme turn every window light or dark, the SWF's stage
+// left as it is.
 // Skipped, saying why, where Electron was not downloaded
 // (pnpm --filter @swf2es/desktop fetch-electron).
 //
@@ -1028,6 +1030,134 @@ async function proxyRefused(through: TestProxy): Promise<void> {
   );
 }
 
+/** The settings file of the app's user data, as written now. */
+const savedSettings = (userData: string) =>
+  JSON.parse(readFileSync(join(userData, "settings.json"), "utf8")) as { theme?: string };
+
+/** What the main process has of the theme: its source, View › Theme's checked item, the window's colour. */
+const mainTheme = (main: App["main"]) =>
+  main<{ source: string; checked: string[]; background: string }>(`(() => {
+    const electron = process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron");
+    const menu = electron.Menu.getApplicationMenu();
+    return {
+      source: electron.nativeTheme.themeSource,
+      checked: ["system", "light", "dark"].filter((t) => menu.getMenuItemById("theme-" + t).checked),
+      background: electron.BrowserWindow.getAllWindows()[0].getBackgroundColor().toLowerCase(),
+    };
+  })()`);
+
+/**
+ * The page's scheme as the theme makes it: prefers-color-scheme, the Canvas colour as a window
+ * background would write it, and the colour of the element's meter, CanvasText by default.
+ */
+const pageTheme = (evaluate: App["evaluate"]) =>
+  evaluate<{ dark: boolean; canvas: string; meter: string }>(`(() => {
+    const probe = document.createElement("div");
+    probe.style.background = "Canvas";
+    document.body.append(probe);
+    const rgb = getComputedStyle(probe).backgroundColor.match(/\\d+/g).slice(0, 3);
+    probe.remove();
+    const meter = document.getElementById("player").shadowRoot?.querySelector(".meter");
+    return {
+      dark: matchMedia("(prefers-color-scheme: dark)").matches,
+      canvas: "#" + rgb.map((n) => Number(n).toString(16).padStart(2, "0")).join(""),
+      meter: meter ? getComputedStyle(meter).color : "",
+    };
+  })()`);
+
+/** The pixels at the stage's centre and in its letterbox above it, the SWF's red and its white. */
+async function stagePixels(devtools: App["devtools"]): Promise<number[][]> {
+  const { data } = await devtools.send<{ data: string }>("Page.captureScreenshot", {
+    format: "png",
+  });
+  const image = decodePng(new Uint8Array(Buffer.from(data, "base64")));
+  const at = (x: number, y: number) => {
+    const i = (y * image.width + x) * 4;
+    return [...image.data.subarray(i, i + 3)];
+  };
+  return [at(image.width >> 1, image.height >> 1), at(image.width >> 1, 2)];
+}
+
+/**
+ * View › Theme: the settings' dark makes every window's prefers-color-scheme dark, the element's
+ * meter and the window's colour before its page draws with it, and leaves the SWF's stage and its
+ * background colour as they are; the menu's Light turns them light at once and is kept. --theme
+ * holds for its run alone, said on stderr, and the settings keep theirs.
+ */
+async function theme(): Promise<void> {
+  await withApp(
+    { recent: [], theme: "dark" },
+    ["--inspect=0", local],
+    async ({ stdout, stderr, until, evaluate, main, devtools, userData }) => {
+      await until("the local SWF in the dark theme", () => stdout.includes("smoke: started"));
+      assert.doesNotMatch(stderr(), /--theme/);
+      assert.deepEqual(await mainTheme(main), {
+        source: "dark",
+        checked: ["dark"],
+        background: "#121212",
+      });
+      await evaluate(`document.getElementById("player").performanceMeter = true`);
+      let page = await pageTheme(evaluate);
+      for (let i = 0; i < 100 && page.meter === ""; i++) {
+        await sleep(50);
+        page = await pageTheme(evaluate);
+      }
+
+      assert.deepEqual(page, { dark: true, canvas: "#121212", meter: "rgb(255, 255, 255)" });
+      const stage = await stagePixels(devtools);
+      assert.deepEqual(stage, [
+        [255, 0, 0],
+        [255, 255, 255],
+      ]);
+
+      await main(
+        `process.getBuiltinModule("module").createRequire(${JSON.stringify(desktopPackage)})("electron").Menu.getApplicationMenu().getMenuItemById("theme-light").click()`,
+      );
+      await until("the page in the light theme", () => {
+        void pageTheme(evaluate).then((now) => {
+          page = now;
+        });
+
+        return !page.dark;
+      });
+      assert.deepEqual(await pageTheme(evaluate), {
+        dark: false,
+        canvas: "#ffffff",
+        meter: "rgb(0, 0, 0)",
+      });
+      assert.deepEqual(await mainTheme(main), {
+        source: "light",
+        checked: ["light"],
+        background: "#ffffff",
+      });
+      assert.equal(savedSettings(userData).theme, "light");
+      assert.deepEqual(await stagePixels(devtools), stage);
+      await evaluate(`(() => {
+        document.getElementById("player").performanceMeter = false;
+        localStorage.removeItem("swf2es.performanceMeter");
+      })()`);
+    },
+  );
+
+  await withApp(
+    { recent: [], theme: "dark" },
+    ["--inspect=0", "--theme=light"],
+    async ({ stderr, evaluate, main, userData }) => {
+      assert.equal((await pageTheme(evaluate)).dark, false);
+      assert.deepEqual(await mainTheme(main), {
+        source: "light",
+        checked: ["light"],
+        background: "#ffffff",
+      });
+      assert.match(
+        stderr(),
+        /swf2es: --theme: light theme for this run; the saved theme \(dark\) is kept for the next run/,
+      );
+      assert.equal(savedSettings(userData).theme, "dark");
+    },
+  );
+}
+
 // The playerglobal the tests play on: the app's own, or
 // Flash Player's under SWF2ES_PLAYERGLOBAL=adobe.
 const both = {
@@ -1289,6 +1419,8 @@ try {
       }
     },
   );
+
+  await theme();
 
   // A SWF's workers run on Web Workers whose script the app's protocol serves, sharing a Mutex
   // and memory on its isolated page.
