@@ -5,7 +5,10 @@
   acceptance suite supplies thousands of cases. A conformance case whose
   first lines hold `// avmshell: <args>` runs in avmshell with them, and
   in swf2es at the API version its `-api` names: `api-versions-air.as`
-  runs in AIR's series of API versions.
+  runs in AIR's series of API versions, `api-versions-all.as` and
+  `api-versions-swf12.as` at the versions of Flash Player roots of SWF 9
+  and SWF 12. `pnpm determinism` and `tests/fuzz/abc.ts` compile at SWF_31,
+  SWF_12 and VM_ALLVERSIONS.
   The oracle's avmshell is a 32-bit x86 build, whose C++ double arithmetic
   may run in the x87's extended precision. Where that shows, swf2es follows
   IEEE doubles and the cases avoid it: `Number.toString(radix)` of a value

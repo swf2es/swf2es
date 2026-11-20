@@ -15,6 +15,11 @@
 // compile it, byte for byte its entry in its module, in order with a new
 // emitter each and in the reverse order with one for all.
 //
+// All of it at the API versions a root runs the compiler at: SWF_31, the
+// player's, and SWF_12 and VM_ALLVERSIONS, which old roots will. At those
+// a chain may be rejected, as code that names a later builtin is, which
+// must be the same every way too.
+//
 // The ABCs are the conformance cases, as the runner compiles them and again
 // with asc's -d, so that their source maps have lines, and as3pb when the
 // programs runner has compiled it. AVM1's action blocks are checked the
@@ -71,6 +76,8 @@ const lines = runOracle(
 // Every case compiles, with -d too: one that does not would leave its
 // source map unchecked.
 const chains: { name: string; abc: Uint8Array }[] = [];
+/** The ABCs of cases that avmshell runs at a version of their own, which may not link at another. */
+const ownVersion = new Set<Uint8Array>();
 names.forEach((name, i) => {
   if (!lines[i].compiled) {
     console.log(`determinism: ${name} did not compile with -d\n${lines[i].compileLog}`);
@@ -79,6 +86,10 @@ names.forEach((name, i) => {
 
   chains.push({ name, abc: read(`${out}${name}.abc`) });
   chains.push({ name: `${name} -d`, abc: read(`${out}lines/${name}.abc`) });
+  if (/^\/\/ avmshell: .*-api /m.test(readFileSync(`${here}cases/${name}.as`, "utf8"))) {
+    ownVersion.add(chains[chains.length - 2].abc);
+    ownVersion.add(chains[chains.length - 1].abc);
+  }
 });
 
 if (existsSync(`${programs}as3pb/ShellMain.abc`)) {
@@ -86,6 +97,24 @@ if (existsSync(`${programs}as3pb/ShellMain.abc`)) {
 }
 
 const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/** SWF_31, then SWF_12 and VM_ALLVERSIONS. */
+const SWF_31 = 50;
+const VERSIONS = [SWF_31, 12, 0];
+let version = SWF_31;
+
+/**
+ * At SWF_31 the corpus is valid, and an ABC that does not link a failure,
+ * but for a case run at a version of its own; at an earlier version a
+ * rejection is output to compare, ending the chain.
+ */
+function rejected(error: number, abc: Uint8Array): string {
+  if (version === SWF_31 && !ownVersion.has(abc)) {
+    throw new Error(`an ABC of the chain failed to link: error ${error}`);
+  }
+
+  return `rejected ${error}`;
+}
 
 /**
  * Each module of a chain and its source map, as `testing` compiles them;
@@ -95,12 +124,12 @@ const sha = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("he
 function compile(testing: any, abc: Uint8Array, entries?: Map<number, string>[]): string[] {
   const results: string[] = [];
   const hashes: string[] = [];
-  testing.domainReset(50);
+  testing.domainReset(version);
   for (const [i, bytes] of [...builtins, abc].entries()) {
-    // The corpus is valid: an ABC that does not link is a failure, not output to compare.
     const error = testing.domainAdd(bytes, i < builtins.length);
     if (error) {
-      throw new Error(`an ABC of the chain failed to link: error ${error}`);
+      results.push(rejected(error, abc));
+      break;
     }
 
     hashes.push(sha(bytes));
@@ -142,7 +171,7 @@ function compare(way: string, name: string, got: string[], want: string[]): void
       line++;
     }
 
-    console.log(`DIFF ${name}, ${way}: ${what(k)} differs at line ${line + 1}`);
+    console.log(`DIFF ${name}, ${way}, API ${version}: ${what(k)} differs at line ${line + 1}`);
     console.log(`  got:  ${(a[line] ?? "(end)").slice(0, 160)}`);
     console.log(`  want: ${(b[line] ?? "(end)").slice(0, 160)}`);
     return;
@@ -152,94 +181,114 @@ function compare(way: string, name: string, got: string[], want: string[]): void
 const started = Date.now();
 const reference = new Map<string, string[]>();
 const referenceEntries = new Map<string, Map<number, string>[]>();
-for (const chain of chains) {
-  const entries: Map<number, string>[] = [];
-  reference.set(chain.name, compile(await loadTesting("dist-test"), chain.abc, entries));
-  referenceEntries.set(chain.name, entries);
-}
-
-/** The chains compiled one after another in one instance of `build`. */
-async function oneInstance(way: string, build: Build, order: typeof chains, times: number) {
-  const testing = await loadTesting(build);
-  for (const chain of order) {
-    for (let n = 0; n < times; n++) {
-      compare(way, chain.name, compile(testing, chain.abc), reference.get(chain.name) ?? []);
-    }
-  }
-}
-
-await oneInstance("after the chains before it", "dist-test", chains, 1);
-await oneInstance("in reverse, twice in a row", "dist-test", [...chains].reverse(), 2);
-await oneInstance("in the checked build", "dist-test-checked", chains, 1);
-
-// The release build has the same source for this behind its own entry; the
-// package's API must give the same bytes.
-{
-  const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
-  const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
-  for (const chain of chains) {
-    const results: string[] = [];
-    const hashes: string[] = [];
-    codegen.reset();
-    for (const [i, bytes] of [...builtins, chain.abc].entries()) {
-      if (codegen.add(bytes, i < builtins.length)) {
-        throw new Error("an ABC of the chain failed to link in the release build");
-      }
-
-      hashes.push(sha(bytes));
-      const compiled = codegen.compile(hashes);
-      results.push(compiled.module, compiled.sourceMap);
-    }
-
-    compare("in the release build", chain.name, results, reference.get(chain.name) ?? []);
-  }
-}
-
-// The JIT/AOT invariant: each method compiled alone, as lazy JIT will
-// compile it, byte for byte its entry in the module. In order, a new
-// emitter for each; then in the reverse order, one emitter for all. The
-// builtins are the same in every chain, so checked in the first.
 let methods = 0;
-{
-  const testing = await loadTesting("dist-test");
-  for (const [c, chain] of chains.entries()) {
-    const abcs = [...builtins, chain.abc];
-    const want = referenceEntries.get(chain.name) ?? [];
-    testing.domainReset(50);
-    for (const [i, bytes] of abcs.entries()) {
-      testing.domainAdd(bytes, i < builtins.length);
-      if (i < builtins.length && c > 0) {
-        continue;
+let rejections = 0;
+for (version of VERSIONS) {
+  await checkAt();
+}
+
+/** Every check, at `version`. */
+async function checkAt(): Promise<void> {
+  reference.clear();
+  referenceEntries.clear();
+  for (const chain of chains) {
+    const entries: Map<number, string>[] = [];
+    reference.set(chain.name, compile(await loadTesting("dist-test"), chain.abc, entries));
+    referenceEntries.set(chain.name, entries);
+    if (reference.get(chain.name)?.at(-1)?.startsWith("rejected")) {
+      rejections++;
+    }
+  }
+
+  /** The chains compiled one after another in one instance of `build`. */
+  async function oneInstance(way: string, build: Build, order: typeof chains, times: number) {
+    const testing = await loadTesting(build);
+    for (const chain of order) {
+      for (let n = 0; n < times; n++) {
+        compare(way, chain.name, compile(testing, chain.abc), reference.get(chain.name) ?? []);
+      }
+    }
+  }
+
+  await oneInstance("after the chains before it", "dist-test", chains, 1);
+  await oneInstance("in reverse, twice in a row", "dist-test", [...chains].reverse(), 2);
+  await oneInstance("in the checked build", "dist-test-checked", chains, 1);
+
+  // The release build has the same source for this behind its own entry; the
+  // package's API must give the same bytes.
+  {
+    const wasm = new URL("../../packages/codegen/dist/codegen.wasm", import.meta.url);
+    const codegen = await createCodegen(await WebAssembly.compile(readFileSync(wasm)));
+    for (const chain of chains) {
+      const results: string[] = [];
+      const hashes: string[] = [];
+      codegen.reset(version);
+      for (const [i, bytes] of [...builtins, chain.abc].entries()) {
+        const error = codegen.add(bytes, i < builtins.length);
+        if (error) {
+          results.push(rejected(error, chain.abc));
+          break;
+        }
+
+        hashes.push(sha(bytes));
+        const compiled = codegen.compile(hashes);
+        results.push(compiled.module, compiled.sourceMap);
       }
 
-      const bodies = [...want[i].keys()];
-      for (const [way, order, reuse] of [
-        ["alone, in order", bodies, false],
-        ["alone, in reverse, one emitter", [...bodies].reverse(), true],
-      ] as const) {
-        const got = parseEntries(testing.domainEmitEach(order.join(","), reuse));
-        for (const body of bodies) {
-          if (got.get(body) !== want[i].get(body)) {
-            differences++;
-            console.log(`DIFF ${chain.name}, module ${i}, body ${body}, ${way}`);
-            console.log(`  got:  ${(got.get(body) ?? "(none)").slice(0, 200)}`);
-            console.log(`  want: ${(want[i].get(body) ?? "(none)").slice(0, 200)}`);
-            break;
+      compare("in the release build", chain.name, results, reference.get(chain.name) ?? []);
+    }
+  }
+
+  // The JIT/AOT invariant: each method compiled alone, as lazy JIT will
+  // compile it, byte for byte its entry in the module. In order, a new
+  // emitter for each; then in the reverse order, one emitter for all. The
+  // builtins are the same in every chain, so checked in the first.
+  {
+    const testing = await loadTesting("dist-test");
+    for (const [c, chain] of chains.entries()) {
+      const abcs = [...builtins, chain.abc];
+      const want = referenceEntries.get(chain.name) ?? [];
+      testing.domainReset(version);
+      for (const [i, bytes] of abcs.entries()) {
+        if (testing.domainAdd(bytes, i < builtins.length) || want[i] === undefined) {
+          break;
+        }
+
+        if (i < builtins.length && c > 0) {
+          continue;
+        }
+
+        const bodies = [...want[i].keys()];
+        for (const [way, order, reuse] of [
+          ["alone, in order", bodies, false],
+          ["alone, in reverse, one emitter", [...bodies].reverse(), true],
+        ] as const) {
+          const got = parseEntries(testing.domainEmitEach(order.join(","), reuse));
+          for (const body of bodies) {
+            if (got.get(body) !== want[i].get(body)) {
+              differences++;
+              console.log(`DIFF ${chain.name}, module ${i}, body ${body}, ${way}, API ${version}`);
+              console.log(`  got:  ${(got.get(body) ?? "(none)").slice(0, 200)}`);
+              console.log(`  want: ${(want[i].get(body) ?? "(none)").slice(0, 200)}`);
+              break;
+            }
           }
         }
-      }
 
-      methods += bodies.length;
+        methods += bodies.length;
+      }
     }
   }
 }
 
 const seconds = ((Date.now() - started) / 1000).toFixed(1);
 if (differences) {
-  console.log(`determinism: ${chains.length} chains, ${differences} differ (${seconds} s)`);
+  console.log(
+    `determinism: ${chains.length} chains at API versions ${VERSIONS.join(", ")}, ${differences} differ (${seconds} s)`,
+  );
   process.exit(1);
 }
 
 console.log(
-  `determinism: ${chains.length} chains, each the same 5 ways, and ${methods} methods each alone as in its module, 2 ways (${seconds} s)`,
+  `determinism: ${chains.length} chains at API versions ${VERSIONS.join(", ")}, each the same 5 ways (${rejections} rejected alike), and ${methods} methods each alone as in its module, 2 ways (${seconds} s)`,
 );
