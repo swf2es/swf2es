@@ -653,7 +653,8 @@ function blendFills(inSprites = false, cachedRows = false): Uint8Array {
  * near each other; four far apart, two in each corner; a chain of each
  * meeting the one before, then one meeting the one before that alone,
  * past an add between; the same in a clip drawn as a layer and in a
- * glowing clip, held; on a second frame each moved by part of a pixel.
+ * glowing clip, its filtered layer; on a second frame each moved by part
+ * of a pixel.
  */
 function blendShared(): Uint8Array {
   const rect = (x: number, y: number, width: number, height: number): w.PathCommand[] => [

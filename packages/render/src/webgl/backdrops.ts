@@ -1,4 +1,7 @@
-/** The most blends one copy of what is below is shared by, which bounds the rectangles compared. */
+/**
+ * The most blends drawn direct, reading what is below or not, offered
+ * after one copy of it, which bounds the rectangles each is compared with.
+ */
 export const SHARED_MOST = 64;
 
 /**
@@ -22,15 +25,18 @@ export const SPREAD = 2;
  * not shared.
  */
 export class Backdrops {
-  /** The blends' commands that share the copy, each with its box. */
+  /** The blends' commands that share the copy, each with its box, `shared` of them. */
   private readonly commands: number[] = [];
   private readonly boxOf: number[] = [];
-  /** What was drawn since the copy, as least x and y, greatest x and y. */
+  private shared = 0;
+  /** What was drawn since the copy, as least x and y, greatest x and y, `drawnCount` of them. */
   private readonly drawn: number[] = [];
+  private drawnCount = 0;
   /**
    * The boxes copied, x, y, width and height each in the target's
    * framebuffer, as Compositor.copyBoxes takes them, and the area of the
-   * rectangles each holds.
+   * rectangles each holds; `boxCount` of them, past which the arrays hold
+   * an earlier copy's.
    */
   readonly boxes: number[] = [];
   private readonly areas: number[] = [];
@@ -41,11 +47,8 @@ export class Backdrops {
 
   /** None shared, for a copy to be made for the blends offered from here on. */
   begin(spread: boolean): void {
-    this.commands.length = 0;
-    this.boxOf.length = 0;
-    this.drawn.length = 0;
-    this.boxes.length = 0;
-    this.areas.length = 0;
+    this.shared = 0;
+    this.drawnCount = 0;
     this.boxCount = 0;
     this.copy = -1;
     this.spread = spread;
@@ -55,7 +58,8 @@ export class Backdrops {
    * The next blend drawn direct, at command `command`, over rectangle `x`,
    * `y`, `width`, `height` of the target's framebuffer, which `reads` what
    * is below or not: whether the copy holds what is below it as it draws.
-   * One that does not ends the blends that share it.
+   * One that does not ends the blends that share it, as does the one past
+   * SHARED_MOST.
    */
   offer(
     command: number,
@@ -65,15 +69,16 @@ export class Backdrops {
     height: number,
     reads: boolean,
   ): boolean {
+    if (this.drawnCount >= SHARED_MOST) {
+      return false;
+    }
+
     const drawn = this.drawn;
     const right = x + width;
     const top = y + height;
-    if (reads) {
-      if (this.commands.length >= SHARED_MOST) {
-        return false;
-      }
 
-      for (let a = 0; a < drawn.length; a += 4) {
+    if (reads) {
+      for (let a = 0; a < this.drawnCount * 4; a += 4) {
         if (drawn[a] < right && x < drawn[a + 2] && drawn[a + 1] < top && y < drawn[a + 3]) {
           return false;
         }
@@ -84,18 +89,23 @@ export class Backdrops {
         return false;
       }
 
-      this.commands.push(command);
-      this.boxOf.push(box);
+      this.commands[this.shared] = command;
+      this.boxOf[this.shared] = box;
+      this.shared++;
     }
 
-    drawn.push(x, y, right, top);
+    const at = this.drawnCount++ * 4;
+    drawn[at] = x;
+    drawn[at + 1] = y;
+    drawn[at + 2] = right;
+    drawn[at + 3] = top;
     return true;
   }
 
   /** The box that holds the rectangle of the blend at command `command`, -1 for one not shared. */
   boxFor(command: number): number {
     const commands = this.commands;
-    for (let n = 0; n < commands.length; n++) {
+    for (let n = 0; n < this.shared; n++) {
       if (commands[n] === command) {
         return this.boxOf[n];
       }
@@ -129,8 +139,12 @@ export class Backdrops {
       return -1;
     }
 
-    boxes.push(x, y, width, height);
-    areas.push(area);
-    return this.boxCount++;
+    const b = this.boxCount++;
+    boxes[b * 4] = x;
+    boxes[b * 4 + 1] = y;
+    boxes[b * 4 + 2] = width;
+    boxes[b * 4 + 3] = height;
+    areas[b] = area;
+    return b;
   }
 }

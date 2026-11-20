@@ -76,7 +76,7 @@ test("a box grows while it is at most SPREAD times the area of what it holds", (
   assert.equal(b.offer(6, 200, 0, 10, 10, true), false);
 });
 
-test("no more than SHARED_MOST blends share a copy", () => {
+test("no more than SHARED_MOST blends are offered after a copy, reading or not", () => {
   const b = new Backdrops();
   b.begin(true);
   for (let k = 0; k < SHARED_MOST; k++) {
@@ -84,6 +84,28 @@ test("no more than SHARED_MOST blends share a copy", () => {
   }
 
   assert.equal(b.offer(SHARED_MOST * 3, SHARED_MOST * 10, 0, 10, 10, true), false);
+
+  // One blend that reads, then particles in add: those past the bound end it, as one that reads.
+  b.begin(true);
+  assert.ok(b.offer(0, 0, 0, 10, 10, true));
+  for (let k = 1; k < SHARED_MOST; k++) {
+    assert.ok(b.offer(k * 3, k * 10, 0, 10, 10, false));
+  }
+
+  assert.equal(b.offer(SHARED_MOST * 3, SHARED_MOST * 10, 0, 10, 10, false), false);
+});
+
+test("arrays kept from an earlier copy hold nothing of it", () => {
+  const b = new Backdrops();
+  b.begin(true);
+  b.offer(0, 0, 0, 10, 10, true);
+  b.offer(3, 100, 100, 10, 10, true);
+  b.begin(true);
+  assert.ok(b.offer(6, 50, 50, 10, 10, true));
+  assert.deepEqual(boxes(b), [[50, 50, 10, 10]]);
+  assert.equal(b.boxFor(3), -1);
+  // What was drawn before is forgotten: this meets only the earlier copy's rectangle.
+  assert.ok(b.offer(9, 0, 0, 10, 10, true));
 });
 
 test("beginning anew forgets the blends and the copy", () => {

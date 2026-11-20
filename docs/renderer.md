@@ -308,9 +308,10 @@ with the context:
   share one copy while each one's rectangle meets none drawn since it
   was made (`webgl/backdrops.ts`), as a blend drawn straight draws
   inside its rectangle alone: rectangles near each other are copied as
-  one box, at most twice their area, and those far apart as boxes of
-  their own in the same pass where the copy is made where they lie (out
-  of a multisampled target), or in a copy of their own elsewhere. So has a shape's part of several fills
+  one box, at most twice their area. Out of a multisampled stage or
+  layer, which the copy is made where it lies, those far apart are
+  boxes of their own in the same pass; out of a single-sampled one, a
+  copy of their own. So has a shape's part of several fills
   that meet without overlapping, as a SWF's shape writes them: where two
   meet inside a pixel, adl blends each by what it covers, not the pixel
   they make together, which only drawing them straight onto what is

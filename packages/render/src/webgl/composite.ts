@@ -299,6 +299,7 @@ export class Compositor {
     offsets.length = count * 2;
     let right = 0;
     let top = 0;
+
     for (let b = 0; b < count; b++) {
       const at = b * 4;
       offsets[b * 2] = lying ? 0 : boxes[at];

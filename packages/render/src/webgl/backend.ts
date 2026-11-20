@@ -1215,6 +1215,7 @@ export class WebGLBackend {
     const backdrops = this.backdrops;
     const place = compositor.place;
     backdrops.begin(compositor.copiesWhereLying(under));
+
     for (let j = k; j < commands.length && this.drawsDirect(commands, j, scene); j += 3) {
       if (
         compositor.cover(this.rectAt(commands, j), under) &&
