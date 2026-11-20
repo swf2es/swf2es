@@ -16,12 +16,24 @@ import { glyphShape } from "./text.js";
 const QUAD_KEYS = 512;
 
 /**
- * A part as made: its geometry's handle, and the fills of a part of several
- * not yet looked into (markFlat), which is null once they have been.
+ * Frames a part of several fills stands unchanged before it is looked into
+ * (markFlat), drawn through its layer until then: a drawing made again on
+ * every frame, as a burst of particles in add is, would otherwise
+ * tessellate its fills together on every frame, at several times what
+ * tessellating them apart costs.
+ */
+const STANDING_FRAMES = 1;
+
+/**
+ * A part as made: its geometry's handle, the frame it was made on, and the
+ * layer's fills of a part of several not yet looked into (markFlat), from
+ * `fillsFrom` up to `fillsTo`, none once they have been.
  */
 export interface MadePart extends PartPaint {
   handle: GeometryHandle;
-  fills: readonly number[] | null;
+  madeAt: number;
+  fillsFrom: number;
+  fillsTo: number;
 }
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
@@ -148,12 +160,14 @@ export class Parts {
 
     // The layer can outlive its handle. Let the registry release the tessellated buffers on expiry.
     const parts = layerParts(layer, this.tessellator, masking).map(
-      ({ geometry, paint, region, mesh, fills }) => ({
+      ({ geometry, paint, region, mesh, fillsFrom = 0, fillsTo = 0 }) => ({
         handle: this.geometries.add(geometry),
         paint,
         region,
         mesh,
-        fills: fills ?? null,
+        madeAt: this.geometries.frame,
+        fillsFrom,
+        fillsTo,
       }),
     );
     cache.set(layer, { parts, version, checkedAt: this.geometries.removalVersion });
@@ -162,15 +176,23 @@ export class Parts {
 
   /**
    * `part` of `layer`, of several fills, marked flat (Geometries.markFlat)
-   * if they do not overlap, looked into once: for a part drawn alone in a
-   * blend mode, which is then drawn without a layer of its own. Asked of
-   * every part of several, it would tessellate each such layer twice.
+   * if they do not overlap: for a part drawn alone in a blend mode, which is
+   * then drawn without a layer of its own. Looked into once, and only once
+   * it has stood STANDING_FRAMES. Asked of every part of several, it would
+   * tessellate each such layer twice.
    */
   markFlat(layer: ShapeLayer, part: MadePart): void {
-    const fills = part.fills;
+    const { fillsFrom, fillsTo } = part;
+    if (fillsTo <= fillsFrom || this.geometries.frame - part.madeAt < STANDING_FRAMES) {
+      return;
+    }
+
+    part.fillsTo = fillsFrom;
     const data = this.geometries.get(part.handle.id);
-    part.fills = null;
-    if (fills && data && fillsApart(layer, fills, data.positions, data.indices, this.tessellator)) {
+    if (
+      data &&
+      fillsApart(layer, fillsFrom, fillsTo, data.positions, data.indices, this.tessellator)
+    ) {
       this.geometries.markFlat(part.handle.id);
     }
   }

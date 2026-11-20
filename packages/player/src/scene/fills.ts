@@ -74,27 +74,48 @@ export function resolveFills(
  * How much less than the area of their triangles the area of fills' contours
  * filled together may be, as a share of the first and in pixels, for the
  * fills to count as not overlapping: what rounding their positions to
- * floats and tessellating them apart and together may take.
+ * floats and tessellating them apart and together may take. A share of
+ * the whole would let a real overlap pass in a large shape: a 32-pixel
+ * square over a 16,000-pixel one at 1e-5.
  */
-const SHARE_APART = 1e-5;
+const SHARE_APART = 1e-7;
 const PIXELS_APART = 1e-3;
 
 /**
- * Whether `layer`'s fills `fills`, tessellated into `positions` and
- * `indices`, cover no point twice, as the fills of a SWF's shape layer that
- * meet edge to edge do and those of a drawing need not: their contours
+ * Whether `layer`'s fills `from` up to `to`, tessellated into `positions`
+ * and `indices`, cover no point twice, as the fills of a SWF's shape layer
+ * that meet edge to edge do and those of a drawing need not: their contours
  * filled together by parity cover all their triangles do, where a point two
  * of them cover is left out. One filled non-zero is not looked into.
+ * Triangles that cover more than the box around them overlap without
+ * tessellating anything, as a burst of discs drawn over each other does.
  */
 export function fillsApart(
   layer: ShapeLayer,
-  fills: readonly number[],
+  from: number,
+  to: number,
   positions: Float32Array,
   indices: Uint32Array,
   tessellate: FillTessellator,
 ): boolean {
+  const apart = trianglesArea(positions, indices, 0);
+  let x0 = Number.POSITIVE_INFINITY;
+  let y0 = Number.POSITIVE_INFINITY;
+  let x1 = Number.NEGATIVE_INFINITY;
+  let y1 = Number.NEGATIVE_INFINITY;
+  for (let k = 0; k < positions.length; k += 2) {
+    x0 = Math.min(x0, positions[k]);
+    x1 = Math.max(x1, positions[k]);
+    y0 = Math.min(y0, positions[k + 1]);
+    y1 = Math.max(y1, positions[k + 1]);
+  }
+
+  if (apart - (x1 - x0) * (y1 - y0) > apart * SHARE_APART + PIXELS_APART) {
+    return false;
+  }
+
   const contours: Path[] = [];
-  for (const i of fills) {
+  for (let i = from; i < to; i++) {
     const fill = layer.fills[i];
     if (fill.winding !== "evenOdd") {
       return false;
@@ -111,7 +132,6 @@ export function fillsApart(
     return false;
   }
 
-  const apart = trianglesArea(positions, indices, 0);
   const whole = trianglesArea(together.vertices, together.indices, together.indexOffset ?? 0);
   return apart - whole <= apart * SHARE_APART + PIXELS_APART;
 }
@@ -123,6 +143,7 @@ function trianglesArea(
   offset: number,
 ): number {
   let twice = 0;
+
   for (let k = 0; k + 2 < indices.length; k += 3) {
     const a = (indices[k] - offset) * 2;
     const b = (indices[k + 1] - offset) * 2;

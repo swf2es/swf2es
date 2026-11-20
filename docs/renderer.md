@@ -308,13 +308,17 @@ with the context:
   meet without overlapping, as a SWF's shape writes them: where two meet
   inside a pixel, adl blends each by what it covers, not the pixel they
   make together, which only drawing them straight onto what is below
-  does: drawn as a host draws, at 8 samples, an edge between two fills in
+  does: drawn as a host draws, at 4 samples, an edge between two fills in
   hard light was up to 126 off adl's through a layer, 38 drawn straight.
   Whether they overlap is looked into only for a part drawn alone in such
-  a mode (`Parts.markFlat`): their contours tessellated together by
-  parity cover less than their triangles do where two overlap. Fills
-  over each other, as a drawing's may be, keep the layer, which blends
-  them as one picture, as adl does.
+  a mode, once it has stood a frame (`Parts.markFlat`): triangles that
+  cover more than their box overlap, and otherwise their contours
+  tessellated together by parity cover less than their triangles do
+  where two overlap. A drawing made again on every frame, as a burst of
+  particles in add is, is never looked into: tessellating its discs
+  together took 4 to 12 times what tessellating them apart did, 5.8 ms
+  a frame for 200 of them. Fills over each other, as a drawing's may be, keep the
+  layer, which blends them as one picture, as adl does.
 - **One state cache.** The backend sets GL state through context3d's
   device layer (`@swf2es/context3d/device`'s `GlState`), so no bind,
   blend or stencil state is set twice.

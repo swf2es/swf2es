@@ -838,9 +838,10 @@ export class RenderView implements Drawer {
         blendsDirect(mode) &&
         layers.length === 1 &&
         layers[0].strokes.length === 0;
+
       for (let i = 0; i < layers.length; i++) {
         const parts = this.parts.partsOf(layers[i], version);
-        if (alone && parts.length === 1 && parts[0].fills) {
+        if (alone && parts.length === 1) {
           this.parts.markFlat(layers[i], parts[0]);
         }
 

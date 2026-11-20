@@ -155,16 +155,34 @@ const circle = (cx: number, cy: number, r: number): Path => [
 function apart(layer: ShapeLayer): boolean {
   const parts = layerParts(layer, tess.tessellate);
   assert.equal(parts.length, 1);
-  const [{ geometry, fills }] = parts;
+  const [{ geometry, fillsFrom, fillsTo }] = parts;
   assert.equal(geometry.flat, false);
-  assert.deepEqual(fills, [...layer.fills.keys()]);
-  return fillsApart(layer, fills ?? [], geometry.positions, geometry.indices, tess.tessellate);
+  assert.deepEqual([fillsFrom, fillsTo], [0, layer.fills.length]);
+  return fillsApart(
+    layer,
+    0,
+    layer.fills.length,
+    geometry.positions,
+    geometry.indices,
+    tess.tessellate,
+  );
 }
 
 test("a part of one fill is flat, and one of several only once they are found apart", () => {
   const parts = layerParts(layer, tess.tessellate);
   assert.equal(parts[0].geometry.flat, true);
-  assert.equal(parts[0].fills, undefined);
+  assert.equal(parts[0].fillsTo, undefined);
+});
+
+test("a part of fills with one left out between them is not looked into", () => {
+  // A fill of nothing between two that meet adds no vertex, but its contours would count.
+  const gapped: ShapeLayer = {
+    fills: [solid([square(0, 0, 10)]), solid([]), solid([square(10, 0, 10)])],
+    strokes: [],
+  };
+  const [part] = layerParts(gapped, tess.tessellate);
+  assert.equal(part.geometry.flat, false);
+  assert.equal(part.fillsTo, undefined);
 });
 
 test("fills that meet edge to edge, along lines or curves, are apart", () => {
@@ -181,12 +199,43 @@ test("fills that meet edge to edge, along lines or curves, are apart", () => {
   assert.equal(apart(disc), true);
 });
 
+test("fills that meet far from the origin, or large, are apart", () => {
+  for (const at of [1e5, 1e6]) {
+    const far: ShapeLayer = {
+      fills: [solid([square(at, at, 10)]), solid([square(at + 10, at, 10)])],
+      strokes: [],
+    };
+    assert.equal(apart(far), true, `at ${at}`);
+  }
+
+  const large: ShapeLayer = {
+    fills: [
+      solid([square(-8000, -8000, 16000), circle(1000, 1000, 5000)]),
+      solid([circle(1000, 1000, 5000)]),
+    ],
+    strokes: [],
+  };
+  assert.equal(apart(large), true);
+});
+
 test("fills that overlap, or filled non-zero, are not apart", () => {
   const over: ShapeLayer = {
     fills: [solid([square(0, 0, 10)]), solid([square(5, 5, 10)])],
     strokes: [],
   };
   assert.equal(apart(over), false);
+  // A small square over a large one, which a share of the whole area would let pass.
+  for (const [size, over] of [
+    [4000, 8.6],
+    [16000, 32],
+  ]) {
+    const large: ShapeLayer = {
+      fills: [solid([square(0, 0, size)]), solid([square(size - over, 0, over * 2)])],
+      strokes: [],
+    };
+    assert.equal(apart(large), false, `${over} over ${size}`);
+  }
+
   // A sliver of a tenth of a pixel over the other, along an edge of 100.
   const sliver: ShapeLayer = {
     fills: [

@@ -95,6 +95,8 @@ export class Geometries extends Registry {
   added: number[] = [];
   /** Changed in place since the backend last took them (update). */
   updated: number[] = [];
+  /** Found flat since the backend last took them (markFlat). */
+  flattened: number[] = [];
 
   add(data: GeometryData): GeometryHandle {
     const handle = this.hold(IDLE_FRAMES);
@@ -117,14 +119,14 @@ export class Geometries extends Registry {
   }
 
   /**
-   * Geometry `id` found flat (GeometryData.flat) after it was added: taken
-   * again, as one updated is, for the backend to draw it so.
+   * Geometry `id` found flat (GeometryData.flat) after it was added, for
+   * the backend to draw it so: its flag alone taken again, not its vertices.
    */
   markFlat(id: number): void {
     const data = this.data[id];
     if (data && !data.flat) {
       data.flat = true;
-      this.updated.push(id);
+      this.flattened.push(id);
     }
   }
 

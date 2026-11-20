@@ -264,7 +264,6 @@ export class GeometryAtlas {
       const data = geometries.get(id);
       if (place && data && !data.glyphs && place.vertices === data.positions.length / 2) {
         this.copyVertices(this.pages[place.page], data, place.vertexStart);
-        place.flat = data.flat === true;
         place.stage = samplesStage(data);
         place.batch = this.batch(data);
       } else if (place && data) {
@@ -274,6 +273,15 @@ export class GeometryAtlas {
     }
 
     geometries.updated.length = 0;
+    // Found flat: what is added after reads it from its data.
+    for (const id of geometries.flattened) {
+      const place = this.places[id];
+      if (place) {
+        place.flat = geometries.get(id)?.flat === true;
+      }
+    }
+
+    geometries.flattened.length = 0;
     let vertices = 0;
     let indices = 0;
     let glyphVertices = 0;

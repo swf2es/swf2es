@@ -232,6 +232,7 @@ export class WebGLBackend {
     geometries.added.length = 0;
     geometries.removed.length = 0;
     geometries.updated.length = 0;
+    geometries.flattened.length = 0;
     if (this.gl.isContextLost()) {
       return;
     }
