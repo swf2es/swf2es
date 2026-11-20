@@ -163,6 +163,12 @@
 // With --counts, each run also gives per-frame means of what the renderer asked of GL: draw calls
 // and the draws they make, program, vertex array and framebuffer binds, uniform calls, stencil
 // state and clears, buffer and texture uploads and their bytes, readbacks, and lines stroked anew.
+// --census takes the renderer's census of each frame (census.ts; docs/renderer.md, "The census"):
+// sub-draws by how they were drawn; the fill runs, their lengths and what ended each; repeats
+// among the fills not merged, which instancing would draw as one; blend layers by what is drawn
+// inside them and how many hold the frame before's content; and objects the walk visited against
+// objects changed. Its methods are wrapped only when asked for, as --counts' are, so its frames'
+// times are not to be compared with others'.
 // --allocs samples the heap and gives the KB the frames allocated, the player's start left out;
 // --profile FILE also writes the sampled profile there, for DevTools' Memory panel to open. After
 // the frames, with the renderer still alive, it gives what the page holds after a full collection,
@@ -175,14 +181,14 @@
 //     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
-//     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
+//     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //     [--checkout DIR] [--no-multi-draw]
 //   node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
-//     [--gpu] [--cpu-profile FILE] [--checkout DIR] [--json]
+//     [--gpu] [--cpu-profile FILE] [--checkout DIR] [--census] [--no-multi-draw] [--json]
 //
 // --no-multi-draw hides WEBGL_multi_draw from the renderer, which then draws
-// as it does in a browser without it, as Firefox is.
+// as it does in a browser without it, as Firefox is; with --swf too.
 //
 // --swf FILE plays a SWF of one's own instead, in real time as the web element plays it
 // (page.ts, playSwf): each animation frame advances the player by the time passed, streamed
@@ -192,7 +198,8 @@
 // (--spike MS), the worst --top N, with what the renderer did in each: programs linked and the
 // ms waited for them, programs first drawn with, buffers made and copied, textures uploaded,
 // filter passes, composites and morphs blended anew. --cpu-profile FILE samples the whole play
-// and names the functions each listed frame spent its time in. The SWF is only an argument: keep
+// and names the functions each listed frame spent its time in. --census takes the renderer's
+// census of every frame drawn, as for a synthetic scene. The SWF is only an argument: keep
 // one that may not be shared out of the repository.
 //
 // --checkout DIR plays another built checkout's packages (its packages/*/dist)
@@ -205,6 +212,7 @@ import { resolve } from "node:path";
 import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
 import { stemFont } from "./cases.ts";
+import { formatCensus, framesFrom, summarise } from "./census.ts";
 import { benchPlayer, playPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 import { compiler } from "./scripts.ts";
@@ -1589,6 +1597,8 @@ async function playFile(path: string): Promise<void> {
     resolution: option("resolution", 1),
     mounts,
     cpuProfilePath: cpuProfile,
+    census: args.includes("--census"),
+    multiDraw: !args.includes("--no-multi-draw"),
   });
   if (played.error) {
     console.error(played.error);
@@ -1649,6 +1659,7 @@ async function playFile(path: string): Promise<void> {
       gl: round(s.gl),
       work: Object.fromEntries(Object.entries(s.work).map(([key, v]) => [key, round(v)])),
     })),
+    ...(args.includes("--census") ? { census: summarise(framesFrom(played.census, 0)) } : {}),
   };
   if (args.includes("--json")) {
     console.log(JSON.stringify(report));
@@ -1688,6 +1699,10 @@ async function playFile(path: string): Promise<void> {
   }
   if (spikes.length > shown) {
     console.log(`    and ${spikes.length - shown} more (--top N, --json)`);
+  }
+
+  if (report.census) {
+    console.log(formatCensus(report.census).join("\n"));
   }
 }
 
@@ -1855,6 +1870,7 @@ const result = await benchPlayer(swf, frames, {
   hover: args.includes("--hover"),
   snapshotPath: args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
   metered: args.includes("--counts"),
+  census: args.includes("--census"),
   multiDraw: !args.includes("--no-multi-draw"),
 });
 if (result.error) {
@@ -1937,6 +1953,10 @@ const summary = {
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, binds, uploads, lines stroked.
   ...(args.includes("--counts") ? { perFrame: perFrame(result.meters.slice(WARMUP)) } : {}),
+  // Frames are numbered from 2, as the meters are: those after the warm-up.
+  ...(args.includes("--census")
+    ? { census: summarise(framesFrom(result.census, WARMUP + 2)) }
+    : {}),
   ...(args.includes("--allocs")
     ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
     : {}),
@@ -2019,6 +2039,10 @@ if (args.includes("--json")) {
   console.log(
     `  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}  mean ${ms(summary.frameMean)}`,
   );
+  if (summary.census) {
+    console.log(formatCensus(summary.census).join("\n"));
+  }
+
   if (cpuProfile) {
     // Profiled from the 12th frame (page.ts, PROFILED_FROM) to the last.
     const { areas, functions } = selfTimes(cpuProfile, frames - 11);

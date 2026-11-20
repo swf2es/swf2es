@@ -155,6 +155,12 @@ node tests/player/bench.ts --swf file.swf [--frames N] [--resolution R] [--gpu] 
                               # it: frame times and the frames that overran one of its frames,
                               # each with what the renderer did then (links, first draws, uploads,
                               # filter passes, morphs) and, profiled, where its time went
+node tests/player/bench.ts [scene | --swf file.swf] --census [--gpu] [--json]   # the renderer's
+                              # census of each frame: sub-draws by path, fill runs' lengths and what
+                              # ended them, repeats instancing would take, blend layers by content
+                              # and unchanged, objects walked against changed (docs/renderer.md)
+node tests/player/census-check.ts   # the census's counts add up to GL's sub-draws on masks and
+                              # blends, with and without multi-draw (part of pnpm test)
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh
                               # ratios, --allocs samples allocation, --counts counts native calls
