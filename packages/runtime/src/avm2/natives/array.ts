@@ -6,6 +6,7 @@ import type { ClassHook } from "../hooks.js";
 import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import {
   AS3,
+  copyElements,
   eachElement,
   elements,
   getElement,
@@ -51,6 +52,18 @@ function arrayElements(rt: Runtime, o: Value): Value[] | null {
 function arrayElementsOf(rt: Runtime, o: AsObject, length: number): Value[] | null {
   const a = arrayElements(rt, o);
   return a !== null && a.length === length ? a : null;
+}
+
+/**
+ * Whether JavaScript's indexOf and lastIndexOf, which pass over a hole,
+ * may answer otherwise than avmplus', which reads it as getUintProperty
+ * does, Array.prototype's element or undefined: for undefined, or where
+ * Array.prototype has elements, and only if `a` has a hole, which
+ * includes reads as undefined.
+ */
+function holesMatter(rt: Runtime, a: Value[], v: Value): boolean {
+  const prototype: AsObject = rt.builtinClass("Array").$prototype;
+  return (v === undefined || prototype.$a.length > 0) && a.includes(undefined);
 }
 
 /** As AvmCore::toInteger: a number, truncated, NaN as 0. */
@@ -322,14 +335,14 @@ export const arrayNatives: Natives = {
     }
 
     const length = lengthOf(rt, o);
+    const from = clampIndex(rt.toNumber(start), length);
+    const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const a = arrayElementsOf(rt, o, length);
     if (a) {
-      return rt.array(a.slice(rt.toNumber(start), rt.toNumber(end)));
+      return rt.array(copyElements(rt, o, a, from, to));
     }
 
     const g = new Generic(rt, o);
-    const from = clampIndex(rt.toNumber(start), length);
-    const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const out: Value[] = [];
     for (let i = from; i < to; i++) {
       out.push(g.get(i));
@@ -382,7 +395,9 @@ export const arrayNatives: Natives = {
         return -1;
       }
 
-      return a.indexOf(v, start);
+      if (!holesMatter(rt, a, v)) {
+        return a.indexOf(v, start);
+      }
     }
 
     // As generic_indexOf: by strict equality, from the start clamped.
@@ -400,13 +415,17 @@ export const arrayNatives: Natives = {
       return -1;
     }
 
+    // As generic_lastIndexOf: from the start clamped, a negative one past the start to 0.
     const length = lengthOf(rt, o);
+    let start = clampIndexInt(rt.toInt(from), length);
+    if (start === length) {
+      start--;
+    }
+
     const a = arrayElementsOf(rt, o, length);
     if (a) {
-      const start = rt.toInt(from);
       if (v instanceof FloatValue) {
-        const at = start < 0 ? a.length + start : Math.min(start, a.length - 1);
-        for (let i = at; i >= 0; i--) {
+        for (let i = start; i >= 0; i--) {
           if (rt.strictEquals(a[i], v)) {
             return i;
           }
@@ -415,14 +434,12 @@ export const arrayNatives: Natives = {
         return -1;
       }
 
-      return a.lastIndexOf(v, start);
+      if (!holesMatter(rt, a, v)) {
+        return start < 0 ? -1 : a.lastIndexOf(v, start);
+      }
     }
 
     const g = new Generic(rt, o);
-    let start = clampIndexInt(rt.toInt(from), length);
-    if (start === length) {
-      start--;
-    }
 
     for (let i = start | 0; i >= 0; i--) {
       if (rt.strictEquals(g.get(i), v)) {
