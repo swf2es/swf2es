@@ -6,7 +6,7 @@
  * (a module per ABC as its SWF loads) and as the ahead-of-time compiler,
  * so both produce identical output. See docs/architecture/overview.md.
  */
-import { AIR_API_VERSION, API_VERSION, checkApiVersion } from "@swf2es/format";
+import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
 
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
@@ -42,12 +42,14 @@ export function libraryLog(codegen: Codegen, index: number, count: number): stri
 /**
  * The text of ABC `index`'s module cache key, whose UTF-8's SHA-256 is the
  * key: what the module depends on, the compiler's identity, the API
- * version, every ABC its domain sees, by hash and whether it is a library,
- * those added after it included, its own place among them, and the
- * compiler's log about them (see Codegen.context), the libraries' part by
- * its digest once taken. The player's module cache and the swf2es command
- * both key by it, so that the command's modules are the cache's. Null
- * where there is no context.
+ * version (only its series for a module whose domain sees libraries alone,
+ * whose names take their versions from their marks and the series, so that
+ * SWFs of several versions share the libraries' modules), every ABC its
+ * domain sees, by hash and whether it is a library, those added after it
+ * included, its own place among them, and the compiler's log about them
+ * (see Codegen.context), the libraries' part by its digest once taken. The
+ * player's module cache and the swf2es command both key by it, so that the
+ * command's modules are the cache's. Null where there is no context.
  */
 export function moduleKey(
   codegen: Codegen,
@@ -60,9 +62,11 @@ export function moduleKey(
     return null;
   }
 
+  const version = codegen.apiVersion;
+  const ofLibraries = context.abcs.every((i) => abcs.builtins[i]);
   return JSON.stringify({
     compiler: codegen.identity,
-    api: codegen.apiVersion,
+    api: ofLibraries ? (isAirApiVersion(version) ? "AIR" : "Flash Player") : version,
     abcs: context.abcs.map((i) => `${abcs.builtins[i] ? "builtin " : ""}${abcs.hashes[i]}`),
     own: context.own,
     libraries,
