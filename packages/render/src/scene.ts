@@ -207,6 +207,52 @@ export class SceneList {
   }
 
   /**
+   * Entries `first` to `end` of `from`, draws alone, written after these as
+   * they were, each naming its row `rowShift` on: a span a frame before
+   * wrote, its rows put elsewhere (docs/renderer.md, "Spans"). A boundary
+   * names layers and draws by number, which a span does not move yet.
+   */
+  appendDraws(from: SceneList, first: number, end: number, rowShift: number): void {
+    const at = this.length;
+    const length = at + end - first;
+    while (length > this.geometry.length) {
+      this.geometry = grow(this.geometry);
+      this.row = grow(this.row);
+      this.blend = grow(this.blend);
+      this.texture = grow(this.texture);
+      this.sampler = grow(this.sampler);
+      this.kind = grow(this.kind);
+    }
+
+    const kinds = from.kind;
+    const rows = from.row;
+    const row = this.row;
+    for (let e = first, to = at; e < end; e++, to++) {
+      if (kinds[e] !== DRAW) {
+        throw new Error(`entry ${e} of a span is no draw, which a span cannot move`);
+      }
+
+      row[to] = rows[e] + rowShift;
+    }
+
+    this.kind.fill(DRAW, at, length);
+    this.geometry.set(from.geometry.subarray(first, end), at);
+    this.blend.set(from.blend.subarray(first, end), at);
+    this.texture.set(from.texture.subarray(first, end), at);
+    this.sampler.set(from.sampler.subarray(first, end), at);
+    this.length = length;
+  }
+
+  /**
+   * The entries from `length` on taken off, as draws written only to be
+   * compared are: draws alone, as a layer begun among them would stay
+   * counted.
+   */
+  truncate(length: number): void {
+    this.length = length;
+  }
+
+  /**
    * A layer begun, padded for its filters (or -1), over whole units as
    * `whole` says (wholes), drawn as a layer whatever it holds where
    * `grouped` (groups), its rectangle none till measured (layerRect): its

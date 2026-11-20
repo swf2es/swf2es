@@ -27,7 +27,8 @@ pnpm typecheck   # tests/ and oracle/ (.ts run directly by node)
 pnpm test        # unit, conformance, library, program, fuzz, player, web, site, packaging and
                  # desktop tests (needs podman or docker, and Chrome; CHROME names another
                  # browser; the desktop's are skipped without Electron's binary)
-pnpm test:checked # the same with every array access bounds-checked
+pnpm test:checked # the same with every array access bounds-checked, and the player's
+                  # shortcuts and the renderer's spans checked against full walks
 pnpm dlx knip                 # unused files, exports and dependencies (knip.json); before
                               # removing anything, see "Code generated code calls" below
 pnpm determinism              # each module the same however it is compiled, and each method

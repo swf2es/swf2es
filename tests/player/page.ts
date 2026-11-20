@@ -88,10 +88,12 @@ const LIBRARIES = [
   new URLSearchParams(location.search).has("adobe") ? "playerglobal-adobe" : "playerglobal-swf2es",
 ];
 
-// `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too.
+// `pnpm test:checked`'s page (chrome.ts): the player checks its own shortcuts too, and every
+// view made on the page the spans of its scene list.
 if (new URLSearchParams(location.search).has("checked")) {
   Scripting.checkRounds = true;
   Scripting.checkPicks = true;
+  RenderView.checkSpans = true;
 }
 
 interface Run {

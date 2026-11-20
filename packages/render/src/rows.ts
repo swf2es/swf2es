@@ -17,6 +17,30 @@ export class Rows {
     this.count = 0;
   }
 
+  /** The rows from `count` on taken off, as rows written only to be compared are. */
+  truncate(count: number): void {
+    this.count = count;
+  }
+
+  /** Rows `first` to `end` of `from` written after these, as they were: the index of the first. */
+  append(from: Rows, first: number, end: number): number {
+    const row = this.count;
+    this.count += end - first;
+    if (this.count * ROW_FLOATS > this.data.length) {
+      let length = this.data.length * 2;
+      while (this.count * ROW_FLOATS > length) {
+        length *= 2;
+      }
+
+      const grown = new Float32Array(length);
+      grown.set(this.data.subarray(0, row * ROW_FLOATS));
+      this.data = grown;
+    }
+
+    this.data.set(from.data.subarray(first * ROW_FLOATS, end * ROW_FLOATS), row * ROW_FLOATS);
+    return row;
+  }
+
   /**
    * A row for the transform at `places[at]`, a b c d tx ty: numbers a
    * caller keeps in a typed array, so that none are boxed passing them.

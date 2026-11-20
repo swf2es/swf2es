@@ -85,9 +85,13 @@ jobs:
         run: pnpm tamarin ecma3/Array as3/Types
   # Ruffle's corpus against tests/player/corpus/baseline.json, beside the tests, so a
   # change that lowers a test's standing fails its PR.
+  # Checked, as pnpm test:checked's pages are: the player's shortcuts and the renderer's spans
+  # are compared with full walks on every test, which draw the same where they hold.
   corpus:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      SWF2ES_CHECKED: "1"
     steps:
       - uses: actions/checkout@v4
         with:

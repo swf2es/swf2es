@@ -101,7 +101,7 @@
   A test that does not finish in its time is a timeout, a standing of its
   own. The corpus is fetched, not committed: CI's `corpus` job, beside
   the test jobs on every pull request and every push to main or dev,
-  fetches it at
+  plays it checked (`SWF2ES_CHECKED=1`, below), fetches it at
   `RUFFLE_COMMIT`, caches it by that commit, and fails on a lowered
   standing, naming the test, its standing before and after, and where its
   trace parts from Flash's. It is what says, in order of what real SWFs
@@ -144,7 +144,10 @@ work beside it and throws where the two differ, on in the checked build
   advances before a late mark;
 - `Scripting.checkPicks` makes a full pick, without kept bounds, beside
   each pick that used them, and picks at a frame end that would have
-  skipped it.
+  skipped it;
+- `RenderView.checkSpans` walks each object whose span of the scene list
+  the frame before would stand for it, and compares the two entry for
+  entry and row for row ([renderer.md](../renderer.md#spans)).
 
 Unit tests are checked only when `tests/unit/checked.ts` is loaded, as
 `tests/unit`'s test script and `pnpm test:checked` do; `SWF2ES_CHECKED=1
