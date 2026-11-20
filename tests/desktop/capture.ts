@@ -54,7 +54,8 @@ const source = `package {
       return names.length > 0;
     }
     private function names(e:Event):void {
-      if (!placeholders(Camera.names, "Camera") && !placeholders(Microphone.names, "Microphone")) {
+      if (Camera.names.length > 0 && Microphone.names.length > 0 &&
+          !placeholders(Camera.names, "Camera") && !placeholders(Microphone.names, "Microphone")) {
         trace("capture names after", true, true);
         removeEventListener(Event.ENTER_FRAME, names);
       }

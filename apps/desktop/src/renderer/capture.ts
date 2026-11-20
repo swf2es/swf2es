@@ -95,6 +95,7 @@ export function shellCapture(api: DesktopCapture, epoch: number): CaptureHost | 
     get microphones() {
       return browser.microphones;
     },
+    release: () => browser.release(),
     permissionStatus: (kind) => api.status(epoch, kind),
     async requestPermission(kind, signal) {
       if (signal.aborted) {
@@ -102,6 +103,7 @@ export function shellCapture(api: DesktopCapture, epoch: number): CaptureHost | 
       }
 
       const result = await api.request(epoch, kind);
+
       if (result === "granted" && !signal.aborted) {
         // The shell's grant opens no device, so read the labels it now lets through.
         await browser.refresh().catch(() => {});

@@ -35,6 +35,8 @@ function constraints(
 export interface BrowserCaptureHost extends CaptureHost {
   /** Reads the devices again, as after a grant the host did not ask for itself. */
   refresh(): Promise<void>;
+  /** Stops listening for device and permission changes; the player calls it at destroy. */
+  release(): void;
 }
 
 /**
@@ -111,6 +113,7 @@ export function lazyBrowserCaptureHost(): BrowserCaptureHost | null {
     void refresh().catch(() => {});
   };
   let prepared: Promise<boolean> | null = null;
+  let released = false;
   const prepare = async (): Promise<boolean> => {
     try {
       await refresh();
@@ -119,14 +122,20 @@ export function lazyBrowserCaptureHost(): BrowserCaptureHost | null {
     }
 
     // Consent given elsewhere (a site setting, another tab) and devices
-    // plugged in or out show up here; the labels come with consent.
-    media.addEventListener("devicechange", refreshLater);
+    // plugged in or out show up here; the labels come with consent. A
+    // release while reading leaves nothing behind.
+    if (!released) {
+      media.addEventListener("devicechange", refreshLater);
+    }
+
     await Promise.all(
       (["camera", "microphone"] as const).map(async (kind) => {
         try {
           const status = await navigator.permissions.query({ name: kind as PermissionName });
           permissionHandles.set(kind, status);
-          status.addEventListener("change", refreshLater);
+          if (!released) {
+            status.addEventListener("change", refreshLater);
+          }
         } catch {
           /* Some hosts expose capture without the Permissions API. */
         }
@@ -146,6 +155,13 @@ export function lazyBrowserCaptureHost(): BrowserCaptureHost | null {
       return prepared;
     },
     refresh,
+    release() {
+      released = true;
+      media.removeEventListener("devicechange", refreshLater);
+      for (const status of permissionHandles.values()) {
+        status.removeEventListener("change", refreshLater);
+      }
+    },
     permissionStatus,
     async requestPermission(kind, signal) {
       if (signal.aborted) {

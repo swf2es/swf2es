@@ -5,6 +5,7 @@
 // finds the devices at a later one.
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
+import { captureDeviceName, captureDeviceNames } from "../../../media/capture-devices.js";
 import { capturePermission, requestCapturePermission } from "../../../media/capture-permission.js";
 import { microphoneRates } from "../../../media/capture-resampler.js";
 import { MicrophoneState, microphoneStates } from "../../../media/microphone.js";
@@ -62,7 +63,7 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
     /** A new array each time, as Flash's. */
     static get names(): Value {
       void s.prepareCapture();
-      return s.rt.array((s.capture?.microphones ?? []).map((device) => device.name));
+      return s.rt.array(captureDeviceNames(s.capture?.microphones ?? [], "Microphone"));
     }
 
     static getMicrophone(index: Value): Value {
@@ -210,7 +211,12 @@ export function microphoneNatives(s: Scripting): avm2.Natives {
 
     get name(): Value {
       const live = state(this);
-      return live ? (s.capture?.microphones?.[live.index]?.name ?? live.device.name) : null;
+      if (!live) {
+        return null;
+      }
+
+      const device = s.capture?.microphones?.[live.index] ?? live.device;
+      return captureDeviceName(device, live.index, "Microphone");
     }
 
     get noiseSuppressionLevel(): number {

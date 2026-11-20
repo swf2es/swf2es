@@ -182,3 +182,34 @@ test("refresh reads the devices again, and a late older reading is dropped", asy
   await older;
   assert.deepEqual(names(host.cameras), ["Front Camera", "USB Webcam"]);
 });
+
+test("release stops listening for device and permission changes", async () => {
+  media.devices = hidden();
+  const host = lazyBrowserCaptureHost();
+  assert.ok(host);
+  await host.prepare?.();
+  host.release();
+
+  const read = media.enumerations;
+  media.devices = labelled();
+  media.dispatchEvent(new Event("devicechange"));
+  permissionStates.get("camera")?.dispatchEvent(new Event("change"));
+  await settle();
+  assert.equal(media.enumerations, read);
+  assert.deepEqual(names(host.cameras), ["Camera"]);
+});
+
+test("a release while preparing leaves no listener behind", async () => {
+  media.devices = hidden();
+  const host = lazyBrowserCaptureHost();
+  assert.ok(host);
+  const preparing = host.prepare?.();
+  host.release();
+  assert.equal(await preparing, true);
+
+  const read = media.enumerations;
+  media.dispatchEvent(new Event("devicechange"));
+  permissionStates.get("microphone")?.dispatchEvent(new Event("change"));
+  await settle();
+  assert.equal(media.enumerations, read);
+});

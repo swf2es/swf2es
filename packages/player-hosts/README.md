@@ -17,6 +17,11 @@ npm install @swf2es/player-hosts
   browser's slow first enumeration at startup. A device the browser has not
   labelled yet, as before consent, is named `Camera`, `Camera 2`, `Microphone`
   and so on, never `""`, and its label replaces that once consent is given.
+  Both return a `BrowserCaptureHost`: a `CaptureHost` with `refresh()`, which
+  reads the devices again (call it after a grant the host did not ask for
+  itself, as an embedder's own consent dialog), and `release()`, which stops
+  its listening for device and permission changes; the player calls
+  `release()` when it is destroyed.
 - `@swf2es/player-hosts/indexeddb`: `indexedDbModuleCache()`, the compiled
   modules kept in IndexedDB for a page's next visit.
 - `@swf2es/player-hosts/precompiled`: `precompiledModules()` reads what the
