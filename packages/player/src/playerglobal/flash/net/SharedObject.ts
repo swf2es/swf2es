@@ -231,7 +231,7 @@ export function sharedObjectNatives(s: Scripting): avm2.Natives {
         return known;
       }
 
-      const o = s.rt.construct(s.rt.classNamed("flash.net::SharedObject")) as AsObject;
+      const o = s.rt.constructNative(s.rt.classNamed("flash.net::SharedObject"));
       o.$key = key;
       o.$name = text;
       o.$encoding = defaultEncoding;
