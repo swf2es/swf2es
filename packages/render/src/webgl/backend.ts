@@ -1102,16 +1102,16 @@ export class WebGLBackend {
 
   /**
    * The layer pushed at command `k` drawn straight onto the target below,
-   * if it may be: unfiltered and not kept, one run of a flat geometry alone
-   * (Draws.blendable) drawn normally in it, and a mode (blendsDirect) whose
-   * blend of the fill pixel by pixel, its edges covering the pixels in part,
-   * is that of the layer's pixels covered alike, as each is linear in what
-   * covers it (add short of its sums' clamp); its colour on the quad's.
-   * Where fills of one shape meet inside a pixel, each blended by what it
-   * covers there is as adl blends them, not the pixel they make together,
-   * which a layer would blend. A layer and its
-   * resolve and composite left out, what reads what is below copies it as
-   * the composite would. Whether it was.
+   * if it may be: unfiltered, not grouped (SceneList.groups) and not kept,
+   * one run of a flat geometry alone (Draws.blendable) drawn normally in
+   * it, and a mode (blendsDirect) whose blend of the fill pixel by pixel,
+   * its edges covering the pixels in part, is that of the layer's pixels
+   * covered alike, as each is linear in what covers it (add short of its
+   * sums' clamp); its colour on the quad's. Where fills of one shape meet
+   * inside a pixel, each blended by what it covers there is as adl blends
+   * them, not the pixel they make together, which a layer would blend. A
+   * layer and its resolve and composite left out, what reads what is below
+   * copies it as the composite would. Whether it was.
    */
   private blendDirect(commands: Commands, k: number, scene: SceneList, canvas: Open): boolean {
     const ops = commands.ops;

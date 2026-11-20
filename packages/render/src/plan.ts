@@ -156,7 +156,7 @@ function emit(scene: SceneList, from: number, to: number, out: Commands, stage: 
         out.push(
           LAYER_PUSH,
           layerParams(out, scene, scene.geometry[i]),
-          scene.pads[scene.geometry[i]] >= 0 ? 1 : 0,
+          scene.pads[scene.geometry[i]] >= 0 ? 1 : scene.groups[scene.geometry[i]] ? 2 : 0,
         );
         break;
       }

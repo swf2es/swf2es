@@ -728,6 +728,10 @@ export class RenderView implements Drawer {
         : WHOLE_SMOOTH;
     let layerRow = -1;
     let layer = -1;
+    // A blend over what Flash keeps a bitmap of, it or the chain of only children it holds: Flash
+    // blends that bitmap as one picture, which fills drawn straight onto what is below would not
+    // be, each blended by what it covers (WebGLBackend.blendDirect, SceneList.groups).
+    const grouped = !hidden && blendsDirect(mode) && cachedChain(o);
     let drawnFrom = 0;
     let output: KeptOutput | null = null;
     // Its filters run before its alpha mask is applied, as Flash masks the bitmap they make: then in
@@ -776,7 +780,7 @@ export class RenderView implements Drawer {
         // once its filters are fitted to that.
         drawnFrom = this.scene.length;
         const keep = output?.keeping ? (output.handle as KeepHandle).id : -1;
-        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole);
+        layer = this.scene.layerBegin(filtering ? 0 : -1, keep, whole, grouped);
       }
     }
 
@@ -837,7 +841,8 @@ export class RenderView implements Drawer {
       // drawn without the layer where they do not overlap (WebGLBackend.blendDirect): looked into
       // only then, as it tessellates them again.
       const alone =
-        ((layer >= 0 && blendsDirect(mode)) || (mode === NORMAL && o === this.soleBlended)) &&
+        ((layer >= 0 && blendsDirect(mode) && !grouped) ||
+          (mode === NORMAL && o === this.soleBlended && !clipped)) &&
         !filtering &&
         !alphaMask &&
         !r &&
@@ -1167,17 +1172,20 @@ export class RenderView implements Drawer {
       const ownerSlice = this.ownerSlice;
       const ownerParent = this.ownerParent;
       // A clip in a blend mode that draws nothing but one child, as a SWF blends its art: that
-      // child's fills may be drawn without the clip's layer, as a blend set on it would be.
+      // child's fills may be drawn without the clip's layer, as a blend set on it would be. A layer,
+      // mask, scroll rectangle or 3D plane on the way between leaves that layer more than them.
       const soleBlended = this.soleBlended;
-      if (
-        layer >= 0 &&
-        blendsDirect(mode) &&
-        !filtering &&
-        !alphaMask &&
-        !r &&
-        !o.drawing?.layers.length
-      ) {
-        this.soleBlended = soleChild(o);
+      if (layer >= 0 || clipped || alphaMask || r || plane) {
+        this.soleBlended =
+          layer >= 0 &&
+          blendsDirect(mode) &&
+          !grouped &&
+          !filtering &&
+          !alphaMask &&
+          !r &&
+          !o.drawing?.layers.length
+            ? soleChild(o)
+            : null;
       }
 
       this.sliceOwner = ownSlice ? o : null;
@@ -1830,7 +1838,6 @@ export class RenderView implements Drawer {
   }
 }
 
-/** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 /**
  * The object at the end of `o`'s chain of only children, those between
  * drawing nothing of their own, if it has no children itself; else null.
@@ -1848,6 +1855,21 @@ function soleChild(o: Container): DisplayObject | null {
   return c === o || (c instanceof Container && c.children.length > 0) ? null : c;
 }
 
+/** Whether Flash keeps a bitmap of `o` or of one in its chain of only children (cached). */
+function cachedChain(o: DisplayObject): boolean {
+  let c = o;
+  while (!cached(c)) {
+    if (!(c instanceof Container) || c.children.length !== 1) {
+      return false;
+    }
+
+    c = c.children[0];
+  }
+
+  return true;
+}
+
+/** Count what `o` asks of the renderer that it does not draw yet (shapes.ts, unsupported). */
 function noteUnsupported(o: DisplayObject): void {
   if (o.filters.length > 0 && undrawnFilter(o.filters)) {
     unsupported.filters++;

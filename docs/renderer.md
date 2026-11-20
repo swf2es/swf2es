@@ -304,25 +304,29 @@ with the context:
   straight onto what is below in its mode (`WebGLBackend.blendDirect`),
   as its layer composited would be, the modes that read what is below
   from the same copy of it, and multiply onto the opaque stage by GL's
-  blending, as its composite. So has a shape's part of several fills that
-  meet without overlapping, as a SWF's shape writes them: where two meet
-  inside a pixel, adl blends each by what it covers, not the pixel they
-  make together, which only drawing them straight onto what is below
-  does: drawn as a host draws, at 4 samples, an edge between two fills in
-  hard light was up to 126 off adl's through a layer, 38 drawn straight.
-  adl does the same where the blend is a clip's that holds the shape
-  alone, as a SWF usually blends its art, a chain of clips deep, the
-  shape moved, turned or coloured in it, or the clip coloured: such a
-  shape is drawn as if the blend were its own (`RenderView`'s
+  blending, as its composite. So has a shape's part of several fills
+  that meet without overlapping, as a SWF's shape writes them: where two
+  meet inside a pixel, adl blends each by what it covers, not the pixel
+  they make together, which only drawing them straight onto what is
+  below does: drawn as a host draws, at 4 samples, an edge between two
+  fills in hard light was up to 126 off adl's through a layer, 38 drawn
+  straight. adl does the same where the blend is a clip's that holds the
+  shape alone, as a SWF usually blends its art, a chain of clips deep,
+  the shape moved, turned or coloured in it, or the clip coloured: such
+  a shape is drawn as if the blend were its own (`RenderView`'s
   `soleBlended`), as close to adl as the layer or closer in all but a
-  few edge pixels. Whether they overlap is looked into only for a part
-  drawn alone in such a mode, once it has stood a frame
-  (`Parts.markFlat`): triangles that cover more than their box overlap,
-  and otherwise their contours tessellated together by parity cover less
-  than their triangles do where two overlap. A drawing made again on every frame, as a burst of
+  few edge pixels. Not where Flash keeps a bitmap of the clip, of one
+  between or of the shape (cacheAsBitmap): it blends that bitmap as one
+  picture, its fills' seam showing, so the view begins such a layer
+  grouped (`SceneList.groups`), which the backend never draws straight.
+  Whether they overlap is looked into only for a part drawn alone in
+  such a mode, once it has stood a frame (`Parts.markFlat`): triangles
+  that cover more than their box overlap, and otherwise their contours
+  tessellated together by parity cover less than their triangles do
+  where two overlap. A drawing made again on every frame, as a burst of
   particles in add is, is never looked into: tessellating its discs
-  together took 4 to 12 times what tessellating them apart did, 5.8 ms
-  a frame for 200 of them. Each look at an object's part doubles how long
+  together took 4 to 12 times what tessellating them apart did, 5.8 ms a
+  frame for 200 of them. Each look at an object's part doubles how long
   its next parts must stand, to 64 frames, so one drawn again every
   second or third frame is looked into once or twice. Fills over each
   other, as a drawing's may be, keep the layer, which blends them as one
