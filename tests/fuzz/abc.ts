@@ -55,6 +55,8 @@ const seeds: Uint8Array[] = [
     }),
   ),
 ];
+// Closures with debug names, in the pool, empty, none and past it, which name their functions.
+seeds.push(closuresSeed());
 for (const [module, names] of [
   ["../unit/codegen/verify-cases.ts", ["verifyCases"]],
   ["../unit/codegen/link-cases.ts", ["linkCases", "resolveCases"]],
@@ -256,3 +258,26 @@ if (failures.length) {
 }
 
 console.log(`fuzz: ${summary}, all well (${seconds} s)`);
+
+/** A script that makes closures named by a pool string, an empty one, none and one past the pool. */
+function closuresSeed(): Uint8Array {
+  const names = [1, 2, 0, 3];
+  const code = [0xd0, 0x30];
+  for (let m = 1; m <= names.length; m++) {
+    code.push(0x40, m, 0x29);
+  }
+
+  code.push(0x47);
+  const body = { code: [0x47], maxStack: 1, localCount: 1, maxScopeDepth: 1 };
+  return abc(
+    { strings: ["x", ""] },
+    tables({
+      methods: [{}, ...names.map((name) => ({ name }))],
+      scripts: [{ init: 0 }],
+      bodies: [
+        { method: 0, code, maxStack: 1, localCount: 1, maxScopeDepth: 1 },
+        ...names.map((_, i) => ({ ...body, method: i + 1 })),
+      ],
+    }),
+  );
+}

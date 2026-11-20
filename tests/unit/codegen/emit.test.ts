@@ -549,6 +549,52 @@ test("a method with a long name is named without the memory growing with it", {
   assert.ok(grown < 4 << 20, `memory grew ${grown} bytes`);
 });
 
+/**
+ * An ABC whose script makes a closure of each method after its first, the
+ * method_info debug name of each the string index `names` gives.
+ */
+function closuresNamed(names: number[]): Uint8Array {
+  const code = [0xd0, 0x30];
+  for (let m = 1; m <= names.length; m++) {
+    code.push(0x40, ...u30(m), 0x29);
+  }
+
+  code.push(0x47);
+  const body = { code: [0x47], maxStack: 1, localCount: 1, maxScopeDepth: 1 };
+  return abc(
+    { strings: ["x", ""] },
+    tables({
+      methods: [{}, ...names.map((name) => ({ name }))],
+      scripts: [{ init: 0 }],
+      bodies: [
+        { method: 0, code, maxStack: 1, localCount: 1, maxScopeDepth: 1 },
+        ...names.map((_, i) => ({ ...body, method: i + 1 })),
+      ],
+    }),
+  );
+}
+
+test("a closure is named by its debug name, <anonymous> if empty, else by its index", {
+  skip,
+}, () => {
+  testing.domainReset(50);
+  testing.domainAdd(new Uint8Array(readFileSync(new URL("builtin.abc", generated))), true);
+  testing.domainModule("");
+  // "x", "", none, and indices past the pool's 3 strings, which avmplus takes for none.
+  assert.equal(testing.domainAdd(closuresNamed([1, 2, 0, 3, 5000, 0x0fffffff]), false), 0);
+  const js = testing.domainModule("") as string;
+  const names = [...js.matchAll(/function (\$_[\w$]+)\(/g)].map((m) => m[1]);
+  assert.deepEqual(names, [
+    "$_global$$init",
+    "$_Function$sx",
+    "$_Function$s$lanonymous$g",
+    "$_MethodInfo$m3",
+    "$_MethodInfo$m4",
+    "$_MethodInfo$m5",
+    "$_MethodInfo$m6",
+  ]);
+});
+
 test("an ABC compiled again gives the same module", { skip }, () => {
   testing.domainReset(50);
   const first = module("builtin.abc", true);

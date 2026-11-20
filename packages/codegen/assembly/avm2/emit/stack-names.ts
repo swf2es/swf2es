@@ -15,7 +15,7 @@ import { TRAITS_Class, TRAITS_Instance, TRAITS_Script } from "../link/traits";
  * class's initializer "Name$cinit", a script's "global$init"; a class's
  * static method under "Name$", a script's function under "global"; a
  * closure "Function/" and its debug name, "<anonymous>" if empty, or
- * "MethodInfo-" and its index if it has none. A name in a public namespace
+ * "MethodInfo-" and its index if it has none, or one outside the pool. A name in a public namespace
  * other than the unnamed one, a package's or the AS3 namespace, carries
  * its URI; one in any other, private or internal, does not.
  */
@@ -61,8 +61,10 @@ export function stackName(domain: Domain, index: u32, m: u32): string {
     }
   }
 
+  // The debug name's index is read unchecked, as avmplus reads it: one
+  // past the pool is no name, as PoolObject::hasString has it.
   const name = abc.methodName[local];
-  if (name === 0) {
+  if (name === 0 || name >= abc.pool.stringCount) {
     return `MethodInfo-${local.toString()}`;
   }
 
