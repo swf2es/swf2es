@@ -467,32 +467,55 @@ take before it is made (`tests/player/census.ts`):
 - **fill runs** as `Draws.prepare` gathers them: their lengths, how many
   were merged, and what ended each: a kept or held output's composite, a
   layer begun or ended, a mask, a blend mode, a glyph run or mesh, the
-  texture slots, a run's 256 draws; and, as a projection of drawing kept
-  and held outputs in normal mode as quads in the runs around them, how
-  many runs, merged draws and sub-draws there would be with the runs a
-  composite alone came between joined (texture slots left out, so the
-  most that could be taken);
+  texture slots, a run's 256 draws. Masks' runs are counted apart;
+- **a projection of item 2** of the renderer plan: the runs that only a
+  normal-mode kept or held composite came between, joined with it as a
+  quad, and how many runs, merged draws and sub-draws there would be,
+  against the fills' sub-draws now, masks' left out. It is an upper
+  bound: it assumes the merged stream has room (`FillBatches.add` gives
+  up when it is full) and leaves out the texture slots, of which each
+  kept output would take one of a run's eight, so a scene of many kept
+  outputs falls short of it;
 - **repeats** among the fills not merged, which instanced drawing would
   draw as one: a fill of the geometry, texture and sampling of the one
   just before it, or of one within 64 before it with no draw between
   overlapping it, and, as a bound, of any fill earlier in the frame;
 - **blend layers** drawn direct or as layers, by the draws inside and
-  their area, and how many hold what a layer held the frame before, still,
-  moved by whole pixels, or by fractions; and backdrop copies;
-- **the walk:** objects visited against objects changed (transform or
-  colour, content, children, pixels), how many a walk of what changed
-  would visit, and the frames in which only transforms and colours did.
+  their area, and how many hold what a layer held the frame before,
+  still, moved by whole pixels, or by fractions; a kept output inside
+  counts by where it is and how it is coloured, and a layer holding a
+  filter's output made that frame is not compared. A filtered object in
+  a blend mode is one layer, counted with the filter layers. And
+  backdrop copies;
+- **the walk:** the objects `RenderView.walk` visited, once each however
+  often (an alpha mask, a 3D object's content), and of those how many
+  changed (transform or colour, content, children, pixels), how many a
+  walk of what changed would visit, and the frames in which only
+  transforms and colours did; apart, the objects in the tree it did not
+  visit (hidden, masks, which the mask walker walks, a kept output's
+  content) and how many of those changed.
+
+What it does not see: 3D objects' planes and `BitmapData.draw` are
+drawn through the backend's `run` (`drawPlane`, `snapshot`), not
+`execute`, and their passes are not counted; nor is a frame whose run
+table did not fit, whose runs `Draws.prepare` did not gather. Each
+census is tagged with the bench's frame it was taken in, so one left
+out shifts no other, and a run with none counted fails.
 
 It costs nothing outside its runs, as `--counts` costs nothing: the
 renderer has no census code. The bench page wraps the view's `render`
-and `walk`, the backend's `execute`, `blendDirect` and `copyBelow`,
-`Draws.prepare` and `gatherRun`, the merged stream's `add` and GL's
-binds and draws, on that view's objects alone and only when `--census`
-is given, and counts from the scene list, rows and commands the frame
-made. It reads those private parts by name and throws where one is
-gone rather than count wrong, so a renaming in the renderer is one in
-`tests/player/page.ts` too. Its frames' times include its own work and
-are not compared with others'.
+and `walk`, the mask walker's `walkMask`, the backend's `execute`,
+`blendDirect` and `copyBelow`, `Draws.prepare` and `gatherRun`, the
+merged stream's `add` and GL's binds and draws, on that view's objects
+alone and only when `--census` is given, and counts from the scene list,
+rows and commands the frame made. It reaches the renderer's private
+methods and fields by name, through `censusMethod` and `censusField` in
+`tests/player/page.ts`, which throw where a name is gone rather than
+count wrong, so a renaming in the renderer is one there too;
+`tests/player/census-check.ts` (part of `pnpm test`) runs it on masked
+lists, with and without `WEBGL_multi_draw`, and on blends, and holds
+the runs it counted to the sub-draws GL was asked for. Its frames'
+times include its own work and are not compared with others'.
 
 ## Why not Pixi
 

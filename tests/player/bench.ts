@@ -212,7 +212,7 @@ import { resolve } from "node:path";
 import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
 import { stemFont } from "./cases.ts";
-import { formatCensus, summarise } from "./census.ts";
+import { formatCensus, framesFrom, summarise } from "./census.ts";
 import { benchPlayer, playPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 import { compiler } from "./scripts.ts";
@@ -1659,7 +1659,7 @@ async function playFile(path: string): Promise<void> {
       gl: round(s.gl),
       work: Object.fromEntries(Object.entries(s.work).map(([key, v]) => [key, round(v)])),
     })),
-    ...(args.includes("--census") ? { census: summarise(played.census) } : {}),
+    ...(args.includes("--census") ? { census: summarise(framesFrom(played.census, 0)) } : {}),
   };
   if (args.includes("--json")) {
     console.log(JSON.stringify(report));
@@ -1953,7 +1953,10 @@ const summary = {
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, binds, uploads, lines stroked.
   ...(args.includes("--counts") ? { perFrame: perFrame(result.meters.slice(WARMUP)) } : {}),
-  ...(args.includes("--census") ? { census: summarise(result.census.slice(WARMUP)) } : {}),
+  // Frames are numbered from 2, as the meters are: those after the warm-up.
+  ...(args.includes("--census")
+    ? { census: summarise(framesFrom(result.census, WARMUP + 2)) }
+    : {}),
   ...(args.includes("--allocs")
     ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
     : {}),

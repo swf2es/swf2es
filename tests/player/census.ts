@@ -7,7 +7,7 @@
 // - of the fills not merged into one draw, how many repeat a geometry, texture and sampling
 //   drawn just before them, or within 64 draws with nothing in between overlapping them;
 // - blend layers by what is drawn inside them, and how many hold what they held the frame before;
-// - objects the walk visited against objects changed since the last frame (dirtyCensus).
+// - objects the walk visited against objects changed since the last frame (walkCensus).
 //
 // Each frame's counts are a flat record of numbers, summed over frames and averaged (summarise).
 import {
@@ -120,6 +120,11 @@ function add(counts: Counts, key: string, by = 1): void {
 /** A layer open as analyseFrame walks the commands. */
 interface Open {
   filtered: boolean;
+  /**
+   * Whether a filter ran on something in it this frame: a held output, or a filtered layer drawn
+   * anew, whose pixels its content then holds, though its draws may be the frame before's.
+   */
+  refiltered: boolean;
   direct: boolean;
   area: number;
   draws: number;
@@ -256,6 +261,21 @@ function blendLayers(
       layer.parts.push(part);
     }
   };
+  // Something placed at x, y in target pixels, noted where it lies from each layer's first.
+  const placed = (x: number, y: number, part: string) => {
+    for (const layer of stack) {
+      if (Number.isNaN(layer.x)) {
+        layer.x = x;
+        layer.y = y;
+      }
+
+      layer.parts.push(`${part}@${(x - layer.x).toFixed(3)},${(y - layer.y).toFixed(3)}`);
+    }
+  };
+  const rowOf = (row: number) =>
+    row < 0
+      ? "-"
+      : `${Array.from(rows.subarray(row * ROW_FLOATS, row * ROW_FLOATS + 4)).join(",")}:${Array.from(rows.subarray(row * ROW_FLOATS + 8, (row + 1) * ROW_FLOATS)).join(",")}`;
 
   for (let k = 0; k < input.commandCount; k++) {
     const at = k * 4;
@@ -264,19 +284,15 @@ function blendLayers(
       case STENCIL_PUSH:
         for (const i of drawsIn(input, ops[at + 1], ops[at + 1] + ops[at + 2])) {
           const r = input.row[i] * ROW_FLOATS;
-          const x = rows[r + 4] * scale;
-          const y = rows[r + 5] * scale;
           for (const layer of stack) {
             layer.draws++;
-            if (Number.isNaN(layer.x)) {
-              layer.x = x;
-              layer.y = y;
-            }
-
-            layer.parts.push(
-              `${ops[at] === RUN ? "d" : "m"}${input.geometry[i]}:${input.texture[i]}:${input.sampler[i]}:${Array.from(rows.subarray(r, r + 4)).join(",")}:${Array.from(rows.subarray(r + 8, r + ROW_FLOATS)).join(",")}:${(x - layer.x).toFixed(3)},${(y - layer.y).toFixed(3)}`,
-            );
           }
+
+          placed(
+            rows[r + 4] * scale,
+            rows[r + 5] * scale,
+            `${ops[at] === RUN ? "d" : "m"}${input.geometry[i]}:${input.texture[i]}:${input.sampler[i]}:${rowOf(input.row[i])}`,
+          );
         }
 
         break;
@@ -288,6 +304,7 @@ function blendLayers(
         note(`L${params[from + 2]}x${params[from + 3]}`);
         stack.push({
           filtered: ops[at + 2] === 1,
+          refiltered: false,
           direct: input.direct.has(k),
           area: params[from + 2] * params[from + 3],
           draws: 0,
@@ -299,16 +316,31 @@ function blendLayers(
       }
       case FILTER:
         note("F");
+        for (let n = 0; n < stack.length - 1; n++) {
+          stack[n].refiltered = true;
+        }
+
         if (stack.length > 0) {
           stack[stack.length - 1].filtered = true;
         }
 
         break;
-      case COMPOSITE:
-        note(`K${params[ops[at + 1] + 4]}`);
+      case COMPOSITE: {
+        // A kept output, the same pixels as the frames before, wherever and however coloured.
+        const from = ops[at + 1];
+        placed(
+          params[from],
+          params[from + 1],
+          `K${params[from + 4]}:${params[from + 2]}x${params[from + 3]}:${ops[at + 2]}:${rowOf(ops[at + 3])}`,
+        );
         break;
+      }
       case HELD:
-        note(`H${ops[at + 1]}`);
+        note("H");
+        for (const layer of stack) {
+          layer.refiltered = true;
+        }
+
         break;
       case LAYER_POP: {
         const layer = stack.pop();
@@ -328,6 +360,11 @@ function blendLayers(
         add(counts, "blend.layers.draws", layer.draws);
         add(counts, "blend.layers.area", layer.area);
         add(counts, `blend.inside.${insideBucket(layer.draws)}`);
+        if (layer.refiltered) {
+          add(counts, "blend.refiltered");
+          break;
+        }
+
         const content = layer.parts.join("|");
         const x = Number.isNaN(layer.x) ? 0 : layer.x;
         const y = Number.isNaN(layer.y) ? 0 : layer.y;
@@ -397,6 +434,12 @@ function fillRuns(input: CensusInput, labels: string[], counts: Counts): void {
     if (subRuns[at + 5] === 1) {
       add(counts, "masks.runs");
       add(counts, "masks.draws", draws);
+      // Without WEBGL_multi_draw a mask's fills are merged too.
+      if (merged) {
+        add(counts, "masks.merged");
+        add(counts, "masks.merged.draws", draws);
+      }
+
       continue;
     }
 
@@ -668,53 +711,117 @@ const CHILDREN = 2;
 const CONTENT = 4;
 const PIXELS = 8;
 
-/** What dirtyCensus reads of a display object. */
+/** What dirtyMarks reads of a display object. */
 export interface Dirtied {
   dirty: number;
   descendantsDirty?: boolean;
   children?: readonly Dirtied[];
 }
 
+/** A mark's bit (dirtyMarks), past the flags: a walk of what changed would visit it. */
+const NEEDED = 1 << 8;
+
 /**
- * The objects under `root` and how many changed since the walk last cleared them: by what changed,
- * and how many a walk that visited only what changed would visit, each changed object, each with a
- * changed descendant and the whole subtree of each whose transform, colour or content changed, as
- * its rows follow; `walk.rowsOnly` 1 where nothing but transforms, colours and pixels changed.
+ * Every object under `root`, through its children, as it stands before the walk clears it: its
+ * flags, and NEEDED where a walk that visited only what changed would visit it, as it changed, or
+ * has a changed descendant, or is in the subtree of one whose transform, colour or content changed,
+ * as its rows follow. walkCensus counts them against the objects the walk did visit.
  */
-export function dirtyCensus(root: Dirtied): Counts {
-  const counts: Counts = { "walk.objects": 0, "walk.dirty": 0, "walk.needed": 0 };
-  let structural = false;
+export function dirtyMarks(root: Dirtied): Map<Dirtied, number> {
+  const marks = new Map<Dirtied, number>();
   const visit = (o: Dirtied, moved: boolean) => {
-    add(counts, "walk.objects");
     const dirty = o.dirty;
-    if (dirty !== 0) {
-      add(counts, "walk.dirty");
-      if (dirty & (CHILDREN | CONTENT)) {
-        structural = true;
-        add(counts, dirty & CONTENT ? "walk.content" : "walk.children");
-      } else {
-        add(
-          counts,
-          dirty & TRANSFORM ? "walk.transform" : dirty & PIXELS ? "walk.pixels" : "walk.other",
-        );
-      }
-    }
-
-    if (moved || dirty !== 0 || o.descendantsDirty) {
-      add(counts, "walk.needed");
-    }
-
-    const children = o.children;
-    if (children) {
-      const below = moved || (dirty & (TRANSFORM | CONTENT)) !== 0;
-      for (const child of children) {
-        visit(child, below);
-      }
+    marks.set(o, dirty | (moved || dirty !== 0 || o.descendantsDirty ? NEEDED : 0));
+    const below = moved || (dirty & (TRANSFORM | CONTENT)) !== 0;
+    for (const child of o.children ?? []) {
+      visit(child, below);
     }
   };
   visit(root, false);
+  return marks;
+}
+
+/** What the walk did in a render (page.ts counts it): its calls, and the objects it drew. */
+export interface Walked {
+  /** RenderView.walk's calls that drew, and the distinct objects they were of. */
+  calls: number;
+  objects: ReadonlySet<Dirtied>;
+  /** Its calls on hidden objects, which return at once (syncHidden passes their subtrees over). */
+  hidden: number;
+  /** The mask walker's calls (Masks.walkMask), a mask's objects, which RenderView.walk leaves. */
+  masks: number;
+}
+
+/**
+ * The walk against what changed: the objects it visited (once each; an alpha mask or a 3D object's
+ * content may be walked twice, `walk.again`), and of those how many changed, by what, and how
+ * many a walk of what changed would visit (`walk.needed`, never more than were visited); apart,
+ * the objects under `marks` the walk did not visit, hidden, masks or the content of a kept
+ * output, and how many of those changed; `walk.rowsOnly` 1 where nothing visited changed but
+ * transforms, colours and pixels.
+ */
+export function walkCensus(marks: ReadonlyMap<Dirtied, number>, walked: Walked): Counts {
+  const counts: Counts = {
+    "walk.calls": walked.calls,
+    "walk.visited": walked.objects.size,
+    "walk.again": walked.calls - walked.objects.size,
+    "walk.hidden": walked.hidden,
+    "walk.masks": walked.masks,
+    "walk.dirty": 0,
+    "walk.needed": 0,
+    "walk.unwalked": 0,
+    "walk.unwalkedDirty": 0,
+  };
+  let structural = false;
+  for (const [o, mark] of marks) {
+    const dirty = mark & 0xff;
+    if (!walked.objects.has(o)) {
+      add(counts, "walk.unwalked");
+      if (dirty !== 0) {
+        add(counts, "walk.unwalkedDirty");
+      }
+
+      continue;
+    }
+
+    if (mark & NEEDED) {
+      add(counts, "walk.needed");
+    }
+
+    if (dirty === 0) {
+      continue;
+    }
+
+    add(counts, "walk.dirty");
+    if (dirty & (CHILDREN | CONTENT)) {
+      structural = true;
+      add(counts, dirty & CONTENT ? "walk.content" : "walk.children");
+    } else {
+      add(
+        counts,
+        dirty & TRANSFORM ? "walk.transform" : dirty & PIXELS ? "walk.pixels" : "walk.other",
+      );
+    }
+  }
+
   counts["walk.rowsOnly"] = structural ? 0 : 1;
   return counts;
+}
+
+/**
+ * The records of frames `first` on, by the frame each was tagged with (page.ts, Census.at), the tag
+ * left out; a render left out (a frame whose runs were not prepared) shifts none of the others.
+ * Throws where none is left: a census that counted nothing must not read as one of nothing.
+ */
+export function framesFrom(records: readonly Counts[], first: number): Counts[] {
+  const out = records.filter((r) => r.frame >= first).map(({ frame: _, ...counts }) => counts);
+  if (out.length === 0) {
+    throw new Error(
+      `the census counted no frame from frame ${first} on, of ${records.length} records`,
+    );
+  }
+
+  return out;
 }
 
 /** Each key's mean over `frames`, and how many frames there were (`frames`). */
@@ -784,13 +891,22 @@ export function formatCensus(s: Counts): string[] {
       .join(", ")}`,
   );
   if (v("joined.runs") > 0) {
+    // The fills' sub-draws now, masks' left out as the projection leaves them.
+    const maskSubDraws = v("masks.draws") - v("masks.merged.draws") + v("masks.merged");
+    const now = v("path.merged") + v("path.multi") + v("path.single") - maskSubDraws;
+    const composites = v("filter.composites") + v("filter.held");
     lines.push(
-      `    if joined  across normal composites, as item 2 of renderer-plan.md would draw them: ${n(v("joined.runs"))} runs, ${n(v("joined.quads"))} quads among their fills; fills and quads in runs that would merge ${n(v("joined.mergeable"))}, sub-draws of fills and quads ${n(v("joined.subDraws"))} (now ${n(v("path.merged") + v("path.multi") + v("path.single"))} of fills and ${n(v("filter.composites") + v("filter.held"))} composites); texture slots not counted`,
+      `    if joined  across normal composites, as item 2 of renderer-plan.md would draw them: ${n(v("joined.runs"))} runs, ${n(v("joined.quads"))} composites among their fills as quads; fills and quads in runs that would merge ${n(v("joined.mergeable"))}, sub-draws of fills and quads ${n(v("joined.subDraws"))} (now ${n(now)} of fills, masks' left out, and ${n(v("joined.quads"))} of the ${n(composites)} composites); ${n(composites - v("joined.quads"))} composites stay as they are`,
+    );
+    lines.push(
+      "               an upper bound: it assumes the merged stream has room, and leaves out the texture slots, of which each kept output would take one of a run's 8",
     );
   }
 
   if (v("masks.runs") > 0) {
-    lines.push(`    masks      ${n(v("masks.runs"))} runs of ${n(v("masks.draws"))} fills`);
+    lines.push(
+      `    masks      ${n(v("masks.runs"))} runs of ${n(v("masks.draws"))} fills, ${n(v("masks.merged.draws"))} of them merged`,
+    );
   }
 
   lines.push(
@@ -810,14 +926,20 @@ export function formatCensus(s: Counts): string[] {
     `    layers     ${n(v("blend.layers.draws"))} fills inside (${INSIDE.map((b) => `${b}: ${n(v(`blend.inside.${b}`))}`).join(", ")}), ${n(v("blend.layers.area") / 1000)} k pixels; backdrop copies ${n(v("copies"))}`,
   );
   lines.push(
-    `    unchanged  ${n(unchanged)} of ${n(layers)} (${pct(unchanged, layers)}) hold the frame before's content still or moved by whole pixels (${n(v("blend.unchanged.still"))} still, ${n(v("blend.unchanged.whole"))} whole), ${n(v("blend.unchanged.moved"))} more moved by fractions; ${n(v("blend.unchanged.draws"))} fills inside them`,
+    `    unchanged  ${n(unchanged)} of ${n(layers)} (${pct(unchanged, layers)}) hold the frame before's content still or moved by whole pixels (${n(v("blend.unchanged.still"))} still, ${n(v("blend.unchanged.whole"))} whole), ${n(v("blend.unchanged.moved"))} more moved by fractions; ${n(v("blend.unchanged.draws"))} fills inside them; ${n(v("blend.refiltered"))} hold a filter's output made this frame, and are not compared`,
+  );
+  lines.push(
+    "               a filtered object in a blend mode is one layer, counted with the filter layers, not here",
   );
   lines.push(
     `  filters      layers drawn ${n(v("filter.layers"))} (${n(v("filter.kept"))} kept), kept outputs composited ${n(v("filter.composites"))}, held ${n(v("filter.held"))}; alpha masks ${n(v("layers.alphaMask"))}`,
   );
-  const objects = v("walk.objects");
+  const visited = v("walk.visited");
   lines.push(
-    `  walk         visited ${n(v("walk.visited"))} (and ${n(v("walk.hidden"))} hidden roots) of ${n(objects)} objects; changed ${n(v("walk.dirty"))} (${pct(v("walk.dirty"), objects)}: transform or colour ${n(v("walk.transform"))}, content ${n(v("walk.content"))}, children ${n(v("walk.children"))}, pixels ${n(v("walk.pixels"))}); a walk of what changed would visit ${n(v("walk.needed"))} (${pct(v("walk.needed"), v("walk.visited"))} of those visited); rows-only frames ${pct(v("walk.rowsOnly"), 1)}`,
+    `  walk         visited ${n(visited)} objects and again ${n(v("walk.again"))} times (alpha masks, 3D content), passed over ${n(v("walk.hidden"))} hidden roots, and the mask walker ${n(v("walk.masks"))} objects; of those visited, changed ${n(v("walk.dirty"))} (${pct(v("walk.dirty"), visited)}: transform or colour ${n(v("walk.transform"))}, content ${n(v("walk.content"))}, children ${n(v("walk.children"))}, pixels ${n(v("walk.pixels"))}); a walk of what changed would visit ${n(v("walk.needed"))} (${pct(v("walk.needed"), visited)}); rows-only frames ${pct(v("walk.rowsOnly"), 1)}`,
+  );
+  lines.push(
+    `    unwalked   ${n(v("walk.unwalked"))} objects in the tree the walk did not visit (hidden, masks, kept outputs' content), ${n(v("walk.unwalkedDirty"))} of them changed`,
   );
   return lines;
 }

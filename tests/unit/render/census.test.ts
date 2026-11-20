@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   Commands,
-  KEPT,
   MASK_BEGIN,
   MASK_POP,
   MASK_USE,
@@ -19,13 +18,15 @@ import {
   analyseFrame,
   type BlendMemory,
   type CensusInput,
-  dirtyCensus,
+  dirtyMarks,
   FORM_FILL,
   FORM_FRESH,
   FORM_GLYPHS,
   FORM_SMALL,
   formatCensus,
+  framesFrom,
   summarise,
+  walkCensus,
 } from "../../player/census.ts";
 
 /**
@@ -218,11 +219,18 @@ test("masks' runs are counted apart", () => {
   scene.marker(MASK_POP, 1, 1);
   const input = frame(scene, rows, squares(2));
   const k = commandOf(input, STENCIL_PUSH);
-  input.subRuns = Int32Array.from([k, 1, 1, 1, 0, 1]);
-  input.subRunCount = 1;
+  const run = commandOf(input, RUN);
+  input.subRuns = Int32Array.from([k, 1, 1, 1, 1, 1, run, 3, 3, 1, 0, 0]);
+  input.subRunCount = 2;
   const { counts } = analyseFrame(input, null);
   assert.equal(counts["masks.runs"], 1);
-  assert.equal(counts.runs, undefined);
+  assert.equal(counts["masks.merged.draws"], 1);
+  assert.equal(counts.runs, 1);
+  // The projection's "now" leaves the mask's sub-draw out, as its runs leave masks out.
+  const lines = formatCensus(
+    summarise([{ ...counts, "path.merged": 1, "path.multi": 1, "joined.runs": 1 }]),
+  );
+  assert.match(lines.find((line) => line.includes("if joined")) ?? "", /\(now 1 of fills/);
 });
 
 /**
@@ -279,48 +287,90 @@ test("blend layers are counted by content, and kept content found again", () => 
   assert.equal(direct.runs, undefined);
 });
 
-test("a kept output inside a layer is part of its content", () => {
+/**
+ * A frame of one screen layer of a fill at the origin and, inside it, kept output 3 at `x`, `y`,
+ * or a filtered layer drawn anew there (held) where `held`.
+ */
+function keptFrame(x: number, y: number, held = false): CensusInput {
   const scene = new SceneList();
   const rows = new Rows();
   const row = rows.add(1, 0, 0, 1, 0, 0, null);
   const layer = scene.layerBegin();
-  scene.layerRect(layer, 0, 0, 20, 20);
+  scene.layerRect(layer, 0, 0, 40, 40);
   scene.draw(0, row, NORMAL);
-  scene.keptLayer(3, NORMAL, row, 0, 0, 10, 10);
+  if (held) {
+    const filtered = scene.layerBegin(2);
+    scene.layerRect(filtered, x, y, 10, 10);
+    scene.draw(0, rows.add(1, 0, 0, 1, x, y, null), NORMAL);
+    scene.layerEnd(NORMAL, -1, 0);
+  } else {
+    scene.keptLayer(3, NORMAL, row, x, y, 10, 10);
+  }
+
   scene.layerEnd(SCREEN, -1);
-  const input = frame(scene, rows, squares(1));
-  assert.equal(input.kind.subarray(0, scene.length).includes(KEPT), true);
-  const { counts } = analyseFrame(input, null);
-  assert.equal(counts["blend.layers"], 1);
-  assert.equal(counts["filter.composites"], 1);
+  return frame(scene, rows, squares(1));
+}
+
+test("a kept output inside a blend layer is its content, a filter drawn anew changes it", () => {
+  const first = analyseFrame(keptFrame(5, 5), null);
+  assert.equal(first.counts["blend.layers"], 1);
+  assert.equal(first.counts["filter.composites"], 1);
+  const again = analyseFrame(keptFrame(5, 5), first.memory).counts;
+  assert.equal(again["blend.unchanged.still"], 1);
+  // The output moved within the layer: other content.
+  const moved = analyseFrame(keptFrame(7, 5), first.memory).counts;
+  assert.equal(
+    Object.keys(moved).some((key) => key.startsWith("blend.unchanged")),
+    false,
+  );
+
+  const held = analyseFrame(keptFrame(5, 5, true), null);
+  assert.equal(held.counts["filter.held"], 1);
+  assert.equal(held.counts["blend.refiltered"], 1);
+  const heldAgain = analyseFrame(keptFrame(5, 5, true), held.memory).counts;
+  assert.equal(heldAgain["blend.refiltered"], 1);
+  assert.equal(heldAgain["blend.unchanged.still"], undefined);
 });
 
-test("the dirty census counts what a walk of what changed would visit", () => {
+test("the walk is counted against what it visited, what it did not apart", () => {
   const leaf = (dirty = 0) => ({ dirty });
   const moved = { dirty: 1, children: [leaf(), leaf()] };
-  const still = { dirty: 0, descendantsDirty: false, children: [leaf()] };
-  const root = { dirty: 0, descendantsDirty: true, children: [moved, still] };
-  assert.deepEqual(dirtyCensus(root), {
-    "walk.objects": 6,
+  // Hidden: its subtree changed, but the walk passes it over.
+  const hidden = { dirty: 0, descendantsDirty: true, children: [leaf(4), leaf(4), leaf(4)] };
+  const root = { dirty: 0, descendantsDirty: true, children: [moved, hidden] };
+  const marks = dirtyMarks(root);
+  const walked = new Set([root, moved, ...moved.children]);
+  assert.deepEqual(walkCensus(marks, { calls: 5, objects: walked, hidden: 1, masks: 0 }), {
+    "walk.calls": 5,
+    "walk.visited": 4,
+    "walk.again": 1,
+    "walk.hidden": 1,
+    "walk.masks": 0,
     "walk.dirty": 1,
     "walk.transform": 1,
     "walk.needed": 4,
+    "walk.unwalked": 4,
+    "walk.unwalkedDirty": 3,
     "walk.rowsOnly": 1,
   });
 
-  const changed = {
-    dirty: 0,
-    descendantsDirty: true,
-    children: [{ dirty: 0, descendantsDirty: true, children: [leaf(4), leaf(8)] }],
-  };
-  assert.deepEqual(dirtyCensus(changed), {
-    "walk.objects": 4,
-    "walk.dirty": 2,
-    "walk.content": 1,
-    "walk.pixels": 1,
-    "walk.needed": 4,
-    "walk.rowsOnly": 0,
-  });
+  // Walked, the content changes make the frame more than rows.
+  const all = new Set(marks.keys());
+  const counts = walkCensus(marks, { calls: 8, objects: all, hidden: 0, masks: 0 });
+  assert.equal(counts["walk.needed"], 8);
+  assert.equal(counts["walk.content"], 3);
+  assert.equal(counts["walk.rowsOnly"], 0);
+  assert.ok(counts["walk.needed"] <= counts["walk.visited"]);
+});
+
+test("frames are taken by their tags, and none is an error", () => {
+  const records = [
+    { frame: 2, runs: 1 },
+    { frame: 12, runs: 2 },
+    { frame: 14, runs: 4 },
+  ];
+  assert.deepEqual(framesFrom(records, 12), [{ runs: 2 }, { runs: 4 }]);
+  assert.throws(() => framesFrom(records, 20), /no frame/);
 });
 
 test("frames are averaged, and the report names what it counted", () => {

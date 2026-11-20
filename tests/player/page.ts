@@ -54,7 +54,7 @@ import {
   analyseFrame,
   type BlendMemory,
   type Dirtied,
-  dirtyCensus,
+  dirtyMarks,
   FORM_FILL,
   FORM_FRESH,
   FORM_GLYPHS,
@@ -64,6 +64,7 @@ import {
   FORM_SMALL,
   FORM_STAGE,
   SUB_RUN_INTS,
+  walkCensus,
 } from "./census.ts";
 import { type RecordedEvent, Replay } from "./replay.ts";
 
@@ -967,29 +968,72 @@ function censusMethod(
   return method as (...args: unknown[]) => unknown;
 }
 
+/** A field of one of the renderer's objects, found by name, which a census reads. */
+function censusField<T = unknown>(object: object, name: string): T {
+  if (!(name in object)) {
+    throw new Error(`the census found no ${name}: the renderer changed, and census.ts with it`);
+  }
+
+  return (object as Record<string, unknown>)[name] as T;
+}
+
+/**
+ * Each frame's census (installCensus), tagged with `at`: the frame of the bench's it was taken in,
+ * which its caller sets before each render, so that one left out cannot shift the rest.
+ */
+interface Census {
+  frames: Record<string, number>[];
+  at: number;
+}
+
 /**
  * The renderer's census (census.ts) of each frame `view` draws from here on, a record a frame: the
  * view's render and walk, the backend's execute, its run gathering, merging, direct blends and
  * backdrop copies, and GL's program and vertex array binds and draws are wrapped, on these objects
  * alone and only when a census is asked for, so that no other frame pays for it. It reads the
- * renderer's private parts by name, and throws where one is missing rather than count wrong.
+ * renderer's private methods and fields by name (censusMethod, censusField), and throws where one
+ * is missing rather than count wrong. 3D objects' planes and BitmapData.draw are drawn through the
+ * backend's run, not execute, and are not counted.
  */
-function installCensus(view: RenderView): Record<string, number>[] {
-  const frames: Record<string, number>[] = [];
+function installCensus(view: RenderView): Census {
+  const census: Census = { frames: [], at: 0 };
   const v = view as unknown as Record<string, unknown>;
-  const backend = v.backend as Record<string, unknown>;
-  const draws = backend.draws as Record<string, unknown>;
-  const batches = draws.batches as Record<string, unknown> & { vertexArray: unknown };
-  const atlas = backend.atlas as { places: (CensusPlace | undefined)[]; frame: number };
-  const gpu = backend.gpu as { textures: unknown[] };
-  const compositor = backend.compositor as Record<string, unknown>;
+  const backend = censusField<Record<string, unknown>>(v, "backend");
+  const draws = censusField<Record<string, unknown>>(backend, "draws");
+  const batches = censusField<Record<string, unknown>>(draws, "batches");
+  const atlas = censusField<object>(backend, "atlas");
+  const places = censusField<(CensusPlace | undefined)[]>(atlas, "places");
+  const textures = censusField<unknown[]>(censusField<object>(backend, "gpu"), "textures");
+  const compositor = censusField<Record<string, unknown>>(backend, "compositor");
+  const masks = censusField<Record<string, unknown>>(v, "masks");
+  for (const name of ["program", "blendProgram", "mesh", "glyphProgram", "stageProgram"]) {
+    censusField(draws, name);
+  }
+
+  censusField(draws, "multi");
+  censusField(draws, "prepared");
+  censusField(draws, "runCount");
+  censusField(batches, "vertexArray");
+  censusField(atlas, "frame");
   const gl = view.gl;
 
-  let walked = { visited: 0, hidden: 0 };
+  // The objects the walk drew, its calls, and the mask walker's.
+  let walked = { calls: 0, objects: new Set<Dirtied>(), hidden: 0, masks: 0 };
   const walk = censusMethod(v, "walk");
   v.walk = function (this: unknown, ...args: unknown[]) {
-    walked[args[2] ? "hidden" : "visited"]++;
+    if (args[2]) {
+      walked.hidden++;
+    } else {
+      walked.calls++;
+      walked.objects.add(args[0] as Dirtied);
+    }
+
     return walk.apply(this, args);
+  };
+  const walkMask = censusMethod(masks, "walkMask");
+  masks.walkMask = function (this: unknown, ...args: unknown[]) {
+    walked.masks++;
+    return walkMask.apply(this, args);
   };
 
   // What the frame's execute gathered, then counted.
@@ -1026,7 +1070,7 @@ function installCensus(view: RenderView): Record<string, number>[] {
       subRuns[at] = -1;
       subRuns[at + 1] = args[1] as number;
       subRuns[at + 2] = last;
-      subRuns[at + 3] = this.runCount as number;
+      subRuns[at + 3] = censusField<number>(this, "runCount");
       subRuns[at + 4] = 0;
       subRuns[at + 5] = args[3] ? 1 : 0;
     }
@@ -1128,7 +1172,7 @@ function installCensus(view: RenderView): Record<string, number>[] {
     const geometries = args[3] as { box: Float32Array };
     const target = args[7] as { scale: number };
     // A frame drawn without its runs prepared (a run table too large) is left out.
-    if (!draws.prepared) {
+    if (!censusField<boolean>(draws, "prepared")) {
       return out;
     }
 
@@ -1155,11 +1199,21 @@ function installCensus(view: RenderView): Record<string, number>[] {
       subRuns[at] = k;
     }
 
+    const frame = censusField<number>(atlas, "frame");
     const form = new Uint8Array(scene.length);
+    let checked = false;
     for (let i = 0; i < scene.length; i++) {
-      const place = atlas.places[scene.geometry[i]];
+      const place = places[scene.geometry[i]];
       if (scene.kind[i] !== DRAW || !place) {
         continue;
+      }
+
+      if (!checked) {
+        for (const name of ["glyphs", "stage", "batch"]) {
+          censusField(place, name);
+        }
+
+        checked = true;
       }
 
       const texture = scene.texture[i];
@@ -1171,13 +1225,13 @@ function installCensus(view: RenderView): Record<string, number>[] {
             ? FORM_SHADED
             : place.stage
               ? FORM_STAGE
-              : texture >= 0 && !gpu.textures[texture]
+              : texture >= 0 && !textures[texture]
                 ? FORM_NONE
                 : FORM_FILL;
       form[i] =
         of |
         (place.batch ? FORM_SMALL : 0) |
-        (place.batch && place.batch.frame === atlas.frame ? FORM_FRESH : 0);
+        (place.batch && place.batch.frame === frame ? FORM_FRESH : 0);
     }
 
     const analysed = analyseFrame(
@@ -1194,7 +1248,7 @@ function installCensus(view: RenderView): Record<string, number>[] {
         boxes: geometries.box,
         rows: rows.data,
         scale: target.scale,
-        multi: draws.multi !== null,
+        multi: censusField(draws, "multi") !== null,
         subRuns,
         subRunCount,
         direct,
@@ -1208,25 +1262,26 @@ function installCensus(view: RenderView): Record<string, number>[] {
 
   const render = censusMethod(v, "render");
   v.render = function (this: unknown, ...args: unknown[]) {
-    const dirty = dirtyCensus(args[0] as Dirtied);
-    walked = { visited: 0, hidden: 0 };
+    const root = args[0] as object;
+    for (const name of ["dirty", "descendantsDirty", "children"]) {
+      censusField(root, name);
+    }
+
+    // Before the walk clears what changed.
+    const marks = dirtyMarks(root as Dirtied);
+    walked = { calls: 0, objects: new Set(), hidden: 0, masks: 0 };
     counted = null;
     const out = render.apply(this, args);
     // Set by the execute the render called, which the compiler cannot see.
     const frame = counted as Record<string, number> | null;
     if (frame) {
-      frames.push({
-        ...frame,
-        ...dirty,
-        "walk.visited": walked.visited,
-        "walk.hidden": walked.hidden,
-      });
+      census.frames.push({ ...frame, ...walkCensus(marks, walked), frame: census.at });
     }
 
     return out;
   };
 
-  return frames;
+  return census;
 }
 
 /** Chrome's console profiler, which the DOM's types leave out. */
@@ -1322,7 +1377,7 @@ async function benchSwf(
     // Only when asked for: each call wrapped and timed would slow the frames timed.
     const counter = metered ? meter(gl) : { read: () => ({}) as Record<string, number> };
     // Only when asked for, as the meter: the census wraps the renderer's own methods.
-    const censused = census ? installCensus(view) : [];
+    const censused = census ? installCensus(view) : null;
     const lineCounts = view.counts;
     const nativeCalls = (globalThis as { benchNativeCalls?: { layer: number; lineBuild: number } })
       .benchNativeCalls;
@@ -1356,6 +1411,10 @@ async function benchSwf(
         throw uncaught[0];
       }
 
+      if (censused) {
+        censused.at = frame;
+      }
+
       view.render(player.stage);
       const drawn = performance.now();
       // Pipelined, the GPU's work goes on behind the next frames', as a page's does, and only
@@ -1379,6 +1438,11 @@ async function benchSwf(
       stroked = lineCounts.strokeContexts;
       meters.push(reading);
       // Renders no tick came before, as a host that draws on every animation frame does.
+      if (censused) {
+        // An idle render's census is no frame's.
+        censused.at = -1;
+      }
+
       for (let k = 0; k < idleRenders; k++) {
         const begun = performance.now();
         view.render(player.stage);
@@ -1410,7 +1474,7 @@ async function benchSwf(
     return {
       counts,
       meters,
-      census: censused,
+      census: censused?.frames ?? [],
       allocated: 0,
       heap,
       tick,
@@ -1662,7 +1726,7 @@ async function playSwf(
     gpu = rendererName(gl);
     const parallel = gl.getSupportedExtensions()?.includes("KHR_parallel_shader_compile") ?? false;
     meter.watch(gl);
-    const censused = census ? installCensus(view) : [];
+    const censused = census ? installCensus(view) : null;
     // As the element's stageSamples: 4 at medium, 8 at high, 16 at best, fewer on a denser canvas.
     const samplesFor = (quality: string) => {
       const samples = quality === "MEDIUM" ? 4 : quality === "HIGH" ? 8 : 16;
@@ -1726,6 +1790,10 @@ async function playSwf(
       if (player.changes !== drawn) {
         drawn = player.changes;
         if (!view.unchanged(player.stage)) {
+          if (censused) {
+            censused.at = steps.length;
+          }
+
           view.render(player.stage);
           rendered = performance.now();
           finish();
@@ -1774,7 +1842,7 @@ async function playSwf(
       links,
       gpu,
       parallel,
-      census: censused,
+      census: censused?.frames ?? [],
       error: null,
     };
   } catch (e) {
