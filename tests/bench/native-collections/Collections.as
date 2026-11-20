@@ -62,6 +62,27 @@ bench("array-some", function():Number
 	{
 		return input.some(never) ? 1 : 0;
 	});
+var small:Array = [3, 1, 4, 1, 5, 9, 2, 6];
+bench("array-indexOf-small", function():Number
+	{
+		var found:Number = 0;
+		for (var k:int = 0; k < 20000; k++)
+		{
+			found += small.indexOf(k & 7) + small.lastIndexOf(k & 7);
+		}
+
+		return found;
+	});
+bench("array-indexOf", function():Number
+	{
+		var found:Number = 0;
+		for (var k:int = 0; k < 64; k++)
+		{
+			found += input.indexOf(k * 127) + input.lastIndexOf(k * 127);
+		}
+
+		return found;
+	});
 bench("vector-map", function():Number
 	{
 		return vector.map(identity).length;
