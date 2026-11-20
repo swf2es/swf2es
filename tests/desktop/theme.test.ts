@@ -26,9 +26,12 @@ test("--theme refuses what does not read", () => {
 test("stderr says --theme holds for the run and the settings keep their own", () => {
   assert.equal(
     themeNotice("dark", "system"),
-    "swf2es: --theme: dark theme for this run; View › Theme's choice, the system's, is kept for the next",
+    "swf2es: --theme: dark theme for this run; the saved theme (the system's) is kept for the next run",
   );
-  assert.match(themeNotice("system", "light"), /the system's theme for this run.*choice, light,/);
+  assert.match(
+    themeNotice("system", "light"),
+    /the system's theme for this run.*saved theme \(light\)/,
+  );
 });
 
 test("View › Theme offers System, Light and Dark as radio items, the current one checked", () => {

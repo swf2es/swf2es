@@ -75,7 +75,8 @@ fetch-electron` does so ahead, for the tests.
   SWF's stage keeps its own background colour, whatever the theme. The app
   remembers the choice in `settings.json` (`theme`) and applies it before
   its window opens; `--theme=system`, `--theme=light` or `--theme=dark`
-  sets it for one run, said on stderr, and leaves the saved one as it is.
+  sets it for one run, said on stderr, and leaves the saved one as it is unless a
+  theme is then chosen from View › Theme.
 - **Libraries.** ActionScript 3 plays on the `builtin.abc` (avmplus',
   MPL-2.0) and playerglobal that ship with the player, with nothing to set
   up. File › Choose playerglobal.abc… plays on another playerglobal, such

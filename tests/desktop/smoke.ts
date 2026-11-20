@@ -1151,7 +1151,7 @@ async function theme(): Promise<void> {
       });
       assert.match(
         stderr(),
-        /swf2es: --theme: light theme for this run; View › Theme's choice, dark, is kept for the next/,
+        /swf2es: --theme: light theme for this run; the saved theme \(dark\) is kept for the next run/,
       );
       assert.equal(savedSettings(userData).theme, "dark");
     },

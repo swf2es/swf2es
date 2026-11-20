@@ -46,7 +46,7 @@ export function themeArgument(
 /** What stderr says of --theme as the app starts: for this run, the settings' choice kept. */
 export function themeNotice(override: Theme, saved: Theme): string {
   const name = (theme: Theme) => (theme === "system" ? "the system's" : theme);
-  return `swf2es: --theme: ${name(override)} theme for this run; View › Theme's choice, ${name(saved)}, is kept for the next`;
+  return `swf2es: --theme: ${name(override)} theme for this run; the saved theme (${name(saved)}) is kept for the next run`;
 }
 
 /** The View menu's Theme submenu: `current` checked, `choose` given the one picked. */
