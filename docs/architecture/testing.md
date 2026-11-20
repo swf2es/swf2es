@@ -148,6 +148,12 @@ work beside it and throws where the two differ, on in the checked build
 - `RenderView.checkSpans` walks each object whose span of the scene list
   the frame took from the frame before, and compares the two entry for
   entry and row for row ([renderer.md](../renderer.md#spans)).
+  `tests/player/spans-fuzz.ts` feeds it seeded random changes (moves,
+  shapes drawn anew, added and removed, objects moved to other parents and
+  places, visibility, colour, masks, bitmap caches, blends, BitmapData
+  draws, the view's scale and viewport) and compares each frame with a
+  view that takes no span, checked and unchecked; `pnpm test` runs 60
+  seeds of 40 frames, and its arguments run more.
 
 Unit tests are checked only when `tests/unit/checked.ts` is loaded, as
 `tests/unit`'s test script and `pnpm test:checked` do; `SWF2ES_CHECKED=1

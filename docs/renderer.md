@@ -203,7 +203,9 @@ picture flags its ancestors only up to the first hidden one, so that a
 hidden video playing does not wake the stage), and a copy whose draws'
 geometries and textures it did not itself use this frame, before the walk
 uses them and would hide it. `tests/player/spans.ts` breaks a span on
-purpose, a drawing changed with no flag set, and sees it caught.
+purpose, a drawing changed with no flag set, and sees it caught;
+`tests/player/spans-fuzz.ts` makes seeded random changes and compares
+each frame with a view that takes no span.
 
 Video is not plain, and stays so: a video's new picture flags its object
 (`VideoObject`) without telling its ancestors, which a span would miss.
