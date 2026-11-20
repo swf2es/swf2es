@@ -4,7 +4,7 @@
 // loopback socket; the traces come on adl's standard error.
 //
 //   node oracle/flash.ts <file.swf> [frames, default 1] [frame to capture...] [low|medium|high|best]
-//   node oracle/flash.ts --root <file.swf> [frames, default 1]
+//   node oracle/flash.ts --root <file.swf> [frames, default 2]
 //
 // adl and amxmlc come from an AIR SDK on PATH, or the ADL and AMXMLC
 // environment variables. An adl that runs AIR's Windows runtime under Wine
@@ -61,9 +61,13 @@ export interface FlashJob {
   /**
    * Run as the application's content, the root, in an adl of its own,
    * rather than loaded by the harness: at its own SWF version's API
-   * version, not the harness's. Traces only: nothing is captured, and it
-   * must be an AS3 SWF. An error nothing caught before its first frame
-   * ends stops it with AIR's dialog, and it comes back incomplete.
+   * version, not the harness's. Traces only: nothing is captured, the
+   * quality is the SWF's, and it must be an AS3 SWF of two frames at least
+   * (rootJobProblem), or it comes back incomplete with the reason among its
+   * errors, unrun: its first frame's end comes before the EXIT_FRAME
+   * listeners the SWF adds in that frame, which a harness job's includes.
+   * An error nothing caught before its first frame ends stops it with
+   * AIR's dialog, and it comes back incomplete, not run again.
    */
   root?: boolean;
 }
@@ -136,15 +140,42 @@ function harness(): string {
 }
 
 /**
+ * Why `job` cannot run as the root, or null if it can: it must be an AS3
+ * SWF, FileAttributes first, which runs for two frames at least and
+ * captures none. In its first frame the helper's EXIT_FRAME listener, added
+ * as its ABC loads, comes before those the SWF adds; it is added again at
+ * that frame's end, after them, so that a job's last frame, from the
+ * second on, ends as the harness's do.
+ */
+export function rootJobProblem(job: FlashJob): string | null {
+  if (job.capture.length) {
+    return "a job run as the root captures no frames";
+  }
+
+  if (job.frames < 2) {
+    return "a job run as the root runs for two frames at least, or it ends before its first frame's EXIT_FRAME listeners";
+  }
+
+  try {
+    const swf = readSwf(job.swf);
+    if (!isAs3(swf) || swf.tags[0]?.code !== tags.FileAttributes) {
+      return "a job run as the root must be an AS3 SWF, FileAttributes first";
+    }
+  } catch (e) {
+    return `a job run as the root must be a SWF: ${(e as Error).message}`;
+  }
+
+  return null;
+}
+
+/**
  * `swf` with Swf2esOracleRoot's ABC first, after its FileAttributes, as a
- * DoABC that runs as it loads (no lazy flag), uncompressed.
+ * DoABC that runs as it loads (no lazy flag), uncompressed. It must be a
+ * SWF rootJobProblem passes.
  */
 function withRootScript(swf: Uint8Array): Uint8Array {
   const job = readSwf(swf);
   const first = job.tags[0];
-  if (!isAs3(job) || first?.code !== tags.FileAttributes) {
-    throw new Error("a job run as the root must be an AS3 SWF");
-  }
 
   const helper = readSwf(new Uint8Array(readFileSync(compiled(rootSource, "Swf2esOracleRoot"))));
   const doAbc = helper.tags.find((t) => t.code === tags.DoABC2);
@@ -168,7 +199,10 @@ function withRootScript(swf: Uint8Array): Uint8Array {
   return new Uint8Array(result);
 }
 
-/** An application of `content`; with `size`, its window 550 by 400, which the harness sizes to each SWF, else the SWF's own. */
+/**
+ * An application of `content`; with `size`, its window 550 by 400, which
+ * the harness sizes to each SWF, else the SWF's own.
+ */
 function descriptor(content: string, id: string, size = true): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <application xmlns="http://ns.adobe.com/air/application/51.3">
@@ -190,7 +224,8 @@ function descriptor(content: string, id: string, size = true): string {
 
 /**
  * A job's cache key: what decides what Flash gives for it, the adl it runs
- * in among it. A job run alone is keyed apart, and one not, as before;
+ * in among it: the harness, or for a job run as the root the helper, which
+ * takes no quality. A job run alone is keyed apart, and one not, as before;
  * and the zone where TZ names one, which adl under Wine takes Flash's
  * local time from.
  */
@@ -202,13 +237,17 @@ export function jobKey(job: FlashJob): string {
     hash.update(`file ${name} ${bytes.length}\n`).update(bytes);
   }
 
-  return hash
-    .update(job.swf)
-    .update(
+  hash.update(job.swf);
+  if (job.root) {
+    hash.update(`\n${job.frames}\nroot\n${readFileSync(rootSource)}`);
+  } else {
+    hash.update(
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
-    )
+    );
+  }
+
+  return hash
     .update(job.alone ? "\nalone" : "")
-    .update(job.root ? `\nroot\n${readFileSync(rootSource)}` : "")
     .update(process.env.TZ ? `\nTZ=${process.env.TZ}` : "")
     .digest("hex");
 }
@@ -236,14 +275,17 @@ function encodeJob(id: number, job: FlashJob): Buffer {
 
 /**
  * Run a job as the root in an adl of its own, until it traces its end and
- * quits, or `timeout` ms pass.
+ * quits, or `timeout` ms pass without its output. One that cannot run so
+ * (rootJobProblem) comes back incomplete, unrun, the reason its error.
  */
 async function runRoot(job: FlashJob, timeout: number, timed: boolean): Promise<FlashResult> {
-  if (job.capture.length) {
-    throw new Error("a job run as the root captures no frames");
+  const result: FlashResult = { output: [], errors: [], images: new Map(), incomplete: true };
+  const problem = rootJobProblem(job);
+  if (problem) {
+    result.errors.push(problem);
+    return result;
   }
 
-  const result: FlashResult = { output: [], errors: [], images: new Map(), incomplete: true };
   const id = `swf2es-root-${process.pid}-${Date.now()}`;
   const app = join(out, `${id}.xml`);
   const content = join(out, `${id}.swf`);
@@ -263,9 +305,12 @@ async function runRoot(job: FlashJob, timeout: number, timed: boolean): Promise<
     adl.stdout?.resume();
     const running = adl;
     await new Promise<void>((done) => {
-      const timer = setTimeout(done, timeout);
+      // From its last output: a loaded machine slows adl's start and frames alike.
+      let timer = setTimeout(done, timeout);
       running.stderr?.setEncoding("utf8").on("data", (d: string) => {
         traces += d;
+        clearTimeout(timer);
+        timer = setTimeout(done, timeout);
       });
       running.once("exit", () => {
         clearTimeout(timer);
@@ -274,6 +319,14 @@ async function runRoot(job: FlashJob, timeout: number, timed: boolean): Promise<
     });
     splitOutput(traces, [result]);
     result.incomplete = !traces.includes(`${MARK}end 0`);
+    // AIR prints what stopped it, before the helper's mark where the ABCs
+    // did not verify: its error, as the job's.
+    if (result.incomplete) {
+      const stopped = traces.split("\n").find((line) => ERROR_LINE.test(line));
+      if (stopped && !result.output.includes(stopped.replace(/\r+$/, ""))) {
+        result.errors.push(stopped.replace(/\r+$/, ""));
+      }
+    }
   } finally {
     if (adl?.pid) {
       try {
@@ -423,6 +476,14 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
   return results;
 }
 
+/** The first line of an error AIR prints as it stops a SWF, as "VerifyError: Error #1053: ...". */
+const ERROR_LINE = /^[\w.:$]*Error: /;
+
+/** Whether a result's traces hold an error: one the helper caught, or one AIR printed as it stopped the SWF. */
+function heldError(result: FlashResult): boolean {
+  return result.errors.length > 0 || result.output.some((line) => ERROR_LINE.test(line));
+}
+
 /** A line of Wine's debug channels, as `0120:fixme:win:IsImmersiveProcess (FFFFFFFF): stub`, its pid first with +pid. */
 const WINE_DEBUG = /^[0-9a-f]{4,}(:[0-9a-f]{4,})?:(fixme|err|warn|trace):/;
 
@@ -458,8 +519,13 @@ function splitOutput(stdout: string, results: FlashResult[]): void {
   }
 }
 
+/** A SWF's frame rate; 24 for one that does not read, as a root job that will not run. */
 function frameRate(swf: Uint8Array): number {
-  return readSwf(swf).frameRate || 24;
+  try {
+    return readSwf(swf).frameRate || 24;
+  } catch {
+    return 24;
+  }
 }
 
 function cachePath(key: string): string {
@@ -565,7 +631,10 @@ export async function runFlash(
     const rest = batch.slice(failed + 1);
     if (failed < batch.length) {
       const stalled = batch[failed];
-      if (stalled.tries === 0) {
+      // A root job whose traces hold an error stopped at it, with AIR's
+      // dialog, which a second run would show again; one that could not
+      // run would not run again either.
+      if (stalled.tries === 0 && !(stalled.job.root && heldError(ran[failed]))) {
         rest.unshift({ ...stalled, tries: 1 });
       } else {
         results[stalled.i] = ran[failed];
@@ -587,13 +656,13 @@ export async function runFlash(
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   const root = args.includes("--root");
-  const [file, frames = "1", ...rest] = args.filter((a) => a !== "--root");
+  const [file, frames = root ? "2" : "1", ...rest] = args.filter((a) => a !== "--root");
   const quality = rest.find((a) => QUALITIES.includes(a));
   const capture = rest.filter((a) => !QUALITIES.includes(a));
   if (!file || (root && capture.length)) {
     console.error(
       "usage: node oracle/flash.ts <file.swf> [frames] [frame to capture...] [low|medium|high|best]\n" +
-        "       node oracle/flash.ts --root <file.swf> [frames]   as the root, at its own version: traces only",
+        "       node oracle/flash.ts --root <file.swf> [frames, 2 at least]   as the root, at its own version: traces only",
     );
     process.exit(2);
   }

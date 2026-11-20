@@ -443,6 +443,23 @@ function uncaughtErrors(compile: Compile): Uint8Array {
 /** A step every third frame, 32 of them, after the load. */
 const UNCAUGHT_FRAMES = 110;
 
+/**
+ * A root of SWF `version` (scripts/VersionedLoads.as.template) loading
+ * scripts/VersionedIsPlaying.as's class in a SWF of `innerVersion`.
+ */
+function versionedLoads(compile: Compile, version: number, innerVersion: number): Uint8Array {
+  const inner = bare(compile("VersionedIsPlaying"), 2, "Main", 100, 50, innerVersion);
+  const template = readFileSync(
+    new URL("../scripts/VersionedLoads.as.template", import.meta.url),
+    "utf8",
+  );
+  const abc = compile(
+    "VersionedLoads",
+    template.replaceAll("@@INNER@@", Buffer.from(inner).toString("base64")),
+  );
+  return bare(abc, 4, "VersionedLoads", 100, 50, version);
+}
+
 function loadsInit(compile: Compile): Uint8Array {
   return loading(compile, "LoadsInit", 1);
 }
@@ -673,9 +690,30 @@ export const scriptingCases: PlayerCase[] = [
     // Run as the root, at SWF 12's API version, where the harness, loading
     // it, would refuse it at its own.
     name: "versioned-isplaying",
-    swf: (abc) => bare(abc, 1, "Main", 100, 50, 12),
+    swf: (abc) => bare(abc, 2, "Main", 100, 50, 12),
     script: "VersionedIsPlaying",
-    frames: 1,
+    frames: 2,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
+    // A SWF 12 root loading the same class in a SWF 30: it runs at the root's version.
+    name: "versioned-loaded",
+    build: (compile) => versionedLoads(compile, 12, 30),
+    frames: 4,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
+    // A worker of a SWF 17 root runs at the latest, not at its root's version, as adl runs it.
+    name: "versioned-worker",
+    swf: (abc) => bare(abc, 1, "VersionedWorker", 100, 50, 17),
+    script: "VersionedWorker",
+    frames: 120,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

@@ -1,0 +1,7 @@
+own isPlaying
+early bound own
+own isPlaying
+by name own
+in true
+own false
+init 30 Main
