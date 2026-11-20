@@ -31,4 +31,9 @@ uncaught ArgumentError: Error #2012: BoundShapeDisplayObject$ class cannot be in
 uncaught ArgumentError: Error #2012: BoundAVM1Movie$ class cannot be instantiated.
 uncaught ArgumentError: Error #2012: BoundStage$ class cannot be instantiated.
 frame 3: 6 null null null null null null a=null
-frame 4: 6 null null null null null null a=null
+added 7 [null null null null null null real] (x=0, y=0, w=100, h=40)
+removeChildAt(0) null 7 [null null null null null null real] (x=0, y=0, w=100, h=40)
+swapChildrenAt(0, 6) 7 [null null null null null null real] (x=0, y=0, w=100, h=40)
+setChildIndex(real, 3) 7 [null null null real null null null] (x=0, y=0, w=100, h=40)
+removeChildren(0, 1) 5 [null real null null null] (x=0, y=0, w=100, h=40)
+frame 4: 5 null real=flash.display::Shape null null null a=null

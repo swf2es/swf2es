@@ -116,9 +116,15 @@ export function containerNatives(s: Scripting): avm2.Natives {
       return child;
     }
 
+    // A child without an AS3 object, as a refused class's placed character is, stays, and
+    // null is given, as Flash does (bound-abstract-display).
     removeChildAt(index: Value): Value {
       const c = this.$display;
       const d = c.children[indexIn(c, index)];
+      if (!d.object) {
+        return null;
+      }
+
       s.lifecycle.remove(d);
       return d.object;
     }
@@ -238,9 +244,14 @@ export function containerNatives(s: Scripting): avm2.Natives {
       c.swapChildren(x, y);
     }
 
+    // Nothing moves where either is a child without an AS3 object (bound-abstract-display).
     swapChildrenAt(a: Value, b: Value): void {
       const c = this.$display;
-      c.swapChildren(c.children[indexIn(c, a)], c.children[indexIn(c, b)]);
+      const x = c.children[indexIn(c, a)];
+      const y = c.children[indexIn(c, b)];
+      if (x.object && y.object) {
+        c.swapChildren(x, y);
+      }
     }
 
     get mouseChildren(): boolean {

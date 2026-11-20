@@ -88,10 +88,49 @@ package
 			}
 
 			trace("frame " + currentFrame + ": " + numChildren + " " + children.join(" ") + " a=" + getChildByName("a"));
+			if (_frame == 2)
+			{
+				nullChildren();
+			}
+
 			if (_frame == 3)
 			{
 				removeEventListener(Event.ENTER_FRAME, frame);
 			}
+		}
+
+		// What the container's methods do with the null children: removeChildAt leaves one
+		// and gives null, swapChildrenAt moves nothing with one, while setChildIndex moves
+		// another past them and removeChildren takes them out. Their squares count in the
+		// bounds, and are drawn.
+		private function nullChildren():void
+		{
+			const real:Shape = new Shape();
+			real.name = "real";
+			real.graphics.beginFill(0x0000ff);
+			real.graphics.drawRect(0, 0, 10, 10);
+			real.y = 30;
+			addChild(real);
+			trace("added " + order());
+			trace("removeChildAt(0) " + removeChildAt(0) + " " + order());
+			swapChildrenAt(0, 6);
+			trace("swapChildrenAt(0, 6) " + order());
+			setChildIndex(real, 3);
+			trace("setChildIndex(real, 3) " + order());
+			removeChildren(0, 1);
+			trace("removeChildren(0, 1) " + order());
+		}
+
+		private function order():String
+		{
+			const names:Array = [];
+			for (var i:int = 0; i < numChildren; i++)
+			{
+				const child:DisplayObject = getChildAt(i);
+				names.push(child == null ? "null" : child.name);
+			}
+
+			return numChildren + " [" + names.join(" ") + "] " + getBounds(this);
 		}
 	}
 }
