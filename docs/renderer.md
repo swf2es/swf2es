@@ -106,10 +106,57 @@ order, an entry a drawable or a boundary:
   ended in `ALPHA_MASK`, which composites it onto that layer by its alpha
   ([architecture/compositing.md](architecture/compositing.md#masks-and-scroll-rectangles)).
 
-The view writes the list and its rows anew each frame. Keeping a span of
-the list for a subtree that did not change, and writing only rows on a
-frame where only transforms or colours changed, is not built; it waits
-for a profile that shows the walk worth it.
+The view writes the list and its rows anew each frame.
+
+### Spans
+
+An object's **span** is the stretch of the scene list and of the rows
+its subtree wrote in a frame (`scene/spans.ts`). On a busy real-content
+recording the walk visits about 5,000 objects a frame, of which about
+57 (1%) changed, and a walk of only what changed would visit about 300
+(6%); no frame changes transforms and colours alone. So the walk is to
+take an unchanged subtree's span from the frame before, its rows moved to
+where they land now (`SceneList.appendDraws`, `Rows.append`), rather than
+walk it again, and to walk only what changed.
+
+A span stands for its object only where nothing it was drawn from can
+have changed:
+
+- the object and everything in it unchanged (`clean`: its flags, and
+  `descendantsDirty`, which `invalidate` sets up to the root);
+- the same parent's transform on the stage and colour from its ancestors,
+  compared as numbers, which line stretch, hairlines' width, drawTriangles'
+  facing and bitmaps' whole pixels follow;
+- the same kept outputs' generation: the view's scale, quality and screen
+  scale;
+- every geometry and texture it names still kept, of the generation it
+  had (`Registry.generation`), not let go of and handed out again;
+- nothing in it that draws by more than that (`plain` in `view.ts`): it is
+  all containers, shapes and bitmaps, with no filter, blend, mask, scroll
+  rectangle, 9-slice grid, 3D transform, bitmap cache, stale shape, clip
+  layer or mask's part, and no paint still to come, shader fill or line
+  that stroked to nothing; and it is walked on the stage, not inside an
+  alpha mask, a sliced owner or a blend's only child. The object must be
+  plain now as well as then: the mask walker clears a mask's flags where
+  the mask is used, which may come before its own place on the list, so
+  an object made a mask there is unflagged at its place (the checked
+  mode's first find, on `mask-ancestors` and `avm1-script-masks`).
+
+A context lost and given back drops every span. `BitmapData.draw`'s and
+a 3D object's passes walk from roots of their own into lists of their
+own, and neither read nor write the stage's spans.
+
+The spans are kept, so far, only to be checked: the view's `checked`
+option (`RenderView.checkSpans`, which `pnpm test:checked`'s pages set)
+records each object's span, and where one would stand for its object the
+next frame, walks the object as ever, copies the span after what the walk
+wrote, compares the two entry for entry and row for row
+(`spanDifference`), takes the copy off and throws where they differ,
+naming the object and the first entry and row that differ. An object
+found changed under one whose flags said nothing in it had throws too.
+Off, the view keeps no span and pays nothing. `tests/player/spans.ts`
+breaks a span on purpose, a drawing changed with no flag set, and sees
+it caught.
 
 ### The planner
 
@@ -590,8 +637,9 @@ GPU took its framebuffer binds a frame from 1,300 to 255 (#646) and then
 
 - **WebGPU,** behind the same command buffer: a span that stands still
   onto a render bundle.
-- **Spans kept across frames, and plans reused,** only where profiles
-  show the walk or the planner hot.
+- **Spans drawn from** ([Spans](#spans)): a frame copying unchanged
+  subtrees' spans rather than walking them, then spans across layers,
+  masks and text; plans reused only where profiles show the planner hot.
 - **Geometry buffers owned by wasm,** so that the module writes the
   atlas's vertices where the backend reads them, only if profiles ask.
 - **Known differences from adl,** parked: a filtered object with a mask
