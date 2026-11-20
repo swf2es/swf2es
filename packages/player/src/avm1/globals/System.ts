@@ -14,13 +14,14 @@ export function systemObject(
   screen: ScreenCapabilities,
   debug: boolean,
   version: number,
+  sandboxType: string,
 ): avm1.Avm1Object {
   const system = new avm1.Avm1Object(realm.objectProto);
   system.define("capabilities", capabilitiesObject(realm, platform, screen, debug), 0);
   // Flash's default: settings stored by exact domain from SWF 7 on.
   system.define("exactSettings", version >= 7, avm1.VERSION_6);
   system.define("useCodepage", false, 0);
-  system.define("security", securityObject(realm), 0);
+  system.define("security", securityObject(realm, sandboxType), 0);
 
   return system;
 }
@@ -77,7 +78,7 @@ function capabilitiesObject(
 }
 
 /** System.security: every domain may script already, and a policy file grants nothing more. */
-function securityObject(realm: avm1.Realm): avm1.Avm1Object {
+function securityObject(realm: avm1.Realm, sandboxType: string): avm1.Avm1Object {
   const security = new avm1.Avm1Object(realm.objectProto);
   security.define(
     "allowDomain",
@@ -94,7 +95,7 @@ function securityObject(realm: avm1.Realm): avm1.Avm1Object {
     realm.method(() => undefined),
     0,
   );
-  security.define("sandboxType", "remote", 0);
+  security.define("sandboxType", sandboxType, 0);
 
   return security;
 }
