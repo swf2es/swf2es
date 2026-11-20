@@ -5,11 +5,20 @@
 // --update-baseline. A test whose standing varies from run to run is set
 // to null and not compared, as --relax does for each test that differs.
 //
-//   node tests/player/corpus/run.ts [--update-baseline | --relax] [--diff [--dump]] [path prefix...]
+//   node tests/player/corpus/run.ts [--update-baseline | --relax] [--diff [--dump]] [--distance]
+//                                   [path prefix...]
 //
 // --diff prints, for each test that does not pass, the lines where the
 // player's trace and Flash's part, and what stopped the player; a
 // regression shows them without it, below its standing before and after.
+//
+// --distance ranks the tests that do not pass by how far they are from
+// passing, nearest first: the expected lines the player's trace differs
+// on, position by position and as a line diff (which one missing or
+// extra line does not throw off), the lines it traced past Flash's or
+// left out, and the first line that differs. The standing is still only
+// the matched prefix; this report shows where one early line hides a
+// test that otherwise matches.
 //
 // The avm1/, avm2/ and timeline/ tests with an output.txt, less those the
 // collector ignores (input, audio, video, fonts). Only traces compare: the
@@ -28,6 +37,7 @@ const update = args.includes("--update-baseline");
 const relax = args.includes("--relax");
 const diff = args.includes("--diff");
 const dump = args.includes("--dump");
+const distanceReport = args.includes("--distance");
 const prefixes = args.filter((a) => !a.startsWith("--"));
 /** A test's scripts may run this long; frames beyond it are a timeout. */
 const TIMEOUT = 20_000;
@@ -120,6 +130,136 @@ function standing(t: RuffleTest, r: PlayerResult): Standing {
   }
 
   return { matched, lines, traced: r.trace.length, error: r.error };
+}
+
+if (distanceReport) {
+  showDistances();
+}
+
+/** How far a failing test's trace is from Flash's. */
+interface Distance {
+  path: string;
+  /** The test's index in `tests` and `results`. */
+  index: number;
+  lines: number;
+  /** Positions below both lengths where the lines differ. */
+  positional: number;
+  /** Lines traced past Flash's last (positive) or left out (negative). */
+  extra: number;
+  /** Lines a line diff removes or adds to turn the trace into Flash's. */
+  edits: number;
+  /** Index of the first line that differs, or -1 when only an error stops the test. */
+  first: number;
+  error: string | null;
+}
+
+function showDistances(): void {
+  const distances: Distance[] = [];
+  for (const [i, t] of tests.entries()) {
+    if (!passed(standings[t.path])) {
+      distances.push(distance(t, i));
+    }
+  }
+
+  // Nearest first; an error counts as a line to fix.
+  const cost = (d: Distance) => d.edits + (d.error ? 1 : 0);
+  distances.sort((a, b) => cost(a) - cost(b) || b.lines - a.lines || (a.path < b.path ? -1 : 1));
+  console.log(`\n${distances.length} tests that do not pass, nearest first:`);
+  console.log("  edits  positional  extra  lines  test");
+  for (const d of distances) {
+    const extra = d.extra > 0 ? `+${d.extra}` : String(d.extra);
+    console.log(
+      `  ${String(d.edits).padStart(5)}  ${String(d.positional).padStart(10)}  ${extra.padStart(5)}  ${String(d.lines).padStart(5)}  ${d.path}${d.error ? `  [${d.error.split("\n")[0].slice(0, 100)}]` : ""}`,
+    );
+    if (d.first >= 0) {
+      const expected = expectedLines(tests[d.index]);
+      const trace = results[d.index].trace;
+      console.log(`         line ${d.first + 1}`);
+      console.log(`           flash  | ${clip(expected[d.first])}`);
+      console.log(`           player | ${clip(trace[d.first])}`);
+    }
+  }
+}
+
+function clip(line: string | undefined): string {
+  if (line === undefined) {
+    return "(none)";
+  }
+
+  return line.length > 160 ? `${line.slice(0, 160)}...` : line;
+}
+
+function distance(t: RuffleTest, index: number): Distance {
+  const r = results[index];
+  const expected = expectedLines(t);
+  const trace = r.trace;
+  const shorter = Math.min(expected.length, trace.length);
+  let positional = 0;
+  let first = -1;
+  for (let i = 0; i < shorter; i++) {
+    if (expected[i] !== trace[i]) {
+      positional++;
+      if (first < 0) {
+        first = i;
+      }
+    }
+  }
+
+  if (first < 0 && expected.length !== trace.length) {
+    first = shorter;
+  }
+
+  return {
+    path: t.path,
+    index,
+    lines: expected.length,
+    positional,
+    extra: trace.length - expected.length,
+    edits: lineEdits(expected, trace),
+    first,
+    error: r.error,
+  };
+}
+
+/**
+ * Lines removed plus lines added by a longest-common-subsequence diff, after
+ * the common head and tail. A diff too big to tabulate counts every line of
+ * the middles.
+ */
+function lineEdits(a: string[], b: string[]): number {
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) {
+    head++;
+  }
+
+  let tail = 0;
+  while (
+    tail < a.length - head &&
+    tail < b.length - head &&
+    a[a.length - 1 - tail] === b[b.length - 1 - tail]
+  ) {
+    tail++;
+  }
+
+  const n = a.length - head - tail;
+  const m = b.length - head - tail;
+  if (n === 0 || m === 0 || n * m > 25_000_000) {
+    return n + m;
+  }
+
+  // One row of the LCS table at a time.
+  let previous = new Uint32Array(m + 1);
+  let row = new Uint32Array(m + 1);
+  for (let i = 1; i <= n; i++) {
+    const line = a[head + i - 1];
+    for (let j = 1; j <= m; j++) {
+      row[j] = line === b[head + j - 1] ? previous[j - 1] + 1 : Math.max(previous[j], row[j - 1]);
+    }
+
+    [previous, row] = [row, previous];
+  }
+
+  return n + m - 2 * previous[m];
 }
 
 const passes = Object.values(standings).filter(passed).length;
