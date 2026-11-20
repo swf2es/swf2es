@@ -29,8 +29,10 @@ export function securityNatives(s: Scripting): avm2.Natives {
       disableAVM1Loading = !!v;
     }
 
+    // The calling SWF's: one loaded from the network is remote, wherever the first one is.
     static get sandboxType(): string {
-      return s.sandboxType;
+      const url = s.code.runningUrl();
+      return url !== null && url !== s.url && /^https?:/i.test(url) ? "remote" : s.sandboxType;
     }
 
     static get pageDomain(): Value {

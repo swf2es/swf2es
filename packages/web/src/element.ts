@@ -769,6 +769,7 @@ export class Swf2esPlayerElement extends ElementBase {
           navigate: internal ? null : undefined,
           fileHost: configuration().fileHost,
           externalInterface: this.#externalInterface(session, objectID, allows),
+          sandboxType: configuration().sandboxType,
         });
       }
 

@@ -1410,6 +1410,7 @@ export class Loads {
         platform: s.platform,
         screenCapabilities: s.screenCapabilities,
         debugger: s.rt.debugger,
+        sandboxType: s.sandboxType,
       });
       vm.attach(swf, library, root, load.bytes.length, s.frameRate, this.avm1Stage(), false);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });

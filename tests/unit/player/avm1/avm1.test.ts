@@ -178,6 +178,14 @@ trace(System.capabilities.isDebugger + " " + (System.capabilities.serverString.i
   played.player.destroy();
 });
 
+test("System.security.sandboxType is the sandbox the host placed the movie in", async () => {
+  const played = await playNet("trace(System.security.sandboxType);", {
+    sandboxType: "localWithFile",
+  });
+  assert.deepEqual(take(played), ["localWithFile"]);
+  played.player.destroy();
+});
+
 test("child clips have no own $version, while getVersion reads the main timeline", async () => {
   const played = await playNet(`
 var child = createEmptyMovieClip("child", 1);

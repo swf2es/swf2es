@@ -77,6 +77,63 @@ test("Security names the host's sandbox, hands it the policy files, and each req
   ]);
 });
 
+test("a SWF loaded from the network is remote, while the local one that loaded it is not", {
+  skip,
+}, async () => {
+  const [main, child] = compileScripts(
+    [
+      {
+        name: "LocalMain",
+        source: `package {
+  import flash.display.*;
+  import flash.net.URLRequest;
+  import flash.system.Security;
+  public class LocalMain extends Sprite {
+    public function LocalMain() {
+      trace("main " + Security.sandboxType);
+      new Loader().load(new URLRequest("http://example.test/child.swf"));
+    }
+  }
+}`,
+      },
+      {
+        name: "RemoteChild",
+        source: `package {
+  import flash.display.Sprite;
+  import flash.system.Security;
+  public class RemoteChild extends Sprite {
+    public function RemoteChild() {
+      trace("child " + Security.sandboxType);
+    }
+  }
+}`,
+      },
+    ],
+    out,
+  ).values();
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "file:///games/main.swf",
+    sandboxType: "localWithNetwork",
+    fetch: async (request) =>
+      request.url === "http://example.test/child.swf"
+        ? { bytes: bare(child, 1, "RemoteChild"), status: 200, headers: [] }
+        : { bytes: null, status: 404, headers: [] },
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(main, 1, "LocalMain"), scripting);
+  await player.start();
+  await scripting.settled();
+  for (let i = 0; i < 3 && lines.length < 2; i++) {
+    player.tick();
+    await scripting.settled();
+  }
+
+  assert.deepEqual(lines, ["main localWithNetwork", "child remote"]);
+  player.destroy();
+});
+
 test("a SWF is remote where the host does not say", async () => {
   const scripting = new Scripting(await createCodegen(wasm));
   assert.equal(scripting.sandboxType, "remote");
