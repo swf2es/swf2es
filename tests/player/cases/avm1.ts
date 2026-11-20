@@ -1814,6 +1814,81 @@ s.setVolume(100); s.setPan(0);`;
   return avm1Swf(version, [], [[as1(source, version)]]);
 }
 
+// Sounds of clips in movies that an AVM1 movie in an AS3 Loader loads, whose
+// code runs under a `_lockroot` clip, set by the loader's onLoadInit for the
+// first and by the movie itself for the second (scripts/Avm1SoundLockroot.as):
+// in adl a Sound of a clip there finds its clip, though the clip's path names
+// the movie's root `_root` and the code's `_root` is the clip locked. A game
+// loaded so plays its effects on its clips, and fades music by its clip.
+function avm1SoundLockroot(): Record<string, Uint8Array> {
+  const version = 8;
+  const samples = 2756; // half a second at 5.5 kHz
+  const pcm = new Uint8Array(samples);
+  for (let i = 0; i < samples; i++) {
+    pcm[i] = 128 + ((i >> 3) & 1 ? 20 : -20);
+  }
+
+  const movie = (frames: Uint8Array[][], extra: Uint8Array[] = []) =>
+    w.swf({
+      version,
+      width: 40,
+      height: 40,
+      frameRate: 24,
+      frameCount: frames.length,
+      tags: [
+        w.fileAttributes(false),
+        ...extra,
+        ...frames.flatMap((tags) => [...tags, w.showFrame()]),
+        w.end(),
+      ],
+    });
+  const child = (tag: string, lock: boolean) =>
+    movie(
+      [
+        lock ? [as1("this._lockroot = true;", version)] : [],
+        [
+          as1(
+            `var tag = "${tag}";
+createEmptyMovieClip("snd", 5);
+trace(tag + " root " + _root + " " + this._lockroot + " snd " + snd);
+s = new Sound(snd);
+s.attachSound("loop");
+s.start();
+trace(tag + " duration " + s.duration + " volume " + s.getVolume());
+s.setVolume(30);
+trace(tag + " volume " + s.getVolume() + " " + new Sound(snd).getVolume() + " " + new Sound(_root.snd).getVolume());
+s.onSoundComplete = function () { trace(tag + " complete " + s.position); };`,
+            version,
+          ),
+        ],
+        [as1("stop();", version)],
+      ],
+      [w.defineSound(1, { rate: 0, samples }, pcm), w.exportAssets([[1, "loop"]])],
+    );
+  const parent = movie([
+    [
+      as1(
+        `var mcl = new MovieClipLoader();
+mcl.addListener({ onLoadInit: function (t) { if (t._name == "a") { t._lockroot = true; } trace("init " + t._name); } });
+createEmptyMovieClip("a", 1);
+createEmptyMovieClip("b", 2);
+mcl.loadClip("avm1-sound-lockroot-a.swf", a);
+var n = 0;
+onEnterFrame = function () {
+  n++;
+  if (n == 20) { mcl.loadClip("avm1-sound-lockroot-b.swf", b); }
+};`,
+        version,
+      ),
+    ],
+  ]);
+  return {
+    "avm1-sound-lockroot-parent.swf": parent,
+    "avm1-sound-lockroot-a.swf": child("a", false),
+    "avm1-sound-lockroot-b.swf": child("b", true),
+  };
+}
+
 // Clips as AVM1 sees them in a SWF of `version`, avm1/clips.as (docs/avm1.md,
 // "Clips and paths"): `a` and `c` of a clip of three frames, which places
 // `b` of another, beside an unnamed square and `Beta`; each clip traces its
@@ -3939,6 +4014,16 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
       maxOutliers: 0,
     }),
   ),
+  {
+    name: "avm1-sound-lockroot",
+    swf: bare,
+    script: "Avm1SoundLockroot",
+    files: avm1SoundLockroot(),
+    frames: 45,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
   ...[5, 6, 7].map(
     (version): PlayerCase => ({
       name: `avm1-depths-swf${version}`,

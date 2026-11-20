@@ -43,6 +43,13 @@ export interface SoundClassHost {
   readonly sounds: SoundHost;
   /** What `value`, an object or a path from the code's target, names; null for nothing. */
   resolve(value: avm1.Value, version: number): DisplayObject | null;
+  /** The path of the clip `value` is, from its level; null for a value that is no clip. */
+  clipPath(value: avm1.Value): string | null;
+  /**
+   * The display object at a path clipPath gave: from its level, whatever `_root` the code
+   * sees, a child or a variable at each name after it.
+   */
+  atPath(path: string, version: number): DisplayObject | null;
   /** The DefineSound ExportAssets named `name`, any case; null for none. */
   exportedSound(name: string): SoundCharacter | null;
   /** `d`'s transform, the global one for null. */
@@ -56,8 +63,10 @@ export interface SoundClassHost {
 }
 
 interface State {
-  /** The target as given; undefined or null for the global sound. */
+  /** The target as given, a clip as its path; undefined or null for the global sound. */
   target: avm1.Value;
+  /** Whether the target is a clip's path from its level, not one from the code's target. */
+  clip: boolean;
   character: SoundCharacter | null;
   /** The ms attachSound found, rounded. */
   duration: number | undefined;
@@ -102,12 +111,18 @@ export function soundClass(host: SoundClassHost): Obj {
   const constr = realm.classOf(
     proto,
     (self, args, v) => {
-      // The target is made a path now, a clip's too, its toString called once (the corpus's
-      // sound_owner_reference): a clip renamed is found by its path, as a variable or a child.
+      // The target is made a path now, a clip's too, another object's toString called once
+      // (the corpus's sound_owner_reference): a clip renamed is found by its path, as a
+      // variable or a child. A clip's path is from its level, and is found from there
+      // whatever `_root` the code sees: in a movie an AS3 Loader holds, it begins `_root`,
+      // which code under a `_lockroot` clip would take for that clip (adl finds the clip).
       const given = args.length > 0 ? args[0] : undefined;
-      const target = given === undefined || given === null ? given : avm1.stringOf(given, v);
+      const path = host.clipPath(given);
+      const target =
+        path ?? (given === undefined || given === null ? given : avm1.stringOf(given, v));
       states.set(self, {
         target,
+        clip: path !== null,
         character: null,
         duration: undefined,
         playing: null,
@@ -121,7 +136,13 @@ export function soundClass(host: SoundClassHost): Obj {
 
   const global = (state: State) => state.target === undefined || state.target === null;
   // The clip a targeted Sound works on, null where the target names none.
-  const owner = (state: State, v: number) => (global(state) ? null : host.resolve(state.target, v));
+  const owner = (state: State, v: number) => {
+    if (global(state)) {
+      return null;
+    }
+
+    return state.clip ? host.atPath(state.target as string, v) : host.resolve(state.target, v);
+  };
   const valid = (state: State, v: number) => global(state) || owner(state, v) !== null;
   // The transform it reads and sets: its clip's, or the global one; undefined for no clip.
   const transformOf = (state: State, v: number): Avm1SoundTransform | undefined => {

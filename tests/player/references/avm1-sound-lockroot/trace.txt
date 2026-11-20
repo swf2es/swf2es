@@ -1,0 +1,10 @@
+init a
+a root _root.a true snd _root.a.snd
+a duration 500 volume 100
+a volume 30 30 30
+a complete 500
+init b
+b root _root.b true snd _root.b.snd
+b duration 500 volume 100
+b volume 30 30 30
+b complete 500

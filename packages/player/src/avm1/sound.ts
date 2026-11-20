@@ -4,7 +4,7 @@
 // after the frame's actions.
 // Sound's state follows Ruffle's (https://github.com/ruffle-rs/ruffle): MIT
 // OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
-import type { avm1 } from "@swf2es/runtime";
+import { avm1 } from "@swf2es/runtime";
 import type { DisplayObject, MovieClip } from "../display/display.js";
 import type { SoundCharacter } from "../display/timeline.js";
 import type { AudioHost, DecodedSound } from "../media/audio.js";
@@ -15,6 +15,7 @@ import {
   updateMixes,
 } from "../media/sounds.js";
 import type { Avm1 } from "./avm1.js";
+import { targetOf } from "./globals/MovieClip.js";
 import {
   type Avm1SoundTransform,
   FULL,
@@ -79,6 +80,20 @@ export class Avm1Sounds implements SoundClassHost {
 
   resolve(value: avm1.Value, version: number): DisplayObject | null {
     return this.movie.resolve(value, version);
+  }
+
+  clipPath(value: avm1.Value): string | null {
+    const d = value instanceof avm1.Avm1Object ? value.display?.target : undefined;
+    return d === undefined ? null : this.movie.pathOf(d as DisplayObject);
+  }
+
+  atPath(path: string, version: number): DisplayObject | null {
+    // Its level found by name, the rest from there as any target path is, a variable too.
+    const dot = path.indexOf(".");
+    const level = this.movie.atPath(dot < 0 ? path : path.slice(0, dot));
+    return level === null || dot < 0
+      ? level
+      : targetOf(this.movie, level, path.slice(dot + 1), version);
   }
 
   /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
