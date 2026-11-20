@@ -39,7 +39,7 @@ function bound(abc: Uint8Array): Uint8Array {
 
 // scripts/BoundAbstractDisplay.as beside script subclasses of the restricted
 // display classes, the first six bound to clips of a square (a shape for
-// BoundShapeDisplayObject), which frame 2 places as a to f.
+// BoundShapeDisplayObject), which frame 2 places as a to f, side by side.
 function boundAbstractDisplay(compile: Compile): Uint8Array {
   const subclasses: [string, string][] = [
     ["BoundDisplayObject", "DisplayObject"],
@@ -83,7 +83,12 @@ function boundAbstractDisplay(compile: Compile): Uint8Array {
       ]),
       w.showFrame(),
       ...characters.map((character, i) =>
-        w.place({ depth: i + 1, character, name: String.fromCharCode(97 + i) }),
+        w.place({
+          depth: i + 1,
+          character,
+          name: String.fromCharCode(97 + i),
+          matrix: { tx: i * 320, ty: 0 },
+        }),
       ),
       w.showFrame(),
       w.showFrame(),
@@ -768,7 +773,7 @@ export const scriptingCases: PlayerCase[] = [
     name: "bound-abstract-display",
     build: boundAbstractDisplay,
     frames: 4,
-    capture: [],
+    capture: [2, 3],
     tolerance: 0,
     maxOutliers: 0,
   },
