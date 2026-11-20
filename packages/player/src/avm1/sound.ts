@@ -4,8 +4,8 @@
 // after the frame's actions.
 // Sound's state follows Ruffle's (https://github.com/ruffle-rs/ruffle): MIT
 // OR Apache-2.0, Copyright (c) 2018-2022 Ruffle LLC and Ruffle contributors.
-import type { avm1 } from "@swf2es/runtime";
-import type { DisplayObject, MovieClip } from "../display/display.js";
+import { avm1 } from "@swf2es/runtime";
+import { type DisplayObject, MovieClip } from "../display/display.js";
 import type { SoundCharacter } from "../display/timeline.js";
 import type { AudioHost, DecodedSound } from "../media/audio.js";
 import {
@@ -15,6 +15,7 @@ import {
   updateMixes,
 } from "../media/sounds.js";
 import type { Avm1 } from "./avm1.js";
+import { targetOf } from "./globals/MovieClip.js";
 import {
   type Avm1SoundTransform,
   FULL,
@@ -77,13 +78,65 @@ export class Avm1Sounds implements SoundClassHost {
     return this.movie.realm;
   }
 
-  resolve(value: avm1.Value, version: number): DisplayObject | null {
-    return this.movie.resolve(value, version);
+  atPath(path: string, version: number): DisplayObject | null {
+    if (path === "") {
+      return null;
+    }
+
+    // In a movie an AS3 Loader holds, `_root` is the movie's root, which a clip's path there
+    // begins with, whatever `_root` the code sees: a string's under a `_lockroot` clip too, by
+    // dots or slashes (adl). A movie of its own honours `_lockroot` in a string's `_root` (Flash
+    // Player 32's projector), so that goes as any path from the code's target.
+    const movie = this.movie;
+    if (movie.hosted && /^_root(?:$|[./])/.test(path)) {
+      const root = movie.atPath("_root");
+      const rest = path.slice("_root.".length);
+      return root === null || rest === "" ? root : targetOf(movie, root, rest, version);
+    }
+
+    // `_levelN` from that level; the rest as any target path is, a variable too.
+    const dot = path.indexOf(".");
+    const level = movie.atPath(dot < 0 ? path : path.slice(0, dot));
+    if (level === null) {
+      return movie.resolve(path, version);
+    }
+
+    return dot < 0 ? level : targetOf(movie, level, path.slice(dot + 1), version);
   }
 
-  /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */
-  exportedSound(name: string): SoundCharacter | null {
-    const swf = this.movie.currentSwf();
+  namedByAs3Path(value: avm1.Value): boolean {
+    const movie = this.movie;
+    const d = value instanceof avm1.Avm1Object ? value.display?.target : undefined;
+    return (
+      movie.hosted &&
+      d instanceof MovieClip &&
+      d !== movie.root &&
+      Boolean(movie.contents.get(d)?.library)
+    );
+  }
+
+  mainCode(): boolean {
+    // swfOf(null) is the main movie's.
+    return this.movie.currentSwf() === this.movie.swfOf(null);
+  }
+
+  /**
+   * The DefineSound ExportAssets named `name`, any case, as attachSound finds it: in the library
+   * of the owner's movie, a clip emptied by unloadMovie its parent's (adl); for the global Sound,
+   * the code's, or none in a movie an AS3 Loader holds (adl), which has no level for it.
+   */
+  exportedSound(name: string, owner: DisplayObject | null): SoundCharacter | null {
+    const movie = this.movie;
+    if (owner === null && movie.hosted) {
+      return null;
+    }
+
+    let d = owner;
+    while (d instanceof MovieClip && d.parent !== null && movie.contents.get(d)?.library === null) {
+      d = d.parent;
+    }
+
+    const swf = d === null ? movie.currentSwf() : movie.swfOf(d);
     const id = swf.exports.get(asciiLower(name));
     const character = id === undefined ? undefined : swf.library?.characters.get(id);
     return character?.type === "sound" ? character : null;

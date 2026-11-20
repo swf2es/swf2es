@@ -304,7 +304,33 @@ with the context:
   straight onto what is below in its mode (`WebGLBackend.blendDirect`),
   as its layer composited would be, the modes that read what is below
   from the same copy of it, and multiply onto the opaque stage by GL's
-  blending, as its composite.
+  blending, as its composite. So has a shape's part of several fills
+  that meet without overlapping, as a SWF's shape writes them: where two
+  meet inside a pixel, adl blends each by what it covers, not the pixel
+  they make together, which only drawing them straight onto what is
+  below does: drawn as a host draws, at 4 samples, an edge between two
+  fills in hard light was up to 126 off adl's through a layer, 38 drawn
+  straight. adl does the same where the blend is a clip's that holds the
+  shape alone, as a SWF usually blends its art, a chain of clips deep,
+  the shape moved, turned or coloured in it, or the clip coloured: such
+  a shape is drawn as if the blend were its own (`RenderView`'s
+  `soleBlended`), as close to adl as the layer or closer in all but a
+  few edge pixels. Not where Flash keeps a bitmap of the clip, of one
+  between or of the shape (cacheAsBitmap): it blends that bitmap as one
+  picture, its fills' seam showing, so the view begins such a layer
+  grouped (`SceneList.groups`), which the backend never draws straight.
+  Whether they overlap is looked into only for a part drawn alone in
+  such a mode, once it has stood a frame (`Parts.markFlat`): triangles
+  that cover more than their box overlap, and otherwise their contours
+  tessellated together by parity cover less than their triangles do
+  where two overlap. A drawing made again on every frame, as a burst of
+  particles in add is, is never looked into: tessellating its discs
+  together took 4 to 12 times what tessellating them apart did, 5.8 ms a
+  frame for 200 of them. Each look at an object's part doubles how long
+  its next parts must stand, to 64 frames, so one drawn again every
+  second or third frame is looked into once or twice. Fills over each
+  other, as a drawing's may be, keep the layer, which blends them as one
+  picture, as adl does.
 - **One state cache.** The backend sets GL state through context3d's
   device layer (`@swf2es/context3d/device`'s `GlState`), so no bind,
   blend or stencil state is set twice.
@@ -454,6 +480,68 @@ and backing storage after full collection with the renderer alive. Run
 warm-up; `--counts` also counts fill and line calls into wasm. Compare built
 checkouts with `--checkout DIR` using the same harness. Longer loops should
 reuse their geometry without increasing retained shapes on fresh ratios.
+
+### The census
+
+`bench.ts --census`, on a synthetic scene or with `--swf`, counts what
+each frame asks of the renderer, to say which change has something to
+take before it is made (`tests/player/census.ts`):
+
+- **sub-draws by path:** merged into one draw, a multi-draw's, a call a
+  fill, the blend program's, meshes, glyphs, stage-sampling fills, and
+  everything else (composites, filter passes, shader fills, the stage);
+- **fill runs** as `Draws.prepare` gathers them: their lengths, how many
+  were merged, and what ended each: a kept or held output's composite, a
+  layer begun or ended, a mask, a blend mode, a glyph run or mesh, the
+  texture slots, a run's 256 draws. Masks' runs are counted apart;
+- **a projection of item 2** of the renderer plan: the runs that only a
+  normal-mode kept or held composite came between, joined with it as a
+  quad, and how many runs, merged draws and sub-draws there would be,
+  against the fills' sub-draws now, masks' left out. It is an upper
+  bound: it assumes the merged stream has room (`FillBatches.add` gives
+  up when it is full) and leaves out the texture slots, of which each
+  kept output would take one of a run's eight, so a scene of many kept
+  outputs falls short of it;
+- **repeats** among the fills not merged, which instanced drawing would
+  draw as one: a fill of the geometry, texture and sampling of the one
+  just before it, or of one within 64 before it with no draw between
+  overlapping it, and, as a bound, of any fill earlier in the frame;
+- **blend layers** drawn direct or as layers, by the draws inside and
+  their area, and how many hold what a layer held the frame before,
+  still, moved by whole pixels, or by fractions; a kept output inside
+  counts by where it is and how it is coloured, and a layer holding a
+  filter's output made that frame is not compared. A filtered object in
+  a blend mode is one layer, counted with the filter layers. And
+  backdrop copies;
+- **the walk:** the objects `RenderView.walk` visited, once each however
+  often (an alpha mask, a 3D object's content), and of those how many
+  changed (transform or colour, content, children, pixels), how many a
+  walk of what changed would visit, and the frames in which only
+  transforms and colours did; apart, the objects in the tree it did not
+  visit (hidden, masks, which the mask walker walks, a kept output's
+  content) and how many of those changed.
+
+What it does not see: 3D objects' planes and `BitmapData.draw` are
+drawn through the backend's `run` (`drawPlane`, `snapshot`), not
+`execute`, and their passes are not counted; nor is a frame whose run
+table did not fit, whose runs `Draws.prepare` did not gather. Each
+census is tagged with the bench's frame it was taken in, so one left
+out shifts no other, and a run with none counted fails.
+
+It costs nothing outside its runs, as `--counts` costs nothing: the
+renderer has no census code. The bench page wraps the view's `render`
+and `walk`, the mask walker's `walkMask`, the backend's `execute`,
+`blendDirect` and `copyBelow`, `Draws.prepare` and `gatherRun`, the
+merged stream's `add` and GL's binds and draws, on that view's objects
+alone and only when `--census` is given, and counts from the scene list,
+rows and commands the frame made. It reaches the renderer's private
+methods and fields by name, through `censusMethod` and `censusField` in
+`tests/player/page.ts`, which throw where a name is gone rather than
+count wrong, so a renaming in the renderer is one there too;
+`tests/player/census-check.ts` (part of `pnpm test`) runs it on masked
+lists, with and without `WEBGL_multi_draw`, and on blends, and holds
+the runs it counted to the sub-draws GL was asked for. Its frames'
+times include its own work and are not compared with others'.
 
 ## Why not Pixi
 

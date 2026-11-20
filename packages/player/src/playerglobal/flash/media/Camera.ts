@@ -7,6 +7,7 @@ import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
 import { pixelRect } from "../../../bitmap/pixel-rect.js";
 import { CameraState, cameraStates } from "../../../media/camera.js";
+import { captureDeviceName, captureDeviceNames } from "../../../media/capture-devices.js";
 import { capturePermission, requestCapturePermission } from "../../../media/capture-permission.js";
 import type { Scripting } from "../../../scripting.js";
 import { storeOf } from "../display/BitmapData.js";
@@ -51,7 +52,7 @@ export function cameraNatives(s: Scripting): avm2.Natives {
     /** A new array each time, as Flash's. */
     static get names(): Value {
       void s.prepareCapture();
-      return s.rt.array((s.capture?.cameras ?? []).map((device) => device.name));
+      return s.rt.array(captureDeviceNames(s.capture?.cameras ?? [], "Camera"));
     }
 
     static getCamera(name: Value): Value {
@@ -122,7 +123,12 @@ export function cameraNatives(s: Scripting): avm2.Natives {
 
     get name(): Value {
       const camera = state(this);
-      return camera ? (s.capture?.cameras[camera.index]?.name ?? camera.device.name) : null;
+      if (!camera) {
+        return null;
+      }
+
+      const device = s.capture?.cameras[camera.index] ?? camera.device;
+      return captureDeviceName(device, camera.index, "Camera");
     }
 
     get position(): Value {

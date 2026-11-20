@@ -2,6 +2,19 @@
 // with what they told Flash: the movie, its FlashVars, how it is shown
 // and scripted, its size, and the id and name the page's scripts find it by.
 import { defineElement, type Swf2esPlayerElement, TAG } from "./element.js";
+import { installFlashPlugin } from "./plugin.js";
+
+/** What replaceFlash and watchFlash do besides swapping the tags. */
+export interface ReplaceOptions {
+  /**
+   * Whether navigator lists Flash Player's plug-in (installFlashPlugin),
+   * for the page's scripts that look for it before they write a Flash
+   * tag: true by default for watchFlash, which swaps the tags they write;
+   * false for replaceFlash, which swaps only the tags there now, so that
+   * a page's later look for Flash does not write tags nothing swaps.
+   */
+  plugin?: boolean;
+}
 
 const FLASH_TYPES = new Set([
   "application/x-shockwave-flash",
@@ -101,12 +114,20 @@ export function flashAttributes(outer: Element): Map<string, string> {
 /**
  * Swap each Flash <object> and <embed> under `root` for a <swf2es-player>
  * carrying its parameters, in its place: the outermost of nested ones, its
- * fallbacks going with it. Returns the elements made.
+ * fallbacks going with it, and list Flash's plug-in in navigator if
+ * `options.plugin` is true. Returns the elements made.
  */
-export function replaceFlash(root: ParentNode = document): Swf2esPlayerElement[] {
+export function replaceFlash(
+  root: ParentNode = document,
+  options: ReplaceOptions = {},
+): Swf2esPlayerElement[] {
   // Where it cannot be defined, a tag swapped for it would play nothing.
   if (!defineElement()) {
     return [];
+  }
+
+  if (options.plugin === true) {
+    installFlashPlugin();
   }
 
   const made: Swf2esPlayerElement[] = [];
@@ -141,10 +162,14 @@ export function replaceFlash(root: ParentNode = document): Swf2esPlayerElement[]
 
 /**
  * replaceFlash now, and again for each Flash tag the page adds under `root`
- * later, until the returned function is called.
+ * later, until the returned function is called; Flash's plug-in listed in
+ * navigator unless `options.plugin` is false.
  */
-export function watchFlash(root: ParentNode & Node = document): () => void {
-  replaceFlash(root);
+export function watchFlash(
+  root: ParentNode & Node = document,
+  options: ReplaceOptions = {},
+): () => void {
+  replaceFlash(root, { plugin: options.plugin !== false });
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       // A tag added, or one made Flash after it was added, its src or type set by a script.
@@ -154,7 +179,7 @@ export function watchFlash(root: ParentNode & Node = document): () => void {
         const tag =
           node instanceof Element && node.localName === "param" ? node.parentElement : node;
         if (tag instanceof Element && tag.isConnected) {
-          replaceFlash(tag);
+          replaceFlash(tag, { plugin: false });
         }
       }
     }

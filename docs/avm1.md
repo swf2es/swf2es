@@ -1344,8 +1344,26 @@ one runs out, every 100000, is the clock read.
 
 ### Sound, Color and SharedObject
 
-These follow Ruffle's classes. A `Sound` or a `Color` keeps its target as
-given, a clip or a path, and finds the clip again each time it is used.
+These follow Ruffle's classes. A `Color` keeps its target as given, a
+clip or a path, and finds the clip again each time it is used. A `Sound`
+keeps a path, a clip's where its reference reaches (none for a removed
+clip's, which then names nothing, not a clip made later where it was), and
+finds the clip by it each time it is used: a path that begins `_levelN`
+from that level; in a movie an AS3 Loader holds, one that begins `_root`
+from the movie's root, whatever `_root` the code sees, so that code under
+a `_lockroot` clip finds the root by `_root` in a clip's path or a
+string's (adl); any other from the code's target, as in a movie of its
+own, whose `_root` in a string honours `_lockroot` (Flash Player 32's
+projector). `attachSound` and `stop(name)`
+look the name up in the library of the clip's movie, whichever movie's
+code asks (adl). The global Sound finds nothing in a movie an AS3 Loader
+holds (adl), and in a movie of its own looks in the code's movie's
+library: unmeasured without a projector, and more permissive than
+Ruffle's, which looks in its `_root`'s (the level, or the `_lockroot`
+clip). In a movie an AS3 Loader holds, Flash names a root a load filled
+by its AS3 path (`_level0.instance1.instance2.holder`): a Sound made of
+it there finds its clip from the code of any loaded movie, which can
+follow `_level0`, and not from the main movie's, which has none (adl).
 A Sound's transform is its clip's, which every sound under the clip
 plays by, or with no target the global one; the sounds it starts are the
 timeline's kind, held to the same 32 and stopped with them, StopSounds

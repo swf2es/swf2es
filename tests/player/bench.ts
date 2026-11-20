@@ -56,7 +56,10 @@
 // of colour: half filled with a bitmap, half with a colour part clear, in
 // add, screen, multiply, lighten, overlay and hard light in turn, every
 // other one gliding each frame, as a game's effects and tinted art are:
-// what a blend mode costs an object that is one fill.
+// what a blend mode costs an object that is one fill. --blend-fills K cuts
+// the coloured ones into K fills that meet, as a SWF's art in a blend
+// mode often is; --blend-clips puts each shape in a clip of its own, which
+// takes the blend mode, as a SWF usually blends its art.
 //
 // --hover holds the mouse still over the stage's middle, as a user's often
 // is, for what a SWF with scripts does for it each frame: with --scripted
@@ -156,6 +159,12 @@
 // whose curves bend with the frame, each moving on a path of its own: what
 // filling and stroking shapes anew costs.
 //
+// --burst N plays instead one shape in add that a script clears and fills
+// with N discs again each frame, over each other, as a burst of particles
+// or a glow is drawn: what a drawing of many fills in a blend mode costs
+// when it is never the same two frames running. --every K draws it again
+// every K-th frame instead, as particles on a timer are.
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -163,6 +172,12 @@
 // With --counts, each run also gives per-frame means of what the renderer asked of GL: draw calls
 // and the draws they make, program, vertex array and framebuffer binds, uniform calls, stencil
 // state and clears, buffer and texture uploads and their bytes, readbacks, and lines stroked anew.
+// --census takes the renderer's census of each frame (census.ts; docs/renderer.md, "The census"):
+// sub-draws by how they were drawn; the fill runs, their lengths and what ended each; repeats
+// among the fills not merged, which instancing would draw as one; blend layers by what is drawn
+// inside them and how many hold the frame before's content; and objects the walk visited against
+// objects changed. Its methods are wrapped only when asked for, as --counts' are, so its frames'
+// times are not to be compared with others'.
 // --allocs samples the heap and gives the KB the frames allocated, the player's start left out;
 // --profile FILE also writes the sampled profile there, for DevTools' Memory panel to open. After
 // the frames, with the renderer still alive, it gives what the page holds after a full collection,
@@ -172,17 +187,18 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
+//     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
+//     | --scripted N [--still] | --town N
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
-//     | --triangles N [--culled] | --redraw N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
-//     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--pace MS]
+//     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
+//     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //     [--checkout DIR] [--no-multi-draw]
 //   node tests/player/bench.ts --swf FILE [--frames N] [--resolution R] [--spike MS] [--top N]
-//     [--gpu] [--cpu-profile FILE] [--checkout DIR] [--json]
+//     [--gpu] [--cpu-profile FILE] [--checkout DIR] [--census] [--no-multi-draw] [--json]
 //
 // --no-multi-draw hides WEBGL_multi_draw from the renderer, which then draws
-// as it does in a browser without it, as Firefox is.
+// as it does in a browser without it, as Firefox is; with --swf too.
 //
 // --swf FILE plays a SWF of one's own instead, in real time as the web element plays it
 // (page.ts, playSwf): each animation frame advances the player by the time passed, streamed
@@ -192,7 +208,8 @@
 // (--spike MS), the worst --top N, with what the renderer did in each: programs linked and the
 // ms waited for them, programs first drawn with, buffers made and copied, textures uploaded,
 // filter passes, composites and morphs blended anew. --cpu-profile FILE samples the whole play
-// and names the functions each listed frame spent its time in. The SWF is only an argument: keep
+// and names the functions each listed frame spent its time in. --census takes the renderer's
+// census of every frame drawn, as for a synthetic scene. The SWF is only an argument: keep
 // one that may not be shared out of the repository.
 //
 // --checkout DIR plays another built checkout's packages (its packages/*/dist)
@@ -205,6 +222,7 @@ import { resolve } from "node:path";
 import { zlibCompress } from "../../packages/format/dist/index.js";
 import * as w from "../swf-writer.ts";
 import { stemFont } from "./cases.ts";
+import { formatCensus, framesFrom, summarise } from "./census.ts";
 import { benchPlayer, playPlayer } from "./chrome.ts";
 import { libraryAbcs } from "./libraries.ts";
 import { compiler } from "./scripts.ts";
@@ -227,6 +245,8 @@ const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const masks = option("masks", 0);
 const blends = option("blends", 0);
+const blendFills = Math.max(1, option("blend-fills", 1));
+const blendClips = args.includes("--blend-clips");
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
@@ -235,6 +255,8 @@ const stamps = option("stamps", 0);
 const readback = option("readback", 0);
 const pen = option("pen", 0);
 const redraws = option("redraw", 0);
+const bursts = option("burst", 0);
+const burstEvery = Math.max(1, option("every", 1));
 const vectors = option("vectors", 0);
 const triangles = option("triangles", 0);
 const texts = option("text", 0);
@@ -663,12 +685,52 @@ function polygonPath(cx: number, cy: number, r: number, sides: number): w.PathCo
 }
 
 /**
+ * A polygon of `sides` around the origin, `r` twips to its corners, cut
+ * into `count` slices of colours that meet at its centre, as a
+ * SWF's shape writes fills that meet: each edge between two once, with the
+ * fill on each side.
+ */
+function slices(r: number, sides: number, count: number): Pick<w.ShapeSpec, "fills" | "paths"> {
+  // A DefineShape's colours, whose alpha it leaves out.
+  const colors = [0xb0d06030, 0xb03080d0, 0xb0e0c040, 0xb060c060, 0xb0a040c0, 0xb040c0c0];
+  const corner = (k: number): [number, number] => {
+    const t = (2 * Math.PI * k) / sides;
+    return [Math.round(r * Math.cos(t)), Math.round(r * Math.sin(t))];
+  };
+  const paths: w.ShapeSpec["paths"] = [];
+
+  for (let s = 0; s < count; s++) {
+    const from = Math.round((s * sides) / count);
+    const to = Math.round(((s + 1) * sides) / count);
+    const arc: w.PathCommand[] = [{ move: corner(from) }];
+
+    for (let k = from + 1; k <= to; k++) {
+      arc.push({ line: corner(k) });
+    }
+
+    paths.push({ fill1: s + 1, commands: arc });
+    // Turning clockwise, the slice on the right of a spoke going out begins at it.
+    if (count > 1) {
+      paths.push({
+        fill0: ((s + count - 1) % count) + 1,
+        fill1: s + 1,
+        commands: [{ move: [0, 0] }, { line: corner(from) }],
+      });
+    }
+  }
+
+  return { fills: Array.from({ length: count }, (_, s) => colors[s % colors.length]), paths };
+}
+
+/**
  * `count` shapes alone in a blend mode each over four bands of colour, on a
  * loop of 48 frames: half a polygon filled with a 16 by 16 bitmap, half one
- * of a colour part clear, in add, screen, multiply, lighten, overlay and
- * hard light in turn, every other one gliding (--blends).
+ * of a colour part clear, cut into `fills` slices of colours of their own
+ * that meet at its centre, in add, screen, multiply, lighten, overlay and
+ * hard light in turn, every other one gliding; or each in a clip that takes
+ * the blend mode, where `clips` (--blends, --blend-fills, --blend-clips).
  */
-function blendsSwf(count: number): Uint8Array {
+function blendsSwf(count: number, fills: number, clips: boolean): Uint8Array {
   const pixels: number[] = [];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
@@ -711,13 +773,16 @@ function blendsSwf(count: number): Uint8Array {
       fills: [{ bitmap: 2, type: 0x42, matrix: { a: 40, d: 40 } }],
       paths: [{ fill1: 1, commands: polygonPath(0, 0, r, 24) }],
     }),
-    w.shape({
-      id: 4,
-      bounds: [-r, r, -r, r],
-      fills: [0xb0d06030],
-      paths: [{ fill1: 1, commands: polygonPath(0, 0, r, 24) }],
-    }),
+    w.shape({ id: 4, bounds: [-r, r, -r, r], ...slices(r, 24, fills) }),
   );
+  if (clips) {
+    for (const id of [3, 4]) {
+      tags.push(
+        w.sprite(id + 2, 1, [w.place({ depth: 1, character: id }), w.showFrame(), w.end()]),
+      );
+    }
+  }
+
   const modes = [8, 4, 3, 5, 13, 14];
   const loop = 48;
   const columns = Math.ceil(Math.sqrt(count * (WIDTH / HEIGHT)));
@@ -734,7 +799,7 @@ function blendsSwf(count: number): Uint8Array {
     tags.push(
       w.place({
         depth: i + 2,
-        character: 3 + (i % 2),
+        character: (clips ? 5 : 3) + (i % 2),
         matrix: at(i, 0),
         blendMode: modes[Math.floor(i / 2) % modes.length],
       }),
@@ -1116,6 +1181,59 @@ function vectorsSwf(count: number): Uint8Array {
     tags: [
       w.fileAttributes(true),
       w.backgroundColor(0xffffff),
+      w.doAbc(abc, "Main"),
+      w.symbolClass([[0, "Main"]]),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
+/** One shape in add, cleared and filled with N discs again every `every` frames (--burst). */
+function burstSwf(count: number, every: number): Uint8Array {
+  const source = `package {
+  import flash.display.BlendMode;
+  import flash.display.Shape;
+  import flash.display.Sprite;
+  import flash.events.Event;
+
+  public class Main extends Sprite {
+    private var burst:Shape = new Shape();
+    private var frame:int = 0;
+
+    public function Main() {
+      burst.blendMode = BlendMode.ADD;
+      addChild(burst);
+      addEventListener(Event.ENTER_FRAME, step);
+    }
+
+    private function step(e:Event):void {
+      frame++;
+      if (frame % ${every} != 0) {
+        return;
+      }
+
+      burst.graphics.clear();
+      for (var i:int = 0; i < ${count}; i++) {
+        var t:Number = frame * 0.03 + i * 0.37;
+        burst.graphics.beginFill(0x402010 + (i % 5) * 0x081020, 0.6);
+        burst.graphics.drawCircle(${WIDTH / 2} + Math.cos(t * 1.3 + i) * ${WIDTH / 3},
+          ${HEIGHT / 2} + Math.sin(t * 0.9 + i * 0.5) * ${HEIGHT / 3}, 10 + (i % 7) * 3);
+        burst.graphics.endFill();
+      }
+    }
+  }
+}`;
+  const abc = compiler()(`BenchBurst${count}x${every}`, source);
+  libraryAbcs();
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0x203040),
       w.doAbc(abc, "Main"),
       w.symbolClass([[0, "Main"]]),
       w.showFrame(),
@@ -1589,6 +1707,8 @@ async function playFile(path: string): Promise<void> {
     resolution: option("resolution", 1),
     mounts,
     cpuProfilePath: cpuProfile,
+    census: args.includes("--census"),
+    multiDraw: !args.includes("--no-multi-draw"),
   });
   if (played.error) {
     console.error(played.error);
@@ -1649,6 +1769,7 @@ async function playFile(path: string): Promise<void> {
       gl: round(s.gl),
       work: Object.fromEntries(Object.entries(s.work).map(([key, v]) => [key, round(v)])),
     })),
+    ...(args.includes("--census") ? { census: summarise(framesFrom(played.census, 0)) } : {}),
   };
   if (args.includes("--json")) {
     console.log(JSON.stringify(report));
@@ -1688,6 +1809,10 @@ async function playFile(path: string): Promise<void> {
   }
   if (spikes.length > shown) {
     console.log(`    and ${spikes.length - shown} more (--top N, --json)`);
+  }
+
+  if (report.census) {
+    console.log(formatCensus(report.census).join("\n"));
   }
 }
 
@@ -1789,52 +1914,54 @@ const swf =
     ? vectorsSwf(vectors)
     : redraws > 0
       ? redrawSwf(redraws)
-      : pen > 0
-        ? penSwf(pen)
-        : texts > 0
-          ? args.includes("--device")
-            ? deviceTextSwf(texts)
-            : textSwf(texts, args.includes("--normal"))
-          : triangles > 0
-            ? trianglesSwf(triangles, args.includes("--culled"))
-            : scrolled > 0
-              ? scrollSwf(scrolled)
-              : readback > 0
-                ? readbackSwf(readback, args.includes("--opaque"))
-                : stamps > 0
-                  ? stampsSwf(stamps)
-                  : town > 0
-                    ? townSwf(town)
-                    : toggleBranches > 0
-                      ? branchSwf(toggleBranches)
-                      : toggle > 0
-                        ? toggleSwf(toggle)
-                        : toggleStatic > 0
-                          ? toggleStaticSwf(toggleStatic)
-                          : scripted > 0
-                            ? scriptedSwf(scripted, args.includes("--still"))
-                            : pulse > 0
-                              ? pulseSwf(
-                                  pulse,
-                                  option("loop", 96),
-                                  option("line", 1),
-                                  option("squash", 1),
-                                )
-                              : masks > 0
-                                ? masksSwf(masks, args.includes("--unmasked"))
-                                : blends > 0
-                                  ? blendsSwf(blends)
-                                  : branches > 0
-                                    ? branchSwf(branches)
-                                    : rig > 0
-                                      ? rigSwf(
-                                          rig,
-                                          args.includes("--swap"),
-                                          args.includes("--fresh"),
-                                          args.includes("--blurred") || filtered > 0,
-                                          args.includes("--glide"),
-                                        )
-                                      : synthetic();
+      : bursts > 0
+        ? burstSwf(bursts, burstEvery)
+        : pen > 0
+          ? penSwf(pen)
+          : texts > 0
+            ? args.includes("--device")
+              ? deviceTextSwf(texts)
+              : textSwf(texts, args.includes("--normal"))
+            : triangles > 0
+              ? trianglesSwf(triangles, args.includes("--culled"))
+              : scrolled > 0
+                ? scrollSwf(scrolled)
+                : readback > 0
+                  ? readbackSwf(readback, args.includes("--opaque"))
+                  : stamps > 0
+                    ? stampsSwf(stamps)
+                    : town > 0
+                      ? townSwf(town)
+                      : toggleBranches > 0
+                        ? branchSwf(toggleBranches)
+                        : toggle > 0
+                          ? toggleSwf(toggle)
+                          : toggleStatic > 0
+                            ? toggleStaticSwf(toggleStatic)
+                            : scripted > 0
+                              ? scriptedSwf(scripted, args.includes("--still"))
+                              : pulse > 0
+                                ? pulseSwf(
+                                    pulse,
+                                    option("loop", 96),
+                                    option("line", 1),
+                                    option("squash", 1),
+                                  )
+                                : masks > 0
+                                  ? masksSwf(masks, args.includes("--unmasked"))
+                                  : blends > 0
+                                    ? blendsSwf(blends, blendFills, blendClips)
+                                    : branches > 0
+                                      ? branchSwf(branches)
+                                      : rig > 0
+                                        ? rigSwf(
+                                            rig,
+                                            args.includes("--swap"),
+                                            args.includes("--fresh"),
+                                            args.includes("--blurred") || filtered > 0,
+                                            args.includes("--glide"),
+                                          )
+                                        : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -1855,6 +1982,7 @@ const result = await benchPlayer(swf, frames, {
   hover: args.includes("--hover"),
   snapshotPath: args.includes("--snapshot") ? args[args.indexOf("--snapshot") + 1] : undefined,
   metered: args.includes("--counts"),
+  census: args.includes("--census"),
   multiDraw: !args.includes("--no-multi-draw"),
 });
 if (result.error) {
@@ -1887,37 +2015,39 @@ const summary = {
       ? `${vectors} shapes built once, moving and turning`
       : redraws > 0
         ? `${redraws} shapes drawn anew each frame`
-        : pen > 0
-          ? `pen of ${pen}`
-          : texts > 0
-            ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
-            : triangles > 0
-              ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
-              : scrolled > 0
-                ? `scrolled bitmap of ${scrolled}`
-                : readback > 0
-                  ? `readback of ${readback} edges${args.includes("--opaque") ? ", opaque" : ""}`
-                  : town > 0
-                    ? `town of ${town}`
-                    : toggleBranches > 0
-                      ? `toggle of ${toggleBranches} branches`
-                      : toggle > 0
-                        ? `toggle of ${toggle}`
-                        : toggleStatic > 0
-                          ? `static toggle of ${toggleStatic}`
-                          : scripted > 0
-                            ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                            : pulse > 0
-                              ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                              : masks > 0
-                                ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                                : blends > 0
-                                  ? `${blends} blended shapes`
-                                  : branches > 0
-                                    ? `${branches} branches`
-                                    : rig > 0
-                                      ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                                      : shapes,
+        : bursts > 0
+          ? `${bursts} discs drawn anew ${burstEvery > 1 ? `every ${burstEvery} frames` : "each frame"} in add`
+          : pen > 0
+            ? `pen of ${pen}`
+            : texts > 0
+              ? `${texts} text fields, ${args.includes("--device") ? "device font" : args.includes("--normal") ? "normal" : "advanced"}`
+              : triangles > 0
+                ? `${triangles} textured triangles drawn each frame${args.includes("--culled") ? ", culled" : ""}`
+                : scrolled > 0
+                  ? `scrolled bitmap of ${scrolled}`
+                  : readback > 0
+                    ? `readback of ${readback} edges${args.includes("--opaque") ? ", opaque" : ""}`
+                    : town > 0
+                      ? `town of ${town}`
+                      : toggleBranches > 0
+                        ? `toggle of ${toggleBranches} branches`
+                        : toggle > 0
+                          ? `toggle of ${toggle}`
+                          : toggleStatic > 0
+                            ? `static toggle of ${toggleStatic}`
+                            : scripted > 0
+                              ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                              : pulse > 0
+                                ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                                : masks > 0
+                                  ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                                  : blends > 0
+                                    ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
+                                    : branches > 0
+                                      ? `${branches} branches`
+                                      : rig > 0
+                                        ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                        : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {
@@ -1937,6 +2067,10 @@ const summary = {
   idle: stats(result.idle.slice(WARMUP * idleRenders)),
   // Each counter's mean over the measured frames: draws, binds, uploads, lines stroked.
   ...(args.includes("--counts") ? { perFrame: perFrame(result.meters.slice(WARMUP)) } : {}),
+  // Frames are numbered from 2, as the meters are: those after the warm-up.
+  ...(args.includes("--census")
+    ? { census: summarise(framesFrom(result.census, WARMUP + 2)) }
+    : {}),
   ...(args.includes("--allocs")
     ? { allocatedKbPerFrame: Math.round(result.allocated / 1024 / (frames - 1)) }
     : {}),
@@ -2019,6 +2153,10 @@ if (args.includes("--json")) {
   console.log(
     `  frame   median ${ms(summary.frame.median)}  p90 ${ms(summary.frame.p90)}  mean ${ms(summary.frameMean)}`,
   );
+  if (summary.census) {
+    console.log(formatCensus(summary.census).join("\n"));
+  }
+
   if (cpuProfile) {
     // Profiled from the 12th frame (page.ts, PROFILED_FROM) to the last.
     const { areas, functions } = selfTimes(cpuProfile, frames - 11);

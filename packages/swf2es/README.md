@@ -9,18 +9,18 @@ modules that loads from a CDN, with nothing to install or build. A page
 that has a bundler installs `@swf2es/web` instead.
 
 ```html
-<script type="module" src="https://unpkg.com/swf2es@0.1.32"></script>
+<script type="module" src="https://unpkg.com/swf2es@0.1.33"></script>
 
 <swf2es-player src="movie.swf" width="800" height="600"></swf2es-player>
 ```
 
-jsDelivr serves it too, at `https://cdn.jsdelivr.net/npm/swf2es@0.1.32`.
+jsDelivr serves it too, at `https://cdn.jsdelivr.net/npm/swf2es@0.1.33`.
 The module exports what `@swf2es/web` does. To call it, import it from the
 same URL, so that the page has one copy:
 
 ```html
 <script type="module">
-  import { configure, watchFlash } from "https://unpkg.com/swf2es@0.1.32";
+  import { configure, watchFlash } from "https://unpkg.com/swf2es@0.1.33";
 
   configure({ cache: true }); // keep compiled modules in IndexedDB
   watchFlash(); // the page's Flash <object> and <embed> tags become players
@@ -30,6 +30,20 @@ same URL, so that the page has one copy:
 Players already in the markup start as the module loads, before any
 script that imports it runs, so a page that configures its players adds
 them from that script, after `configure`.
+
+`watchFlash` also lists Flash Player's plug-in in `navigator.plugins`,
+for the page's scripts that look for Flash before they write its tags
+(`watchFlash(document, { plugin: false })` leaves it out; the
+[guide](https://swf2es.github.io/swf2es/docs/#replace-the-flash-tags-on-an-existing-page)
+says when to). A module runs only once the page has been read, after
+such a script that looks as it loads, as swfobject does; for that one,
+load `dist/plugin.js`, a classic script that lists the plug-in alone
+(1.8 KB), before it, in each frame that looks:
+
+```html
+<script src="https://unpkg.com/swf2es@0.1.33/dist/plugin.js" crossorigin></script>
+<script src="swfobject.js"></script>
+```
 
 ## Relative URLs
 
@@ -48,7 +62,7 @@ Name a version in the URL. Until 1.0, a minor release (0.2) may change
 what a page sees, so pin at least the minor version: unpkg's
 `swf2es@0.1` takes 0.1's fixes as they are released, and redirects to the
 exact version, whose files the page then loads together. On jsDelivr, pin
-the exact version (`swf2es@0.1.32`): it serves a range without
+the exact version (`swf2es@0.1.33`): it serves a range without
 redirecting, so the files the main one loads later would come from
 whatever version the range names by then.
 

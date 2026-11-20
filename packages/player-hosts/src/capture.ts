@@ -31,12 +31,45 @@ function constraints(
   };
 }
 
+/** The browser's capture host, and its devices read again on demand. */
+export interface BrowserCaptureHost extends CaptureHost {
+  /** Reads the devices again, as after a grant the host did not ask for itself. */
+  refresh(): Promise<void>;
+  /** Stops listening for device and permission changes; the player calls it at destroy. */
+  release(): void;
+}
+
+/**
+ * A kind's devices, named. Browsers leave labels empty until the page may
+ * capture that kind, but Flash never names a device "": content checks
+ * `names[0]` and sends `names` on, where a server may refuse an empty
+ * field. So an unlabelled device is named by its kind and position
+ * ("Camera", "Camera 2") until consent gives its label.
+ */
+function devicesOf(
+  devices: readonly MediaDeviceInfo[],
+  kind: MediaDeviceKind,
+  base: string,
+): CaptureDevice[] {
+  const list: CaptureDevice[] = [];
+  for (const device of devices) {
+    if (device.kind !== kind) {
+      continue;
+    }
+
+    const placeholder = list.length === 0 ? base : `${base} ${list.length + 1}`;
+    list.push({ id: device.deviceId, name: device.label.trim() ? device.label : placeholder });
+  }
+
+  return list;
+}
+
 /**
  * The browser's capture host, its devices and permission states read
  * already. Enumerating never prompts; capture starts only at openCamera
  * and Chromium asks for consent. Null where the browser has no capture.
  */
-export async function browserCaptureHost(): Promise<CaptureHost | null> {
+export async function browserCaptureHost(): Promise<BrowserCaptureHost | null> {
   const host = lazyBrowserCaptureHost();
   return host && (await host.prepare?.()) ? host : null;
 }
@@ -47,7 +80,7 @@ export async function browserCaptureHost(): Promise<CaptureHost | null> {
  * or Microphone, as a browser's first enumeration is slow. Until then it
  * reports no devices. Null where the browser has no capture.
  */
-export function lazyBrowserCaptureHost(): CaptureHost | null {
+export function lazyBrowserCaptureHost(): BrowserCaptureHost | null {
   const media = globalThis.navigator?.mediaDevices;
   if (!media?.getUserMedia || !media.enumerateDevices) {
     return null;
@@ -60,19 +93,27 @@ export function lazyBrowserCaptureHost(): CaptureHost | null {
   const permissionHandles = new Map<CaptureKind, PermissionStatus>();
   let cameras: CaptureDevice[] = [];
   let microphones: CaptureDevice[] = [];
+  let started = 0;
+  let applied = 0;
   const refresh = async () => {
+    const reading = ++started;
     const devices = await media.enumerateDevices();
+    // Readings overlap at consent and device changes; one that ends late
+    // must not bring back the placeholders a newer one replaced.
+    if (reading < applied) {
+      return;
+    }
+
+    applied = reading;
     microphones =
-      typeof AudioWorkletNode === "function"
-        ? devices
-            .filter((d) => d.kind === "audioinput")
-            .map((d) => ({ id: d.deviceId, name: d.label }))
-        : [];
-    cameras = devices
-      .filter((d) => d.kind === "videoinput")
-      .map((d) => ({ id: d.deviceId, name: d.label }));
+      typeof AudioWorkletNode === "function" ? devicesOf(devices, "audioinput", "Microphone") : [];
+    cameras = devicesOf(devices, "videoinput", "Camera");
+  };
+  const refreshLater = () => {
+    void refresh().catch(() => {});
   };
   let prepared: Promise<boolean> | null = null;
+  let released = false;
   const prepare = async (): Promise<boolean> => {
     try {
       await refresh();
@@ -80,11 +121,21 @@ export function lazyBrowserCaptureHost(): CaptureHost | null {
       return false;
     }
 
+    // Consent given elsewhere (a site setting, another tab) and devices
+    // plugged in or out show up here; the labels come with consent. A
+    // release while reading leaves nothing behind.
+    if (!released) {
+      media.addEventListener("devicechange", refreshLater);
+    }
+
     await Promise.all(
       (["camera", "microphone"] as const).map(async (kind) => {
         try {
           const status = await navigator.permissions.query({ name: kind as PermissionName });
           permissionHandles.set(kind, status);
+          if (!released) {
+            status.addEventListener("change", refreshLater);
+          }
         } catch {
           /* Some hosts expose capture without the Permissions API. */
         }
@@ -102,6 +153,14 @@ export function lazyBrowserCaptureHost(): CaptureHost | null {
     prepare() {
       prepared ??= prepare();
       return prepared;
+    },
+    refresh,
+    release() {
+      released = true;
+      media.removeEventListener("devicechange", refreshLater);
+      for (const status of permissionHandles.values()) {
+        status.removeEventListener("change", refreshLater);
+      }
     },
     permissionStatus,
     async requestPermission(kind, signal) {
@@ -160,9 +219,7 @@ export function lazyBrowserCaptureHost(): CaptureHost | null {
           },
         },
         signal,
-        () => {
-          void refresh().catch(() => {});
-        },
+        refreshLater,
       );
     },
     openCamera(device, mode, events, signal) {
@@ -180,9 +237,7 @@ export function lazyBrowserCaptureHost(): CaptureHost | null {
           },
         },
         signal,
-        () => {
-          void refresh().catch(() => {});
-        },
+        refreshLater,
       );
     },
   };
