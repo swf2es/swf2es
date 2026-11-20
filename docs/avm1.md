@@ -1728,6 +1728,26 @@ job made adds the page's and paper's measures to the prototype, listed,
 over what a script set there, and no later job again: a job's are 0,
 unchanged by a set, anything else's undefined (adl).
 
+### Devices and streams it plays nothing of
+
+`Camera`, `Microphone`, `NetStream`, `Video`, `Accessibility`,
+`System.IME` and, from SWF 8, `flash.text.TextRenderer` are there with
+Flash's names and nothing behind them (`globals/media.ts`,
+`Accessibility.ts`, `TextRenderer.ts`, `System.ts`). They are all there
+from SWF 5, but their members come later. Most are SWF 6's: the device
+setters, `NetStream`'s publishing side, `Accessibility`'s functions and
+`IME`'s broadcaster. `IME`'s functions are SWF 8's, and `getInfo` and
+the microphone's codec settings SWF 10's (adl). What adl gives without a
+device, a screen reader or an IME is what they give: no camera or
+microphone to `get` and no `names`, `isActive` false, the IME disabled in
+the `UNKNOWN` mode with each function failing. A stream plays nothing,
+and its buffer properties read undefined. `TextRenderer` keeps
+`displayMode` and `maxLevel` as Flash checks them, though text is drawn
+the same whatever they are. `tests/player/avm1/devices.as` holds them to
+adl. AVM1's camera is not wired to the capture host
+(docs/camera-microphone.md) yet. A SWF 5 also sees `LocalConnection`,
+without its functions, and no `TextField.prototype`.
+
 ## Testing against Flash
 
 - **Ruffle's corpus**: `avm1/` has 715 tests at the pinned commit, all

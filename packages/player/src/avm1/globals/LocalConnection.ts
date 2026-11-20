@@ -76,7 +76,7 @@ export function localConnectionClass(
     () => undefined,
   );
   const method = (name: string, native: avm1.Native) =>
-    proto.define(name, realm.method(native), avm1.DONT_ENUM | avm1.DONT_DELETE);
+    proto.define(name, realm.method(native), avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.VERSION_6);
   method("connect", (self, args) => {
     const state = states.get(self);
     return typeof args[0] !== "string"

@@ -74,6 +74,7 @@ import { constructBlocks, ScriptClips } from "./clips.js";
 import { lazyBlocks } from "./compile.js";
 import { ExternalCalls } from "./external.js";
 import { type FocusHost, FocusTracker } from "./focus.js";
+import { accessibilityObject } from "./globals/Accessibility.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
@@ -94,6 +95,7 @@ import {
   targetOf,
 } from "./globals/MovieClip.js";
 import { movieClipLoaderClass } from "./globals/MovieClipLoader.js";
+import { cameraClass, microphoneClass, netStreamClass, videoClass } from "./globals/media.js";
 import { netConnectionClass, Remoting } from "./globals/NetConnection.js";
 import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
@@ -104,6 +106,7 @@ import { styleSheetClass } from "./globals/StyleSheet.js";
 import { systemObject } from "./globals/System.js";
 import { textFieldClass } from "./globals/TextField.js";
 import { textFormatClass } from "./globals/TextFormat.js";
+import { textPackage } from "./globals/TextRenderer.js";
 import { textSnapshotClass } from "./globals/TextSnapshot.js";
 import { xmlClass } from "./globals/XML.js";
 import { type XmlNodes, xmlNodeClass, serialize as xmlString } from "./globals/XMLNode.js";
@@ -645,12 +648,16 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define(
       "LocalConnection",
       localConnectionClass(this, xml, xmlNodes),
-      avm1.DONT_ENUM | avm1.VERSION_6,
+      avm1.DONT_ENUM,
     );
     realm.global.define("LoadVars", loadVarsClass(this), avm1.DONT_ENUM);
     realm.global.define("XMLSocket", xmlSocketClass(this, xml), avm1.DONT_ENUM);
     realm.global.define("NetConnection", netConnectionClass(this, this.remoting), avm1.DONT_ENUM);
+    realm.global.define("NetStream", netStreamClass(realm), avm1.DONT_ENUM);
+    realm.global.define("Camera", cameraClass(realm), avm1.DONT_ENUM);
+    realm.global.define("Microphone", microphoneClass(realm), avm1.DONT_ENUM);
     const flash = flashPackage(this);
+    flash.define("text", textPackage(realm), 0);
     flash.define("net", fileReferenceClasses(this), 0);
     const external = new avm1.Avm1Object(realm.objectProto);
     external.define("ExternalInterface", externalInterfaceClass(this.external), 0);
@@ -682,6 +689,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     const menus = contextMenuClasses(realm);
     realm.global.define("ContextMenu", menus.ContextMenu, avm1.DONT_ENUM);
     realm.global.define("ContextMenuItem", menus.ContextMenuItem, avm1.DONT_ENUM);
+    realm.global.define("Video", videoClass(realm), avm1.DONT_ENUM);
+    realm.global.define("Accessibility", accessibilityObject(realm), avm1.DONT_ENUM);
     realm.global.define(
       "System",
       systemObject(

@@ -36,6 +36,7 @@ export {
   VERSION_6,
   VERSION_7,
   VERSION_8,
+  VERSION_10,
 } from "./objects.js";
 export { Realm } from "./realm.js";
 export {

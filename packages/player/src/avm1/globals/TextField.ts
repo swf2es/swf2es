@@ -156,10 +156,12 @@ const rgbOf = (v: Value, version: number) => (avm1.toNumber(v, version) >>> 0) &
 export function textFieldClass(host: TextFieldHost): { constr: avm1.Avm1Function; proto: Obj } {
   const realm = host.realm;
   const proto = new avm1.Avm1Object(realm.objectProto);
+  // A SWF 5 sees no TextField.prototype, though its fields have it (adl).
   const constr = realm.classOf(
     proto,
     (self) => self,
     () => undefined,
+    avm1.VERSION_6,
   );
 
   /** `_global.TextFormat.prototype`, as it is now. */
