@@ -7,15 +7,23 @@
 import { isAs3, readSwf, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import { Avm1, getUrlNavigate } from "../avm1/avm1.js";
+import type { StageHost } from "../avm1/globals/Stage.js";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import { decodeImageFile, decodeImages, hasUndecoded, imageFormat } from "../bitmap/images.js";
 import { type Container, MovieClip, rootOf, unloads } from "../display/display.js";
 import { type BitmapPixels, type Library, readLibrary } from "../display/timeline.js";
 import type { FetchProgress, FetchPurpose, FetchRequest, FetchResult } from "../hosts.js";
 import { LoadedAvm1Input } from "../input/avm1.js";
-import { streamFrames, warmAudioFor } from "../media/sounds.js";
+import {
+  type SoundHost,
+  sharedMixerOf,
+  stopTimelineSounds,
+  streamFrames,
+  warmAudioFor,
+} from "../media/sounds.js";
 import { type Pieces, piecesOf } from "../pieces.js";
 import type { Scripting } from "../scripting.js";
+import type { StageScaleMode } from "../stage.js";
 import { dispatchEvent } from "./events.js";
 
 const textEncoder = new TextEncoder();
@@ -77,6 +85,18 @@ interface Avm1Load {
   failed: boolean;
 }
 
+const NO_SOUND_HOSTS: SoundHost[] = [];
+
+/**
+ * An AVM1 movie its Loader let go of, until it goes (Loads.unloadedAvm1):
+ * then kept "listening" without an unload handler, or "sending" with one,
+ * its connections closed, until its sends are delivered.
+ */
+interface UnloadedAvm1 {
+  vm: Avm1;
+  state: "play" | "played" | "unload" | "listening" | "sending";
+}
+
 /**
  * The LocalConnection messages a frame delivers at most, the rest the
  * frames after, first in first out (Loads.deferLocal). Flash polls them in
@@ -90,8 +110,27 @@ const LOCAL_DELIVERIES = 16;
 export class Loads {
   /** Only loaded AVM1 movies enter this map; ordinary AS3 players create no AVM1 runtime. */
   private readonly avm1Movies = new Map<MovieClip, { vm: Avm1; first: Swf | null }>();
-  /** Movies unloaded whose LocalConnections still listen or send (Avm1.unloadFromLoader). */
-  private readonly unloadedAvm1 = new Set<Avm1>();
+  /**
+   * Movies unloaded and not yet let go of, which Flash Player 32 lets go
+   * of at the frame's end, their LocalConnections' names and their sounds'
+   * channels held until then. One unloaded before the frame's AVM1 has
+   * played (in ENTER_FRAME, or a timer due at the frame) plays it
+   * ("play"), its unload handlers never run; one unloaded after
+   * ("unload"), or between frames (a mouse event, a timer shorter than a
+   * frame), runs its clips' unload handlers as it goes, at the frame's end,
+   * or as the next frame starts. One with an interval or a timeout to come,
+   * which unloadAndStop clears first, does neither, wherever it is
+   * unloaded. A movie with no unload handler anywhere in it whose
+   * LocalConnections still listen or send is then kept for them
+   * ("listening", Avm1.unloadFromLoader), as Flash keeps it, until neither
+   * holds (keeps); one with a handler and sends still to deliver, until they
+   * are ("sending", Avm1.closeForSends).
+   */
+  private readonly unloadedAvm1: UnloadedAvm1[] = [];
+  /** Whether the frame's AVM1 has played, from then until the next frame starts. */
+  private avm1Ticked = false;
+  /** The stage the loaded movies' Stage reads and sets, once one is loaded. */
+  private stage: StageHost | null = null;
   /** LocalConnection's deliveries, AS3's and the loaded AVM1 movies' (deferLocal). */
   private readonly localReady: (() => void)[] = [];
 
@@ -122,15 +161,15 @@ export class Loads {
     this.flashvars = options.parameters ?? {};
   }
 
-  tickAvm1(): void {
-    for (const vm of this.unloadedAvm1) {
-      if (!this.keeps(vm)) {
-        this.unloadedAvm1.delete(vm);
-        vm.destroy(false);
-      }
-    }
+  /** A frame starts: the movies unloaded since the last one ended go. */
+  beginAvm1Frame(): void {
+    this.avm1Ticked = false;
+    this.releaseUnloadedAvm1();
+  }
 
-    if (this.avm1Movies.size === 0) {
+  tickAvm1(): void {
+    this.avm1Ticked = true;
+    if (this.avm1Movies.size === 0 && this.unloadedAvm1.length === 0) {
       return;
     }
 
@@ -144,6 +183,131 @@ export class Loads {
         movie.vm.tick(this.s.frameRate);
       }
     }
+
+    for (const movie of this.unloadedAvm1) {
+      if (movie.state === "play") {
+        movie.state = "played";
+        movie.vm.tick(this.s.frameRate);
+      }
+    }
+  }
+
+  /**
+   * The frame over: the movies unloaded in it go, or, listening, are kept
+   * stopped; those kept go once nothing keeps them.
+   */
+  releaseUnloadedAvm1(): void {
+    if (this.unloadedAvm1.length === 0) {
+      return;
+    }
+
+    const batch = this.unloadedAvm1.splice(0);
+    let next = 0;
+    try {
+      while (next < batch.length && !this.s.destroyed) {
+        this.releaseUnloaded(batch[next++]);
+      }
+    } finally {
+      // What a throw, or a handler that had the host destroy the player, left: gone now.
+      for (const movie of batch.slice(next)) {
+        movie.vm.destroy(false);
+      }
+    }
+  }
+
+  /**
+   * An unloaded movie at the frame's end. One with an unload handler (as it
+   * is now, its last frame played) runs it and goes, though not before its
+   * sends are delivered, as Flash delivers one its onUnload makes (adl, the
+   * projector); one without is kept while it listens or sends.
+   */
+  private releaseUnloaded(movie: UnloadedAvm1): void {
+    const vm = movie.vm;
+    if (movie.state === "listening" || movie.state === "sending") {
+      if (this.keeps(vm)) {
+        this.unloadedAvm1.push(movie);
+      } else {
+        vm.destroy(false);
+      }
+
+      return;
+    }
+
+    const handled = vm.hasUnloadHandler();
+    try {
+      if (handled && movie.state === "unload") {
+        vm.runUnloadHandlers();
+      }
+    } catch (error) {
+      // As the movie's own errors go: AVM1 has no event for them.
+      this.s.tellHost(error);
+    }
+
+    if (this.s.destroyed || !this.keeps(vm) || (handled && vm.localPending === 0)) {
+      vm.destroy(false);
+      return;
+    }
+
+    if (handled) {
+      movie.state = "sending";
+      vm.closeForSends();
+    } else {
+      movie.state = "listening";
+      vm.unloadFromLoader();
+    }
+
+    this.unloadedAvm1.push(movie);
+  }
+
+  /** The stage resized in noScale: each loaded movie's Stage.onResize. */
+  stageResized(): void {
+    for (const movie of [...this.avm1Movies.values()]) {
+      movie.vm.stageResized();
+    }
+  }
+
+  /** The stage as a loaded movie's Stage has it: this player's, one for every movie. */
+  private avm1Stage(): StageHost {
+    if (this.stage === null) {
+      const s = this.s;
+      this.stage = {
+        get stageWidth() {
+          return s.stageWidth;
+        },
+        get stageHeight() {
+          return s.stageHeight;
+        },
+        get scaleMode() {
+          return s.stageScaleMode;
+        },
+        set scaleMode(mode: string) {
+          s.setStageScaleMode(mode as StageScaleMode);
+        },
+        get align() {
+          return s.stageAlign;
+        },
+        set align(align: string) {
+          s.setStageAlign(align);
+        },
+        get showMenu() {
+          return s.showDefaultContextMenu;
+        },
+        set showMenu(show: boolean) {
+          s.showDefaultContextMenu = show;
+        },
+      };
+    }
+
+    return this.stage;
+  }
+
+  /** The loaded movies' sounds, which play under this player's mixer, those unloaded in the frame among them. */
+  avm1SoundHosts(): SoundHost[] {
+    if (this.avm1Movies.size === 0 && this.unloadedAvm1.length === 0) {
+      return NO_SOUND_HOSTS;
+    }
+
+    return [...this.avm1Movies.values(), ...this.unloadedAvm1].map((movie) => movie.vm.sounds);
   }
 
   streamFrames(): number {
@@ -161,12 +325,8 @@ export class Loads {
 
   /** The AVM1 movies' SharedObjects written, as the page may be going. */
   saveAvm1SharedObjects(): void {
-    for (const movie of this.avm1Movies.values()) {
+    for (const movie of [...this.avm1Movies.values(), ...this.unloadedAvm1]) {
       movie.vm.saveSharedObjects();
-    }
-
-    for (const vm of this.unloadedAvm1) {
-      vm.saveSharedObjects();
     }
   }
 
@@ -179,15 +339,10 @@ export class Loads {
   }
 
   destroyAvm1(): void {
-    for (const movie of this.avm1Movies.values()) {
+    for (const movie of [...this.avm1Movies.values(), ...this.unloadedAvm1.splice(0)]) {
       movie.vm.destroy(false);
     }
 
-    for (const vm of this.unloadedAvm1) {
-      vm.destroy(false);
-    }
-
-    this.unloadedAvm1.clear();
     this.avm1Movies.clear();
     this.s.avm1Input = null;
   }
@@ -1002,6 +1157,15 @@ export class Loads {
   unload(loader: AsObject, stop = false): void {
     this.closeLoad(loader);
     const content: AsObject | null = loader.$content ?? null;
+    // unloadAndStop stops an AVM1 movie's sounds and timers at once, before the frame it may still play.
+    if (stop && content) {
+      const movie = this.avm1Movies.get(content.$display);
+      if (movie) {
+        stopTimelineSounds(movie.vm.sounds);
+        movie.vm.realm.timers.clear();
+      }
+    }
+
     this.dropContent(loader);
     this.s.rt.forgetCaches();
     if (stop && content) {
@@ -1035,16 +1199,20 @@ export class Loads {
     if (content) {
       const movie = this.avm1Movies.get(content.$display);
       if (movie) {
-        this.s.avm1Input?.unloading(content.$display as MovieClip);
-        // Its LocalConnections outlive it, as in Flash, until it closes them.
-        if (this.keeps(movie.vm)) {
-          movie.vm.unloadFromLoader();
-          this.unloadedAvm1.add(movie.vm);
-        } else {
-          movie.vm.destroy(false);
-        }
-
         this.avm1Movies.delete(content.$display);
+        // One with an interval or a timeout to come plays no more frames.
+        const timers = movie.vm.realm.timers;
+        this.unloadedAvm1.push({
+          vm: movie.vm,
+          state:
+            movie.first !== null || timers.size > 0
+              ? "played"
+              : this.avm1Ticked
+                ? "unload"
+                : "play",
+        });
+        timers.clear();
+        this.s.avm1Input?.unloading(content.$display as MovieClip);
         if (this.s.avm1Input?.remove(content.$display)) {
           this.s.avm1Input = null;
         }
@@ -1219,11 +1387,15 @@ export class Loads {
         print: s.rt.print,
         // AVM1 has no event for it: the host's alone.
         onUncaught: (error) => s.tellHost(error),
-        url: load.url ?? info.$dynamic ?? info.$loaderURL ?? s.url,
+        // One from bytes has the URL of the SWF that loaded it, not its LoaderInfo's
+        // [[DYNAMIC]] one: its _url, and its SharedObjects' path (Flash Player 32).
+        url: load.url ?? info.$loaderURL ?? s.url,
         base: s.base ?? undefined,
         fetch: s.fetch ?? undefined,
         socket: s.socket ?? undefined,
         audio: s.audio,
+        mixer: sharedMixerOf(s),
+        quality: s,
         storage: s.storage,
         fileHost: s.fileHost,
         decodeImage: s.decodeImage,
@@ -1239,7 +1411,7 @@ export class Loads {
         screenCapabilities: s.screenCapabilities,
         debugger: s.rt.debugger,
       });
-      vm.attach(swf, library, root, load.bytes.length, s.frameRate, s, false);
+      vm.attach(swf, library, root, load.bytes.length, s.frameRate, this.avm1Stage(), false);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
       s.avm1Input ??= new LoadedAvm1Input(s);
       s.avm1Input.add(root, vm);

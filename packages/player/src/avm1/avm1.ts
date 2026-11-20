@@ -62,6 +62,7 @@ import { LocalConnections } from "../localconnection.js";
 import { type AudioHost, browserAudioHost } from "../media/audio.js";
 import {
   finishTimelineSounds,
+  type SharedMixer,
   type SoundHost,
   stopSoundsUnder,
   stopTimelineSounds,
@@ -98,7 +99,7 @@ import { printJobClass } from "./globals/PrintJob.js";
 import { type FocusState, selectionObject } from "./globals/Selection.js";
 import { sharedObjectClass } from "./globals/SharedObject.js";
 import { soundClass } from "./globals/Sound.js";
-import { type StageSize, stageObject } from "./globals/Stage.js";
+import { ownStage, type StageHost, stageObject } from "./globals/Stage.js";
 import { styleSheetClass } from "./globals/StyleSheet.js";
 import { systemObject } from "./globals/System.js";
 import { textFieldClass } from "./globals/TextField.js";
@@ -179,6 +180,10 @@ export interface Avm1Options {
   storage?: SharedObjectStorage;
   /** What plays the timeline's sounds and Sound's: the browser's Web Audio by default; null for none. */
   audio?: AudioHost | null;
+  /** The mixer of the AS3 player that loaded the movie, which its sounds play under; its own without one. */
+  mixer?: SharedMixer;
+  /** What keeps the quality of the AS3 player that loaded the movie, which _quality reads and sets; its own without one. */
+  quality?: { quality: string };
   /**
    * fscommand's commands, as a plug-in passed them to its page. Without
    * one, "quit" stops the SWF after its frame, as a projector quits and
@@ -353,7 +358,11 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The player's clock, the scripts' timeout and setInterval's timers. */
   readonly timers: Timers;
 
-  quality = "HIGH";
+  /** Stage, once the SWF is attached: whose listeners hear onResize. */
+  private stageFace: avm1.Avm1Object | null = null;
+  /** The quality, where no AS3 player that loaded the movie keeps it. */
+  private ownQuality = "HIGH";
+  private readonly sharedQuality: { quality: string } | null;
   focusRect = true;
   soundBufferTime = 5;
   newInvalidBounds = false;
@@ -402,12 +411,27 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   readonly fileLifetime = new AbortController();
   /** Destroyed: nothing of it is left, its LocalConnections closed. */
   closed = false;
+  /** Unloaded with an unload handler, its sends still to deliver: their onStatus no longer comes. */
+  private muted = false;
   /** Its LocalConnection sends not yet delivered: an unloaded movie is kept for them. */
   localPending = 0;
   private readonly deferLocalTo: ((deliver: () => void) => void) | null;
 
   get frameRate(): number {
     return this.rate;
+  }
+
+  /** The stage's quality, "LOW" to "BEST": an AS3 player's, which it shares with its loaded movies. */
+  get quality(): string {
+    return this.sharedQuality?.quality ?? this.ownQuality;
+  }
+
+  set quality(quality: string) {
+    if (this.sharedQuality === null) {
+      this.ownQuality = quality;
+    } else {
+      this.sharedQuality.quality = quality;
+    }
   }
 
   constructor(
@@ -423,6 +447,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.debugger = options.debugger ?? false;
     this.parameters = options.parameters ?? {};
     this.localConnections = options.localConnections ?? new LocalConnections();
+    this.sharedQuality = options.quality ?? null;
     this.deferLocalTo = options.deferLocal ?? null;
     this.storage = options.storage ?? defaultStorage();
     this.net = new Avm1Net(
@@ -437,7 +462,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       options.decodeImage === undefined ? decodeInBrowser : options.decodeImage,
     );
     this.external = new ExternalCalls(this, options.externalInterface ?? null);
-    this.media = new Avm1Sounds(this, this.audio);
+    this.media = new Avm1Sounds(this, this.audio, options.mixer ?? null);
     this.sounds = this.media.sounds;
     this.timers = new Timers(
       this,
@@ -495,7 +520,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
         this.startDrag(target as DisplayObject, lockCenter, bounds),
       stopDrag: () => this.stopDrag(),
       returned: () => this.queue.returned(),
-      stopSounds: () => stopTimelineSounds(this.sounds),
+      stopSounds: () => this.media.stopAll(),
       loadVariables: (into, url, form) => this.loadVariables(into as DisplayObject, url, form),
       loadMovie: (into, url, form) =>
         this.loadMovie(typeof into === "number" ? into : (into as DisplayObject), url, form),
@@ -548,10 +573,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     root: MovieClip,
     size = swf.header.fileLength,
     frameRate = swf.frameRate,
-    stageSize: StageSize = {
+    stage: StageHost = ownStage({
       stageWidth: Math.round((swf.frameSize.xMax - swf.frameSize.xMin) / 20),
       stageHeight: Math.round((swf.frameSize.yMax - swf.frameSize.yMin) / 20),
-    },
+    }),
     standalone = true,
   ): void {
     this.movieRoot = root;
@@ -595,7 +620,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     realm.global.define("Key", this.input.keyFace, avm1.DONT_ENUM);
     this.input.mouseFace = mouseObject(realm, this.input, this.swfVersion);
     realm.global.define("Mouse", this.input.mouseFace, avm1.DONT_ENUM);
-    realm.global.define("Stage", stageObject(realm, stageSize), avm1.DONT_ENUM);
+    this.stageFace = stageObject(realm, stage);
+    realm.global.define("Stage", this.stageFace, avm1.DONT_ENUM);
     this.focusTracker.selectionFace = selectionObject(realm, this, this.swfVersion);
     realm.global.define("Selection", this.focusTracker.selectionFace, avm1.DONT_ENUM);
     realm.global.define("Color", colorClass(this), avm1.DONT_ENUM);
@@ -1341,6 +1367,19 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   }
 
   /**
+   * Unloaded with an unload handler while its sends wait: it stops, its
+   * connections close, their names free from the next frame, and it stays
+   * only to have its sends delivered, whose onStatus it no longer hears, as
+   * Flash delivers what an onUnload sends and tells it nothing (adl and the
+   * projector).
+   */
+  closeForSends(): void {
+    this.stop();
+    this.localConnections.destroy(this);
+    this.muted = true;
+  }
+
+  /**
    * A LocalConnection's delivery, on the host's queue or else the
    * network's, counted until it is made.
    */
@@ -1359,6 +1398,41 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
       this.deferLocalTo(counted);
     } else {
       this.net.defer(counted);
+    }
+  }
+
+  /** The stage resized in noScale: Stage's listeners hear onResize, as an AS3 stage's RESIZE goes. */
+  stageResized(): void {
+    const stage = this.stageFace;
+    if (stage === null || this.halted) {
+      return;
+    }
+
+    this.timers.begin();
+    try {
+      this.callback(stage, "broadcastMessage", ["onResize"]);
+      this.queue.run();
+    } finally {
+      this.timers.end();
+    }
+  }
+
+  /**
+   * The movie unloaded from the AS3 Loader that held it: its clips' unload
+   * handlers, the children's first, run now, as Flash Player 32 runs them
+   * for a movie unloaded after its frame has played.
+   */
+  runUnloadHandlers(): void {
+    if (this.movieRoot === null || this.halted) {
+      return;
+    }
+
+    this.timers.begin();
+    try {
+      this.unload(this.movieRoot);
+      this.queue.run();
+    } finally {
+      this.timers.end();
     }
   }
 
@@ -1439,7 +1513,10 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
    * clips' unloads at most.
    */
   localInvoke(o: avm1.Avm1Object, name: string, args: Value[], fallback: Value = undefined): Value {
-    const cx = this.movieRoot === null || this.halted ? null : this.activationOf(this.movieRoot);
+    const cx =
+      this.movieRoot === null || this.halted || this.muted
+        ? null
+        : this.activationOf(this.movieRoot);
     if (cx === null) {
       return undefined;
     }
@@ -1827,6 +1904,14 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     this.unload(d);
     this.pending.push(d);
     return true;
+  }
+
+  /**
+   * Whether a clip of the movie has an unload handler: Flash Player 32 lets
+   * a movie with one go whole once unloaded, and keeps one without listening.
+   */
+  hasUnloadHandler(): boolean {
+    return this.movieRoot !== null && this.swfVersion >= 5 && this.delays(this.movieRoot);
   }
 
   /** Whether `d` or a clip in it has an unload handler. */

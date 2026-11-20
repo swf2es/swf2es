@@ -1701,14 +1701,17 @@ refuses the call, which is asked of the sender's domain whether it is
 the receiver's or not. A method the receiver lacks, or a property that
 is no function, is passed over in silence; in AS3, what the method
 throws, or a sealed client's #1069, is an AsyncErrorEvent. A movie an
-AS3 Loader unloads keeps its connections, as Flash Player 32 and adl
+AS3 Loader unloads with no unload handler in it (an `onUnload`, or a clip
+event's, on any of its clips) keeps its connections, as Flash Player 32 and adl
 keep them even after `unloadAndStop`, a removal and a collection: it
 plays no more, but takes messages and answers them, its sends' onStatus
 comes, and its names stay taken until it closes them or the player ends;
 a send still to be delivered keeps it too, as a movie unloaded by the
 first of its two messages still delivers the second
 (`Avm1.unloadFromLoader`; the `avm1-local-connection` case). Then, or
-once it stops for good, it is destroyed, its code let go of. Connections
+once it stops for good, it is destroyed, its code let go of. One with a
+handler goes whole as the frame ends, its names free from the next, in
+both too (loading.md has the rest of an unload). Connections
 are not shared with other tabs or applications.
 
 ### PrintJob

@@ -154,9 +154,33 @@ services. A movie from bytes runs its first-frame script after the
 following frame's AS3 ENTER_FRAME; a URL-loaded movie runs it in the load
 frame. Subsequent frames tick that VM once, and the AS3 timeline walker
 skips its subtree. Timeline sounds
-and script-driven playback run with the child. Unloading destroys the
-child VM without closing the parent's audio device, but for its
-LocalConnections, which Flash keeps connected (below). Keys and focus
+and script-driven playback run with the child, under the parent's mixer:
+its global `Sound` reads and sets `SoundMixer.soundTransform`, either
+side's stop stops both, and they share the 32 channels. It has the
+parent's stage, `Stage`'s scale mode, align and menu, `onResize` after
+`RESIZE` in noScale, and `_quality`; one from bytes has the loading SWF's
+URL as its `_url`, for its SharedObjects and relative loads. Unloading
+lets the child VM go at the frame's end, as Flash Player 32 does, its
+LocalConnections' names and its sounds' channels taken until then: one
+unloaded in `ENTER_FRAME`, before its AVM1 has played, still plays that
+frame unless an interval or a timeout of its is to come, its unload
+handlers never running; one unloaded after its frame runs its clips'
+`onUnload`, children first, as the frame ends, or, between frames, as the
+next starts. `unloadAndStop` stops its sounds and timers at once. A movie
+with no unload handler anywhere in it is kept, stopped, while its
+LocalConnections listen or send (below); one with a handler goes whole,
+its names free from the next frame, though only once what it sent, its
+onUnload's sends among them, is delivered, their onStatus no longer told
+it (measured in adl and the projector). An onUnload's send arrives the
+next frame, as adl delivers it and as the host's queue delivers any send
+made at a frame's end; the projector delivers it in the same frame. A kept movie's LocalConnection
+handlers still run: a sound one starts plays and holds its channel until
+the movie goes, its onSoundComplete never told, as no frame of it plays;
+Flash keeps such a movie running, sounds and all.
+Flash also keeps such a movie's intervals, sounds and Key and Mouse
+listeners running after `unload()`, its sounds and its Key and Mouse
+listeners after `unloadAndStop` too; these stop here. The parent's audio
+device stays open. Keys and focus
 reach these loaded movies as Flash Player 32 sends them (input.md,
 "Keyboard and focus"). Wheel routing into them remains incomplete.
 `AVM1Movie`'s `call` and `addCallback` throw #2014 as Flash Player 32's
@@ -181,9 +205,10 @@ no messages does no frame work. Receiver methods, domain permissions and
 sender status events enter the appropriate VM, never sharing live script
 objects. A method a receiver lacks, or a property that is no function, is
 passed over in silence, as in Flash. Closing or destroying a receiver
-frees its name; an AVM1 movie an AS3 Loader unloads keeps its names, and
-stays while it listens or has a send to deliver, as Flash keeps it
-(avm1.md, "AVM1 and AVM2"). This is in-process messaging, not Flash's
+frees its name; an AVM1 movie an AS3 Loader unloads with no unload
+handler in it keeps its names, and stays while it listens or has a send
+to deliver, as Flash keeps it (avm1.md, "AVM1 and AVM2"); one with a
+handler frees them as the frame ends. This is in-process messaging, not Flash's
 machine-wide transport: browser tabs and desktop processes do not share
 connections.
 

@@ -1083,9 +1083,34 @@ export class Scripting {
 
     this.stageWidth = width;
     this.stageHeight = height;
+    if (this.stageScaleMode !== "noScale") {
+      return;
+    }
+
     const stage = this.stage?.object;
-    if (this.stageScaleMode === "noScale" && stage && heard(stage, "resize")) {
+    if (stage && heard(stage, "resize")) {
       dispatchTo(this, stage, this.event("resize"));
+    }
+
+    // Then the loaded AVM1 movies' Stage.onResize (Flash Player 32).
+    this.loads.stageResized();
+  }
+
+  /** A script's scale mode, one of AS3's names: the host lays the stage out again for a new one. */
+  setStageScaleMode(mode: StageScaleMode): void {
+    this.stageScaleModeSet = true;
+    if (mode !== this.stageScaleMode) {
+      this.stageScaleMode = mode;
+      this.onStageLayout?.();
+    }
+  }
+
+  /** A script's alignment, as stageAlignment gives it. */
+  setStageAlign(align: string): void {
+    this.stageAlignSet = true;
+    if (align !== this.stageAlign) {
+      this.stageAlign = align;
+      this.onStageLayout?.();
     }
   }
 
@@ -1889,6 +1914,7 @@ export class Scripting {
 
   private playFrame(root: DisplayObject, entered: boolean, render: boolean): void {
     this.overflowed = false;
+    this.loads.beginAvm1Frame();
     finishSounds(this);
     if (entered) {
       this.frames++;
@@ -1921,6 +1947,7 @@ export class Scripting {
     }
 
     this.loads.deliverAvm1Loads();
+    this.loads.releaseUnloadedAvm1();
     // What is under a mouse that stands still, as the frame left the list.
     this.pointer?.frameEnded();
     if (render) {
