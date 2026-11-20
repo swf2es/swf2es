@@ -83,36 +83,25 @@ export class Avm1Sounds implements SoundClassHost {
       return null;
     }
 
-    // `_root` and `_levelN` from the level, which a path from a clip in a movie an AS3 Loader
-    // holds begins with, `_root`, and which a string under a `_lockroot` clip names too (adl):
-    // not the clip locked, which the code's `_root` is. The rest as any target path is, a
-    // variable too.
+    // In a movie an AS3 Loader holds, `_root` is the movie's root, which a clip's path there
+    // begins with, whatever `_root` the code sees: a string's under a `_lockroot` clip too, by
+    // dots or slashes (adl). A movie of its own honours `_lockroot` in a string's `_root` (Flash
+    // Player 32's projector), so that goes as any path from the code's target.
     const movie = this.movie;
+    if (movie.hosted && /^_root(?:$|[./])/.test(path)) {
+      const root = movie.atPath("_root");
+      const rest = path.slice("_root.".length);
+      return root === null || rest === "" ? root : targetOf(movie, root, rest, version);
+    }
+
+    // `_levelN` from that level; the rest as any target path is, a variable too.
     const dot = path.indexOf(".");
-    const first = dot < 0 ? path : path.slice(0, dot);
-    const level = first === "_root" ? this.levelOfCode() : movie.atPath(first);
+    const level = movie.atPath(dot < 0 ? path : path.slice(0, dot));
     if (level === null) {
       return movie.resolve(path, version);
     }
 
     return dot < 0 ? level : targetOf(movie, level, path.slice(dot + 1), version);
-  }
-
-  /** The level of the code's target, whatever its `_root`: the movie's root where the movie has no levels. */
-  private levelOfCode(): DisplayObject | null {
-    const movie = this.movie;
-    if (movie.hosted) {
-      return movie.atPath("_root");
-    }
-
-    const target = movie.realm.current?.target as DisplayObject | null | undefined;
-    for (let o = target ?? null; o !== null; o = o.parent) {
-      if (movie.levelOf(o) !== null) {
-        return o;
-      }
-    }
-
-    return movie.root;
   }
 
   /** The DefineSound ExportAssets named `name`, any case, as attachSound finds it. */

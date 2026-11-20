@@ -203,6 +203,40 @@ test("a Sound keeps its target's path: a removed clip's names nothing, a level's
   assert.deepEqual(lines, ["1: undefined 30 undefined"]);
 });
 
+test("in a movie of its own, a string's _root under a _lockroot clip is the clip locked", async () => {
+  // Flash Player 32's projector: code in `lk`, locked, finds its own `snd` by "_root.snd", and
+  // nothing by "_root.lk.snd"; `_level0` is the level whatever is locked.
+  const locker = as1(`this._lockroot = true;
+createEmptyMovieClip("snd", 5);
+new Sound(snd).setVolume(30);
+_parent.createEmptyMovieClip("snd", 9);
+new Sound(_parent.snd).setVolume(44);
+_parent.rel = new Sound("snd");
+_parent.r = "root=" + _root + " str=" + new Sound("_root.snd").getVolume() + " full=" + new Sound("_root.lk.snd").getVolume() + " lvl=" + new Sound("_level0.snd").getVolume() + " lvlfull=" + new Sound("_level0.lk.snd").getVolume() + " rel=" + new Sound("snd").getVolume() + " up=" + new Sound("../snd").getVolume() + " par=" + new Sound("_parent.snd").getVolume() + " sl=" + new Sound("/snd").getVolume() + " sl2=" + new Sound("/lk/snd").getVolume() + " clip=" + new Sound(snd).getVolume() + " rootclip=" + new Sound(_root.snd).getVolume();
+stop();`);
+  const swf = w.swf({
+    version: 8,
+    width: 20,
+    height: 20,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.sprite(10, 2, [w.showFrame(), locker, w.showFrame(), w.end()]),
+      w.place({ depth: 20, character: 10, name: "lk" }),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      as1(`trace(r + " | later rel=" + rel.getVolume()); stop();`),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const { lines } = await play(swf, 6);
+  assert.deepEqual(lines, [
+    "4: root=_level0.lk str=30 full=undefined lvl=44 lvlfull=30 rel=30 up=44 par=44 sl=30 sl2=undefined clip=30 rootclip=30 | later rel=44",
+  ]);
+});
+
 test("a loaded movie's Sounds stop as it goes; a clip's of the movie that removes it plays on", async () => {
   // adl: the child's Sound on a clip of its own stops, and never completes, when the child is
   // removed, unloaded or replaced; the parent's Sound on a clip it removes completes.

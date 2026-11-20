@@ -1894,17 +1894,17 @@ onEnterFrame = function () {
 // time, through a rename, a clip made where it was and a variable; a removed
 // clip's reference, which names nothing, nor a clip made later where it was;
 // and a string's `_root` under a `_lockroot` clip, which is the movie's root,
-// as a clip's path's is, not the clip locked, whenever the Sound was made and
-// however the clip is locked since. (The string of a removed clip's
-// reference, once a clip is made where it was, is not Flash's, so it is not
-// traced.)
+// as a clip's path's is, not the clip locked, by dots or slashes, whenever the
+// Sound was made and however the clip is locked since. (The string of a
+// removed clip's reference, once a clip is made where it was, is not
+// Flash's, so it is not traced.)
 function avm1SoundTargets(): Uint8Array {
   const version = 8;
   const locker = `this._lockroot = true;
 createEmptyMovieClip("snd", 5);
 var s = new Sound(snd);
 s.setVolume(30);
-trace("L root " + _root + " snd " + snd + " vol " + s.getVolume() + " " + new Sound(_root.snd).getVolume() + " str " + new Sound("_root.snd").getVolume() + " " + new Sound("snd").getVolume() + " full " + new Sound(String(snd)).getVolume() + " this " + new Sound(this).getVolume());
+trace("L root " + _root + " snd " + snd + " vol " + s.getVolume() + " " + new Sound(_root.snd).getVolume() + " str " + new Sound("_root.snd").getVolume() + " " + new Sound("snd").getVolume() + " full " + new Sound(String(snd)).getVolume() + " this " + new Sound(this).getVolume() + " slash " + new Sound("_root/lk/snd").getVolume());
 this._lockroot = false;
 trace("L unlocked root " + _root + " vol " + s.getVolume() + " str " + new Sound("_root.snd").getVolume() + " full " + new Sound(String(snd)).getVolume());
 var q = new Sound("_root.lk.snd");
