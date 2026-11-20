@@ -288,7 +288,10 @@ Flash Player's API with bodies of swf2es's own over the player's natives.
 A method native in Flash Player's playerglobal is native in ours, which the
 player's TypeScript implements; private natives are declared with the
 signatures it binds. `--check` holds the compiled API to Flash Player's
-(names, version marks, types, defaults, flags), and a unit test holds the
+(names, version marks, types, defaults, flags), but for the classes Flash
+Player 32's playerglobal has and the oracle's, older, lacks (`NEWER_CLASSES`:
+AVLoader, the AV events, DRMMetadataEvent, VideoTextureEvent, AVResult and
+AVPlayState), which it has nothing to hold to. A unit test holds the
 committed file to its sources; `SWF2ES_PLAYERGLOBAL=adobe` runs the tests on
 Flash Player's own instead. Its VM-internal names are marked 52, VM_INTERNAL
 in `core/api-versions.h`, where Flash Player's are marked 42, VM_INTERNAL in

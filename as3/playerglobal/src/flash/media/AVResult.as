@@ -7,13 +7,6 @@ package flash.media
 	[API("688")]
 	public class AVResult
 	{
-		private var _result:int;
-
-		public function AVResult(result:int)
-		{
-			_result = result;
-		}
-
 		public static const END_OF_PERIOD:int = -1;
 		public static const SUCCESS:int = 0;
 		public static const ASYNC_OPERATION_IN_PROGRESS:int = 1;
@@ -115,6 +108,13 @@ package flash.media
 		public static const CRYPTO_ERROR_DIGEST_FINISH:int = 305;
 		public static const CRYPTO_ERROR_BAD_PARAMETER:int = 306;
 		public static const CRYPTO_ERROR_UNKNOWN:int = 307;
+
+		private var _result:int;
+
+		public function AVResult(result:int)
+		{
+			_result = result;
+		}
 
 		public function get result():int
 		{

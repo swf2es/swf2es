@@ -294,8 +294,7 @@ const NEWER = new Set([
 ]);
 
 // Classes of Flash Player 32's playerglobal that the oracle's lacks, so
-// --check has nothing to hold them to. Their members' marks are kept below
-// 42 as NEWER's are: VideoTextureEvent's SWF 29 members are left unmarked.
+// --check has nothing to hold them to.
 const NEWER_CLASSES = new Set([
   "flash.display::AVLoader",
   "flash.events::AVDictionaryDataEvent",

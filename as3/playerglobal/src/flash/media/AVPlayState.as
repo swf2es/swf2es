@@ -7,13 +7,6 @@ package flash.media
 	[API("688")]
 	public class AVPlayState
 	{
-		private var _state:int;
-
-		public function AVPlayState(state:uint)
-		{
-			_state = state;
-		}
-
 		public static const UNINITIALIZED:int = 0;
 		public static const READY:int = 1;
 		public static const BUFFERING:int = 2;
@@ -23,6 +16,13 @@ package flash.media
 		public static const SUSPENDED:int = 6;
 		public static const TRICK_PLAY:int = 7;
 		public static const UNRECOVERABLE_ERROR:int = 8;
+
+		private var _state:int;
+
+		public function AVPlayState(state:uint)
+		{
+			_state = state;
+		}
 
 		public function get state():int
 		{
