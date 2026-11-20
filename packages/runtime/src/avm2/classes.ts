@@ -147,6 +147,7 @@ export function newClass(
   cls.$prototype = prototype;
   itraits.proto.$p = prototype;
   prototype.$d.set("constructor", cls);
+  prototype.$d.indexed = false;
   prototype.$dontEnum = new Set(["constructor"]);
 
   const iscope = rt.scope(scope, [cls], 0);

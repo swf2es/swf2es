@@ -111,6 +111,33 @@ export function getElement(rt: Runtime, o: AsObject, i: number): Value {
 }
 
 /**
+ * Elements from..to of `o`, an Array whose storage is `a`, copied as
+ * avmplus copies them, by getUintProperty: a hole is the prototype's
+ * element, or undefined, which the copy holds as its own.
+ */
+export function copyElements(
+  rt: Runtime,
+  o: AsObject,
+  a: Value[],
+  from: number,
+  to: number,
+): Value[] {
+  const out = a.slice(from, to);
+  // A hole reads as undefined to includes: without one, nothing to fill.
+  if (!out.includes(undefined)) {
+    return out;
+  }
+
+  for (let i = 0; i < out.length; i++) {
+    if (!(i in out)) {
+      out[i] = getElement(rt, o, from + i);
+    }
+  }
+
+  return out;
+}
+
+/**
  * As getLengthProperty, the length Array's natives walk to: an Array's or
  * a Vector's own, which nothing can override, else the length property's,
  * through the getter an Array subclass may override, as a uint.

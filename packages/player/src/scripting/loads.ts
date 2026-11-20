@@ -378,7 +378,7 @@ export class Loads {
    * content is known: what its natives read is kept on it as $ fields.
    */
   loaderInfo(loader: AsObject | null): AsObject {
-    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    const info = this.s.rt.constructNative(this.s.rt.classNamed("flash.display::LoaderInfo"));
     info.$loader = loader;
     info.$content = null;
     info.$bytes = null;
@@ -405,7 +405,7 @@ export class Loads {
       return made.info;
     }
 
-    const info = this.s.rt.construct(this.s.rt.classNamed("flash.display::LoaderInfo"));
+    const info = this.s.rt.constructNative(this.s.rt.classNamed("flash.display::LoaderInfo"));
     for (const name of MIRRORED) {
       Object.defineProperty(info, name, { get: () => main[name], configurable: true });
     }
@@ -1410,6 +1410,8 @@ export class Loads {
         platform: s.platform,
         screenCapabilities: s.screenCapabilities,
         debugger: s.rt.debugger,
+        // As Security.sandboxType asks of a loaded SWF: one from the network is remote.
+        sandboxType: loadedSandbox(s, load.url),
       });
       vm.attach(swf, library, root, load.bytes.length, s.frameRate, this.avm1Stage(), false);
       this.avm1Movies.set(root, { vm, first: load.url === null ? swf : null });
@@ -1522,6 +1524,16 @@ const NO_BYTES = new Uint8Array(0);
  * loaderInfo.parameters: decoded, `+` as a space, a name without `=` an
  * empty value, an empty name left out, and the last of a name kept.
  */
+/**
+ * The sandbox Security.sandboxType reports for a SWF from `url`: one
+ * loaded from the network is remote, wherever the SWF that loaded it is;
+ * the main SWF, and any other, is in the host's. It reports, and gates
+ * nothing: a check that must fail closed asks Code.securityUrls.
+ */
+export function loadedSandbox(s: Scripting, url: string | null): string {
+  return url !== null && url !== s.url && /^https?:/i.test(url) ? "remote" : s.sandboxType;
+}
+
 function queryParameters(url: string): Map<string, string> {
   const parameters = new Map<string, string>();
   const path = url.split("#", 1)[0];

@@ -1,11 +1,13 @@
 // Array: its natives, and its instances' element storage.
 
 import type { AsObject, Value } from "../descriptors.js";
+import type { DynamicProperties } from "../dynamic-properties.js";
 import { FloatValue } from "../float.js";
 import type { ClassHook } from "../hooks.js";
 import { type Runtime, SEALED_ELEMENTS } from "../runtime.js";
 import {
   AS3,
+  copyElements,
   eachElement,
   elements,
   getElement,
@@ -51,6 +53,35 @@ function arrayElements(rt: Runtime, o: Value): Value[] | null {
 function arrayElementsOf(rt: Runtime, o: AsObject, length: number): Value[] | null {
   const a = arrayElements(rt, o);
   return a !== null && a.length === length ? a : null;
+}
+
+/**
+ * Whether JavaScript's indexOf and lastIndexOf, which pass over a hole,
+ * may answer otherwise than avmplus', which reads it as getUintProperty
+ * does, through the prototype chain of `o`, whose storage `a` is: for
+ * undefined, or where a prototype has elements, and only if `a` has a
+ * hole, which includes reads as undefined.
+ */
+function holesMatter(o: AsObject, a: Value[], v: Value): boolean {
+  return (v === undefined || prototypesHaveElements(o)) && a.includes(undefined);
+}
+
+/**
+ * Whether a prototype of an Array has what a hole could read: elements of
+ * its own, as Array.prototype keeps them, or dynamic properties named by
+ * indices, as Object.prototype and a subclass's prototype keep them, or
+ * kept them once. An Array's chain is classes' prototypes alone.
+ */
+function prototypesHaveElements(o: AsObject): boolean {
+  for (let p: AsObject | null = o.$p; p; p = p.$p) {
+    const a: Value[] | undefined = p.$a;
+    const d: DynamicProperties | null | undefined = p.$d;
+    if ((a !== undefined && a.length > 0) || (d && d.indexed === true)) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 /** As AvmCore::toInteger: a number, truncated, NaN as 0. */
@@ -322,14 +353,14 @@ export const arrayNatives: Natives = {
     }
 
     const length = lengthOf(rt, o);
+    const from = clampIndex(rt.toNumber(start), length);
+    const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const a = arrayElementsOf(rt, o, length);
     if (a) {
-      return rt.array(a.slice(rt.toNumber(start), rt.toNumber(end)));
+      return rt.array(copyElements(rt, o, a, from, to));
     }
 
     const g = new Generic(rt, o);
-    const from = clampIndex(rt.toNumber(start), length);
-    const to = Math.max(from, clampIndex(rt.toNumber(end), length));
     const out: Value[] = [];
     for (let i = from; i < to; i++) {
       out.push(g.get(i));
@@ -370,19 +401,19 @@ export const arrayNatives: Natives = {
 
     const length = lengthOf(rt, o);
     const a = arrayElementsOf(rt, o, length);
-    if (a) {
+    if (a && !holesMatter(o, a, v)) {
       const start = rt.toInt(from);
-      if (v instanceof FloatValue) {
-        for (let i = clampIndexInt(start, a.length); i < a.length; i++) {
-          if (rt.strictEquals(a[i], v)) {
-            return i;
-          }
-        }
-
-        return -1;
+      if (!(v instanceof FloatValue)) {
+        return a.indexOf(v, start);
       }
 
-      return a.indexOf(v, start);
+      for (let i = clampIndexInt(start, a.length); i < a.length; i++) {
+        if (rt.strictEquals(a[i], v)) {
+          return i;
+        }
+      }
+
+      return -1;
     }
 
     // As generic_indexOf: by strict equality, from the start clamped.
@@ -400,29 +431,29 @@ export const arrayNatives: Natives = {
       return -1;
     }
 
+    // As generic_lastIndexOf: from the start clamped, a negative one past the start to 0.
     const length = lengthOf(rt, o);
-    const a = arrayElementsOf(rt, o, length);
-    if (a) {
-      const start = rt.toInt(from);
-      if (v instanceof FloatValue) {
-        const at = start < 0 ? a.length + start : Math.min(start, a.length - 1);
-        for (let i = at; i >= 0; i--) {
-          if (rt.strictEquals(a[i], v)) {
-            return i;
-          }
-        }
-
-        return -1;
-      }
-
-      return a.lastIndexOf(v, start);
-    }
-
-    const g = new Generic(rt, o);
     let start = clampIndexInt(rt.toInt(from), length);
     if (start === length) {
       start--;
     }
+
+    const a = arrayElementsOf(rt, o, length);
+    if (a && !holesMatter(o, a, v)) {
+      if (!(v instanceof FloatValue)) {
+        return start < 0 ? -1 : a.lastIndexOf(v, start);
+      }
+
+      for (let i = start; i >= 0; i--) {
+        if (rt.strictEquals(a[i], v)) {
+          return i;
+        }
+      }
+
+      return -1;
+    }
+
+    const g = new Generic(rt, o);
 
     for (let i = start | 0; i >= 0; i--) {
       if (rt.strictEquals(g.get(i), v)) {

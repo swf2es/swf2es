@@ -1,0 +1,24 @@
+globals Accessibility:undefined Camera:undefined Microphone:undefined NetStream:undefined Video:undefined LocalConnection:undefined TextField:undefined flash:undefined
+prototypes a:object b:object c:object d:object e:object f:undefined
+NetStream attachAudio:undefined attachVideo:undefined backBufferTime:undefined checkPolicyFile:undefined close:undefined getInfo:undefined maxPauseBufferTime:undefined onPeerConnect:function pause:function play:function play2:function publish:function receiveAudio:function receiveVideo:function seek:function send:undefined setBufferTime:undefined
+Video attachVideo:undefined clear:undefined
+Camera setCursor:undefined setKeyFrameInterval:undefined setLoopback:undefined setMode:undefined setMotionLevel:undefined setQuality:undefined
+Camera statics get:function
+Microphone setCodec:undefined setEncodeQuality:undefined setFramesPerPacket:undefined setGain:undefined setRate:undefined setSilenceLevel:undefined setUseEchoSuppression:undefined
+Microphone statics get:function
+IME ALPHANUMERIC_FULL:string UNKNOWN:string _listeners:undefined addListener:undefined broadcastMessage:undefined removeListener:undefined doConversion:undefined getConversionMode:undefined getEnabled:undefined setCompositionString:undefined setConversionMode:undefined setEnabled:undefined
+Accessibility isActive:undefined sendEvent:undefined updateProperties:undefined
+LocalConnection close:undefined connect:undefined domain:undefined send:undefined
+Accessibility enumerates isActive sendEvent updateProperties
+Camera enumerates get names
+Camera.prototype enumerates 
+NetStream.prototype enumerates 
+IME enumerates 
+called undefined undefined undefined undefined
+new object object object object
+stream       true
+modes ALPHANUMERIC_FULL ALPHANUMERIC_HALF CHINESE JAPANESE_HIRAGANA JAPANESE_KATAKANA_FULL JAPANESE_KATAKANA_HALF KOREAN UNKNOWN 
+mode written KOREAN
+IME        
+Accessibility    true
+Accessibility written undefined undefined

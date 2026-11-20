@@ -487,17 +487,44 @@ export class Traits {
       return true;
     }
 
-    // An interface a base settled after this class copied its interfaces.
+    return this.everyInterface().has(t);
+  }
+
+  /**
+   * The interfaces of this class and its bases, each with its own,
+   * transitively: also an interface a base settled after this class copied
+   * its interfaces, and one an interface has settled after it was copied.
+   */
+  everyInterface(): Set<Traits> {
+    if (this.allInterfaces !== null) {
+      return this.allInterfaces;
+    }
+
     this.settleInterfaces();
     let settled = true;
     const all = new Set<Traits>();
+    const add = (i: Traits): void => {
+      if (all.has(i)) {
+        return;
+      }
+
+      all.add(i);
+      i.settleInterfaces();
+      if (i.pendingInterfaces) {
+        settled = false;
+      }
+
+      for (const j of i.interfaces) {
+        add(j);
+      }
+    };
     for (let c: Traits | null = this; c; c = c.base) {
       if (c.pendingInterfaces) {
         settled = false;
       }
 
       for (const i of c.interfaces) {
-        all.add(i);
+        add(i);
       }
     }
 
@@ -505,7 +532,7 @@ export class Traits {
       this.allInterfaces = all;
     }
 
-    return all.has(t);
+    return all;
   }
 }
 

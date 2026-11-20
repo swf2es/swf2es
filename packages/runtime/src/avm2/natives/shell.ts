@@ -663,7 +663,7 @@ function sharedItem(rt: Runtime, value: Value): { kind: number; bytes: Uint8Arra
 /** As construct="abstract" and "native": AS3 does not construct the class itself, a subclass it may. */
 const abstract = (name: string): ClassHook => ({
   construct: (rt) => {
-    throw rt.error("ArgumentError", 2012, name);
+    throw rt.cantInstantiate(name);
   },
 });
 

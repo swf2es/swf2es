@@ -271,8 +271,8 @@ export class MethodEmitter {
     floatLocals(this);
 
     const count = traits.paramCount[global];
-    // Named, for stacks and profiles: a name its code never binds.
-    const name = this.functionName.length ? this.functionName : "$method";
+    // Named, for stacks and profiles: a name its code never binds (stack-names.ts).
+    const name = this.functionName;
     this.bound = hasBoundEntry(this, global);
     // A method with an entry for bound calls is that entry, `name$u`, then
     // its checked entry, `name` (see boundEntry).
@@ -578,7 +578,7 @@ export class MethodEmitter {
       out.text(", l");
       out.uint(local++);
       out.text(" = rt.arguments(arguments, ");
-      out.text(this.functionName.length ? this.functionName : "$method");
+      out.text(this.functionName);
       out.text(")");
     }
 

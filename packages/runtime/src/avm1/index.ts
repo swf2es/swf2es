@@ -2,7 +2,11 @@
 
 export { goto } from "./clips.js";
 export { Avm1Super, ScriptFunction } from "./functions.js";
-export { broadcastMessage, initializeBroadcaster } from "./globals/broadcaster.js";
+export {
+  broadcastMessage,
+  broadcastVersion,
+  initializeBroadcaster,
+} from "./globals/broadcaster.js";
 export { DateCell } from "./globals/date.js";
 export { escapeAvm1, parseIntAvm1, unescapeAvm1 } from "./globals/global.js";
 export {
@@ -36,6 +40,7 @@ export {
   VERSION_6,
   VERSION_7,
   VERSION_8,
+  VERSION_10,
 } from "./objects.js";
 export { Realm } from "./realm.js";
 export {

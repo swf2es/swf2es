@@ -149,7 +149,7 @@ trace(System.useCodepage + " " + System.exactSettings);`,
       `${platform.os}|${platform.playerType}|${platform.language}`,
       "true",
       "number true",
-      "security,useCodepage,exactSettings,capabilities",
+      "IME,security,useCodepage,exactSettings,capabilities",
       "34",
       "x",
       `true ${version >= 7 ? "function" : "undefined"} remote`,
@@ -175,6 +175,14 @@ trace(System.capabilities.isDebugger + " " + (System.capabilities.serverString.i
     "Mac OS 10.5|600",
     "true true",
   ]);
+  played.player.destroy();
+});
+
+test("System.security.sandboxType is the sandbox the host placed the movie in", async () => {
+  const played = await playNet("trace(System.security.sandboxType);", {
+    sandboxType: "localWithFile",
+  });
+  assert.deepEqual(take(played), ["localWithFile"]);
   played.player.destroy();
 });
 

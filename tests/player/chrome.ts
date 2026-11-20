@@ -36,6 +36,12 @@ export interface PlayerJob {
   /** Played as AIR plays it, AIR's API defined (Scripting's `air`). */
   air?: boolean;
   /**
+   * The API version it runs at (Scripting's `apiVersion`): the latest by
+   * default, or a root SWF's version's, as Flash runs everything at its
+   * root's (run.ts pins its cases to the oracle's harness's).
+   */
+  apiVersion?: "latest" | number;
+  /**
    * Every frame drawn, as a host draws it, at the stage's size and no
    * larger, and waited for: a benchmark's frames then take their drawing's
    * time as Flash's do (players.ts). No frame is captured.
@@ -366,6 +372,7 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               socket: job.socket,
               lazyCompilation: job.lazyCompilation,
               air: job.air,
+              apiVersion: job.apiVersion,
               draw: job.draw,
               realTime: job.realTime,
             })})`,

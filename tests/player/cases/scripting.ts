@@ -37,6 +37,67 @@ function bound(abc: Uint8Array): Uint8Array {
   });
 }
 
+// scripts/BoundAbstractDisplay.as beside script subclasses of the restricted
+// display classes, the first six bound to clips of a square (a shape for
+// BoundShapeDisplayObject), which frame 2 places as a to f, side by side.
+function boundAbstractDisplay(compile: Compile): Uint8Array {
+  const subclasses: [string, string][] = [
+    ["BoundDisplayObject", "DisplayObject"],
+    ["BoundInteractiveObject", "InteractiveObject"],
+    ["BoundContainer", "DisplayObjectContainer"],
+    ["BoundShapeDisplayObject", "DisplayObject"],
+    ["BoundAVM1Movie", "AVM1Movie"],
+    ["BoundStage", "Stage"],
+    ["MyDisplayObject", "DisplayObject"],
+    ["MyAVM1Movie", "AVM1Movie"],
+    ["MyStage", "Stage"],
+  ];
+  const abcs = subclasses.map(([name, base]) =>
+    compile(
+      name,
+      `package { import flash.display.${base}; public class ${name} extends ${base} { public function ${name}() { trace("${name} constructed"); } } }`,
+    ),
+  );
+  const characters = [2, 3, 4, 1, 5, 6];
+  const clip = (id: number) =>
+    w.sprite(id, 1, [w.place({ depth: 1, character: 1 }), w.showFrame(), w.end()]);
+  return w.swf({
+    width: 100,
+    height: 50,
+    frameRate: 24,
+    frameCount: 4,
+    tags: [
+      w.fileAttributes(true),
+      w.backgroundColor(0xffffff),
+      square(1, 0xff0000, 400),
+      clip(2),
+      clip(3),
+      clip(4),
+      clip(5),
+      clip(6),
+      ...abcs.map((abc) => w.doAbc(abc)),
+      w.doAbc(compile("BoundAbstractDisplay"), "BoundAbstractDisplay"),
+      w.symbolClass([
+        [0, "BoundAbstractDisplay"],
+        ...characters.map((id, i): [number, string] => [id, subclasses[i][0]]),
+      ]),
+      w.showFrame(),
+      ...characters.map((character, i) =>
+        w.place({
+          depth: i + 1,
+          character,
+          name: String.fromCharCode(97 + i),
+          matrix: { tx: i * 320, ty: 0 },
+        }),
+      ),
+      w.showFrame(),
+      w.showFrame(),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+}
+
 // Clips of a square, two MorphShapes growing a square and three empty
 // text fields, side by side, which frames 2 to 4 move with every property a place sets, for
 // scripts/ScriptedMoves.as to touch, then a loop back to frame 1's places.
@@ -609,6 +670,18 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Run as the root, at SWF 12's API version, where the harness, loading
+    // it, would refuse it at its own.
+    name: "versioned-isplaying",
+    swf: (abc) => bare(abc, 1, "Main", 100, 50, 12),
+    script: "VersionedIsPlaying",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
     name: "events",
     swf: bare,
     script: "Events",
@@ -682,6 +755,34 @@ export const scriptingCases: PlayerCase[] = [
     },
     script: "WorkerMutex",
     frames: 10,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // The classes a script may not construct, and what extends them: #2012 naming the class made.
+    name: "abstract-classes",
+    swf: (abc) => bare(abc, 1, "AbstractClasses"),
+    script: "AbstractClasses",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    name: "bound-abstract-display",
+    build: boundAbstractDisplay,
+    frames: 4,
+    capture: [2, 3],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
+    // Error.getStackTrace, as the debugger player names each method in it.
+    name: "stack-traces",
+    swf: (abc) => bare(abc, 1, "StackTraces"),
+    script: "StackTraces",
+    frames: 1,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

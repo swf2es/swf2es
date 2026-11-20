@@ -49,6 +49,7 @@ import {
   typeExpr,
   uri,
 } from "./refs";
+import { identifierOf, stackName } from "./stack-names";
 
 /**
  * The most slots a traits' fill sets. V8 counts only fields already
@@ -293,7 +294,9 @@ export class ModuleEmitter {
       }
 
       if (body < 0) {
-        out.text("rt.noBody");
+        out.text("rt.noBody(");
+        this.text(`${stackName(domain, this.index, global)}()`);
+        out.text(")");
         continue;
       }
 
@@ -304,9 +307,7 @@ export class ModuleEmitter {
       }
 
       if (result > 0) {
-        out.text("rt.verifyError(");
-        out.uint(result);
-        out.text(")");
+        this.verifyError(result, global, <u32>body, decoder);
         continue;
       }
 
@@ -422,6 +423,58 @@ export class ModuleEmitter {
   }
 
   /**
+   * The factory of method `global`, whose body failed verification with
+   * `error`: the VerifyError with the arguments avmplus' message takes, the
+   * method's name as its stack trace shows it, and the numbers verifying
+   * the body again finds: an illegal opcode and its offset, unbalanced
+   * depths, or a scope's index or a register out of range. Numbers found with another error than `error` are not its, and
+   * are left out.
+   */
+  verifyError(error: i32, global: u32, body: u32, decoder: BodyDecoder): void {
+    const out = this.out;
+    out.text("rt.verifyError(");
+    out.uint(error);
+    switch (error) {
+      case C.kIllegalOpcodeError:
+        out.text(", ");
+        this.text(`${stackName(this.domain, this.index, global)}()`);
+        this.errorNumbers(error, global, body, decoder, 2);
+        break;
+      case C.kStackDepthUnbalancedError:
+      case C.kScopeDepthUnbalancedError:
+        this.errorNumbers(error, global, body, decoder, 2);
+        break;
+      case C.kGetScopeObjectBoundsError:
+      case C.kInvalidRegisterError:
+        this.errorNumbers(error, global, body, decoder, 1);
+        break;
+      case C.kIllegalSetDxns:
+      case C.kIllegalSuperCallError:
+        out.text(", ");
+        this.text(`${stackName(this.domain, this.index, global)}()`);
+        break;
+    }
+
+    out.text(")");
+  }
+
+  /** The `count` numbers verifying `body` again records with `error`, as arguments; none for another error, or if it records none. */
+  private errorNumbers(error: i32, global: u32, body: u32, decoder: BodyDecoder, count: u32): void {
+    const code = decoder.decode(body, this.domain.traits.scopeOf(global));
+    if (code.error !== error || !code.numbered) {
+      return;
+    }
+
+    const out = this.out;
+    out.text(", ");
+    out.uint(code.errorA);
+    if (count > 1) {
+      out.text(", ");
+      out.uint(code.errorB);
+    }
+  }
+
+  /**
    * A native method's name, as avmplus binds its C++ ones: "Class.name" for
    * a class's static method, "Class#name" for an instance method, and the
    * qualified name alone for a script's function; getters and setters as
@@ -435,28 +488,11 @@ export class ModuleEmitter {
 
   /**
    * Method m's name as a JavaScript identifier for its function: its name
-   * as nativeName gives it, each character outside [A-Za-z0-9_] as `_`, and
-   * `$` before, which no name the generated code binds starts with; a
-   * method no trait binds, such as a closure, as `$f` and its index.
+   * in a stack trace, escaped (stack-names.ts), which begins with `$_`, as
+   * no name the generated code binds does.
    */
   functionName(m: u32): string {
-    const text = this.methodName(m);
-    if (text.length === 0) {
-      return `$f${m - this.domain.methodStart[this.index]}`;
-    }
-
-    // Into one buffer, made once: a string grown a character at a time is
-    // copied each time, which the minimal runtime collects only between calls.
-    const units = new StaticArray<u16>(text.length + 1);
-    units[0] = 0x24; // $
-    for (let i = 0; i < text.length; i++) {
-      const c = <u16>text.charCodeAt(i);
-      const word =
-        (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;
-      units[i + 1] = word ? c : 0x5f; // _
-    }
-
-    return String.UTF16.decodeUnsafe(changetype<usize>(units), units.length << 1);
+    return identifierOf(stackName(this.domain, this.index, m));
   }
 
   /** Method m's name: "Class.name", "Class#name", or a script's qualified name, "" if no trait binds it. */

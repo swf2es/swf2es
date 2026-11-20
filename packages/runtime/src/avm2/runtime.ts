@@ -2487,10 +2487,30 @@ export class Runtime {
     }
 
     if (cls.$it.uninstantiable) {
-      throw this.error("ArgumentError", 2012, cls.$it.name);
+      throw this.cantInstantiate(cls.$it.name);
     }
 
     return cls.$it.instance();
+  }
+
+  /**
+   * A class AS3 may not construct, as a native factory makes it: its
+   * instance and constructor, past the class's construct hook and the
+   * checks of a construct="abstract" or "restricted" class.
+   */
+  constructNative(cls: AsObject, args: Value[] = []): AsObject {
+    const o = cls.$it.instance();
+    cls.$it.proto.$init.apply(o, args);
+    return o;
+  }
+
+  /**
+   * #2012 for the class named `name`, as ScriptObject::throwCantInstantiateError
+   * words it: the local name of the class object's traits, "Name$".
+   */
+  cantInstantiate(name: string): Value {
+    const colons = name.lastIndexOf("::");
+    return this.error("ArgumentError", 2012, `${colons < 0 ? name : name.slice(colons + 2)}$`);
   }
 
   /** A class called as a function: a conversion for the builtins, else a coercion. */
@@ -3777,16 +3797,16 @@ export class Runtime {
     return r;
   }
 
-  get noBody(): Factory {
-    return noBodyFactory(this);
+  noBody(name: string): Factory {
+    return noBodyFactory(this, name);
   }
 
   get unverified(): Factory {
     return unverifiedFactory(this);
   }
 
-  verifyError(id: number): Factory {
-    return verifyErrorFactory(this, id);
+  verifyError(id: number, ...args: Value[]): Factory {
+    return verifyErrorFactory(this, id, args);
   }
 
   isPrimitive(v: Value): boolean {

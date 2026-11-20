@@ -4,6 +4,7 @@
 // loopback socket; the traces come on adl's standard error.
 //
 //   node oracle/flash.ts <file.swf> [frames, default 1] [frame to capture...] [low|medium|high|best]
+//   node oracle/flash.ts --root <file.swf> [frames, default 1]
 //
 // adl and amxmlc come from an AIR SDK on PATH, or the ADL and AMXMLC
 // environment variables. An adl that runs AIR's Windows runtime under Wine
@@ -12,6 +13,12 @@
 // id at a time: each run gets a copy of the descriptor with an id of its own.
 // Results are cached by the SWF's hash and the frames asked for;
 // SWF2ES_FLASH_FRESH=1 ignores the cache.
+//
+// Flash runs everything at its root SWF's API version, so every SWF the
+// harness loads runs at the harness's, HARNESS_SWF_VERSION's. A job run as
+// the root (FlashJob.root, --root) is the application's content itself, at
+// its own version, with oracle/flash/Swf2esOracleRoot.as's ABC put first
+// in it to mark its traces and end it: traces only, and AS3 only.
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -19,11 +26,19 @@ import { createServer, type Socket } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 // The built package, as the tests use it: node runs its .js, not its sources.
-import { backgroundColor, readSwf } from "../packages/format/dist/index.js";
+import { backgroundColor, isAs3, readSwf, tags } from "../packages/format/dist/index.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = resolve(here, "out/flash");
 const harnessSource = join(here, "flash/Harness.as");
+const rootSource = join(here, "flash/Swf2esOracleRoot.as");
+
+/**
+ * The harness's SWF version, which every job it loads runs at the API
+ * version of (apiVersionOf: AIR_20_0 here, Flash Player's SWF_31 in the
+ * player), as Flash runs a loaded SWF at its root's.
+ */
+export const HARNESS_SWF_VERSION = 51;
 
 /** A SWF to run, and the frames of it to capture (frame 1 is its first). */
 export interface FlashJob {
@@ -38,6 +53,32 @@ export interface FlashJob {
    * as a read past a bitmap draws the memory another job left there.
    */
   alone?: boolean;
+  /**
+   * More files, by name, for what it loads by a relative URL: they go
+   * beside the harness, whose URL a SWF it loads from bytes has.
+   */
+  files?: Record<string, Uint8Array>;
+  /**
+   * Run as the application's content, the root, in an adl of its own,
+   * rather than loaded by the harness: at its own SWF version's API
+   * version, not the harness's. Traces only: nothing is captured, and it
+   * must be an AS3 SWF. An error nothing caught before its first frame
+   * ends stops it with AIR's dialog, and it comes back incomplete.
+   */
+  root?: boolean;
+}
+
+/**
+ * `name`, if it is a plain file name, which a job's or a player case's
+ * file may have: letters, digits, `_`, `-` and dots, not first. Anything
+ * else, a path or `..` among them, throws.
+ */
+export function plainFileName(name: string): string {
+  if (!/^[\w-][\w.-]*$/.test(name)) {
+    throw new Error(`a file of a job is named by a plain file name, not ${JSON.stringify(name)}`);
+  }
+
+  return name;
 }
 
 export interface FlashResult {
@@ -60,21 +101,25 @@ function tool(name: string): string {
   return process.env[name.toUpperCase()] ?? name;
 }
 
-// Traces kept; AIR's float type off, as Flash Player content has none.
-const HARNESS_FLAGS = ["-compiler.float=false", "-omit-trace-statements=false"];
+// Traces kept; AIR's float type off, as Flash Player content has none; the
+// version pinned, as the player's cases are to it.
+const HARNESS_FLAGS = [
+  "-compiler.float=false",
+  "-omit-trace-statements=false",
+  `-swf-version=${HARNESS_SWF_VERSION}`,
+];
 
-/** The harness's SWF, compiled again when its source or its flags change. */
-function harness(): string {
-  const source = readFileSync(harnessSource);
+/** `source`'s SWF, compiled again when the source or the flags change. */
+function compiled(source: string, name: string): string {
   const hash = createHash("sha256")
-    .update(source)
+    .update(readFileSync(source))
     .update(HARNESS_FLAGS.join(" "))
     .digest("hex")
     .slice(0, 16);
-  const swf = join(out, `Harness-${hash}.swf`);
+  const swf = join(out, `${name}-${hash}.swf`);
   if (!existsSync(swf)) {
     mkdirSync(out, { recursive: true });
-    const result = spawnSync(tool("amxmlc"), [...HARNESS_FLAGS, "-output", swf, harnessSource], {
+    const result = spawnSync(tool("amxmlc"), [...HARNESS_FLAGS, "-output", swf, source], {
       encoding: "utf8",
     });
     if (!existsSync(swf)) {
@@ -85,7 +130,46 @@ function harness(): string {
   return swf;
 }
 
-function descriptor(content: string, id: string): string {
+/** The harness's SWF. */
+function harness(): string {
+  return compiled(harnessSource, "Harness");
+}
+
+/**
+ * `swf` with Swf2esOracleRoot's ABC first, after its FileAttributes, as a
+ * DoABC that runs as it loads (no lazy flag), uncompressed.
+ */
+function withRootScript(swf: Uint8Array): Uint8Array {
+  const job = readSwf(swf);
+  const first = job.tags[0];
+  if (!isAs3(job) || first?.code !== tags.FileAttributes) {
+    throw new Error("a job run as the root must be an AS3 SWF");
+  }
+
+  const helper = readSwf(new Uint8Array(readFileSync(compiled(rootSource, "Swf2esOracleRoot"))));
+  const doAbc = helper.tags.find((t) => t.code === tags.DoABC2);
+  if (!doAbc) {
+    throw new Error("amxmlc gave Swf2esOracleRoot no DoABC");
+  }
+
+  // DoABC2: u32 flags, a name ending in 0, the ABC.
+  const body = helper.bytes.subarray(doAbc.offset, doAbc.offset + doAbc.length);
+  const abc = body.subarray(body.indexOf(0, 4) + 1);
+  const name = Buffer.from("swf2es-oracle-root\0", "latin1");
+  const tag = Buffer.alloc(6 + 4 + name.length);
+  tag.writeUInt16LE((tags.DoABC2 << 6) | 0x3f, 0);
+  tag.writeUInt32LE(4 + name.length + abc.length, 2);
+  name.copy(tag, 10);
+
+  const at = first.offset + first.length;
+  const result = Buffer.concat([job.bytes.subarray(0, at), tag, abc, job.bytes.subarray(at)]);
+  result.write("FWS", 0, "latin1");
+  result.writeUInt32LE(result.length, 4);
+  return new Uint8Array(result);
+}
+
+/** An application of `content`; with `size`, its window 550 by 400, which the harness sizes to each SWF, else the SWF's own. */
+function descriptor(content: string, id: string, size = true): string {
   return `<?xml version="1.0" encoding="utf-8"?>
 <application xmlns="http://ns.adobe.com/air/application/51.3">
   <id>${id}</id>
@@ -93,9 +177,7 @@ function descriptor(content: string, id: string): string {
   <versionNumber>0.1.0</versionNumber>
   <initialWindow>
     <content>${content}</content>
-    <visible>false</visible>
-    <width>550</width>
-    <height>400</height>
+    <visible>false</visible>${size ? "\n    <width>550</width>\n    <height>400</height>" : ""}
     <renderMode>cpu</renderMode>
     <!-- Without it AIR keeps high quality where a SWF asks for low or medium. -->
     <allowLowQuality>true</allowLowQuality>
@@ -113,12 +195,20 @@ function descriptor(content: string, id: string): string {
  * local time from.
  */
 export function jobKey(job: FlashJob): string {
-  return createHash("sha256")
+  const hash = createHash("sha256");
+  for (const [name, bytes] of Object.entries(job.files ?? {}).sort(([a], [b]) =>
+    a < b ? -1 : 1,
+  )) {
+    hash.update(`file ${name} ${bytes.length}\n`).update(bytes);
+  }
+
+  return hash
     .update(job.swf)
     .update(
       `\n${job.frames}\n${job.quality ?? "high"}\n${job.capture.join(",")}\n${readFileSync(harnessSource)}`,
     )
     .update(job.alone ? "\nalone" : "")
+    .update(job.root ? `\nroot\n${readFileSync(rootSource)}` : "")
     .update(process.env.TZ ? `\nTZ=${process.env.TZ}` : "")
     .digest("hex");
 }
@@ -144,6 +234,62 @@ function encodeJob(id: number, job: FlashJob): Buffer {
   return Buffer.concat([head, job.swf]);
 }
 
+/**
+ * Run a job as the root in an adl of its own, until it traces its end and
+ * quits, or `timeout` ms pass.
+ */
+async function runRoot(job: FlashJob, timeout: number, timed: boolean): Promise<FlashResult> {
+  if (job.capture.length) {
+    throw new Error("a job run as the root captures no frames");
+  }
+
+  const result: FlashResult = { output: [], errors: [], images: new Map(), incomplete: true };
+  const id = `swf2es-root-${process.pid}-${Date.now()}`;
+  const app = join(out, `${id}.xml`);
+  const content = join(out, `${id}.swf`);
+  mkdirSync(out, { recursive: true });
+  writeFileSync(content, withRootScript(job.swf));
+  writeFileSync(app, descriptor(`${id}.swf`, id, false));
+
+  let adl: ChildProcess | null = null;
+  try {
+    const flags = timed ? ["-nodebug"] : [];
+    adl = spawn(tool("adl"), [...flags, `${id}.xml`, ".", "--", String(job.frames)], {
+      cwd: out,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let traces = "";
+    adl.stdout?.resume();
+    const running = adl;
+    await new Promise<void>((done) => {
+      const timer = setTimeout(done, timeout);
+      running.stderr?.setEncoding("utf8").on("data", (d: string) => {
+        traces += d;
+      });
+      running.once("exit", () => {
+        clearTimeout(timer);
+        done();
+      });
+    });
+    splitOutput(traces, [result]);
+    result.incomplete = !traces.includes(`${MARK}end 0`);
+  } finally {
+    if (adl?.pid) {
+      try {
+        process.kill(-adl.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+    }
+
+    rmSync(app, { force: true });
+    rmSync(content, { force: true });
+  }
+
+  return result;
+}
+
 /** Run the jobs in one adl, until one is `timeout` ms without word from the harness. */
 async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promise<FlashResult[]> {
   const results: FlashResult[] = jobs.map(() => ({
@@ -156,6 +302,19 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
   const id = `swf2es-harness-${process.pid}-${Date.now()}`;
   const app = join(out, `${id}.xml`);
   writeFileSync(app, descriptor(content.slice(out.length + 1), id));
+
+  const files = jobs.flatMap((job) => Object.entries(job.files ?? {}));
+  // They share the harness's directory: one name, one file.
+  const written = new Map<string, Uint8Array>();
+  for (const [name, bytes] of files) {
+    const before = written.get(name);
+    if (before !== undefined && Buffer.compare(before, bytes) !== 0) {
+      throw new Error(`two jobs have different files named ${name}`);
+    }
+
+    written.set(name, bytes);
+    writeFileSync(join(out, plainFileName(name)), bytes);
+  }
 
   const server = createServer();
   await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
@@ -256,6 +415,9 @@ async function runAdl(jobs: FlashJob[], timeout: number, timed: boolean): Promis
 
     server.close();
     rmSync(app, { force: true });
+    for (const [name] of files) {
+      rmSync(join(out, name), { force: true });
+    }
   }
 
   return results;
@@ -357,17 +519,20 @@ export async function runFlash(
   // again in another. It runs once more, first in the next, as adl now and then
   // stalls on a SWF that runs well alone, before it comes back incomplete.
   while (todo.length) {
-    // A job that runs alone has an adl of its own; the others share one, up to it.
-    const next = todo.findIndex((t, k) => k > 0 && t.job.alone);
-    const size = todo[0].job.alone ? 1 : next < 0 ? todo.length : next;
+    // A job that runs alone or as the root has an adl of its own; the others share one, up to it.
+    const own = (job: FlashJob) => job.alone || job.root;
+    const next = todo.findIndex((t, k) => k > 0 && own(t.job));
+    const size = own(todo[0].job) ? 1 : next < 0 ? todo.length : next;
     const batch = todo.slice(0, size);
     const later = todo.slice(size);
     const longest = Math.max(...batch.map((t) => (t.job.frames / frameRate(t.job.swf)) * 1000));
-    const ran = await runAdl(
-      batch.map((t) => t.job),
-      timeout + longest,
-      timed,
-    );
+    const ran = batch[0].job.root
+      ? [await runRoot(batch[0].job, timeout + longest, timed)]
+      : await runAdl(
+          batch.map((t) => t.job),
+          timeout + longest,
+          timed,
+        );
     let failed = ran.findIndex((r) => r.incomplete);
     if (failed < 0) {
       failed = batch.length;
@@ -420,16 +585,21 @@ export async function runFlash(
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [file, frames = "1", ...rest] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const root = args.includes("--root");
+  const [file, frames = "1", ...rest] = args.filter((a) => a !== "--root");
   const quality = rest.find((a) => QUALITIES.includes(a));
   const capture = rest.filter((a) => !QUALITIES.includes(a));
-  if (!file) {
-    console.error("usage: node oracle/flash.ts <file.swf> [frames] [frame to capture...]");
+  if (!file || (root && capture.length)) {
+    console.error(
+      "usage: node oracle/flash.ts <file.swf> [frames] [frame to capture...] [low|medium|high|best]\n" +
+        "       node oracle/flash.ts --root <file.swf> [frames]   as the root, at its own version: traces only",
+    );
     process.exit(2);
   }
 
   const swf = new Uint8Array(readFileSync(file));
-  const job = { swf, frames: Number(frames), quality, capture: capture.map(Number) };
+  const job = { swf, frames: Number(frames), quality, capture: capture.map(Number), root };
   const [result] = await runFlash([job]);
   for (const line of result.output) {
     console.log(line);

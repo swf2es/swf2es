@@ -10,7 +10,7 @@
 // goings, loads and timers.
 
 import { AIR_API_VERSION, API_VERSION, type Codegen } from "@swf2es/codegen";
-import type { Swf } from "@swf2es/format";
+import { apiVersionOf, type Swf } from "@swf2es/format";
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "./as3/types.js";
 import { decodeInBrowser, type ImageDecode } from "./bitmap/images.js";
@@ -404,8 +404,14 @@ export class Scripting {
 
   constructor(
     readonly codegen: Codegen,
-    // The API version follows `air`, the one switch for it, below.
     options: Omit<avm2.RuntimeOptions, "apiVersion"> & {
+      /**
+       * The API version the SWFs run at, of the series `air` picks: "latest",
+       * its latest, by default; or a root SWF's version, which Flash runs
+       * the root and everything it loads at the API version of
+       * (apiVersionOf), as the tests pin a SWF to their oracle's root's.
+       */
+      apiVersion?: "latest" | number;
       fetch?: FetchHost;
       url?: string;
       localConnections?: LocalConnections;
@@ -600,7 +606,12 @@ export class Scripting {
         // What a SWF's catch swallowed is still said, as an uncaught one is.
         onUnsupported: (message) => console.warn(`${message} (caught by the SWF)`),
         ...options,
-        apiVersion: this.air ? AIR_API_VERSION : API_VERSION,
+        apiVersion:
+          options.apiVersion === undefined || options.apiVersion === "latest"
+            ? this.air
+              ? AIR_API_VERSION
+              : API_VERSION
+            : apiVersionOf(options.apiVersion, this.air),
       },
     );
     this.mainDomain = this.rt.childDomain(this.rt.root);

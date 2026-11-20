@@ -1,6 +1,7 @@
 // The global functions, bugzilla, and Error.
 
-import type { Value } from "../descriptors.js";
+import type { AsObject, Value } from "../descriptors.js";
+import { stackNames } from "../errors.js";
 import type { ClassHook } from "../hooks.js";
 import { formatClassName } from "../names.js";
 import { errorMessages } from "../player-messages.js";
@@ -112,7 +113,18 @@ export const toplevelNatives: Natives = {
   // The debugger player writes the template as it is, %1 and all; an id it has no text for is the number alone.
   "Error.getErrorMessage": (rt) => (id: number) =>
     rt.debugger && errorMessages[id] ? `Error #${id}: ${errorMessages[id]}` : `Error #${id}`,
-  "Error#getStackTrace": plain(() => null),
+  // The debugger player's: the error as a string, then a line for each AS3
+  // method that was running when it was made; null in the release player.
+  "Error#getStackTrace": (rt) =>
+    function (this: AsObject): string | null {
+      if (!rt.debugger) {
+        return null;
+      }
+
+      const made = this.$jsError;
+      const frames = made instanceof Error ? stackNames(made.stack).slice(0, 64) : [];
+      return `${rt.toString(this)}\n${frames.map((name) => `\tat ${name}()`).join("\n")}`;
+    },
 };
 
 /**
@@ -124,18 +136,20 @@ const constructs: ClassHook = { call: (rt, cls, args) => rt.constructClass(cls, 
 
 /**
  * An AS3 error's JavaScript error, made with it: where it was made, the
- * compiled method's name in it, for a host to show (Runtime.stackOf). The
- * release player has no stack trace for AS3 to read, and getStackTrace
- * still gives null.
+ * compiled method's name in it, for a host to show (Runtime.stackOf), and
+ * for getStackTrace in debugger mode; the release player has no stack
+ * trace for AS3 to read.
  */
 const errorClass: ClassHook = {
   ...constructs,
-  create: (traits) => {
+  create: (traits, rt) => {
     const o = Object.create(traits.proto);
     // V8 keeps 10 frames, and the runtime's own take most of those before the first AS3 one.
+    // In debugger mode, enough for the 64 methods Flash lists (StackTrace's kMaxDisplayDepth),
+    // a bound method's two entries each, past the runtime's.
     const engine = Error as ErrorConstructor & { stackTraceLimit?: number };
     const limit = engine.stackTraceLimit;
-    engine.stackTraceLimit = 48;
+    engine.stackTraceLimit = rt.debugger ? 192 : 48;
     Object.defineProperty(o, "$jsError", { value: new Error() });
     engine.stackTraceLimit = limit;
     return o;

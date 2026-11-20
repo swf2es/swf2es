@@ -2,7 +2,8 @@
 // holds, so for any bytes the compiler must reject them with a VerifyError
 // or compile them, never trap: a trap kills the wasm instance. Each case is
 // a seed ABC with a few mutations, added to a domain after the builtins
-// avmshell loads; then
+// avmshell loads, at SWF_31, SWF_12 or VM_ALLVERSIONS in turn, the API
+// versions the player's and old roots run the compiler at; then
 //
 //   - the compiler did not trap;
 //   - a module it accepted imports as an ES module;
@@ -55,6 +56,8 @@ const seeds: Uint8Array[] = [
     }),
   ),
 ];
+// Closures with debug names, in the pool, empty, none and past it, which name their functions.
+seeds.push(closuresSeed());
 for (const [module, names] of [
   ["../unit/codegen/verify-cases.ts", ["verifyCases"]],
   ["../unit/codegen/link-cases.ts", ["linkCases", "resolveCases"]],
@@ -171,20 +174,24 @@ const failures: string[] = [];
 let accepted = 0;
 let slowest = { ms: 0, at: -1 };
 
+let apiVersion = 50;
+
 function fail(abc: Uint8Array, why: string): void {
   mkdirSync(`${out}failures`, { recursive: true });
   const name = `${out}failures/${sha(abc).slice(0, 16)}.abc`;
   writeFileSync(name, abc);
-  failures.push(`${why}: ${name}`);
+  failures.push(`${why}, at API version ${apiVersion}: ${name}`);
 }
 
 const utf8 = new TextDecoder("utf-8", { fatal: true });
+const VERSIONS = [50, 12, 0];
 const started = Date.now();
 for (let k = 0; k < caseCount; k++) {
   const abc = mutate(seeds[below(seeds.length)]);
   const t0 = performance.now();
   try {
-    testing.domainReset(50);
+    apiVersion = VERSIONS[k % VERSIONS.length];
+    testing.domainReset(apiVersion);
     for (const b of builtins) {
       testing.domainAdd(b, true);
     }
@@ -256,3 +263,26 @@ if (failures.length) {
 }
 
 console.log(`fuzz: ${summary}, all well (${seconds} s)`);
+
+/** A script that makes closures named by a pool string, an empty one, none and one past the pool. */
+function closuresSeed(): Uint8Array {
+  const names = [1, 2, 0, 3];
+  const code = [0xd0, 0x30];
+  for (let m = 1; m <= names.length; m++) {
+    code.push(0x40, m, 0x29);
+  }
+
+  code.push(0x47);
+  const body = { code: [0x47], maxStack: 1, localCount: 1, maxScopeDepth: 1 };
+  return abc(
+    { strings: ["x", ""] },
+    tables({
+      methods: [{}, ...names.map((name) => ({ name }))],
+      scripts: [{ init: 0 }],
+      bodies: [
+        { method: 0, code, maxStack: 1, localCount: 1, maxScopeDepth: 1 },
+        ...names.map((_, i) => ({ ...body, method: i + 1 })),
+      ],
+    }),
+  );
+}

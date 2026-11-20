@@ -27,10 +27,12 @@ test("wrapper and wasm agree on the compiler version", async () => {
 
 test("the compiler is reset only at an API version ABCs run at, which keys name", async () => {
   const codegen = await createCodegen(module);
-  for (const version of [0, 52, 256 + API_VERSION, 1.5]) {
+  for (const version of [-1, 52, 256 + API_VERSION, 1.5]) {
     assert.throws(() => codegen.reset(version), RangeError, `${version}`);
   }
 
+  codegen.reset(0);
+  assert.equal(codegen.apiVersion, 0);
   codegen.reset(AIR_API_VERSION);
   assert.equal(codegen.apiVersion, AIR_API_VERSION);
   codegen.reset();
@@ -60,6 +62,22 @@ test("a module key names the compiler, the ABCs its domain sees and what it foun
   const found = moduleKey(codegen, 1, abcs, null);
   assert.notEqual(found, key);
   assert.match(JSON.parse(found ?? "").log, /:x$/);
+});
+
+test("a library's module key names the API version's series, a SWF's the version", async () => {
+  const codegen = await createCodegen(module);
+  const keys = (version: number) => {
+    codegen.reset(version);
+    assert.equal(codegen.add(script([0x47], {}, [{ name: 1, kind: SLOT }]), true), 0);
+    assert.equal(codegen.add(script([0x47]), false, codegen.childDomain(0)), 0);
+    const abcs = { hashes: ["a", "b"], builtins: [true, false] };
+    return [0, 1].map((i) => JSON.parse(moduleKey(codegen, i, abcs, null) ?? "").api);
+  };
+
+  assert.deepEqual(keys(0), ["Flash Player", 0]);
+  assert.deepEqual(keys(12), ["Flash Player", 12]);
+  assert.deepEqual(keys(API_VERSION), ["Flash Player", API_VERSION]);
+  assert.deepEqual(keys(AIR_API_VERSION), ["AIR", AIR_API_VERSION]);
 });
 
 test("reads the ABC version header", async () => {

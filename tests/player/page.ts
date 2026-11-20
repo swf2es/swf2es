@@ -19,7 +19,7 @@
 // draws: the samples are then each resolved from the multisampled targets,
 // blends' backdrops and the stage alike, before the page averages them.
 import { createCodegen } from "@swf2es/codegen";
-import { definesInput, isAs3, readActions, readSwf, tags } from "@swf2es/format";
+import { definesInput, fileAttributes, isAs3, readActions, readSwf, tags } from "@swf2es/format";
 import {
   Avm1,
   airLibrary,
@@ -100,6 +100,7 @@ async function scriptingFor(
     onCompile,
     lazyCompilation = false,
     air = false,
+    apiVersion = "latest",
     logFetch = false,
     realTime = false,
   }: {
@@ -108,6 +109,8 @@ async function scriptingFor(
     lazyCompilation?: boolean;
     /** Played as AIR plays it (Scripting's `air`). */
     air?: boolean;
+    /** The API version it runs at, the latest or a root's SWF version's (Scripting's `apiVersion`). */
+    apiVersion?: "latest" | number;
     /** Its fetches traced, for a test with log_fetch (testFetch). */
     logFetch?: boolean;
     /** getTimer and timers by the wall clock, as a benchmark needs, not by the frames. */
@@ -146,6 +149,7 @@ async function scriptingFor(
     moduleCache,
     lazyCompilation,
     air,
+    apiVersion,
     // A trace of several lines is several lines of Flash's log, which breaks at "\r" as at "\n".
     print: (line) => trace.push(...line.split(/\r|\n/)),
     // The debugger player, as adl is and as Ruffle's traces were recorded: errors carry their text.
@@ -158,6 +162,7 @@ async function scriptingFor(
       ? { screenResolutionX: 1536, screenResolutionY: 864, pixelAspectRatio: 1, screenDPI: 72 }
       : undefined,
     url: fileUrl,
+    sandboxType: fileUrl && !air ? localSandbox(bytes) : undefined,
     // A navigateToURL to "_self" would take the page itself away.
     navigate: null,
     // An ErrorEvent no listener heard (#2044) ends no run: Flash tells its debugger of it and
@@ -389,6 +394,7 @@ async function avm1For(
     onUncaught: (error) => uncaught.push(error),
     realTime: null,
     url: fileName === undefined ? undefined : `file:///${fileName}`,
+    sandboxType: fileName === undefined ? undefined : localSandbox(bytes),
     fetch: testFetch(swfUrl, trace, logFetch),
     socket: scriptedSockets(socket, trace, logFetch, uncaught),
     // A page is never opened: a test that logs fetches traces it as Ruffle's navigator logs it.
@@ -404,6 +410,15 @@ async function avm1For(
         }
       : null,
   });
+}
+
+/**
+ * The sandbox of a SWF Flash played from disk, as the desktop app chooses
+ * it: localWithNetwork if its FileAttributes ask for the network, else
+ * localWithFile.
+ */
+function localSandbox(bytes: Uint8Array): string {
+  return fileAttributes(bytes) & 0x01 ? "localWithNetwork" : "localWithFile";
 }
 
 /**
@@ -483,6 +498,8 @@ interface RunSwfOptions {
   lazyCompilation?: boolean;
   /** Played as AIR plays it (Scripting's `air`). */
   air?: boolean;
+  /** The API version it runs at (Scripting's `apiVersion`). */
+  apiVersion?: "latest" | number;
   /** Every frame drawn at the stage's size, as a host draws it, and waited for (chrome.ts). */
   draw?: boolean;
   /** getTimer and timers by the wall clock rather than the frames (scriptingFor). */
@@ -505,6 +522,7 @@ async function runSwf(
     socket = null,
     lazyCompilation = false,
     air = false,
+    apiVersion = "latest",
     draw = false,
     realTime = false,
   }: RunSwfOptions,
@@ -525,6 +543,7 @@ async function runSwf(
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
       lazyCompilation,
       air,
+      apiVersion,
       logFetch,
       realTime,
     });

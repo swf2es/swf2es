@@ -40,6 +40,94 @@ export function stackOf(error: Value): string | null {
 }
 
 /**
+ * The AS3 methods on `stack`, innermost first, each as Flash's debugger
+ * player names it in a stack trace ("Test/get x", "global$init"), which
+ * codegen spells into its function's identifier (stack-names.ts): "$_",
+ * then the name, a "$" before each escape. A method's checked entry and
+ * the unchecked one it calls ("$u" after the name) are one frame; frames
+ * of anything else are left out.
+ */
+export function stackNames(stack: string | undefined): string[] {
+  const names: string[] = [];
+  let previous = "";
+  for (const line of stack?.split("\n") ?? []) {
+    // V8's "at Type.name [as alias] (site)", or another engine's "name@site".
+    const v8 = /^\s*at (?:async )?(?:new )?(\S+)/.exec(line);
+    const text = v8 ? v8[1] : line.slice(0, Math.max(0, line.indexOf("@")));
+    const id = /(?:^|[.\s/])(\$_[\w$]+)$/.exec(text)?.[1];
+    const name = id === undefined ? null : decodeStackName(id);
+    if (name === null) {
+      continue;
+    }
+
+    if (`${id}$u` !== previous) {
+      names.push(name);
+    }
+
+    previous = id as string;
+  }
+
+  return names;
+}
+
+/** The name in identifier `id` (see stackNames), or null for one no method has. */
+function decodeStackName(id: string): string | null {
+  let name = "";
+  for (let i = 2; i < id.length; i++) {
+    const c = id[i];
+    if (c !== "$") {
+      name += c;
+      continue;
+    }
+
+    const code = id[++i];
+    switch (code) {
+      case "$":
+        name += "$";
+        break;
+      case "s":
+        name += "/";
+        break;
+      case "c":
+        name += ":";
+        break;
+      case "d":
+        name += ".";
+        break;
+      case "w":
+        name += " ";
+        break;
+      case "l":
+        name += "<";
+        break;
+      case "g":
+        name += ">";
+        break;
+      case "m":
+        name += "-";
+        break;
+      case "x": {
+        const hex = id.slice(i + 1, i + 5);
+        if (!/^[0-9a-f]{4}$/.test(hex)) {
+          return null;
+        }
+
+        name += String.fromCharCode(Number.parseInt(hex, 16));
+        i += 4;
+        break;
+      }
+      // A bound entry's suffix, last.
+      case "u":
+        return i === id.length - 1 ? name : null;
+      default:
+        return null;
+    }
+  }
+
+  return name;
+}
+
+/**
  * What an error the runtime made says in full, its text and arguments as
  * debugger mode words them, for a host to show: the release player's
  * message, which the SWF sees, is the number alone. Null for any other value.

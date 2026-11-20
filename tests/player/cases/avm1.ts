@@ -1625,6 +1625,52 @@ function avm1Script(name: string, version: number): Uint8Array {
   });
 }
 
+// A SWF 5 movie that loads SWF 6, 7 and 8 movies into its clips, each
+// asking for the next (avm1/loaded-broadcasters.as and its -child.as).
+function avm1LoadedBroadcasters(): PlayerCase {
+  const source = (name: string) =>
+    readFileSync(new URL(`../avm1/${name}.as`, import.meta.url), "utf8");
+  const movie = (version: number, code: string, tags: Uint8Array[] = []) =>
+    w.swf({
+      version,
+      width: 40,
+      height: 40,
+      frameRate: 24,
+      frameCount: 1,
+      tags: [
+        ...(version >= 8 ? [w.fileAttributes(false)] : []),
+        w.backgroundColor(0xffffff),
+        ...tags,
+        w.doAction([...script(code, version)(flashAssembler()).end().bytes()]),
+        w.showFrame(),
+        w.end(),
+      ],
+    });
+  const versions = [6, 7, 8];
+  const clips = [
+    w.sprite(1, 1, [w.showFrame(), w.end()]),
+    ...versions.map((v, i) => w.place({ depth: i + 1, character: 1, name: `clip${v}` })),
+  ];
+  const files: Record<string, Uint8Array> = { "loaded-broadcasters-empty.swf": movie(7, "") };
+  for (const v of versions) {
+    files[`loaded-broadcasters-${v}.swf`] = movie(
+      v,
+      `var swf = ${v};\n${source("loaded-broadcasters-child")}`,
+    );
+  }
+
+  return {
+    name: "avm1-loaded-broadcasters",
+    swf: movie(5, source("loaded-broadcasters"), clips),
+    files,
+    traced: true,
+    frames: 24,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  };
+}
+
 function avm1Drawing(version: number): Uint8Array {
   return w.swf({
     version,
@@ -3705,19 +3751,46 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
       maxOutliers: 0,
     }),
   ),
-  ...["array", "string", "number", "math", "classes", "broadcaster", "globals", "date"].flatMap(
-    (name) =>
-      [5, 6, 7, 8, 10].map(
-        (version): PlayerCase => ({
-          name: `avm1-${name}-swf${version}`,
-          swf: avm1Script(name, version),
-          traced: true,
-          frames: 2,
-          capture: [],
-          tolerance: 0,
-          maxOutliers: 0,
-        }),
-      ),
+  ...[
+    "array",
+    "string",
+    "number",
+    "math",
+    "classes",
+    "broadcaster",
+    "globals",
+    "date",
+    "devices",
+    "movieclip-loader",
+  ].flatMap((name) =>
+    [5, 6, 7, 8, 10].map(
+      (version): PlayerCase => ({
+        name: `avm1-${name}-swf${version}`,
+        swf: avm1Script(name, version),
+        traced: true,
+        frames: 2,
+        capture: [],
+        tolerance: 0,
+        maxOutliers: 0,
+        // The flags it clears on MovieClipLoader's prototype stay cleared for the next SWF in
+        // the same adl, which shares AVM1's globals.
+        alone: name === "movieclip-loader",
+      }),
+    ),
+  ),
+  avm1LoadedBroadcasters(),
+  // Alone: Flash keeps what a connected stream adds to NetStream's prototype.
+  ...[5, 6, 7, 8].map(
+    (version): PlayerCase => ({
+      name: `avm1-netstream-swf${version}`,
+      swf: avm1Script("netstream", version),
+      traced: true,
+      frames: 2,
+      capture: [],
+      tolerance: 0,
+      maxOutliers: 0,
+      alone: true,
+    }),
   ),
   ...[5, 6, 7, 8].map(
     (version): PlayerCase => ({

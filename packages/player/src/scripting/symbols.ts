@@ -353,7 +353,8 @@ export class Symbols {
   /**
    * The display object for an instance a script makes with `new`: the
    * character of a class SymbolClass bound, if the class or a base of it
-   * is one, else an empty clip, shape or container by the nearest base.
+   * is one, else an empty clip, shape or container by the nearest base;
+   * #2012 for a class only the player makes, as Flash refuses it.
    */
   displayFor(traits: SymbolTraits): DisplayObject {
     const library: Library = this.s.library ?? {
@@ -400,14 +401,19 @@ export class Symbols {
           return new MovieClip(EMPTY_TIMELINE, library);
         case "flash.display::Shape":
           return new ShapeObject(null);
-        // Only a timeline makes a MorphShape or a StaticText.
+        case "flash.display::Sprite":
+        case "flash.display::Loader":
+          return new Container();
+        // What reaches it past the classes above only the player makes: DisplayObject,
+        // InteractiveObject, DisplayObjectContainer, Stage and TextLine; a timeline's
+        // MorphShape and StaticText; an AVM1 SWF's load's AVM1Movie (requestLoad). A
+        // script's subclass of one is refused before this, as restricted
+        // (abstract-classes.ts), or cannot be, the class being final.
+        case "flash.display::DisplayObject":
         case "flash.display::MorphShape":
-          throw this.s.rt.error("ArgumentError", 2012, "MorphShape$");
         case "flash.text::StaticText":
-          throw this.s.rt.error("ArgumentError", 2012, "StaticText$");
-        // Only a load of an AVM1 SWF makes one (requestLoad).
         case "flash.display::AVM1Movie":
-          throw this.s.rt.error("ArgumentError", 2012, "AVM1Movie$");
+          throw this.s.rt.cantInstantiate(traits.name);
         case "flash.display::Bitmap":
           return new BitmapObject(null);
         case "flash.media::Video":

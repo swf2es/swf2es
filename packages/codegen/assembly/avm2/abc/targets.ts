@@ -83,9 +83,11 @@ export function target(bd: BodyDecoder, from: i64, to: i64, stack: u32, scope: u
   }
 
   if (isNew) {
-    // Code decoded as part of another block must have been reached with the same state.
+    // Code decoded as part of another block must have been reached with the
+    // same state. avmplus walks the code in order: the walk's state at t is
+    // the one arriving, this edge's the target's it recorded.
     const walked = bd.cover[t] === START;
-    if (walked && !sameDepths(bd, bd.stackAt[t], bd.scopeAt[t], stack, scope)) {
+    if (walked && !sameDepths(bd, stack, scope, bd.stackAt[t], bd.scopeAt[t])) {
       return false;
     }
 
@@ -168,20 +170,21 @@ function restoreCurrent(bd: BodyDecoder): void {
   memory.copy(changetype<usize>(bd.valueFlags), changetype<usize>(bd.savedFlags), bd.frameSize);
 }
 
+/** Whether the depths arriving match the target's; avmplus' messages name the arriving first. */
 function sameDepths(
   bd: BodyDecoder,
+  targetStack: u32,
+  targetScope: u32,
   stack: u32,
   scope: u32,
-  otherStack: u32,
-  otherScope: u32,
 ): bool {
-  if (stack !== otherStack) {
-    bd.code.fail(C.kStackDepthUnbalancedError);
+  if (stack !== targetStack) {
+    bd.code.failWith(C.kStackDepthUnbalancedError, stack, targetStack);
     return false;
   }
 
-  if (scope !== otherScope) {
-    bd.code.fail(C.kScopeDepthUnbalancedError);
+  if (scope !== targetScope) {
+    bd.code.failWith(C.kScopeDepthUnbalancedError, scope, targetScope);
     return false;
   }
 

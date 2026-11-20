@@ -204,10 +204,11 @@ members and do not show; a binding above the caller's API version is
 left out, the caller taken to be the latest player's, as avmshell runs
 (a SWF's own version is not yet consulted), which hides the builtins'
 `[API(CONFIG::VM_INTERNAL)]` members: VM_INTERNAL is the last mark of
-the table an ABC was built with, 42 in the AIR 15 SDK's, which the
-oracle's playerglobal has, 52 in `core/api-versions.h`, which the
-submodule's builtin has, so the compiler reads a builtin ABC's highest
-mark, from 42 up, as its internal one. For that the compiler emits what the
+the table a library was built with, 52 in `core/api-versions.h`, which
+avmplus' builtin and swf2es' playerglobal have, 42 in the AIR 15 SDK's,
+which Flash Player's playerglobal has. A library states its table by its
+marks: the compiler reads 52 as internal, and 42 too in a library that
+marks nothing later. For that the compiler emits what the
 runtime needed nothing of before: each method's signature beside its
 factory (return type, parameter types, how many are required), the
 constructor's in the class descriptor, and a class's and its traits'
@@ -289,9 +290,10 @@ player's TypeScript implements; private natives are declared with the
 signatures it binds. `--check` holds the compiled API to Flash Player's
 (names, version marks, types, defaults, flags), and a unit test holds the
 committed file to its sources; `SWF2ES_PLAYERGLOBAL=adobe` runs the tests on
-Flash Player's own instead. No version mark goes past the reference's 41:
-a builtin's highest mark from 42 up is the VM's internal one
-(`API_FirstInternalMark`), which a higher mark would make public.
+Flash Player's own instead. Its VM-internal names are marked 52, VM_INTERNAL
+in `core/api-versions.h`, where Flash Player's are marked 42, VM_INTERNAL in
+the AIR 15 SDK's table (`--check` reads Flash's 42 as our 52), so that a
+name may be marked with any version up to 51 (codegen's `namespaces.ts`).
 
 ## Random numbers
 

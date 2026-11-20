@@ -7,10 +7,16 @@
 // and expected to fail, and one that passes is reported for its mark to
 // come off.
 //
+// Flash runs everything at its root SWF's API version, and the oracle's
+// harness is every case's root but a `root` case's: the player plays each
+// case at the harness's version, a `root` case at its own, which Flash ran
+// it at as the application's content.
+//
 //   node tests/player/run.ts [--lazy] [--shard i/n] [case...]   check (the i-th of n parts)
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { HARNESS_SWF_VERSION, plainFileName, runFlash } from "../../oracle/flash.ts";
 import { isAs3, readSwf } from "../../packages/format/dist/index.js";
 import { cases, type PlayerCase } from "./cases.ts";
 import { runPlayer } from "./chrome.ts";
@@ -67,14 +73,24 @@ const isAvm1 = (swf: Uint8Array): boolean => {
   }
 };
 const traced = (c: PlayerCase) => Boolean(c.script || c.build || c.traced);
-const jobs = chosen.map((c) => ({ ...c, swf: swfOf(c), lazyCompilation }));
+for (const c of cases) {
+  if (c.root && (c.capture.length || !traced(c))) {
+    throw new Error(`${c.name}: a case run as the root is traced and captures no frames`);
+  }
+}
+
+// A case's files are served beside it (files below), its SWF at a URL there.
+const jobs = chosen.map((c) => {
+  const swf = swfOf(c);
+  const apiVersion = c.root ? readSwf(swf).header.version : HARNESS_SWF_VERSION;
+  const url = c.files ? `/files/${c.name}/${c.name}.swf` : undefined;
+  return { ...c, swf, lazyCompilation, apiVersion, url };
+});
 for (const c of gaps) {
   swfOf(c);
 }
 
 if (update) {
-  // The oracle needs adl, which only this mode does.
-  const { runFlash } = await import("../../oracle/flash.ts");
   // The harness loads each SWF with a Loader, where an AVM1 SWF runs as an
   // AVM1Movie, whose first frame's traces adl prints only with its second:
   // it is given two frames at least.
@@ -85,7 +101,8 @@ if (update) {
         typeof flash === "function"
           ? flash(scripts.get(chosen[i].script ?? "") as Uint8Array)
           : (flash ?? job.swf);
-      return { ...job, swf, frames: isAvm1(swf) ? Math.max(job.frames, 2) : job.frames };
+      const frames = !job.root && isAvm1(swf) ? Math.max(job.frames, 2) : job.frames;
+      return { ...job, swf, frames };
     }),
   );
   for (const [i, c] of chosen.entries()) {
@@ -111,7 +128,18 @@ if (update) {
     );
   }
 } else {
-  const results = await runPlayer(jobs);
+  const files = `${here}out/files/`;
+  for (const c of chosen) {
+    if (c.files) {
+      rmSync(`${files}${c.name}`, { recursive: true, force: true });
+      mkdirSync(`${files}${c.name}`, { recursive: true });
+      for (const [name, bytes] of Object.entries(c.files)) {
+        writeFileSync(`${files}${c.name}/${plainFileName(name)}`, bytes);
+      }
+    }
+  }
+
+  const results = await runPlayer(jobs, { mounts: [["/files/", files]] });
   let failed = 0;
   for (const [i, c] of chosen.entries()) {
     const r = results[i];

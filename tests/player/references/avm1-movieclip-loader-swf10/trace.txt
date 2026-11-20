@@ -1,0 +1,10 @@
+class function
+instance object true true object
+instance loadClip:function getProgress:function unloadClip:function addListener:function removeListener:function broadcastMessage:function _listeners:object constructor:function toString:function hasOwnProperty:function
+prototype loadClip:function getProgress:function unloadClip:function addListener:function removeListener:function broadcastMessage:function _listeners:object constructor:function toString:function hasOwnProperty:function
+loadClip undefined undefined undefined
+listeners object 1 true
+enumerated 
+cleared 0x400 loadClip:function getProgress:function unloadClip:function addListener:function removeListener:function broadcastMessage:function _listeners:object constructor:function toString:function hasOwnProperty:function
+cleared 0x480 loadClip:function getProgress:function unloadClip:function addListener:function removeListener:function broadcastMessage:function _listeners:object constructor:function toString:function hasOwnProperty:function
+listener true 2 true

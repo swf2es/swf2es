@@ -271,7 +271,11 @@ sendToURL's `send`; a browser's fetch ignores it, and a host that judges
 requests as Flash did (the desktop app) reads it. Such a host also gets
 the policy files `Security.loadPolicyFile` names, resolved against the
 SWF (`loadPolicyFile`), and names the sandbox `Security.sandboxType`
-reports (`sandboxType`, "remote" by default). The result
+reports (`sandboxType`, "remote" by default). The getter answers for the
+SWF whose code calls it: one loaded from the network is "remote", the
+main SWF and any other in the host's sandbox (`loadedSandbox` in
+`scripting/loads.ts`). It reports and gates nothing; a check that must
+hold asks `Code.securityUrls`, which fails closed. The result
 arrives on the player thread in a later frame.
 A successful stream reports `OPEN`, `PROGRESS`, `HTTP_STATUS`, `COMPLETE`;
 a failed one reports `HTTP_STATUS` before `IO_ERROR`. A URL load through

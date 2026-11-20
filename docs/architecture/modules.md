@@ -98,7 +98,10 @@ would have left it, but for the weights `compact` goes by.
 
 A module is keyed by a SHA-256 of all it depends on (codegen's
 `moduleKey`, which the swf2es command keys by too): the compiler's
-identity, the API version, and its context (`Codegen.context`): every ABC
+identity, the API version (a library's module, whose domain sees only
+libraries, by its series alone: a library's names take their versions from
+its marks and the series, `library-versions.test.ts`, so SWFs of several
+versions share its modules), and its context (`Codegen.context`): every ABC
 its application domain sees, by hash and whether it is a library, in load
 order, those added after it included (a SWF's DoABCs are all added before
 any compiles, so the first may extend a class of the last), its own place

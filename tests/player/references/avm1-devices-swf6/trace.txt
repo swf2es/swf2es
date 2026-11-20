@@ -1,0 +1,24 @@
+globals Accessibility:object Camera:function Microphone:function NetStream:function Video:function LocalConnection:function TextField:function flash:undefined
+prototypes a:object b:object c:object d:object e:object f:object
+NetStream attachAudio:function attachVideo:function backBufferTime:undefined checkPolicyFile:undefined close:function getInfo:undefined maxPauseBufferTime:undefined onPeerConnect:function pause:function play:function play2:function publish:function receiveAudio:function receiveVideo:function seek:function send:function setBufferTime:function
+Video attachVideo:function clear:function
+Camera setCursor:function setKeyFrameInterval:function setLoopback:function setMode:function setMotionLevel:function setQuality:function
+Camera statics get:function
+Microphone setCodec:undefined setEncodeQuality:undefined setFramesPerPacket:undefined setGain:function setRate:function setSilenceLevel:function setUseEchoSuppression:function
+Microphone statics get:function
+IME ALPHANUMERIC_FULL:string UNKNOWN:string _listeners:object addListener:function broadcastMessage:function removeListener:function doConversion:undefined getConversionMode:undefined getEnabled:undefined setCompositionString:undefined setConversionMode:undefined setEnabled:undefined
+Accessibility isActive:function sendEvent:function updateProperties:function
+LocalConnection close:function connect:function domain:function send:function
+Accessibility enumerates isActive sendEvent updateProperties
+Camera enumerates get names
+Camera.prototype enumerates 
+NetStream.prototype enumerates 
+IME enumerates 
+called undefined undefined undefined undefined
+new object object object object
+stream       true
+modes ALPHANUMERIC_FULL ALPHANUMERIC_HALF CHINESE JAPANESE_HIRAGANA JAPANESE_KATAKANA_FULL JAPANESE_KATAKANA_HALF KOREAN UNKNOWN 
+mode written KOREAN
+IME        
+Accessibility false   true
+Accessibility written function function

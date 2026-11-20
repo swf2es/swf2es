@@ -12,7 +12,7 @@ export function securityDomainNatives(s: Scripting): avm2.Natives {
 
   class SecurityDomainNatives {
     static get currentDomain(): avm2.AsObject {
-      // Its public constructor throws; the player creates the singleton directly.
+      // Its construct hook refuses a script's `new`; the player makes the singleton directly.
       if (!current) {
         current = s.rt.classNamed("flash.system::SecurityDomain").$it.instance();
       }
@@ -26,10 +26,6 @@ export function securityDomainNatives(s: Scripting): avm2.Natives {
      */
     get domainID(): string {
       return hex(sha256Here(textEncoder.encode(s.url))).toUpperCase();
-    }
-
-    "flash.system:SecurityDomain::ctor_impl"(): void {
-      throw s.rt.error("ArgumentError", 2012, "SecurityDomain");
     }
   }
 
