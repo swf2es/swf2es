@@ -609,6 +609,18 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Run as the root, at SWF 12's API version, where the harness, loading
+    // it, would refuse it at its own.
+    name: "versioned-isplaying",
+    swf: (abc) => bare(abc, 1, "Main", 100, 50, 12),
+    script: "VersionedIsPlaying",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+    root: true,
+  },
+  {
     name: "events",
     swf: bare,
     script: "Events",
