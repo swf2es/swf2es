@@ -54,6 +54,18 @@ function arrayElementsOf(rt: Runtime, o: AsObject, length: number): Value[] | nu
   return a !== null && a.length === length ? a : null;
 }
 
+/**
+ * Whether JavaScript's indexOf and lastIndexOf, which pass over a hole,
+ * may answer otherwise than avmplus', which reads it as getUintProperty
+ * does, Array.prototype's element or undefined: for undefined, or where
+ * Array.prototype has elements, and only if `a` has a hole, which
+ * includes reads as undefined.
+ */
+function holesMatter(rt: Runtime, a: Value[], v: Value): boolean {
+  const prototype: AsObject = rt.builtinClass("Array").$prototype;
+  return (v === undefined || prototype.$a.length > 0) && a.includes(undefined);
+}
+
 /** As AvmCore::toInteger: a number, truncated, NaN as 0. */
 function toInteger(rt: Runtime, v: Value): number {
   const n = rt.toNumber(v);
@@ -383,7 +395,9 @@ export const arrayNatives: Natives = {
         return -1;
       }
 
-      return a.indexOf(v, start);
+      if (!holesMatter(rt, a, v)) {
+        return a.indexOf(v, start);
+      }
     }
 
     // As generic_indexOf: by strict equality, from the start clamped.
@@ -420,7 +434,9 @@ export const arrayNatives: Natives = {
         return -1;
       }
 
-      return start < 0 ? -1 : a.lastIndexOf(v, start);
+      if (!holesMatter(rt, a, v)) {
+        return start < 0 ? -1 : a.lastIndexOf(v, start);
+      }
     }
 
     const g = new Generic(rt, o);
