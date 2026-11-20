@@ -127,7 +127,11 @@ export const objectNatives: Natives = {
   [`Function#${AS3}::apply`]: (rt) =>
     function (this: AsObject, receiver: Value, args: Value) {
       // Its arguments an Array, or none, as FunctionObject::AS3_apply has them.
-      if (args !== null && args !== undefined && args.$a === undefined) {
+      if (
+        args !== null &&
+        args !== undefined &&
+        (args.$a === undefined || !rt.traitsOf(args).isSubtypeOf(rt.builtinClass("Array").$it))
+      ) {
         throw rt.error("TypeError", 1116);
       }
 
