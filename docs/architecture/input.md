@@ -540,18 +540,45 @@ once the press's Mouse listeners ran: one they bring there keeps the
 focus too, though the press reaches none of its handlers, and one they
 take away does not. A press on a movie's drawn clip is one on
 its Loader, as AS3 has it, and one elsewhere takes a movie's field's
-focus away. As the focus moves from one movie's field to another's, Flash
-names the other field to `onKillFocus` and `onSetFocus`; the player names
-nothing, as no movie's objects are another's. Tab moves through one order
-of AS3's objects and the movies' (each in its movie's own terms,
-`avm1/focus.ts`), by tabIndex where any has one, else by place, one
-object of each place as AS3 keeps it, the movies' among AS3's: from AS3
-to a movie's field after a `keyFocusChange` naming nothing, then
-`focusOut`; from a movie's field with no `keyFocusChange`. A field Tab
+focus away; while a movie's field has the focus, a press on AS3's objects
+sends no `mouseFocusChange`. A press where no move took the pointer, as
+Ruffle's recorded input has them, reaches the movies as if one had.
+Flash keeps one `Selection` too (`LoadedAvm1Input` is each movie's
+`FocusHost`), measured in the projector with two movies
+(`tests/unit/player/input/avm1-focus.test.ts`): every movie's Selection
+listeners hear every move, in the order the movies came, a move among
+AS3's objects, or to or from none, as one from null to null before its
+`focusOut`; a move from one movie's field to another's names the other
+field to `onKillFocus`, `onSetFocus` and the listeners, as the player
+passes a movie's object to another movie's code; `Selection.getFocus`
+in any movie gives the path of whatever has the focus, AS3's objects from
+the root as `_level0`, its indices read AS3's focused field too,
+`setSelection` selects in it, and `setFocus(null)` takes the focus
+wherever it is. A listener that moves the focus again does not stop the
+rest hearing the move it interrupted, as in Flash; one that takes it to a
+movie's field as AS3's object takes it leaves that object a `focusOut`
+and no `focusIn`, and then the object AS3 had before a `focusOut` too, and
+the field the focus, where Flash, after a move from nothing, naming the
+field to `getFocus` and nothing to `stage.focus` too, types into AS3's
+object and reads its indices. A field's `onKillFocus` runs while the
+field still has the focus: focusing it again there moves nothing and the
+move goes on, and a
+move anywhere else there kills it once, the move under way going on,
+where Flash kills it again at each move till its AVM1 stack overflows,
+then leaves the focus where the move was going or nowhere. A movie
+unloaded with the focus tells its field and every movie's listeners, as
+Flash does once `unload()` has returned, and nothing of its focuses
+again then. Tab moves through one order of AS3's objects and the movies'
+(each in its movie's own terms, `avm1/focus.ts`), by tabIndex
+where any object of either has one, the two kinds sorted as numbers
+together, equal ones as the display list has them and -1 none in either,
+and the rest left out; else by place, one object of each place as AS3
+keeps it, the movies' among AS3's: from AS3's object to a movie's field
+after a `keyFocusChange` naming nothing, then `focusOut`; from a movie's
+field, or from nothing to it, with no `keyFocusChange`. A field Tab
 focuses, AS3's or a movie's, has all its text selected, as typing then
-replaces it in Flash. Where both have tabIndex, the two kinds sort as
-numbers together, which is not measured, and a movie's negative indices,
-which AVM1 keeps, come before AS3's.
+replaces it in Flash. A movie's indices below -1, which AVM1 keeps, are
+not measured.
 
 The focus's rectangle (`input/focus-highlight.ts`) is drawn as Flash
 Player 32's projector draws it under real keys, measured there since adl

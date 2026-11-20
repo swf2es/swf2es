@@ -5,9 +5,11 @@
 // key goes to each movie's Key listeners and clip events; the movie with
 // the focus alone types or presses with it, and Tab moves through one order
 // of the host's objects and the movies' (input/keyboard.ts).
+import type { avm1 } from "@swf2es/runtime";
 import type { Avm1 } from "../avm1/avm1.js";
-import type { Tabbed } from "../avm1/focus.js";
+import type { FocusHost, Tabbed } from "../avm1/focus.js";
 import { Avm1Keyboard } from "../avm1/keyboard.js";
+import { pathOf } from "../avm1/paths.js";
 import { Avm1Pointer } from "../avm1/pointer.js";
 import { Container, type DisplayObject, type MovieClip } from "../display/display.js";
 import type { Scripting } from "../scripting.js";
@@ -15,10 +17,20 @@ import type { MenuItem } from "./context-menu.js";
 import { type KeyState, setFocus } from "./keyboard.js";
 import type { Cursor, PointerState } from "./pointer.js";
 
-export class LoadedAvm1Input {
+export class LoadedAvm1Input implements FocusHost {
   private readonly movies = new Map<MovieClip, Avm1Pointer>();
   private readonly keyboards = new Map<MovieClip, { vm: Avm1; keyboard: Avm1Keyboard }>();
   private over: Avm1Pointer | null = null;
+  /** Whether a movie's move of the focus is taking it from AS3, which tells the movies nothing more. */
+  private moving = false;
+  /** How many movies' moves have taken the focus from AS3, which tells AS3 a listener took it. */
+  private steals = 0;
+  /** The object hearing onKillFocus, which no move inside it kills again. */
+  private killing: DisplayObject | null = null;
+  /** The movie being unloaded, which nothing focuses. */
+  private dying: Avm1 | null = null;
+  /** The movie that had the focus as the press being handled came. */
+  private pressHolder: Avm1 | null = null;
 
   constructor(private readonly s: Scripting) {}
 
@@ -32,19 +44,27 @@ export class LoadedAvm1Input {
     pointer.onCursor = () => this.s.pointer?.updateCursor();
     this.movies.set(root, pointer);
     this.keyboards.set(root, { vm, keyboard: new Avm1Keyboard(vm) });
-    vm.onFocus = (d) => {
-      if (d === null) {
-        return;
-      }
+    vm.focusHost = this;
+  }
 
-      for (const [other, movie] of this.keyboards) {
-        if (other !== root && movie.vm.focused !== null) {
-          movie.vm.focus(null);
-        }
+  /**
+   * A movie about to be unloaded: what it has focused loses the focus, its
+   * onKillFocus and every movie's Selection listeners told, as Flash Player
+   * 32 tells them, though there after the unload call returned; nothing
+   * focuses one of its objects again then.
+   */
+  unloading(root: MovieClip): void {
+    const movie = this.keyboards.get(root);
+    if (movie && movie.vm.focused !== null) {
+      // Nothing of its own takes the focus back as it goes: its fields are gone to Flash's
+      // listeners by then.
+      this.dying = movie.vm;
+      try {
+        movie.vm.focus(null);
+      } finally {
+        this.dying = null;
       }
-
-      setFocus(this.s, null);
-    };
+    }
   }
 
   remove(root: MovieClip): boolean {
@@ -55,12 +75,148 @@ export class LoadedAvm1Input {
 
     const movie = this.keyboards.get(root);
     if (movie) {
-      movie.vm.onFocus = null;
+      movie.vm.focusHost = null;
     }
 
     this.movies.delete(root);
     this.keyboards.delete(root);
     return this.movies.size === 0;
+  }
+
+  /** The movie whose focus is on something, which no object of the host's has then. */
+  private holder(): Avm1 | null {
+    for (const { vm } of this.keyboards.values()) {
+      if (vm.focused !== null) {
+        return vm;
+      }
+    }
+
+    return null;
+  }
+
+  get current(): DisplayObject | null {
+    return this.holder()?.focused ?? this.s.focus;
+  }
+
+  /**
+   * A movie's move of the one focus, as Flash Player 32 tells it: what had
+   * it hears onKillFocus naming what takes it, in whichever movie, then
+   * that onSetFocus naming what had it, then every movie's Selection
+   * listeners, in the order the movies came; an object of AS3's is null to
+   * them, and loses the focus last, with a focusOut naming nothing.
+   */
+  move(movie: Avm1, d: DisplayObject | null, byPointer: boolean): void {
+    const holder = this.holder();
+    if ((d === null && holder !== movie) || (d !== null && movie === this.dying)) {
+      return;
+    }
+
+    const tracker = movie.focusTracker;
+    const old = holder?.focused ?? null;
+    if (holder === movie && old === d) {
+      tracker.assign(d);
+      tracker.selectFocused(byPointer);
+      return;
+    }
+
+    // What had the focus keeps it as it hears onKillFocus: its Selection.setFocus of itself
+    // there moves nothing, and the move goes on (Flash Player 32). Any other move there would
+    // kill it again: Flash Player 32 does, over and over till its AVM1 stack overflows, and then
+    // leaves the focus where the move was going, or nowhere; the player kills it once, and the
+    // move under way wins.
+    if (old !== null && old === this.killing) {
+      return;
+    }
+
+    const oldFace = old?.avm1 ?? null;
+    const newFace = d?.avm1 ?? null;
+    if (holder !== null && old !== null) {
+      const outer = this.killing;
+      this.killing = old;
+      try {
+        holder.focusTracker.killed(old, newFace);
+      } finally {
+        this.killing = outer;
+      }
+
+      if (this.current !== old) {
+        return;
+      }
+    }
+
+    holder?.focusTracker.assign(null);
+    tracker.assign(d);
+    if (d !== null) {
+      tracker.given(d, oldFace);
+    }
+
+    // A handler that moved the focus on told the movies of that move itself.
+    if (movie.focused !== d) {
+      return;
+    }
+
+    this.selectionMoved(oldFace, newFace);
+    tracker.selectFocused(byPointer);
+
+    if (d !== null && this.s.focus !== null) {
+      this.steals++;
+      this.moving = true;
+      try {
+        setFocus(this.s, null);
+      } finally {
+        this.moving = false;
+      }
+    }
+  }
+
+  /**
+   * Every movie's Selection listeners hear onSetFocus(old, new), in the
+   * order the movies came: all of them, though one moved the focus on, as
+   * Flash Player 32 goes on telling the rest of the move they heard.
+   */
+  private selectionMoved(old: avm1.Avm1Object | null, next: avm1.Avm1Object | null): void {
+    for (const { vm } of [...this.keyboards.values()]) {
+      vm.focusTracker.moved(old, next);
+    }
+  }
+
+  /**
+   * AS3's focus moving from one of its objects, or none, to another, or
+   * none: every movie's Selection listeners hear onSetFocus(null, null)
+   * first, as Flash Player 32 tells them, unless a movie's move of the
+   * focus took it. Whether a listener's move then took the focus from AS3.
+   */
+  hostMoved(): boolean {
+    if (this.moving) {
+      return false;
+    }
+
+    const steals = this.steals;
+    this.selectionMoved(null, null);
+    return this.steals !== steals;
+  }
+
+  clear(): void {
+    const holder = this.holder();
+    if (holder !== null) {
+      holder.focus(null);
+      return;
+    }
+
+    setFocus(this.s, null);
+  }
+
+  pathOf(d: DisplayObject): string | null {
+    for (let p: DisplayObject | null = d; p !== null; p = p.parent) {
+      const movie = this.keyboards.get(p as MovieClip);
+      if (movie) {
+        return movie.vm.pathOf(d);
+      }
+    }
+
+    // An object of AS3's, from the root as level 0 (Flash Player 32's `_level0.as3field`).
+    const { root, stage } = this.s;
+    return pathOf(d, (o) => (o === root || o === stage ? 0 : null));
   }
 
   /** The keyboard of the movie whose focus is on something, which no object of the host's has then. */
@@ -98,11 +254,7 @@ export class LoadedAvm1Input {
 
   /** An object of the host's took the focus: no movie keeps it. */
   blur(): void {
-    for (const { vm } of [...this.keyboards.values()]) {
-      if (vm.focused !== null) {
-        vm.focus(null);
-      }
-    }
+    this.holder()?.focus(null);
   }
 
   /**
@@ -148,6 +300,10 @@ export class LoadedAvm1Input {
     this.movies.get(root)?.hit(x, y) ?? false;
 
   broadcast(type: "move" | "down" | "up", p: PointerState): void {
+    if (type === "down") {
+      this.pressHolder = this.holder();
+    }
+
     for (const pointer of this.movies.values()) {
       pointer.broadcast(type, p);
     }
@@ -184,9 +340,20 @@ export class LoadedAvm1Input {
     // A press over any movie's button, as its handlers left what is under the pointer, moves no
     // movie's focus (Flash Player 32), whether or not the press reaches the button.
     const keep = type === "down" && (this.over?.pressable(p.x, p.y) ?? false);
-    for (const pointer of this.movies.values()) {
+    // The movie pressed first: a field it focuses takes the focus from another movie's, which
+    // hears onKillFocus naming it (Flash Player 32), before the press elsewhere drops it.
+    const pointers = [...this.movies.entries()];
+    if (this.over !== null) {
+      pointers.sort(([, a], [, b]) => (a === this.over ? -1 : b === this.over ? 1 : 0));
+    }
+
+    for (const [root, pointer] of pointers) {
       const before = pointer.redraws;
-      pointer.keepFocus = keep;
+      // A movie not pressed takes away only a focus it had as the press came: not one a script
+      // gave it as the press's AS3 handlers ran (a Selection listener's, Flash Player 32).
+      const vm = this.keyboards.get(root)?.vm ?? null;
+      pointer.keepFocus =
+        keep || (type === "down" && pointer !== this.over && vm !== this.pressHolder);
       pointer.handle(type, p, false);
       redraws += pointer.redraws - before;
     }
@@ -208,6 +375,7 @@ export class LoadedAvm1Input {
 
   /** The press each movie keeps from its broadcast, forgotten once the host is done with it. */
   forgetPress(): void {
+    this.pressHolder = null;
     for (const pointer of this.movies.values()) {
       pointer.forgetPress();
     }

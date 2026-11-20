@@ -72,7 +72,7 @@ import { RegisteredClasses } from "./classes.js";
 import { constructBlocks, ScriptClips } from "./clips.js";
 import { lazyBlocks } from "./compile.js";
 import { ExternalCalls } from "./external.js";
-import { FocusTracker } from "./focus.js";
+import { type FocusHost, FocusTracker } from "./focus.js";
 import { type BitmapHost, bitmapDataClass, bitmapObject, storeOf } from "./globals/BitmapData.js";
 import { buttonClass } from "./globals/Button.js";
 import { colorClass } from "./globals/Color.js";
@@ -1685,11 +1685,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   /** The host's renderer, which BitmapData's draw of a display object draws by; null where there is none. */
   drawer: Drawer | null = null;
 
-  /**
-   * Told when the focus moves to `d`, or to nothing, after the move's
-   * events: an AS3 host keeps one focus across its loaded movies (input/avm1.ts).
-   */
-  onFocus: ((d: DisplayObject | null) => void) | null = null;
+  /** The one focus of the AS3 host that loaded the movie, which its focus moves (input/avm1.ts). */
+  focusHost: FocusHost | null = null;
 
   /** The library's bitmap exported as `name`, as a new transparent store, as loadBitmap makes one. */
   libraryBitmap(name: string): BitmapStore | null {
@@ -1741,6 +1738,26 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
   pathOf(d: DisplayObject): string {
     return pathOf(d, (o) => this.levelOf(o), !this.standalone);
+  }
+
+  /** What has the focus Selection reads: the host's one focus, where an AS3 host loaded the movie. */
+  get current(): DisplayObject | null {
+    return this.focusHost !== null ? this.focusHost.current : this.focusTracker.focusedObject;
+  }
+
+  /** The path Selection gives `d`, an object of this movie's, another's or the host's. */
+  focusPathOf(d: DisplayObject): string | null {
+    return this.focusHost !== null ? this.focusHost.pathOf(d) : this.pathOf(d);
+  }
+
+  /** Selection.setFocus(null): no focus in the movie, or, in a host, none anywhere. */
+  clearFocus(): void {
+    if (this.focusHost !== null) {
+      this.focusHost.clear();
+      return;
+    }
+
+    this.focus(null);
   }
 
   resolve(value: avm1.Value, version: number): DisplayObject | null {

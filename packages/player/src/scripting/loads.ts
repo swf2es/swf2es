@@ -1035,6 +1035,7 @@ export class Loads {
     if (content) {
       const movie = this.avm1Movies.get(content.$display);
       if (movie) {
+        this.s.avm1Input?.unloading(content.$display as MovieClip);
         // Its LocalConnections outlive it, as in Flash, until it closes them.
         if (this.keeps(movie.vm)) {
           movie.vm.unloadFromLoader();

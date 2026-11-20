@@ -349,6 +349,13 @@ export class PointerInput implements Pointer {
     s.mouseStageY = p.y;
     this.last = p;
     this.updateDrag();
+    // A press or a release at a new point, with no move there first (Ruffle's recorded input):
+    // the AVM1 movies see the pointer arrive there first, as the move a mouse makes would show
+    // them, so that a press weighs what is under it against that.
+    if (type !== "move" && moved && s.avm1Input) {
+      this.redraws += s.avm1Input.sync(p, this.pick(p));
+    }
+
     try {
       s.avm1Input?.broadcast(type, p);
       this.dispatch(type, p, moved);

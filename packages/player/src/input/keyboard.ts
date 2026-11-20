@@ -96,10 +96,26 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
   }
 
   // One focus in the player: the AVM1 movies the host's Loaders hold give theirs up first. One
-  // whose onKillFocus takes it back keeps it, its setFocus(null) having told `previous`.
-  if (next && s.avm1Input) {
-    s.avm1Input.blur();
-    if (s.focus !== previous || s.avm1Input?.focused()) {
+  // whose onKillFocus takes it back keeps it, its setFocus(null) having told `previous`. A move
+  // among AS3's objects, or to or from none, the movies' Selection listeners hear as one from
+  // null to null (Flash Player 32), before the focusOut.
+  if (s.avm1Input) {
+    if (next && s.avm1Input.focused()) {
+      // `next`'s as the movies hear it go, as in Flash Player 32: a listener that takes it back
+      // to a movie's field leaves `next` a focusOut and no focusIn.
+      s.focus = next;
+      try {
+        s.avm1Input.blur();
+      } finally {
+        if (s.focus === next) {
+          s.focus = previous;
+        }
+      }
+
+      if (s.focus !== previous || s.avm1Input?.focused()) {
+        return;
+      }
+    } else if (hostMoved(s, previous, next)) {
       return;
     }
   }
@@ -136,6 +152,47 @@ export function setFocus(s: Scripting, next: DisplayObject | null, highlight = f
   if (next && s.focus === next) {
     focusEvent(s, "focusIn", next, previous, false);
   }
+}
+
+/**
+ * The movies' Selection listeners told of AS3's move from `previous` to
+ * `next`, as they hear it with the focus `next`'s, as in Flash Player 32.
+ * Whether one of them took the focus to a movie's field: `next` then hears
+ * a focusOut and no focusIn, and `previous`, once the rest heard the move,
+ * a focusOut naming what has the focus then, unless a focusOut listener
+ * gave the focus back to it.
+ */
+function hostMoved(
+  s: Scripting,
+  previous: DisplayObject | null,
+  next: DisplayObject | null,
+): boolean {
+  s.focus = next;
+  let stolen = false;
+  try {
+    stolen = s.avm1Input?.hostMoved() ?? false;
+  } finally {
+    if (!stolen && s.focus === next) {
+      s.focus = previous;
+    }
+  }
+
+  if (!stolen) {
+    return s.focus !== previous;
+  }
+
+  // Unless a focusOut listener gave it back.
+  if (previous && previous !== next && s.focus !== previous) {
+    previous.focusDrop = null;
+    if (previous instanceof TextObject) {
+      previous.focused = false;
+      previous.invalidate(CONTENT);
+    }
+
+    focusEvent(s, "focusOut", previous, s.focus, false);
+  }
+
+  return true;
 }
 
 /** What the focus's rectangle is drawn around: what has the focus, where it shows (setFocus). */
@@ -510,7 +567,8 @@ export class KeyboardInput implements Keyboard {
    * focus to the target where a click focuses it, else to nothing; a
    * field's caret where it was clicked. A press on a button of a loaded
    * AVM1 movie, `onMovie`, moves no focus, though what has it hears the
-   * mouseFocusChange, naming nothing, as Flash Player 32 has it.
+   * mouseFocusChange, naming nothing, as Flash Player 32 has it; while a
+   * movie's field has the focus, there is no mouseFocusChange at all.
    */
   pressed(
     target: DisplayObject | null,
@@ -546,7 +604,13 @@ export class KeyboardInput implements Keyboard {
       return;
     }
 
-    if (focusEvent(s, "mouseFocusChange", s.focus ?? this.stage, pressed, true)) {
+    // While a loaded AVM1 movie's field has the focus, AS3 hears no mouseFocusChange: the field
+    // loses it as AS3's object takes it, or as the press elsewhere drops it (Flash Player 32).
+    const fromMovie = s.avm1Input?.focused() ?? null;
+    if (
+      fromMovie === null &&
+      focusEvent(s, "mouseFocusChange", s.focus ?? this.stage, pressed, true)
+    ) {
       return;
     }
 
@@ -580,7 +644,8 @@ export class KeyboardInput implements Keyboard {
    * one of each place, as Flash orders them. The objects of the AVM1 movies
    * the host's Loaders hold are in the same order, each as its movie has
    * it (avm1/focus.ts), as Flash Player 32 tabs between them; a move from
-   * one of them sends no keyFocusChange, and a move to one names nothing.
+   * one of them, or from nothing to one, sends no keyFocusChange, and a
+   * move to one names nothing.
    * A field it focuses has all its text selected.
    */
   private tab(back: boolean): boolean {
@@ -643,8 +708,10 @@ export class KeyboardInput implements Keyboard {
     const at = current ? order.findIndex((t) => t.d === current) : -1;
     const n = order.length;
     const next = order[at < 0 ? (back ? n - 1 : 0) : (at + (back ? -1 : 1) + n) % n];
+    // From nothing to a movie's object, Flash Player 32 sends no keyFocusChange either.
     if (
       inMovie === null &&
+      (s.focus !== null || next.movie === null) &&
       focusEvent(s, "keyFocusChange", s.focus ?? this.stage, next.movie ? null : next.d, true, TAB)
     ) {
       return true;
