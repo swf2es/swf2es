@@ -36,6 +36,26 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
+test("the API version is the series' latest, or a root SWF version's, for the compiler and runtime alike", async () => {
+  const cases: [options: { air?: boolean; apiVersion?: "latest" | number }, version: number][] = [
+    [{}, 50],
+    [{ apiVersion: "latest" }, 50],
+    [{ air: true }, 51],
+    // The oracle's harness, SWF 51, which the player's cases are pinned to.
+    [{ apiVersion: 51 }, 50],
+    [{ air: true, apiVersion: 51 }, 51],
+    [{ apiVersion: 12 }, 12],
+    [{ air: true, apiVersion: 12 }, 13],
+    [{ apiVersion: 9 }, 0],
+    [{ air: true, apiVersion: 9 }, 1],
+  ];
+  for (const [options, version] of cases) {
+    const scripting = new Scripting(await createCodegen(wasm), { realTime: null, ...options });
+    assert.equal(scripting.rt.apiVersion, version);
+    assert.equal(scripting.codegen.apiVersion, version);
+  }
+});
+
 test("a document class is constructed on the root and its frame scripts run in order", {
   skip,
 }, async () => {
