@@ -142,7 +142,8 @@ there for its code, so an old SWF whose class named a getter of its own
 which shows all of them whatever the SWF's version. `apiversion="root"`
 on an element, or `configure({ apiVersion: "root" })` for all of them,
 runs each at its root's, as Flash did: the root's version from its
-header, and what it loads and its workers at the same. A number names a
+header, and what it loads at the same; its workers run at the latest, as
+they did in AIR. A number names a
 root's SWF version instead, as `apiversion="12"`, for a SWF whose real
 root was another, such as one a wrapper of another version loaded; and
 `"latest"` the default. An AIR application stays at the latest with
@@ -543,7 +544,7 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-policy-files` | Lets the SWF read every public host's data, send it headers and open sockets to it as if its cross-domain policy files allowed it, for this run. This machine and private networks still need their own policy file. |
 | `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
-| `--api-version=root` | Plays the SWF, what it loads and its workers at its own SWF version's API version, as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
+| `--api-version=root` | Plays the SWF and what it loads at its own SWF version's API version (its workers at the latest), as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |

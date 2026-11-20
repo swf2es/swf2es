@@ -216,7 +216,7 @@ export class Code {
 
   /** What a worker is handed of this VM's modules, or null. */
   handedModules(): HandedModules | null {
-    return this.recorder?.handed(this.hashes, this.s.codegen.apiVersion) ?? null;
+    return this.recorder?.handed(this.hashes, this.s.rt.apiVersion) ?? null;
   }
 
   /** Load the libraries the SWF's code links against (builtin, playerglobal), whose scripts run on first use. */
@@ -333,7 +333,7 @@ export class Code {
       const modules = linked instanceof Promise ? await linked : linked;
       if (main) {
         this.mainLinked = true;
-        this.recorder?.freeze(this.hashes, this.s.codegen.apiVersion);
+        this.recorder?.freeze(this.hashes, this.s.rt.apiVersion);
       }
 
       for (const [k, { lazy }] of added.entries()) {

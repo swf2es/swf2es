@@ -55,7 +55,8 @@ options:
                        a root of that version's, for a SWF such a root
                        loads. A player at another version looks none of
                        the modules up; an AIR application plays at the
-                       latest whatever its apiVersion. Refused for an AVM1
+                       latest with root, at a number's version with a
+                       number. Refused for an AVM1
                        SWF but latest, and root for an ABC, which has no
                        header
   -q, --quiet          print nothing but errors
