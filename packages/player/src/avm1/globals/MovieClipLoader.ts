@@ -36,7 +36,10 @@ export interface LoaderHost {
   progressOf(d: DisplayObject): [loaded: number, total: number];
 }
 
-const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE;
+// A class of SWF 7: a SWF of 5 or 6 sees the class and an instance's
+// _listeners, but nothing of its prototype, as adl has it: not its
+// members, its constructor, nor its __proto__, so neither Object's methods.
+const FIXED = avm1.DONT_ENUM | avm1.DONT_DELETE | avm1.VERSION_7;
 
 /** A level's number as Rust's `as i32` casts one: cut toward zero, saturated, NaN 0. */
 function levelNumber(n: number): number {
@@ -47,7 +50,8 @@ function levelNumber(n: number): number {
 export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Avm1Function {
   const realm = host.realm;
   const proto = new avm1.Avm1Object(realm.objectProto);
-  avm1.initializeBroadcaster(proto, realm, version);
+  // As SWF 7 sees AsBroadcaster's methods: a SWF 5 that reveals them finds them (adl).
+  avm1.initializeBroadcaster(proto, realm, Math.max(version, 7));
   const constr = realm.classOf(
     proto,
     (self, _, v) => {
@@ -56,6 +60,19 @@ export function movieClipLoaderClass(host: LoaderHost, version: number): avm1.Av
     },
     () => undefined,
   );
+  for (const name of [
+    "__proto__",
+    "constructor",
+    "broadcastMessage",
+    "addListener",
+    "removeListener",
+    "_listeners",
+  ]) {
+    const p = proto.own(name, 7);
+    if (p !== undefined) {
+      p.flags |= avm1.VERSION_7;
+    }
+  }
 
   /**
    * The display object a target names: a path from the code's target, a
