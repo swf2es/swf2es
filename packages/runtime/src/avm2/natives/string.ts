@@ -95,25 +95,39 @@ export const stringNatives: Natives = {
   }),
   "String.String::_replace": (rt) => (s: string, pattern: Value, replacement: Value) => {
     const p = pattern?.$re instanceof RegExp ? pattern.$re : rt.toString(pattern);
-    // As RegExpObject::replace: a global pattern matches from the start and
-    // leaves lastIndex as it was, where JavaScript's sets it to 0.
-    const lastIndex = p instanceof RegExp ? p.lastIndex : 0;
-    try {
-      if (replacement !== null && typeof replacement === "object" && replacement.$f) {
-        // The function gets the match, its groups, its position and the string.
-        return s.replace(p, (...a: Value[]) => {
-          const args = typeof a[a.length - 1] === "object" ? a.slice(0, -1) : a;
-          return rt.toString(rt.callValue(replacement, null, args, null));
-        });
+    // As RegExpObject::replace, which neither reads nor writes lastIndex: a
+    // global pattern matches from the start, and its lastIndex is what it
+    // was, or what a replacement function made it. JavaScript's sets it to
+    // 0 as it matches, all of it before the first call of the function,
+    // and a pattern that is not global it leaves alone.
+    const global = p instanceof RegExp && p.global;
+    const lastIndex = global ? p.lastIndex : 0;
+    if (replacement !== null && typeof replacement === "object" && replacement.$f) {
+      let first = global;
+      // The function gets the match, its groups, its position and the string.
+      const result = s.replace(p, (...a: Value[]) => {
+        if (first) {
+          first = false;
+          (p as RegExp).lastIndex = lastIndex;
+        }
+
+        const args = typeof a[a.length - 1] === "object" ? a.slice(0, -1) : a;
+        return rt.toString(rt.callValue(replacement, null, args, null));
+      });
+      if (first) {
+        (p as RegExp).lastIndex = lastIndex;
       }
 
-      const text = rt.toString(replacement);
-      return s.replace(p, p instanceof RegExp ? replacementOf(p, text) : text);
-    } finally {
-      if (p instanceof RegExp) {
-        p.lastIndex = lastIndex;
-      }
+      return result;
     }
+
+    const text = rt.toString(replacement);
+    const result = s.replace(p, p instanceof RegExp ? replacementOf(p, text) : text);
+    if (global) {
+      (p as RegExp).lastIndex = lastIndex;
+    }
+
+    return result;
   },
   // A string pattern is a RegExp's, as avmplus makes one of it.
   "String.String::_search": (rt) => (s: string, pattern: Value) =>
