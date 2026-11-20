@@ -1,0 +1,39 @@
+Error: static
+	at StackTraces$cinit()
+	at global$init()
+Error: constructor
+	at StackTraces()
+Error
+	at StackTraces/method()
+	at StackTraces()
+Error: getter
+	at StackTraces/get value()
+	at StackTraces()
+Error: setter
+	at StackTraces/set value()
+	at StackTraces()
+Error: static method
+	at StackTraces$/staticMethod()
+	at StackTraces()
+Error: namespaced
+	at StackTraces/http://example.com/custom::named()
+	at StackTraces()
+Error: private
+	at StackTraces/privately()
+	at StackTraces()
+Error: closure
+	at Function/StackTraces.as$0:anonymous()
+	at StackTraces()
+Error: file-private class
+	at Helper/run()
+	at StackTraces()
+Other: renamed
+	at StackTraces()
+TypeError: Error #1009: Cannot access a property or method of a null object reference.
+	at StackTraces/thrower()
+	at StackTraces()
+Error: subclass
+	at StackTraces()
+Error: script function
+	at Function/scriptFunction()
+	at StackTraces()

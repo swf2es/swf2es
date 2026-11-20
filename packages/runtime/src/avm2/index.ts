@@ -11,7 +11,7 @@ export { builtinLibrary } from "./builtin-library.js";
 export type { BuiltinClasses, BuiltinStatics } from "./builtin-types.generated.js";
 export type { Abc, AsObject, CompileUnit, FoundDefinition, Method, Value } from "./descriptors.js";
 export { type Domain, frameScripts, frameSites, siteScript, stackFrames } from "./domain.js";
-export { UnsupportedError } from "./errors.js";
+export { stackNames, UnsupportedError } from "./errors.js";
 export { FloatValue, hasFloatLibrary } from "./float.js";
 export { floatLibrary } from "./float-library.js";
 export type { ClassHook, NativesProvider } from "./hooks.js";

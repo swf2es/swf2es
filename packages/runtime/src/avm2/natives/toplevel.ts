@@ -1,6 +1,7 @@
 // The global functions, bugzilla, and Error.
 
-import type { Value } from "../descriptors.js";
+import type { AsObject, Value } from "../descriptors.js";
+import { stackNames } from "../errors.js";
 import type { ClassHook } from "../hooks.js";
 import { formatClassName } from "../names.js";
 import { errorMessages } from "../player-messages.js";
@@ -112,7 +113,18 @@ export const toplevelNatives: Natives = {
   // The debugger player writes the template as it is, %1 and all; an id it has no text for is the number alone.
   "Error.getErrorMessage": (rt) => (id: number) =>
     rt.debugger && errorMessages[id] ? `Error #${id}: ${errorMessages[id]}` : `Error #${id}`,
-  "Error#getStackTrace": plain(() => null),
+  // The debugger player's: the error as a string, then a line for each AS3
+  // method that was running when it was made; null in the release player.
+  "Error#getStackTrace": (rt) =>
+    function (this: AsObject): string | null {
+      if (!rt.debugger) {
+        return null;
+      }
+
+      const made = this.$jsError;
+      const frames = made instanceof Error ? stackNames(made.stack) : [];
+      return `${rt.toString(this)}\n${frames.map((name) => `\tat ${name}()`).join("\n")}`;
+    },
 };
 
 /**
@@ -124,9 +136,9 @@ const constructs: ClassHook = { call: (rt, cls, args) => rt.constructClass(cls, 
 
 /**
  * An AS3 error's JavaScript error, made with it: where it was made, the
- * compiled method's name in it, for a host to show (Runtime.stackOf). The
- * release player has no stack trace for AS3 to read, and getStackTrace
- * still gives null.
+ * compiled method's name in it, for a host to show (Runtime.stackOf), and
+ * for getStackTrace in debugger mode; the release player has no stack
+ * trace for AS3 to read.
  */
 const errorClass: ClassHook = {
   ...constructs,

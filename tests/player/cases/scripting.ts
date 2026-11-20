@@ -697,6 +697,16 @@ export const scriptingCases: PlayerCase[] = [
     maxOutliers: 0,
   },
   {
+    // Error.getStackTrace, as the debugger player names each method in it.
+    name: "stack-traces",
+    swf: (abc) => bare(abc, 1, "StackTraces"),
+    script: "StackTraces",
+    frames: 1,
+    capture: [],
+    tolerance: 0,
+    maxOutliers: 0,
+  },
+  {
     name: "accessibility-natives",
     swf: (abc) => bare(abc, 1, "AccessibilityNatives"),
     script: "AccessibilityNatives",

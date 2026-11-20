@@ -483,10 +483,19 @@ receiver's class. Where the player has no function to name, or it is a
 class's own method, an Error is the outermost SWF's on the stack it was
 made with, and any other value the main SWF's.
 
-An AS3 error keeps the JavaScript stack it was made on, out of AS3's
-sight (the release player's `getStackTrace` gives null), for a host to
+An AS3 error keeps the JavaScript stack it was made on, for a host to
 say where an error nothing caught came from: `Runtime.stackOf` gives its
-lines from the first compiled method's, whose names begin with `$`.
+lines from the first compiled method's, whose names begin with `$`. In
+the release player AS3 never sees it (`getStackTrace` gives null); in
+the debugger player `getStackTrace` gives the error as a string, then a
+line `\tat Name()` for each compiled method on that stack, named as Flash
+names it ("Test/get x", "Test$cinit", "global$init",
+"Function/<anonymous>"). Codegen spells that name into each function's
+identifier, "$_" and the name with `$` escapes
+(`assembly/avm2/emit/stack-names.ts`), and the runtime reads it back
+(`stackNames` in `errors.ts`), so release builds run and emit nothing more
+for it. Flash also lists its native methods' frames, which have no
+compiled function here and are left out.
 
 ## A timeline's places over a child
 
