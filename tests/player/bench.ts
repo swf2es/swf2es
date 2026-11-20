@@ -161,7 +161,8 @@
 // --burst N plays instead one shape in add that a script clears and fills
 // with N discs again each frame, over each other, as a burst of particles
 // or a glow is drawn: what a drawing of many fills in a blend mode costs
-// when it is never the same two frames running.
+// when it is never the same two frames running. --every K draws it again
+// every K-th frame instead, as particles on a timer are.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
@@ -188,7 +189,7 @@
 //     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K]
 //     | --scripted N [--still] | --town N
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
-//     | --triangles N [--culled] | --redraw N | --burst N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
+//     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
 //     [--checkout DIR] [--no-multi-draw]
@@ -253,6 +254,7 @@ const readback = option("readback", 0);
 const pen = option("pen", 0);
 const redraws = option("redraw", 0);
 const bursts = option("burst", 0);
+const burstEvery = Math.max(1, option("every", 1));
 const vectors = option("vectors", 0);
 const triangles = option("triangles", 0);
 const texts = option("text", 0);
@@ -1176,8 +1178,8 @@ function vectorsSwf(count: number): Uint8Array {
   });
 }
 
-/** One shape in add, cleared and filled with N discs again each frame (--burst). */
-function burstSwf(count: number): Uint8Array {
+/** One shape in add, cleared and filled with N discs again every `every` frames (--burst). */
+function burstSwf(count: number, every: number): Uint8Array {
   const source = `package {
   import flash.display.BlendMode;
   import flash.display.Shape;
@@ -1196,6 +1198,10 @@ function burstSwf(count: number): Uint8Array {
 
     private function step(e:Event):void {
       frame++;
+      if (frame % ${every} != 0) {
+        return;
+      }
+
       burst.graphics.clear();
       for (var i:int = 0; i < ${count}; i++) {
         var t:Number = frame * 0.03 + i * 0.37;
@@ -1207,7 +1213,7 @@ function burstSwf(count: number): Uint8Array {
     }
   }
 }`;
-  const abc = compiler()(`BenchBurst${count}`, source);
+  const abc = compiler()(`BenchBurst${count}x${every}`, source);
   libraryAbcs();
   return w.swf({
     width: WIDTH,
@@ -1898,7 +1904,7 @@ const swf =
     : redraws > 0
       ? redrawSwf(redraws)
       : bursts > 0
-        ? burstSwf(bursts)
+        ? burstSwf(bursts, burstEvery)
         : pen > 0
           ? penSwf(pen)
           : texts > 0
@@ -1999,7 +2005,7 @@ const summary = {
       : redraws > 0
         ? `${redraws} shapes drawn anew each frame`
         : bursts > 0
-          ? `${bursts} discs drawn anew each frame in add`
+          ? `${bursts} discs drawn anew ${burstEvery > 1 ? `every ${burstEvery} frames` : "each frame"} in add`
           : pen > 0
             ? `pen of ${pen}`
             : texts > 0

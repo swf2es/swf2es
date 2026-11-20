@@ -20,9 +20,13 @@ const QUAD_KEYS = 512;
  * (markFlat), drawn through its layer until then: a drawing made again on
  * every frame, as a burst of particles in add is, would otherwise
  * tessellate its fills together on every frame, at several times what
- * tessellating them apart costs.
+ * tessellating them apart costs. Each look at an object's part doubles what
+ * its next parts must stand, up to MOST_STANDING_FRAMES: one drawn again
+ * every second or third frame stands a frame or two, and is looked into a
+ * few times, not every time.
  */
 const STANDING_FRAMES = 1;
+const MOST_STANDING_FRAMES = 64;
 
 /**
  * A part as made: its geometry's handle, the frame it was made on, and the
@@ -63,6 +67,8 @@ export class Parts {
    * which version: those its next version leaves out are let go of then.
    */
   private readonly drawnLayers = new WeakMap<DisplayObject, DrawnLayers>();
+  /** The frames each object's next part must stand before it is looked into (markFlat). */
+  private readonly standing = new WeakMap<DisplayObject, number>();
   /** Quads by their width, then their height: numbers, not a key formatted from them. */
   private readonly quads = new Map<number, Map<number, GeometryHandle>>();
   /** Quads made since the last were let go of, which past QUAD_KEYS looks for those gone. */
@@ -175,19 +181,22 @@ export class Parts {
   }
 
   /**
-   * `part` of `layer`, of several fills, marked flat (Geometries.markFlat)
-   * if they do not overlap: for a part drawn alone in a blend mode, which is
-   * then drawn without a layer of its own. Looked into once, and only once
-   * it has stood STANDING_FRAMES. Asked of every part of several, it would
-   * tessellate each such layer twice.
+   * `part` of `layer`, of several fills, drawn by `o`, marked flat
+   * (Geometries.markFlat) if they do not overlap: for a part drawn alone in
+   * a blend mode, which is then drawn without a layer of its own. Looked
+   * into once, and only once it has stood as long as `o`'s parts must
+   * (STANDING_FRAMES). Asked of every part of several, it would tessellate
+   * each such layer twice.
    */
-  markFlat(layer: ShapeLayer, part: MadePart): void {
+  markFlat(o: DisplayObject, layer: ShapeLayer, part: MadePart): void {
     const { fillsFrom, fillsTo } = part;
-    if (fillsTo <= fillsFrom || this.geometries.frame - part.madeAt < STANDING_FRAMES) {
+    const standing = this.standing.get(o) ?? STANDING_FRAMES;
+    if (fillsTo <= fillsFrom || this.geometries.frame - part.madeAt < standing) {
       return;
     }
 
     part.fillsTo = fillsFrom;
+    this.standing.set(o, Math.min(standing * 2, MOST_STANDING_FRAMES));
     const data = this.geometries.get(part.handle.id);
     if (
       data &&

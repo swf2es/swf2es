@@ -4,6 +4,7 @@ import { setImmediate } from "node:timers/promises";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { Tessellator } from "@swf2es/native/render";
+import type { DisplayObject } from "../../../../packages/player/dist/display/displayobject.js";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
 import { Parts } from "../../../../packages/player/dist/scene/parts.js";
@@ -178,21 +179,22 @@ test("a part of fills that meet is marked flat once it has stood, one of fills o
   try {
     const flatness = (x: number, y = 0) => {
       const d = squares(x, y);
+      const o = {} as DisplayObject;
       const [part] = parts.partsOf(d.layers[0], d.version);
       const before = geometries.get(part.handle.id)?.flat;
       // Not on the frame it was made.
       for (let frame = 0; frame < 1; frame++) {
-        parts.markFlat(d.layers[0], part);
+        parts.markFlat(o, d.layers[0], part);
         assert.equal(geometries.get(part.handle.id)?.flat, before);
         geometries.endFrame();
         parts.partsOf(d.layers[0], d.version);
       }
 
       const made = calls.layers;
-      parts.markFlat(d.layers[0], part);
+      parts.markFlat(o, d.layers[0], part);
       const flattened = geometries.flattened.length;
       // Looked into once: asked again, it is not tessellated again.
-      parts.markFlat(d.layers[0], part);
+      parts.markFlat(o, d.layers[0], part);
       return [before, geometries.get(part.handle.id)?.flat, flattened, calls.layers - made];
     };
 
@@ -211,6 +213,7 @@ test("a drawing made again on every frame is never looked into", () => {
   const { tessellator, geometries, parts, calls } = counting();
   try {
     const d = squares(20);
+    const o = {} as DisplayObject;
     for (let frame = 0; frame < 10; frame++) {
       d.clear();
       d.beginFill({ type: "solid", color: 0xff0088ff });
@@ -220,11 +223,39 @@ test("a drawing made again on every frame is never looked into", () => {
       d.endFill();
       const [part] = parts.partsOf(d.layers[0], d.version);
       const made = calls.layers;
-      parts.markFlat(d.layers[0], part);
+      parts.markFlat(o, d.layers[0], part);
       assert.equal(calls.layers, made, `frame ${frame}`);
       geometries.endFrame();
     }
   } finally {
     tessellator.dispose();
+  }
+});
+
+test("a drawing made again every second or third frame is looked into a few times, not each time", () => {
+  for (const every of [2, 3]) {
+    const { tessellator, geometries, parts, calls } = counting();
+    try {
+      const o = {} as DisplayObject;
+      let d = squares(10, 10);
+      let joint = 0;
+      for (let frame = 0; frame < 30; frame++) {
+        // Over each other within their box, which only tessellating them together finds.
+        if (frame % every === 0) {
+          d = squares(10 + frame / 10, 10);
+        }
+
+        const [part] = parts.partsOf(d.layers[0], d.version);
+        const made = calls.layers;
+        parts.markFlat(o, d.layers[0], part);
+        joint += calls.layers - made;
+        geometries.endFrame();
+      }
+
+      // Each look doubles what the next part must stand: 1, 2, 4, soon more than it stands.
+      assert.equal(joint, every - 1, `every ${every}`);
+    } finally {
+      tessellator.dispose();
+    }
   }
 });

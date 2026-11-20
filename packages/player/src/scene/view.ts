@@ -842,7 +842,7 @@ export class RenderView implements Drawer {
       for (let i = 0; i < layers.length; i++) {
         const parts = this.parts.partsOf(layers[i], version);
         if (alone && parts.length === 1) {
-          this.parts.markFlat(layers[i], parts[0]);
+          this.parts.markFlat(o, layers[i], parts[0]);
         }
 
         for (const part of parts) {
