@@ -1356,10 +1356,14 @@ string's (adl); any other from the code's target, as in a movie of its
 own, whose `_root` in a string honours `_lockroot` (Flash Player 32's
 projector). `attachSound` and `stop(name)`
 look the name up in the library of the clip's movie, whichever movie's
-code asks; the global Sound in the code's movie's, and in a movie an AS3
-Loader holds in none (adl). There a Sound made of a root a load filled
-finds its clip from that movie's code alone, as Flash names the root by
-its AS3 path, which the movie that loaded it cannot follow.
+code asks (adl). The global Sound finds nothing in a movie an AS3 Loader
+holds (adl), and in a movie of its own looks in the code's movie's
+library: unmeasured without a projector, and more permissive than
+Ruffle's, which looks in its `_root`'s (the level, or the `_lockroot`
+clip). In a movie an AS3 Loader holds, Flash names a root a load filled
+by its AS3 path (`_level0.instance1.instance2.holder`): a Sound made of
+it there finds its clip from the code of any loaded movie, which can
+follow `_level0`, and not from the main movie's, which has none (adl).
 A Sound's transform is its clip's, which every sound under the clip
 plays by, or with no target the global one; the sounds it starts are the
 timeline's kind, held to the same 32 and stopped with them, StopSounds

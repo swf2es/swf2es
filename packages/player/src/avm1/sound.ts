@@ -104,15 +104,20 @@ export class Avm1Sounds implements SoundClassHost {
     return dot < 0 ? level : targetOf(movie, level, path.slice(dot + 1), version);
   }
 
-  filledMovie(value: avm1.Value): object | null {
+  namedByAs3Path(value: avm1.Value): boolean {
     const movie = this.movie;
     const d = value instanceof avm1.Avm1Object ? value.display?.target : undefined;
-    const filled = d instanceof MovieClip ? movie.contents.get(d) : undefined;
-    return movie.hosted && filled?.library && d !== movie.root ? filled : null;
+    return (
+      movie.hosted &&
+      d instanceof MovieClip &&
+      d !== movie.root &&
+      Boolean(movie.contents.get(d)?.library)
+    );
   }
 
-  codeMovie(): object {
-    return this.movie.currentSwf();
+  mainCode(): boolean {
+    // swfOf(null) is the main movie's.
+    return this.movie.currentSwf() === this.movie.swfOf(null);
   }
 
   /**

@@ -1964,7 +1964,10 @@ stop();`;
 // parent's code "cloop" by one of the child's. The global Sound finds
 // nothing in a movie a Loader holds. A Sound made of `holder` once the
 // child fills it finds no clip from the parent's code, as Flash names that
-// root by its AS3 path, but does from the child's, and one made before.
+// root by its AS3 path, `_level0.instance1…`, which the main movie's code
+// cannot follow; one made before the load does. Any loaded movie's code
+// follows it: the child's own, and that of the grandchild ("gloop") the
+// child loads into its clip `g`, whose root the child finds by a Sound too.
 function avm1SoundLibrary(): Record<string, Uint8Array> {
   const version = 8;
   const sound = (samples: number) => {
@@ -1995,13 +1998,25 @@ function avm1SoundLibrary(): Record<string, Uint8Array> {
     });
   // Each row a Sound of the target, or the global one for null: the duration it attached, and
   // its volume, which a Sound that finds its clip has.
-  const rows = (who: string, targets: [string, string][]) =>
+  const rows = (who: string, targets: [string, string][], names = ["cloop", "ploop"]) =>
     `function d(label, target, name) {
   var s = target == null ? new Sound() : new Sound(target);
   s.attachSound(name);
   trace("${who} " + label + " " + name + " " + s.duration + " " + s.getVolume());
 }
-${targets.flatMap(([label, target]) => ["cloop", "ploop"].map((name) => `d("${label}", ${target}, "${name}");`)).join("\n")}`;
+${targets.flatMap(([label, target]) => names.map((name) => `d("${label}", ${target}, "${name}");`)).join("\n")}`;
+  const grand = movie("gloop", 1378, [
+    "",
+    `${rows(
+      "grand",
+      [
+        ["own-root", "this"],
+        ["parent-root", "_parent"],
+      ],
+      ["gloop", "cloop"],
+    )}
+stop();`,
+  ]);
   const child = movie("cloop", 2756, [
     "",
     `createEmptyMovieClip("inner", 3);
@@ -2013,6 +2028,16 @@ ${rows("child", [
   ["own-root-named", "_parent.holder"],
   ["global", "null"],
 ])}
+createEmptyMovieClip("g", 4);
+new MovieClipLoader().loadClip("avm1-sound-library-grand.swf", g);
+var k = 0;
+onEnterFrame = function () {
+  k++;
+  if (k == 8) {
+    ${rows("child", [["grand-root", "g"]], ["gloop", "cloop"]).replace(/\n/g, "\n    ")}
+    delete onEnterFrame;
+  }
+};
 stop();`,
   ]);
   const parent = movie("ploop", 5512, [
@@ -2039,6 +2064,9 @@ onEnterFrame = function () {
     ]).replace(/\n/g, "\n    ")}
     early.attachSound("cloop");
     trace("parent early cloop " + early.duration + " " + early.getVolume());
+  }
+  if (n == 16) {
+    ${rows("parent", [["grand-root", "holder.g"]], ["gloop", "cloop"]).replace(/\n/g, "\n    ")}
     delete onEnterFrame;
   }
 };`,
@@ -2046,6 +2074,7 @@ onEnterFrame = function () {
   return {
     "avm1-sound-library-parent.swf": parent,
     "avm1-sound-library-child.swf": child,
+    "avm1-sound-library-grand.swf": grand,
   };
 }
 
@@ -4189,7 +4218,7 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
     swf: bare,
     script: "Avm1SoundLibrary",
     files: avm1SoundLibrary(),
-    frames: 12,
+    frames: 24,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,
