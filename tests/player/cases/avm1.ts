@@ -3761,6 +3761,7 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
     "globals",
     "date",
     "devices",
+    "movieclip-loader",
   ].flatMap((name) =>
     [5, 6, 7, 8, 10].map(
       (version): PlayerCase => ({
@@ -3771,6 +3772,9 @@ trace("avm1 hairline after _width " + c._xscale + " " + c._yscale + " " + c._wid
         capture: [],
         tolerance: 0,
         maxOutliers: 0,
+        // The flags it clears on MovieClipLoader's prototype stay cleared for the next SWF in
+        // the same adl, which shares AVM1's globals.
+        alone: name === "movieclip-loader",
       }),
     ),
   ),

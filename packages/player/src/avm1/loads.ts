@@ -493,7 +493,8 @@ export class MovieLoads {
    */
   private tell(load: MovieLoad, name: string, args: Value[]): void {
     if (load.loader !== null && !this.movie.halted) {
-      this.movie.broadcast(load.loader, name, args);
+      // A class of SWF 7, its broadcaster hidden below (globals/MovieClipLoader.ts).
+      this.movie.broadcast(load.loader, name, args, 7);
     }
   }
 
