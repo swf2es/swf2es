@@ -44,7 +44,7 @@ export interface PlayerJob {
   /**
    * Every frame drawn, as a host draws it, at the stage's size and no
    * larger, and waited for: a benchmark's frames then take their drawing's
-   * time as Flash's do (players.ts). No frame is captured.
+   * time as Flash's do (players.ts). A frame captured is drawn so too.
    */
   draw?: boolean;
   /** getTimer and timers by the wall clock, as a benchmark times itself, not by the frames. */

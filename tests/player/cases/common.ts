@@ -36,6 +36,12 @@ export interface PlayerCase {
   flash?: Uint8Array | ((abc: Uint8Array) => Uint8Array);
   /** Played as a host whose renderer is made with `antialias: true` draws it, multisampled; Flash draws it as ever. */
   antialias?: boolean;
+  /**
+   * Drawn as a host draws, a pixel a stage pixel, not on the grid of samples
+   * a capture averages (page.ts): with `antialias`, as the web element draws
+   * its edges, by multisampling alone.
+   */
+  draw?: boolean;
   /** Played as AIR plays it, AIR's API defined (Scripting's `air`); Flash's harness is AIR's. */
   air?: boolean;
   /**

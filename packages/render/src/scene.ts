@@ -31,6 +31,29 @@ export const KERNEL = 14;
  */
 export const ALPHA_MASK = -2;
 
+/**
+ * Whether a layer of one flat geometry (GeometryData.flat) in blend mode
+ * `mode` may be drawn straight onto what is below instead: each pixel's
+ * blend of what covers it in part then is that of its layer's pixel, as
+ * adl's is (WebGLBackend.blendDirect).
+ */
+export function blendsDirect(mode: number): boolean {
+  switch (mode) {
+    case ADD:
+    case SCREEN:
+    case MULTIPLY:
+    case LIGHTEN:
+    case DARKEN:
+    case DIFFERENCE:
+    case OVERLAY:
+    case HARDLIGHT:
+    case INVERT:
+      return true;
+    default:
+      return false;
+  }
+}
+
 /** Flash's blend mode names, by their number here. */
 export const BLEND_NAMES = [
   "normal",

@@ -7,6 +7,7 @@ import {
   ALPHA_MASK,
   BLEND,
   BLEND_NAMES,
+  blendsDirect,
   CLAMP,
   Commands,
   FILL_SHADER,
@@ -826,8 +827,25 @@ export class RenderView implements Drawer {
       const opaque = !color || color.aMul + color.aAdd / 255 >= 1;
       // Read once for the object, not for each textured part.
       const smoothing = this.smoothing;
+      // A layer of a part of several fills alone, drawn without the layer where they do not
+      // overlap (WebGLBackend.blendDirect): looked into only then, as it tessellates them again.
+      const alone =
+        layer >= 0 &&
+        !filtering &&
+        !alphaMask &&
+        !r &&
+        !childful &&
+        blendsDirect(mode) &&
+        layers.length === 1 &&
+        layers[0].strokes.length === 0;
+
       for (let i = 0; i < layers.length; i++) {
-        for (const part of this.parts.partsOf(layers[i], version)) {
+        const parts = this.parts.partsOf(layers[i], version);
+        if (alone && parts.length === 1) {
+          this.parts.markFlat(o, layers[i], parts[0]);
+        }
+
+        for (const part of parts) {
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(part.handle.id);
           // A shader fill's draw names its kernel's chain of the frame's filters.
