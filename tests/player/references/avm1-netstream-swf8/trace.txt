@@ -7,3 +7,12 @@ values audiocodec=128,undefined bufferLength=0,undefined bufferTime=0,undefined 
 buffer undefined 2 undefined undefined false true
 written 2
 after enumerates audiocodec bufferLength bufferTime bytesLoaded bytesTotal currentFps decodedFrames liveDelay time videocodec
+none undefined false undefined
+undefined status NetConnection.Connect.Success status true undefined
+undefined true true undefined
+rtmp true false rtmp://127.0.0.1:9/x
+pending 0 128
+junk true false junk 0
+five true 5
+junk status undefined undefined false junk
+rtmp status NetConnection.Connect.Failed error false rtmp://127.0.0.1:9/x

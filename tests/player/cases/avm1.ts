@@ -1651,7 +1651,7 @@ function avm1LoadedBroadcasters(): PlayerCase {
     w.sprite(1, 1, [w.showFrame(), w.end()]),
     ...versions.map((v, i) => w.place({ depth: i + 1, character: 1, name: `clip${v}` })),
   ];
-  const files: Record<string, Uint8Array> = {};
+  const files: Record<string, Uint8Array> = { "loaded-broadcasters-empty.swf": movie(7, "") };
   for (const v of versions) {
     files[`loaded-broadcasters-${v}.swf`] = movie(
       v,
@@ -1664,7 +1664,7 @@ function avm1LoadedBroadcasters(): PlayerCase {
     swf: movie(5, source("loaded-broadcasters"), clips),
     files,
     traced: true,
-    frames: 12,
+    frames: 24,
     capture: [],
     tolerance: 0,
     maxOutliers: 0,

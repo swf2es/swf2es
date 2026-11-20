@@ -493,7 +493,7 @@ export class MovieLoads {
    */
   private tell(load: MovieLoad, name: string, args: Value[]): void {
     if (load.loader !== null && !this.movie.halted) {
-      this.movie.callback(load.loader, "broadcastMessage", [name, ...args]);
+      this.movie.broadcast(load.loader, name, args);
     }
   }
 

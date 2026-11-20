@@ -96,18 +96,23 @@ const STREAM_VALUES: [string, avm1.Value][] = [
   ["videocodec", 2048],
 ];
 
+/** A stream made on a NetConnection: whether it has a stream's state (NetConnection.ts). */
+export interface StreamConnections {
+  streams(connection: avm1.Avm1Object): boolean;
+}
+
 /**
  * `_global.NetStream`: what plays a stream from SWF 5, what publishes or
  * closes one from SWF 6, getInfo from SWF 10. Its properties read
  * undefined, as a stream's do before it connects. The first stream made
- * on a connected NetConnection (`connected`: connect(null)'s) gives the
- * prototype enumerable getters of a stream's state, which such a stream
- * reads as one that has found nothing to play (adl). Nothing plays, and
- * play tells nothing.
+ * on a NetConnection that connect took, failed not yet, gives the
+ * prototype enumerable getters of a stream's state from SWF 6, over what
+ * a script set there, which such a stream reads as one that has found
+ * nothing to play (adl). Nothing plays, and play tells nothing.
  */
 export function netStreamClass(
   realm: avm1.Realm,
-  connected: (connection: avm1.Value) => boolean,
+  connections: StreamConnections,
 ): avm1.Avm1Function {
   const buffers = new WeakMap<avm1.Avm1Object, { time: number }>();
   const ofStream =
@@ -118,7 +123,8 @@ export function netStreamClass(
     };
   let streamed = false;
   const made = (self: avm1.Avm1Object, args: avm1.Value[]) => {
-    if (args.length === 0 || !connected(args[0])) {
+    const connection = args.length > 0 ? args[0] : undefined;
+    if (!(connection instanceof avm1.Avm1Object) || !connections.streams(connection)) {
       return;
     }
 
@@ -129,9 +135,10 @@ export function netStreamClass(
 
     streamed = true;
     const getter = (name: string, read: (self: avm1.Avm1Object) => avm1.Value) => {
-      const p = proto.add(name, undefined, 0);
+      const p = proto.add(name, undefined, avm1.VERSION_6);
       p.get = realm.method((self) => read(self));
     };
+
     for (const [name, value] of STREAM_VALUES) {
       getter(
         name,

@@ -29,7 +29,7 @@ export function fileReferenceClasses(movie: Avm1): avm1.Avm1Object {
     },
   };
   const notify = (self: Obj, name: string, args: avm1.Value[] = []) => {
-    movie.callback(self, "broadcastMessage", [name, self, ...args]);
+    movie.broadcast(self, name, [self, ...args]);
   };
   const state = (self: Obj): FileReference => {
     let ref = states.get(self);

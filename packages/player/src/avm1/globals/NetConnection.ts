@@ -5,7 +5,8 @@
 // an http or https URL is Flash Remoting: each call is queued, and the
 // frame's calls go together as one AMF0 packet POSTed to the URL, the
 // connection's headers with them, each call's answer, /n/onResult or
-// /n/onStatus, going to its responder. Any other URL connects nothing.
+// /n/onStatus, going to its responder. An RTMP URL fails at the frame's
+// end, as adl's does without a server; any other connects nothing.
 import { avm1 } from "@swf2es/runtime";
 import { Reader, Writer } from "../amf.js";
 import type { Avm1Net } from "../net.js";
@@ -40,10 +41,19 @@ interface Call {
   readonly responder: Obj | null;
 }
 
-/** A connection: the local one, or Flash Remoting's to `url`. */
+/**
+ * A connection: the local one, Flash Remoting's to `url`, an RTMP server's
+ * that fails, or one to what is neither, which does nothing.
+ */
 interface Connection {
   readonly self: Obj;
+  readonly kind: "local" | "remoting" | "rtmp" | "other";
+  /** Remoting's URL; null for the others. */
   readonly url: string | null;
+  /** What `uri` reads. */
+  readonly uri: Value;
+  /** Whether it failed, as an RTMP connection has by the end of its frame. */
+  failed: boolean;
   headers: Header[];
   queue: Call[];
 }
@@ -168,6 +178,8 @@ function messagesOf(
 export class Remoting {
   private readonly connections = new WeakMap<Obj, Connection>();
   private waiting = new Set<Connection>();
+  private failing = new Set<Connection>();
+  private streamed = new Set<Connection>();
 
   constructor(private readonly host: NetConnectionHost) {}
 
@@ -177,8 +189,27 @@ export class Remoting {
     this.waiting.add(c);
   }
 
-  /** A frame's end: each connection's calls sent as one packet. */
+  /** A frame's end: each RTMP connection made failed, and each connection's calls sent as one packet. */
   flush(): void {
+    // A stream on a connection to what is neither remoting nor RTMP has
+    // its onStatus told nothing (adl).
+    const streamed = this.streamed;
+    this.streamed = new Set();
+    for (const c of streamed) {
+      if (this.connections.get(c.self) === c) {
+        this.host.callback(c.self, "onStatus", []);
+      }
+    }
+
+    const failing = this.failing;
+    this.failing = new Set();
+    for (const c of failing) {
+      if (this.connections.get(c.self) === c) {
+        c.failed = true;
+        this.status(c.self, "NetConnection.Connect.Failed", "error");
+      }
+    }
+
     const waiting = this.waiting;
     this.waiting = new Set();
     for (const c of waiting) {
@@ -226,15 +257,31 @@ export class Remoting {
     return this.connections.get(self);
   }
 
-  /** `self` connected to `url`, local for null; the connection it had closed first. */
-  open(self: Obj, url: string | null): void {
+  /**
+   * A stream made on `self`: whether it has a stream's state, as on a
+   * connection made that has not failed.
+   */
+  streams(self: Obj): boolean {
+    const c = this.connections.get(self);
+    if (c?.kind === "other") {
+      this.streamed.add(c);
+    }
+
+    return c !== undefined && !c.failed;
+  }
+
+  /** `self` connected as `kind`, `uri` its URI; the connection it had closed first. */
+  open(self: Obj, kind: Connection["kind"], uri: Value, url: string | null = null): void {
     if (this.connections.has(self)) {
       this.close(self, false);
     }
 
-    this.connections.set(self, { self, url, headers: [], queue: [] });
-    if (url === null) {
+    const c: Connection = { self, kind, url, uri, failed: false, headers: [], queue: [] };
+    this.connections.set(self, c);
+    if (kind === "local") {
       this.status(self, "NetConnection.Connect.Success");
+    } else if (kind === "rtmp") {
+      this.failing.add(c);
     }
   }
 
@@ -247,17 +294,19 @@ export class Remoting {
 
     this.connections.delete(self);
     this.waiting.delete(c);
+    this.failing.delete(c);
+    this.streamed.delete(c);
     this.status(self, "NetConnection.Connect.Closed");
     if (explicit && c.url !== null) {
       this.host.callback(self, "onStatus", []);
     }
   }
 
-  private status(self: Obj, code: string): void {
+  private status(self: Obj, code: string, level = "status"): void {
     const { realm, version } = this.host;
     const event = realm.newObject(version);
     avm1.set(event, "code", code, version);
-    avm1.set(event, "level", "status", version);
+    avm1.set(event, "level", level, version);
     this.host.callback(self, "onStatus", [event]);
   }
 }
@@ -306,22 +355,29 @@ export function netConnectionClass(host: NetConnectionHost, remoting: Remoting):
       return undefined;
     });
 
-  getter("protocol", (c) => (c !== undefined && c.url === null ? "rtmp" : undefined));
-  // True for anything given, whether or not it connects (adl); nothing given connects nothing.
+  getter("protocol", (c) => (c?.kind === "local" ? "rtmp" : undefined));
+  // True for anything given, whether or not it connects, but undefined up
+  // to SWF 6; nothing given, or undefined up to SWF 6, connects nothing (adl).
   answering("connect", (self, args, v) => {
     if (args.length === 0) {
       return undefined;
     }
 
     const url = args[0];
+    if (url === undefined && v <= 6) {
+      return false;
+    }
+
     if (url === undefined || url === null) {
-      remoting.open(self, null);
+      remoting.open(self, "local", url === null ? "null" : undefined);
       return true;
     }
 
     const text = avm1.stringOf(url, v);
     if (/^https?:\/\//i.test(text)) {
-      remoting.open(self, text);
+      remoting.open(self, "remoting", text, text);
+    } else {
+      remoting.open(self, /^rtm(p[a-z]*|fp):/i.test(text) ? "rtmp" : "other", text);
     }
 
     return true;
@@ -355,7 +411,7 @@ export function netConnectionClass(host: NetConnectionHost, remoting: Remoting):
       c.headers.push({ name, mustUnderstand, value });
     }
   });
-  getter("isConnected", (c) => c !== undefined && c.url === null);
-  getter("uri", (c) => (c === undefined ? undefined : (c.url ?? "null")));
+  getter("isConnected", (c) => c?.kind === "local");
+  getter("uri", (c) => c?.uri);
   return constr;
 }

@@ -7,3 +7,9 @@ values audiocodec=, bufferLength=, bufferTime=, bytesLoaded=, bytesTotal=, check
 buffer      
 written 5
 after enumerates 
+none  false 
+undefined  false 
+rtmp  false 
+pending  
+junk  false  
+five  

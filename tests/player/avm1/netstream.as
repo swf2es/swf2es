@@ -32,3 +32,24 @@ trace("buffer " + stream.setBufferTime(2) + " " + stream.bufferTime + " " + plai
 stream.bufferTime = 5;
 trace("written " + stream.bufferTime);
 en("after", NetStream.prototype);
+// What connect takes: nothing connects nothing; undefined, up to SWF 6,
+// neither; an RTMP URL fails at the frame's end, where a stream made on it
+// meanwhile has a stream's state; anything else neither connects nor fails.
+function told(name, connection) {
+  connection.onStatus = function(info) {
+    trace(name + " status " + info.code + " " + info.level + " " + connection.isConnected + " " + connection.uri);
+  };
+  return connection;
+}
+var none = told("none", new NetConnection());
+trace("none " + none.connect() + " " + none.isConnected + " " + none.uri);
+var absent = told("undefined", new NetConnection());
+trace("undefined " + absent.connect(undefined) + " " + absent.isConnected + " " + absent.uri);
+var rtmp = told("rtmp", new NetConnection());
+trace("rtmp " + rtmp.connect("rtmp://127.0.0.1:9/x") + " " + rtmp.isConnected + " " + rtmp.uri);
+var pending = new NetStream(rtmp);
+trace("pending " + pending.time + " " + pending.audiocodec);
+var junk = told("junk", new NetConnection());
+trace("junk " + junk.connect("junk") + " " + junk.isConnected + " " + junk.uri + " " + new NetStream(junk).time);
+var five = told("five", new NetConnection());
+trace("five " + five.connect(5) + " " + five.uri);
