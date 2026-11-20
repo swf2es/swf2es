@@ -2,12 +2,19 @@
 // URL dialog, a window of its own.
 import { basename } from "node:path";
 import { fileURLToPath } from "node:url";
-import { BrowserWindow, dialog, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
+import {
+  BrowserWindow,
+  dialog,
+  type IpcMainEvent,
+  type IpcMainInvokeEvent,
+  nativeTheme,
+} from "electron";
 import type { LibraryName } from "../shared/api.js";
 import { buildMenu } from "./menu.ts";
 import { openChosen, readStart } from "./open.ts";
 import { APP_ORIGIN } from "./protocol.ts";
 import { settings, window } from "./state.ts";
+import { windowBackground } from "./theme.ts";
 
 const promptPreload = fileURLToPath(new URL("../preload/prompt.cjs", import.meta.url));
 const PROMPT_URL = `${APP_ORIGIN}/open-url.html`;
@@ -110,6 +117,7 @@ export function showUrlDialog(): void {
     fullscreenable: false,
     title: "Open URL",
     show: false,
+    backgroundColor: windowBackground(nativeTheme.shouldUseDarkColors),
     webPreferences: {
       preload: promptPreload,
       contextIsolation: true,

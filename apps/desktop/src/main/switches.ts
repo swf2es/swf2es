@@ -3,13 +3,14 @@
 // --ignore-policy-files and --proxy, the network judged through them and
 // what opens an AIR application's WebSockets, each said on stderr as the
 // app starts; --no-http-cache;
-// --flashvars and --param, the SWF's embedding (embedding.ts); --software-gl; and
-// --api-version (api-version.ts).
+// --flashvars and --param, the SWF's embedding (embedding.ts); --software-gl;
+// --api-version (api-version.ts); and --theme (theme.ts).
 import { apiVersionArgument } from "./api-version.ts";
 import { embeddingArguments } from "./embedding.ts";
 import { Network } from "./network.ts";
 import { policyIgnoredHosts, policyIgnoredNotice, unverifiedHosts } from "./network-rules.ts";
 import { describeProxy, proxyArgument } from "./proxy.ts";
+import { themeArgument } from "./theme.ts";
 import type { WebSocketOptions } from "./websocket-connections.ts";
 
 /** The app's own arguments: not an AIR application's, after "--". */
@@ -35,6 +36,18 @@ if ("error" in versioned) {
 }
 
 export const apiVersion = versioned.apiVersion;
+
+/**
+ * --theme=system|light|dark: the app's look for this run, over View › Theme's, which it leaves
+ * as it is in the settings; one that does not read stops the app.
+ */
+const themed = themeArgument(own.slice(1));
+if ("error" in themed) {
+  process.stderr.write(`swf2es: ${themed.error}\n`);
+  process.exit(2);
+}
+
+export const themeOverride = themed.theme;
 
 /** --software-gl: SwiftShader draws, on the CPU, where Chromium takes no GPU or even where it does (gpu.ts). */
 export const softwareGl = own.includes("--software-gl");

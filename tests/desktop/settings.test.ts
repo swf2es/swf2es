@@ -85,3 +85,30 @@ test("the HTTP cache is on unless the File menu turned it off", () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("the theme is the system's unless View › Theme chose another", () => {
+  const directory = mkdtempSync(join(tmpdir(), "swf2es-settings-"));
+  try {
+    const settings = new SettingsFile(directory);
+    assert.equal(settings.theme, "system");
+    settings.opened("example.swf");
+    assert.equal(
+      "theme" in JSON.parse(readFileSync(join(directory, "settings.json"), "utf8")),
+      false,
+    );
+
+    for (const theme of ["dark", "light", "system"] as const) {
+      assert.equal(settings.setTheme(theme), true);
+      settings.opened("other.swf");
+      assert.equal(new SettingsFile(directory).theme, theme);
+      assert.equal(JSON.parse(readFileSync(join(directory, "settings.json"), "utf8")).theme, theme);
+    }
+
+    for (const value of ["Dark", "black", 1, null, true]) {
+      writeFileSync(join(directory, "settings.json"), JSON.stringify({ theme: value }));
+      assert.equal(new SettingsFile(directory).theme, "system", `theme: ${value}`);
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

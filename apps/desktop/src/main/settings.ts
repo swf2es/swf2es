@@ -1,10 +1,12 @@
 // What the app remembers between runs, in settings.json under its user
 // data: a playerglobal.abc the user chose, the SWFs opened last, Stage3D
-// turned off or on from the View menu, and the HTTP cache from the File menu.
+// and the theme as the View menu set them, and the HTTP cache from the File
+// menu.
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { LibraryName, LibraryState } from "../shared/api.js";
+import { isTheme, type Theme } from "./theme.ts";
 
 export interface Settings {
   /**
@@ -15,6 +17,8 @@ export interface Settings {
   stage3DChoice?: boolean;
   /** The HTTP cache as the File menu last set it; absent until it does, which is on. */
   httpCache?: boolean;
+  /** The theme as the View menu last set it; absent until it does, which is the system's. */
+  theme?: Theme;
   playerglobal?: string;
   /** Most recent first. */
   recent: string[];
@@ -75,6 +79,15 @@ export class SettingsFile {
     return this.update({ httpCache: enabled });
   }
 
+  /** The app's light or dark look: the system's unless the user chose one. */
+  get theme(): Theme {
+    return this.current.theme ?? "system";
+  }
+
+  setTheme(theme: Theme): boolean {
+    return this.update({ theme });
+  }
+
   /** `path` opened: first in the recent list. */
   opened(path: string): void {
     this.update({
@@ -108,6 +121,7 @@ export class SettingsFile {
       return {
         stage3DChoice: typeof read.stage3DChoice === "boolean" ? read.stage3DChoice : undefined,
         httpCache: typeof read.httpCache === "boolean" ? read.httpCache : undefined,
+        theme: isTheme(read.theme) ? read.theme : undefined,
         playerglobal: text(read.playerglobal),
         recent: strings(read.recent),
         sockets: Object.fromEntries(

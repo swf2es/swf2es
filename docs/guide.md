@@ -545,6 +545,7 @@ the builtin.abc and playerglobal the player ships.
 | `--ignore-policy-files=data.example,localhost` | The same for the hosts named alone, exactly (not their subdomains), this machine's and private networks' too. |
 | `--no-http-cache` | Neither reads nor keeps the HTTP cache, for this run. |
 | `--api-version=root` | Plays the SWF and what it loads at its own SWF version's API version (its workers at the latest), as Flash did, which hides the classes and members of later players; an AIR application stays at the latest. `latest`, the default, shows them all; a number plays them at a root of that SWF version's. |
+| `--theme=dark` | The app's look for this run: `system`, `light` or `dark`, over View › Theme's, which stays as it was. |
 | `--software-gl` | Draws with SwiftShader, on the CPU: where Chromium takes no GPU (a server, Xvfb), or one that gives WebGL but not WebGL 2. Only for SWFs you trust. |
 | `--proxy=socks5://host:1080` | Sends the SWF's requests, sockets and WebSockets through a SOCKS5 proxy, for this run (`socks5h://` is the same). |
 | `--proxy=http://user:pass@host:3128` | The same through an HTTP proxy, by a `CONNECT` tunnel for each connection; either kind takes a username and password. |
@@ -675,6 +676,12 @@ content plays with nothing to set up. View › Stage3D turns
 it off, after which a SWF's `requestContext3D` gets Error #3702, "Context3D
 not available", and on again; the app remembers the choice and restarts
 the movie playing.
+
+View › Theme makes the app light or dark, or follows the system, the
+default: its pages, the element's performance meter and context menu
+follow, and the title bar and menus where the platform allows. A SWF's
+stage keeps its own background colour. The app remembers the choice, and
+`--theme=light` or `--theme=dark` sets one for a single run.
 
 On Linux, a local file a SWF or an AIR application names that is not there
 as named is found as Windows and macOS find it, ignoring case, so content
