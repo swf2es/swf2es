@@ -8,12 +8,30 @@ import { Container } from "../display/container.js";
 import { CLEAN, type DisplayObject } from "../display/displayobject.js";
 
 /**
- * An object's span of the frame it was written in: its entries and rows,
- * and what it was drawn under, its parent's transform on the stage and the
- * colour transform its ancestors gave it.
+ * An object's span of the frame it was written in, its entries and rows;
+ * and, from its last walk, where its span began then and, for its
+ * children, the transform on the stage and the colour they were drawn
+ * under, which each child's span written then stands under alike.
  */
 export interface ObjectSpan extends Span {
+  /** The Spans that wrote it (Spans.id): another view drawing the same object writes its own. */
+  owner: number;
+  /** The frame its span was written in, or taken into; -1 for none. */
   frame: number;
+  /**
+   * Its parent then (its serial, -1 for none), under whose context it stood:
+   * a child moved to another parent is not flagged itself. A number, so that
+   * a span holds no object.
+   */
+  parent: number;
+  /**
+   * The frame it was last walked in with its children's spans written (under),
+   * -1 for none, and where its span began then: its own span taken whole
+   * since moved what it holds by as much as it moved.
+   */
+  walked: number;
+  walkedFirst: number;
+  walkedRowsFirst: number;
   a: number;
   b: number;
   c: number;
@@ -31,17 +49,22 @@ export interface ObjectSpan extends Span {
   aAdd: number;
 }
 
+/**
+ * Where an object's children's spans lie, as its walk finds them (Spans.under):
+ * written in `frame`'s walk, and in the frame before's list `entries` and
+ * `rows` on from where they were written; `frame` -1 where none may stand.
+ */
+export interface Context {
+  frame: number;
+  entries: number;
+  rows: number;
+}
+
 /** Whether nothing in `o` changed since it was last walked: its flags, and its descendants'. */
 export function clean(o: DisplayObject): boolean {
   return o.dirty === CLEAN && !(o instanceof Container && o.descendantsDirty);
 }
 
-/**
- * The spans of the stage's walks: written as each object is walked, read
- * the frame after. The frame before's scene list and rows are kept, which
- * the spans name, with the generation each draw's geometry and texture had,
- * so that one let go of since is never named again.
- */
 /** The Spans made, which numbers each. */
 let made = 0;
 
@@ -53,16 +76,27 @@ let made = 0;
  */
 const lastWalks = new WeakMap<object, { spans: number; walk: number }>();
 
+/**
+ * The spans of the stage's walks: written as each object is walked, read
+ * the frame after. The frame before's scene list and rows are kept, which
+ * the spans name, with the generation each draw's geometry and texture had,
+ * so that one let go of since is never named again.
+ */
 export class Spans {
-  /** Its number (lastWalks): a number, so that what it spans holds no view. */
+  /** Its number, which its spans carry: a number, so that what it spans holds no view. */
   private readonly id = ++made;
-  private readonly spans = new WeakMap<DisplayObject, ObjectSpan>();
   /** The stage's walks begun, the one under way the last. */
   private frame = 0;
   /** Whether the frame before's spans may be read: it walked to its end, at this generation. */
   private usable = false;
   private ended = false;
   private generation = -1;
+  /** Where the stage's walk began the frame before, the viewport's corner (root). */
+  private rootX = 0;
+  private rootY = 0;
+  /** Where the span `kept` found lies in the frame before's list: its first entry and row. */
+  from = 0;
+  rowsFrom = 0;
   /** The frame before's list and rows, which its spans name. */
   scene = new SceneList();
   rows = new Rows();
@@ -143,88 +177,21 @@ export class Spans {
     this.ended = false;
   }
 
-  /**
-   * `o`'s span of the frame before, if it may stand for `o` now: written
-   * then, under the parent's transform at `places[at]` and the colour
-   * `tint` it has now, its draws' geometries and textures those still
-   * kept. Whether nothing in `o` changed is its caller's to know.
-   */
-  kept(
-    o: DisplayObject,
-    places: Float64Array,
-    at: number,
-    tint: ColorTransform | null,
-    geometries: Geometries,
-    textures: Textures,
-  ): ObjectSpan | null {
-    const s = this.usable ? this.spans.get(o) : undefined;
-    if (
-      !s ||
-      s.frame !== this.frame - 1 ||
-      s.a !== places[at] ||
-      s.b !== places[at + 1] ||
-      s.c !== places[at + 2] ||
-      s.d !== places[at + 3] ||
-      s.tx !== places[at + 4] ||
-      s.ty !== places[at + 5] ||
-      (tint
-        ? !s.tinted ||
-          s.rMul !== tint.rMul ||
-          s.gMul !== tint.gMul ||
-          s.bMul !== tint.bMul ||
-          s.aMul !== tint.aMul ||
-          s.rAdd !== tint.rAdd ||
-          s.gAdd !== tint.gAdd ||
-          s.bAdd !== tint.bAdd ||
-          s.aAdd !== tint.aAdd
-        : s.tinted)
-    ) {
-      return null;
-    }
-
-    const scene = this.scene;
-    const ids = scene.geometry;
-    const texture = scene.texture;
-    const g = this.geometryGenerations;
-    const t = this.textureGenerations;
-    for (let e = s.first; e < s.end; e++) {
-      const id = ids[e];
-      if (g[e] < 0 || !geometries.holds(id) || geometries.generation(id) !== g[e]) {
-        return null;
-      }
-
-      const k = texture[e];
-      if (k >= 0 && (t[e] < 0 || !textures.holds(k) || textures.generation(k) !== t[e])) {
-        return null;
-      }
-    }
-
-    return s;
-  }
-
-  /**
-   * `o`'s span of this frame, entries `first` to `end` and rows `rowsFirst`
-   * to `rowsEnd`, written under the parent's transform at `places[at]` and
-   * the colour `tint`.
-   */
-  record(
-    o: DisplayObject,
-    first: number,
-    end: number,
-    rowsFirst: number,
-    rowsEnd: number,
-    places: Float64Array,
-    at: number,
-    tint: ColorTransform | null,
-  ): void {
-    let s = this.spans.get(o);
-    if (!s) {
+  /** `o`'s span and what its children stand under, this Spans', made empty if there was none. */
+  private own(o: DisplayObject): ObjectSpan {
+    let s = o.span as ObjectSpan | null;
+    if (s === null || s.owner !== this.id) {
       s = {
-        frame: 0,
+        owner: this.id,
+        frame: -1,
+        parent: -1,
         first: 0,
         end: 0,
         rowsFirst: 0,
         rowsEnd: 0,
+        walked: -1,
+        walkedFirst: 0,
+        walkedRowsFirst: 0,
         a: 0,
         b: 0,
         c: 0,
@@ -241,30 +208,184 @@ export class Spans {
         bAdd: 0,
         aAdd: 0,
       };
-      this.spans.set(o, s);
+      o.span = s;
     }
 
+    return s;
+  }
+
+  /**
+   * Where `o`'s children's spans lie in the frame before's list, if they may
+   * stand for them now: `o` walked now from entry `first` and row
+   * `rowsFirst`, under the transform on the stage at `places[at]` and the
+   * colour `tint` (its children's), its own span found as `parent` says of
+   * its parent's children (Context). Its children's spans were written in
+   * its last walk, under what it noted then, which must be what they stand
+   * under now; they lie where they were then, moved as `o`'s span was moved
+   * since, as copied whole with it, and as the spans holding it were (the
+   * parent's context). Noted for the next frame, and `out` set to it.
+   */
+  under(
+    o: DisplayObject,
+    first: number,
+    rowsFirst: number,
+    places: Float64Array,
+    at: number,
+    tint: ColorTransform | null,
+    parent: Context,
+    out: Context,
+  ): void {
+    const s = this.own(o);
+    const a = places[at];
+    const b = places[at + 1];
+    const c = places[at + 2];
+    const d = places[at + 3];
+    const tx = places[at + 4];
+    const ty = places[at + 5];
+    const same =
+      this.usable &&
+      s.walked >= 0 &&
+      s.a === a &&
+      s.b === b &&
+      s.c === c &&
+      s.d === d &&
+      s.tx === tx &&
+      s.ty === ty &&
+      (tint
+        ? s.tinted &&
+          s.rMul === tint.rMul &&
+          s.gMul === tint.gMul &&
+          s.bMul === tint.bMul &&
+          s.aMul === tint.aMul &&
+          s.rAdd === tint.rAdd &&
+          s.gAdd === tint.gAdd &&
+          s.bAdd === tint.bAdd &&
+          s.aAdd === tint.aAdd
+        : !s.tinted);
+    const before = this.frame - 1;
+    out.frame = -1;
+    if (!same) {
+      // Nothing of the children's stands.
+    } else if (s.walked === before) {
+      out.frame = before;
+      out.entries = 0;
+      out.rows = 0;
+    } else if (s.frame === before) {
+      out.frame = s.walked;
+      out.entries = s.first - s.walkedFirst;
+      out.rows = s.rowsFirst - s.walkedRowsFirst;
+    } else if (parent.frame >= 0 && s.frame === parent.frame) {
+      out.frame = s.walked;
+      out.entries = s.first + parent.entries - s.walkedFirst;
+      out.rows = s.rowsFirst + parent.rows - s.walkedRowsFirst;
+    }
+
+    s.walked = this.frame;
+    s.walkedFirst = first;
+    s.walkedRowsFirst = rowsFirst;
+    if (!same) {
+      s.a = a;
+      s.b = b;
+      s.c = c;
+      s.d = d;
+      s.tx = tx;
+      s.ty = ty;
+      s.tinted = tint !== null;
+      if (tint) {
+        s.rMul = tint.rMul;
+        s.gMul = tint.gMul;
+        s.bMul = tint.bMul;
+        s.aMul = tint.aMul;
+        s.rAdd = tint.rAdd;
+        s.gAdd = tint.gAdd;
+        s.bAdd = tint.bAdd;
+        s.aAdd = tint.aAdd;
+      }
+    }
+  }
+
+  /** The root's context (Context): the stage's walk beginning at the viewport's corner (`x`, `y`) as the frame before's did. */
+  root(x: number, y: number, out: Context): void {
+    const same = this.usable && x === this.rootX && y === this.rootY;
+    this.rootX = x;
+    this.rootY = y;
+    out.frame = same ? this.frame - 1 : -1;
+    out.entries = 0;
+    out.rows = 0;
+  }
+
+  /**
+   * `o`'s span, if it may stand for `o` now: written where `context` says
+   * its parent's children's spans were (Context), its parent then the one
+   * it has, its draws' geometries and textures those still kept; where it
+   * lies in the frame before's list then `from` and `rowsFrom`. Whether
+   * nothing in `o` changed is its caller's to know.
+   */
+  kept(
+    o: DisplayObject,
+    context: Context,
+    geometries: Geometries,
+    textures: Textures,
+  ): ObjectSpan | null {
+    const s = o.span as ObjectSpan | null;
+    if (
+      !this.usable ||
+      context.frame < 0 ||
+      s === null ||
+      s.owner !== this.id ||
+      s.frame !== context.frame ||
+      s.parent !== (o.parent ? o.parent.serial : -1)
+    ) {
+      return null;
+    }
+
+    const from = s.first + context.entries;
+    const ids = this.scene.geometry;
+    const texture = this.scene.texture;
+    const g = this.geometryGenerations;
+    const t = this.textureGenerations;
+    for (let e = from; e < from + s.end - s.first; e++) {
+      const id = ids[e];
+      if (g[e] < 0 || !geometries.holds(id) || geometries.generation(id) !== g[e]) {
+        return null;
+      }
+
+      const k = texture[e];
+      if (k >= 0 && (t[e] < 0 || !textures.holds(k) || textures.generation(k) !== t[e])) {
+        return null;
+      }
+    }
+
+    this.from = from;
+    this.rowsFrom = s.rowsFirst + context.rows;
+    return s;
+  }
+
+  /**
+   * `o`'s span of this frame: entries `first` to `end`, rows `rowsFirst` to
+   * `rowsEnd`. A walk that wrote none of its children's spans (under), as
+   * of children walked hidden, leaves none of theirs to be found through it.
+   */
+  record(o: DisplayObject, first: number, end: number, rowsFirst: number, rowsEnd: number): void {
+    const s = this.own(o);
+    if (s.walked !== this.frame) {
+      s.walked = -1;
+    }
+
+    s.frame = this.frame;
+    s.parent = o.parent ? o.parent.serial : -1;
+    s.first = first;
+    s.end = end;
+    s.rowsFirst = rowsFirst;
+    s.rowsEnd = rowsEnd;
+  }
+
+  /** Span `s`, taken into this frame, noted where it now lies. */
+  moved(s: ObjectSpan, first: number, end: number, rowsFirst: number, rowsEnd: number): void {
     s.frame = this.frame;
     s.first = first;
     s.end = end;
     s.rowsFirst = rowsFirst;
     s.rowsEnd = rowsEnd;
-    s.a = places[at];
-    s.b = places[at + 1];
-    s.c = places[at + 2];
-    s.d = places[at + 3];
-    s.tx = places[at + 4];
-    s.ty = places[at + 5];
-    s.tinted = tint !== null;
-    if (tint) {
-      s.rMul = tint.rMul;
-      s.gMul = tint.gMul;
-      s.bMul = tint.bMul;
-      s.aMul = tint.aMul;
-      s.rAdd = tint.rAdd;
-      s.gAdd = tint.gAdd;
-      s.bAdd = tint.bAdd;
-      s.aAdd = tint.aAdd;
-    }
   }
 }

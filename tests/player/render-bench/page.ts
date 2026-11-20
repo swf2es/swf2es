@@ -90,7 +90,9 @@ export function scene(name: string, options: Options): Result {
   try {
     for (let f = -30; f < options.frames; f++) {
       if (name !== "visible") {
-        for (let i = 0; i < branches.length; i++) {
+        // "tenth" moves one branch in ten, the rest still, as a crowded scene stands mostly still.
+        const step = name === "tenth" ? 10 : 1;
+        for (let i = (f + 30) % step; i < branches.length; i += step) {
           branches[i].matrix.tx = (i % 8) * 60 + ((f + 30) % 8);
           branches[i].invalidate(name === "rebuilding" ? CONTENT : TRANSFORM);
         }

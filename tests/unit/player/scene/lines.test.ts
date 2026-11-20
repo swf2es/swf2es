@@ -66,6 +66,28 @@ test("past its budget, lines drawn neither this frame nor the last go, the least
   assert.deepEqual(lines.counts, { strokeContexts: 4, strokeReuses: 1 });
 });
 
+test("past its budget, lines a span drew, used as geometries without a take, stay", () => {
+  const geometries = new Geometries();
+  const lines = new LineCache(geometries, tessellate, 1);
+  const layer = straightLine();
+  const kept = lines.take(layer, 0, 1, 0, 0, 1, 1, null, true);
+  assert.ok(kept);
+  geometries.endFrame();
+  const handles = [];
+  for (let frame = 1; frame < 4; frame++) {
+    // A span taken from the frame before uses the geometry, as the view's copySpan does.
+    geometries.use(kept.id);
+    handles.push(lines.take(layer, 0, frame + 1, 0, 0, frame + 1, 1, null, true));
+    geometries.endFrame();
+  }
+
+  assert.equal(geometries.alive(kept), true);
+  assert.deepEqual(
+    handles.map((h) => h !== null && geometries.alive(h)),
+    [false, true, true],
+  );
+});
+
 test("lines that stroke to nothing are forgotten once undrawn for the idle frames", () => {
   const geometries = new Geometries();
   const lines = new LineCache(geometries, tessellate);

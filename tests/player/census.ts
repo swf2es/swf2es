@@ -750,6 +750,8 @@ export interface Walked {
   hidden: number;
   /** The mask walker's calls (Masks.walkMask), a mask's objects, which RenderView.walk leaves. */
   masks: number;
+  /** The objects whose span of the frame before was taken whole (RenderView.copySpan), not walked. */
+  copied?: number;
 }
 
 /**
@@ -767,6 +769,7 @@ export function walkCensus(marks: ReadonlyMap<Dirtied, number>, walked: Walked):
     "walk.again": walked.calls - walked.objects.size,
     "walk.hidden": walked.hidden,
     "walk.masks": walked.masks,
+    "walk.copied": walked.copied ?? 0,
     "walk.dirty": 0,
     "walk.needed": 0,
     "walk.unwalked": 0,
@@ -939,7 +942,10 @@ export function formatCensus(s: Counts): string[] {
     `  walk         visited ${n(visited)} objects and again ${n(v("walk.again"))} times (alpha masks, 3D content), passed over ${n(v("walk.hidden"))} hidden roots, and the mask walker ${n(v("walk.masks"))} objects; of those visited, changed ${n(v("walk.dirty"))} (${pct(v("walk.dirty"), visited)}: transform or colour ${n(v("walk.transform"))}, content ${n(v("walk.content"))}, children ${n(v("walk.children"))}, pixels ${n(v("walk.pixels"))}); a walk of what changed would visit ${n(v("walk.needed"))} (${pct(v("walk.needed"), visited)}); rows-only frames ${pct(v("walk.rowsOnly"), 1)}`,
   );
   lines.push(
-    `    unwalked   ${n(v("walk.unwalked"))} objects in the tree the walk did not visit (hidden, masks, kept outputs' content), ${n(v("walk.unwalkedDirty"))} of them changed`,
+    `    spans      took ${n(v("walk.copied"))} objects' spans of the frame before whole, not walking them or what is in them`,
+  );
+  lines.push(
+    `    unwalked   ${n(v("walk.unwalked"))} objects in the tree the walk did not visit (hidden, masks, kept outputs' content, spans taken), ${n(v("walk.unwalkedDirty"))} of them changed`,
   );
   return lines;
 }

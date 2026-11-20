@@ -146,7 +146,7 @@ work beside it and throws where the two differ, on in the checked build
   each pick that used them, and picks at a frame end that would have
   skipped it;
 - `RenderView.checkSpans` walks each object whose span of the scene list
-  the frame before would stand for it, and compares the two entry for
+  the frame took from the frame before, and compares the two entry for
   entry and row for row ([renderer.md](../renderer.md#spans)).
 
 Unit tests are checked only when `tests/unit/checked.ts` is loaded, as

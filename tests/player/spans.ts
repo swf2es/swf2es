@@ -23,9 +23,16 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     d.curveTo(x + 4, 24, x + 8, 16);
     return d;
   };
-  // Four clips of four shapes, under a root.
+  // Four clips of four shapes in a group, under a root, after a lead clip whose length moves where
+  // the group's draws lie in the list.
   const scene = () => {
     const root = new Container();
+    const lead = new Container();
+    lead.name = 'lead';
+    const group = new Container();
+    group.name = 'group';
+    root.addChildAt(lead, 0);
+    root.addChildAt(group, 1);
     const clips = [];
     for (let i = 0; i < 4; i++) {
       const clip = new Container();
@@ -40,11 +47,11 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
 
       clip.matrix.ty = i * 16;
       clip.invalidate(TRANSFORM);
-      root.addChildAt(clip, i);
+      group.addChildAt(clip, i);
       clips.push(clip);
     }
 
-    return { root, clips };
+    return { root, lead, group, clips };
   };
   const failures = [];
   const thrown = (f) => {
@@ -94,18 +101,51 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     ['masked, still', () => {}],
     ['the mask taken back', (s) => { s.clips[0].setMask(null); }],
     ['unmasked, still', () => {}],
+    ['still once more', () => {}],
+    // The group, taken whole, moved down the list as the lead grows.
+    ['the lead grows', (s) => { const shape = new ShapeObject(null); shape.drawing = drawing(0xff4000ff, 50); shape.invalidate(CONTENT); s.lead.addChildAt(shape, 0); }],
+    ['grown, still', () => {}],
+    // A part of a clip that stood still inside the group taken whole: the clip's and its siblings'
+    // spans are found where the group's copies moved them.
+    ['a shape in a still clip', (s) => { s.clips[1].children[2].drawing = drawing(0xff0080ff, 22); s.clips[1].children[2].invalidate(CONTENT); }],
+    // That clip, walked, then carried down the list in the group taken whole, then changed again:
+    // its parts are found where both the group's copies and the clip's place in it put them.
+    ['the lead grows again', (s) => { const shape = new ShapeObject(null); shape.drawing = drawing(0xff6000ff, 56); shape.invalidate(CONTENT); s.lead.addChildAt(shape, 0); }],
+    ['grown again, still', () => {}],
+    ['another shape in that clip', (s) => { s.clips[1].children[0].drawing = drawing(0xff00a0ff, 2); s.clips[1].children[0].invalidate(CONTENT); }],
+    ['a clip given a child', (s) => { const shape = new ShapeObject(null); shape.drawing = drawing(0xff2040ff, 40); shape.invalidate(CONTENT); s.clips[2].addChildAt(shape, 0); }],
+    // A child moved to another parent walked the frame before, unflagged itself.
+    ['two clips touched', (s) => { s.clips[0].children[1].invalidate(CONTENT); s.clips[2].children[1].invalidate(CONTENT); }],
+    ['a shape moved to another clip', (s) => { const shape = s.clips[2].children[3]; s.clips[2].removeChild(shape); s.clips[0].addChildAt(shape, 0); }],
+    ['moved, still', () => {}],
+    // A clip's parts changed while it was hidden, which a hidden walk only clears the flags of.
+    ['a clip hidden', (s) => { s.clips[2].visible = false; s.clips[2].invalidate(TRANSFORM); }],
+    ['hidden, a part drawn anew', (s) => { s.clips[2].children[1].drawing = drawing(0xff80ffff, 14); s.clips[2].children[1].invalidate(CONTENT); }],
+    ['the clip shown', (s) => { s.clips[2].visible = true; s.clips[2].invalidate(TRANSFORM); }],
+    ['shown, still', () => {}],
   ];
   for (const checked of [true, false]) {
     const view = make(checked);
+    // The spans a render takes whole (RenderView.copySpan), of what a frame did not change.
+    const copySpan = view.copySpan;
+    let copied = 0;
+    view.copySpan = function (...args) {
+      copied++;
+      return copySpan.apply(this, args);
+    };
     try {
       const s = scene();
       const twin = scene();
-      for (const [name, step] of steps) {
+      for (const [k, [name, step]] of steps.entries()) {
         step(s);
         step(twin);
+        copied = 0;
         const error = thrown(() => view.render(s.root));
         if (error) failures.push(checked + ', ' + name + ': threw ' + error);
         same(checked + ', ' + name, view, s, twin);
+        // The first frame writes no span, the second the first ones; from the third, each frame
+        // takes those of what it did not change, those under one taken whole the frame before too.
+        if (k >= 2 && copied === 0) failures.push(checked + ', ' + name + ': took no span');
       }
 
       // BitmapData.draw between frames, of another list and of a part of this one: its passes must
@@ -128,7 +168,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       const back = event(view, 'webglcontextrestored');
       ext.restoreContext();
       await back;
-      if (checked && view.spans?.ended !== false) failures.push('a context given back kept its spans');
+      if (view.spans.ended !== false) failures.push(checked + ': a context given back kept its spans');
       for (const name of ['restored', 'restored, still']) {
         const error = thrown(() => view.render(s.root));
         if (error) failures.push(checked + ', ' + name + ': threw ' + error);
@@ -136,10 +176,11 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       }
 
       // A shape drawn anew with no flag set: its span, and its clip's, are stale.
-      s.clips[0].children[2].drawing = drawing(0xffff0000, 30);
+      const changed = s.clips[0].children[2];
+      changed.drawing = drawing(0xffff0000, 30);
       const stale = thrown(() => view.render(s.root));
       if (checked) {
-        if (!stale || !/the span of root\\.clip0 \\(Container\\) is stale|the span of root\\.clip0\\.shape2 \\(ShapeObject\\) is stale/.test(stale) || !/entry 0 of the span/.test(stale)) {
+        if (!stale || !stale.includes('the span of root (Container) is stale, first at root.group.clip0.' + changed.name + ' (ShapeObject)') || !/entry \\d+ of the span/.test(stale)) {
           failures.push('stale span not caught as it should be: ' + stale);
         }
       } else if (stale) {
@@ -153,7 +194,7 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
       untoldScene.clips[3].children[3].dirty |= CONTENT;
       const untold = thrown(() => view.render(untoldScene.root));
       if (checked) {
-        if (!untold || !/root\\.clip3\\.shape3 \\(ShapeObject\\)/.test(untold) || !/changed/.test(untold)) {
+        if (!untold || !/root\\.group\\.clip3\\.shape3 \\(ShapeObject\\)/.test(untold) || !/changed/.test(untold)) {
           failures.push('untold change not caught: ' + untold);
         }
       } else if (untold) {

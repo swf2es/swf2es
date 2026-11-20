@@ -508,6 +508,11 @@ export class DisplayObject {
   space: Space | null = null;
   /** The perspective projection a script set on its transform, or null. */
   projection: Projection | null = null;
+  /**
+   * The renderer's span of it (scene/spans.ts): where its subtree lay in the
+   * scene list a view last wrote, which only that view reads; null for none.
+   */
+  span: object | null = null;
 
   /** A store it shows or fills with changed its pixels, or was disposed. */
   pixelsChanged(disposed: boolean): void {

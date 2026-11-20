@@ -90,6 +90,48 @@ function entriesDiffer(
 }
 
 /**
+ * The first entry and the first row, counted from each span's first, at
+ * which spans `a` and `b` differ, or -1 for none; past the shorter's end
+ * where only their lengths do.
+ */
+export function firstDifference(
+  aScene: SceneList,
+  aRows: Rows,
+  a: Span,
+  bScene: SceneList,
+  bRows: Rows,
+  b: Span,
+): { entry: number; row: number } {
+  const entries = Math.min(a.end - a.first, b.end - b.first);
+  let entry = a.end - a.first === b.end - b.first ? -1 : entries;
+  for (let k = 0; k < entries; k++) {
+    if (entriesDiffer(aScene, a.first + k, a, bScene, b.first + k, b)) {
+      entry = k;
+      break;
+    }
+  }
+
+  const rows = Math.min(a.rowsEnd - a.rowsFirst, b.rowsEnd - b.rowsFirst);
+  let row = a.rowsEnd - a.rowsFirst === b.rowsEnd - b.rowsFirst ? -1 : rows;
+  for (let k = 0; k < rows && (row < 0 || k < row); k++) {
+    const i = (a.rowsFirst + k) * ROW_FLOATS;
+    const j = (b.rowsFirst + k) * ROW_FLOATS;
+    for (let f = 0; f < ROW_FLOATS; f++) {
+      if (differ(aRows.data[i + f], bRows.data[j + f])) {
+        row = k;
+        break;
+      }
+    }
+
+    if (row === k) {
+      break;
+    }
+  }
+
+  return { entry, row };
+}
+
+/**
  * Where span `b` of `bScene` and `bRows` draws otherwise than span `a` of
  * `aScene` and `aRows`, in words that name each by `aName` and `bName`:
  * their lengths, their first entry and first row that differ, each in full,

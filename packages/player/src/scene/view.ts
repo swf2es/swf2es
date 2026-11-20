@@ -12,6 +12,7 @@ import {
   Commands,
   FILL_SHADER,
   Filters,
+  firstDifference,
   Geometries,
   KERNEL,
   type KeepHandle,
@@ -69,7 +70,7 @@ import { Parts } from "./parts.js";
 import { Planes, planeUnchanged } from "./planes.js";
 import { bindCanvasPointer } from "./pointer.js";
 import { unsupported } from "./shapes.js";
-import { clean, Spans } from "./spans.js";
+import { type Context, clean, type ObjectSpan, Spans } from "./spans.js";
 import { StaleShapes } from "./stale-shapes.js";
 import { deviceTextResolution, fieldItems, staticItems, type TextOmissions } from "./text.js";
 import { placedRow, TextItems } from "./text-items.js";
@@ -98,18 +99,22 @@ export interface RenderViewOptions {
   /** Samples a pixel the stage and its layers are multisampled with (`samples`); 1, none, if left out. */
   samples?: number;
   /**
-   * Whether each object's span of the scene list (Spans) is checked: walked
-   * in full, as a frame with no spans would walk it, where a span kept from
-   * the frame before would stand for it, the two compared entry for entry
-   * and row for row, and an error thrown where they differ, naming the
-   * object and where. For tests (`pnpm test:checked`); RenderView.checkSpans
-   * if left out. Spans follow the objects' flags, which a walk clears, so
-   * they are read only while this view alone walks its display list: one
-   * walked by another view since (several views of one list, as a test may
-   * make) is walked whole.
+   * Whether each object's span of the scene list (Spans) is checked: where
+   * one taken from the frame before stands for its object, the object is
+   * walked in full as well, as a frame with no spans would walk it, the two
+   * compared entry for entry and row for row, and an error thrown where they
+   * differ, naming the object and where. For tests (`pnpm test:checked`);
+   * RenderView.checkSpans if left out. Spans follow the objects' flags, which
+   * a walk clears, so they are read only while this view alone walks its
+   * display list: one walked by another view since (several views of one
+   * list, as a test may make) is walked whole.
    */
   checked?: boolean;
 }
+
+/** What an object's span is as its walk begins (RenderView.spanBegun). */
+const STANDING = 1;
+const TAKEN = 2;
 
 /** No transform, where a walk starts. */
 const UNIT_PLACE = [1, 0, 0, 1, 0, 0];
@@ -267,15 +272,29 @@ export class RenderView implements Drawer {
   /** What BitmapData.draw's passes write (drawAlone), apart from the stage's. */
   private readonly drawScene = new SceneList();
   private readonly drawRows = new Rows();
-  /** The stage's objects' spans of the scene list, kept where they are checked (`checked`), else none. */
-  private readonly spans: Spans | null;
+  /** The stage's objects' spans of the scene list, which a frame takes unchanged subtrees' from. */
+  private readonly spans = new Spans();
+  /** Whether each span taken is checked against a walk of its object (`checked`). */
+  private readonly checked: boolean;
   /**
    * What the walk met that a span does not follow, counted as it is met: an
    * object's span stands for it only where its walk counted none (plain).
    */
   private unkept = 0;
-  /** The spans being checked, a walk of each under way (checkSpan). */
+  /**
+   * Where the spans of the children of the object walked at each depth lie
+   * (Spans.under), the root's first, read by each child.
+   */
+  private readonly contexts: Context[] = [];
+  /** The walks of objects whose spans were taken under way, which check them (copySpan). */
   private checking = 0;
+  /**
+   * The objects such a walk walked, in order, and the entry and row each
+   * began at: the first difference is told as the deepest object's whose
+   * own draws or rows it is in.
+   */
+  private readonly checkedObjects: DisplayObject[] = [];
+  private readonly checkedFirsts: number[] = [];
 
   constructor(options: RenderViewOptions) {
     // First, so that a page that cannot run the render module throws before a context is made.
@@ -303,7 +322,7 @@ export class RenderView implements Drawer {
     this.gl = gl;
     this.backend = new WebGLBackend(gl);
     this.samples = options.samples ?? 1;
-    this.spans = (options.checked ?? RenderView.checkSpans) ? new Spans() : null;
+    this.checked = options.checked ?? RenderView.checkSpans;
     // None of a context made lost, till it is restored.
     this.textureLimit = (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number | null) ?? 0;
 
@@ -329,7 +348,7 @@ export class RenderView implements Drawer {
   /** The context came back: the backend made again, and every texture added again as it is drawn. */
   private readonly restored = () => {
     this.drawnRoot = null;
-    this.spans?.drop();
+    this.spans.drop();
     this.backend.restore(this.geometries);
     this.textures.lost();
     this.keeps.lost();
@@ -497,7 +516,7 @@ export class RenderView implements Drawer {
       // Drawing on with the context it has: the outputs the frame given up on was to keep were
       // never all drawn, and are drawn again.
       this.keeps.lost();
-      this.spans?.drop();
+      this.spans.drop();
     }
 
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
@@ -523,16 +542,14 @@ export class RenderView implements Drawer {
 
     // The lists the frame before wrote kept for its spans, this frame's written into others.
     const spans = this.spans;
-    if (spans) {
-      let top = root;
-      while (top.parent) {
-        top = top.parent;
-      }
-
-      const free = spans.begin(this.scene, this.rows, this.keptGeneration, top);
-      this.scene = free.scene;
-      this.rows = free.rows;
+    let top = root;
+    while (top.parent) {
+      top = top.parent;
     }
+
+    const free = spans.begin(this.scene, this.rows, this.keptGeneration, top);
+    this.scene = free.scene;
+    this.rows = free.rows;
 
     this.scene.reset();
     this.rows.reset();
@@ -552,7 +569,7 @@ export class RenderView implements Drawer {
       allowResets(true);
     }
 
-    spans?.end(this.scene, this.geometries, this.textures);
+    spans.end(this.scene, this.geometries, this.textures);
     if (this.highlight) {
       this.drawHighlight(this.highlight);
     }
@@ -628,35 +645,19 @@ export class RenderView implements Drawer {
       return;
     }
 
-    // Where its span begins, and whether one is kept for it (Spans): counted unkept unless plain.
-    const spans = this.spans;
+    // What it is, asked once: instanceof is among the dearest of the walk's checks.
+    const isContainer = o instanceof Container;
+    const isShape = !isContainer && o instanceof ShapeObject;
+    const isOther = !isContainer && !isShape;
+
+    // Where its span begins, and its span of the frame before taken instead of a walk where that
+    // stands for it (Spans): counted unkept unless plain.
     const first = this.scene.length;
     const rowsFirst = this.rows.count;
     const unkept = this.unkept;
-    const spanning = spans !== null && this.spanContext();
-    let kept: Span | null = null;
-    if (spans !== null) {
-      if (this.checking > 0 && !clean(o)) {
-        throw new Error(
-          `the span of an object above ${describe(o)} was taken as unchanged, but it changed`,
-        );
-      }
-
-      // Plain now, as well as when its span was written: a mask walked before its place on the
-      // list had its flags cleared there (Masks.walkMask), and becomes no plain object unflagged.
-      const isPlain = plain(o);
-      if (!isPlain) {
-        this.unkept++;
-      }
-
-      const s =
-        spanning && isPlain && clean(o)
-          ? spans.kept(o, this.places, this.walkDepth * 6, tint, this.geometries, this.textures)
-          : null;
-      if (s) {
-        kept = { first: s.first, end: s.end, rowsFirst: s.rowsFirst, rowsEnd: s.rowsEnd };
-        this.checking++;
-      }
+    const standing = this.spanBegun(o, tint, isContainer, isShape, first, rowsFirst);
+    if (standing === TAKEN) {
+      return;
     }
 
     // Its parent's transform from the stack of them, where its own goes for its children: numbers
@@ -771,7 +772,7 @@ export class RenderView implements Drawer {
       unsupported.blendModes++;
     }
 
-    const childful = o instanceof Container && o.children.length > 0;
+    const childful = isContainer && (o as Container).children.length > 0;
     // A 3D object's layer is its bitmap already.
     const mode = hidden || named < 0 || (named === LAYER && (!childful || plane)) ? NORMAL : named;
     // Its filters draw it as a layer too, which they run over before its blend: adl filters the
@@ -785,7 +786,7 @@ export class RenderView implements Drawer {
     const slice =
       ownSlice ??
       (!hidden &&
-      o instanceof ShapeObject &&
+      isShape &&
       o.parent !== null &&
       o.parent === this.sliceOwner &&
       o.filters.length === 0
@@ -886,10 +887,9 @@ export class RenderView implements Drawer {
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
     // whose bitmap cache Flash shows stale draws what that shows (staleShape).
-    const shape =
-      o instanceof ShapeObject
-        ? this.staleShapes.staleShape(o, hidden, this.snapshotting, a, b, c, d)
-        : null;
+    const shape = isShape
+      ? this.staleShapes.staleShape(o as ShapeObject, hidden, this.snapshotting, a, b, c, d)
+      : null;
     // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
     const version = o.drawing ? o.drawing.version : 0;
     const drawn = o.drawing
@@ -1121,7 +1121,7 @@ export class RenderView implements Drawer {
       }
     }
 
-    if (!hidden && (o instanceof TextObject || o instanceof StaticTextObject)) {
+    if (!hidden && isOther && (o instanceof TextObject || o instanceof StaticTextObject)) {
       const omitted: TextOmissions = { advanced: false, clip: null, clipFrom: 0, clipTo: 0 };
       const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
       // Its embedded glyphs as Saffron draws them, all in one geometry drawn where the first of
@@ -1208,7 +1208,7 @@ export class RenderView implements Drawer {
       }
     }
 
-    if (o instanceof VideoObject && !hidden && o.picture && o.source) {
+    if (isOther && o instanceof VideoObject && !hidden && o.picture && o.source) {
       const picture = o.picture;
       const texture = this.videos.texture(o.source);
       if (texture && o.boxWidth > 0 && o.boxHeight > 0) {
@@ -1228,7 +1228,7 @@ export class RenderView implements Drawer {
       }
     }
 
-    const store = o instanceof BitmapObject && !hidden ? o.store : null;
+    const store = isOther && o instanceof BitmapObject && !hidden ? o.store : null;
     if (store && !store.disposed && store.width > 0 && store.height > 0) {
       const quad = this.parts.quad(store.width, store.height);
       const texture = this.paints.storeTexture(store);
@@ -1250,10 +1250,11 @@ export class RenderView implements Drawer {
       this.scene.draw(quad.id, row, NORMAL, texture.id, (smooth ? SMOOTH : 0) | CLAMP);
     }
 
-    if (o instanceof Container && !passed) {
+    if (isContainer && !passed) {
+      const container = o as Container;
       // A timeline's clip layer clips the children after it, up to its clip depth: kept track of
       // only where a child is one, as most containers have none.
-      const children = o.children;
+      const children = container.children;
       let clips: Clips | null = null;
       let open = 0;
 
@@ -1274,7 +1275,7 @@ export class RenderView implements Drawer {
           !alphaMask &&
           !r &&
           !o.drawing?.layers.length
-            ? soleChild(o)
+            ? soleChild(container)
             : null;
       }
 
@@ -1282,6 +1283,24 @@ export class RenderView implements Drawer {
       this.ownerSlice = ownSlice;
       if (ownSlice) {
         this.ownerParent = [pa, pb, pc, pd];
+      }
+
+      // Where its children's spans lie, if they stand under what they did the frame before
+      // (Spans.under); none for children walked hidden, which draw nothing.
+      const childContext = this.contextAt(depth + 1);
+      if (!hidden && this.spanContext()) {
+        this.spans.under(
+          o,
+          first,
+          rowsFirst,
+          this.places,
+          at + 6,
+          color,
+          this.contextAt(depth),
+          childContext,
+        );
+      } else {
+        childContext.frame = -1;
       }
 
       for (let i = 0; i < children.length; i++) {
@@ -1333,7 +1352,7 @@ export class RenderView implements Drawer {
       }
 
       if (!this.snapshotting) {
-        o.descendantsDirty = false;
+        container.descendantsDirty = false;
       }
     }
 
@@ -1375,22 +1394,8 @@ export class RenderView implements Drawer {
       this.masks.popMask(this.scene);
     }
 
-    if (kept) {
-      this.checking--;
-      this.checkSpan(o, kept, first, rowsFirst);
-    }
-
-    if (spanning && this.unkept === unkept) {
-      (spans as Spans).record(
-        o,
-        first,
-        this.scene.length,
-        rowsFirst,
-        this.rows.count,
-        this.places,
-        depth * 6,
-        tint,
-      );
+    if (standing === STANDING && this.unkept === unkept) {
+      this.spans.record(o, first, this.scene.length, rowsFirst, this.rows.count);
     }
 
     this.walkDepth--;
@@ -1401,12 +1406,73 @@ export class RenderView implements Drawer {
   }
 
   /**
+   * `o`'s span, as its walk begins at entry `first` and row `rowsFirst` in
+   * the colour `tint`: TAKEN where its span of the frame before was taken
+   * in its stead (copySpan); STANDING where it stands under what it did the
+   * frame before, where alone a span written for it may be taken, so that
+   * one under a parent that moves each frame is not written; else none, 0.
+   * An object that is not plain is counted unkept (plain).
+   */
+  private spanBegun(
+    o: DisplayObject,
+    tint: ColorTransform | null,
+    isContainer: boolean,
+    isShape: boolean,
+    first: number,
+    rowsFirst: number,
+  ): number {
+    const context = this.spanContext() ? this.contexts[this.walkDepth] : null;
+    if (this.checking > 0) {
+      if (!clean(o)) {
+        throw new Error(
+          `the span of an object above ${describe(o)} was taken as unchanged, but it changed`,
+        );
+      }
+
+      this.checkedObjects.push(o);
+      this.checkedFirsts.push(first, rowsFirst);
+    }
+
+    // Plain now, as well as when its span was written: a mask walked before its place on the list
+    // had its flags cleared there (Masks.walkMask), and becomes no plain object unflagged.
+    if (!plain(o, isContainer, isShape)) {
+      this.unkept++;
+      return 0;
+    }
+
+    if (context === null || context.frame < 0) {
+      return 0;
+    }
+
+    if (o.dirty === CLEAN && !(isContainer && (o as Container).descendantsDirty)) {
+      const s = this.spans.kept(o, context, this.geometries, this.textures);
+      if (s) {
+        this.copySpan(o, s, tint);
+        return TAKEN;
+      }
+    }
+
+    return STANDING;
+  }
+
+  /** The context of the children of the object walked at `depth` - 1 (contexts), made if new. */
+  private contextAt(depth: number): Context {
+    const contexts = this.contexts;
+    while (contexts.length <= depth) {
+      contexts.push({ frame: -1, entries: 0, rows: 0 });
+    }
+
+    return contexts[depth];
+  }
+
+  /**
    * Whether the walk is where spans are kept: the stage's, and not inside an
    * alpha mask, a sliced owner or a blend's only child, whose objects draw
    * by more than their own flags and transform.
    */
   private spanContext(): boolean {
     return (
+      this.checking === 0 &&
       this.drawRoot === null &&
       !this.inAlphaMask &&
       this.sliceOwner === null &&
@@ -1415,35 +1481,109 @@ export class RenderView implements Drawer {
   }
 
   /**
-   * `o`'s span `kept` from the frame before, compared with what its walk
-   * just wrote, from entry `first` and row `rowsFirst`: copied after it as a
-   * frame that keeps it would copy it, then taken off again; an error,
-   * saying where they differ, where they do.
+   * `o`'s span `s` of the frame before taken in place of its walk: its draws
+   * and rows written after what this frame's walk wrote, the rows moved to
+   * where they land, every geometry and texture they name used, as a walk
+   * would use them, and the span noted where it now lies. Checked
+   * (`checked`), `o` is walked in full after it as well, its flags all clear
+   * or the walk throws, the two compared and the walk taken off again.
    */
-  private checkSpan(o: DisplayObject, kept: Span, first: number, rowsFirst: number): void {
-    const spans = this.spans as Spans;
+  private copySpan(o: DisplayObject, s: ObjectSpan, tint: ColorTransform | null): void {
+    const spans = this.spans;
     const scene = this.scene;
     const rows = this.rows;
-    const walked = { first, end: scene.length, rowsFirst, rowsEnd: rows.count };
-    const at = scene.length;
-    const rowsAt = rows.append(spans.rows, kept.rowsFirst, kept.rowsEnd);
-    scene.appendDraws(spans.scene, kept.first, kept.end, rowsAt - kept.rowsFirst);
-    const copied = { first: at, end: scene.length, rowsFirst: rowsAt, rowsEnd: rows.count };
-    const difference = spanDifference(
-      "the span kept from the frame before",
-      scene,
-      rows,
-      copied,
-      "the walk",
-      scene,
-      rows,
-      walked,
-    );
-    scene.truncate(at);
-    rows.truncate(rowsAt);
-    if (difference) {
-      throw new Error(`the span of ${describe(o)} is stale: ${difference}`);
+    const first = scene.length;
+    const from = spans.from;
+    const rowsFrom = spans.rowsFrom;
+    const rowsFirst = rows.append(spans.rows, rowsFrom, rowsFrom + s.rowsEnd - s.rowsFirst);
+    scene.appendDraws(spans.scene, from, from + s.end - s.first, rowsFirst - rowsFrom);
+    const end = scene.length;
+    const rowsEnd = rows.count;
+    const geometry = scene.geometry;
+    const texture = scene.texture;
+    for (let e = first; e < end; e++) {
+      this.geometries.use(geometry[e]);
+      if (texture[e] >= 0) {
+        this.textures.use(texture[e]);
+      }
     }
+
+    if (this.checked) {
+      // The copy's own uses, before the walk below makes them too and would hide one left out.
+      for (let e = first; e < end; e++) {
+        const t = texture[e];
+        if (
+          this.geometries.usedIn(geometry[e]) !== this.geometries.frame ||
+          (t >= 0 && this.textures.usedIn(t) !== this.textures.frame)
+        ) {
+          throw new Error(`the span of ${describe(o)} names entry ${e - first} unused`);
+        }
+      }
+
+      // Walked where no span is taken nor written, as the frame would walk it without spans.
+      const unkept = this.unkept;
+      this.checking++;
+      this.checkedObjects.length = 0;
+      this.checkedFirsts.length = 0;
+      try {
+        this.walk(o, tint, false);
+      } finally {
+        this.checking--;
+        this.unkept = unkept;
+      }
+
+      const copied: Span = { first, end, rowsFirst, rowsEnd };
+      const walked: Span = {
+        first: end,
+        end: scene.length,
+        rowsFirst: rowsEnd,
+        rowsEnd: rows.count,
+      };
+      const difference = spanDifference(
+        "the span kept from the frame before",
+        scene,
+        rows,
+        copied,
+        "the walk",
+        scene,
+        rows,
+        walked,
+      );
+      if (difference) {
+        const at = firstDifference(scene, rows, copied, scene, rows, walked);
+        throw new Error(
+          `the span of ${describe(o)} is stale, first at ${describe(this.checkedAt(at.entry < 0 ? -1 : end + at.entry, at.row < 0 ? -1 : rowsEnd + at.row))}: ${difference}`,
+        );
+      }
+
+      scene.truncate(end);
+      rows.truncate(rowsEnd);
+      this.checkedObjects.length = 0;
+      this.checkedFirsts.length = 0;
+    }
+
+    spans.moved(s, first, end, rowsFirst, rowsEnd);
+  }
+
+  /**
+   * The deepest object the last check's walk walked whose own draws hold
+   * entry `entry`, or else whose rows hold row `row` (-1 for neither): the
+   * last to begin at or before it, as an object draws its own before its
+   * children.
+   */
+  private checkedAt(entry: number, row: number): DisplayObject {
+    const objects = this.checkedObjects;
+    const firsts = this.checkedFirsts;
+    const by = entry >= 0 ? 0 : 1;
+    const at = entry >= 0 ? entry : row;
+    let found = objects[0];
+    for (let k = 0; k < objects.length; k++) {
+      if (firsts[k * 2 + by] <= at) {
+        found = objects[k];
+      }
+    }
+
+    return found;
   }
 
   /**
@@ -1503,9 +1643,11 @@ export class RenderView implements Drawer {
   private walkFrom(o: DisplayObject): void {
     this.walkDepth = 0;
     this.places.set(UNIT_PLACE);
+    this.contextAt(0).frame = -1;
     if (!this.drawRoot) {
       this.places[4] = -this.viewX;
       this.places[5] = -this.viewY;
+      this.spans.root(this.viewX, this.viewY, this.contextAt(0));
     }
 
     this.walk(o, null, false);
@@ -2046,13 +2188,12 @@ function severalFills(o: DisplayObject): boolean {
  * its colour alone, which its span keeps (Spans): a container, a shape or a
  * bitmap, with no filter, blend, mask, scroll rectangle, 9-slice grid, 3D
  * transform, bitmap cache, clip depth, nor a mask's part to play. Text,
- * video and the rest draw by more, and are walked.
+ * video and the rest draw by more, and are walked. `isContainer` and
+ * `isShape` are what the walk found it is.
  */
-function plain(o: DisplayObject): boolean {
+function plain(o: DisplayObject, isContainer: boolean, isShape: boolean): boolean {
   return (
-    (o instanceof ShapeObject
-      ? o.stale === null
-      : o instanceof Container || o instanceof BitmapObject) &&
+    (isShape ? (o as ShapeObject).stale === null : isContainer || o instanceof BitmapObject) &&
     o.filters.length === 0 &&
     o.blendMode === "normal" &&
     o.mask === null &&
