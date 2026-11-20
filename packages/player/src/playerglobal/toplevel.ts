@@ -42,6 +42,18 @@ export function definitionNamed(
   return find(qualify(name));
 }
 
+/**
+ * What `qualified`, "pkg::Name" or "Name", names in `domain`, as Flash's
+ * lookups by a string find it: one in a package at user code's API
+ * version, one in none at every version, so that a SWF 9 root's
+ * getDefinitionByName("JSON") finds JSON, of SWF 13, which its code does
+ * not see (the corpus's avm2/appdomain_lookup_edge_cases and
+ * json_version_gated).
+ */
+export function definitionIn(rt: avm2.Runtime, qualified: string, domain: avm2.Domain): Value {
+  return rt.definitionNamed(qualified, domain, qualified.includes("::") ? undefined : null);
+}
+
 const UTF8 = new TextEncoder();
 
 export function toplevelNatives(s: Scripting): avm2.Natives {
@@ -53,7 +65,7 @@ export function toplevelNatives(s: Scripting): avm2.Natives {
       },
     // Looked up in the domain of the code that asks, as Flash's.
     "flash.utils::getDefinitionByName": (rt) => (name: Value) =>
-      definitionNamed(rt, rt.toString(name), (q) => rt.definitionNamed(q, s.code.codeDomain())),
+      definitionNamed(rt, rt.toString(name), (q) => definitionIn(rt, q, s.code.codeDomain())),
     // The alias registerClassAlias gave the value's class, which describeType writes; null for none.
     "flash.utils::getAliasName": (rt) => (v: Value) => {
       if (v === null || v === undefined) {
