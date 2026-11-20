@@ -9,7 +9,9 @@ export interface ReplaceOptions {
   /**
    * Whether navigator lists Flash Player's plug-in (installFlashPlugin),
    * for the page's scripts that look for it before they write a Flash
-   * tag: true by default.
+   * tag: true by default for watchFlash, which swaps the tags they write;
+   * false for replaceFlash, which swaps only the tags there now, so that
+   * a page's later look for Flash does not write tags nothing swaps.
    */
   plugin?: boolean;
 }
@@ -112,8 +114,8 @@ export function flashAttributes(outer: Element): Map<string, string> {
 /**
  * Swap each Flash <object> and <embed> under `root` for a <swf2es-player>
  * carrying its parameters, in its place: the outermost of nested ones, its
- * fallbacks going with it, and list Flash's plug-in in navigator unless
- * `options.plugin` is false. Returns the elements made.
+ * fallbacks going with it, and list Flash's plug-in in navigator if
+ * `options.plugin` is true. Returns the elements made.
  */
 export function replaceFlash(
   root: ParentNode = document,
@@ -124,7 +126,7 @@ export function replaceFlash(
     return [];
   }
 
-  if (options.plugin !== false) {
+  if (options.plugin === true) {
     installFlashPlugin();
   }
 
@@ -160,13 +162,14 @@ export function replaceFlash(
 
 /**
  * replaceFlash now, and again for each Flash tag the page adds under `root`
- * later, until the returned function is called.
+ * later, until the returned function is called; Flash's plug-in listed in
+ * navigator unless `options.plugin` is false.
  */
 export function watchFlash(
   root: ParentNode & Node = document,
   options: ReplaceOptions = {},
 ): () => void {
-  replaceFlash(root, options);
+  replaceFlash(root, { plugin: options.plugin !== false });
   const observer = new MutationObserver((mutations) => {
     for (const mutation of mutations) {
       // A tag added, or one made Flash after it was added, its src or type set by a script.

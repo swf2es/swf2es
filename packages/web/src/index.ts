@@ -1,8 +1,9 @@
 /**
  * swf2es on any web page: the `<swf2es-player>` element, defined as this
  * module loads where there is a DOM, `replaceFlash` for a page's Flash
- * tags and `installFlashPlugin` for its scripts that look for Flash, `openAirApp` for an AIR application the element plays, and the
- * page's one configuration.
+ * tags and `installFlashPlugin` for its scripts that look for Flash,
+ * `openAirApp` for an AIR application the element plays, and the page's
+ * one configuration.
  */
 import { defineElement } from "./element.js";
 

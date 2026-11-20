@@ -154,7 +154,7 @@ writeFileSync(
 <html>
 <head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="script-src 'self' ${origin} 'unsafe-eval' 'wasm-unsafe-eval'; worker-src ${origin} blob:">
-<script src="${origin}/${VERSION}/dist/plugin.js"></script>
+<script src="${origin}/${VERSION}/dist/plugin.js" crossorigin></script>
 <script src="detect.js"></script>
 <script type="module" src="replace.js"></script>
 </head>
