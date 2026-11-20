@@ -77,9 +77,9 @@ package flash.accessibility
 		}
 
 		// Flash Player's API that Ruffle's source lacks: native, and not implemented.
-		[API("702")]
+		[API("712")]
 		public native function get_selectionAnchorIndex():*;
-		[API("702")]
+		[API("712")]
 		public native function get_selectionActiveIndex():*;
 	}
 }

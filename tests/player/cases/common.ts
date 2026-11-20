@@ -38,6 +38,14 @@ export interface PlayerCase {
   antialias?: boolean;
   /** Played as AIR plays it, AIR's API defined (Scripting's `air`); Flash's harness is AIR's. */
   air?: boolean;
+  /**
+   * Run as the root, at its own SWF version's API version: in Flash as the
+   * application's content (FlashJob.root), and in the player at that
+   * version. Flash runs everything at its root SWF's API version, so a
+   * case the harness loads runs at the harness's, and the player plays the
+   * others at it (HARNESS_SWF_VERSION). Traces only: it captures no frames.
+   */
+  root?: boolean;
   /** An AVM1 SWF whose trace must match Flash's. */
   traced?: boolean;
   /**
@@ -135,8 +143,10 @@ export function bare(
   documentClass = "Main",
   width = 100,
   height = 50,
+  version?: number,
 ): Uint8Array {
   return w.swf({
+    version,
     width,
     height,
     frameRate: 24,

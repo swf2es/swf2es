@@ -4,7 +4,7 @@
 // (Runtime.constructNative). What adl throws for each is the
 // abstract-classes player case's reference. The display classes refuse in
 // SymbolLibrary.displayFor, where the display object of a script's `new`
-// is made; Context3D's family in its AS3 constructors.
+// is made.
 import type { avm2 } from "@swf2es/runtime";
 
 const ABSTRACT = [
@@ -12,6 +12,13 @@ const ABSTRACT = [
   "flash.display::Graphics",
   "flash.display::LoaderInfo",
   "flash.display::Stage3D",
+  "flash.display3D::Context3D",
+  "flash.display3D::IndexBuffer3D",
+  "flash.display3D::Program3D",
+  "flash.display3D::VertexBuffer3D",
+  "flash.display3D.textures::CubeTexture",
+  "flash.display3D.textures::RectangleTexture",
+  "flash.display3D.textures::Texture",
   "flash.external::ExternalInterface",
   "flash.geom::Utils3D",
   "flash.media::StageVideo",
@@ -36,6 +43,20 @@ const ABSTRACT = [
 /** Also restricted: a script's subclass is refused too, naming itself. */
 const RESTRICTED = ["flash.ui::GameInputControl"];
 
+/**
+ * Restricted display classes, whose own `new` displayFor refuses: a script's
+ * subclass is refused even where SymbolClass binds it to a character, and
+ * so is what the timeline places of that character, leaving its slot a
+ * null child (the bound-abstract-display player case, from adl).
+ */
+const RESTRICTED_DISPLAY = [
+  "flash.display::AVM1Movie",
+  "flash.display::DisplayObject",
+  "flash.display::DisplayObjectContainer",
+  "flash.display::InteractiveObject",
+  "flash.display::Stage",
+];
+
 /** `hooks` with the abstract classes' construct hooks added to whatever else each has. */
 export function withAbstractClasses(
   hooks: Record<string, avm2.ClassHook>,
@@ -51,12 +72,23 @@ export function withAbstractClasses(
     hooks[name] = { ...hooks[name], construct: refuse, restricted: true };
   }
 
+  for (const name of RESTRICTED_DISPLAY) {
+    hooks[name] = { ...hooks[name], restricted: true };
+  }
+
   // Flash's ContentElement refuses in its AS3 constructor, which names it so; its
-  // subclasses construct.
+  // subclasses construct. SecurityDomain refuses so too, though with no frame of
+  // its own in the error's stack trace (Ruffle's avm2/abstract_classes, from Flash).
   hooks["flash.text.engine::ContentElement"] = {
     ...hooks["flash.text.engine::ContentElement"],
     construct: (rt) => {
       throw rt.error("ArgumentError", 2012, "ContentElement");
+    },
+  };
+  hooks["flash.system::SecurityDomain"] = {
+    ...hooks["flash.system::SecurityDomain"],
+    construct: (rt) => {
+      throw rt.error("ArgumentError", 2012, "SecurityDomain");
     },
   };
   return hooks;

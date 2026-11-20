@@ -54,6 +54,16 @@ import { verifyAt } from "./verify";
 export class Code {
   /** 0, or the VerifyError number avmplus would throw; then the lists are incomplete. */
   error: i32 = 0;
+  /**
+   * The numbers avmplus' message for `error` names: an illegal opcode and
+   * its offset, the unbalanced stack or scope depths, the incoming one
+   * first and the target's second, or a scope's index or a register alone;
+   * none where `numbered` is false, as getouterscope's index past a captured
+   * scope chain has none.
+   */
+  errorA: u32 = 0;
+  errorB: u32 = 0;
+  numbered: bool = false;
   count: u32 = 0;
   offset: StaticArray<u32> = new StaticArray<u32>(0);
   /** Offset of the next instruction in the code. */
@@ -69,6 +79,19 @@ export class Code {
   fail(error: i32): Code {
     if (!this.error) {
       this.error = error;
+      this.numbered = false;
+    }
+
+    return this;
+  }
+
+  /** fail, with the two numbers its message names. */
+  failWith(error: i32, a: u32, b: u32): Code {
+    if (!this.error) {
+      this.error = error;
+      this.errorA = a;
+      this.errorB = b;
+      this.numbered = true;
     }
 
     return this;
@@ -277,6 +300,9 @@ export class BodyDecoder {
     const abc = this.abc;
     const code = this.code;
     code.error = 0;
+    code.errorA = 0;
+    code.errorB = 0;
+    code.numbered = false;
     code.count = 0;
     code.caseCount = 0;
     // Not the last body's, which may be another ABC's: a body that fails before
@@ -482,7 +508,7 @@ export class BodyDecoder {
 
   checkLocal(register: u32): bool {
     if (register >= this.localCount) {
-      this.code.fail(C.kInvalidRegisterError);
+      this.code.failWith(C.kInvalidRegisterError, register, 0);
       return false;
     }
 
@@ -790,7 +816,7 @@ export class BodyDecoder {
         (!this.abc.hasFloatSupport &&
           (opcode === ops.OP_pushfloat || opcode === ops.OP_convert_f || opcode === ops.OP_unplus))
       ) {
-        code.fail(C.kIllegalOpcodeError);
+        code.failWith(C.kIllegalOpcodeError, opcode, pc);
         return false;
       }
 
@@ -1038,6 +1064,12 @@ export class BodyDecoder {
 
   fail(error: i32): bool {
     this.code.fail(error);
+    return false;
+  }
+
+  /** fail, with the number its message names. */
+  failWith(error: i32, a: u32): bool {
+    this.code.failWith(error, a, 0);
     return false;
   }
 

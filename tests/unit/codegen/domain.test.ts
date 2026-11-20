@@ -295,6 +295,36 @@ test("a builtin ABC's version marks are stripped and set the binding's version",
   assert.match(testing.domainSummary() as string, / versioned p$/);
 });
 
+test("a library's internal mark is 52, or 42 in one marking nothing later, as Flash's playerglobal", () => {
+  const SWF_27 = 42;
+  const AIR_20_0 = 51;
+  // Of the AIR 15 SDK's table, as Flash Player's playerglobal: 42 is VM_INTERNAL.
+  testing.domainReset(SWF_31);
+  assert.equal(testing.domainAdd(definitions([[`p${mark(SWF_27)}`, "a"]]), true), 0);
+  assert.equal(find("p", "a"), "none");
+  assert.equal(find("p", "a", VM_INTERNAL), "abc 0 script 0 trait 0");
+
+  // Of core/api-versions.h's, as swf2es' playerglobal: 42 is SWF_27, and
+  // marks up to 51 are versions, the highest included.
+  testing.domainReset(AIR_20_0);
+  const library = definitions([
+    [`p${mark(SWF_27)}`, "a"],
+    [`p${mark(AIR_20_0)}`, "b"],
+    [`p${mark(VM_INTERNAL)}`, "c"],
+  ]);
+  assert.equal(testing.domainAdd(library, true), 0);
+  // AIR's series: SWF_27 moves to AIR_16_0, 43.
+  assert.equal(find("p", "a", 43), "abc 0 script 0 trait 0");
+  assert.equal(find("p", "a", 41), "none");
+  assert.equal(find("p", "b", AIR_20_0), "abc 0 script 0 trait 1");
+  assert.equal(find("p", "c", AIR_20_0), "none");
+
+  // Its highest mark a version, with no internal names.
+  testing.domainReset(AIR_20_0);
+  assert.equal(testing.domainAdd(definitions([[`p${mark(AIR_20_0)}`, "b"]]), true), 0);
+  assert.equal(find("p", "b", AIR_20_0), "abc 0 script 0 trait 0");
+});
+
 test("user ABCs' marks are stripped, but their public names get the domain's version", () => {
   testing.domainReset(SWF_31);
   assert.equal(testing.domainAdd(definitions([[`p${mark(12)}`, "a"]]), false), 0);

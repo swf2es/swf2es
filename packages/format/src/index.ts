@@ -30,7 +30,13 @@ export {
   readActions,
 } from "./actions.js";
 export { type AirDescriptor, readAirDescriptor } from "./air-descriptor.js";
-export { AIR_API_VERSION, API_VERSION, checkApiVersion } from "./api-versions.js";
+export {
+  AIR_API_VERSION,
+  API_VERSION,
+  apiVersionOf,
+  checkApiVersion,
+  isAirApiVersion,
+} from "./api-versions.js";
 export { type Bitmap, isBitmapTag, readBitmap } from "./bitmap.js";
 export {
   BUTTON_DOWN,
