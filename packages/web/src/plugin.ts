@@ -91,8 +91,9 @@ const prototypeOf = (name: string): object =>
 /**
  * Lists `added` after the entries of navigator's `key`: a listing of both
  * in its place, or, where navigator will not take one, `added` defined on
- * the browser's listing itself, by name and in its `length`, `item`,
- * `namedItem` and iteration (by index too, where the browser lets it).
+ * the browser's listing itself by name, and in its `length`, `item` and
+ * iteration only where it takes them by index too, which Chrome's and
+ * Firefox's do not: a loop to `length` would read past what it indexes.
  */
 function extend<T extends object>(
   navigator: Navigator,
@@ -103,6 +104,7 @@ function extend<T extends object>(
 ) {
   const own = navigator[key] as unknown as Listing<T>;
   const entries = [...entriesOf(own), ...added];
+
   try {
     Object.defineProperty(navigator, key, {
       value: listing(Object.getPrototypeOf(own), entries, nameOf, more(own)),
@@ -116,30 +118,37 @@ function extend<T extends object>(
 
   try {
     const first = own.length;
+    let indexed = true;
     for (let i = 0; i < added.length; i++) {
       try {
         Object.defineProperty(own, first + i, { value: added[i], configurable: true });
       } catch {
-        // A browser's listing takes no index past its own.
+        indexed = false;
       }
 
       Object.defineProperty(own, nameOf(added[i] as T), hidden(added[i]));
     }
 
     const { item, namedItem } = own;
-    Object.defineProperties(own, {
-      length: { get: () => entries.length, configurable: true },
-      item: hidden((index: number) =>
-        index >>> 0 < first ? item.call(own, index) : (entries[index >>> 0] ?? null),
-      ),
-      namedItem: hidden(
+    Object.defineProperty(
+      own,
+      "namedItem",
+      hidden(
         (name: string) =>
           namedItem.call(own, name) ??
           added.find((entry) => nameOf(entry) === String(name)) ??
           null,
       ),
-      [Symbol.iterator]: hidden(() => entries.values()),
-    });
+    );
+    if (indexed) {
+      Object.defineProperties(own, {
+        length: { get: () => entries.length, configurable: true },
+        item: hidden((index: number) =>
+          index >>> 0 < first ? item.call(own, index) : (entries[index >>> 0] ?? null),
+        ),
+        [Symbol.iterator]: hidden(() => entries.values()),
+      });
+    }
   } catch {
     // A frozen listing: nothing to be done.
   }
@@ -149,12 +158,21 @@ function extend<T extends object>(
  * Lists Flash Player's plug-in, "Shockwave Flash 32.0 r0", in
  * `navigator.plugins` and its MIME types in `navigator.mimeTypes`, after
  * the browser's own, for scripts that look for Flash before they embed a
- * SWF. replaceFlash and watchFlash call it; the browser build's
- * `dist/plugin.js` does as it loads, for a page's scripts that run before
- * a module. Once a page: where a Flash plug-in is listed already, this
- * does nothing.
+ * SWF. watchFlash calls it, and replaceFlash when asked; the browser
+ * build's `dist/plugin.js` does as it loads, for a page's scripts that run
+ * before a module. Once a page: where a Flash plug-in is listed already,
+ * this does nothing, and where navigator is not a browser's, it throws
+ * nothing.
  */
 export function installFlashPlugin(): void {
+  try {
+    install();
+  } catch {
+    // A navigator of a test's or a server's DOM, without the browser's listings' members.
+  }
+}
+
+function install(): void {
   const navigator = globalThis.navigator as Navigator | undefined;
   if (!navigator?.plugins || !navigator.mimeTypes || navigator.plugins.namedItem(NAME)) {
     return;

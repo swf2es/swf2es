@@ -10,12 +10,12 @@ interface Entry {
 
 /** A browser's listing, as Chrome's PluginArray and MimeTypeArray: by index, by name, item and namedItem. */
 class Listing {
-  readonly #entries: Entry[];
+  declare readonly entries: Entry[];
   refreshed = 0;
   [key: string]: unknown;
 
   constructor(entries: Entry[]) {
-    this.#entries = entries;
+    Object.defineProperty(this, "entries", { value: entries });
     entries.forEach((entry, i) => {
       this[i] = entry;
       Object.defineProperty(this, (entry.name ?? entry.type) as string, { value: entry });
@@ -23,21 +23,34 @@ class Listing {
   }
 
   get length() {
-    return this.#entries.length;
+    return this.entries.length;
   }
 
   item(index: number) {
-    return this.#entries[index] ?? null;
+    return this.entries[index] ?? null;
   }
 
   namedItem(name: string) {
-    return this.#entries.find((entry) => (entry.name ?? entry.type) === name) ?? null;
+    return this.entries.find((entry) => (entry.name ?? entry.type) === name) ?? null;
   }
 
   refresh() {
     this.refreshed++;
   }
+
+  [Symbol.iterator]() {
+    return this.entries.values();
+  }
 }
+
+/** `listing` refusing an index past its own, as Chrome's and Firefox's do. */
+const refusingIndices = (listing: Listing): Listing =>
+  new Proxy(listing, {
+    defineProperty: (target, key, descriptor) =>
+      typeof key === "string" && /^\d+$/.test(key)
+        ? false
+        : Reflect.defineProperty(target, key, descriptor),
+  });
 
 type Listed = Listing & { [index: number]: Entry & Record<string, unknown> };
 
@@ -48,15 +61,21 @@ afterEach(() => {
   }
 });
 
-/** A navigator listing a PDF viewer, as Chrome's, its listings pinned as a browser's may be. */
-function fakeNavigator(pinned = false) {
+/**
+ * A navigator listing a PDF viewer, as Chrome's, its listings pinned as a browser's may be, and
+ * refusing indices past their own as a browser's do.
+ */
+function fakeNavigator(pinned = false, refusing = false) {
   const pdf: Entry = { name: "PDF Viewer" };
   const navigator = {} as { plugins: Listed; mimeTypes: Listed };
   for (const [key, listing] of [
     ["plugins", new Listing([pdf])],
     ["mimeTypes", new Listing([{ type: "application/pdf" }])],
   ] as const) {
-    Object.defineProperty(navigator, key, { value: listing, configurable: !pinned });
+    Object.defineProperty(navigator, key, {
+      value: refusing ? refusingIndices(listing) : listing,
+      configurable: !pinned,
+    });
   }
 
   Object.defineProperty(globalThis, "navigator", { value: navigator, configurable: true });
@@ -113,7 +132,7 @@ test("Flash's plug-in is listed after the browser's, of the version Capabilities
   assert.equal(navigator.plugins, listed, "installed twice");
 });
 
-test("where navigator's listings cannot be replaced, Flash is listed on them", () => {
+test("where navigator's listings cannot be replaced, Flash is listed on them by index too", () => {
   const { navigator, pdf } = fakeNavigator(true);
   const plugins = navigator.plugins;
   installFlashPlugin();
@@ -136,8 +155,44 @@ test("where navigator's listings cannot be replaced, Flash is listed on them", (
   );
 });
 
-test("without navigator's listings, nothing is listed and nothing throws", () => {
+test("on a browser's listings that take no index past their own, Flash is listed by name", () => {
+  const { navigator, pdf } = fakeNavigator(true, true);
+  const plugins = navigator.plugins;
+  installFlashPlugin();
+
+  assert.equal(navigator.plugins, plugins);
+  // A loop to length reads only what is there.
+  assert.equal(plugins.length, 1);
+  assert.equal(plugins[plugins.length - 1], pdf);
+  assert.equal(plugins.item(1), null);
+  assert.deepEqual(
+    [...(plugins as unknown as Iterable<Entry>)].map((p) => p.name),
+    ["PDF Viewer"],
+  );
+  const flash = plugins.namedItem("Shockwave Flash") as Entry & Record<string, unknown>;
+  assert.equal(flash.description, "Shockwave Flash 32.0 r0");
+  assert.equal(plugins["Shockwave Flash"], flash);
+  assert.equal(plugins.namedItem("PDF Viewer"), pdf);
+  const mimeTypes = navigator.mimeTypes;
+  assert.equal(mimeTypes.length, 1);
+  assert.equal(
+    (mimeTypes.namedItem("application/x-shockwave-flash") as Record<string, unknown>).enabledPlugin,
+    flash,
+  );
+  assert.equal(
+    mimeTypes["application/futuresplash"],
+    mimeTypes.namedItem("application/futuresplash"),
+  );
+});
+
+test("without a browser's navigator, nothing is listed and nothing throws", () => {
   Object.defineProperty(globalThis, "navigator", { value: {}, configurable: true });
   installFlashPlugin();
   assert.deepEqual(Object.keys(globalThis.navigator), []);
+
+  // A test DOM's listings, without namedItem or item.
+  const shim = { plugins: { length: 0 }, mimeTypes: { length: 0 } };
+  Object.defineProperty(globalThis, "navigator", { value: shim, configurable: true });
+  installFlashPlugin();
+  assert.deepEqual(shim, { plugins: { length: 0 }, mimeTypes: { length: 0 } });
 });

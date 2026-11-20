@@ -19,8 +19,8 @@
 // button and fires audioblocked, and a click on the button, which the SWF
 // never hears, or on the stage, which it does, lets the stream play.
 // watchFlash lists Flash's plug-in for an old page's detection, after the
-// browser's own, and on the browser's listings where navigator will not
-// take others; with its plugin option false, the page finds no Flash.
+// browser's own, and names it on the browser's listings where navigator
+// will not take others; with its plugin option false, the page finds none.
 //
 //   node tests/web/run.ts
 import assert from "node:assert/strict";
@@ -811,6 +811,20 @@ async function detection() {
     before,
     plugins: [...plugins].map((p) => p.name),
     items: Array.from({ length: plugins.length }, (_, i) => plugins.item(i)?.name),
+    // A classic loop to length, which throws on an index past what the listing holds.
+    looped: (() => {
+      try {
+        const names = [];
+        for (let i = 0; i < plugins.length; i++) {
+          names.push(plugins[i].name);
+        }
+
+        return names;
+      } catch (e) {
+        return String(e);
+      }
+    })(),
+    last: plugins.length > 0 ? plugins[plugins.length - 1]?.name ?? null : null,
     keys: Object.keys(plugins),
     mimeTypes: [...navigator.mimeTypes].map((m) => m.type),
     pluginArray: Object.prototype.toString.call(plugins) + " " + (plugins instanceof PluginArray),
@@ -3863,6 +3877,8 @@ const detected = await withPage(
       before: { plugins: string[]; mimeTypes: string[] };
       plugins: string[];
       items: string[];
+      looped: string[] | string;
+      last: string | null;
       keys: string[];
       mimeTypes: string[];
       pluginArray: string;
@@ -3877,6 +3893,7 @@ const detected = await withPage(
       } | null;
       refreshed: boolean;
     }
+
     const open = async (page: string): Promise<Detected> => {
       const origin = await call<string>(evaluate, "location.origin");
       await send("Page.navigate", { url: `${origin}/web-test/${page}` });
@@ -3894,17 +3911,22 @@ const detected = await withPage(
       "application/x-shockwave-flash swf true",
       "application/futuresplash spl true",
     ];
-    const listed = (r: Detected) => {
+    // Found by name either way; by index only where Flash's entries could be listed so.
+    const listed = (r: Detected, indexed: boolean) => {
       assert.deepEqual(r.version, [32, 0, 0]);
       assert.equal(r.tag, "swf2es-player");
       assert.ok(r.playing, "the swapped <embed> did not play");
-      assert.deepEqual(r.plugins, [...r.before.plugins, "Shockwave Flash"]);
-      assert.deepEqual(r.items, r.plugins);
-      assert.deepEqual(r.mimeTypes, [
-        ...r.before.mimeTypes,
-        "application/x-shockwave-flash",
-        "application/futuresplash",
-      ]);
+      const plugins = indexed ? [...r.before.plugins, "Shockwave Flash"] : r.before.plugins;
+      assert.deepEqual(r.plugins, plugins);
+      assert.deepEqual(r.items, plugins);
+      assert.deepEqual(r.looped, plugins);
+      assert.equal(r.last, plugins.at(-1) ?? null);
+      assert.deepEqual(
+        r.mimeTypes,
+        indexed
+          ? [...r.before.mimeTypes, "application/x-shockwave-flash", "application/futuresplash"]
+          : r.before.mimeTypes,
+      );
       assert.ok(r.browsers, "the browser's own plug-ins are not listed as they were");
       assert.equal(r.pluginArray, "[object PluginArray] true");
       assert.deepEqual(r.flash, {
@@ -3923,7 +3945,7 @@ const detected = await withPage(
         "an old page's detection finds Flash 32 and its <embed> is swapped",
         "detect.html",
         (r: Detected) => {
-          listed(r);
+          listed(r, true);
           assert.deepEqual(
             r.keys,
             r.plugins.map((_, i) => String(i)),
@@ -3942,9 +3964,9 @@ const detected = await withPage(
         },
       ],
       [
-        "where navigator's plugins cannot be replaced, the browser's listing lists Flash",
+        "where navigator's plugins cannot be replaced, the browser's listing names Flash",
         "detect-pinned.html",
-        listed,
+        (r: Detected) => listed(r, false),
       ],
     ] as const) {
       try {
