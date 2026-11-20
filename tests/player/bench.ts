@@ -56,7 +56,9 @@
 // of colour: half filled with a bitmap, half with a colour part clear, in
 // add, screen, multiply, lighten, overlay and hard light in turn, every
 // other one gliding each frame, as a game's effects and tinted art are:
-// what a blend mode costs an object that is one fill.
+// what a blend mode costs an object that is one fill. --blend-fills K cuts
+// the coloured ones into K fills that meet, as a SWF's art in a blend
+// mode often is.
 //
 // --hover holds the mouse still over the stage's middle, as a user's often
 // is, for what a SWF with scripts does for it each frame: with --scripted
@@ -178,7 +180,8 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --blends N | --scripted N [--still] | --town N
+//     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K]
+//     | --scripted N [--still] | --town N
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
@@ -235,6 +238,7 @@ const idleRenders = option("idle", 0);
 const toggle = option("toggle", 0);
 const masks = option("masks", 0);
 const blends = option("blends", 0);
+const blendFills = Math.max(1, option("blend-fills", 1));
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
@@ -671,12 +675,49 @@ function polygonPath(cx: number, cy: number, r: number, sides: number): w.PathCo
 }
 
 /**
+ * A polygon of `sides` around the origin, `r` twips to its corners, cut
+ * into `count` slices of colours that meet at its centre, as a
+ * SWF's shape writes fills that meet: each edge between two once, with the
+ * fill on each side.
+ */
+function slices(r: number, sides: number, count: number): Pick<w.ShapeSpec, "fills" | "paths"> {
+  // A DefineShape's colours, whose alpha it leaves out.
+  const colors = [0xb0d06030, 0xb03080d0, 0xb0e0c040, 0xb060c060, 0xb0a040c0, 0xb040c0c0];
+  const corner = (k: number): [number, number] => {
+    const t = (2 * Math.PI * k) / sides;
+    return [Math.round(r * Math.cos(t)), Math.round(r * Math.sin(t))];
+  };
+  const paths: w.ShapeSpec["paths"] = [];
+  for (let s = 0; s < count; s++) {
+    const from = Math.round((s * sides) / count);
+    const to = Math.round(((s + 1) * sides) / count);
+    const arc: w.PathCommand[] = [{ move: corner(from) }];
+    for (let k = from + 1; k <= to; k++) {
+      arc.push({ line: corner(k) });
+    }
+
+    paths.push({ fill1: s + 1, commands: arc });
+    // Turning clockwise, the slice on the right of a spoke going out begins at it.
+    if (count > 1) {
+      paths.push({
+        fill0: ((s + count - 1) % count) + 1,
+        fill1: s + 1,
+        commands: [{ move: [0, 0] }, { line: corner(from) }],
+      });
+    }
+  }
+
+  return { fills: Array.from({ length: count }, (_, s) => colors[s % colors.length]), paths };
+}
+
+/**
  * `count` shapes alone in a blend mode each over four bands of colour, on a
  * loop of 48 frames: half a polygon filled with a 16 by 16 bitmap, half one
- * of a colour part clear, in add, screen, multiply, lighten, overlay and
- * hard light in turn, every other one gliding (--blends).
+ * of a colour part clear, cut into `fills` slices of colours of their own
+ * that meet at its centre, in add, screen, multiply, lighten, overlay and
+ * hard light in turn, every other one gliding (--blends, --blend-fills).
  */
-function blendsSwf(count: number): Uint8Array {
+function blendsSwf(count: number, fills: number): Uint8Array {
   const pixels: number[] = [];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
@@ -719,12 +760,7 @@ function blendsSwf(count: number): Uint8Array {
       fills: [{ bitmap: 2, type: 0x42, matrix: { a: 40, d: 40 } }],
       paths: [{ fill1: 1, commands: polygonPath(0, 0, r, 24) }],
     }),
-    w.shape({
-      id: 4,
-      bounds: [-r, r, -r, r],
-      fills: [0xb0d06030],
-      paths: [{ fill1: 1, commands: polygonPath(0, 0, r, 24) }],
-    }),
+    w.shape({ id: 4, bounds: [-r, r, -r, r], ...slices(r, 24, fills) }),
   );
   const modes = [8, 4, 3, 5, 13, 14];
   const loop = 48;
@@ -1838,7 +1874,7 @@ const swf =
                               : masks > 0
                                 ? masksSwf(masks, args.includes("--unmasked"))
                                 : blends > 0
-                                  ? blendsSwf(blends)
+                                  ? blendsSwf(blends, blendFills)
                                   : branches > 0
                                     ? branchSwf(branches)
                                     : rig > 0
@@ -1928,7 +1964,7 @@ const summary = {
                               : masks > 0
                                 ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
                                 : blends > 0
-                                  ? `${blends} blended shapes`
+                                  ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}`
                                   : branches > 0
                                     ? `${branches} branches`
                                     : rig > 0
