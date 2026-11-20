@@ -11,6 +11,7 @@
 //
 // Each frame's counts are a flat record of numbers, summed over frames and averaged (summarise).
 import {
+  ADD,
   ALPHA_MASK,
   BLEND_NAMES,
   CLEAR,
@@ -24,10 +25,12 @@ import {
   LAYER_POP,
   LAYER_PUSH,
   MIRROR,
+  MULTIPLY,
   NORMAL,
   REPEAT,
   ROW_FLOATS,
   RUN,
+  SCREEN,
   SMOOTH,
   SNAP,
   STENCIL_POP,
@@ -91,6 +94,10 @@ export interface CensusInput {
   subRunCount: number;
   /** The LAYER_PUSH commands whose one fill was drawn straight onto what is below (blendDirect). */
   direct: ReadonlySet<number>;
+  /** Whether the stage is opaque throughout (Commands.opaqueStage), and the target's size. */
+  opaque?: boolean;
+  width?: number;
+  height?: number;
 }
 
 /** Blend layers' content from the frame before: positions in target pixels by content. */
@@ -146,6 +153,8 @@ export function analyseFrame(
   const labels = commandLabels(input, counts);
   const memory = blendLayers(input, previous, counts);
   fillRuns(input, labels, counts);
+  backdropCopies(input, false, counts);
+  backdropCopies(input, true, counts);
   return { counts, memory };
 }
 
@@ -705,6 +714,255 @@ function overlap(boxes: number[], p: number, j: number): boolean {
   );
 }
 
+/** Whether blend mode `mode` reads what is below onto a target `opaque` or not (webgl/composite.ts). */
+function readsBelow(mode: number, opaque: boolean): boolean {
+  return !(
+    mode === NORMAL ||
+    mode === ALPHA_MASK ||
+    mode === LAYER ||
+    mode === ADD ||
+    mode === SCREEN ||
+    (mode === MULTIPLY && opaque)
+  );
+}
+
+/** A target as backdropCopies walks the commands: where it lies, and the copy open on it. */
+interface CopyTarget {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  opaque: boolean;
+  /** The rectangles one copy would take for the blends that share it, four numbers each; null for none open. */
+  copied: number[] | null;
+  /** What was drawn into the target since that copy, four numbers each. */
+  drawn: number[];
+}
+
+/** Whether rectangle `a` of `from` meets rectangle `x0, y0, x1, y1`. */
+function meets(from: number[], a: number, x0: number, y0: number, x1: number, y1: number): boolean {
+  return from[a] < x1 && x0 < from[a + 2] && from[a + 1] < y1 && y0 < from[a + 3];
+}
+
+/**
+ * The blends that read what is below, drawn direct or composited, each of which would copy it
+ * unshared (Compositor.copyBoxes); and how many could share the copy an earlier one made on their
+ * target, as one copy of more than one rectangle (renderer-plan.md, item 3): those whose
+ * rectangles meet nothing drawn into the target since that copy. Counted twice:
+ * `loose`, past draws, masks and composites in between that do not meet them, the copy given up
+ * where another target's copy takes its place; and not, between blends drawn direct alone.
+ */
+function backdropCopies(input: CensusInput, loose: boolean, counts: Counts): void {
+  const { ops, params } = input;
+  const key = loose ? "share.loose" : "share.strict";
+  const stack: CopyTarget[] = [
+    {
+      x0: 0,
+      y0: 0,
+      x1: input.width ?? Number.POSITIVE_INFINITY,
+      y1: input.height ?? Number.POSITIVE_INFINITY,
+      opaque: input.opaque ?? false,
+      copied: null,
+      drawn: [],
+    },
+  ];
+  let owner: CopyTarget | null = null;
+  const close = (target: CopyTarget) => {
+    const copied = target.copied;
+    if (copied && copied.length > 4) {
+      let parts = 0;
+      let x0 = Number.POSITIVE_INFINITY;
+      let y0 = Number.POSITIVE_INFINITY;
+      let x1 = Number.NEGATIVE_INFINITY;
+      let y1 = Number.NEGATIVE_INFINITY;
+      for (let a = 0; a < copied.length; a += 4) {
+        parts += (copied[a + 2] - copied[a]) * (copied[a + 3] - copied[a + 1]);
+        x0 = Math.min(x0, copied[a]);
+        y0 = Math.min(y0, copied[a + 1]);
+        x1 = Math.max(x1, copied[a + 2]);
+        y1 = Math.max(y1, copied[a + 3]);
+      }
+
+      add(counts, `${key}.groups`);
+      add(counts, `${key}.parts`, parts);
+      add(counts, `${key}.union`, (x1 - x0) * (y1 - y0));
+    }
+
+    target.copied = null;
+    target.drawn.length = 0;
+  };
+  // Something drawn into the top target over a rectangle, or over all of it.
+  const drawn = (x0: number, y0: number, x1: number, y1: number) => {
+    const top = stack[stack.length - 1];
+    if (top.copied) {
+      top.drawn.push(x0, y0, x1, y1);
+    }
+  };
+  // A blend over rectangle `left, top, right, bottom`, cut to the target's, as cover cuts it.
+  const blend = (
+    left: number,
+    up: number,
+    right: number,
+    bottom: number,
+    mode: number,
+    direct: boolean,
+  ) => {
+    const top = stack[stack.length - 1];
+    const x0 = Math.max(top.x0, left);
+    const y0 = Math.max(top.y0, up);
+    const x1 = Math.min(top.x1, right);
+    const y1 = Math.min(top.y1, bottom);
+    if (x1 <= x0 || y1 <= y0) {
+      return;
+    }
+
+    if (readsBelow(mode, top.opaque)) {
+      if (!loose) {
+        add(counts, "copies.computed");
+        add(counts, direct ? "copies.direct" : "copies.composite");
+      }
+
+      let shares = top.copied !== null && owner === top && (loose || direct);
+      for (let a = 0; shares && a < top.drawn.length; a += 4) {
+        shares = !meets(top.drawn, a, x0, y0, x1, y1);
+      }
+
+      if (shares) {
+        add(counts, `${key}.${direct ? "direct" : "composite"}`);
+        top.copied?.push(x0, y0, x1, y1);
+      } else {
+        if (owner) {
+          close(owner);
+        }
+
+        if (loose || direct) {
+          top.copied = [x0, y0, x1, y1];
+          owner = top;
+        }
+      }
+    }
+
+    drawn(x0, y0, x1, y1);
+  };
+  const box: number[] = [];
+
+  for (let k = 0; k < input.commandCount; k++) {
+    const at = k * 4;
+    const top = stack[stack.length - 1];
+    switch (ops[at]) {
+      case RUN:
+        if (!loose) {
+          close(top);
+          break;
+        }
+
+        for (const i of drawsIn(input, ops[at + 1], ops[at + 1] + ops[at + 2])) {
+          box.length = 0;
+          placeBox(input, i, box);
+          drawn(box[0] - MARGIN, box[1] - MARGIN, box[2] + MARGIN, box[3] + MARGIN);
+        }
+
+        break;
+      case STENCIL_PUSH:
+      case STENCIL_POP:
+        // A mask draws into the stencil alone.
+        if (!loose) {
+          close(top);
+        }
+
+        break;
+      case HOLD_PUSH: {
+        // Drawn ahead of the stage, its copies apart from the stage's.
+        if (!loose) {
+          close(top);
+        }
+
+        let depth = 0;
+        for (; ops[k * 4] !== HOLD_POP; k++) {
+          const op = ops[k * 4];
+          if (op === LAYER_PUSH) {
+            depth++;
+          } else if (
+            op === LAYER_POP &&
+            depth-- > 0 &&
+            !loose &&
+            readsBelow(ops[k * 4 + 1], false)
+          ) {
+            add(counts, "copies.computed");
+            add(counts, "copies.composite");
+          }
+        }
+
+        break;
+      }
+      case COMPOSITE:
+        if (!loose) {
+          close(top);
+        }
+
+        blend(
+          params[ops[at + 1]],
+          params[ops[at + 1] + 1],
+          params[ops[at + 1]] + params[ops[at + 1] + 2],
+          params[ops[at + 1] + 1] + params[ops[at + 1] + 3],
+          ops[at + 2],
+          false,
+        );
+        break;
+      case LAYER_PUSH: {
+        const from = ops[at + 1];
+        if (input.direct.has(k)) {
+          // Its run and its pop with it, the pop's mode the blend's.
+          blend(
+            params[from],
+            params[from + 1],
+            params[from] + params[from + 2],
+            params[from + 1] + params[from + 3],
+            ops[at + 9],
+            true,
+          );
+          k += 2;
+          break;
+        }
+
+        if (!loose) {
+          close(top);
+        }
+
+        stack.push({
+          x0: params[from],
+          y0: params[from + 1],
+          x1: params[from] + params[from + 2],
+          y1: params[from + 1] + params[from + 3],
+          opaque: false,
+          copied: null,
+          drawn: [],
+        });
+        break;
+      }
+      case LAYER_POP: {
+        const layer = stack.pop() as CopyTarget;
+        close(layer);
+        if (!loose) {
+          close(stack[stack.length - 1]);
+        }
+
+        blend(layer.x0, layer.y0, layer.x1, layer.y1, ops[at + 1], false);
+        break;
+      }
+      case FILTER:
+        break;
+      default:
+        // A clear, a held output composited over a rectangle not read here.
+        close(top);
+    }
+  }
+
+  for (const target of stack) {
+    close(target);
+  }
+}
+
 /** The display objects' flags (player/src/display/displayobject.ts). */
 const TRANSFORM = 1;
 const CHILDREN = 2;
@@ -923,7 +1181,14 @@ export function formatCensus(s: Counts): string[] {
       .join(", ")}): drawn direct ${n(v("blend.direct"))}, as layers ${n(layers)}`,
   );
   lines.push(
-    `    layers     ${n(v("blend.layers.draws"))} fills inside (${INSIDE.map((b) => `${b}: ${n(v(`blend.inside.${b}`))}`).join(", ")}), ${n(v("blend.layers.area") / 1000)} k pixels; backdrop copies ${n(v("copies"))}`,
+    `    layers     ${n(v("blend.layers.draws"))} fills inside (${INSIDE.map((b) => `${b}: ${n(v(`blend.inside.${b}`))}`).join(", ")}), ${n(v("blend.layers.area") / 1000)} k pixels`,
+  );
+  const union = (variant: string) =>
+    v(`${variant}.groups`) > 0
+      ? `, ${n(v(`${variant}.groups`))} copies of more than one, their bounding boxes ${n(v(`${variant}.union`) / Math.max(1, v(`${variant}.parts`)))} times their rectangles' area`
+      : "";
+  lines.push(
+    `    copies     made ${n(v("copies"))} of ${n(v("copies.boxes"))} boxes, for ${n(v("copies.computed"))} blends that read what is below (direct ${n(v("copies.direct"))}, composited ${n(v("copies.composite"))}); of those, could share an earlier one's copy: after blends drawn direct alone ${n(v("share.strict.direct"))}${union("share.strict")}; past draws, masks and composites that do not meet them ${n(v("share.loose.direct") + v("share.loose.composite"))} (${n(v("share.loose.direct"))} direct)${union("share.loose")}`,
   );
   lines.push(
     `    unchanged  ${n(unchanged)} of ${n(layers)} (${pct(unchanged, layers)}) hold the frame before's content still or moved by whole pixels (${n(v("blend.unchanged.still"))} still, ${n(v("blend.unchanged.whole"))} whole), ${n(v("blend.unchanged.moved"))} more moved by fractions; ${n(v("blend.unchanged.draws"))} fills inside them; ${n(v("blend.refiltered"))} hold a filter's output made this frame, and are not compared`,

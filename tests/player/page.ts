@@ -1170,7 +1170,7 @@ function installCensus(view: RenderView): Census {
     const scene = args[1] as SceneList;
     const rows = args[2] as { data: Float32Array };
     const geometries = args[3] as { box: Float32Array };
-    const target = args[7] as { scale: number };
+    const target = args[7] as { scale: number; width: number; height: number };
     // A frame drawn without its runs prepared (a run table too large) is left out.
     if (!censusField<boolean>(draws, "prepared")) {
       return out;
@@ -1252,6 +1252,9 @@ function installCensus(view: RenderView): Census {
         subRuns,
         subRunCount,
         direct,
+        opaque: commands.opaqueStage,
+        width: target.width,
+        height: target.height,
       },
       memory,
     );
