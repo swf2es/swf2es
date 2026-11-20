@@ -494,8 +494,9 @@ names it ("Test/get x", "Test$cinit", "global$init",
 identifier, "$_" and the name with `$` escapes
 (`assembly/avm2/emit/stack-names.ts`), and the runtime reads it back
 (`stackNames` in `errors.ts`), so release builds run and emit nothing more
-for it. Flash also lists its native methods' frames, which have no
-compiled function here and are left out.
+for it. A module minified after it was compiled ahead of time loses those
+names, and its stack traces with them. Flash also lists its native
+methods' frames, which have no compiled function here and are left out.
 
 ## A timeline's places over a child
 
