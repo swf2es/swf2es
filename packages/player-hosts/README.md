@@ -14,7 +14,9 @@ npm install @swf2es/player-hosts
   Pass it as `new Scripting(codegen, { capture })`; omitting it preserves
   the player's no-device behaviour. `lazyBrowserCaptureHost()` enumerates
   only when a SWF names Camera or Microphone, sparing every other SWF the
-  browser's slow first enumeration at startup.
+  browser's slow first enumeration at startup. A device the browser has not
+  labelled yet, as before consent, is named `Camera`, `Camera 2`, `Microphone`
+  and so on, never `""`, and its label replaces that once consent is given.
 - `@swf2es/player-hosts/indexeddb`: `indexedDbModuleCache()`, the compiled
   modules kept in IndexedDB for a page's next visit.
 - `@swf2es/player-hosts/precompiled`: `precompiledModules()` reads what the

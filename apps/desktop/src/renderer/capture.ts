@@ -96,10 +96,19 @@ export function shellCapture(api: DesktopCapture, epoch: number): CaptureHost | 
       return browser.microphones;
     },
     permissionStatus: (kind) => api.status(epoch, kind),
-    requestPermission: (kind, signal) =>
-      signal.aborted
-        ? Promise.resolve("denied")
-        : api.request(epoch, kind).then((result) => (signal.aborted ? "denied" : result)),
+    async requestPermission(kind, signal) {
+      if (signal.aborted) {
+        return "denied";
+      }
+
+      const result = await api.request(epoch, kind);
+      if (result === "granted" && !signal.aborted) {
+        // The shell's grant opens no device, so read the labels it now lets through.
+        await browser.refresh().catch(() => {});
+      }
+
+      return signal.aborted ? "denied" : result;
+    },
     openCamera(device, initial, events, signal) {
       let mode = initial;
       const opened = open(

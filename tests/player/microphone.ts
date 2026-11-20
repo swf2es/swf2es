@@ -67,7 +67,7 @@ const { value, exception } = await withPage(
       check(tracks.every(t => t.readyState === 'ended'), 'listener removal kept track');
     }
     check(status.includes('Microphone.Unmuted'), 'missing unmuted status');
-    check(get(mic, 'name').length > 0, 'label not refreshed');
+    check(get(mic, 'name') !== 'Microphone', 'label not refreshed');
     set(mic, 'gain', 0);
     let silent = 0;
     const remove = listen(mic, 'sampleData', e => {
