@@ -876,7 +876,11 @@ export interface WorkerHost {
   release?(): void;
 }
 
-/** A capture device's stable host identifier and display name (possibly blank before consent). */
+/**
+ * A capture device's stable host identifier and display name. A host may
+ * leave the name blank, as browsers do before consent; the player names
+ * such a device by its kind and position (media/capture-devices.ts).
+ */
 export interface CaptureDevice {
   id: string;
   name: string;
@@ -940,6 +944,8 @@ export interface CaptureHost {
     events: CameraEvents,
     signal: AbortSignal,
   ): CameraCapture;
+  /** The player that used it is gone: what the host listens to for it may go too. */
+  release?(): void;
 }
 
 export interface MicrophoneMode {

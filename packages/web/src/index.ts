@@ -1,8 +1,9 @@
 /**
  * swf2es on any web page: the `<swf2es-player>` element, defined as this
  * module loads where there is a DOM, `replaceFlash` for a page's Flash
- * tags, `openAirApp` for an AIR application the element plays, and the
- * page's one configuration.
+ * tags and `installFlashPlugin` for its scripts that look for Flash,
+ * `openAirApp` for an AIR application the element plays, and the page's
+ * one configuration.
  */
 import { defineElement } from "./element.js";
 
@@ -23,7 +24,14 @@ export { ExternalInterfaceError, type PageValue } from "./external.js";
 export { type Placement, place, type ScaleMode, scaleMode } from "./layout.js";
 export type { MeterCorner } from "./meter.js";
 export type { FrameListener, FrameStats } from "./playback.js";
-export { flashAttributes, isFlash, replaceFlash, watchFlash } from "./replace.js";
+export { installFlashPlugin } from "./plugin.js";
+export {
+  flashAttributes,
+  isFlash,
+  type ReplaceOptions,
+  replaceFlash,
+  watchFlash,
+} from "./replace.js";
 export type { Stage3DSurfaceFactory, Stage3DSurfaceLoader } from "./stage3d.js";
 
 defineElement();
