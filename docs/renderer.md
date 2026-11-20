@@ -170,6 +170,11 @@ children's spans where they were written, moved as far as its own span
 and those holding it were moved since (`Context`), so that a part
 changed in a character that stood still, taken whole for frames, walks
 the character and that part, and copies the character's other parts.
+A container's span is found inside its parent's that way only where that
+parent is the one it had when its span was written: one moved to another
+parent standing alike, after a frame that carried one parent down the
+list and not the other, would find its children's spans where the new
+parent's copy moved them, not where they lie.
 Lines are let go of by their geometries' last use rather than the line
 cache's own (`LineCache`'s trim), as a span drawing them never asks the
 cache.

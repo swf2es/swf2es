@@ -1,9 +1,10 @@
 // Spans (docs/renderer.md, "Spans"): a scene that changes as flags say draws
 // as a fresh view draws a twin of it, and passes the checked mode, through
 // BitmapData.draw's passes between frames, a context lost and given back, a
-// mask given mid-run and two views of one display list; a span made stale on
-// purpose, by a change no flag tells of, is caught, the error naming the
-// object and the difference.
+// mask given mid-run, a container moved between parents that stand alike
+// and two views of one display list; a span made stale on purpose, by a
+// change no flag tells of, is caught, the error naming the object and the
+// difference.
 import assert from "node:assert/strict";
 import { withPage } from "./chrome.ts";
 
@@ -12,6 +13,10 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
   const { RenderView } = await import('@swf2es/player/scene');
   const { Container, ShapeObject, CONTENT, TRANSFORM } = await import('/player/display/display.js');
   const { Drawing } = await import('/player/display/drawing.js');
+  // One tessellator for every view: each view's own makes wasm instances, freed only as the page
+  // collects them, and fills went missing once a page had made many views.
+  const { Tessellator } = await import('@swf2es/native/render');
+  const tessellator = new Tessellator();
   const drawing = (color, x) => {
     const d = new Drawing();
     d.beginFill({ type: 'solid', color });
@@ -68,7 +73,8 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
     gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, out);
     return out;
   };
-  const make = (checked) => new RenderView({ width: 64, height: 64, checked, preserveDrawingBuffer: true });
+  const make = (checked) =>
+    new RenderView({ width: 64, height: 64, checked, preserveDrawingBuffer: true, fillTessellator: tessellator.tessellate });
   // Drawn by \`view\`, \`s\` as a fresh view draws \`twin\`, which took the same steps.
   const same = (label, view, s, twin) => {
     const fresh = make(false);
@@ -199,6 +205,56 @@ const { value, exception } = await withPage("runSwf", (evaluate) =>
         }
       } else if (untold) {
         failures.push('unchecked view threw ' + untold);
+      }
+    } finally {
+      view.destroy();
+    }
+  }
+
+  // A container moved between two parents that stand alike, after a frame that carried one and
+  // not the other: both were walked in one frame and taken whole since, the second carried down
+  // the list as a sibling between them grew. The mover's span lay in its old parent's, so its
+  // children's are not where the new parent's copy moved its own.
+  const parents = () => {
+    const shape = (color, x, y) => {
+      const s = new ShapeObject(null);
+      s.drawing = drawing(color, x);
+      s.matrix.ty = y;
+      s.invalidate(CONTENT);
+      return s;
+    };
+    const container = (name, children) => {
+      const c = new Container();
+      c.name = name;
+      for (const [k, child] of children.entries()) c.addChildAt(child, k);
+      return c;
+    };
+    const p = container('p', [shape(0xff0000ff, 0, 0), shape(0xff0040ff, 12, 0)]);
+    const g1 = container('g1', [p]);
+    const x = container('x', [shape(0xff00ff00, 0, 24)]);
+    const g2 = container('g2', [shape(0xffff0000, 0, 44)]);
+    const root = container('root', [g1, x, g2]);
+    return { root, g1, x, g2, p, shape };
+  };
+  const moves = [
+    ['first', () => {}],
+    ['still', () => {}],
+    ['a sibling between grows', (s) => { s.x.addChildAt(s.shape(0xff00ffff, 30, 24), 0); }],
+    ['a container moved to a parent standing alike', (s) => { s.g1.removeChild(s.p); s.g2.addChildAt(s.p, 1); }],
+    ['moved, still', () => {}],
+    ['moved, still again', () => {}],
+  ];
+  for (const checked of [true, false]) {
+    const view = make(checked);
+    try {
+      const s = parents();
+      const twin = parents();
+      for (const [name, step] of moves) {
+        step(s);
+        step(twin);
+        const error = thrown(() => view.render(s.root));
+        if (error) failures.push('moved, ' + checked + ', ' + name + ': threw ' + error);
+        same('moved, ' + checked + ', ' + name, view, s, twin);
       }
     } finally {
       view.destroy();

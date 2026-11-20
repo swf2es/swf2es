@@ -274,7 +274,12 @@ export class Spans {
       out.frame = s.walked;
       out.entries = s.first - s.walkedFirst;
       out.rows = s.rowsFirst - s.walkedRowsFirst;
-    } else if (parent.frame >= 0 && s.frame === parent.frame) {
+    } else if (
+      parent.frame >= 0 &&
+      s.frame === parent.frame &&
+      s.parent === (o.parent ? o.parent.serial : -1)
+    ) {
+      // Its span lay in its parent's, as copied whole since, only where that parent was its own then.
       out.frame = s.walked;
       out.entries = s.first + parent.entries - s.walkedFirst;
       out.rows = s.rowsFirst + parent.rows - s.walkedRowsFirst;
