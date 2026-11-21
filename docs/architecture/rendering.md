@@ -159,7 +159,18 @@ after ten minutes, 14,000 had no instance, and their layers, 191 MB of
 the 222 MB all held, were never used. The tag is read once as the SWF
 is, for the bounds and the bitmaps its fills take as the SWF has them
 then, and again when it is first drawn; the SWF's bytes, which its
-sounds and placements keep, are there to read it from.
+sounds and placements keep, are there to read it from. Its paths, its
+fills' contours and its lines', are let go of again once nothing has
+read them for 120 frames (`display/tag-shapes.ts`), and read from the
+tag again when next asked for: past a shape's first draw only lines
+stroked at a new scale, a hit test, a geometry expired or lost, or
+`readGraphicsData` read them, and each of those that goes on reads them
+every frame. A long session of busy real content that loads about 300
+SWFs had drawn 26,600 of its 43,500 shapes, whose paths, 251 MB of a
+1.27 GB heap, it held for as long as their SWFs were loaded. The layers,
+their fills and lines and paints, stay, and stay the same objects: the
+renderer keeps a layer's triangles and stroked lines by it, so a shape
+drawn on with its paths let go of is not tessellated again.
 A morph shape (DefineMorphShape, DefineMorphShape2) is two shapes whose
 edges pair in order; a `MorphShape` shows their blend at the ratio its
 placements give (`display/morph.ts`), a shape like any other, so it draws,
