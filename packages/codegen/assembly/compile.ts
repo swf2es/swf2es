@@ -277,7 +277,8 @@ export function domainModule(
  * codegen's memory, which never shrinks, need hold no more than a part
  * (see ModuleEmitter.begin). Nothing else may be called in between but
  * __collect: anything else that compiles or changes the domain abandons
- * the module, what it fixed in the domain so far left as it is.
+ * the module (see abandon). The wrapper asks for every part before it
+ * calls anything else, so it never abandons one.
  */
 export function domainModuleBytes(
   hashes: string = "",
@@ -336,9 +337,23 @@ let pendingIndex: u32 = 0;
 let pendingKeep: bool = false;
 let pendingRows: u64 = 0;
 
-/** Leave the module being written a part at a time, as the domain changes under it. */
+/**
+ * Leave the module being written a part at a time, as the domain changes
+ * under it; its rows are weighed to its ABC as a finished module's are.
+ * What it fixed in the domain stays: abandoned while verifying, the ABC
+ * stays counted as verified, and the log keeps its LOG_Verify and what the
+ * verification resolved so far (see Verifier). A later compile of the ABC
+ * then logs a verification of its own after those and resolves the rest
+ * after it, so the log, and with it domainContext and any cache key taken
+ * from it, is not the one a compile never abandoned leaves. Rolling back
+ * cannot fix that: what was resolved is in the domain's tables, and logged
+ * again after a new LOG_Verify it would be in another order.
+ */
 function abandon(): void {
-  pending = null;
+  if (pending !== null) {
+    weigh(domain, pendingIndex, pendingRows);
+    pending = null;
+  }
 }
 
 function startModule(
