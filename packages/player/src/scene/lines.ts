@@ -157,10 +157,11 @@ export class LineCache {
 
   /**
    * `layer`'s lines through the linear transform `key[0]` to `key[3]` (a b
-   * c d), at least `key[4]` (least) wide, drawn opaque or not: stroked again for another transform, screen
-   * or version of its drawing, the old ones kept while drawn as the
-   * geometries keep them. A layer of no painted line (LayerLines' painted);
-   * `layerLines`, where given, is what `of` gave for the layer and version.
+   * c d), at least `key[4]` (least) wide, drawn opaque or not: stroked
+   * again for another transform, screen or version of its drawing, the old
+   * ones kept while drawn as the geometries keep them. A layer of no painted
+   * line (LayerLines' painted); `layerLines`, where given, is what `of` gave
+   * for the layer and version.
    */
   take(
     layer: ShapeLayer,

@@ -681,6 +681,54 @@ test("a kept output composited where its floats grow the store names it", () => 
   assert.deepEqual(Array.from(commands.params.subarray(60, 65)), [10, 20, 30, 40, 5]);
 });
 
+test("layers and masks nested past the first stacks' room are measured all the same", () => {
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const row = rows.add(1, 0, 0, 1, 0, 0, null);
+  const depth = 20;
+  // Each layer one more around the last: its draw's pixels, and one more each side.
+  const layers = new SceneList();
+  for (let k = 0; k < depth; k++) {
+    layers.layerBegin();
+  }
+
+  layers.draw(spanning(geometries, 40, 40, 50, 50), row, 0);
+  for (let k = 0; k < depth; k++) {
+    layers.marker(LAYER_END, MULTIPLY, -1);
+  }
+
+  measureLayers(layers, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  for (let k = 0; k < depth; k++) {
+    const out = depth - 1 - k;
+    assert.deepEqual(
+      Array.from(layers.layers.subarray(k * 4, k * 4 + 4)),
+      [39 - out, 39 - out, 12 + 2 * out, 12 + 2 * out],
+      `layer ${k}`,
+    );
+  }
+
+  // Masks inside masks clip to what they all cover: the outermost cuts the top, the innermost
+  // the bottom, and those between nothing.
+  const masks = new SceneList();
+  masks.layerBegin();
+  for (let k = 0; k < depth; k++) {
+    masks.marker(MASK_BEGIN);
+    const top = k === 0 ? 30 : 0;
+    const bottom = k === depth - 1 ? 70 : 100;
+    masks.draw(spanning(geometries, 0, top, 100, bottom), row, 0);
+    masks.marker(MASK_USE, 2, 1);
+  }
+
+  masks.draw(spanning(geometries, 0, 0, 100, 100), row, 0);
+  for (let k = 0; k < depth; k++) {
+    masks.marker(MASK_POP, 2, 1);
+  }
+
+  masks.marker(LAYER_END, MULTIPLY, -1);
+  measureLayers(masks, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  assert.deepEqual(Array.from(masks.layers.subarray(0, 4)), [0, 29, 101, 42]);
+});
+
 test("a kept output goes once undrawn long enough, and a lost context takes them all", () => {
   const keeps = new Keeps();
   const used = keeps.add();

@@ -51,6 +51,24 @@ test("a layer seen again through a transform finds its lines, another strokes th
   assert.equal(geometries.alive(first), false);
 });
 
+test("a key array written over for each take is read, not kept, as the walk's one is", () => {
+  const geometries = new Geometries();
+  const lines = new LineCache(geometries, tessellate);
+  const layer = straightLine();
+  const scratch = new Float64Array(5);
+  const take = (a: number, d: number) => {
+    scratch.set([a, 0, 0, d, 1]);
+    return lines.take(layer, 0, scratch, null, true);
+  };
+  const once = take(1, 1);
+  const twice = take(2, 2);
+  assert.ok(once && twice);
+  assert.notEqual(once, twice);
+  assert.equal(take(1, 1), once);
+  assert.equal(take(2, 2), twice);
+  assert.deepEqual(lines.counts, { strokeContexts: 2, strokeReuses: 2 });
+});
+
 test("past its budget, lines drawn neither this frame nor the last go, the least lately drawn first", () => {
   const geometries = new Geometries();
   // Past any lines at all: what is drawn lately stays, and the budget grows to it.
