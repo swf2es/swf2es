@@ -466,7 +466,11 @@ times or not at all, and say nothing. So `src/render/validate.zig` checks
 its triangles before they are drawn: along 256 scanlines over the fill's
 box, every stretch between two crossings must be covered once where the
 contours' winding there says the rule fills it and not at all elsewhere,
-stretches narrower than a twip (or than the positions' f32 rounding) aside.
+stretches narrower than a quarter of a pixel (or than the positions' f32
+rounding) aside: lyon leaves slivers a tenth of a pixel wide between
+converging contours here and there, a faint line at most, where libtess2
+would take seconds; one up to about a third of a pixel wide can fall
+between scanlines.
 It reads every triangle once, about 11 ms of lyon's 153 on a deck of 95
 contours; lyon's wrong wedges can be under three pixels tall, which 48
 scanlines let through. A fill whose triangles fail it goes to libtess2: the bands give

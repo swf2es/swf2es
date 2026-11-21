@@ -803,8 +803,8 @@ function checkCoverage(
 
 /**
  * How much area lyon's fill of the contours may differ from libtess2's by: slivers between
- * contours thinner than the module's check's twip, which it lets lyon leave out, and positions
- * narrowed to f32, along the contours' length.
+ * contours about as thin as the module's check's quarter pixel, which it lets lyon leave out or add
+ * between its scanlines, and positions narrowed to f32, along the contours' length.
  */
 function slivers(contours: number[][]): number {
   let length = 0;
@@ -814,7 +814,7 @@ function slivers(contours: number[][]): number {
     }
   }
 
-  return 5e-5 * length;
+  return 2e-4 * length;
 }
 
 /** deckContours' shape, `count` contours turned `turn` apart about (`centre`, `centre`), unrounded. */

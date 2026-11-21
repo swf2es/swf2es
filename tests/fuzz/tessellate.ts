@@ -636,8 +636,8 @@ for (let i = 0; i < Math.max(8, Math.floor(cases / 100)); i++) {
   // The same area as libtess2's, lyon made to refuse it.
   const reference = rawFill(contours, nonZero, -2);
   assert.equal(reference.by, LIBTESS2, context);
-  // Within slivers thinner than the module's check's twip, which it lets lyon leave out, and
-  // positions narrowed to f32, along the contours' length.
+  // Within slivers about as thin as the module's check's quarter pixel, which it lets lyon leave
+  // out or add between its scanlines, and positions narrowed to f32, along the contours' length.
   let length = 0;
   for (const points of contours) {
     for (let k = 0, j = points.length - 2; k < points.length; j = k, k += 2) {
@@ -646,7 +646,7 @@ for (let i = 0; i < Math.max(8, Math.floor(cases / 100)); i++) {
   }
 
   assert.ok(
-    Math.abs(area - reference.area) <= 2e-3 * reference.area + 5e-5 * length,
+    Math.abs(area - reference.area) <= 2e-3 * reference.area + 2e-4 * length,
     `area ${area} against libtess2's ${reference.area}: ${context}`,
   );
 

@@ -3,10 +3,11 @@
 //! places under the even-odd rule, covering wedges more than once or not at all, and says
 //! nothing. Along a set of horizontal scanlines over the fill's box, the triangles' coverage of
 //! every stretch between two crossings must be what the contours' winding there says the rule
-//! fills: once where it fills, never where it does not. Stretches narrower than a twip, or than
-//! the positions' f32 rounding, say nothing, as the triangles' edges and the contours' differ by
-//! that much. Scanlines see every point of a stretch where samples would see a few, at the cost
-//! of one pass over the triangles and the edges.
+//! fills: once where it fills, never where it does not. Stretches narrower than a quarter of a
+//! pixel, or than the positions' f32 rounding, say nothing: the triangles' edges and the
+//! contours' differ by the rounding, and lyon leaves slivers that thin between converging
+//! contours, which draw as a faint line at most. Scanlines see every point of a stretch where
+//! samples would see a few, at the cost of one pass over the triangles and the edges.
 //!
 //! The check is a pure function of the points and triangles, so a fill goes the same way on
 //! every run.
@@ -94,8 +95,10 @@ fn check(allocator: std.mem.Allocator, coords: []const f64, ends: []const u32, n
         y.* = top + (@as(f64, @floatFromInt(k)) + offset) * step;
     }
 
-    // A twip, or what f32 positions this far out round to, a few times over.
-    const tolerance = @max(1.0 / 20.0, farthest * 0x1p-20);
+    // A quarter of a pixel, or what f32 positions this far out round to, a few times over: lyon
+    // leaves slivers a tenth of a pixel wide here and there between contours that converge, a
+    // faint line at most, where libtess2 takes seconds; its wrong wedges are wider.
+    const tolerance = @max(0.25, farthest * 0x1p-20);
 
     // Every crossing found in one pass over the triangles and one over the edges, then sorted
     // by line, by counting, and along each line.
@@ -261,7 +264,9 @@ test "a hole filled under the even-odd rule is caught, and under the non-zero ru
     try testing.expect(!covers(testing.allocator, &coords, &ends, true, &coords, &ring));
 }
 
-test "triangles off by less than a twip pass" {
-    const positions = [_]f64{ 0, 0, 10.01, 0, 10.01, 10, 0, 10 };
-    try testing.expect(covers(testing.allocator, &square, &.{4}, false, &positions, &.{ 0, 1, 2, 0, 2, 3 }));
+test "triangles off by less than a quarter of a pixel pass, and by more do not" {
+    const near = [_]f64{ 0, 0, 10.2, 0, 10.2, 10, 0, 10 };
+    try testing.expect(covers(testing.allocator, &square, &.{4}, false, &near, &.{ 0, 1, 2, 0, 2, 3 }));
+    const far = [_]f64{ 0, 0, 10.5, 0, 10.5, 10, 0, 10 };
+    try testing.expect(!covers(testing.allocator, &square, &.{4}, false, &far, &.{ 0, 1, 2, 0, 2, 3 }));
 }
