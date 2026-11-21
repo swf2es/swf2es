@@ -253,3 +253,42 @@ test("keys taken as the player takes them, at each load, are the keys taken once
 
   assert.deepEqual(keys(player, hashes.length), keys(command, hashes.length));
 });
+
+/** A key context without the indices of the ABCs it names, which ABCs added elsewhere move. */
+const placed = (context: KeyContext | null) => context && { ...context, abcs: context.abcs.length };
+
+test("a domain's keys do not depend on ABCs added where it does not see", async () => {
+  // A SWF's ABCs all added to the main movie's domain, then each keyed and
+  // compiled in turn; in one of the two, an ABC added to a sibling of the
+  // domain before the last is keyed, which settles nothing it sees.
+  const keys: ReturnType<typeof placed>[][] = [];
+  for (const elsewhere of [false, true]) {
+    const { t, abcDomain, main } = await start();
+    const sibling = t.domainChild(0);
+    const chains = new KeyChains(keyLog(t));
+    const first = abcDomain.length;
+    for (let k = 0; k < 30; k++) {
+      assert.equal(t.domainAdd(pool[k % pool.length], false, main), 0);
+      abcDomain.push(main);
+    }
+
+    const taken: ReturnType<typeof placed>[] = [];
+    for (let k = 0; k < 30; k++) {
+      if (elsewhere && k === 29) {
+        assert.equal(t.domainAdd(sorts, false, sibling), 0);
+      }
+
+      taken.push(placed(chains.context(first + k, LIBRARIES)));
+      taken.push(placed(new KeyChains(keyLog(t, false)).context(first + k, LIBRARIES)));
+      t.domainModule("", first + k, false);
+    }
+
+    keys.push(taken);
+  }
+
+  assert.ok(
+    keys[0].some((c) => c?.rest),
+    "entries go unsettled",
+  );
+  assert.deepEqual(keys[1], keys[0]);
+});

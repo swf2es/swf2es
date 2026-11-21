@@ -688,8 +688,14 @@ function writeEntry(out: Output, e: i32, own: u32, seen: u32[], count: u32): boo
  * What a module cache key names of ABC `index` besides its application
  * domain's log, which domainKeyLogBytes gives, handed out (see handOut):
  * the first two lines of domainContext, then the ABC's application
- * domain, and how many rebuilds the domain is from its reset. No address
- * if there is no such ABC.
+ * domain, how many rebuilds the domain is from its reset, and the index
+ * of the first log entry made after the last ABC the domain sees was
+ * added. The entries before it are settled for the domain: none changes
+ * while it is live, but in a rebuild, where one made since may (a
+ * verification's LOG_Verify may go as it ends, see Verifier, and adding
+ * an ABC abandons a verification under way). Which those are depends on
+ * what the domain sees alone, not on ABCs added elsewhere. No address if
+ * there is no such ABC.
  */
 export function domainKeyHeaderBytes(index: i32 = -1): usize {
   const at = abcIndex(index);
@@ -698,13 +704,16 @@ export function domainKeyHeaderBytes(index: i32 = -1): usize {
   }
 
   const own = domain.abcDomain[at];
+  const seen = seenBy(own);
   const out = context;
   out.reset();
-  writeSeen(out, seenBy(own), <u32>at);
+  writeSeen(out, seen, <u32>at);
   out.byte(0x0a);
   out.uint(own);
   out.byte(0x0a);
   out.uint(domain.generation);
+  out.byte(0x0a);
+  out.uint(firstAfter(<i32>seen[seen.length - 1]));
   return handOut(out);
 }
 
@@ -718,18 +727,22 @@ export function domainParent(appDomain: i32): i32 {
 /**
  * How far live application domain `appDomain`'s log, as domainKeyLogBytes
  * writes it, is its parent's, entry for entry: the index of the first log
- * entry past which they may part, 0 for the root or a domain not live.
- * Before its first ABC is added, a domain sees what its parent does, by
- * the same places and counts, but for the findings of the two (one
- * parent further up from it) and its own (which its parent does not see).
+ * entry past which they may part, 0 for the root or a domain not live,
+ * and never past the first made since the last ABC was added, which may
+ * still change. Before its first ABC is added, a domain sees what its
+ * parent does, by the same places and counts, but for the findings of
+ * the two (one parent further up from it) and its own (which its parent
+ * does not see).
  */
 export function domainKeyFork(appDomain: i32): i32 {
   if (appDomain <= 0 || !isLive(appDomain)) {
     return 0;
   }
 
+  // Never past the entries made before the last ABC was added, which a
+  // verification under way may still take back.
   const own = <u32>appDomain;
-  let bound = domain.logKind.length;
+  let bound = firstAfter(domain.abcs.length - 1);
   for (let i = 0; i < domain.abcs.length; i++) {
     if (domain.abcDomain[i] === own) {
       bound = firstAfter(i);
@@ -757,16 +770,13 @@ export function domainKeyFork(appDomain: i32): i32 {
  * for an ABC of the domain, from entry `from` to entry `to` (the log's
  * end where negative), the entries made with `after` ABCs added or fewer
  * left out, handed out (see handOut): no address if `appDomain` is not
- * live. The entries made before the last ABC was added are settled: none
- * of them changes any more while the domain is live, but in a rebuild,
- * where those made since may (a verification's LOG_Verify may go, see
- * Verifier). After every `block` settled entries it writes, `filled` of
- * the first block written before `from`, it writes a line of "#" and the
- * index of the entry after them; and before the first entry not settled,
- * or at the end, a line of "$" and the index of that entry, from which a
- * later call goes on. So that a host keying a domain's modules chains the
- * digests of its blocks once each, and takes its parent's blocks for its
- * own before domainKeyFork.
+ * live. Where `block` is positive, after every `block` entries it writes,
+ * `filled` of the first block written before `from`, a line of "#" and
+ * the index of the entry after them; and at the end, a line of "$" and
+ * the index it ended at. So that a host keying a domain's modules chains
+ * the digests of its blocks of settled entries (domainKeyHeaderBytes)
+ * once each, and takes its parent's blocks for its own before
+ * domainKeyFork.
  */
 export function domainKeyLogBytes(
   appDomain: i32,
@@ -776,7 +786,7 @@ export function domainKeyLogBytes(
   block: i32,
   filled: i32,
 ): usize {
-  if (!isLive(appDomain) || from < 0 || block <= 0 || filled < 0 || filled >= block) {
+  if (!isLive(appDomain) || from < 0 || filled < 0 || (block > 0 && filled >= block)) {
     return handOut(null);
   }
 
@@ -786,20 +796,14 @@ export function domainKeyLogBytes(
   out.reset();
   const length = domain.logKind.length;
   const end = to < 0 || to > length ? length : to;
-  const settled = <u32>domain.abcs.length;
   let count: u32 = 0;
   let e = max(from, firstAfter(after));
   for (; e < end; e++) {
-    // The entries after one not settled are not either.
-    if (domain.logAt[e] >= settled) {
-      break;
-    }
-
     while (count < <u32>seen.length && seen[count] < domain.logAt[e]) {
       count++;
     }
 
-    if (writeEntry(out, e, own, seen, count) && ++filled === block) {
+    if (writeEntry(out, e, own, seen, count) && block > 0 && ++filled === block) {
       out.byte(0x0a);
       out.byte(0x23);
       out.uint(e + 1);
@@ -810,14 +814,6 @@ export function domainKeyLogBytes(
   out.byte(0x0a);
   out.byte(0x24);
   out.uint(e);
-  for (; e < end; e++) {
-    while (count < <u32>seen.length && seen[count] < domain.logAt[e]) {
-      count++;
-    }
-
-    writeEntry(out, e, own, seen, count);
-  }
-
   return handOut(out);
 }
 

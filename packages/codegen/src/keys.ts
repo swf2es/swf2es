@@ -4,16 +4,18 @@
 // "Caching modules").
 //
 // A key names the log as its ABC's application domain sees it (codegen's
-// domainContext). Its entries made before the last ABC was added are
-// settled: none changes while the domain is live and the compiler not
-// rebuilt. A key names those by the chained digests of their blocks of
+// domainContext). Its entries made before the last ABC the domain sees
+// was added are settled: none changes while the domain is live and the
+// compiler not rebuilt, and which they are depends on what the domain
+// sees alone. A key names those by the chained digests of their blocks of
 // KEY_BLOCK entries, sha256(previous digest + block), and the rest by
 // their text. Each domain keeps where its chain is, the digest so far
 // and the settled entries after the last block, so the next key reads
 // only the entries made since; a new domain's chain starts as its
-// parent's is where the two logs part (domainKeyFork). The blocks are
-// the same however they were read, so the key is the same as one taken
-// from nothing.
+// parent's is where the two logs part (domainKeyFork), so a parent's
+// chain may run past its own settled entries, and its key then splits at
+// the last block's end before them. The blocks are the same however they
+// were read, so the key is the same as one taken from nothing.
 import { sha256Joined } from "./sha256.js";
 
 /** How many entries of the log each chained digest takes. */
@@ -112,46 +114,75 @@ export class KeyChains {
     const lines = header.split("\n");
     const appDomain = Number(lines[2]);
     const generation = Number(lines[3]);
+    const settled = Number(lines[4]);
     if (generation !== this.generation) {
       this.chains.clear();
       this.generation = generation;
     }
 
-    const chain = this.chain(appDomain, after);
-    const { entry, filled } = chain.at;
-    const bytes = this.codegen.log(appDomain, after, entry, -1, KEY_BLOCK, filled);
-    if (bytes === null) {
+    const chain = this.chain(appDomain, after, settled);
+    if (chain === null) {
       return null;
     }
 
-    const unsettled = read(bytes, chain);
-    const { digest, partial } = chain.at;
+    // Gone past the settled entries for a child's start: from the last
+    // block's end before them, as the key splits its blocks there.
+    let at = chain.at;
+    if (at.entry > settled) {
+      const back: Chain = { marks: [], at: before(chain.marks, settled) };
+      if (!this.extend(appDomain, after, back, settled)) {
+        return null;
+      }
+
+      at = back.at;
+    }
+
+    const rest = this.codegen.log(appDomain, after, settled, -1, 0, 0);
+    if (rest === null) {
+      return null;
+    }
+
     return {
       abcs: lines[0] ? lines[0].split(",").map(Number) : [],
       own: Number(lines[1]),
-      blocks: digest,
-      rest: ascii.decode(partial) + unsettled,
+      blocks: at.digest,
+      rest: ascii.decode(at.partial) + ascii.decode(rest.subarray(0, rest.lastIndexOf(0x0a))),
     };
   }
 
-  /** `appDomain`'s chain, gone on with up to entry `limit` where that is not negative. */
-  private chain(appDomain: number, after: number, limit = -1): Chain {
+  /** `appDomain`'s chain, gone on with up to entry `limit`; null, and none kept, where it is not live. */
+  private chain(appDomain: number, after: number, limit: number): Chain | null {
     const name = `${appDomain} ${after}`;
-    let chain = this.chains.get(name);
-    if (chain === undefined) {
-      chain = { marks: [], at: this.start(appDomain, after) };
+    const kept = this.chains.get(name);
+    const chain = kept ?? { marks: [], at: this.start(appDomain, after) };
+    if (!this.extend(appDomain, after, chain, limit)) {
+      return null;
+    }
+
+    if (kept === undefined) {
       this.chains.set(name, chain);
     }
 
+    return chain;
+  }
+
+  /** Go on with `appDomain`'s `chain` up to entry `limit`: false where the domain is not live. */
+  private extend(appDomain: number, after: number, chain: Chain, limit: number): boolean {
     const { entry, filled } = chain.at;
-    if (limit >= 0 && entry < limit) {
-      const bytes = this.codegen.log(appDomain, after, entry, limit, KEY_BLOCK, filled);
-      if (bytes !== null) {
-        read(bytes, chain);
-      }
+    const bytes = this.codegen.log(
+      appDomain,
+      after,
+      entry,
+      Math.max(entry, limit),
+      KEY_BLOCK,
+      filled,
+    );
+    if (bytes === null) {
+      return false;
     }
 
-    return chain;
+    read(bytes, chain);
+    return true;
   }
 
   /** Where a domain's chain starts: where its parent's is last before the two part, else at none. */
@@ -162,27 +193,32 @@ export class KeyChains {
     }
 
     const fork = this.codegen.fork(appDomain);
-    const { at, marks } = this.chain(parent, after, fork);
-    if (at.entry <= fork) {
-      return at;
+    const chain = this.chain(parent, after, fork);
+    if (chain === null) {
+      return NONE;
     }
 
-    for (let k = marks.length - 1; k >= 0; k--) {
-      if (marks[k].entry <= fork) {
-        return marks[k];
-      }
-    }
-
-    return NONE;
+    return chain.at.entry <= fork ? chain.at : before(chain.marks, fork);
   }
+}
+
+/** The last of `marks` at or before entry `entry`, else none. */
+function before(marks: Mark[], entry: number): Mark {
+  for (let k = marks.length - 1; k >= 0; k--) {
+    if (marks[k].entry <= entry) {
+      return marks[k];
+    }
+  }
+
+  return NONE;
 }
 
 /**
  * Go on with `chain` by domainKeyLogBytes' `bytes`: each block's digest
  * chained, a mark at its end, the oldest let go of past KEPT, and where it
- * goes on from next. The text of the entries not settled.
+ * goes on from next.
  */
-function read(bytes: Uint8Array, chain: Chain): string {
+function read(bytes: Uint8Array, chain: Chain): void {
   let { digest, partial, filled } = chain.at;
   let start = 0;
   let entries = 0;
@@ -197,7 +233,7 @@ function read(bytes: Uint8Array, chain: Chain): string {
       continue;
     }
 
-    // A line of "#" and the entry after a block, or of "$" and the first entry not settled.
+    // A line of "#" and the entry after a block, or of "$" and the entry it ended at.
     let entry = 0;
     let j = i + 2;
     for (; j < bytes.length && bytes[j] !== 0x0a; j++) {
@@ -217,7 +253,7 @@ function read(bytes: Uint8Array, chain: Chain): string {
         chain.marks.splice(0, chain.marks.length - KEPT);
       }
 
-      return j >= bytes.length ? "" : ascii.decode(bytes.subarray(j));
+      return;
     }
 
     entries = 0;
