@@ -1,6 +1,7 @@
 // libtess2 for wasm32-freestanding, with the curves of a layer's fills
-// flattened first (flatten.zig), and the band filler (bands.zig) for what
-// libtess2 refuses or fails at. The host resets the module's bounded bump
+// flattened first (flatten.zig), lyon (lyon.zig) for the fills of densely
+// crossing contours libtess2 is slow at (crossings.zig), and the band filler
+// (bands.zig) for what either refuses or fails at. The host resets the module's bounded bump
 // arena (arena.zig) before each call, a fill (run) or a layer's fills (layer), and copies the
 // resulting geometry into owned buffers.
 // The vendored C uses its allocator callbacks; libc allocation and longjmp
@@ -12,6 +13,9 @@ const arena = @import("arena.zig");
 const bands = @import("bands.zig");
 const earclip = @import("earclip.zig");
 const monotone = @import("monotone.zig");
+const crossings = @import("crossings.zig");
+const lyon = @import("lyon.zig");
+const validate = @import("validate.zig");
 
 extern "env" fn failure(code: c_int) noreturn;
 
@@ -21,13 +25,92 @@ pub const Output = struct {
     indices: []const c.TESSindex,
 };
 
-/// The last fill's output, libtess2's or the band filler's, in the arena.
+/// The last fill's output, libtess2's, lyon's or the band filler's, in the arena.
 var out: ?Output = null;
 /// The arena's generation `out` was made in: another's reset leaves it none.
 var made_in: u32 = 0;
-/// Off once libtess2 has unwound an instance through `failure`: the host
-/// then fills the call again in a new instance by the bands alone.
+/// Off once libtess2 has unwound an instance through `failure`, or lyon has
+/// trapped: the host then fills the call again in a new instance by the
+/// bands alone.
 var libtess = true;
+
+/// What filled the last fill, for tests (filledBy): none, a fan, the
+/// monotone cut, ear clipping, libtess2, lyon or the bands.
+const Filler = enum(u32) { none, fan, monotone, earclip, libtess2, lyon, bands };
+var filler: Filler = .none;
+
+export fn filledBy() u32 {
+    return @backingInt(filler);
+}
+
+/// For tests: what the next lyon fill does in place of filling. 0 fills; a negative status is
+/// returned as lyon's own; 1 traps, as a panic in lyon does; 2 fills, and its triangles are
+/// taken as having failed the check, both ways. It applies once.
+var lyon_fault: i32 = 0;
+
+export fn lyonFault(fault: i32) void {
+    lyon_fault = fault;
+}
+
+/// For tests: validate.zig's verdict on `index_count` indices at `triangles` into `vertex_count`
+/// positions at `at` as the fill of the contours at `coords`: 0 right, 1 wrong, 2 out of
+/// memory, -2 for arguments that disagree.
+export fn checkFill(coords: [*]const f64, count: usize, ends: [*]const u32, contours: usize, nonzero: i32, at: [*]const f64, vertex_count: usize, triangles: [*]const i32, index_count: usize) i32 {
+    if (!valid(coords[0 .. count * 2], ends[0..contours], nonzero) or index_count % 3 != 0) {
+        return -2;
+    }
+
+    for (triangles[0..index_count]) |index| {
+        if (index < 0 or @as(usize, @intCast(index)) >= vertex_count) {
+            return -2;
+        }
+    }
+
+    return switch (validate.covers(arena.allocator, coords[0 .. count * 2], ends[0..contours], nonzero == 1, at[0 .. vertex_count * 2], triangles[0..index_count])) {
+        .right => 0,
+        .wrong => 1,
+        .no_memory => 2,
+    };
+}
+
+/// lyon's fill, checked (validate.zig): its status, -3 where the check found no memory for its
+/// scratch, as lyon's own buffers report, or -4 where its triangles failed the check every way.
+/// Contours that come within thousandths of a pixel of each other can come out wrong one way and
+/// right the other, and a try costs a tenth of what libtess2 takes over them: so where lyon's
+/// sweep along y, its default and the quicker on decks, fails the check, it sweeps again along x.
+/// Snapping the points to whole twips as a third and fourth try rescued none of the decks these
+/// two lost. Out of memory for
+/// the check is lyon's own: libtess2, in the same nearly full arena, would run out too and unwind
+/// the instance, where the bands fail cleanly and the host fills the call again alone.
+fn lyonChecked(coords: []const f64, ends: []const u32, nonzero: bool) union(enum) { output: lyon.Output, status: i32 } {
+    const fault = lyon_fault;
+    lyon_fault = 0;
+    if (fault < 0) {
+        return .{ .status = fault };
+    }
+
+    if (fault == 1) {
+        @trap();
+    }
+
+    const mark = arena.top;
+    for ([_]i32{ 0, lyon.horizontal }) |flags| {
+        arena.top = mark;
+        switch (lyon.fill(coords, ends, nonzero, flags)) {
+            .output => |result| {
+                const verdict = if (fault == 2) .wrong else validate.covers(arena.allocator, coords, ends, nonzero, result.positions, result.indices);
+                switch (verdict) {
+                    .right => return .{ .output = result },
+                    .wrong => {},
+                    .no_memory => return .{ .status = -3 },
+                }
+            },
+            .status => |status| return .{ .status = status },
+        }
+    }
+
+    return .{ .status = -4 };
+}
 
 export fn reset() void {
     arena.reset();
@@ -98,14 +181,17 @@ fn valid(coords: []const f64, ends: []const u32, nonzero: i32) bool {
 /// the bands could fill it in the memory left.
 fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     out = null;
+    filler = .none;
     made_in = arena.generation;
     const mark = arena.top;
+    const in_range = inRange(coords);
     // One convex contour, a triangle above all, as a drawing redrawn every frame draws thousands:
     // a fan, which either rule fills alike, and no sweep. Within libtess2's range alone, where its
     // turns' cross products are finite: past it they may overflow and pass a concave contour.
-    if (libtess and ends.len == 1 and inRange(coords)) {
+    if (libtess and ends.len == 1 and in_range) {
         if (fan(coords)) |result| {
             out = result;
+            filler = .fan;
             return 0;
         }
 
@@ -115,21 +201,49 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
         const found = monotone.fill(arena.allocator, coords);
         if (found == .triangles) {
             out = .{ .positions = coords, .indices = found.triangles };
+            filler = .monotone;
             return 0;
         }
 
         arena.top = mark;
         if (earclip.fill(arena.allocator, coords, found == .simple)) |triangles| {
             out = .{ .positions = coords, .indices = triangles };
+            filler = .earclip;
             return 0;
         }
 
         arena.top = mark;
     }
 
-    if (libtess and inRange(coords)) {
+    // Many contours that cross each other densely, which libtess2 takes seconds over: lyon, its
+    // triangles checked; the bands where it fails; libtess2 where it refuses the coordinates as
+    // past its range, or its triangles fail the check, which the bands cannot fill in good time
+    // (they give up on such decks after a tenth of a second or more). A trap in lyon is the
+    // host's, as one in libtess2 is.
+    var dense = false;
+    if (libtess and in_range) {
+        dense = crossings.dense(arena.allocator, coords, ends);
+        arena.top = mark;
+    }
+
+    if (dense) {
+        switch (lyonChecked(coords, ends, nonzero)) {
+            .output => |result| {
+                out = .{ .positions = result.positions, .indices = result.indices };
+                filler = .lyon;
+                return 0;
+            },
+            .status => |status| {
+                arena.top = mark;
+                dense = status != lyon.refused and status != -4;
+            },
+        }
+    }
+
+    if (!dense and libtess and in_range) {
         if (libtess2(coords, ends, nonzero)) |result| {
             out = result;
+            filler = .libtess2;
             return 0;
         }
 
@@ -142,6 +256,7 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
         return -1;
     };
     out = .{ .positions = result.positions, .indices = result.indices };
+    filler = .bands;
     return 0;
 }
 
@@ -281,6 +396,7 @@ export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: 
 /// point in `ends`: run's status, its output in `out`.
 pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32) i32 {
     out = null;
+    filler = .none;
     if (!valid(coords, ends, nonzero)) {
         return -2;
     }

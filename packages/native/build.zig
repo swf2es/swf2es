@@ -1,7 +1,7 @@
 // Every binary of the package, each its own wasm32-freestanding module in
 // zig-out/bin/: mp3 (minimp3), audio (ADPCM and Nellymoser), compress
 // (zlib and the LZMA SDK), render
-// (bitmap's SIMD kernels, libtess2's fills and the lines) and atf
+// (bitmap's SIMD kernels, libtess2's and lyon's fills and the lines) and atf
 // (jxrlib's JPEG XR decoder). build.ts runs
 // this with the pinned Zig and checks the results in as base64; `zig build
 // test` runs the bitmap kernel's, the fill flattener's, the band filler's,
@@ -39,7 +39,7 @@ fn wasm(b: *std.Build, features: []const std.Target.wasm.Feature) std.Build.Reso
 /// The kernels', the fill flattener's, the band filler's, the blurs' and the sound decoders' tests, on the host.
 fn tests(b: *std.Build) void {
     const test_step = b.step("test", "Run the bitmap kernel's, the fill flattener's, the band filler's, the blurs' and the sound decoders' tests on the host");
-    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "earclip", "src/render/earclip.zig" }, .{ "monotone", "src/render/monotone.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" }, .{ "png", "src/compress/png.zig" }, .{ "jpeg", "src/compress/jpeg.zig" } }) |unit| {
+    inline for (.{ .{ "bitmap", "src/render/convolve.zig" }, .{ "flatten", "src/render/flatten.zig" }, .{ "bands", "src/render/bands.zig" }, .{ "earclip", "src/render/earclip.zig" }, .{ "crossings", "src/render/crossings.zig" }, .{ "validate", "src/render/validate.zig" }, .{ "monotone", "src/render/monotone.zig" }, .{ "blur", "src/render/blur.zig" }, .{ "pixels", "src/render/pixels.zig" }, .{ "draw", "src/render/draw.zig" }, .{ "dxt", "src/render/dxt.zig" }, .{ "adpcm", "src/audio/adpcm.zig" }, .{ "nellymoser", "src/audio/nellymoser.zig" }, .{ "png", "src/compress/png.zig" }, .{ "jpeg", "src/compress/jpeg.zig" } }) |unit| {
         const module = b.createModule(.{ .root_source_file = b.path(unit[1]), .target = b.graph.host });
         test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .name = unit[0], .root_module = module })).step);
     }
@@ -215,7 +215,8 @@ fn compress(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.built
 
 /// What the renderer computes natively, in one module, src/render/: the
 /// bitmap kernels (bitmap.zig, convolve.zig), fill tessellation
-/// (tessellate.zig's arena and libtess2, flatten.zig's curves) and a
+/// (tessellate.zig's arena and libtess2, lyon from swf2es/tessellate's
+/// static library for densely crossing fills, flatten.zig's curves) and a
 /// layer's lines (strokes.zig), their outlines filled by the same libtess2
 /// in the same memory. Each user instantiates it apart, its memory its own.
 fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.Optimize, include: std.Build.LazyPath) void {
@@ -227,7 +228,7 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         "highWater",   "allocated",  "setLimit",        "layer",        "lineInput",       "lineHeader",  "lineBuild",
         "resetArena",  "convolve",   "capacity",        "bandsOnly",    "blurFilter",      "layerFilter", "channelPixels",
         "mergePixels", "overPixels", "palettePixels",   "matrixPixels", "transformPixels", "noisePixels", "perlinPixels",
-        "wordsPixels", "drawPixels", "compositePixels", "encodeDxt",
+        "wordsPixels", "drawPixels", "compositePixels", "encodeDxt",    "filledBy",        "lyonFault",   "checkFill",
     };
 
     const library = b.path(vendor ++ "libtess2");
@@ -257,6 +258,9 @@ fn render(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin
         .files = &sources,
         .flags = &.{ "-O2", "-DNDEBUG", "-mbulk-memory", "-fno-stack-protector" },
     });
+    // lyon's fill tessellator, swf2es/tessellate's release (src/render/lyon/release.json): it
+    // takes malloc, realloc and free from arena.zig.
+    root.addObjectFile(b.path("src/render/lyon/libswf2es_tessellate.a"));
 
     const module = b.addExecutable(.{ .name = "render", .root_module = root });
     module.entry = .disabled;
