@@ -201,7 +201,10 @@
 //
 // --still-shapes N plays instead N shapes of their own, each a wobbly outline of curves filled
 // with a gradient and a disc of a colour inside it, both outlined, standing still on a grid: what
-// the geometries of a library of distinct art hold once drawn (the geometry line).
+// the geometries of a library of distinct art hold once drawn (the geometry line). --change-every
+// K plays them on a loop of K frames that takes one shape away halfway and puts it back at its end,
+// an occasional change in a still scene's runs: its worst draw and tessellation (max) show what
+// the change costs.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
@@ -226,7 +229,7 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --still-shapes N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
+//     | --toggle-static N | --still-shapes N [--change-every K] | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
 //     [--blend-after F]
 //     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
@@ -1830,7 +1833,7 @@ function stillCrowdSwf(count: number): Uint8Array {
  * 24 curves filled with a linear gradient, a disc inside it of a colour, and both outlined, as a
  * SWF's library of distinct art is shown at once. What their geometries hold once drawn.
  */
-function stillShapesSwf(count: number): Uint8Array {
+function stillShapesSwf(count: number, every = 0): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
   const r = 400;
   const across = Math.max(1, Math.ceil(Math.sqrt((count * WIDTH) / HEIGHT)));
@@ -1894,8 +1897,39 @@ function stillShapesSwf(count: number): Uint8Array {
     );
   }
 
-  tags.push(w.showFrame(), w.end());
-  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+  tags.push(w.showFrame());
+  // A loop of `every` frames that takes one shape away halfway and puts it back at its end: an
+  // occasional change in a still scene's runs.
+  for (let f = 1; f < every; f++) {
+    if (f === every >> 1) {
+      tags.push(w.remove(Math.ceil(count / 2)));
+    } else if (f === every - 1) {
+      const c = Math.ceil(count / 2) - 1;
+      tags.push(
+        w.place({
+          depth: c + 1,
+          character: c + 1,
+          matrix: {
+            a: scale,
+            d: scale,
+            tx: Math.round((c % across) * cell + cell / 2),
+            ty: Math.round(Math.floor(c / across) * cell + cell / 2),
+          },
+        }),
+      );
+    }
+
+    tags.push(w.showFrame());
+  }
+
+  tags.push(w.end());
+  return w.swf({
+    width: WIDTH,
+    height: HEIGHT,
+    frameRate: 24,
+    frameCount: Math.max(1, every),
+    tags,
+  });
 }
 
 /** Detailed, coloured branches whose independent timelines should not repack each other's art. */
@@ -2413,7 +2447,7 @@ const swf =
                             : stillCrowd > 0
                               ? stillCrowdSwf(stillCrowd)
                               : stillShapes > 0
-                                ? stillShapesSwf(stillShapes)
+                                ? stillShapesSwf(stillShapes, option("change-every", 0))
                                 : toggleBranches > 0
                                   ? branchSwf(toggleBranches)
                                   : toggle > 0
@@ -2495,7 +2529,11 @@ const tick = result.tick.slice(WARMUP);
 const draw = result.draw.slice(WARMUP);
 const gl = result.gl.slice(WARMUP);
 const total = tick.map((t, i) => t + draw[i] + gl[i]);
-const stats = (values: number[]) => ({ median: quantile(values, 0.5), p90: quantile(values, 0.9) });
+const stats = (values: number[]) => ({
+  median: quantile(values, 0.5),
+  p90: quantile(values, 0.9),
+  max: values.length > 0 ? Math.max(...values) : 0,
+});
 const tessellation = result.tessellation.slice(WARMUP);
 const summary = {
   shapes:
@@ -2681,10 +2719,12 @@ if (args.includes("--json")) {
   }
 
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
-  console.log(`  draw    median ${ms(summary.draw.median)}  p90 ${ms(summary.draw.p90)}`);
+  console.log(
+    `  draw    median ${ms(summary.draw.median)}  p90 ${ms(summary.draw.p90)}  max ${ms(summary.draw.max)}`,
+  );
   console.log(`  gl      median ${ms(summary.gl.median)}  p90 ${ms(summary.gl.p90)}`);
   console.log(
-    `  tess    median ${ms(summary.tessellation.median)}  p90 ${ms(summary.tessellation.p90)} (of the draw)`,
+    `  tess    median ${ms(summary.tessellation.median)}  p90 ${ms(summary.tessellation.p90)}  max ${ms(summary.tessellation.max)} (of the draw)`,
   );
   if (idleRenders > 0) {
     console.log(
