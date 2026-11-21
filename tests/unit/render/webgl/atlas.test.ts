@@ -11,6 +11,7 @@ import {
 import {
   GeometryAtlas,
   type Place,
+  QUIET_SWEEP_FRAMES,
   STREAM_QUIET_FRAMES,
 } from "../../../../packages/render/dist/webgl/atlas.js";
 import { FillBatches } from "../../../../packages/render/dist/webgl/batches.js";
@@ -144,8 +145,8 @@ function shape(seed: number, count: number): GeometryData {
 /** Frames placed till what was added has stood long enough for its arrays to be let go of. */
 function settle(atlas: GeometryAtlas, geometries: Geometries): void {
   // Placed on the first, let go of RELEASE_FRAMES of the registry's on; one small enough to merge
-  // once no run's stream has staged it for STREAM_QUIET_FRAMES of the atlas'.
-  for (let i = 0; i <= RELEASE_FRAMES + STREAM_QUIET_FRAMES; i++) {
+  // once no run's stream has staged it for STREAM_QUIET_FRAMES of the atlas', at the next look.
+  for (let i = 0; i <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + QUIET_SWEEP_FRAMES; i++) {
     atlas.place(geometries);
     drawn(geometries);
   }
@@ -734,7 +735,7 @@ test("a still run's geometries are let go of once quiet, and wanted again where 
   s.atlas.place(s.geometries);
   drawn(s.geometries);
   // Still: staged once, then drawn from its copy, which stages nothing.
-  for (let frame = 0; frame <= RELEASE_FRAMES + STREAM_QUIET_FRAMES; frame++) {
+  for (let frame = 0; frame <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + QUIET_SWEEP_FRAMES; frame++) {
     s.atlas.place(s.geometries);
     drawn(s.geometries);
     const { segment } = run(s, ids);

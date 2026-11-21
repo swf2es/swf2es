@@ -97,6 +97,9 @@ const NO_INDICES = new Uint16Array(0);
  */
 export const STREAM_QUIET_FRAMES = 300;
 
+/** Atlas frames between looks over the places waiting to be quiet (GeometryAtlas.quieten). */
+export const QUIET_SWEEP_FRAMES = 30;
+
 /**
  * `source`, indices into `count` vertices, copied into an array of their own: in 16 bits where
  * they fit, and in a buffer of their own, not the geometry's, which is let go of.
@@ -216,6 +219,13 @@ export class GeometryAtlas {
   private settling: Place[] = [];
   private settlingIds: number[] = [];
   private settlingFrames: number[] = [];
+  /**
+   * The settled places small enough to merge whose arrays wait for no run's stream to have
+   * staged them for STREAM_QUIET_FRAMES (quieten), with their ids: looked over every
+   * QUIET_SWEEP_FRAMES, not every frame.
+   */
+  private quiet: Place[] = [];
+  private quietIds: number[] = [];
 
   constructor(gl: WebGL2RenderingContext, state: GlState) {
     this.gl = gl;
@@ -258,6 +268,8 @@ export class GeometryAtlas {
     this.stagedIndexCount = 0;
     this.places = [];
     this.settling = [];
+    this.quiet = [];
+    this.quietIds = [];
     this.settlingIds = [];
     this.settlingFrames = [];
     this.tables.setUp();
@@ -468,6 +480,14 @@ export class GeometryAtlas {
    * after copies that never reached the GPU; the restore's Geometries.lost rebuilds them.
    */
   private settle(geometries: Geometries): void {
+    if (this.gl.isContextLost()) {
+      return;
+    }
+
+    if (this.frame % QUIET_SWEEP_FRAMES === 0) {
+      this.quieten(geometries);
+    }
+
     const places = this.settling;
     const ids = this.settlingIds;
     const frames = this.settlingFrames;
@@ -476,38 +496,68 @@ export class GeometryAtlas {
       k++;
     }
 
-    if (k === 0 || this.gl.isContextLost()) {
+    if (k === 0) {
       return;
     }
 
-    // Those a run's stream staged lately waited on again, behind the rest.
-    const waiting: number[] = [];
     for (let i = 0; i < k; i++) {
       const place = places[i];
       if (this.places[ids[i]] !== place || !geometries.get(ids[i])) {
         continue;
       }
 
+      // Staged by a run's stream lately: waits among the quiet till none has for a while.
       if (place.batch && this.frame - place.stagedIn < STREAM_QUIET_FRAMES) {
-        waiting.push(i);
+        this.quiet.push(place);
+        this.quietIds.push(ids[i]);
+      } else {
+        this.release(geometries, place, ids[i]);
+      }
+    }
+
+    // Moved down in place: a frame's settling allocates nothing.
+    places.copyWithin(0, k);
+    ids.copyWithin(0, k);
+    frames.copyWithin(0, k);
+    places.length -= k;
+    ids.length -= k;
+    frames.length -= k;
+  }
+
+  /**
+   * The places waiting among the quiet (settle) looked over: those no run's stream has staged
+   * for STREAM_QUIET_FRAMES let go of, those let go of otherwise forgotten, the rest kept in
+   * place.
+   */
+  private quieten(geometries: Geometries): void {
+    const places = this.quiet;
+    const ids = this.quietIds;
+    let kept = 0;
+    for (let i = 0; i < places.length; i++) {
+      const place = places[i];
+      if (this.places[ids[i]] !== place || !geometries.get(ids[i])) {
         continue;
       }
 
-      place.local = localIndices(place.local, place.vertices);
-      place.data = null;
-      place.releasedIn = this.frame;
-      geometries.release(ids[i]);
+      if (this.frame - place.stagedIn < STREAM_QUIET_FRAMES) {
+        places[kept] = place;
+        ids[kept] = ids[i];
+        kept++;
+      } else {
+        this.release(geometries, place, ids[i]);
+      }
     }
 
-    for (const i of waiting) {
-      places.push(places[i]);
-      ids.push(ids[i]);
-      frames.push(geometries.frame);
-    }
+    places.length = kept;
+    ids.length = kept;
+  }
 
-    places.splice(0, k);
-    ids.splice(0, k);
-    frames.splice(0, k);
+  /** `place`'s indices copied into an array of their own, and geometry `id`'s arrays let go of. */
+  private release(geometries: Geometries, place: Place, id: number): void {
+    place.local = localIndices(place.local, place.vertices);
+    place.data = null;
+    place.releasedIn = this.frame;
+    geometries.release(id);
   }
 
   /**
