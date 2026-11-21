@@ -221,26 +221,23 @@ export class WebGLBackend {
   }
 
   /**
-   * The context came back after it was lost: everything made again, every
-   * geometry copied in again from the registry's arrays. The textures were
-   * lost with it, which their owners add again (Textures.lost). Lost again
+   * The context came back after it was lost: everything made again. The
+   * geometries whose arrays the registry let go of are lost with it, which
+   * their owners add again as they draw them, and those it keeps are copied
+   * in again by the next frame (Geometries.lost). The textures were lost
+   * too, which their owners add again (Textures.lost). Lost again
    * meanwhile, it stays stale, for the next restore.
    */
   restore(geometries: Geometries): void {
     this.losses.clear();
     this.made = this.ready = false;
-    geometries.added.length = 0;
-    geometries.removed.length = 0;
-    geometries.updated.length = 0;
-    geometries.flattened.length = 0;
+    geometries.lost();
     if (this.gl.isContextLost()) {
       return;
     }
 
     try {
       this.setUp();
-      this.atlas.repack(geometries);
-      this.atlas.repackGlyphs(geometries);
       this.made = this.ready = true;
     } catch (e) {
       this.gaveUp(e);

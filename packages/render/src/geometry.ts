@@ -6,6 +6,16 @@ import { type Handle, Registry } from "./registry.js";
  */
 export const IDLE_FRAMES = 300;
 
+/**
+ * Frames of the registry (Geometries.frame) a geometry stands copied to the GPU before its
+ * arrays are let go of (release): one drawn anew each frame, as a script's drawing redrawn every
+ * frame is, goes whole before then, and costs the backend no copy of its indices; copying a
+ * thousand such geometries' indices a frame took about a millisecond. An owner that reads a
+ * geometry's arrays after adding it does so within these frames, or asks for them again
+ * (rebuild).
+ */
+export const RELEASE_FRAMES = 3;
+
 /** Floats a vertex of advanced text's glyph quads (GeometryData.glyphs). */
 export const GLYPH_FLOATS = 18;
 
@@ -83,12 +93,23 @@ export interface GeometryData {
  * Every geometry a scene list may name, by id. What goes undrawn for
  * IDLE_FRAMES is let go of; its owner finds it gone by its handle and adds
  * it again. The backend takes what was added and removed since it last
- * looked (taken), and keeps its own copies.
+ * looked (taken), and keeps its own copies: once it has copied a geometry's
+ * arrays to a live GPU context, the registry lets go of them (release),
+ * unless their owner changes them in place (add's `keep`). Nothing else
+ * releases them, so a view with no GPU backend, as in node, keeps every
+ * geometry's arrays. A reader that needs arrays let go of, a lost context
+ * or a CPU rasterizer alike, asks for them again through one entry point,
+ * rebuild: the geometry is removed, and its owner adds it again with its
+ * arrays as it next draws it, as it does an expired one.
  */
 export class Geometries extends Registry {
   /** Changes only when a handle can have become stale, including expiry and context loss. */
   removalVersion = 0;
   private readonly data: (GeometryData | null)[] = [];
+  /** Whether each geometry's arrays stay held once copied, as their owner changes them in place (update). */
+  private readonly kept: boolean[] = [];
+  /** Whether each geometry is flat (GeometryData.flat), its arrays held or not. */
+  private readonly flats: boolean[] = [];
   /** Each geometry's box: its positions' least x and y, then their greatest. */
   private boxes = new Float32Array(1024);
   /** Added since the backend last took them. */
@@ -98,10 +119,17 @@ export class Geometries extends Registry {
   /** Found flat since the backend last took them (markFlat). */
   flattened: number[] = [];
 
-  add(data: GeometryData): GeometryHandle {
+  /**
+   * `data` added, for the backend to copy. Its arrays are let go of once
+   * copied (release) unless `keep`, for an owner that changes them in place
+   * (update).
+   */
+  add(data: GeometryData, keep = false): GeometryHandle {
     const handle = this.hold(IDLE_FRAMES);
     const id = handle.id;
     this.data[id] = data;
+    this.kept[id] = keep;
+    this.flats[id] = data.flat === true;
     this.added.push(id);
     this.measure(id);
     return handle;
@@ -109,13 +137,49 @@ export class Geometries extends Registry {
 
   /**
    * Geometry `id`'s arrays changed in place, their lengths as they were: its
-   * box measured again, and its vertices copied again where they lie.
+   * box measured again, and its vertices copied again where they lie. Only
+   * for a geometry added to be kept, and only its vertices: the backend
+   * keeps the indices it was added with (the atlas's Place.local).
    */
   update(id: number): void {
-    if (this.data[id]) {
+    if (this.data[id] && this.kept[id]) {
       this.measure(id);
       this.updated.push(id);
     }
+  }
+
+  /**
+   * Geometry `id`'s arrays copied by the backend to a live GPU context,
+   * which keeps what it needs of them: let go of, unless they were added to
+   * be kept. Its box and flatness stay. Only the GPU backend calls it, once
+   * the copy is made (webgl/atlas.ts).
+   */
+  release(id: number): void {
+    if (!this.kept[id]) {
+      this.data[id] = null;
+    }
+  }
+
+  /** Whether geometry `id` is held but its arrays were let go of (release). */
+  released(id: number): boolean {
+    return this.holds(id) && !this.data[id];
+  }
+
+  /**
+   * Geometry `id`'s arrays wanted again, by any reader of them: where they
+   * were let go of (release), the geometry is removed, for its owner to add
+   * it again with its arrays as it next draws it (tessellated and stroked
+   * again, or from a slow layer's kept triangles), as an expired one is;
+   * its handle then reads dead. True where it was removed so; false where
+   * its arrays are held (get), or it is not held at all.
+   */
+  rebuild(id: number): boolean {
+    if (!this.released(id)) {
+      return false;
+    }
+
+    this.remove(id);
+    return true;
   }
 
   /**
@@ -123,10 +187,40 @@ export class Geometries extends Registry {
    * the backend to draw it so: its flag alone taken again, not its vertices.
    */
   markFlat(id: number): void {
-    const data = this.data[id];
-    if (data && !data.flat) {
-      data.flat = true;
+    if (this.holds(id) && !this.flats[id]) {
+      this.flats[id] = true;
+      const data = this.data[id];
+      if (data) {
+        data.flat = true;
+      }
+
       this.flattened.push(id);
+    }
+  }
+
+  /** Whether geometry `id` is flat (GeometryData.flat, markFlat). */
+  flat(id: number): boolean {
+    return this.flats[id] === true;
+  }
+
+  /**
+   * The context was lost, and the backend's copies with it: the geometries
+   * whose arrays were let go of rebuilt (rebuild), and those whose arrays
+   * are held added again as they are.
+   */
+  override lost(): void {
+    for (let id = 0; id < this.size; id++) {
+      this.rebuild(id);
+    }
+
+    this.added.length = 0;
+    this.removed.length = 0;
+    this.updated.length = 0;
+    this.flattened.length = 0;
+    for (let id = 0; id < this.size; id++) {
+      if (this.holds(id)) {
+        this.added.push(id);
+      }
     }
   }
 
@@ -166,24 +260,15 @@ export class Geometries extends Registry {
     return this.boxes;
   }
 
+  /** Geometry `id`'s arrays, null once let go of (release) or for one not held. */
   get(id: number): GeometryData | null {
     return this.data[id] ?? null;
-  }
-
-  /** The ids of every geometry held, in order. */
-  live(): number[] {
-    const ids: number[] = [];
-    for (let id = 0; id < this.data.length; id++) {
-      if (this.data[id]) {
-        ids.push(id);
-      }
-    }
-
-    return ids;
   }
 
   protected override dropped(id: number): void {
     this.removalVersion++;
     this.data[id] = null;
+    this.kept[id] = false;
+    this.flats[id] = false;
   }
 }

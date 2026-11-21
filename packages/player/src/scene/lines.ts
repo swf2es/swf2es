@@ -9,7 +9,7 @@ import type { ShapeLayer } from "../display/shapes.js";
 import { evenWidth, scalesEvenly } from "../display/stretch.js";
 import { same } from "../display/value-lists.js";
 import type { FillTessellator } from "./fills.js";
-import { type Part, strokePart } from "./shapes.js";
+import { type Part, type PartPaint, strokePart } from "./shapes.js";
 import { layerStrokes } from "./strokes.js";
 
 /**
@@ -59,10 +59,11 @@ export interface LayerLines {
 
 /**
  * A part of a painted layer's lines, drawn in order: each run of lines of
- * a colour, and each line of a paint, textured (strokePart).
+ * a colour, and each line of a paint, textured (strokePart). Its paint, not
+ * its geometry, whose arrays the registry lets go of once on the GPU.
  */
 export interface LinePiece {
-  part: Part;
+  part: PartPaint;
   handle: GeometryHandle;
 }
 
@@ -259,15 +260,14 @@ export class LineCache {
     let pieces: LinePiece[] | null = null;
     let vertices = 0;
     if (lines.painted) {
-      pieces = this.paintedPieces(layer, a, b, c, d, least, by, opaque) ?? null;
+      const built = this.paintedPieces(layer, a, b, c, d, least, by, opaque);
       // Not built, as where no instance could be made: none kept, so that a later frame asks again.
-      if (!pieces) {
+      if (!built) {
         return null;
       }
 
-      for (const piece of pieces) {
-        vertices += piece.part.geometry.positions.length / 2;
-      }
+      pieces = built.pieces;
+      vertices = built.vertices;
     } else {
       const data = layerStrokes(layer, a, b, c, d, least, this.tessellator.lines, by, opaque);
       // As for the pieces.
@@ -323,8 +323,9 @@ export class LineCache {
 
   /**
    * A painted layer's lines as its pieces, in order: each run of lines of
-   * a colour built together, each painted line alone and textured. Undefined
-   * where the builder built none, which a later frame may try again.
+   * a colour built together, each painted line alone and textured, and the
+   * vertices they hold. Undefined where the builder built none, which a
+   * later frame may try again.
    */
   private paintedPieces(
     layer: ShapeLayer,
@@ -335,10 +336,11 @@ export class LineCache {
     least: number,
     by: readonly number[] | null,
     opaque: boolean,
-  ): LinePiece[] | undefined {
+  ): { pieces: LinePiece[]; vertices: number } | undefined {
     const strokes = layer.strokes;
     const builder = this.tessellator.lines;
     const pieces: LinePiece[] = [];
+    let vertices = 0;
     for (let from = 0; from < strokes.length; ) {
       const paint = strokes[from].paint;
       let to = from + 1;
@@ -361,13 +363,18 @@ export class LineCache {
           ? strokePart(data, a, b, c, d, paint)
           : { geometry: data, paint: null, region: null, mesh: null };
       if (part) {
-        pieces.push({ part, handle: this.geometries.add(part.geometry) });
+        const { paint: painted, region, mesh } = part;
+        pieces.push({
+          part: { paint: painted, region, mesh },
+          handle: this.geometries.add(part.geometry),
+        });
+        vertices += part.geometry.positions.length / 2;
       }
 
       from = to;
     }
 
-    return pieces;
+    return { pieces, vertices };
   }
 
   /** Whether `e` holds geometries. */

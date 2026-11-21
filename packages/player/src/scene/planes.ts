@@ -169,7 +169,8 @@ export class Planes {
         indices: Uint32Array.of(0, 1, 2, 0, 2, 3),
       };
       planeQuadData(data, this.quad, width, height);
-      kept = { handle: this.geometries.add(data), data };
+      // Kept: its arrays change in place as it moves (update).
+      kept = { handle: this.geometries.add(data, true), data };
       this.quads.set(o, kept);
     } else if (planeQuadData(kept.data, this.quad, width, height)) {
       this.geometries.update(kept.handle.id);

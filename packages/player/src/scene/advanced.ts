@@ -187,7 +187,11 @@ interface AdvancedText {
   grid: string;
   thickness: number;
   sharpness: number;
-  glyphs: AdvancedGlyphs | null;
+  /**
+   * Its glyphs drawn as normal text (AdvancedGlyphs' normal), null where it cannot be drawn so:
+   * not its quads, whose arrays the registry lets go of once they are on the GPU.
+   */
+  normal: number[] | null;
   handle: GeometryHandle | null;
 }
 
@@ -247,7 +251,7 @@ export class AdvancedTexts {
           kept.sharpness === field.sharpness)) &&
       (!kept.handle || this.geometries.alive(kept.handle))
     ) {
-      return kept.glyphs ? { handle: kept.handle, normal: kept.glyphs.normal, m } : null;
+      return kept.normal ? { handle: kept.handle, normal: kept.normal, m } : null;
     }
 
     if (kept?.handle && this.geometries.alive(kept.handle)) {
@@ -267,7 +271,7 @@ export class AdvancedTexts {
       grid: field?.gridFitType ?? "",
       thickness: field?.thickness ?? 0,
       sharpness: field?.sharpness ?? 0,
-      glyphs,
+      normal: glyphs?.normal ?? null,
       handle: glyphs?.geometry ? this.geometries.add(glyphs.geometry) : null,
     };
     texts.set(o, kept);

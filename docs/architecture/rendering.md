@@ -14,15 +14,25 @@ A shape layer's fills are geometries of the renderer's, made once for
 the layer and shared by every instance that draws it (`scene/parts.ts`,
 `partsOf`), a
 drawing's for each version of it, and let go of once undrawn for 300
-frames (`IDLE_FRAMES`). A layer that took 20 ms or more to make
+frames (`IDLE_FRAMES`). Their arrays on the CPU go sooner: three frames
+after the GPU backend has copied them into a live context
+(`Geometries.release`, called only by `webgl/atlas.ts` after the copy),
+the registry lets go of them
+and the backend keeps only their indices. A view with no GPU backend, as
+in node, never lets go of them. A reader that wants arrays let go of,
+the restore after a lost context or a CPU rasterizer alike, asks for them
+through one entry point, `Geometries.rebuild`: the geometry is removed,
+and its owner adds it again with its arrays as it next draws it, as it
+does one that expired (`renderer.md`, "Resources"). A layer that took 20 ms or more to make
 (`SLOW_PARTS_MS`), as a morph's blend of a hundred crossing contours takes
 libtess2 seconds, keeps its triangles when its geometries go
 (`scene/kept-parts.ts`), so a tween longer than the idle frames adds its
 blends again on each loop rather than tessellating them again; one with a
 fill the tessellator refused keeps nothing, to be tried again. Every view
 shares one budget of 64 MB (`KEPT_PARTS_BYTES`), which counts only the
-triangles whose geometries have gone, as a geometry held is the same
-arrays. Triangles that do not fit as they expire push out those worth
+triangles whose geometries have gone, as a geometry held draws them; its
+registry lets go of its own reference to them once they are on the GPU
+(`Geometries.release`), so the store's is a kept layer's only CPU copy. Triangles that do not fit as they expire push out those worth
 less, in milliseconds a byte, and are let go of otherwise, a tie too: let
 go of by age, a loop of more blends than fit would find none of them kept.
 They go otherwise with their layer, their view, or as their drawing

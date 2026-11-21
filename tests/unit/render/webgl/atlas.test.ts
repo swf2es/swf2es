@@ -4,18 +4,28 @@ import { GlState } from "../../../../packages/context3d/dist/device/state.js";
 import {
   Geometries,
   type GeometryData,
+  GLYPH_FLOATS,
+  RELEASE_FRAMES,
   TARGET_TEXEL,
 } from "../../../../packages/render/dist/geometry.js";
-import { GeometryAtlas, type Place } from "../../../../packages/render/dist/webgl/atlas.js";
+import {
+  GeometryAtlas,
+  type Place,
+  VERTEX_BYTES,
+} from "../../../../packages/render/dist/webgl/atlas.js";
+import { FillBatches } from "../../../../packages/render/dist/webgl/batches.js";
 import {
   blendFillFragment,
   fillFragment,
   fillVertex,
   stageFillFragment,
+  TABLE_ENTRIES,
 } from "../../../../packages/render/dist/webgl/programs.js";
 
 const ARRAY_BUFFER = 0x8892;
 const ELEMENT_ARRAY_BUFFER = 0x8893;
+const COPY_READ_BUFFER = 0x8f36;
+const COPY_WRITE_BUFFER = 0x8f37;
 
 interface FakeBuffer {
   bytes: Uint8Array;
@@ -27,15 +37,26 @@ interface FakeArray {
 
 /**
  * Just enough of WebGL 2 for the atlas: buffers that keep their bytes, the
- * element buffer bound in the vertex array as GL binds it, and counts of the
- * calls that make and fill buffers.
+ * element buffer bound in the vertex array as GL binds it, copies between
+ * buffers on the "GPU", and counts of the calls that make and fill the
+ * atlas' buffers and of the copies.
  */
 function fakeGl() {
   let arrayBuffer: FakeBuffer | null = null;
   let vertexArray: FakeArray | null = null;
-  const counts = { bufferData: 0, bufferSubData: 0 };
+  const copyBuffers: Record<number, FakeBuffer | null> = {
+    [COPY_READ_BUFFER]: null,
+    [COPY_WRITE_BUFFER]: null,
+  };
+  const counts = { bufferData: 0, bufferSubData: 0, copies: 0 };
+  const context = { lost: false };
   const bound = (target: number): FakeBuffer => {
-    const buffer = target === ARRAY_BUFFER ? arrayBuffer : (vertexArray?.elements ?? null);
+    const buffer =
+      target === ARRAY_BUFFER
+        ? arrayBuffer
+        : target === ELEMENT_ARRAY_BUFFER
+          ? (vertexArray?.elements ?? null)
+          : copyBuffers[target];
     assert.ok(buffer, `no buffer bound to ${target}`);
     return buffer;
   };
@@ -43,28 +64,38 @@ function fakeGl() {
   const impl: Record<string, unknown> = {
     ARRAY_BUFFER,
     ELEMENT_ARRAY_BUFFER,
+    COPY_READ_BUFFER,
+    COPY_WRITE_BUFFER,
     MAX_TEXTURE_SIZE: 0x0d33,
     createBuffer: (): FakeBuffer => ({ bytes: new Uint8Array(0) }),
+    deleteBuffer(buffer: FakeBuffer) {
+      buffer.bytes = new Uint8Array(0);
+    },
     createVertexArray: (): FakeArray => ({ elements: null }),
     bindVertexArray(array: FakeArray | null) {
       vertexArray = array;
     },
-    bindBuffer(target: number, buffer: FakeBuffer) {
+    bindBuffer(target: number, buffer: FakeBuffer | null) {
       if (target === ARRAY_BUFFER) {
         arrayBuffer = buffer;
-      } else {
+      } else if (target === ELEMENT_ARRAY_BUFFER) {
         assert.ok(vertexArray, "an element buffer bound outside a vertex array");
         vertexArray.elements = buffer;
+      } else {
+        copyBuffers[target] = buffer;
       }
     },
     bufferData(target: number, size: number) {
-      counts.bufferData++;
+      if (target === ARRAY_BUFFER || target === ELEMENT_ARRAY_BUFFER) {
+        counts.bufferData++;
+      }
+
       bound(target).bytes = new Uint8Array(size);
     },
     bufferSubData(
       target: number,
       offset: number,
-      data: Float32Array | Uint32Array,
+      data: Float32Array | Uint32Array | Int32Array,
       from = 0,
       length = data.length - from,
     ) {
@@ -74,13 +105,22 @@ function fakeGl() {
       assert.ok(offset + bytes.length <= buffer.bytes.length, "an upload past the buffer's end");
       buffer.bytes.set(bytes, offset);
     },
+    copyBufferSubData(read: number, write: number, from: number, to: number, size: number) {
+      counts.copies++;
+      const source = bound(read);
+      const target = bound(write);
+      assert.notEqual(source, target, "a copy within one buffer");
+      assert.ok(from + size <= source.bytes.length, "a copy from past the buffer's end");
+      assert.ok(to + size <= target.bytes.length, "a copy to past the buffer's end");
+      target.bytes.set(source.bytes.subarray(from, from + size), to);
+    },
     getParameter: () => 4096,
-    isContextLost: () => false,
+    isContextLost: () => context.lost,
   };
   const gl = new Proxy(impl, {
     get: (target, key) => (key in target ? target[key as string] : () => ({})),
   }) as unknown as ConstructorParameters<typeof GeometryAtlas>[0];
-  return { gl, counts };
+  return { gl, counts, context };
 }
 
 /** A shape of `count` vertices, each at (seed, i), coloured seed, and a fan of triangles. */
@@ -101,13 +141,43 @@ function shape(seed: number, count: number): GeometryData {
   return { positions, colors, indices };
 }
 
-/** Each live shape's vertices and indices as the atlas' buffers hold them, at its place, in its own page. */
+/** Frames placed till what was added has stood long enough for its arrays to be let go of. */
+function settle(atlas: GeometryAtlas, geometries: Geometries): void {
+  // Placed on the first, let go of RELEASE_FRAMES of the registry's on.
+  for (let i = 0; i <= RELEASE_FRAMES; i++) {
+    atlas.place(geometries);
+    geometries.endFrame();
+  }
+}
+
+/** Every shape added, by id, as its owner keeps it: the registry lets go of its arrays. */
+const made = new WeakMap<Geometries, Map<number, GeometryData>>();
+
+/** `data` added to `geometries`, kept where `keep`, and remembered for check. */
+function add(geometries: Geometries, data: GeometryData, keep = false): number {
+  const id = geometries.add(data, keep).id;
+  let shapes = made.get(geometries);
+  if (!shapes) {
+    shapes = new Map();
+    made.set(geometries, shapes);
+  }
+
+  shapes.set(id, data);
+  return id;
+}
+
+/**
+ * Each live shape's vertices and indices as the atlas' buffers hold them, at its place, in its
+ * own page; its indices as its place keeps them; and its arrays let go of by the registry unless
+ * it was added to be kept.
+ */
 function check(atlas: GeometryAtlas, geometries: Geometries, seeds: Map<number, number>): void {
   const taken = new Map<number, Place>();
   for (const [id, seed] of seeds) {
     const place = atlas.places[id] as Place;
     assert.ok(place, `geometry ${id} has no place`);
-    const data = geometries.get(id) as GeometryData;
+    const data = made.get(geometries)?.get(id) as GeometryData;
+    assert.ok(geometries.get(id) === null || geometries.get(id) === data);
     const page = atlas.pages[place.page] as unknown as {
       vertexBuffer: FakeBuffer;
       indexBuffer: FakeBuffer;
@@ -125,6 +195,12 @@ function check(atlas: GeometryAtlas, geometries: Geometries, seeds: Map<number, 
     assert.equal(place.indices, data.indices.length);
     for (let i = 0; i < place.indices; i++) {
       assert.equal(indices[place.indexStart + i], data.indices[i] + place.vertexStart);
+    }
+
+    assert.deepEqual([...place.local], [...data.indices]);
+    // Once let go of, its indices are a copy of their own, not a view on the geometry's arrays.
+    if (geometries.released(id)) {
+      assert.ok(place.local.buffer !== data.indices.buffer);
     }
 
     taken.set(id, place);
@@ -150,8 +226,8 @@ test("shapes let go of leave holes that later shapes fill, each indexed from its
   const geometries = new Geometries();
   const seeds = new Map<number, number>();
   for (let i = 0; i < 64; i++) {
-    const handle = geometries.add(shape(i + 1, 500));
-    seeds.set(handle.id, i + 1);
+    const id = add(geometries, shape(i + 1, 500));
+    seeds.set(id, i + 1);
   }
 
   atlas.place(geometries);
@@ -169,8 +245,8 @@ test("shapes let go of leave holes that later shapes fill, each indexed from its
 
     for (let i = 0; i < 32; i++) {
       const seed = 1000 + round * 100 + i;
-      const handle = geometries.add(shape(seed, 300 + ((i * 37) % 200)));
-      seeds.set(handle.id, seed);
+      const id = add(geometries, shape(seed, 300 + ((i * 37) % 200)));
+      seeds.set(id, seed);
     }
 
     atlas.place(geometries);
@@ -191,8 +267,8 @@ test("a shape no hole holds packs the atlas again, with what was added before it
   for (let round = 0; round < 2; round++) {
     for (let i = 0; i < 64; i++) {
       const seed = round * 64 + i + 1;
-      const handle = geometries.add(shape(seed, 1024));
-      seeds.set(handle.id, seed);
+      const id = add(geometries, shape(seed, 1024));
+      seeds.set(id, seed);
     }
 
     atlas.place(geometries);
@@ -207,39 +283,64 @@ test("a shape no hole holds packs the atlas again, with what was added before it
 
   atlas.place(geometries);
   // Room for half the atlas, but in holes of 1024: a small shape fits, then a large one does not.
-  const small = geometries.add(shape(500, 1000));
-  seeds.set(small.id, 500);
-  const large = geometries.add(shape(501, 4000));
-  seeds.set(large.id, 501);
+  const small = add(geometries, shape(500, 1000));
+  seeds.set(small, 500);
+  seeds.set(add(geometries, shape(501, 4000)), 501);
   atlas.place(geometries);
   assert.equal(counts.bufferData, 4);
   check(atlas, geometries, seeds);
-  // Packed from the start, in order of id.
-  assert.equal((atlas.places[ids[1]] as Place).vertexStart, 0);
+  // Packed from the start in their order in the page, their vertices moved on the GPU: the
+  // small one first, from the first hole.
+  assert.equal((atlas.places[small] as Place).vertexStart, 0);
+  assert.equal((atlas.places[ids[1]] as Place).vertexStart, 1000);
+  assert.equal((atlas.places[ids[3]] as Place).vertexStart, 2024);
+  assert.ok(counts.copies > 0);
 });
 
-test("a context restored packs every live shape again from the start", () => {
+test("a context lost takes the shapes whose arrays were let go of, and copies those kept again from the start", () => {
   const { gl } = fakeGl();
   const atlas = new GeometryAtlas(gl, new GlState(gl));
   atlas.setUp();
   const geometries = new Geometries();
   const seeds = new Map<number, number>();
+  const handles = new Map<number, ReturnType<Geometries["add"]>>();
   for (let i = 0; i < 20; i++) {
-    const handle = geometries.add(shape(i + 1, 100 + i));
-    seeds.set(handle.id, i + 1);
+    // Every fourth kept, as a 3D object's quad is, whose owner changes it in place.
+    const id = add(geometries, shape(i + 1, 100 + i), i % 4 === 0);
+    handles.set(id, { id, generation: geometries.generation(id) });
+    seeds.set(id, i + 1);
   }
 
-  atlas.place(geometries);
-  for (const id of [...seeds.keys()].slice(0, 10)) {
+  settle(atlas, geometries);
+  for (const id of [...seeds.keys()].slice(0, 6)) {
     geometries.remove(id);
     seeds.delete(id);
   }
 
   atlas.place(geometries);
+  const version = geometries.removalVersion;
   atlas.setUp();
-  atlas.repack(geometries);
+  geometries.lost();
+  assert.ok(geometries.removalVersion > version);
+  atlas.place(geometries);
+  for (const [id, handle] of handles) {
+    const kept = seeds.has(id) && (seeds.get(id) as number) % 4 === 1;
+    assert.equal(geometries.alive(handle), kept, `geometry ${id}`);
+    if (!kept) {
+      seeds.delete(id);
+    }
+  }
+
+  assert.equal(seeds.size, 3);
   check(atlas, geometries, seeds);
-  assert.equal(Math.min(...[...seeds.keys()].map((id) => atlas.places[id]?.vertexStart ?? 0)), 0);
+  assert.equal(Math.min(...[...seeds.keys()].map((id) => atlas.places[id]?.vertexStart ?? -1)), 0);
+  // Their owners add the others again, which go after them.
+  for (let i = 0; i < 4; i++) {
+    seeds.set(add(geometries, shape(100 + i, 50)), 100 + i);
+  }
+
+  atlas.place(geometries);
+  check(atlas, geometries, seeds);
 });
 
 test("shapes added together go in one hole that holds them all, in one upload a buffer", () => {
@@ -252,8 +353,8 @@ test("shapes added together go in one hole that holds them all, in one upload a 
   for (let round = 0; round < 2; round++) {
     for (let i = 0; i < 64; i++) {
       const seed = round * 64 + i + 1;
-      const handle = geometries.add(shape(seed, 1024));
-      seeds.set(handle.id, seed);
+      const id = add(geometries, shape(seed, 1024));
+      seeds.set(id, seed);
     }
 
     atlas.place(geometries);
@@ -270,8 +371,8 @@ test("shapes added together go in one hole that holds them all, in one upload a 
   const hole = (atlas.places[ids[15]] as Place).vertexStart + 1024;
   const uploads = counts.bufferSubData;
   for (let i = 0; i < 20; i++) {
-    const handle = geometries.add(shape(900 + i, 300));
-    seeds.set(handle.id, 900 + i);
+    const id = add(geometries, shape(900 + i, 300));
+    seeds.set(id, 900 + i);
   }
 
   atlas.place(geometries);
@@ -291,26 +392,26 @@ test("an id added twice in a frame keeps one place, its first copy's room given 
   const atlas = new GeometryAtlas(gl, new GlState(gl));
   atlas.setUp();
   const geometries = new Geometries();
-  const kept = geometries.add(shape(1, 100));
+  const kept = add(geometries, shape(1, 100));
   atlas.place(geometries);
-  const first = geometries.add(shape(2, 200));
-  geometries.remove(first.id);
-  const second = geometries.add(shape(3, 50));
-  assert.equal(second.id, first.id);
+  const first = add(geometries, shape(2, 200));
+  geometries.remove(first);
+  const second = add(geometries, shape(3, 50));
+  assert.equal(second, first);
   atlas.place(geometries);
   check(
     atlas,
     geometries,
     new Map([
-      [kept.id, 1],
-      [second.id, 3],
+      [kept, 1],
+      [second, 3],
     ]),
   );
   const page = atlas.pages[0];
   assert.equal(page.live, 150);
   // Letting both go leaves the page empty, filled again from its start.
-  geometries.remove(kept.id);
-  geometries.remove(second.id);
+  geometries.remove(kept);
+  geometries.remove(second);
   atlas.place(geometries);
   assert.equal(page.live, 0);
   assert.equal(page.vertices.top, 0);
@@ -332,6 +433,7 @@ test("random adds, removals and in-place updates keep every live shape whole and
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
   let next = 1;
+  const keeps = new Set<number>();
   for (let frame = 0; frame < 300; frame++) {
     const ops = 1 + Math.floor(random() * 24);
     for (let op = 0; op < ops; op++) {
@@ -342,14 +444,28 @@ test("random adds, removals and in-place updates keep every live shape whole and
         const big = random() < 0.03;
         const count = big ? 17000 + Math.floor(random() * 4000) : Math.floor(random() * 900);
         const seed = next++;
-        seeds.set(geometries.add(shape(seed, count)).id, seed);
+        // A few kept, which alone may change in place.
+        const keep = random() < 0.2;
+        const id = add(geometries, shape(seed, count), keep);
+        seeds.set(id, seed);
+        if (keep) {
+          keeps.add(id);
+        } else {
+          keeps.delete(id);
+        }
       } else if (roll < 0.85) {
         const id = ids[Math.floor(random() * ids.length)];
         geometries.remove(id);
         seeds.delete(id);
+        keeps.delete(id);
       } else {
         // The same lengths, new values: copied again where it lies.
-        const id = ids[Math.floor(random() * ids.length)];
+        const kept = ids.filter((id) => keeps.has(id));
+        if (kept.length === 0) {
+          continue;
+        }
+
+        const id = kept[Math.floor(random() * kept.length)];
         const data = geometries.get(id) as GeometryData;
         const seed = next++;
         for (let i = 0; i < data.colors.length; i++) {
@@ -381,8 +497,8 @@ test("a fill sampling the stage's pixel anywhere is marked for the stage fill pr
   const plain = { ...shape(1, 4), texels: new Float32Array(8) };
   // One fill of a part that samples the stage, after one that does not (samplesAlike).
   const mixed = { ...shape(2, 4), texels: Float32Array.of(0, 0, 1, 1, TARGET_TEXEL, 0, 2, 2) };
-  const a = geometries.add(plain).id;
-  const b = geometries.add(mixed).id;
+  const a = add(geometries, plain, true);
+  const b = add(geometries, mixed, true);
   atlas.place(geometries);
   assert.equal(atlas.places[a]?.stage, false);
   assert.equal(atlas.places[b]?.stage, true);
@@ -408,4 +524,218 @@ test("only the stage fill program finds the stage's pixel, so the fill program's
 
   assert.equal(fillVertex(false, false, true).includes(String(TARGET_TEXEL / 2)), true);
   assert.equal(stageFillFragment.includes("gl_FragCoord"), true);
+});
+
+test("a shape of more vertices than 16 bits count keeps its indices in 32 bits, and moves with them", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const seeds = new Map<number, number>();
+  const small = add(geometries, shape(1, 300));
+  seeds.set(small, 1);
+  seeds.set(add(geometries, shape(2, 70000)), 2);
+  settle(atlas, geometries);
+  check(atlas, geometries, seeds);
+  const wide = [...seeds.keys()].find((id) => id !== small) as number;
+  assert.ok(atlas.places[wide]?.local instanceof Uint32Array);
+  assert.ok(atlas.places[small]?.local instanceof Uint16Array);
+  // Packed again behind a shape added where the first was, past what the room holds.
+  geometries.remove(small);
+  seeds.delete(small);
+  seeds.set(add(geometries, shape(3, 200000)), 3);
+  atlas.place(geometries);
+  check(atlas, geometries, seeds);
+});
+
+/** Advanced text's quads: `quads` of them, each vertex's floats from `seed`, mode and table their own. */
+function glyphs(seed: number, quads: number): GeometryData {
+  const count = quads * 4;
+  const vertices = new Float32Array(count * GLYPH_FLOATS);
+  for (let i = 0; i < vertices.length; i++) {
+    vertices[i] = seed * 1000 + i;
+  }
+
+  const indices = new Uint32Array(quads * 6);
+  for (let q = 0; q < quads; q++) {
+    indices.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4, q * 4 + 2, q * 4 + 3], q * 6);
+  }
+
+  return {
+    positions: new Float32Array(count * 2),
+    colors: new Uint32Array(count),
+    indices,
+    glyphs: {
+      vertices,
+      mode: Float32Array.of(seed, 0, 0, 0),
+      table: new Float32Array(TABLE_ENTRIES * 4).fill(seed),
+    },
+  };
+}
+
+test("texts' quads let go of are packed out of the glyph atlas on the GPU, their tables slotted again", () => {
+  const { gl, counts } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const texts = new Map<number, GeometryData>();
+  for (let i = 0; i < 12; i++) {
+    const data = glyphs(i + 1, 40 + i * 10);
+    texts.set(geometries.add(data).id, data);
+  }
+
+  atlas.place(geometries);
+  // Most let go of: their holes outweigh what is live, and the next frame packs the atlas.
+  for (const id of [...texts.keys()].filter((_, k) => k % 4 !== 1)) {
+    geometries.remove(id);
+    texts.delete(id);
+  }
+
+  const copies = counts.copies;
+  const added = glyphs(99, 20);
+  texts.set(geometries.add(added).id, added);
+  atlas.place(geometries);
+  assert.ok(counts.copies > copies);
+  settle(atlas, geometries);
+  const fake = atlas as unknown as { glyphBuffer: FakeBuffer; glyphIndexBuffer: FakeBuffer };
+  const floats = new Float32Array(fake.glyphBuffer.bytes.buffer);
+  const indices = new Uint32Array(fake.glyphIndexBuffer.bytes.buffer);
+  let top = 0;
+  for (const [id, data] of texts) {
+    assert.equal(geometries.get(id), null);
+    const place = atlas.places[id] as Place;
+    const vertices = data.glyphs?.vertices as Float32Array;
+    assert.deepEqual(
+      floats.subarray(
+        place.vertexStart * GLYPH_FLOATS,
+        (place.vertexStart + place.vertices) * GLYPH_FLOATS,
+      ),
+      vertices,
+    );
+    for (let i = 0; i < place.indices; i++) {
+      assert.equal(indices[place.indexStart + i], data.indices[i] + place.vertexStart);
+    }
+
+    assert.ok((place.glyphs?.slot ?? -1) >= 0);
+    top = Math.max(top, place.vertexStart + place.vertices);
+  }
+
+  // Only the live texts' quads, in a row from the start.
+  assert.equal(
+    top,
+    [...texts.values()].reduce((n, d) => n + (d.indices.length / 6) * 4, 0),
+  );
+});
+
+test("a run's stream copies its geometries' vertices from the atlas on the GPU, and their indices from the atlas's copies", () => {
+  const { gl } = fakeGl();
+  const state = new GlState(gl);
+  const atlas = new GeometryAtlas(gl, state);
+  atlas.setUp();
+  const batches = new FillBatches(gl, state, atlas);
+  batches.setUp(64);
+  const geometries = new Geometries();
+  const ids: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    ids.push(add(geometries, shape(i + 1, 3 + (i % 7) * 20)));
+  }
+
+  // Drawn frames after they were placed, as a run is merged only then, once their arrays are
+  // let go of; one geometry drawn twice, by two instances.
+  settle(atlas, geometries);
+  atlas.place(geometries);
+  const run = [...ids, ids[3]];
+  const places = run.map((id) => atlas.places[id] as Place);
+  assert.ok(places.every((place) => place.batch !== null));
+  for (const id of ids) {
+    assert.equal(geometries.get(id), null);
+  }
+
+  batches.reset();
+  const rows = Int32Array.from(run, (_, k) => 1000 + k);
+  const segment = batches.add(places, rows, run.length, atlas.frame, 32, false);
+  assert.ok(segment);
+  batches.upload();
+  const fake = batches as unknown as {
+    vertexBuffer: FakeBuffer;
+    slotBuffer: FakeBuffer;
+    indexBuffer: FakeBuffer;
+  };
+  const atlasBytes = (atlas.pages[0] as unknown as { vertexBuffer: FakeBuffer }).vertexBuffer.bytes;
+  const slots = new Int32Array(fake.slotBuffer.bytes.buffer);
+  const indices = new Uint32Array(fake.indexBuffer.bytes.buffer);
+  let base = 0;
+  let index = segment.indexStart;
+  const first = slots[0];
+  for (let k = 0; k < run.length; k++) {
+    const place = places[k];
+    assert.deepEqual(
+      fake.vertexBuffer.bytes.subarray(base * VERTEX_BYTES, (base + place.vertices) * VERTEX_BYTES),
+      atlasBytes.subarray(
+        place.vertexStart * VERTEX_BYTES,
+        (place.vertexStart + place.vertices) * VERTEX_BYTES,
+      ),
+    );
+    for (let j = 0; j < place.vertices; j++) {
+      assert.equal(slots[base + j], first + k);
+    }
+
+    const data = made.get(geometries)?.get(run[k]) as GeometryData;
+    for (let j = 0; j < place.indices; j++) {
+      assert.equal(indices[index + j], base + data.indices[j]);
+    }
+
+    base += place.vertices;
+    index += place.indices;
+  }
+
+  assert.equal(index - segment.indexStart, segment.indices);
+});
+
+test("geometries copied while the context is lost keep their arrays, for the restore to copy", () => {
+  const { gl, context } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  const before = add(geometries, shape(1, 30));
+  settle(atlas, geometries);
+  assert.ok(geometries.released(before));
+  context.lost = true;
+  const during = add(geometries, shape(2, 40));
+  settle(atlas, geometries);
+  assert.ok(!geometries.released(during) && geometries.get(during) !== null);
+  // Restored: the one let go of is rebuilt by its owner, the other copied again as it is.
+  context.lost = false;
+  atlas.setUp();
+  geometries.lost();
+  assert.ok(!geometries.holds(before));
+  settle(atlas, geometries);
+  check(atlas, geometries, new Map([[during, 2]]));
+  assert.ok(geometries.released(during));
+});
+
+test("a geometry drawn anew each frame is let go of whole before its indices are copied", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  let last = -1;
+  for (let frame = 0; frame < 10; frame++) {
+    if (last >= 0) {
+      geometries.remove(last);
+    }
+
+    last = add(geometries, shape(frame + 1, 50));
+    atlas.place(geometries);
+    geometries.endFrame();
+    const place = atlas.places[last] as Place;
+    // Its indices still the geometry's own, uncopied, and its arrays held.
+    assert.equal(place.local, made.get(geometries)?.get(last)?.indices);
+    assert.ok(!geometries.released(last));
+  }
+
+  // One that stands is let go of, its indices copied.
+  settle(atlas, geometries);
+  assert.ok(geometries.released(last));
+  check(atlas, geometries, new Map([[last, 10]]));
 });
