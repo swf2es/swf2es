@@ -36,7 +36,9 @@ import {
 import { type DictionaryKeys, NAMED } from "./dictionary-keys.js";
 import { compileUnit, Domain, definitionNames, findScript, type Script } from "./domain.js";
 import { isViewRangeError, SharedMemoryView } from "./domain-memory.js";
+import { ArgumentsProperties } from "./dynamic-properties.js";
 import {
+  ARGUMENTS_HIDDEN,
   continues,
   dictionaryAt,
   type Enumeration,
@@ -46,6 +48,7 @@ import {
   forgetStep,
   INT_ATOM_LIMIT,
   nextIndex,
+  ownHidden,
   ownNames,
   pairIndex,
   pairOf,
@@ -688,7 +691,7 @@ export class Runtime {
       for (const [d, factory, id, , params] of script.desc.traits.methods) {
         const method = withId(factory(this.empty, this.scriptSuper), id);
         this.keepStatic(factory, method);
-        installMethod(this, traits.methodHome(3), d, method, factory, params);
+        installMethod(this, traits, d, method, factory, params);
       }
 
       // Caches keep the methods.
@@ -1675,9 +1678,18 @@ export class Runtime {
     fillCache(head, o, traits, b, mn);
   }
 
-  /** Method `id` of `o` bound to it, the same function each time. */
+  /** Method `id` of `traits`, a class `o` is an instance of, bound to `o`, the same function each time. */
   methodClosure(o: Value, traits: Traits, id: number): AsObject {
-    const method: Method = traits.proto[methodKey(id)];
+    return this.boundClosure(o, traits.proto[methodKey(id)], traits);
+  }
+
+  /**
+   * `method` bound to `o`, the same function each time, whose module
+   * (moduleOf) is its receiver's class's, as avmplus has a bound method's
+   * code context, whichever class it was found through first; `traits`'s
+   * for a receiver with no class of its own.
+   */
+  private boundClosure(o: Value, method: Method, traits: Traits): AsObject {
     const key = typeof o === "object" ? o : traits.proto;
     let byMethod = this.closures.get(key);
     if (!byMethod) {
@@ -1704,7 +1716,7 @@ export class Runtime {
       f.$id = (method as Method & { $id?: number }).$id ?? 0;
       f.$closure = true;
       // Whose method it is, for moduleOf.
-      f.$of = traits;
+      f.$of = this.receiverTraits(o) ?? traits;
       if (typeof o === "object") {
         byMethod.set(method, f);
       }
@@ -1849,7 +1861,7 @@ export class Runtime {
       }
 
       // A name deleted is enumerable again when set anew, as avmplus has it.
-      o.$dontEnum?.delete(name);
+      ownHidden(o)?.delete(name);
       return o.$d ? o.$d.delete(name) || true : false;
     }
 
@@ -2578,25 +2590,66 @@ export class Runtime {
 
   /**
    * A method's `arguments`: every argument it was called with, declared or
-   * not, and as `callee`, not enumerable, the method's Function object,
-   * the one a newfunction made for it, so that `arguments.callee === f`,
-   * else one made for it once, as avmplus' MethodClosure is.
+   * not, and as `callee`, not enumerable, the method's Function object
+   * (calleeOf), made only when the name is first read.
    */
-  arguments(args: IArguments, callee: Method): AsObject {
-    const o = this.array(Array.prototype.slice.call(args));
-    let f = this.functionObjects.get(callee);
-    if (!f) {
-      f = this.newFunctionObject(callee, null);
-      this.functionObjects.set(callee, f);
-    }
-
-    o.$d.set("callee", f);
-    o.$dontEnum = new Set(["callee"]);
+  arguments(args: IArguments, callee: Method, receiver?: Value): AsObject {
+    const properties = new ArgumentsProperties(this, callee, receiver);
+    const o = (this.arrayTraits ?? this.builtinTraits("Array")).instance(properties);
+    o.$a = Array.prototype.slice.call(args);
+    o.$dontEnum = ARGUMENTS_HIDDEN;
     return o;
   }
 
-  /** Each method's Function object, by the method, for arguments.callee. */
+  /**
+   * arguments.callee of method `callee` called on `receiver`, as avmplus'
+   * createArguments gives it: a function's own Function object, the one a
+   * newfunction made for it, so that `arguments.callee === f`; else the
+   * method bound to its receiver, the one MethodClosure avmplus keeps for
+   * a method and a receiver, so that a class's or a script's method's
+   * callee is the closure a read of it gives (`arguments.callee ==
+   * this.m`), and a constructor's or an initializer's, read of nothing,
+   * still calls it on its object. A method with no object to bind gets
+   * a Function of its own, made once.
+   */
+  calleeOf(callee: Value, receiver: Value): Value {
+    const method = callee as Method;
+    const f = this.functionObjects.get(method);
+    if (f) {
+      return f;
+    }
+
+    if (typeof receiver === "object" && receiver !== null) {
+      const home = this.homes.get(method);
+      return home
+        ? this.methodClosure(receiver, home.traits, home.id)
+        : this.boundClosure(receiver, method, this.traitsOf(receiver));
+    }
+
+    let unbound = this.unboundCallees.get(method);
+    if (!unbound) {
+      unbound = this.newFunctionObject(method, null);
+      this.unboundCallees.set(method, unbound);
+    }
+
+    return unbound;
+  }
+
+  /** Each function's Function object, by its code, as newfunction made it. */
   private readonly functionObjects = new WeakMap<Method, AsObject>();
+
+  /** The callee a method gets with no object to bind it to, by the method. */
+  private readonly unboundCallees = new WeakMap<Method, AsObject>();
+
+  /** Where each installed method is, by the method and by its bound form, for arguments.callee. */
+  private readonly homes = new WeakMap<Method, { traits: Traits; id: number }>();
+
+  /** Notes method `f`, and `bound`, its form for a bound call, as `traits`' method at dispatch id `id`. */
+  installed(f: Method, bound: Method, traits: Traits, id: number): void {
+    const home = { traits, id };
+    this.homes.set(f, home);
+    this.homes.set(bound, home);
+  }
 
   newFunction(factory: Factory, scope: Scope, id = 0): AsObject {
     const method = factory(scope, null);

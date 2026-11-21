@@ -2,9 +2,9 @@
 // them through Runtime.native, noBody, unverified and verifyError: once,
 // when it loads, never on a call.
 
-import type { AsObject, Factory, Method, TypeRef, Value } from "./descriptors.js";
+import type { Factory, Method, TypeRef, Value } from "./descriptors.js";
 import type { Runtime } from "./runtime.js";
-import { boundKey, methodKey, untypedSetKey } from "./traits.js";
+import { boundKey, methodKey, type Traits, untypedSetKey } from "./traits.js";
 
 /**
  * A native with argument counts to check, when it has any, its declared
@@ -64,7 +64,7 @@ export function nativeFactory(rt: Runtime, name: string, required: number, max: 
 }
 
 /**
- * `f`, a method `factory` made, installed in `proto` at dispatch id `d`,
+ * `f`, a method `factory` made, installed in `traits`' prototype at dispatch id `d`,
  * with what a call the compiler did not bind needs to coerce its arguments
  * by its declared `params`, if it is a native that declares a primitive or
  * Object one. avmplus coerces a native's arguments on entry, however it was
@@ -76,14 +76,17 @@ export function nativeFactory(rt: Runtime, name: string, required: number, max: 
  */
 export function installMethod(
   rt: Runtime,
-  proto: AsObject,
+  traits: Traits,
   d: number,
   f: Method,
   factory: Factory,
   params: TypeRef[],
 ): void {
+  const proto = traits.methodHome(3);
+  const bound = (f as Method & { $bound?: Method }).$bound ?? f;
   proto[methodKey(d)] = f;
-  proto[boundKey(d)] = (f as Method & { $bound?: Method }).$bound ?? f;
+  proto[boundKey(d)] = bound;
+  rt.installed(f, bound, traits, d);
   const key = untypedSetKey(d);
   if (!natives.has(factory) || !params.some((t) => COERCED.has(t))) {
     if (key in proto) {

@@ -2,7 +2,7 @@
 // calling or constructing Object, Namespace, QName or Function does.
 
 import type { AsObject, Value } from "../descriptors.js";
-import { forgetStep } from "../enumeration.js";
+import { forgetStep, ownHidden } from "../enumeration.js";
 import type { ClassHook } from "../hooks.js";
 import { formatClassName, Namespace, prefixOf, publicQname } from "../names.js";
 import { NOT_FOUND, type Runtime } from "../runtime.js";
@@ -46,7 +46,7 @@ export const objectNatives: Natives = {
 
     const name = rt.toString(v);
     if (enumerable) {
-      o.$dontEnum?.delete(name);
+      ownHidden(o)?.delete(name);
       if (o.$d) {
         // A name shown: the for-ins that found them all hidden look again.
         o.$d.allHidden = false;
@@ -57,7 +57,7 @@ export const objectNatives: Natives = {
         forgetStep(o);
       }
 
-      o.$dontEnum.add(name);
+      (ownHidden(o) as Set<string>).add(name);
     }
   },
   // A primitive's prototype chain is its class's, as toPrototype gives it.
