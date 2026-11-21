@@ -16,8 +16,22 @@ import {
   type Tag,
   tags,
 } from "../../../../packages/format/dist/index.js";
-import { ACTIONS, PLACE, Places, REMOVE } from "../../../../packages/player/dist/display/places.js";
+import {
+  ButtonObject,
+  type DisplayObject,
+  type MovieClip,
+  ShapeObject,
+} from "../../../../packages/player/dist/display/display.js";
+import {
+  ACTIONS,
+  giveScratch,
+  PLACE,
+  Places,
+  REMOVE,
+  takeScratch,
+} from "../../../../packages/player/dist/display/places.js";
 import { readLibrary, type Timeline } from "../../../../packages/player/dist/display/timeline.js";
+import { Player } from "../../../../packages/player/dist/player.js";
 import * as w from "../../../swf-writer.ts";
 
 const PLACE_CODES = new Set<number>([
@@ -319,6 +333,304 @@ test("a goto folds places together as it did their objects, a rewind's as first 
       assert.deepEqual(scratch.place(j), { ...expected, name: null });
     }
   }
+});
+
+/** A place of nothing but what `fields` give. */
+function bare(fields: Partial<Place>): Place {
+  return {
+    depth: 1,
+    move: true,
+    character: null,
+    matrix: null,
+    colorTransform: null,
+    ratio: null,
+    name: null,
+    clipDepth: null,
+    className: null,
+    hasImage: false,
+    blendMode: null,
+    cacheAsBitmap: null,
+    visible: null,
+    opaqueBackground: null,
+    filters: null,
+    metaData: null,
+    actions: null,
+    corrupt: 0,
+    ...fields,
+  };
+}
+
+// A 32-bit LCG, so the places are the same every run.
+function lcg(seed: number): () => number {
+  let s = seed;
+  return () => {
+    s = (Math.imul(s, 1103515245) + 12345) >>> 0;
+    return s >>> 8;
+  };
+}
+
+test("thousands of matrices and colour transforms, many repeated, are each kept once and read back", () => {
+  const next = lcg(3);
+  const pick = (n: number) => next() % n;
+  // Pools small enough that values repeat, large enough that the tables grow and rehash.
+  const scale = () => (pick(1 << 18) - (1 << 17)) / 0x10000;
+  const shapes = Array.from({ length: 400 }, () => ({
+    a: scale(),
+    b: scale(),
+    c: scale(),
+    d: scale(),
+  }));
+  const offsets = Array.from({ length: 50 }, () => pick(40000) - 20000);
+  const places = new Places();
+  const read: Place[] = [];
+  const matrices = new Set<string>();
+  const colors = new Set<string>(["256,256,256,256,0,0,0,0"]);
+  for (let i = 0; i < 6000; i++) {
+    const matrix =
+      i % 7 === 0 ? null : { ...shapes[pick(400)], tx: offsets[pick(50)], ty: offsets[pick(8)] };
+    const mult = [256, pick(512), 256, pick(300)];
+    const add = [pick(64) - 32, 0, 0, 0];
+    const colorTransform =
+      i % 3 === 0
+        ? {
+            rMul: mult[0] / 256,
+            gMul: mult[1] / 256,
+            bMul: mult[2] / 256,
+            aMul: mult[3] / 256,
+            rAdd: add[0],
+            gAdd: add[1],
+            bAdd: add[2],
+            aAdd: add[3],
+          }
+        : null;
+    const place = bare({ depth: (i % 500) + 1, matrix, colorTransform, ratio: i % 5 ? null : i });
+    read.push(place);
+    places.add(place);
+    if (matrix) {
+      matrices.add(matrixKey(matrix));
+    }
+
+    if (colorTransform) {
+      colors.add([...mult, ...add].join());
+    }
+  }
+
+  places.seal();
+  for (let i = 0; i < read.length; i++) {
+    assert.deepEqual(places.place(i), read[i], `place ${i}`);
+  }
+
+  // Each distinct one once, the identity among them from the start.
+  assert.equal(places.matrixCount, matrices.size + (matrices.has(matrixKey(IDENTITY)) ? 0 : 1));
+  assert.equal(places.colorCount, colors.size);
+  // Past the tables' first sizes, so they grew and were rehashed.
+  assert.ok(places.matrixCount > 300 && places.colorCount > 300);
+});
+
+/** What the store keeps a matrix once by. */
+function matrixKey(m: { a: number; b: number; c: number; d: number; tx: number; ty: number }) {
+  return [m.a, m.b, m.c, m.d, m.tx, m.ty].join();
+}
+
+test("a goto's scratch records come from a pool, emptied as given back, one for each goto under way", () => {
+  const store = new Places();
+  for (let i = 0; i < 200; i++) {
+    store.add(bare({ depth: i + 1, name: `n${i}`, matrix: { ...IDENTITY, tx: i }, actions: [i] }));
+  }
+
+  store.add(bare({ depth: 999, matrix: { ...IDENTITY, tx: 5 } }));
+  store.seal();
+  const plain = 200;
+
+  // A large goto, then a small one: the scratch is reused, with nothing of the large one left.
+  const first = takeScratch(store);
+  for (let i = 0; i < 200; i++) {
+    first.copy(store, i);
+  }
+
+  giveScratch(first);
+  const again = takeScratch(store);
+  assert.equal(again, first);
+  assert.equal(again.count, 0);
+  const j = again.copy(store, plain);
+  assert.deepEqual(again.place(j), store.place(plain));
+  assert.equal(again.name(j), null);
+  assert.equal(again.actions(j), null);
+
+  // A goto inside another takes a scratch of its own; the outer one's records stay as they were.
+  const outer = again;
+  const a = outer.copy(store, 3);
+  const inner = takeScratch(store);
+  assert.notEqual(inner, outer);
+  for (let i = 0; i < 50; i++) {
+    inner.merge(inner.copy(store, i), store, plain);
+  }
+
+  giveScratch(inner);
+  assert.deepEqual(outer.place(a), store.place(3));
+  assert.deepEqual(outer.place(j), store.place(plain));
+  giveScratch(outer);
+});
+
+/** A movie of square 1 and sprite 3 (a square that slides on 4 frames), and the frames given. */
+function nestedMovie(...frames: Uint8Array[][]): Player {
+  const square = w.shape({
+    id: 1,
+    bounds: [0, 1000, 0, 1000],
+    fills: [0xff0000],
+    paths: [{ fill1: 1, commands: [{ move: [0, 0] }, { line: [1000, 0] }, { line: [0, 0] }] }],
+  });
+  const sprite = w.sprite(3, 4, [
+    w.place({ depth: 1, character: 1, matrix: { tx: 0 } }),
+    w.showFrame(),
+    ...[1, 2, 3].flatMap((f) => [
+      w.place({ depth: 1, move: true, matrix: { tx: 100 * f } }),
+      w.showFrame(),
+    ]),
+    w.end(),
+  ]);
+  const tags = [w.fileAttributes(true), square, sprite];
+  for (const frame of frames) {
+    tags.push(...frame, w.showFrame());
+  }
+
+  tags.push(w.end());
+  return new Player(
+    w.swf({ width: 200, height: 100, frameRate: 24, frameCount: frames.length, tags }),
+  );
+}
+
+test("a goto run inside another's, from a removal it makes, leaves both as each alone would", () => {
+  const frames = () =>
+    nestedMovie(
+      [w.place({ depth: 1, character: 1 }), w.place({ depth: 2, character: 1, matrix: { tx: 0 } })],
+      [w.place({ depth: 2, move: true, matrix: { tx: 200 } }), w.place({ depth: 5, character: 3 })],
+      [w.remove(1), w.place({ depth: 2, move: true, matrix: { tx: 400, ty: 60 } })],
+      [w.place({ depth: 2, move: true, colorTransform: { mult: [0.5, 1, 1, 1] } })],
+    );
+  const alone = frames();
+  alone.root.gotoFrame(4);
+  const clip = alone.root.depths.get(5) as MovieClip;
+  clip.gotoFrame(4);
+  clip.gotoFrame(2);
+
+  const player = frames();
+  const root = player.root;
+  root.gotoFrame(2);
+  const nested = root.depths.get(5) as MovieClip;
+  nested.gotoFrame(4);
+  // The removal on frame 3 runs while the root's goto folds its places: a listener's goto then.
+  let calls = 0;
+  root.library.removing = () => {
+    calls++;
+    nested.gotoFrame(2);
+  };
+  root.gotoFrame(4);
+  root.library.removing = null;
+
+  assert.equal(calls, 1);
+  const state = (d: DisplayObject | undefined) => [
+    d?.matrix.tx,
+    d?.matrix.ty,
+    d?.colorTransform?.rMul ?? null,
+  ];
+  assert.deepEqual(state(root.depths.get(2)), state(alone.root.depths.get(2)));
+  assert.deepEqual(state(root.depths.get(2)), [20, 3, 0.5]);
+  assert.deepEqual(state(nested.depths.get(1)), state(clip.depths.get(1)));
+  // A rewind's place puts back the colour a first place leaves unsaid: none, as identity.
+  assert.deepEqual(state(nested.depths.get(1)), [5, 0, 1]);
+});
+
+/** A DefineButton2 of one record, square 1 in the up and hit test states, coloured and added. */
+function lookedButton(id: number): Uint8Array {
+  const record = new w.BitWriter();
+  // HasBlendMode, StateHitTest, StateUp.
+  record
+    .u8(0x20 | 0x08 | 0x01)
+    .u16(1)
+    .u16(1);
+  w.matrix(record, { tx: 400, ty: 200 });
+  record.align();
+  // A CXFORMWITHALPHA of multipliers alone: red halved.
+  record.ub(1, 0).ub(1, 1).ub(4, 10).sb(10, 128).sb(10, 256).sb(10, 256).sb(10, 256).align();
+  record.u8(8);
+  const body = new w.BitWriter().u16(id).u8(0).u16(0).raw(record.done()).u8(0);
+  return w.tag(34, body.done());
+}
+
+test("a button's record places its look in the states, and its transform alone in the hit test state", () => {
+  const swf = w.swf({
+    width: 200,
+    height: 100,
+    frameCount: 1,
+    tags: [
+      w.fileAttributes(true),
+      w.shape({ id: 1, bounds: [0, 100, 0, 100], fills: [0xff0000], paths: [] }),
+      lookedButton(4),
+      w.place({ depth: 1, character: 4 }),
+      w.showFrame(),
+      w.end(),
+    ],
+  });
+  const button = new Player(swf).root.depths.get(1) as ButtonObject;
+  assert.ok(button instanceof ButtonObject);
+  const up = button.upState as DisplayObject;
+  const hit = button.hitTestState as DisplayObject;
+  assert.deepEqual(
+    [up.matrix.tx, up.matrix.ty, up.colorTransform?.rMul, up.blendMode],
+    [20, 10, 0.5, "add"],
+  );
+  assert.deepEqual(
+    [hit.matrix.tx, hit.matrix.ty, hit.colorTransform, hit.blendMode],
+    [20, 10, null, "normal"],
+  );
+});
+
+/** A Shape a script made. */
+class Shape extends ShapeObject {
+  constructor() {
+    super(null);
+  }
+}
+
+test("to an object a script transformed a place gives its name, clip depth and cacheAsBitmap alone", () => {
+  const places = new Places();
+  const everything = places.add(
+    bare({
+      name: "named",
+      matrix: { ...IDENTITY, tx: 400 },
+      colorTransform: { ...IDENTITY_COLOR, rMul: 0.5 },
+      clipDepth: 7,
+      blendMode: 8,
+      cacheAsBitmap: true,
+      visible: false,
+      filters: new Uint8Array([1, 1, 0, 0, 4, 0, 0, 0, 4, 0, 8]),
+    }),
+  );
+  places.seal();
+
+  const shape = new Shape();
+  shape.touch();
+  shape.applyPlace(places, everything);
+  assert.deepEqual([shape.name, shape.clipDepth, shape.cachedAsBitmap], ["named", 7, true]);
+  assert.deepEqual(
+    [shape.matrix.tx, shape.colorTransform, shape.visible, shape.blendMode, shape.filters.length],
+    [0, null, true, "normal", 0],
+  );
+
+  // Untouched, it takes all of it.
+  const plain = new Shape();
+  plain.applyPlace(places, everything);
+  assert.deepEqual(
+    [
+      plain.matrix.tx,
+      plain.colorTransform?.rMul,
+      plain.visible,
+      plain.blendMode,
+      plain.filters.length,
+    ],
+    [20, 0.5, false, "add", 1],
+  );
 });
 
 // Ruffle's corpus, where tests/player/corpus/fetch-ruffle.ts has fetched it: every place of
