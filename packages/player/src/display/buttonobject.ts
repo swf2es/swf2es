@@ -21,6 +21,7 @@ import {
   scriptWork,
 } from "./displayobject.js";
 import { displayFor } from "./instantiate.js";
+import { Places } from "./places.js";
 import type { ButtonCharacter, DisplayCharacter, Library } from "./timeline.js";
 
 /** The state a button shows, as the pointer has it. */
@@ -368,7 +369,7 @@ export class ButtonObject extends Container {
 
       const previous = this.depths.get(record.depth);
       const display = previous?.character?.id === c.id ? previous : displayFor(c, library);
-      display.applyPlace(recordPlace(record, true));
+      display.applyPlace(placesOf(character), 2 * i);
       if (display !== previous) {
         this.placeAtDepth(display, record.depth);
         this.avm1Made?.(display, c);
@@ -405,7 +406,9 @@ export function buttonStates(
   const state = (flag: number): DisplayObject => {
     const parts: { display: DisplayObject; character: DisplayCharacter; record: ButtonRecord }[] =
       [];
-    for (const record of character.records) {
+    const places = placesOf(character);
+    for (let i = 0; i < character.records.length; i++) {
+      const record = character.records[i];
       const c = record.states & flag ? library.characters.get(record.character) : undefined;
       if (
         c &&
@@ -415,7 +418,7 @@ export function buttonStates(
         c.type !== "sound"
       ) {
         const display = displayFor(c, library);
-        display.applyPlace(recordPlace(record, flag !== BUTTON_HIT_TEST));
+        display.applyPlace(places, flag === BUTTON_HIT_TEST ? 2 * i + 1 : 2 * i);
         parts.push({ display, character: c, record });
       }
     }
@@ -457,6 +460,25 @@ export function buttonStates(
   }
 
   button.show();
+}
+
+/**
+ * A button's records as places, made once: record k's at 2k, and at 2k + 1
+ * as the hit test state places it.
+ */
+function placesOf(character: ButtonCharacter): Places {
+  if (!character.places) {
+    const places = new Places();
+    for (const record of character.records) {
+      places.add(recordPlace(record, true));
+      places.add(recordPlace(record, false));
+    }
+
+    places.seal();
+    character.places = places;
+  }
+
+  return character.places;
 }
 
 /** A button record as a place of its character: its transform, and, but in the hit test state, its look. */

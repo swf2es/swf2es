@@ -14,7 +14,6 @@ import {
   isAs3,
   isBitmapTag,
   type MorphShape,
-  type Place,
   readActions,
   readBinaryData,
   readBitmap,
@@ -55,17 +54,8 @@ import type { BitmapStore } from "../bitmap/bitmap.js";
 import { FontSet } from "../text/fonts.js";
 import type { DisplayObject, MovieClip } from "./display.js";
 import type { Rect } from "./geometry.js";
+import { ACTIONS, PLACE, type Places, REMOVE, TimelineStore } from "./places.js";
 import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
-
-/**
- * What a frame does, in tag order: places, removals and, in an AVM1
- * timeline, its DoAction tags by their bodies' offsets, which the clip
- * queues as it reaches them (avm1/avm1.ts).
- */
-export type FrameCommand =
-  | { type: "place"; place: Place }
-  | { type: "remove"; depth: number }
-  | { type: "actions"; tag: number };
 
 /** A frame's name, or a scene's, and its frame, 1 the first. */
 export interface FrameName {
@@ -74,8 +64,15 @@ export interface FrameName {
 }
 
 export interface Timeline {
-  /** Frame k's commands at index k - 1. */
-  frames: FrameCommand[][];
+  /**
+   * What its frames do, in tag order, in its SWF's store (places.ts):
+   * places, removals and, in an AVM1 timeline, its DoAction tags by their
+   * bodies' offsets, which the clip queues as it reaches them (avm1/avm1.ts).
+   */
+  store: TimelineStore;
+  /** Its first frame's index in the store. */
+  first: number;
+  frameCount: number;
   /**
    * The labels scripts read, in frame order: the scene data's where the
    * SWF has it (a root's DefineSceneAndFrameLabelData), even none, its
@@ -104,10 +101,10 @@ export interface Timeline {
    */
   played?: number;
   /**
-   * An AVM1 timeline's DoAction tags after its last ShowFrame, which Flash
-   * runs once, as the clip stays on its last frame.
+   * An AVM1 timeline's DoAction tags after its last ShowFrame, by their
+   * offsets, which Flash runs once, as the clip stays on its last frame.
    */
-  tail?: FrameCommand[];
+  tail?: number[];
   /** How many bytes its tags take, a sprite's in its DefineSprite, which AVM1's getBytesTotal gives; the root's are the SWF's. */
   length?: number;
 }
@@ -120,8 +117,8 @@ export interface Timeline {
  * removal, which a clip with an unload handler outlives for a frame.
  */
 export interface TimelineActions {
-  /** A display object about to be placed by `place`, before it is made: its clip actions. */
-  placing(display: DisplayObject, place: Place): void;
+  /** A display object about to be placed by record `place` of `places`, before it is made: its clip actions. */
+  placing(display: DisplayObject, places: Places, place: number): void;
   made(display: DisplayObject): void;
   entered(clip: MovieClip, frame: number): void;
   /** A goto's skipped frames: their exports and initializations, without their frame actions. */
@@ -216,6 +213,8 @@ export interface ButtonCharacter {
   sounds: ({ id: number; info: SoundInfo } | null)[] | null;
   /** DefineScalingGrid's 9-slice grid, in pixels; null without. */
   grid: Rect | null;
+  /** Its records as places, made as it is first shown (buttonobject.ts). */
+  places?: Places;
 }
 
 /** DefineFont through 3: its name and style, glyphs, and optional layout. */
@@ -532,6 +531,12 @@ function shapeOf(
   return character;
 }
 
+/** What a SWF's timelines are read into: their store, and their names, each string once. */
+interface Into {
+  store: TimelineStore;
+  strings: Map<string, string>;
+}
+
 /**
  * Morphs by their tag's bytes, as shapes are: a SWF loaded again blends at
  * the ratios the first already blended, and its blends' layers are the
@@ -610,11 +615,13 @@ function timelineOf(
   actions: ActionList | null,
   // The SWF's version, which its shapes' bitmap fills are read by.
   version: number,
+  into: Into,
 ): Timeline {
   const avm1 = actions !== null;
   const ended = list.at(-1)?.code === tags.End;
   const last = list.length - (ended ? 2 : 1);
-  const frames: FrameCommand[][] = [[]];
+  // Each frame's commands, kind and argument in turn, until they go into the store.
+  const frames: number[][] = [[]];
   const tagged: FrameName[] = [];
   const frameLabels = new Map<number, string>();
   const sounds = new Map<number, StartSound[]>();
@@ -637,15 +644,18 @@ function timelineOf(
       case tags.PlaceObject2:
       case tags.PlaceObject3:
       case tags.PlaceObject4:
-        frame.push({ type: "place", place: readPlace(bytes, t, actions ?? undefined) });
+        frame.push(
+          PLACE,
+          into.store.places.add(readPlace(bytes, t, actions ?? undefined), into.strings),
+        );
         break;
       case tags.RemoveObject:
       case tags.RemoveObject2:
-        frame.push({ type: "remove", depth: readRemove(bytes, t) });
+        frame.push(REMOVE, readRemove(bytes, t));
         break;
       case tags.DoAction:
         if (avm1 && t.length > 0) {
-          frame.push({ type: "actions", tag: t.offset });
+          frame.push(ACTIONS, t.offset);
         }
         break;
       case tags.FrameLabel: {
@@ -703,7 +713,16 @@ function timelineOf(
           type: "sprite",
           id: sprite.id,
           timeline: {
-            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, actions, version),
+            ...timelineOf(
+              bytes,
+              sprite.tags,
+              sprite.frameCount,
+              library,
+              jpeg,
+              actions,
+              version,
+              into,
+            ),
             length: t.length - 4,
           },
           grid: null,
@@ -860,7 +879,7 @@ function timelineOf(
   const loops = ended;
   // The frames ShowFrame tags end: what follows the last opens one more.
   let played = list[last]?.code === tags.ShowFrame ? frames.length : frames.length - 1;
-  let tail: FrameCommand[] = [];
+  let tail: number[] = [];
   if (!avm1) {
     frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
     played = Math.max(1, Math.min(played, frames.length));
@@ -868,10 +887,19 @@ function timelineOf(
       frames.push([]);
     }
   } else if (list[last]?.code !== tags.ShowFrame) {
-    tail = frames.length > 1 ? frames[frames.length - 1].filter((c) => c.type === "actions") : [];
+    const after = frames.length > 1 ? frames[frames.length - 1] : [];
+    for (let c = 0; c < after.length; c += 2) {
+      if (after[c] === ACTIONS) {
+        tail.push(after[c + 1]);
+      }
+    }
+
     frames.length = Math.max(1, frames.length - 1);
     if (loops && frames.length > 1) {
-      frames[frames.length - 1].push(...tail);
+      for (const tag of tail) {
+        frames[frames.length - 1].push(ACTIONS, tag);
+      }
+
       tail = [];
     }
   }
@@ -886,7 +914,9 @@ function timelineOf(
   const sceneList = data ? named(data.scenes) : [{ name: "", frame: 1 }];
   sceneList[0].frame = 1;
   return {
-    frames,
+    store: into.store,
+    first: into.store.addFrames(frames),
+    frameCount: frames.length,
     labels,
     gotoLabels: labels.length > 0 ? labels : tagged,
     frameLabels,
@@ -904,6 +934,7 @@ export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
   // An AVM1 SWF's action blocks, which its places' clip actions are among.
   const actions = isAs3(swf) ? null : readActions(swf);
+  const into = { store: new TimelineStore(), strings: new Map<string, string>() };
   const root = timelineOf(
     swf.bytes,
     swf.tags,
@@ -912,7 +943,9 @@ export function readLibrary(swf: Swf): Library {
     { tables: null },
     actions,
     swf.header.version,
+    into,
   );
+  into.store.seal();
   const fonts = new FontSet();
   for (const c of characters.values()) {
     if (c.type === "font") {

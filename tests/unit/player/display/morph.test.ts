@@ -13,6 +13,7 @@ import { Container } from "../../../../packages/player/dist/display/container.js
 import { ShapeObject } from "../../../../packages/player/dist/display/display.js";
 import { CLEAN, CONTENT } from "../../../../packages/player/dist/display/displayobject.js";
 import { blend, morphAt } from "../../../../packages/player/dist/display/morph.js";
+import { Places } from "../../../../packages/player/dist/display/places.js";
 import { framePassed } from "../../../../packages/player/dist/display/shapeobject.js";
 import type { MorphCharacter } from "../../../../packages/player/dist/display/timeline.js";
 import { syncHidden } from "../../../../packages/player/dist/scene/hidden.js";
@@ -179,8 +180,8 @@ test("clearing a morph's blends resets its growth history", () => {
   assert.equal(c.blends.size, 64);
 });
 
-/** A PlaceObject2 moving depth 1 to `ratio`. */
-function ratioPlace(ratio: number) {
+/** A PlaceObject2 moving depth 1 to `ratio`, as record 0 of its places. */
+function ratioPlace(ratio: number): Places {
   const swf = readSwf(
     w.swf({
       width: 100,
@@ -190,17 +191,19 @@ function ratioPlace(ratio: number) {
       tags: [w.place({ depth: 1, move: true, ratio })],
     }),
   );
-  return readPlace(swf.bytes, swf.tags[0]);
+  const places = new Places();
+  places.add(readPlace(swf.bytes, swf.tags[0]));
+  return places;
 }
 
 test("a MorphShape blends at its first place's ratio, and blends a later one's once a frame passes", () => {
   const c = character();
   const shape = ShapeObject.ofMorph(c);
-  shape.applyPlace(ratioPlace(65535));
+  shape.applyPlace(ratioPlace(65535), 0);
   assert.equal(shape.shape, morphAt(c, 65535));
   assert.equal(shape.blending, false);
 
-  shape.applyPlace(ratioPlace(30000));
+  shape.applyPlace(ratioPlace(30000), 0);
   assert.equal(shape.shape, morphAt(c, 65535));
   assert.equal(shape.blending, true);
 
@@ -212,8 +215,8 @@ test("a MorphShape blends at its first place's ratio, and blends a later one's o
   assert.equal(shape.blending, false);
 
   // Placed away and back within a frame, it is at the ratio the frame began with.
-  shape.applyPlace(ratioPlace(1000));
-  shape.applyPlace(ratioPlace(30000));
+  shape.applyPlace(ratioPlace(1000), 0);
+  shape.applyPlace(ratioPlace(30000), 0);
   assert.equal(shape.blending, false);
 });
 
@@ -223,9 +226,9 @@ test("a script's shape test misses a blending MorphShape, the pointer's meets it
   root.loaderInfo = {} as never;
   const shape = ShapeObject.ofMorph(c);
   root.addChildAt(shape, 0);
-  shape.applyPlace(ratioPlace(0));
+  shape.applyPlace(ratioPlace(0), 0);
   framePassed();
-  shape.applyPlace(ratioPlace(65535));
+  shape.applyPlace(ratioPlace(65535), 0);
   // (57.5, 57.5), sampled half a pixel left of the point: in the start, outside the end.
   const hits = (pointer: boolean) => hitsPoint(shape, 58, 57.5, true, root, pointer);
 
@@ -243,7 +246,7 @@ test("scripts are told a MorphShape's start bounds, in a container too, whatever
   const clip = new Container();
   const shape = ShapeObject.ofMorph(c);
   clip.addChildAt(shape, 0);
-  shape.applyPlace(ratioPlace(65535));
+  shape.applyPlace(ratioPlace(65535), 0);
   const start = { xMin: 0, yMin: 0, xMax: 60, yMax: 60 };
 
   assert.deepEqual(reportedBounds(shape, true), start);

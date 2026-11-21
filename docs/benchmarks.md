@@ -83,6 +83,10 @@ draws on the machine's GPU (on a machine with two,
   into a ByteArray after a 54-byte header (`--opaque` for an opaque
   bitmap): a fresh bitmap's texture, the readback after a draw and the
   scan;
+- `--timelines N`: N sprites of their own, each 240 frames (`--loop K`)
+  of 12 parts moving and a third of them fading, as tweens laid out frame
+  by frame are; with `--allocs`, what the timelines hold after a full
+  collection;
 - `--deck N`: one shape of N wobbly contours stacked almost on top of
   each other, filled even-odd, whose crossings make libtess2 slow with
   the square of N (`--paint gradient` or `bitmap`; `--ratio-change`

@@ -25,7 +25,7 @@
 // is swf.ts's.
 
 import type { Codegen } from "@swf2es/codegen";
-import { type ActionList, ClipEvent, isAs3, type Place, type Swf } from "@swf2es/format";
+import { type ActionList, ClipEvent, isAs3, type Swf } from "@swf2es/format";
 import { avm1 } from "@swf2es/runtime";
 import { BitmapStore } from "../bitmap/bitmap.js";
 import { decodeInBrowser, type ImageDecode } from "../bitmap/images.js";
@@ -284,6 +284,14 @@ export function getUrlNavigate(navigate: Navigate | null, swfUrl: string): Avm1N
   };
 }
 
+/** A place's clip actions and the events of those Flash cannot read (Place.actions and corrupt). */
+interface ClipActions {
+  actions: number[] | null;
+  corrupt: number;
+}
+
+const NO_CLIP_ACTIONS: ClipActions = { actions: null, corrupt: 0 };
+
 /** The AS2 methods a clip's events call from SWF 6, by the event's bit. */
 const METHODS = new Map<number, string>([
   [ClipEvent.load, "onLoad"],
@@ -360,8 +368,8 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
   private clipProto: avm1.Avm1Object | null = null;
   private buttonProto: avm1.Avm1Object | null = null;
   private textFieldProto: avm1.Avm1Object | null = null;
-  /** The places of clips being placed, until they are made. */
-  private readonly places = new WeakMap<MovieClip, Place>();
+  /** The clip actions of clips being placed, by their places, until they are made. */
+  private readonly places = new WeakMap<MovieClip, ClipActions>();
   /** The clips removed with an unload handler, kept until the next frame. */
   private pending: DisplayObject[] = [];
   /** The player's clock, the scripts' timeout and setInterval's timers. */
@@ -742,10 +750,15 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
 
     this.swfs.set(library, swf);
     library.avm1 = {
-      placing: (display, place) => {
+      placing: (display, places, place) => {
         // Only a clip's is read, as it is made: a shape's would wait for the collector.
         if (display instanceof MovieClip) {
-          this.places.set(display, place);
+          const actions = places.actions(place);
+          const corrupt = places.corrupt(place);
+          this.places.set(
+            display,
+            actions === null && corrupt === 0 ? NO_CLIP_ACTIONS : { actions, corrupt },
+          );
         }
       },
       made: (display) => this.made(display),
@@ -1249,7 +1262,7 @@ export class Avm1 implements Movie, FocusState, BitmapHost, BindingHost {
     if (place !== undefined) {
       this.places.delete(d);
       native.corrupt = place.corrupt;
-      native.handlers = handlersOf(place, native.swf);
+      native.handlers = handlersOf(place.actions, native.swf);
       this.corruptPlace(d, place.corrupt);
     } else if (source !== undefined) {
       this.scriptClips.handed.delete(d);

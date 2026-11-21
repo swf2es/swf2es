@@ -7,6 +7,7 @@ import {
   type DisplayObject,
   TextObject,
 } from "../../../../packages/player/dist/display/display.js";
+import { Places } from "../../../../packages/player/dist/display/places.js";
 import type { ClipboardText } from "../../../../packages/player/dist/hosts.js";
 import {
   highlighted,
@@ -448,15 +449,28 @@ test("an object taken off its parent, or hidden, loses focus", () => {
   equal(scripting.focus, null);
 
   setFocus(scripting, b);
-  b.applyPlace({
+  const hidden = new Places();
+  hidden.add({
+    depth: 1,
+    move: true,
+    character: null,
     matrix: null,
     colorTransform: null,
+    ratio: null,
     name: null,
-    visible: false,
     clipDepth: null,
+    className: null,
+    hasImage: false,
     blendMode: null,
+    cacheAsBitmap: null,
+    visible: false,
+    opaqueBackground: null,
     filters: null,
-  } as never);
+    metaData: null,
+    actions: null,
+    corrupt: 0,
+  });
+  b.applyPlace(hidden, 0);
   equal(scripting.focus, null);
 });
 
