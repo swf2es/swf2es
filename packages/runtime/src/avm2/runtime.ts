@@ -688,7 +688,7 @@ export class Runtime {
       for (const [d, factory, id, , params] of script.desc.traits.methods) {
         const method = withId(factory(this.empty, this.scriptSuper), id);
         this.keepStatic(factory, method);
-        installMethod(this, traits.methodHome(3), d, method, factory, params);
+        installMethod(this, traits, d, method, factory, params);
       }
 
       // Caches keep the methods.
@@ -2578,13 +2578,20 @@ export class Runtime {
 
   /**
    * A method's `arguments`: every argument it was called with, declared or
-   * not, and as `callee`, not enumerable, the method's Function object,
-   * the one a newfunction made for it, so that `arguments.callee === f`,
-   * else one made for it once, as avmplus' MethodClosure is.
+   * not, and as `callee`, not enumerable, the method's Function object: a
+   * class's or a script's method bound to `receiver`, the closure a read of
+   * the method gives, as avmplus keeps one MethodClosure for a method and a
+   * receiver (so that `arguments.callee == this.m`); else the one a
+   * newfunction made for it, so that `arguments.callee === f`, or one made
+   * for it once.
    */
-  arguments(args: IArguments, callee: Method): AsObject {
+  arguments(args: IArguments, callee: Method, receiver?: Value): AsObject {
     const o = this.array(Array.prototype.slice.call(args));
-    let f = this.functionObjects.get(callee);
+    const home =
+      typeof receiver === "object" && receiver !== null ? this.homes.get(callee) : undefined;
+    let f = home
+      ? this.methodClosure(receiver, home.traits, home.id)
+      : this.functionObjects.get(callee);
     if (!f) {
       f = this.newFunctionObject(callee, null);
       this.functionObjects.set(callee, f);
@@ -2597,6 +2604,16 @@ export class Runtime {
 
   /** Each method's Function object, by the method, for arguments.callee. */
   private readonly functionObjects = new WeakMap<Method, AsObject>();
+
+  /** Where each installed method is, by the method and by its bound form, for arguments.callee. */
+  private readonly homes = new WeakMap<Method, { traits: Traits; id: number }>();
+
+  /** Notes method `f`, and `bound`, its form for a bound call, as `traits`' method at dispatch id `id`. */
+  installed(f: Method, bound: Method, traits: Traits, id: number): void {
+    const home = { traits, id };
+    this.homes.set(f, home);
+    this.homes.set(bound, home);
+  }
 
   newFunction(factory: Factory, scope: Scope, id = 0): AsObject {
     const method = factory(scope, null);

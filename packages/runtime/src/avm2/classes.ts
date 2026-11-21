@@ -154,13 +154,13 @@ export function newClass(
   for (const [d, factory, id, , params] of desc.static.methods) {
     const method = withId(factory(scope, rt.staticSuper), id);
     rt.keepStatic(factory, method);
-    installMethod(rt, straits.methodHome(3), d, method, factory, params);
+    installMethod(rt, straits, d, method, factory, params);
   }
 
   for (const [d, factory, id, , params] of desc.instance.methods) {
     const method = withId(factory(iscope, base), id);
     rt.keepStatic(factory, method);
-    installMethod(rt, itraits.methodHome(3), d, method, factory, params);
+    installMethod(rt, itraits, d, method, factory, params);
   }
 
   // Playerglobal can declare an accessor whose setter has no ABC body.
