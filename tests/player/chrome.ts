@@ -6,6 +6,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { GeometryTally } from "./census.ts";
 import { serve } from "./serve.ts";
 
 export interface PlayerJob {
@@ -458,6 +459,8 @@ export interface BenchResult {
   first: number;
   renderer: string;
   error: string | null;
+  /** The CPU copies of geometries the view held after the frames (census.ts, GeometryTally). */
+  geometry?: GeometryTally;
   morphs?: {
     requests: number[];
     misses: number[];
