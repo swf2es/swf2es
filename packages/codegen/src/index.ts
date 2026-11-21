@@ -8,6 +8,10 @@
  */
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
+import { KeyChains, type KeyContext } from "./keys.js";
+
+export { KeyChains, type KeyContext, type KeyLog } from "./keys.js";
+export { hex, sha256Here } from "./sha256.js";
 
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
@@ -47,9 +51,11 @@ export function libraryLog(codegen: Codegen, index: number, count: number): stri
  * SWFs of several versions share the libraries' modules), every ABC its
  * domain sees, by hash and whether it is a library, those added after it
  * included, its own place among them, and the compiler's log about them
- * (see Codegen.context), the libraries' part by its digest once taken. The
- * player's module cache and the swf2es command both key by it, so that the
- * command's modules are the cache's. Null where there is no context.
+ * (see Codegen.context), the libraries' part by its digest once taken and
+ * the rest by the chained digests of its blocks of entries but the last
+ * few (see Codegen.keyContext). The player's module cache and the swf2es
+ * command both key by it, so that the command's modules are the cache's.
+ * Null where there is no context.
  */
 export function moduleKey(
   codegen: Codegen,
@@ -57,7 +63,7 @@ export function moduleKey(
   abcs: AddedAbcs,
   libraries: LibraryDigest | null,
 ): string | null {
-  const context = codegen.context(index, libraries?.count ?? 0);
+  const context = codegen.keyContext(index, libraries?.count ?? 0);
   if (!context) {
     return null;
   }
@@ -70,7 +76,8 @@ export function moduleKey(
     abcs: context.abcs.map((i) => `${abcs.builtins[i] ? "builtin " : ""}${abcs.hashes[i]}`),
     own: context.own,
     libraries,
-    log: context.log,
+    blocks: context.blocks,
+    log: context.rest,
   });
 }
 
@@ -291,6 +298,17 @@ export interface Codegen {
    */
   context(index?: number, after?: number, upTo?: number): ModuleContext | null;
   /**
+   * ABC `index`'s context as a module key names it, the log's entries
+   * made with `after` ABCs added or fewer left out: the log by the chained
+   * digests of its blocks of entries, those made before the last ABC was
+   * added, and the text of the entries after them. Each application
+   * domain keeps its last digest, so a key reads and digests only the
+   * entries made since the last, or since its parent's. The same domain
+   * gives the same however its keys were taken. Null for an ABC never
+   * added, or of a domain not live.
+   */
+  keyContext(index?: number, after?: number): KeyContext | null;
+  /**
    * A string that changes whenever a context might: a host that took one
    * and finds this the same since need not take it again.
    */
@@ -486,6 +504,21 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   const identity = stamps.length ? String.fromCharCode(...new Uint8Array(stamps[0])) : null;
   let epoch = 0;
   let apiVersion = API_VERSION;
+  // Read where they are in codegen's memory, digested before the next call in.
+  const chains = new KeyChains({
+    header(index) {
+      const address = wasm.domainKeyHeaderBytes(index);
+      return address === 0 ? "" : handed(address, wasm.outputLength());
+    },
+    parent: (appDomain) => wasm.domainParent(appDomain),
+    fork: (appDomain) => wasm.domainKeyFork(appDomain),
+    log(appDomain, after, from, to, block, filled) {
+      const address = wasm.domainKeyLogBytes(appDomain, after, from, to, block, filled);
+      return address === 0
+        ? null
+        : new Uint8Array(wasm.memory.buffer, address, wasm.outputLength());
+    },
+  });
   const collected = <T>(result: T, reclaim = false): T => {
     const grown = wasm.memory.buffer.byteLength;
     if (reclaim || grown > size || ++calls >= COLLECT_EVERY) {
@@ -510,6 +543,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       checkApiVersion(version);
       added = 0;
       epoch++;
+      chains.clear();
       apiVersion = version;
       collected(wasm.domainReset(version));
     },
@@ -539,6 +573,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     dropDomain(appDomain, of = epoch) {
       if (of === epoch) {
         collected(wasm.domainDrop(appDomain));
+        chains.forget((d) => wasm.domainState(d) === 2);
       }
     },
     evictDomain(appDomain) {
@@ -633,6 +668,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
         own: Number(text.slice(first + 1, second < 0 ? text.length : second)),
         log: second < 0 ? "" : text.slice(second + 1),
       };
+    },
+    keyContext(index = -1, after = 0) {
+      if (added === 0) {
+        return null;
+      }
+
+      return collected(chains.context(indexOf(index), after));
     },
     revision() {
       return `${epoch} ${wasm.domainRevision()}`;

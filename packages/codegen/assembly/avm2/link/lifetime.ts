@@ -392,6 +392,7 @@ function keepEntry(dom: Domain, from: Domain, e: i32): void {
   let a = from.logA[e];
   if (from.logKind[e] === LOG_Found) {
     a = <u32>dom.foundDomain.length;
+    dom.foundEntry.push(<u32>dom.logKind.length);
     dom.foundDomain.push(from.foundDomain[from.logA[e]]);
     dom.foundKind.push(from.foundKind[from.logA[e]]);
     dom.foundUri.push(from.foundUri[from.logA[e]]);
