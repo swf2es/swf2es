@@ -232,6 +232,9 @@ export class WebGLBackend {
     this.losses.clear();
     this.made = this.ready = false;
     geometries.lost();
+    // Lost again already: the atlas keeps the places and settling geometries of the context
+    // before, naming ids Geometries.lost removed, till the next restore makes it anew (setUp).
+    // Nothing reads them meanwhile, as no frame is drawn or planned while the context is lost.
     if (this.gl.isContextLost()) {
       return;
     }

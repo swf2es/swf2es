@@ -255,11 +255,14 @@ whose entries go once unused for their idle frames:
   (`webgl/atlas.ts`, one page of them for now), those a frame adds staged
   and uploaded together. Once a copied geometry has stood three of the
   registry's frames (`RELEASE_FRAMES`), the registry lets go of its arrays
-  (`Geometries.release`; only after a copy into a live context, so frames
-  drawn while it is lost keep theirs, and a view with no GPU backend keeps
-  them all), and the atlas keeps only its indices, counted from its first
-  vertex, in a copy of their own, 16 bits where they fit (`Place.local`): what moving it or merging it needs, as
-  WebGL copies index buffers only as they are and cannot add to them. A
+  (`Geometries.release`; only after a copy into a context not known to be
+  lost, so frames drawn while it is flagged lost keep theirs, and a view
+  with no GPU backend keeps them all; arrays let go of after copies in
+  Chrome's window before it flags a loss are rebuilt by the restore), and
+  the atlas keeps only its indices, counted from its first vertex, in a
+  copy of their own, 16 bits where they fit (`Place.local`): what moving
+  it or merging it needs, as WebGL copies index buffers only as they are
+  and cannot add to them. A
   geometry drawn anew each frame, as a script's drawing redrawn every
   frame is, goes whole before then: copying the indices of 1,600 such
   geometries a frame (`bench.ts --redraw 800`) took a millisecond. A geometry whose owner

@@ -425,8 +425,10 @@ export class GeometryAtlas {
   /**
    * The geometries placed RELEASE_FRAMES of their registry's ago or more, by its frames, not the
    * atlas', which a BitmapData's draws advance too, and placed still: their indices copied into
-   * arrays of their own and their arrays let go of (Geometries.release), only into a live
-   * context, as copies made into a lost one are no copies and the arrays stay for the restore.
+   * arrays of their own and their arrays let go of (Geometries.release), only while the context
+   * is not known to be lost: copies made into a lost one are no copies, and the arrays stay for
+   * the restore. In Chrome's window before it flags a loss (webgl/losses.ts), arrays may go
+   * after copies that never reached the GPU; the restore's Geometries.lost rebuilds them.
    */
   private settle(geometries: Geometries): void {
     const places = this.settling;

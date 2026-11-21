@@ -15,15 +15,18 @@ the layer and shared by every instance that draws it (`scene/parts.ts`,
 `partsOf`), a
 drawing's for each version of it, and let go of once undrawn for 300
 frames (`IDLE_FRAMES`). Their arrays on the CPU go sooner: three frames
-after the GPU backend has copied them into a live context
-(`Geometries.release`, called only by `webgl/atlas.ts` after the copy),
-the registry lets go of them
-and the backend keeps only their indices. A view with no GPU backend, as
-in node, never lets go of them. A reader that wants arrays let go of,
-the restore after a lost context or a CPU rasterizer alike, asks for them
-through one entry point, `Geometries.rebuild`: the geometry is removed,
-and its owner adds it again with its arrays as it next draws it, as it
-does one that expired (`renderer.md`, "Resources"). A layer that took 20 ms or more to make
+after the GPU backend has copied them into a context not known to be
+lost (`Geometries.release`, called only by `webgl/atlas.ts` after the
+copy), the registry lets go of them and the backend keeps only their
+indices; a loss found later, as Chrome flags one only a task after,
+rebuilds them. A view with no GPU backend, as in node, never lets go of
+them. A reader that wants arrays let go of, the restore after a lost
+context or a CPU rasterizer alike, asks for them through one entry point,
+`Geometries.rebuild`: the geometry is removed, and its owner adds it
+again with its arrays as it next draws it, as it does one that expired
+(`renderer.md`, "Resources"). It is called outside a frame's walk, or
+with the view's spans dropped after, as a scene list walked before names
+the removed id. A layer that took 20 ms or more to make
 (`SLOW_PARTS_MS`), as a morph's blend of a hundred crossing contours takes
 libtess2 seconds, keeps its triangles when its geometries go
 (`scene/kept-parts.ts`), so a tween longer than the idle frames adds its

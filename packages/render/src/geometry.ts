@@ -94,7 +94,7 @@ export interface GeometryData {
  * IDLE_FRAMES is let go of; its owner finds it gone by its handle and adds
  * it again. The backend takes what was added and removed since it last
  * looked (taken), and keeps its own copies: once it has copied a geometry's
- * arrays to a live GPU context, the registry lets go of them (release),
+ * arrays into a context not known to be lost, the registry lets go of them (release),
  * unless their owner changes them in place (add's `keep`). Nothing else
  * releases them, so a view with no GPU backend, as in node, keeps every
  * geometry's arrays. A reader that needs arrays let go of, a lost context
@@ -149,7 +149,7 @@ export class Geometries extends Registry {
   }
 
   /**
-   * Geometry `id`'s arrays copied by the backend to a live GPU context,
+   * Geometry `id`'s arrays copied by the backend into a context not known to be lost,
    * which keeps what it needs of them: let go of, unless they were added to
    * be kept. Its box and flatness stay. Only the GPU backend calls it, once
    * the copy is made (webgl/atlas.ts).
@@ -171,7 +171,12 @@ export class Geometries extends Registry {
    * it again with its arrays as it next draws it (tessellated and stroked
    * again, or from a slow layer's kept triangles), as an expired one is;
    * its handle then reads dead. True where it was removed so; false where
-   * its arrays are held (get), or it is not held at all.
+   * its arrays are held (get), or it is not held at all. Called outside a
+   * frame's walk, or with the view's spans dropped after: a frame walked
+   * or kept as spans (scene/spans.ts) before the call names the removed id
+   * in its scene list, which then draws nothing for it. An owner remaking
+   * its own geometry as it is next asked for it, before it is drawn, may
+   * call it mid-walk (Parts.partsOf).
    */
   rebuild(id: number): boolean {
     if (!this.released(id)) {
