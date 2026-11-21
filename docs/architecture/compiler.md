@@ -126,8 +126,11 @@ Each method goes through the same steps, in `codegen`:
    labelled `break`) from the dominator tree for the reducible code compilers
    emit, falling back to the dispatcher. Conformance tests check that both
    give the same results.
-5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
-   JavaScript strings, and names are copied straight from the ABC. A
+5. **Emission** writes JavaScript as ASCII into a growable byte buffer: no
+   JavaScript strings, and names are copied straight from the ABC, every
+   character past ASCII a `\u` escape (`output.ts`), so that V8 keeps a
+   module's source one byte a character; a single character past U+00FF
+   would make it keep the whole source two. A
    method's frame, its entry checks and how it reads and writes registers
    are `emit/method.ts`'s; its blocks, written an instruction at a time,
    `emit/blocks.ts`'s, and its handler regions and catch

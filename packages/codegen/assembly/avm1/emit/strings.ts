@@ -8,7 +8,7 @@
 // point, or one past U+10FFFF, is a U+FFFD; and a code point of 0, or a
 // sequence the string's end cuts short, ends the string there.
 // tests/unit/codegen/avm1-emit.test.ts holds the cases adl was asked.
-import { Output, wellFormed } from "../../output";
+import { codePoint, Output, wellFormed } from "../../output";
 
 /** What ConvertUTF.c subtracts from the sum of a sequence of 1 to 6 bytes. */
 const OFFSETS: StaticArray<u32> = [0, 0x3080, 0xe2080, 0x3c82080, 0xfa082080, 0x82082080];
@@ -41,18 +41,11 @@ export function avm1String(out: Output, ptr: usize, length: u32, utf8: bool): vo
       continue;
     }
 
-    // Well-formed UTF-8 reads as adl reads it, and is copied.
+    // Well-formed UTF-8 reads as adl reads it; escaped, as every character
+    // past ASCII is, to keep the module ASCII (Output.string).
     const n = wellFormed(ptr + i, length - i);
     if (n !== 0) {
-      if (b === 0xe2 && load<u8>(ptr + i + 1) === 0x80 && (load<u8>(ptr + i + 2) & 0xfe) === 0xa8) {
-        // U+2028 and U+2029 end a line in older engines.
-        out.text(load<u8>(ptr + i + 2) === 0xa8 ? "\\u2028" : "\\u2029");
-      } else {
-        for (let k: u32 = 0; k < n; k++) {
-          out.byte(load<u8>(ptr + i + k));
-        }
-      }
-
+      out.point(codePoint(ptr + i, n));
       i += n;
       continue;
     }
@@ -76,11 +69,8 @@ export function avm1String(out: Output, ptr: usize, length: u32, utf8: bool): vo
     // Escaped, since what it reads as may be a quote or a line's end.
     if (c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) {
       out.unit(0xfffd);
-    } else if (c > 0xffff) {
-      out.unit(0xd800 + ((c - 0x10000) >> 10));
-      out.unit(0xdc00 + ((c - 0x10000) & 0x3ff));
     } else {
-      out.unit(c);
+      out.point(c);
     }
   }
 
