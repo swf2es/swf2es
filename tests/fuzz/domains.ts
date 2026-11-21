@@ -21,7 +21,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { containerEngine, libraries, runOracle } from "../../oracle/oracle.ts";
-import { KeyChains, type KeyLog } from "../../packages/codegen/dist/keys.js";
+import { KeyChains, type KeyLog } from "@swf2es/codegen";
 import { classes, GETTER, METHOD, mn, OVERRIDE, SLOT } from "../unit/codegen/link-cases.ts";
 import { loadTesting } from "../unit/codegen/testing-module.ts";
 
