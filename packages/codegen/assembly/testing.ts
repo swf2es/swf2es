@@ -26,7 +26,6 @@ export {
   domainEmitEachBytes,
   domainEvict,
   domainFound,
-  domainLazyModuleBytes,
   domainLinked,
   domainLogMark,
   domainLogSince,

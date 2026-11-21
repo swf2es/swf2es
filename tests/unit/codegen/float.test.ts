@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { createCodegen } from "@swf2es/codegen";
+import { API_VERSION, createCodegen } from "@swf2es/codegen";
 import { avm2 } from "@swf2es/runtime";
 import { compileFloatLibrary, GENERATED, generated } from "../../libraries/float.ts";
 import { libraryAbcs } from "../../player/libraries.ts";
@@ -212,7 +212,7 @@ test("float defaults preserve dynamic identity and coerce numeric parameter defa
   }
 });
 
-test("scalar AIR modules compile identically whole, lazily, and after unrelated methods", async () => {
+test("scalar AIR modules compile identically whole, a method at a time, and after unrelated methods", async () => {
   const module = await WebAssembly.compile(
     readFileSync(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
   );
@@ -228,7 +228,17 @@ test("scalar AIR modules compile identically whole, lazily, and after unrelated 
   const compiled = cg.compile();
   assert.ok(compiled.entries.size > 1);
   assert.doesNotMatch(compiled.module, /verifyError\(/);
-  assert.deepEqual(cg.compileMethods([...compiled.entries.keys()].reverse()), compiled.entries);
+  // Each method alone, in the reverse order with one emitter, its entry.
+  testing.domainReset(API_VERSION);
+  for (const library of libraries) {
+    assert.equal(testing.domainAdd(library, true), 0);
+  }
+  assert.equal(testing.domainAdd(bytes, false), 0);
+  const bodies = [...compiled.entries.keys()].reverse();
+  assert.equal(
+    testing.domainEmitEach(bodies.join(","), true),
+    bodies.map((body) => `${body}\u0001${compiled.entries.get(body)}\u0002`).join(""),
+  );
   assert.equal(cg.add(program([0x22, 1, 0x48])), 0);
   cg.compile();
   assert.equal(cg.compileModule(undefined, libraries.length), compiled.module);

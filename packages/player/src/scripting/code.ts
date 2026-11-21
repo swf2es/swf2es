@@ -19,7 +19,6 @@ import {
   type ModuleRecorder,
   namesWorkerDomain,
 } from "./handover.js";
-import { methodCompiler, supportsLazyCompilation } from "./lazy.js";
 import { sha256 } from "./sha256.js";
 
 const textEncoder = new TextEncoder();
@@ -471,11 +470,6 @@ export class Code {
    * it or under it, so a domain loaded into again stays.
    */
   private evict(domain: avm2.Domain): void {
-    // Deferred bodies still need their ABCs. Domain GC drops them as usual.
-    if (this.s.lazyCompilation) {
-      return;
-    }
-
     const target = this.codegenDomains.get(domain.id);
     if (
       target !== undefined &&
@@ -525,26 +519,15 @@ export class Code {
    * script the frames name, as codeDomain skips their code.
    */
   private evaluateAt(index: number, builtin: boolean, ready?: Ready): Module | Promise<Module> {
-    const compiled = (
-      module?: string,
-      lazy = !builtin && this.s.lazyCompilation && supportsLazyCompilation(),
-    ) => {
+    const compiled = (module?: string): Module | Promise<Module> => {
       const script = `swf2es-${++this.modules}.js`;
-      const epoch = this.s.codegen.epoch;
-      const source = module ?? this.compileNow(index, lazy);
-      const evaluated = builtin
+      const source = module ?? this.compileNow(index);
+      return builtin
         ? { factory: evaluateFunction(source, script), script }
         : evaluate(source, script);
-      const mark = (value: Evaluated): Module => ({
-        ...value,
-        lazy,
-        epoch,
-      });
-      return evaluated instanceof Promise ? evaluated.then(mark) : mark(evaluated);
     };
     if (!ready) {
-      const lazy = !builtin && this.s.lazyCompilation && supportsLazyCompilation();
-      const handed = lazy ? null : this.handover?.take(index, this.hashes);
+      const handed = this.handover?.take(index, this.hashes);
       if (handed) {
         if (handed.url !== undefined) {
           return this.importHanded(handed);
@@ -553,16 +536,13 @@ export class Code {
         // Read only once taken: a worker on other ABCs never reads the SWF's.
         const source = handed.module;
         return typeof source === "string" || source === undefined
-          ? compiled(source ?? "", false)
-          : source.text().then((text) => compiled(text, false));
+          ? compiled(source ?? "")
+          : source.text().then((text) => compiled(text));
       }
     }
 
     if (!ready?.cached) {
-      return compiled(
-        ready?.module,
-        ready?.lazy ?? (!builtin && this.s.lazyCompilation && supportsLazyCompilation()),
-      );
+      return compiled(ready?.module);
     }
 
     if (ready.imported) {
@@ -575,7 +555,7 @@ export class Code {
       return compiled();
     };
     try {
-      const evaluated = compiled(ready.module, false);
+      const evaluated = compiled(ready.module);
       return evaluated instanceof Promise
         ? evaluated.then((e) => ({ ...e, cached: true }), recompiled)
         : { ...evaluated, cached: true };
@@ -602,11 +582,7 @@ export class Code {
     origin?: { url: string; library: Library },
   ): Value {
     let script = evaluated.script;
-    const jit = evaluated.lazy
-      ? methodCompiler(this.s, index, domain, script, evaluated.epoch)
-      : undefined;
-    const run = (factory: Factory) =>
-      this.s.rt.loadInto(domain, () => factory(this.s.rt, jit), builtin);
+    const run = (factory: Factory) => this.s.rt.loadInto(domain, () => factory(this.s.rt), builtin);
     let linked: Value;
     if (!evaluated.cached || !ready) {
       linked = run(evaluated.factory);
@@ -642,17 +618,11 @@ export class Code {
   }
 
   /**
-   * ABC `index`'s module compiled now, `lazy` or whole, and journaled;
-   * with its log where it may be handed to a worker.
+   * ABC `index`'s module compiled now, and journaled; with its log
+   * where it may be handed to a worker.
    */
-  private compileNow(index: number, lazy: boolean): string {
+  private compileNow(index: number): string {
     const codegen = this.s.codegen;
-    if (lazy) {
-      const module = codegen.compileLazyModule(this.hashes, index);
-      this.journal(`lazy ${index}`);
-      return module;
-    }
-
     if (this.recorder?.open) {
       const { module, log } = codegen.compileModuleLogged(this.hashes, index);
       this.recorded(index, { text: module }, log);
@@ -695,10 +665,8 @@ export class Code {
     await this.digestLibraries(indices[0]);
     const smallest = cache?.minBytes ?? MIN_CACHED_ABC;
     for (const index of indices) {
-      const lazy = !this.builtins[index] && this.s.lazyCompilation && supportsLazyCompilation();
       if (this.sizes[index] < smallest) {
-        const module = this.compileNow(index, lazy);
-        ready.push({ module, key: null, cached: false, lazy });
+        ready.push({ module: this.compileNow(index), key: null, cached: false });
         continue;
       }
 
@@ -745,11 +713,6 @@ export class Code {
         this.unmodelled();
         failed = true;
         this.discard(key, cached);
-      }
-
-      if (lazy) {
-        ready.push({ module: this.compileNow(index, true), key, cached: false, lazy: true });
-        continue;
       }
 
       const { module, log } = this.s.codegen.compileModuleLogged(this.hashes, index);
@@ -1101,8 +1064,6 @@ async function read(
 /** A module evaluated or imported, and whether it came from the cache. */
 interface Module extends Evaluated {
   cached?: boolean;
-  lazy?: boolean;
-  epoch?: number;
 }
 
 type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
@@ -1114,7 +1075,6 @@ type Read = NonNullable<Awaited<ReturnType<typeof read>>>;
  */
 interface Ready {
   module: string;
-  lazy?: boolean;
   key: string | null;
   cached: boolean;
   entry?: CachedModule;

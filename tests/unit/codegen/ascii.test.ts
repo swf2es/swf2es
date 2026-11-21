@@ -55,8 +55,6 @@ test("the libraries' modules, source maps and methods compiled alone are ASCII",
     for (const [body, entry] of entries) {
       assertAscii(entry, `${name}'s body ${body}`);
     }
-
-    assertAscii(codegen.compileLazyModule(), `${name}, lazy`);
   }
 });
 
@@ -133,20 +131,12 @@ test("strings, names and paths past ASCII are escaped and read back as they were
     assertAscii(entry, `body ${body}`);
   }
 
-  const lazy = codegen.compileLazyModule(["0123"]);
-  assertAscii(lazy, "lazy module");
-
   // The constants, the name a missing body's error gives, and the function's identifier.
   const values = literals(compiled);
   assert.ok(values.includes(CONSTANT));
   assert.ok(values.includes(READ));
   assert.ok(values.includes(`global/${NO_BODY}()`));
   assert.ok(compiled.includes("$_global$sgr$x00fc$x00dfen"));
-  // The lazy module leaves the bodies to the JIT, their entries.
-  for (const value of literals(lazy)) {
-    assert.ok(values.includes(value), JSON.stringify(value));
-  }
-
   assert.ok(
     [...entries.values()].some(
       (entry) => literals(entry).includes(CONSTANT) && literals(entry).includes(READ),

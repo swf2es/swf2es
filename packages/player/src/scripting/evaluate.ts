@@ -2,12 +2,11 @@
 // own that its code's stack frames give, by which Runtime.codeDomain and
 // Code.codeOrigin tell whose code runs.
 import { avm2 } from "@swf2es/runtime";
-import type { LazyCompiler } from "./lazy.js";
 
 type Value = avm2.Value;
 
 /** A module's factory, as it exports it: given the runtime, it loads the module into it. */
-export type Factory = (rt: avm2.Runtime, jit?: LazyCompiler) => Value;
+export type Factory = (rt: avm2.Runtime) => Value;
 
 /** A module's factory and the script its code's frames name. */
 export interface Evaluated {
@@ -24,9 +23,8 @@ const EXPORT = "export default ";
  * never be collected; a Function's goes once nothing refers to its
  * functions. A module is one exported function and nothing else, so it
  * runs the same returned from a strict Function, the names its code uses
- * its own function's variables (see Lazy compilation in
- * docs/architecture/compiler.md); its lines in a stack are its file's two further
- * on, after Function's header.
+ * its own function's variables; its lines in a stack are its file's two
+ * further on, after Function's header.
  */
 export function evaluateFunction(module: string, script: string): Factory {
   return new Function(`"use strict"; return ${body(module)}//# sourceURL=${script}\n`)();

@@ -29,8 +29,8 @@
 // as rt.literalName(M[9], "name"), and the methods of primitives' classes
 // it calls, null until each is first called; numbered as the method first refers
 // to each, so that its code does not
-// depend on the module's other methods: compiled alone, as lazy JIT will
-// compile it, it comes out as it is in the module.
+// depend on the module's other methods: compiled alone, as the determinism
+// check compiles it, it comes out as it is in the module.
 
 import { Output } from "../../output";
 import { BodyDecoder, bodyDecoder, Verifier } from "../abc/code";
@@ -95,7 +95,6 @@ export class ModuleEmitter {
   /** A module written a part at a time: what begin was given, and how far step has got. */
   private hashes: string[] = [];
   private linkedOnly: bool = false;
-  private lazy: bool = false;
   private phase: u8 = PHASE_Done;
   private verifier: Verifier | null = null;
   private results: StaticArray<i32> = new StaticArray<i32>(0);
@@ -119,13 +118,8 @@ export class ModuleEmitter {
    * this one's and then only those of the ABCs it names as linked, in
    * order (see domainLinked), so a host need not pass every ABC's.
    */
-  module(
-    hashes: string[],
-    linkedOnly: bool = false,
-    lazy: bool = false,
-    results: StaticArray<i32> | null = null,
-  ): void {
-    this.begin(hashes, linkedOnly, lazy, results);
+  module(hashes: string[], linkedOnly: bool = false): void {
+    this.begin(hashes, linkedOnly);
     while (!this.step(u64.MAX_VALUE, false)) {}
   }
 
@@ -137,20 +131,14 @@ export class ModuleEmitter {
    * host collect each part's before the next, and hand out each part's
    * text, so that codegen's memory, which never shrinks, holds one part's.
    */
-  begin(
-    hashes: string[],
-    linkedOnly: bool = false,
-    lazy: bool = false,
-    results: StaticArray<i32> | null = null,
-  ): void {
+  begin(hashes: string[], linkedOnly: bool = false): void {
     const out = this.out;
     out.reset();
     this.methods.map.reset();
     this.hashes = hashes;
     this.linkedOnly = linkedOnly;
-    this.lazy = lazy;
     this.cursor = 0;
-    out.text(lazy ? "export default function (rt, jit) {\n" : "export default function (rt) {\n");
+    out.text("export default function (rt) {\n");
     // A null check's throw, an expression where a check reads its register
     // (MethodEmitter.checkedRead), and an argument count's (checkEntry); not
     // named with a $, so that a stack starts at the method that called them
@@ -163,21 +151,9 @@ export class ModuleEmitter {
     out.text("  const cls = (n, name) => rt.cls(n, name);\n");
     out.text("  const mn = (kind, set, name) => rt.name(N, V, kind, set, name);\n");
     this.names();
-    if (lazy) {
-      out.text("  const lf = (m, b) => { let f; return (...args) => {\n");
-      out.text("    if (!f) { f = jit(b, [rt, nn, ac, ns, cls, N, S, M, V, F, A]); F[m] = f; }\n");
-      out.text("    return f(...args);\n  }; };\n");
-    }
-
     // Verified after the names are written, as before any method.
-    if (results === null) {
-      this.verifier = new Verifier(this.domain, this.index);
-      this.phase = PHASE_Verify;
-    } else {
-      this.results = results;
-      this.phase = PHASE_Methods;
-      out.text("  const F = [");
-    }
+    this.verifier = new Verifier(this.domain, this.index);
+    this.phase = PHASE_Verify;
   }
 
   /**
@@ -393,7 +369,6 @@ export class ModuleEmitter {
     const domain = this.domain;
     const abc = domain.abcs[this.index];
     const results = this.results;
-    const lazy = this.lazy;
     // Asked for again by each part, as another may have retargeted it.
     const decoder = bodyDecoder(domain, this.index);
     const start = domain.methodStart[this.index];
@@ -430,15 +405,6 @@ export class ModuleEmitter {
 
       if (result > 0) {
         this.verifyError(result, global, <u32>body, decoder);
-        continue;
-      }
-
-      if (lazy) {
-        out.text("lf(");
-        out.uint(m);
-        out.text(", ");
-        out.uint(<u32>body);
-        out.text(")");
         continue;
       }
 

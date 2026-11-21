@@ -149,7 +149,6 @@ async function scriptingFor(
   {
     moduleCache = null,
     onCompile,
-    lazyCompilation = false,
     air = false,
     apiVersion = "latest",
     logFetch = false,
@@ -157,7 +156,6 @@ async function scriptingFor(
   }: {
     moduleCache?: ModuleCache | null;
     onCompile?: () => void;
-    lazyCompilation?: boolean;
     /** Played as AIR plays it (Scripting's `air`). */
     air?: boolean;
     /** The API version it runs at (Scripting's `apiVersion`), "root" its own SWF version's. */
@@ -198,7 +196,6 @@ async function scriptingFor(
     : undefined;
   const scripting = new Scripting(codegen, {
     moduleCache,
-    lazyCompilation,
     air,
     apiVersion,
     swfVersion: swf.header.version,
@@ -547,7 +544,6 @@ interface RunSwfOptions {
   viewport?: { width: number; height: number } | null;
   logFetch?: boolean;
   socket?: SocketStep[] | null;
-  lazyCompilation?: boolean;
   /** Played as AIR plays it (Scripting's `air`). */
   air?: boolean;
   /** The API version it runs at (Scripting's `apiVersion`). */
@@ -572,7 +568,6 @@ async function runSwf(
     viewport = null,
     logFetch = false,
     socket = null,
-    lazyCompilation = false,
     air = false,
     apiVersion = "latest",
     draw = false,
@@ -593,7 +588,6 @@ async function runSwf(
   };
   try {
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
-      lazyCompilation,
       air,
       apiVersion,
       logFetch,
@@ -2740,12 +2734,7 @@ let opened: {
 /** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
 let leakCache: ModuleCache | null = null;
 
-async function openSwf(
-  base64: string,
-  url: string | null,
-  cached = false,
-  lazyCompilation = false,
-): Promise<string | null> {
+async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
   opened = null;
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const trace: string[] = [];
@@ -2758,7 +2747,6 @@ async function openSwf(
 
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
       moduleCache: cached ? leakCache : null,
-      lazyCompilation,
     });
     const player = new Player(bytes, scripting);
     await player.start();

@@ -655,11 +655,11 @@ async function churn(n: number, source = "embed.swf") {
   return { ...counts };
 }
 
-/** Exercise the opt-in path without the eager modules already stored by earlier checks. */
-async function lazyChurn(n: number) {
+/** Players that compile their SWF, not take the modules earlier checks stored, made and destroyed: how many played. */
+async function compileChurn(n: number) {
   const { web } = await loading;
-  web.configure({ lazyCompilation: true, cache: false });
-  let enabled = 0;
+  web.configure({ cache: false });
+  let played = 0;
   try {
     for (let i = 0; i < n; i++) {
       const element = await newPlayer();
@@ -667,8 +667,8 @@ async function lazyChurn(n: number) {
       try {
         await element.load("/web-test/scripted.swf");
         await frames(2);
-        if (element.player?.scripting?.lazyCompilation) {
-          enabled++;
+        if (element.player?.scripting) {
+          played++;
           gone.push(new WeakRef(element.player));
         }
       } finally {
@@ -680,10 +680,10 @@ async function lazyChurn(n: number) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   } finally {
-    web.configure({ lazyCompilation: false, cache: true });
+    web.configure({ cache: true });
   }
 
-  return enabled;
+  return played;
 }
 
 /**
@@ -1411,7 +1411,7 @@ Object.assign(globalThis, {
   airAloneRun,
   watched,
   churn,
-  lazyChurn,
+  compileChurn,
   avm1Churn,
   avm1External,
   loadedExternal,

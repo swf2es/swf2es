@@ -13,9 +13,9 @@
 //
 // So nothing the compiler keeps between calls, such as its reused buffers,
 // leaks into what it writes. Then the JIT/AOT invariant of
-// docs/architecture/overview.md: each method compiled alone, as lazy JIT will
-// compile it, byte for byte its entry in its module, in order with a new
-// emitter each and in the reverse order with one for all.
+// docs/architecture/overview.md: each method compiled alone byte for byte
+// its entry in its module, in order with a new emitter each and in the
+// reverse order with one for all.
 //
 // All of it at the API versions a root runs the compiler at: SWF_31, the
 // player's, and SWF_12 and VM_ALLVERSIONS, which old roots will. At those
@@ -290,9 +290,9 @@ async function checkAt(): Promise<void> {
     }
   }
 
-  // The JIT/AOT invariant: each method compiled alone, as lazy JIT will
-  // compile it, byte for byte its entry in the module. In order, a new
-  // emitter for each; then in the reverse order, one emitter for all. The
+  // The JIT/AOT invariant: each method compiled alone byte for byte its
+  // entry in the module. In order, a new emitter for each; then in the
+  // reverse order, one emitter for all. The
   // builtins are the same in every chain, so checked in the first.
   {
     const testing = await loadTesting("dist-test");

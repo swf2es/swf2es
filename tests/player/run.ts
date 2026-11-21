@@ -14,7 +14,7 @@
 // header (apiVersion "root"). adl runs it in AIR's series, the page in
 // Flash Player's unless the case is `air`.
 //
-//   node tests/player/run.ts [--lazy] [--shard i/n] [case...]   check (the i-th of n parts)
+//   node tests/player/run.ts [--shard i/n] [case...]   check (the i-th of n parts)
 //   node tests/player/run.ts --update [case...]   draw the references again in Flash
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -34,7 +34,6 @@ import { compiler, compileScripts } from "./scripts.ts";
 const here = fileURLToPath(new URL(".", import.meta.url));
 const args = process.argv.slice(2);
 const update = args.includes("--update");
-const lazyCompilation = args.includes("--lazy");
 const shardAt = args.indexOf("--shard");
 const [shard, shards] =
   shardAt < 0 ? [1, 1] : (args[shardAt + 1] ?? "").split("/").map((n) => Number(n || NaN));
@@ -98,7 +97,7 @@ const jobs = chosen.map((c) => {
   // A root case's from its own SWF, as the player derives it.
   const apiVersion: "root" | number = c.root ? "root" : HARNESS_SWF_VERSION;
   const url = c.files ? `/files/${c.name}/${c.name}.swf` : undefined;
-  return { ...c, swf, lazyCompilation, apiVersion, url };
+  return { ...c, swf, apiVersion, url };
 });
 for (const c of gaps) {
   swfOf(c);

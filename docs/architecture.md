@@ -9,7 +9,7 @@ topic each:
   invariant, the packages and their boundaries, and milestone 1.
 - [The compiler](architecture/compiler.md): parsing, linking and
   verifying ABCs; compiling a method, the generated code, the object
-  model, modules and the bootstrap, lazy compilation.
+  model, modules and the bootstrap.
 - [The runtime and the standard library](architecture/runtime.md):
   application domains, describeType, avmplus' corners, the builtins,
   ABCs run as avmshell runs them.

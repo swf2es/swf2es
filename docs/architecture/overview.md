@@ -5,8 +5,7 @@ JavaScript. It has one compiler, which runs at two different times:
 
 - **JIT**: the player runs `@swf2es/codegen` as a SWF loads, and compiles
   each of the SWF's ABCs whole to an ES module (see [A SWF's
-  code](player.md#a-swfs-code)). An opt-in mode compiles method bodies on first
-  factory use (see [Optional lazy compilation](compiler.md#optional-lazy-compilation)).
+  code](player.md#a-swfs-code)).
 - **AOT**: node (or a server) runs the same compiler ahead of time, with the
   `swf2es` command (`packages/cli`), and the player takes its modules in
   place of compiling them (see [Compiling ahead of time and caching
@@ -30,9 +29,8 @@ compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
   `compact` reuses the memory they freed (see [Parsing, linking and
   verifying](compiler.md#parsing-linking-and-verifying));
 - the last ABC added compiles with `compile`, whole, to its module, source
-  map and the entry of each method; with `compileModule`, to its module
-  alone; or with `compileLazyModule`, to its tables and lazy factories,
-  whose bodies compile with `compileMethods` on first factory use;
+  map and the entry of each method; or with `compileModule`, to its
+  module alone;
 - `context`, `revision`, `compileModuleLogged` and `replay` serve a cache
   of modules (see [Caching modules](modules.md#caching-modules)).
 
@@ -93,9 +91,11 @@ over the builtins, then each conformance case (also compiled with asc's
   others, in the reverse order twice in a row, and in the build that checks
   every array access, so that nothing the compiler keeps between calls,
   such as its reused buffers, leaks into its output.
-- **The JIT/AOT invariant:** each method compiled alone, as lazy JIT
-  compiles it, is byte for byte its entry in its module: in order with a
-  new emitter each, and in the reverse order with one emitter for all.
+- **The JIT/AOT invariant:** each method compiled alone (the test build's
+  `domainEmitEach`) is byte for byte its entry in its module: in order with
+  a new emitter each, and in the reverse order with one emitter for all,
+  so that a method's code depends on nothing compiled before it, which a
+  module written a part at a time relies on too.
   Everything a method's code refers to is indexed by its ABC (multinames,
   namespaces, functions, descriptors), but for the classes and Vectors it
   refers to and the names it makes of strings it holds, which it has in a

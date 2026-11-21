@@ -45,19 +45,10 @@ if (process.argv.includes("--update")) {
   assert.equal(`${air.output.join("\n")}\n`, readFileSync(reference, "utf8"));
 }
 
-const results = await runPlayer(
-  [false, true].map((lazyCompilation) => ({
-    swf,
-    frames: 2,
-    capture: [],
-    lazyCompilation,
-  })),
-);
-for (const result of results) {
-  assert.equal(result.error, null);
-  assert.deepEqual(result.trace, air.output);
-}
-console.log(`AIR float: ${air.output.length} lines match, eager and lazy`);
+const [result] = await runPlayer([{ swf, frames: 2, capture: [] }]);
+assert.equal(result.error, null);
+assert.deepEqual(result.trace, air.output);
+console.log(`AIR float: ${air.output.length} lines match`);
 
 /** AIR retains source paths even with debug=false; keep the fixture independent of its checkout. */
 function stableSourcePaths(abc: Uint8Array): Uint8Array {

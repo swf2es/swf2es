@@ -2,7 +2,8 @@
 // so that the two builds run the same code: a domain the ABCs are added
 // to, and the module, the source map and the method entries the last one
 // compiles to, whole, as the JIT and ahead-of-time compilation take them,
-// or a method at a time, as lazy compilation will (see docs/architecture/compiler.md).
+// and, for the test build, a method at a time, each as it is in the module
+// (see docs/architecture/compiler.md).
 import { bodyDecoder, releaseDecoder, verifyMethods } from "./avm2/abc/code";
 import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
@@ -34,11 +35,9 @@ import { handOut, Output } from "./output";
 
 export let domain = new Domain();
 
-// The last ABC's methods verified, kept for the JIT, which compiles them
-// one at a time; another ABC added, or a new domain, starts over.
+// The last ABC's methods verified, kept for domainEmitEach, which compiles
+// them one at a time; another ABC added, or a new domain, starts over.
 let verified: StaticArray<i32> | null = null;
-// Lazy modules freeze verification before later loads can change their scopes.
-const lazyVerified = new Map<u32, StaticArray<i32>>();
 
 /**
  * The emitter of the module domainModule wrote last, if it was kept: its
@@ -55,7 +54,6 @@ let written: ModuleEmitter | null = null;
 export function domainReset(apiVersion: i32): void {
   abandon();
   domain = new Domain();
-  lazyVerified.clear();
   domain.apiVersion = <u8>apiVersion;
   verified = null;
   written = null;
@@ -102,7 +100,6 @@ export function domainDrop(appDomain: i32): void {
   abandon();
   if (appDomain >= 0) {
     drop(domain, <u32>appDomain);
-    pruneLazyVerification();
   }
 }
 
@@ -117,7 +114,6 @@ export function domainEvict(appDomain: i32): void {
   abandon();
   if (appDomain >= 0) {
     evict(domain, <u32>appDomain);
-    pruneLazyVerification();
   }
 }
 
@@ -196,10 +192,9 @@ export function domainRebuild(): bool {
     return false;
   }
 
-  // A closure's scope is found by verifying its ABC, which the JIT does
+  // A closure's scope is found by verifying its ABC, which domainEmitEach does
   // once for its first method: the new domain has none found yet.
   domain = fresh;
-  lazyVerified.clear();
   verified = null;
   written = null;
   // The decoder may still be made for the old domain, which it would keep.
@@ -229,10 +224,6 @@ export function domainFound(
 
 /** Each body of ABC `index`'s VerifyError, 0 if it verified, -1 if nothing runs it; verified once per ABC asked for. */
 function verifiedBodies(index: u32): StaticArray<i32> {
-  if (lazyVerified.has(index)) {
-    return lazyVerified.get(index);
-  }
-
   let results = verified;
   if (results === null || verifiedIndex !== index) {
     results = verifyMethods(domain, index);
@@ -244,15 +235,6 @@ function verifiedBodies(index: u32): StaticArray<i32> {
 }
 
 let verifiedIndex: u32 = 0;
-
-function pruneLazyVerification(): void {
-  const indices = lazyVerified.keys();
-  for (let i = 0; i < indices.length; i++) {
-    if (!domain.isLive(indices[i])) {
-      lazyVerified.delete(indices[i]);
-    }
-  }
-}
 
 /**
  * ABC `index` of the domain, or the last added for -1; -1 again where
@@ -330,11 +312,6 @@ export function domainModuleDone(): bool {
   return pending === null;
 }
 
-/** A module's tables and lazy method factories, handed out as domainModuleBytes's; method entries are emitted separately. */
-export function domainLazyModuleBytes(hashes: string = "", index: i32 = -1): usize {
-  return handOut(writeModule(hashes, index, false, true, true));
-}
-
 /**
  * The bytes of garbage, roughly, a part of a module makes (see
  * ModuleEmitter.step). A collection between parts takes about half a
@@ -399,13 +376,7 @@ function stepModule(emitter: ModuleEmitter, fresh: bool): void {
   }
 }
 
-function writeModule(
-  hashes: string,
-  index: i32,
-  keep: bool,
-  linkedOnly: bool,
-  lazy: bool = false,
-): Output | null {
+function writeModule(hashes: string, index: i32, keep: bool, linkedOnly: bool): Output | null {
   written = null;
   abandon();
   // No ABC, no module: the caller asked before adding one.
@@ -416,13 +387,7 @@ function writeModule(
 
   const rows = domain.rows();
   const emitter = new ModuleEmitter(domain, <u32>at);
-  let results: StaticArray<i32> | null = null;
-  if (lazy) {
-    results = verifiedBodies(<u32>at);
-    lazyVerified.set(<u32>at, results);
-  }
-
-  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly, lazy, results);
+  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly);
   weigh(domain, <u32>at, rows);
   if (keep) {
     written = emitter;
@@ -467,8 +432,8 @@ export function domainSourceMap(): string {
 }
 
 /**
- * Method bodies of ABC `which` (the last added for -1) compiled alone, as lazy JIT will
- * compile them: each its entry in F, as the module writes it. `bodies` are
+ * Method bodies of ABC `which` (the last added for -1) compiled alone, for
+ * the tests that hold each to its entry in F, as the module writes it. `bodies` are
  * their indices, comma-separated, in the order to compile them; `reuse`
  * compiles them all with one emitter, else each with a new one. The ABC is
  * verified once first, which a closure's scope needs. Written as

@@ -37,77 +37,72 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-for (const lazyCompilation of [false, true]) {
-  const mode = lazyCompilation ? "lazy" : "eager";
-  test(`the main SWF delivers final progress after its first frame subscribes (${mode})`, {
-    skip,
-  }, async (t) => {
-    const lines: string[] = [];
-    const scripting = new Scripting(await createCodegen(wasm), {
-      print: (line) => lines.push(line),
-      url: "http://example.test/main.swf",
-      lazyCompilation,
-    });
-    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-    const swf = bare(compiler(out)("MainLoadProgress"), 2, "MainLoadProgress");
-    const player = new Player(swf, scripting);
-    t.after(() => player.destroy());
-    await player.start();
-
-    // AIR with this fixture streamed over HTTP, with trailing binary data keeping the load
-    // open after frame 1: its final progress follows INIT and may run a goto before COMPLETE.
-    assert.deepEqual(lines, [
-      "frame 1",
-      "init 1",
-      "progress 1 true true true true",
-      "frame 2",
-      "complete 2",
-    ]);
-    assert.equal(player.root.currentFrame, 2);
-    assert.equal(player.root.playing, false);
-
-    lines.length = 0;
-    player.tick();
-    player.tick();
-    assert.deepEqual(lines, [], "the completed load reports progress only once");
+test(`the main SWF delivers final progress after its first frame subscribes`, {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
   });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const swf = bare(compiler(out)("MainLoadProgress"), 2, "MainLoadProgress");
+  const player = new Player(swf, scripting);
+  t.after(() => player.destroy());
+  await player.start();
 
-  test(`loadBytes preserves progress before the loaded SWF subscribes (${mode})`, {
-    skip,
-  }, async (t) => {
-    const lines: string[] = [];
-    const scripting = new Scripting(await createCodegen(wasm), {
-      print: (line) => lines.push(line),
-      lazyCompilation,
-    });
-    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-    const compile = compiler(out);
-    const host = compile(
-      "MainProgressHost",
-      `package {
+  // AIR with this fixture streamed over HTTP, with trailing binary data keeping the load
+  // open after frame 1: its final progress follows INIT and may run a goto before COMPLETE.
+  assert.deepEqual(lines, [
+    "frame 1",
+    "init 1",
+    "progress 1 true true true true",
+    "frame 2",
+    "complete 2",
+  ]);
+  assert.equal(player.root.currentFrame, 2);
+  assert.equal(player.root.playing, false);
+
+  lines.length = 0;
+  player.tick();
+  player.tick();
+  assert.deepEqual(lines, [], "the completed load reports progress only once");
+});
+
+test(`loadBytes preserves progress before the loaded SWF subscribes`, {
+  skip,
+}, async (t) => {
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+  });
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const compile = compiler(out);
+  const host = compile(
+    "MainProgressHost",
+    `package {
       import flash.display.Sprite;
       public class MainProgressHost extends Sprite {}
     }`,
-    );
-    const player = new Player(bare(host, 1, "MainProgressHost"), scripting);
-    t.after(() => player.destroy());
-    await player.start();
+  );
+  const player = new Player(bare(host, 1, "MainProgressHost"), scripting);
+  t.after(() => player.destroy());
+  await player.start();
 
-    const loader = scripting.rt.construct(scripting.rt.classNamed("flash.display::Loader"));
-    player.root.addChildAt(loader.$display, 0);
-    scripting.loads.requestLoad(loader, bare(compile("MainLoadProgress"), 2, "MainLoadProgress"));
-    await scripting.settled();
-    player.tick();
-    player.tick();
+  const loader = scripting.rt.construct(scripting.rt.classNamed("flash.display::Loader"));
+  player.root.addChildAt(loader.$display, 0);
+  scripting.loads.requestLoad(loader, bare(compile("MainLoadProgress"), 2, "MainLoadProgress"));
+  await scripting.settled();
+  player.tick();
+  player.tick();
 
-    // The same fixture in AIR's loadBytes harness sees no late progress and stays stopped.
-    assert.deepEqual(lines, ["frame 1", "init 1", "complete 1"]);
-    const info = scripting.rt.getProperty(loader, scripting.rt.publicName("contentLoaderInfo"));
-    const child = scripting.rt.getProperty(info, scripting.rt.publicName("content"));
-    assert.equal((child.$display as MovieClip).currentFrame, 1);
-    assert.equal((child.$display as MovieClip).playing, false);
-  });
-}
+  // The same fixture in AIR's loadBytes harness sees no late progress and stays stopped.
+  assert.deepEqual(lines, ["frame 1", "init 1", "complete 1"]);
+  const info = scripting.rt.getProperty(loader, scripting.rt.publicName("contentLoaderInfo"));
+  const child = scripting.rt.getProperty(info, scripting.rt.publicName("content"));
+  assert.equal((child.$display as MovieClip).currentFrame, 1);
+  assert.equal((child.$display as MovieClip).playing, false);
+});
 
 test("an unloaded LoaderInfo reports its owner's URL before any load", { skip }, async () => {
   const scripting = new Scripting(await createCodegen(wasm), {
@@ -1861,18 +1856,16 @@ test("a URL's bytes of no known type are told as any are, then #2124 with the UR
   );
 });
 
-for (const lazyCompilation of [false, true]) {
-  const mode = lazyCompilation ? "lazy" : "eager";
-  test(`a SWF loaded again by URL into a domain of all its ABCs runs as the domain's (${mode})`, {
-    skip,
-  }, async (t) => {
-    // Its script, run again, finds the domain's names, loads a SWF into a
-    // child of the domain by default, and leaves a timer that runs after
-    // the SWF's own domain was evicted; and Code keeps no copy of its ABC.
-    const compile = compiler(out);
-    const gear = compile(
-      "DupGear",
-      `package {
+test(`a SWF loaded again by URL into a domain of all its ABCs runs as the domain's`, {
+  skip,
+}, async (t) => {
+  // Its script, run again, finds the domain's names, loads a SWF into a
+  // child of the domain by default, and leaves a timer that runs after
+  // the SWF's own domain was evicted; and Code keeps no copy of its ABC.
+  const compile = compiler(out);
+  const gear = compile(
+    "DupGear",
+    `package {
   import flash.display.Sprite;
   public class DupGear extends Sprite {}
 }
@@ -1898,10 +1891,10 @@ import flash.utils.setTimeout;
   }, 100);
 })();
 `,
-    );
-    const main = compile(
-      "DupMain",
-      `package {
+  );
+  const main = compile(
+    "DupMain",
+    `package {
   import flash.display.Loader;
   import flash.display.Sprite;
   import flash.events.Event;
@@ -1931,63 +1924,61 @@ import flash.utils.setTimeout;
     }
   }
 }`,
-    );
-    const swfs: Record<string, Uint8Array> = {
-      "gear.swf": bare(gear, 1, "DupGear"),
-      "probe.swf": bare(
-        compile(
-          "DupProbe",
-          "package { import flash.display.Sprite; public class DupProbe extends Sprite {} }",
-        ),
-        1,
+  );
+  const swfs: Record<string, Uint8Array> = {
+    "gear.swf": bare(gear, 1, "DupGear"),
+    "probe.swf": bare(
+      compile(
         "DupProbe",
+        "package { import flash.display.Sprite; public class DupProbe extends Sprite {} }",
       ),
-    };
-    const lines: string[] = [];
-    const scripting = new Scripting(await createCodegen(wasm), {
-      print: (line) => lines.push(line),
-      url: "http://example.test/main.swf",
-      lazyCompilation,
-      fetch: async ({ url }) => {
-        const bytes = swfs[url.slice(url.lastIndexOf("/") + 1)];
-        if (!bytes) {
-          throw new Error("404");
-        }
+      1,
+      "DupProbe",
+    ),
+  };
+  const lines: string[] = [];
+  const scripting = new Scripting(await createCodegen(wasm), {
+    print: (line) => lines.push(line),
+    url: "http://example.test/main.swf",
+    fetch: async ({ url }) => {
+      const bytes = swfs[url.slice(url.lastIndexOf("/") + 1)];
+      if (!bytes) {
+        throw new Error("404");
+      }
 
-        return { bytes, status: 200, headers: [] };
-      },
-    });
-    await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
-    const player = new Player(bare(main, 1, "DupMain"), scripting);
-    t.after(() => player.destroy());
-    await player.start();
-    for (let frame = 0; frame < 2000 && !lines.includes("done"); frame++) {
-      await scripting.settled();
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      player.tick();
-    }
-
-    assert.deepEqual([...lines].sort(), [
-      "done",
-      "loaded: true",
-      "loaded: true",
-      "probe's parent: DupGear",
-      "probe's parent: DupGear",
-      "script: DupGear",
-      "script: DupGear",
-      "timer: DupGear",
-      "timer: DupGear",
-    ]);
-    // The domain's copy of the ABC alone, for a revival: none for the domain the second load linked into.
-    const evictable = (
-      scripting.code as unknown as { evictable: Map<number, Map<number, Uint8Array>> }
-    ).evictable;
-    const copies = [...evictable.values()].filter((abcs) =>
-      [...abcs.values()].some((bytes) => bytes.length === gear.length),
-    );
-    assert.equal(copies.length, 1);
+      return { bytes, status: 200, headers: [] };
+    },
   });
-}
+  await scripting.loadLibraries(libraryAbcs(`${out}libraries/`));
+  const player = new Player(bare(main, 1, "DupMain"), scripting);
+  t.after(() => player.destroy());
+  await player.start();
+  for (let frame = 0; frame < 2000 && !lines.includes("done"); frame++) {
+    await scripting.settled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    player.tick();
+  }
+
+  assert.deepEqual([...lines].sort(), [
+    "done",
+    "loaded: true",
+    "loaded: true",
+    "probe's parent: DupGear",
+    "probe's parent: DupGear",
+    "script: DupGear",
+    "script: DupGear",
+    "timer: DupGear",
+    "timer: DupGear",
+  ]);
+  // The domain's copy of the ABC alone, for a revival: none for the domain the second load linked into.
+  const evictable = (
+    scripting.code as unknown as { evictable: Map<number, Map<number, Uint8Array>> }
+  ).evictable;
+  const copies = [...evictable.values()].filter((abcs) =>
+    [...abcs.values()].some((bytes) => bytes.length === gear.length),
+  );
+  assert.equal(copies.length, 1);
+});
 
 test("a host that tells a response as it comes has each piece told in the frame after", {
   skip,

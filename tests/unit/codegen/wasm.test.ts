@@ -192,20 +192,19 @@ test("the release build compiles what the test build compiles, byte for byte", {
   assert.equal(compiled.module, testing.domainModule("b\na"));
   assert.equal(compiled.sourceMap, testing.domainSourceMap());
   assert.ok(compiled.entries.size > 0);
-  assert.deepEqual(codegen.compileMethods([...compiled.entries.keys()]), compiled.entries);
+  // Each method compiled alone by the test build: its entry.
+  const entries = testing.domainModuleEntries();
+  assert.equal(testing.domainEmitEach([...compiled.entries.keys()].join(","), true), entries);
   assert.match(compiled.module, /7/);
 
-  // Nothing asked for, or bodies the ABC has not: nothing, not body 0 or a trap.
-  assert.deepEqual(codegen.compileMethods([]), new Map());
-  assert.deepEqual(codegen.compileMethods([9999, -1, 1.5]), new Map());
-  // Verified once: asking again gives the same, from the cache.
-  assert.deepEqual(codegen.compileMethods([0]), new Map([[0, compiled.entries.get(0) ?? ""]]));
+  // Nothing asked for, or a body the ABC has not: nothing, not body 0 or a trap.
+  assert.equal(testing.domainEmitEach("", true), "");
+  assert.equal(testing.domainEmitEach("9999", true), "");
 
   // By index: the last is the default, an earlier one compiles against the
   // later too, and one not added is an error, not a trap.
   assert.equal(codegen.compile(["b", "a"], 1).module, compiled.module);
   assert.equal(codegen.compile(["b", "a"], 0).module, testing.domainModule("b\na", 0));
-  assert.deepEqual(codegen.compileMethods([...compiled.entries.keys()], 1), compiled.entries);
   assert.throws(() => codegen.compile(["b", "a"], 2), /only 2 have been added/);
 
   // The module alone is compile's, by default and by index.
@@ -286,7 +285,6 @@ test("compiling before an ABC is added is an error, not a trap", async () => {
   codegen.reset();
   assert.throws(() => codegen.compile(), /no ABC has been added/);
   assert.throws(() => codegen.compileModule(), /no ABC has been added/);
-  assert.throws(() => codegen.compileMethods([0]), /no ABC has been added/);
   // An ABC the domain rejects does not count as added.
   assert.notEqual(codegen.add(new Uint8Array([16, 0, 46, 0, 1, 2, 3])), 0);
   assert.throws(() => codegen.compile(), /no ABC has been added/);
@@ -382,9 +380,7 @@ test("a malformed log is refused, not a trap", async () => {
   assert.equal(codegen.replay(""), true);
 });
 
-test("lazy modules defer entries without changing their code, including UTF-8 strings", async () => {
-  const codegen = await createCodegen(module);
-  codegen.reset();
+test("a method compiled alone is handed out as its entry's UTF-8, strings past ASCII included", () => {
   const bytes = abc(
     { strings: ["snowman ☃ and astral 🚀"] },
     tables({
@@ -402,28 +398,9 @@ test("lazy modules defer entries without changing their code, including UTF-8 st
       ],
     }),
   );
-  assert.equal(codegen.add(bytes), 0);
-  const eager = codegen.compile();
-  const lazy = codegen.compileLazyModule();
   testing.domainReset(50);
   assert.equal(testing.domainAdd(bytes, false), 0);
-  const decoder = new TextDecoder();
-  assert.equal(decoder.decode(testing.domainLazyModuleBytes("", -1)), lazy);
-  assert.equal(
-    decoder.decode(testing.domainEmitEachBytes("0", true)),
-    testing.domainEmitEach("0", true),
-  );
-  assert.match(lazy, /function \(rt, jit\)/);
-  assert.doesNotMatch(lazy, /snowman/);
-  assert.deepEqual(codegen.compileMethods([...eager.entries.keys()]), eager.entries);
-  assert.equal(codegen.compileModule(), eager.module);
-  assert.throws(() => codegen.compileLazyModule([], 1), /only 1 have been added/);
-
-  const child = codegen.childDomain(0);
-  assert.equal(codegen.add(bytes, false, child), 0);
-  codegen.compileLazyModule();
-  codegen.dropDomain(child);
-  assert.deepEqual(codegen.compileMethods([0], 1), new Map());
-  assert.throws(() => codegen.compileLazyModule([], 1), /domain was dropped/);
-  assert.deepEqual(codegen.compileMethods([0], 0), eager.entries);
+  const entry = testing.domainEmitEach("0", true);
+  assert.match(entry, /snowman/);
+  assert.equal(new TextDecoder().decode(testing.domainEmitEachBytes("0", true)), entry);
 });

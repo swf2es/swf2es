@@ -311,7 +311,7 @@ without `'unsafe-eval'` (`precompiledModules` with `importModules`), by
 importing them from the same URLs. So a page that plays a SWF from its
 modules compiled ahead of time runs its workers under that policy too,
 their own scripts served with it; a worker on ABCs the primordial did
-not compile ahead of time, or with lazy compilation, compiles them, and
+not compile ahead of time compiles them, and
 needs `'unsafe-eval'` as the primordial would.
 
 A background worker's `trace` goes to the primordial's output, an error
