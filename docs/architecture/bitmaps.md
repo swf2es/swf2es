@@ -223,8 +223,9 @@ something reads them (`getPixel`, a draw, a texture made again after it
 went idle or with a lost context, Stage3D's upload). A store a script
 wrote is its own and never let go of. An image is decoded once, as the
 SWF is linked (below), and kept: the browser decodes only asynchronously,
-and a script may read a bitmap's pixels at any time. Format 3 a palette of RGB, or RGBA with the 2 tag, and rows of indices
-padded to 4 bytes; format 4 15-bit RGB, each 5-bit channel v widened
+and a script may read a bitmap's pixels at any time. Format 3 holds a
+palette of RGB, or RGBA with the 2 tag, and rows of indices padded to 4
+bytes; format 4 15-bit RGB, each 5-bit channel v widened
 to v · 8 + 7 and 0 kept at 0; format 5 xRGB, or with the 2 tag ARGB
 already premultiplied, which the store takes as it is. The JPEG tags are
 an image: the JPEG, PNG or GIF bytes, with a JPEG's stray `FF D9 FF D8`
