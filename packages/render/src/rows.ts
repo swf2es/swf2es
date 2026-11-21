@@ -37,7 +37,14 @@ export class Rows {
       this.data = grown;
     }
 
-    this.data.set(from.data.subarray(first * ROW_FLOATS, end * ROW_FLOATS), row * ROW_FLOATS);
+    // By index, as a view to copy from would be an allocation each span.
+    const source = from.data;
+    const data = this.data;
+    const last = end * ROW_FLOATS;
+    for (let i = first * ROW_FLOATS, to = row * ROW_FLOATS; i < last; i++, to++) {
+      data[to] = source[i];
+    }
+
     return row;
   }
 

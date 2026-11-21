@@ -224,22 +224,33 @@ export class SceneList {
       this.kind = grow(this.kind);
     }
 
+    // Column by column, by index: a view of each to copy whole was most of what a frame of
+    // spans allocated.
     const kinds = from.kind;
     const rows = from.row;
+    const geometries = from.geometry;
+    const blends = from.blend;
+    const textures = from.texture;
+    const samplers = from.sampler;
+    const kind = this.kind;
     const row = this.row;
+    const geometry = this.geometry;
+    const blend = this.blend;
+    const texture = this.texture;
+    const sampler = this.sampler;
     for (let e = first, to = at; e < end; e++, to++) {
       if (kinds[e] !== DRAW) {
         throw new Error(`entry ${e} of a span is no draw, which a span cannot move`);
       }
 
+      kind[to] = DRAW;
       row[to] = rows[e] + rowShift;
+      geometry[to] = geometries[e];
+      blend[to] = blends[e];
+      texture[to] = textures[e];
+      sampler[to] = samplers[e];
     }
 
-    this.kind.fill(DRAW, at, length);
-    this.geometry.set(from.geometry.subarray(first, end), at);
-    this.blend.set(from.blend.subarray(first, end), at);
-    this.texture.set(from.texture.subarray(first, end), at);
-    this.sampler.set(from.sampler.subarray(first, end), at);
     this.length = length;
   }
 
