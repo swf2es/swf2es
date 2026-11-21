@@ -83,6 +83,19 @@ draws on the machine's GPU (on a machine with two,
   into a ByteArray after a 54-byte header (`--opaque` for an opaque
   bitmap): a fresh bitmap's texture, the readback after a draw and the
   scan;
+- `--timelines N`: N sprites of their own, each 240 frames (`--loop K`)
+  of 12 parts moving and a third of them fading, as tweens laid out frame
+  by frame are; with `--allocs`, what the timelines hold after a full
+  collection;
+- `--deck N`: one shape of N wobbly contours stacked almost on top of
+  each other, filled even-odd, whose crossings make libtess2 slow with
+  the square of N (`--paint gradient` or `bitmap`; `--ratio-change`
+  makes it a morph at a new ratio each frame, tessellated anew;
+  `--deck-turn T` turns each contour T from the last rather than 0.004,
+  and at 1e-4 brings 80 to 100 of them within hundredths of a pixel of
+  each other, where lyon's triangles can fail the native check both ways
+  and libtess2 fills them); the `tess` line, for every scene, is the
+  draw's time in the tessellator;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).
@@ -631,18 +644,16 @@ points at:
   compare converts both elements to Number each time, where avmplus'
   ArraySort compares the elements' doubles in C++.
 
-## AVM2 eager and lazy compilation
+## AVM2 startup
 
 `pnpm bench:avm2 [--runs 5] [--frames 600] [--json /tmp/avm2.json]`
-compares the default eager loader with the optional lazy compiler, in
-fresh node processes, alternating their order. The generated movie
+times the player's loader in fresh node processes. The generated movie
 exercises captured functions, arrays, properties and frame events across
 three scenes, with nested bodies left unused; the libraries, startup,
 first-use scenes and warmed ticks are measured apart, each scene's value
-is checked, and warmed ticks must compile no further methods.
+is checked, and warmed ticks must compile no further modules.
 `--swf /path/to/movie.swf` measures a local movie's startup and ticks,
-without interaction. `node tests/player/run.ts --lazy` and `pnpm corpus
---lazy avm2/` run the browser cases lazily.
+without interaction.
 
 ## Reference numbers
 

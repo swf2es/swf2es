@@ -8,8 +8,8 @@
 //
 //   - the compiler did not trap;
 //   - a module it accepted imports as an ES module;
-//   - each method compiled alone, as the JIT compiles it, is byte for byte
-//     its entry in the module (docs/architecture/overview.md's JIT/AOT invariant).
+//   - each method compiled alone is byte for byte its entry in the
+//     module (docs/architecture/overview.md's JIT/AOT invariant).
 //
 // The seeds are the unit tests' hand-built ABCs and the conformance cases,
 // compiled into this package's own out/. A case that fails is written to
@@ -203,13 +203,19 @@ for (let k = 0; k < caseCount; k++) {
 
     accepted++;
     const hashes = [...builtinHashes, sha(abc)].join("\n");
-    // The bytes the player decodes (codegen's wrapper) are the module's
-    // well-formed UTF-8: a decode that refuses none gives the same string.
-    const bytes: Uint8Array = testing.domainModuleBytes(hashes, -1, false);
+    // The bytes the player decodes (codegen's wrapper), part by part, are
+    // the module's well-formed UTF-8: a decode that refuses none gives the
+    // same string.
+    const parts: Uint8Array[] = [testing.domainModuleBytes(hashes, -1, false)];
+    while (!testing.domainModuleDone()) {
+      testing.__collect();
+      parts.push(testing.domainModuleMoreBytes());
+    }
+
     const module: string = testing.domainModule(hashes);
     let decoded: string | null = null;
     try {
-      decoded = utf8.decode(bytes);
+      decoded = parts.map((part) => utf8.decode(part)).join("");
     } catch {
       // Not UTF-8: reported below.
     }
@@ -230,15 +236,11 @@ for (let k = 0; k < caseCount; k++) {
 
     const want = parseEntries(testing.domainModuleEntries());
     const got = parseEntries(testing.domainEmitEach([...want.keys()].join(","), false));
-    const lazy = utf8.decode(
-      testing.domainLazyModuleBytes([sha(abc), ...builtinHashes].join("\n")),
-    );
-    await import(`data:text/javascript;base64,${Buffer.from(lazy).toString("base64")}`);
-    const deferred = parseEntries(
+    const reused = parseEntries(
       utf8.decode(testing.domainEmitEachBytes([...want.keys()].join(","), true)),
     );
     for (const [body, entry] of want) {
-      if (got.get(body) !== entry || deferred.get(body) !== entry) {
+      if (got.get(body) !== entry || reused.get(body) !== entry) {
         fail(abc, `method body ${body} compiled alone differs from its entry`);
         break;
       }

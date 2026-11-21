@@ -10,7 +10,12 @@ import {
   WORDS_SOLID,
   WORDS_UNMULTIPLY,
 } from "@swf2es/native/render";
-import type { BitmapCharacter, BitmapPixels } from "../display/timeline.js";
+import {
+  type BitmapCharacter,
+  type BitmapPixels,
+  INVALID_PIXELS,
+  losslessPixels,
+} from "../display/timeline.js";
 import { bitmapKernel } from "./kernel.js";
 import type { PixelRect } from "./pixel-rect.js";
 
@@ -305,6 +310,16 @@ export class BitmapStore {
    * from is one array, not one for the library and one for each BitmapData.
    */
   private shared = false;
+  /**
+   * Where shared pixels come from again, for a library bitmap that makes
+   * them at once and the same each time (a lossless one, inflated from its
+   * tag): the store lets go of them once a texture holds them (`uploaded`),
+   * so a bitmap shown is held by the GPU alone, and takes them again when
+   * they are read. Null for any other.
+   */
+  private source: ((keep: boolean) => Uint32Array) | null = null;
+  /** Whether the shared pixels were let go of, to be taken from `source` when next read. */
+  private released = false;
   /** The renderers' copies of the store, one each, for `dispose` to free. */
   readonly copies = new Set<GpuCopy>();
   /** The copy a draw wrote last, which reading `pixels` brings back while it is newer; null for none. */
@@ -334,17 +349,22 @@ export class BitmapStore {
    */
   readonly views = new Set<WeakRef<{ pixelsChanged(disposed: boolean): void }>>();
 
-  /** `shared`, where given, is the pixels it holds, its own until written: see `of`. */
+  /**
+   * `shared`, where given, is the pixels it holds, its own until written,
+   * and `source` what makes them again: see `of`.
+   */
   constructor(
     readonly width: number,
     readonly height: number,
     readonly transparent: boolean,
     fill: number,
     shared?: Uint32Array,
+    source?: (keep: boolean) => Uint32Array,
   ) {
     if (shared) {
       this.cpu = shared;
       this.shared = true;
+      this.source = source ?? null;
       return;
     }
 
@@ -388,7 +408,7 @@ export class BitmapStore {
     const pixels = this.readable;
     if (this.shared) {
       this.cpu = pixels.slice();
-      this.shared = false;
+      this.own();
     }
 
     return this.cpu;
@@ -397,8 +417,18 @@ export class BitmapStore {
   set pixels(pixels: Uint32Array) {
     this.cpu = pixels;
     this.solid = null;
-    this.shared = false;
+    this.own();
     this.gpuNewer = false;
+  }
+
+  /**
+   * The pixels the store's own, no longer a library bitmap's: nothing to let
+   * go of or make again, and `source`, which holds the bitmap's tag, let go.
+   */
+  private own(): void {
+    this.shared = false;
+    this.released = false;
+    this.source = null;
   }
 
   /**
@@ -407,15 +437,54 @@ export class BitmapStore {
    * which may be the same, takes the one it writes first, so both are one array.
    */
   get readable(): Uint32Array {
+    return this.read(true);
+  }
+
+  /**
+   * `readable` as a renderer reads it to make a texture, again after one
+   * went idle or with a lost context: shared pixels made again for it are
+   * not kept for being wanted again (timeline.ts' losslessPixels), as a
+   * read of them, or a store made of them, keeps them.
+   */
+  get texels(): Uint32Array {
+    return this.read(false);
+  }
+
+  private read(keep: boolean): Uint32Array {
     if (this.gpuNewer && this.gpu) {
-      this.cpu = this.gpu.read();
-      this.solid = null;
-      this.shared = false;
+      // A draw wrote the store last: the pixels let go of are not wanted, but where the copy
+      // went with a lost context, whose read gives back the store's pixels as they were, which
+      // are the library's still where they were shared.
+      const read = this.gpu.read();
+      if (!(this.shared && read === this.cpu)) {
+        this.cpu = read;
+        this.solid = null;
+        this.own();
+      }
+    } else if (this.released && this.source !== null) {
+      this.cpu = this.source(keep);
+      this.released = false;
     }
 
     this.gpuNewer = false;
     this.made();
     return this.cpu;
+  }
+
+  /**
+   * A renderer made a texture of the pixels as they are now: shared ones
+   * that `source` makes again are let go of till they are read.
+   */
+  uploaded(): void {
+    if (this.shared && this.source !== null && !this.gpuNewer) {
+      this.cpu = NO_PIXELS;
+      this.released = true;
+    }
+  }
+
+  /** Whether the store holds no pixels now, having let go of shared ones `source` makes again. */
+  get releasedPixels(): boolean {
+    return this.released;
   }
 
   /** Whether the GPU's copy is newer than the CPU's, which a read of `pixels` would bring back. */
@@ -442,7 +511,7 @@ export class BitmapStore {
       this.gpuNewer = false;
     }
 
-    return this.readable;
+    return this.texels;
   }
 
   /**
@@ -469,15 +538,27 @@ export class BitmapStore {
 
   /**
    * A store of its own holding `pixels`, premultiplied already, which are
-   * never written: the store shares them until it is.
+   * never written: the store shares them until it is. `source`, where
+   * given, makes the same pixels again at once, so the store may let go of
+   * them while a texture holds them.
    */
-  static of(pixels: {
-    width: number;
-    height: number;
-    transparent: boolean;
-    pixels: Uint32Array;
-  }): BitmapStore {
-    return new BitmapStore(pixels.width, pixels.height, pixels.transparent, 0, pixels.pixels);
+  static of(
+    pixels: {
+      width: number;
+      height: number;
+      transparent: boolean;
+      pixels: Uint32Array;
+    },
+    source?: (keep: boolean) => Uint32Array,
+  ): BitmapStore {
+    return new BitmapStore(
+      pixels.width,
+      pixels.height,
+      pixels.transparent,
+      0,
+      pixels.pixels,
+      source,
+    );
   }
 
   /** `argb` as this store keeps it: premultiplied, and opaque where the store is. */
@@ -1057,8 +1138,11 @@ function scale(p: number, a: number): number {
   );
 }
 
-/** Each bitmap's fill store, by its pixels, which the SWFs that define the bitmap alike share. */
-const fillStores = new WeakMap<BitmapPixels, BitmapStore>();
+/**
+ * Each bitmap's fill store, by its definition for a lossless one and its
+ * decoded pixels for an image, which the SWFs that define the bitmap alike share.
+ */
+const fillStores = new WeakMap<object, BitmapStore>();
 
 /**
  * The store a SWF bitmap's fills draw from, one for all its shapes and for
@@ -1066,22 +1150,56 @@ const fillStores = new WeakMap<BitmapPixels, BitmapStore>();
  * decoded. Nothing writes it.
  */
 export function characterStore(character: BitmapCharacter): BitmapStore | null {
-  const pixels = character.pixels;
-  if (!pixels) {
+  if (character.store) {
+    return character.store;
+  }
+
+  // A lossless bitmap's store is found by its definition, so another SWF's inflates nothing.
+  const definition = character.definition;
+  const key = definition.type === "lossless" ? definition : character.pixels;
+  if (!key) {
     return null;
   }
 
-  if (!character.store) {
-    let store = fillStores.get(pixels);
-    if (!store) {
-      store = BitmapStore.of(pixels);
-      fillStores.set(pixels, store);
-    }
-
-    character.store = store;
+  let store = fillStores.get(key);
+  if (!store) {
+    store = symbolStore(character);
+    fillStores.set(key, store);
   }
 
-  return character.store;
+  character.store = store;
+  return store;
+}
+
+/**
+ * A store of a SWF bitmap's pixels, `pixels` where they are at hand: one
+ * that lets go of them while a texture holds them where the bitmap is
+ * lossless, to inflate them again when they are read; `transparent` as the
+ * store reports itself, where that is not as the bitmap is.
+ */
+export function symbolStore(
+  character: BitmapCharacter,
+  pixels: BitmapPixels | null = character.pixels,
+  transparent?: boolean,
+): BitmapStore {
+  const made = pixels ?? INVALID_PIXELS;
+  const definition = character.definition;
+  const shape = transparent === undefined ? made : { ...made, transparent };
+  // What Flash cannot read is 0 by 0, nothing to let go of.
+  const count = made.pixels.length;
+  if (definition.type !== "lossless" || count === 0) {
+    return BitmapStore.of(shape);
+  }
+
+  return BitmapStore.of(shape, (keep) => {
+    const again = losslessPixels(definition, keep).pixels;
+    // Never a store of fewer pixels than its size, whatever went wrong.
+    if (again.length !== count) {
+      throw new RangeError("swf2es: a bitmap's pixels came back another size");
+    }
+
+    return again;
+  });
 }
 
 /** Whether a word's low byte comes first in memory, as on every machine a browser runs on. */

@@ -87,6 +87,38 @@ test("a copy grows the lists it is written into", () => {
   assert.equal(nowRows.data[3999 * ROW_FLOATS + 4], 1);
 });
 
+test("a short span and a long one are copied alike, as they are copied differently", () => {
+  for (const draws of [1, 3, 4, 63, 64, 65, 200]) {
+    const before = new SceneList();
+    const beforeRows = new Rows();
+    before.draw(1, beforeRows.add(1, 0, 0, 1, 0, 0, null), NORMAL);
+    const first = before.length;
+    const rowsFirst = beforeRows.count;
+    for (let k = 0; k < draws; k++) {
+      const row = beforeRows.add(k + 1, 0, 0, 1, k, -k, k % 2 === 0 ? null : RED);
+      before.draw(10 + k, row, k % 3 === 0 ? MULTIPLY : NORMAL, k % 5, k % 2);
+    }
+
+    const kept = { first, end: before.length, rowsFirst, rowsEnd: beforeRows.count };
+    const now = new SceneList();
+    const nowRows = new Rows();
+    for (let k = 0; k < 3; k++) {
+      now.draw(50 + k, nowRows.add(1, 0, 0, 1, 0, 0, null), NORMAL);
+    }
+
+    const copied = copy(before, beforeRows, kept, now, nowRows);
+    assert.equal(
+      spanDifference("the kept span", now, nowRows, copied, "the walk", before, beforeRows, kept),
+      null,
+      `${draws} draws`,
+    );
+    assert.deepEqual(
+      Array.from(now.row.subarray(copied.first, copied.end)),
+      Array.from({ length: draws }, (_, k) => 3 + k),
+    );
+  }
+});
+
 test("a span of boundaries is not copied", () => {
   const before = new SceneList();
   before.layerBegin();

@@ -136,7 +136,81 @@ test("a geometry undrawn too long is let go of, and its handle says so", () => {
   assert.ok(geometries.alive(kept));
   assert.ok(!geometries.alive(idle));
   assert.deepEqual(geometries.removed, [idle.id]);
-  assert.deepEqual(geometries.live(), [kept.id]);
+  assert.ok(geometries.holds(kept.id) && !geometries.holds(idle.id));
+});
+
+test("a geometry's arrays are let go of once the backend copied them, unless added to be kept", () => {
+  const geometries = new Geometries();
+  const shape = triangle();
+  const quad = triangle();
+  const released = geometries.add(shape);
+  const kept = geometries.add(quad, true);
+  geometries.release(released.id);
+  geometries.release(kept.id);
+  assert.equal(geometries.get(released.id), null);
+  assert.ok(geometries.released(released.id) && geometries.alive(released));
+  assert.equal(geometries.get(kept.id), quad);
+  assert.ok(!geometries.released(kept.id));
+  // Its box and flatness stay, which the frame's bounds and blends read.
+  assert.deepEqual(
+    Array.from(geometries.box.subarray(released.id * 4, released.id * 4 + 4)),
+    Array.from(geometries.box.subarray(kept.id * 4, kept.id * 4 + 4)),
+  );
+  geometries.markFlat(released.id);
+  assert.ok(geometries.flat(released.id));
+  assert.deepEqual(geometries.flattened, [released.id]);
+  // Changed in place: only the kept one, whose owner holds what changed.
+  geometries.update(released.id);
+  geometries.update(kept.id);
+  assert.deepEqual(geometries.updated, [kept.id]);
+});
+
+test("any reader rebuilds a geometry whose arrays were let go of: removed, for its owner to add again", () => {
+  const geometries = new Geometries();
+  const released = geometries.add(triangle());
+  const kept = geometries.add(triangle(), true);
+  const waiting = geometries.add(triangle());
+  geometries.release(released.id);
+  geometries.release(kept.id);
+  const version = geometries.removalVersion;
+  assert.equal(geometries.rebuild(released.id), true);
+  assert.ok(!geometries.alive(released));
+  assert.ok(geometries.removalVersion > version);
+  // Arrays held, or nothing held: nothing to rebuild.
+  assert.equal(geometries.rebuild(kept.id), false);
+  assert.equal(geometries.rebuild(waiting.id), false);
+  assert.equal(geometries.rebuild(released.id), false);
+  assert.ok(geometries.alive(kept) && geometries.alive(waiting));
+});
+
+test("a geometry nothing copied to a GPU keeps its arrays, as in a view without one", () => {
+  const geometries = new Geometries();
+  const data = triangle();
+  const handle = geometries.add(data);
+  for (let i = 0; i < 10; i++) {
+    geometries.use(handle.id);
+    geometries.endFrame();
+  }
+
+  assert.equal(geometries.get(handle.id), data);
+  assert.ok(!geometries.released(handle.id));
+});
+
+test("a lost context takes the geometries whose arrays were let go of, and adds those kept again", () => {
+  const geometries = new Geometries();
+  const released = geometries.add(triangle());
+  const kept = geometries.add(triangle(), true);
+  const waiting = geometries.add(triangle());
+  geometries.release(released.id);
+  geometries.release(kept.id);
+  geometries.added.length = 0;
+  const version = geometries.removalVersion;
+  geometries.lost();
+  assert.ok(!geometries.alive(released));
+  assert.ok(geometries.alive(kept) && geometries.alive(waiting));
+  assert.ok(geometries.removalVersion > version);
+  assert.deepEqual(geometries.added, [kept.id, waiting.id]);
+  assert.deepEqual(geometries.removed, []);
 });
 
 test("a reused id is a new generation, which an old handle does not name", () => {
@@ -329,7 +403,7 @@ test("a geometry changed in place is measured again and noted for the backend, a
     colors: new Uint32Array(3),
     indices: new Uint32Array([0, 1, 2]),
   };
-  const { id } = geometries.add(data);
+  const { id } = geometries.add(data, true);
   geometries.added.length = 0;
   data.positions.set([5, 5, 20, 5, 20, 30]);
   geometries.update(id);
@@ -619,6 +693,114 @@ test("a layer keeps its output as its kept output, which a later frame composite
   outer.layerEnd(MULTIPLY, -1);
   measureLayers(outer, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
   assert.deepEqual(Array.from(outer.layers.subarray(0, 4)), [9, 19, 32, 42]);
+});
+
+test("an operation's floats are all kept, wherever they grow the store", () => {
+  // The store starts at 64 floats: each count written at each length before and past that.
+  const writes = [
+    (c: Commands, v: number) => c.param4(v, v + 1, v + 2, v + 3),
+    (c: Commands, v: number) => c.param5(v, v + 1, v + 2, v + 3, v + 4),
+    (c: Commands, v: number) => c.param8(v, v + 1, v + 2, v + 3, v + 4, v + 5, v + 6, v + 7),
+  ];
+  const counts = [4, 5, 8];
+  for (let before = 0; before <= 64; before++) {
+    const fives = [0, 1, 2, 3].find((n) => before >= 5 * n && (before - 5 * n) % 4 === 0);
+    if (fives === undefined) {
+      continue;
+    }
+
+    for (let w = 0; w < writes.length; w++) {
+      const commands = new Commands();
+      const expected: number[] = [];
+      const write = (k: number) => {
+        const at = writes[k](commands, expected.length + 1);
+        assert.equal(at, expected.length);
+        for (let n = 0; n < counts[k]; n++) {
+          expected.push(at + 1 + n);
+        }
+      };
+      for (let n = 0; n < fives; n++) {
+        write(1);
+      }
+
+      while (expected.length < before) {
+        write(0);
+      }
+
+      write(w);
+      assert.deepEqual(
+        Array.from(commands.params.subarray(0, commands.paramLength)),
+        expected,
+        `${counts[w]} floats after ${before}`,
+      );
+    }
+  }
+});
+
+test("a kept output composited where its floats grow the store names it", () => {
+  // The clear's four floats and seven layers' eight fill the first store but for four.
+  const scene = new SceneList();
+  for (let k = 0; k < 7; k++) {
+    const layer = scene.layerBegin();
+    scene.draw(0, 0, 0);
+    scene.layerEnd(NORMAL, -1, -1);
+    scene.layerRect(layer, 1, 2, 3, 4);
+  }
+
+  scene.keptLayer(5, MULTIPLY, -1, 10, 20, 30, 40);
+  const commands = new Commands();
+  plan(scene, 0xffffffff, commands);
+  const composite = ops(commands).find(([op]) => op === COMPOSITE);
+  assert.deepEqual(composite, [COMPOSITE, 60, MULTIPLY, -1]);
+  assert.deepEqual(Array.from(commands.params.subarray(60, 65)), [10, 20, 30, 40, 5]);
+});
+
+test("layers and masks nested past the first stacks' room are measured all the same", () => {
+  const geometries = new Geometries();
+  const rows = new Rows();
+  const row = rows.add(1, 0, 0, 1, 0, 0, null);
+  const depth = 20;
+  // Each layer one more around the last: its draw's pixels, and one more each side.
+  const layers = new SceneList();
+  for (let k = 0; k < depth; k++) {
+    layers.layerBegin();
+  }
+
+  layers.draw(spanning(geometries, 40, 40, 50, 50), row, 0);
+  for (let k = 0; k < depth; k++) {
+    layers.marker(LAYER_END, MULTIPLY, -1);
+  }
+
+  measureLayers(layers, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  for (let k = 0; k < depth; k++) {
+    const out = depth - 1 - k;
+    assert.deepEqual(
+      Array.from(layers.layers.subarray(k * 4, k * 4 + 4)),
+      [39 - out, 39 - out, 12 + 2 * out, 12 + 2 * out],
+      `layer ${k}`,
+    );
+  }
+
+  // Masks inside masks clip to what they all cover: the outermost cuts the top, the innermost
+  // the bottom, and those between nothing.
+  const masks = new SceneList();
+  masks.layerBegin();
+  for (let k = 0; k < depth; k++) {
+    masks.marker(MASK_BEGIN);
+    const top = k === 0 ? 30 : 0;
+    const bottom = k === depth - 1 ? 70 : 100;
+    masks.draw(spanning(geometries, 0, top, 100, bottom), row, 0);
+    masks.marker(MASK_USE, 2, 1);
+  }
+
+  masks.draw(spanning(geometries, 0, 0, 100, 100), row, 0);
+  for (let k = 0; k < depth; k++) {
+    masks.marker(MASK_POP, 2, 1);
+  }
+
+  masks.marker(LAYER_END, MULTIPLY, -1);
+  measureLayers(masks, rows, geometries, { width: 200, height: 200, scale: 1, resolution: 1 });
+  assert.deepEqual(Array.from(masks.layers.subarray(0, 4)), [0, 29, 101, 42]);
 });
 
 test("a kept output goes once undrawn long enough, and a lost context takes them all", () => {

@@ -253,16 +253,37 @@ whose entries go once unused for their idle frames:
 - **Geometries** (`geometry.ts`): fills and lines as the native module
   writes them, copied once into the atlas's vertex and index buffers
   (`webgl/atlas.ts`, one page of them for now), those a frame adds staged
-  and uploaded together. A geometry let go of leaves holes, kept sorted
+  and uploaded together. Once a copied geometry has stood three of the
+  registry's frames (`RELEASE_FRAMES`), the registry lets go of its arrays
+  (`Geometries.release`; only after a copy into a context not known to be
+  lost, so frames drawn while it is flagged lost keep theirs, and a view
+  with no GPU backend keeps them all; arrays let go of after copies in
+  Chrome's window before it flags a loss are rebuilt by the restore), and
+  the atlas keeps only its indices, counted from its first vertex, in a
+  copy of their own, 16 bits where they fit (`Place.local`): what moving
+  it or merging it needs, as WebGL copies index buffers only as they are
+  and cannot add to them. A
+  geometry drawn anew each frame, as a script's drawing redrawn every
+  frame is, goes whole before then: copying the indices of 1,600 such
+  geometries a frame (`bench.ts --redraw 800`) took a millisecond. A geometry whose owner
+  changes its arrays in place, a 3D object's quad, is added to be kept
+  (`add`'s `keep`). A geometry let go of leaves holes, kept sorted
   and merged with their neighbours (`webgl/free-ranges.ts`); what is added
   goes at the top while it fits, so that a frame's additions lie in a row
   and go up in one upload, then in the first hole that holds it. Only what
-  finds no room packs the atlas again, into buffers twice what is live:
-  packing it again for its holes alone copied and uploaded every
-  geometry, tens of megabytes, every few seconds of a busy SWF. An atlas
-  left empty is filled again from its start, in the buffers it has. An
-  atlas that outgrows its largest buffer starts again with only what is
-  live, rather than failing.
+  finds no room packs the atlas again, into buffers twice what is live,
+  its geometries' vertices moved on the GPU (`copyBufferSubData`, through
+  a copy of the old store, which a new one replaces) and their indices
+  written again from their copies: packing it again for its holes
+  alone copied and uploaded every geometry, tens of megabytes, every few
+  seconds of a busy SWF. An atlas left empty is filled again from its
+  start, in the buffers it has. Advanced text's glyph quads are kept and
+  moved alike in an atlas of their own. On a busy real-content recording
+  the arrays let go of were 17 to 23 MB, for 4 to 6 MB of indices kept,
+  and the page's array buffers after a full collection went from 88 to
+  95 MiB to 75 to 77; on `bench.ts --still-shapes 2000`, 2,000 distinct
+  shapes standing still, from 43.7 to 20.1 MB, and on `--town 200` from
+  35.8 to 28.2 MB.
 - **Textures** (`textures.ts`): bitmaps, device text, gradients, their
   pixels uploaded and then let go of on the CPU
   (`webgl/gpu-textures.ts`).
@@ -297,7 +318,13 @@ whose entries go once unused for their idle frames:
   addressing reading `vc[]` by a vertex's value as its programs ask.
 
 After a lost context everything is made again from what the player
-keeps, as it is for Stage3D. While it is lost a frame costs nothing:
+keeps, as it is for Stage3D. The geometries whose arrays were let go of
+are lost with it: the registry rebuilds them (`Geometries.lost`, through
+`Geometries.rebuild`, the entry point any reader of arrays let go of
+calls), removing them for their owners to add again as they draw them,
+as they do an expired one, so a scene is tessellated and stroked again once, a slow layer's
+kept triangles (`scene/kept-parts.ts`) added again as they are; those
+added to be kept are copied in again. While it is lost a frame costs nothing:
 the view neither walks nor plans. A program whose link fails because
 the context was lost (`ShaderError.lost`) is no error. When a GPU
 process dies, every status reads false and every log reads empty, and
@@ -353,11 +380,13 @@ with the context:
   or, where it cannot be, a call a fill, its row told by a uniform.
 - **Merged fills** (`batches.ts`): runs of at least 32 small geometries
   unchanged since the previous frame use one indexed draw. Each run's
-  geometries are copied into a segment of a stream, their vertices
-  carrying as an integer attribute the slot of the draw's packed row in
+  geometries are copied into a segment of a stream, their vertices from
+  the atlas's on the GPU, beside them in a buffer of their own an integer
+  attribute, the slot of the draw's packed row in
   an integer texture the stream keeps for its segments, written as the
   rows change, so transforms, colour and quarter-pixel snapping use the
-  same shader math. A segment is found again by its geometries, in their
+  same shader math; their indices are the atlas's copies, from the
+  segment's start. A segment is found again by its geometries, in their
   order, wherever its run comes in a later frame: moving, recolouring or
   reordering objects only updates the row texture and the segments' rows.
   The segments a frame adds are staged on the CPU after the stream's top
@@ -479,8 +508,10 @@ compose with the display list without copies.
   fan, a thin one that goes once along an axis and back as a strip
   (`monotone.zig`), and any other simple concave contour of at most 64
   vertices by ear clipping after checking for crossings and touches
-  (`earclip.zig`).
-  Whatever libtess2 refuses or fails at goes to bands (`bands.zig`):
+  (`earclip.zig`). A fill of many contours that cross each other densely
+  goes to lyon instead of libtess2 (`crossings.zig`, `lyon.zig`), its triangles checked
+  along scanlines before they are drawn (`validate.zig`), libtess2 filling what fails.
+  Whatever libtess2 or lyon refuses or fails at goes to bands (`bands.zig`):
   each horizontal band between vertices and crossings filled as disjoint
   trapezoids under its winding rule. Its `LineBuilder` builds a layer's
   lines in one call (`strokes.zig`): triangles along the path for a line
@@ -563,6 +594,10 @@ masks. `--still-crowd N` is a large scene that mostly stands still: N clips of
 12 outlined shapes in 8 groups, one in 32 playing, moving a part and
 swapping another's shape each frame, about 1% of its objects changing, as
 on a busy real-content recording: what the walk costs with spans.
+`--still-shapes N` is N distinct shapes standing still, an outline of
+curves filled with a gradient and a disc inside it, both lined: what their
+geometries hold once drawn, which every run prints (`geometry`: the
+registry's CPU copies and the atlas's indices).
 `--redraw N` has a script clear and draw N shapes again each
 frame, a fill of two curves under a line: what tessellating, stroking and
 uploading shapes anew costs. `--checkout DIR` plays another built

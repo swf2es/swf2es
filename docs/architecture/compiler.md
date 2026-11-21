@@ -126,8 +126,11 @@ Each method goes through the same steps, in `codegen`:
    labelled `break`) from the dominator tree for the reducible code compilers
    emit, falling back to the dispatcher. Conformance tests check that both
    give the same results.
-5. **Emission** writes JavaScript as UTF-8 into a growable byte buffer: no
-   JavaScript strings, and names are copied straight from the ABC. A
+5. **Emission** writes JavaScript as ASCII into a growable byte buffer: no
+   JavaScript strings, and names are copied straight from the ABC, every
+   character past ASCII a `\u` escape (`output.ts`), so that V8 keeps a
+   module's source one byte a character; a single character past U+00FF
+   would make it keep the whole source two. A
    method's frame, its entry checks and how it reads and writes registers
    are `emit/method.ts`'s; its blocks, written an instruction at a time,
    `emit/blocks.ts`'s, and its handler regions and catch
@@ -533,58 +536,3 @@ emitter checks that order as it writes each block, and writes the method
 with the dispatcher where it does not hold: one `try`/`catch` around the
 loop, whose `catch` tries the handlers covering `t`'s region in the
 table's order and goes on at the first match's block.
-
-### Optional lazy compilation
-
-The default player compiles each ABC whole when it loads (see [A SWF's
-code](player.md#a-swfs-code)). `new Scripting(codegen, { lazyCompilation: true })`
-opts into compiling uncached AVM2 bodies on first factory use. The web
-embedder exposes the same option through `configure({ lazyCompilation:
-true })`. It remains experimental and off by default.
-
-The module's names, layouts, scripts and verification are prepared before
-execution, so their scopes resolve against the same domain as eager code.
-A lazy factory compiles its entry once, replaces its slot in F and returns
-the entry's original function. Later calls run that function directly;
-creating another closure may revisit the cached factory. Native methods,
-missing bodies and verification errors retain their eager factories. AOT
-still emits whole modules. Existing whole modules in the module cache are
-consumed normally; partial lazy modules are never written to that cache.
-The compiler must belong to this player for its lifetime: resetting it
-rejects a later deferred compile rather than using another movie's ABC.
-
-Entries transfer from Wasm as UTF-8. The wrapper collects after a lazy
-skeleton, after memory growth, every 64 calls, or 256 KiB of method source
-since the last collection.
-It does not collect after every method, which costs substantially more.
-Verification results are kept per lazy ABC, cleared when its domain is
-dropped or evicted, and regenerated after a compiler-domain rebuild.
-Lazy mode retains compiler domains until runtime-domain collection instead
-of evicting them immediately after linking: deferred bodies still need their
-ABCs. Normal domain dropping and idle compaction still apply. Destroying
-a player clears shared property caches so their last getter or method
-cannot keep the destroyed player alive.
-
-The first method request is not the first verification: verification runs
-when the module's skeleton is built. It still verifies the ABC as a whole,
-so lazy mode does not eliminate this startup cost. Dynamic Function entries
-need identifiable stack frames; unsupported engines and policies fall back
-to whole-module compilation. Per-method sourceURLs have the form
-`swf2es-26.js/$f63.js`; frame parsing maps them to their module for both domain
-lookup and caller security checks. Class-reference tables are built under
-the original module's domain, even when another SWF is loading.
-
-Each entry is built with a strict `Function` whose parameters are the
-module's tables and helpers (`rt`, `nn`, `ac`, `ns`, `cls`, `N`, `S`, `M`,
-`V`, `F`, `A`). This keeps their lookups lexical, as in the eager module;
-direct `eval` would instead introduce dynamic scope lookups. Strictness
-matches the original ES module. The entry itself is byte for byte its
-factory in the whole module, the same JIT/AOT invariant the compiler's
-method-at-a-time tests enforce.
-
-See [the AVM2 benchmark](../benchmarks.md#avm2-eager-and-lazy-compilation) for
-startup, first-use and warmed measurements. The potential saving depends
-on which factories the application binds: methods bind when a class or
-script is initialized, and a nested function when `newfunction` runs, not
-on each ActionScript call. A class whose every method is bound immediately
-may gain little while paying additional per-entry compilation costs.

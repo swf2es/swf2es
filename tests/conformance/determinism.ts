@@ -6,14 +6,16 @@
 //   - in one instance, after all the chains before it;
 //   - in one instance, in the reverse order, each chain twice in a row;
 //   - in the build that checks every array access;
+//   - a part at a time, cut at every body, as the wrapper asks for a
+//     large module (ModuleEmitter.step);
 //   - in the release build, codegen.wasm, through the package's API, as the
 //     player and the AOT compiler use it.
 //
 // So nothing the compiler keeps between calls, such as its reused buffers,
 // leaks into what it writes. Then the JIT/AOT invariant of
-// docs/architecture/overview.md: each method compiled alone, as lazy JIT will
-// compile it, byte for byte its entry in its module, in order with a new
-// emitter each and in the reverse order with one for all.
+// docs/architecture/overview.md: each method compiled alone byte for byte
+// its entry in its module, in order with a new emitter each and in the
+// reverse order with one for all.
 //
 // All of it at the API versions a root runs the compiler at: SWF_31, the
 // player's, and SWF_12 and VM_ALLVERSIONS, which old roots will. At those
@@ -145,6 +147,46 @@ function compile(testing: any, abc: Uint8Array, entries?: Map<number, string>[])
   return results;
 }
 
+const utf8 = new TextDecoder();
+
+/**
+ * compile's modules and source maps, each module written a part at a time
+ * and cut at every body (domainPartBudget), not kept and kept: what the
+ * host is handed part by part, the first's text in place of the last.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: the asc bindings are untyped JS
+function compileInParts(testing: any, abc: Uint8Array): string[] {
+  const parts = (hashes: string, keep: boolean) => {
+    const got = [utf8.decode(testing.domainModuleBytes(hashes, -1, keep, false))];
+    while (!testing.domainModuleDone()) {
+      // Collected at every cut, as the wrapper collects: what a part keeps
+      // for the next must be reachable from the module being written.
+      testing.__collect();
+      got.push(utf8.decode(testing.domainModuleMoreBytes()));
+    }
+
+    return got.join("");
+  };
+  const results: string[] = [];
+  const hashes: string[] = [];
+  testing.domainReset(version);
+  testing.domainPartBudget(1);
+  for (const [i, bytes] of [...builtins, abc].entries()) {
+    const error = testing.domainAdd(bytes, i < builtins.length);
+    if (error) {
+      results.push(rejected(error, abc, i < builtins.length));
+      break;
+    }
+
+    hashes.push(sha(bytes));
+    const fresh = parts(hashes.join("\n"), false);
+    const kept = parts(hashes.join("\n"), true);
+    results.push(fresh === kept ? fresh : "(kept, another module)", testing.domainSourceMap());
+  }
+
+  return results;
+}
+
 /** Entries as domainModuleEntries and domainEmitEach write them: body, U+0001, entry, U+0002. */
 function parseEntries(text: string): Map<number, string> {
   const entries = new Map<number, string>();
@@ -218,6 +260,13 @@ async function checkAt(): Promise<void> {
   await oneInstance("after the chains before it", "dist-test", chains, 1);
   await oneInstance("in reverse, twice in a row", "dist-test", [...chains].reverse(), 2);
   await oneInstance("in the checked build", "dist-test-checked", chains, 1);
+  {
+    const testing = await loadTesting("dist-test");
+    for (const chain of chains) {
+      const got = compileInParts(testing, chain.abc);
+      compare("a part at a time", chain.name, got, reference.get(chain.name) ?? []);
+    }
+  }
 
   // The release build has the same source for this behind its own entry; the
   // package's API must give the same bytes.
@@ -244,9 +293,9 @@ async function checkAt(): Promise<void> {
     }
   }
 
-  // The JIT/AOT invariant: each method compiled alone, as lazy JIT will
-  // compile it, byte for byte its entry in the module. In order, a new
-  // emitter for each; then in the reverse order, one emitter for all. The
+  // The JIT/AOT invariant: each method compiled alone byte for byte its
+  // entry in the module. In order, a new emitter for each; then in the
+  // reverse order, one emitter for all. The
   // builtins are the same in every chain, so checked in the first.
   {
     const testing = await loadTesting("dist-test");
@@ -295,5 +344,5 @@ if (differences) {
 }
 
 console.log(
-  `determinism: ${chains.length} chains at API versions ${VERSIONS.join(", ")}, each the same 5 ways (${rejections} rejected alike), and ${methods} methods each alone as in its module, 2 ways (${seconds} s)`,
+  `determinism: ${chains.length} chains at API versions ${VERSIONS.join(", ")}, each the same 6 ways (${rejections} rejected alike), and ${methods} methods each alone as in its module, 2 ways (${seconds} s)`,
 );

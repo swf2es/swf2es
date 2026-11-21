@@ -100,8 +100,6 @@ export interface Configuration {
    * default, as a first visit is some 9% slower for the writes.
    */
   cache?: boolean;
-  /** Experimental AVM2 compilation on first method-factory use; off by default. */
-  lazyCompilation?: boolean;
   /**
    * The API version the SWFs the element plays next run at, where an
    * element has no `apiversion` attribute: "latest", the default, sees

@@ -42,6 +42,7 @@ import { webWorkerHost } from "@swf2es/player-hosts/workers";
 import {
   type Commands,
   DRAW,
+  type GeometryData,
   MESH,
   PLANE,
   RUN,
@@ -63,6 +64,7 @@ import {
   FORM_SHADED,
   FORM_SMALL,
   FORM_STAGE,
+  type GeometryTally,
   SUB_RUN_INTS,
   walkCensus,
 } from "./census.ts";
@@ -73,12 +75,34 @@ import { type RecordedEvent, Replay } from "./replay.ts";
  * first needs it.
  */
 let nativeFills: import("@swf2es/native/render").Tessellator | null = null;
+let timedFills: import("@swf2es/native/render").Tessellator["tessellate"] | null = null;
+
+/** The ms the renderer's layers of fills have taken to tessellate, which benchSwf reads each frame. */
+let tessellationMs = 0;
 
 async function fillTessellator(): Promise<
   import("@swf2es/native/render").Tessellator["tessellate"]
 > {
-  nativeFills ??= new (await import("@swf2es/native/render")).Tessellator();
-  return nativeFills.tessellate;
+  if (!timedFills) {
+    nativeFills ??= new (await import("@swf2es/native/render")).Tessellator();
+    const fills = nativeFills.tessellate;
+    timedFills = Object.assign(
+      (contours: readonly (readonly number[])[], nonZero: boolean) => fills(contours, nonZero),
+      {
+        layer: (...args: Parameters<typeof fills.layer>) => {
+          const begun = performance.now();
+          try {
+            return fills.layer(...args);
+          } finally {
+            tessellationMs += performance.now() - begun;
+          }
+        },
+        lines: fills.lines,
+      },
+    );
+  }
+
+  return timedFills;
 }
 
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
@@ -127,7 +151,6 @@ async function scriptingFor(
   {
     moduleCache = null,
     onCompile,
-    lazyCompilation = false,
     air = false,
     apiVersion = "latest",
     logFetch = false,
@@ -135,7 +158,6 @@ async function scriptingFor(
   }: {
     moduleCache?: ModuleCache | null;
     onCompile?: () => void;
-    lazyCompilation?: boolean;
     /** Played as AIR plays it (Scripting's `air`). */
     air?: boolean;
     /** The API version it runs at (Scripting's `apiVersion`), "root" its own SWF version's. */
@@ -176,7 +198,6 @@ async function scriptingFor(
     : undefined;
   const scripting = new Scripting(codegen, {
     moduleCache,
-    lazyCompilation,
     air,
     apiVersion,
     swfVersion: swf.header.version,
@@ -525,7 +546,6 @@ interface RunSwfOptions {
   viewport?: { width: number; height: number } | null;
   logFetch?: boolean;
   socket?: SocketStep[] | null;
-  lazyCompilation?: boolean;
   /** Played as AIR plays it (Scripting's `air`). */
   air?: boolean;
   /** The API version it runs at (Scripting's `apiVersion`). */
@@ -550,7 +570,6 @@ async function runSwf(
     viewport = null,
     logFetch = false,
     socket = null,
-    lazyCompilation = false,
     air = false,
     apiVersion = "latest",
     draw = false,
@@ -571,7 +590,6 @@ async function runSwf(
   };
   try {
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
-      lazyCompilation,
       air,
       apiVersion,
       logFetch,
@@ -747,12 +765,16 @@ interface Bench {
   draw: number[];
   /** GL's part: the wait for what was issued to finish. */
   gl: number[];
+  /** The draw's part spent tessellating fills (fillTessellator). */
+  tessellation: number[];
   /** Each render after a frame's with no tick between, whole: draw and GL. */
   idle: number[];
   first: number;
   /** The GL renderer that drew: SwiftShader, or a GPU's name. */
   renderer: string;
   error: string | null;
+  /** The CPU copies of geometries the view held after the frames: see geometryTally. */
+  geometry?: GeometryTally;
   morphs?: {
     requests: number[];
     misses: number[];
@@ -969,6 +991,62 @@ function censusMethod(
   }
 
   return method as (...args: unknown[]) => unknown;
+}
+
+/**
+ * The geometries `view`'s registry holds and the CPU copies of them it keeps: the bytes of their
+ * vertices' arrays and of their indices, and of the distinct buffers those lie in, which is what
+ * the arrays keep alive; those of a geometry small enough to be merged (the atlas's Place.batch)
+ * and advanced text's glyph quads apart.
+ */
+function geometryTally(view: RenderView): GeometryTally {
+  const registry = censusField<object>(view, "geometries");
+  const data = censusField<(GeometryData | null)[]>(registry, "data");
+  const tally: GeometryTally = {
+    count: 0,
+    vertexBytes: 0,
+    indexBytes: 0,
+    bufferBytes: 0,
+    smallBufferBytes: 0,
+    glyphBufferBytes: 0,
+    ownBytes: 0,
+  };
+  // The indices the atlas keeps of what it placed (webgl/atlas.ts, Place.local).
+  const atlas = censusField<Record<string, unknown>>(censusField<object>(view, "backend"), "atlas");
+  for (const place of (atlas.places ?? []) as ({ local?: Uint16Array | Uint32Array } | null)[]) {
+    tally.ownBytes += place?.local?.byteLength ?? 0;
+  }
+
+  tally.count = censusField<number>(registry, "count");
+  const buffers = new Set<ArrayBufferLike>();
+  for (const g of data) {
+    if (!g) {
+      continue;
+    }
+
+    const arrays = [g.positions, g.colors, g.texels, g.depths, g.glyphs?.vertices];
+    let bytes = 0;
+    for (const array of [...arrays, g.indices]) {
+      if (array && array.byteLength > 0 && !buffers.has(array.buffer)) {
+        buffers.add(array.buffer);
+        bytes += array.buffer.byteLength;
+      }
+    }
+
+    for (const array of arrays) {
+      tally.vertexBytes += array?.byteLength ?? 0;
+    }
+
+    tally.indexBytes += g.indices?.byteLength ?? 0;
+    tally.bufferBytes += bytes;
+    if (g.glyphs) {
+      tally.glyphBufferBytes += bytes;
+    } else if ((g.positions?.length ?? 0) <= 512 && (g.indices?.length ?? 0) <= 1024 && !g.depths) {
+      tally.smallBufferBytes += bytes;
+    }
+  }
+
+  return tally;
 }
 
 /** A field of one of the renderer's objects, found by name, which a census reads. */
@@ -1355,6 +1433,7 @@ async function benchSwf(
   const tick: number[] = [];
   const draw: number[] = [];
   const finished: number[] = [];
+  const tessellation: number[] = [];
   const idle: number[] = [];
   let name = "";
   try {
@@ -1410,6 +1489,7 @@ async function benchSwf(
     }
     morphs?.reset();
     let stroked = lineCounts.strokeContexts;
+    tessellationMs = 0;
     for (let frame = 2; frame <= frames; frame++) {
       // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
       if (cpuProfile && frame === PROFILED_FROM) {
@@ -1450,6 +1530,9 @@ async function benchSwf(
       tick.push(ticked - before);
       draw.push(drawn - ticked);
       finished.push(performance.now() - drawn);
+      // Part of the draw: the frame's fills tessellated.
+      tessellation.push(tessellationMs);
+      tessellationMs = 0;
       // Lines stroked anew this frame.
       const reading = counter.read();
       morphs?.frame();
@@ -1487,6 +1570,7 @@ async function benchSwf(
 
     const counts = { ...lineCounts };
     const heap: [number, number] = [heapBefore, heapNow()];
+    const geometry = geometryTally(view);
     // Everything still held while chrome.ts collects and measures what the frames left (benchHold).
     if (hold) {
       await new Promise<void>((release) => {
@@ -1504,10 +1588,12 @@ async function benchSwf(
       tick,
       draw,
       gl: finished,
+      tessellation,
       idle,
       first,
       renderer: name,
       error: null,
+      geometry,
       ...(morphs ? { morphs: morphs.result() } : {}),
     };
   } catch (e) {
@@ -1520,6 +1606,7 @@ async function benchSwf(
       tick,
       draw,
       gl: finished,
+      tessellation,
       idle,
       first: 0,
       renderer: name,
@@ -2709,12 +2796,7 @@ let opened: {
 /** The module cache openSwf's players share, made by the first that asks for one (leak.ts --cache). */
 let leakCache: ModuleCache | null = null;
 
-async function openSwf(
-  base64: string,
-  url: string | null,
-  cached = false,
-  lazyCompilation = false,
-): Promise<string | null> {
+async function openSwf(base64: string, url: string | null, cached = false): Promise<string | null> {
   opened = null;
   const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
   const trace: string[] = [];
@@ -2727,7 +2809,6 @@ async function openSwf(
 
     scripting = await scriptingFor(bytes, trace, url, uncaught, {
       moduleCache: cached ? leakCache : null,
-      lazyCompilation,
     });
     const player = new Player(bytes, scripting);
     await player.start();

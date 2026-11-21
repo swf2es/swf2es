@@ -3,8 +3,10 @@
 // (build.zig) with the pinned Zig, which compiles each sub-path's Zig and,
 // with its clang, the vendored C, unchanged, to wasm32-freestanding; each
 // module is written as base64 into src/<sub-path>/binary.ts, and the
-// vendored C's notices into LICENSE.third-party. --check verifies each
-// binary's inputs' digest and the notices without building.
+// vendored C's notices into LICENSE.third-party. render also links lyon,
+// swf2es/tessellate's release archive (src/render/lyon/), whose digest must
+// be the one its release.json names. --check verifies that, each binary's
+// inputs' digest and the notices without building.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -15,6 +17,15 @@ import { findZig, ZIG_VERSION } from "../../tools/zig.ts";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
 const vendor = fileURLToPath(new URL("../../vendor/", import.meta.url));
+/**
+ * lyon's fill tessellator, which render links: swf2es/tessellate's release archive, checked in
+ * as its CI built it, with release.json naming its tag and digest and LICENSE.third-party, the
+ * release's notices, verbatim.
+ */
+const lyon = join(here, "src/render/lyon");
+const LYON_ARCHIVE = join(lyon, "libswf2es_tessellate.a");
+const LYON_RELEASE = join(lyon, "release.json");
+const LYON_NOTICES = join(lyon, "LICENSE.third-party");
 
 /** A directory's files that match, sorted: more than build.zig compiles, never less. */
 const files = (dir: string, pattern: RegExp) =>
@@ -77,8 +88,11 @@ const BINARIES: Binary[] = [
       ...files(join(vendor, "libtess2/Include"), /\.[ch]$/),
       ...files(join(vendor, "libtess2/Source"), /\.[ch]$/),
       join(vendor, "libtess2/LICENSE.txt"),
+      LYON_ARCHIVE,
+      LYON_RELEASE,
+      LYON_NOTICES,
     ],
-    note: "; libtess2 is under SGI Free Software License B",
+    note: "; libtess2 is under SGI Free Software License B, lyon and the crates it uses under the MIT license",
   },
   {
     path: "atf",
@@ -190,6 +204,32 @@ W3C Software and Document License:
 https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document
 `;
 
+interface LyonRelease {
+  repository: string;
+  tag: string;
+  sha256: string;
+}
+
+const lyonRelease = (): LyonRelease => JSON.parse(readFileSync(LYON_RELEASE, "utf8"));
+
+/** The archive checked in is the release release.json names, byte for byte. */
+function checkLyon(): void {
+  const digest = createHash("sha256").update(readFileSync(LYON_ARCHIVE)).digest("hex");
+  if (digest !== lyonRelease().sha256) {
+    throw new Error(`${LYON_ARCHIVE} is not the release in release.json (sha256 ${digest})`);
+  }
+}
+
+/** The tessellate release's own notices, under where the archive comes from. */
+function lyonNotice(): string {
+  const { repository, tag } = lyonRelease();
+  return `src/render/lyon/libswf2es_tessellate.a, linked into the render module, is
+${repository}'s release ${tag}, built by its CI. It holds
+lyon's fill tessellator and the code below; the release's notices follow.
+
+${readFileSync(LYON_NOTICES, "utf8")}`;
+}
+
 /** Each vendored library's notice, verbatim, and the derived work's, under the sub-path that compiles it in. */
 function notices(): string {
   const sections: [string, string][] = [
@@ -198,6 +238,7 @@ function notices(): string {
     ["@swf2es/native/mp3: minimp3", readFileSync(join(vendor, "minimp3/LICENSE"), "utf8")],
     ["@swf2es/native/audio: FFmpeg's Nellymoser decoder", FFMPEG_NELLYMOSER],
     ["@swf2es/native/render: libtess2", readFileSync(join(vendor, "libtess2/LICENSE.txt"), "utf8")],
+    ["@swf2es/native/render: lyon, the crates it uses, and Rust's core and alloc", lyonNotice()],
     ["@swf2es/native/render: SVG's feTurbulence (perlinNoise)", FE_TURBULENCE],
     ["@swf2es/native/atf: jxrlib", readFileSync(join(vendor, "jxrlib/LICENSE"), "utf8")],
     ["@swf2es/native: Zig's standard library and compiler-rt", ZIG],
@@ -232,6 +273,7 @@ function inputDigest(binary: Binary): string {
 
 const target = (binary: Binary) => join(here, "src", binary.path, "binary.ts");
 const license = join(here, "LICENSE.third-party");
+checkLyon();
 if (process.argv.includes("--check")) {
   for (const binary of BINARIES) {
     if (!readFileSync(target(binary), "utf8").includes(`inputs: ${inputDigest(binary)}`)) {

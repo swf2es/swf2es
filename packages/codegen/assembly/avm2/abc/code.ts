@@ -1152,33 +1152,137 @@ export function nameParts(pool: ConstantPool, index: u32): u8 {
  * VerifyError, 0 if it verified, or -1 if nothing could run it.
  */
 export function verifyMethods(domain: Domain, index: u32): StaticArray<i32> {
-  // Logged before what it resolves, as what it captures is a function's
-  // scope before its signature (see Domain.logKind); kept if it is the
-  // ABC's first, or finds a scope the first did not.
-  const first = domain.abcVerified[index] === 0;
-  domain.abcVerified[index] = 1;
-  const entry = domain.logKind.length;
-  const captures = domain.captures;
-  domain.logged(LOG_Verify, index, 0, 0);
-  let results = verifyAll(domain, index);
-  for (let pass = 0; pass < SETTLE_PASSES && settleContests(domain, index); pass++) {
-    results = verifyAll(domain, index);
-  }
-
-  if (!first && domain.captures === captures) {
-    if (domain.logKind.length === entry + 1) {
-      domain.logKind.length = entry;
-      domain.logAt.length = entry;
-      domain.logAbc.length = entry;
-      domain.logA.length = entry;
-      domain.logB.length = entry;
-    } else {
-      domain.logKind[entry] = LOG_None;
-    }
-  }
-
-  return results;
+  const verifier = new Verifier(domain, index);
+  verifier.run(u64.MAX_VALUE);
+  return verifier.results;
 }
+
+/**
+ * verifyMethods a part at a time, so that a host may collect the garbage
+ * of each part before the next: run until it returns true, with nothing
+ * else decoding in between. The parts verify what verifyMethods does, in
+ * its order, however they are cut. The constructor counts the ABC as
+ * verified and logs LOG_Verify at once, as verifyMethods does, so one
+ * left before it is done leaves both, and what it resolved, in the domain
+ * (see abandon in compile.ts).
+ */
+@final
+export class Verifier {
+  domain: Domain;
+  index: u32;
+  /** Each body's VerifyError, 0 if it verified, -1 if nothing runs it; complete once run returns true. */
+  results: StaticArray<i32> = new StaticArray<i32>(0);
+  private first: bool;
+  private entry: i32;
+  private captures: u32;
+  private queue: u32[] = [];
+  private at: i32 = 0;
+  private pass: i32 = 0;
+  private done: bool = false;
+  /** The bytes of code the last run verified, as its budget counts them. */
+  spent: u64 = 0;
+
+  constructor(domain: Domain, index: u32) {
+    this.domain = domain;
+    this.index = index;
+    // Logged before what it resolves, as what it captures is a function's
+    // scope before its signature (see Domain.logKind); kept if it is the
+    // ABC's first, or finds a scope the first did not.
+    this.first = domain.abcVerified[index] === 0;
+    domain.abcVerified[index] = 1;
+    this.entry = domain.logKind.length;
+    this.captures = domain.captures;
+    domain.logged(LOG_Verify, index, 0, 0);
+    this.start();
+  }
+
+  /**
+   * Verify until done, or until the bodies verified by this call hold
+   * `budget` bytes of code, counting at least BODY_COST a body: whether done.
+   */
+  run(budget: u64): bool {
+    if (this.done) {
+      return true;
+    }
+
+    const domain = this.domain;
+    const index = this.index;
+    const abc = domain.abcs[index];
+    const traits = domain.traits;
+    const methods = domain.methodStart[index];
+    // Asked for again by each part, as another may have retargeted it.
+    const decoder = bodyDecoder(domain, index);
+    this.spent = 0;
+    for (;;) {
+      const results = this.results;
+      while (this.at < this.queue.length) {
+        if (this.spent >= budget) {
+          return false;
+        }
+
+        const m = this.queue[this.at++];
+        const body = abc.methodBody[m - methods];
+        const scope = traits.scopeOf(m);
+        if (body < 0 || scope === null || results[body] !== -1) {
+          continue;
+        }
+
+        results[body] = decoder.decode(<u32>body, scope).error;
+        this.spent += max<u64>(<u64>abc.bodyCodeLength[body], BODY_COST);
+        for (let c = 0; c < decoder.captured.length; c++) {
+          this.queue.push(decoder.captured[c]);
+        }
+      }
+
+      if (this.pass >= SETTLE_PASSES || !settleContests(domain, index)) {
+        break;
+      }
+
+      this.pass++;
+      this.start();
+    }
+
+    if (!this.first && domain.captures === this.captures) {
+      const entry = this.entry;
+      if (domain.logKind.length === entry + 1) {
+        domain.logKind.length = entry;
+        domain.logAt.length = entry;
+        domain.logAbc.length = entry;
+        domain.logA.length = entry;
+        domain.logB.length = entry;
+      } else {
+        domain.logKind[entry] = LOG_None;
+      }
+    }
+
+    this.done = true;
+    return true;
+  }
+
+  /** A pass over the ABC from its scripts, as each settling of its contested functions starts again. */
+  private start(): void {
+    const domain = this.domain;
+    const index = this.index;
+    const abc = domain.abcs[index];
+    const results = new StaticArray<i32>(abc.bodyCount);
+    for (let b: u32 = 0; b < abc.bodyCount; b++) {
+      results[b] = -1;
+    }
+
+    const queue: u32[] = [];
+    const scripts = domain.scriptTraits[index];
+    for (let s: u32 = 0; s < abc.scriptCount; s++) {
+      domain.methodsOf(scripts[s], queue);
+    }
+
+    this.results = results;
+    this.queue = queue;
+    this.at = 0;
+  }
+}
+
+/** What a body counts for in Verifier.run's budget at least, as one of a few bytes still takes a decode. */
+const BODY_COST: u64 = 64;
 
 /** Verifications of an ABC again as its contested functions' merged scope chains settle, at most. */
 const SETTLE_PASSES = 8;
@@ -1250,37 +1354,4 @@ export function bodyDecoder(domain: Domain, index: u32): BodyDecoder {
   }
 
   return decoder;
-}
-
-function verifyAll(domain: Domain, index: u32): StaticArray<i32> {
-  const abc = domain.abcs[index];
-  const traits = domain.traits;
-  const results = new StaticArray<i32>(abc.bodyCount);
-  for (let b: u32 = 0; b < abc.bodyCount; b++) {
-    results[b] = -1;
-  }
-
-  const queue: u32[] = [];
-  const scripts = domain.scriptTraits[index];
-  for (let s: u32 = 0; s < abc.scriptCount; s++) {
-    domain.methodsOf(scripts[s], queue);
-  }
-
-  const methods = domain.methodStart[index];
-  const decoder = bodyDecoder(domain, index);
-  for (let q = 0; q < queue.length; q++) {
-    const m = queue[q];
-    const body = abc.methodBody[m - methods];
-    const scope = traits.scopeOf(m);
-    if (body < 0 || scope === null || results[body] !== -1) {
-      continue;
-    }
-
-    results[body] = decoder.decode(<u32>body, scope).error;
-    for (let c = 0; c < decoder.captured.length; c++) {
-      queue.push(decoder.captured[c]);
-    }
-  }
-
-  return results;
 }

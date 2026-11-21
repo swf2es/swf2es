@@ -5,8 +5,7 @@ JavaScript. It has one compiler, which runs at two different times:
 
 - **JIT**: the player runs `@swf2es/codegen` as a SWF loads, and compiles
   each of the SWF's ABCs whole to an ES module (see [A SWF's
-  code](player.md#a-swfs-code)). An opt-in mode compiles method bodies on first
-  factory use (see [Optional lazy compilation](compiler.md#optional-lazy-compilation)).
+  code](player.md#a-swfs-code)).
 - **AOT**: node (or a server) runs the same compiler ahead of time, with the
   `swf2es` command (`packages/cli`), and the player takes its modules in
   place of compiling them (see [Compiling ahead of time and caching
@@ -30,16 +29,26 @@ compiler's API; besides `identity`, `epoch`, `abcVersion`, `usage` and
   `compact` reuses the memory they freed (see [Parsing, linking and
   verifying](compiler.md#parsing-linking-and-verifying));
 - the last ABC added compiles with `compile`, whole, to its module, source
-  map and the entry of each method; with `compileModule`, to its module
-  alone; or with `compileLazyModule`, to its tables and lazy factories,
-  whose bodies compile with `compileMethods` on first factory use;
+  map and the entry of each method; or with `compileModule`, to its
+  module alone;
 - `context`, `revision`, `compileModuleLogged` and `replay` serve a cache
   of modules (see [Caching modules](modules.md#caching-modules)).
 
-The source map and the entries are written each in a call of its own,
-after the module's garbage is collected, and only when asked for: written
-with the module, a large ABC's entries alone took codegen's memory from 128
-to 256 MiB, which wasm never gives back. All go through
+A module is written a part at a time, a call each, the wrapper collecting
+each part's garbage and decoding its text before it asks for the next:
+verifying an ABC's methods and writing all their entries in one call
+held every method's garbage and the whole module's text at once, and
+wasm never gives memory back. A part makes about 2 MiB of garbage, so a
+new instance's memory, measured in node, is 8 MiB after compiling the
+player's libraries (builtin and playerglobal) where it was 32, and still
+8 after as3pb's ABC as well, and a large application's compile takes
+little more than the tables it keeps live. A player that has loaded a few
+SWFs after the libraries is at 16 MiB (`tests/player/leak.ts`). The parts are cut only between bodies, so the module
+is the same however it is cut (`ModuleEmitter.begin` and `step`). The
+source map and the entries are written each in a call of its own, after
+the module's garbage is collected, and only when asked for: written with
+the module, a large ABC's entries alone took codegen's memory from 128
+to 256 MiB. All go through
 `assembly/compile.ts`, which the test build (`assembly/testing.ts`, with
 the reader, verifier and emitter exposed for the node tests by its parts in
 `assembly/testing/`) exports too,
@@ -84,9 +93,11 @@ over the builtins, then each conformance case (also compiled with asc's
   others, in the reverse order twice in a row, and in the build that checks
   every array access, so that nothing the compiler keeps between calls,
   such as its reused buffers, leaks into its output.
-- **The JIT/AOT invariant:** each method compiled alone, as lazy JIT
-  compiles it, is byte for byte its entry in its module: in order with a
-  new emitter each, and in the reverse order with one emitter for all.
+- **The JIT/AOT invariant:** each method compiled alone (the test build's
+  `domainEmitEach`) is byte for byte its entry in its module: in order with
+  a new emitter each, and in the reverse order with one emitter for all,
+  so that a method's code depends on nothing compiled before it, which a
+  module written a part at a time relies on too.
   Everything a method's code refers to is indexed by its ABC (multinames,
   namespaces, functions, descriptors), but for the classes and Vectors it
   refers to and the names it makes of strings it holds, which it has in a
@@ -97,7 +108,7 @@ over the builtins, then each conformance case (also compiled with asc's
 
 | Package   | Responsibility                                                  | May depend on             |
 |-----------|-----------------------------------------------------------------|---------------------------|
-| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
+| `native`  | the WebAssembly modules, each a sub-path with its own binary: `compress` (zlib and LZMA), `mp3` (minimp3), `audio` (ADPCM and Nellymoser, in Zig), `render` (fills with libtess2, and lyon for densely crossing ones, lines and BitmapData's CPU kernels) and `atf` (Stage3D's ATF textures, their JPEG XR images by jxrlib), C and Zig built by one Zig project | — |
 | `format`  | SWF container and tags, a DoABC's bytes (codegen parses the ABC), AVM1 action blocks | native |
 | `codegen` | bytecode → IR → ES modules, in AssemblyScript (`assembly/`)     | format                    |
 | `runtime` | AS3 and AVM1 language semantics called by generated code        | format                    |
@@ -298,7 +309,11 @@ Third-party C swf2es forks lives in `vendor/`, a git submodule each, kept
 apart from `packages/` because it is neither swf2es's code nor under its
 licence: zlib, the LZMA SDK, minimp3, libtess2 and jxrlib, compiled into
 `native`'s binaries (above), never linked by pnpm. The boundaries test
-checks that `vendor/` holds those alone.
+checks that `vendor/` holds those alone. lyon's fill tessellator, which is
+Rust, is not there: [swf2es/tessellate](https://github.com/swf2es/tessellate)
+builds it into a wasm32 static library, and `native` checks in that
+release's archive with its digest and notices
+(`packages/native/src/render/lyon/`), so swf2es builds no Rust.
 
 ## Milestone 1
 

@@ -160,7 +160,7 @@ export interface Compiled {
   module: string;
   /** JSON: the module's lines mapped to the AS3 lines debugline names. */
   sourceMap: string;
-  /** By method body index: the body's entry in the module's F, as the JIT compiles it alone. */
+  /** By method body index: the body's entry in the module's F. */
   entries: Map<number, string>;
 }
 
@@ -188,8 +188,8 @@ export interface LoggedModule {
 
 /**
  * The compiler. ABCs are added to a domain in the order the SWF loads them
- * (the builtins first), and the last one added compiles, whole or a method
- * at a time, to code that is byte for byte the same either way.
+ * (the builtins first), and the last one added compiles to its module,
+ * byte for byte the same however the compiler got there.
  */
 export interface Codegen {
   /**
@@ -282,20 +282,6 @@ export interface Codegen {
    */
   compileModule(hashes?: string[], index?: number): string;
   /**
-   * An opt-in JIT module's tables and lazy factories. Its default export
-   * takes (rt, jit); jit(body, bindings) returns that body's factory.
-   * Verification still runs now to fix scopes against the current domain.
-   * This module is not an AOT module and must not enter the module cache.
-   */
-  compileLazyModule(hashes?: string[], index?: number): string;
-  /**
-   * Method bodies of ABC `index` (the last added by default) compiled
-   * alone, as the optional lazy JIT compiles each on first factory use;
-   * a native, unverified or unknown one is left out. Each is byte for byte
-   * its entry in the whole module.
-   */
-  compileMethods(bodies: number[], index?: number): Map<number, string>;
-  /**
    * What ABC `index`'s module depends on beyond the ABCs' bytes, for a
    * cache key: besides the ABCs its domain sees, what the domain has
    * fixed of what resolves lazily, which a later ABC in an ancestor would
@@ -376,6 +362,13 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     );
   }
 
+  // Or before it wrote a module a part at a time.
+  if (!WebAssembly.Module.exports(module).some((e) => e.name === "domainModuleMoreBytes")) {
+    throw new Error(
+      "codegen.wasm has no domainModuleMoreBytes export, which the wrapper expects: it is older than the wrapper",
+    );
+  }
+
   // codegen.wasm uses AssemblyScript's minimal runtime, which collects
   // garbage only when asked. Nothing runs in wasm between calls, so that is
   // when: every COLLECT_EVERY calls, and after a call that grew memory.
@@ -383,7 +376,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   // cycle's garbage grow it a little further.
   let size = wasm.memory.buffer.byteLength;
   let calls = 0;
-  let methodBytes = 0;
   // Whether the domain has an ABC to compile: asking before is a mistake worth a message, not a trap.
   let added = 0;
   const last = (what: string) => {
@@ -401,7 +393,7 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
   };
   // ABC `index`'s module, its source map and entries kept for `keep`. A
   // module is never empty: the ABC was of a dropped application domain.
-  const moduleOf = (hashes: string[], index: number, keep: boolean, lazy = false) => {
+  const moduleOf = (hashes: string[], index: number, keep: boolean) => {
     // Only the hashes the module names: joining every ABC's for each
     // compile took megabytes of codegen's memory a few thousand loads on.
     const at = indexOf(index);
@@ -413,12 +405,19 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     }
 
     // Its bytes decoded here: lifted as a string, a module of megabytes took
-    // longer than compiling it. The emitter writes only well-formed UTF-8,
-    // which decodes alike either way.
-    const address = lazy
-      ? wasm.domainLazyModuleBytes(named.join("\n"), at)
-      : wasm.domainModuleBytes(named.join("\n"), at, keep, true);
-    const module = collected(handed(address, wasm.outputLength()), lazy);
+    // longer than compiling it. The emitter writes only ASCII, which decodes
+    // alike either way, and to a string the engine keeps a byte a character.
+    // A large ABC's module comes a part at a time, each part's garbage
+    // collected before the next is written (see domainModuleBytes).
+    const parts = [
+      handed(wasm.domainModuleBytes(named.join("\n"), at, keep, true), wasm.outputLength()),
+    ];
+    while (!wasm.domainModuleDone()) {
+      wasm.__collect();
+      parts.push(handed(wasm.domainModuleMoreBytes(), wasm.outputLength()));
+    }
+
+    const module = collected(parts.length === 1 ? parts[0] : parts.join(""), parts.length > 1);
     if (module === "") {
       throw new Error(`ABC ${index}: its application domain was dropped`);
     }
@@ -493,7 +492,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       wasm.__collect();
       size = grown;
       calls = 0;
-      methodBytes = 0;
     }
 
     return result;
@@ -617,10 +615,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
       last("compileModule");
       return moduleOf(hashes, index, false);
     },
-    compileLazyModule(hashes = [], index = -1) {
-      last("compileLazyModule");
-      return moduleOf(hashes, index, false, true);
-    },
     context(index = -1, after = 0, upTo = -1) {
       if (added === 0) {
         return null;
@@ -653,19 +647,6 @@ export async function createCodegen(module: WebAssembly.Module): Promise<Codegen
     replay(log, index = -1) {
       last("replay");
       return collected(wasm.domainReplay(log, indexOf(index)));
-    },
-    compileMethods(bodies, index = -1) {
-      last("compileMethods");
-      const indices = bodies.filter((b) => Number.isInteger(b) && b >= 0);
-      if (indices.length === 0) {
-        return new Map();
-      }
-
-      const address = wasm.domainEmitEachBytes(indices.join(","), true, indexOf(index));
-      const length = wasm.outputLength();
-      methodBytes += length;
-      const text = handed(address, length);
-      return parseEntries(collected(text, methodBytes >= COLLECT_METHOD_BYTES));
     },
     compileActions(bytes, actions) {
       const module = actionsModule(bytes, actions, true);
@@ -737,8 +718,6 @@ function parseEntries(text: string): Map<number, string> {
 const COLLECT_EVERY = 64;
 /** How many SWFs whose blocks or units are compiled codegen holds a copy of at most. */
 const HELD_SWFS = 4;
-// Large method entries should not accumulate sixty-four calls of garbage.
-const COLLECT_METHOD_BYTES = 256 * 1024;
 
 // TextDecoder is the web's and node's alike, though not ECMAScript's,
 // whose library alone the compiler's wrapper is typed against.

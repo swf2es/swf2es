@@ -708,8 +708,7 @@ what they did, and `Code.codeDomain` gives the domain for the child, for
 `currentDomain`, `getDefinitionByName` and a load's default domain. The
 child is evicted once linked, as a loaded SWF's domain is, with no copy
 of its ABCs kept to revive it, as nothing loads into it or under it, and
-goes with the SWF's code; with lazy compilation, whose deferred bodies
-need their ABCs, it goes when it is collected. Loaded so five times a
+goes with the SWF's code. Loaded so five times a
 second, 80 small SWFs in turn, the compactions this asks for rebuilt the
 compiler's domain once every 15 seconds or so, about 40 ms each from an
 idle callback, as often as loads into new domains each have it rebuilt,
@@ -726,10 +725,7 @@ only for `newclass` and `newactivation`, so a module with neither keeps
 it only through its domain's globals, its scripts' entries, and not even
 those if every name it defines was defined in the chain before; code of
 such a module may then still run after its Abc went, and codeUrl and
-codeLibrary fall back to the main SWF's. Lazy compilation keeps each
-returned method's originating Abc in a WeakMap keyed by that method, so
-entries built apart from their module retain their code origin even when
-the body itself never reads A. The
+codeLibrary fall back to the main SWF's. The
 symbols bound to names nothing defined (`Symbols.unbound`) are still
 kept for good, their libraries with them.
 

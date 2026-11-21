@@ -37,7 +37,7 @@ async function play(
   name: string,
   body: string,
   frames: number,
-  { inner, lazyCompilation = false }: { inner?: Uint8Array; lazyCompilation?: boolean } = {},
+  { inner }: { inner?: Uint8Array } = {},
 ): Promise<{ lines: string[]; told: string[]; scripting: Scripting; raw: unknown[] }> {
   const lines: string[] = [];
   const raw: unknown[] = [];
@@ -46,7 +46,6 @@ async function play(
     onUncaught: (error) => raw.push(error),
     url: "http://example.test/main.swf",
     realTime: null,
-    lazyCompilation,
     fetch: async () =>
       inner
         ? { bytes: inner, status: 200, headers: [] }
@@ -229,17 +228,16 @@ test("without a hook, the frame throws what no listener prevented", { skip }, as
   player.tick();
 });
 
-for (const lazyCompilation of [false, true]) {
-  test(`a loaded SWF's error goes from its LoaderInfo up through its Loader (${lazyCompilation ? "lazy" : "eager"})`, {
-    skip,
-  }, async () => {
-    const compile = compiler(out);
-    const inner = bare(
-      compile(
+test("a loaded SWF's error goes from its LoaderInfo up through its Loader", {
+  skip,
+}, async () => {
+  const compile = compiler(out);
+  const inner = bare(
+    compile(
+      "Inner",
+      source(
         "Inner",
-        source(
-          "Inner",
-          `public function Inner() {
+        `public function Inner() {
             loaderInfo.uncaughtErrorEvents.addEventListener(UncaughtErrorEvent.UNCAUGHT_ERROR,
               function (e:UncaughtErrorEvent):void { trace("  inner, phase " + e.eventPhase + ", " + (e.target == loaderInfo)); });
           }
@@ -252,14 +250,14 @@ for (const lazyCompilation of [false, true]) {
             });
           }
           public function fail():void { throw new Error("inner's method"); }`,
-        ),
       ),
-      2,
-      "Inner",
-    );
-    const { lines, told } = await play(
-      "Outer",
-      `private var loader:Loader = new Loader();
+    ),
+    2,
+    "Inner",
+  );
+  const { lines, told } = await play(
+    "Outer",
+    `private var loader:Loader = new Loader();
       private var frame:int = 1;
       private var stop:String = "";
       public function Outer() {
@@ -294,42 +292,41 @@ for (const lazyCompilation of [false, true]) {
           if (stop == name) { e.stopPropagation(); }
         });
       }`,
-      16,
-      { inner, lazyCompilation },
-    );
+    16,
+    { inner },
+  );
 
-    assert.deepEqual(lines, [
-      "off the list",
-      "  loader capturing, true",
-      "  inner, phase 2, true",
-      "  loader, phase 3, true, a string",
-      "on the list",
-      "  outer capturing, true",
-      "  loader capturing, true",
-      "  inner, phase 2, true",
-      "  loader, phase 3, true, Error: inner's",
-      "  outer, phase 3, true, Error: inner's",
-      "stopped at the loader",
-      "  outer capturing, true",
-      "  loader capturing, true",
-      "  inner, phase 2, true",
-      "  loader, phase 3, true, 1",
-      // The SWF whose listener the player called, not the one whose function threw.
-      "outer's function",
-      "  outer capturing, true",
-      "  loader capturing, true",
-      "  inner, phase 2, true",
-      "  loader, phase 3, true, Error: outer's function",
-      "  outer, phase 3, true, Error: outer's function",
-      "inner's method",
-      "  outer, phase 2, false, Error: inner's method",
-      "not prevented",
-      "  outer capturing, true",
-      "  loader capturing, true",
-      "  inner, phase 2, true",
-      "  loader, phase 3, true, 2",
-      "  outer, phase 3, true, 2",
-    ]);
-    assert.deepEqual(told, ["2"]);
-  });
-}
+  assert.deepEqual(lines, [
+    "off the list",
+    "  loader capturing, true",
+    "  inner, phase 2, true",
+    "  loader, phase 3, true, a string",
+    "on the list",
+    "  outer capturing, true",
+    "  loader capturing, true",
+    "  inner, phase 2, true",
+    "  loader, phase 3, true, Error: inner's",
+    "  outer, phase 3, true, Error: inner's",
+    "stopped at the loader",
+    "  outer capturing, true",
+    "  loader capturing, true",
+    "  inner, phase 2, true",
+    "  loader, phase 3, true, 1",
+    // The SWF whose listener the player called, not the one whose function threw.
+    "outer's function",
+    "  outer capturing, true",
+    "  loader capturing, true",
+    "  inner, phase 2, true",
+    "  loader, phase 3, true, Error: outer's function",
+    "  outer, phase 3, true, Error: outer's function",
+    "inner's method",
+    "  outer, phase 2, false, Error: inner's method",
+    "not prevented",
+    "  outer capturing, true",
+    "  loader capturing, true",
+    "  inner, phase 2, true",
+    "  loader, phase 3, true, 2",
+    "  outer, phase 3, true, 2",
+  ]);
+  assert.deepEqual(told, ["2"]);
+});

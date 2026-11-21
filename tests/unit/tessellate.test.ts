@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PATH_CUBIC, PATH_CURVE, PATH_LINE, PATH_MOVE, Tessellator } from "@swf2es/native/render";
 import { binary } from "../../packages/native/dist/render/binary.js";
+import { deckContours } from "../player/deck.ts";
 import { tessellationFixtures } from "./tessellate-fixtures.ts";
 
 const square = [0, 0, 10, 0, 10, 10, 0, 10];
@@ -623,4 +624,403 @@ test("one convex contour is a fan, its points as given; one that winds round twi
   assert.equal(covers(7, 6), false);
   assert.equal(covers(8, 1), true);
   tess.dispose();
+});
+
+/** The render module alone, to see which filler took a fill and to make lyon fail (lyonFault). */
+interface RawRender {
+  memory: WebAssembly.Memory;
+  reset(): void;
+  alloc(size: number): number;
+  setLimit(size: number): void;
+  run(coords: number, count: number, ends: number, contours: number, nonzero: number): number;
+  vertices(): number;
+  indices(): number;
+  vertexCount(): number;
+  triangleCount(): number;
+  filledBy(): number;
+  lyonFault(fault: number): void;
+  checkFill(
+    coords: number,
+    count: number,
+    ends: number,
+    contours: number,
+    nonzero: number,
+    positions: number,
+    vertexCount: number,
+    indices: number,
+    indexCount: number,
+  ): number;
+}
+
+const LIBTESS2 = 4;
+const LYON = 5;
+const BANDS = 6;
+const LYON_X = 7;
+
+async function rawRender(): Promise<RawRender> {
+  const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
+  const instance = await WebAssembly.instantiate(module, {
+    env: {
+      failure: () => {
+        throw new Error("native failure");
+      },
+      sine: Math.sin,
+      cosine: Math.cos,
+    },
+  });
+  return instance.exports as unknown as RawRender;
+}
+
+interface RawFill {
+  status: number;
+  ms: number;
+  by: number;
+  vertices: Float64Array;
+  indices: Int32Array;
+}
+
+/** A fill by `x`, lyon made to fail as `fault` says, in an arena of `limit` bytes. */
+function rawFill(
+  x: RawRender,
+  contours: number[][],
+  nonZero: boolean,
+  fault = 0,
+  limit = 128 << 20,
+): RawFill {
+  x.reset();
+  x.setLimit(limit);
+  x.lyonFault(fault);
+  const flat = contours.flat();
+  const coords = x.alloc(flat.length * 8);
+  const ends = x.alloc(contours.length * 4);
+  new Float64Array(x.memory.buffer, coords, flat.length).set(flat);
+  let end = 0;
+  new Uint32Array(x.memory.buffer, ends, contours.length).set(
+    contours.map((points) => (end += points.length / 2)),
+  );
+  const start = performance.now();
+  const status = x.run(coords, flat.length / 2, ends, contours.length, Number(nonZero));
+  return {
+    status,
+    ms: performance.now() - start,
+    by: x.filledBy(),
+    vertices: new Float64Array(x.memory.buffer, x.vertices(), x.vertexCount() * 2).slice(),
+    indices: new Int32Array(x.memory.buffer, x.indices(), x.triangleCount() * 3).slice(),
+  };
+}
+
+function rawArea(fill: { vertices: Float64Array; indices: Int32Array }): number {
+  return area({ vertices: fill.vertices, indices: Uint32Array.from(fill.indices) });
+}
+
+function winding(contours: number[][], px: number, py: number): number {
+  let n = 0;
+  for (const p of contours) {
+    for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+      const cross = (p[i] - p[j]) * (py - p[j + 1]) - (p[i + 1] - p[j + 1]) * (px - p[j]);
+      if (p[j + 1] <= py && p[i + 1] > py && cross > 0) {
+        n++;
+      } else if (p[j + 1] > py && p[i + 1] <= py && cross < 0) {
+        n--;
+      }
+    }
+  }
+
+  return n;
+}
+
+/** Whether a point lies within `margin` of an edge of the contours. */
+function nearEdge(contours: number[][], px: number, py: number, margin: number): boolean {
+  for (const p of contours) {
+    for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+      const dx = p[i] - p[j];
+      const dy = p[i + 1] - p[j + 1];
+      const length = dx * dx + dy * dy;
+      const s =
+        length === 0
+          ? 0
+          : Math.min(1, Math.max(0, ((px - p[j]) * dx + (py - p[j + 1]) * dy) / length));
+      if (Math.hypot(p[j] + s * dx - px, p[j + 1] + s * dy - py) < margin) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * `samples` points over the contours' box, but those near an edge, each covered by the fill's
+ * triangles once where the rule fills it and not at all elsewhere: lyon's positions are f32s,
+ * so a point this close to an edge may fall either side of it.
+ */
+function checkCoverage(
+  contours: number[][],
+  nonZero: boolean,
+  fill: RawFill,
+  samples: number,
+): void {
+  const { vertices: v, indices: t } = fill;
+  let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity];
+  for (const p of contours) {
+    for (let i = 0; i < p.length; i += 2) {
+      [x0, x1] = [Math.min(x0, p[i]), Math.max(x1, p[i])];
+      [y0, y1] = [Math.min(y0, p[i + 1]), Math.max(y1, p[i + 1])];
+    }
+  }
+
+  const margin = Math.max(1e-3, Math.max(Math.abs(x1), Math.abs(y1)) * 2e-7);
+  let checked = 0;
+  for (let k = 0; checked < samples && k < samples * 10; k++) {
+    const px = x0 + ((k * 0.6180339887 + 0.1) % 1) * (x1 - x0);
+    const py = y0 + ((k * 0.7548776662 + 0.1) % 1) * (y1 - y0);
+    let covered = 0;
+    let edge = false;
+    for (let i = 0; i < t.length && !edge; i += 3) {
+      const [a, b, c] = [t[i] * 2, t[i + 1] * 2, t[i + 2] * 2];
+      if (
+        px < Math.min(v[a], v[b], v[c]) ||
+        px > Math.max(v[a], v[b], v[c]) ||
+        py < Math.min(v[a + 1], v[b + 1], v[c + 1]) ||
+        py > Math.max(v[a + 1], v[b + 1], v[c + 1])
+      ) {
+        continue;
+      }
+
+      const p = (v[b] - v[a]) * (py - v[a + 1]) - (v[b + 1] - v[a + 1]) * (px - v[a]);
+      const q = (v[c] - v[b]) * (py - v[b + 1]) - (v[c + 1] - v[b + 1]) * (px - v[b]);
+      const r = (v[a] - v[c]) * (py - v[c + 1]) - (v[a + 1] - v[c + 1]) * (px - v[c]);
+      // Within a ten-millionth of a pixel of an edge's line, inside the triangle's box, the
+      // sample says nothing: the bands leave triangles with sides that short.
+      const ab = Math.hypot(v[b] - v[a], v[b + 1] - v[a + 1]);
+      const bc = Math.hypot(v[c] - v[b], v[c + 1] - v[b + 1]);
+      const ca = Math.hypot(v[a] - v[c], v[a + 1] - v[c + 1]);
+      edge = Math.min(Math.abs(p) / ab, Math.abs(q) / bc, Math.abs(r) / ca) < 1e-7;
+      if ((p > 0 && q > 0 && r > 0) || (p < 0 && q < 0 && r < 0)) {
+        covered++;
+      }
+    }
+
+    if (edge || nearEdge(contours, px, py, margin)) {
+      continue;
+    }
+
+    const w = winding(contours, px, py);
+    assert.equal(covered, Number(nonZero ? w !== 0 : w % 2 !== 0), `at ${px}, ${py}`);
+    checked++;
+  }
+
+  assert.equal(checked, samples);
+}
+
+/**
+ * How much area lyon's fill of the contours may differ from libtess2's by: slivers between
+ * contours about as thin as the module's check's quarter pixel, which it lets lyon leave out or add
+ * between its scanlines, and positions narrowed to f32, along the contours' length.
+ */
+function slivers(contours: number[][]): number {
+  let length = 0;
+  for (const p of contours) {
+    for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+      length += Math.hypot(p[i] - p[j], p[i + 1] - p[j + 1]);
+    }
+  }
+
+  return 2e-4 * length;
+}
+
+/** deckContours' shape, `count` contours turned `turn` apart about (`centre`, `centre`), unrounded. */
+function deckAt(count: number, turn: number, centre: number, points = 200, scale = 1): number[][] {
+  const contours: number[][] = [];
+  for (let c = 0; c < count; c++) {
+    const [cos, sin] = [Math.cos(c * turn), Math.sin(c * turn)];
+    const contour: number[] = [];
+    for (let k = 0; k < points; k++) {
+      const u = (k / points) * Math.PI * 2;
+      const r = 200 + 12 * Math.sin(u * 9);
+      const [x, y] = [r * Math.cos(u) * 0.7, r * Math.sin(u)];
+      contour.push((centre + x * cos - y * sin) * scale, (centre + x * sin + y * cos) * scale);
+    }
+
+    contours.push(contour);
+  }
+
+  return contours;
+}
+
+test("many densely crossing contours go to lyon, fast and covered once; other fills do not", async () => {
+  const x = await rawRender();
+  // libtess2 takes over a second over 80 such contours in wasm; lyon about a tenth of one.
+  const deck = deckContours(80);
+  for (const nonZero of [false, true]) {
+    const fill = rawFill(x, deck, nonZero);
+    assert.equal(fill.status, 0);
+    assert.equal(fill.by, LYON);
+    assert.ok(fill.ms < 1000, `${fill.ms} ms`);
+    checkCoverage(deck, nonZero, fill, 200);
+  }
+
+  // The same area as libtess2's (lyon refused, -2), where it is quick enough to compare with.
+  const twenty = deckContours(20);
+  const lyon = rawFill(x, twenty, false);
+  const libtess2 = rawFill(x, twenty, false, -2);
+  assert.equal(lyon.by, LYON);
+  assert.equal(libtess2.by, LIBTESS2);
+  assert.ok(Math.abs(rawArea(lyon) - rawArea(libtess2)) < 1e-4 * rawArea(libtess2));
+
+  // Ten crossing contours are too few to be worth it; a thousand squares side by side cross nowhere.
+  assert.equal(rawFill(x, deckContours(10), false).by, LIBTESS2);
+  const grid = Array.from({ length: 1024 }, (_, k) => {
+    const [gx, gy] = [k % 32, Math.floor(k / 32)];
+    return [gx, gy, gx + 1, gy, gx + 1, gy + 1, gx, gy + 1];
+  });
+  assert.equal(rawFill(x, grid, false).by, LIBTESS2);
+});
+
+test("contours a hundredth of a pixel apart fill right by either rule, near the origin or far", async () => {
+  const x = await rawRender();
+  for (const turn of [1e-5, 1e-4, 1e-3]) {
+    for (const centre of [400, 3000]) {
+      const deck = deckAt(40, turn, centre);
+      for (const nonZero of [false, true]) {
+        const fill = rawFill(x, deck, nonZero);
+        const context = `turn ${turn} about ${centre}, ${nonZero ? "non-zero" : "even-odd"}`;
+        assert.equal(fill.status, 0, context);
+        // Whichever filler took it, lyon or, where its triangles failed the check, libtess2.
+        assert.ok(fill.by === LYON || fill.by === LYON_X || fill.by === LIBTESS2, context);
+        checkCoverage(deck, nonZero, fill, 60);
+        const reference = rawFill(x, deck, nonZero, -2);
+        assert.ok(
+          Math.abs(rawArea(fill) - rawArea(reference)) <= 2e-3 * rawArea(reference) + slivers(deck),
+          `${context}: area ${rawArea(fill)} against libtess2's ${rawArea(reference)}`,
+        );
+      }
+    }
+  }
+});
+
+test("where lyon fails, refuses or is wrong, the fill goes on to the bands or to libtess2", async () => {
+  const x = await rawRender();
+  // Twelve contours of a hundred points, which the bands can fill too.
+  const deck = deckAt(12, 0.004, 300, 100);
+  for (const nonZero of [false, true]) {
+    const own = rawFill(x, deck, nonZero);
+    assert.equal(own.by, LYON);
+    // lyon failing (-1) or out of memory for its own buffers (-3): the bands.
+    for (const fault of [-1, -3]) {
+      const fill = rawFill(x, deck, nonZero, fault);
+      assert.equal(fill.status, 0);
+      assert.equal(fill.by, BANDS);
+      checkCoverage(deck, nonZero, fill, 60);
+    }
+
+    // lyon refusing the coordinates (-2), or its triangles failing the check: libtess2.
+    for (const fault of [-2, 2]) {
+      const fill = rawFill(x, deck, nonZero, fault);
+      assert.equal(fill.status, 0);
+      assert.equal(fill.by, LIBTESS2);
+      checkCoverage(deck, nonZero, fill, 60);
+    }
+  }
+
+  // A deck wider than lyon's twips reach about its centre is refused, and libtess2 fills it.
+  const wide = deckAt(12, 0.004, 300, 200, 5000);
+  assert.equal(rawFill(x, wide, false).by, LIBTESS2);
+  // A fault applies to one fill.
+  assert.equal(rawFill(x, deck, false).by, LYON);
+});
+
+test("a trap in lyon, as running out of memory inside it is, leaves the bands to fill in a new instance", async () => {
+  // Out of memory in lyon's own allocations traps (unreachable) rather than returning -3, which
+  // only the crate's own buffers report.
+  const x = await rawRender();
+  const deck = deckContours(40);
+  assert.throws(() => rawFill(x, deck, false, 0, 3 << 20), /unreachable/);
+
+  // The tessellator lets that instance go and fills by the bands alone in a new one.
+  const tessellator = new Tessellator({ memoryLimit: 3 << 20 });
+  const instance = () => (tessellator as unknown as { instance: unknown }).instance;
+  assert.equal(tessellator.tessellate([square], false)?.indices.length, 6);
+  const before = instance();
+  tessellator.tessellate(deck, false);
+  assert.notEqual(instance(), before);
+
+  // A trap made to happen where the bands can fill: their triangles, in a new instance.
+  const small = deckAt(12, 0.004, 300, 100);
+  const banded = new Tessellator({ bands: true }).tessellate(small, false);
+  const tess = new Tessellator();
+  assert.equal(tess.tessellate([square], false)?.indices.length, 6);
+  const first = (tess as unknown as { instance: RawRender }).instance;
+  first.lyonFault(1);
+  const fill = tess.tessellate(small, false);
+  assert.ok(fill && banded);
+  assert.notEqual((tess as unknown as { instance: RawRender }).instance, first);
+  assert.deepEqual(Array.from(fill.vertices), Array.from(banded.vertices));
+  assert.deepEqual(Array.from(fill.indices), Array.from(banded.indices));
+});
+
+test("lyon's triangles wrong both ways are caught and libtess2 fills the deck instead", async () => {
+  // The smallest such deck found: 80 contours of 200 points, each turned 1e-4 from the last.
+  const x = await rawRender();
+  const deck = deckAt(80, 1e-4, 400);
+  const fill = rawFill(x, deck, false);
+  assert.equal(fill.status, 0);
+  assert.equal(fill.by, LIBTESS2);
+  checkCoverage(deck, false, fill, 60);
+});
+
+test("the check adds up thin wrong stretches, which pass one at a time", async () => {
+  // libtess2's even-odd triangles judged as the non-zero rule's fill of 41 contours turned 1e-4
+  // apart: wrong by some 140 px², all of it in stretches under a quarter of a pixel.
+  const x = await rawRender();
+  const deck = deckAt(41, 1e-4, 400);
+  const evenOdd = rawFill(x, deck, false, -2);
+  assert.equal(evenOdd.by, LIBTESS2);
+  const check = (nonZero: boolean) => {
+    x.reset();
+    const flat = deck.flat();
+    const coords = x.alloc(flat.length * 8);
+    const ends = x.alloc(deck.length * 4);
+    const positions = x.alloc(evenOdd.vertices.length * 8);
+    const indices = x.alloc(evenOdd.indices.length * 4);
+    new Float64Array(x.memory.buffer, coords, flat.length).set(flat);
+    let end = 0;
+    new Uint32Array(x.memory.buffer, ends, deck.length).set(
+      deck.map((points) => (end += points.length / 2)),
+    );
+    new Float64Array(x.memory.buffer, positions, evenOdd.vertices.length).set(evenOdd.vertices);
+    new Int32Array(x.memory.buffer, indices, evenOdd.indices.length).set(evenOdd.indices);
+    return x.checkFill(
+      coords,
+      flat.length / 2,
+      ends,
+      deck.length,
+      Number(nonZero),
+      positions,
+      evenOdd.vertices.length / 2,
+      indices,
+      evenOdd.indices.length,
+    );
+  };
+  assert.equal(check(false), 0);
+  assert.equal(check(true), 1);
+});
+
+test("where lyon's sweep along y fails the check, its sweep along x can fill the deck right", async () => {
+  // 95 contours each turned 1e-3 from the last: lyon along y fails the check, along x passes.
+  const x = await rawRender();
+  const deck = deckAt(95, 1e-3, 400);
+  const fill = rawFill(x, deck, false);
+  assert.equal(fill.status, 0);
+  assert.equal(fill.by, LYON_X);
+  checkCoverage(deck, false, fill, 60);
+});
+
+test("where lyon's sweep along y fails the check and along x fails outright, libtess2 fills it", async () => {
+  const x = await rawRender();
+  const deck = deckAt(12, 0.004, 300, 100);
+  const fill = rawFill(x, deck, false, 3);
+  assert.equal(fill.status, 0);
+  assert.equal(fill.by, LIBTESS2);
+  checkCoverage(deck, false, fill, 60);
 });

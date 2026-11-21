@@ -29,22 +29,44 @@ function straightLine() {
 
 const tessellate = new Tessellator().tessellate;
 
+/** A line cache's key: the linear transform a b c d, and the least width. */
+const key = (a: number, b: number, c: number, d: number, least: number) =>
+  Float64Array.of(a, b, c, d, least);
+
 test("a layer seen again through a transform finds its lines, another strokes them anew", () => {
   const geometries = new Geometries();
   const lines = new LineCache(geometries, tessellate);
   const layer = straightLine();
-  const first = lines.take(layer, 0, 1, 0, 0, 1, 1, null, true);
+  const first = lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true);
   assert.ok(first);
-  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), first);
+  assert.equal(lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true), first);
   // Zero's two signs are one transform, as compared.
-  assert.equal(lines.take(layer, 0, 1, -0, 0, 1, 1, null, true), first);
-  assert.notEqual(lines.take(layer, 0, 2, 0, 0, 2, 1, null, true), first);
+  assert.equal(lines.take(layer, 0, key(1, -0, 0, 1, 1), null, true), first);
+  assert.notEqual(lines.take(layer, 0, key(2, 0, 0, 2, 1), null, true), first);
   assert.deepEqual(lines.counts, { strokeContexts: 2, strokeReuses: 2 });
 
   // A new version of its drawing strokes them again, the old let go of.
-  const again = lines.take(layer, 1, 1, 0, 0, 1, 1, null, true);
+  const again = lines.take(layer, 1, key(1, 0, 0, 1, 1), null, true);
   assert.ok(again);
   assert.equal(geometries.alive(first), false);
+});
+
+test("a key array written over for each take is read, not kept, as the walk's one is", () => {
+  const geometries = new Geometries();
+  const lines = new LineCache(geometries, tessellate);
+  const layer = straightLine();
+  const scratch = new Float64Array(5);
+  const take = (a: number, d: number) => {
+    scratch.set([a, 0, 0, d, 1]);
+    return lines.take(layer, 0, scratch, null, true);
+  };
+  const once = take(1, 1);
+  const twice = take(2, 2);
+  assert.ok(once && twice);
+  assert.notEqual(once, twice);
+  assert.equal(take(1, 1), once);
+  assert.equal(take(2, 2), twice);
+  assert.deepEqual(lines.counts, { strokeContexts: 2, strokeReuses: 2 });
 });
 
 test("past its budget, lines drawn neither this frame nor the last go, the least lately drawn first", () => {
@@ -54,7 +76,7 @@ test("past its budget, lines drawn neither this frame nor the last go, the least
   const layer = straightLine();
   const handles = [];
   for (let frame = 0; frame < 4; frame++) {
-    handles.push(lines.take(layer, 0, frame + 1, 0, 0, frame + 1, 1, null, true));
+    handles.push(lines.take(layer, 0, key(frame + 1, 0, 0, frame + 1, 1), null, true));
     geometries.endFrame();
   }
 
@@ -62,7 +84,7 @@ test("past its budget, lines drawn neither this frame nor the last go, the least
     handles.map((h) => h !== null && geometries.alive(h)),
     [false, false, true, true],
   );
-  assert.equal(lines.take(layer, 0, 4, 0, 0, 4, 1, null, true), handles[3]);
+  assert.equal(lines.take(layer, 0, key(4, 0, 0, 4, 1), null, true), handles[3]);
   assert.deepEqual(lines.counts, { strokeContexts: 4, strokeReuses: 1 });
 });
 
@@ -70,14 +92,14 @@ test("past its budget, lines a span drew, used as geometries without a take, sta
   const geometries = new Geometries();
   const lines = new LineCache(geometries, tessellate, 1);
   const layer = straightLine();
-  const kept = lines.take(layer, 0, 1, 0, 0, 1, 1, null, true);
+  const kept = lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true);
   assert.ok(kept);
   geometries.endFrame();
   const handles = [];
   for (let frame = 1; frame < 4; frame++) {
     // A span taken from the frame before uses the geometry, as the view's copySpan does.
     geometries.use(kept.id);
-    handles.push(lines.take(layer, 0, frame + 1, 0, 0, frame + 1, 1, null, true));
+    handles.push(lines.take(layer, 0, key(frame + 1, 0, 0, frame + 1, 1), null, true));
     geometries.endFrame();
   }
 
@@ -94,7 +116,7 @@ test("lines that stroke to nothing are forgotten once undrawn for the idle frame
   const layer = straightLine();
   // A transform that flattens the plane strokes nothing, here a new one on every frame.
   for (let frame = 0; frame < 600; frame++) {
-    assert.equal(lines.take(layer, 0, 0, frame, 0, 0, 1, null, true), null);
+    assert.equal(lines.take(layer, 0, key(0, frame, 0, 0, 1), null, true), null);
     geometries.endFrame();
   }
 
@@ -107,12 +129,12 @@ test("after a busy stretch, the lines no longer drawn go within a sweep", () => 
   const layer = straightLine();
   const busy = [];
   for (let k = 0; k < 10; k++) {
-    busy.push(lines.take(layer, 0, k + 1, 0, 0, k + 1, 1, null, true));
+    busy.push(lines.take(layer, 0, key(k + 1, 0, 0, k + 1, 1), null, true));
   }
 
   geometries.endFrame();
   for (let frame = 1; frame < 70; frame++) {
-    lines.take(layer, 0, 1, 0, 0, 1, 1, null, true);
+    lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true);
     geometries.endFrame();
   }
 
@@ -142,8 +164,8 @@ test("a layer the line builder refuses has no lines, kept so", () => {
   const builder = failing(false);
   const lines = new LineCache(new Geometries(), { layer: tessellate.layer, lines: builder });
   const layer = straightLine();
-  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
-  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
+  assert.equal(lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true), null);
+  assert.equal(lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true), null);
   assert.equal(builder.asked, 1);
 });
 
@@ -151,11 +173,11 @@ test("a layer the line builder unwound on is asked for once more, and again on a
   const builder = failing(true);
   const lines = new LineCache(new Geometries(), { layer: tessellate.layer, lines: builder });
   const layer = straightLine();
-  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
+  assert.equal(lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true), null);
   // Once more, as after libtess2 trapped, when the builder's next instance fills by the bands.
   assert.equal(builder.asked, 2);
   // Not kept as none: what failed for a while is built when it can be.
-  assert.equal(lines.take(layer, 0, 1, 0, 0, 1, 1, null, true), null);
+  assert.equal(lines.take(layer, 0, key(1, 0, 0, 1, 1), null, true), null);
   assert.equal(builder.asked, 4);
 });
 
@@ -198,13 +220,18 @@ test("a painted layer's lines come in pieces in order: runs of a colour together
   assert.equal(lines.of(layer, 0).painted, true);
 
   // Turned a quarter and scaled twice: the texels are the shape's points all the same.
-  const pieces = lines.pieces(layer, 0, 0, 2, -2, 0, 1, null, true);
+  const pieces = lines.pieces(layer, 0, key(0, 2, -2, 0, 1), null, true);
   assert.ok(pieces);
   assert.deepEqual(
     pieces.map((p) => p.part.paint?.type ?? null),
     [null, "image", null],
   );
-  const { positions, texels } = pieces[1].part.geometry;
+  // Its paint alone kept with it: the geometry's arrays are the registry's, let go of once on the
+  // GPU.
+  assert.ok(pieces.every((p) => !("geometry" in p.part)));
+  const geometry = geometries.get(pieces[1].handle.id);
+  assert.ok(geometry);
+  const { positions, texels } = geometry;
   assert.ok(texels);
   for (let k = 0; k < positions.length; k += 2) {
     // (x, y) went to (-2 y, 2 x).
@@ -214,9 +241,9 @@ test("a painted layer's lines come in pieces in order: runs of a colour together
   }
 
   // Found again, and stroked anew once a piece is let go of.
-  assert.equal(lines.pieces(layer, 0, 0, 2, -2, 0, 1, null, true), pieces);
+  assert.equal(lines.pieces(layer, 0, key(0, 2, -2, 0, 1), null, true), pieces);
   geometries.remove(pieces[2].handle.id);
-  const again = lines.pieces(layer, 0, 0, 2, -2, 0, 1, null, true);
+  const again = lines.pieces(layer, 0, key(0, 2, -2, 0, 1), null, true);
   assert.notEqual(again, pieces);
   assert.equal(geometries.alive(pieces[0].handle), false);
   assert.ok(again?.every((p) => geometries.alive(p.handle)));

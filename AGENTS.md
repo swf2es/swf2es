@@ -155,7 +155,8 @@ node tests/desktop/relay-bench.ts [<checkout A> <checkout B>] [runs] [--burst N]
                               # sending many small messages: IPC messages, reads, buffers, CPU
 node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--gpu]   # time the
                               # player on a busy synthetic timeline in Chrome (--town: a busy room's
-                              # mix, see docs/renderer.md; --blends: shapes alone in blend modes);
+                              # mix, see docs/renderer.md; --blends: shapes alone in blend modes;
+                              # --bitmaps N [--drawn K] [--respawn]: many lossless bitmaps, few drawn);
                               # keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
 node tests/player/bench.ts --swf file.swf [--frames N] [--resolution R] [--gpu] [--cpu-profile F]
@@ -169,6 +170,10 @@ node tests/player/bench.ts [scene | --swf file.swf] --census [--gpu] [--json]   
                               # and unchanged, objects walked against changed (docs/renderer.md)
 node tests/player/census-check.ts   # the census's counts add up to GL's sub-draws on masks and
                               # blends, with and without multi-draw (part of pnpm test)
+node tests/player/bench.ts --deck N [--paint solid|gradient|bitmap] [--ratio-change] [--deck-turn T] [--gpu]
+                              # one even-odd fill of N densely crossing contours, which libtess2 is
+                              # slow at; --ratio-change tessellates it anew each frame (tess: its time);
+                              # --deck-turn 1e-4 brings them within hundredths of a pixel of each other
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh
                               # ratios, --allocs samples allocation, --counts counts native calls

@@ -82,23 +82,23 @@ const SHARE_APART = 1e-7;
 const PIXELS_APART = 1e-3;
 
 /**
- * Whether `layer`'s fills `from` up to `to`, tessellated into `positions`
- * and `indices`, cover no point twice, as the fills of a SWF's shape layer
- * that meet edge to edge do and those of a drawing need not: their contours
- * filled together by parity cover all their triangles do, where a point two
- * of them cover is left out. One filled non-zero is not looked into.
- * Triangles that cover more than the box around them overlap without
- * tessellating anything, as a burst of discs drawn over each other does.
+ * What fillsApart weighs of a part's triangles: the sum of their areas, and
+ * the box around them, its least x and y and greatest x and y.
  */
-export function fillsApart(
-  layer: ShapeLayer,
-  from: number,
-  to: number,
-  positions: Float32Array,
-  indices: Uint32Array,
-  tessellate: FillTessellator,
-): boolean {
-  const apart = trianglesArea(positions, indices, 0);
+export interface PartArea {
+  area: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
+/**
+ * The PartArea of a part tessellated into `positions` and `indices`: taken
+ * as it is made, as its arrays are let go of once on the GPU, before
+ * fillsApart is asked.
+ */
+export function partArea(positions: Float32Array, indices: Uint32Array): PartArea {
   let x0 = Number.POSITIVE_INFINITY;
   let y0 = Number.POSITIVE_INFINITY;
   let x1 = Number.NEGATIVE_INFINITY;
@@ -110,7 +110,28 @@ export function fillsApart(
     y1 = Math.max(y1, positions[k + 1]);
   }
 
-  if (apart - (x1 - x0) * (y1 - y0) > apart * SHARE_APART + PIXELS_APART) {
+  return { area: trianglesArea(positions, indices, 0), x0, y0, x1, y1 };
+}
+
+/**
+ * Whether `layer`'s fills `from` up to `to`, tessellated into a part of
+ * `part`'s area and box (partArea), cover no point twice, as the fills of a
+ * SWF's shape layer that meet edge to edge do and those of a drawing need
+ * not: their contours filled together by parity cover all their triangles
+ * do, where a point two of them cover is left out. One filled non-zero is
+ * not looked into. Triangles that cover more than the box around them
+ * overlap without tessellating anything, as a burst of discs drawn over
+ * each other does.
+ */
+export function fillsApart(
+  layer: ShapeLayer,
+  from: number,
+  to: number,
+  part: PartArea,
+  tessellate: FillTessellator,
+): boolean {
+  const apart = part.area;
+  if (apart - (part.x1 - part.x0) * (part.y1 - part.y0) > apart * SHARE_APART + PIXELS_APART) {
     return false;
   }
 

@@ -6,10 +6,10 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { GeometryTally } from "./census.ts";
 import { serve } from "./serve.ts";
 
 export interface PlayerJob {
-  lazyCompilation?: boolean;
   swf: Uint8Array;
   frames: number;
   capture: number[];
@@ -371,7 +371,6 @@ export function runPlayer(jobs: PlayerJob[], options: RunOptions = {}): Promise<
               viewport: job.viewport,
               logFetch: job.logFetch,
               socket: job.socket,
-              lazyCompilation: job.lazyCompilation,
               air: job.air,
               apiVersion: job.apiVersion,
               draw: job.draw,
@@ -452,10 +451,14 @@ export interface BenchResult {
   tick: number[];
   draw: number[];
   gl: number[];
+  /** The draw's part spent tessellating fills. */
+  tessellation: number[];
   idle: number[];
   first: number;
   renderer: string;
   error: string | null;
+  /** The CPU copies of geometries the view held after the frames (census.ts, GeometryTally). */
+  geometry?: GeometryTally;
   morphs?: {
     requests: number[];
     misses: number[];
@@ -676,6 +679,7 @@ export function benchPlayer(
           tick: [],
           draw: [],
           gl: [],
+          tessellation: [],
           idle: [],
           first: 0,
           renderer: "",
@@ -859,10 +863,9 @@ export interface SteppedPage {
   /**
    * Start a SWF at `url` on the page, letting go of any opened before;
    * what stopped it, if anything. `cached` gives its player the page's
-   * IndexedDB module cache, which every such player shares; `lazy`
-   * compiles its methods on first use (Scripting's lazyCompilation).
+   * IndexedDB module cache, which every such player shares.
    */
-  open(swf: Uint8Array, url: string, cached?: boolean, lazy?: boolean): Promise<string | null>;
+  open(swf: Uint8Array, url: string, cached?: boolean): Promise<string | null>;
   /** Play the opened SWF until it has traced `lines` lines or played `frames` frames. */
   step(
     lines: number,
@@ -899,8 +902,8 @@ export function withSteppedPage<T>(
       };
       const base64 = (swf: Uint8Array) => JSON.stringify(Buffer.from(swf).toString("base64"));
       return run({
-        open: (swf, url, cached = false, lazy = false) =>
-          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached}, ${lazy})`),
+        open: (swf, url, cached = false) =>
+          answer(`openSwf(${base64(swf)}, ${JSON.stringify(url)}, ${cached})`),
         step: (lines, frames) => answer(`stepSwf(${lines}, ${frames})`),
         trace: () => answer("traceSwf()"),
         close: async () => {

@@ -27,6 +27,8 @@ const crossCutting: Record<string, string> = {
     "one focus and one Selection across an AS3 host and its AVM1 movies: keyboard.ts, avm1.ts, Selection",
   "scripting/avm1-movie.test.ts":
     "AVM1 movies an AS3 Loader holds: loads.ts with sounds.ts, AVM1's Sound and Stage, and unloads",
+  "bitmap/library-bitmaps.test.ts":
+    "a SWF's lossless bitmaps inflated when wanted and let go of once uploaded: timeline.ts, bitmap.ts, paints.ts",
   "playerglobal/air-only.test.ts":
     "AIR's classes on the web and in AIR: playerglobal's marks, codegen's series, lookups by name",
 };

@@ -3,7 +3,7 @@
 // method emitter marks the output as it writes it, in order; the map then
 // finds each mark's line and column in the module by walking its bytes once.
 
-import { Output } from "../../output";
+import { codePoint, Output, wellFormed } from "../../output";
 import { ConstantPool } from "../abc/pool";
 
 const BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
@@ -33,6 +33,23 @@ export class SourceMap {
     this.offset.length = count;
     this.file.length = count;
     this.line.length = count;
+  }
+
+  /**
+   * Forget every mark but the last, made `by` bytes earlier, as the text
+   * before it is handed out (ModuleEmitter.step): marking compares the
+   * last mark's offset with the next's, and the two stay as far apart.
+   */
+  rebase(by: u32): void {
+    const n = this.offset.length;
+    if (n === 0) {
+      return;
+    }
+
+    this.offset[0] = this.offset[n - 1] - by;
+    this.file[0] = this.file[n - 1];
+    this.line[0] = this.line[n - 1];
+    this.truncate(1);
   }
 
   /** The marks from `from` on moved `by` bytes later, for text put in before them. */
@@ -135,12 +152,30 @@ export class SourceMap {
     out.text('"}');
   }
 
-  /** A pool string, UTF-8 from `ptr`, as a JSON string of a path: each `;` a `/`, never two together. */
+  /**
+   * A pool string, UTF-8 from `ptr`, as a JSON string of a path: each `;` a
+   * `/`, never two together, and past ASCII \u escapes, as in the module.
+   */
   private path(out: Output, ptr: usize, length: u32): void {
     out.byte(0x22);
     let slash = false;
-    for (let i: u32 = 0; i < length; i++) {
+    let i: u32 = 0;
+    while (i < length) {
       let b = load<u8>(ptr + i);
+      if (b >= 0x80) {
+        slash = false;
+        const n = wellFormed(ptr + i, length - i);
+        if (n === 0) {
+          i += out.lenient(ptr + i, length - i);
+        } else {
+          out.point(codePoint(ptr + i, n));
+          i += n;
+        }
+
+        continue;
+      }
+
+      i++;
       if (b === 0x3b || b === 0x5c) {
         b = 0x2f;
       }

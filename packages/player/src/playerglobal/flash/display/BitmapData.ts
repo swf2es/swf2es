@@ -3,7 +3,7 @@
 // ArgumentError 2015 for a size it refuses and for a store disposed.
 import { avm2 } from "@swf2es/runtime";
 import type { As3 } from "../../../as3/types.js";
-import { BitmapStore } from "../../../bitmap/bitmap.js";
+import { BitmapStore, symbolStore } from "../../../bitmap/bitmap.js";
 import { type Affine, drawBitmap } from "../../../bitmap/composite.js";
 import { drawDisplayObject, videoNeedsRenderer } from "../../../bitmap/draw.js";
 import {
@@ -36,7 +36,7 @@ import { shaderFilter } from "../../../bitmap/pixel-bender.js";
 import { type PixelRect, pixelRect, spanRect } from "../../../bitmap/pixel-rect.js";
 import { encodePng } from "../../../bitmap/png.js";
 import type { Filter } from "../../../display/filters.js";
-import { type BitmapCharacter, INVALID_PIXELS } from "../../../display/timeline.js";
+import type { BitmapCharacter } from "../../../display/timeline.js";
 import { VideoObject } from "../../../display/videoobject.js";
 import type { Scripting } from "../../../scripting.js";
 import { filterKindOf, recordOf } from "../filters/BitmapFilter.js";
@@ -271,7 +271,7 @@ export function bitmapDataNatives(s: Scripting): avm2.Natives {
       // A class SymbolClass binds to a bitmap has its pixels, whatever size it asks for.
       const symbol: BitmapCharacter | null = this.$symbol;
       if (symbol) {
-        this.$store = BitmapStore.of(symbol.pixels ?? INVALID_PIXELS);
+        this.$store = symbolStore(symbol);
         return;
       }
 

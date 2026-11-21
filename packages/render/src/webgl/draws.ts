@@ -225,7 +225,7 @@ export class Draws {
     this.gl = gl;
     this.state = state;
     this.atlas = atlas;
-    this.batches = new FillBatches(gl, state);
+    this.batches = new FillBatches(gl, state, atlas);
     this.gpu = gpu;
     this.pool = pool;
   }
@@ -855,8 +855,8 @@ export class Draws {
       last = j;
     }
 
+    // Places past the count are left from runs before: trimmed, the array would grow again.
     this.runCount = draws;
-    this.runPlaces.length = draws;
 
     return last;
   }

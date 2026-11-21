@@ -35,6 +35,7 @@ export {
   type GeometryHandle,
   GLYPH_FLOATS,
   IDLE_FRAMES,
+  RELEASE_FRAMES,
   TARGET_TEXEL,
 } from "./geometry.js";
 export { KEEP_IDLE_FRAMES, type KeepHandle, Keeps } from "./keeps.js";

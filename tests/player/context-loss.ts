@@ -4,10 +4,14 @@
 // transform, a gradient and a line; a bitmap that never changes, placed and
 // as a smoothed fill, which uploads again from its store; glows, and a
 // blurred sprite holding a glowing one, filtered layers drawn ahead of the
-// stage, whose kept outputs go with the context.
+// stage, whose kept outputs go with the context. The geometries' arrays are
+// let go of once uploaded, so those are made again by their owners after
+// the loss: shapes tessellated and stroked again, text's glyph quads in an
+// embedded font, advanced and normal, and in a device font.
 import assert from "node:assert/strict";
 import { deflateSync } from "node:zlib";
 import * as w from "../swf-writer.ts";
+import { stemFont } from "./cases/common.ts";
 import {
   playLosingContext,
   playLosingContextPlan,
@@ -106,6 +110,19 @@ const filled = w.shape({
   ],
 });
 
+// Text: Stem drawn with advanced anti-aliasing (a CSMTextSettings tag's flash type) and with
+// normal, and a device font's.
+const csm = (id: number) =>
+  w.tag(74, Uint8Array.from([id & 0xff, id >> 8, 0x40, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+const texts = [
+  stemFont(20),
+  w.editText(21, "123456 lmaW", 3000, 600, 0, { font: 20, fontHeight: 400, useOutlines: true }),
+  csm(21),
+  w.editText(22, "lm 6543 aW", 3000, 600, 0, { font: 20, fontHeight: 300, useOutlines: true }),
+  w.fontName(23, "_sans"),
+  w.editText(24, "Lost text", 3000, 600, 0, { font: 23, fontHeight: 300, color: 0x204080 }),
+];
+
 // A blurred sprite holding a glowing one: filtered layers in a filtered layer.
 const nested = w.sprite(8, 1, [
   w.place({ depth: 1, character: 2, glows: [{ color: 0x00ccff, blur: 4, strength: 2 }] }),
@@ -122,6 +139,7 @@ const tags: Uint8Array[] = [
   image,
   filled,
   nested,
+  ...texts,
 ];
 let depth = 1;
 for (let i = 0; i < 24; i++) {
@@ -154,6 +172,12 @@ tags.push(
   }),
   w.place({ depth: depth++, character: 7, matrix: { tx: 1700, ty: 3800 } }),
   w.place({ depth: depth++, character: 8, matrix: { tx: 4500, ty: 4300 }, blurs: [3] }),
+  w.place({ depth: depth++, character: 21, matrix: { tx: 200, ty: 200 } }),
+  w.place({ depth: depth++, character: 24, matrix: { tx: 200, ty: 5300 } }),
+  // The run that turns every third object in 3D leaves text alone: text in 3D draws a few pixels
+  // apart once the context comes back, its arrays let go of or not.
+  w.place({ depth: depth++, character: 2, matrix: { tx: 6000, ty: 200 } }),
+  w.place({ depth: depth++, character: 22, matrix: { tx: 3400, ty: 200 } }),
   w.showFrame(),
   w.end(),
 );

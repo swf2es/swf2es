@@ -7,6 +7,7 @@ import {
   type Bitmap,
   type ButtonRecord,
   type CsmTextSettings,
+  decodeLossless,
   type EditText,
   type Font,
   type Font4,
@@ -14,7 +15,6 @@ import {
   isAs3,
   isBitmapTag,
   type MorphShape,
-  type Place,
   readActions,
   readBinaryData,
   readBitmap,
@@ -55,17 +55,8 @@ import type { BitmapStore } from "../bitmap/bitmap.js";
 import { FontSet } from "../text/fonts.js";
 import type { DisplayObject, MovieClip } from "./display.js";
 import type { Rect } from "./geometry.js";
+import { ACTIONS, PLACE, type Places, REMOVE, TimelineStore } from "./places.js";
 import { boundsOf, type ShapeBounds, type ShapeLayer, shapeLayers } from "./shapes.js";
-
-/**
- * What a frame does, in tag order: places, removals and, in an AVM1
- * timeline, its DoAction tags by their bodies' offsets, which the clip
- * queues as it reaches them (avm1/avm1.ts).
- */
-export type FrameCommand =
-  | { type: "place"; place: Place }
-  | { type: "remove"; depth: number }
-  | { type: "actions"; tag: number };
 
 /** A frame's name, or a scene's, and its frame, 1 the first. */
 export interface FrameName {
@@ -74,8 +65,15 @@ export interface FrameName {
 }
 
 export interface Timeline {
-  /** Frame k's commands at index k - 1. */
-  frames: FrameCommand[][];
+  /**
+   * What its frames do, in tag order, in its SWF's store (places.ts):
+   * places, removals and, in an AVM1 timeline, its DoAction tags by their
+   * bodies' offsets, which the clip queues as it reaches them (avm1/avm1.ts).
+   */
+  store: TimelineStore;
+  /** Its first frame's index in the store. */
+  first: number;
+  frameCount: number;
   /**
    * The labels scripts read, in frame order: the scene data's where the
    * SWF has it (a root's DefineSceneAndFrameLabelData), even none, its
@@ -104,10 +102,10 @@ export interface Timeline {
    */
   played?: number;
   /**
-   * An AVM1 timeline's DoAction tags after its last ShowFrame, which Flash
-   * runs once, as the clip stays on its last frame.
+   * An AVM1 timeline's DoAction tags after its last ShowFrame, by their
+   * offsets, which Flash runs once, as the clip stays on its last frame.
    */
-  tail?: FrameCommand[];
+  tail?: number[];
   /** How many bytes its tags take, a sprite's in its DefineSprite, which AVM1's getBytesTotal gives; the root's are the SWF's. */
   length?: number;
 }
@@ -120,8 +118,8 @@ export interface Timeline {
  * removal, which a clip with an unload handler outlives for a frame.
  */
 export interface TimelineActions {
-  /** A display object about to be placed by `place`, before it is made: its clip actions. */
-  placing(display: DisplayObject, place: Place): void;
+  /** A display object about to be placed by record `place` of `places`, before it is made: its clip actions. */
+  placing(display: DisplayObject, places: Places, place: number): void;
   made(display: DisplayObject): void;
   entered(clip: MovieClip, frame: number): void;
   /** A goto's skipped frames: their exports and initializations, without their frame actions. */
@@ -216,6 +214,8 @@ export interface ButtonCharacter {
   sounds: ({ id: number; info: SoundInfo } | null)[] | null;
   /** DefineScalingGrid's 9-slice grid, in pixels; null without. */
   grid: Rect | null;
+  /** Its records as places, made as it is first shown (buttonobject.ts). */
+  places?: Places;
 }
 
 /** DefineFont through 3: its name and style, glyphs, and optional layout. */
@@ -244,7 +244,11 @@ export interface BitmapCharacter {
   type: "bitmap";
   id: number;
   definition: Bitmap;
-  /** Set when the SWF is read for the lossless formats, and once decoded for an image; null until then. */
+  /**
+   * A lossless bitmap's, inflated from its tag whenever asked for and held
+   * only while something else holds them (losslessPixels), so a new object
+   * each time though the same pixels; an image's once decoded, null until then.
+   */
   pixels: BitmapPixels | null;
   /** The store bitmap fills draw it from, one for every shape; made when one is first drawn. */
   store?: BitmapStore;
@@ -400,11 +404,16 @@ const SHARED_BITMAP_MOST = 1 << 20;
 /** The bitmap tag `t` defines, the one a SWF read before defined alike where there is one. */
 function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bitmap {
   // A short header is a bitmap Flash refuses: read as invalid, never shared with a long one.
+  // A lossless definition is read from a copy of its tag, which it inflates from whenever its
+  // pixels are wanted: a store of it kept after its SWF is unloaded holds that, not the SWF.
+  const lossless = t.code === tags.DefineBitsLossless || t.code === tags.DefineBitsLossless2;
+  const tag = bytes.subarray(t.offset, t.offset + t.length);
   if (t.code === tags.DefineBits || !t.long || t.length > SHARED_BITMAP_MOST) {
-    return readBitmap(bytes, t, tables);
+    return lossless
+      ? readBitmap(tag.slice(), { ...t, offset: 0 }, tables)
+      : readBitmap(bytes, t, tables);
   }
 
-  const tag = bytes.subarray(t.offset, t.offset + t.length);
   const hash = sampledHash(t.code, tag);
   for (const entry of sharedBitmaps.get(hash) ?? []) {
     const definition = entry.definition.deref();
@@ -413,14 +422,101 @@ function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bit
     }
   }
 
-  const definition = readBitmap(bytes, t, tables);
-  // An image's definition holds its bytes in the SWF's already; a lossless one only its pixels.
-  const own = definition.type === "image" ? tag : tag.slice();
+  // An image's definition holds its bytes in the SWF's.
+  const own = lossless ? tag.slice() : tag;
+  const definition = lossless
+    ? readBitmap(own, { ...t, offset: 0 }, tables)
+    : readBitmap(bytes, t, tables);
   const list = sharedBitmaps.get(hash) ?? [];
   list.push({ tag: own, definition: new WeakRef(definition) });
   sharedBitmaps.set(hash, list);
   bitmapsGone.register(definition, { hash, tag: own });
   return definition;
+}
+
+type LosslessBitmap = Extract<Bitmap, { type: "lossless" }>;
+
+/**
+ * Each lossless bitmap's pixels as last inflated, held weakly: a store made
+ * of them holds them till its texture is made of them (BitmapStore's
+ * `uploaded`), and they go once none does, to be inflated again from the
+ * tag if they are wanted again. What Flash cannot read is remembered.
+ */
+const inflated = new WeakMap<LosslessBitmap, WeakRef<Uint32Array>>();
+const unreadable = new WeakSet<LosslessBitmap>();
+/**
+ * The pixels of bitmaps a script or a new store wanted again after a
+ * collection took theirs, kept from then on: a symbol instantiated over and
+ * over would otherwise be inflated after each, up to some 10 ms for 1024 by
+ * 1024. A texture made again, after going idle or with a lost context, does
+ * not keep them: that would keep every bitmap shown after one lost context,
+ * and it uploads them anyway, a cost of the same order.
+ */
+const wantedAgain = new WeakMap<LosslessBitmap, Uint32Array>();
+
+/**
+ * A lossless bitmap's pixels, inflated if nothing holds them; kept from then
+ * on where they were inflated before and `keep` (wantedAgain).
+ */
+export function losslessPixels(definition: LosslessBitmap, keep = true): BitmapPixels {
+  const { width, height, transparent } = definition;
+  const held = wantedAgain.get(definition) ?? inflated.get(definition)?.deref();
+  if (held) {
+    return { width, height, transparent, pixels: held };
+  }
+
+  if (unreadable.has(definition)) {
+    return INVALID_PIXELS;
+  }
+
+  const decoded = decodeLossless(definition);
+  if (!decoded) {
+    // Data that inflated once inflates again: what failed is memory, which a store must not
+    // take for a bitmap Flash cannot read, 0 by 0 though it is not.
+    if (inflated.has(definition)) {
+      throw new RangeError("swf2es: a bitmap's pixels could not be inflated again");
+    }
+
+    unreadable.add(definition);
+    return INVALID_PIXELS;
+  }
+
+  if (keep && inflated.has(definition)) {
+    wantedAgain.set(definition, decoded.pixels);
+  }
+
+  inflated.set(definition, new WeakRef(decoded.pixels));
+  return decoded;
+}
+
+/** A lossless bitmap's pixels if something holds them still, without inflating them. */
+export function heldPixels(definition: LosslessBitmap): Uint32Array | null {
+  return wantedAgain.get(definition) ?? inflated.get(definition)?.deref() ?? null;
+}
+
+/** Whether a lossless bitmap's pixels are kept for being wanted again after they went. */
+export function keptPixels(definition: LosslessBitmap): boolean {
+  return wantedAgain.has(definition);
+}
+
+/** The character of a bitmap tag's definition. */
+function bitmapCharacter(definition: Bitmap): BitmapCharacter {
+  const { id } = definition;
+  switch (definition.type) {
+    case "lossless":
+      return {
+        type: "bitmap",
+        id,
+        definition,
+        get pixels() {
+          return losslessPixels(definition);
+        },
+      };
+    case "invalid":
+      return { type: "bitmap", id, definition, pixels: INVALID_PIXELS };
+    default:
+      return { type: "bitmap", id, definition, pixels: null };
+  }
 }
 
 /**
@@ -532,6 +628,81 @@ function shapeOf(
   return character;
 }
 
+/** What a SWF's timelines are read into: their store, and their names, each string once. */
+interface Into {
+  store: TimelineStore;
+  strings: Map<string, string>;
+}
+
+/**
+ * Morphs by their tag's bytes, as shapes are: a SWF loaded again blends at
+ * the ratios the first already blended, and its blends' layers are the
+ * first's, which the renderer keeps the triangles of, so a tween a crowd of
+ * loads plays is tessellated once at each ratio, not once a load. A morph
+ * filled with a bitmap keeps to its SWF, whose bitmap it is (and whose
+ * version alone tells whether that bitmap is smoothed). Held weakly: one no
+ * library holds goes, with its blends, and its entry after it.
+ */
+const sharedMorphs = new Map<number, { tag: Uint8Array; morph: WeakRef<MorphCharacter> }[]>();
+const morphsGone = new FinalizationRegistry<{ hash: number; tag: Uint8Array }>(({ hash, tag }) => {
+  const list = sharedMorphs.get(hash)?.filter((entry) => entry.tag !== tag) ?? [];
+  if (list.length > 0) {
+    sharedMorphs.set(hash, list);
+  } else {
+    sharedMorphs.delete(hash);
+  }
+});
+
+/** The morph a DefineMorphShape tag defines, as another SWF defined it alike if one did. */
+function morphOf(
+  bytes: Uint8Array,
+  t: Tag,
+  library: Map<number, Character>,
+  version: number,
+): MorphCharacter {
+  const tag = bytes.subarray(t.offset, t.offset + t.length);
+  const hash = tagHash(t.code, tag);
+  for (const entry of sharedMorphs.get(hash) ?? []) {
+    const shared = entry.morph.deref();
+    if (shared && sameBytes(entry.tag, tag)) {
+      return shared;
+    }
+  }
+
+  const morph = readMorphShape(bytes, t.code, t.offset, t.length, version);
+  // Neither end's records bring styles of their own (readMorphShape).
+  const filled =
+    morph.fills.some(({ start }) => start.type === "bitmap") ||
+    morph.lines.some(({ start }) => start.fill?.type === "bitmap");
+  if (filled) {
+    return {
+      type: "morph",
+      id: morph.id,
+      morph,
+      blends: new Map(),
+      bitmap: (id) => {
+        const c = library.get(id);
+        return c?.type === "bitmap" ? c : null;
+      },
+    };
+  }
+
+  // No reference to this SWF's library or bytes: another library can keep it after it is unloaded.
+  const character: MorphCharacter = {
+    type: "morph",
+    id: morph.id,
+    morph,
+    blends: new Map(),
+    bitmap: () => null,
+  };
+  const own = tag.slice();
+  const list = sharedMorphs.get(hash) ?? [];
+  list.push({ tag: own, morph: new WeakRef(character) });
+  sharedMorphs.set(hash, list);
+  morphsGone.register(character, { hash, tag: own });
+  return character;
+}
+
 function timelineOf(
   bytes: Uint8Array,
   list: Tag[],
@@ -541,11 +712,13 @@ function timelineOf(
   actions: ActionList | null,
   // The SWF's version, which its shapes' bitmap fills are read by.
   version: number,
+  into: Into,
 ): Timeline {
   const avm1 = actions !== null;
   const ended = list.at(-1)?.code === tags.End;
   const last = list.length - (ended ? 2 : 1);
-  const frames: FrameCommand[][] = [[]];
+  // Each frame's commands, kind and argument in turn, until they go into the store.
+  const frames: number[][] = [[]];
   const tagged: FrameName[] = [];
   const frameLabels = new Map<number, string>();
   const sounds = new Map<number, StartSound[]>();
@@ -568,15 +741,18 @@ function timelineOf(
       case tags.PlaceObject2:
       case tags.PlaceObject3:
       case tags.PlaceObject4:
-        frame.push({ type: "place", place: readPlace(bytes, t, actions ?? undefined) });
+        frame.push(
+          PLACE,
+          into.store.places.add(readPlace(bytes, t, actions ?? undefined), into.strings),
+        );
         break;
       case tags.RemoveObject:
       case tags.RemoveObject2:
-        frame.push({ type: "remove", depth: readRemove(bytes, t) });
+        frame.push(REMOVE, readRemove(bytes, t));
         break;
       case tags.DoAction:
         if (avm1 && t.length > 0) {
-          frame.push({ type: "actions", tag: t.offset });
+          frame.push(ACTIONS, t.offset);
         }
         break;
       case tags.FrameLabel: {
@@ -624,17 +800,8 @@ function timelineOf(
       }
       case tags.DefineMorphShape:
       case tags.DefineMorphShape2: {
-        const morph = readMorphShape(bytes, t.code, t.offset, t.length, version);
-        library.set(morph.id, {
-          type: "morph",
-          id: morph.id,
-          morph,
-          blends: new Map(),
-          bitmap: (id) => {
-            const c = library.get(id);
-            return c?.type === "bitmap" ? c : null;
-          },
-        });
+        const morph = morphOf(bytes, t, library, version);
+        library.set(morph.id, morph);
         break;
       }
       case tags.DefineSprite: {
@@ -643,7 +810,16 @@ function timelineOf(
           type: "sprite",
           id: sprite.id,
           timeline: {
-            ...timelineOf(bytes, sprite.tags, sprite.frameCount, library, jpeg, actions, version),
+            ...timelineOf(
+              bytes,
+              sprite.tags,
+              sprite.frameCount,
+              library,
+              jpeg,
+              actions,
+              version,
+              into,
+            ),
             length: t.length - 4,
           },
           grid: null,
@@ -773,17 +949,7 @@ function timelineOf(
       default:
         if (isBitmapTag(t.code)) {
           const definition = sharedBitmap(bytes, t, jpeg.tables);
-          library.set(definition.id, {
-            type: "bitmap",
-            id: definition.id,
-            definition,
-            pixels:
-              definition.type === "pixels"
-                ? definition
-                : definition.type === "invalid"
-                  ? INVALID_PIXELS
-                  : null,
-          });
+          library.set(definition.id, bitmapCharacter(definition));
         }
     }
   }
@@ -800,7 +966,7 @@ function timelineOf(
   const loops = ended;
   // The frames ShowFrame tags end: what follows the last opens one more.
   let played = list[last]?.code === tags.ShowFrame ? frames.length : frames.length - 1;
-  let tail: FrameCommand[] = [];
+  let tail: number[] = [];
   if (!avm1) {
     frames.length = Math.max(1, Math.min(frames.length, frameCount || 1));
     played = Math.max(1, Math.min(played, frames.length));
@@ -808,10 +974,19 @@ function timelineOf(
       frames.push([]);
     }
   } else if (list[last]?.code !== tags.ShowFrame) {
-    tail = frames.length > 1 ? frames[frames.length - 1].filter((c) => c.type === "actions") : [];
+    const after = frames.length > 1 ? frames[frames.length - 1] : [];
+    for (let c = 0; c < after.length; c += 2) {
+      if (after[c] === ACTIONS) {
+        tail.push(after[c + 1]);
+      }
+    }
+
     frames.length = Math.max(1, frames.length - 1);
     if (loops && frames.length > 1) {
-      frames[frames.length - 1].push(...tail);
+      for (const tag of tail) {
+        frames[frames.length - 1].push(ACTIONS, tag);
+      }
+
       tail = [];
     }
   }
@@ -826,7 +1001,9 @@ function timelineOf(
   const sceneList = data ? named(data.scenes) : [{ name: "", frame: 1 }];
   sceneList[0].frame = 1;
   return {
-    frames,
+    store: into.store,
+    first: into.store.addFrames(frames),
+    frameCount: frames.length,
     labels,
     gotoLabels: labels.length > 0 ? labels : tagged,
     frameLabels,
@@ -844,6 +1021,7 @@ export function readLibrary(swf: Swf): Library {
   const characters = new Map<number, Character>();
   // An AVM1 SWF's action blocks, which its places' clip actions are among.
   const actions = isAs3(swf) ? null : readActions(swf);
+  const into = { store: new TimelineStore(), strings: new Map<string, string>() };
   const root = timelineOf(
     swf.bytes,
     swf.tags,
@@ -852,7 +1030,9 @@ export function readLibrary(swf: Swf): Library {
     { tables: null },
     actions,
     swf.header.version,
+    into,
   );
+  into.store.seal();
   const fonts = new FontSet();
   for (const c of characters.values()) {
     if (c.type === "font") {

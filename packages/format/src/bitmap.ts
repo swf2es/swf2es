@@ -1,4 +1,5 @@
-// The SWF's bitmap tags. The lossless formats are read here to pixels; the
+// The SWF's bitmap tags. The lossless formats are read here to their
+// compressed pixels, which decodeLossless inflates when they are wanted; the
 // JPEG tags hold an image (a JPEG, PNG or GIF) for the player to decode,
 // with what Flash does to its bytes first already done.
 import { zlibUncompress } from "./compression.js";
@@ -12,15 +13,32 @@ import {
   DefineBitsLossless2,
 } from "./tags.js";
 
+/** A bitmap's pixels: premultiplied ARGB, row by row. */
+export interface BitmapPixelData {
+  width: number;
+  height: number;
+  transparent: boolean;
+  pixels: Uint32Array;
+}
+
 export type Bitmap =
-  /** Premultiplied ARGB, row by row. */
+  /**
+   * DefineBitsLossless or 2, as the tag holds it: decodeLossless makes its
+   * pixels, null for data Flash cannot read.
+   */
   | {
       id: number;
-      type: "pixels";
+      type: "lossless";
+      /** 3, 4 or 5: palette, 15-bit or 32-bit pixels. */
+      format: number;
       width: number;
       height: number;
+      /** Whether it is DefineBitsLossless2, whose pixels have alpha. */
       transparent: boolean;
-      pixels: Uint32Array;
+      /** A palette's colours, for format 3. */
+      colors: number;
+      /** The zlib stream of palette and pixels. */
+      data: Uint8Array;
     }
   | {
       id: number;
@@ -182,7 +200,7 @@ function concatAll(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** DefineBitsLossless and 2: a palette, 15-bit or 32-bit pixels, zlib'd. */
+/** DefineBitsLossless and 2: a palette, 15-bit or 32-bit pixels, zlib'd, left compressed. */
 function lossless(id: number, body: Uint8Array, alpha: boolean): Bitmap {
   if (body.length < 7) {
     return invalid(id);
@@ -196,7 +214,29 @@ function lossless(id: number, body: Uint8Array, alpha: boolean): Bitmap {
   }
 
   const colors = format === 3 ? body[7] + 1 : 0;
-  const data = zlibUncompress(body.subarray(format === 3 ? 8 : 7));
+  const data = body.subarray(format === 3 ? 8 : 7);
+  return { id, type: "lossless", format, width, height, transparent: alpha, colors, data };
+}
+
+/**
+ * A lossless bitmap's pixels, inflated from its tag: the same each time it
+ * is asked. Null for data Flash cannot read: a corrupt stream, or too
+ * little of it.
+ */
+export function decodeLossless(
+  bitmap: Extract<Bitmap, { type: "lossless" }>,
+): BitmapPixelData | null {
+  try {
+    return inflateLossless(bitmap);
+  } catch {
+    // Corrupt zlib data.
+    return null;
+  }
+}
+
+function inflateLossless(bitmap: Extract<Bitmap, { type: "lossless" }>): BitmapPixelData | null {
+  const { format, width, height, colors, transparent: alpha } = bitmap;
+  const data = zlibUncompress(bitmap.data);
   const pixels = new Uint32Array(width * height);
   if (format === 3) {
     const entry = alpha ? 4 : 3;
@@ -212,7 +252,7 @@ function lossless(id: number, body: Uint8Array, alpha: boolean): Bitmap {
     const stride = (width + 3) & ~3;
     const start = colors * entry;
     if (start + stride * (height - 1) + width > data.length) {
-      return invalid(id);
+      return null;
     }
 
     for (let y = 0; y < height; y++) {
@@ -224,7 +264,7 @@ function lossless(id: number, body: Uint8Array, alpha: boolean): Bitmap {
     // 15-bit RGB, rows padded to 4 bytes; a channel v is v * 8 + 7, 0 kept at 0.
     const stride = (width * 2 + 3) & ~3;
     if (stride * (height - 1) + width * 2 > data.length) {
-      return invalid(id);
+      return null;
     }
 
     const widen = (v: number) => (v === 0 ? 0 : v * 8 + 7);
@@ -242,7 +282,7 @@ function lossless(id: number, body: Uint8Array, alpha: boolean): Bitmap {
     }
   } else {
     if (width * height * 4 > data.length) {
-      return invalid(id);
+      return null;
     }
 
     for (let i = 0; i < width * height; i++) {
@@ -252,5 +292,5 @@ function lossless(id: number, body: Uint8Array, alpha: boolean): Bitmap {
     }
   }
 
-  return { id, type: "pixels", width, height, transparent: alpha, pixels };
+  return { width, height, transparent: alpha, pixels };
 }

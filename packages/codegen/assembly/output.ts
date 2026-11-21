@@ -1,5 +1,6 @@
-// The JavaScript being written, as UTF-8 bytes in one growable buffer that
-// is reused from method to method; both bytecodes' emitters write to it.
+// The JavaScript being written, as bytes, all ASCII (string() escapes the
+// rest), in one growable buffer that is reused from method to method; both
+// bytecodes' emitters write to it.
 @final
 export class Output {
   bytes: StaticArray<u8> = new StaticArray<u8>(1 << 16);
@@ -114,11 +115,12 @@ export class Output {
    * UTF-8 bytes from `ptr`, such as a string in the ABC, as a JavaScript
    * string literal of the string avmplus reads from them: quotes,
    * backslashes, line breaks and other control characters are escaped, and
-   * U+2028 and U+2029, which end a line in older engines. avmplus reads a
-   * pool string leniently (PoolObject::getString): a byte that starts no
-   * sequence is the character of its value, and a surrogate's three bytes
-   * are that code unit. What JavaScript would read otherwise, or not at
-   * all, is escaped as what avmplus reads; well-formed UTF-8 is copied.
+   * every character past ASCII as \u escapes, so that the module is ASCII
+   * and the engine keeps its source a byte a character: one character past
+   * U+00FF anywhere in it took V8 two bytes for each of its millions.
+   * avmplus reads a pool string leniently (PoolObject::getString): a byte
+   * that starts no sequence is the character of its value, and a
+   * surrogate's three bytes are that code unit.
    */
   string(ptr: usize, length: u32): void {
     this.reserve(length + 2);
@@ -151,18 +153,8 @@ export class Output {
       const n = wellFormed(ptr + i, length - i);
       if (n === 0) {
         i += this.lenient(ptr + i, length - i);
-      } else if (
-        b === 0xe2 &&
-        load<u8>(ptr + i + 1) === 0x80 &&
-        (load<u8>(ptr + i + 2) & 0xfe) === 0xa8
-      ) {
-        this.text(load<u8>(ptr + i + 2) === 0xa8 ? "\\u2028" : "\\u2029");
-        i += 3;
       } else {
-        for (let k: u32 = 0; k < n; k++) {
-          this.byte(load<u8>(ptr + i + k));
-        }
-
+        this.point(codePoint(ptr + i, n));
         i += n;
       }
     }
@@ -199,8 +191,7 @@ export class Output {
         if (left >= 4 && follows(ptr, 1) && follows(ptr, 2) && follows(ptr, 3)) {
           const ch = ((c & 0x07) << 18) | (bits(ptr, 1) << 12) | (bits(ptr, 2) << 6) | bits(ptr, 3);
           if (ch >= 0x10000) {
-            this.unit((((ch - 0x10000) >> 10) & 0x3ff) + 0xd800);
-            this.unit(((ch - 0x10000) & 0x3ff) + 0xdc00);
+            this.point(ch);
             return 4;
           }
         }
@@ -211,6 +202,16 @@ export class Output {
 
     this.unit(c);
     return 1;
+  }
+
+  /** A code point as \u escapes, two surrogates' past U+FFFF. */
+  point(c: u32): void {
+    if (c > 0xffff) {
+      this.unit((((c - 0x10000) >> 10) & 0x3ff) + 0xd800);
+      this.unit(((c - 0x10000) & 0x3ff) + 0xdc00);
+    } else {
+      this.unit(c);
+    }
   }
 
   /** A UTF-16 code unit as a \u escape. */
@@ -253,6 +254,19 @@ export function wellFormed(ptr: usize, left: u32): u32 {
   return 0;
 }
 
+/** The code point of the well-formed sequence of `n` bytes at `ptr` (wellFormed). */
+export function codePoint(ptr: usize, n: u32): u32 {
+  const c = <u32>load<u8>(ptr);
+  switch (n) {
+    case 2:
+      return ((c & 0x1f) << 6) | bits(ptr, 1);
+    case 3:
+      return ((c & 0x0f) << 12) | (bits(ptr, 1) << 6) | bits(ptr, 2);
+    default:
+      return ((c & 0x07) << 18) | (bits(ptr, 1) << 12) | (bits(ptr, 2) << 6) | bits(ptr, 3);
+  }
+}
+
 /** Whether byte k from `ptr` continues a sequence: 10xxxxxx. */
 function follows(ptr: usize, k: u32): bool {
   return (load<u8>(ptr + k) & 0xc0) === 0x80;
@@ -272,20 +286,20 @@ function bits(ptr: usize, k: u32): u32 {
 let handedLength: u32 = 0;
 
 /**
- * `out`'s bytes handed to the host where they are, by their address, 0 for
- * none; outputLength gives how many there are. A copy into a Uint8Array
+ * `out`'s bytes from offset `from` handed to the host where they are, by
+ * their address, 0 for none; outputLength gives how many there are. A copy into a Uint8Array
  * took as much again as the module, in the call that set codegen's
  * high-water mark. The host reads them before it calls in again: the next
  * call may move them, or a collection free them.
  */
-export function handOut(out: Output | null): usize {
+export function handOut(out: Output | null, from: u32 = 0): usize {
   if (out === null) {
     handedLength = 0;
     return 0;
   }
 
-  handedLength = out.length;
-  return changetype<usize>(out.bytes);
+  handedLength = out.length - from;
+  return changetype<usize>(out.bytes) + from;
 }
 
 /** How many bytes the last call that handed some out (handOut) gave. */

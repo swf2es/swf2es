@@ -2,7 +2,8 @@
 // so that the two builds run the same code: a domain the ABCs are added
 // to, and the module, the source map and the method entries the last one
 // compiles to, whole, as the JIT and ahead-of-time compilation take them,
-// or a method at a time, as lazy compilation will (see docs/architecture/compiler.md).
+// and, for the test build, a method at a time, each as it is in the module
+// (see docs/architecture/compiler.md).
 import { bodyDecoder, releaseDecoder, verifyMethods } from "./avm2/abc/code";
 import * as C from "./avm2/abc/constants";
 import { PADDING } from "./avm2/abc/reader";
@@ -34,11 +35,9 @@ import { handOut, Output } from "./output";
 
 export let domain = new Domain();
 
-// The last ABC's methods verified, kept for the JIT, which compiles them
-// one at a time; another ABC added, or a new domain, starts over.
+// The last ABC's methods verified, kept for domainEmitEach, which compiles
+// them one at a time; another ABC added, or a new domain, starts over.
 let verified: StaticArray<i32> | null = null;
-// Lazy modules freeze verification before later loads can change their scopes.
-const lazyVerified = new Map<u32, StaticArray<i32>>();
 
 /**
  * The emitter of the module domainModule wrote last, if it was kept: its
@@ -53,8 +52,8 @@ let written: ModuleEmitter | null = null;
  * series, Flash Player's or AIR's, is the domain's.
  */
 export function domainReset(apiVersion: i32): void {
+  abandon();
   domain = new Domain();
-  lazyVerified.clear();
   domain.apiVersion = <u8>apiVersion;
   verified = null;
   written = null;
@@ -67,6 +66,7 @@ export function domainReset(apiVersion: i32): void {
  * rejected with; -1 for an application domain never made or dropped.
  */
 export function domainAdd(bytes: Uint8Array, builtin: bool, appDomain: i32 = 0): i32 {
+  abandon();
   if (!isLive(appDomain)) {
     return -1;
   }
@@ -97,9 +97,9 @@ function isLive(appDomain: i32): bool {
  * by domainCompact.
  */
 export function domainDrop(appDomain: i32): void {
+  abandon();
   if (appDomain >= 0) {
     drop(domain, <u32>appDomain);
-    pruneLazyVerification();
   }
 }
 
@@ -111,9 +111,9 @@ export function domainDrop(appDomain: i32): void {
  * bytes to give again.
  */
 export function domainEvict(appDomain: i32): void {
+  abandon();
   if (appDomain >= 0) {
     evict(domain, <u32>appDomain);
-    pruneLazyVerification();
   }
 }
 
@@ -130,6 +130,7 @@ export function domainState(appDomain: i32): i32 {
  * they were rejected with, or -1 if the ABC is not of an evicted domain.
  */
 export function domainRestore(index: i32, bytes: Uint8Array): i32 {
+  abandon();
   if (index < 0) {
     return -1;
   }
@@ -148,6 +149,7 @@ export function domainRestore(index: i32, bytes: Uint8Array): i32 {
  * evicted, if they cannot be.
  */
 export function domainRevive(appDomain: i32): i32 {
+  abandon();
   if (appDomain < 0) {
     return -1;
   }
@@ -184,15 +186,15 @@ export function domainCompact(): bool {
  * or not, as the fuzzers ask; false, leaving it, if one did not link.
  */
 export function domainRebuild(): bool {
+  abandon();
   const fresh = rebuilt(domain);
   if (fresh === null) {
     return false;
   }
 
-  // A closure's scope is found by verifying its ABC, which the JIT does
+  // A closure's scope is found by verifying its ABC, which domainEmitEach does
   // once for its first method: the new domain has none found yet.
   domain = fresh;
-  lazyVerified.clear();
   verified = null;
   written = null;
   // The decoder may still be made for the old domain, which it would keep.
@@ -215,16 +217,13 @@ export function domainFound(
   abc: i32,
   asType: bool,
 ): void {
+  abandon();
   verified = null;
   domain.addFound(<u32>appDomain, <u8>nsKind, uri, name, <u32>abc, asType);
 }
 
 /** Each body of ABC `index`'s VerifyError, 0 if it verified, -1 if nothing runs it; verified once per ABC asked for. */
 function verifiedBodies(index: u32): StaticArray<i32> {
-  if (lazyVerified.has(index)) {
-    return lazyVerified.get(index);
-  }
-
   let results = verified;
   if (results === null || verifiedIndex !== index) {
     results = verifyMethods(domain, index);
@@ -236,15 +235,6 @@ function verifiedBodies(index: u32): StaticArray<i32> {
 }
 
 let verifiedIndex: u32 = 0;
-
-function pruneLazyVerification(): void {
-  const indices = lazyVerified.keys();
-  for (let i = 0; i < indices.length; i++) {
-    if (!domain.isLive(indices[i])) {
-      lazyVerified.delete(indices[i]);
-    }
-  }
-}
 
 /**
  * ABC `index` of the domain, or the last added for -1; -1 again where
@@ -281,7 +271,14 @@ export function domainModule(
  * domainModule's module as its UTF-8 bytes, which the host decodes: a
  * module of megabytes is decoded there many times faster than made a
  * string here and lifted a code unit at a time. Handed out where they are
- * (handOut), none where it is "".
+ * (handOut), none where it is "". Only its first part, if domainModuleDone
+ * is then false: domainModuleMoreBytes hands out each next, a call each,
+ * so that the host collects each part's garbage before the next, and
+ * codegen's memory, which never shrinks, need hold no more than a part
+ * (see ModuleEmitter.begin). Nothing else may be called in between but
+ * __collect: anything else that compiles or changes the domain abandons
+ * the module (see abandon). The wrapper asks for every part before it
+ * calls anything else, so it never abandons one.
  */
 export function domainModuleBytes(
   hashes: string = "",
@@ -289,22 +286,114 @@ export function domainModuleBytes(
   keep: bool = true,
   linkedOnly: bool = false,
 ): usize {
-  return handOut(writeModule(hashes, index, keep, linkedOnly));
+  const emitter = startModule(hashes, index, keep, linkedOnly);
+  if (emitter === null) {
+    return handOut(null);
+  }
+
+  stepModule(emitter, false);
+  return handOut(emitter.out);
 }
 
-/** A module's tables and lazy method factories, handed out as domainModuleBytes's; method entries are emitted separately. */
-export function domainLazyModuleBytes(hashes: string = "", index: i32 = -1): usize {
-  return handOut(writeModule(hashes, index, false, true, true));
+/** The next part of the module domainModuleBytes started, handed out as it hands out the first; none once it is done. */
+export function domainModuleMoreBytes(): usize {
+  const emitter = pending;
+  if (emitter === null) {
+    return handOut(null);
+  }
+
+  // A module kept keeps all its text, for its source map and entries.
+  const from = pendingKeep ? emitter.out.length : 0;
+  stepModule(emitter, !pendingKeep);
+  return handOut(emitter.out, from);
 }
 
-function writeModule(
+/** Whether the module domainModuleBytes started is done: no part of it is left to hand out, or it was abandoned. */
+export function domainModuleDone(): bool {
+  return pending === null;
+}
+
+/**
+ * The bytes of garbage, roughly, a part of a module makes (see
+ * ModuleEmitter.step). A collection between parts takes about half a
+ * millisecond with a large application's tables live, so smaller parts
+ * cost time: at 2 MiB as3pb and the LZ4 program compiled 3 to 4% slower
+ * than whole, and a new instance's memory after compiling the player's
+ * libraries alone was 8 MiB where whole it was 32; at 4 MiB it was 16,
+ * and at 1 MiB no less than at 2.
+ */
+const PART_BUDGET: u64 = 2 << 20;
+
+let partBudget = PART_BUDGET;
+
+/** For tests: each part's budget, as step counts it; PART_BUDGET for 0 or less. Not in codegen.wasm. */
+export function domainPartBudget(bytes: i32): void {
+  partBudget = bytes > 0 ? <u64>bytes : PART_BUDGET;
+}
+
+/** The module being written a part at a time, what it was started with, and the domain's rows before it. */
+let pending: ModuleEmitter | null = null;
+let pendingIndex: u32 = 0;
+let pendingKeep: bool = false;
+let pendingRows: u64 = 0;
+
+/**
+ * Leave the module being written a part at a time, as the domain changes
+ * under it; its rows are weighed to its ABC as a finished module's are.
+ * What it fixed in the domain stays: abandoned while verifying, the ABC
+ * stays counted as verified, and the log keeps its LOG_Verify and what the
+ * verification resolved so far (see Verifier). A later compile of the ABC
+ * then logs a verification of its own after those and resolves the rest
+ * after it, so the log, and with it domainContext and any cache key taken
+ * from it, is not the one a compile never abandoned leaves. Rolling back
+ * cannot fix that: what was resolved is in the domain's tables, and logged
+ * again after a new LOG_Verify it would be in another order.
+ */
+function abandon(): void {
+  if (pending !== null) {
+    weigh(domain, pendingIndex, pendingRows);
+    pending = null;
+  }
+}
+
+function startModule(
   hashes: string,
   index: i32,
   keep: bool,
   linkedOnly: bool,
-  lazy: bool = false,
-): Output | null {
+): ModuleEmitter | null {
   written = null;
+  abandon();
+  // No ABC, no module: the caller asked before adding one.
+  const at = abcIndex(index);
+  if (at < 0) {
+    return null;
+  }
+
+  const emitter = new ModuleEmitter(domain, <u32>at);
+  pending = emitter;
+  pendingIndex = <u32>at;
+  pendingKeep = keep;
+  pendingRows = domain.rows();
+  emitter.begin(hashes.length ? hashes.split("\n") : [], linkedOnly);
+  return emitter;
+}
+
+function stepModule(emitter: ModuleEmitter, fresh: bool): void {
+  if (!emitter.step(partBudget, fresh)) {
+    return;
+  }
+
+  pending = null;
+  weigh(domain, pendingIndex, pendingRows);
+  if (pendingKeep) {
+    written = emitter;
+  }
+}
+
+function writeModule(hashes: string, index: i32, keep: bool, linkedOnly: bool): Output | null {
+  written = null;
+  abandon();
   // No ABC, no module: the caller asked before adding one.
   const at = abcIndex(index);
   if (at < 0) {
@@ -313,13 +402,7 @@ function writeModule(
 
   const rows = domain.rows();
   const emitter = new ModuleEmitter(domain, <u32>at);
-  let results: StaticArray<i32> | null = null;
-  if (lazy) {
-    results = verifiedBodies(<u32>at);
-    lazyVerified.set(<u32>at, results);
-  }
-
-  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly, lazy, results);
+  emitter.module(hashes.length ? hashes.split("\n") : [], linkedOnly);
   weigh(domain, <u32>at, rows);
   if (keep) {
     written = emitter;
@@ -364,8 +447,8 @@ export function domainSourceMap(): string {
 }
 
 /**
- * Method bodies of ABC `which` (the last added for -1) compiled alone, as lazy JIT will
- * compile them: each its entry in F, as the module writes it. `bodies` are
+ * Method bodies of ABC `which` (the last added for -1) compiled alone, for
+ * the tests that hold each to its entry in F, as the module writes it. `bodies` are
  * their indices, comma-separated, in the order to compile them; `reuse`
  * compiles them all with one emitter, else each with a new one. The ABC is
  * verified once first, which a closure's scope needs. Written as
@@ -382,6 +465,7 @@ export function domainEmitEachBytes(bodies: string, reuse: bool, which: i32 = -1
 }
 
 function emitEach(bodies: string, reuse: bool, which: i32): Output {
+  abandon();
   const at = abcIndex(which);
   if (at < 0) {
     return new Output();
@@ -652,6 +736,7 @@ export function domainLogSince(mark: i32, index: i32 = -1): string {
  * out an error; the entries before it are done.
  */
 export function domainReplay(log: string, index: i32 = -1): bool {
+  abandon();
   const at = abcIndex(index);
   if (at < 0) {
     return false;

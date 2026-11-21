@@ -9,7 +9,7 @@ import type { ShapeLayer } from "../display/shapes.js";
 import { evenWidth, scalesEvenly } from "../display/stretch.js";
 import { same } from "../display/value-lists.js";
 import type { FillTessellator } from "./fills.js";
-import { type Part, strokePart } from "./shapes.js";
+import { type Part, type PartPaint, strokePart } from "./shapes.js";
 import { layerStrokes } from "./strokes.js";
 
 /**
@@ -32,10 +32,14 @@ const SWEEP_FRAMES = 60;
 const hashFloat = new Float64Array(1);
 const hashInts = new Int32Array(hashFloat.buffer);
 
-/** `h` mixed with the bits of `x`, zero's two signs alike and every NaN, as same() takes them. */
+/**
+ * `h` mixed with the bits of `x`, zero's two signs alike and every NaN, as
+ * same() takes them: in 31 bits, which V8 keeps as a small integer, where
+ * half of all 32-bit hashes were boxed on every frame.
+ */
 function mixHash(h: number, x: number): number {
   hashFloat[0] = x === 0 ? 0 : Number.isNaN(x) ? Number.NaN : x;
-  return Math.imul(Math.imul(h ^ hashInts[0], 0x9e3779b1) ^ hashInts[1], 0x85ebca6b);
+  return Math.imul(Math.imul(h ^ hashInts[0], 0x9e3779b1) ^ hashInts[1], 0x85ebca6b) >> 1;
 }
 
 /**
@@ -55,10 +59,11 @@ export interface LayerLines {
 
 /**
  * A part of a painted layer's lines, drawn in order: each run of lines of
- * a colour, and each line of a paint, textured (strokePart).
+ * a colour, and each line of a paint, textured (strokePart). Its paint, not
+ * its geometry, whose arrays the registry lets go of once on the GPU.
  */
 export interface LinePiece {
-  part: Part;
+  part: PartPaint;
   handle: GeometryHandle;
 }
 
@@ -152,60 +157,54 @@ export class LineCache {
   }
 
   /**
-   * `layer`'s lines through the linear transform (a b c d), at least `least`
-   * wide, drawn opaque or not: stroked again for another transform, screen
-   * or version of its drawing, the old ones kept while drawn as the
-   * geometries keep them. A layer of no painted line (LayerLines' painted);
-   * `layerLines`, where given, is what `of` gave for the layer and version.
+   * `layer`'s lines through the linear transform `key[0]` to `key[3]` (a b
+   * c d), at least `key[4]` (least) wide, drawn opaque or not: stroked
+   * again for another transform, screen or version of its drawing, the old
+   * ones kept while drawn as the geometries keep them. A layer of no painted
+   * line (LayerLines' painted); `layerLines`, where given, is what `of` gave
+   * for the layer and version.
    */
   take(
     layer: ShapeLayer,
     version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
+    key: Float64Array,
     by: readonly number[] | null,
     drawnOpaque: boolean,
     layerLines?: LayerLines,
   ): GeometryHandle | null {
-    return (
-      this.entry(layer, version, a, b, c, d, least, by, drawnOpaque, layerLines)?.handle ?? null
-    );
+    return this.entry(layer, version, key, by, drawnOpaque, layerLines)?.handle ?? null;
   }
 
   /** As take, a painted layer's lines in their pieces, in order; null for none. */
   pieces(
     layer: ShapeLayer,
     version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
+    key: Float64Array,
     by: readonly number[] | null,
     drawnOpaque: boolean,
     layerLines?: LayerLines,
   ): readonly LinePiece[] | null {
-    return (
-      this.entry(layer, version, a, b, c, d, least, by, drawnOpaque, layerLines)?.pieces ?? null
-    );
+    return this.entry(layer, version, key, by, drawnOpaque, layerLines)?.pieces ?? null;
   }
 
-  /** The entry take and pieces read, stroked if it was not, or its geometries were let go of. */
+  /**
+   * The entry take and pieces read, stroked if it was not, or its geometries
+   * were let go of. Its key's numbers come in a typed array: passed one by
+   * one, each would be boxed on every frame of every line.
+   */
   private entry(
     layer: ShapeLayer,
     version: number,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    least: number,
+    key: Float64Array,
     by: readonly number[] | null,
     drawnOpaque: boolean,
     layerLines?: LayerLines,
   ): LineEntry | null {
+    const a = key[0];
+    const b = key[1];
+    const c = key[2];
+    const d = key[3];
+    const least = key[4];
     const frame = this.geometries.frame;
     if (frame - this.swept >= SWEEP_FRAMES) {
       this.trim(frame);
@@ -261,15 +260,14 @@ export class LineCache {
     let pieces: LinePiece[] | null = null;
     let vertices = 0;
     if (lines.painted) {
-      pieces = this.paintedPieces(layer, a, b, c, d, least, by, opaque) ?? null;
+      const built = this.paintedPieces(layer, a, b, c, d, least, by, opaque);
       // Not built, as where no instance could be made: none kept, so that a later frame asks again.
-      if (!pieces) {
+      if (!built) {
         return null;
       }
 
-      for (const piece of pieces) {
-        vertices += piece.part.geometry.positions.length / 2;
-      }
+      pieces = built.pieces;
+      vertices = built.vertices;
     } else {
       const data = layerStrokes(layer, a, b, c, d, least, this.tessellator.lines, by, opaque);
       // As for the pieces.
@@ -325,8 +323,9 @@ export class LineCache {
 
   /**
    * A painted layer's lines as its pieces, in order: each run of lines of
-   * a colour built together, each painted line alone and textured. Undefined
-   * where the builder built none, which a later frame may try again.
+   * a colour built together, each painted line alone and textured, and the
+   * vertices they hold. Undefined where the builder built none, which a
+   * later frame may try again.
    */
   private paintedPieces(
     layer: ShapeLayer,
@@ -337,10 +336,11 @@ export class LineCache {
     least: number,
     by: readonly number[] | null,
     opaque: boolean,
-  ): LinePiece[] | undefined {
+  ): { pieces: LinePiece[]; vertices: number } | undefined {
     const strokes = layer.strokes;
     const builder = this.tessellator.lines;
     const pieces: LinePiece[] = [];
+    let vertices = 0;
     for (let from = 0; from < strokes.length; ) {
       const paint = strokes[from].paint;
       let to = from + 1;
@@ -363,13 +363,18 @@ export class LineCache {
           ? strokePart(data, a, b, c, d, paint)
           : { geometry: data, paint: null, region: null, mesh: null };
       if (part) {
-        pieces.push({ part, handle: this.geometries.add(part.geometry) });
+        const { paint: painted, region, mesh } = part;
+        pieces.push({
+          part: { paint: painted, region, mesh },
+          handle: this.geometries.add(part.geometry),
+        });
+        vertices += part.geometry.positions.length / 2;
       }
 
       from = to;
     }
 
-    return pieces;
+    return { pieces, vertices };
   }
 
   /** Whether `e` holds geometries. */

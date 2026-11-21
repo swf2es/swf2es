@@ -1,13 +1,7 @@
 // The display object every kind extends: its place in its parent, its
 // transform, 2D and 3D, its look, and the flags and counts by which the
 // renderer, the pointer's pick and the frame's walks learn of its changes.
-import {
-  type ColorTransform,
-  IDENTITY,
-  type Matrix,
-  type Place,
-  readFilters,
-} from "@swf2es/format";
+import { type ColorTransform, IDENTITY, type Matrix, readFilters } from "@swf2es/format";
 import type { avm1, avm2 } from "@swf2es/runtime";
 import type { ShaderUse } from "../bitmap/pixel-bender.js";
 import type { ButtonObject } from "./buttonobject.js";
@@ -17,6 +11,7 @@ import { type Filter, filterOfSwf } from "./filters.js";
 import { type Rect, shifted } from "./geometry.js";
 import { compose3D, decompose3D, identity3D } from "./matrix3d.js";
 import { placedInPerspective } from "./perspective.js";
+import type { Places } from "./places.js";
 import type { Character } from "./timeline.js";
 
 /** Nothing changed since the renderer last looked, or what did. */
@@ -890,73 +885,80 @@ export class DisplayObject {
     this.invalidate(TRANSFORM);
   }
 
-  /** Apply a place's transform, colour, name and visibility; to one a script transformed, its name and clip depth only. */
-  applyPlace(place: Place): void {
-    if (place.name !== null) {
-      this.name = place.name;
+  /** Apply record `i` of `places`: its transform, colour, name and visibility; to one a script transformed, its name and clip depth only. */
+  applyPlace(places: Places, i: number): void {
+    const name = places.name(i);
+    if (name !== null) {
+      this.name = name;
       this.timelineNamed = true;
     }
 
     if (this.transformed) {
-      if (place.clipDepth !== null) {
-        this.applyRare({ ...place, blendMode: null, filters: null });
+      if (places.clipDepth(i) >= 0) {
+        this.applyRare(places, i, true);
       }
 
       return;
     }
 
-    if (place.matrix) {
-      const m = place.matrix;
-      this.adoptMatrix({ a: m.a, b: m.b, c: m.c, d: m.d, tx: m.tx / 20, ty: m.ty / 20 });
+    const matrix = places.matrix(i);
+    if (matrix >= 0) {
+      this.adoptMatrix(places.pixelMatrix(matrix));
     }
 
-    if (place.colorTransform) {
-      this.colorTransform = place.colorTransform;
+    const color = places.colorTransform(i);
+    if (color >= 0) {
+      this.colorTransform = places.colorObject(color);
       this.invalidate(TRANSFORM);
     }
 
-    if (place.ratio !== null) {
-      this.ratio = place.ratio;
+    const ratio = places.ratio(i);
+    if (ratio >= 0) {
+      this.ratio = ratio;
     }
 
-    if (place.visible !== null) {
-      this.visible = place.visible;
+    const visible = places.visible(i);
+    if (visible !== null) {
+      this.visible = visible;
       this.invalidate(TRANSFORM);
-      if (!place.visible) {
+      if (!visible) {
         this.focusDrop?.(this);
       }
     }
 
     // Apart, and once tested: applyPlace runs for each move of each frame, and grown it is no longer inlined.
-    if (
-      place.clipDepth !== null ||
-      place.blendMode !== null ||
-      place.filters !== null ||
-      place.cacheAsBitmap !== null
-    ) {
-      this.applyRare(place);
+    if (places.setsRare(i)) {
+      this.applyRare(places, i, false);
     }
   }
 
-  /** What a place sets that few do: a clip depth, a blend mode, filters, cacheAsBitmap. */
-  private applyRare(place: Place): void {
-    if (place.cacheAsBitmap !== null) {
-      this.setCachedAsBitmap(place.cacheAsBitmap);
+  /**
+   * What a place sets that few do: a clip depth, a blend mode, filters,
+   * cacheAsBitmap; to one a script `transformed`, its clip depth and
+   * cacheAsBitmap alone.
+   */
+  private applyRare(places: Places, i: number, transformed: boolean): void {
+    const cacheAsBitmap = places.cacheAsBitmap(i);
+    if (cacheAsBitmap !== null) {
+      this.setCachedAsBitmap(cacheAsBitmap);
     }
 
-    if (place.filters !== null) {
-      this.filters = placedFilters(place.filters);
+    const filters = transformed ? null : places.filters(i);
+    if (filters !== null) {
+      this.filters = placedFilters(filters);
       this.invalidate(TRANSFORM);
     }
 
-    if (place.clipDepth !== null && place.clipDepth !== this.clipDepth) {
-      this.clipDepth = place.clipDepth;
+    const clipDepth = places.clipDepth(i);
+    if (clipDepth >= 0 && clipDepth !== this.clipDepth) {
+      this.clipDepth = clipDepth;
       this.invalidate(TRANSFORM);
       this.parent?.invalidate(CHILDREN);
     }
 
-    if (place.blendMode !== null) {
-      this.setBlendMode(BLEND_MODES[place.blendMode] ?? "normal");
+    const blendMode = transformed ? -1 : places.blendMode(i);
+    if (blendMode >= 0) {
+      this.setBlendMode(BLEND_MODES[blendMode] ?? "normal");
     }
   }
 

@@ -5,7 +5,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Tessellator } from "@swf2es/native/render";
 import type { Path, ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
-import { fillsApart, resolveFills } from "../../../../packages/player/dist/scene/fills.js";
+import {
+  fillsApart,
+  partArea,
+  resolveFills,
+} from "../../../../packages/player/dist/scene/fills.js";
 import { layerParts } from "../../../../packages/player/dist/scene/shapes.js";
 
 const layer: ShapeLayer = {
@@ -162,8 +166,7 @@ function apart(layer: ShapeLayer): boolean {
     layer,
     0,
     layer.fills.length,
-    geometry.positions,
-    geometry.indices,
+    partArea(geometry.positions, geometry.indices),
     tess.tessellate,
   );
 }

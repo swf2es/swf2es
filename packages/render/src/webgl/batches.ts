@@ -1,13 +1,7 @@
 import type { GlState } from "@swf2es/context3d/device";
-import type { Place } from "./atlas.js";
+import { type GeometryAtlas, type Place, VERTEX_BYTES } from "./atlas.js";
 import { COLOR_AT, DRAW_AT, MERGED_LINE, MERGED_UNIT, POSITION_AT, TEXEL_AT } from "./programs.js";
 
-/**
- * Atlas attributes followed by where the draw's packed row is in the rows'
- * texture: transforms and snapping stay in the shader, and a row that
- * changes changes no vertex.
- */
-const WORDS = 6;
 /** Bound the extra CPU and GPU storage, falling back to the atlas after it fills. */
 const VERTICES_MOST = 2 << 20;
 const INDICES_MOST = 6 << 20;
@@ -36,20 +30,35 @@ interface Segment {
  * Small geometries merged run by run in painter's order, each run's copy a
  * segment of one stream that any later run of the same geometries draws
  * again, wherever it comes in the frame: its rows are in a texture of its
- * own, written each frame, not in its vertices. Only the segments a frame adds are staged on the
- * CPU, after the stream's top, and uploaded there at once; what is below
- * stays on the GPU alone, and a buffer grown keeps it by a copy there.
- * Segments no run used in a frame are let go of, and their room once the
- * stream is twice what the last frame used, the stream then made anew.
+ * own, written each frame, not in its vertices. A segment's vertices are
+ * copied from the atlas on the GPU, as the atlas has them, and beside them
+ * in a buffer of their own each one's slot of its draw's row in the rows'
+ * texture: transforms and snapping stay in the shader, and a row that
+ * changes changes no vertex. Only the slots and indices of the segments a
+ * frame adds are staged on the CPU, after the stream's top, and uploaded
+ * there at once, the indices from the atlas' copies (Place.local), as the
+ * geometries' arrays are let go of once in the atlas; what is below stays
+ * on the GPU alone, and a buffer grown keeps it by a copy there. Segments
+ * no run used in a frame are let go of, and their room once the stream is
+ * twice what the last frame used, the stream then made anew.
  */
 export class FillBatches {
   vertexArray!: WebGLVertexArrayObject;
   private vertexBuffer!: WebGLBuffer;
+  private slotBuffer!: WebGLBuffer;
   private indexBuffer!: WebGLBuffer;
-  /** The staged words, the same bytes as floats, and indices: the stream from fromVertex and fromIndex. */
-  private words = new Uint32Array(0);
-  private floats = new Float32Array(0);
+  /** The staged slots and indices: the stream from fromVertex and fromIndex. */
+  private slots = new Int32Array(0);
   private indices = new Uint32Array(0);
+  /**
+   * The copies from the atlas a frame's segments stage, made as it uploads: each from its page's
+   * vertex buffer, from vertex `copyFrom`, to the stream's vertex `copyTo`, `copyCount` vertices.
+   */
+  private readonly copyPage: WebGLBuffer[] = [];
+  private readonly copyFrom: number[] = [];
+  private readonly copyTo: number[] = [];
+  private readonly copyCount: number[] = [];
+  private copies = 0;
   private vertexCapacity = 0;
   private indexCapacity = 0;
   private vertexTop = 0;
@@ -94,6 +103,7 @@ export class FillBatches {
   constructor(
     private readonly gl: WebGL2RenderingContext,
     private readonly state: GlState,
+    private readonly atlas: GeometryAtlas,
   ) {}
 
   /** The buffers and the rows' texture made, `textureMost` lines at most, as the context comes. */
@@ -105,18 +115,20 @@ export class FillBatches {
     this.slotsMost = MERGED_LINE * textureMost;
     this.vertexArray = gl.createVertexArray() as WebGLVertexArrayObject;
     this.vertexBuffer = gl.createBuffer() as WebGLBuffer;
+    this.slotBuffer = gl.createBuffer() as WebGLBuffer;
     this.indexBuffer = gl.createBuffer() as WebGLBuffer;
     this.state.bindVertexArray(this.vertexArray);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer);
     gl.enableVertexAttribArray(POSITION_AT);
-    gl.vertexAttribPointer(POSITION_AT, 2, gl.FLOAT, false, WORDS * 4, 0);
+    gl.vertexAttribPointer(POSITION_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 0);
     gl.enableVertexAttribArray(TEXEL_AT);
-    gl.vertexAttribPointer(TEXEL_AT, 2, gl.FLOAT, false, WORDS * 4, 8);
+    gl.vertexAttribPointer(TEXEL_AT, 2, gl.FLOAT, false, VERTEX_BYTES, 8);
     gl.enableVertexAttribArray(COLOR_AT);
-    gl.vertexAttribPointer(COLOR_AT, 4, gl.UNSIGNED_BYTE, true, WORDS * 4, 16);
+    gl.vertexAttribPointer(COLOR_AT, 4, gl.UNSIGNED_BYTE, true, VERTEX_BYTES, 16);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.slotBuffer);
     gl.enableVertexAttribArray(DRAW_AT);
-    gl.vertexAttribIPointer(DRAW_AT, 1, gl.INT, WORDS * 4, 20);
+    gl.vertexAttribIPointer(DRAW_AT, 1, gl.INT, 4, 0);
     // Disabled in the atlas VAO: a negative attribute selects the existing run-table path.
     gl.vertexAttribI4i(DRAW_AT, -1, 0, 0, 0);
     this.vertexCapacity = 0;
@@ -152,6 +164,7 @@ export class FillBatches {
     }
 
     this.full = false;
+    this.copies = 0;
     const seen = this.seenBefore;
     this.seenBefore = this.seen;
     this.seen = seen;
@@ -251,28 +264,20 @@ export class FillBatches {
       this.vertexTop + vertices - this.fromVertex,
       this.indexTop + indices - this.fromIndex,
     );
-    const floats = this.floats;
-    const words = this.words;
+    const slots = this.slots;
     const staged = this.indices;
+    const pages = this.atlas.pages;
     for (let i = 0; i < count; i++) {
       const place = places[i];
-      const batch = place.batch as Batch;
-      segment.batches[i] = batch;
-      const data = batch.data;
+      segment.batches[i] = place.batch as Batch;
       const base = this.vertexTop;
-      for (let j = 0; j < place.vertices; j++) {
-        const at = (base - this.fromVertex + j) * WORDS;
-        floats[at] = data.positions[j * 2];
-        floats[at + 1] = data.positions[j * 2 + 1];
-        floats[at + 2] = data.texels ? data.texels[j * 2] : 0;
-        floats[at + 3] = data.texels ? data.texels[j * 2 + 1] : 0;
-        words[at + 4] = data.colors[j];
-        words[at + 5] = segment.slot + i;
-      }
-
+      const page = pages[place.page];
+      this.stageCopy(page.vertexBuffer, place.vertexStart, base, place.vertices);
+      slots.fill(segment.slot + i, base - this.fromVertex, base - this.fromVertex + place.vertices);
+      const local = place.local;
       let at = this.indexTop - this.fromIndex;
-      for (let j = 0; j < place.indices; j++) {
-        staged[at++] = base + data.indices[j];
+      for (let j = 0; j < local.length; j++) {
+        staged[at++] = base + local[j];
       }
 
       this.vertexTop += place.vertices;
@@ -288,6 +293,30 @@ export class FillBatches {
     this.use(segment);
     this.writeRows(segment.slot, rows, count);
     return segment;
+  }
+
+  /**
+   * `count` vertices from vertex `from` of an atlas page's `buffer` to be copied to the stream's
+   * vertex `to` as the frame uploads: joined to the copy before where both run on from it, as
+   * geometries placed together lie together.
+   */
+  private stageCopy(buffer: WebGLBuffer, from: number, to: number, count: number): void {
+    const k = this.copies - 1;
+    if (
+      k >= 0 &&
+      this.copyPage[k] === buffer &&
+      this.copyFrom[k] + this.copyCount[k] === from &&
+      this.copyTo[k] + this.copyCount[k] === to
+    ) {
+      this.copyCount[k] += count;
+      return;
+    }
+
+    this.copyPage[k + 1] = buffer;
+    this.copyFrom[k + 1] = from;
+    this.copyTo[k + 1] = to;
+    this.copyCount[k + 1] = count;
+    this.copies = k + 2;
   }
 
   /** Whether the `count` rows from `slot` are `rows`. */
@@ -421,22 +450,27 @@ export class FillBatches {
     this.watch(staging);
   }
 
-  /** What add staged uploaded where it lies, the buffers grown first to fit the stream. */
+  /**
+   * What add staged uploaded where it lies, and the vertices it staged copied from the atlas, the
+   * buffers grown first to fit the stream.
+   */
   private uploadStaged(): void {
     const gl = this.gl;
     this.state.bindVertexArray(this.vertexArray);
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
     if (this.vertexTop > this.vertexCapacity) {
       this.vertexCapacity = Math.min(
         VERTICES_MOST,
         Math.max(this.vertexTop, this.vertexCapacity * 2),
       );
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
       this.resize(
         gl.ARRAY_BUFFER,
         this.vertexBuffer,
-        this.vertexCapacity * WORDS * 4,
-        this.fromVertex * WORDS * 4,
+        this.vertexCapacity * VERTEX_BYTES,
+        this.fromVertex * VERTEX_BYTES,
       );
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.slotBuffer);
+      this.resize(gl.ARRAY_BUFFER, this.slotBuffer, this.vertexCapacity * 4, this.fromVertex * 4);
     }
 
     if (this.indexTop > this.indexCapacity) {
@@ -449,13 +483,28 @@ export class FillBatches {
       );
     }
 
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.slotBuffer);
     gl.bufferSubData(
       gl.ARRAY_BUFFER,
-      this.fromVertex * WORDS * 4,
-      this.words,
+      this.fromVertex * 4,
+      this.slots,
       0,
-      (this.vertexTop - this.fromVertex) * WORDS,
+      this.vertexTop - this.fromVertex,
     );
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.vertexBuffer);
+    for (let k = 0; k < this.copies; k++) {
+      gl.bindBuffer(gl.COPY_READ_BUFFER, this.copyPage[k]);
+      gl.copyBufferSubData(
+        gl.COPY_READ_BUFFER,
+        gl.ARRAY_BUFFER,
+        this.copyFrom[k] * VERTEX_BYTES,
+        this.copyTo[k] * VERTEX_BYTES,
+        this.copyCount[k] * VERTEX_BYTES,
+      );
+    }
+
+    gl.bindBuffer(gl.COPY_READ_BUFFER, null);
+    this.copies = 0;
     gl.bufferSubData(
       gl.ELEMENT_ARRAY_BUFFER,
       this.fromIndex * 4,
@@ -474,21 +523,22 @@ export class FillBatches {
 
     this.gl.deleteVertexArray(this.vertexArray);
     this.gl.deleteBuffer(this.vertexBuffer);
+    this.gl.deleteBuffer(this.slotBuffer);
     this.gl.deleteBuffer(this.indexBuffer);
-    this.words = new Uint32Array(0);
-    this.floats = new Float32Array(0);
+    this.slots = new Int32Array(0);
     this.indices = new Uint32Array(0);
+    this.copyPage.length = 0;
+    this.copies = 0;
   }
 
   /** Staging for at least `vertices` and `indices` from its start, what is staged kept. */
   private stageRoom(vertices: number, indices: number): void {
-    if (vertices * WORDS > this.words.length) {
-      const grown = new Uint32Array(
-        Math.min(VERTICES_MOST * WORDS, Math.max(vertices * WORDS, this.words.length * 2)),
+    if (vertices > this.slots.length) {
+      const grown = new Int32Array(
+        Math.min(VERTICES_MOST, Math.max(vertices, this.slots.length * 2)),
       );
-      grown.set(this.words);
-      this.words = grown;
-      this.floats = new Float32Array(grown.buffer);
+      grown.set(this.slots);
+      this.slots = grown;
     }
 
     if (indices > this.indices.length) {
@@ -529,9 +579,11 @@ export class FillBatches {
       this.resize(
         gl.ARRAY_BUFFER,
         this.vertexBuffer,
-        vertices * WORDS * 4,
-        keepVertices * WORDS * 4,
+        vertices * VERTEX_BYTES,
+        keepVertices * VERTEX_BYTES,
       );
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.slotBuffer);
+      this.resize(gl.ARRAY_BUFFER, this.slotBuffer, vertices * 4, keepVertices * 4);
     }
 
     const indices = Math.max(INDICES_LEAST, this.mostIndices * 2);
@@ -541,10 +593,9 @@ export class FillBatches {
       this.resize(gl.ELEMENT_ARRAY_BUFFER, this.indexBuffer, indices * 4, keepIndices * 4);
     }
 
-    const staged = Math.max(VERTICES_LEAST, this.mostStaged * 2) * WORDS;
-    if (this.mostStaged * 4 * WORDS <= this.words.length && staged < this.words.length) {
-      this.words = new Uint32Array(staged);
-      this.floats = new Float32Array(this.words.buffer);
+    const staged = Math.max(VERTICES_LEAST, this.mostStaged * 2);
+    if (this.mostStaged * 4 <= this.slots.length && staged < this.slots.length) {
+      this.slots = new Int32Array(staged);
     }
 
     const stagedIndices = Math.max(INDICES_LEAST, this.mostStagedIndices * 2);

@@ -14,15 +14,53 @@ A shape layer's fills are geometries of the renderer's, made once for
 the layer and shared by every instance that draws it (`scene/parts.ts`,
 `partsOf`), a
 drawing's for each version of it, and let go of once undrawn for 300
-frames (`IDLE_FRAMES`). They are built from Flash's edges
+frames (`IDLE_FRAMES`). Their arrays on the CPU go sooner: three frames
+after the GPU backend has copied them into a context not known to be
+lost (`Geometries.release`, called only by `webgl/atlas.ts` after the
+copy), the registry lets go of them and the backend keeps only their
+indices; a loss found later, as Chrome flags one only a task after,
+rebuilds them. A view with no GPU backend, as in node, never lets go of
+them. A reader that wants arrays let go of, the restore after a lost
+context or a CPU rasterizer alike, asks for them through one entry point,
+`Geometries.rebuild`: the geometry is removed, and its owner adds it
+again with its arrays as it next draws it, as it does one that expired
+(`renderer.md`, "Resources"). It is called outside a frame's walk, or
+with the view's spans dropped after, as a scene list walked before names
+the removed id. A layer that took 20 ms or more to make
+(`SLOW_PARTS_MS`), as a morph's blend of a hundred crossing contours takes
+libtess2 seconds, keeps its triangles when its geometries go
+(`scene/kept-parts.ts`), so a tween longer than the idle frames adds its
+blends again on each loop rather than tessellating them again; one with a
+fill the tessellator refused keeps nothing, to be tried again. Every view
+shares one budget of 64 MB (`KEPT_PARTS_BYTES`), which counts only the
+triangles whose geometries have gone, as a geometry held draws them; its
+registry lets go of its own reference to them once they are on the GPU
+(`Geometries.release`), so the store's is a kept layer's only CPU copy. Triangles that do not fit as they expire push out those worth
+less, in milliseconds a byte, and are let go of otherwise, a tie too: let
+go of by age, a loop of more blends than fit would find none of them kept.
+They go otherwise with their layer, their view, or as their drawing
+changes or no longer draws them; fewer than 64 KB are never kept
+(`LEAST_KEPT_BYTES`), as a small layer is slow only when a collection
+pauses its making. A morph's
+blend past its 64 to 256 kept (`display/morph.ts`) is collected, its kept
+triangles with it. The geometries are built from Flash's edges
 (`display/shapes.ts`: each edge goes to its right fill forward and its
 left fill reversed, joined into contours; one with the same fill on both
 sides, a seam Flash Pro leaves inside a fill, goes to neither, so it
 cannot change the winding, `shared-fill-edges`) and tessellated by
 `@swf2es/native`'s libtess2, a layer in one call (`scene/fills.ts`,
 `resolveFills`; [packages/native](../../packages/native/README.md)), which
-flattens their curves too. What libtess2 refuses or fails at, the module
-fills itself by bands: each horizontal band between vertices and
+flattens their curves too. A fill of four contours or more and a thousand
+points or more whose contours stack eight deep or more (their boxes' areas
+over the fill's) and whose edges cross each other 1,000 times or more, as a
+morph of near-identical outlines each turned a little does, goes to lyon instead, its
+triangles checked along scanlines against the contours' winding before they are drawn
+(`native/src/render/validate.zig`), and libtess2 filling what fails the check
+(`native/src/render/crossings.zig`, `lyon.zig`), whose sweep takes a tenth
+of the time libtess2's quadratic one does there; every other fill stays
+with libtess2, which fills a few self-crossing even-odd shapes correctly
+that lyon covers twice in places. What libtess2 or lyon refuses or fails
+at, the module fills itself by bands: each horizontal band between vertices and
 crossings filled as disjoint trapezoids under its winding rule
 (`bands.zig`). The module is required: there is no JS path for fills,
 lines or BitmapData's convolution. No overlapping paint is needed, including for translucent fills,
@@ -128,7 +166,9 @@ bounds and hit-tests as one. The blend mixes where the ends' points lie,
 not their deltas, a straight edge paired with a curve as a curve, and
 keeps them to whole twips, so a closed path stays closed for `display/shapes.ts`
 to join. A morph starts by keeping its 64 latest blends, shared by its
-instances. If an evicted ratio returns, the limit doubles, up to 256;
+instances, and, as shapes are, by every SWF whose tag is alike but for
+one filled with a bitmap, so a SWF loaded again draws the blends the first
+made, tessellated once. If an evicted ratio returns, the limit doubles, up to 256;
 only the latest 256 evicted ratio numbers are remembered. This lets longer
 looping tweens reuse their paths and tessellations without increasing the
 limit for characters whose ratios never repeat. Clearing the blends resets the limit,
