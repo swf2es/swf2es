@@ -452,6 +452,8 @@ export interface BenchResult {
   tick: number[];
   draw: number[];
   gl: number[];
+  /** The draw's part spent tessellating fills. */
+  tessellation: number[];
   idle: number[];
   first: number;
   renderer: string;
@@ -676,6 +678,7 @@ export function benchPlayer(
           tick: [],
           draw: [],
           gl: [],
+          tessellation: [],
           idle: [],
           first: 0,
           renderer: "",

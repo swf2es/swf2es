@@ -16,6 +16,9 @@ import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
 // Grow only after a ratio returns following eviction: longer looping tweens
 // otherwise rebuild every frame, while fresh ratios gain nothing from more space.
+// A blend let go of past the limit is collected, and with it its layers'
+// triangles kept past their expiry (scene/kept-parts.ts), so a tween of more
+// ratios than MOST_BLENDS tessellates them again on each loop.
 const KEPT_BLENDS = 64;
 const MOST_BLENDS = 256;
 const histories = new WeakMap<MorphCharacter, { limit: number; evicted: Set<number> }>();

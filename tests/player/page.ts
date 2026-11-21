@@ -73,12 +73,34 @@ import { type RecordedEvent, Replay } from "./replay.ts";
  * first needs it.
  */
 let nativeFills: import("@swf2es/native/render").Tessellator | null = null;
+let timedFills: import("@swf2es/native/render").Tessellator["tessellate"] | null = null;
+
+/** The ms the renderer's layers of fills have taken to tessellate, which benchSwf reads each frame. */
+let tessellationMs = 0;
 
 async function fillTessellator(): Promise<
   import("@swf2es/native/render").Tessellator["tessellate"]
 > {
-  nativeFills ??= new (await import("@swf2es/native/render")).Tessellator();
-  return nativeFills.tessellate;
+  if (!timedFills) {
+    nativeFills ??= new (await import("@swf2es/native/render")).Tessellator();
+    const fills = nativeFills.tessellate;
+    timedFills = Object.assign(
+      (contours: readonly (readonly number[])[], nonZero: boolean) => fills(contours, nonZero),
+      {
+        layer: (...args: Parameters<typeof fills.layer>) => {
+          const begun = performance.now();
+          try {
+            return fills.layer(...args);
+          } finally {
+            tessellationMs += performance.now() - begun;
+          }
+        },
+        lines: fills.lines,
+      },
+    );
+  }
+
+  return timedFills;
 }
 
 // The player's own playerglobal, or Flash Player's under SWF2ES_PLAYERGLOBAL=adobe
@@ -747,6 +769,8 @@ interface Bench {
   draw: number[];
   /** GL's part: the wait for what was issued to finish. */
   gl: number[];
+  /** The draw's part spent tessellating fills (fillTessellator). */
+  tessellation: number[];
   /** Each render after a frame's with no tick between, whole: draw and GL. */
   idle: number[];
   first: number;
@@ -1355,6 +1379,7 @@ async function benchSwf(
   const tick: number[] = [];
   const draw: number[] = [];
   const finished: number[] = [];
+  const tessellation: number[] = [];
   const idle: number[] = [];
   let name = "";
   try {
@@ -1410,6 +1435,7 @@ async function benchSwf(
     }
     morphs?.reset();
     let stroked = lineCounts.strokeContexts;
+    tessellationMs = 0;
     for (let frame = 2; frame <= frames; frame++) {
       // The frames after the bench's warm-up, profiled for chrome.ts to read (--cpu-profile).
       if (cpuProfile && frame === PROFILED_FROM) {
@@ -1450,6 +1476,9 @@ async function benchSwf(
       tick.push(ticked - before);
       draw.push(drawn - ticked);
       finished.push(performance.now() - drawn);
+      // Part of the draw: the frame's fills tessellated.
+      tessellation.push(tessellationMs);
+      tessellationMs = 0;
       // Lines stroked anew this frame.
       const reading = counter.read();
       morphs?.frame();
@@ -1504,6 +1533,7 @@ async function benchSwf(
       tick,
       draw,
       gl: finished,
+      tessellation,
       idle,
       first,
       renderer: name,
@@ -1520,6 +1550,7 @@ async function benchSwf(
       tick,
       draw,
       gl: finished,
+      tessellation,
       idle,
       first: 0,
       renderer: name,

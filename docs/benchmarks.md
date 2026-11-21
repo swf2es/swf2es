@@ -87,6 +87,11 @@ draws on the machine's GPU (on a machine with two,
   of 12 parts moving and a third of them fading, as tweens laid out frame
   by frame are; with `--allocs`, what the timelines hold after a full
   collection;
+- `--deck N`: one shape of N wobbly contours stacked almost on top of
+  each other, filled even-odd, whose crossings make libtess2 slow with
+  the square of N (`--paint gradient` or `bitmap`; `--ratio-change`
+  makes it a morph at a new ratio each frame, tessellated anew); the
+  `tess` line, for every scene, is the draw's time in the tessellator;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).
