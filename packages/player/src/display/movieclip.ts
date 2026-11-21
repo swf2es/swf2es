@@ -1,10 +1,8 @@
 // A MovieClip: a container its timeline's frames place, move and remove
 // children in as its playhead plays or jumps.
-import { IDENTITY, type Place } from "@swf2es/format";
 import type { avm2 } from "@swf2es/runtime";
 import { BitmapObject } from "./bitmapobject.js";
 import { ButtonObject } from "./buttonobject.js";
-import { IDENTITY_COLOR } from "./color.js";
 import { Container } from "./container.js";
 import {
   advancing,
@@ -16,11 +14,18 @@ import {
   scriptWork,
 } from "./displayobject.js";
 import { construct, displayFor } from "./instantiate.js";
+import {
+  ACTIONS,
+  EMPTY_STORE,
+  giveScratch,
+  PLACE,
+  type Places,
+  REMOVE,
+  takeScratch,
+} from "./places.js";
 import { cached, ShapeObject, StaleCache } from "./shapeobject.js";
 import { StaticTextObject, TextObject } from "./textobjects.js";
 import type { Character, DisplayCharacter, Library, ShapeCharacter, Timeline } from "./timeline.js";
-
-const NO_FILTER_BYTES = new Uint8Array([0]);
 
 /**
  * Whether `display` is the kind of object `character` makes, so that a
@@ -106,12 +111,12 @@ function sameBounds(a: ShapeCharacter, b: ShapeCharacter): boolean {
   return x.xMin === y.xMin && x.xMax === y.xMax && x.yMin === y.yMin && x.yMax === y.yMax;
 }
 
-/** What the frames of a jump do at one depth, folded together. */
+/** What the frames of a jump do at one depth, folded together, as records of the goto's scratch places. */
 interface Jump {
-  /** Changes from before any place put a character: they apply to a child that is there, and to nothing else. */
-  before: Place | null;
-  /** The place that put a character, with what followed folded in; move false for one placed anew. */
-  place: Place | null;
+  /** Changes from before any place put a character: they apply to a child that is there, and to nothing else; -1 for none. */
+  before: number;
+  /** The place that put a character, with what followed folded in; move false for one placed anew; -1 for none. */
+  place: number;
   /** The frame of the place that makes the child, if one is made. */
   frame: number;
   /**
@@ -354,7 +359,7 @@ export class MovieClip extends Container {
   }
 
   get totalFrames(): number {
-    return this.timeline.frames.length;
+    return this.timeline.frameCount;
   }
 
   /** The frame's sounds, where it has any and something plays them. */
@@ -384,39 +389,46 @@ export class MovieClip extends Container {
     this.library.avm1?.entered(this, frame);
     // Told once the frame's sounds started, as its clips' first frames come after them.
     const placed: [Library, DisplayObject][] = [];
-    for (const command of this.timeline.frames[frame - 1] ?? []) {
-      if (command.type === "remove") {
-        this.removeAtDepth(command.depth);
+    const timeline = this.timeline;
+    const store = timeline.store;
+    const places = store.places;
+    for (let c = store.start(timeline, frame), end = store.end(timeline, frame); c < end; c++) {
+      const kind = store.kinds[c];
+      if (kind === REMOVE) {
+        this.removeAtDepth(store.args[c]);
         continue;
       }
 
-      if (command.type === "actions") {
-        this.library.avm1?.actions(this, command.tag);
+      if (kind === ACTIONS) {
+        this.library.avm1?.actions(this, store.args[c]);
         continue;
       }
 
-      const place = command.place;
-      const existing = this.depths.get(place.depth);
-      if (!place.move && existing) {
-        this.library.avm1?.occupied(place.depth);
+      const place = store.args[c];
+      const depth = places.depth(place);
+      const move = places.move(place);
+      const id = places.character(place);
+      const existing = this.depths.get(depth);
+      if (!move && existing) {
+        this.library.avm1?.occupied(depth);
         continue;
       }
 
-      if (place.move && existing && place.character === null) {
-        existing.applyPlace(place);
+      if (move && existing && id < 0) {
+        existing.applyPlace(places, place);
         continue;
       }
 
       // A new character, or one that replaces what is at the depth.
       // Data is no display object: Flash places nothing for it.
-      let character: Character | null | undefined =
-        place.character === null ? null : this.library.characters.get(place.character);
+      let character: Character | null | undefined = id < 0 ? null : this.library.characters.get(id);
       // Placed by class name alone, the class's symbol is placed, from the
       // SWF that bound it: a SWF of dialogs places buttons a library SWF
       // loaded into its domain binds (`placed-by-class`).
       let library = this.library;
-      if (place.character === null && place.className !== null && !place.move && !place.hasImage) {
-        const symbol = this.library.placedSymbol?.(place.className) ?? null;
+      const className = id < 0 && !move ? places.className(place) : null;
+      if (className !== null && !places.hasImage(place)) {
+        const symbol = this.library.placedSymbol?.(className) ?? null;
         if (symbol) {
           character = symbol.character;
           library = symbol.library;
@@ -430,27 +442,27 @@ export class MovieClip extends Container {
         character.type === "fontCff" ||
         character.type === "sound"
       ) {
-        existing?.applyPlace(place);
+        existing?.applyPlace(places, place);
         continue;
       }
 
       // With the move flag the child stays, another character or not; and
       // where there is none, the move places nothing (`rewind-first`).
-      if (place.move) {
+      if (move) {
         if (existing) {
           swap(existing, character);
-          existing.applyPlace(place);
+          existing.applyPlace(places, place);
         }
 
         continue;
       }
 
-      const child = displayFor(character, library, place.hasImage);
-      child.applyPlace(place);
-      child.metaData = place.metaData;
+      const child = displayFor(character, library, places.hasImage(place));
+      child.applyPlace(places, place);
+      child.metaData = places.metaData(place);
       child.placeFrame = frame;
-      this.library.avm1?.placing(child, place);
-      this.placeAtDepth(child, place.depth);
+      this.library.avm1?.placing(child, places, place);
+      this.placeAtDepth(child, depth);
       // Before its own first frame is placed, which the hook may do: those it places sit out too.
       if (later === "held" && this.fresh && child instanceof MovieClip) {
         child.fresh = true;
@@ -483,7 +495,11 @@ export class MovieClip extends Container {
    * past the frames' places of the children it kept. The child a place
    * made here is named; any other place's names are passed over.
    */
-  private named(anew: { jump: Jump; place: Place }[], made: Map<Jump, DisplayObject>): void {
+  private named(
+    anew: { jump: Jump; place: number }[],
+    places: Places,
+    made: Map<Jump, DisplayObject>,
+  ): void {
     const library = this.library;
     if (!library.placed) {
       return;
@@ -491,10 +507,11 @@ export class MovieClip extends Container {
 
     for (const { jump, place } of anew) {
       const child = made.get(jump);
+      const id = places.character(place);
       if (child !== undefined) {
         library.placed(child);
-      } else if (place.character !== null) {
-        library.passedOver?.(namesOf(library, place.character, place.name !== null));
+      } else if (id >= 0) {
+        library.passedOver?.(namesOf(library, id, places.name(place) !== null));
       }
     }
   }
@@ -535,27 +552,35 @@ export class MovieClip extends Container {
 
     const jumps = new Map<number, Jump>();
     // Each place anew the frames replay, in their order, for the names Flash gives them (named).
-    const anew: { jump: Jump; place: Place }[] = [];
+    const anew: { jump: Jump; place: number }[] = [];
+    const timeline = this.timeline;
+    const store = timeline.store;
+    const places = store.places;
+    // The jumps' places, folded together apart from the timeline's.
+    const scratch = takeScratch(places);
     for (let f = (rewind ? 0 : this.currentFrame) + 1; f <= target; f++) {
-      for (const command of this.timeline.frames[f - 1] ?? []) {
-        if (command.type === "actions") {
+      for (let c = store.start(timeline, f), end = store.end(timeline, f); c < end; c++) {
+        const kind = store.kinds[c];
+        if (kind === ACTIONS) {
           continue;
         }
 
-        if (command.type === "remove") {
-          jumps.delete(command.depth);
+        if (kind === REMOVE) {
+          jumps.delete(store.args[c]);
           // Going forward, a removal between the frames takes effect.
           if (!rewind) {
-            this.removeAtDepth(command.depth);
+            this.removeAtDepth(store.args[c]);
           }
 
           continue;
         }
 
-        const place = command.place;
-        const jump = jumps.get(place.depth) ?? {
-          before: null,
-          place: null,
+        const place = store.args[c];
+        const depth = places.depth(place);
+        const move = places.move(place);
+        const jump = jumps.get(depth) ?? {
+          before: -1,
+          place: -1,
           frame: f,
           placed: false,
         };
@@ -563,26 +588,34 @@ export class MovieClip extends Container {
         // A rewind replays from an empty display list, so what the frames do
         // at a depth nothing has placed yet is known: a change does nothing,
         // and a place in a child's stead places anew.
-        if (place.character === null) {
-          if (jump.place) {
-            jump.place = mergePlace(jump.place, place);
+        if (places.character(place) < 0) {
+          if (jump.place >= 0) {
+            scratch.merge(jump.place, places, place);
           } else if (!rewind) {
-            jump.before = jump.before ? mergePlace(jump.before, place) : place;
+            if (jump.before >= 0) {
+              scratch.merge(jump.before, places, place);
+            } else {
+              jump.before = scratch.copy(places, place);
+            }
           }
-        } else if (!place.move && (jump.place || (!rewind && this.depths.has(place.depth)))) {
+        } else if (!move && (jump.place >= 0 || (!rewind && this.depths.has(depth)))) {
           // At a depth taken by then, as frame by frame: let be.
           continue;
-        } else if (!place.move) {
+        } else if (!move) {
           // Anew: the child starts from nothing, and from here.
-          jump.before = null;
-          jump.place = rewind ? asFirstPlaced(place) : place;
+          jump.before = -1;
+          jump.place = scratch.copy(places, place);
+          if (rewind) {
+            scratch.firstPlaced(jump.place);
+          }
+
           jump.frame = f;
           jump.placed = true;
           anew.push({ jump, place });
-        } else if (jump.place) {
-          jump.place = mergePlace(jump.place, place);
-        } else if (!rewind && this.depths.has(place.depth)) {
-          jump.place = place;
+        } else if (jump.place >= 0) {
+          scratch.merge(jump.place, places, place);
+        } else if (!rewind && this.depths.has(depth)) {
+          jump.place = scratch.copy(places, place);
           jump.frame = f;
         } else {
           // Another character with the move flag where nothing is: as frame
@@ -590,7 +623,7 @@ export class MovieClip extends Container {
           continue;
         }
 
-        jumps.set(place.depth, jump);
+        jumps.set(depth, jump);
       }
     }
 
@@ -634,13 +667,13 @@ export class MovieClip extends Container {
         }
 
         const jump = jumps.get(depth);
-        const id = jump?.place?.character ?? null;
-        if (!jump || (jump.place && jump.place.ratio !== child.ratio)) {
+        const id = jump && jump.place >= 0 ? scratch.character(jump.place) : -1;
+        if (!jump || (jump.place >= 0 && scratch.ratio(jump.place) !== child.ratio)) {
           this.removeAtDepth(depth);
         } else if (
           child.placeFrame > target &&
           jump.placed &&
-          madeAs(child, id === null ? undefined : this.library.characters.get(id)) &&
+          madeAs(child, id < 0 ? undefined : this.library.characters.get(id)) &&
           // An AVM1 clip of another character goes, to be made anew (Ruffle's survives_rewind).
           !(this.library.avm1 && child instanceof MovieClip && child.character?.id !== id)
         ) {
@@ -662,27 +695,27 @@ export class MovieClip extends Container {
     const made = new Map<Jump, DisplayObject>();
     for (const [depth, jump] of jumps) {
       const existing = this.depths.get(depth);
-      if (existing && kept.has(depth) && jump.place) {
-        const id = jump.place.character;
-        const character = id === null ? undefined : this.library.characters.get(id);
+      const place = jump.place;
+      const id = place >= 0 ? scratch.character(place) : -1;
+      if (existing && kept.has(depth) && place >= 0) {
+        const character = id < 0 ? undefined : this.library.characters.get(id);
         if (character) {
           swap(existing, character);
         }
 
-        existing.applyPlace(jump.place);
+        existing.applyPlace(scratch, place);
         continue;
       }
 
-      if (existing && jump.before) {
-        existing.applyPlace(jump.before);
+      if (existing && jump.before >= 0) {
+        existing.applyPlace(scratch, jump.before);
       }
 
-      if (!jump.place) {
+      if (place < 0) {
         continue;
       }
 
-      const character =
-        jump.place.character === null ? null : this.library.characters.get(jump.place.character);
+      const character = id < 0 ? null : this.library.characters.get(id);
       if (
         !character ||
         character.type === "binary" ||
@@ -690,7 +723,7 @@ export class MovieClip extends Container {
         character.type === "fontCff" ||
         character.type === "sound"
       ) {
-        existing?.applyPlace(jump.place);
+        existing?.applyPlace(scratch, place);
         continue;
       }
 
@@ -709,22 +742,23 @@ export class MovieClip extends Container {
         existing.transformed &&
         existing.character !== character
       ) {
-        existing.applyPlace({ ...jump.place, name: null });
+        scratch.unnamed(place);
+        existing.applyPlace(scratch, place);
         continue;
       }
 
       const same = existing?.character === character;
-      if (existing && (rewind ? same : jump.place.move)) {
+      if (existing && (rewind ? same : scratch.move(place))) {
         swap(existing, character);
-        existing.applyPlace(jump.place);
+        existing.applyPlace(scratch, place);
         continue;
       }
 
-      const child = displayFor(character, this.library, jump.place.hasImage);
-      child.applyPlace(jump.place);
-      child.metaData = jump.place.metaData;
+      const child = displayFor(character, this.library, scratch.hasImage(place));
+      child.applyPlace(scratch, place);
+      child.metaData = scratch.metaData(place);
       child.placeFrame = jump.frame;
-      this.library.avm1?.placing(child, jump.place);
+      this.library.avm1?.placing(child, scratch, place);
       this.placeAtDepth(child, depth);
       made.set(jump, child);
       if (looping && this.library.constructLater) {
@@ -734,10 +768,11 @@ export class MovieClip extends Container {
       }
     }
 
+    giveScratch(scratch);
     // Named once all are placed, before any is made alive: their first frames' sounds then
     // come before the target frame's, as they did as each was made. A goto places this
     // timeline's own characters alone, no symbol by class name, so the library is its own.
-    this.named(anew, made);
+    this.named(anew, places, made);
     if (this.library.constructPlaced) {
       this.library.constructPlaced(placed);
     } else if (this.library.avm1 && target !== from) {
@@ -757,11 +792,18 @@ export class MovieClip extends Container {
 
       if (target === frame) {
         avm1.entered(this, target);
-        for (const command of this.timeline.frames[target - 1] ?? []) {
-          if (command.type === "actions") {
-            avm1.actions(this, command.tag);
-          } else if (command.type === "place") {
-            const child = this.depths.get(command.place.depth);
+        const timeline = this.timeline;
+        const store = timeline.store;
+        for (
+          let c = store.start(timeline, target), end = store.end(timeline, target);
+          c < end;
+          c++
+        ) {
+          const kind = store.kinds[c];
+          if (kind === ACTIONS) {
+            avm1.actions(this, store.args[c]);
+          } else if (kind === PLACE) {
+            const child = this.depths.get(store.places.depth(store.args[c]));
             const character = child && pending.get(child);
             if (child && character) {
               pending.delete(child);
@@ -852,7 +894,7 @@ export class MovieClip extends Container {
 
   /** The frame it plays to before it loops or stays (Timeline.played). */
   private get lastPlayed(): number {
-    const total = this.timeline.frames.length;
+    const total = this.timeline.frameCount;
     return Math.min(this.timeline.played ?? total, total);
   }
 
@@ -874,10 +916,8 @@ export class MovieClip extends Container {
     const last = this.lastPlayed;
     if (avm1 && this.playing && this.currentFrame >= last && !(this.timeline.loops && last > 1)) {
       this.playing = false;
-      for (const command of this.tailed ? [] : (this.timeline.tail ?? [])) {
-        if (command.type === "actions") {
-          avm1.actions(this, command.tag);
-        }
+      for (const tag of this.tailed ? [] : (this.timeline.tail ?? [])) {
+        avm1.actions(this, tag);
       }
 
       this.tailed = true;
@@ -914,12 +954,6 @@ export class MovieClip extends Container {
 }
 
 /**
- * A rewind's place with what it leaves unsaid said: the transform, colour,
- * ratio and the rest as a character first placed has them, as Ruffle's
- * goto fills them in. The name and visibility are not among them: they
- * stay as they were.
- */
-/**
  * How many names placing `id` takes: its own, where the place names it
  * none, and its first frame's, a clip's children's as they are placed.
  */
@@ -934,24 +968,23 @@ function namesOf(library: Library, id: number, named: boolean, depth = 0): numbe
     // What its first frame places, as runFrame places it: one place at a depth, until removed,
     // a symbol by class name the library's that bound it.
     const taken = new Set<number>();
-    for (const command of character.timeline.frames[0] ?? []) {
-      if (command.type === "remove") {
-        taken.delete(command.depth);
-      } else if (
-        command.type === "place" &&
-        !command.place.move &&
-        !taken.has(command.place.depth)
-      ) {
-        const place = command.place;
-        const symbol =
-          place.character === null && place.className !== null && !place.hasImage
-            ? (library.placedSymbol?.(place.className) ?? null)
-            : null;
+    const timeline = character.timeline;
+    const store = timeline.store;
+    const places = store.places;
+    for (let c = store.start(timeline, 1), end = store.end(timeline, 1); c < end; c++) {
+      const kind = store.kinds[c];
+      const place = store.args[c];
+      if (kind === REMOVE) {
+        taken.delete(place);
+      } else if (kind === PLACE && !places.move(place) && !taken.has(places.depth(place))) {
+        const id = places.character(place);
+        const className = id < 0 && !places.hasImage(place) ? places.className(place) : null;
+        const symbol = className !== null ? (library.placedSymbol?.(className) ?? null) : null;
         const from = symbol?.library ?? library;
-        const placed = symbol?.character.id ?? place.character;
-        if (placed !== null && isDisplayCharacter(from.characters.get(placed))) {
-          taken.add(place.depth);
-          count += namesOf(from, placed, place.name !== null, depth + 1);
+        const placed = symbol?.character.id ?? id;
+        if (placed >= 0 && isDisplayCharacter(from.characters.get(placed))) {
+          taken.add(places.depth(place));
+          count += namesOf(from, placed, places.name(place) !== null, depth + 1);
         }
       }
     }
@@ -971,45 +1004,14 @@ function isDisplayCharacter(character: Character | undefined): character is Disp
   );
 }
 
-function asFirstPlaced(place: Place): Place {
-  return {
-    ...place,
-    matrix: place.matrix ?? IDENTITY,
-    colorTransform: place.colorTransform ?? IDENTITY_COLOR,
-    ratio: place.ratio ?? 0,
-    blendMode: place.blendMode ?? 0,
-    // An empty FILTERLIST: a rewind clears what the frames after set.
-    filters: place.filters ?? NO_FILTER_BYTES,
-    cacheAsBitmap: place.cacheAsBitmap ?? false,
-  };
-}
-
-/** `next` over `previous`: what the later place sets, and the rest as it was. */
-function mergePlace(previous: Place, next: Place): Place {
-  return {
-    ...previous,
-    character: next.character ?? previous.character,
-    matrix: next.matrix ?? previous.matrix,
-    colorTransform: next.colorTransform ?? previous.colorTransform,
-    ratio: next.ratio ?? previous.ratio,
-    name: next.name ?? previous.name,
-    clipDepth: next.clipDepth ?? previous.clipDepth,
-    className: next.className ?? previous.className,
-    blendMode: next.blendMode ?? previous.blendMode,
-    cacheAsBitmap: next.cacheAsBitmap ?? previous.cacheAsBitmap,
-    visible: next.visible ?? previous.visible,
-    opaqueBackground: next.opaqueBackground ?? previous.opaqueBackground,
-    filters: next.filters ?? previous.filters,
-    actions: next.actions ?? previous.actions,
-  };
-}
-
 /** The timeline depth AVM1's depths count from: a script's depths are from it, the timeline's below it. */
 const AVM1_DEPTH_BIAS = 16384;
 
 /** A timeline of one empty frame: a clip a script makes. */
 export const EMPTY_TIMELINE: Timeline = {
-  frames: [[]],
+  store: EMPTY_STORE,
+  first: 0,
+  frameCount: 1,
   labels: [],
   gotoLabels: [],
   frameLabels: new Map(),

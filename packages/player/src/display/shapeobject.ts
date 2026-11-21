@@ -1,10 +1,11 @@
 // A Shape or MorphShape a timeline placed or a script made, and what
 // Flash's bitmap cache of one still shows after its shape is swapped.
-import type { ColorTransform, Place } from "@swf2es/format";
+import type { ColorTransform } from "@swf2es/format";
 import { IDENTITY_COLOR } from "./color.js";
 import { CONTENT, DisplayObject, pickWork, TRANSFORM } from "./displayobject.js";
 import type { Filter } from "./filters.js";
 import { morphAt } from "./morph.js";
+import type { Places } from "./places.js";
 import type { MorphCharacter, ShapeCharacter } from "./timeline.js";
 
 /**
@@ -71,9 +72,9 @@ export class ShapeObject extends DisplayObject {
    * or moving mouse. What scripts are told of its bounds is its start's
    * (ownBounds).
    */
-  override applyPlace(place: Place): void {
+  override applyPlace(places: Places, i: number): void {
     const ratio = this.ratio;
-    super.applyPlace(place);
+    super.applyPlace(places, i);
 
     const morph = this.morph;
     if (morph && this.unplaced) {

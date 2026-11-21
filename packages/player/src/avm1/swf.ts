@@ -5,14 +5,7 @@
 // The per-movie library and button conditions follow Ruffle's
 // (https://github.com/ruffle-rs/ruffle): MIT OR Apache-2.0, Copyright (c)
 // 2018-2022 Ruffle LLC and Ruffle contributors.
-import {
-  type ActionList,
-  ClipEvent,
-  type Place,
-  readExports,
-  type Swf,
-  tags,
-} from "@swf2es/format";
+import { type ActionList, ClipEvent, readExports, type Swf, tags } from "@swf2es/format";
 import type { avm1 } from "@swf2es/runtime";
 import type { MovieClip } from "../display/display.js";
 import type { Library } from "../display/timeline.js";
@@ -164,14 +157,14 @@ export function readRootFrames(swf: Swf, into: Avm1Swf): void {
 }
 
 /** A place's clip actions, with the events each runs for, as `swf`'s action list has them. */
-export function handlersOf(place: Place, swf: Avm1Swf): Handler[] | null {
+export function handlersOf(actions: number[] | null, swf: Avm1Swf): Handler[] | null {
   const list = swf.list;
-  if (place.actions === null || place.actions.length === 0 || list === null) {
+  if (actions === null || actions.length === 0 || list === null) {
     return null;
   }
 
   const handlers: Handler[] = [];
-  for (const index of place.actions) {
+  for (const index of actions) {
     const owner = list.blocks[index].owner;
     if (owner.type === "clip") {
       handlers.push({ events: owner.events, key: owner.key, block: index });
