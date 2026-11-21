@@ -1,6 +1,5 @@
 import type { GlState } from "@swf2es/context3d/device";
-import type { GeometryData } from "../geometry.js";
-import { type GeometryAtlas, type Place, STREAM_QUIET_FRAMES } from "./atlas.js";
+import type { Place } from "./atlas.js";
 import { COLOR_AT, DRAW_AT, MERGED_LINE, MERGED_UNIT, POSITION_AT, TEXEL_AT } from "./programs.js";
 
 /**
@@ -39,13 +38,7 @@ interface Segment {
  * again, wherever it comes in the frame: its rows are in a texture of its
  * own, written each frame, not in its vertices. Only the segments a frame adds are staged on the
  * CPU, after the stream's top, and uploaded there at once; what is below
- * stays on the GPU alone, and a buffer grown keeps it by a copy there. A
- * run is staged only from geometries whose arrays are held (Place.data):
- * one with a geometry whose arrays were let go of is drawn from the atlas,
- * and the geometry wanted again where runs keep coming to it, as moving
- * content's do (GeometryAtlas.wanted). Copying such geometries from the
- * atlas on the GPU instead, a copy for each, made a frame of moving
- * timelines thousands of copies and ANGLE's GL wait twice as long.
+ * stays on the GPU alone, and a buffer grown keeps it by a copy there.
  * Segments no run used in a frame are let go of, and their room once the
  * stream is twice what the last frame used, the stream then made anew.
  */
@@ -101,7 +94,6 @@ export class FillBatches {
   constructor(
     private readonly gl: WebGL2RenderingContext,
     private readonly state: GlState,
-    private readonly atlas: GeometryAtlas,
   ) {}
 
   /** The buffers and the rows' texture made, `textureMost` lines at most, as the context comes. */
@@ -202,25 +194,19 @@ export class FillBatches {
     // till the next, and the frame before keyed only what was live beside it, never the one
     // let go of: no key left from that one matches.
     let key = count;
-    let released = false;
-    let fresh = false;
-    const now = this.atlas.frame;
     for (let i = 0; i < count; i++) {
       const place = places[i];
-      if (!place.batch) {
+      if (!place.batch || place.batch.frame === frame) {
         return null;
       }
 
-      // Added this frame: not merged till the next, but its run marked as coming (below).
-      fresh ||= place.batch.frame === frame;
-      released ||= !place.data;
       vertices += place.vertices;
       indices += place.indices;
       key = Math.imul(key ^ place.indexStart, 0x9e3779b1) ^ place.indices;
     }
 
     const first = places[0].batch as Batch;
-    let list = fresh ? undefined : this.segments.get(first);
+    let list = this.segments.get(first);
     if (list) {
       for (const segment of list) {
         // A copy a run drew this frame already serves another only with the same rows.
@@ -234,31 +220,6 @@ export class FillBatches {
           return segment;
         }
       }
-    }
-
-    // A run no copy serves, which a moving scene makes anew frame after frame: its geometries'
-    // arrays kept while runs keep coming to them (GeometryAtlas' settle), and those already let
-    // go of wanted again where runs came to them twice within STREAM_QUIET_FRAMES; the run drawn
-    // from the atlas meanwhile.
-    for (let i = 0; i < count; i++) {
-      const place = places[i];
-      if (place.stagedIn === now) {
-        continue;
-      }
-
-      if (
-        !place.data &&
-        place.stagedIn >= place.releasedIn &&
-        now - place.stagedIn < STREAM_QUIET_FRAMES
-      ) {
-        this.atlas.wanted.push(place.id);
-      }
-
-      place.stagedIn = now;
-    }
-
-    if (fresh || released) {
-      return null;
     }
 
     // A key alike by chance merges a run a frame early, which costs a copy and draws the same.
@@ -295,8 +256,9 @@ export class FillBatches {
     const staged = this.indices;
     for (let i = 0; i < count; i++) {
       const place = places[i];
-      segment.batches[i] = place.batch as Batch;
-      const data = place.data as GeometryData;
+      const batch = place.batch as Batch;
+      segment.batches[i] = batch;
+      const data = batch.data;
       const base = this.vertexTop;
       for (let j = 0; j < place.vertices; j++) {
         const at = (base - this.fromVertex + j) * WORDS;

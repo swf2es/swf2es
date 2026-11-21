@@ -118,8 +118,6 @@ export class Geometries extends Registry {
   updated: number[] = [];
   /** Found flat since the backend last took them (markFlat). */
   flattened: number[] = [];
-  /** Whose arrays a reader wants again (want), rebuilt at the next safe point (rebuildWanted). */
-  private readonly wanted: number[] = [];
 
   /**
    * `data` added, for the backend to copy. Its arrays are let go of once
@@ -208,26 +206,6 @@ export class Geometries extends Registry {
   /** Whether geometry `id` is flat (GeometryData.flat, markFlat). */
   flat(id: number): boolean {
     return this.flats[id] === true;
-  }
-
-  /**
-   * Geometry `id`'s arrays wanted again by a reader that may not remove it
-   * where it is (rebuild), as the backend's, which reads a frame's draws:
-   * rebuilt by rebuildWanted, which the view calls before its next walk.
-   */
-  want(id: number): void {
-    if (this.released(id)) {
-      this.wanted.push(id);
-    }
-  }
-
-  /** The geometries wanted again since the last call (want) rebuilt: outside a frame's walk. */
-  rebuildWanted(): void {
-    for (let i = 0; i < this.wanted.length; i++) {
-      this.rebuild(this.wanted[i]);
-    }
-
-    this.wanted.length = 0;
   }
 
   /**

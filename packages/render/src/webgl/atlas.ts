@@ -91,16 +91,6 @@ export interface Page {
 const NO_INDICES = new Uint16Array(0);
 
 /**
- * Atlas frames a geometry small enough to merge (Place.batch) goes unstaged by a run's stream
- * before its arrays are let go of: a still scene's runs are staged once and drawn from their
- * copies after, a moving one's staged anew every frame or few.
- */
-export const STREAM_QUIET_FRAMES = 300;
-
-/** Atlas frames between looks over the places waiting to be quiet (GeometryAtlas.quieten). */
-export const QUIET_SWEEP_FRAMES = 30;
-
-/**
  * `source`, indices into `count` vertices, copied into an array of their own: in 16 bits where
  * they fit, and in a buffer of their own, not the geometry's, which is let go of.
  */
@@ -127,33 +117,15 @@ export interface Place {
   /** Whether it samples the stage's pixel (samplesStage), which the stage fill program draws. */
   stage: boolean;
   /**
-   * Small, unchanged geometries may be copied into a run's streaming buffer: their vertices from
-   * `data` where it is held, else from the page, on the GPU, and their indices from `local`. The
-   * frame it was placed on.
+   * Small, unchanged geometries may be copied into a run's streaming buffer from their arrays,
+   * which their registry keeps (settle): the frame it was placed on.
    */
-  batch: { frame: number } | null;
+  batch: { data: GeometryData; frame: number } | null;
   /**
-   * Its geometry's arrays while the registry holds them, for a run's stream to stage on the CPU:
-   * null once let go of (Geometries.release).
-   */
-  data: GeometryData | null;
-  /** Its geometry's id, which the stream names in `GeometryAtlas.wanted`. */
-  id: number;
-  /**
-   * The atlas' frame in which a run's stream last staged it (FillBatches.add), and the one in
-   * which its arrays were let go of. One staged within STREAM_QUIET_FRAMES is in runs made anew,
-   * as moving content's are, frame after frame: it keeps its arrays (settle), as copying each such
-   * geometry from the page on the GPU, thousands of small copies a frame, took ANGLE longer than
-   * staging them all on the CPU. One staged twice so after its arrays went is wanted again
-   * (GeometryAtlas.wanted): rebuilt, with its arrays, it then keeps them while it is staged.
-   */
-  stagedIn: number;
-  releasedIn: number;
-  /**
-   * Its indices counted from its first vertex: what moving it in the atlas (repack) or copying it
-   * into a run's stream needs, as WebGL copies an index buffer only as it is. Its geometry's own
-   * till it has stood RELEASE_FRAMES, then a copy of its own, in 16 bits where its vertices fit,
-   * as its arrays are let go of (Geometries.release).
+   * Its indices counted from its first vertex: what moving it in the atlas (repack) needs, as
+   * WebGL copies an index buffer only as it is. Its geometry's own till it has stood
+   * RELEASE_FRAMES, then, where its arrays are let go of (Geometries.release), a copy of its own,
+   * in 16 bits where its vertices fit.
    */
   local: Uint16Array | Uint32Array;
 }
@@ -161,9 +133,11 @@ export interface Place {
 /**
  * The geometry atlas: every geometry copied once into a page's vertex and
  * index buffers, and advanced text's glyph quads into an atlas of their
- * own, where the draws find them by their places. Only a geometry's indices
- * stay on the CPU once copied (Place.local), counted from its first vertex,
- * and its registry lets go of its arrays (Geometries.release). A geometry
+ * own, where the draws find them by their places. Once copied, a geometry
+ * too large to merge keeps only its indices on the CPU (Place.local),
+ * counted from its first vertex, and its registry lets go of its arrays
+ * (Geometries.release); one small enough to merge keeps its arrays, which a
+ * run's stream stages again whenever moving content makes its runs anew. A geometry
  * let go of leaves holes in its page, which later geometries are placed in
  * once the top is full; a page is packed again only when what is added
  * finds no room, its vertices moved on the GPU and its indices written
@@ -205,11 +179,6 @@ export class GeometryAtlas {
   };
   /** The texts' modes and tables, which the glyph program reads. */
   readonly tables: GlyphTables;
-  /**
-   * The geometries a run's stream staged twice within STREAM_QUIET_FRAMES after their arrays were
-   * let go of, for the registry to rebuild before the next walk (Geometries.want).
-   */
-  wanted: number[] = [];
   /** The ids counted among a frame's additions, each once (place). */
   private readonly counted = new Set<number>();
   /**
@@ -219,13 +188,6 @@ export class GeometryAtlas {
   private settling: Place[] = [];
   private settlingIds: number[] = [];
   private settlingFrames: number[] = [];
-  /**
-   * The settled places small enough to merge whose arrays wait for no run's stream to have
-   * staged them for STREAM_QUIET_FRAMES (quieten), with their ids: looked over every
-   * QUIET_SWEEP_FRAMES, not every frame.
-   */
-  private quiet: Place[] = [];
-  private quietIds: number[] = [];
 
   constructor(gl: WebGL2RenderingContext, state: GlState) {
     this.gl = gl;
@@ -268,8 +230,6 @@ export class GeometryAtlas {
     this.stagedIndexCount = 0;
     this.places = [];
     this.settling = [];
-    this.quiet = [];
-    this.quietIds = [];
     this.settlingIds = [];
     this.settlingFrames = [];
     this.tables.setUp();
@@ -312,7 +272,6 @@ export class GeometryAtlas {
     this.places[id] = null;
     // Its geometry's own, where it has not settled: a settling entry would keep them alive.
     place.local = NO_INDICES;
-    place.data = null;
     if (place.glyphs) {
       this.glyphs.live -= place.vertices;
       this.glyphs.holes += place.vertices;
@@ -334,11 +293,6 @@ export class GeometryAtlas {
    */
   place(geometries: Geometries): void {
     this.frame++;
-    for (let i = 0; i < this.wanted.length; i++) {
-      geometries.want(this.wanted[i]);
-    }
-
-    this.wanted.length = 0;
     for (const id of geometries.removed) {
       this.letGo(id);
     }
@@ -361,7 +315,6 @@ export class GeometryAtlas {
         this.copyVertices(this.pages[place.page], data, place.vertexStart);
         place.stage = samplesStage(data);
         place.batch = this.batch(data);
-        place.data = data;
       } else if (place && data) {
         this.letGo(id);
         geometries.added.push(id);
@@ -473,21 +426,18 @@ export class GeometryAtlas {
 
   /**
    * The geometries placed RELEASE_FRAMES of their registry's ago or more, by its frames, not the
-   * atlas', which a BitmapData's draws advance too, and placed still: their indices copied into
-   * arrays of their own and their arrays let go of (Geometries.release), only while the context
+   * atlas', which a BitmapData's draws advance too, placed still and too large to merge: their
+   * arrays let go of (Geometries.release) and their indices copied into arrays of their own. One
+   * small enough to merge keeps its arrays, which a run's stream stages again whenever moving
+   * content makes its runs anew: copying such geometries from the page on the GPU instead, a copy
+   * for each, made a frame of moving timelines thousands of copies and ANGLE's GL wait twice as
+   * long (0.1.35), and getting them back by tessellating them again stalls a frame wherever a
+   * still run changes or the stream is made anew. Only while the context
    * is not known to be lost: copies made into a lost one are no copies, and the arrays stay for
    * the restore. In Chrome's window before it flags a loss (webgl/losses.ts), arrays may go
    * after copies that never reached the GPU; the restore's Geometries.lost rebuilds them.
    */
   private settle(geometries: Geometries): void {
-    if (this.gl.isContextLost()) {
-      return;
-    }
-
-    if (this.frame % QUIET_SWEEP_FRAMES === 0) {
-      this.quieten(geometries);
-    }
-
     const places = this.settling;
     const ids = this.settlingIds;
     const frames = this.settlingFrames;
@@ -496,22 +446,18 @@ export class GeometryAtlas {
       k++;
     }
 
-    if (k === 0) {
+    if (k === 0 || this.gl.isContextLost()) {
       return;
     }
 
     for (let i = 0; i < k; i++) {
       const place = places[i];
-      if (this.places[ids[i]] !== place || !geometries.get(ids[i])) {
-        continue;
-      }
-
-      // Staged by a run's stream lately: waits among the quiet till none has for a while.
-      if (place.batch && this.frame - place.stagedIn < STREAM_QUIET_FRAMES) {
-        this.quiet.push(place);
-        this.quietIds.push(ids[i]);
-      } else {
-        this.release(geometries, place, ids[i]);
+      // Small enough to merge (Place.batch): its arrays kept for a run's stream to stage.
+      if (this.places[ids[i]] === place && !place.batch && geometries.get(ids[i])) {
+        geometries.release(ids[i]);
+        if (geometries.released(ids[i])) {
+          place.local = localIndices(place.local, place.vertices);
+        }
       }
     }
 
@@ -522,42 +468,6 @@ export class GeometryAtlas {
     places.length -= k;
     ids.length -= k;
     frames.length -= k;
-  }
-
-  /**
-   * The places waiting among the quiet (settle) looked over: those no run's stream has staged
-   * for STREAM_QUIET_FRAMES let go of, those let go of otherwise forgotten, the rest kept in
-   * place.
-   */
-  private quieten(geometries: Geometries): void {
-    const places = this.quiet;
-    const ids = this.quietIds;
-    let kept = 0;
-    for (let i = 0; i < places.length; i++) {
-      const place = places[i];
-      if (this.places[ids[i]] !== place || !geometries.get(ids[i])) {
-        continue;
-      }
-
-      if (this.frame - place.stagedIn < STREAM_QUIET_FRAMES) {
-        places[kept] = place;
-        ids[kept] = ids[i];
-        kept++;
-      } else {
-        this.release(geometries, place, ids[i]);
-      }
-    }
-
-    places.length = kept;
-    ids.length = kept;
-  }
-
-  /** `place`'s indices copied into an array of their own, and geometry `id`'s arrays let go of. */
-  private release(geometries: Geometries, place: Place, id: number): void {
-    place.local = localIndices(place.local, place.vertices);
-    place.data = null;
-    place.releasedIn = this.frame;
-    geometries.release(id);
   }
 
   /**
@@ -775,11 +685,6 @@ export class GeometryAtlas {
       stage: samplesStage(data),
       batch: this.batch(data),
       local: source,
-      data,
-      id,
-      // As if staged as it is placed: a moving scene's runs come to it within STREAM_QUIET_FRAMES.
-      stagedIn: this.frame,
-      releasedIn: Number.POSITIVE_INFINITY,
     };
     page.live += count;
   }
@@ -893,7 +798,7 @@ export class GeometryAtlas {
 
   private batch(data: GeometryData): Place["batch"] {
     return data.positions.length <= 512 && data.indices.length <= 1024 && !data.depths
-      ? { frame: this.frame }
+      ? { data, frame: this.frame }
       : null;
   }
 
@@ -932,10 +837,6 @@ export class GeometryAtlas {
       stage: false,
       batch: null,
       local: source,
-      data: null,
-      id,
-      stagedIn: Number.NEGATIVE_INFINITY,
-      releasedIn: Number.POSITIVE_INFINITY,
     };
     g.top += count;
     g.indexTop += indices.length;

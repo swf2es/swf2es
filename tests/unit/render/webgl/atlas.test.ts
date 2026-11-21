@@ -8,12 +8,7 @@ import {
   RELEASE_FRAMES,
   TARGET_TEXEL,
 } from "../../../../packages/render/dist/geometry.js";
-import {
-  GeometryAtlas,
-  type Place,
-  QUIET_SWEEP_FRAMES,
-  STREAM_QUIET_FRAMES,
-} from "../../../../packages/render/dist/webgl/atlas.js";
+import { GeometryAtlas, type Place } from "../../../../packages/render/dist/webgl/atlas.js";
 import { FillBatches } from "../../../../packages/render/dist/webgl/batches.js";
 import {
   blendFillFragment,
@@ -144,9 +139,8 @@ function shape(seed: number, count: number): GeometryData {
 
 /** Frames placed till what was added has stood long enough for its arrays to be let go of. */
 function settle(atlas: GeometryAtlas, geometries: Geometries): void {
-  // Placed on the first, let go of RELEASE_FRAMES of the registry's on; one small enough to merge
-  // once no run's stream has staged it for STREAM_QUIET_FRAMES of the atlas', at the next look.
-  for (let i = 0; i <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + QUIET_SWEEP_FRAMES; i++) {
+  // Placed on the first, let go of RELEASE_FRAMES of the registry's on, where too large to merge.
+  for (let i = 0; i <= RELEASE_FRAMES; i++) {
     atlas.place(geometries);
     drawn(geometries);
   }
@@ -319,7 +313,7 @@ test("a context lost takes the shapes whose arrays were let go of, and copies th
   const handles = new Map<number, ReturnType<Geometries["add"]>>();
   for (let i = 0; i < 20; i++) {
     // Every fourth kept, as a 3D object's quad is, whose owner changes it in place.
-    const id = add(geometries, shape(i + 1, 100 + i), i % 4 === 0);
+    const id = add(geometries, shape(i + 1, 300 + i), i % 4 === 0);
     handles.set(id, { id, generation: geometries.generation(id) });
     seeds.set(id, i + 1);
   }
@@ -677,21 +671,29 @@ function run(s: ReturnType<typeof stream>, ids: number[]) {
   return { segment, places, ids: ids2 };
 }
 
-test("a run's stream stages its geometries from their arrays, which runs made anew keep held", () => {
+test("a run's stream stages its geometries from their arrays, which merged geometries keep", () => {
   const s = stream();
   const ids: number[] = [];
   for (let i = 0; i < 40; i++) {
-    ids.push(add(s.geometries, shape(i + 1, 3 + (i % 7) * 20)));
+    const data = shape(i + 1, 3 + (i % 7) * 20);
+    // Some textured, whose texels the stream stages too.
+    if (i % 3 === 0) {
+      data.texels = Float32Array.from(data.positions, (v, k) => v * 2 + k);
+    }
+
+    ids.push(add(s.geometries, data));
   }
 
-  // Moving: a run no copy serves on every frame, as runs are made anew, past the quiet frames.
-  for (let frame = 0; frame <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + 5; frame++) {
+  // A moving scene's runs, made anew each frame, long past the frames a geometry too large to
+  // merge would have kept its arrays.
+  for (let frame = 0; frame <= RELEASE_FRAMES + 10; frame++) {
     s.atlas.place(s.geometries);
     drawn(s.geometries);
     const ordered = frame % 2 ? ids : [...ids].reverse();
     const { segment, places, ids: order } = run(s, ordered);
     if (frame === 0) {
       // Placed this frame: drawn from the atlas till the next.
+      assert.equal(segment, null);
       continue;
     }
 
@@ -702,8 +704,13 @@ test("a run's stream stages its geometries from their arrays, which runs made an
     for (let k = 0; k < order.length; k++) {
       const data = made.get(s.geometries)?.get(order[k]) as GeometryData;
       for (let j = 0; j < places[k].vertices; j++) {
-        assert.equal(floats[(base + j) * 6 + 1], data.positions[j * 2 + 1]);
-        assert.equal(words[(base + j) * 6 + 4], data.colors[j]);
+        const at = (base + j) * 6;
+        assert.equal(floats[at], data.positions[j * 2]);
+        assert.equal(floats[at + 1], data.positions[j * 2 + 1]);
+        assert.equal(floats[at + 2], data.texels ? data.texels[j * 2] : 0);
+        assert.equal(floats[at + 3], data.texels ? data.texels[j * 2 + 1] : 0);
+        assert.equal(words[at + 4], data.colors[j]);
+        assert.equal(words[at + 5] - words[5], k, "each draw's slot, in order");
       }
 
       for (let j = 0; j < places[k].indices; j++) {
@@ -719,49 +726,43 @@ test("a run's stream stages its geometries from their arrays, which runs made an
   }
 
   for (const id of ids) {
-    assert.ok(!s.geometries.released(id), `geometry ${id} kept for the runs made anew`);
+    assert.ok(!s.geometries.released(id), `geometry ${id} small enough to merge keeps its arrays`);
   }
 
   assert.equal(s.counts.copies, 0);
 });
 
-test("a still run's geometries are let go of once quiet, and wanted again where runs come back to them", () => {
-  const s = stream();
-  const ids: number[] = [];
-  for (let i = 0; i < 40; i++) {
-    ids.push(add(s.geometries, shape(i + 1, 3 + (i % 7) * 20)));
+test("a geometry too large to merge is let go of at RELEASE_FRAMES, one small enough kept", () => {
+  const { gl } = fakeGl();
+  const atlas = new GeometryAtlas(gl, new GlState(gl));
+  atlas.setUp();
+  const geometries = new Geometries();
+  // 256 vertices and 1,024 indices at most merge (Place.batch).
+  const small = add(geometries, shape(1, 256));
+  const large = add(geometries, shape(2, 257));
+  for (let frame = 0; frame < RELEASE_FRAMES; frame++) {
+    atlas.place(geometries);
+    drawn(geometries);
+    assert.ok(!geometries.released(small) && !geometries.released(large), `frame ${frame}`);
   }
 
-  s.atlas.place(s.geometries);
-  drawn(s.geometries);
-  // Still: staged once, then drawn from its copy, which stages nothing.
-  for (let frame = 0; frame <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + QUIET_SWEEP_FRAMES; frame++) {
-    s.atlas.place(s.geometries);
-    drawn(s.geometries);
-    const { segment } = run(s, ids);
-    assert.ok(segment);
-  }
-
-  for (const id of ids) {
-    assert.ok(s.geometries.released(id), `geometry ${id} let go of once quiet`);
-  }
-
-  // The scene moves: a run no copy serves. Drawn from the atlas, the geometries wanted again
-  // as runs come to them a second time, and rebuilt before the next walk.
-  const reversed = [...ids].reverse();
-  s.atlas.place(s.geometries);
-  assert.equal(run(s, reversed).segment, null);
-  s.atlas.place(s.geometries);
-  assert.equal(run(s, ids).segment, null);
-  s.atlas.place(s.geometries);
-  const version = s.geometries.removalVersion;
-  s.geometries.rebuildWanted();
-  assert.ok(s.geometries.removalVersion > version);
-  for (const id of ids) {
-    assert.ok(!s.geometries.holds(id), `geometry ${id} rebuilt`);
-  }
-
-  assert.equal(s.counts.copies, 0);
+  atlas.place(geometries);
+  assert.ok(geometries.released(large));
+  assert.ok(atlas.places[large]?.local instanceof Uint16Array);
+  assert.ok(!geometries.released(small));
+  assert.equal(atlas.places[small]?.batch?.data, made.get(geometries)?.get(small));
+  // However long it stands.
+  settle(atlas, geometries);
+  settle(atlas, geometries);
+  assert.ok(!geometries.released(small));
+  check(
+    atlas,
+    geometries,
+    new Map([
+      [small, 1],
+      [large, 2],
+    ]),
+  );
 });
 
 test("geometries copied while the context is lost keep their arrays, for the restore to copy", () => {
@@ -769,11 +770,11 @@ test("geometries copied while the context is lost keep their arrays, for the res
   const atlas = new GeometryAtlas(gl, new GlState(gl));
   atlas.setUp();
   const geometries = new Geometries();
-  const before = add(geometries, shape(1, 30));
+  const before = add(geometries, shape(1, 300));
   settle(atlas, geometries);
   assert.ok(geometries.released(before));
   context.lost = true;
-  const during = add(geometries, shape(2, 40));
+  const during = add(geometries, shape(2, 400));
   settle(atlas, geometries);
   assert.ok(!geometries.released(during) && geometries.get(during) !== null);
   // Restored: the one let go of is rebuilt by its owner, the other copied again as it is.
@@ -797,7 +798,7 @@ test("a geometry drawn anew each frame is let go of whole before its indices are
       geometries.remove(last);
     }
 
-    last = add(geometries, shape(frame + 1, 50));
+    last = add(geometries, shape(frame + 1, 300));
     atlas.place(geometries);
     geometries.endFrame();
     const place = atlas.places[last] as Place;

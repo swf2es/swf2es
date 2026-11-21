@@ -253,8 +253,9 @@ whose entries go once unused for their idle frames:
 - **Geometries** (`geometry.ts`): fills and lines as the native module
   writes them, copied once into the atlas's vertex and index buffers
   (`webgl/atlas.ts`, one page of them for now), those a frame adds staged
-  and uploaded together. Once a copied geometry has stood three of the
-  registry's frames (`RELEASE_FRAMES`), the registry lets go of its arrays
+  and uploaded together. Once a copied geometry too large to merge (more
+  than 256 vertices or 1,024 indices, or a mesh) has stood three of the registry's
+  frames (`RELEASE_FRAMES`), the registry lets go of its arrays
   (`Geometries.release`; only after a copy into a context not known to be
   lost, so frames drawn while it is flagged lost keep theirs, and a view
   with no GPU backend keeps them all; arrays let go of after copies in
@@ -266,14 +267,13 @@ whose entries go once unused for their idle frames:
   geometry drawn anew each frame, as a script's drawing redrawn every
   frame is, goes whole before then: copying the indices of 1,600 such
   geometries a frame (`bench.ts --redraw 800`) took a millisecond. One
-  small enough to merge (below) keeps its arrays while runs that no copy
-  serves keep coming to it, and goes only once none has for
-  `STREAM_QUIET_FRAMES` (300) of the atlas's frames: a still scene's runs
-  are staged once and drawn from their copies after, a moving one's are
-  made anew every frame or few, and staging them needs the arrays. Copying
-  each such geometry's vertices from the atlas on the GPU instead, a copy
-  for each, made a frame of `--timelines 400` some 6,400 copies and the GL
-  wait nearly twice as long (#1179, mended after). A geometry whose owner
+  small enough to merge (below) keeps its arrays: a moving scene makes its
+  runs anew every frame or few, and staging them needs them. Copying each
+  such geometry's vertices from the atlas on the GPU instead, a copy for
+  each, made a frame of `--timelines 400` some 6,400 copies and the GL
+  wait nearly twice as long (0.1.35); and letting a still scene's go and
+  tessellating them again when its runs change, or when the stream is
+  made anew, stalled a frame for each such change. A geometry whose owner
   changes its arrays in place, a 3D object's quad, is added to be kept
   (`add`'s `keep`). A geometry let go of leaves holes, kept sorted
   and merged with their neighbours (`webgl/free-ranges.ts`); what is added
@@ -392,11 +392,7 @@ with the context:
   their vertices carrying as an integer attribute the slot of the draw's
   packed row in an integer texture the stream keeps for its segments,
   written as the rows change, so transforms, colour and quarter-pixel
-  snapping use the same shader math. A run with a geometry whose arrays
-  were let go of is drawn from the atlas, and that geometry wanted again
-  where such runs come to it twice within `STREAM_QUIET_FRAMES`: the view
-  rebuilds it before its next walk (`Geometries.want`, `rebuildWanted`),
-  and it keeps its arrays from then while runs keep coming to it. A segment is found again by its geometries, in their
+  snapping use the same shader math. A segment is found again by its geometries, in their
   order, wherever its run comes in a later frame: moving, recolouring or
   reordering objects only updates the row texture and the segments' rows.
   The segments a frame adds are staged on the CPU after the stream's top
