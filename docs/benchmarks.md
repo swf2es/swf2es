@@ -83,6 +83,10 @@ draws on the machine's GPU (on a machine with two,
   into a ByteArray after a 54-byte header (`--opaque` for an opaque
   bitmap): a fresh bitmap's texture, the readback after a draw and the
   scan;
+- `--timelines N`: N sprites of their own, each 240 frames (`--loop K`)
+  of 12 parts moving and a third of them fading, as tweens laid out frame
+  by frame are; with `--allocs`, what the timelines hold after a full
+  collection;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).
