@@ -292,3 +292,65 @@ test("a domain's keys do not depend on ABCs added where it does not see", async 
   );
   assert.deepEqual(keys[1], keys[0]);
 });
+
+test("keys taken between the parts of a module, and after it is abandoned, are those from nothing", async () => {
+  const { t, abcDomain, main } = await start();
+  const chains = new KeyChains(keyLog(t));
+  for (let k = 0; k < 8; k++) {
+    assert.equal(t.domainAdd(pool[k % pool.length], false, main), 0);
+    abcDomain.push(main);
+    t.domainModule("", abcDomain.length - 1, false);
+  }
+
+  check(t, chains, abcDomain, "loaded");
+  t.domainPartBudget(256);
+  try {
+    for (const abandon of [false, true]) {
+      assert.equal(t.domainAdd(sorts, false, main), 0);
+      abcDomain.push(main);
+      t.domainModuleBytes("", abcDomain.length - 1, false, false);
+      let parts = 1;
+      while (!t.domainModuleDone()) {
+        check(t, chains, abcDomain, `part ${parts}`);
+        if (abandon && parts === 2) {
+          // A finding abandons the module, which keeps what it logged so far.
+          t.domainFound(main, 0, "", "A", abcDomain.indexOf(main) + 1, true);
+          check(t, chains, abcDomain, "abandoned");
+          break;
+        }
+
+        t.domainModuleMoreBytes();
+        parts++;
+      }
+
+      assert.ok(parts > 1, "the module comes in parts");
+      check(t, chains, abcDomain, abandon ? "after abandoning" : "done");
+    }
+  } finally {
+    t.domainPartBudget(0);
+  }
+});
+
+test("a finding of a child with no ABC yet keys its children apart from their grandparent", async () => {
+  const { t, abcDomain, main } = await start();
+  const chains = new KeyChains(keyLog(t));
+  const add = (abc: Uint8Array, domain: number) => {
+    assert.equal(t.domainAdd(abc, false, domain), 0);
+    abcDomain.push(domain);
+    t.domainModule("", abcDomain.length - 1, false);
+    return abcDomain.length - 1;
+  };
+
+  for (let k = 0; k < 6; k++) {
+    add(pool[k % pool.length], main);
+  }
+
+  const definesA = add(a, main);
+  check(t, chains, abcDomain, "loaded");
+  const child = t.domainChild(main);
+  t.domainFound(child, 0, "", "A", definesA, true);
+  add(sorts, t.domainChild(child));
+  check(t, chains, abcDomain, "below the finding");
+  add(b, child);
+  check(t, chains, abcDomain, "the child's own");
+});
