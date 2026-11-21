@@ -228,7 +228,7 @@ test("without a hook, the frame throws what no listener prevented", { skip }, as
   player.tick();
 });
 
-test(`a loaded SWF's error goes from its LoaderInfo up through its Loader`, {
+test("a loaded SWF's error goes from its LoaderInfo up through its Loader", {
   skip,
 }, async () => {
   const compile = compiler(out);

@@ -59,7 +59,7 @@ async function play(onTrace?: (line: string) => void) {
   return { player, scripting, lines, control, mouse, settle };
 }
 
-test(`loaded AVM1 moves coalesce at the host boundary`, { skip }, async () => {
+test("loaded AVM1 moves coalesce at the host boundary", { skip }, async () => {
   const p = await play();
   try {
     p.player.pointer?.post({ x: 300, y: 300 });
@@ -72,7 +72,7 @@ test(`loaded AVM1 moves coalesce at the host boundary`, { skip }, async () => {
   }
 });
 
-test(`unloading from a loaded AVM1 mouse listener prevents its button press`, {
+test("unloading from a loaded AVM1 mouse listener prevents its button press", {
   skip,
 }, async () => {
   let unload = () => {};
@@ -94,7 +94,7 @@ test(`unloading from a loaded AVM1 mouse listener prevents its button press`, {
   }
 });
 
-test(`loaded AVM1 buttons take transformed clicks without AS3 Loader events`, {
+test("loaded AVM1 buttons take transformed clicks without AS3 Loader events", {
   skip,
 }, async () => {
   const p = await play();
@@ -205,7 +205,7 @@ for (const scenario of [
   });
 }
 
-test(`loaded AVM1 capture survives an overlay or leaving the movie`, {
+test("loaded AVM1 capture survives an overlay or leaving the movie", {
   skip,
 }, async () => {
   const p = await play();
@@ -247,7 +247,7 @@ test(`loaded AVM1 capture survives an overlay or leaving the movie`, {
   }
 });
 
-test(`loaded AVM1 idle hover, clipping and unload lifetime`, { skip }, async () => {
+test("loaded AVM1 idle hover, clipping and unload lifetime", { skip }, async () => {
   const p = await play();
   try {
     p.mouse("move");
@@ -283,7 +283,7 @@ test(`loaded AVM1 idle hover, clipping and unload lifetime`, { skip }, async () 
   }
 });
 
-test(`an AS3 mask clips loaded AVM1 button picks`, { skip }, async () => {
+test("an AS3 mask clips loaded AVM1 button picks", { skip }, async () => {
   const p = await play();
   try {
     p.control("mask");

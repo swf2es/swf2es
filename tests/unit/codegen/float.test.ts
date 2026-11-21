@@ -233,6 +233,7 @@ test("scalar AIR modules compile identically whole, a method at a time, and afte
   for (const library of libraries) {
     assert.equal(testing.domainAdd(library, true), 0);
   }
+
   assert.equal(testing.domainAdd(bytes, false), 0);
   const bodies = [...compiled.entries.keys()].reverse();
   assert.equal(

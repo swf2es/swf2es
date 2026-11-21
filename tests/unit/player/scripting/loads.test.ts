@@ -37,7 +37,7 @@ const wasm = await WebAssembly.compile(
   await readFile(fileURLToPath(import.meta.resolve("@swf2es/codegen/codegen.wasm"))),
 );
 
-test(`the main SWF delivers final progress after its first frame subscribes`, {
+test("the main SWF delivers final progress after its first frame subscribes", {
   skip,
 }, async (t) => {
   const lines: string[] = [];
@@ -69,7 +69,7 @@ test(`the main SWF delivers final progress after its first frame subscribes`, {
   assert.deepEqual(lines, [], "the completed load reports progress only once");
 });
 
-test(`loadBytes preserves progress before the loaded SWF subscribes`, {
+test("loadBytes preserves progress before the loaded SWF subscribes", {
   skip,
 }, async (t) => {
   const lines: string[] = [];
@@ -1856,7 +1856,7 @@ test("a URL's bytes of no known type are told as any are, then #2124 with the UR
   );
 });
 
-test(`a SWF loaded again by URL into a domain of all its ABCs runs as the domain's`, {
+test("a SWF loaded again by URL into a domain of all its ABCs runs as the domain's", {
   skip,
 }, async (t) => {
   // Its script, run again, finds the domain's names, loads a SWF into a

@@ -405,7 +405,7 @@ async function as3(nested = false, loaded = false, ended = true) {
   return { clock, player, clip, scripting, bytes };
 }
 
-test(`stream catch-up dispatches RENDER only after the last frame`, {
+test("stream catch-up dispatches RENDER only after the last frame", {
   skip,
 }, async (t) => {
   const { clock, player, scripting } = await as3();
@@ -427,7 +427,7 @@ test(`stream catch-up dispatches RENDER only after the last frame`, {
   assert.equal(get("renders"), renders + 2, "a standalone tick still presents its frame");
 });
 
-test(`catch-up still renders once when its CPU budget ends early`, {
+test("catch-up still renders once when its CPU budget ends early", {
   skip,
 }, async (t) => {
   const { clock, player, scripting } = await as3();
@@ -447,7 +447,7 @@ test(`catch-up still renders once when its CPU budget ends early`, {
   assert.equal(rt.getProperty(player.root.object, rt.publicName("renders")), 1);
 });
 
-test(`a catch-up frame and its RENDER report both errors in the same call`, {
+test("a catch-up frame and its RENDER report both errors in the same call", {
   skip,
 }, async (t) => {
   const { clock, player, scripting } = await as3();

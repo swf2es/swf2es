@@ -1601,7 +1601,7 @@ async function inputRender() {
   };
 }
 
-test(`input redraws prepare RENDER after the handler, coalescing moves without a timeline frame`, {
+test("input redraws prepare RENDER after the handler, coalescing moves without a timeline frame", {
   skip,
 }, async (t) => {
   const { player, scripting, cursor, take, advance } = await inputRender();
@@ -1626,7 +1626,7 @@ test(`input redraws prepare RENDER after the handler, coalescing moves without a
   assert.deepEqual(take(), []);
 });
 
-test(`invalidate without updateAfterEvent still waits for a timeline frame`, {
+test("invalidate without updateAfterEvent still waits for a timeline frame", {
   skip,
 }, async (t) => {
   const { player, scripting, cursor, take, command, advance } = await inputRender();
@@ -1643,7 +1643,7 @@ test(`invalidate without updateAfterEvent still waits for a timeline frame`, {
   assert.equal(scripting.invalidated, false);
 });
 
-test(`keyboard and touch redraw requests also prepare RENDER between frames`, {
+test("keyboard and touch redraw requests also prepare RENDER between frames", {
   skip,
 }, async (t) => {
   const { player, scripting, take, advance } = await inputRender();
@@ -1664,7 +1664,7 @@ test(`keyboard and touch redraw requests also prepare RENDER between frames`, {
   assert.equal(scripting.frames, frame);
 });
 
-test(`a requested redraw applies scrollRect even without a RENDER broadcast`, {
+test("a requested redraw applies scrollRect even without a RENDER broadcast", {
   skip,
 }, async (t) => {
   const { player, scripting, cursor, take, command, advance } = await inputRender();
@@ -1679,7 +1679,7 @@ test(`a requested redraw applies scrollRect even without a RENDER broadcast`, {
   assert.deepEqual(cursor.scroll, { xMin: 10, yMin: 20, xMax: 40, yMax: 60 });
 });
 
-test(`a frame consumes its redraw request without consuming a later invalidation`, {
+test("a frame consumes its redraw request without consuming a later invalidation", {
   skip,
 }, async (t) => {
   const { player, scripting, take, command, advance } = await inputRender();
@@ -1696,7 +1696,7 @@ test(`a frame consumes its redraw request without consuming a later invalidation
   assert.deepEqual(take(), ["frame", "render 0,0"]);
 });
 
-test(`a timer's intermediate render consumes its request without a second broadcast`, {
+test("a timer's intermediate render consumes its request without a second broadcast", {
   skip,
 }, async (t) => {
   const { player, scripting, take, command, advance } = await inputRender();
@@ -1712,7 +1712,7 @@ test(`a timer's intermediate render consumes its request without a second broadc
   assert.equal(scripting.frames, frame);
 });
 
-test(`RENDER reaches only objects currently on stage`, {
+test("RENDER reaches only objects currently on stage", {
   skip,
 }, async (t) => {
   const source = readFileSync(new URL("./RenderMembership.as", import.meta.url), "utf8");

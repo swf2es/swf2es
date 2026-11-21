@@ -21,7 +21,7 @@ try {
   skip = (error as Error).message;
 }
 
-test(`context menus snapshot after opening, dispatch once and expire on destroy`, {
+test("context menus snapshot after opening, dispatch once and expire on destroy", {
   skip,
 }, async () => {
   const wasm = await WebAssembly.compile(
