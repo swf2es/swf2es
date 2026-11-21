@@ -6,9 +6,16 @@ import { runInNewContext } from "node:vm";
 import { Tessellator } from "@swf2es/native/render";
 import type { DisplayObject } from "../../../../packages/player/dist/display/displayobject.js";
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
+import { morphAt } from "../../../../packages/player/dist/display/morph.js";
+import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
-import { Parts } from "../../../../packages/player/dist/scene/parts.js";
+import {
+  type KeptPartsOptions,
+  Parts,
+  SLOW_PARTS_MS,
+} from "../../../../packages/player/dist/scene/parts.js";
 import { Geometries, IDLE_FRAMES } from "../../../../packages/render/dist/index.js";
+import { crossingMorph } from "./crossing-morph.ts";
 
 function drawing() {
   const d = new Drawing();
@@ -159,7 +166,7 @@ function squares(x: number, y = 0): Drawing {
 }
 
 /** `fixture`'s, with the tessellator's layer calls counted. */
-function counting() {
+function counting(kept: KeptPartsOptions = {}) {
   const tessellator = new Tessellator();
   const geometries = new Geometries();
   const calls = { layers: 0 };
@@ -170,7 +177,7 @@ function counting() {
     },
     lines: tessellator.tessellate.lines,
   };
-  const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate));
+  const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate), kept);
   return { tessellator, geometries, parts, calls };
 }
 
@@ -257,5 +264,172 @@ test("a drawing made again every second or third frame is looked into a few time
     } finally {
       tessellator.dispose();
     }
+  }
+});
+
+/**
+ * A tween of `ratios` played `loops` times, each ratio drawn for `hold`
+ * frames: the layers' parts asked for on each, as the view asks.
+ */
+function tween(
+  { geometries, parts }: ReturnType<typeof counting>,
+  morph: ReturnType<typeof crossingMorph>,
+  ratios: number[],
+  hold: number,
+  loops: number,
+): void {
+  for (let loop = 0; loop < loops; loop++) {
+    for (const ratio of ratios) {
+      const { layers } = morphAt(morph, ratio);
+      for (let frame = 0; frame < hold; frame++) {
+        for (const layer of layers) {
+          for (const part of parts.partsOf(layer, 0)) {
+            assert.ok(geometries.alive(part.handle));
+          }
+        }
+
+        geometries.endFrame();
+      }
+    }
+  }
+}
+
+test("a tween longer than the idle frames tessellates its slow blends once, its fast ones each loop", () => {
+  // Each ratio undrawn for longer than IDLE_FRAMES between its visits.
+  const ratios = [0, 13107, 26214, 39321, 52428, 65535];
+  const hold = Math.ceil(IDLE_FRAMES / (ratios.length - 1)) + 1;
+  for (const [slowMs, expected] of [
+    [0, ratios.length],
+    [Number.POSITIVE_INFINITY, ratios.length * 3],
+  ]) {
+    const fixture = counting({ slowMs });
+    try {
+      tween(fixture, crossingMorph(4), ratios, hold, 3);
+      assert.equal(fixture.calls.layers, expected, `slowMs ${slowMs}`);
+      assert.equal(fixture.parts.keptSize > 0, slowMs === 0);
+    } finally {
+      fixture.tessellator.dispose();
+    }
+  }
+});
+
+test("a blend slower to tessellate than SLOW_PARTS_MS keeps its triangles, a context lost too", () => {
+  // Some hundreds of milliseconds each, well past the threshold on any machine.
+  const morph = crossingMorph(40);
+  const fixture = counting();
+  const { geometries, parts, calls, tessellator } = fixture;
+  try {
+    const started = performance.now();
+    tween(fixture, morph, [0, 65535], IDLE_FRAMES + 2, 2);
+    assert.ok((performance.now() - started) / 2 > SLOW_PARTS_MS);
+    assert.equal(calls.layers, 2);
+    assert.ok(parts.keptSize > 0);
+
+    geometries.lost();
+    tween(fixture, morph, [0, 65535], 1, 1);
+    assert.equal(calls.layers, 2);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("kept triangles stay within their bytes, the least recently drawn let go of first", () => {
+  const morph = crossingMorph(3);
+  const sizing = counting({ slowMs: 0 });
+  let size: number;
+  try {
+    sizing.parts.partsOf(morphAt(morph, 0).layers[0], 0);
+    size = sizing.parts.keptSize;
+  } finally {
+    sizing.tessellator.dispose();
+  }
+
+  // Room for two and a half blends of about that size.
+  const bytes = Math.floor(size * 2.5);
+  const fixture = counting({ slowMs: 0, bytes });
+  const { geometries, parts, calls, tessellator } = fixture;
+  try {
+    const ratios = [0, 16384, 32768, 49152, 65535];
+    const layers = ratios.map((ratio) => morphAt(morph, ratio).layers[0]);
+    for (const layer of layers) {
+      parts.partsOf(layer, 0);
+      assert.ok(parts.keptSize <= bytes);
+    }
+
+    assert.ok(parts.keptSize > 0);
+    for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+      geometries.endFrame();
+    }
+
+    // The last two are added again, the first three tessellated again.
+    const made = calls.layers;
+    for (const layer of layers.slice(3)) {
+      parts.partsOf(layer, 0);
+    }
+
+    assert.equal(calls.layers, made);
+    for (const layer of layers.slice(0, 3)) {
+      parts.partsOf(layer, 0);
+      assert.ok(parts.keptSize <= bytes);
+    }
+
+    assert.equal(calls.layers, made + 3);
+
+    // One larger than the bound is never kept.
+    const small = counting({ slowMs: 0, bytes: Math.floor(size / 2) });
+    try {
+      small.parts.partsOf(layers[0], 0);
+      assert.equal(small.parts.keptSize, 0);
+    } finally {
+      small.tessellator.dispose();
+    }
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a drawing's next version, or a layer it no longer draws, lets its kept triangles go", () => {
+  const { tessellator, parts } = counting({ slowMs: 0 });
+  try {
+    const d = squares(40);
+    const o = {} as DisplayObject;
+    parts.dropUndrawn(o, d.layers, d.version);
+    parts.partsOf(d.layers[0], d.version);
+    const first = parts.keptSize;
+    assert.ok(first > 0);
+    // Changed in place: the old version's let go of, the new one's kept in their stead.
+    parts.partsOf(d.layers[0], d.version + 1);
+    assert.equal(parts.keptSize, first);
+
+    const e = squares(60);
+    parts.dropUndrawn(o, e.layers, d.version + 1);
+    assert.equal(parts.keptSize, 0);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a collected layer's kept triangles go with it", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const { tessellator, parts } = counting({ slowMs: 0 });
+  try {
+    const keep = (): WeakRef<ShapeLayer> => {
+      const layer = squares(40).layers[0];
+      parts.partsOf(layer, 0);
+      return new WeakRef(layer);
+    };
+    const layer = keep();
+    assert.ok(parts.keptSize > 0);
+
+    for (let i = 0; i < 20 && parts.keptSize > 0; i++) {
+      await setImmediate();
+      gc();
+    }
+
+    assert.equal(layer.deref(), undefined);
+    assert.equal(parts.keptSize, 0);
+  } finally {
+    tessellator.dispose();
   }
 });

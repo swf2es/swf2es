@@ -14,7 +14,12 @@ A shape layer's fills are geometries of the renderer's, made once for
 the layer and shared by every instance that draws it (`scene/parts.ts`,
 `partsOf`), a
 drawing's for each version of it, and let go of once undrawn for 300
-frames (`IDLE_FRAMES`). They are built from Flash's edges
+frames (`IDLE_FRAMES`). A layer that took 20 ms or more to make
+(`SLOW_PARTS_MS`), as a morph's blend of a hundred crossing contours takes
+libtess2 seconds, keeps its triangles when its geometries go, up to 64 MB
+of them, those least recently added let go of first (`KEPT_PARTS_BYTES`),
+so a tween longer than the idle frames adds its blends again on each loop
+rather than tessellating them again. The geometries are built from Flash's edges
 (`display/shapes.ts`: each edge goes to its right fill forward and its
 left fill reversed, joined into contours; one with the same fill on both
 sides, a seam Flash Pro leaves inside a fill, goes to neither, so it
