@@ -296,6 +296,8 @@ test("a symbol's store drawn into on the GPU after letting go of its pixels read
   lost = true;
   await collect(() => heldPixels(definition));
   assert.deepEqual([...other.readable], expected);
+  // Made again for a lost context, not for being wanted: not kept.
+  assert.equal(keptPixels(definition), false);
   other.setPixel32(0, 0, 0xff00ff00);
   assert.equal(other.getPixel32(0, 0), 0xff00ff00);
   assert.deepEqual([...symbolStore(character).readable], expected);
@@ -321,7 +323,13 @@ test("a bitmap's texture let go of for going undrawn is made again of the same t
   assert.deepEqual(upload(textures).get(again.id), texels);
   assert.equal(store.releasedPixels, true);
 
-  // Wanted again, kept: a symbol made over and over after it inflates no more.
+  // Made again for a texture alone: not kept.
+  assert.equal(keptPixels(definition), false);
+
+  // A symbol made again after a collection is wanted again: kept, and made over and over after,
+  // it inflates no more.
+  await collect(() => heldPixels(definition));
+  symbolStore(character);
   assert.equal(keptPixels(definition), true);
   const kept = heldPixels(definition);
   for (let i = 0; i < 3; i++) {
@@ -330,6 +338,30 @@ test("a bitmap's texture let go of for going undrawn is made again of the same t
     upload(textures);
     await collect(() => false);
     assert.equal(heldPixels(definition), kept);
+  }
+});
+
+test("a texture made again for a lost context inflates its bitmap without keeping it", async () => {
+  const character = bitmapIn(movie(1, 8));
+  const definition = definitionOf(character);
+  const textures = new Textures();
+  const paints = new Paints(textures);
+  const store = characterStore(character);
+  assert.ok(store);
+  const handle = paints.storeTexture(store);
+  const texels = upload(textures).get(handle.id);
+  assert.ok(texels);
+  await collect(() => heldPixels(definition));
+  assert.equal(heldPixels(definition), null);
+
+  for (let i = 0; i < 2; i++) {
+    textures.lost();
+    const again = paints.storeTexture(store);
+    assert.deepEqual(upload(textures).get(again.id), texels);
+    assert.equal(store.releasedPixels, true);
+    assert.equal(keptPixels(definition), false);
+    await collect(() => heldPixels(definition));
+    assert.equal(heldPixels(definition), null, "let go of again after each");
   }
 });
 

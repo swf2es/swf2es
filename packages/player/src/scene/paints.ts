@@ -143,8 +143,9 @@ export class Paints {
       }
 
       if (kept.version !== store.version) {
-        kept.version = store.version;
+        // Counted current only once set: pixels that could not be made are asked for again.
         this.textures.set(id, store.width, store.height, this.bytesOf(store, id), idle);
+        kept.version = store.version;
         store.uploaded();
       } else if (idle !== undefined) {
         this.textures.idleWithin(id, idle);
@@ -265,7 +266,7 @@ export class Paints {
    * than through a copy of its own.
    */
   private bytesOf(store: BitmapStore, id: number): Uint8Array {
-    const pixels = store.readable;
+    const pixels = store.texels;
     const bytes = this.textures.bytes(pixels.length * 4, id);
     rgbaInto(pixels, bytes, store.holdsAlpha);
     return bytes;

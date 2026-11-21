@@ -445,15 +445,20 @@ type LosslessBitmap = Extract<Bitmap, { type: "lossless" }>;
 const inflated = new WeakMap<LosslessBitmap, WeakRef<Uint32Array>>();
 const unreadable = new WeakSet<LosslessBitmap>();
 /**
- * The pixels of bitmaps inflated again after theirs went, kept from then on:
- * one wanted again after a collection (a symbol instantiated over and over,
- * a texture made again after going idle) would otherwise be inflated after
- * each, up to some 10 ms for 1024 by 1024.
+ * The pixels of bitmaps a script or a new store wanted again after a
+ * collection took theirs, kept from then on: a symbol instantiated over and
+ * over would otherwise be inflated after each, up to some 10 ms for 1024 by
+ * 1024. A texture made again, after going idle or with a lost context, does
+ * not keep them: that would keep every bitmap shown after one lost context,
+ * and it uploads them anyway, a cost of the same order.
  */
 const wantedAgain = new WeakMap<LosslessBitmap, Uint32Array>();
 
-/** A lossless bitmap's pixels, inflated if nothing holds them. */
-export function losslessPixels(definition: LosslessBitmap): BitmapPixels {
+/**
+ * A lossless bitmap's pixels, inflated if nothing holds them; kept from then
+ * on where they were inflated before and `keep` (wantedAgain).
+ */
+export function losslessPixels(definition: LosslessBitmap, keep = true): BitmapPixels {
   const { width, height, transparent } = definition;
   const held = wantedAgain.get(definition) ?? inflated.get(definition)?.deref();
   if (held) {
@@ -476,7 +481,7 @@ export function losslessPixels(definition: LosslessBitmap): BitmapPixels {
     return INVALID_PIXELS;
   }
 
-  if (inflated.has(definition)) {
+  if (keep && inflated.has(definition)) {
     wantedAgain.set(definition, decoded.pixels);
   }
 

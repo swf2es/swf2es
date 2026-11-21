@@ -317,7 +317,7 @@ export class BitmapStore {
    * so a bitmap shown is held by the GPU alone, and takes them again when
    * they are read. Null for any other.
    */
-  private source: (() => Uint32Array) | null = null;
+  private source: ((keep: boolean) => Uint32Array) | null = null;
   /** Whether the shared pixels were let go of, to be taken from `source` when next read. */
   private released = false;
   /** The renderers' copies of the store, one each, for `dispose` to free. */
@@ -359,7 +359,7 @@ export class BitmapStore {
     readonly transparent: boolean,
     fill: number,
     shared?: Uint32Array,
-    source?: () => Uint32Array,
+    source?: (keep: boolean) => Uint32Array,
   ) {
     if (shared) {
       this.cpu = shared;
@@ -437,6 +437,20 @@ export class BitmapStore {
    * which may be the same, takes the one it writes first, so both are one array.
    */
   get readable(): Uint32Array {
+    return this.read(true);
+  }
+
+  /**
+   * `readable` as a renderer reads it to make a texture, again after one
+   * went idle or with a lost context: shared pixels made again for it are
+   * not kept for being wanted again (timeline.ts' losslessPixels), as a
+   * read of them, or a store made of them, keeps them.
+   */
+  get texels(): Uint32Array {
+    return this.read(false);
+  }
+
+  private read(keep: boolean): Uint32Array {
     if (this.gpuNewer && this.gpu) {
       // A draw wrote the store last: the pixels let go of are not wanted, but where the copy
       // went with a lost context, whose read gives back the store's pixels as they were, which
@@ -448,7 +462,7 @@ export class BitmapStore {
         this.own();
       }
     } else if (this.released && this.source !== null) {
-      this.cpu = this.source();
+      this.cpu = this.source(keep);
       this.released = false;
     }
 
@@ -497,7 +511,7 @@ export class BitmapStore {
       this.gpuNewer = false;
     }
 
-    return this.readable;
+    return this.texels;
   }
 
   /**
@@ -535,7 +549,7 @@ export class BitmapStore {
       transparent: boolean;
       pixels: Uint32Array;
     },
-    source?: () => Uint32Array,
+    source?: (keep: boolean) => Uint32Array,
   ): BitmapStore {
     return new BitmapStore(
       pixels.width,
@@ -1177,8 +1191,8 @@ export function symbolStore(
     return BitmapStore.of(shape);
   }
 
-  return BitmapStore.of(shape, () => {
-    const again = losslessPixels(definition).pixels;
+  return BitmapStore.of(shape, (keep) => {
+    const again = losslessPixels(definition, keep).pixels;
     // Never a store of fewer pixels than its size, whatever went wrong.
     if (again.length !== count) {
       throw new RangeError("swf2es: a bitmap's pixels came back another size");
