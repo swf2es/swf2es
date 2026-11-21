@@ -136,7 +136,81 @@ test("a geometry undrawn too long is let go of, and its handle says so", () => {
   assert.ok(geometries.alive(kept));
   assert.ok(!geometries.alive(idle));
   assert.deepEqual(geometries.removed, [idle.id]);
-  assert.deepEqual(geometries.live(), [kept.id]);
+  assert.ok(geometries.holds(kept.id) && !geometries.holds(idle.id));
+});
+
+test("a geometry's arrays are let go of once the backend copied them, unless added to be kept", () => {
+  const geometries = new Geometries();
+  const shape = triangle();
+  const quad = triangle();
+  const released = geometries.add(shape);
+  const kept = geometries.add(quad, true);
+  geometries.release(released.id);
+  geometries.release(kept.id);
+  assert.equal(geometries.get(released.id), null);
+  assert.ok(geometries.released(released.id) && geometries.alive(released));
+  assert.equal(geometries.get(kept.id), quad);
+  assert.ok(!geometries.released(kept.id));
+  // Its box and flatness stay, which the frame's bounds and blends read.
+  assert.deepEqual(
+    Array.from(geometries.box.subarray(released.id * 4, released.id * 4 + 4)),
+    Array.from(geometries.box.subarray(kept.id * 4, kept.id * 4 + 4)),
+  );
+  geometries.markFlat(released.id);
+  assert.ok(geometries.flat(released.id));
+  assert.deepEqual(geometries.flattened, [released.id]);
+  // Changed in place: only the kept one, whose owner holds what changed.
+  geometries.update(released.id);
+  geometries.update(kept.id);
+  assert.deepEqual(geometries.updated, [kept.id]);
+});
+
+test("any reader rebuilds a geometry whose arrays were let go of: removed, for its owner to add again", () => {
+  const geometries = new Geometries();
+  const released = geometries.add(triangle());
+  const kept = geometries.add(triangle(), true);
+  const waiting = geometries.add(triangle());
+  geometries.release(released.id);
+  geometries.release(kept.id);
+  const version = geometries.removalVersion;
+  assert.equal(geometries.rebuild(released.id), true);
+  assert.ok(!geometries.alive(released));
+  assert.ok(geometries.removalVersion > version);
+  // Arrays held, or nothing held: nothing to rebuild.
+  assert.equal(geometries.rebuild(kept.id), false);
+  assert.equal(geometries.rebuild(waiting.id), false);
+  assert.equal(geometries.rebuild(released.id), false);
+  assert.ok(geometries.alive(kept) && geometries.alive(waiting));
+});
+
+test("a geometry nothing copied to a GPU keeps its arrays, as in a view without one", () => {
+  const geometries = new Geometries();
+  const data = triangle();
+  const handle = geometries.add(data);
+  for (let i = 0; i < 10; i++) {
+    geometries.use(handle.id);
+    geometries.endFrame();
+  }
+
+  assert.equal(geometries.get(handle.id), data);
+  assert.ok(!geometries.released(handle.id));
+});
+
+test("a lost context takes the geometries whose arrays were let go of, and adds those kept again", () => {
+  const geometries = new Geometries();
+  const released = geometries.add(triangle());
+  const kept = geometries.add(triangle(), true);
+  const waiting = geometries.add(triangle());
+  geometries.release(released.id);
+  geometries.release(kept.id);
+  geometries.added.length = 0;
+  const version = geometries.removalVersion;
+  geometries.lost();
+  assert.ok(!geometries.alive(released));
+  assert.ok(geometries.alive(kept) && geometries.alive(waiting));
+  assert.ok(geometries.removalVersion > version);
+  assert.deepEqual(geometries.added, [kept.id, waiting.id]);
+  assert.deepEqual(geometries.removed, []);
 });
 
 test("a reused id is a new generation, which an old handle does not name", () => {
@@ -329,7 +403,7 @@ test("a geometry changed in place is measured again and noted for the backend, a
     colors: new Uint32Array(3),
     indices: new Uint32Array([0, 1, 2]),
   };
-  const { id } = geometries.add(data);
+  const { id } = geometries.add(data, true);
   geometries.added.length = 0;
   data.positions.set([5, 5, 20, 5, 20, 30]);
   geometries.update(id);

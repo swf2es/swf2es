@@ -949,3 +949,20 @@ export function formatCensus(s: Counts): string[] {
   );
   return lines;
 }
+
+/**
+ * The geometries a view's registry holds after a bench's frames, and the bytes of the CPU copies
+ * it keeps of them (page.ts, geometryTally): their vertices' arrays and indices as views, and the
+ * distinct buffers those lie in, which they keep alive; of those, the buffers of geometries small
+ * enough to be merged and of advanced text's glyph quads; and the atlas's own copy of their indices.
+ */
+export interface GeometryTally {
+  count: number;
+  vertexBytes: number;
+  indexBytes: number;
+  bufferBytes: number;
+  smallBufferBytes: number;
+  glyphBufferBytes: number;
+  /** The indices the atlas keeps of the geometries it placed, as their arrays are let go of. */
+  ownBytes: number;
+}

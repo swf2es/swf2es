@@ -59,7 +59,10 @@
 // what a blend mode costs an object that is one fill. --blend-fills K cuts
 // the coloured ones into K fills that meet, as a SWF's art in a blend
 // mode often is; --blend-clips puts each shape in a clip of its own, which
-// takes the blend mode, as a SWF usually blends its art.
+// takes the blend mode, as a SWF usually blends its art. --blend-after F
+// draws the shapes normally till frame F, which gives each its blend mode,
+// as a script sets one on art drawn for a while (a part asked to be looked
+// into after its geometry's arrays were let go of: Parts.markFlat).
 //
 // --hover holds the mouse still over the stage's middle, as a user's often
 // is, for what a SWF with scripts does for it each frame: with --scripted
@@ -196,6 +199,10 @@
 // frame, as a SWF spawns copies of a bitmap symbol over and over: each a new store of the
 // bitmap's pixels, which another kept or let go of may have to make again.
 //
+// --still-shapes N plays instead N shapes of their own, each a wobbly outline of curves filled
+// with a gradient and a disc of a colour inside it, both outlined, standing still on a grid: what
+// the geometries of a library of distinct art hold once drawn (the geometry line).
+//
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
 // it); the bench prints the functions that took the most time themselves.
@@ -219,7 +226,8 @@
 //     [--colored [--fade]]
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
-//     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
+//     | --toggle-static N | --still-shapes N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
+//     [--blend-after F]
 //     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]
@@ -282,11 +290,13 @@ const masks = option("masks", 0);
 const blends = option("blends", 0);
 const blendFills = Math.max(1, option("blend-fills", 1));
 const blendClips = args.includes("--blend-clips");
+const blendAfter = option("blend-after", 0);
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
 const timelines = option("timelines", 0);
 const stillCrowd = option("still-crowd", 0);
+const stillShapes = option("still-shapes", 0);
 const scrolled = option("scroll", 0);
 const stamps = option("stamps", 0);
 const readback = option("readback", 0);
@@ -779,7 +789,7 @@ function slices(r: number, sides: number, count: number): Pick<w.ShapeSpec, "fil
  * hard light in turn, every other one gliding; or each in a clip that takes
  * the blend mode, where `clips` (--blends, --blend-fills, --blend-clips).
  */
-function blendsSwf(count: number, fills: number, clips: boolean): Uint8Array {
+function blendsSwf(count: number, fills: number, clips: boolean, after = 0): Uint8Array {
   const pixels: number[] = [];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
@@ -850,15 +860,24 @@ function blendsSwf(count: number, fills: number, clips: boolean): Uint8Array {
         depth: i + 2,
         character: (clips ? 5 : 3) + (i % 2),
         matrix: at(i, 0),
-        blendMode: modes[Math.floor(i / 2) % modes.length],
+        blendMode: after > 0 ? undefined : modes[Math.floor(i / 2) % modes.length],
       }),
     );
   }
 
   tags.push(w.showFrame());
   for (let f = 1; f < loop; f++) {
-    for (let i = 1; i < count; i += 2) {
-      tags.push(w.place({ depth: i + 2, move: true, matrix: at(i, f) }));
+    // Each shape given its blend mode on frame `after`, the gliding ones moved as ever.
+    const all = after > 0 && f === after;
+    for (let i = all ? 0 : 1; i < count; i += all ? 1 : 2) {
+      tags.push(
+        w.place({
+          depth: i + 2,
+          move: true,
+          matrix: i % 2 ? at(i, f) : undefined,
+          blendMode: all ? modes[Math.floor(i / 2) % modes.length] : undefined,
+        }),
+      );
     }
 
     tags.push(w.showFrame());
@@ -1806,6 +1825,79 @@ function stillCrowdSwf(count: number): Uint8Array {
   return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
 }
 
+/**
+ * `count` shapes of their own, standing still on a grid (--still-shapes): each a wobbly outline of
+ * 24 curves filled with a linear gradient, a disc inside it of a colour, and both outlined, as a
+ * SWF's library of distinct art is shown at once. What their geometries hold once drawn.
+ */
+function stillShapesSwf(count: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  const r = 400;
+  const across = Math.max(1, Math.ceil(Math.sqrt((count * WIDTH) / HEIGHT)));
+  const cell = (WIDTH * TWIPS) / across;
+  const scale = cell / (2.4 * r);
+  const edges = 24;
+  for (let c = 0; c < count; c++) {
+    const id = c + 1;
+    const wobble = (k: number) => 1 + 0.25 * Math.sin(k * 1.7 + c * 0.61) * Math.cos(c * 0.37 + k);
+    const point = (k: number, out: number): [number, number] => {
+      const t = (2 * Math.PI * k) / edges;
+      return [Math.round(out * r * Math.cos(t)), Math.round(out * r * Math.sin(t))];
+    };
+    const outline: w.PathCommand[] = [{ move: point(0, wobble(0)) }];
+    for (let k = 0; k < edges; k++) {
+      const [cx, cy] = point(k + 0.5, wobble(k + 0.5) * 1.15);
+      const [x, y] = point(k + 1, wobble((k + 1) % edges));
+      outline.push({ curve: [cx, cy, x, y] });
+    }
+
+    const d = Math.round(r * (0.25 + 0.1 * Math.sin(c)));
+    const disc: w.PathCommand[] = [
+      { move: [d, 0] },
+      { curve: [d, d, 0, d] },
+      { curve: [-d, d, -d, 0] },
+      { curve: [-d, -d, 0, -d] },
+      { curve: [d, -d, d, 0] },
+    ];
+    tags.push(
+      w.shape({
+        id,
+        version: 3,
+        bounds: [-2 * r, 2 * r, -2 * r, 2 * r],
+        fills: [
+          {
+            type: 0x10,
+            matrix: { a: r / 16384, d: r / 16384, b: (c % 5) * 0.004 },
+            stops: [
+              [0, 0xff000000 | ((c * 0x2a6f3d) & 0xffffff)],
+              [255, 0xff000000 | ((c * 0x5d3b1f) & 0xffffff)],
+            ],
+          },
+          0xc0000000 | ((c * 0x1f3b5d) & 0xffffff),
+        ],
+        lines: [{ width: 20, color: 0xff202020 }],
+        paths: [
+          { fill1: 1, line: 1, commands: outline },
+          { fill1: 2, fill0: 1, line: 1, commands: disc },
+        ],
+      }),
+      w.place({
+        depth: id,
+        character: id,
+        matrix: {
+          a: scale,
+          d: scale,
+          tx: Math.round((c % across) * cell + cell / 2),
+          ty: Math.round(Math.floor(c / across) * cell + cell / 2),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** Detailed, coloured branches whose independent timelines should not repack each other's art. */
 function branchSwf(count: number): Uint8Array {
   const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
@@ -2320,36 +2412,43 @@ const swf =
                             ? timelinesSwf(timelines, option("loop", 240))
                             : stillCrowd > 0
                               ? stillCrowdSwf(stillCrowd)
-                              : toggleBranches > 0
-                                ? branchSwf(toggleBranches)
-                                : toggle > 0
-                                  ? toggleSwf(toggle)
-                                  : toggleStatic > 0
-                                    ? toggleStaticSwf(toggleStatic)
-                                    : scripted > 0
-                                      ? scriptedSwf(scripted, args.includes("--still"))
-                                      : pulse > 0
-                                        ? pulseSwf(
-                                            pulse,
-                                            option("loop", 96),
-                                            option("line", 1),
-                                            option("squash", 1),
-                                          )
-                                        : masks > 0
-                                          ? masksSwf(masks, args.includes("--unmasked"))
-                                          : blends > 0
-                                            ? blendsSwf(blends, blendFills, blendClips)
-                                            : branches > 0
-                                              ? branchSwf(branches)
-                                              : rig > 0
-                                                ? rigSwf(
-                                                    rig,
-                                                    args.includes("--swap"),
-                                                    args.includes("--fresh"),
-                                                    args.includes("--blurred") || filtered > 0,
-                                                    args.includes("--glide"),
-                                                  )
-                                                : synthetic();
+                              : stillShapes > 0
+                                ? stillShapesSwf(stillShapes)
+                                : toggleBranches > 0
+                                  ? branchSwf(toggleBranches)
+                                  : toggle > 0
+                                    ? toggleSwf(toggle)
+                                    : toggleStatic > 0
+                                      ? toggleStaticSwf(toggleStatic)
+                                      : scripted > 0
+                                        ? scriptedSwf(scripted, args.includes("--still"))
+                                        : pulse > 0
+                                          ? pulseSwf(
+                                              pulse,
+                                              option("loop", 96),
+                                              option("line", 1),
+                                              option("squash", 1),
+                                            )
+                                          : masks > 0
+                                            ? masksSwf(masks, args.includes("--unmasked"))
+                                            : blends > 0
+                                              ? blendsSwf(
+                                                  blends,
+                                                  blendFills,
+                                                  blendClips,
+                                                  blendAfter,
+                                                )
+                                              : branches > 0
+                                                ? branchSwf(branches)
+                                                : rig > 0
+                                                  ? rigSwf(
+                                                      rig,
+                                                      args.includes("--swap"),
+                                                      args.includes("--fresh"),
+                                                      args.includes("--blurred") || filtered > 0,
+                                                      args.includes("--glide"),
+                                                    )
+                                                  : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -2426,27 +2525,30 @@ const summary = {
                             ? `${timelines} timelines of ${option("loop", 240)} frames`
                             : stillCrowd > 0
                               ? `still crowd of ${stillCrowd}, one in 32 playing`
-                              : toggleBranches > 0
-                                ? `toggle of ${toggleBranches} branches`
-                                : toggle > 0
-                                  ? `toggle of ${toggle}`
-                                  : toggleStatic > 0
-                                    ? `static toggle of ${toggleStatic}`
-                                    : scripted > 0
-                                      ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                                      : pulse > 0
-                                        ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                                        : masks > 0
-                                          ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                                          : blends > 0
-                                            ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
-                                            : branches > 0
-                                              ? `${branches} branches`
-                                              : rig > 0
-                                                ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                                                : shapes,
+                              : stillShapes > 0
+                                ? `${stillShapes} distinct shapes, standing still`
+                                : toggleBranches > 0
+                                  ? `toggle of ${toggleBranches} branches`
+                                  : toggle > 0
+                                    ? `toggle of ${toggle}`
+                                    : toggleStatic > 0
+                                      ? `static toggle of ${toggleStatic}`
+                                      : scripted > 0
+                                        ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                                        : pulse > 0
+                                          ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                                          : masks > 0
+                                            ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                                            : blends > 0
+                                              ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
+                                              : branches > 0
+                                                ? `${branches} branches`
+                                                : rig > 0
+                                                  ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                                  : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
+  geometry: result.geometry,
   retainedMb: {
     heap: Math.round(result.retained.heap / 1e5) / 10,
     buffers: Math.round(result.retained.buffers / 1e5) / 10,
@@ -2570,6 +2672,14 @@ if (args.includes("--json")) {
   console.log(
     `  held    ${summary.retainedMb.heap} MB of JS heap and ${summary.retainedMb.buffers} MB of array buffers after a full collection`,
   );
+  if (result.geometry) {
+    const mb = (bytes: number) => (bytes / 1e6).toFixed(1);
+    const g = result.geometry;
+    console.log(
+      `  geometry ${g.count} held, their CPU copies ${mb(g.bufferBytes)} MB of buffers (${mb(g.vertexBytes)} MB vertices, ${mb(g.indexBytes)} MB indices; ${mb(g.smallBufferBytes)} MB small, ${mb(g.glyphBufferBytes)} MB glyph quads); the atlas's indices ${mb(g.ownBytes ?? 0)} MB`,
+    );
+  }
+
   console.log(`  tick    median ${ms(summary.tick.median)}  p90 ${ms(summary.tick.p90)}`);
   console.log(`  draw    median ${ms(summary.draw.median)}  p90 ${ms(summary.draw.p90)}`);
   console.log(`  gl      median ${ms(summary.gl.median)}  p90 ${ms(summary.gl.p90)}`);

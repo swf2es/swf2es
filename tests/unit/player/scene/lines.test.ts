@@ -226,7 +226,12 @@ test("a painted layer's lines come in pieces in order: runs of a colour together
     pieces.map((p) => p.part.paint?.type ?? null),
     [null, "image", null],
   );
-  const { positions, texels } = pieces[1].part.geometry;
+  // Its paint alone kept with it: the geometry's arrays are the registry's, let go of once on the
+  // GPU.
+  assert.ok(pieces.every((p) => !("geometry" in p.part)));
+  const geometry = geometries.get(pieces[1].handle.id);
+  assert.ok(geometry);
+  const { positions, texels } = geometry;
   assert.ok(texels);
   for (let k = 0; k < positions.length; k += 2) {
     // (x, y) went to (-2 y, 2 x).

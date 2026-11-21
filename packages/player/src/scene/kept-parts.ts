@@ -3,7 +3,9 @@
 // second, and a tween longer than IDLE_FRAMES would otherwise make each of
 // its blends again on every loop. One store for every view, within one
 // budget, which counts only the triangles whose geometries have gone: while
-// a geometry is held, its registry holds the same arrays.
+// a geometry is held, they are what it draws, held either way. The registry
+// lets go of its arrays once on the GPU (Geometries.release), so a kept
+// layer's arrays are this store's alone.
 import type { Geometries, GeometryData, GeometryHandle } from "@swf2es/render";
 import type { ShapeLayer } from "../display/shapes.js";
 

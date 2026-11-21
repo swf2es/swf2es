@@ -16,7 +16,7 @@ import {
 } from "../../../../packages/player/dist/scene/kept-parts.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
 import { Parts } from "../../../../packages/player/dist/scene/parts.js";
-import { Geometries, IDLE_FRAMES } from "../../../../packages/render/dist/index.js";
+import { Geometries, IDLE_FRAMES, RELEASE_FRAMES } from "../../../../packages/render/dist/index.js";
 import { crossingMorph } from "./crossing-morph.ts";
 
 function drawing() {
@@ -51,6 +51,15 @@ function fixture(keeping = false) {
 }
 
 const KEEPING = [false, true];
+
+/** What was added copied by the backend, as the atlas does: their arrays let go of (release). */
+function uploaded(geometries: Geometries): void {
+  for (const id of geometries.added) {
+    geometries.release(id);
+  }
+
+  geometries.added.length = 0;
+}
 
 test("unchanged cached parts need no repeated handle validation, including after a frame", () => {
   const { tessellator, geometries, parts, d } = fixture();
@@ -128,6 +137,8 @@ for (const keeping of KEEPING) {
       assert.ok(next.every((p) => geometries.alive(p.handle)));
       regular = next;
 
+      // The backend copied them and the registry let go of their arrays, which a loss then takes.
+      uploaded(geometries);
       geometries.lost();
       next = parts.partsOf(layer, d.version);
       assert.notEqual(next, regular);
@@ -171,7 +182,7 @@ test("idle shape layers release their geometry buffers between visits", async ()
         geometries.endFrame();
       }
 
-      assert.deepEqual(geometries.live(), []);
+      assert.equal(geometries.count, 0);
       // WeakRef keeps its target through this turn. Collect before revisiting the same layer.
       await setImmediate();
       gc();
@@ -202,7 +213,7 @@ test("kept layers hold their buffers past expiry, till their drawing changes", a
       parts.endFrame();
     }
 
-    assert.deepEqual(geometries.live(), []);
+    assert.equal(geometries.count, 0);
     assert.ok(kept.bytes > 0);
     await setImmediate();
     gc();
@@ -251,7 +262,7 @@ test("a kept layer whose parts expired in part adds them all again, none held tw
     assert.equal(calls.layers, 1);
     assert.ok(next.every((p) => geometries.alive(p.handle)));
     assert.ok(!geometries.alive(first[1].handle), "the part still held is let go of, not doubled");
-    assert.equal(geometries.live().length, 2);
+    assert.equal(geometries.count, 2);
     assert.deepEqual(
       next.map((p) => geometries.get(p.handle.id)?.positions),
       arrays,
@@ -296,11 +307,11 @@ test("a part of fills that meet is marked flat once it has stood, one of fills o
       const d = squares(x, y);
       const o = {} as DisplayObject;
       const [part] = parts.partsOf(d.layers[0], d.version);
-      const before = geometries.get(part.handle.id)?.flat;
+      const before = geometries.flat(part.handle.id);
       // Not on the frame it was made.
       for (let frame = 0; frame < 1; frame++) {
         parts.markFlat(o, d.layers[0], part);
-        assert.equal(geometries.get(part.handle.id)?.flat, before);
+        assert.equal(geometries.flat(part.handle.id), before);
         geometries.endFrame();
         parts.partsOf(d.layers[0], d.version);
       }
@@ -310,7 +321,7 @@ test("a part of fills that meet is marked flat once it has stood, one of fills o
       const flattened = geometries.flattened.length;
       // Looked into once: asked again, it is not tessellated again.
       parts.markFlat(o, d.layers[0], part);
-      return [before, geometries.get(part.handle.id)?.flat, flattened, calls.layers - made];
+      return [before, geometries.flat(part.handle.id), flattened, calls.layers - made];
     };
 
     assert.deepEqual(flatness(20), [false, true, 1, 1]);
@@ -321,6 +332,83 @@ test("a part of fills that meet is marked flat once it has stood, one of fills o
     assert.deepEqual(flatness(10, 10), [false, false, 0, 1]);
   } finally {
     tessellator.dispose();
+  }
+});
+
+test("a part looked into after its arrays are let go of is weighed while they were held", () => {
+  const { tessellator, geometries, parts, calls } = counting();
+  try {
+    const o = {} as DisplayObject;
+    // Two looks first, so that the object's next part must stand four frames.
+    for (let k = 0; k < 2; k++) {
+      const d = squares(20 + k);
+      const [part] = parts.partsOf(d.layers[0], d.version);
+      for (let frame = 0; frame <= 2 ** k; frame++) {
+        parts.markFlat(o, d.layers[0], part);
+        geometries.endFrame();
+      }
+    }
+
+    const d = squares(30);
+    const layer = d.layers[0];
+    const [part] = parts.partsOf(layer, d.version);
+    const looked = calls.layers;
+    for (let frame = 0; frame < RELEASE_FRAMES; frame++) {
+      parts.markFlat(o, layer, part);
+      geometries.endFrame();
+    }
+
+    // Copied to the GPU and stood: the registry lets go of its arrays, before the look.
+    uploaded(geometries);
+    assert.equal(geometries.get(part.handle.id), null);
+    assert.equal(calls.layers, looked);
+    for (let frame = RELEASE_FRAMES; frame <= 4; frame++) {
+      parts.markFlat(o, layer, part);
+      geometries.endFrame();
+    }
+
+    assert.equal(calls.layers, looked + 1);
+    assert.ok(geometries.flat(part.handle.id));
+    // A drawing made anew each frame is never weighed: no arrays read, nothing looked into.
+    const again = squares(40);
+    const [fresh] = parts.partsOf(again.layers[0], again.version);
+    parts.markFlat(o, again.layers[0], fresh);
+    assert.equal(fresh.area, null);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a part first asked about after its arrays are let go of is weighed again, and found flat at once", () => {
+  for (const slow of [false, true]) {
+    const { tessellator, geometries, parts, calls } = counting(
+      slow ? { slowMs: 0 } : { slowMs: Number.POSITIVE_INFINITY },
+    );
+    try {
+      const o = {} as DisplayObject;
+      const d = squares(20);
+      const layer = d.layers[0];
+      let [part] = parts.partsOf(layer, d.version);
+      // Drawn as it is for frames, copied to the GPU and its arrays let go of, then alone in a
+      // blend mode: asked about late.
+      for (let frame = 0; frame <= RELEASE_FRAMES; frame++) {
+        geometries.endFrame();
+        [part] = parts.partsOf(layer, d.version);
+      }
+
+      uploaded(geometries);
+      assert.equal(geometries.get(part.handle.id), null);
+      const made = calls.layers;
+      parts.markFlat(o, layer, part);
+      // Flat on the frame it was asked, its geometry as it was: weighed from the kept triangles,
+      // or its layer tessellated again for that alone, then its fills together.
+      assert.ok(geometries.flat(part.handle.id));
+      assert.equal(part.fillsTo, part.fillsFrom);
+      assert.equal(parts.partsOf(layer, d.version)[0], part);
+      assert.equal(calls.layers, made + (slow ? 1 : 2));
+    } finally {
+      tessellator.dispose();
+    }
   }
 });
 
@@ -477,7 +565,9 @@ test("re-added triangles are the ones made, flat and looked into as they were", 
     const indices = made.indices.slice();
     geometries.endFrame();
     parts.markFlat(o, layer, part);
-    assert.equal(made.flat, true);
+    assert.ok(geometries.flat(part.handle.id));
+    // Copied to the GPU: the registry lets go of its arrays, the store holds them.
+    uploaded(geometries);
     assert.equal(part.fillsTo, part.fillsFrom);
 
     idle(fixture);

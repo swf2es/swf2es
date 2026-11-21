@@ -42,6 +42,7 @@ import { webWorkerHost } from "@swf2es/player-hosts/workers";
 import {
   type Commands,
   DRAW,
+  type GeometryData,
   MESH,
   PLANE,
   RUN,
@@ -63,6 +64,7 @@ import {
   FORM_SHADED,
   FORM_SMALL,
   FORM_STAGE,
+  type GeometryTally,
   SUB_RUN_INTS,
   walkCensus,
 } from "./census.ts";
@@ -771,6 +773,8 @@ interface Bench {
   /** The GL renderer that drew: SwiftShader, or a GPU's name. */
   renderer: string;
   error: string | null;
+  /** The CPU copies of geometries the view held after the frames: see geometryTally. */
+  geometry?: GeometryTally;
   morphs?: {
     requests: number[];
     misses: number[];
@@ -987,6 +991,62 @@ function censusMethod(
   }
 
   return method as (...args: unknown[]) => unknown;
+}
+
+/**
+ * The geometries `view`'s registry holds and the CPU copies of them it keeps: the bytes of their
+ * vertices' arrays and of their indices, and of the distinct buffers those lie in, which is what
+ * the arrays keep alive; those of a geometry small enough to be merged (the atlas's Place.batch)
+ * and advanced text's glyph quads apart.
+ */
+function geometryTally(view: RenderView): GeometryTally {
+  const registry = censusField<object>(view, "geometries");
+  const data = censusField<(GeometryData | null)[]>(registry, "data");
+  const tally: GeometryTally = {
+    count: 0,
+    vertexBytes: 0,
+    indexBytes: 0,
+    bufferBytes: 0,
+    smallBufferBytes: 0,
+    glyphBufferBytes: 0,
+    ownBytes: 0,
+  };
+  // The indices the atlas keeps of what it placed (webgl/atlas.ts, Place.local).
+  const atlas = censusField<Record<string, unknown>>(censusField<object>(view, "backend"), "atlas");
+  for (const place of (atlas.places ?? []) as ({ local?: Uint16Array | Uint32Array } | null)[]) {
+    tally.ownBytes += place?.local?.byteLength ?? 0;
+  }
+
+  tally.count = censusField<number>(registry, "count");
+  const buffers = new Set<ArrayBufferLike>();
+  for (const g of data) {
+    if (!g) {
+      continue;
+    }
+
+    const arrays = [g.positions, g.colors, g.texels, g.depths, g.glyphs?.vertices];
+    let bytes = 0;
+    for (const array of [...arrays, g.indices]) {
+      if (array && array.byteLength > 0 && !buffers.has(array.buffer)) {
+        buffers.add(array.buffer);
+        bytes += array.buffer.byteLength;
+      }
+    }
+
+    for (const array of arrays) {
+      tally.vertexBytes += array?.byteLength ?? 0;
+    }
+
+    tally.indexBytes += g.indices?.byteLength ?? 0;
+    tally.bufferBytes += bytes;
+    if (g.glyphs) {
+      tally.glyphBufferBytes += bytes;
+    } else if ((g.positions?.length ?? 0) <= 512 && (g.indices?.length ?? 0) <= 1024 && !g.depths) {
+      tally.smallBufferBytes += bytes;
+    }
+  }
+
+  return tally;
 }
 
 /** A field of one of the renderer's objects, found by name, which a census reads. */
@@ -1510,6 +1570,7 @@ async function benchSwf(
 
     const counts = { ...lineCounts };
     const heap: [number, number] = [heapBefore, heapNow()];
+    const geometry = geometryTally(view);
     // Everything still held while chrome.ts collects and measures what the frames left (benchHold).
     if (hold) {
       await new Promise<void>((release) => {
@@ -1532,6 +1593,7 @@ async function benchSwf(
       first,
       renderer: name,
       error: null,
+      geometry,
       ...(morphs ? { morphs: morphs.result() } : {}),
     };
   } catch (e) {

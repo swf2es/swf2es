@@ -6,10 +6,10 @@
 // keeps its triangles past its geometries' expiry, to add them again
 // (kept-parts.ts).
 import type { Glyph } from "@swf2es/format";
-import type { Geometries, GeometryHandle } from "@swf2es/render";
+import { type Geometries, type GeometryHandle, RELEASE_FRAMES } from "@swf2es/render";
 import type { DisplayObject } from "../display/displayobject.js";
 import { type ShapeLayer, shapeLayers } from "../display/shapes.js";
-import { type FillTessellator, fillsApart } from "./fills.js";
+import { type FillTessellator, fillsApart, type PartArea, partArea } from "./fills.js";
 import { type KeptEntry, type KeptParts, keptParts } from "./kept-parts.js";
 import type { LineCache } from "./lines.js";
 import { bitmapQuad, layerParts, type PartPaint } from "./shapes.js";
@@ -34,13 +34,19 @@ const MOST_STANDING_FRAMES = 64;
 /**
  * A part as made: its geometry's handle, the frame it was made on, and the
  * layer's fills of a part of several not yet looked into (markFlat), from
- * `fillsFrom` up to `fillsTo`, none once they have been.
+ * `fillsFrom` up to `fillsTo`, none once they have been, with what the look
+ * weighs of its triangles (partArea), taken from its arrays before the
+ * registry lets go of them (RELEASE_FRAMES), and only for a part asked to
+ * be looked into (markFlat).
  */
 export interface MadePart extends PartPaint {
   handle: GeometryHandle;
   madeAt: number;
   fillsFrom: number;
   fillsTo: number;
+  area: PartArea | null;
+  /** Found flat (markFlat): kept triangles added again are flat too, their arrays' flag unset. */
+  flat: boolean;
 }
 
 /** A layer's parts as made, for its drawing's version, as a drawing changes its layers in place. */
@@ -190,11 +196,14 @@ export class Parts {
       const kept = made.kept.geometries;
       const madeAt = this.geometries.frame;
       // Looked into or not (markFlat) as they were, and standing again from now before a look.
-      made.parts = made.parts.map((part, i) => ({
-        ...part,
-        handle: this.geometries.add(kept[i]),
-        madeAt,
-      }));
+      made.parts = made.parts.map((part, i) => {
+        // Found flat once its arrays were the store's alone, which the registry had let go of.
+        if (part.flat) {
+          kept[i].flat = true;
+        }
+
+        return { ...part, handle: this.geometries.add(kept[i]), madeAt };
+      });
       made.checkedAt = this.geometries.removalVersion;
       this.kept.added(made);
       return made.parts;
@@ -218,6 +227,8 @@ export class Parts {
       madeAt: this.geometries.frame,
       fillsFrom,
       fillsTo,
+      area: null,
+      flat: false,
     }));
     const entry: Made = { parts, version, checkedAt: this.geometries.removalVersion, kept: null };
     cache.set(layer, entry);
@@ -246,19 +257,58 @@ export class Parts {
   markFlat(o: DisplayObject, layer: ShapeLayer, part: MadePart): void {
     const { fillsFrom, fillsTo } = part;
     const standing = this.standing.get(o) ?? STANDING_FRAMES;
-    if (fillsTo <= fillsFrom || this.geometries.frame - part.madeAt < standing) {
+    const stood = this.geometries.frame - part.madeAt;
+    if (fillsTo <= fillsFrom) {
+      return;
+    }
+
+    // Weighed from its arrays on its last frame before the registry may let go of them, or as it
+    // is looked into while they are held: a part drawn anew each frame is never weighed.
+    if (!part.area && (stood >= RELEASE_FRAMES - 1 || stood >= standing)) {
+      const data = this.geometries.alive(part.handle) ? this.geometries.get(part.handle.id) : null;
+      part.area = data ? partArea(data.positions, data.indices) : null;
+    }
+
+    if (stood < standing) {
       return;
     }
 
     part.fillsTo = fillsFrom;
     this.standing.set(o, Math.min(standing * 2, MOST_STANDING_FRAMES));
-    const data = this.geometries.get(part.handle.id);
+    const area =
+      part.area ?? (this.geometries.alive(part.handle) ? this.lateArea(layer, part) : null);
+    part.area = null;
+    // A handle a loss or an expiry let go of may name another geometry by now.
     if (
-      data &&
-      fillsApart(layer, fillsFrom, fillsTo, data.positions, data.indices, this.tessellator)
+      area &&
+      this.geometries.alive(part.handle) &&
+      fillsApart(layer, fillsFrom, fillsTo, area, this.tessellator)
     ) {
+      part.flat = true;
       this.geometries.markFlat(part.handle.id);
     }
+  }
+
+  /**
+   * The PartArea of `part` of `layer`, asked to be looked into first after
+   * the registry let go of its arrays, as a shape drawn for a while becomes
+   * alone in a blend mode: from its layer's kept triangles, or its layer
+   * tessellated again for the weighing alone, its geometry left as it is.
+   * Asking for the arrays again (Geometries.rebuild) would draw the part
+   * through a blend layer till it was made again and had stood.
+   */
+  private lateArea(layer: ShapeLayer, part: MadePart): PartArea | null {
+    const made = this.made.get(layer);
+    const index = made ? made.parts.indexOf(part) : -1;
+    const kept = index >= 0 ? made?.kept?.geometries[index] : undefined;
+    if (kept) {
+      return partArea(kept.positions, kept.indices);
+    }
+
+    const again = layerParts(layer, this.tessellator).find(
+      (p) => p.fillsFrom === part.fillsFrom && (p.fillsTo ?? 0) > (p.fillsFrom ?? 0),
+    );
+    return again ? partArea(again.geometry.positions, again.geometry.indices) : null;
   }
 
   /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */
