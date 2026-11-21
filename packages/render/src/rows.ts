@@ -6,6 +6,11 @@
 export const ROW_FLOATS = 16;
 /** Rows a line of the rows' texture. */
 export const ROWS_A_LINE = 256;
+/**
+ * Floats of a span from which Rows.append copies through a view: below
+ * it, copying by index costs less than making the view.
+ */
+const SPAN_VIEW_FLOATS = 4 * ROW_FLOATS;
 
 /** The rows of a frame's draws, written in order and uploaded together. */
 export class Rows {
@@ -37,12 +42,18 @@ export class Rows {
       this.data = grown;
     }
 
-    // By index, as a view to copy from would be an allocation each span.
+    // A short span by index, as a view to copy from would be an allocation each span; a long one
+    // through the view, which copies it much faster.
     const source = from.data;
     const data = this.data;
+    const start = first * ROW_FLOATS;
     const last = end * ROW_FLOATS;
-    for (let i = first * ROW_FLOATS, to = row * ROW_FLOATS; i < last; i++, to++) {
-      data[to] = source[i];
+    if (last - start < SPAN_VIEW_FLOATS) {
+      for (let i = start, to = row * ROW_FLOATS; i < last; i++, to++) {
+        data[to] = source[i];
+      }
+    } else {
+      data.set(source.subarray(start, last), row * ROW_FLOATS);
     }
 
     return row;

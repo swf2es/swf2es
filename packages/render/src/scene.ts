@@ -146,6 +146,12 @@ export const WHOLE_SMOOTH = 1;
 export const WHOLE_ALIASED = 2;
 
 /**
+ * Draws of a span from which SceneList.appendDraws copies its columns
+ * through views: below it, copying by index costs less than making them.
+ */
+const SPAN_VIEW_DRAWS = 64;
+
+/**
  * A frame's drawing in order: each entry a geometry drawn under a row with
  * a blend mode, and the texture it samples (-1 for none) and how. Boundaries
  * (filters, masks, blend layers) come with the features that need them.
@@ -224,16 +230,35 @@ export class SceneList {
       this.kind = grow(this.kind);
     }
 
-    // Column by column, by index: a view of each to copy whole was most of what a frame of
-    // spans allocated.
     const kinds = from.kind;
     const rows = from.row;
+    const kind = this.kind;
+    const row = this.row;
+    if (end - first >= SPAN_VIEW_DRAWS) {
+      // A long span's other columns through views, which copy them much faster than by index.
+      for (let e = first, to = at; e < end; e++, to++) {
+        if (kinds[e] !== DRAW) {
+          throw new Error(`entry ${e} of a span is no draw, which a span cannot move`);
+        }
+
+        kind[to] = DRAW;
+        row[to] = rows[e] + rowShift;
+      }
+
+      this.geometry.set(from.geometry.subarray(first, end), at);
+      this.blend.set(from.blend.subarray(first, end), at);
+      this.texture.set(from.texture.subarray(first, end), at);
+      this.sampler.set(from.sampler.subarray(first, end), at);
+      this.length = length;
+      return;
+    }
+
+    // Column by column, by index: a view of each to copy whole was most of what a frame of
+    // spans allocated, most spans being short.
     const geometries = from.geometry;
     const blends = from.blend;
     const textures = from.texture;
     const samplers = from.sampler;
-    const kind = this.kind;
-    const row = this.row;
     const geometry = this.geometry;
     const blend = this.blend;
     const texture = this.texture;
