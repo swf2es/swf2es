@@ -53,20 +53,33 @@ export class Rows {
    * caller keeps in a typed array, so that none are boxed passing them.
    */
   addPlaced(places: Float64Array, at: number, ct: ColorRow | null): number {
-    return this.add(
-      places[at],
-      places[at + 1],
-      places[at + 2],
-      places[at + 3],
-      places[at + 4],
-      places[at + 5],
-      ct,
-    );
+    // Written here, not passed to add, which would box them where it is not inlined.
+    const row = this.next();
+    const out = this.data;
+    const to = row * ROW_FLOATS;
+    out[to] = places[at];
+    out[to + 1] = places[at + 1];
+    out[to + 2] = places[at + 2];
+    out[to + 3] = places[at + 3];
+    out[to + 4] = places[at + 4];
+    out[to + 5] = places[at + 5];
+    this.color(to, ct);
+    return row;
   }
 
   /** A row for the translation of the transform at `places[at]` alone. */
   addTranslated(places: Float64Array, at: number, ct: ColorRow | null): number {
-    return this.add(1, 0, 0, 1, places[at + 4], places[at + 5], ct);
+    const row = this.next();
+    const out = this.data;
+    const to = row * ROW_FLOATS;
+    out[to] = 1;
+    out[to + 1] = 0;
+    out[to + 2] = 0;
+    out[to + 3] = 1;
+    out[to + 4] = places[at + 4];
+    out[to + 5] = places[at + 5];
+    this.color(to, ct);
+    return row;
   }
 
   /**
@@ -82,13 +95,7 @@ export class Rows {
     ty: number,
     ct: ColorRow | null,
   ): number {
-    const row = this.count++;
-    if (this.count * ROW_FLOATS > this.data.length) {
-      const grown = new Float32Array(this.data.length * 2);
-      grown.set(this.data);
-      this.data = grown;
-    }
-
+    const row = this.next();
     const out = this.data;
     const at = row * ROW_FLOATS;
     out[at] = a;
@@ -97,6 +104,25 @@ export class Rows {
     out[at + 3] = d;
     out[at + 4] = tx;
     out[at + 5] = ty;
+    this.color(at, ct);
+    return row;
+  }
+
+  /** A row taken, the store grown for it: its index. */
+  private next(): number {
+    const row = this.count++;
+    if (this.count * ROW_FLOATS > this.data.length) {
+      const grown = new Float32Array(this.data.length * 2);
+      grown.set(this.data);
+      this.data = grown;
+    }
+
+    return row;
+  }
+
+  /** The row at `data[at]` coloured by `ct`, or by nothing where it is null. */
+  private color(at: number, ct: ColorRow | null): void {
+    const out = this.data;
     out[at + 6] = 0;
     out[at + 7] = 0;
     out[at + 8] = ct ? ct.rMul : 1;
@@ -107,7 +133,6 @@ export class Rows {
     out[at + 13] = ct ? ct.gAdd / 255 : 0;
     out[at + 14] = ct ? ct.bAdd / 255 : 0;
     out[at + 15] = ct ? ct.aAdd / 255 : 0;
-    return row;
   }
 }
 

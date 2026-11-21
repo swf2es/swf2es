@@ -63,7 +63,7 @@ import type { FillTessellator } from "./fills.js";
 import { FilterLayers, type KeptOutput } from "./filter-layers.js";
 import { undrawnFilter } from "./filters.js";
 import { syncHidden } from "./hidden.js";
-import { LineCache } from "./lines.js";
+import { LineCache, type LinePiece } from "./lines.js";
 import { Masks } from "./masks.js";
 import { Paints, paintSampler } from "./paints.js";
 import { Parts } from "./parts.js";
@@ -72,8 +72,14 @@ import { bindCanvasPointer } from "./pointer.js";
 import { unsupported } from "./shapes.js";
 import { type Context, clean, type ObjectSpan, Spans } from "./spans.js";
 import { StaleShapes } from "./stale-shapes.js";
-import { deviceTextResolution, fieldItems, staticItems, type TextOmissions } from "./text.js";
-import { placedRow, TextItems } from "./text-items.js";
+import {
+  clearOmissions,
+  deviceTextResolution,
+  fieldItems,
+  staticItems,
+  type TextOmissions,
+} from "./text.js";
+import { placedRowAt, TextItems } from "./text-items.js";
 import { Videos } from "./videos.js";
 
 export interface RenderViewOptions {
@@ -211,6 +217,17 @@ export class RenderView implements Drawer {
   private places = new Float64Array(6 * 64);
   /** A Bitmap's placement moved onto whole pixels (wholePixels). */
   private moved = new Float64Array(6);
+  /** What turns and mirrors stretched lines into place (stretchRow), its row made from it. */
+  private readonly turn = new Float64Array(6);
+  /** The line cache's key for a layer's lines (LineCache.take). */
+  private readonly lineKey = new Float64Array(5);
+  /** What a text's items leave out, filled again for each text the walk draws. */
+  private readonly omitted: TextOmissions = {
+    advanced: false,
+    clip: null,
+    clipFrom: 0,
+    clipTo: 0,
+  };
   private readonly colorSlots: ColorTransform[] = [];
   /** The sliced owner whose children are walked now, its slice, and its parent's linear transform. */
   private sliceOwner: DisplayObject | null = null;
@@ -838,12 +855,8 @@ export class RenderView implements Drawer {
               o,
               filtering,
               slice?.key ?? "",
-              a,
-              b,
-              c,
-              d,
-              tx,
-              ty,
+              this.places,
+              at + 6,
               this.target,
               this.frames,
               this.keptGeneration,
@@ -881,14 +894,29 @@ export class RenderView implements Drawer {
       const width = Math.max(0, r.xMax - r.xMin);
       const height = Math.max(0, r.yMax - r.yMin);
       const first = this.masks.maskBegin(this.scene);
-      this.masks.rectMask(this.scene, this.rows, a, b, c, d, tx, ty, r.xMin, r.yMin, width, height);
+      this.masks.rectMask(
+        this.scene,
+        this.rows,
+        this.places,
+        at + 6,
+        r.xMin,
+        r.yMin,
+        width,
+        height,
+      );
       this.masks.maskUse(this.scene, first);
     }
 
     // A shape takes a morph's new ratio as it is drawn, which its bounds and hit tests follow; one
     // whose bitmap cache Flash shows stale draws what that shows (staleShape).
     const shape = isShape
-      ? this.staleShapes.staleShape(o as ShapeObject, hidden, this.snapshotting, a, b, c, d)
+      ? this.staleShapes.staleShape(
+          o as ShapeObject,
+          hidden,
+          this.snapshotting,
+          this.places,
+          at + 6,
+        )
       : null;
     // adl culls drawTriangles' triangles as they turn on the screen, or in a BitmapData's draw.
     const version = o.drawing ? o.drawing.version : 0;
@@ -940,7 +968,8 @@ export class RenderView implements Drawer {
           this.parts.markFlat(o, layers[i], parts[0]);
         }
 
-        for (const part of parts) {
+        for (let j = 0; j < parts.length; j++) {
+          const part = parts[j];
           // Kept while drawn, even with no texture yet: a layer let go of is tessellated again whole.
           this.geometries.use(part.handle.id);
           // A shader fill's draw names its kernel's chain of the frame's filters.
@@ -1009,62 +1038,21 @@ export class RenderView implements Drawer {
         }
 
         const by = even ? stretch : null;
+        // The cache's key: the transform the lines are stroked through, and the least width.
+        const key = this.lineKey;
+        key[0] = by ? by[0] : a;
+        key[1] = by ? by[1] : b;
+        key[2] = by ? by[2] : c;
+        key[3] = by ? by[3] : d;
+        key[4] = least;
         // A layer with a painted line in pieces, each textured by its paint as a fill's part is.
         const painted = layerLines.painted;
         const lines = painted
           ? null
-          : by
-            ? this.lineCache.take(
-                layers[i],
-                version,
-                by[0],
-                by[1],
-                by[2],
-                by[3],
-                least,
-                null,
-                opaque,
-                layerLines,
-              )
-            : this.lineCache.take(
-                layers[i],
-                version,
-                a,
-                b,
-                c,
-                d,
-                least,
-                lineBy,
-                opaque,
-                layerLines,
-              );
+          : this.lineCache.take(layers[i], version, key, by ? null : lineBy, opaque, layerLines);
         const pieces = !painted
           ? null
-          : by
-            ? this.lineCache.pieces(
-                layers[i],
-                version,
-                by[0],
-                by[1],
-                by[2],
-                by[3],
-                least,
-                null,
-                opaque,
-                layerLines,
-              )
-            : this.lineCache.pieces(
-                layers[i],
-                version,
-                a,
-                b,
-                c,
-                d,
-                least,
-                lineBy,
-                opaque,
-                layerLines,
-              );
+          : this.lineCache.pieces(layers[i], version, key, by ? null : lineBy, opaque, layerLines);
         // Stroked to nothing, or not built, which a later frame tries again.
         if (!lines && !pieces?.length) {
           this.unkept++;
@@ -1077,15 +1065,15 @@ export class RenderView implements Drawer {
           const n0 = by[3] / det;
           const n1 = -by[1] / det;
           const n3 = by[0] / det;
-          stretchRow = this.rows.add(
-            a * n0 + c * n1,
-            b * n0 + d * n1,
-            a * n1 + c * n3,
-            b * n1 + d * n3,
-            tx,
-            ty,
-            color,
-          );
+          // Through a typed array, as six numbers passed would each be boxed.
+          const turn = this.turn;
+          turn[0] = a * n0 + c * n1;
+          turn[1] = b * n0 + d * n1;
+          turn[2] = a * n1 + c * n3;
+          turn[3] = b * n1 + d * n3;
+          turn[4] = tx;
+          turn[5] = ty;
+          stretchRow = this.rows.addPlaced(turn, 0, color);
         } else if (!by && lineRow < 0) {
           lineRow = this.rows.addTranslated(this.places, at + 6, color);
         }
@@ -1097,7 +1085,10 @@ export class RenderView implements Drawer {
           continue;
         }
 
-        for (const { part, handle } of pieces ?? []) {
+        // No lines, so pieces, as the check above found.
+        const drawnPieces = pieces as readonly LinePiece[];
+        for (let j = 0; j < drawnPieces.length; j++) {
+          const { part, handle } = drawnPieces[j];
           // Kept while drawn, even with no texture yet, as a fill's part is.
           this.geometries.use(handle.id);
           const texture = part.paint ? this.paints.paintTexture(part) : null;
@@ -1122,7 +1113,9 @@ export class RenderView implements Drawer {
     }
 
     if (!hidden && isOther && (o instanceof TextObject || o instanceof StaticTextObject)) {
-      const omitted: TextOmissions = { advanced: false, clip: null, clipFrom: 0, clipTo: 0 };
+      // Read before any other text is walked.
+      const omitted = this.omitted;
+      clearOmissions(omitted);
       const items = o instanceof TextObject ? fieldItems(o, omitted) : staticItems(o, omitted);
       // Its embedded glyphs as Saffron draws them, all in one geometry drawn where the first of
       // them was, else as normal text.
@@ -1143,7 +1136,7 @@ export class RenderView implements Drawer {
       // runs on whole canvas pixels.
       const resolution =
         o instanceof TextObject && !o.embedFonts
-          ? deviceTextResolution([a, b, c, d], this.scale * this.resolution)
+          ? deviceTextResolution(this.places, this.scale * this.resolution, at + 6)
           : 1;
       // Its text, where it runs over, clipped inside the gutter; its box and caret are not.
       const clip = omitted.clip;
@@ -1154,12 +1147,8 @@ export class RenderView implements Drawer {
           this.masks.rectMask(
             this.scene,
             this.rows,
-            a,
-            b,
-            c,
-            d,
-            tx,
-            ty,
+            this.places,
+            at + 6,
             clip.x,
             clip.y,
             clip.width,
@@ -1182,12 +1171,8 @@ export class RenderView implements Drawer {
             this.scene,
             this.rows,
             item,
-            a,
-            b,
-            c,
-            d,
-            tx,
-            ty,
+            this.places,
+            at + 6,
             color,
             resolution,
             this.target.scale,
@@ -1197,7 +1182,7 @@ export class RenderView implements Drawer {
           this.geometries.use(advanced.handle.id);
           this.scene.draw(
             advanced.handle.id,
-            placedRow(this.rows, a, b, c, d, tx, ty, advanced.m, color),
+            placedRowAt(this.rows, this.places, at + 6, advanced.m, color),
             NORMAL,
           );
         }

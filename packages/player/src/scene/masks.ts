@@ -22,11 +22,13 @@ import { StaticTextObject, TextObject } from "../display/textobjects.js";
 import type { Parts } from "./parts.js";
 import { unsupported } from "./shapes.js";
 import { fieldItems, staticItems, type TextOmissions } from "./text.js";
-import { placedRow } from "./text-items.js";
+import { placedRow, placedRowAt } from "./text-items.js";
 
 export class Masks {
   /** The masks pushed and not yet popped, as each one's first draw and count. */
   private readonly stack: number[] = [];
+  /** A rectangle's place in its object, rewritten for each (rectMask). */
+  private readonly rectPlace = { a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0 };
 
   constructor(
     private readonly geometries: Geometries,
@@ -58,33 +60,28 @@ export class Masks {
     scene.marker(MASK_POP, first, count);
   }
 
-  /** A rectangle of `o`'s space, x y width height, under its transform (a b c d tx ty), as a mask's draw. */
+  /**
+   * A rectangle of `o`'s space, x y width height, under its transform (a b
+   * c d tx ty, read from `places[at]` so that none is boxed passing it), as
+   * a mask's draw.
+   */
   rectMask(
     scene: SceneList,
     rows: Rows,
-    a: number,
-    b: number,
-    c: number,
-    d: number,
-    tx: number,
-    ty: number,
+    places: Float64Array,
+    at: number,
     x: number,
     y: number,
     width: number,
     height: number,
   ): void {
     const quad = this.parts.unitQuad();
-    const row = placedRow(
-      rows,
-      a,
-      b,
-      c,
-      d,
-      tx,
-      ty,
-      { a: width, b: 0, c: 0, d: height, tx: x, ty: y },
-      null,
-    );
+    const m = this.rectPlace;
+    m.a = width;
+    m.d = height;
+    m.tx = x;
+    m.ty = y;
+    const row = placedRowAt(rows, places, at, m, null);
     this.geometries.use(quad.id);
     scene.draw(quad.id, row, NORMAL);
   }
