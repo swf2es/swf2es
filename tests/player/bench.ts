@@ -108,6 +108,12 @@
 // every fifth pulsing. What a crowded town's characters cost: new lines for
 // new stretches, filters and the frame's walks.
 //
+// --timelines N plays instead N sprites of their own, each a timeline of
+// --loop K frames (240) on which 12 parts move on every frame, every third
+// fading too, each named where first placed, as a SWF's tweened animations
+// are once laid out frame by frame: what its timelines hold in memory (with
+// --allocs, after a full collection) and what playing them costs.
+//
 // --pipelined waits for the GPU only every 30 frames, not after each, so
 // that its work goes on behind the next frames' as a page's does: the
 // frames' mean is then the slower of the page's and the GPU's share, where
@@ -194,7 +200,7 @@
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
-//     | --scripted N [--still] | --town N | --still-crowd N
+//     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]] [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
@@ -256,6 +262,7 @@ const blendClips = args.includes("--blend-clips");
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
+const timelines = option("timelines", 0);
 const stillCrowd = option("still-crowd", 0);
 const scrolled = option("scroll", 0);
 const stamps = option("stamps", 0);
@@ -1412,6 +1419,73 @@ function trianglesSwf(count: number, culled: boolean): Uint8Array {
   });
 }
 
+/**
+ * The timelines (--timelines): `count` sprites, each with frames of its own,
+ * `loop` of them, on which 12 parts move, every third fading as well.
+ */
+function timelinesSwf(count: number, loop: number): Uint8Array {
+  const tags: Uint8Array[] = [w.fileAttributes(true), w.backgroundColor(0xffffff)];
+  for (let i = 0; i < 4; i++) {
+    tags.push(part(11 + i, 6 + 2 * i));
+  }
+
+  for (let c = 0; c < count; c++) {
+    const sprite: Uint8Array[] = [];
+    for (let f = 0; f < loop; f++) {
+      const t = (2 * Math.PI * f) / loop;
+      for (let i = 0; i < 12; i++) {
+        const a = 0.5 * Math.sin(t * 2 + i + c);
+        const s = 0.6 + 0.3 * Math.sin(t * 3 + i);
+        const matrix = {
+          a: s * Math.cos(a),
+          b: s * Math.sin(a),
+          c: -s * Math.sin(a),
+          d: s * Math.cos(a),
+          tx: Math.round(500 * Math.cos(i + t)),
+          ty: Math.round(500 * Math.sin(i * 1.7 + t)),
+        };
+        const colorTransform =
+          i % 3 === 0 ? { mult: [1, 1, 1, 0.6 + 0.4 * Math.sin(t * 4 + i)] } : undefined;
+        sprite.push(
+          f === 0
+            ? w.place({
+                depth: i + 1,
+                character: 11 + (i % 4),
+                name: `part${i}`,
+                matrix,
+                colorTransform,
+              })
+            : w.place({ depth: i + 1, move: true, matrix, colorTransform }),
+        );
+      }
+
+      sprite.push(w.showFrame());
+    }
+
+    tags.push(w.sprite(100 + c, loop, [...sprite, w.end()]));
+  }
+
+  const columns = Math.ceil(Math.sqrt(count));
+  const scale = 2 / columns;
+  for (let c = 0; c < count; c++) {
+    tags.push(
+      w.place({
+        depth: c + 1,
+        character: 100 + c,
+        matrix: {
+          a: scale,
+          d: scale,
+          tx: Math.round(((c % columns) + 0.5) * (WIDTH / columns) * TWIPS),
+          ty: Math.round((Math.floor(c / columns) + 0.5) * (HEIGHT / columns) * TWIPS),
+        },
+      }),
+    );
+  }
+
+  tags.push(w.showFrame(), w.end());
+  return w.swf({ width: WIDTH, height: HEIGHT, frameRate: 24, frameCount: 1, tags });
+}
+
 /** The town's classes: the root, and each character's, whose frame scripts count its loops. */
 const TOWN_SOURCE = readFileSync(new URL("./scripts/BenchTown.as", import.meta.url), "utf8");
 
@@ -2001,38 +2075,40 @@ const swf =
                     ? stampsSwf(stamps)
                     : town > 0
                       ? townSwf(town)
-                      : stillCrowd > 0
-                        ? stillCrowdSwf(stillCrowd)
-                        : toggleBranches > 0
-                          ? branchSwf(toggleBranches)
-                          : toggle > 0
-                            ? toggleSwf(toggle)
-                            : toggleStatic > 0
-                              ? toggleStaticSwf(toggleStatic)
-                              : scripted > 0
-                                ? scriptedSwf(scripted, args.includes("--still"))
-                                : pulse > 0
-                                  ? pulseSwf(
-                                      pulse,
-                                      option("loop", 96),
-                                      option("line", 1),
-                                      option("squash", 1),
-                                    )
-                                  : masks > 0
-                                    ? masksSwf(masks, args.includes("--unmasked"))
-                                    : blends > 0
-                                      ? blendsSwf(blends, blendFills, blendClips)
-                                      : branches > 0
-                                        ? branchSwf(branches)
-                                        : rig > 0
-                                          ? rigSwf(
-                                              rig,
-                                              args.includes("--swap"),
-                                              args.includes("--fresh"),
-                                              args.includes("--blurred") || filtered > 0,
-                                              args.includes("--glide"),
-                                            )
-                                          : synthetic();
+                      : timelines > 0
+                        ? timelinesSwf(timelines, option("loop", 240))
+                        : stillCrowd > 0
+                          ? stillCrowdSwf(stillCrowd)
+                          : toggleBranches > 0
+                            ? branchSwf(toggleBranches)
+                            : toggle > 0
+                              ? toggleSwf(toggle)
+                              : toggleStatic > 0
+                                ? toggleStaticSwf(toggleStatic)
+                                : scripted > 0
+                                  ? scriptedSwf(scripted, args.includes("--still"))
+                                  : pulse > 0
+                                    ? pulseSwf(
+                                        pulse,
+                                        option("loop", 96),
+                                        option("line", 1),
+                                        option("squash", 1),
+                                      )
+                                    : masks > 0
+                                      ? masksSwf(masks, args.includes("--unmasked"))
+                                      : blends > 0
+                                        ? blendsSwf(blends, blendFills, blendClips)
+                                        : branches > 0
+                                          ? branchSwf(branches)
+                                          : rig > 0
+                                            ? rigSwf(
+                                                rig,
+                                                args.includes("--swap"),
+                                                args.includes("--fresh"),
+                                                args.includes("--blurred") || filtered > 0,
+                                                args.includes("--glide"),
+                                              )
+                                            : synthetic();
 if (args.includes("--write-swf")) {
   writeFileSync(args[args.indexOf("--write-swf") + 1], swf);
   process.exit(0);
@@ -2100,27 +2176,29 @@ const summary = {
                     ? `readback of ${readback} edges${args.includes("--opaque") ? ", opaque" : ""}`
                     : town > 0
                       ? `town of ${town}`
-                      : stillCrowd > 0
-                        ? `still crowd of ${stillCrowd}, one in 32 playing`
-                        : toggleBranches > 0
-                          ? `toggle of ${toggleBranches} branches`
-                          : toggle > 0
-                            ? `toggle of ${toggle}`
-                            : toggleStatic > 0
-                              ? `static toggle of ${toggleStatic}`
-                              : scripted > 0
-                                ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
-                                : pulse > 0
-                                  ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
-                                  : masks > 0
-                                    ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
-                                    : blends > 0
-                                      ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
-                                      : branches > 0
-                                        ? `${branches} branches`
-                                        : rig > 0
-                                          ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
-                                          : shapes,
+                      : timelines > 0
+                        ? `${timelines} timelines of ${option("loop", 240)} frames`
+                        : stillCrowd > 0
+                          ? `still crowd of ${stillCrowd}, one in 32 playing`
+                          : toggleBranches > 0
+                            ? `toggle of ${toggleBranches} branches`
+                            : toggle > 0
+                              ? `toggle of ${toggle}`
+                              : toggleStatic > 0
+                                ? `static toggle of ${toggleStatic}`
+                                : scripted > 0
+                                  ? `scripted rig of ${scripted}${args.includes("--still") ? ", still" : ""}`
+                                  : pulse > 0
+                                    ? `pulsing rig of ${pulse}, loop of ${option("loop", 96)}, lines ${option("line", 1)} twips${pace > 0 ? `, ${pace} ms apart` : ""}`
+                                    : masks > 0
+                                      ? `${masks} masked lists${args.includes("--unmasked") ? ", unmasked" : ""}`
+                                      : blends > 0
+                                        ? `${blends} blended shapes${blendFills > 1 ? `, ${blendFills} fills to a coloured one` : ""}${blendClips ? ", each in a blended clip" : ""}`
+                                        : branches > 0
+                                          ? `${branches} branches`
+                                          : rig > 0
+                                            ? `rig of ${rig}${["swap", "fresh", "blurred", "glide"].map((o) => (args.includes(`--${o}`) ? `, ${o}` : "")).join("")}${filtered > 0 ? `, every ${ordinal(filtered)} part blurred` : ""}${added ? ", added" : ""}`
+                                            : shapes,
   counts: result.counts,
   heapMb: result.heap.map((b) => Math.round(b / 1e5) / 10),
   retainedMb: {
