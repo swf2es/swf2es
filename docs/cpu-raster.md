@@ -294,3 +294,39 @@ a texture already; in node it is not drawn.
    What should it be?
 9. **Heuristic thresholds** (2, 12 of 16, 8) are guesses until
    `bench.ts --drawer auto` and real SWFs show their effect.
+
+## 8. Since this draft (November 2026)
+
+Later changes that bear on the design:
+
+- **Fills tile.** Dense crossing fills now go to lyon behind a scanline
+  check (`validate.zig`), with libtess2 as the fallback (#1174, #1176),
+  so every filler's triangles cover each point once by the fill's rule.
+  The check passes stretches under a quarter of a pixel and a summed
+  drift under a quarter of a pixel per scanline, so a sliver that thin
+  may still be covered twice or not at all. Both backends get the same
+  triangles, so the differential tests in section 5 are unaffected; a
+  comparison with Flash's references may see it at an edge sample.
+- **A path rasterizer, as an alternative for fills.** `validate.zig`
+  already finds each scanline's crossings and decides coverage under
+  even-odd and non-zero. Run at the sample rows, (i + 0.5)/n of a pixel,
+  the same walk could fill a path's samples directly, with no
+  tessellation, for draws that only the CPU sees (node). It still counts
+  samples, but an edge sample is decided by the crossing, not by the top-left
+  rule, so it would not match the GPU's triangles exactly (question 1).
+- **Bitmap stores** (#1175): a library bitmap's pixels are inflated on
+  demand and dropped once its texture is made. The CPU backend should
+  read texels through `BitmapStore.texels`, which inflates without
+  keeping, not through `pixels`, which makes the store the script's own
+  and unshared.
+- **Geometry copies** (in progress, `perf/geometry-copies`): the
+  renderer drops the CPU copy of a geometry once the GPU has it, with a
+  rebuild path for context loss. The CPU backend must read geometries
+  through that path. In node nothing is uploaded, so nothing is
+  dropped. This bears on question 4.
+- **Memory** (question 6): on 95-contour decks lyon's fills reach 30 to
+  34 MB of the render instance's arena. A band pass and its filtered
+  layers in the same instance share the 128 MiB ceiling with them, so
+  the CPU backend should run in an instance of its own, as each
+  `Tessellator` does, or budget for it. Codegen's memory no longer
+  peaks with a module's whole text (#1177).
