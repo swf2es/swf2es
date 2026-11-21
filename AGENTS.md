@@ -172,9 +172,6 @@ node tests/player/census-check.ts   # the census's counts add up to GL's sub-dra
 node tests/player/bench.ts --deck N [--paint solid|gradient|bitmap] [--ratio-change] [--gpu]
                               # one even-odd fill of N densely crossing contours, which libtess2 is
                               # slow at; --ratio-change tessellates it anew each frame (tess: its time)
-node tests/player/cover-bench.ts [--gpu] [--decks 10,40,80,160] [--samples 4,16] [--scales 1,2]
-                              # that deck drawn by a stencil-then-cover prototype against libtess2's
-                              # triangles: pixels compared, GPU time (TIME_ELAPSED) and CPU time
 node tests/player/morph-bench.ts [--morphs N] [--edges N] [--loop N] [--phases] [--unique] [--gpu]
                               # animated morphs: frame time and cache work; --loop 0 visits fresh
                               # ratios, --allocs samples allocation, --counts counts native calls

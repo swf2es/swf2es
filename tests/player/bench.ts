@@ -177,7 +177,6 @@
 // bitmap instead of a colour (solid). --ratio-change makes it a morph shape placed at a new ratio
 // each frame, so that every frame tessellates it anew, as a tween of such a morph does. The
 // frames' tessellation (tess) is their draw's part spent in the tessellator, for every mode.
-// cover-bench.ts draws the same deck by stencil-then-cover instead.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens

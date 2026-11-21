@@ -87,10 +87,7 @@ draws on the machine's GPU (on a machine with two,
   each other, filled even-odd, whose crossings make libtess2 slow with
   the square of N (`--paint gradient` or `bitmap`; `--ratio-change`
   makes it a morph at a new ratio each frame, tessellated anew); the
-  `tess` line, for every scene, is the draw's time in the tessellator.
-  `tests/player/cover-bench.ts` draws the same deck by a stencil-then-cover
-  prototype and by libtess2's triangles, and compares their pixels, GPU
-  time and CPU time;
+  `tess` line, for every scene, is the draw's time in the tessellator;
 - and others for one path each: `--rig`, `--pulse`, `--branches`,
   `--toggle`, `--masks`, `--scroll`, `--stamps`, `--pen`, `--triangles`,
   `--redraw`, `--vectors` (the script's header says what each plays).

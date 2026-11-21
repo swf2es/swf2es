@@ -1,7 +1,7 @@
 // The deck: a fill of many wobbly closed contours stacked almost on top of each other, each turned
 // a little from the last, so that neighbours cross at many points and libtess2's sweep slows
 // with the square of the crossings, as one real morph shape's does (#1104, "pathological
-// fills"). bench.ts --deck plays it; cover-bench.ts draws it covered and tessellated.
+// fills"). bench.ts --deck plays it.
 
 /** Points a contour. */
 export const DECK_POINTS = 200;
