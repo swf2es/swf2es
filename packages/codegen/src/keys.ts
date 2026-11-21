@@ -66,10 +66,15 @@ interface Mark {
   filled: number;
 }
 
-/** A domain's chain: where it goes on from, and the last ends of its blocks, for a new child's start. */
+/**
+ * A domain's chain: where it goes on from, the last ends of its blocks,
+ * for a new child's start, and where it was at the settled entries its
+ * last key split at, where it has gone past them for a child's start.
+ */
 interface Chain {
   marks: Mark[];
   at: Mark;
+  held?: Mark;
 }
 
 const EMPTY = new Uint8Array(0);
@@ -126,15 +131,25 @@ export class KeyChains {
     }
 
     // Gone past the settled entries for a child's start: from the last
-    // block's end before them, as the key splits its blocks there.
+    // block's end before them, as the key splits its blocks there, or
+    // from where the last key split, kept, as only the last KEPT block
+    // ends are, and a chain gone further for children would read the
+    // domain's log from the start for every key until it gains an ABC.
     let at = chain.at;
     if (at.entry > settled) {
-      const back: Chain = { marks: [], at: before(chain.marks, settled) };
+      let from = before(chain.marks, settled);
+      const held = chain.held;
+      if (held !== undefined && held.entry <= settled && held.entry >= from.entry) {
+        from = held;
+      }
+
+      const back: Chain = { marks: [], at: from };
       if (!this.extend(appDomain, after, back, settled)) {
         return null;
       }
 
       at = back.at;
+      chain.held = at;
     }
 
     const rest = this.codegen.log(appDomain, after, settled, -1, 0, 0);

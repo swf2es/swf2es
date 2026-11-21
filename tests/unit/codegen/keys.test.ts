@@ -375,3 +375,38 @@ test("an ABC of a domain not live has no key, and its domain keeps no chain", as
     assert.equal(new KeyChains(keyLog(t)).context(index, LIBRARIES), null);
   }
 });
+
+test("a domain whose chain a child took past its settled entries keys as from nothing, again", async () => {
+  const { t, abcDomain, main } = await start();
+  const read = { bytes: 0 };
+  const chains = new KeyChains(keyLog(t, true, read));
+  // A SWF's ABCs added, then compiled: what they log is past the entries the
+  // main movie's domain settled, until it gains an ABC.
+  const first = abcDomain.length;
+  for (let k = 0; k < 40; k++) {
+    assert.equal(t.domainAdd(pool[k % pool.length], false, main), 0);
+    abcDomain.push(main);
+  }
+
+  for (let k = 0; k < 40; k++) {
+    chains.context(first + k, LIBRARIES);
+    t.domainModule("", first + k, false);
+  }
+
+  // A child's start takes the main movie's domain's chain through all of it.
+  const child = t.domainChild(main);
+  assert.equal(t.domainAdd(sorts, false, child), 0);
+  abcDomain.push(child);
+  chains.context(abcDomain.length - 1, LIBRARIES);
+
+  const last = first + 39;
+  const reads: number[] = [];
+  for (let k = 0; k < 2; k++) {
+    read.bytes = 0;
+    const kept = chains.context(last, LIBRARIES);
+    reads.push(read.bytes);
+    assert.deepEqual(kept, new KeyChains(keyLog(t, false)).context(last, LIBRARIES));
+  }
+
+  assert.ok(reads[1] <= reads[0], `read ${reads[0]} bytes, then ${reads[1]}`);
+});
