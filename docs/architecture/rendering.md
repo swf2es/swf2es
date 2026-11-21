@@ -128,7 +128,9 @@ bounds and hit-tests as one. The blend mixes where the ends' points lie,
 not their deltas, a straight edge paired with a curve as a curve, and
 keeps them to whole twips, so a closed path stays closed for `display/shapes.ts`
 to join. A morph starts by keeping its 64 latest blends, shared by its
-instances. If an evicted ratio returns, the limit doubles, up to 256;
+instances, and, as shapes are, by every SWF whose tag is alike but for
+one filled with a bitmap, so a SWF loaded again draws the blends the first
+made, tessellated once. If an evicted ratio returns, the limit doubles, up to 256;
 only the latest 256 evicted ratio numbers are remembered. This lets longer
 looping tweens reuse their paths and tessellations without increasing the
 limit for characters whose ratios never repeat. Clearing the blends resets the limit,

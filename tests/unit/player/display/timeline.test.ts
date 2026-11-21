@@ -4,10 +4,17 @@ import { setImmediate } from "node:timers/promises";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
 import { readShape, readSwf } from "@swf2es/format";
+import { Tessellator } from "@swf2es/native/render";
+import { morphAt } from "../../../../packages/player/dist/display/morph.js";
 import { shapeLayers } from "../../../../packages/player/dist/display/shapes.js";
+import type { MorphCharacter } from "../../../../packages/player/dist/display/timeline.js";
 import { readLibrary } from "../../../../packages/player/dist/display/timeline.js";
+import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
+import { Parts } from "../../../../packages/player/dist/scene/parts.js";
 import { placeGlyphs } from "../../../../packages/player/dist/text/static.js";
+import { Geometries } from "../../../../packages/render/dist/index.js";
 import * as w from "../../../swf-writer.ts";
+import { crossingMorphTag, movieOf } from "../scene/crossing-morph.ts";
 
 test("legacy fonts receive names, styles and character mappings after text has referenced them", () => {
   const library = readLibrary(
@@ -159,4 +166,103 @@ test("a shape is drawn into layers when first asked for, as it was at once", () 
   const eager = shapeLayers(readShape(swf.bytes, tag.code, tag.offset, tag.length));
   assert.deepEqual(shape.layers, eager);
   assert.equal(shape.layers, shape.layers);
+});
+
+const morphIn = (bytes: Uint8Array) => {
+  const morph = readLibrary(readSwf(bytes)).characters.get(1);
+  assert.equal(morph?.type, "morph");
+  return morph as MorphCharacter;
+};
+
+test("a SWF read again shares its morphs, and their blends, with the first, and only the morphs alike", () => {
+  const bytes = movieOf(crossingMorphTag(4));
+  const first = morphIn(bytes);
+  const second = morphIn(bytes.slice());
+  assert.equal(second, first);
+  assert.equal(morphAt(second, 1000), morphAt(first, 1000));
+  assert.notEqual(morphIn(movieOf(crossingMorphTag(4, 200, 0xff996633))), first);
+});
+
+test("a second load of a morph tessellates none of the blends the first drew", () => {
+  const tessellator = new Tessellator();
+  const geometries = new Geometries();
+  let calls = 0;
+  const tessellate = {
+    layer: (...args: Parameters<typeof tessellator.tessellate.layer>) => {
+      calls++;
+      return tessellator.tessellate.layer(...args);
+    },
+    lines: tessellator.tessellate.lines,
+  };
+  const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate));
+  const ratios = [0, 21845, 43690, 65535];
+  const play = (bytes: Uint8Array) => {
+    const morph = morphIn(bytes);
+    for (const ratio of ratios) {
+      for (const layer of morphAt(morph, ratio).layers) {
+        parts.partsOf(layer, 0);
+      }
+
+      geometries.endFrame();
+    }
+
+    return morph;
+  };
+
+  try {
+    const bytes = movieOf(crossingMorphTag(4));
+    const first = play(bytes);
+    assert.equal(calls, ratios.length);
+    const second = play(bytes.slice());
+    assert.equal(second, first);
+    assert.equal(calls, ratios.length);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a morph filled with a bitmap keeps to its SWF", () => {
+  const tag = w.morphShape({
+    id: 1,
+    startBounds: [0, 400, 0, 400],
+    endBounds: [0, 400, 0, 400],
+    fills: [{ type: 0x41, bitmap: 7, startMatrix: { a: 20, d: 20 }, endMatrix: { a: 20, d: 20 } }],
+    start: [
+      {
+        fill1: 1,
+        commands: [{ move: [0, 0] }, { line: [400, 0] }, { line: [400, 400] }, { line: [0, 0] }],
+      },
+    ],
+    end: [[{ move: [0, 0] }, { line: [400, 0] }, { line: [400, 400] }, { line: [0, 0] }]],
+  });
+  const bytes = movieOf(tag);
+  const first = morphIn(bytes);
+  assert.equal(first.morph.fills[0].start.type, "bitmap");
+  assert.notEqual(morphIn(bytes.slice()), first);
+});
+
+test("a shared morph goes, with its blends, once no library holds it", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc: () => void = runInNewContext("gc");
+  const bytes = movieOf(crossingMorphTag(4));
+
+  const load = () => {
+    const morph = morphIn(bytes.slice());
+    const blend = morphAt(morph, 30000);
+    return { morph: new WeakRef(morph), blend: new WeakRef(blend) };
+  };
+  const { morph, blend } = load();
+  // A load while the first's is held shares it.
+  assert.equal(morphIn(bytes.slice()), morph.deref());
+
+  for (let i = 0; i < 10 && morph.deref(); i++) {
+    await setImmediate();
+    gc();
+  }
+
+  assert.equal(morph.deref(), undefined);
+  assert.equal(blend.deref(), undefined);
+  // Read again after, a new one, whose blends are made again.
+  const again = morphIn(bytes.slice());
+  assert.equal(again.blends.size, 0);
 });
