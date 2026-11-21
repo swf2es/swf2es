@@ -5,6 +5,7 @@
 // and the blocks each queued action runs (docs/avm1.md, "The frame").
 import { avm1 } from "@swf2es/runtime";
 import type { DisplayObject, MovieClip } from "../display/display.js";
+import { ACTIONS } from "../display/places.js";
 import type { Avm1 } from "./avm1.js";
 import { ClipNative, nativeOf } from "./globals/MovieClip.js";
 import type { Avm1Swf } from "./swf.js";
@@ -305,9 +306,11 @@ export class ActionQueue {
   /** CallFrame: the actions of `clip`'s frame `frame`, run now in order, each with a pool of its own. */
   callFrame(clip: MovieClip, frame: number): void {
     const swf = this.movie.swfOf(clip);
-    for (const command of clip.timeline.frames[frame - 1] ?? []) {
-      if (command.type === "actions") {
-        for (const index of swf.list?.byTag.get(command.tag) ?? []) {
+    const timeline = clip.timeline;
+    const store = timeline.store;
+    for (let c = store.start(timeline, frame), end = store.end(timeline, frame); c < end; c++) {
+      if (store.kinds[c] === ACTIONS) {
+        for (const index of swf.list?.byTag.get(store.args[c]) ?? []) {
           this.runBlock(swf, index, [], clip);
         }
       }

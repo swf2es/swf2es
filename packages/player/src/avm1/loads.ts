@@ -138,7 +138,7 @@ function within(previous: Promise<unknown>, ms: number): Promise<unknown> {
 }
 
 /** What a clip unloaded or in error shows: no frames, which it never enters. */
-const NO_FRAMES: Timeline = { ...EMPTY_TIMELINE, frames: [] };
+const NO_FRAMES: Timeline = { ...EMPTY_TIMELINE, frameCount: 0 };
 
 /** loadMovie's and MovieClipLoader's loads, which the movie owns. */
 export class MovieLoads {
