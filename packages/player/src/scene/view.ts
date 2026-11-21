@@ -2137,6 +2137,7 @@ export class RenderView implements Drawer {
     this.canvas.removeEventListener("webglcontextlost", this.lost);
     this.canvas.removeEventListener("webglcontextrestored", this.restored);
     this.backend.destroy();
+    this.parts.destroy();
     this.releaseOutlines();
     this.ownTessellator?.dispose();
     if (this.ownCanvas && !this.gl.isContextLost()) {

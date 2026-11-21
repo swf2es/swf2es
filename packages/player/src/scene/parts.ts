@@ -93,6 +93,11 @@ export class Parts {
     private readonly kept: KeptParts = keptParts,
   ) {}
 
+  /** The view destroyed: its kept triangles let go of, which another view's budget may use. */
+  destroy(): void {
+    this.kept.forgetView(this.geometries);
+  }
+
   /** A frame drawn, its geometries' frame ended: the kept triangles whose geometries expired counted. */
   endFrame(): void {
     this.kept.settle(this.geometries);

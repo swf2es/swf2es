@@ -109,7 +109,7 @@ for (const keeping of KEEPING) {
 
 for (const keeping of KEEPING) {
   test(`expiry, context loss, drawing versions and masks still invalidate independently, keeping ${keeping}`, () => {
-    const { tessellator, geometries, parts, d, calls } = fixture(keeping);
+    const { tessellator, geometries, parts, d, calls, kept } = fixture(keeping);
     try {
       const layer = d.layers[0];
       let regular = parts.partsOf(layer, d.version);
@@ -117,8 +117,13 @@ for (const keeping of KEEPING) {
       assert.notEqual(regular, mask);
       for (let i = 0; i <= IDLE_FRAMES + 1; i++) {
         geometries.endFrame();
+        parts.endFrame();
       }
+      const expired = kept.bytes;
+      assert.equal(expired > 0, keeping);
       let next = parts.partsOf(layer, d.version);
+      // The drawn parts added again count no more; the mask's, still expired, do.
+      assert.ok(keeping ? kept.bytes > 0 && kept.bytes < expired : kept.bytes === 0);
       assert.notEqual(next, regular);
       assert.ok(next.every((p) => geometries.alive(p.handle)));
       regular = next;
@@ -203,7 +208,10 @@ test("kept layers hold their buffers past expiry, till their drawing changes", a
     gc();
     assert.notEqual(first.deref(), undefined);
 
+    // The expired triangles of the old version let go of, and the new version's held.
     draw(d.version + 1);
+    assert.equal(kept.bytes, 0);
+    assert.equal(kept.size, 1);
     await setImmediate();
     gc();
     assert.equal(first.deref(), undefined);
@@ -746,10 +754,17 @@ test("a collected view's kept triangles go with it, though their layers live on"
         kept,
       );
       parts.partsOf(layer, 0);
+      // Expired before the view goes, so that it counts.
+      for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+        geometries.endFrame();
+        parts.endFrame();
+      }
+
       return new WeakRef(geometries);
     };
     const view = keep();
     assert.equal(kept.size, 1);
+    assert.ok(kept.bytes > 0);
 
     for (let i = 0; i < 20 && kept.size > 0; i++) {
       await setImmediate();
@@ -758,7 +773,61 @@ test("a collected view's kept triangles go with it, though their layers live on"
 
     assert.equal(view.deref(), undefined);
     assert.equal(kept.size, 0);
+    assert.equal(kept.bytes, 0);
     assert.equal(layer.fills.length, 2);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a destroyed view's kept triangles go at once, though it is still held", () => {
+  const { tessellator, kept, a, b } = twoViews(1 << 30, []);
+  try {
+    a.parts.partsOf(squares(40).layers[0], 0);
+    a.idle();
+    const [part] = b.parts.partsOf(squares(60).layers[0], 0);
+    assert.equal(kept.size, 2);
+    assert.ok(kept.bytes > 0);
+
+    a.parts.destroy();
+    assert.equal(kept.size, 1);
+    assert.equal(kept.bytes, 0);
+    // The other view's go on as they were.
+    b.idle();
+    assert.ok(kept.bytes > 0);
+    assert.ok(!b.geometries.alive(part.handle));
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("of two kept triangles worth the same, the one counted stays and the newcomer goes", () => {
+  // Alike, made in 1 ms each, with room for one.
+  const size = (() => {
+    const fixture = counting({ slowMs: 0 });
+    try {
+      fixture.parts.partsOf(squares(40).layers[0], 0);
+      idle(fixture);
+      return fixture.kept.bytes;
+    } finally {
+      fixture.tessellator.dispose();
+    }
+  })();
+  const { tessellator, kept, calls, a } = twoViews(Math.floor(size * 1.5), [1, 1]);
+  try {
+    const [first, second] = [squares(40), squares(40)].map((d) => d.layers[0]);
+    a.parts.partsOf(first, 0);
+    a.idle();
+    a.parts.partsOf(second, 0);
+    a.idle();
+    assert.equal(kept.size, 1);
+    assert.equal(kept.bytes, size);
+
+    const made = calls.layers;
+    a.parts.partsOf(first, 0);
+    assert.equal(calls.layers, made);
+    a.parts.partsOf(second, 0);
+    assert.equal(calls.layers, made + 1);
   } finally {
     tessellator.dispose();
   }

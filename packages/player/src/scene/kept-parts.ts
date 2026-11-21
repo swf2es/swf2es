@@ -144,7 +144,7 @@ export class KeptParts {
       view = { owners: new Set(), held: new Set(), settledAt: registry.removalVersion };
       this.views.set(registry, view);
       this.listed.add(view);
-      this.viewGone.register(registry, view);
+      this.viewGone.register(registry, view, view);
     }
 
     this.forget(owner);
@@ -180,6 +180,25 @@ export class KeptParts {
     this.count--;
     this.layerGone.unregister(owner);
     owner.kept = null;
+  }
+
+  /**
+   * `registry`'s view destroyed: its kept triangles let go of now, as one
+   * destroyed may still be held a while, keeping them from the budget.
+   */
+  forgetView(registry: Geometries): void {
+    const view = this.views.get(registry);
+    if (!view) {
+      return;
+    }
+
+    for (const owner of view.owners) {
+      this.forget(owner);
+    }
+
+    this.views.delete(registry);
+    this.listed.delete(view);
+    this.viewGone.unregister(view);
   }
 
   /**
