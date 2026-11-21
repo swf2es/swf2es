@@ -9,6 +9,8 @@
 import { AIR_API_VERSION, API_VERSION, checkApiVersion, isAirApiVersion } from "@swf2es/format";
 import { instantiate } from "./codegen.js";
 
+export { hex, sha256Here } from "./sha256.js";
+
 /** Bumped whenever generated code or the runtime ABI it calls changes. */
 export const COMPILER_VERSION = "0.0.0";
 
