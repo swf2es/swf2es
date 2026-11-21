@@ -270,7 +270,14 @@ export class Playback {
 
     let drew = false;
     if (show && (this.player.changes !== this.drawn || this.dirty)) {
-      this.draw();
+      // Reported as a frame's error is: a bitmap whose pixels cannot be made again for want of
+      // memory throws from the draw that uploads it.
+      try {
+        this.draw();
+      } catch (error) {
+        this.report(error);
+      }
+
       drew = true;
     }
 
