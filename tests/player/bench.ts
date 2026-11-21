@@ -59,7 +59,10 @@
 // what a blend mode costs an object that is one fill. --blend-fills K cuts
 // the coloured ones into K fills that meet, as a SWF's art in a blend
 // mode often is; --blend-clips puts each shape in a clip of its own, which
-// takes the blend mode, as a SWF usually blends its art.
+// takes the blend mode, as a SWF usually blends its art. --blend-after F
+// draws the shapes normally till frame F, which gives each its blend mode,
+// as a script sets one on art drawn for a while (a part asked to be looked
+// into after its geometry's arrays were let go of: Parts.markFlat).
 //
 // --hover holds the mouse still over the stage's middle, as a user's often
 // is, for what a SWF with scripts does for it each frame: with --scripted
@@ -224,6 +227,7 @@
 //     | --pulse N [--loop K] [--line W] [--squash F]
 //     | --branches N | --toggle-branches N | --toggle N
 //     | --toggle-static N | --still-shapes N | --masks N [--unmasked] | --blends N [--blend-fills K] [--blend-clips]
+//     [--blend-after F]
 //     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]
@@ -286,6 +290,7 @@ const masks = option("masks", 0);
 const blends = option("blends", 0);
 const blendFills = Math.max(1, option("blend-fills", 1));
 const blendClips = args.includes("--blend-clips");
+const blendAfter = option("blend-after", 0);
 const scripted = option("scripted", 0);
 const pulse = option("pulse", 0);
 const town = option("town", 0);
@@ -784,7 +789,7 @@ function slices(r: number, sides: number, count: number): Pick<w.ShapeSpec, "fil
  * hard light in turn, every other one gliding; or each in a clip that takes
  * the blend mode, where `clips` (--blends, --blend-fills, --blend-clips).
  */
-function blendsSwf(count: number, fills: number, clips: boolean): Uint8Array {
+function blendsSwf(count: number, fills: number, clips: boolean, after = 0): Uint8Array {
   const pixels: number[] = [];
   for (let y = 0; y < 16; y++) {
     for (let x = 0; x < 16; x++) {
@@ -855,15 +860,24 @@ function blendsSwf(count: number, fills: number, clips: boolean): Uint8Array {
         depth: i + 2,
         character: (clips ? 5 : 3) + (i % 2),
         matrix: at(i, 0),
-        blendMode: modes[Math.floor(i / 2) % modes.length],
+        blendMode: after > 0 ? undefined : modes[Math.floor(i / 2) % modes.length],
       }),
     );
   }
 
   tags.push(w.showFrame());
   for (let f = 1; f < loop; f++) {
-    for (let i = 1; i < count; i += 2) {
-      tags.push(w.place({ depth: i + 2, move: true, matrix: at(i, f) }));
+    // Each shape given its blend mode on frame `after`, the gliding ones moved as ever.
+    const all = after > 0 && f === after;
+    for (let i = all ? 0 : 1; i < count; i += all ? 1 : 2) {
+      tags.push(
+        w.place({
+          depth: i + 2,
+          move: true,
+          matrix: i % 2 ? at(i, f) : undefined,
+          blendMode: all ? modes[Math.floor(i / 2) % modes.length] : undefined,
+        }),
+      );
     }
 
     tags.push(w.showFrame());
@@ -2418,7 +2432,12 @@ const swf =
                                           : masks > 0
                                             ? masksSwf(masks, args.includes("--unmasked"))
                                             : blends > 0
-                                              ? blendsSwf(blends, blendFills, blendClips)
+                                              ? blendsSwf(
+                                                  blends,
+                                                  blendFills,
+                                                  blendClips,
+                                                  blendAfter,
+                                                )
                                               : branches > 0
                                                 ? branchSwf(branches)
                                                 : rig > 0
