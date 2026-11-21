@@ -208,6 +208,7 @@ for (let k = 0; k < caseCount; k++) {
     // same string.
     const parts: Uint8Array[] = [testing.domainModuleBytes(hashes, -1, false)];
     while (!testing.domainModuleDone()) {
+      testing.__collect();
       parts.push(testing.domainModuleMoreBytes());
     }
 

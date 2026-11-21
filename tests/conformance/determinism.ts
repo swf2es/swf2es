@@ -159,6 +159,9 @@ function compileInParts(testing: any, abc: Uint8Array): string[] {
   const parts = (hashes: string, keep: boolean) => {
     const got = [utf8.decode(testing.domainModuleBytes(hashes, -1, keep, false))];
     while (!testing.domainModuleDone()) {
+      // Collected at every cut, as the wrapper collects: what a part keeps
+      // for the next must be reachable from the module being written.
+      testing.__collect();
       got.push(utf8.decode(testing.domainModuleMoreBytes()));
     }
 

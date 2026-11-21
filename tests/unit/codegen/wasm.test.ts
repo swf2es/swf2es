@@ -235,10 +235,12 @@ test("a module's source map and entries are written when asked for, from it alon
 test("a module written a part at a time is the module written whole", { skip }, async () => {
   const builtin = new Uint8Array(await readFile(new URL("builtin.abc", generated)));
   const utf8 = new TextDecoder();
-  // Its parts, each next one asked for until it is done.
+  // Its parts, each next one asked for until it is done, garbage collected
+  // at every cut as the wrapper collects it.
   const parts = (hashes: string, index: number, keep: boolean) => {
     const got = [utf8.decode(testing.domainModuleBytes(hashes, index, keep, false))];
     while (!testing.domainModuleDone()) {
+      testing.__collect();
       got.push(utf8.decode(testing.domainModuleMoreBytes()));
     }
 
