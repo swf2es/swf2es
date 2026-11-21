@@ -67,7 +67,9 @@ The wrappers, the Zig and the build are Apache-2.0. `LICENSE.third-party`
 carries each vendored library's notice: zlib is under the zlib license,
 the LZMA SDK files are in the public domain, minimp3 is CC0-1.0,
 libtess2 is under SGI Free Software License B, and jxrlib is under the BSD
-2-Clause License; and those of the code derived from FFmpeg's Nellymoser
+2-Clause License; lyon, the crates it uses and Rust's core and alloc,
+in the render module through swf2es/tessellate's archive, under the MIT
+License (`src/render/lyon/LICENSE.third-party`, the release's notices); and those of the code derived from FFmpeg's Nellymoser
 decoder (`src/audio/nellymoser.zig`), under the MIT License, and of the code
 derived from SVG 1.1's feTurbulence (`src/render/pixels.zig`'s
 perlinNoise), under the W3C Software and Document License.
@@ -429,8 +431,40 @@ Crossings, touches, overlapping edges and repeated
 points, or an ear search that stalls, leave the fill to libtess2. The
 fast paths stay within libtess2's coordinate range.
 
+libtess2's sweep keeps its active edges in a sorted list and gives each
+crossing a vertex, so a fill of many contours that cross each other
+densely, as a morph of near-identical outlines each turned a little does,
+takes it time with the square of its crossings: seconds for a hundred
+such contours. Before libtess2, `src/render/crossings.zig` looks at a fill
+of four contours or more and a thousand points or more: first at how deep
+its contours' boxes stack, their areas' sum over its box's area, which is N
+for a deck of N contours and has stayed under six for every ordinary shape
+measured, so that a fill stacked less than eight deep goes on to libtess2
+at the cost of one pass over its points. A deeper one has its proper
+crossings counted: its edges sorted into a grid of cells about twice an
+edge long, each cell's pairs tested, and given up after 64 pairs a point.
+A fill of 1,000 crossings or more goes to lyon's fill tessellator
+(`src/render/lyon.zig`), which takes a tenth of the time there. The count
+is a function of the points alone, so a fill goes the same way every
+time. lyon is Rust: [swf2es/tessellate](https://github.com/swf2es/tessellate)
+builds it into a `no_std` wasm32 static library, and
+`src/render/lyon/libswf2es_tessellate.a` is that repository's release
+archive, as its CI built it, with `release.json` naming its tag and
+SHA-256, which `build.ts` checks, and `LICENSE.third-party` its notices.
+`build.zig` links it into the render module (`addObjectFile`); it imports
+only `malloc`, `realloc` and `free`, which `src/render/arena.zig` exports,
+so its output lives in the arena until the next reset. It fills in twips,
+as lyon's absolute epsilons drop sub-pixel slivers at pixel scale, and
+gives positions back as f32s, which the module widens. Every other fill
+stays with libtess2, which fills a few ordinary self-crossing even-odd
+shapes correctly that lyon covers twice in places. What lyon fails at goes
+to the bands; input it refuses (coordinates past ±838,860.8) to libtess2;
+and a trap in it is the host's, as one in libtess2 is. `filledBy()`
+names what filled the last fill, for tests.
+
 What libtess2 fails at, gives output
-unfit to draw for, or cannot take (coordinates outside ±2^23), the module
+unfit to draw for, or cannot take (coordinates outside ±2^23), and what lyon
+fails at, the module
 fills by bands (`src/render/bands.zig`): the fill cut at every vertex's
 height and every height two edges cross at, each span the rule fills a
 trapezoid between two edges, the bands meeting along horizontal lines,
@@ -454,7 +488,10 @@ curved layers, quadratics, cubics, curves of no length and NaN coordinates,
 and checks each fill against a JS flattening tessellated alone: drawn or
 refused alike, the same geometry bit for bit as JS with plain square roots
 gives, and within the flatness of what `Math.hypot` gives. `zig build
-test` in this folder runs `flatten.zig`'s and `bands.zig`'s own tests. Synthetic fixtures
+test` in this folder runs `flatten.zig`'s, `bands.zig`'s and
+`crossings.zig`'s own tests. The fuzz ends with decks of random densely
+crossing contours, each of which must go to lyon and cover every sample
+once where its rule fills it and not at all elsewhere. Synthetic fixtures
 also check coincident edges, holes and detail at large coordinates.
 
 ## lines

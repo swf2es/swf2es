@@ -479,8 +479,9 @@ compose with the display list without copies.
   fan, a thin one that goes once along an axis and back as a strip
   (`monotone.zig`), and any other simple concave contour of at most 64
   vertices by ear clipping after checking for crossings and touches
-  (`earclip.zig`).
-  Whatever libtess2 refuses or fails at goes to bands (`bands.zig`):
+  (`earclip.zig`). A fill of many contours that cross each other densely
+  goes to lyon instead of libtess2 (`crossings.zig`, `lyon.zig`).
+  Whatever libtess2 or lyon refuses or fails at goes to bands (`bands.zig`):
   each horizontal band between vertices and crossings filled as disjoint
   trapezoids under its winding rule. Its `LineBuilder` builds a layer's
   lines in one call (`strokes.zig`): triangles along the path for a line

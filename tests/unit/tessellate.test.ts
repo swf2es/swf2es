@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PATH_CUBIC, PATH_CURVE, PATH_LINE, PATH_MOVE, Tessellator } from "@swf2es/native/render";
 import { binary } from "../../packages/native/dist/render/binary.js";
+import { deckContours } from "../player/deck.ts";
 import { tessellationFixtures } from "./tessellate-fixtures.ts";
 
 const square = [0, 0, 10, 0, 10, 10, 0, 10];
@@ -623,4 +624,137 @@ test("one convex contour is a fan, its points as given; one that winds round twi
   assert.equal(covers(7, 6), false);
   assert.equal(covers(8, 1), true);
   tess.dispose();
+});
+
+test("many densely crossing contours go to lyon, fast and covered once; other fills do not", async () => {
+  const module = await WebAssembly.compile(Buffer.from(binary, "base64"));
+  const instance = await WebAssembly.instantiate(module, {
+    env: {
+      failure: () => assert.fail("unexpected native trap"),
+      sine: Math.sin,
+      cosine: Math.cos,
+    },
+  });
+  const x = instance.exports as unknown as {
+    memory: WebAssembly.Memory;
+    reset(): void;
+    alloc(size: number): number;
+    run(coords: number, count: number, ends: number, contours: number, nonzero: number): number;
+    vertices(): number;
+    indices(): number;
+    vertexCount(): number;
+    triangleCount(): number;
+    filledBy(): number;
+  };
+  const LIBTESS2 = 4;
+  const LYON = 5;
+  const fill = (contours: number[][], nonZero: boolean) => {
+    x.reset();
+    const flat = contours.flat();
+    const coords = x.alloc(flat.length * 8);
+    const ends = x.alloc(contours.length * 4);
+    new Float64Array(x.memory.buffer, coords, flat.length).set(flat);
+    let end = 0;
+    new Uint32Array(x.memory.buffer, ends, contours.length).set(
+      contours.map((points) => (end += points.length / 2)),
+    );
+    const start = performance.now();
+    assert.equal(x.run(coords, flat.length / 2, ends, contours.length, Number(nonZero)), 0);
+    return {
+      ms: performance.now() - start,
+      by: x.filledBy(),
+      vertices: new Float64Array(x.memory.buffer, x.vertices(), x.vertexCount() * 2).slice(),
+      indices: new Int32Array(x.memory.buffer, x.indices(), x.triangleCount() * 3).slice(),
+    };
+  };
+  const winding = (contours: number[][], px: number, py: number) => {
+    let n = 0;
+    for (const p of contours) {
+      for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+        const cross = (p[i] - p[j]) * (py - p[j + 1]) - (p[i + 1] - p[j + 1]) * (px - p[j]);
+        if (p[j + 1] <= py && p[i + 1] > py && cross > 0) {
+          n++;
+        } else if (p[j + 1] > py && p[i + 1] <= py && cross < 0) {
+          n--;
+        }
+      }
+    }
+
+    return n;
+  };
+
+  // lyon's positions are f32s: a sample this close to an edge may fall either side of it.
+  const near = (contours: number[][], px: number, py: number) =>
+    contours.some((p) =>
+      p.some((_, i) => {
+        if (i % 2 === 1) {
+          return false;
+        }
+
+        const j = (i + 2) % p.length;
+        const [dx, dy] = [p[j] - p[i], p[j + 1] - p[i + 1]];
+        const s = Math.min(
+          1,
+          Math.max(0, ((px - p[i]) * dx + (py - p[i + 1]) * dy) / (dx * dx + dy * dy)),
+        );
+        return Math.hypot(p[i] + s * dx - px, p[i + 1] + s * dy - py) < 1e-3;
+      }),
+    );
+
+  // libtess2 takes over a second over 80 such contours in wasm; lyon about a tenth of one.
+  const deck = deckContours(80);
+  for (const nonZero of [false, true]) {
+    const result = fill(deck, nonZero);
+    assert.equal(result.by, LYON);
+    assert.ok(result.ms < 1000, `${result.ms} ms`);
+    const { vertices: v, indices: t } = result;
+    let samples = 0;
+    for (let k = 0; samples < 300 && k < 3000; k++) {
+      const px = 190 + ((k * 0.6180339887) % 1) * 420;
+      const py = 90 + ((k * 0.7548776662) % 1) * 420;
+      let covered = 0;
+      let edge = false;
+      for (let i = 0; i < t.length && !edge; i += 3) {
+        const [a, b, c] = [t[i] * 2, t[i + 1] * 2, t[i + 2] * 2];
+        // A triangle of no area covers nothing.
+        if ((v[b] - v[a]) * (v[c + 1] - v[a + 1]) === (v[b + 1] - v[a + 1]) * (v[c] - v[a])) {
+          continue;
+        }
+
+        const p = (v[b] - v[a]) * (py - v[a + 1]) - (v[b + 1] - v[a + 1]) * (px - v[a]);
+        const q = (v[c] - v[b]) * (py - v[b + 1]) - (v[c + 1] - v[b + 1]) * (px - v[b]);
+        const r = (v[a] - v[c]) * (py - v[c + 1]) - (v[a + 1] - v[c + 1]) * (px - v[c]);
+        edge = Math.min(Math.abs(p), Math.abs(q), Math.abs(r)) < 1e-9;
+        if ((p > 0 && q > 0 && r > 0) || (p < 0 && q < 0 && r < 0)) {
+          covered++;
+        }
+      }
+
+      if (edge || near(deck, px, py)) {
+        continue;
+      }
+
+      const w = winding(deck, px, py);
+      assert.equal(covered, Number(nonZero ? w !== 0 : w % 2 !== 0), `at ${px}, ${py}`);
+      samples++;
+    }
+
+    assert.equal(samples, 300);
+  }
+
+  // The same area as libtess2's, where it is quick enough to compare with.
+  const twenty = deckContours(20);
+  const lyon = fill(twenty, false);
+  assert.equal(lyon.by, LYON);
+  const reference = new Tessellator().tessellate(twenty, false);
+  const lyonArea = area({ vertices: lyon.vertices, indices: Uint32Array.from(lyon.indices) });
+  assert.ok(Math.abs(lyonArea - area(reference)) < 1e-4 * area(reference));
+
+  // Ten crossing contours are too few to be worth it; a thousand squares side by side cross nowhere.
+  assert.equal(fill(deckContours(10), false).by, LIBTESS2);
+  const grid = Array.from({ length: 1024 }, (_, k) => {
+    const [gx, gy] = [k % 32, Math.floor(k / 32)];
+    return [gx, gy, gx + 1, gy, gx + 1, gy + 1, gx, gy + 1];
+  });
+  assert.equal(fill(grid, false).by, LIBTESS2);
 });

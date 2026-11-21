@@ -1,6 +1,7 @@
 // libtess2 for wasm32-freestanding, with the curves of a layer's fills
-// flattened first (flatten.zig), and the band filler (bands.zig) for what
-// libtess2 refuses or fails at. The host resets the module's bounded bump
+// flattened first (flatten.zig), lyon (lyon.zig) for the fills of densely
+// crossing contours libtess2 is slow at (crossings.zig), and the band filler
+// (bands.zig) for what either refuses or fails at. The host resets the module's bounded bump
 // arena (arena.zig) before each call, a fill (run) or a layer's fills (layer), and copies the
 // resulting geometry into owned buffers.
 // The vendored C uses its allocator callbacks; libc allocation and longjmp
@@ -12,6 +13,8 @@ const arena = @import("arena.zig");
 const bands = @import("bands.zig");
 const earclip = @import("earclip.zig");
 const monotone = @import("monotone.zig");
+const crossings = @import("crossings.zig");
+const lyon = @import("lyon.zig");
 
 extern "env" fn failure(code: c_int) noreturn;
 
@@ -21,13 +24,23 @@ pub const Output = struct {
     indices: []const c.TESSindex,
 };
 
-/// The last fill's output, libtess2's or the band filler's, in the arena.
+/// The last fill's output, libtess2's, lyon's or the band filler's, in the arena.
 var out: ?Output = null;
 /// The arena's generation `out` was made in: another's reset leaves it none.
 var made_in: u32 = 0;
-/// Off once libtess2 has unwound an instance through `failure`: the host
-/// then fills the call again in a new instance by the bands alone.
+/// Off once libtess2 has unwound an instance through `failure`, or lyon has
+/// trapped: the host then fills the call again in a new instance by the
+/// bands alone.
 var libtess = true;
+
+/// What filled the last fill, for tests (filledBy): none, a fan, the
+/// monotone cut, ear clipping, libtess2, lyon or the bands.
+const Filler = enum(u32) { none, fan, monotone, earclip, libtess2, lyon, bands };
+var filler: Filler = .none;
+
+export fn filledBy() u32 {
+    return @backingInt(filler);
+}
 
 export fn reset() void {
     arena.reset();
@@ -98,14 +111,17 @@ fn valid(coords: []const f64, ends: []const u32, nonzero: i32) bool {
 /// the bands could fill it in the memory left.
 fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
     out = null;
+    filler = .none;
     made_in = arena.generation;
     const mark = arena.top;
+    const in_range = inRange(coords);
     // One convex contour, a triangle above all, as a drawing redrawn every frame draws thousands:
     // a fan, which either rule fills alike, and no sweep. Within libtess2's range alone, where its
     // turns' cross products are finite: past it they may overflow and pass a concave contour.
-    if (libtess and ends.len == 1 and inRange(coords)) {
+    if (libtess and ends.len == 1 and in_range) {
         if (fan(coords)) |result| {
             out = result;
+            filler = .fan;
             return 0;
         }
 
@@ -115,21 +131,47 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
         const found = monotone.fill(arena.allocator, coords);
         if (found == .triangles) {
             out = .{ .positions = coords, .indices = found.triangles };
+            filler = .monotone;
             return 0;
         }
 
         arena.top = mark;
         if (earclip.fill(arena.allocator, coords, found == .simple)) |triangles| {
             out = .{ .positions = coords, .indices = triangles };
+            filler = .earclip;
             return 0;
         }
 
         arena.top = mark;
     }
 
-    if (libtess and inRange(coords)) {
+    // Many contours that cross each other densely, which libtess2 takes seconds over: lyon, or
+    // the bands where it fails, but libtess2 still where lyon refuses the coordinates as past
+    // its range. A trap in lyon is the host's, as one in libtess2 is.
+    var dense = false;
+    if (libtess and in_range) {
+        dense = crossings.dense(arena.allocator, coords, ends);
+        arena.top = mark;
+    }
+
+    if (dense) {
+        switch (lyon.fill(coords, ends, nonzero)) {
+            .output => |result| {
+                out = .{ .positions = result.positions, .indices = result.indices };
+                filler = .lyon;
+                return 0;
+            },
+            .status => |status| {
+                arena.top = mark;
+                dense = status != lyon.refused;
+            },
+        }
+    }
+
+    if (!dense and libtess and in_range) {
         if (libtess2(coords, ends, nonzero)) |result| {
             out = result;
+            filler = .libtess2;
             return 0;
         }
 
@@ -142,6 +184,7 @@ fn tessellate(coords: []const f64, ends: []const u32, nonzero: bool) i32 {
         return -1;
     };
     out = .{ .positions = result.positions, .indices = result.indices };
+    filler = .bands;
     return 0;
 }
 
@@ -281,6 +324,7 @@ export fn run(coords: [*]const f64, count: usize, ends: [*]const u32, contours: 
 /// point in `ends`: run's status, its output in `out`.
 pub fn fill(coords: []const f64, ends: []const u32, nonzero: i32) i32 {
     out = null;
+    filler = .none;
     if (!valid(coords, ends, nonzero)) {
         return -2;
     }

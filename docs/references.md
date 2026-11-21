@@ -73,6 +73,11 @@ truth.
   lazy ABC parser in TypeScript descended from Shumway. Apache-2.0.
 - **Shumway** (archived): [`mozilla/shumway`](https://github.com/mozilla/shumway),
   the origin of AwayFL's AVM2, with its SWF tag parsers. Apache-2.0.
+- **lyon**: [`nical/lyon`](https://github.com/nical/lyon)'s fill
+  tessellator (`lyon_tessellation`), which the render module links for
+  fills of densely crossing contours, built for wasm32 by
+  [swf2es/tessellate](https://github.com/swf2es/tessellate) and checked in
+  as its release (`packages/native/src/render/lyon/`). MIT or Apache-2.0.
 - **PixiJS v8's `FilterSystem`**: how a filtered layer is measured and
   padded (`packages/render/src/measure.ts`), which the filters'
   exactness rules were found against while the player drew with Pixi.

@@ -21,8 +21,15 @@ sides, a seam Flash Pro leaves inside a fill, goes to neither, so it
 cannot change the winding, `shared-fill-edges`) and tessellated by
 `@swf2es/native`'s libtess2, a layer in one call (`scene/fills.ts`,
 `resolveFills`; [packages/native](../../packages/native/README.md)), which
-flattens their curves too. What libtess2 refuses or fails at, the module
-fills itself by bands: each horizontal band between vertices and
+flattens their curves too. A fill of four contours or more and a thousand
+points or more whose contours stack eight deep or more (their boxes' areas
+over the fill's) and whose edges cross each other 1,000 times or more, as a
+morph of near-identical outlines each turned a little does, goes to lyon instead
+(`native/src/render/crossings.zig`, `lyon.zig`), whose sweep takes a tenth
+of the time libtess2's quadratic one does there; every other fill stays
+with libtess2, which fills a few self-crossing even-odd shapes correctly
+that lyon covers twice in places. What libtess2 or lyon refuses or fails
+at, the module fills itself by bands: each horizontal band between vertices and
 crossings filled as disjoint trapezoids under its winding rule
 (`bands.zig`). The module is required: there is no JS path for fills,
 lines or BitmapData's convolution. No overlapping paint is needed, including for translucent fills,

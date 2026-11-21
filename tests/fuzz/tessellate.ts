@@ -5,9 +5,13 @@
 // by the bands the module fills by where libtess2 fails (bands.zig). Then curved fills:
 // the layer call's flattening must match a JS one, as the player's was, the same points where
 // the two take a curve in as many chords, and within the flatness where a bend at a whole
-// number of chords rounds the other way; the same fills drawn and the same refused.
+// number of chords rounds the other way; the same fills drawn and the same refused. Last, decks of
+// many wobbly contours that cross densely, which the module gives lyon rather than libtess2
+// (crossings.zig): each must go to lyon, and every sample be covered once where its rule fills
+// it and not at all elsewhere.
 // Run with: node tests/fuzz/tessellate.ts [cases, 2000] [seed, 1]
 import assert from "node:assert/strict";
+import { binary } from "../../packages/native/dist/render/binary.js";
 import {
   type FillGeometry,
   PATH_CUBIC,
@@ -498,4 +502,151 @@ for (let i = 0; i < cases / 8; i++) {
 
 console.log(
   `fuzz tessellate: ${curved} curved fills flattened in layers as JS does (${differing} a chord apart at a boundary, ${rejected} refused by both)`,
+);
+
+/** The render module's tessellator alone, to see which filler took a fill (filledBy). */
+const raw = (
+  await WebAssembly.instantiate(await WebAssembly.compile(Buffer.from(binary, "base64")), {
+    env: {
+      failure: () => {
+        throw new Error("native trap");
+      },
+      sine: Math.sin,
+      cosine: Math.cos,
+    },
+  })
+).exports as unknown as {
+  memory: WebAssembly.Memory;
+  reset(): void;
+  alloc(size: number): number;
+  run(coords: number, count: number, ends: number, contours: number, nonzero: number): number;
+  vertices(): number;
+  indices(): number;
+  vertexCount(): number;
+  triangleCount(): number;
+  filledBy(): number;
+};
+const LYON = 5;
+
+/** A deck of random wobbly ellipses, each turned a little from the last, every point jittered. */
+function deck(): number[][] {
+  const count = 24 + Math.floor(random() * 17);
+  const points = 120 + Math.floor(random() * 120);
+  const turn = 0.002 + random() * 0.01;
+  const lobes = 5 + Math.floor(random() * 8);
+  const wobble = 6 + random() * 18;
+  const squash = 0.4 + random() * 0.4;
+  const jitter = random() * 0.5;
+  const contours: number[][] = [];
+  for (let c = 0; c < count; c++) {
+    const a = c * turn;
+    const contour: number[] = [];
+    for (let k = 0; k < points; k++) {
+      const u = (k / points) * 2 * Math.PI;
+      const r = 100 + wobble * Math.sin(u * lobes + c * 0.01);
+      const x = r * Math.cos(u) * squash + (random() - 0.5) * jitter;
+      const y = r * Math.sin(u) + (random() - 0.5) * jitter;
+      contour.push(
+        Math.round((150 + x * Math.cos(a) - y * Math.sin(a)) * 20) / 20,
+        Math.round((150 + x * Math.sin(a) + y * Math.cos(a)) * 20) / 20,
+      );
+    }
+
+    if (random() < 0.5) {
+      contour.reverse();
+    }
+
+    contours.push(contour);
+  }
+
+  return contours;
+}
+
+/** Whether a point lies within `margin` of an edge of the contours. */
+function near(contours: number[][], x: number, y: number, margin: number): boolean {
+  for (const points of contours) {
+    for (let i = 0, j = points.length - 2; i < points.length; j = i, i += 2) {
+      const dx = points[i] - points[j];
+      const dy = points[i + 1] - points[j + 1];
+      const length = dx * dx + dy * dy;
+      const t =
+        length === 0
+          ? 0
+          : Math.min(1, Math.max(0, ((x - points[j]) * dx + (y - points[j + 1]) * dy) / length));
+      if (Math.hypot(points[j] + t * dx - x, points[j + 1] + t * dy - y) < margin) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+let decks = 0;
+let deckSamples = 0;
+for (let i = 0; i < Math.max(4, Math.floor(cases / 100)); i++) {
+  const contours = deck();
+  const nonZero = i % 2 === 1;
+  const flat = contours.flat();
+  raw.reset();
+  const coords = raw.alloc(flat.length * 8);
+  const ends = raw.alloc(contours.length * 4);
+  new Float64Array(raw.memory.buffer, coords, flat.length).set(flat);
+  let end = 0;
+  new Uint32Array(raw.memory.buffer, ends, contours.length).set(
+    contours.map((points) => (end += points.length / 2)),
+  );
+  const context = `deck ${i} from seed ${seed}, ${nonZero ? "non-zero" : "even-odd"}`;
+  assert.equal(
+    raw.run(coords, flat.length / 2, ends, contours.length, Number(nonZero)),
+    0,
+    context,
+  );
+  assert.equal(raw.filledBy(), LYON, `not lyon's: ${context}`);
+  const v = new Float64Array(raw.memory.buffer, raw.vertices(), raw.vertexCount() * 2).slice();
+  const t = new Int32Array(raw.memory.buffer, raw.indices(), raw.triangleCount() * 3).slice();
+  for (let sample = 0; sample < 40; sample++) {
+    const x = 40 + random() * 220;
+    const y = 40 + random() * 220;
+    // lyon's positions are f32s: a sample this close to an edge may fall either side of it.
+    if (near(contours, x, y, 1e-3)) {
+      continue;
+    }
+
+    let covered = 0;
+    let onEdge = false;
+    for (let j = 0; j < t.length && !onEdge; j += 3) {
+      const a = t[j] * 2;
+      const b = t[j + 1] * 2;
+      const c = t[j + 2] * 2;
+      // A triangle of no area covers nothing.
+      if ((v[b] - v[a]) * (v[c + 1] - v[a + 1]) === (v[b + 1] - v[a + 1]) * (v[c] - v[a])) {
+        continue;
+      }
+
+      const p = (v[b] - v[a]) * (y - v[a + 1]) - (v[b + 1] - v[a + 1]) * (x - v[a]);
+      const q = (v[c] - v[b]) * (y - v[b + 1]) - (v[c + 1] - v[b + 1]) * (x - v[b]);
+      const r = (v[a] - v[c]) * (y - v[c + 1]) - (v[a + 1] - v[c + 1]) * (x - v[c]);
+      // On a triangle's own edge, where two triangles meet, the sample says nothing.
+      onEdge = Math.min(Math.abs(p), Math.abs(q), Math.abs(r)) < 1e-9;
+      if ((p > 0 && q > 0 && r > 0) || (p < 0 && q < 0 && r < 0)) {
+        covered++;
+      }
+    }
+
+    if (onEdge) {
+      continue;
+    }
+
+    const count = winding(contours, x, y);
+    const expected = nonZero ? count !== 0 : Math.abs(count) % 2 === 1;
+    assert.equal(covered, Number(expected), `coverage at ${x},${y}: ${context}`);
+    deckSamples++;
+  }
+
+  decks++;
+}
+
+console.log(
+  `fuzz tessellate: ${decks} decks of densely crossing contours filled by lyon, ${deckSamples} winding samples each covered once or not at all`,
 );
