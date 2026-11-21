@@ -188,7 +188,10 @@
 // (DefineBitsLossless2), of which --drawn K (N / 10 by default) fill shapes on the stage,
 // each moving a pixel each frame: what a library of bitmaps costs, most never shown, as an
 // application's SWFs define them. What the page holds after a full collection is their
-// pixels' memory; the first frame, their reading and drawing.
+// pixels' memory; the first frame, their reading and drawing. With --respawn the K drawn are
+// the bitmaps themselves, placed on the timeline and each replaced by a new instance every
+// frame, as a SWF spawns copies of a bitmap symbol over and over: each a new store of the
+// bitmap's pixels, which another kept or let go of may have to make again.
 //
 // --cpu-profile FILE samples the frames after the warm-up in Chrome's
 // profiler and writes the profile there (DevTools' Performance panel opens
@@ -217,7 +220,7 @@
 //     | --scripted N [--still] | --town N | --still-crowd N | --timelines N [--loop K]
 //     | --scroll N | --readback N [--opaque] | --stamps N | --pen N
 //     | --triangles N [--culled] | --redraw N | --burst N [--every K] | --vectors N | --text N [--normal | --device]
-//     | --deck N [--paint solid|gradient|bitmap] [--ratio-change] | --bitmaps N [--drawn K]]
+//     | --deck N [--paint solid|gradient|bitmap] [--ratio-change] | --bitmaps N [--drawn K] [--respawn]]
 //     [--toggle-every K] [--frames N] [--idle K]
 //     [--swap] [--gpu] [--antialias] [--allocs [--profile FILE]] [--counts] [--census] [--pace MS]
 //     [--hover] [--json] [--write-swf FILE] [--cpu-profile FILE] [--pipelined] [--snapshot FILE]
@@ -1966,7 +1969,7 @@ function deckSwf(count: number, paint: string, ratioChange: boolean): Uint8Array
  * `count` lossless bitmaps of their own pixels, the first `drawn` filling a
  * square each on the stage, moving a pixel each frame (--bitmaps, --drawn).
  */
-function bitmapsSwf(count: number, drawn: number): Uint8Array {
+function bitmapsSwf(count: number, drawn: number, respawn: boolean): Uint8Array {
   const SIDE = 128;
   const tags: Uint8Array[] = [w.backgroundColor(0xf0f0f0)];
   for (let i = 0; i < count; i++) {
@@ -2006,7 +2009,7 @@ function bitmapsSwf(count: number, drawn: number): Uint8Array {
     ty:
       (Math.floor(k / across) % Math.max(1, Math.floor(HEIGHT / (SIDE / 2)))) * (SIDE / 2) * TWIPS,
   });
-  for (let k = 0; k < drawn; k++) {
+  for (let k = 0; k < drawn && !respawn; k++) {
     tags.push(
       w.shape({
         id: count + 1 + k,
@@ -2021,13 +2024,21 @@ function bitmapsSwf(count: number, drawn: number): Uint8Array {
   for (let frame = 0; frame < frames; frame++) {
     for (let k = 0; k < drawn; k++) {
       const { tx, ty } = at(k);
-      tags.push(
-        w.place({
-          depth: k + 1,
-          ...(frame === 0 ? { character: count + 1 + k } : { move: true }),
-          matrix: { tx: tx + (frame % 2) * TWIPS, ty },
-        }),
-      );
+      const matrix = { tx: tx + (frame % 2) * TWIPS, ty };
+      if (respawn) {
+        tags.push(
+          ...(frame === 0 ? [] : [w.remove(k + 1)]),
+          w.place({ depth: k + 1, character: k + 1, matrix }),
+        );
+      } else {
+        tags.push(
+          w.place({
+            depth: k + 1,
+            ...(frame === 0 ? { character: count + 1 + k } : { move: true }),
+            matrix,
+          }),
+        );
+      }
     }
 
     tags.push(w.showFrame());
@@ -2274,7 +2285,7 @@ function within(profile: SampledProfile, from: number, ms: number): string[] {
 
 const swf =
   bitmaps > 0
-    ? bitmapsSwf(bitmaps, drawnBitmaps)
+    ? bitmapsSwf(bitmaps, drawnBitmaps, args.includes("--respawn"))
     : deck > 0
       ? deckSwf(deck, paint, ratioChange)
       : vectors > 0
@@ -2384,7 +2395,7 @@ const tessellation = result.tessellation.slice(WARMUP);
 const summary = {
   shapes:
     bitmaps > 0
-      ? `${bitmaps} bitmaps, ${drawnBitmaps} drawn`
+      ? `${bitmaps} bitmaps, ${drawnBitmaps} drawn${args.includes("--respawn") ? ", a new instance each frame" : ""}`
       : deck > 0
         ? `deck of ${deck} contours, ${paint}, ${ratioChange ? "a new ratio each frame" : "moving"}`
         : vectors > 0

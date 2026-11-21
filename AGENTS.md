@@ -155,7 +155,8 @@ node tests/desktop/relay-bench.ts [<checkout A> <checkout B>] [runs] [--burst N]
                               # sending many small messages: IPC messages, reads, buffers, CPU
 node tests/player/bench.ts [--shapes N] [--frames N] [--town N] [--blends N] [--gpu]   # time the
                               # player on a busy synthetic timeline in Chrome (--town: a busy room's
-                              # mix, see docs/renderer.md; --blends: shapes alone in blend modes);
+                              # mix, see docs/renderer.md; --blends: shapes alone in blend modes;
+                              # --bitmaps N [--drawn K] [--respawn]: many lossless bitmaps, few drawn);
                               # keep a change only for a gain that repeats;
                               # --write-swf FILE writes its SWF for another player instead
 node tests/player/bench.ts --swf file.swf [--frames N] [--resolution R] [--gpu] [--cpu-profile F]
