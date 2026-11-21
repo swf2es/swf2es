@@ -220,11 +220,14 @@ while a store holds them: a store of a lossless bitmap, which nothing
 has written, lets go of them once a renderer has made its texture of
 them, and inflates them again from the tag, the same pixels, when
 something reads them (`getPixel`, a draw, a texture made again after it
-went idle or with a lost context, Stage3D's upload). One inflated again
-so, after a collection took them, is kept from then on, being wanted
-again and again. A store a script wrote is its own and never let go of. An image is decoded once, as the
-SWF is linked (below), and kept: the browser decodes only asynchronously,
-and a script may read a bitmap's pixels at any time. Format 3 holds a
+went idle or with a lost context, Stage3D's upload). A bitmap a script
+or a new store wants again after a collection took its pixels is kept
+from then on, being wanted again and again; a texture made again does not
+keep it, as one lost context would keep every bitmap shown. A store a
+script wrote is its own and never let go of. An image is decoded once, as
+the SWF is linked (below), and kept: the browser decodes only
+asynchronously, and a script may read a bitmap's pixels at any time.
+Format 3 holds a
 palette of RGB, or RGBA with the 2 tag, and rows of indices padded to 4
 bytes; format 4 15-bit RGB, each 5-bit channel v widened
 to v · 8 + 7 and 0 kept at 0; format 5 xRGB, or with the 2 tag ARGB
