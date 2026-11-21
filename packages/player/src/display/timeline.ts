@@ -404,11 +404,16 @@ const SHARED_BITMAP_MOST = 1 << 20;
 /** The bitmap tag `t` defines, the one a SWF read before defined alike where there is one. */
 function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bitmap {
   // A short header is a bitmap Flash refuses: read as invalid, never shared with a long one.
+  // A lossless definition is read from a copy of its tag, which it inflates from whenever its
+  // pixels are wanted: a store of it kept after its SWF is unloaded holds that, not the SWF.
+  const lossless = t.code === tags.DefineBitsLossless || t.code === tags.DefineBitsLossless2;
+  const tag = bytes.subarray(t.offset, t.offset + t.length);
   if (t.code === tags.DefineBits || !t.long || t.length > SHARED_BITMAP_MOST) {
-    return readBitmap(bytes, t, tables);
+    return lossless
+      ? readBitmap(tag.slice(), { ...t, offset: 0 }, tables)
+      : readBitmap(bytes, t, tables);
   }
 
-  const tag = bytes.subarray(t.offset, t.offset + t.length);
   const hash = sampledHash(t.code, tag);
   for (const entry of sharedBitmaps.get(hash) ?? []) {
     const definition = entry.definition.deref();
@@ -417,9 +422,7 @@ function sharedBitmap(bytes: Uint8Array, t: Tag, tables: Uint8Array | null): Bit
     }
   }
 
-  // An image's definition holds its bytes in the SWF's; a lossless one is read from a copy of
-  // its tag, which it inflates from whenever its pixels are wanted, so it never holds the SWF's.
-  const lossless = t.code === tags.DefineBitsLossless || t.code === tags.DefineBitsLossless2;
+  // An image's definition holds its bytes in the SWF's.
   const own = lossless ? tag.slice() : tag;
   const definition = lossless
     ? readBitmap(own, { ...t, offset: 0 }, tables)
@@ -441,11 +444,18 @@ type LosslessBitmap = Extract<Bitmap, { type: "lossless" }>;
  */
 const inflated = new WeakMap<LosslessBitmap, WeakRef<Uint32Array>>();
 const unreadable = new WeakSet<LosslessBitmap>();
+/**
+ * The pixels of bitmaps inflated again after theirs went, kept from then on:
+ * one wanted again after a collection (a symbol instantiated over and over,
+ * a texture made again after going idle) would otherwise be inflated after
+ * each, up to some 10 ms for 1024 by 1024.
+ */
+const wantedAgain = new WeakMap<LosslessBitmap, Uint32Array>();
 
 /** A lossless bitmap's pixels, inflated if nothing holds them. */
 export function losslessPixels(definition: LosslessBitmap): BitmapPixels {
   const { width, height, transparent } = definition;
-  const held = inflated.get(definition)?.deref();
+  const held = wantedAgain.get(definition) ?? inflated.get(definition)?.deref();
   if (held) {
     return { width, height, transparent, pixels: held };
   }
@@ -456,8 +466,18 @@ export function losslessPixels(definition: LosslessBitmap): BitmapPixels {
 
   const decoded = decodeLossless(definition);
   if (!decoded) {
+    // Data that inflated once inflates again: what failed is memory, which a store must not
+    // take for a bitmap Flash cannot read, 0 by 0 though it is not.
+    if (inflated.has(definition)) {
+      throw new RangeError("swf2es: a bitmap's pixels could not be inflated again");
+    }
+
     unreadable.add(definition);
     return INVALID_PIXELS;
+  }
+
+  if (inflated.has(definition)) {
+    wantedAgain.set(definition, decoded.pixels);
   }
 
   inflated.set(definition, new WeakRef(decoded.pixels));
@@ -466,7 +486,12 @@ export function losslessPixels(definition: LosslessBitmap): BitmapPixels {
 
 /** A lossless bitmap's pixels if something holds them still, without inflating them. */
 export function heldPixels(definition: LosslessBitmap): Uint32Array | null {
-  return inflated.get(definition)?.deref() ?? null;
+  return wantedAgain.get(definition) ?? inflated.get(definition)?.deref() ?? null;
+}
+
+/** Whether a lossless bitmap's pixels are kept for being wanted again after they went. */
+export function keptPixels(definition: LosslessBitmap): boolean {
+  return wantedAgain.has(definition);
 }
 
 /** The character of a bitmap tag's definition. */

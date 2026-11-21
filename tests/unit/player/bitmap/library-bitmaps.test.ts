@@ -8,7 +8,7 @@ import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { setFlagsFromString } from "node:v8";
 import { runInNewContext } from "node:vm";
-import { readSwf, zlibCompress } from "@swf2es/format";
+import { decodeLossless, readSwf, zlibCompress } from "@swf2es/format";
 import {
   BitmapStore,
   characterStore,
@@ -18,6 +18,7 @@ import {
 import {
   type BitmapCharacter,
   heldPixels,
+  keptPixels,
   readLibrary,
 } from "../../../../packages/player/dist/display/timeline.js";
 import { Paints } from "../../../../packages/player/dist/scene/paints.js";
@@ -105,8 +106,7 @@ test("a lossless bitmap is read without inflating it, and inflated as it is firs
 test("a bitmap's store lets go of its pixels once uploaded, and inflates them again, the same, as they are read", async () => {
   const character = bitmapIn(movie(1, 2));
   const definition = definitionOf(character);
-  const expected = [...(character.pixels?.pixels ?? [])];
-  await collect(() => heldPixels(definition));
+  const expected = [...(decodeLossless(definition)?.pixels ?? [])];
   assert.equal(heldPixels(definition), null, "nothing holds them till a store is made");
 
   const textures = new Textures();
@@ -127,9 +127,12 @@ test("a bitmap's store lets go of its pixels once uploaded, and inflates them ag
   assert.equal(textures.pending.length, 0);
   assert.equal(heldPixels(definition), null);
 
-  // Read, as a draw or getPixel reads them: inflated again, the same pixels.
+  // Read, as a draw or getPixel reads them: inflated again, the same pixels, and kept from then
+  // on, wanted again after they went.
+  assert.equal(keptPixels(definition), false);
   assert.deepEqual([...store.readable], expected);
   assert.equal(store.releasedPixels, false);
+  assert.equal(keptPixels(definition), true);
   const fresh = BitmapStore.of({
     width: WIDTH,
     height: HEIGHT,
@@ -144,9 +147,9 @@ test("a bitmap's store lets go of its pixels once uploaded, and inflates them ag
   assert.deepEqual(upload(textures).get(again.id), texels);
   assert.equal(store.releasedPixels, true);
 
-  // And again once they were let go of and collected: inflated for it.
-  await collect(() => heldPixels(definition));
-  assert.equal(heldPixels(definition), null);
+  // And again once the store let go of them: kept, the same.
+  await collect(() => !heldPixels(definition));
+  assert.deepEqual([...(heldPixels(definition) ?? [])], expected);
   textures.lost();
   again = paints.storeTexture(store);
   assert.deepEqual(upload(textures).get(again.id), texels);
@@ -223,6 +226,111 @@ test("a bitmap Flash cannot read is told as it is inflated, 0 by 0, and its stor
   assert.deepEqual([character.pixels?.width, character.pixels?.height], [0, 0]);
   const store = symbolStore(character);
   assert.deepEqual([store.width, store.height], [0, 0]);
+
+  // Its fills draw from a store of nothing, as they did when it was read to nothing.
+  const textures = new Textures();
+  const paints = new Paints(textures);
+  const fill = characterStore(character);
+  assert.ok(fill);
+  assert.deepEqual([fill.width, fill.height], [0, 0]);
+  paints.storeTexture(fill);
+  upload(textures);
+  assert.equal(fill.releasedPixels, false);
+});
+
+test("a bitmap that inflated once and fails to again throws, rather than empty a store of its size", async () => {
+  const character = bitmapIn(movie(1, 5));
+  const definition = definitionOf(character);
+  const textures = new Textures();
+  const paints = new Paints(textures);
+  const store = symbolStore(character);
+  const expected = [...store.readable];
+  paints.storeTexture(store);
+  upload(textures);
+  await collect(() => heldPixels(definition));
+  assert.equal(heldPixels(definition), null);
+
+  // Its stream broken after it inflated, as memory running out fails an inflation.
+  const last = definition.data.length - 1;
+  definition.data[last] ^= 0xff;
+  assert.throws(() => store.readable, RangeError);
+  assert.throws(() => symbolStore(character), RangeError);
+  assert.deepEqual([store.width, store.height], [WIDTH, HEIGHT]);
+
+  // Not taken for a bitmap Flash cannot read: once it inflates again, the same pixels.
+  definition.data[last] ^= 0xff;
+  assert.deepEqual([...store.readable], expected);
+  assert.deepEqual([...symbolStore(character).readable], expected);
+});
+
+test("a symbol's store drawn into on the GPU after letting go of its pixels reads the drawing, its own", async () => {
+  const character = bitmapIn(movie(1, 6));
+  const definition = definitionOf(character);
+  const drawn = Uint8Array.from({ length: WIDTH * HEIGHT * 4 }, (_, i) => [1, 2, 3, 255][i % 4]);
+  let lost = false;
+  const textures = new Textures();
+  const paints = new Paints(textures, {
+    read: () => (lost ? null : drawn.slice()),
+    fill: () => false,
+    copy: () => false,
+  });
+  const expected = [...symbolStore(character).readable];
+
+  const store = symbolStore(character);
+  paints.storeTexture(store);
+  upload(textures);
+  assert.equal(store.releasedPixels, true);
+  paints.drawn(store);
+  assert.deepEqual([...store.readable], new Array(WIDTH * HEIGHT).fill(0xff010203));
+  // Its own now: changed and uploaded, never let go of.
+  store.setPixel32(0, 0, 0xff00ff00);
+  paints.storeTexture(store);
+  upload(textures);
+  assert.equal(store.releasedPixels, false);
+
+  // A drawing lost with its context: the bitmap's pixels as they were, the library's still.
+  const other = symbolStore(character);
+  paints.storeTexture(other);
+  upload(textures);
+  paints.drawn(other);
+  lost = true;
+  await collect(() => heldPixels(definition));
+  assert.deepEqual([...other.readable], expected);
+  other.setPixel32(0, 0, 0xff00ff00);
+  assert.equal(other.getPixel32(0, 0), 0xff00ff00);
+  assert.deepEqual([...symbolStore(character).readable], expected);
+});
+
+test("a bitmap's texture let go of for going undrawn is made again of the same texels", async () => {
+  const character = bitmapIn(movie(1, 7));
+  const definition = definitionOf(character);
+  const textures = new Textures();
+  const paints = new Paints(textures);
+  const store = characterStore(character);
+  assert.ok(store);
+  const handle = paints.storeTexture(store, 2);
+  const texels = upload(textures).get(handle.id);
+  for (let i = 0; i < 4; i++) {
+    upload(textures);
+  }
+
+  assert.equal(textures.alive(handle), false);
+  await collect(() => heldPixels(definition));
+  assert.equal(heldPixels(definition), null);
+  const again = paints.storeTexture(store);
+  assert.deepEqual(upload(textures).get(again.id), texels);
+  assert.equal(store.releasedPixels, true);
+
+  // Wanted again, kept: a symbol made over and over after it inflates no more.
+  assert.equal(keptPixels(definition), true);
+  const kept = heldPixels(definition);
+  for (let i = 0; i < 3; i++) {
+    const spawned = symbolStore(character);
+    paints.storeTexture(spawned);
+    upload(textures);
+    await collect(() => false);
+    assert.equal(heldPixels(definition), kept);
+  }
 });
 
 test("SWFs that define a lossless bitmap alike share one store and one inflation", () => {

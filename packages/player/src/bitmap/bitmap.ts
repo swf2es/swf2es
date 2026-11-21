@@ -408,7 +408,7 @@ export class BitmapStore {
     const pixels = this.readable;
     if (this.shared) {
       this.cpu = pixels.slice();
-      this.shared = false;
+      this.own();
     }
 
     return this.cpu;
@@ -417,9 +417,18 @@ export class BitmapStore {
   set pixels(pixels: Uint32Array) {
     this.cpu = pixels;
     this.solid = null;
+    this.own();
+    this.gpuNewer = false;
+  }
+
+  /**
+   * The pixels the store's own, no longer a library bitmap's: nothing to let
+   * go of or make again, and `source`, which holds the bitmap's tag, let go.
+   */
+  private own(): void {
     this.shared = false;
     this.released = false;
-    this.gpuNewer = false;
+    this.source = null;
   }
 
   /**
@@ -428,16 +437,19 @@ export class BitmapStore {
    * which may be the same, takes the one it writes first, so both are one array.
    */
   get readable(): Uint32Array {
-    const source = this.source;
-    if (this.released && source !== null) {
-      this.cpu = source();
-      this.released = false;
-    }
-
     if (this.gpuNewer && this.gpu) {
-      this.cpu = this.gpu.read();
-      this.solid = null;
-      this.shared = false;
+      // A draw wrote the store last: the pixels let go of are not wanted, but where the copy
+      // went with a lost context, whose read gives back the store's pixels as they were, which
+      // are the library's still where they were shared.
+      const read = this.gpu.read();
+      if (!(this.shared && read === this.cpu)) {
+        this.cpu = read;
+        this.solid = null;
+        this.own();
+      }
+    } else if (this.released && this.source !== null) {
+      this.cpu = this.source();
+      this.released = false;
     }
 
     this.gpuNewer = false;
@@ -1160,11 +1172,20 @@ export function symbolStore(
   const definition = character.definition;
   const shape = transparent === undefined ? made : { ...made, transparent };
   // What Flash cannot read is 0 by 0, nothing to let go of.
-  if (definition.type !== "lossless" || made.pixels.length === 0) {
+  const count = made.pixels.length;
+  if (definition.type !== "lossless" || count === 0) {
     return BitmapStore.of(shape);
   }
 
-  return BitmapStore.of(shape, () => losslessPixels(definition).pixels);
+  return BitmapStore.of(shape, () => {
+    const again = losslessPixels(definition).pixels;
+    // Never a store of fewer pixels than its size, whatever went wrong.
+    if (again.length !== count) {
+      throw new RangeError("swf2es: a bitmap's pixels came back another size");
+    }
+
+    return again;
+  });
 }
 
 /** Whether a word's low byte comes first in memory, as on every machine a browser runs on. */
