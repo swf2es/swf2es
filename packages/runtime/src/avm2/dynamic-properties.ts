@@ -219,3 +219,96 @@ export class DynamicProperties extends Map<string, Value> {
     return walk;
   }
 }
+
+/** What gives an arguments object its callee, when that is first read: the Runtime. */
+export interface CalleeSource {
+  calleeOf(callee: Value, receiver: Value): Value;
+}
+
+/**
+ * An arguments object's properties, whose `callee` is made only when read:
+ * a method's is its closure bound to the receiver, which most methods that
+ * take `arguments` never ask for, and would otherwise make on every call.
+ * Until then the name is there, holding undefined, so that it is found,
+ * hidden and enumerated in its place as the Function would be.
+ */
+export class ArgumentsProperties extends DynamicProperties {
+  /** The method called and its receiver, until callee is read or replaced. */
+  private source: CalleeSource | null;
+  private callee: Value;
+  private receiver: Value;
+
+  constructor(source: CalleeSource, callee: Value, receiver: Value) {
+    super();
+    this.source = source;
+    this.callee = callee;
+    this.receiver = receiver;
+    super.set("callee", undefined);
+  }
+
+  override get(name: string): Value | undefined {
+    if (this.source !== null && name === "callee") {
+      this.settle();
+    }
+
+    return super.get(name);
+  }
+
+  override set(name: string, value: Value): this {
+    if (name === "callee") {
+      this.source = null;
+    }
+
+    return super.set(name, value);
+  }
+
+  override delete(name: string): boolean {
+    if (name === "callee") {
+      this.source = null;
+    }
+
+    return super.delete(name);
+  }
+
+  override clear(): void {
+    this.source = null;
+    super.clear();
+  }
+
+  override values(): IterableIterator<Value> {
+    this.settle();
+    return super.values();
+  }
+
+  override entries(): IterableIterator<[string, Value]> {
+    this.settle();
+    return super.entries();
+  }
+
+  override [Symbol.iterator](): IterableIterator<[string, Value]> {
+    this.settle();
+    return super[Symbol.iterator]();
+  }
+
+  override forEach(
+    each: (value: Value, name: string, map: Map<string, Value>) => void,
+    self?: unknown,
+  ): void {
+    this.settle();
+    super.forEach(each, self);
+  }
+
+  /** Puts the callee in its place, made now. */
+  private settle(): void {
+    const source = this.source;
+    if (source === null) {
+      return;
+    }
+
+    this.source = null;
+    // Map's own set: the name is there already, in its place among the rest.
+    Map.prototype.set.call(this, "callee", source.calleeOf(this.callee, this.receiver));
+    this.callee = undefined;
+    this.receiver = undefined;
+  }
+}

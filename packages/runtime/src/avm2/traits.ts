@@ -380,10 +380,13 @@ export class Traits {
     return 0;
   }
 
-  /** A new object with these traits, its slots at their initial values. */
-  instance(): AsObject {
+  /**
+   * A new object with these traits, its slots at their initial values, and
+   * `properties` as its dynamic ones where given, which these must allow.
+   */
+  instance(properties?: DynamicProperties): AsObject {
     const o = this.create ? this.create(this) : Object.create(this.proto);
-    o.$d = this.dynamic ? new DynamicProperties() : null;
+    o.$d = this.dynamic ? (properties ?? new DynamicProperties()) : null;
     if (!this.allDefaults) {
       this.allDefaults = this.base ? [...this.base.defaultsOf(), ...this.own] : this.own.slice();
       this.filler = this.fillOf();
