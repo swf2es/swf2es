@@ -536,6 +536,11 @@ export class RenderView implements Drawer {
       this.spans.drop();
     }
 
+    // Geometries whose arrays the backend wants again, as moving content's staged frame after
+    // frame: removed before the walk, for their owners to add again with them; spans naming them
+    // are found stale by their generation.
+    this.geometries.rebuildWanted();
+
     // The drawing buffer, which a browser may hold smaller than the canvas asks for.
     const target = this.target;
     target.width = this.gl.drawingBufferWidth;

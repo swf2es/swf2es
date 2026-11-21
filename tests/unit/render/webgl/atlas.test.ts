@@ -11,7 +11,8 @@ import {
 import {
   GeometryAtlas,
   type Place,
-  VERTEX_BYTES,
+  QUIET_SWEEP_FRAMES,
+  STREAM_QUIET_FRAMES,
 } from "../../../../packages/render/dist/webgl/atlas.js";
 import { FillBatches } from "../../../../packages/render/dist/webgl/batches.js";
 import {
@@ -143,11 +144,23 @@ function shape(seed: number, count: number): GeometryData {
 
 /** Frames placed till what was added has stood long enough for its arrays to be let go of. */
 function settle(atlas: GeometryAtlas, geometries: Geometries): void {
-  // Placed on the first, let go of RELEASE_FRAMES of the registry's on.
-  for (let i = 0; i <= RELEASE_FRAMES; i++) {
+  // Placed on the first, let go of RELEASE_FRAMES of the registry's on; one small enough to merge
+  // once no run's stream has staged it for STREAM_QUIET_FRAMES of the atlas', at the next look.
+  for (let i = 0; i <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + QUIET_SWEEP_FRAMES; i++) {
     atlas.place(geometries);
-    geometries.endFrame();
+    drawn(geometries);
   }
+}
+
+/** A frame ended with every geometry drawn, so that none goes for its idle frames. */
+function drawn(geometries: Geometries): void {
+  for (let id = 0; id < geometries.size; id++) {
+    if (geometries.holds(id)) {
+      geometries.use(id);
+    }
+  }
+
+  geometries.endFrame();
 }
 
 /** Every shape added, by id, as its owner keeps it: the registry lets go of its arrays. */
@@ -627,69 +640,128 @@ test("texts' quads let go of are packed out of the glyph atlas on the GPU, their
   );
 });
 
-test("a run's stream copies its geometries' vertices from the atlas on the GPU, and their indices from the atlas's copies", () => {
-  const { gl } = fakeGl();
+/** A run's stream over a fake GL's atlas, and what it uploaded: its vertices, slots' words and indices. */
+function stream() {
+  const { gl, counts } = fakeGl();
   const state = new GlState(gl);
   const atlas = new GeometryAtlas(gl, state);
   atlas.setUp();
   const batches = new FillBatches(gl, state, atlas);
   batches.setUp(64);
   const geometries = new Geometries();
+  const uploaded = () => {
+    const fake = batches as unknown as { vertexBuffer: FakeBuffer; indexBuffer: FakeBuffer };
+    return {
+      words: new Uint32Array(fake.vertexBuffer.bytes.buffer),
+      floats: new Float32Array(fake.vertexBuffer.bytes.buffer),
+      indices: new Uint32Array(fake.indexBuffer.bytes.buffer),
+    };
+  };
+  return { gl, counts, atlas, batches, geometries, uploaded };
+}
+
+/** The stream asked for a run of `ids`, one geometry drawn twice; what it gave, uploaded. */
+function run(s: ReturnType<typeof stream>, ids: number[]) {
+  const ids2 = [...ids, ids[3]];
+  const places = ids2.map((id) => s.atlas.places[id] as Place);
+  s.batches.reset();
+  const segment = s.batches.add(
+    places,
+    Int32Array.from(ids2, (_, k) => 1000 + k),
+    ids2.length,
+    s.atlas.frame,
+    32,
+    false,
+  );
+  s.batches.upload();
+  return { segment, places, ids: ids2 };
+}
+
+test("a run's stream stages its geometries from their arrays, which runs made anew keep held", () => {
+  const s = stream();
   const ids: number[] = [];
   for (let i = 0; i < 40; i++) {
-    ids.push(add(geometries, shape(i + 1, 3 + (i % 7) * 20)));
+    ids.push(add(s.geometries, shape(i + 1, 3 + (i % 7) * 20)));
   }
 
-  // Drawn frames after they were placed, as a run is merged only then, once their arrays are
-  // let go of; one geometry drawn twice, by two instances.
-  settle(atlas, geometries);
-  atlas.place(geometries);
-  const run = [...ids, ids[3]];
-  const places = run.map((id) => atlas.places[id] as Place);
-  assert.ok(places.every((place) => place.batch !== null));
+  // Moving: a run no copy serves on every frame, as runs are made anew, past the quiet frames.
+  for (let frame = 0; frame <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + 5; frame++) {
+    s.atlas.place(s.geometries);
+    drawn(s.geometries);
+    const ordered = frame % 2 ? ids : [...ids].reverse();
+    const { segment, places, ids: order } = run(s, ordered);
+    if (frame === 0) {
+      // Placed this frame: drawn from the atlas till the next.
+      continue;
+    }
+
+    assert.ok(segment, `frame ${frame}`);
+    const { words, floats, indices } = s.uploaded();
+    let base = 0;
+    let index = segment.indexStart;
+    for (let k = 0; k < order.length; k++) {
+      const data = made.get(s.geometries)?.get(order[k]) as GeometryData;
+      for (let j = 0; j < places[k].vertices; j++) {
+        assert.equal(floats[(base + j) * 6 + 1], data.positions[j * 2 + 1]);
+        assert.equal(words[(base + j) * 6 + 4], data.colors[j]);
+      }
+
+      for (let j = 0; j < places[k].indices; j++) {
+        assert.equal(indices[index + j], base + data.indices[j]);
+      }
+
+      base += places[k].vertices;
+      index += places[k].indices;
+    }
+
+    // Each frame's segment staged anew at the stream's top, which then makes it anew.
+    s.batches.reset();
+  }
+
   for (const id of ids) {
-    assert.equal(geometries.get(id), null);
+    assert.ok(!s.geometries.released(id), `geometry ${id} kept for the runs made anew`);
   }
 
-  batches.reset();
-  const rows = Int32Array.from(run, (_, k) => 1000 + k);
-  const segment = batches.add(places, rows, run.length, atlas.frame, 32, false);
-  assert.ok(segment);
-  batches.upload();
-  const fake = batches as unknown as {
-    vertexBuffer: FakeBuffer;
-    slotBuffer: FakeBuffer;
-    indexBuffer: FakeBuffer;
-  };
-  const atlasBytes = (atlas.pages[0] as unknown as { vertexBuffer: FakeBuffer }).vertexBuffer.bytes;
-  const slots = new Int32Array(fake.slotBuffer.bytes.buffer);
-  const indices = new Uint32Array(fake.indexBuffer.bytes.buffer);
-  let base = 0;
-  let index = segment.indexStart;
-  const first = slots[0];
-  for (let k = 0; k < run.length; k++) {
-    const place = places[k];
-    assert.deepEqual(
-      fake.vertexBuffer.bytes.subarray(base * VERTEX_BYTES, (base + place.vertices) * VERTEX_BYTES),
-      atlasBytes.subarray(
-        place.vertexStart * VERTEX_BYTES,
-        (place.vertexStart + place.vertices) * VERTEX_BYTES,
-      ),
-    );
-    for (let j = 0; j < place.vertices; j++) {
-      assert.equal(slots[base + j], first + k);
-    }
+  assert.equal(s.counts.copies, 0);
+});
 
-    const data = made.get(geometries)?.get(run[k]) as GeometryData;
-    for (let j = 0; j < place.indices; j++) {
-      assert.equal(indices[index + j], base + data.indices[j]);
-    }
-
-    base += place.vertices;
-    index += place.indices;
+test("a still run's geometries are let go of once quiet, and wanted again where runs come back to them", () => {
+  const s = stream();
+  const ids: number[] = [];
+  for (let i = 0; i < 40; i++) {
+    ids.push(add(s.geometries, shape(i + 1, 3 + (i % 7) * 20)));
   }
 
-  assert.equal(index - segment.indexStart, segment.indices);
+  s.atlas.place(s.geometries);
+  drawn(s.geometries);
+  // Still: staged once, then drawn from its copy, which stages nothing.
+  for (let frame = 0; frame <= RELEASE_FRAMES + STREAM_QUIET_FRAMES + QUIET_SWEEP_FRAMES; frame++) {
+    s.atlas.place(s.geometries);
+    drawn(s.geometries);
+    const { segment } = run(s, ids);
+    assert.ok(segment);
+  }
+
+  for (const id of ids) {
+    assert.ok(s.geometries.released(id), `geometry ${id} let go of once quiet`);
+  }
+
+  // The scene moves: a run no copy serves. Drawn from the atlas, the geometries wanted again
+  // as runs come to them a second time, and rebuilt before the next walk.
+  const reversed = [...ids].reverse();
+  s.atlas.place(s.geometries);
+  assert.equal(run(s, reversed).segment, null);
+  s.atlas.place(s.geometries);
+  assert.equal(run(s, ids).segment, null);
+  s.atlas.place(s.geometries);
+  const version = s.geometries.removalVersion;
+  s.geometries.rebuildWanted();
+  assert.ok(s.geometries.removalVersion > version);
+  for (const id of ids) {
+    assert.ok(!s.geometries.holds(id), `geometry ${id} rebuilt`);
+  }
+
+  assert.equal(s.counts.copies, 0);
 });
 
 test("geometries copied while the context is lost keep their arrays, for the restore to copy", () => {

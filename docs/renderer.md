@@ -265,7 +265,15 @@ whose entries go once unused for their idle frames:
   and cannot add to them. A
   geometry drawn anew each frame, as a script's drawing redrawn every
   frame is, goes whole before then: copying the indices of 1,600 such
-  geometries a frame (`bench.ts --redraw 800`) took a millisecond. A geometry whose owner
+  geometries a frame (`bench.ts --redraw 800`) took a millisecond. One
+  small enough to merge (below) keeps its arrays while runs that no copy
+  serves keep coming to it, and goes only once none has for
+  `STREAM_QUIET_FRAMES` (300) of the atlas's frames: a still scene's runs
+  are staged once and drawn from their copies after, a moving one's are
+  made anew every frame or few, and staging them needs the arrays. Copying
+  each such geometry's vertices from the atlas on the GPU instead, a copy
+  for each, made a frame of `--timelines 400` some 6,400 copies and the GL
+  wait nearly twice as long (#1179, mended after). A geometry whose owner
   changes its arrays in place, a 3D object's quad, is added to be kept
   (`add`'s `keep`). A geometry let go of leaves holes, kept sorted
   and merged with their neighbours (`webgl/free-ranges.ts`); what is added
@@ -380,13 +388,15 @@ with the context:
   or, where it cannot be, a call a fill, its row told by a uniform.
 - **Merged fills** (`batches.ts`): runs of at least 32 small geometries
   unchanged since the previous frame use one indexed draw. Each run's
-  geometries are copied into a segment of a stream, their vertices from
-  the atlas's on the GPU, beside them in a buffer of their own an integer
-  attribute, the slot of the draw's packed row in
-  an integer texture the stream keeps for its segments, written as the
-  rows change, so transforms, colour and quarter-pixel snapping use the
-  same shader math; their indices are the atlas's copies, from the
-  segment's start. A segment is found again by its geometries, in their
+  geometries are copied into a segment of a stream, from their arrays,
+  their vertices carrying as an integer attribute the slot of the draw's
+  packed row in an integer texture the stream keeps for its segments,
+  written as the rows change, so transforms, colour and quarter-pixel
+  snapping use the same shader math. A run with a geometry whose arrays
+  were let go of is drawn from the atlas, and that geometry wanted again
+  where such runs come to it twice within `STREAM_QUIET_FRAMES`: the view
+  rebuilds it before its next walk (`Geometries.want`, `rebuildWanted`),
+  and it keeps its arrays from then while runs keep coming to it. A segment is found again by its geometries, in their
   order, wherever its run comes in a later frame: moving, recolouring or
   reordering objects only updates the row texture and the segments' rows.
   The segments a frame adds are staged on the CPU after the stream's top
