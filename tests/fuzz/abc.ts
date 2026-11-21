@@ -203,13 +203,18 @@ for (let k = 0; k < caseCount; k++) {
 
     accepted++;
     const hashes = [...builtinHashes, sha(abc)].join("\n");
-    // The bytes the player decodes (codegen's wrapper) are the module's
-    // well-formed UTF-8: a decode that refuses none gives the same string.
-    const bytes: Uint8Array = testing.domainModuleBytes(hashes, -1, false);
+    // The bytes the player decodes (codegen's wrapper), part by part, are
+    // the module's well-formed UTF-8: a decode that refuses none gives the
+    // same string.
+    const parts: Uint8Array[] = [testing.domainModuleBytes(hashes, -1, false)];
+    while (!testing.domainModuleDone()) {
+      parts.push(testing.domainModuleMoreBytes());
+    }
+
     const module: string = testing.domainModule(hashes);
     let decoded: string | null = null;
     try {
-      decoded = utf8.decode(bytes);
+      decoded = parts.map((part) => utf8.decode(part)).join("");
     } catch {
       // Not UTF-8: reported below.
     }

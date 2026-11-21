@@ -90,14 +90,15 @@ const BOUND = 64 * 1024;
 /**
  * What codegen's memory may grow to over the loads without failing, if it
  * was smaller after the warm ones. Wasm memory is a high-water mark, and
- * compiling the libraries takes it to 32 MiB, within which the compiler's
- * compactions then keep it. Read from a module cache, the libraries are
- * not compiled, and it starts at 8 MiB: dead domains building up before a
- * compaction, and a compaction making new tables beside the old, then take
- * it to 16 MiB after some 20 loads, and to 32 after some hundreds or not
- * at all, never further in 4,000. A leak would pass it, but only a large
- * one: from a start of 8 or 16 MiB, some 80 KB a load over 300 loads is
- * hidden, which the run without the cache, starting at 32 MiB, does catch.
+ * compiling the libraries, a part of each module at a time, takes it to
+ * 16 MiB; read from a module cache, they are not compiled, and it starts
+ * at 8. Dead domains building up before a compaction, and a compaction
+ * making new tables beside the old, then take it to 16 MiB after some 20
+ * loads, and to 32 after some hundreds or not at all (the shared gear,
+ * uncached, within 300), never further in 4,000. A leak would pass it, but
+ * only a large one: from a start of 8 or 16 MiB, some 80 KB a load over
+ * 300 loads is hidden, though the live ABCs' weight, held to BOUND a
+ * load, catches one in the compiler's tables.
  */
 const CODEGEN_CEILING = 32 * 1024 * 1024;
 
