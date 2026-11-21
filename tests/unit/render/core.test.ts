@@ -196,6 +196,24 @@ test("a geometry nothing copied to a GPU keeps its arrays, as in a view without 
   assert.ok(!geometries.released(handle.id));
 });
 
+test("arrays a reader wants again are rebuilt at the next safe point, not where it asks", () => {
+  const geometries = new Geometries();
+  const released = geometries.add(triangle());
+  const held = geometries.add(triangle());
+  geometries.release(released.id);
+  geometries.want(released.id);
+  geometries.want(held.id);
+  // Asked mid-frame: nothing removed yet.
+  assert.ok(geometries.alive(released) && geometries.alive(held));
+  geometries.rebuildWanted();
+  assert.ok(!geometries.alive(released));
+  assert.ok(geometries.alive(held));
+  // Asked for once: a second safe point rebuilds nothing more.
+  const version = geometries.removalVersion;
+  geometries.rebuildWanted();
+  assert.equal(geometries.removalVersion, version);
+});
+
 test("a lost context takes the geometries whose arrays were let go of, and adds those kept again", () => {
   const geometries = new Geometries();
   const released = geometries.add(triangle());

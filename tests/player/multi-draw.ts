@@ -280,7 +280,7 @@ const { value, exception } = await withPage(
           compare("grown stream, frame " + frame);
         }
         const grown = merged.vertexCapacity;
-        const grownStaging = merged.slots.length;
+        const grownStaging = merged.words.length;
         if (!(small > 0 && grown > small) || merged.indexTop === 0 || copies === 0) {
           throw new Error("The merged stream did not grow, keeping its start");
         }
@@ -292,7 +292,7 @@ const { value, exception } = await withPage(
         for (let frame = 0; frame < 490; frame++) {
           compare("shrunk stream, frame " + frame);
         }
-        if (!(merged.vertexCapacity < grown && merged.slots.length < grownStaging) || copies === 0) {
+        if (!(merged.vertexCapacity < grown && merged.words.length < grownStaging) || copies === 0) {
           throw new Error("The merged stream kept its room");
         }
         bufferUploads = 0;
@@ -316,8 +316,7 @@ const { value, exception } = await withPage(
       destroyed = true;
       if (multi.gl.isContextLost() || multi.gl.isTexture(table) ||
           multi.gl.isVertexArray(batches.vertexArray) ||
-          multi.gl.isBuffer(batches.vertexBuffer) || multi.gl.isBuffer(batches.slotBuffer) ||
-          multi.gl.isBuffer(batches.indexBuffer)) {
+          multi.gl.isBuffer(batches.vertexBuffer) || multi.gl.isBuffer(batches.indexBuffer)) {
         throw new Error("Draw table survived renderer destruction");
       }
       return { frames, largest };
