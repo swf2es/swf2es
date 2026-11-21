@@ -287,9 +287,18 @@ export function shape(spec: ShapeSpec): Uint8Array {
 
 type MatrixSpec = { a?: number; b?: number; c?: number; d?: number; tx?: number; ty?: number };
 
-/** A morph fill: a solid colour, or a linear or radial gradient, at both ends; colours 0xAARRGGBB. */
+/**
+ * A morph fill: a solid colour, a linear or radial gradient, or a bitmap (types as BitmapFill's),
+ * at both ends; colours 0xAARRGGBB.
+ */
 export type MorphFillSpec =
   | { start: number; end: number }
+  | {
+      bitmap: number;
+      type: 0x40 | 0x41 | 0x42 | 0x43;
+      startMatrix?: MatrixSpec;
+      endMatrix?: MatrixSpec;
+    }
   | {
       type: 0x10 | 0x12;
       startMatrix?: MatrixSpec;
@@ -337,6 +346,13 @@ export function morphShape(spec: MorphShapeSpec): Uint8Array {
       body.u8(0);
       color(body, f.start);
       color(body, f.end);
+      return;
+    }
+
+    if ("bitmap" in f) {
+      body.u8(f.type).u16(f.bitmap);
+      matrix(body, f.startMatrix ?? {});
+      matrix(body, f.endMatrix ?? {});
       return;
     }
 
