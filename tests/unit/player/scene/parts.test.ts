@@ -8,12 +8,13 @@ import type { DisplayObject } from "../../../../packages/player/dist/display/dis
 import { Drawing } from "../../../../packages/player/dist/display/drawing.js";
 import { morphAt } from "../../../../packages/player/dist/display/morph.js";
 import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes.js";
-import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
 import {
+  KeptParts,
   type KeptPartsOptions,
-  Parts,
   SLOW_PARTS_MS,
-} from "../../../../packages/player/dist/scene/parts.js";
+} from "../../../../packages/player/dist/scene/kept-parts.js";
+import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
+import { Parts } from "../../../../packages/player/dist/scene/parts.js";
 import { Geometries, IDLE_FRAMES } from "../../../../packages/render/dist/index.js";
 import { crossingMorph } from "./crossing-morph.ts";
 
@@ -28,10 +29,12 @@ function drawing() {
 function fixture() {
   const tessellator = new Tessellator();
   const geometries = new Geometries();
+  // Nothing kept, however long a busy machine takes.
   const parts = new Parts(
     geometries,
     tessellator.tessellate,
     new LineCache(geometries, tessellator.tessellate),
+    new KeptParts({ slowMs: Number.POSITIVE_INFINITY }),
   );
   const d = drawing();
   return { tessellator, geometries, parts, d };
@@ -165,8 +168,8 @@ function squares(x: number, y = 0): Drawing {
   return d;
 }
 
-/** `fixture`'s, with the tessellator's layer calls counted. */
-function counting(kept: KeptPartsOptions = {}) {
+/** `fixture`'s, with the tessellator's layer calls counted, keeping triangles in a store of its own. */
+function counting(options: KeptPartsOptions = { slowMs: Number.POSITIVE_INFINITY }) {
   const tessellator = new Tessellator();
   const geometries = new Geometries();
   const calls = { layers: 0 };
@@ -177,8 +180,9 @@ function counting(kept: KeptPartsOptions = {}) {
     },
     lines: tessellator.tessellate.lines,
   };
+  const kept = new KeptParts(options);
   const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate), kept);
-  return { tessellator, geometries, parts, calls };
+  return { tessellator, geometries, parts, calls, kept };
 }
 
 test("a part of fills that meet is marked flat once it has stood, one of fills over each other not", () => {
@@ -267,18 +271,31 @@ test("a drawing made again every second or third frame is looked into a few time
   }
 });
 
+/** Frames enough for what was drawn before them to expire, each ended as the view ends one. */
+function idle({ geometries, parts }: ReturnType<typeof counting>): void {
+  for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+    geometries.endFrame();
+    parts.endFrame();
+  }
+}
+
 /**
  * A tween of `ratios` played `loops` times, each ratio drawn for `hold`
- * frames: the layers' parts asked for on each, as the view asks.
+ * frames and nothing for `gap` frames after each loop: the layers' parts
+ * asked for on each, as the view asks, and the tessellations each loop made.
  */
 function tween(
-  { geometries, parts }: ReturnType<typeof counting>,
+  fixture: ReturnType<typeof counting>,
   morph: ReturnType<typeof crossingMorph>,
   ratios: number[],
   hold: number,
   loops: number,
-): void {
+  gap = 0,
+): number[] {
+  const { geometries, parts, calls, kept } = fixture;
+  const made: number[] = [];
   for (let loop = 0; loop < loops; loop++) {
+    const before = calls.layers;
     for (const ratio of ratios) {
       const { layers } = morphAt(morph, ratio);
       for (let frame = 0; frame < hold; frame++) {
@@ -289,97 +306,219 @@ function tween(
         }
 
         geometries.endFrame();
+        parts.endFrame();
+        assert.ok(kept.bytes <= kept.most);
       }
     }
+
+    for (let frame = 0; frame < gap; frame++) {
+      geometries.endFrame();
+      parts.endFrame();
+    }
+
+    made.push(calls.layers - before);
   }
+
+  return made;
 }
 
+/** Each ratio undrawn for longer than IDLE_FRAMES between its visits. */
+function holdFor(ratios: number[]): number {
+  return Math.ceil(IDLE_FRAMES / (ratios.length - 1)) + 1;
+}
+
+const SIX = [0, 13107, 26214, 39321, 52428, 65535];
+
 test("a tween longer than the idle frames tessellates its slow blends once, its fast ones each loop", () => {
-  // Each ratio undrawn for longer than IDLE_FRAMES between its visits.
-  const ratios = [0, 13107, 26214, 39321, 52428, 65535];
-  const hold = Math.ceil(IDLE_FRAMES / (ratios.length - 1)) + 1;
   for (const [slowMs, expected] of [
-    [0, ratios.length],
-    [Number.POSITIVE_INFINITY, ratios.length * 3],
-  ]) {
+    [0, [6, 0, 0]],
+    [Number.POSITIVE_INFINITY, [6, 6, 6]],
+  ] as const) {
     const fixture = counting({ slowMs });
     try {
-      tween(fixture, crossingMorph(4), ratios, hold, 3);
-      assert.equal(fixture.calls.layers, expected, `slowMs ${slowMs}`);
-      assert.equal(fixture.parts.keptSize > 0, slowMs === 0);
+      assert.deepEqual(tween(fixture, crossingMorph(4), SIX, holdFor(SIX), 3), expected);
+      assert.equal(fixture.kept.size, slowMs === 0 ? 6 : 0);
     } finally {
       fixture.tessellator.dispose();
     }
   }
 });
 
-test("a blend slower to tessellate than SLOW_PARTS_MS keeps its triangles, a context lost too", () => {
+test("a blend slower to tessellate than SLOW_PARTS_MS keeps its triangles", () => {
   // Some hundreds of milliseconds each, well past the threshold on any machine.
   const morph = crossingMorph(40);
-  const fixture = counting();
-  const { geometries, parts, calls, tessellator } = fixture;
+  const fixture = counting({});
   try {
     const started = performance.now();
-    tween(fixture, morph, [0, 65535], IDLE_FRAMES + 2, 2);
+    assert.deepEqual(tween(fixture, morph, [0, 65535], IDLE_FRAMES + 2, 2), [2, 0]);
     assert.ok((performance.now() - started) / 2 > SLOW_PARTS_MS);
-    assert.equal(calls.layers, 2);
-    assert.ok(parts.keptSize > 0);
+    assert.equal(fixture.kept.size, 2);
+  } finally {
+    fixture.tessellator.dispose();
+  }
+});
 
-    geometries.lost();
-    tween(fixture, morph, [0, 65535], 1, 1);
+test("re-added triangles are the ones made, flat and looked into as they were", () => {
+  const fixture = counting({ slowMs: 0 });
+  const { geometries, parts, calls, tessellator } = fixture;
+  try {
+    // Two fills that meet: flat once looked into.
+    const d = squares(20);
+    const layer = d.layers[0];
+    const o = {} as DisplayObject;
+    const [part] = parts.partsOf(layer, d.version);
+    const made = geometries.get(part.handle.id);
+    assert.ok(made);
+    const positions = made.positions.slice();
+    const indices = made.indices.slice();
+    geometries.endFrame();
+    parts.markFlat(o, layer, part);
+    assert.equal(made.flat, true);
+    assert.equal(part.fillsTo, part.fillsFrom);
+
+    idle(fixture);
+    assert.ok(!geometries.alive(part.handle));
+    assert.ok(fixture.kept.bytes > 0);
+    const looked = calls.layers;
+    const [again] = parts.partsOf(layer, d.version);
+    assert.notEqual(again.handle, part.handle);
+    assert.equal(again.madeAt, geometries.frame);
+    assert.equal(fixture.kept.bytes, 0, "added again, they count no more");
+    const data = geometries.get(again.handle.id);
+    assert.ok(data);
+    assert.deepEqual(data.positions, positions);
+    assert.deepEqual(data.indices, indices);
+    assert.equal(data.flat, true);
+    assert.equal(again.fillsTo, again.fillsFrom);
+
+    // Not looked into again, standing or not.
+    geometries.endFrame();
+    parts.markFlat(o, layer, again);
+    assert.equal(calls.layers, looked);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a layer kept as drawn and as a mask is added again as both", () => {
+  const fixture = counting({ slowMs: 0 });
+  const { parts, calls, tessellator } = fixture;
+  try {
+    const layer = squares(40).layers[0];
+    parts.partsOf(layer, 0);
+    parts.partsOf(layer, 0, true);
+    assert.equal(calls.layers, 2);
+    assert.equal(fixture.kept.size, 2);
+
+    idle(fixture);
+    const both = fixture.kept.bytes;
+    assert.ok(both > 0);
+    parts.partsOf(layer, 0);
+    assert.ok(fixture.kept.bytes > 0 && fixture.kept.bytes < both);
+    parts.partsOf(layer, 0, true);
+    assert.equal(fixture.kept.bytes, 0);
     assert.equal(calls.layers, 2);
   } finally {
     tessellator.dispose();
   }
 });
 
-test("kept triangles stay within their bytes, the least recently drawn let go of first", () => {
-  const morph = crossingMorph(3);
-  const sizing = counting({ slowMs: 0 });
-  let size: number;
+test("a layer with a fill refused keeps nothing, to be tried again", () => {
+  const tessellator = new Tessellator();
+  const geometries = new Geometries();
+  const kept = new KeptParts({ slowMs: 0 });
+  let calls = 0;
+  const tessellate = {
+    layer: (...args: Parameters<typeof tessellator.tessellate.layer>) => {
+      calls++;
+      const out = tessellator.tessellate.layer(...args);
+      return out && [null, ...out.slice(1)];
+    },
+    lines: tessellator.tessellate.lines,
+  };
+  const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate), kept);
   try {
-    sizing.parts.partsOf(morphAt(morph, 0).layers[0], 0);
-    size = sizing.parts.keptSize;
-  } finally {
-    sizing.tessellator.dispose();
-  }
-
-  // Room for two and a half blends of about that size.
-  const bytes = Math.floor(size * 2.5);
-  const fixture = counting({ slowMs: 0, bytes });
-  const { geometries, parts, calls, tessellator } = fixture;
-  try {
-    const ratios = [0, 16384, 32768, 49152, 65535];
-    const layers = ratios.map((ratio) => morphAt(morph, ratio).layers[0]);
-    for (const layer of layers) {
-      parts.partsOf(layer, 0);
-      assert.ok(parts.keptSize <= bytes);
-    }
-
-    assert.ok(parts.keptSize > 0);
+    const layer = squares(40).layers[0];
+    parts.partsOf(layer, 0);
+    assert.equal(kept.size, 0);
     for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
       geometries.endFrame();
+      parts.endFrame();
     }
 
-    // The last two are added again, the first three tessellated again.
+    parts.partsOf(layer, 0);
+    assert.equal(calls, 2);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+/** The bytes a blend of `crossingMorph(count)` keeps. */
+function blendBytes(count: number): number {
+  const fixture = counting({ slowMs: 0 });
+  try {
+    fixture.parts.partsOf(morphAt(crossingMorph(count), 32768).layers[0], 0);
+    idle(fixture);
+    return fixture.kept.bytes;
+  } finally {
+    fixture.tessellator.dispose();
+  }
+}
+
+test("a tween of more slow blends than fit keeps finding the same share of them each loop", () => {
+  const ratios = [0, 8192, 16384, 24576, 32768, 40960, 49152, 57344, 65535];
+  // Every blend made in a millisecond, and room for about three of the nine.
+  let clock = 0;
+  const bytes = Math.floor(blendBytes(4) * 3.5);
+  const fixture = counting({ slowMs: 0, bytes, now: () => clock++ });
+  try {
+    // Shown for a moment, then hidden for longer than the idle frames: every blend expired at once.
+    const made = tween(fixture, crossingMorph(4), ratios, 2, 6, 2 * IDLE_FRAMES);
+    assert.equal(made[0], ratios.length);
+    const hits = made.slice(1).map((m) => ratios.length - m);
+    assert.deepEqual(hits, [3, 3, 3, 3, 3]);
+  } finally {
+    fixture.tessellator.dispose();
+  }
+});
+
+test("expired triangles stay within their bytes: those worth more a byte push out those worth less", () => {
+  const size = blendBytes(4);
+  // Room for two, and the clock's readings around each making.
+  let readings: number[] = [];
+  const fixture = counting({
+    slowMs: 0,
+    bytes: Math.floor(size * 2.5),
+    now: () => readings.shift() ?? 0,
+  });
+  const { parts, calls, kept, tessellator } = fixture;
+  try {
+    const morph = crossingMorph(4);
+    const layers = [0, 20000, 40000, 60000].map((ratio) => morphAt(morph, ratio).layers[0]);
+    // Made in 1, 3, 2 and 1 milliseconds.
+    for (const [i, layer] of layers.entries()) {
+      readings = [0, [1, 3, 2, 1][i]];
+      parts.partsOf(layer, 0);
+    }
+
+    assert.equal(kept.size, 4);
+    idle(fixture);
+    // The first and the last, worth least, are let go of; a tie with what it would push out too.
+    assert.equal(kept.size, 2);
+    assert.ok(kept.bytes <= Math.floor(size * 2.5));
     const made = calls.layers;
-    for (const layer of layers.slice(3)) {
-      parts.partsOf(layer, 0);
-    }
-
+    parts.partsOf(layers[1], 0);
+    parts.partsOf(layers[2], 0);
     assert.equal(calls.layers, made);
-    for (const layer of layers.slice(0, 3)) {
-      parts.partsOf(layer, 0);
-      assert.ok(parts.keptSize <= bytes);
-    }
+    parts.partsOf(layers[0], 0);
+    parts.partsOf(layers[3], 0);
+    assert.equal(calls.layers, made + 2);
 
-    assert.equal(calls.layers, made + 3);
-
-    // One larger than the bound is never kept.
+    // One larger than the budget is never kept.
     const small = counting({ slowMs: 0, bytes: Math.floor(size / 2) });
     try {
       small.parts.partsOf(layers[0], 0);
-      assert.equal(small.parts.keptSize, 0);
+      assert.equal(small.kept.size, 0);
     } finally {
       small.tessellator.dispose();
     }
@@ -388,22 +527,56 @@ test("kept triangles stay within their bytes, the least recently drawn let go of
   }
 });
 
+test("expired triangles not added again for long may be let go of whatever they cost", () => {
+  const size = blendBytes(4);
+  // The first made in 100 ms, the second in 1 ms.
+  const readings = [0, 100, 0, 1];
+  const fixture = counting({
+    slowMs: 0,
+    bytes: Math.floor(size * 1.5),
+    now: () => readings.shift() ?? 0,
+  });
+  const { geometries, parts, calls, kept, tessellator } = fixture;
+  try {
+    const morph = crossingMorph(4);
+    const [first, second] = [0, 65535].map((ratio) => morphAt(morph, ratio).layers[0]);
+    parts.partsOf(first, 0);
+    idle(fixture);
+    assert.equal(kept.bytes > 0, true);
+    for (let frame = 0; frame < 10 * IDLE_FRAMES; frame++) {
+      geometries.endFrame();
+      parts.endFrame();
+    }
+
+    parts.partsOf(second, 0);
+    idle(fixture);
+    // The first, gone stale, gives way to the second, worth far less.
+    assert.equal(kept.size, 1);
+    const made = calls.layers;
+    parts.partsOf(second, 0);
+    assert.equal(calls.layers, made);
+    parts.partsOf(first, 0);
+    assert.equal(calls.layers, made + 1);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
 test("a drawing's next version, or a layer it no longer draws, lets its kept triangles go", () => {
-  const { tessellator, parts } = counting({ slowMs: 0 });
+  const { tessellator, parts, kept } = counting({ slowMs: 0 });
   try {
     const d = squares(40);
     const o = {} as DisplayObject;
     parts.dropUndrawn(o, d.layers, d.version);
     parts.partsOf(d.layers[0], d.version);
-    const first = parts.keptSize;
-    assert.ok(first > 0);
+    assert.equal(kept.size, 1);
     // Changed in place: the old version's let go of, the new one's kept in their stead.
     parts.partsOf(d.layers[0], d.version + 1);
-    assert.equal(parts.keptSize, first);
+    assert.equal(kept.size, 1);
 
     const e = squares(60);
     parts.dropUndrawn(o, e.layers, d.version + 1);
-    assert.equal(parts.keptSize, 0);
+    assert.equal(kept.size, 0);
   } finally {
     tessellator.dispose();
   }
@@ -412,7 +585,7 @@ test("a drawing's next version, or a layer it no longer draws, lets its kept tri
 test("a collected layer's kept triangles go with it", async () => {
   setFlagsFromString("--expose-gc");
   const gc = runInNewContext("gc") as () => void;
-  const { tessellator, parts } = counting({ slowMs: 0 });
+  const { tessellator, parts, kept } = counting({ slowMs: 0 });
   try {
     const keep = (): WeakRef<ShapeLayer> => {
       const layer = squares(40).layers[0];
@@ -420,15 +593,15 @@ test("a collected layer's kept triangles go with it", async () => {
       return new WeakRef(layer);
     };
     const layer = keep();
-    assert.ok(parts.keptSize > 0);
+    assert.equal(kept.size, 1);
 
-    for (let i = 0; i < 20 && parts.keptSize > 0; i++) {
+    for (let i = 0; i < 20 && kept.size > 0; i++) {
       await setImmediate();
       gc();
     }
 
     assert.equal(layer.deref(), undefined);
-    assert.equal(parts.keptSize, 0);
+    assert.equal(kept.size, 0);
   } finally {
     tessellator.dispose();
   }

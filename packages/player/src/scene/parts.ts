@@ -3,12 +3,14 @@
 // drawing's version, a drawing used as a mask's apart; a bitmap's quad of
 // each size; a glyph's fill. A drawing drawn again lets go of the parts
 // of the layers it no longer draws (dropUndrawn). A layer slow to tessellate
-// keeps its triangles past its geometries' expiry, to add them again.
+// keeps its triangles past its geometries' expiry, to add them again
+// (kept-parts.ts).
 import type { Glyph } from "@swf2es/format";
-import type { Geometries, GeometryData, GeometryHandle } from "@swf2es/render";
+import type { Geometries, GeometryHandle } from "@swf2es/render";
 import type { DisplayObject } from "../display/displayobject.js";
 import { type ShapeLayer, shapeLayers } from "../display/shapes.js";
 import { type FillTessellator, fillsApart } from "./fills.js";
+import { type KeptEntry, type KeptParts, keptParts } from "./kept-parts.js";
 import type { LineCache } from "./lines.js";
 import { bitmapQuad, layerParts, type PartPaint } from "./shapes.js";
 import { glyphShape } from "./text.js";
@@ -30,32 +32,6 @@ const STANDING_FRAMES = 1;
 const MOST_STANDING_FRAMES = 64;
 
 /**
- * Milliseconds a layer's parts must take to make for their triangles to
- * outlive their geometries: a morph's blend of many crossing contours can
- * take the tessellator a second, and a tween longer than IDLE_FRAMES would
- * otherwise make each of its blends again on every loop. A layer made
- * faster is made again, as keeping it would cost more memory than time.
- */
-export const SLOW_PARTS_MS = 20;
-
-/**
- * Bytes of slow layers' triangles kept at most, those least recently added
- * let go of first: a blend of a hundred crossing contours keeps about 2 MB,
- * and a tween of a few dozen such blends fits.
- */
-export const KEPT_PARTS_BYTES = 64 * 1024 * 1024;
-
-/** How Parts keeps slow layers' triangles: the defaults, or a test's. */
-export interface KeptPartsOptions {
-  /** SLOW_PARTS_MS by default. */
-  slowMs?: number;
-  /** KEPT_PARTS_BYTES by default. */
-  bytes?: number;
-  /** The clock a layer's making is timed by, in milliseconds; performance.now by default. */
-  now?: () => number;
-}
-
-/**
  * A part as made: its geometry's handle, the frame it was made on, and the
  * layer's fills of a part of several not yet looked into (markFlat), from
  * `fillsFrom` up to `fillsTo`, none once they have been.
@@ -73,11 +49,11 @@ export interface Made {
   version: number;
   checkedAt: number;
   /**
-   * Its parts' geometries in order, where they were slow to make
-   * (SLOW_PARTS_MS) and are among those kept: added again when theirs
-   * expire or are lost, rather than tessellated again.
+   * Its parts' geometries, where they were slow to make (SLOW_PARTS_MS)
+   * and are among those kept (kept-parts.ts): added again when theirs
+   * expire, rather than tessellated again.
    */
-  kept: GeometryData[] | null;
+  kept: KeptEntry | null;
 }
 
 /**
@@ -108,29 +84,18 @@ export class Parts {
   private quadsMade = 0;
   /** Each glyph's fill, made once for every text drawn in it; null for an empty glyph. */
   private readonly glyphs = new WeakMap<Glyph, GeometryHandle | null>();
-  /** The layers whose triangles are kept, least recently added first, and the bytes of each. */
-  private readonly kept = new Map<Made, number>();
-  private keptBytes = 0;
-  /** A kept layer's triangles let go of with the layer: Made holds no reference to it. */
-  private readonly keptGone = new FinalizationRegistry<Made>((made) => this.forget(made));
-  private readonly slowMs: number;
-  private readonly mostKept: number;
-  private readonly now: () => number;
 
   constructor(
     private readonly geometries: Geometries,
     private readonly tessellator: FillTessellator,
     private readonly lineCache: LineCache,
-    options: KeptPartsOptions = {},
-  ) {
-    this.slowMs = options.slowMs ?? SLOW_PARTS_MS;
-    this.mostKept = options.bytes ?? KEPT_PARTS_BYTES;
-    this.now = options.now ?? (() => performance.now());
-  }
+    /** Where slow layers' triangles are kept: every view's store, or a test's. */
+    private readonly kept: KeptParts = keptParts,
+  ) {}
 
-  /** Bytes of slow layers' triangles kept now. */
-  get keptSize(): number {
-    return this.keptBytes;
+  /** A frame drawn, its geometries' frame ended: the kept triangles whose geometries expired counted. */
+  endFrame(): void {
+    this.kept.settle();
   }
 
   /**
@@ -180,7 +145,7 @@ export class Parts {
       }
     }
 
-    this.forget(made);
+    this.kept.forget(made);
     cache.delete(layer);
   }
 
@@ -216,24 +181,28 @@ export class Parts {
       }
     }
 
-    const kept = made?.kept;
-    if (made && kept && made.version === version) {
-      // Looked into or not (markFlat) as they were.
-      made.parts = made.parts.map((part, i) => ({ ...part, handle: this.geometries.add(kept[i]) }));
+    if (made?.kept && made.version === version) {
+      const kept = made.kept.geometries;
+      const madeAt = this.geometries.frame;
+      // Looked into or not (markFlat) as they were, and standing again from now before a look.
+      made.parts = made.parts.map((part, i) => ({
+        ...part,
+        handle: this.geometries.add(kept[i]),
+        madeAt,
+      }));
       made.checkedAt = this.geometries.removalVersion;
-      const bytes = this.kept.get(made) ?? 0;
-      this.kept.delete(made);
-      this.kept.set(made, bytes);
+      this.kept.added(made, this.geometries);
       return made.parts;
     }
 
     if (made) {
-      this.forget(made);
+      this.kept.forget(made);
     }
 
-    const started = this.now();
-    const fresh = layerParts(layer, this.tessellator, masking);
-    const slow = this.now() - started >= this.slowMs;
+    const outcome = { refused: false };
+    const started = this.kept.now();
+    const fresh = layerParts(layer, this.tessellator, masking, outcome);
+    const ms = this.kept.now() - started;
     // The layer can outlive its handle. Let the registry release the tessellated buffers on expiry,
     // unless they were slow to make.
     const parts = fresh.map(({ geometry, paint, region, mesh, fillsFrom = 0, fillsTo = 0 }) => ({
@@ -247,54 +216,18 @@ export class Parts {
     }));
     const entry: Made = { parts, version, checkedAt: this.geometries.removalVersion, kept: null };
     cache.set(layer, entry);
-    if (slow) {
-      this.keep(
+    // A fill refused is tried again when the geometries expire, as it would be otherwise.
+    if (!outcome.refused) {
+      this.kept.keep(
         layer,
         entry,
         fresh.map((part) => part.geometry),
+        ms,
+        this.geometries,
       );
     }
 
     return parts;
-  }
-
-  /** `made`'s geometries kept past their expiry, those least recently added let go of past the bound. */
-  private keep(layer: ShapeLayer, made: Made, geometries: GeometryData[]): void {
-    let bytes = 0;
-    for (const g of geometries) {
-      bytes += g.positions.byteLength + g.colors.byteLength + g.indices.byteLength;
-      bytes += (g.texels?.byteLength ?? 0) + (g.depths?.byteLength ?? 0);
-    }
-
-    if (bytes > this.mostKept) {
-      return;
-    }
-
-    made.kept = geometries;
-    this.kept.set(made, bytes);
-    this.keptBytes += bytes;
-    this.keptGone.register(layer, made, made);
-
-    for (const oldest of this.kept.keys()) {
-      if (this.keptBytes <= this.mostKept) {
-        break;
-      }
-
-      this.forget(oldest);
-    }
-  }
-
-  /** `made`'s kept geometries let go of, if it has any. */
-  private forget(made: Made): void {
-    const bytes = this.kept.get(made);
-    if (bytes === undefined) {
-      return;
-    }
-
-    this.kept.delete(made);
-    this.keptBytes -= bytes;
-    this.keptGone.unregister(made);
-    made.kept = null;
   }
 
   /**

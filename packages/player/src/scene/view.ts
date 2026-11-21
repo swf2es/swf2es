@@ -590,6 +590,7 @@ export class RenderView implements Drawer {
       target,
     );
     this.geometries.endFrame();
+    this.parts.endFrame();
     this.textures.endFrame();
     this.keeps.endFrame();
     this.drawnRoot = root;

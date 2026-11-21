@@ -16,10 +16,18 @@ the layer and shared by every instance that draws it (`scene/parts.ts`,
 drawing's for each version of it, and let go of once undrawn for 300
 frames (`IDLE_FRAMES`). A layer that took 20 ms or more to make
 (`SLOW_PARTS_MS`), as a morph's blend of a hundred crossing contours takes
-libtess2 seconds, keeps its triangles when its geometries go, up to 64 MB
-of them, those least recently added let go of first (`KEPT_PARTS_BYTES`),
-so a tween longer than the idle frames adds its blends again on each loop
-rather than tessellating them again. The geometries are built from Flash's edges
+libtess2 seconds, keeps its triangles when its geometries go
+(`scene/kept-parts.ts`), so a tween longer than the idle frames adds its
+blends again on each loop rather than tessellating them again; one with a
+fill the tessellator refused keeps nothing, to be tried again. Every view
+shares one budget of 64 MB (`KEPT_PARTS_BYTES`), which counts only the
+triangles whose geometries have gone, as a geometry held is the same
+arrays. Triangles that do not fit as they expire push out those worth
+less, in milliseconds a byte, or those not added again for ten times the
+idle frames, and are let go of otherwise, a tie too: let go of by age, a
+loop of more blends than fit would find none of them kept. A morph's
+blend past its 64 to 256 kept (`display/morph.ts`) is collected, its kept
+triangles with it. The geometries are built from Flash's edges
 (`display/shapes.ts`: each edge goes to its right fill forward and its
 left fill reversed, joined into contours; one with the same fill on both
 sides, a seam Flash Pro leaves inside a fill, goes to neither, so it

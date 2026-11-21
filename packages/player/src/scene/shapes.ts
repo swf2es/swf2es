@@ -387,14 +387,16 @@ export function radialTexels(pixels: number): number {
 /**
  * `layer`'s fills as geometries in order, positions in the shape's pixels,
  * then its meshes, drawn after the fills, as drawTriangles' are. A fill of
- * a bitmap the SWF lacks is red, as Flash draws it.
+ * a bitmap the SWF lacks is red, as Flash draws it. Where `outcome` is
+ * given, its `refused` tells whether the tessellator refused any fill.
  */
 export function layerParts(
   layer: ShapeLayer,
   tessellator: FillTessellator,
   masking = false,
+  outcome?: { refused: boolean },
 ): Part[] {
-  const parts = layer.fills.length > 0 ? fillParts(layer, tessellator, masking) : [];
+  const parts = layer.fills.length > 0 ? fillParts(layer, tessellator, masking, outcome) : [];
 
   for (const mesh of layer.meshes ?? []) {
     const part = meshPart(mesh);
@@ -440,10 +442,18 @@ function meshPart(mesh: TriangleMesh): Part | null {
 }
 
 /** `layer`'s fills as geometries in order. */
-function fillParts(layer: ShapeLayer, tessellator: FillTessellator, masking: boolean): Part[] {
+function fillParts(
+  layer: ShapeLayer,
+  tessellator: FillTessellator,
+  masking: boolean,
+  outcome?: { refused: boolean },
+): Part[] {
   // A drawing used as a mask fills non-zero, whatever its winding (fills.ts, resolveFills).
   // Read below before the tessellator is called again, so borrowed from it.
   const geometries = resolveFills(layer, masking, tessellator, true);
+  if (outcome) {
+    outcome.refused = geometries.includes(null);
+  }
   const out = new Gathered();
   for (let i = 0; i < layer.fills.length; i++) {
     const { fill, contours } = layer.fills[i];
