@@ -379,6 +379,39 @@ test("a part looked into after its arrays are let go of is weighed while they we
   }
 });
 
+test("a part first asked about after its arrays are let go of is weighed again, and found flat at once", () => {
+  for (const slow of [false, true]) {
+    const { tessellator, geometries, parts, calls } = counting(
+      slow ? { slowMs: 0 } : { slowMs: Number.POSITIVE_INFINITY },
+    );
+    try {
+      const o = {} as DisplayObject;
+      const d = squares(20);
+      const layer = d.layers[0];
+      let [part] = parts.partsOf(layer, d.version);
+      // Drawn as it is for frames, copied to the GPU and its arrays let go of, then alone in a
+      // blend mode: asked about late.
+      for (let frame = 0; frame <= RELEASE_FRAMES; frame++) {
+        geometries.endFrame();
+        [part] = parts.partsOf(layer, d.version);
+      }
+
+      uploaded(geometries);
+      assert.equal(geometries.get(part.handle.id), null);
+      const made = calls.layers;
+      parts.markFlat(o, layer, part);
+      // Flat on the frame it was asked, its geometry as it was: weighed from the kept triangles,
+      // or its layer tessellated again for that alone, then its fills together.
+      assert.ok(geometries.flat(part.handle.id));
+      assert.equal(part.fillsTo, part.fillsFrom);
+      assert.equal(parts.partsOf(layer, d.version)[0], part);
+      assert.equal(calls.layers, made + (slow ? 1 : 2));
+    } finally {
+      tessellator.dispose();
+    }
+  }
+});
+
 test("a drawing made again on every frame is never looked into", () => {
   const { tessellator, geometries, parts, calls } = counting();
   try {

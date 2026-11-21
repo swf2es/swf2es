@@ -275,7 +275,8 @@ export class Parts {
 
     part.fillsTo = fillsFrom;
     this.standing.set(o, Math.min(standing * 2, MOST_STANDING_FRAMES));
-    const area = part.area;
+    const area =
+      part.area ?? (this.geometries.alive(part.handle) ? this.lateArea(layer, part) : null);
     part.area = null;
     // A handle a loss or an expiry let go of may name another geometry by now.
     if (
@@ -286,6 +287,28 @@ export class Parts {
       part.flat = true;
       this.geometries.markFlat(part.handle.id);
     }
+  }
+
+  /**
+   * The PartArea of `part` of `layer`, asked to be looked into first after
+   * the registry let go of its arrays, as a shape drawn for a while becomes
+   * alone in a blend mode: from its layer's kept triangles, or its layer
+   * tessellated again for the weighing alone, its geometry left as it is.
+   * Asking for the arrays again (Geometries.rebuild) would draw the part
+   * through a blend layer till it was made again and had stood.
+   */
+  private lateArea(layer: ShapeLayer, part: MadePart): PartArea | null {
+    const made = this.made.get(layer);
+    const index = made ? made.parts.indexOf(part) : -1;
+    const kept = index >= 0 ? made?.kept?.geometries[index] : undefined;
+    if (kept) {
+      return partArea(kept.positions, kept.indices);
+    }
+
+    const again = layerParts(layer, this.tessellator).find(
+      (p) => p.fillsFrom === part.fillsFrom && (p.fillsTo ?? 0) > (p.fillsFrom ?? 0),
+    );
+    return again ? partArea(again.geometry.positions, again.geometry.indices) : null;
   }
 
   /** A glyph's outline as a white fill, in the font's units over 20, as shapeLayers takes twips. */
