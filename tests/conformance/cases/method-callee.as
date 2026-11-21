@@ -6,7 +6,8 @@
 // called. An override's callee is its own, not the base method's, which
 // super reaches, and a method applied to another receiver is still bound
 // to its own. A constructor's callee calls it on its object again. The
-// name is the arguments object's own and not enumerable.
+// name is the arguments object's own and not enumerable, till one
+// arguments object is told otherwise, which leaves the next one's hidden.
 namespace calleeNs = "urn:method-callee";
 
 interface ICallee {
@@ -79,6 +80,16 @@ class CalleeBase implements ICallee {
 		}
 
 		return before + "|" + [f === this.enumeration, arguments.hasOwnProperty("callee"), arguments.propertyIsEnumerable("callee"), keys.sort().join(" "), "callee" in arguments].join(",");
+	}
+
+	public function shown(a:int):String {
+		arguments.setPropertyIsEnumerable("callee", true);
+		var keys:Array = [];
+		for (var k:String in arguments) {
+			keys.push(k);
+		}
+
+		return [arguments.propertyIsEnumerable("callee"), keys.sort().join(" ")].join(",");
 	}
 
 	public static function sm():String {
@@ -162,6 +173,7 @@ trace("prototype", ({}).calleeOnPrototype() === b.self);
 delete Object.prototype.calleeOnPrototype;
 trace("activation", a.withActivation(4));
 trace("enumeration", a.enumeration(1, 2));
+trace("shown", a.shown(1), "then", a.enumeration(3, 4));
 var probe:CtorProbe = new CtorProbe(true);
 trace("constructor", probe.hits, probe.sameObject);
 var anon:Function = function():Boolean {

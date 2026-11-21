@@ -233,17 +233,20 @@ export interface CalleeSource {
  * hidden and enumerated in its place as the Function would be.
  */
 export class ArgumentsProperties extends DynamicProperties {
+  // Declared, not defined: assigned once in the constructor, as a field
+  // defined first and then assigned costs every call of such a method.
   /** The method called and its receiver, until callee is read or replaced. */
-  private source: CalleeSource | null;
-  private callee: Value;
-  private receiver: Value;
+  declare private source: CalleeSource | null;
+  declare private callee: Value;
+  declare private receiver: Value;
 
   constructor(source: CalleeSource, callee: Value, receiver: Value) {
     super();
     this.source = source;
     this.callee = callee;
     this.receiver = receiver;
-    super.set("callee", undefined);
+    // Map's own set: a new object's first name, with nothing to note.
+    Map.prototype.set.call(this, "callee", undefined);
   }
 
   override get(name: string): Value | undefined {

@@ -38,6 +38,7 @@ import { compileUnit, Domain, definitionNames, findScript, type Script } from ".
 import { isViewRangeError, SharedMemoryView } from "./domain-memory.js";
 import { ArgumentsProperties } from "./dynamic-properties.js";
 import {
+  ARGUMENTS_HIDDEN,
   continues,
   dictionaryAt,
   type Enumeration,
@@ -47,6 +48,7 @@ import {
   forgetStep,
   INT_ATOM_LIMIT,
   nextIndex,
+  ownHidden,
   ownNames,
   pairIndex,
   pairOf,
@@ -1859,7 +1861,7 @@ export class Runtime {
       }
 
       // A name deleted is enumerable again when set anew, as avmplus has it.
-      o.$dontEnum?.delete(name);
+      ownHidden(o)?.delete(name);
       return o.$d ? o.$d.delete(name) || true : false;
     }
 
@@ -2595,7 +2597,7 @@ export class Runtime {
     const properties = new ArgumentsProperties(this, callee, receiver);
     const o = (this.arrayTraits ?? this.builtinTraits("Array")).instance(properties);
     o.$a = Array.prototype.slice.call(args);
-    o.$dontEnum = new Set(["callee"]);
+    o.$dontEnum = ARGUMENTS_HIDDEN;
     return o;
   }
 
