@@ -253,8 +253,9 @@ whose entries go once unused for their idle frames:
 - **Geometries** (`geometry.ts`): fills and lines as the native module
   writes them, copied once into the atlas's vertex and index buffers
   (`webgl/atlas.ts`, one page of them for now), those a frame adds staged
-  and uploaded together. Once a copied geometry has stood three of the
-  registry's frames (`RELEASE_FRAMES`), the registry lets go of its arrays
+  and uploaded together. Once a copied geometry too large to merge (more
+  than 256 vertices or 1,024 indices, or a mesh) has stood three of the registry's
+  frames (`RELEASE_FRAMES`), the registry lets go of its arrays
   (`Geometries.release`; only after a copy into a context not known to be
   lost, so frames drawn while it is flagged lost keep theirs, and a view
   with no GPU backend keeps them all; arrays let go of after copies in
@@ -265,7 +266,14 @@ whose entries go once unused for their idle frames:
   and cannot add to them. A
   geometry drawn anew each frame, as a script's drawing redrawn every
   frame is, goes whole before then: copying the indices of 1,600 such
-  geometries a frame (`bench.ts --redraw 800`) took a millisecond. A geometry whose owner
+  geometries a frame (`bench.ts --redraw 800`) took a millisecond. One
+  small enough to merge (below) keeps its arrays: a moving scene makes its
+  runs anew every frame or few, and staging them needs them. Copying each
+  such geometry's vertices from the atlas on the GPU instead, a copy for
+  each, made a frame of `--timelines 400` some 6,400 copies and the GL
+  wait nearly twice as long (0.1.35); and letting a still scene's go and
+  tessellating them again when its runs change, or when the stream is
+  made anew, stalled a frame for each such change. A geometry whose owner
   changes its arrays in place, a 3D object's quad, is added to be kept
   (`add`'s `keep`). A geometry let go of leaves holes, kept sorted
   and merged with their neighbours (`webgl/free-ranges.ts`); what is added
@@ -279,11 +287,12 @@ whose entries go once unused for their idle frames:
   seconds of a busy SWF. An atlas left empty is filled again from its
   start, in the buffers it has. Advanced text's glyph quads are kept and
   moved alike in an atlas of their own. On a busy real-content recording
-  the arrays let go of were 17 to 23 MB, for 4 to 6 MB of indices kept,
-  and the page's array buffers after a full collection went from 88 to
-  95 MiB to 75 to 77; on `bench.ts --still-shapes 2000`, 2,000 distinct
-  shapes standing still, from 43.7 to 20.1 MB, and on `--town 200` from
-  35.8 to 28.2 MB.
+  the arrays let go of, of geometries too large to merge, were about 12
+  to 15 MB, and the page's array buffers after a full collection went
+  from 88 to 92 MiB to 79 to 81; on `bench.ts --still-shapes 2000`, 2,000
+  distinct shapes standing still, from 41.7 to 33.8 MB, two thirds of
+  its geometries' bytes being in ones small enough to merge; `--town 200`, all of whose
+  geometries merge, holds what it did.
 - **Textures** (`textures.ts`): bitmaps, device text, gradients, their
   pixels uploaded and then let go of on the CPU
   (`webgl/gpu-textures.ts`).
@@ -380,13 +389,11 @@ with the context:
   or, where it cannot be, a call a fill, its row told by a uniform.
 - **Merged fills** (`batches.ts`): runs of at least 32 small geometries
   unchanged since the previous frame use one indexed draw. Each run's
-  geometries are copied into a segment of a stream, their vertices from
-  the atlas's on the GPU, beside them in a buffer of their own an integer
-  attribute, the slot of the draw's packed row in
-  an integer texture the stream keeps for its segments, written as the
-  rows change, so transforms, colour and quarter-pixel snapping use the
-  same shader math; their indices are the atlas's copies, from the
-  segment's start. A segment is found again by its geometries, in their
+  geometries are copied into a segment of a stream, from their arrays,
+  their vertices carrying as an integer attribute the slot of the draw's
+  packed row in an integer texture the stream keeps for its segments,
+  written as the rows change, so transforms, colour and quarter-pixel
+  snapping use the same shader math. A segment is found again by its geometries, in their
   order, wherever its run comes in a later frame: moving, recolouring or
   reordering objects only updates the row texture and the segments' rows.
   The segments a frame adds are staged on the CPU after the stream's top
