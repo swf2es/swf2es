@@ -78,7 +78,7 @@ export function plan(scene: SceneList, background: number, out: Commands): void 
   const alpha = (background >>> 24) / 255;
   out.push(
     CLEAR,
-    out.param(
+    out.param4(
       (((background >> 16) & 0xff) / 255) * alpha,
       (((background >> 8) & 0xff) / 255) * alpha,
       ((background & 0xff) / 255) * alpha,
@@ -176,7 +176,7 @@ function emit(scene: SceneList, from: number, to: number, out: Commands, stage: 
         if (r[at + 2] > 0 && r[at + 3] > 0) {
           out.push(
             COMPOSITE,
-            out.param(r[at], r[at + 1], r[at + 2], r[at + 3], scene.texture[i]),
+            out.param5(r[at], r[at + 1], r[at + 2], r[at + 3], scene.texture[i]),
             scene.blend[i],
             scene.row[i],
           );
@@ -280,8 +280,8 @@ function layerParams(out: Commands, scene: SceneList, layer: number): number {
   const o = scene.objects;
   const at = layer * 4;
   return scene.wholes[layer] === NO_WHOLE
-    ? out.param(r[at], r[at + 1], r[at + 2], r[at + 3], 0, 0, -1, -1)
-    : out.param(
+    ? out.param8(r[at], r[at + 1], r[at + 2], r[at + 3], 0, 0, -1, -1)
+    : out.param8(
         r[at],
         r[at + 1],
         r[at + 2],

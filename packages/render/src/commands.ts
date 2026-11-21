@@ -83,17 +83,53 @@ export class Commands {
     this.ops[at + 3] = c;
   }
 
-  /** Floats for the operation pushed next, where it reads them from. */
-  param(...values: number[]): number {
+  /**
+   * Four floats for the operation pushed next, where it reads them from: of
+   * fixed counts, as a rest parameter would make an array each call.
+   */
+  param4(a: number, b: number, c: number, d: number): number {
+    const at = this.paramRoom(4);
+    const params = this.params;
+    params[at] = a;
+    params[at + 1] = b;
+    params[at + 2] = c;
+    params[at + 3] = d;
+    return at;
+  }
+
+  /** Five floats for the operation pushed next (param4). */
+  param5(a: number, b: number, c: number, d: number, e: number): number {
+    const at = this.param4(a, b, c, d);
+    this.params[this.paramRoom(1)] = e;
+    return at;
+  }
+
+  /** Eight floats for the operation pushed next (param4). */
+  param8(
+    a: number,
+    b: number,
+    c: number,
+    d: number,
+    e: number,
+    f: number,
+    g: number,
+    h: number,
+  ): number {
+    const at = this.param4(a, b, c, d);
+    this.param4(e, f, g, h);
+    return at;
+  }
+
+  /** Where `count` more floats go, taken. */
+  private paramRoom(count: number): number {
     const at = this.paramLength;
-    if (at + values.length > this.params.length) {
-      const grown = new Float32Array(Math.max(this.params.length * 2, at + values.length));
+    if (at + count > this.params.length) {
+      const grown = new Float32Array(Math.max(this.params.length * 2, at + count));
       grown.set(this.params);
       this.params = grown;
     }
 
-    this.params.set(values, at);
-    this.paramLength += values.length;
+    this.paramLength = at + count;
     return at;
   }
 }
