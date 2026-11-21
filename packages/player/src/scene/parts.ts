@@ -95,7 +95,7 @@ export class Parts {
 
   /** A frame drawn, its geometries' frame ended: the kept triangles whose geometries expired counted. */
   endFrame(): void {
-    this.kept.settle();
+    this.kept.settle(this.geometries);
   }
 
   /**
@@ -191,7 +191,7 @@ export class Parts {
         madeAt,
       }));
       made.checkedAt = this.geometries.removalVersion;
-      this.kept.added(made, this.geometries);
+      this.kept.added(made);
       return made.parts;
     }
 

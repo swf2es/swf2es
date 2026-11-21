@@ -11,6 +11,7 @@ import type { ShapeLayer } from "../../../../packages/player/dist/display/shapes
 import {
   KeptParts,
   type KeptPartsOptions,
+  LEAST_KEPT_BYTES,
   SLOW_PARTS_MS,
 } from "../../../../packages/player/dist/scene/kept-parts.js";
 import { LineCache } from "../../../../packages/player/dist/scene/lines.js";
@@ -26,19 +27,30 @@ function drawing() {
   return d;
 }
 
-function fixture() {
+/**
+ * A drawing's parts, the tessellator's layer calls counted: nothing kept,
+ * however long a busy machine takes, or, `keeping`, every layer kept.
+ */
+function fixture(keeping = false) {
   const tessellator = new Tessellator();
   const geometries = new Geometries();
-  // Nothing kept, however long a busy machine takes.
-  const parts = new Parts(
-    geometries,
-    tessellator.tessellate,
-    new LineCache(geometries, tessellator.tessellate),
-    new KeptParts({ slowMs: Number.POSITIVE_INFINITY }),
+  const calls = { layers: 0 };
+  const tessellate = {
+    layer: (...args: Parameters<typeof tessellator.tessellate.layer>) => {
+      calls.layers++;
+      return tessellator.tessellate.layer(...args);
+    },
+    lines: tessellator.tessellate.lines,
+  };
+  const kept = new KeptParts(
+    keeping ? { slowMs: 0, leastBytes: 0 } : { slowMs: Number.POSITIVE_INFINITY },
   );
+  const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate), kept);
   const d = drawing();
-  return { tessellator, geometries, parts, d };
+  return { tessellator, geometries, parts, d, calls, kept };
 }
+
+const KEEPING = [false, true];
 
 test("unchanged cached parts need no repeated handle validation, including after a frame", () => {
   const { tessellator, geometries, parts, d } = fixture();
@@ -71,56 +83,66 @@ test("unchanged cached parts need no repeated handle validation, including after
   }
 });
 
-test("a removal and id reuse in the same frame cannot revive cached parts", () => {
-  const { tessellator, geometries, parts, d } = fixture();
-  try {
-    const first = parts.partsOf(d.layers[0], d.version);
-    const old = first[0].handle;
-    const geometry = geometries.get(old.id);
-    assert.ok(geometry);
-    geometries.remove(old.id);
-    const replacement = geometries.add(geometry);
-    assert.equal(replacement.id, old.id);
-    assert.notEqual(replacement.generation, old.generation);
-    const next = parts.partsOf(d.layers[0], d.version);
-    assert.notEqual(next, first);
-    assert.ok(geometries.alive(next[0].handle));
-    assert.ok(geometries.alive(replacement), "rebuild must not remove the id's new owner");
-  } finally {
-    tessellator.dispose();
-  }
-});
-
-test("expiry, context loss, drawing versions and masks still invalidate independently", () => {
-  const { tessellator, geometries, parts, d } = fixture();
-  try {
-    const layer = d.layers[0];
-    let regular = parts.partsOf(layer, d.version);
-    const mask = parts.partsOf(layer, d.version, true);
-    assert.notEqual(regular, mask);
-    for (let i = 0; i <= IDLE_FRAMES + 1; i++) {
-      geometries.endFrame();
+for (const keeping of KEEPING) {
+  test(`a removal and id reuse in the same frame cannot revive cached parts, keeping ${keeping}`, () => {
+    const { tessellator, geometries, parts, d, calls } = fixture(keeping);
+    try {
+      const first = parts.partsOf(d.layers[0], d.version);
+      const old = first[0].handle;
+      const geometry = geometries.get(old.id);
+      assert.ok(geometry);
+      geometries.remove(old.id);
+      const replacement = geometries.add(geometry);
+      assert.equal(replacement.id, old.id);
+      assert.notEqual(replacement.generation, old.generation);
+      const next = parts.partsOf(d.layers[0], d.version);
+      assert.notEqual(next, first);
+      assert.ok(geometries.alive(next[0].handle));
+      assert.ok(geometries.alive(replacement), "rebuild must not remove the id's new owner");
+      // Kept, added again rather than made again.
+      assert.equal(calls.layers, keeping ? 1 : 2);
+    } finally {
+      tessellator.dispose();
     }
-    let next = parts.partsOf(layer, d.version);
-    assert.notEqual(next, regular);
-    assert.ok(next.every((p) => geometries.alive(p.handle)));
-    regular = next;
+  });
+}
 
-    geometries.lost();
-    next = parts.partsOf(layer, d.version);
-    assert.notEqual(next, regular);
-    assert.ok(next.every((p) => geometries.alive(p.handle)));
-    assert.notEqual(parts.partsOf(layer, d.version, true), mask);
-    regular = next;
+for (const keeping of KEEPING) {
+  test(`expiry, context loss, drawing versions and masks still invalidate independently, keeping ${keeping}`, () => {
+    const { tessellator, geometries, parts, d, calls } = fixture(keeping);
+    try {
+      const layer = d.layers[0];
+      let regular = parts.partsOf(layer, d.version);
+      const mask = parts.partsOf(layer, d.version, true);
+      assert.notEqual(regular, mask);
+      for (let i = 0; i <= IDLE_FRAMES + 1; i++) {
+        geometries.endFrame();
+      }
+      let next = parts.partsOf(layer, d.version);
+      assert.notEqual(next, regular);
+      assert.ok(next.every((p) => geometries.alive(p.handle)));
+      regular = next;
 
-    next = parts.partsOf(layer, d.version + 1);
-    assert.notEqual(next, regular);
-    assert.ok(regular.every((p) => !geometries.alive(p.handle)));
-    assert.ok(next.every((p) => geometries.alive(p.handle)));
-  } finally {
-    tessellator.dispose();
-  }
-});
+      geometries.lost();
+      next = parts.partsOf(layer, d.version);
+      assert.notEqual(next, regular);
+      assert.ok(next.every((p) => geometries.alive(p.handle)));
+      assert.notEqual(parts.partsOf(layer, d.version, true), mask);
+      regular = next;
+
+      // Kept, the drawn and the mask's parts are added again after expiry and after a loss.
+      assert.equal(calls.layers, keeping ? 2 : 5);
+
+      next = parts.partsOf(layer, d.version + 1);
+      assert.notEqual(next, regular);
+      assert.ok(regular.every((p) => !geometries.alive(p.handle)));
+      assert.ok(next.every((p) => geometries.alive(p.handle)));
+      assert.equal(calls.layers, keeping ? 3 : 6);
+    } finally {
+      tessellator.dispose();
+    }
+  });
+}
 
 test("idle shape layers release their geometry buffers between visits", async () => {
   setFlagsFromString("--expose-gc");
@@ -157,6 +179,80 @@ test("idle shape layers release their geometry buffers between visits", async ()
   }
 });
 
+test("kept layers hold their buffers past expiry, till their drawing changes", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const { tessellator, geometries, parts, d, kept } = fixture(true);
+  const layer = d.layers[0];
+  try {
+    const draw = (version: number) => {
+      const [{ handle }] = parts.partsOf(layer, version);
+      const geometry = geometries.get(handle.id);
+      assert.ok(geometry);
+      return new WeakRef(geometry.positions.buffer);
+    };
+    const first = draw(d.version);
+    for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+      geometries.endFrame();
+      parts.endFrame();
+    }
+
+    assert.deepEqual(geometries.live(), []);
+    assert.ok(kept.bytes > 0);
+    await setImmediate();
+    gc();
+    assert.notEqual(first.deref(), undefined);
+
+    draw(d.version + 1);
+    await setImmediate();
+    gc();
+    assert.equal(first.deref(), undefined);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a kept layer whose parts expired in part adds them all again, none held twice", () => {
+  const { tessellator, geometries, parts, calls } = fixture(true);
+  try {
+    // A solid fill and a gradient: two parts.
+    const d = new Drawing();
+    d.beginFill({ type: "solid", color: 0xff0088ff });
+    d.drawRect(0, 0, 20, 20);
+    d.beginFill({
+      type: "gradient",
+      radial: false,
+      focal: 0,
+      stops: [
+        { ratio: 0, color: 0xff000000 },
+        { ratio: 255, color: 0xffffffff },
+      ],
+      spread: 0,
+      linearRgb: false,
+      matrix: { a: 0.01, b: 0, c: 0, d: 0.01, tx: 50, ty: 10 },
+    });
+    d.drawRect(40, 0, 20, 20);
+    d.endFill();
+    const layer = d.layers[0];
+    const first = parts.partsOf(layer, d.version);
+    assert.equal(first.length, 2);
+    const arrays = first.map((p) => geometries.get(p.handle.id)?.positions);
+    geometries.remove(first[0].handle.id);
+
+    const next = parts.partsOf(layer, d.version);
+    assert.equal(calls.layers, 1);
+    assert.ok(next.every((p) => geometries.alive(p.handle)));
+    assert.ok(!geometries.alive(first[1].handle), "the part still held is let go of, not doubled");
+    assert.equal(geometries.live().length, 2);
+    assert.deepEqual(
+      next.map((p) => geometries.get(p.handle.id)?.positions),
+      arrays,
+    );
+  } finally {
+    tessellator.dispose();
+  }
+});
+
 /** Two squares 20 wide, the second at (`x`, `y`), in one layer of a drawing. */
 function squares(x: number, y = 0): Drawing {
   const d = new Drawing();
@@ -180,7 +276,7 @@ function counting(options: KeptPartsOptions = { slowMs: Number.POSITIVE_INFINITY
     },
     lines: tessellator.tessellate.lines,
   };
-  const kept = new KeptParts(options);
+  const kept = new KeptParts({ leastBytes: 0, ...options });
   const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate), kept);
   return { tessellator, geometries, parts, calls, kept };
 }
@@ -527,36 +623,142 @@ test("expired triangles stay within their bytes: those worth more a byte push ou
   }
 });
 
-test("expired triangles not added again for long may be let go of whatever they cost", () => {
-  const size = blendBytes(4);
-  // The first made in 100 ms, the second in 1 ms.
-  const readings = [0, 100, 0, 1];
-  const fixture = counting({
-    slowMs: 0,
-    bytes: Math.floor(size * 1.5),
-    now: () => readings.shift() ?? 0,
-  });
-  const { geometries, parts, calls, kept, tessellator } = fixture;
+test("a loop far longer than the idle frames, of more slow blends than fit, keeps finding them", () => {
+  const ratios = [0, 8192, 16384, 24576, 32768, 40960, 49152, 57344, 65535];
+  let clock = 0;
+  const bytes = Math.floor(blendBytes(4) * 3.5);
+  const fixture = counting({ slowMs: 0, bytes, now: () => clock++ });
   try {
-    const morph = crossingMorph(4);
-    const [first, second] = [0, 65535].map((ratio) => morphAt(morph, ratio).layers[0]);
-    parts.partsOf(first, 0);
-    idle(fixture);
-    assert.equal(kept.bytes > 0, true);
-    for (let frame = 0; frame < 10 * IDLE_FRAMES; frame++) {
-      geometries.endFrame();
-      parts.endFrame();
-    }
+    // Hidden for thirty times the idle frames between showings: nothing kept goes for its age.
+    const made = tween(fixture, crossingMorph(4), ratios, 2, 4, 30 * IDLE_FRAMES);
+    const hits = made.slice(1).map((m) => ratios.length - m);
+    assert.deepEqual(hits, [3, 3, 3]);
+  } finally {
+    fixture.tessellator.dispose();
+  }
+});
 
-    parts.partsOf(second, 0);
-    idle(fixture);
-    // The first, gone stale, gives way to the second, worth far less.
+test("a layer of fewer than LEAST_KEPT_BYTES is never kept, however slow", () => {
+  const fixture = counting({ slowMs: 0, leastBytes: LEAST_KEPT_BYTES });
+  try {
+    fixture.parts.partsOf(squares(40).layers[0], 0);
+    assert.equal(fixture.kept.size, 0);
+    fixture.parts.partsOf(morphAt(crossingMorph(40), 0).layers[0], 0);
+    assert.equal(fixture.kept.size, 1);
+  } finally {
+    fixture.tessellator.dispose();
+  }
+});
+
+/** Two views' parts, each of its own registry, keeping in one store; each layer made in `costs`' next ms. */
+function twoViews(bytes: number, costs: number[]) {
+  const tessellator = new Tessellator();
+  const readings: number[] = [];
+  const kept = new KeptParts({
+    slowMs: 0,
+    leastBytes: 0,
+    bytes,
+    now: () => {
+      if (readings.length === 0) {
+        readings.push(0, costs.shift() ?? 1);
+      }
+
+      return readings.shift() as number;
+    },
+  });
+  const calls = { layers: 0 };
+  const tessellate = {
+    layer: (...args: Parameters<typeof tessellator.tessellate.layer>) => {
+      calls.layers++;
+      return tessellator.tessellate.layer(...args);
+    },
+    lines: tessellator.tessellate.lines,
+  };
+  const view = () => {
+    const geometries = new Geometries();
+    const parts = new Parts(geometries, tessellate, new LineCache(geometries, tessellate), kept);
+    const idle = () => {
+      for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+        geometries.endFrame();
+        parts.endFrame();
+      }
+    };
+    return { geometries, parts, idle };
+  };
+  return { tessellator, kept, calls, a: view(), b: view() };
+}
+
+test("two views share one budget: one's triangles worth more push out the other's", () => {
+  const size = blendBytes(4);
+  const morph = crossingMorph(4);
+  const [cheap, dear] = [0, 65535].map((ratio) => morphAt(morph, ratio).layers[0]);
+  // Made in 1 ms in the first view, 5 ms in the second, with room for one.
+  const { tessellator, kept, calls, a, b } = twoViews(Math.floor(size * 1.5), [1, 5]);
+  try {
+    a.parts.partsOf(cheap, 0);
+    a.idle();
+    assert.ok(kept.bytes > 0);
+    b.parts.partsOf(dear, 0);
+    b.idle();
     assert.equal(kept.size, 1);
     const made = calls.layers;
-    parts.partsOf(second, 0);
+    b.parts.partsOf(dear, 0);
     assert.equal(calls.layers, made);
-    parts.partsOf(first, 0);
+    a.parts.partsOf(cheap, 0);
     assert.equal(calls.layers, made + 1);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a view's frames settle its own kept triangles, not another's", () => {
+  const { tessellator, kept, a, b } = twoViews(1 << 30, []);
+  try {
+    const [part] = a.parts.partsOf(squares(40).layers[0], 0);
+    for (let frame = 0; frame <= IDLE_FRAMES + 1; frame++) {
+      a.geometries.endFrame();
+      b.geometries.endFrame();
+      b.parts.endFrame();
+    }
+
+    assert.ok(!a.geometries.alive(part.handle));
+    assert.equal(kept.bytes, 0);
+    a.parts.endFrame();
+    assert.ok(kept.bytes > 0);
+  } finally {
+    tessellator.dispose();
+  }
+});
+
+test("a collected view's kept triangles go with it, though their layers live on", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const tessellator = new Tessellator();
+  const kept = new KeptParts({ slowMs: 0, leastBytes: 0 });
+  const layer = squares(40).layers[0];
+  try {
+    const keep = () => {
+      const geometries = new Geometries();
+      const parts = new Parts(
+        geometries,
+        tessellator.tessellate,
+        new LineCache(geometries, tessellator.tessellate),
+        kept,
+      );
+      parts.partsOf(layer, 0);
+      return new WeakRef(geometries);
+    };
+    const view = keep();
+    assert.equal(kept.size, 1);
+
+    for (let i = 0; i < 20 && kept.size > 0; i++) {
+      await setImmediate();
+      gc();
+    }
+
+    assert.equal(view.deref(), undefined);
+    assert.equal(kept.size, 0);
+    assert.equal(layer.fills.length, 2);
   } finally {
     tessellator.dispose();
   }

@@ -23,9 +23,12 @@ fill the tessellator refused keeps nothing, to be tried again. Every view
 shares one budget of 64 MB (`KEPT_PARTS_BYTES`), which counts only the
 triangles whose geometries have gone, as a geometry held is the same
 arrays. Triangles that do not fit as they expire push out those worth
-less, in milliseconds a byte, or those not added again for ten times the
-idle frames, and are let go of otherwise, a tie too: let go of by age, a
-loop of more blends than fit would find none of them kept. A morph's
+less, in milliseconds a byte, and are let go of otherwise, a tie too: let
+go of by age, a loop of more blends than fit would find none of them kept.
+They go otherwise with their layer, their view, or as their drawing
+changes or no longer draws them; fewer than 64 KB are never kept
+(`LEAST_KEPT_BYTES`), as a small layer is slow only when a collection
+pauses its making. A morph's
 blend past its 64 to 256 kept (`display/morph.ts`) is collected, its kept
 triangles with it. The geometries are built from Flash's edges
 (`display/shapes.ts`: each edge goes to its right fill forward and its
