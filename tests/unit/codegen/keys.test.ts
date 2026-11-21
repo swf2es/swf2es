@@ -354,3 +354,24 @@ test("a finding of a child with no ABC yet keys its children apart from their gr
   add(b, child);
   check(t, chains, abcDomain, "the child's own");
 });
+
+test("an ABC of a domain not live has no key, and its domain keeps no chain", async () => {
+  const { t, abcDomain, main } = await start();
+  const chains = new KeyChains(keyLog(t));
+  // Below the main movie's domain, which holds no ABC: the evicted domain's live ancestors none but the root's.
+  const evicted = t.domainChild(main);
+  const dropped = t.domainChild(main);
+  for (const domain of [evicted, dropped]) {
+    assert.equal(t.domainAdd(sorts, false, domain), 0);
+    abcDomain.push(domain);
+    assert.ok(chains.context(abcDomain.length - 1, LIBRARIES));
+  }
+
+  t.domainEvict(evicted);
+  t.domainDrop(dropped);
+  for (const index of [abcDomain.length - 2, abcDomain.length - 1]) {
+    assert.equal(t.domainKeyHeaderBytes(index).length, 0);
+    assert.equal(chains.context(index, LIBRARIES), null);
+    assert.equal(new KeyChains(keyLog(t)).context(index, LIBRARIES), null);
+  }
+});

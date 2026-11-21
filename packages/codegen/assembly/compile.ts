@@ -703,8 +703,14 @@ export function domainKeyHeaderBytes(index: i32 = -1): usize {
     return handOut(null);
   }
 
+  // abcIndex takes only an ABC of a live domain, which sees it, so `seen`
+  // holds it; refused all the same where it does not.
   const own = domain.abcDomain[at];
   const seen = seenBy(own);
+  if (seen.length === 0) {
+    return handOut(null);
+  }
+
   const out = context;
   out.reset();
   writeSeen(out, seen, <u32>at);
